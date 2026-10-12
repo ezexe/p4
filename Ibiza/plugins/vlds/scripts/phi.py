@@ -771,11 +771,38 @@ def masked_spans(store):
 
 
 def tombstone_masks(store, span=None):
-    """[(line, freed, owner-words, time)] — every tombstone, normalized: the mask the barrier applies."""
+    """[(ref, freed, owner-words, time)] — every tombstone, normalized: the mask the barrier applies. A hot tombstone
+    is located by its line; on a keyspace store the cold ones join it, located by id (cold_tombstone_masks), so a
+    mask outlives the pour or archive that moved its tombstone into the runs."""
     out = []
     for line, field, value, fields in (hot_entries(store, "tombstones.md", span) or []):
         if field == "freed":
             out.append((line, norm_text(value), norm_text(fields.get("owner-words", "")), fields.get("time", "")))
+    if on_keyspace(store):
+        out += cold_tombstone_masks(store)
+    return out
+
+
+def cold_tombstone_masks(store):
+    """[(ref, freed, owner-words, time)] for every tombstone the keyspace holds in its runs, read through idb.py's
+    validated reader (the record's run and line, a wrapped body unwrapped) — the same masks idb.py's mark_freed applies
+    to the cold tier, here applied to the hot one. The ref is '<id> (cold)'; it never equals a hot line number, so the
+    write barrier's trace always counts a cold mask among the old ones. An unreadable keyspace yields none: the check
+    reports it, and the hot masks still apply."""
+    import idb  # noqa: E402 — the keyspace engine beside this file; imported late, since it imports this module
+    try:
+        ks, _how = idb.load_keys(store)
+    except Exception:  # noqa: BLE001
+        return []
+    cache, out = idb.RunCache(store), []
+    for (_o, pk), r in sorted(ks.cold("tombstones").items()):
+        e = cache.entry(r["at"])
+        if e is None:
+            continue
+        field, value, fields = idb.parse_block(idb.unwrap(store, e.body))
+        if field == "freed":
+            out.append((f"{r.get('id') or pk} (cold)", norm_text(value), norm_text(fields.get("owner-words", "")),
+                        fields.get("time", "")))
     return out
 
 

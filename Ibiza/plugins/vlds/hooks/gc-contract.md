@@ -1,7 +1,7 @@
 ## VLDS gc (always on)
 
 The collector is never invoked and never off. It collects belief state the way V8's Oilpan (cppgc) collects a C++ heap — trace-based mark-and-sweep, limited compaction, marking and sweeping interleaved with the work — and this session is its mutator: its cycle runs every turn, on the plugin's hooks and in the operator, whether anyone names it or not.
-`/vlds:gc full` forces an atomic collection, and `/vlds:gc <target>` collects that target first. The `vlds:gc` skill holds the full doctrine; load it when a phase below reaches a judgment this block does not settle.
+`/vlds:gc full` forces an atomic collection, `/vlds:gc archive` pours the whole hot tier into the cold tier, and `/vlds:gc <target>` collects that target first. The `vlds:gc` skill holds the full doctrine; load it when a phase below reaches a judgment this block does not settle.
 
 **The heap.** Every entry in `store/*` (rulings, rules, claims, inferences, tasks, tombstones) and any base memory or plan doc the work leans on.
 **Roots** (Persistent): the owner's LIVE rulings and standing rules, the world as it verifies now, and the live turn.
@@ -28,4 +28,6 @@ The collector is never invoked and never off. It collects belief state the way V
 
 **Reachability, not reference.** An entry is live because marking reaches it from a root, not because something cites it. A cluster of rules that cite only each other is unreachable whatever each link says. Such an island is surfaced as UNOWNED and never swept on the collector's word.
 
-**Modes.** Concurrent is the default, and it is never switched off. `/vlds:gc full` is the atomic collection: every phase back to back over the whole store, with the session doing nothing else until it ends, so it needs no write barrier.
+**The archive opens on the owner's word.** What a pour moves into the cold tier stays there verbatim and is never removed, and nothing reads it unasked: the pool, the standing rules and every derivation read the hot files alone. `/vlds:recall <query>` is the one road in — the owner asks, the operator reads through `idb.py`, and each match returns as weakened provenance through the read barrier, written back into a hot file only when the owner rules it live again.
+
+**Modes.** Concurrent is the default, and it is never switched off. `/vlds:gc full` is the atomic collection: every phase back to back over the whole store, with the session doing nothing else until it ends, so it needs no write barrier. `/vlds:gc archive`, on the owner's word alone, is no collection: it pours the whole hot tier into the cold tier, LIVE rulings included and nothing exempt, writing no tombstone — the next session starts empty and reaches the past only through `/vlds:recall`.

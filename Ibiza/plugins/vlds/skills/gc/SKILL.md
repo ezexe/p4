@@ -1,8 +1,8 @@
 ---
 name: gc
 description: "The epistemic garbage collector, always on. It is the liveness instrument for STORED state: memories, configured rules, plan-doc rulings, session-summary carryovers, and training-data assumptions. It is modeled on V8's Oilpan (cppgc): trace-based mark-and-sweep with limited compaction, marking and sweeping running concurrently with the work and incrementally beside it. Its cycle rides the plugin's hooks every turn and never waits to be invoked. Roots are marked at session start, the store is traced in the background, a write barrier traces every store write, and the precise collection runs at the turn's close, when the turn holds nothing. Where the gate asks whether a claim is known now, the gc asks whether a stored decision is still ALIVE, meaning reachable from a live root (a standing user ruling, or a currently-verifiable state of the world) through handles, never through a paraphrase. It catches the use-after-free (a retracted ruling still applied), the leak (a directive whose justifying causes were fixed long ago), the dangling pointer (a memory citing what no longer exists), the island (rules that cite only each other), and the stale oldest generation (training data asserting versioned facts as current). A free runs its pre-finalizers in its own turn. Sweeps compact rather than erase, so the durable lesson survives and the dead directive dies, and every free is tombstoned so the same garbage is not re-learned."
-when_to_use: "The cycle runs without this skill: its contract is injected at every session start and its barriers ride the hooks. Load the skill when a phase reaches a judgment that block does not settle. That means a retraction or superseding ruling whose free must be swept transitively with its pre-finalizers, a `gc:` line from the write barrier naming re-allocated garbage or holders of a freed entry, a stored rule or memory about to steer work whose provenance is in doubt, a completed arc that obsoletes stored claims, a full (atomic) collection, or a pressure audit."
-argument-hint: "[stored decision or store to collect | 'full' for an atomic whole-store collection]"
+when_to_use: "The cycle runs without this skill: its contract is injected at every session start and its barriers ride the hooks. Load the skill when a phase reaches a judgment that block does not settle. That means a retraction or superseding ruling whose free must be swept transitively with its pre-finalizers, a `gc:` line from the write barrier naming re-allocated garbage or holders of a freed entry, a stored rule or memory about to steer work whose provenance is in doubt, a completed arc that obsoletes stored claims, a full (atomic) collection, an archive of the whole hot tier on the owner's word, or a pressure audit."
+argument-hint: "[stored decision or store to collect | 'full' for an atomic whole-store collection | 'archive' to pour the whole hot tier into the cold tier]"
 ---
 
 # VLDS GC
@@ -15,7 +15,7 @@ argument-hint: "[stored decision or store to collect | 'full' for an atomic whol
 Oilpan is not called by the code it serves. The embedder's platform schedules it, and it does its marking and sweeping on background threads and in small steps between the mutator's tasks.
 The gc runs the same way. **This session is the mutator**, the plugin's hooks are the platform, and the operator subagent is the background thread.
 The cycle runs every turn whether or not anyone names the gc. Its contract ([../../hooks/gc-contract.md](../../hooks/gc-contract.md)) is injected at every SessionStart beside the memory override, and its barriers are hooks and scripts.
-This skill is the doctrine those phases cite. `/vlds:gc full` forces an atomic collection, and `/vlds:gc <target>` collects that target first.
+This skill is the doctrine those phases cite. `/vlds:gc full` forces an atomic collection, `/vlds:gc archive` pours the whole hot tier into the cold tier, and `/vlds:gc <target>` collects that target first.
 
 ## The heap, the roots, the handles
 
@@ -73,6 +73,8 @@ At the turn's close the turn holds nothing, so the collection is precise there a
 The one reclamation at a turn's start, the dispatch pour at a new session's first prompt, also happens on an empty stack. It falls between two event loops, and every row it moves belongs to a conversation that is not this one.
 
 **Atomic on demand.** `/vlds:gc full` is the stop-the-world collection: every phase back to back over the whole store, including the cold tier and the base memories, with the session doing nothing else until it ends. Because nothing else runs, it needs no write barrier.
+
+**Archive on the owner's word.** `/vlds:gc archive` is not a collection: it frees nothing and writes no tombstone. It pours every entry of every hot object store into the keyspace's cold tier, LIVE rulings and standing rules included, nothing exempt, so the next session starts on an empty hot tier and the store's past reaches it only through `/vlds:recall`. It runs only when the owner invokes it, never on the collector's initiative and never inside a sweep, and only on the keyspace. Run `idb.py --store <store> archive --session <id> --now "<now>" --dry` first and report its counts, then the same without `--dry`, and tell the owner that the running session still holds its pool and that a new session is the one that starts empty. An archived LIVE ruling stops steering because nothing marks from the cold tier, not because it was retracted. It comes back as a root only when the owner rules it live again. The tombstones go cold with everything else, and their masks still reach the hot barriers, which read the keyspace's cold tombstones beside the hot ones. The design and its costs are in [reference.md](reference.md), the archive.
 
 ## Marking
 
@@ -192,7 +194,7 @@ The cycle runs without being asked. This procedure is what a phase hands you whe
 4. **Pre-finalize, then sweep**: rewrite or sweep every live holder of its handle, transitively and in this turn; compact (keep the durable lesson, kill the dead directive); then **tombstone** the free in `tombstones.md` with the retraction, its date, the user's words, and what was swept. Leave the bytes' reclamation to the turn closes.
 5. **Surface the result**: what was collected, what survived compaction, and what is now `UNOWNED` awaiting a ruling.
 
-If a target was passed with the command (`/vlds:gc <target>`), collect **that** first. `/vlds:gc full` runs every phase, atomically, over the whole store.
+If a target was passed with the command (`/vlds:gc <target>`), collect **that** first. `/vlds:gc full` runs every phase, atomically, over the whole store. `/vlds:gc archive` runs no phase: it pours the whole hot tier, as **Archive on the owner's word** says.
 
 ## Additional Resources
 

@@ -194,6 +194,19 @@ def build(state):
 
 
 FRAGMENT_DROP_RE = re.compile(r"<!doctype[^>]*>|</?html[^>]*>|</?head>|<meta[^>]*>|<title>.*?</title>|</?body>", re.I | re.S)
+CSS_LINE_COMMENT_RE = re.compile(r"^[ \t]*/\*.*?\*/[ \t]*\n", re.M | re.S)
+CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
+JS_LINE_COMMENT_RE = re.compile(r"^[ \t]*//[^\n]*\n", re.M)
+
+
+def strip_comments(code):
+    """The chat widget's rules forbid code comments in a widget, so the fragment drops them: CSS block comments from
+    the style block (a comment on a line of its own takes its line with it), whole-line JS comments from the rest.
+    A `//` inside a line — a file:/// or vscode:// URL, a regex — is code and stays, and the state block's JSON lines
+    always open with a quote or a bracket, never with `//`."""
+    end = code.index("</style>")
+    style = CSS_COMMENT_RE.sub("", CSS_LINE_COMMENT_RE.sub("", code[:end]))
+    return style + JS_LINE_COMMENT_RE.sub("", code[end:])
 
 
 def fragment(state):
@@ -205,7 +218,7 @@ def fragment(state):
     page = page.replace("background: var(--bg); color: var(--fg);", "background: transparent; color: var(--fg);", 1)
     page = FRAGMENT_DROP_RE.sub("", page)
     style_end = page.index("</style>") + len("</style>")
-    return (page[:style_end].strip() + '\n<div class="acts-page">\n' + page[style_end:].strip() + "\n</div>\n")
+    return strip_comments(page[:style_end].strip() + '\n<div class="acts-page">\n' + page[style_end:].strip() + "\n</div>\n")
 
 
 def write_page(page_path, state):

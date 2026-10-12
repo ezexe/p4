@@ -206,6 +206,31 @@ def test_widget_fragment():
         raise AssertionError("a briefs list was accepted")
 
 
+def test_fragment_has_no_comments():
+    """The widget rules forbid code comments, so the fragment carries none — while the code a `//` sits inside (the
+    file:/// and vscode:// links, the escaped marker) survives, and the inlined assembler still ends its prompt in the
+    acts-widget marker. The standalone page keeps its comments."""
+    import re
+    state = fresh()
+    code = b.fragment(state)
+    style = code[:code.index("</style>")]
+    assert "/*" not in style and "*/" not in style, "the fragment's style block keeps a CSS comment"
+    assert not re.search(r"^[ \t]*//", code, re.M), "the fragment keeps a whole-line JS comment"
+    assert '"file:///"' in code and '"vscode://file/"' in code, "a // inside a line of code was stripped"
+    assert "<\\!-- acts-widget round=" in code, "the escaped marker in the inlined assembler was lost"
+    assert "/* Two panes" in b.build(state), "the standalone page lost its comments"
+    node = shutil.which("node")
+    if not node:
+        print("skip  test_fragment_has_no_comments: the prompt half (no node)")
+        return
+    fn = code[code.index("function assemblePrompt"):code.index('if (typeof module !== "undefined")')]
+    data = dict(SAMPLE, round=4)
+    js = fn + ";const d=JSON.parse(process.argv[1]);process.stdout.write(assemblePrompt(d,['commit'],{}))"
+    out = subprocess.run([node, "-e", js, json.dumps(data)], capture_output=True, text=True, encoding="utf-8")
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.endswith("<!-- acts-widget round=4 picked=commit -->"), out.stdout[-80:]
+
+
 def test_stored_entries():
     """A finished act's store entries are attached from the turn record, found at their line, and followed into
     the keyspace run a pour moves them to."""

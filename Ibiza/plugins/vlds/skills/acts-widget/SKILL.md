@@ -1,7 +1,7 @@
 ---
 name: acts-widget
 description: "The session's acts page — one self-contained HTML page per session, recycled at every closing: each closing's pending acts are appended as a new round, the owner ticks acts and copies the Markdown prompt the page assembles, and when that prompt arrives the reply records the pick into the same page before acting, so the page reads as the session's log of closings — what was offered, what was picked, what was left — oldest first, with the open closing at the bottom."
-when_to_use: "At a closing with pending acts, when the session serves it through the acts page; and on a message carrying an `<!-- acts-widget round=N picked=... -->` line, which is a pick from that page to record before running the acts it names."
+when_to_use: "At every closing with pending acts: the round is appended whichever form serves it — the native question panel by default, the page itself in chat once the owner asked for the visual page; when the panel's answer lands, to record the pick; and on a message carrying an `<!-- acts-widget round=N picked=... -->` line, which is a pick from that page to record before running the acts it names."
 argument-hint: "[append ACTS.json | pick --acts ID,ID | show]"
 ---
 
@@ -23,7 +23,8 @@ python "${CLAUDE_PLUGIN_ROOT}/skills/acts-widget/build_acts_widget.py" append <a
 ```
 
 A round still open when the next one is appended is marked superseded — the owner never answered it — so only one closing is ever open.
-3. Serve the page in chat as the turn's last tool call: print its widget code and pass it whole as `show_widget`'s `widget_code`, with a `title` naming the closing.
+3. Serve the closing as the turn's last tool call. By default that is the native question panel (`AskUserQuestion`, multiSelect): one option per act of the round, the recommended act first, each description the act's summary plus its `briefs` lines, at most four options to a question and four questions to a panel. Its answer returns in place: record it with `pick` (below), an Other note with `--note`, and open the final message, after the Deviations block, with the `## Picked acts` prompt the page would have assembled.
+Serve the page itself in chat only once the owner has asked for the visual page in words, for the rest of that session: print its widget code and pass it whole as `show_widget`'s `widget_code`, with a `title` naming the closing.
 
 ```bash
 python "${CLAUDE_PLUGIN_ROOT}/skills/acts-widget/build_acts_widget.py" widget --session <short id> --out <notebook>/acts-widget/<short id>.widget.html

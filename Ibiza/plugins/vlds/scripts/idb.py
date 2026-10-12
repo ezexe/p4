@@ -37,7 +37,11 @@ Subcommands (every writer takes the lock; every reader validates what it reads):
               expired and poured, the logger past its budget poured down to three quarters — then a compaction when
               due. Any count pours: no position has to open.
   pour        a judged pour placed: FILE:L1,L2 ... names the entries the sweep moment scored cold, by head line;
-              two-phase — journal, write the run, the verify-pour gate, commit the keyspace, trim the hot file.
+              two-phase — journal, write the run, the verify-pour gate, commit the keyspace, trim the hot file. A root
+              (a local-storage.md or index.md entry the read barrier reads LIVE) is refused unless --archive is passed.
+  archive     /vlds:gc archive, on the owner's word alone: every entry of every hot object store poured through the
+              pour's own path, LIVE roots included, nothing exempt; the hot tier left empty for the next session, the
+              cold tier reached only by /vlds:recall. --dry prints the counts and writes nothing.
   compact     merge an object store's small runs (4 or more, or 2 or more when due): verify-merge first, exact
               duplicates collapsed, nothing freed ever dropped.
   migrate     the gentle migration from the φ-register: arc/ imported verbatim (ids kept), every entry and blob
@@ -46,6 +50,8 @@ Subcommands (every writer takes the lock; every reader validates what it reads):
   rollback    undo a migration at any point: entries poured since back to their hot files, arc/ back, the φ
               index back with index-engine: phi, idb/ removed — refused only if an archived entry was edited since.
   get / range / find   point, range and index reads, each validated against the record's version and sha.
+  blob / blobs   an external object's text (a poured dispatch record, a legacy attachment), refused unless it is
+              registered and still hashes to the sha the keyspace recorded; and the listing of what is registered.
   check       the keyspace scans, plus the store-level scans phi.py check keeps (duplication, liveness, conformance,
               stray, the hot budgets and the φ pressure ratio); exit 1 = corruption.
   engine      which engine runs this store, from the index's `index-engine:` and what is on disk.
@@ -116,6 +122,7 @@ INDEX_HEAD = ("# VLDS Store — Index\n\nDerived — the hot table is rewritten 
 OBJECT_STORES = {"local-storage.md": "ls", "index.md": "ix", "data-store.md": "ds", "ledger.md": "le",
                  "tombstones.md": "ts", "virtual.md": "vr", "session-storage.md": "ss", "logger.md": "lg",
                  "briefs.md": "br"}
+ROOT_FILES = {"local-storage.md", "index.md"}   # where a LIVE entry is a root: the owner's rulings and standing rules
 PREFIX_OS = {p: f[:-3] for f, p in OBJECT_STORES.items()}
 DEFAULT_BUDGET = {"local-storage.md": 21, "index.md": 21, "data-store.md": 34, "ledger.md": 21,
                   "tombstones.md": 21, "virtual.md": 13, "session-storage.md": 13, "logger.md": 34,
@@ -1514,54 +1521,96 @@ def cmd_sync(store, session, now, full=False, budget_s=SYNC_BUDGET_S):
     return 0
 
 
-def cmd_pour(store, session, now, specs, dry=False):
-    """The judged pour: the operator's sweep moment names what is cold by head line; this places it — any count."""
+def cmd_pour(store, session, now, specs, dry=False, archive=False):
+    """The judged pour: the operator's sweep moment names what is cold by head line; this places it — any count.
+    A root — a local-storage.md or index.md entry the read barrier reads LIVE — is refused unless `archive` is set,
+    so a sweep's naming never pours a LIVE ruling; the archive is the one caller that sets it."""
     session8 = session[:8]
+    tag = "archive" if archive else "sweep"
     spec = {}
     for item in specs:
         fname, _sep, lines = item.partition(":")
         try:
             spec.setdefault(fname.strip(), []).extend(int(x) for x in lines.split(",") if x.strip())
         except ValueError:
-            print(f"sweep: refused — {item!r}: head lines must be integers")
+            print(f"{tag}: refused — {item!r}: head lines must be integers")
             return 1
+    masks = phi.tombstone_masks(store)
     for fname, lines in spec.items():
-        blocks = {b.line1 for b in (hot_blocks(store, fname) or [])}
+        blocks = {b.line1: b for b in (hot_blocks(store, fname) or [])}
         if fname not in OBJECT_STORES:
-            print(f"sweep: refused — {fname}: not a hot file that pours")
+            print(f"{tag}: refused — {fname}: not a hot file that pours")
             return 1
         bad = [l for l in lines if l not in blocks]
         if bad:
-            print(f"sweep: refused — {fname}: line {bad[0]} is not an entry head (heads at {sorted(blocks)})")
+            print(f"{tag}: refused — {fname}: line {bad[0]} is not an entry head (heads at {sorted(blocks)})")
             return 1
+        if not archive and fname in ROOT_FILES:
+            for l in lines:
+                b = blocks[l]
+                if phi.barrier_state(fname, b.field, b.value, b.fields, session, masks)[0] == "LIVE":
+                    kind = "ruling" if fname == "local-storage.md" else "rule"
+                    print(f"{tag}: refused — {fname}:{l} is a LIVE {kind}, a root; a sweep never pours one "
+                          "(only /vlds:gc archive does, through --archive)")
+                    return 1
     if dry:
-        print("sweep: dry run — would pour " + ", ".join(f"{len(v)} {k}" for k, v in spec.items()) + "; nothing written")
+        print(f"{tag}: dry run — would pour " + ", ".join(f"{len(v)} {k}" for k, v in spec.items())
+              + "; nothing written")
         return 0
+    if archive:
+        via = "the archive (/vlds:gc archive), placed by scripts/idb.py archive"
+        run_by = "Run on the owner's word by /vlds:gc archive, placed by scripts/idb.py archive"
+    else:
+        via = "the sweep moment, placed by scripts/idb.py pour"
+        run_by = "Scored by the operator's sweep moment, placed and run by scripts/idb.py pour"
     lockp = idb_path(store, LOCK)
     ok, msg = take_lock(lockp, session)
     if not ok:
-        print(f"sweep: skipped — {msg}")
+        print(f"{tag}: skipped — {msg}")
         return 0
     try:
         ks, _how = load_keys(store)
         recover(store, ks)
         finish_migration(store, ks, now, session8)
-        plans = do_pour(store, ks, spec, now, session8, "the sweep moment, placed by scripts/idb.py pour")
+        plans = do_pour(store, ks, spec, now, session8, via)
         n, line = pour_summary(plans)
-        log_move(store, now, f"Judged sweep placed mechanically — {n} pours into the keyspace", [line],
-                 "Scored by the operator's sweep moment, placed and run by scripts/idb.py pour")
+        headline = (f"Archive — the hot tier poured whole, {n} entries into the keyspace" if archive
+                    else f"Judged sweep placed mechanically — {n} pours into the keyspace")
+        log_move(store, now, headline, [line], run_by)
         sync(store, ks, now)
         save_keys(store, ks)
-        rewrite_index(store, now, session8, "the sweep moment, placed by scripts/idb.py pour", line,
-                      poured=[p["fname"] for p in plans])
+        rewrite_index(store, now, session8, via, line, poured=[p["fname"] for p in plans])
         journal_compact(store)
     except Exception as e:  # noqa: BLE001
         release_lock(lockp, session)
-        print(f"sweep: stopped — {type(e).__name__}: {e}")
+        print(f"{tag}: stopped — {type(e).__name__}: {e}")
         return 1
     release_lock(lockp, session)
-    print(f"sweep: {line}; {check_verdict(store)}")
+    print(f"{tag}: {line}; {check_verdict(store)}")
     return 0
+
+
+def cmd_archive(store, session, now, dry=False):
+    """/vlds:gc archive: every entry head of every hot object store, LIVE roots included and nothing exempt, placed
+    through cmd_pour's own path — the hot tier emptied, the cold tier reached only by /vlds:recall. On the keyspace
+    alone: a φ store has no runs to place into until it migrates."""
+    if resolve(store)[0] != "idb":
+        print("archive: refused — the store is on the φ-register; the archive places through the keyspace "
+              "(migrate first)")
+        return 1
+    specs, counts = [], []
+    for fname in sorted(OBJECT_STORES):
+        heads = [b.line1 for b in (hot_blocks(store, fname) or [])]
+        if heads:
+            specs.append(f"{fname}:" + ",".join(str(h) for h in heads))
+            counts.append(f"{len(heads)} {fname}")
+    if not specs:
+        print("archive: nothing to pour — every hot object store is empty")
+        return 0
+    if dry:
+        print("archive: dry run — would pour " + ", ".join(counts) + "; nothing written")
+        return 0
+    return cmd_pour(store, session, now, specs, archive=True)
 
 
 def cmd_compact(store, session, now, force=False):
@@ -2091,6 +2140,43 @@ def cmd_find(store, os_, index, key):
     return 0
 
 
+def cmd_blobs(store, kind=None):
+    """Every registered external object, or those under one blobs/ subdirectory (dispatch, legacy, an object store's
+    wrapped entries): its name, size, rows and recorded sha — what `blob` can read."""
+    ks, _how = load_keys(store)
+    n = 0
+    for (k, name), f in sorted(ks.blobs.items()):
+        if kind and k != kind:
+            continue
+        print(f"{k} {name} bytes={f.get('bytes')} rows={f.get('rows')} sha={f.get('sha')}")
+        n += 1
+    print(f"blobs: {n} external object(s)" + (f" under {kind}" if kind else ""))
+    return 0
+
+
+def cmd_blob(store, kind, name):
+    """One external object's text, read only when the keyspace registers it and the file still hashes to the sha it
+    recorded: an unregistered blob (a pour the next sync has not registered yet) or a changed one is refused, and the
+    check is where either is settled."""
+    ks, _how = load_keys(store)
+    f = ks.blobs.get((kind, name))
+    if f is None:
+        print(f"blob: {kind}/{name} is not a registered external object — `blobs {kind}` lists the registered ones")
+        return 1
+    rel = f.get("blob") or f"{BLOBS}/{kind}/{name}"
+    path = rel_path(store, rel)
+    if not os.path.exists(path):
+        print(f"blob: {rel} is registered but missing on disk — the check reports it")
+        return 1
+    if file_sha(path) != f.get("sha"):
+        print(f"blob: {rel} no longer hashes to the sha the keyspace recorded ({f.get('sha')}) — refused; a hand edit "
+              "or a torn write is the check's to settle")
+        return 1
+    print(f"{kind} {name} bytes={f.get('bytes')} rows={f.get('rows')} sha={f.get('sha')}")
+    print(read_text(path))
+    return 0
+
+
 # ─── check ──────────────────────────────────────────────────────────────────────────────────────────────
 
 def cmd_check(store):
@@ -2368,6 +2454,9 @@ def main():
     p = writer("pour")
     p.add_argument("specs", nargs="+", metavar="FILE:L1,L2", help="a hot file and the head lines of its cold entries")
     p.add_argument("--dry", action="store_true")
+    p.add_argument("--archive", action="store_true", help="let a LIVE ruling or rule pour — /vlds:gc archive's flag")
+    p = writer("archive")
+    p.add_argument("--dry", action="store_true", help="print the counts per object store; write nothing")
     p = writer("compact")
     p.add_argument("--force", action="store_true", help="compact every object store with two or more small runs now")
     p = writer("migrate")
@@ -2388,6 +2477,11 @@ def main():
     p.add_argument("object_store")
     p.add_argument("index", help="an index type or name, e.g. 31:by-status or by-status")
     p.add_argument("key")
+    p = sub.add_parser("blob")
+    p.add_argument("kind", help="the blobs/ subdirectory, e.g. dispatch")
+    p.add_argument("name", help="the file name, e.g. dispatch-20261012-162054-8fd0d9d0.md")
+    p = sub.add_parser("blobs")
+    p.add_argument("kind", nargs="?", default=None, help="only this blobs/ subdirectory")
     sub.add_parser("check")
     sub.add_parser("engine")
     sub.add_parser("pool-diff")
@@ -2400,7 +2494,9 @@ def main():
     if args.cmd == "light":
         return cmd_light(store, args.session, now, args.dry, args.budget_s)
     if args.cmd == "pour":
-        return cmd_pour(store, args.session, now, args.specs, args.dry)
+        return cmd_pour(store, args.session, now, args.specs, args.dry, args.archive)
+    if args.cmd == "archive":
+        return cmd_archive(store, args.session, now, args.dry)
     if args.cmd == "compact":
         return cmd_compact(store, args.session, now, args.force)
     if args.cmd == "migrate":
@@ -2415,6 +2511,10 @@ def main():
         return cmd_range(store, args.object_store, args.lo, args.hi)
     if args.cmd == "find":
         return cmd_find(store, args.object_store, args.index, args.key)
+    if args.cmd == "blob":
+        return cmd_blob(store, args.kind, args.name)
+    if args.cmd == "blobs":
+        return cmd_blobs(store, args.kind)
     if args.cmd == "check":
         return cmd_check(store)
     if args.cmd == "engine":

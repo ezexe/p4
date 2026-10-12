@@ -1071,6 +1071,101 @@ def test_edges():
     print("edges: green")
 
 
+def test_pour_refuses_a_root():
+    """A sweep's naming never pours a LIVE ruling: pour refuses a root unless --archive is passed, writing nothing."""
+    root, store = seed_keyspace()
+    try:
+        idb(store, "sync", "--session", "root-session", "--now", NOW)
+        h = heads(store, "local-storage.md")
+        rc, out = idb(store, "pour", "--session", "root-session", "--now", NOW, f"local-storage.md:{h[0]}")
+        assert rc == 1 and f"local-storage.md:{h[0]} is a LIVE ruling, a root" in out, out
+        assert not os.path.isdir(os.path.join(store, "idb", "runs")), "a refused pour wrote a run"
+        assert heads(store, "local-storage.md") == h, "a refused pour trimmed the hot file"
+        # the SPENT ruling beside it is no root, and pours as before
+        rc, out = idb(store, "pour", "--session", "root-session", "--now", NOW, "--dry", f"local-storage.md:{h[1]}")
+        assert rc == 0 and "would pour 1 local-storage.md" in out, out
+        rc, out = idb(store, "pour", "--session", "root-session", "--now", NOW, "--archive", f"local-storage.md:{h[0]}")
+        assert rc == 0 and "archive: poured 1 (1 local-storage.md)" in out, out
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("pour refuses a root: green")
+
+
+def test_archive():
+    """/vlds:gc archive: every hot object store poured whole, LIVE roots included and nothing exempt; the freed stay
+    freed in the keyspace, the cold tombstones still mask the hot tier, and dispatch.md is untouched."""
+    root, store = seed_keyspace(logger=3, data=[("the sky is blue", "a look")], tombs=[('"go"', "go", "local-storage.md")])
+    try:
+        idb(store, "sync", "--session", "arch-session", "--now", NOW)
+        dispatch = read(os.path.join(store, "dispatch.md"))
+        hot = {f: len(heads(store, f)) for f in engine.OBJECT_STORES if os.path.exists(os.path.join(store, f))}
+        # (a) the dry run counts every hot object store and writes nothing
+        rc, out = idb(store, "archive", "--session", "arch-session", "--now", NOW, "--dry")
+        assert rc == 0 and "archive: dry run — would pour" in out, out
+        for f, n in hot.items():
+            if n:
+                assert f"{n} {f}" in out, f"(a) the dry run did not count {f}: {out}"
+        assert not os.path.isdir(os.path.join(store, "idb", "runs")), "(a) the dry run wrote"
+        # (b) the archive empties the hot tier, the logger keeping only the archive's own line
+        rc, out = idb(store, "archive", "--session", "arch-session", "--now", NOW)
+        assert rc == 0 and "archive: poured" in out, out
+        for f in hot:
+            want = 1 if f == "logger.md" else 0
+            assert th.count_entries(os.path.join(store, f)) == want, f"(b) {f} kept hot entries"
+        assert "Archive — the hot tier poured whole" in read(os.path.join(store, "logger.md"))
+        assert read(os.path.join(store, "dispatch.md")) == dispatch, "(b) the archive touched dispatch.md"
+        # (c) every record of the poured object stores is cold; the masked ruling is still freed, the LIVE one live
+        ls = records(store, "local-storage")
+        assert ls and all(r["at"].startswith("runs/") for r in ls.values()), ls
+        states = sorted(r["state"] for r in ls.values())
+        assert states == ["freed", "live"], f"(c) the archive changed a free: {states}"
+        live_id = next(r["id"] for r in ls.values() if r["state"] == "live")
+        rc, out = idb(store, "get", "local-storage", live_id)
+        assert rc == 0 and "the plan goes in the reply as one fenced block" in out and "status: LIVE" in out, out
+        # (d) the cold tombstone still masks the hot tier: a ruling in the freed owner-words reads FREED
+        masks = phi.tombstone_masks(store)
+        assert any(str(m[0]).endswith("(cold)") for m in masks), f"(d) no cold mask: {masks}"
+        state, why = phi.barrier_state("local-storage.md", "ruling", '"go"', {"owner-words": '"go"', "status": "LIVE"},
+                                       "arch-session", masks)
+        assert state == "FREED" and "(cold)" in why, (state, why)
+        clean_check(store, "after the archive")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    # (e) a store on the φ-register is refused: the archive places through the keyspace
+    root, store = seed_keyspace(recall="index-engine: phi\n")
+    try:
+        rc, out = idb(store, "archive", "--session", "arch-session", "--now", NOW)
+        assert rc == 1 and "the store is on the φ-register" in out, out
+        assert th.count_entries(os.path.join(store, "local-storage.md")) == 2, "(e) a refused archive poured"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("archive: green")
+
+
+def test_blob_reads():
+    """blob and blobs read a registered external object, validated against its recorded sha; an unregistered or
+    changed blob is refused."""
+    root, store = seed_keyspace()
+    try:
+        bdir = os.path.join(store, "idb", "blobs", "dispatch")
+        os.makedirs(bdir)
+        path = os.path.join(bdir, "dispatch-20260929-0900-abcd1234.md")
+        write(path, read(os.path.join(store, "dispatch.md")) + '\n- fingerprint: "ship the fix"\n  time: 2026-09-29 09:00\n')
+        rc, out = idb(store, "blob", "dispatch", "dispatch-20260929-0900-abcd1234.md")
+        assert rc == 1 and "is not a registered external object" in out, out
+        idb(store, "sync", "--session", "blob-session", "--now", NOW)
+        rc, out = idb(store, "blobs", "dispatch")
+        assert rc == 0 and "dispatch-20260929-0900-abcd1234.md" in out and "1 external object(s) under dispatch" in out, out
+        rc, out = idb(store, "blob", "dispatch", "dispatch-20260929-0900-abcd1234.md")
+        assert rc == 0 and '- fingerprint: "ship the fix"' in out, out
+        write(path, read(path) + "  addressed: edited by hand\n")
+        rc, out = idb(store, "blob", "dispatch", "dispatch-20260929-0900-abcd1234.md")
+        assert rc == 1 and "no longer hashes to the sha the keyspace recorded" in out, out
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("blob reads: green")
+
+
 if __name__ == "__main__":
     test_keyspace_derivation()
     test_hand_edit_and_sweep()
@@ -1091,4 +1186,7 @@ if __name__ == "__main__":
     test_rounds()
     test_wrap_and_crlf()
     test_edges()
+    test_pour_refuses_a_root()
+    test_archive()
+    test_blob_reads()
     print("test_idb.py: all green")
