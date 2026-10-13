@@ -11,12 +11,12 @@ content cmdlets, python's open() in a write mode, cp / mv destinations). Three c
 
   the harness scratchpad   ANY file written into the per-session temp directory the system prompt names
                            (`.../Temp/claude/<project>/<session>/scratchpad/`): code belongs under
-                           `.claude/p4/sessions/<s8>/src/<task>/` as a frag; everything else belongs under the project's own
-                           `.claude/scratchpad/` — the notebook, which the user can see and which outlives
+                           `.claude/p4/sessions/<s8>/src/<task>/` as a frag; everything else belongs under the notebook,
+                           `.claude/p4/scratchpad/` (the p4 repo tracks it), which the user can see and which outlives
                            the session
   any other temp location  a CODE file (by extension or by name) written to /tmp, the user's temp directory,
                            and their spellings — a frag belongs under `.claude/p4/sessions/<s8>/src/<task>/`
-  a project scratchpad     a CODE file (by extension or by name) written under any `.claude/scratchpad/` —
+  a project scratchpad     a CODE file (by extension or by name) written under a notebook (`.claude/p4/scratchpad/` or an older `.claude/scratchpad/`) —
                            where a swap script lands once it has stopped calling itself a frag; the ask
                            carries the split and the floor: the notebook is git-ignored and holds notes,
                            logs and caches; a program whose job no single tool call does is a frag under
@@ -70,7 +70,12 @@ def project_root(payload):
 def session_src(root, payload):
     """This session's frag home: <project>/.claude/p4/sessions/<s8>/src — the p4 layout, one directory per session."""
     sid = (str(payload.get("session_id") or "").strip() or "unknown")[:8]
-    return os.path.join(root, ".claude", "p4", "sessions", sid, "src")
+    base = os.path.join(root, ".claude", "p4", "sessions")
+    try:   # the directory is `<title-slug>--<s8>` once named by the session's first title, `<s8>` until then
+        name = next((n for n in os.listdir(base) if n == sid or n.endswith("--" + sid)), sid)
+    except OSError:
+        name = sid
+    return os.path.join(base, name, "src")
 
 
 def all_session_srcs(root):
@@ -128,7 +133,8 @@ def in_temp(path):
 
 def in_project_pad(path):
     p = _norm(path)
-    return "/.claude/scratchpad/" in p or p.startswith(".claude/scratchpad/")
+    # the notebook: .claude/p4/scratchpad/ (tracked by the p4 repo), or an older .claude/scratchpad/ (git-ignored)
+    return any(m in p or p.startswith(m[1:]) for m in ("/.claude/p4/scratchpad/", "/.claude/scratchpad/"))
 
 
 # Scratch data dropped straight into the project root: untracked, unswept, and found by the user long after the
@@ -217,7 +223,7 @@ def cmd_frag_gate(payload):
     is_sub = bool(payload.get("agent_id"))
     root = project_root(payload)
     src = session_src(root, payload)
-    pad = os.path.join(root, ".claude", "scratchpad")
+    pad = os.path.join(root, ".claude", "p4", "scratchpad")
     reasons = []
     seen = set()
     for p in written_paths(payload):
@@ -228,21 +234,21 @@ def cmd_frag_gate(payload):
         # A build file is code by name, never a `.txt` dump: the project's own CMakeLists.txt is not scratch.
         if in_project_root(p, root) and is_data(p) and not is_code(p) and name.lower() not in KNOWN_ROOT:
             reasons.append(f"{name} is a data file headed for the project root ({p}) — scratch data belongs under "
-                           f"{pad}{os.sep}, which is git-ignored and swept, not beside the project's own manifests where "
+                           f"{pad}{os.sep}, the notebook the p4 repo tracks, not beside the project's own manifests where "
                            f"it lands untracked and is found later by the user rather than by whoever wrote it")
         elif is_sub:
             continue
         elif in_scratchpad(p):
             home = (f"{src}{os.sep}<task>{os.sep} as a registered frag, tracked in the p4 repo" if is_code(p)
-                    else f"{pad}{os.sep}, the project's git-ignored notebook")
+                    else f"{pad}{os.sep}, the notebook, which the p4 repo tracks")
             reasons.append(f"{name} is headed for the harness's per-session scratchpad ({p}) — it belongs under {home}: "
                            f"that directory is named after a session id, invisible to the user, and gone with the session")
         elif in_temp(p) and is_code(p):
             reasons.append(f"{name} is code headed for a temp location ({p}) — a frag belongs under {src}{os.sep}<task>{os.sep} "
                            f"and in src{os.sep}frags.md")
         elif in_project_pad(p) and is_code(p):
-            reasons.append(f"{name} is code headed for a project's .claude/scratchpad ({p}) — the scratchpad is the project's "
-                           f"git-ignored notebook, for notes, logs, output and copies kept for reading; code worth keeping is "
+            reasons.append(f"{name} is code headed for a project's notebook ({p}) — the notebook is "
+                           f"for notes, logs, output and copies kept for reading; code worth keeping is "
                            f"not a note: a program whose job no single tool call does is a frag under {src}{os.sep}<task>{os.sep} "
                            f"registered in src{os.sep}frags.md and tracked in the p4 repo, and an edit, an append, a "
                            f"whole-file write, or one shell command is the tool's own call and no file; a page or source "

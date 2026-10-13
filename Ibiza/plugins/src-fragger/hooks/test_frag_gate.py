@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """test_frag_gate.py — acceptance tests for the frag gate: anything into the harness scratchpad asks, code
-into any other temp location asks, code (by extension or by name) into any project's .claude/scratchpad/
-asks (the split and the floor: the notebook is git-ignored, a frag is tracked under src/, and a tool call is
+into any other temp location asks, code (by extension or by name) into a notebook (.claude/p4/scratchpad/, or an older .claude/scratchpad/)
+asks (the split and the floor: the notebook is for notes, a frag is tracked under src/, and a tool call is
 no file), and files under p4/src/, non-code files in the project's scratchpad, or the project tree
 pass. Then the SessionStart hook: it seeds src/frags.md and the notebook's own `.gitignore` of `*`,
 overwrites neither, and says in one line when the project's root rules ignore src/. Run from anywhere:
@@ -19,7 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 GATE = os.path.join(HERE, "frag_gate.py")
 SCRATCH = "C:/Users/someone/AppData/Local/Temp/claude/E--projects-x/abc123/scratchpad"
 STORE_SRC = "E:/projects/x/.claude/p4/sessions/test-ses/src/sweep-20260903"
-PROJECT_PAD = "E:/projects/x/.claude/scratchpad"
+PROJECT_PAD = "E:/projects/x/.claude/p4/scratchpad"
 
 
 def run(payload):
@@ -63,8 +63,10 @@ def main():
     assert run(bash("cat > .claude/scratchpad/gen.py <<'EOF'\nprint(1)\nEOF\n")) is not None, "bash heredoc code into the project scratchpad passed"
     assert run(write("E:/other/.claude/scratchpad/swap.py")) is not None, "code in another project's scratchpad passed"
     assert run(write(f"{PROJECT_PAD}/notes.md")) is None, "notes in the project scratchpad asked"
-    # the ask carries the split: the notebook is git-ignored, a frag is tracked
-    assert "git-ignored notebook" in d["permissionDecisionReason"] and "tracked" in d["permissionDecisionReason"], d
+    # the ask carries the split: the notebook is for notes, a frag is registered and tracked
+    assert "notebook is for notes" in d["permissionDecisionReason"] and "tracked" in d["permissionDecisionReason"], d
+    # an older .claude/scratchpad/ is still a notebook to the gate
+    assert run(write("E:/projects/x/.claude/scratchpad/old.py")) is not None, "code in an older notebook passed"
     # code by a build-language extension or by name asks in a notebook too, and passes under src/
     assert run(write(f"{PROJECT_PAD}/envtest.cmake")) is not None, "a .cmake probe in the project scratchpad passed"
     assert run(write(f"{PROJECT_PAD}/probe/CMakeLists.txt")) is not None, "CMakeLists.txt in the project scratchpad passed"
@@ -240,15 +242,15 @@ def session_open():
 
     out = open_session()
     assert "## src-fragger (always active)" in out, out[:300]
-    assert read(root, ".claude", "scratchpad", ".gitignore") == "*\n", "the notebook's .gitignore was not seeded as *"
+    # the notebook is created inside the p4 repo with no .gitignore of its own: the p4 repo tracks it
+    assert os.path.isdir(os.path.join(root, ".claude", "p4", "scratchpad")), "the notebook was not created"
+    assert not os.path.exists(os.path.join(root, ".claude", "p4", "scratchpad", ".gitignore")), "the notebook ignores itself"
+    assert not os.path.exists(os.path.join(root, ".claude", "scratchpad")), "an old-style notebook was created"
     assert read(root, ".claude", "p4", "sessions", "test-ses", "src", "frags.md") == read(HERE, "frags-seed.md"), "the register was not seeded"
-    # a user's edit to either seed is a ruling: neither is overwritten
-    put("# tracked on purpose\n", root, ".claude", "scratchpad", ".gitignore")
+    # a user's edit to the register is a ruling: never overwritten
     put("# my register\n", root, ".claude", "p4", "sessions", "test-ses", "src", "frags.md")
     open_session()
-    assert read(root, ".claude", "scratchpad", ".gitignore") == "# tracked on purpose\n", "the user's .gitignore edit was overwritten"
     assert read(root, ".claude", "p4", "sessions", "test-ses", "src", "frags.md") == "# my register\n", "the user's register was overwritten"
-    put("*\n", root, ".claude", "scratchpad", ".gitignore")
     git = shutil.which("git")
     if not git:
         print("test_frag_gate.py: session-open git cases SKIPPED — no git on PATH")
@@ -259,9 +261,13 @@ def session_open():
         return subprocess.run([git, "-C", root, *args], capture_output=True, timeout=60).returncode
 
     assert g("init", "-q") == 0, "git init failed"
-    # the seed ignores the notebook by itself, with no root rule — and src/ stays trackable
-    assert g("check-ignore", "-q", ".claude/scratchpad/notes.md") == 0, "the notebook does not ignore itself"
-    assert g("check-ignore", "-q", ".claude/scratchpad/probe.py") == 0, "code in the notebook is not ignored"
+    # the p4 repo, once it exists, tracks the notebook: nothing in it is ignored there
+    assert subprocess.run([git, "init", "-q", os.path.join(root, ".claude", "p4")], timeout=60).returncode == 0
+    put("a note\n", root, ".claude", "p4", "scratchpad", "notes.md")
+    p4g = subprocess.run([git, "-C", os.path.join(root, ".claude", "p4"), "check-ignore", "-q", "scratchpad/notes.md"],
+                         capture_output=True, timeout=60).returncode
+    assert p4g == 1, "the p4 repo ignores the notebook"
+    shutil.rmtree(os.path.join(root, ".claude", "p4", ".git"))
     # with no p4 repo yet, p4/src/ is untracked, and the hook says so in one line
     out = open_session()
     assert out.count(NOTICE) == 1, "the no-p4-repo notice is missing or more than one line"

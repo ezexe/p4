@@ -20,7 +20,9 @@
 # vlds plugin it migrates a legacy src/ itself — the flat .claude/p4/src/ (moved, inside the p4 repo) or the older
 # .claude/vlds/src/ (copied, left for the user) — into .claude/p4/sessions/_legacy/src/.
 #
-# The notebook (.claude/scratchpad/) is seeded with a .gitignore of `*` on the same terms. The hook never touches
+# The notebook, .claude/p4/scratchpad/, is created here and tracked by the p4 repo like the rest of .claude/p4/ (the
+# project's repo excludes it whole); no .gitignore is seeded in it. An older .claude/scratchpad/ is left as it was,
+# its own .gitignore of `*` included, the user's to dispose. The hook never touches
 # the project's index or its root .gitignore; where no p4 repo exists (the vlds plugin absent), that is said in one
 # line for the user to act on, never acted on for them.
 set -u
@@ -34,7 +36,7 @@ if [ "$step" = "seed" ] || [ "$step" = "all" ]; then
   if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then
     p4="${CLAUDE_PROJECT_DIR}/.claude/p4"
     lock="${CLAUDE_PROJECT_DIR}/.claude/.p4-layout.lock"
-    pad="${CLAUDE_PROJECT_DIR}/.claude/scratchpad"
+    pad="$p4/scratchpad"
     # give the vlds hooks a moment to take the lock, then wait it out
     i=0
     while [ "$i" -lt 200 ]; do
@@ -44,7 +46,10 @@ if [ "$step" = "seed" ] || [ "$step" = "all" ]; then
     done
     sid=$(printf '%s' "$payload" | tr -d '\r\n' | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | cut -c1-8)
     [ -n "$sid" ] || sid="unknown"
-    src="$p4/sessions/$sid/src"
+    # the session directory is `<title-slug>--<s8>` once named by its first title, `<s8>` until then
+    sdir="$sid"
+    for d in "$p4"/sessions/*--"$sid"; do [ -d "$d" ] && sdir=$(basename "$d"); done
+    src="$p4/sessions/$sdir/src"
     legacy_src="$p4/sessions/_legacy/src"
     if [ ! -e "$legacy_src" ]; then
       if [ -d "$p4/src" ]; then
@@ -57,7 +62,6 @@ if [ "$step" = "seed" ] || [ "$step" = "all" ]; then
     fi
     mkdir -p "$src" "$pad" "$p4/sindex"
     [ -f "$src/frags.md" ] || cp "$seed" "$src/frags.md" 2>/dev/null || true
-    [ -f "$pad/.gitignore" ] || printf '*\n' >"$pad/.gitignore" 2>/dev/null || true
     # the cumulative frag index: every session's register entries, by session
     {
       echo "# sindex — the cumulative frag register: every session's src/frags.md entries under its own heading;"

@@ -94,8 +94,10 @@ CURRENT_SID = ["test-session"]   # the session a test's store belongs to; run_ho
 
 
 def store_of(root, sid=None):
-    """A test project's session store: <root>/.claude/p4/sessions/<s8>/vlds (scripts/partition.py)."""
-    return os.path.join(root, ".claude", "p4", "sessions", (sid or CURRENT_SID[0])[:8], "vlds")
+    """A test project's session store, as the hooks resolve it: <root>/.claude/p4/sessions/<name>/vlds, <name> the
+    session's `<title-slug>--<s8>` once named, `<s8>` until then (scripts/partition.py)."""
+    import partition  # noqa: E402 — beside this file
+    return partition.session_store(os.path.join(root, ".claude", "p4"), sid or CURRENT_SID[0])
 
 
 def seed_project(sid="test-session"):
@@ -483,11 +485,19 @@ def test_session_title():
                     '{"type":"custom-title","customTitle":"First  session:  the real title","sessionId":"first-session"}\n')
         out = run_hook("prompt-open", {"session_id": "first-session", "prompt": "hello", "transcript_path": transcript}, root)
         assert 'session first-se "First session: the real title"' in out, f"(a) id + title not in the prompt-hook header:\n{out}"
+        # (a2) the session directory is named by that first title, once, and the stamp lands in the named store
+        store = store_of(root, "first-session")
+        assert os.path.basename(os.path.dirname(store)) == "first-session-the-real-title--first-se", store
+        assert "session directory named by its first title" in out, f"(a2) the rename not announced:\n{out}"
+        with open(transcript, "a", encoding="utf-8", newline="\n") as f:
+            f.write('{"type":"custom-title","customTitle":"A later name","sessionId":"first-session"}\n')
+        run_hook("prompt-open", {"session_id": "first-session", "prompt": "again", "transcript_path": transcript}, root)
+        assert store_of(root, "first-session") == store, "(a2) a later title renamed the directory"
         with open(os.path.join(store, "dispatch.md"), encoding="utf-8") as f:
             assert 'session first-se "First session: the real title"' in f.read(), "(a) id + title not in the stamp"
         with open(os.path.join(store, ".sessions"), encoding="utf-8") as f:
             ledger = f.read()
-        assert ledger.strip().endswith("First session: the real title"), f"(b) .sessions lacks the title: {ledger}"
+        assert ledger.strip().endswith("A later name"), f"(b) .sessions lacks the latest title: {ledger}"
         # (c) a second session writes its own store — seeded, stamped there, named by its short id alone — and
         # nothing is poured or dated anywhere: the first session's record stays whole in its own directory
         first_rows = open(os.path.join(store, "dispatch.md"), encoding="utf-8").read()

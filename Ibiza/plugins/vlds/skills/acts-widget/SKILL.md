@@ -7,7 +7,7 @@ argument-hint: "[append ACTS.json | pick --acts ID,ID | show]"
 
 # Acts widget
 
-One page per session, at `<working dir>/.claude/scratchpad/acts-widget/<session short id>.html` — the git-ignored notebook, since the page is the session's own working surface and nothing reads it after the session.
+One page per session, at `<working dir>/.claude/p4/scratchpad/acts-widget/<session short id>.html` — the notebook, tracked by the p4 repo, since the page is the session's own working surface and nothing reads it after the session.
 The page is its own state: the rounds live in a JSON block inside it, `build_acts_widget.py` reads that block back on every call and rewrites the page whole, so there is never a second file to keep in step.
 A path that already holds something other than an acts page is refused, never overwritten.
 

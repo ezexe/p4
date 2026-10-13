@@ -1346,8 +1346,18 @@ def cmd_prompt_open(payload, store):
         return 0
     sid, tag, title = session_tag(payload, store)
     now = datetime.datetime.now()
+    renamed = None
+    p4 = pt.p4_of(store)
+    if p4 and title and sid != "unknown":
+        # the session directory is named by the session's first title, once, at the start of a turn
+        renamed = pt.name_session(p4, sid, title)
+        if renamed:
+            store = pt.session_store(p4, sid)
     os.makedirs(store, exist_ok=True)
     lines = [f"## VLDS prompt hook (session {tag})", "- " + now_line(now)]
+    if renamed:
+        lines.append(f"- session directory named by its first title: {session_store_label(store)} (was "
+                     f".claude/p4/sessions/{sid[:8]}/) — every path below is the new one; the name sticks")
     if not title:
         lines.append("- title: none yet — no custom-title record in the transcript at hook time (it is written "
                      "asynchronously) and none recorded in .sessions; re-read at the next prompt")

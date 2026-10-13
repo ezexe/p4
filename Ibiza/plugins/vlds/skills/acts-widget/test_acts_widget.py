@@ -64,7 +64,7 @@ def test_session_page_round_trip():
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f)
         run = lambda *a: b.main(["x", *a, "--session", "abc12345", "--root", root])  # noqa: E731
-        page = os.path.join(root, ".claude", "scratchpad", "acts-widget", "abc12345.html")
+        page = os.path.join(root, ".claude", "p4", "scratchpad", "acts-widget", "abc12345.html")
 
         assert run("pick", "--acts", "commit") == 1, "a pick before any closing was accepted"
         assert run("append", acts1, "--now", "2026-10-08 18:50") == 0 and os.path.exists(page)
@@ -255,7 +255,7 @@ def test_stored_entries():
         assert run("stored", "--store", store, "--record", rec, "--act", "pr") == 1, "an unpicked act took entries"
         assert run("stored", "--store", store, "--record", rec, "--act", "commit") == 0
         assert run("stored", "--store", store, "--record", rec, "--act", "commit") == 0, "a re-run failed"
-        page = os.path.join(root, ".claude", "scratchpad", "acts-widget", "s1.html")
+        page = os.path.join(root, ".claude", "p4", "scratchpad", "acts-widget", "s1.html")
         rnd = b.load_state(page)["rounds"][0]
         assert len(rnd["stored"]) == 2, "a re-run attached the same entries twice"
         claim, gone = rnd["stored"]

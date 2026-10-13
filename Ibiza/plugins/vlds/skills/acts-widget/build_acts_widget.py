@@ -17,7 +17,7 @@ ACTS.json is one closing:
              "briefs": {"changes": "...", "scope": "..."}}]}
 
 Every act needs id, title and goal; ids are unique within a round. --session alone puts the page at
-<root>/.claude/scratchpad/acts-widget/<session>.html (root defaults to the working directory), so a session
+<root>/.claude/p4/scratchpad/acts-widget/<session>.html (root defaults to the working directory), so a session
 recycles one page. `widget` prints that page as a chat widget's code, for show_widget, where its Send button posts
 the assembled prompt as the next message. The page is its own state: the rounds live in a JSON block inside it, read back on every
 append or pick, and the page is rewritten whole. It inlines assemble.js, so the prompt it shows is built by the
@@ -234,7 +234,7 @@ def page_path_of(args):
         return args.page
     if not args.session:
         raise ValueError("--page or --session is required")
-    return os.path.join(args.root or os.getcwd(), ".claude", "scratchpad", "acts-widget", f"{args.session}.html")
+    return os.path.join(args.root or os.getcwd(), ".claude", "p4", "scratchpad", "acts-widget", f"{args.session}.html")
 
 
 def summary(state):

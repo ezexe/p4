@@ -1,12 +1,13 @@
 """partition.py — the p4 layout: one directory per session, two cumulative indexes beside them.
 
     .claude/p4/                       a git repository of its own, separate from the project's
-    .claude/p4/sessions/<s8>/vlds/    the session's VLDS store — every file it writes, its own keyspace (idb/)
-    .claude/p4/sessions/<s8>/src/     the session's frags (the src-fragger plugin's), with its own register
+    .claude/p4/sessions/<name>/vlds/  the session's VLDS store — every file it writes, its own keyspace (idb/)
+    .claude/p4/sessions/<name>/src/   the session's frags (the src-fragger plugin's), with its own register
     .claude/p4/vindex/                the cumulative VLDS index over every session's store, and the recall config
     .claude/p4/sindex/                the cumulative frag register over every session's src/
 
-A session's store is a whole VLDS store, so every writer — the hooks, record.py, the keyspace's sync and pours —
+A session directory's <name> is `<title-slug>--<s8>`, named once by the session's first chat title (`<s8>`, its short id,
+until a title exists; the first title sticks). A session's store is a whole VLDS store, so every writer — the hooks, record.py, the keyspace's sync and pours —
 runs on it unchanged and lands in that session's directory: nothing pours it, nothing dates it, and it is never
 removed. Readers that need what other sessions wrote — the owner's rulings and standing rules, the verified claims,
 the tombstones, the briefs, the ledger's corrections, the logger's history, the owner voice — read across every
@@ -18,6 +19,7 @@ own and only session: `session_stores` returns it alone and `vindex_dir` is the 
 the single-store behaviour there.
 """
 import os
+import re
 import time
 
 SESSIONS = "sessions"
@@ -47,12 +49,55 @@ def partitioned(store):
     return p4_of(store) is not None
 
 
+SLUG_MAX = 60
+
+
+def slug(title):
+    """A title made a directory name: lower case, every run of characters outside [a-z0-9] one dash, the ends trimmed,
+    at most SLUG_MAX characters — the same rule hooks/p4-layout.sh applies in shell, so both name a session alike."""
+    s = re.sub(r"[^a-z0-9]+", "-", str(title or "").lower()).strip("-")
+    return s[:SLUG_MAX].strip("-")
+
+
+def session_dirname(p4, session):
+    """A session's directory name: `<title-slug>--<s8>` once the session has been named by its first title, `<s8>`
+    until then — found on disk by the short id it ends in, so a rename never loses the session."""
+    s8 = short(session)
+    root = os.path.join(p4, SESSIONS)
+    try:
+        for n in os.listdir(root):
+            if n == s8 or n.endswith("--" + s8):
+                return n
+    except OSError:
+        pass
+    return s8
+
+
+def name_session(p4, session, title):
+    """Name a session by its first title, once: `<s8>` → `<title-slug>--<s8>`. A session already named keeps its
+    name whatever its title becomes (the first title sticks); no title, an empty slug, or a taken name renames
+    nothing. Returns the new name, or None."""
+    s8 = short(session)
+    cur = session_dirname(p4, session)
+    sl = slug(title)
+    if cur != s8 or not sl:
+        return None
+    src, dst = os.path.join(p4, SESSIONS, cur), os.path.join(p4, SESSIONS, f"{sl}--{s8}")
+    if not os.path.isdir(src) or os.path.exists(dst):
+        return None
+    try:
+        os.rename(src, dst)
+    except OSError:
+        return None
+    return os.path.basename(dst)
+
+
 def session_store(p4, session):
-    return os.path.join(p4, SESSIONS, short(session), "vlds")
+    return os.path.join(p4, SESSIONS, session_dirname(p4, session), "vlds")
 
 
 def session_src(p4, session):
-    return os.path.join(p4, SESSIONS, short(session), "src")
+    return os.path.join(p4, SESSIONS, session_dirname(p4, session), "src")
 
 
 def session_of(store):

@@ -73,12 +73,30 @@ for f in "$legacy_dir"/vlds/idb/blobs/dispatch/dispatch-*.md "$legacy_dir"/vlds/
   [ -f "$f" ] || continue
   owner=$(basename "$f" .md | sed 's/^dispatch-[0-9]\{8\}-[0-9]\{6\}-//' | cut -c1-8)
   [ -n "$owner" ] || continue
-  target="$p4/sessions/$owner/vlds/dispatch.md"
+  odir="$owner"   # a directory already named by its title (`<slug>--<s8>`) is the same session's
+  for d in "$p4"/sessions/*--"$owner"; do [ -d "$d" ] && odir=$(basename "$d"); done
+  target="$p4/sessions/$odir/vlds/dispatch.md"
   if [ ! -e "$target" ]; then
-    mkdir -p "$p4/sessions/$owner/vlds" && cp "$f" "$target" 2>/dev/null && n=$((n + 1))
+    mkdir -p "$p4/sessions/$odir/vlds" && cp "$f" "$target" 2>/dev/null && n=$((n + 1))
   fi
 done
 [ "$n" -gt 0 ] && echo "vlds: copied $n dated dispatch pour(s) into their sessions' own directories (sessions/<id>/vlds/dispatch.md); the pours stay in the legacy store's cold tier."
+# every session directory still named by its bare short id is named by its first title, when any session's .sessions
+# ledger records one: `<title-slug>--<s8>`, the slug the same rule as scripts/partition.py slug() — lower case, every
+# run outside [a-z0-9] one dash, the ends trimmed, at most 60 characters. A named directory keeps its name.
+named=0
+for d in "$p4"/sessions/*; do
+  [ -d "$d" ] || continue
+  s8=$(basename "$d")
+  case "$s8" in _*|*--*) continue ;; esac
+  title=$(cat "$p4"/sessions/*/vlds/.sessions 2>/dev/null | awk -v id="$s8" 'substr($1, 1, 8) == id && NF > 3 { t = $0; sub(/^[^ ]+ [^ ]+ [^ ]+ /, "", t); if (!first) first = t } END { print first }')
+  [ -n "$title" ] || continue
+  sl=$(printf '%s' "$title" | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9][^a-z0-9]*/-/g; s/^-*//; s/-*$//' | cut -c1-60 | sed 's/-*$//')
+  [ -n "$sl" ] || continue
+  [ -e "$p4/sessions/$sl--$s8" ] && continue
+  mv "$d" "$p4/sessions/$sl--$s8" 2>/dev/null && named=$((named + 1))
+done
+[ "$named" -gt 0 ] && echo "vlds: named $named session director(ies) by their first chat title (<title-slug>--<id>); a named directory keeps its name."
 # the recall config, from the legacy index
 if [ ! -e "$p4/vindex/phi-index.md" ] && [ -f "$legacy_dir/vlds/phi-index.md" ]; then
   mkdir -p "$p4/vindex" && cp "$legacy_dir/vlds/phi-index.md" "$p4/vindex/phi-index.md" 2>/dev/null \
