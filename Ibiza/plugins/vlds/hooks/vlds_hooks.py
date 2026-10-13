@@ -1850,13 +1850,48 @@ def cmd_turn_close(payload, store):
     except Exception:  # noqa: BLE001 — a hook degrades, never raises; the next turn close rebuilds it
         pass
     kept = [r for r in reports if r and not (r.startswith("turn-close: nothing to move") and "owed" not in r)]
-    if not kept:
-        return 0
-    with open(os.path.join(store, TURN_CLOSE), "a", encoding="utf-8", newline="\n") as f:
-        for r in kept:
-            f.write(f"{sid} {stamp} {r[len('turn-close: '):]}\n")
-    print("\n".join(kept))
+    if kept:
+        with open(os.path.join(store, TURN_CLOSE), "a", encoding="utf-8", newline="\n") as f:
+            for r in kept:
+                f.write(f"{sid} {stamp} {r[len('turn-close: '):]}\n")
+    block = conductor_owed(payload, store, sid, stamp)
+    if block:
+        print(json.dumps({"decision": "block", "reason": block}))
+    elif kept:
+        print("\n".join(kept))
     return 0
+
+
+POOL_OWED = ".pool-owed"    # the session ids whose first unpooled stop was blocked once — the second stop passes
+
+
+def conductor_owed(payload, store, sid, stamp):
+    """The reason to block this stop once, or None: the recall config names a conductor (`operator-via:`) on the
+    pooled road and this session has no pool of its own yet, so its first moment never ran — the launch no hook can
+    make (a hook has no channel to spawn a subagent), owed by the session before its turn ends. Once per session:
+    a stop the hook already continued (`stop_hook_active`) and a session already blocked both pass, so a session
+    without the conductor agent is never held in a loop."""
+    if payload.get("stop_hook_active") or sid == "unknown" or not os.path.isdir(store):
+        return None
+    cfg = pt.config_index(store)
+    _inject, _digest, _from, pool, models = recall_lists(read_text(cfg) if os.path.exists(cfg) else "")
+    via = models.get("via")
+    if pool != "subagent" or not via or pool_session(store) == sid[:8]:
+        return None
+    marker = os.path.join(store, POOL_OWED)
+    seen = set(read_text(marker).split()) if os.path.exists(marker) else set()
+    if sid in seen:
+        return None
+    with open(marker, "a", encoding="utf-8", newline="\n") as f:
+        f.write(sid + "\n")
+    brief = os.path.join(plugin_root(), "hooks", "operator-prompt.md")
+    return (f"VLDS: this session's first moment never ran — the recall config names {via} as the conductor and "
+            f"this session has no pool ({session_store_label(store)}recall-pool.md). Before ending the turn, launch "
+            f"it: the Agent tool, subagent_type {via}, in the foreground, with one message — `Read {brief} and do what "
+            f"it says. store: {store} | session: {sid[:8]} | now: {stamp} | moment: open | <this session's task in "
+            f"one line, and the owner's words>` — and a last line `conductor: launch the operator with this message "
+            f"on {models['pool']}, and return a derived understanding`; act on the derivation it returns, then finish "
+            "the reply. This stop is blocked once per session; if the agent type is not available, say so and stop.")
 
 
 def main():

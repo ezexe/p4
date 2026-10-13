@@ -386,6 +386,45 @@ def test_owner_voice():
     print("owner voice: green")
 
 
+def test_conductor_owed():
+    """The Stop hook's one block: with operator-via set and no pool of this session's own, the first stop is blocked
+    with the conductor launch spelled out; the next stop passes, as does a stop the hook already continued; a session
+    whose pool is built, and a config with no conductor, are never blocked."""
+    root, store = seed_project("owed-session")
+    try:
+        vindex = os.path.join(root, ".claude", "p4", "vindex")
+        os.makedirs(vindex)
+        with open(os.path.join(vindex, "phi-index.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("# idx\n\n## recall\n\noperator-via: mister:roboto\n")
+        out = run_hook("turn-close", {"cwd": root, "stop_hook_active": True}, root)
+        assert '"decision": "block"' not in out, f"(a) a continued stop was blocked:\n{out}"
+        out = run_hook("turn-close", {"cwd": root}, root)
+        d = json.loads(next(l for l in out.splitlines() if l.startswith("{")))
+        assert d["decision"] == "block" and "subagent_type mister:roboto" in d["reason"] \
+            and "conductor: launch the operator" in d["reason"] and "operator-prompt.md" in d["reason"], d
+        out = run_hook("turn-close", {"cwd": root}, root)
+        assert '"decision": "block"' not in out, f"(b) the second stop was blocked:\n{out}"
+        root2, store2 = seed_project("pooled-session")
+        try:
+            os.makedirs(os.path.join(root2, ".claude", "p4", "vindex"))
+            shutil.copy(os.path.join(vindex, "phi-index.md"), os.path.join(root2, ".claude", "p4", "vindex", "phi-index.md"))
+            with open(os.path.join(store2, "recall-pool.md"), "w", encoding="utf-8", newline="\n") as f:
+                f.write("# VLDS Recall Pool\n\nsession: pooled-s\n")
+            out = run_hook("turn-close", {"cwd": root2}, root2)
+            assert '"decision": "block"' not in out, f"(c) a pooled session was blocked:\n{out}"
+        finally:
+            shutil.rmtree(root2, ignore_errors=True)
+        root3, _store3 = seed_project("plain-session")
+        try:
+            out = run_hook("turn-close", {"cwd": root3}, root3)
+            assert '"decision": "block"' not in out, f"(d) a config with no conductor was blocked:\n{out}"
+        finally:
+            shutil.rmtree(root3, ignore_errors=True)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("conductor owed: green")
+
+
 def test_cross_session_reads():
     """The p4 layout's reads: a ruling one session recorded is a standing rule in another session's start and its
     barrier; another session's inferences and dispatch rows never reach this one; the barrier's virtual lines map back
@@ -413,6 +452,19 @@ def test_cross_session_reads():
         with open(os.path.join(root, ".claude", "p4", "vindex", "sessions.tsv"), encoding="utf-8") as f:
             listed = f.read()
         assert "first-se\t" in listed and "second-s\t" in listed, f"(c) vindex lacks a session:\n{listed}"
+        # (d) the close writes into a file the new session store lacks: created from another session's header
+        rec = os.path.join(root, "rec.md")
+        with open(rec, "w", encoding="utf-8", newline="\n") as f:
+            f.write("## ledger.md\n- correction: a lesson in a new store\n  time: 2026-09-03 10:00\n  match: a\n"
+                    "  meant: b\n")
+        r = subprocess.run([sys.executable, os.path.join(HERE, "record.py"), "--store", second, "--session",
+                            "second-session", "--now", "2026-09-03 10:00", "--record", rec], capture_output=True,
+                           timeout=60)
+        out = r.stdout.decode("utf-8", "replace")
+        assert "written: ledger.md" in out and "refused: nothing" in out, f"(d) the record refused:\n{out}"
+        with open(os.path.join(second, "ledger.md"), encoding="utf-8") as f:
+            text = f.read()
+        assert text.startswith(LEDGER_HEADER.split("\n")[0]) and "a lesson in a new store" in text, text[:300]
     finally:
         shutil.rmtree(root, ignore_errors=True)
     print("cross-session reads: green")
@@ -1409,6 +1461,7 @@ if __name__ == "__main__":
     test_clock_and_post_write()
     test_gc_trace()
     test_owner_voice()
+    test_conductor_owed()
     test_cross_session_reads()
     test_session_title()
     test_pool_mode()

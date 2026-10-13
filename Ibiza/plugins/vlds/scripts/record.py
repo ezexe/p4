@@ -49,6 +49,30 @@ except Exception:  # noqa: BLE001 — the hooks file is beside this one; without
 
 import datetime  # noqa: E402
 
+sys.path.insert(0, HERE)
+import partition as pt  # noqa: E402 — the p4 layout: a new session store starts with none of the shared files
+
+
+def seed_from_peer(store, fname):
+    """A file a new session store lacks, created from another session's copy of it — its header, up to and including
+    the first `---` line, entries none: the file's shape is its header, and the header is the same in every session.
+    Nothing is created when no session holds the file, or outside the p4 layout."""
+    if not pt.partitioned(store):
+        return False
+    for peer, _lb in pt.expand(store, fname):
+        src = os.path.join(peer, fname)
+        if os.path.normcase(os.path.abspath(peer)) == os.path.normcase(os.path.abspath(store)) or not os.path.exists(src):
+            continue
+        with open(src, encoding="utf-8") as f:
+            lines = f.read().replace("\r\n", "\n").split("\n")
+        if "---" not in lines:
+            continue
+        os.makedirs(store, exist_ok=True)
+        with open(os.path.join(store, fname), "w", encoding="utf-8", newline="\n") as f:
+            f.write("\n".join(lines[:lines.index("---") + 1]) + "\n")
+        return True
+    return False
+
 STORE_FILES = {"dispatch.md", "index.md", "ledger.md", "logger.md", "tombstones.md", "virtual.md",
                "session-storage.md", "local-storage.md", "data-store.md", "briefs.md"}
 LOGGER_ENTRY_RE = re.compile(r"^- `\[(?:gate|guide|gc|inspector|looper)\]` 20\d\d-\d\d-\d\d(?: \d\d:\d\d)? — \*\*")
@@ -211,6 +235,8 @@ def apply_record(store, session, now, text, dry):
             refused.append(f"{fname} — {head[:60]} — not a store file")
             continue
         path = os.path.join(store, fname)
+        if not os.path.exists(path):
+            seed_from_peer(store, fname)
         if not os.path.exists(path):
             refused.append(f"{fname} — {head[:60]} — file absent")
             continue
