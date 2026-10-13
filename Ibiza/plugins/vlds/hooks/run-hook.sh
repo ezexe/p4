@@ -7,6 +7,10 @@
 # rows fall back to the model — stamp, pour, and recall read are then its own acts for the session.
 set -u
 
+# every session-open subcommand reads the store, so the p4 layout (the legacy copy, the repo) lands first —
+# hooks/p4-layout.sh serializes the concurrent SessionStart callers and prints only for the one that did the work
+[ "${1:-}" = "session-open" ] && sh "${CLAUDE_PLUGIN_ROOT}/hooks/p4-layout.sh"
+
 for c in python3 python py; do
   if command -v "$c" >/dev/null 2>&1 && "$c" -c "import sys" >/dev/null 2>&1; then
     exec "$c" "${CLAUDE_PLUGIN_ROOT}/hooks/vlds_hooks.py" "$@"

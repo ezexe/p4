@@ -36,6 +36,14 @@ if [ "$step" = "seed" ] || [ "$step" = "all" ]; then
     mkdir -p "$src" "$pad"
     [ -f "$src/frags.md" ] || cp "$seed" "$src/frags.md" 2>/dev/null || true
     [ -f "$pad/.gitignore" ] || printf '*\n' >"$pad/.gitignore" 2>/dev/null || true
+    # the vlds plugin's SessionStart hooks, run concurrently with this one, initialize the p4 repo under the lock
+    # .claude/.p4-layout.lock: give them a moment to start, and wait out the lock, before calling the repo absent
+    i=0
+    while [ ! -e "${CLAUDE_PROJECT_DIR}/.claude/p4/.git" ] && [ "$i" -lt 200 ]; do
+      [ "$i" -ge 20 ] && [ ! -d "${CLAUDE_PROJECT_DIR}/.claude/.p4-layout.lock" ] && break
+      sleep 0.1 2>/dev/null || sleep 1
+      i=$((i + 1))
+    done
     if command -v git >/dev/null 2>&1 && [ ! -e "${CLAUDE_PROJECT_DIR}/.claude/p4/.git" ]; then
       echo "src-fragger: .claude/p4/ is not a git repository yet — p4/src/ is untracked until the vlds SessionStart hook (or the user) initializes it; say so once."
     fi
