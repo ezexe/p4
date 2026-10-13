@@ -232,13 +232,16 @@ def looks_store_shaped(path):
 
 def stray_files(store):
     """Store-named, store-shaped files outside the store, to STRAY_DEPTH under the project root (the parent
-    of `.claude`), skipping STRAY_SKIP directories and the store itself; [] when the store is not at
-    `<root>/.claude/vlds`, since no project root is defined then."""
-    dot = os.path.dirname(os.path.abspath(store))
-    if os.path.basename(dot) != ".claude":
+    of `.claude`), skipping STRAY_SKIP directories, the store itself and the legacy store at `.claude/vlds`
+    (the SessionStart hook's migration source, left for the user to dispose); [] when the store is not at
+    `<root>/.claude/p4/vlds`, since no project root is defined then."""
+    p4 = os.path.dirname(os.path.abspath(store))
+    dot = os.path.dirname(p4)
+    if os.path.basename(p4) != "p4" or os.path.basename(dot) != ".claude":
         return []
     root = os.path.dirname(dot)
     store_abs = os.path.normcase(os.path.abspath(store))
+    legacy_abs = os.path.normcase(os.path.join(dot, "vlds"))
     found = []
 
     def walk(d, depth):
@@ -252,7 +255,7 @@ def stray_files(store):
             except OSError:
                 continue
             if is_dir:
-                if e.name in STRAY_SKIP or os.path.normcase(os.path.abspath(e.path)) == store_abs:
+                if e.name in STRAY_SKIP or os.path.normcase(os.path.abspath(e.path)) in (store_abs, legacy_abs):
                     continue
                 if depth < STRAY_DEPTH:
                     walk(e.path, depth + 1)
@@ -1437,7 +1440,7 @@ def main():
             stream.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(prog="phi.py", description="VLDS φ-register mechanical companion")
     ap.add_argument("--store", default=os.path.join(os.environ.get("CLAUDE_PROJECT_DIR", "."),
-                                                    ".claude", "vlds"))
+                                                    ".claude", "p4", "vlds"))
     sub = ap.add_subparsers(dest="cmd")
     sub.add_parser("check")
     sub.add_parser("mask", help="retired")

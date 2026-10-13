@@ -6,7 +6,7 @@ the session title, the pooled recall mode (directive, silent slots, first-prompt
 next prompt, the lock).
 
 Run from anywhere:  python scripts/test_hooks.py
-Each test seeds a throwaway project under a temp dir (a `.claude/vlds/` store with the dispatch seed, a ledger,
+Each test seeds a throwaway project under a temp dir (a `.claude/p4/vlds/` store with the dispatch seed, a ledger,
 a local-storage file), points CLAUDE_PROJECT_DIR at it, and runs the hook or phi.py as the harness would —
 a subprocess with the JSON payload on stdin. Exit 0 = every test green; the first failing assertion names
 the test. Nothing here touches a real store.
@@ -73,13 +73,13 @@ The user's stated preferences and rulings, in their words.
 """
 
 # the incident fence, in shape: a python heredoc, a correctly homed dispatch append, and a ledger append whose
-# path is spelled bare (true under an earlier fence's `cd .claude/vlds`, false at the repo root) with a hedged
+# path is spelled bare (true under an earlier fence's `cd .claude/p4/vlds`, false at the repo root) with a hedged
 # minute digit
 INCIDENT = (
     'cd "{root}" && python - <<\'EOF\'\n'
     'print("the by-value fix")\n'
     'EOF\n'
-    'cat >> .claude/vlds/dispatch.md <<\'EOF\'\n'
+    'cat >> .claude/p4/vlds/dispatch.md <<\'EOF\'\n'
     '  addressed: the by-value fix landed\n'
     'EOF\n'
     'cat >> ledger.md <<\'EOF\'\n'
@@ -92,7 +92,7 @@ INCIDENT = (
 
 def seed_project():
     root = tempfile.mkdtemp(prefix="vlds-test-")
-    store = os.path.join(root, ".claude", "vlds")
+    store = os.path.join(root, ".claude", "p4", "vlds")
     os.makedirs(store)
     shutil.copy(SEED, os.path.join(store, "dispatch.md"))
     with open(os.path.join(store, "ledger.md"), "w", encoding="utf-8", newline="\n") as f:
@@ -131,7 +131,7 @@ def write(path, content, cwd):
 
 def stamped(v, cwd):
     """A homed ledger append carrying one `time:` value — the gate's clock cases."""
-    return bash(f'cat >> .claude/vlds/ledger.md <<\'EOF\'\n- correction: x\n  time: {v}\nEOF\n', cwd)
+    return bash(f'cat >> .claude/p4/vlds/ledger.md <<\'EOF\'\n- correction: x\n  time: {v}\nEOF\n', cwd)
 
 
 def norm(p):
@@ -149,7 +149,7 @@ def test_pre_write():
         assert "12:4x" in reason, f"(a) placeholder time not named: {reason}"
         assert "dispatch.md resolves to" not in reason, "(a) the homed dispatch append was reported as stray"
         # (b) the same fence homed: nothing for the path, ask for the time
-        homed = INCIDENT.format(root=root.replace("\\", "/")).replace("cat >> ledger.md", "cat >> .claude/vlds/ledger.md")
+        homed = INCIDENT.format(root=root.replace("\\", "/")).replace("cat >> ledger.md", "cat >> .claude/p4/vlds/ledger.md")
         d = decision(run_hook("pre-write", bash(homed, root), root))
         assert d and "12:4x" in d["permissionDecisionReason"], "(b) placeholder time not asked about"
         assert "outside the store" not in d["permissionDecisionReason"], "(b) homed path reported as stray"
@@ -163,12 +163,12 @@ def test_pre_write():
         out = run_hook("pre-write", write(os.path.join(store, "index.md"), "- key: x\n  decision: rule\n", root), root)
         assert out.strip() == "", f"(e) homed Write produced output: {out}"
         # (f) the cd-into-store spelling is homed; a bare spelling with no cd resolves to the root
-        out = run_hook("pre-write", bash('cd .claude/vlds && cat >> ledger.md <<\'EOF\'\n- key: x\nEOF\n', root), root)
+        out = run_hook("pre-write", bash('cd .claude/p4/vlds && cat >> ledger.md <<\'EOF\'\n- key: x\nEOF\n', root), root)
         assert out.strip() == "", f"(f) cd-into-store spelling reported: {out}"
         d = decision(run_hook("pre-write", bash('cat >> ledger.md <<\'EOF\'\n- key: x\nEOF\n', root), root))
         assert d and "outside the store" in d["permissionDecisionReason"], "(f) bare spelling not asked about"
         # (g) a peer store's file is homed; a Git Bash /e/ spelling resolves; a PowerShell cmdlet is matched
-        peer = os.path.join(root, "peer", ".claude", "vlds", "ledger.md").replace("\\", "/")
+        peer = os.path.join(root, "peer", ".claude", "p4", "vlds", "ledger.md").replace("\\", "/")
         assert run_hook("pre-write", bash(f'cat >> "{peer}" <<\'EOF\'\n- key: x\nEOF\n', root), root).strip() == "", \
             "(g) peer store write reported as stray"
         ps = {"tool_name": "PowerShell", "cwd": root,
@@ -176,7 +176,7 @@ def test_pre_write():
         d = decision(run_hook("pre-write", ps, root))
         assert d and "outside the store" in d["permissionDecisionReason"], "(g) Add-Content to a bare path not asked about"
         # (h) a runtime placeholder in a generating script is exempt
-        gen = 'python - <<\'EOF\'\nwith open(".claude/vlds/ledger.md", "a") as f:\n    f.write(f"  time: {now:%Y-%m-%d %H:%M}\\n")\nEOF\n'
+        gen = 'python - <<\'EOF\'\nwith open(".claude/p4/vlds/ledger.md", "a") as f:\n    f.write(f"  time: {now:%Y-%m-%d %H:%M}\\n")\nEOF\n'
         assert run_hook("pre-write", bash(gen, root), root).strip() == "", "(h) runtime placeholder was flagged"
         # (i) a stamp guessed ahead of the clock: ask, naming the value and the latest now:; a stamp behind the
         # clock and today's date alone are silent; a date past today's asks
@@ -498,12 +498,12 @@ def test_pool_mode():
         assert "operator-prompt.md" in out and "pool-prompt.md" in out and "record.py" in out, \
             f"(a) a brief or the record script missing:\n{out}"
         assert "by the index's road, children (skeleton:" in out and "one judged pass on sonnet" in out \
-            and "one reader per file on haiku" in out and "on haiku)" in out and "at most 4 continuations" in out, \
+            and "one reader per file on haiku" in out and "on sonnet)" in out and "at most 4 continuations" in out, \
             f"(a) the per-moment models, the road, or the continuation bound missing:\n{out}"
         assert "Launch it once" in out and "SendMessage" in out, f"(a) the one-per-session continuation missing:\n{out}"
         assert "CONDUCTED" not in out and "; via " not in out, f"(a) a conductor named with no operator-via set:\n{out}"
         assert "`operator-via:` an agent that conducts the operator" in out, f"(a) the operator-via key unlisted:\n{out}"
-        assert "pool: subagent (operator haiku, pool sonnet, children haiku, sweep sonnet; road children; 4 continuations)" \
+        assert "pool: subagent (operator sonnet, pool sonnet, children haiku, sweep sonnet; road children; 4 continuations)" \
             in out, f"(a) the mode line missing:\n{out}"
         assert "the plan goes in the reply" not in out, "(a) a hot-file entry was injected in the pooled mode"
         assert "register: 0" in out and "hot (live/budget)" in out, f"(a) the index digest missing:\n{out}"
@@ -783,7 +783,7 @@ def test_pour():
 def test_check_delta():
     root, store = seed_project()
     try:
-        payload = bash('cat >> .claude/vlds/ledger.md <<\'EOF\'\n- correction: x\n  time: 2026-09-02 11:27\nEOF\n', root)
+        payload = bash('cat >> .claude/p4/vlds/ledger.md <<\'EOF\'\n- correction: x\n  time: 2026-09-02 11:27\nEOF\n', root)
         payload["session_id"] = "delta-session"
         first = decision(run_hook("post-write", payload, root))["additionalContext"]
         second = decision(run_hook("post-write", payload, root))["additionalContext"]

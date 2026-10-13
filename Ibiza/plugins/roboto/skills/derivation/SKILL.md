@@ -27,7 +27,7 @@ metadata:
 ## The Flow
 
 ```text
-session ──hand-off──▶ roboto ──operator line──▶ operator (the moment's model: Sonnet for the pool and the sweep)
+session ──hand-off──▶ roboto ──operator line──▶ operator (the moment's model: Sonnet by default for every moment)
                                                    └──▶ haiku puppets, one per store file (the pool's children road)
 session ◀──derived understanding── roboto ◀──derivation── operator ◀──picks── puppets
 ```

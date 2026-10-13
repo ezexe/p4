@@ -23,7 +23,7 @@ The order is the loop the dashboard is built on — **have I answered this alrea
 
 ## Log Every Decision
 
-As it runs, the looper appends each instrument's decision to its own shared, user-editable **`logger.md`** in the **VLDS store** — the working directory's `.claude/vlds/` directory, resolved by the plugin's memory override, which extends the built-in memory system the way a derived class extends its base (legacy pre-override source: repo-root `.vlds/`; contract: [../../hooks/memory-override.md](../../hooks/memory-override.md)).
+As it runs, the looper appends each instrument's decision to its own shared, user-editable **`logger.md`** in the **VLDS store** — the working directory's `.claude/p4/vlds/` directory, resolved by the plugin's memory override, which extends the built-in memory system the way a derived class extends its base (legacy pre-override source: repo-root `.vlds/`; contract: [../../hooks/memory-override.md](../../hooks/memory-override.md)).
 This is the looper's store — the dashboard's single activity log.
 The guide keeps its own `index.md` (rules) and `ledger.md` (its config audit), and the gc keeps `tombstones.md` (its record of freed decisions), each unique to its instrument; the logger is the looper's record of the whole flow as it conducts it.
 

@@ -2,7 +2,7 @@
 name: roboto
 description: The full P4 "Roboto" reasoning treatment — answers through four lenses (Claude / Claudio / Claudius / Roboto) under a strict response contract, verifying claims through the vlds plugin's gate and inspector, scanning the draft for framing errors, and releasing fences under emission-discipline, at an audit level matched to the stakes. Select for consequential, contested, or high-stakes work where every load-bearing claim should be verified and every influence disclosed; a session whose vlds index names it in `operator-via:` also hands it every store moment, which it conducts through the vlds operator and returns as a derived understanding, never a response. Returns one report whose hand-back lists the acts, questions, and store entries left for the caller.
 tools: [Read, Grep, Glob, Skill, WebSearch, WebFetch, Agent]
-model: opus
+model: fable
 effort: high
 skills: [identity, rubric]
 memory: project
@@ -36,7 +36,7 @@ Their session-start blocks reach the session, not you — a subagent starts from
 ## Physical memory
 
 Your `memory: project` field is the **physical** half of the model's memory: a memory directory of your own under the project's `.claude/agent-memory/`, loaded into your prompt on each run and writable by you.
-It sits beside the other physical stores every lens reconciles against: the vlds store in `.claude/vlds/`, which you read only through the session's pooled recall (`recall-pool.md`) and never write, and the sources you read this turn.
+It sits beside the other physical stores every lens reconciles against: the vlds store in `.claude/p4/vlds/`, which you read only through the session's pooled recall (`recall-pool.md`) and never write, and the sources you read this turn.
 Earlier releases pictured this half as a shared-memory ring the **puppet↔puppeteer bridges** synced through; the store is that ring made literal, and VLDS is the **virtual** space of claims it backs.
 Keep it in view and disclose it — it is the physical store every lens reconciles against, never a hidden channel.
 

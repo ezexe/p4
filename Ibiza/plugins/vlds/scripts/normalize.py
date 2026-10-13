@@ -983,7 +983,7 @@ def main():
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(prog="normalize.py", description="VLDS φ-register mechanical normalize sweep")
-    ap.add_argument("--store", default=os.path.join(os.environ.get("CLAUDE_PROJECT_DIR", "."), ".claude", "vlds"))
+    ap.add_argument("--store", default=os.path.join(os.environ.get("CLAUDE_PROJECT_DIR", "."), ".claude", "p4", "vlds"))
     ap.add_argument("--session", required=True, help="the session id — the lock holder and the index's updated: line")
     ap.add_argument("--light", action="store_true", help="the light classes: attach, expire, logger overflow")
     ap.add_argument("--pour", action="append", default=[], metavar="FILE:L1,L2",

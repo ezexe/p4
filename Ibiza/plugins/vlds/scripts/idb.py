@@ -2436,7 +2436,7 @@ def main():
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(prog="idb.py", description="VLDS keyspace — IndexedDB's indexing in plain text")
-    ap.add_argument("--store", default=os.path.join(os.environ.get("CLAUDE_PROJECT_DIR", "."), ".claude", "vlds"))
+    ap.add_argument("--store", default=os.path.join(os.environ.get("CLAUDE_PROJECT_DIR", "."), ".claude", "p4", "vlds"))
     sub = ap.add_subparsers(dest="cmd")
 
     def writer(name, **kw):

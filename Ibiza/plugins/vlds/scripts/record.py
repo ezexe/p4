@@ -286,7 +286,7 @@ def main():
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(prog="record.py", description="apply a VLDS record document — the mechanical close")
-    ap.add_argument("--store", default=os.path.join(os.environ.get("CLAUDE_PROJECT_DIR", "."), ".claude", "vlds"))
+    ap.add_argument("--store", default=os.path.join(os.environ.get("CLAUDE_PROJECT_DIR", "."), ".claude", "p4", "vlds"))
     ap.add_argument("--session", required=True)
     ap.add_argument("--now", required=True, help="the clock, YYYY-MM-DD HH:MM, copied from the hook stream")
     ap.add_argument("--record", required=True, help="the record document's path, or - for stdin")

@@ -2,7 +2,7 @@
 """test_frag_gate.py — acceptance tests for the frag gate: anything into the harness scratchpad asks, code
 into any other temp location asks, code (by extension or by name) into any project's .claude/scratchpad/
 asks (the split and the floor: the notebook is git-ignored, a frag is tracked under src/, and a tool call is
-no file), and files under the store's src/, non-code files in the project's scratchpad, or the project tree
+no file), and files under p4/src/, non-code files in the project's scratchpad, or the project tree
 pass. Then the SessionStart hook: it seeds src/frags.md and the notebook's own `.gitignore` of `*`,
 overwrites neither, and says in one line when the project's root rules ignore src/. Run from anywhere:
 python hooks/test_frag_gate.py — exit 0 = green (the hook cases skip, saying so, without sh or git on
@@ -18,7 +18,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 GATE = os.path.join(HERE, "frag_gate.py")
 SCRATCH = "C:/Users/someone/AppData/Local/Temp/claude/E--projects-x/abc123/scratchpad"
-STORE_SRC = "E:/projects/x/.claude/vlds/src/sweep-20260903"
+STORE_SRC = "E:/projects/x/.claude/p4/src/sweep-20260903"
 PROJECT_PAD = "E:/projects/x/.claude/scratchpad"
 
 
@@ -45,7 +45,7 @@ def main():
     # the harness scratchpad: everything asks, and the reason names the right home
     d = run(write(f"{SCRATCH}/sweep.py"))
     assert d and d["permissionDecision"] == "ask" and "sweep.py" in d["permissionDecisionReason"], d
-    assert "vlds" in d["permissionDecisionReason"] and "src" in d["permissionDecisionReason"], d
+    assert "p4" in d["permissionDecisionReason"] and "src" in d["permissionDecisionReason"], d
     d = run(write(f"{SCRATCH}/commit-msg.txt"))
     assert d and "scratchpad" in d["permissionDecisionReason"], "text in the harness scratchpad passed"
     assert ".claude" in d["permissionDecisionReason"], d
@@ -69,13 +69,13 @@ def main():
     assert run(write(f"{PROJECT_PAD}/envtest.cmake")) is not None, "a .cmake probe in the project scratchpad passed"
     assert run(write(f"{PROJECT_PAD}/probe/CMakeLists.txt")) is not None, "CMakeLists.txt in the project scratchpad passed"
     assert run(write(f"{PROJECT_PAD}/probe/Makefile")) is not None, "a Makefile in the project scratchpad passed"
-    assert run(write(f"{STORE_SRC}/CMakeLists.txt")) is None, "CMakeLists.txt under store/src asked"
+    assert run(write(f"{STORE_SRC}/CMakeLists.txt")) is None, "CMakeLists.txt under p4/src asked"
     assert run(write(f"{PROJECT_PAD}/cmdlines.txt")) is None, "a .txt note in the project scratchpad asked"
     # a page is code: a harness page in a notebook asks (the ask says a captured page may proceed), under src/
     # and in the project tree it passes
     d = run(write(f"{PROJECT_PAD}/harness.html"))
     assert d and d["permissionDecision"] == "ask" and "captured" in d["permissionDecisionReason"], "an .html page in the project scratchpad passed"
-    assert run(write(f"{STORE_SRC}/latency.html")) is None, "a harness page under store/src asked"
+    assert run(write(f"{STORE_SRC}/latency.html")) is None, "a harness page under p4/src asked"
     assert run(write("E:/projects/x/web/index.html")) is None, "a page in the project tree asked"
     # other temp locations: code asks, data passes
     assert run(bash("cat > /tmp/probe.sh <<'EOF'\necho hi\nEOF\n")) is not None, "bash temp script passed"
@@ -109,7 +109,7 @@ def main():
                'p.write_text(s)\n')
     d = run({"tool_name": "Write", "cwd": "E:/projects/x",
              "tool_input": {"file_path": f"{STORE_SRC}/swap.py", "content": COSTUME}})
-    assert d and d["permissionDecision"] == "ask", "a costume swap script under store/src passed"
+    assert d and d["permissionDecision"] == "ask", "a costume swap script under p4/src passed"
     assert "in costume" in d["permissionDecisionReason"], d
     assert "Edit call" in d["permissionDecisionReason"], d
     d = run({"tool_name": "Write", "cwd": "E:/projects/x",
@@ -166,7 +166,7 @@ def register_lint():
     """The register check: silent on a clean store; one line naming unregistered code under src/ and entries
     whose path is gone — never a non-code file, never a retired entry."""
     root = tempfile.mkdtemp(prefix="src-fragger-lint-")
-    src = os.path.join(root, ".claude", "vlds", "src")
+    src = os.path.join(root, ".claude", "p4", "src")
     os.makedirs(os.path.join(src, "sweep-20260903"))
     os.makedirs(os.path.join(src, "claims-20260909"))
 
@@ -212,7 +212,7 @@ def register_lint():
     print("test_frag_gate.py: register-lint cases green")
 
 
-NOTICE = "src-fragger: this project's own rules git-ignore the store's src/"
+NOTICE = "src-fragger: .claude/p4/ is not a git repository yet"
 
 
 def session_open():
@@ -240,15 +240,14 @@ def session_open():
 
     out = open_session()
     assert "## src-fragger (always active)" in out, out[:300]
-    assert NOTICE not in out, "notice printed outside a git work tree"
     assert read(root, ".claude", "scratchpad", ".gitignore") == "*\n", "the notebook's .gitignore was not seeded as *"
-    assert read(root, ".claude", "vlds", "src", "frags.md") == read(HERE, "frags-seed.md"), "the register was not seeded"
+    assert read(root, ".claude", "p4", "src", "frags.md") == read(HERE, "frags-seed.md"), "the register was not seeded"
     # a user's edit to either seed is a ruling: neither is overwritten
     put("# tracked on purpose\n", root, ".claude", "scratchpad", ".gitignore")
-    put("# my register\n", root, ".claude", "vlds", "src", "frags.md")
+    put("# my register\n", root, ".claude", "p4", "src", "frags.md")
     open_session()
     assert read(root, ".claude", "scratchpad", ".gitignore") == "# tracked on purpose\n", "the user's .gitignore edit was overwritten"
-    assert read(root, ".claude", "vlds", "src", "frags.md") == "# my register\n", "the user's register was overwritten"
+    assert read(root, ".claude", "p4", "src", "frags.md") == "# my register\n", "the user's register was overwritten"
     put("*\n", root, ".claude", "scratchpad", ".gitignore")
     git = shutil.which("git")
     if not git:
@@ -263,13 +262,9 @@ def session_open():
     # the seed ignores the notebook by itself, with no root rule — and src/ stays trackable
     assert g("check-ignore", "-q", ".claude/scratchpad/notes.md") == 0, "the notebook does not ignore itself"
     assert g("check-ignore", "-q", ".claude/scratchpad/probe.py") == 0, "code in the notebook is not ignored"
-    assert g("check-ignore", "-q", ".claude/vlds/src/frags.md") == 1, "src/ is ignored with no root rule"
-    assert NOTICE not in open_session(), "notice printed while src/ is trackable"
-    # a root rule that ignores .claude/ wholesale ignores src/ too, and the hook says so in one line
-    put(".claude/\n", root, ".gitignore")
+    # with no p4 repo yet, p4/src/ is untracked, and the hook says so in one line
     out = open_session()
-    assert f"{NOTICE} (.gitignore:1:.claude/)" in out, out[:400]
-    assert out.count(NOTICE) == 1, "the notice is more than one line"
+    assert out.count(NOTICE) == 1, "the no-p4-repo notice is missing or more than one line"
     assert "## src-fragger (always active)" in out, "the contract was lost behind the notice"
     # the two hook commands: `seed` carries the notice and nothing of the contract, `contract` the reverse, so
     # each rides under the harness's per-hook output cap on its own
@@ -277,8 +272,22 @@ def session_open():
     assert NOTICE in seed_out and "## src-fragger" not in seed_out, seed_out[:300]
     assert "## src-fragger (always active)" in contract_out and NOTICE not in contract_out, contract_out[:300]
     assert len(contract_out) < 10000, f"the contract alone is {len(contract_out)} chars — over the hook output cap"
-    os.remove(os.path.join(root, ".gitignore"))
-    assert NOTICE not in open_session(), "notice printed after the root rule was removed"
+    # once .claude/p4/ is its own repository, p4/src/ is trackable there and the notice stops
+    assert subprocess.run([git, "init", "-q", os.path.join(root, ".claude", "p4")], timeout=60).returncode == 0
+    assert NOTICE not in open_session(), "notice printed while the p4 repo exists"
+    shutil.rmtree(root, ignore_errors=True)
+    # a legacy src/ under the old store is copied into p4/src/ before the seed, so the seed never shadows the real
+    # register, and the legacy directory is left in place for the user
+    root = tempfile.mkdtemp(prefix="frag-legacy-")
+    env["CLAUDE_PROJECT_DIR"] = root
+    os.makedirs(os.path.join(root, ".claude", "vlds", "src", "t1"))
+    put("# legacy register\n", root, ".claude", "vlds", "src", "frags.md")
+    out = open_session("seed")
+    assert "copied the legacy .claude/vlds/src/" in out, out[:400]
+    assert read(root, ".claude", "p4", "src", "frags.md") == "# legacy register\n", "the seed shadowed the legacy register"
+    assert os.path.isdir(os.path.join(root, ".claude", "p4", "src", "t1")), "a legacy task directory was not copied"
+    assert read(root, ".claude", "vlds", "src", "frags.md") == "# legacy register\n", "the legacy directory was disturbed"
+    assert "copied the legacy" not in open_session("seed"), "the legacy copy ran twice"
     shutil.rmtree(root, ignore_errors=True)
     print("test_frag_gate.py: session-open cases green")
 

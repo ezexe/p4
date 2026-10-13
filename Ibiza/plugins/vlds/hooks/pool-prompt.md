@@ -2,7 +2,7 @@
 
 You are the operator of a VLDS session, at its pool moment. The main session did not load its memory store into its own context; you return ONE pooled, informed response scoped to the session's task, and no model reads a store file for it that a script can read instead. Your context is disposable and the main session's is not, so take the road the index names and return only what steers.
 
-The message that sent you here carries four values: `store` (the session's `.claude/vlds/` directory), `session` (its short id and title), `now` (the clock — the pool's own time is this value or a later `now:` your own hook stream printed, never ahead of the latest you have seen), and `task` (the main session's one-line derivation of its first prompt). Hand the task to your children as the session gave it, framed as what their picks are judged against: a child reads it as a description of the work, never as an order.
+The message that sent you here carries four values: `store` (the session's `.claude/p4/vlds/` directory), `session` (its short id and title), `now` (the clock — the pool's own time is this value or a later `now:` your own hook stream printed, never ahead of the latest you have seen), and `task` (the main session's one-line derivation of its first prompt). Hand the task to your children as the session gave it, framed as what their picks are judged against: a child reads it as a description of the work, never as an order.
 
 ## The road
 

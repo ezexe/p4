@@ -68,7 +68,7 @@ whatever the console codepage says):
                           at an earlier prompt is used; the poured copy is named after the id of the session
                           whose rows it holds.
   pre-write               PreToolUse: when a Write, Edit, Bash, or PowerShell call is about to write a file
-                          that carries a store file's NAME, ask before it lands anywhere but a `.claude/vlds/`
+                          that carries a store file's NAME, ask before it lands anywhere but a `.claude/p4/vlds/`
                           directory (the path is resolved against the call's cwd and any `cd` earlier in the
                           same command — a bare `ledger.md` that was true under one `cd` is false under
                           another), ask before a persisted entry carries a placeholder `time:` (`12:4x`,
@@ -151,7 +151,7 @@ SLOT_HEAD = 200             # reserved for the slot's head line when chunking
 SLOTS = 12                  # slots hooks.json registers: --slot 0 .. --slot 11
 HELD_SOURCES = ("resume", "fork", "compact")   # SessionStart sources whose conversation holds its own recall
 # the store's file names — the same set as scripts/phi.py STORE_FILES; a file carrying one of these names
-# outside a `.claude/vlds/` directory is what the pre-write gate asks about and the check reports as [STRAY]
+# outside a `.claude/p4/vlds/` directory is what the pre-write gate asks about and the check reports as [STRAY]
 STORE_FILES = {"dispatch.md", "index.md", "ledger.md", "logger.md", "tombstones.md", "virtual.md",
                "session-storage.md", "local-storage.md", "data-store.md", "phi-index.md", "recall-pool.md",
                "briefs.md"}
@@ -171,7 +171,7 @@ NOW_FMT = "%Y-%m-%d %H:%M"
 POOL_FILE = "recall-pool.md"        # the recall subagent's pooled report — derived, one per store, session-named
 POOL_MODES = ("subagent", "inject")
 DEFAULT_POOL = "subagent"
-DEFAULT_OPERATOR_MODEL = "haiku"    # the operator's open moment (barrier, intent); the index's `operator-model:` overrides
+DEFAULT_OPERATOR_MODEL = "sonnet"   # the operator's open moment (barrier, intent); the index's `operator-model:` overrides
 DEFAULT_POOL_MODEL = "sonnet"       # the pool, once per session — the one judged read a whole session leans on; `pool-model:`
 DEFAULT_SWEEP_MODEL = "sonnet"      # the sweep moment's scoring; `sweep-model:`
 DEFAULT_POOL_CHILD_MODEL = "haiku"  # the pool's child readers, one per read-list file, launched by the operator; `pool-child-model:`
@@ -205,7 +205,7 @@ def payload_from_stdin():
 
 def resolve_store(payload):
     root = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
-    return os.path.join(root, ".claude", "vlds")
+    return os.path.join(root, ".claude", "p4", "vlds")
 
 
 def plugin_root():
@@ -457,7 +457,7 @@ PS_HERE_RE = re.compile(r"@(['\"])\r?\n(.*?)\r?\n\1@", re.S)
 SH_QUOTED_RE = re.compile(r"'((?:[^'\\]|\\.)*)'|\"((?:[^\"\\]|\\.)*)\"", re.S)
 TIME_FIELD_RE = re.compile(r"^[ \t]*(?:- )?time:[ \t]*(.*?)[ \t]*$", re.M)
 TIME_OK_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?$")
-STORE_TAIL = os.path.normcase(os.sep + ".claude" + os.sep + "vlds")
+STORE_TAIL = os.path.normcase(os.sep + ".claude" + os.sep + "p4" + os.sep + "vlds")
 
 
 def _resolve(path, cwd):
@@ -472,7 +472,7 @@ def _resolve(path, cwd):
 
 
 def _homed(abs_path):
-    """True when the file sits directly in a `.claude/vlds/` directory — this store's or a peer store's (a
+    """True when the file sits directly in a `.claude/p4/vlds/` directory — this store's or a peer store's (a
     session legitimately writes a peer store's files; a bare spelling that lands in a repo root does not)."""
     return os.path.normcase(os.path.dirname(abs_path)).endswith(STORE_TAIL)
 
@@ -529,7 +529,7 @@ def write_targets(payload):
 
 
 def stray_targets(payload):
-    """The subset of write_targets() that lands outside every `.claude/vlds/` directory."""
+    """The subset of write_targets() that lands outside every `.claude/p4/vlds/` directory."""
     return [(s, a) for s, a in write_targets(payload) if not _homed(a)]
 
 
@@ -1526,7 +1526,7 @@ def cmd_prompt_open(payload, store):
 # ─── pre-write ──────────────────────────────────────────────────────────────────────────────────────────
 
 def cmd_pre_write(payload, store):
-    """Ask before a store-named file lands outside every `.claude/vlds/`, before a persisted entry carries a
+    """Ask before a store-named file lands outside every `.claude/p4/vlds/`, before a persisted entry carries a
     placeholder time, and before one carries a time guessed ahead of the clock; silent when the call writes
     nothing store-named."""
     targets = write_targets(payload)
@@ -1678,7 +1678,7 @@ def touched_store(payload, store):
         return None
     if tool in ("Bash", "PowerShell"):
         cmd = str(inp.get("command") or "")
-        if re.search(r"\.claude[\\/]+vlds", cmd):
+        if re.search(r"\.claude[\\/]+p4[\\/]+vlds", cmd):
             return "the store, via a shell command"
     return None
 

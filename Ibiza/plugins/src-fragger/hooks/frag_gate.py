@@ -11,16 +11,16 @@ content cmdlets, python's open() in a write mode, cp / mv destinations). Three c
 
   the harness scratchpad   ANY file written into the per-session temp directory the system prompt names
                            (`.../Temp/claude/<project>/<session>/scratchpad/`): code belongs under
-                           `<store>/src/<task>/` as a frag; everything else belongs under the project's own
+                           `.claude/p4/src/<task>/` as a frag; everything else belongs under the project's own
                            `.claude/scratchpad/` — the notebook, which the user can see and which outlives
                            the session
   any other temp location  a CODE file (by extension or by name) written to /tmp, the user's temp directory,
-                           and their spellings — a frag belongs under `<store>/src/<task>/`
+                           and their spellings — a frag belongs under `.claude/p4/src/<task>/`
   a project scratchpad     a CODE file (by extension or by name) written under any `.claude/scratchpad/` —
                            where a swap script lands once it has stopped calling itself a frag; the ask
                            carries the split and the floor: the notebook is git-ignored and holds notes,
                            logs and caches; a program whose job no single tool call does is a frag under
-                           `<store>/src/<task>/`, tracked with the project, what it reads or produced that
+                           `.claude/p4/src/<task>/`, tracked in the p4 repo, what it reads or produced that
                            is worth keeping lives in that task's out/, and an edit, an append, a whole-file
                            write, or one shell command is the tool's own call and no file
 
@@ -75,7 +75,7 @@ def is_code(path):
 # The floor's mechanical arm. A frag is code whose job no single tool call does; a program that reads one
 # file, swaps a span, and writes it back is an Edit call in costume — it keys on text that moves, lands twice
 # when its new text contains its old, and carries a register entry the call never needed. Detected by shape,
-# not by location: the costume is just as wrong under `store/src/` as in a scratchpad, and location was the
+# not by location: the costume is just as wrong under `p4/src/` as in a scratchpad, and location was the
 # only thing the gate could see before. Conservative by construction — all three of read, swap and write-back
 # must be present in a short body, so a script that merely writes an output file is untouched. It asks, never
 # denies: a false positive costs one prompt, and the honest throwaway proceeds.
@@ -187,7 +187,7 @@ def code_body(payload, path):
 def cmd_frag_gate(payload):
     # A subagent never receives the SessionStart contracts — no hook event injects text into a spawned
     # subagent's context (SubagentStart's stdout goes to the debug log, not the agent), so its writer was
-    # never told a frag belongs under `store/src/`. The gate's ask, though, is answered by the human, who
+    # never told a frag belongs under `p4/src/`. The gate's ask, though, is answered by the human, who
     # cannot redirect an agent that is already running. Asking anyway produces a prompt with no actionable
     # recipient — one per scratch file, which is a stream, not a gate. `agent_id` is present only inside a
     # subagent call, so it is the tell.
@@ -200,7 +200,7 @@ def cmd_frag_gate(payload):
     # scoping should go.
     is_sub = bool(payload.get("agent_id"))
     root = project_root(payload)
-    src = os.path.join(root, ".claude", "vlds", "src")
+    src = os.path.join(root, ".claude", "p4", "src")
     pad = os.path.join(root, ".claude", "scratchpad")
     reasons = []
     seen = set()
@@ -217,7 +217,7 @@ def cmd_frag_gate(payload):
         elif is_sub:
             continue
         elif in_scratchpad(p):
-            home = (f"{src}{os.sep}<task>{os.sep} as a registered frag, tracked with the project" if is_code(p)
+            home = (f"{src}{os.sep}<task>{os.sep} as a registered frag, tracked in the p4 repo" if is_code(p)
                     else f"{pad}{os.sep}, the project's git-ignored notebook")
             reasons.append(f"{name} is headed for the harness's per-session scratchpad ({p}) — it belongs under {home}: "
                            f"that directory is named after a session id, invisible to the user, and gone with the session")
@@ -228,7 +228,7 @@ def cmd_frag_gate(payload):
             reasons.append(f"{name} is code headed for a project's .claude/scratchpad ({p}) — the scratchpad is the project's "
                            f"git-ignored notebook, for notes, logs, output and copies kept for reading; code worth keeping is "
                            f"not a note: a program whose job no single tool call does is a frag under {src}{os.sep}<task>{os.sep} "
-                           f"registered in src{os.sep}frags.md and tracked with the project, and an edit, an append, a "
+                           f"registered in src{os.sep}frags.md and tracked in the p4 repo, and an edit, an append, a "
                            f"whole-file write, or one shell command is the tool's own call and no file; a page or source "
                            f"captured from elsewhere belongs in the task's out{os.sep} under src{os.sep}, beside the frag that "
                            f"reads it")
@@ -307,7 +307,7 @@ def register_drift(src):
 
 def cmd_register_lint(payload):
     root = project_root(payload)
-    src = os.path.join(root, ".claude", "vlds", "src")
+    src = os.path.join(root, ".claude", "p4", "src")
     unregistered, gone = register_drift(src)
     if not unregistered and not gone:
         return 0
