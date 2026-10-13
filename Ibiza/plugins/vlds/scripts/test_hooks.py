@@ -929,6 +929,39 @@ def _panel(question, options):
                                           "options": [{"label": o, "description": d} for o, d in options]}]}}
 
 
+def test_pre_agent():
+    """The conductor gate: silent with no `operator-via:`; with one, a main-context Agent call carrying the
+    operator brief to another agent type is denied once, naming the conductor, and its re-issue passes; the
+    hand-off to the conductor passes with its conductor line and is denied once without it; a call inside a
+    subagent and a call without the brief pass."""
+    root, store = seed_project()
+    try:
+        brief = "Read C:/x/vlds/hooks/operator-prompt.md and do what it says. store: s | session: a | now: n | moment: open"
+
+        def agent(kind, prompt, sub=None):
+            p = {"tool_name": "Agent", "cwd": root, "tool_input": {"subagent_type": kind, "prompt": prompt}}
+            if sub:
+                p["agent_id"] = sub
+            return run_hook("pre-agent", p, root)
+
+        seed_register(store)
+        assert agent("general-purpose", brief).strip() == "", "(pre-agent) spoke with no operator-via"
+        seed_register(store, recall="operator-via: mister:roboto\n")
+        d = decision(agent("general-purpose", brief))
+        assert d and d["permissionDecision"] == "deny" and "mister:roboto" in d["permissionDecisionReason"], d
+        assert agent("general-purpose", brief).strip() == "", "(pre-agent) the re-issue did not pass"
+        conducted = brief + "\nconductor: launch the operator with this message on sonnet, and return a derived understanding"
+        assert agent("mister:roboto", conducted).strip() == "", "(pre-agent) the conducted hand-off was bounced"
+        assert agent("roboto", conducted + " ").strip() == "", "(pre-agent) the bare agent name was not matched"
+        d = decision(agent("mister:roboto", brief + " | facts"))
+        assert d and "conductor line" in d["permissionDecisionReason"], d
+        assert agent("general-purpose", brief + " | inside", sub="abc123").strip() == "", "(pre-agent) spoke in a subagent"
+        assert agent("general-purpose", "explore the repo").strip() == "", "(pre-agent) spoke without the brief"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("pre-agent: green")
+
+
 def test_pre_ask():
     """The applier: silent with no briefs.md or no standing label; a picker whose option briefs lack a standing
     label is denied once, naming the label and the options; the same picker passes on re-issue; briefs that
@@ -1328,6 +1361,7 @@ if __name__ == "__main__":
     test_check_delta()
     test_detail_ask()
     test_pre_ask()
+    test_pre_agent()
     test_record_truncated_head()
     test_record_bare_head()
     test_barrier_states()

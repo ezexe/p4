@@ -93,7 +93,14 @@ whatever the console codepage says):
                           briefs.md — the judgment no hook can make, since transcripts keep no reasoning; a
                           picker's submit or skip whose resembling rows are all addressed is written FRESH by
                           construction, never handed to the operator.
-  post-write              PostToolUse: when a Write, Edit, Bash, or PowerShell call touched the store, or wrote
+  pre-agent               PreToolUse on Agent: when the index's `operator-via:` names a conductor, a main-context
+                          Agent call carrying the operator brief (hooks/operator-prompt.md) to any other agent
+                          type, or to the conductor without its `conductor: launch the operator …` line, is
+                          DENIED with the call to make instead — once per call fingerprint in store/.pre-agent,
+                          so a re-issue passes (a conductor missing from the session's agent types is launched
+                          around, and said so). Silent inside a subagent (`agent_id`), where the conductor
+                          launches the operator itself.
+  post-write             PostToolUse: when a Write, Edit, Bash, or PowerShell call touched the store, or wrote
                           a store-named file anywhere, print the clock and run `phi.py check`, handing its
                           verdict back as additionalContext — a mis-homed write is followed at once by a check
                           whose `[STRAY]` line names the file. The full verdict is handed back when it differs
@@ -157,6 +164,7 @@ STORE_FILES = {"dispatch.md", "index.md", "ledger.md", "logger.md", "tombstones.
                "briefs.md"}
 BRIEFS_FILE = "briefs.md"           # what a picker left out, named when the owner asked — hooks/briefs-seed.md
 PRE_ASK_SEEN = ".pre-ask"           # picker fingerprints the pre-ask gate has bounced once; the re-issue passes
+PRE_AGENT_SEEN = ".pre-agent"       # operator hand-offs the pre-agent gate has bounced once; the re-issue passes
 # the two picker tools — the closing's built widget and the fork's native panel — as PreToolUse names them
 PICKER_TOOL_RE = re.compile(r"^(AskUserQuestion|mcp__[A-Za-z0-9_-]+__show_widget)$")
 # the elicitation shell's own submit line ("<Title> details — Label: value · Label: value") and its skip
@@ -1653,6 +1661,58 @@ def cmd_pre_ask(payload, store):
     return 0
 
 
+# ─── pre-agent ──────────────────────────────────────────────────────────────────────────────────────────
+
+def _agent_matches(subagent_type, via):
+    """True when the Agent call's subagent_type names the conductor — exactly, or by the bare name either side
+    of a plugin prefix (`mister:roboto` and `roboto` are one agent to the harness's listing)."""
+    a, b = str(subagent_type or "").strip().lower(), str(via or "").strip().lower()
+    return bool(a) and (a == b or a.split(":")[-1] == b.split(":")[-1])
+
+
+def cmd_pre_agent(payload, store):
+    """When the index's `operator-via:` names a conductor, bounce an Agent call from the main context that carries
+    the operator brief (hooks/operator-prompt.md) to any other agent type, or to the conductor without its
+    `conductor:` line — once per call fingerprint, so a re-issue passes (the contract's own exit: a conductor not
+    among the session's agent types is launched around, and said so). Silent inside a subagent (`agent_id` is the
+    tell): there the conductor itself launches the operator, which is the road this gate keeps open."""
+    if str(payload.get("tool_name") or "") not in ("Agent", "Task") or payload.get("agent_id"):
+        return 0
+    inp = payload.get("tool_input") or {}
+    if not isinstance(inp, dict):
+        return 0
+    prompt = str(inp.get("prompt") or "")
+    if "operator-prompt.md" not in prompt:
+        return 0
+    index_path = os.path.join(store, "phi-index.md")
+    via = recall_lists(read_text(index_path))[4].get("via") if os.path.exists(index_path) else None
+    if not via:
+        return 0
+    to_conductor = _agent_matches(inp.get("subagent_type"), via)
+    if to_conductor and re.search(r"(?m)^\s*conductor:\s*launch the operator\b", prompt):
+        return 0
+    fp = sha12(("pre-agent\n" + str(inp.get("subagent_type") or "") + "\n" + prompt).encode("utf-8"))
+    seen_path = os.path.join(store, PRE_AGENT_SEEN)
+    seen = set(read_text(seen_path).split()) if os.path.exists(seen_path) else set()
+    if fp in seen:
+        return 0
+    with open(seen_path, "a", encoding="utf-8", newline="\n") as f:
+        f.write(fp + "\n")
+    line = "`conductor: launch the operator with this message on <the moment's model>, and return a derived understanding`"
+    if to_conductor:
+        why = f"the hand-off to {via} lacks its conductor line — add {line} as the message's last line"
+    else:
+        why = (f"the index's `operator-via:` names {via} as the conductor, and this call launches the operator as "
+               f"`{inp.get('subagent_type') or 'general-purpose'}` around it — re-issue it with subagent_type {via}, "
+               f"the same message plus {line}")
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse", "permissionDecision": "deny",
+        "permissionDecisionReason": (f"VLDS pre-agent: {why}. When {via} is not among this session's agent types, "
+                                     "re-issue this call unchanged — the re-issue passes — and say in the reply that "
+                                     "the operator was launched directly.")}}))
+    return 0
+
+
 # ─── post-write ─────────────────────────────────────────────────────────────────────────────────────────
 
 def touched_store(payload, store):
@@ -1890,6 +1950,8 @@ def main():
             return cmd_pre_write(payload, store)
         if sub == "pre-ask":
             return cmd_pre_ask(payload, store)
+        if sub == "pre-agent":
+            return cmd_pre_agent(payload, store)
         if sub == "post-write":
             return cmd_post_write(payload, store)
         if sub == "turn-close":
