@@ -1049,7 +1049,7 @@ def sync(store, ks, now, budget_s=SYNC_BUDGET_S, only=None, rep=None, cache=None
     t0 = time.monotonic()
     finished = True
     for i, fname in enumerate(order):
-        if only is None and i > 0 and time.monotonic() - t0 > budget_s:
+        if only is None and i > 0 and time.monotonic() - t0 >= budget_s:
             ks.meta[("@", "sweep-cursor")] = fname[:-3]
             rep["deferred"] = [f[:-3] for f in order[i:]]
             finished = False
@@ -1435,7 +1435,7 @@ def cmd_light(store, session, now, dry=False, budget_s=None):
     budget = budget_s if budget_s is not None else float("inf")
 
     def spent():
-        return time.monotonic() - t0 > budget
+        return time.monotonic() - t0 >= budget
     lockp = idb_path(store, LOCK)
     ok, msg = take_lock(lockp, session)
     if not ok:
@@ -1685,7 +1685,7 @@ def build_from_phi(store, work, now, session8, budget_s=None):
     t0 = time.monotonic()
 
     def in_time():
-        if budget_s is not None and time.monotonic() - t0 > budget_s:
+        if budget_s is not None and time.monotonic() - t0 >= budget_s:
             raise MigrateError(f"out of time after {budget_s:.0f} s — nothing committed; the next turn close tries again")
     for seg in segs:
         in_time()
