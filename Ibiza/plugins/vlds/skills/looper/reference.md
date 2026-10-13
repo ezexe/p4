@@ -20,7 +20,7 @@ These triggers once lived in each instrument's `when_to_use`. With the gate, gui
 
 ## The Shared Logger
 
-`logger.md` — in the **VLDS store**, the working directory's `.claude/p4/vlds/` directory resolved by the plugin's memory override ([../../hooks/memory-override.md](../../hooks/memory-override.md)) — is the looper's own: the dashboard's single, append-only, user-editable activity log. Every instrument's decision is logged there as the looper runs, tagged by instrument.
+`logger.md` — in the **VLDS store**, the working directory's `.claude/p4/sessions/<s8>/vlds/` directory resolved by the plugin's memory override ([../../hooks/memory-override.md](../../hooks/memory-override.md)) — is the looper's own: the dashboard's single, append-only, user-editable activity log. Every instrument's decision is logged there as the looper runs, tagged by instrument.
 The operative shape lives in the file's own header — one tagged bullet per decision, the canonical form — and on divergence the file wins, because a user's edit to it is a ruling; the yaml blocks below are the teaching decomposition of what each instrument's entry carries, not a literal serialization.
 Each entry carries a `time` — local `YYYY-MM-DD HH:MM` read from the system clock at write time, never invented; if the real time isn't available, stamp the date alone rather than fabricate minutes (fake precision is the gate's own failure mode):
 

@@ -29,7 +29,7 @@ metadata:
 The four lenses make a single response auditable.
 `persistence` is what lets the instance get _better across_ responses — without it, every session starts from zero and the owner re-teaches the same preferences and re-makes the same corrections.
 
-The durable home is the vlds plugin's store, `.claude/p4/vlds/` in the working directory: partition files that each define their own entry shape in their header.
+The durable home is the vlds plugin's store, `.claude/p4/sessions/<s8>/vlds/` in the working directory: partition files that each define their own entry shape in their header.
 The `vlds` skill reads that store as provenance, through the session's pooled recall.
 `persistence` is the disciplined proposer: it decides what deserves a durable slot, picks the file, and shapes the entry.
 

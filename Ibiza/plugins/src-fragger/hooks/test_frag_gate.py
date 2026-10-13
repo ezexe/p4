@@ -18,7 +18,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 GATE = os.path.join(HERE, "frag_gate.py")
 SCRATCH = "C:/Users/someone/AppData/Local/Temp/claude/E--projects-x/abc123/scratchpad"
-STORE_SRC = "E:/projects/x/.claude/p4/src/sweep-20260903"
+STORE_SRC = "E:/projects/x/.claude/p4/sessions/test-ses/src/sweep-20260903"
 PROJECT_PAD = "E:/projects/x/.claude/scratchpad"
 
 
@@ -166,7 +166,7 @@ def register_lint():
     """The register check: silent on a clean store; one line naming unregistered code under src/ and entries
     whose path is gone — never a non-code file, never a retired entry."""
     root = tempfile.mkdtemp(prefix="src-fragger-lint-")
-    src = os.path.join(root, ".claude", "p4", "src")
+    src = os.path.join(root, ".claude", "p4", "sessions", "test-ses", "src")
     os.makedirs(os.path.join(src, "sweep-20260903"))
     os.makedirs(os.path.join(src, "claims-20260909"))
 
@@ -227,7 +227,7 @@ def session_open():
 
     def open_session(*step):
         r = subprocess.run([sh, os.path.join(HERE, "session-open.sh"), *step], env=env, capture_output=True,
-                           timeout=60)
+                           input=b'{"source": "startup", "session_id": "test-session"}', timeout=60)
         return r.stdout.decode("utf-8", "replace")
 
     def read(*parts):
@@ -241,13 +241,13 @@ def session_open():
     out = open_session()
     assert "## src-fragger (always active)" in out, out[:300]
     assert read(root, ".claude", "scratchpad", ".gitignore") == "*\n", "the notebook's .gitignore was not seeded as *"
-    assert read(root, ".claude", "p4", "src", "frags.md") == read(HERE, "frags-seed.md"), "the register was not seeded"
+    assert read(root, ".claude", "p4", "sessions", "test-ses", "src", "frags.md") == read(HERE, "frags-seed.md"), "the register was not seeded"
     # a user's edit to either seed is a ruling: neither is overwritten
     put("# tracked on purpose\n", root, ".claude", "scratchpad", ".gitignore")
-    put("# my register\n", root, ".claude", "p4", "src", "frags.md")
+    put("# my register\n", root, ".claude", "p4", "sessions", "test-ses", "src", "frags.md")
     open_session()
     assert read(root, ".claude", "scratchpad", ".gitignore") == "# tracked on purpose\n", "the user's .gitignore edit was overwritten"
-    assert read(root, ".claude", "p4", "src", "frags.md") == "# my register\n", "the user's register was overwritten"
+    assert read(root, ".claude", "p4", "sessions", "test-ses", "src", "frags.md") == "# my register\n", "the user's register was overwritten"
     put("*\n", root, ".claude", "scratchpad", ".gitignore")
     git = shutil.which("git")
     if not git:
@@ -276,18 +276,37 @@ def session_open():
     assert subprocess.run([git, "init", "-q", os.path.join(root, ".claude", "p4")], timeout=60).returncode == 0
     assert NOTICE not in open_session(), "notice printed while the p4 repo exists"
     shutil.rmtree(root, ignore_errors=True)
-    # a legacy src/ under the old store is copied into p4/src/ before the seed, so the seed never shadows the real
-    # register, and the legacy directory is left in place for the user
+    # a legacy src/ under the old store is copied into the session directory _legacy, the legacy directory is left
+    # in place for the user, and this session gets its own seeded register beside it
     root = tempfile.mkdtemp(prefix="frag-legacy-")
     env["CLAUDE_PROJECT_DIR"] = root
     os.makedirs(os.path.join(root, ".claude", "vlds", "src", "t1"))
-    put("# legacy register\n", root, ".claude", "vlds", "src", "frags.md")
+    legacy_reg = ("# legacy register\n\n---\n\n- frag: t1/run.py\n  time: 2026-09-03 13:13\n  task: t\n  run: r\n"
+                  "  state: live\n")
+    put(legacy_reg, root, ".claude", "vlds", "src", "frags.md")
     out = open_session("seed")
     assert "copied the legacy .claude/vlds/src/" in out, out[:400]
-    assert read(root, ".claude", "p4", "src", "frags.md") == "# legacy register\n", "the seed shadowed the legacy register"
-    assert os.path.isdir(os.path.join(root, ".claude", "p4", "src", "t1")), "a legacy task directory was not copied"
-    assert read(root, ".claude", "vlds", "src", "frags.md") == "# legacy register\n", "the legacy directory was disturbed"
+    assert read(root, ".claude", "p4", "sessions", "_legacy", "src", "frags.md") == legacy_reg, "the legacy register moved wrong"
+    assert os.path.isdir(os.path.join(root, ".claude", "p4", "sessions", "_legacy", "src", "t1")), "a legacy task directory was not copied"
+    assert read(root, ".claude", "p4", "sessions", "test-ses", "src", "frags.md") == read(HERE, "frags-seed.md"), \
+        "this session's own register was not seeded"
+    assert read(root, ".claude", "vlds", "src", "frags.md") == legacy_reg, "the legacy directory was disturbed"
     assert "copied the legacy" not in open_session("seed"), "the legacy copy ran twice"
+    # the cumulative frag index lists every session's register, and its keys name the frag by session
+    sindex = read(root, ".claude", "p4", "sindex", "frags.md")
+    assert "## _legacy" in sindex and "- frag: t1/run.py" in sindex and "## test-ses" in sindex, sindex
+    keys = read(root, ".claude", "p4", "sindex", "keys.tsv")
+    assert "_legacy\tt1/run.py\tlive\t2026-09-03 13:13" in keys, keys
+    shutil.rmtree(root, ignore_errors=True)
+    # the flat .claude/p4/src/ (vlds 0.0.51 to 0.0.53) is moved, inside the p4 repo, into _legacy
+    root = tempfile.mkdtemp(prefix="frag-flat-")
+    env["CLAUDE_PROJECT_DIR"] = root
+    os.makedirs(os.path.join(root, ".claude", "p4", "src", "t2"))
+    put("# flat register\n", root, ".claude", "p4", "src", "frags.md")
+    out = open_session("seed")
+    assert "moved the flat .claude/p4/src/" in out, out[:400]
+    assert not os.path.exists(os.path.join(root, ".claude", "p4", "src")), "the flat src/ is still there"
+    assert read(root, ".claude", "p4", "sessions", "_legacy", "src", "frags.md") == "# flat register\n", "flat register lost"
     shutil.rmtree(root, ignore_errors=True)
     print("test_frag_gate.py: session-open cases green")
 

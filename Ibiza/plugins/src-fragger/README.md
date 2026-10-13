@@ -7,7 +7,7 @@ A small plugin with one rule, one split, one floor, and one gate: every piece of
 Two homes under the project's `.claude/`, one axis — worth, not file type:
 
 - **`.claude/scratchpad/` is the notebook, and it is always git-ignored.** What nothing will read again: notes, plans, commit drafts, a run's logs and transcripts, build trees, caches. The SessionStart hook seeds a `.gitignore` of `*` inside it, so it ignores itself wherever the project's root `.gitignore` stands; a note there is never committed and costs nothing.
-- **`.claude/p4/src/` is git-tracked in the p4 repo, separate from the project's.** Every reusable and worthwhile output of the work — code or not, whatever someone will run, read, or edit again — lives there and rides in the p4 repo's history. The frags sit in the task's directory, registered; what they read and what they produced that is worth keeping — a fetched spec, a captured page, a downloaded source or doc, a design spec a workflow returned, a run's report — sits in the task's `out/` (`src/<task>/out/`), tracked and unregistered; a sheet or README lives beside the frags.
+- **`.claude/p4/sessions/<s8>/src/` is git-tracked in the p4 repo, separate from the project's.** Every reusable and worthwhile output of the work — code or not, whatever someone will run, read, or edit again — lives there and rides in the p4 repo's history. The frags sit in the task's directory, registered; what they read and what they produced that is worth keeping — a fetched spec, a captured page, a downloaded source or doc, a design spec a workflow returned, a run's report — sits in the task's `out/` (`src/<task>/out/`), tracked and unregistered; a sheet or README lives beside the frags.
 
 What the work produced on the way stays in the notebook; what it produced that is worth keeping — what a later task runs, reads or edits, what a commit is about to carry — graduates to `src/`: code into the task's directory and the register, anything else into its `out/`, a one-line pointer left behind, and a frag whose path it was follows it. A log a claim cites stays a note; the claim's own entry carries what was read, and the instrument that produced it is the output. Nothing in the notebook is force-added to git: a note that seems to need committing is an output that needs moving. A truly throwaway probe — run once to answer a question and never again — may stay in the notebook after the gate's ask; the ask exists because "throwaway" is what every kept script called itself first.
 
@@ -17,7 +17,7 @@ There are three places agent-written code can land, with three lifetimes:
 
 - **The harness's per-session scratchpad dies with the session.** Code there is invisible to the user, rewritten from scratch by the next task that needs it, and unreachable when it matters most — when the harness refuses the agent's own execution and the user has to run it, a file in a temp directory named after a session id is not something a user can be asked to find.
 - **The project's notebook outlives the session but lives on one disk only.** Ignored, never in the project's history — the right lifetime for a build log, the wrong one for the harness that read it.
-- **A frag under `<working dir>/.claude/p4/src/<task>/` outlives the session, is the user's to open and edit (an edit is a ruling), rides in the p4 repo's history, and when execution is refused the hand-off is one registered command.**
+- **A frag under `<working dir>/.claude/p4/sessions/<s8>/src/<task>/` outlives the session, is the user's to open and edit (an edit is a ruling), rides in the p4 repo's history, and when execution is refused the hand-off is one registered command.**
 
 ## The floor
 
@@ -38,7 +38,7 @@ A hand-off costs the user exactly the labor the frag exists to remove, so it is 
 
 ## The register
 
-`p4/src/frags.md`, one entry per frag:
+`.claude/p4/sessions/<s8>/src/frags.md`, one entry per frag:
 
 ```yaml
 - frag: [path relative to src/]
@@ -50,7 +50,7 @@ A hand-off costs the user exactly the labor the frag exists to remove, so it is 
 
 ## Relation to vlds
 
-src-fragger shares the VLDS store (`<working dir>/.claude/p4/vlds/`) and nothing else. The vlds plugin's `pre-write` gate ignores `src/` (no store file name lives there) and its `phi.py check` does not scan it; a frag's provenance — which ruling asked for it, which session wrote it — belongs in the store's own files, never in the frag, so the frag stays portable.
+src-fragger shares the VLDS store (`<working dir>/.claude/p4/sessions/<s8>/vlds/`) and nothing else. The vlds plugin's `pre-write` gate ignores `src/` (no store file name lives there) and its `phi.py check` does not scan it; a frag's provenance — which ruling asked for it, which session wrote it — belongs in the store's own files, never in the frag, so the frag stays portable.
 
 ## Install
 

@@ -41,13 +41,13 @@ ledger_entry:
 
 ## Where the Index and Ledger Live
 
-Both stores are plain, user-readable files in the **VLDS store** — the working directory's **`.claude/p4/vlds/`** directory, resolved by the plugin's memory override, extending the built-in memory system the way a derived class extends its base (contract: [../../hooks/memory-override.md](../../hooks/memory-override.md)):
+Both stores are plain, user-readable files in the **VLDS store** — the working directory's **`.claude/p4/sessions/<s8>/vlds/`** directory, resolved by the plugin's memory override, extending the built-in memory system the way a derived class extends its base (contract: [../../hooks/memory-override.md](../../hooks/memory-override.md)):
 
 - **`index.md`** — the decided rules, one `index_entry` per key. Read it at the start of a need to run the `hit` / `miss` lookup; write to it when a miss is configured. Small and authoritative.
 - **`ledger.md`** — the append-only record. Append a `ledger_entry` on every surfaced moment and every silent reuse; the user reads it to `promote` or `correct`.
 
 The store lives in the project's own `.claude/` directory — user-editable in place (the virtual layer made literal, not a hidden store), and the first write creates the directory and file.
-Committing `.claude/p4/vlds/index.md` lets team-wide conventions travel with the repo; gitignore `ledger.md` if the audit trail should stay personal.
+Committing `.claude/p4/sessions/<s8>/vlds/index.md` lets team-wide conventions travel with the repo; gitignore `ledger.md` if the audit trail should stay personal.
 A pre-override repo-root `.vlds/` is still read as a legacy source; new writes land in the resolved store.
 
 ## The Mis-match: a silent miss wearing a hit's clothes

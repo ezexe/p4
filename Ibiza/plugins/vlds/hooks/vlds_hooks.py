@@ -59,16 +59,15 @@ whatever the console codepage says):
                           notification` or `agent message`, FRESH, addressed as consumed — because a row left
                           open there would be closed by an operator whose own completion arrives the same way,
                           a loop with no floor.
-                          Then, on the FIRST prompt a session id ever submits, pour dispatch.md whole-file into arc/ — a sha-verified
-                          byte-identical copy, then a reseed that preserves the file's own header (a user's
-                          header edit is a ruling). Every output names the session by its short id and, when
-                          the transcript's last custom-title record gives one, its chat title — the id stays
-                          for reference because a title can change, and .sessions maps id to title; when the
-                          transcript lags the hook (it is written asynchronously), the title .sessions recorded
-                          at an earlier prompt is used; the poured copy is named after the id of the session
-                          whose rows it holds.
+                          The store is the session's own (`.claude/p4/sessions/<s8>/vlds/`, scripts/partition.py):
+                          its dispatch.md and briefs.md are seeded there when absent, and nothing is ever poured
+                          or dated — the session directory is the session's record. Every output names the
+                          session by its short id and, when the transcript's last custom-title record gives one,
+                          its chat title — the id stays for reference because a title can change, and .sessions
+                          maps id to title; when the transcript lags the hook (it is written asynchronously), the
+                          title .sessions recorded at an earlier prompt is used.
   pre-write               PreToolUse: when a Write, Edit, Bash, or PowerShell call is about to write a file
-                          that carries a store file's NAME, ask before it lands anywhere but a `.claude/p4/vlds/`
+                          that carries a store file's NAME, ask before it lands anywhere but a `.claude/p4/sessions/<s8>/vlds/`
                           directory (the path is resolved against the call's cwd and any `cd` earlier in the
                           same command — a bare `ledger.md` that was true under one `cd` is false under
                           another), ask before a persisted entry carries a placeholder `time:` (`12:4x`,
@@ -147,6 +146,9 @@ import sys
 import time
 from collections import Counter
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+import partition as pt  # noqa: E402 — scripts/partition.py: which store files live in a session's own directory
+
 DEFAULT_INJECT = ["local-storage.md", "index.md", "tombstones.md", "ledger.md", "session-storage.md",
                   "virtual.md", "briefs.md"]
 DEFAULT_DIGEST = ["data-store.md", "logger.md"]
@@ -158,7 +160,7 @@ SLOT_HEAD = 200             # reserved for the slot's head line when chunking
 SLOTS = 12                  # slots hooks.json registers: --slot 0 .. --slot 11
 HELD_SOURCES = ("resume", "fork", "compact")   # SessionStart sources whose conversation holds its own recall
 # the store's file names — the same set as scripts/phi.py STORE_FILES; a file carrying one of these names
-# outside a `.claude/p4/vlds/` directory is what the pre-write gate asks about and the check reports as [STRAY]
+# outside a `.claude/p4/sessions/<s8>/vlds/` directory is what the pre-write gate asks about and the check reports as [STRAY]
 STORE_FILES = {"dispatch.md", "index.md", "ledger.md", "logger.md", "tombstones.md", "virtual.md",
                "session-storage.md", "local-storage.md", "data-store.md", "phi-index.md", "recall-pool.md",
                "briefs.md"}
@@ -212,8 +214,9 @@ def payload_from_stdin():
 
 
 def resolve_store(payload):
+    """This session's store: `<project>/.claude/p4/sessions/<s8>/vlds` (scripts/partition.py has the layout)."""
     root = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
-    return os.path.join(root, ".claude", "p4", "vlds")
+    return pt.session_store(os.path.join(root, ".claude", "p4"), payload.get("session_id") or "unknown")
 
 
 def plugin_root():
@@ -280,14 +283,12 @@ def store_engine(store):
     return "phi", "phi", "unknown"
 
 
-def poured_dispatch_records(store):
-    """Every dispatch record a first prompt poured out of dispatch.md, oldest first by name: arc/ on the φ-register,
-    idb/blobs/dispatch/ on the keyspace (a migrated store holds only the latter)."""
-    paths = []
-    for d in (os.path.join(store, "arc"), os.path.join(store, "idb", "blobs", "dispatch")):
-        if os.path.isdir(d):
-            paths += [os.path.join(d, f) for f in os.listdir(d) if f.startswith("dispatch-") and f.endswith(".md")]
-    return sorted(paths, key=os.path.basename)
+def session_dispatch_records(store):
+    """Every session's dispatch record, oldest session first — `sessions/<s8>/vlds/dispatch.md` in each session
+    directory (the store alone outside the p4 layout). A pre-partition store's dated pours are copied into their
+    owners' directories by hooks/p4-layout.sh and stay in the migrated store's cold tier as they were, so reading the
+    directories alone counts each row once."""
+    return [p for p in (os.path.join(s, "dispatch.md") for s in pt.session_stores(store)) if os.path.exists(p)]
 
 
 def read_bytes(path):
@@ -425,21 +426,21 @@ def record_seen(store, sid, now, title=None):
     return fresh
 
 
-def previous_session_id(store, sid):
-    """The short id of the last session recorded before `sid` — the owner of the rows a pour closes; None when
-    `sid` is the first. The .sessions ledger maps the id to that session's title."""
-    ledger = os.path.join(store, ".sessions")
-    if not os.path.exists(ledger):
-        return None
-    prev = None
-    for l in read_text(ledger).split("\n"):
-        parts = l.split(" ", 3)
-        if len(parts) < 3 or not parts[0].strip():
-            continue
-        if parts[0] == sid:
-            break
-        prev = parts[0][:8]
-    return prev
+def seed_session_store(store):
+    """A session store's two seeded files, when absent: the dispatch record and the briefs, from the plugin's seeds.
+    Never overwritten — a user's edit is a ruling."""
+    os.makedirs(store, exist_ok=True)
+    for name, seed in (("dispatch.md", "dispatch-seed.md"), (BRIEFS_FILE, "briefs-seed.md")):
+        target = os.path.join(store, name)
+        src = os.path.join(plugin_root(), "hooks", seed)
+        if not os.path.exists(target) and os.path.exists(src):
+            write_bytes(target, read_bytes(src))
+
+
+def session_store_label(store):
+    """The store as a reader names it: `.claude/p4/sessions/<s8>/vlds/` inside the layout, the path outside."""
+    s = pt.session_of(store)
+    return f".claude/p4/sessions/{s}/vlds/" if s else store
 
 
 # ─── the store-path matcher (pre-write and post-write share it) ─────────────────────────────────────────
@@ -465,7 +466,7 @@ PS_HERE_RE = re.compile(r"@(['\"])\r?\n(.*?)\r?\n\1@", re.S)
 SH_QUOTED_RE = re.compile(r"'((?:[^'\\]|\\.)*)'|\"((?:[^\"\\]|\\.)*)\"", re.S)
 TIME_FIELD_RE = re.compile(r"^[ \t]*(?:- )?time:[ \t]*(.*?)[ \t]*$", re.M)
 TIME_OK_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?$")
-STORE_TAIL = os.path.normcase(os.sep + ".claude" + os.sep + "p4" + os.sep + "vlds")
+P4_TAIL = os.path.normcase(os.sep + ".claude" + os.sep + "p4")
 
 
 def _resolve(path, cwd):
@@ -480,9 +481,10 @@ def _resolve(path, cwd):
 
 
 def _homed(abs_path):
-    """True when the file sits directly in a `.claude/p4/vlds/` directory — this store's or a peer store's (a
-    session legitimately writes a peer store's files; a bare spelling that lands in a repo root does not)."""
-    return os.path.normcase(os.path.dirname(abs_path)).endswith(STORE_TAIL)
+    """True when the file sits directly in a session store, `.claude/p4/sessions/<s8>/vlds/` — this session's or
+    another's (a free's pre-finalizer legitimately rewrites an earlier session's entry; a bare spelling that lands in
+    a repo root does not)."""
+    return pt.homed_dir(os.path.dirname(abs_path), P4_TAIL)
 
 
 def _first_group(m):
@@ -537,7 +539,7 @@ def write_targets(payload):
 
 
 def stray_targets(payload):
-    """The subset of write_targets() that lands outside every `.claude/p4/vlds/` directory."""
+    """The subset of write_targets() that lands outside every `.claude/p4/sessions/<s8>/vlds/` directory."""
     return [(s, a) for s, a in write_targets(payload) if not _homed(a)]
 
 
@@ -748,8 +750,7 @@ def known_short(store, preview):
     if count < KNOWN_SHORT_MIN:
         return 0, None
     prior = None
-    paths = poured_dispatch_records(store) + [os.path.join(store, "dispatch.md")]
-    for p in paths:
+    for p in session_dispatch_records(store):
         if not os.path.exists(p):
             continue
         _header, blocks = split_entries(read_text(p))
@@ -789,12 +790,21 @@ def index_digest(index_text, register=True):
 
 
 def digest_line(store, fname):
-    path = os.path.join(store, fname)
-    if not os.path.exists(path):
+    """One line for a read-list file — inside the p4 layout, across every session store a read of it covers (this
+    session's alone for a session-local file)."""
+    found = pt.paths(store, fname)
+    if not found:
         return f"- {fname} — absent"
-    entries = entry_lines(read_text(path))
+    entries, size = [], 0
+    for path, _lb in found:
+        entries += entry_lines(read_text(path))
+        size += os.path.getsize(path)
     last = entries[-1][:100] if entries else "(no entries)"
-    return f"- {fname} — {len(entries)} entries, {os.path.getsize(path):,} B; last: {last}"
+    where = ""
+    if pt.partitioned(store):
+        where = (" in this session" if fname in pt.SESSION_LOCAL
+                 else f" across {len(found)} session{'' if len(found) == 1 else 's'}")
+    return f"- {fname} — {len(entries)} entries{where}, {size:,} B; last: {last}"
 
 
 def session_source(payload):
@@ -858,7 +868,7 @@ def cmd_session_standing(payload, store, part):
     whichever road the recall takes. The pooled mode only, since the inject mode's slots carry the files whole
     already; every source prints it, because a resumed or compacted conversation may predate the block or have
     summarized it away."""
-    index_path = os.path.join(store, "phi-index.md")
+    index_path = pt.config_index(store)
     if not os.path.exists(index_path) and store_engine(store)[0] != "idb":
         return 0
     _inject, _digest, _from_index, pool, _models = recall_lists(read_text(index_path) if os.path.exists(index_path)
@@ -886,7 +896,7 @@ def cmd_session_slot(payload, store, slot):
     """One chunk per hook output — the only way past the per-hook cap; silent in the pooled mode."""
     if session_source(payload) in HELD_SOURCES:
         return 0
-    index_path = os.path.join(store, "phi-index.md")
+    index_path = pt.config_index(store)
     if not os.path.exists(index_path):
         return 0
     inject, _digest, _from_index, pool, _models = recall_lists(read_text(index_path))
@@ -929,12 +939,11 @@ def _token(text):
 
 
 def voice_corpus(store):
-    """Every verbatim owner field in the store: owner-words and by in the hot files, fingerprint in
-    dispatch.md and every poured dispatch record (arc/, or idb/blobs/dispatch/ on the keyspace). Header template
-    lines ([...] values) are skipped."""
+    """Every verbatim owner field across the session stores: owner-words and by in local-storage.md and
+    tombstones.md, fingerprint in every session's dispatch.md. Header template lines ([...] values) are skipped."""
     texts = []
-    paths = [os.path.join(store, f) for f in ("local-storage.md", "tombstones.md", "dispatch.md")]
-    paths += poured_dispatch_records(store)
+    paths = [p for f in ("local-storage.md", "tombstones.md") for p, _lb in pt.paths(store, f)]
+    paths += session_dispatch_records(store)
     for p in paths:
         if not os.path.exists(p):
             continue
@@ -1016,7 +1025,7 @@ def cmd_session_open(payload, store):
                   f"pours nothing; the conversation holds its own recall, so digest and verdict only")
     engine, _setting, _state = store_engine(store)
     keyspace = engine == "idb"
-    index_path = os.path.join(store, "phi-index.md")
+    index_path = pt.config_index(store)
     if not os.path.exists(index_path) and not keyspace:
         print("no phi-index.md yet — cold-start: read store/* yourself, then bootstrap the register per /vlds:gc")
         return 0
@@ -1062,8 +1071,13 @@ def cmd_session_open(payload, store):
         if keyspace and m is not None:
             print("\n### keyspace — digest (idb/keys.tsv; the subagent reads phi-index.md whole)")
             print(m.keyspace_digest(store))
-            if index_text:
-                print(index_digest(index_text, register=False))
+            own = os.path.join(store, "phi-index.md")
+            own_text = read_text(own) if os.path.exists(own) else ("" if pt.partitioned(store) else index_text)
+            if own_text:
+                print(index_digest(own_text, register=False))
+            if pt.partitioned(store):
+                print(f"store: {session_store_label(store)} — this session's own; the recall config is "
+                      ".claude/p4/vindex/phi-index.md, and the read list spans every session's store")
         else:
             print("\n### phi-index.md — digest (the subagent reads it whole)")
             print(index_digest(index_text))
@@ -1116,102 +1130,6 @@ def lock_holder(store, sid, keyspace=False):
     if holder != sid and age < LOCK_STALE_S:
         return f"{holder} ({int(age)} s old)"
     return None
-
-
-def pour_dispatch(store, sid, tag, now):
-    path = os.path.join(store, "dispatch.md")
-    if not os.path.exists(path):
-        return "pour: dispatch.md absent — nothing to pour (the SessionStart hook seeds it)"
-    data = read_bytes(path)
-    parts = split_header(data)
-    if parts is None:
-        return "pour: dispatch.md has no header/entries separator — skipped (pre-canonical; the gc judges)"
-    head, sep, body = parts
-    entries = entry_lines(body.decode("utf-8", errors="replace"), after_separator=False)
-    if not entries:
-        return "pour: dispatch.md holds no entries — nothing to pour"
-    keyspace = store_engine(store)[0] == "idb"
-    idb = idb_module() if keyspace else None
-    if keyspace and idb is None:
-        return ("pour: skipped — the store is on the keyspace but scripts/idb.py could not load; the rows stay hot "
-                "until it can")
-    held = lock_holder(store, sid, keyspace=keyspace)
-    if held:
-        return (f"pour: skipped — sweep lock held by {held}; this session is recorded as seen, so the entries "
-                f"stay hot until the next new session's first prompt or an in-session sweep")
-    if idb is not None:
-        return pour_dispatch_keyspace(store, sid, idb, data, head, sep, entries, now)
-    arc = os.path.join(store, "arc")
-    os.makedirs(arc, exist_ok=True)
-    owner = previous_session_id(store, sid) or sid[:8]
-    name = f"dispatch-{now:%Y%m%d-%H%M%S}-{owner}.md"
-    target = os.path.join(arc, name)
-    if os.path.exists(target):
-        return f"pour: skipped — arc/{name} already exists"
-    digest = sha12(data)
-    write_bytes(target, data)
-    if sha12(read_bytes(target)) != digest:
-        os.remove(target)
-        return "pour: ABORTED — the arc copy did not read back byte-identical; dispatch.md left untouched"
-    write_bytes(path, head + sep)
-    return (f"pour: {len(entries)} entries ({len(data):,} B) → arc/{name} (sha {digest}, verified byte-identical); "
-            f"dispatch.md reseeded from its own header — registering the copy as an attachment is owed to the "
-            f"next sweep")
-
-
-def pour_dispatch_keyspace(store, sid, idb, data, head, sep, entries, now):
-    """The pour on the keyspace: dispatch.md copied whole to idb/blobs/dispatch/ inside a marker — idb/pending/<name>,
-    written before the copy and removed after the reseed — so a crash between them is the next pass's to settle; the
-    sync at the turn's close registers the copy as an external object. No lock is taken: a marker file of its own is
-    how a writer without one leaves its intent, since a shared journal rewritten under the lock could lose it."""
-    bdir = os.path.join(store, "idb", "blobs", "dispatch")
-    os.makedirs(bdir, exist_ok=True)
-    owner = previous_session_id(store, sid) or sid[:8]
-    name = f"dispatch-{now:%Y%m%d-%H%M%S}-{owner}.md"
-    rel = f"blobs/dispatch/{name}"
-    target = os.path.join(bdir, name)
-    if os.path.exists(target):
-        return f"pour: skipped — idb/{rel} already exists"
-    _settled, young = idb.settle_pending(store)
-    if young:
-        return (f"pour: skipped — another pour is marked in flight ({young[0]}); this session is recorded as seen, "
-                "so the rows stay hot until the next new session's first prompt")
-    digest = sha12(data)
-    idb.pending_open(store, name)
-    write_bytes(target, data)
-    if sha12(read_bytes(target)) != digest:
-        os.remove(target)
-        idb.pending_close(store, name)
-        return "pour: ABORTED — the copy did not read back byte-identical; dispatch.md left untouched"
-    write_bytes(os.path.join(store, "dispatch.md"), head + sep)
-    idb.pending_close(store, name)
-    return (f"pour: {len(entries)} entries ({len(data):,} B) → idb/{rel} (sha {digest}, verified byte-identical); "
-            f"dispatch.md reseeded from its own header — the next sync registers the copy in the keyspace")
-
-
-def barrier_candidates(store, preview):
-    """The earlier dispatch rows whose fingerprint resembles the message — the mechanical half of the dispatch
-    barrier. Identical token sets always match; otherwise a Jaccard overlap at or above BARRIER_JACCARD on a message
-    of at least BARRIER_MIN_TOKENS tokens. The judgment — ECHO, SUPERSEDED, or a fresh ask that merely reads alike —
-    is the operator subagent's, so a candidate leaves `state:` open for it."""
-    path = os.path.join(store, "dispatch.md")
-    if not os.path.exists(path):
-        return []
-    new = set(_token(preview).split())
-    if not new:
-        return []
-    out = []
-    for l in entry_lines(read_text(path)):
-        m = re.match(r'^- fingerprint:\s*"?(.*?)"?\s*$', l)
-        if not m:
-            continue
-        old = set(_token(m.group(1)).split())
-        if not old:
-            continue
-        overlap = len(old & new) / len(old | new)
-        if old == new or (len(new) >= BARRIER_MIN_TOKENS and overlap >= BARRIER_JACCARD):
-            out.append(m.group(1)[:60])
-    return out
 
 
 NOTIFICATION_PREFIX = "<task-notification>"   # a background task's completion, delivered as a prompt
@@ -1341,11 +1259,12 @@ def last_picker(payload, preview):
 
 def standing_labels(store):
     """The labels briefs.md holds as standing — an entry whose `standing:` carries a time — with their counts."""
-    path = os.path.join(store, BRIEFS_FILE)
-    if not os.path.exists(path):
+    found = pt.paths(store, BRIEFS_FILE)
+    if not found:
         return {}
     counts, ruled, label, standing = {}, set(), None, False
-    for l in entry_body_lines(read_text(path)) + ["- end:"]:
+    body = [l for path, _lb in found for l in entry_body_lines(read_text(path)) + ["- end:"]]
+    for l in body + ["- end:"]:
         if l.startswith("- "):
             if label:
                 counts[label] = counts.get(label, 0) + 1
@@ -1432,9 +1351,11 @@ def cmd_prompt_open(payload, store):
         lines.append("- title: none yet — no custom-title record in the transcript at hook time (it is written "
                      "asynchronously) and none recorded in .sessions; re-read at the next prompt")
     lines += take_turn_close_reports(store, sid)
+    seed_session_store(store)
     if record_seen(store, sid, now, title):
-        lines.append("- " + pour_dispatch(store, sid, tag, now))
-        index_path = os.path.join(store, "phi-index.md")
+        lines.append(f"- session store: {session_store_label(store)} — this session's own directory holds every entry "
+                     "it writes; nothing is poured or dated")
+        index_path = pt.config_index(store)
         index_txt = read_text(index_path) if os.path.exists(index_path) else (
             "" if store_engine(store)[0] == "idb" else None)
         if index_txt is not None and recall_lists(index_txt)[3] == "subagent":
@@ -1534,7 +1455,7 @@ def cmd_prompt_open(payload, store):
 # ─── pre-write ──────────────────────────────────────────────────────────────────────────────────────────
 
 def cmd_pre_write(payload, store):
-    """Ask before a store-named file lands outside every `.claude/p4/vlds/`, before a persisted entry carries a
+    """Ask before a store-named file lands outside every `.claude/p4/sessions/<s8>/vlds/`, before a persisted entry carries a
     placeholder time, and before one carries a time guessed ahead of the clock; silent when the call writes
     nothing store-named."""
     targets = write_targets(payload)
@@ -1684,7 +1605,7 @@ def cmd_pre_agent(payload, store):
     prompt = str(inp.get("prompt") or "")
     if "operator-prompt.md" not in prompt:
         return 0
-    index_path = os.path.join(store, "phi-index.md")
+    index_path = pt.config_index(store)
     via = recall_lists(read_text(index_path))[4].get("via") if os.path.exists(index_path) else None
     if not via:
         return 0
@@ -1738,7 +1659,7 @@ def touched_store(payload, store):
         return None
     if tool in ("Bash", "PowerShell"):
         cmd = str(inp.get("command") or "")
-        if re.search(r"\.claude[\\/]+p4[\\/]+vlds", cmd):
+        if re.search(r"\.claude[\\/]+p4[\\/]+sessions[\\/]+[^\\/\s]+[\\/]+vlds", cmd):
             return "the store, via a shell command"
     return None
 
@@ -1764,7 +1685,23 @@ def check_delta(store, sid, summary):
     return summary
 
 
+def written_store(payload):
+    """The session store a call wrote into, when it is one — a free's pre-finalizer may rewrite an earlier session's
+    entry, and that store is the one to check — else None."""
+    inp = payload.get("tool_input") or {}
+    fp = inp.get("file_path") if isinstance(inp, dict) else None
+    cwd = str(payload.get("cwd") or os.getcwd())
+    cands = [_resolve(str(fp), cwd)] if fp else [a for _s, a in write_targets(payload)]
+    for a in cands:
+        if _homed(a) and pt.p4_of(os.path.dirname(a)):
+            return os.path.dirname(a)
+    return None
+
+
 def cmd_post_write(payload, store):
+    other = written_store(payload)
+    if other and os.path.normcase(os.path.abspath(other)) != os.path.normcase(os.path.abspath(store)):
+        store = other
     what = touched_store(payload, store)
     if not what or not os.path.isdir(store):
         return 0
@@ -1907,6 +1844,10 @@ def cmd_turn_close(payload, store):
                 transient = any(t in line for t in ("out of time", "skipped", "could not run", "failed (exit"))
                 if line and not transient and record_verdict(store, ".idb-shadow", fp, line):
                     reports.append(f"turn-close: {line}")
+    try:
+        pt.build_vindex(store)      # the cumulative index over every session store; silent, never a report line
+    except Exception:  # noqa: BLE001 — a hook degrades, never raises; the next turn close rebuilds it
+        pass
     kept = [r for r in reports if r and not (r.startswith("turn-close: nothing to move") and "owed" not in r)]
     if not kept:
         return 0

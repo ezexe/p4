@@ -54,7 +54,7 @@ A message that answers the closing some other way — a skip, a typed reply — 
 When `scripts/record.py` has applied the turn's record, attach what it wrote to the acts that wrote it, so the page's log lists each finished act's VLDS store entries as links that open the store file at that entry's line in VS Code:
 
 ```bash
-python "${CLAUDE_PLUGIN_ROOT}/skills/acts-widget/build_acts_widget.py" stored --session <short id> --store <working dir>/.claude/p4/vlds --record <the turn record> --act ID
+python "${CLAUDE_PLUGIN_ROOT}/skills/acts-widget/build_acts_widget.py" stored --session <short id> --store <working dir>/.claude/p4/sessions/<s8>/vlds --record <the turn record> --act ID
 ```
 
 Leave `--act` off when the round picked several acts and the record's entries are the turn's as a whole: they are listed under the closing instead of under one act; a round with one picked act takes them under that act on its own.

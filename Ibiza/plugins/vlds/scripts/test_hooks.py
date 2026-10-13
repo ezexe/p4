@@ -6,7 +6,7 @@ the session title, the pooled recall mode (directive, silent slots, first-prompt
 next prompt, the lock).
 
 Run from anywhere:  python scripts/test_hooks.py
-Each test seeds a throwaway project under a temp dir (a `.claude/p4/vlds/` store with the dispatch seed, a ledger,
+Each test seeds a throwaway project under a temp dir (a `.claude/p4/sessions/test-ses/vlds/` store with the dispatch seed, a ledger,
 a local-storage file), points CLAUDE_PROJECT_DIR at it, and runs the hook or phi.py as the harness would —
 a subprocess with the JSON payload on stdin. Exit 0 = every test green; the first failing assertion names
 the test. Nothing here touches a real store.
@@ -73,13 +73,13 @@ The user's stated preferences and rulings, in their words.
 """
 
 # the incident fence, in shape: a python heredoc, a correctly homed dispatch append, and a ledger append whose
-# path is spelled bare (true under an earlier fence's `cd .claude/p4/vlds`, false at the repo root) with a hedged
+# path is spelled bare (true under an earlier fence's `cd .claude/p4/sessions/test-ses/vlds`, false at the repo root) with a hedged
 # minute digit
 INCIDENT = (
     'cd "{root}" && python - <<\'EOF\'\n'
     'print("the by-value fix")\n'
     'EOF\n'
-    'cat >> .claude/p4/vlds/dispatch.md <<\'EOF\'\n'
+    'cat >> .claude/p4/sessions/test-ses/vlds/dispatch.md <<\'EOF\'\n'
     '  addressed: the by-value fix landed\n'
     'EOF\n'
     'cat >> ledger.md <<\'EOF\'\n'
@@ -90,9 +90,18 @@ INCIDENT = (
 )
 
 
-def seed_project():
+CURRENT_SID = ["test-session"]   # the session a test's store belongs to; run_hook stamps it on an id-less payload
+
+
+def store_of(root, sid=None):
+    """A test project's session store: <root>/.claude/p4/sessions/<s8>/vlds (scripts/partition.py)."""
+    return os.path.join(root, ".claude", "p4", "sessions", (sid or CURRENT_SID[0])[:8], "vlds")
+
+
+def seed_project(sid="test-session"):
+    CURRENT_SID[0] = sid
     root = tempfile.mkdtemp(prefix="vlds-test-")
-    store = os.path.join(root, ".claude", "p4", "vlds")
+    store = store_of(root, sid)
     os.makedirs(store)
     shutil.copy(SEED, os.path.join(store, "dispatch.md"))
     with open(os.path.join(store, "ledger.md"), "w", encoding="utf-8", newline="\n") as f:
@@ -103,6 +112,9 @@ def seed_project():
 
 
 def run_hook(sub, payload, root):
+    # one store per test: every payload is the seeded session's, unless a test keeps a second session on purpose
+    if isinstance(payload, dict) and not payload.pop("_keep_sid", False):
+        payload = dict(payload, session_id=CURRENT_SID[0])
     env = dict(os.environ, CLAUDE_PROJECT_DIR=root, CLAUDE_PLUGIN_ROOT=PLUGIN)
     r = subprocess.run([sys.executable, HOOKS, sub], input=json.dumps(payload).encode("utf-8"),
                        capture_output=True, env=env, timeout=60)
@@ -131,7 +143,7 @@ def write(path, content, cwd):
 
 def stamped(v, cwd):
     """A homed ledger append carrying one `time:` value — the gate's clock cases."""
-    return bash(f'cat >> .claude/p4/vlds/ledger.md <<\'EOF\'\n- correction: x\n  time: {v}\nEOF\n', cwd)
+    return bash(f'cat >> .claude/p4/sessions/test-ses/vlds/ledger.md <<\'EOF\'\n- correction: x\n  time: {v}\nEOF\n', cwd)
 
 
 def norm(p):
@@ -149,7 +161,7 @@ def test_pre_write():
         assert "12:4x" in reason, f"(a) placeholder time not named: {reason}"
         assert "dispatch.md resolves to" not in reason, "(a) the homed dispatch append was reported as stray"
         # (b) the same fence homed: nothing for the path, ask for the time
-        homed = INCIDENT.format(root=root.replace("\\", "/")).replace("cat >> ledger.md", "cat >> .claude/p4/vlds/ledger.md")
+        homed = INCIDENT.format(root=root.replace("\\", "/")).replace("cat >> ledger.md", "cat >> .claude/p4/sessions/test-ses/vlds/ledger.md")
         d = decision(run_hook("pre-write", bash(homed, root), root))
         assert d and "12:4x" in d["permissionDecisionReason"], "(b) placeholder time not asked about"
         assert "outside the store" not in d["permissionDecisionReason"], "(b) homed path reported as stray"
@@ -163,12 +175,12 @@ def test_pre_write():
         out = run_hook("pre-write", write(os.path.join(store, "index.md"), "- key: x\n  decision: rule\n", root), root)
         assert out.strip() == "", f"(e) homed Write produced output: {out}"
         # (f) the cd-into-store spelling is homed; a bare spelling with no cd resolves to the root
-        out = run_hook("pre-write", bash('cd .claude/p4/vlds && cat >> ledger.md <<\'EOF\'\n- key: x\nEOF\n', root), root)
+        out = run_hook("pre-write", bash('cd .claude/p4/sessions/test-ses/vlds && cat >> ledger.md <<\'EOF\'\n- key: x\nEOF\n', root), root)
         assert out.strip() == "", f"(f) cd-into-store spelling reported: {out}"
         d = decision(run_hook("pre-write", bash('cat >> ledger.md <<\'EOF\'\n- key: x\nEOF\n', root), root))
         assert d and "outside the store" in d["permissionDecisionReason"], "(f) bare spelling not asked about"
         # (g) a peer store's file is homed; a Git Bash /e/ spelling resolves; a PowerShell cmdlet is matched
-        peer = os.path.join(root, "peer", ".claude", "p4", "vlds", "ledger.md").replace("\\", "/")
+        peer = os.path.join(root, "peer", ".claude", "p4", "sessions", "other-se", "vlds", "ledger.md").replace("\\", "/")
         assert run_hook("pre-write", bash(f'cat >> "{peer}" <<\'EOF\'\n- key: x\nEOF\n', root), root).strip() == "", \
             "(g) peer store write reported as stray"
         ps = {"tool_name": "PowerShell", "cwd": root,
@@ -176,7 +188,7 @@ def test_pre_write():
         d = decision(run_hook("pre-write", ps, root))
         assert d and "outside the store" in d["permissionDecisionReason"], "(g) Add-Content to a bare path not asked about"
         # (h) a runtime placeholder in a generating script is exempt
-        gen = 'python - <<\'EOF\'\nwith open(".claude/p4/vlds/ledger.md", "a") as f:\n    f.write(f"  time: {now:%Y-%m-%d %H:%M}\\n")\nEOF\n'
+        gen = 'python - <<\'EOF\'\nwith open(".claude/p4/sessions/test-ses/vlds/ledger.md", "a") as f:\n    f.write(f"  time: {now:%Y-%m-%d %H:%M}\\n")\nEOF\n'
         assert run_hook("pre-write", bash(gen, root), root).strip() == "", "(h) runtime placeholder was flagged"
         # (i) a stamp guessed ahead of the clock: ask, naming the value and the latest now:; a stamp behind the
         # clock and today's date alone are silent; a date past today's asks
@@ -374,12 +386,44 @@ def test_owner_voice():
     print("owner voice: green")
 
 
+def test_cross_session_reads():
+    """The p4 layout's reads: a ruling one session recorded is a standing rule in another session's start and its
+    barrier; another session's inferences and dispatch rows never reach this one; the barrier's virtual lines map back
+    to the session that holds each entry; the cumulative index lists every session store."""
+    root, first = seed_project("first-session")
+    try:
+        second = store_of(root, "second-session")
+        os.makedirs(second)
+        shutil.copy(SEED, os.path.join(second, "dispatch.md"))
+        with open(os.path.join(second, "local-storage.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(LOCAL_STORAGE.replace('"go"', '"the second session ruled this"'))
+        with open(os.path.join(first, "virtual.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(VIRTUAL_HEADER + "\n- inference: the first session's own inference\n  time: 2026-09-03 10:30\n"
+                    "  basis: a reading\n  minted: session first-se, turn 1\n  disposition: pending\n")
+        out = run_hook("session-open", {"source": "resume", "session_id": "second-session", "_keep_sid": True}, root)
+        assert "local-storage.md — 4 entries across 2 sessions" in out, f"(a) the rulings not read across sessions:\n{out}"
+        assert "virtual.md — absent" in out, f"(a) another session's inferences reached this one:\n{out}"
+        r = subprocess.run([sys.executable, PHI, "--store", second, "barrier", "--session", "second-se"],
+                           capture_output=True, timeout=60)
+        bar = r.stdout.decode("utf-8", "replace")
+        assert "the second session ruled this" in bar and '"go"' in bar, f"(b) the barrier lacks a session's ruling:\n{bar}"
+        assert "first session's own inference" not in bar, f"(b) another session's inference in the barrier:\n{bar}"
+        assert "sessions (virtual lines → session directory): local-storage.md 1-" in bar, f"(b) no session map:\n{bar}"
+        run_hook("turn-close", {"session_id": "second-session", "cwd": root, "_keep_sid": True}, root)
+        with open(os.path.join(root, ".claude", "p4", "vindex", "sessions.tsv"), encoding="utf-8") as f:
+            listed = f.read()
+        assert "first-se\t" in listed and "second-s\t" in listed, f"(c) vindex lacks a session:\n{listed}"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("cross-session reads: green")
+
+
 def test_session_title():
-    root, store = seed_project()
+    root, store = seed_project("first-session")
     seed_register(store)    # the φ road names its stage: a store with no index now starts on the keyspace (test_idb.py)
     try:
         # (a) the chat title comes from the transcript's LAST custom-title record and names the session, beside
-        # its short id, in the prompt hook's header and in the stamp; (b) the .sessions ledger carries it
+        # its short id, in the prompt hook's header and in the stamp; (b) the session's own .sessions carries it
         transcript = os.path.join(root, "first.jsonl")
         with open(transcript, "w", encoding="utf-8", newline="\n") as f:
             f.write('{"type":"custom-title","customTitle":"Old name","sessionId":"first-session"}\n'
@@ -392,25 +436,36 @@ def test_session_title():
         with open(os.path.join(store, ".sessions"), encoding="utf-8") as f:
             ledger = f.read()
         assert ledger.strip().endswith("First session: the real title"), f"(b) .sessions lacks the title: {ledger}"
-        # (c) a second session with no transcript is named by its short id alone, and its first prompt's pour is
-        # named after the id of the session whose rows it holds — the first one
-        out = run_hook("prompt-open", {"session_id": "second-session", "prompt": "hi"}, root)
+        # (c) a second session writes its own store — seeded, stamped there, named by its short id alone — and
+        # nothing is poured or dated anywhere: the first session's record stays whole in its own directory
+        first_rows = open(os.path.join(store, "dispatch.md"), encoding="utf-8").read()
+        out = run_hook("prompt-open", {"session_id": "second-session", "prompt": "hi", "_keep_sid": True}, root)
         assert "session second-s" in out and '"' not in out.split("\n")[0], f"(c) short id alone expected:\n{out}"
-        poured = [f for f in os.listdir(os.path.join(store, "arc")) if f.startswith("dispatch-")]
-        assert len(poured) == 1 and poured[0].endswith("-first-se.md"), f"(c) pour name: {poured}"
-        # (d) the check recognizes the pour as the hook's
-        assert "hook-poured dispatch record" in run_check(store), "(d) the pour not recognized by check"
-        # (e) the transcript lags (no title record yet) but .sessions already holds this session's title — the
+        second = store_of(root, "second-session")
+        assert '- fingerprint: "hi"' in open(os.path.join(second, "dispatch.md"), encoding="utf-8").read(), \
+            "(c) the second session's row not in its own store"
+        assert open(os.path.join(store, "dispatch.md"), encoding="utf-8").read() == first_rows, \
+            "(c) the first session's record changed"
+        for d in (store, second):
+            assert not os.path.isdir(os.path.join(d, "idb", "blobs", "dispatch")), f"(c) a dated pour in {d}"
+            arc = os.path.join(d, "arc")
+            assert not (os.path.isdir(arc) and [f for f in os.listdir(arc) if f.startswith("dispatch-")]), \
+                f"(c) a dated pour in {arc}"
+        # (e) the transcript lags (no title record yet) but the session's .sessions already holds its title — the
         # ledger's title is used; (f) with neither, the prompt hook says so
         empty = os.path.join(root, "empty.jsonl")
         with open(empty, "w", encoding="utf-8", newline="\n") as f:
             f.write('{"type":"mode","mode":"normal","sessionId":"third-session"}\n')
-        with open(os.path.join(store, ".sessions"), "a", encoding="utf-8", newline="\n") as f:
+        third = store_of(root, "third-session")
+        os.makedirs(third)
+        with open(os.path.join(third, ".sessions"), "a", encoding="utf-8", newline="\n") as f:
             f.write("third-session 2026-09-03 20:00 Ledger title\n")
-        out = run_hook("prompt-open", {"session_id": "third-session", "prompt": "hey", "transcript_path": empty}, root)
+        out = run_hook("prompt-open", {"session_id": "third-session", "prompt": "hey", "transcript_path": empty,
+                                       "_keep_sid": True}, root)
         assert 'session third-se "Ledger title"' in out, f"(e) the ledger's title not used when the transcript lags:\n{out}"
         assert "title: none yet" not in out, "(e) the none-yet line printed although the ledger had a title"
-        out = run_hook("prompt-open", {"session_id": "fourth-session", "prompt": "yo", "transcript_path": empty}, root)
+        out = run_hook("prompt-open", {"session_id": "fourth-session", "prompt": "yo", "transcript_path": empty,
+                                       "_keep_sid": True}, root)
         assert "session fourth-s" in out and "title: none yet" in out, f"(f) the none-yet line missing:\n{out}"
     finally:
         shutil.rmtree(root, ignore_errors=True)
@@ -489,7 +544,7 @@ def count_entries(path):
 
 
 def test_pool_mode():
-    root, store = seed_project()
+    root, store = seed_project("pool-session")
     try:
         seed_register(store)
         # (a) the default is the pooled mode: the directive, no hot-file text, silent slots
@@ -520,8 +575,8 @@ def test_pool_mode():
             f.write("# VLDS Recall Pool\n\nsession: pool-ses \"A title\"\ntask: test the pool\npooled: 2026-09-03 10:00\n\n## steering\n\n- [local-storage 2026-09-03 10:00 LIVE] the plan goes in the reply as one fence\n")
         out = run_hook("session-open", {"source": "compact", "session_id": "pool-session"}, root)
         assert "re-injected after the compact" in out and "task: test the pool" in out, f"(c) pool not re-injected:\n{out}"
-        out = run_hook("session-open", {"source": "compact", "session_id": "other-session"}, root)
-        assert "belongs to session pool-ses" in out and "task: test the pool" not in out, f"(c) another session's pool re-injected:\n{out}"
+        out = run_hook("session-open", {"source": "compact", "session_id": "other-session", "_keep_sid": True}, root)
+        assert "task: test the pool" not in out, f"(c) another session's pool re-injected:\n{out}"
         out = run_hook("session-open", {"source": "resume", "session_id": "pool-session"}, root)
         assert "re-injected" not in out, "(c) a resume re-injected the pool"
         # (d) `pool: inject` restores the slot injection; `operator-model:` (or the older `pool-model:`) picks the model
@@ -555,7 +610,7 @@ def test_pool_mode():
 
 def run_hook_slot(slot, root):
     env = dict(os.environ, CLAUDE_PROJECT_DIR=root, CLAUDE_PLUGIN_ROOT=PLUGIN)
-    payload = {"source": "startup", "session_id": "pool-session"}
+    payload = {"source": "startup", "session_id": CURRENT_SID[0]}
     r = subprocess.run([sys.executable, HOOKS, "session-open", "--slot", str(slot)],
                        input=json.dumps(payload).encode("utf-8"), capture_output=True, env=env, timeout=60)
     return r.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
@@ -597,12 +652,13 @@ def test_turn_close():
         assert not os.path.getsize(os.path.join(store, ".turn-close")), "(b) the report was not taken"
         out = run_hook("turn-close", {"session_id": "test-session", "cwd": root}, root)
         assert out.strip() == "", f"(b) a Stop with nothing to move printed:\n{out}"
-        # (c) another session's Stop expires this session's entry: one pour, a fresh position 1 — register 100001
-        out = run_hook("turn-close", {"session_id": "third-session", "cwd": root}, root)
-        assert "poured 1 (1 virtual.md) into arc-1-a.md" in out and "register 100001" in out, f"(c) report:\n{out}"
-        assert count_entries(os.path.join(store, "virtual.md")) == 0, "(c) the entry still hot"
-        check = run_check(store)
-        assert "0 corruption, 0 debt" in check, f"(c) check:\n{check}"
+        # (c) another session's Stop runs on its own store and touches nothing in this one: this session's entry
+        # stays hot, and the cumulative index lists both session stores
+        run_hook("turn-close", {"session_id": "third-session", "cwd": root, "_keep_sid": True}, root)
+        assert count_entries(os.path.join(store, "virtual.md")) == 1, "(c) another session's Stop reached this store"
+        with open(os.path.join(root, ".claude", "p4", "vindex", "sessions.tsv"), encoding="utf-8") as f:
+            listed = f.read()
+        assert "test-ses\t" in listed, f"(c) vindex lacks this session:\n{listed}"
         # (d) a fresh lock held by another session skips the sweep and says so
         seed_register(store, logger_entries=40)
         with open(os.path.join(arc, ".sweep-lock"), "w", encoding="utf-8", newline="\n") as f:
@@ -783,13 +839,14 @@ def test_pour():
 def test_check_delta():
     root, store = seed_project()
     try:
-        payload = bash('cat >> .claude/p4/vlds/ledger.md <<\'EOF\'\n- correction: x\n  time: 2026-09-02 11:27\nEOF\n', root)
+        payload = bash('cat >> .claude/p4/sessions/test-ses/vlds/ledger.md <<\'EOF\'\n- correction: x\n  time: 2026-09-02 11:27\nEOF\n', root)
         payload["session_id"] = "delta-session"
         first = decision(run_hook("post-write", payload, root))["additionalContext"]
         second = decision(run_hook("post-write", payload, root))["additionalContext"]
         assert "unchanged since the last check" not in first, first
         assert "unchanged since the last check" in second and "phi.py check:" in second, second
         payload["session_id"] = "another-session"
+        payload["_keep_sid"] = True
         third = decision(run_hook("post-write", payload, root))["additionalContext"]
         assert "unchanged" not in third, "(delta) another session's first check came back short"
     finally:
@@ -1296,7 +1353,7 @@ def test_barrier_states():
 
 def run_hook_standing(part, root):
     env = dict(os.environ, CLAUDE_PROJECT_DIR=root, CLAUDE_PLUGIN_ROOT=PLUGIN)
-    payload = {"source": "resume", "session_id": "pool-session"}
+    payload = {"source": "resume", "session_id": CURRENT_SID[0]}
     r = subprocess.run([sys.executable, HOOKS, "session-open", "--standing", str(part)],
                        input=json.dumps(payload).encode("utf-8"), capture_output=True, env=env, timeout=60)
     return r.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
@@ -1352,6 +1409,7 @@ if __name__ == "__main__":
     test_clock_and_post_write()
     test_gc_trace()
     test_owner_voice()
+    test_cross_session_reads()
     test_session_title()
     test_pool_mode()
     test_turn_close()

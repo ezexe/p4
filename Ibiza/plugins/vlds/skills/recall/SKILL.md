@@ -18,7 +18,7 @@ A freed entry is marked `state=freed` in the keyspace and never removed.
 The pool, the SessionStart standing block and the open moment's derivation read the hot files alone, so a new session starts with none of this in its context.
 
 The object stores are the hot files' names without `.md`: `local-storage`, `index`, `data-store`, `ledger`, `tombstones`, `virtual`, `session-storage`, `logger`, `briefs`.
-A poured dispatch record (`idb/blobs/dispatch/`) is an external object, not a record, so a request about a past message reads it through `idb.py blobs dispatch` (the listing) and `idb.py blob dispatch <name>` (one record's text, refused unless the keyspace registers it and it still hashes to the sha recorded for it). A match there is a row whose `fingerprint:` or `addressed:` bears on the request, quoted with the record's name.
+Each session keeps its own store (`.claude/p4/sessions/<s8>/vlds/`) with its own keyspace, so a recall runs `idb.py --store <that store>` per session; `.claude/p4/vindex/keys.tsv` (every session's keyspace line, its session first) and `vindex/sessions.tsv` say which sessions to open. A past message is in that session's own `dispatch.md`. A pre-partition store's poured dispatch record (`idb/blobs/dispatch/`, now under `sessions/_legacy/vlds/`) is an external object, not a record, so a request about a past message reads it through `idb.py blobs dispatch` (the listing) and `idb.py blob dispatch <name>` (one record's text, refused unless the keyspace registers it and it still hashes to the sha recorded for it). A match there is a row whose `fingerprint:` or `addressed:` bears on the request, quoted with the record's name.
 
 ## The request
 

@@ -87,7 +87,7 @@ The instance is modeled as a computer, and its memory has two faces.
 | Face         | What it is                                                                             | Where it lives                                                                                                        |
 | ------------ | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | **Virtual**  | the claims: what is asserted, provenance-tagged and tiered                             | this skill and the gate                                                                                               |
-| **Physical** | the bytes that can back a claim: the store, the agent's own memory, the sources read   | the working directory's `.claude/p4/vlds/`; the directory the agent's `memory: project` field gives it; files and pages read this turn |
+| **Physical** | the bytes that can back a claim: the store, the agent's own memory, the sources read   | the working directory's `.claude/p4/sessions/<s8>/vlds/`; the directory the agent's `memory: project` field gives it; files and pages read this turn |
 
 Verification is the translation between the two: the MMU-style check that a virtual claim maps to a resident physical page.
 `CONFIRMED` is a page that maps, `PENDING` is a page fault to service before access, and `HEDGED` is a page no physical page can ever back.
@@ -105,7 +105,7 @@ The vlds store is that ring made literal: every session reads it through the poo
 
 Each partition file's own header defines its entry shape, and on divergence the file wins, because an edit to it is the owner's ruling.
 A claim backed by a `DataStore` entry or a source read this turn carries far stronger provenance than a `Virtual` inference.
-Roboto reads the store only through the session's pooled recall, `.claude/p4/vlds/recall-pool.md`, which the vlds operator has already passed through the read barrier.
+Roboto reads the store only through the session's pooled recall, `.claude/p4/sessions/<s8>/vlds/recall-pool.md`, which the vlds operator has already passed through the read barrier.
 It never opens a partition file and never writes the store.
 A finding that belongs in a tier goes back to the caller as a store proposal in that partition's entry shape (the `persistence` skill), and the caller's turn close records it.
 
@@ -142,7 +142,7 @@ runtime:
   plugins: [each dependency and the version found] # e.g. vlds 0.0.38, emission-discipline 0.0.4
   filesystem:
     working_directory: "[the session's working directory]"
-    store: .claude/p4/vlds/
+    store: .claude/p4/sessions/<s8>/vlds/
     agent_memory: "[the agent's memory directory]"
   injected: [the caller's brief, CLAUDE.md files, hook output, system reminders]
 ```

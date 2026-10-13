@@ -11,16 +11,16 @@ content cmdlets, python's open() in a write mode, cp / mv destinations). Three c
 
   the harness scratchpad   ANY file written into the per-session temp directory the system prompt names
                            (`.../Temp/claude/<project>/<session>/scratchpad/`): code belongs under
-                           `.claude/p4/src/<task>/` as a frag; everything else belongs under the project's own
+                           `.claude/p4/sessions/<s8>/src/<task>/` as a frag; everything else belongs under the project's own
                            `.claude/scratchpad/` — the notebook, which the user can see and which outlives
                            the session
   any other temp location  a CODE file (by extension or by name) written to /tmp, the user's temp directory,
-                           and their spellings — a frag belongs under `.claude/p4/src/<task>/`
+                           and their spellings — a frag belongs under `.claude/p4/sessions/<s8>/src/<task>/`
   a project scratchpad     a CODE file (by extension or by name) written under any `.claude/scratchpad/` —
                            where a swap script lands once it has stopped calling itself a frag; the ask
                            carries the split and the floor: the notebook is git-ignored and holds notes,
                            logs and caches; a program whose job no single tool call does is a frag under
-                           `.claude/p4/src/<task>/`, tracked in the p4 repo, what it reads or produced that
+                           `.claude/p4/sessions/<s8>/src/<task>/`, tracked in the p4 repo, what it reads or produced that
                            is worth keeping lives in that task's out/, and an edit, an append, a whole-file
                            write, or one shell command is the tool's own call and no file
 
@@ -65,6 +65,22 @@ def payload_from_stdin():
 
 def project_root(payload):
     return os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
+
+
+def session_src(root, payload):
+    """This session's frag home: <project>/.claude/p4/sessions/<s8>/src — the p4 layout, one directory per session."""
+    sid = (str(payload.get("session_id") or "").strip() or "unknown")[:8]
+    return os.path.join(root, ".claude", "p4", "sessions", sid, "src")
+
+
+def all_session_srcs(root):
+    """[(s8, src)] for every session directory holding a src/, by name."""
+    base = os.path.join(root, ".claude", "p4", "sessions")
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return []
+    return [(n, os.path.join(base, n, "src")) for n in names if os.path.isdir(os.path.join(base, n, "src"))]
 
 
 def is_code(path):
@@ -200,7 +216,7 @@ def cmd_frag_gate(payload):
     # scoping should go.
     is_sub = bool(payload.get("agent_id"))
     root = project_root(payload)
-    src = os.path.join(root, ".claude", "p4", "src")
+    src = session_src(root, payload)
     pad = os.path.join(root, ".claude", "scratchpad")
     reasons = []
     seen = set()
@@ -307,8 +323,11 @@ def register_drift(src):
 
 def cmd_register_lint(payload):
     root = project_root(payload)
-    src = os.path.join(root, ".claude", "p4", "src")
-    unregistered, gone = register_drift(src)
+    unregistered, gone = [], []
+    for name, src in all_session_srcs(root):
+        u, g = register_drift(src)
+        unregistered += [f"{name}/{p}" for p in u]
+        gone += [f"{name}/{p}" for p in g]
     if not unregistered and not gone:
         return 0
     parts = []

@@ -15,7 +15,7 @@ INCIDENT = (
     'cd "E:/gritz/juce-8.0.12-windows/juser/AudioPlugin" && python - <<\'EOF\'\n'
     'print("the by-value fix")\n'
     'EOF\n'
-    'cat >> .claude/p4/vlds/dispatch.md <<\'EOF\'\n'
+    'cat >> .claude/p4/sessions/<s8>/vlds/dispatch.md <<\'EOF\'\n'
     '  addressed: the by-value fix landed\n'
     'EOF\n'
     'cat >> ledger.md <<\'EOF\'\n'

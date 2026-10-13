@@ -1,26 +1,32 @@
 #!/bin/sh
-# VLDS p4 layout: keep <project>/.claude/p4/ — a git repository of its own, separate from the project's,
-# holding the store at p4/vlds/ and everything frag at p4/src/ (the src-fragger plugin's) — and seed the store.
+# VLDS p4 layout: keep <project>/.claude/p4/ — a git repository of its own, separate from the project's:
 #
-# The harness runs one event's hooks concurrently, and every SessionStart hook that reads the store calls this
-# first (session-open.sh part 0, and run-hook.sh before every session-open subcommand), so a recall digest never
-# reads a store the legacy copy has not filled yet. The work is serialized by a lock directory, created
-# atomically by mkdir: the caller that creates it does the work and removes it; every other caller waits for
-# it to go (at most LOCK_WAIT seconds, then proceeds — a crashed holder never wedges a start) and then finds
-# the work done. Every step is idempotent, so a waiter that proceeds past a stale lock repeats nothing harmful.
+#   .claude/p4/sessions/<s8>/vlds/    a session's VLDS store, every file it writes (scripts/partition.py)
+#   .claude/p4/sessions/<s8>/src/     a session's frags (the src-fragger plugin's)
+#   .claude/p4/vindex/                the cumulative VLDS index (rebuilt at every turn close) and the recall config
+#   .claude/p4/sindex/                the cumulative frag register (src-fragger rebuilds it at session start)
 #
-# A legacy store at .claude/vlds/ is copied into p4/vlds/ once, src/ left out (src-fragger copies that into
-# p4/src/ itself, so the two plugins never write the same target), and the legacy directory is left for the
-# user to dispose. The p4 repo is initialized when absent, and the project's repo is told to ignore it through
-# its own .git/info/exclude — local, never committed, never the project's root .gitignore. Prints a line only
-# for what it did; the caller that did the work is the one whose output carries it.
+# The harness runs one event's hooks concurrently, and every SessionStart hook that reads a store calls this first
+# (session-open.sh part 0, and run-hook.sh before every session-open subcommand; src-fragger waits out the lock), so
+# nothing reads a layout this has not finished. The work is serialized by a lock directory, created atomically by
+# mkdir: the caller that creates it does the work and removes it; every other caller waits for it to go (at most
+# LOCK_WAIT seconds, then proceeds — a crashed holder never wedges a start) and then finds the work done. Every
+# step is idempotent.
+#
+# A pre-partition store moves into the session directory `_legacy`: the flat .claude/p4/vlds/ and .claude/p4/src/
+# are moved (they are inside the p4 repo, which records the rename), or an older .claude/vlds/ is copied (it is the
+# project's, left for the user to dispose). Each dated dispatch pour the legacy store holds
+# (idb/blobs/dispatch/dispatch-<date>-<s8>.md, or arc/dispatch-…) is copied into its owner's own directory as
+# sessions/<s8>/vlds/dispatch.md — the pour itself stays in the legacy store's cold tier, verbatim. The legacy
+# index seeds vindex/phi-index.md, whose ## recall section rules every session from then on. The p4 repo is
+# initialized when absent, and the project's repo ignores it through its own .git/info/exclude — local, never
+# committed, never the project's root .gitignore. Prints a line only for what it did.
 set -u
 
 [ -n "${CLAUDE_PROJECT_DIR:-}" ] || exit 0
 LOCK_WAIT=20
 p4="${CLAUDE_PROJECT_DIR}/.claude/p4"
-store="$p4/vlds"
-legacy="${CLAUDE_PROJECT_DIR}/.claude/vlds"
+legacy_dir="$p4/sessions/_legacy"
 lock="${CLAUDE_PROJECT_DIR}/.claude/.p4-layout.lock"
 mkdir -p "${CLAUDE_PROJECT_DIR}/.claude" 2>/dev/null
 
@@ -34,25 +40,55 @@ if ! mkdir "$lock" 2>/dev/null; then
   mkdir "$lock" 2>/dev/null || exit 0
 fi
 trap 'rmdir "$lock" 2>/dev/null' EXIT
+mkdir -p "$p4/sessions"
 
-if [ -d "$legacy" ] && [ ! -e "$store" ]; then
-  mkdir -p "$store"
-  ok=1
-  for e in "$legacy"/* "$legacy"/.[!.]*; do
-    [ -e "$e" ] || continue
-    [ "$(basename "$e")" = "src" ] && continue
-    cp -a "$e" "$store/" 2>/dev/null || ok=0
-  done
-  if [ "$ok" -eq 1 ]; then
-    echo "vlds: copied the legacy store .claude/vlds/ into .claude/p4/vlds/ (src/ goes to .claude/p4/src/) — the legacy directory is left for the user to dispose."
-  else
-    echo "vlds: the copy of the legacy store .claude/vlds/ into .claude/p4/vlds/ was incomplete — compare the two before the store is written further."
+# the flat p4 layout (vlds 0.0.51 to 0.0.53): moved, inside the p4 repo
+if [ -d "$p4/vlds" ] && [ ! -e "$legacy_dir/vlds" ]; then
+  mkdir -p "$legacy_dir"
+  if mv "$p4/vlds" "$legacy_dir/vlds" 2>/dev/null; then
+    [ -d "$p4/src" ] && [ ! -e "$legacy_dir/src" ] && mv "$p4/src" "$legacy_dir/src" 2>/dev/null
+    echo "vlds: moved the flat .claude/p4/vlds/ and .claude/p4/src/ into the session directory .claude/p4/sessions/_legacy/ — every session now writes its own sessions/<id>/vlds/ and src/."
   fi
 fi
-mkdir -p "$store"
+# the project's older store (vlds 0.0.50 and before): copied, left for the user
+legacy_old="${CLAUDE_PROJECT_DIR}/.claude/vlds"
+if [ -d "$legacy_old" ] && [ ! -e "$legacy_dir/vlds" ]; then
+  mkdir -p "$legacy_dir/vlds"
+  ok=1
+  for e in "$legacy_old"/* "$legacy_old"/.[!.]*; do
+    [ -e "$e" ] || continue
+    [ "$(basename "$e")" = "src" ] && continue
+    cp -a "$e" "$legacy_dir/vlds/" 2>/dev/null || ok=0
+  done
+  [ -d "$legacy_old/src" ] && [ ! -e "$legacy_dir/src" ] && { cp -a "$legacy_old/src" "$legacy_dir/src" 2>/dev/null || ok=0; }
+  if [ "$ok" -eq 1 ]; then
+    echo "vlds: copied the legacy store .claude/vlds/ into .claude/p4/sessions/_legacy/ — the legacy directory is left for the user to dispose."
+  else
+    echo "vlds: the copy of the legacy store .claude/vlds/ into .claude/p4/sessions/_legacy/ was incomplete — compare the two before anything is written further."
+  fi
+fi
+# each dated dispatch pour, into its owner's directory
+n=0
+for f in "$legacy_dir"/vlds/idb/blobs/dispatch/dispatch-*.md "$legacy_dir"/vlds/arc/dispatch-*.md; do
+  [ -f "$f" ] || continue
+  owner=$(basename "$f" .md | sed 's/^dispatch-[0-9]\{8\}-[0-9]\{6\}-//' | cut -c1-8)
+  [ -n "$owner" ] || continue
+  target="$p4/sessions/$owner/vlds/dispatch.md"
+  if [ ! -e "$target" ]; then
+    mkdir -p "$p4/sessions/$owner/vlds" && cp "$f" "$target" 2>/dev/null && n=$((n + 1))
+  fi
+done
+[ "$n" -gt 0 ] && echo "vlds: copied $n dated dispatch pour(s) into their sessions' own directories (sessions/<id>/vlds/dispatch.md); the pours stay in the legacy store's cold tier."
+# the recall config, from the legacy index
+if [ ! -e "$p4/vindex/phi-index.md" ] && [ -f "$legacy_dir/vlds/phi-index.md" ]; then
+  mkdir -p "$p4/vindex" && cp "$legacy_dir/vlds/phi-index.md" "$p4/vindex/phi-index.md" 2>/dev/null \
+    && echo "vlds: seeded .claude/p4/vindex/phi-index.md from the legacy index — its ## recall section rules every session's recall."
+fi
+mkdir -p "$p4/vindex"
+
 if command -v git >/dev/null 2>&1 && [ ! -e "$p4/.git" ]; then
   if git init -q "$p4" 2>/dev/null; then
-    echo "vlds: initialized .claude/p4/ as its own git repository — the store and the frags are tracked there, never in the project's repo."
+    echo "vlds: initialized .claude/p4/ as its own git repository — the sessions and the indexes are tracked there, never in the project's repo."
   fi
 fi
 if command -v git >/dev/null 2>&1; then
@@ -65,6 +101,4 @@ if command -v git >/dev/null 2>&1; then
     fi
   fi
 fi
-[ -f "$store/dispatch.md" ] || cp "${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-seed.md" "$store/dispatch.md" 2>/dev/null || true
-[ -f "$store/briefs.md" ] || cp "${CLAUDE_PLUGIN_ROOT}/hooks/briefs-seed.md" "$store/briefs.md" 2>/dev/null || true
 exit 0

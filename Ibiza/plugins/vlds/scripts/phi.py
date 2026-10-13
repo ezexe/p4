@@ -68,6 +68,9 @@ import sys
 import time
 from collections import Counter
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import partition as pt  # noqa: E402 — the p4 layout: one store per session, read across by merged_entries()
+
 CACHE = [1, 2]
 while len(CACHE) < 40:
     CACHE.append(CACHE[-1] + CACHE[-2])
@@ -234,10 +237,10 @@ def stray_files(store):
     """Store-named, store-shaped files outside the store, to STRAY_DEPTH under the project root (the parent
     of `.claude`), skipping STRAY_SKIP directories, the store itself and the legacy store at `.claude/vlds`
     (the SessionStart hook's migration source, left for the user to dispose); [] when the store is not at
-    `<root>/.claude/p4/vlds`, since no project root is defined then."""
-    p4 = os.path.dirname(os.path.abspath(store))
-    dot = os.path.dirname(p4)
-    if os.path.basename(p4) != "p4" or os.path.basename(dot) != ".claude":
+    `<root>/.claude/p4/sessions/<s8>/vlds`, since no project root is defined then."""
+    p4 = pt.p4_of(store)
+    dot = os.path.dirname(p4) if p4 else ""
+    if not p4 or os.path.basename(p4) != "p4" or os.path.basename(dot) != ".claude":
         return []
     root = os.path.dirname(dot)
     store_abs = os.path.normcase(os.path.abspath(store))
@@ -739,9 +742,41 @@ def hot_entries(store, fname, span=None):
     return out
 
 
+def merged_entries(store, fname):
+    """(entries, segments) — hot_entries() across every session store a read of `fname` covers (scripts/partition.py:
+    this session's alone for a session-local file, every session's for the rest), each store's own masked span
+    skipped. Lines are VIRTUAL: the session files are laid end to end in session order, so a line names one entry
+    across them and every caller that keys on (file, line) — the barrier, the picks, the pool — works unchanged;
+    `segments` [(label, first, last)] maps a virtual line back to its session's file. Outside the p4 layout it is
+    hot_entries() of the store itself, lines unchanged. entries is None when no session holds the file."""
+    out, segs, offset = [], [], 0
+    for s, lb in pt.expand(store, fname):
+        path = os.path.join(s, fname)
+        if not os.path.exists(path):
+            continue
+        got = hot_entries(s, fname, masked_spans(s).get(fname)) or []
+        n = len(read(path).split("\n"))
+        out += [(line + offset, field, value, fields) for line, field, value, fields in got]
+        segs.append((lb, offset + 1, offset + n))
+        offset += n
+    return (out if segs else None), segs
+
+
+def segment_note(store, files):
+    """One line mapping the virtual lines of the files a merged read spans more than one session for, or ''."""
+    if not pt.partitioned(store):
+        return ""
+    parts = []
+    for fname in files:
+        segs = merged_entries(store, fname)[1]
+        if len(segs) > 1:
+            parts.append(f"{fname} " + ", ".join(f"{a}-{b}={lb.split('/')[0]}" for lb, a, b in segs))
+    return ("sessions (virtual lines → session directory): " + "; ".join(parts)) if parts else ""
+
+
 def recall_files(store):
-    """The read list from the index's `## recall` section — inject then digest — or the barrier's default."""
-    idx = parse_index(store)
+    """The read list from the config index's `## recall` section — inject then digest — or the barrier's default."""
+    idx = parse_index(os.path.dirname(pt.config_index(store)))
     if not idx:
         return list(BARRIER_DEFAULT_FILES)
     inject, digest, in_recall = [], [], False
@@ -778,11 +813,13 @@ def tombstone_masks(store, span=None):
     is located by its line; on a keyspace store the cold ones join it, located by id (cold_tombstone_masks), so a
     mask outlives the pour or archive that moved its tombstone into the runs."""
     out = []
-    for line, field, value, fields in (hot_entries(store, "tombstones.md", span) or []):
+    hot = merged_entries(store, "tombstones.md")[0] if pt.partitioned(store) else hot_entries(store, "tombstones.md", span)
+    for line, field, value, fields in (hot or []):
         if field == "freed":
             out.append((line, norm_text(value), norm_text(fields.get("owner-words", "")), fields.get("time", "")))
-    if on_keyspace(store):
-        out += cold_tombstone_masks(store)
+    for s in pt.session_stores(store):
+        if on_keyspace(s):
+            out += cold_tombstone_masks(s)
     return out
 
 
@@ -883,7 +920,7 @@ def barrier_rows(store, session, files=None):
     masks = tombstone_masks(store, spans.get("tombstones.md"))
     rows, missing = [], []
     for fname in files:
-        entries = hot_entries(store, fname, spans.get(fname))
+        entries = merged_entries(store, fname)[0]
         if entries is None:
             missing.append(fname)
             continue
@@ -911,6 +948,9 @@ def cmd_barrier(args, store):
         return 0
     print(f"barrier — store {store}, session {args.session or '(none)'}, {len(files)} file(s), "
           f"{len(masks)} tombstone mask(s)")
+    note = segment_note(store, files)
+    if note:
+        print(note)
     for fname in files:
         if fname in missing:
             print(f"## {fname} — absent")
@@ -982,8 +1022,8 @@ def read_picks(path):
 
 
 def index_road(store):
-    """The index's `pool-road:` — children when absent or unknown."""
-    idx = parse_index(store)
+    """The config index's `pool-road:` — children when absent or unknown."""
+    idx = parse_index(os.path.dirname(pt.config_index(store)))
     if not idx:
         return "children"
     in_recall = False
@@ -1187,6 +1227,9 @@ def cmd_pool(args, store):
                    if any(read_label(f) == label for f in present))) if args.picks else "")
                + (f"; appendix {len(text) - len(pool_part)} characters" if len(text) > len(pool_part) else "")
                + ")" + (f" → {args.out}" if args.out else ""))
+    note = segment_note(store, files)
+    if note:
+        summary += "\n" + note
     if args.out:
         # the pool file never carries the appendix
         with open(args.out, "w", encoding="utf-8", newline="\n") as f:
@@ -1345,7 +1388,7 @@ def gc_trace(store, session="", record=True):
     spans = masked_spans(store)
     entries = {}
     for fname in SEED_HOT:
-        got = hot_entries(store, fname, spans.get(fname))
+        got = merged_entries(store, fname)[0]
         if got is not None:
             entries[fname] = got
     keys = {f: head_keys(es) for f, es in entries.items()}

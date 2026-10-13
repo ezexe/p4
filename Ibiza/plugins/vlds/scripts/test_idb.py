@@ -106,9 +106,9 @@ def read(path):
         return f.read()
 
 
-def seed_keyspace(logger=0, virtual=(), recall="index-engine: idb-new-stores\n", data=(), tombs=()):
+def seed_keyspace(logger=0, virtual=(), recall="index-engine: idb-new-stores\n", data=(), tombs=(), sid="test-session"):
     """A project whose index names a keyspace stage and has no φ register — a new store as the keyspace meets it."""
-    root, store = th.seed_project()
+    root, store = th.seed_project(sid)
     write(os.path.join(store, "phi-index.md"), f"# idx\n\n## recall\n\n{recall}")
     with open(os.path.join(store, "logger.md"), "w", encoding="utf-8", newline="\n") as f:
         f.write(th.LOGGER_HEADER)
@@ -327,7 +327,8 @@ def test_pour_crash_recovery():
 
 def test_light_through_the_hook():
     root, store = seed_keyspace(logger=40, virtual=[("other-session", "an inference another session minted"),
-                                                    ("light-session", "an inference this session minted")])
+                                                    ("light-session", "an inference this session minted")],
+                                sid="light-session")
     try:
         out = th.run_hook("turn-close", {"session_id": "light-session", "cwd": root}, root)
         assert out.startswith("turn-close: keyspace started"), f"(a) report:\n{out}"
@@ -352,54 +353,29 @@ def test_light_through_the_hook():
 
 
 def test_dispatch_blob():
-    root, store = seed_keyspace()
+    """Every session keeps its own dispatch record in its own store: a second session's first prompt seeds and stamps
+    its own, the first session's record stays whole where it was, and no dated pour is written anywhere."""
+    root, store = seed_keyspace(sid="first-session")
     try:
         th.run_hook("prompt-open", {"session_id": "first-session", "prompt": "commit"}, root)
         th.run_hook("prompt-open", {"session_id": "first-session", "prompt": "commit"}, root)
         th.run_hook("turn-close", {"session_id": "first-session", "cwd": root}, root)
-        # a new session's first prompt pours dispatch.md whole into idb/blobs/dispatch/, journaled
-        out = th.run_hook("prompt-open", {"session_id": "second-session", "prompt": "hello there"}, root)
-        assert "→ idb/blobs/dispatch/dispatch-" in out and out.count("-first-se.md") == 1, f"(a) the pour:\n{out}"
-        blobs = os.listdir(os.path.join(store, "idb", "blobs", "dispatch"))
-        assert len(blobs) == 1, blobs
-        pending = os.path.join(store, "idb", "pending")
-        assert not os.path.isdir(pending) or not os.listdir(pending), "(a) the pour's marker was not closed"
-        assert "commit" not in read(os.path.join(store, "dispatch.md")).split("---", 1)[-1], "(a) not reseeded"
-        # the turn close registers it as an external object; the owner corpus reads it
-        th.run_hook("turn-close", {"session_id": "second-session", "cwd": root}, root)
-        line = next(l for l in keys(store).split("\n") if l.startswith(f"dispatch\t03\t{blobs[0]}"))
-        assert "rows=2" in line and "sha=" in line, line
-        out = th.run_hook("prompt-open", {"session_id": "second-session", "prompt": "commit"}, root)
-        assert 'short message, known: "commit" ×' in out, f"(b) the owner corpus did not read the blob:\n{out}"
-        # a torn pour — the copy made, the reseed never done, the intent old: the next pass removes the copy
-        name = "dispatch-20260901-100000-torn-ses.md"
-        shutil.copyfile(os.path.join(store, "dispatch.md"), os.path.join(store, "idb", "blobs", "dispatch", name))
-        engine.pending_open(store, name)
-        old = datetime.datetime(2026, 9, 1, 10, 0).timestamp()
-        os.utime(os.path.join(store, "idb", "pending", name), (old, old))
-        rc, out = idb(store, "check")
-        assert f"idb/pending/{name}: a dispatch pour that never closed" in out, out
-        rc, out = idb(store, "light", "--session", "second-session", "--now", NOW)
-        assert f"recovered a torn dispatch pour: blobs/dispatch/{name} removed" in out, out
-        assert not os.path.exists(os.path.join(store, "idb", "blobs", "dispatch", name)), "(c) the torn copy stayed"
-        assert not os.listdir(os.path.join(store, "idb", "pending")), "(c) the marker stayed"
-        clean_check(store, "(c)")
-        # (d) a marker still young may be another session's pour in flight: the prompt hook skips its own pour
-        th.run_hook("prompt-open", {"session_id": "second-session", "prompt": "a row to pour"}, root)
-        engine.pending_open(store, "dispatch-20260929-000000-inflight.md")
-        out = th.run_hook("prompt-open", {"session_id": "third-session", "prompt": "hello"}, root)
-        assert "pour: skipped — another pour is marked in flight" in out, f"(d) a young marker was raced:\n{out}"
-        assert "a row to pour" in read(os.path.join(store, "dispatch.md")), "(d) the rows left dispatch.md"
-        # (e) the same marker grown old, its copy torn: settled first, then the new pour takes every row once
-        torn = "dispatch-20260929-000000-inflight.md"
-        shutil.copyfile(os.path.join(store, "dispatch.md"), os.path.join(store, "idb", "blobs", "dispatch", torn))
-        os.utime(os.path.join(store, "idb", "pending", torn), (old, old))
-        out = th.run_hook("prompt-open", {"session_id": "fourth-session", "prompt": "hi again"}, root)
-        assert "→ idb/blobs/dispatch/" in out and not os.path.exists(
-            os.path.join(store, "idb", "blobs", "dispatch", torn)), f"(e) the torn copy was not settled:\n{out}"
+        before = read(os.path.join(store, "dispatch.md"))
+        assert before.count('- fingerprint: "commit"') == 2, before[-400:]
+        out = th.run_hook("prompt-open", {"session_id": "second-session", "prompt": "hello there", "_keep_sid": True},
+                          root)
+        second = th.store_of(root, "second-session")
+        assert "session store: .claude/p4/sessions/second-s/vlds/" in out, out
+        assert '- fingerprint: "hello there"' in read(os.path.join(second, "dispatch.md")), "no row in the second store"
+        assert read(os.path.join(store, "dispatch.md")) == before, "the first session's record changed"
+        for d in (store, second):
+            assert not os.path.isdir(os.path.join(d, "idb", "blobs", "dispatch")), f"a dated pour in {d}"
+        # the owner voice and a known command read across both sessions' records
+        out = th.run_hook("prompt-open", {"session_id": "second-session", "prompt": "commit", "_keep_sid": True}, root)
+        assert "known" in out and "commit" in out, f"a known command not derived across sessions:{out}"
     finally:
         shutil.rmtree(root, ignore_errors=True)
-    print("dispatch blob: green")
+    print("dispatch per session: green")
 
 
 def test_freed_marks():
@@ -731,8 +707,11 @@ def test_rollback():
         first = engine.hot_blocks(store, "logger.md")[0]
         idb(store, "pour", "--session", "rb-session", "--now", NOW, f"logger.md:{first.line1}")
         th.run_hook("prompt-open", {"session_id": "rb-session", "prompt": "a row for the record"}, root)
-        th.run_hook("prompt-open", {"session_id": "rb-new-session", "prompt": "a new session"}, root)
-        poured = os.listdir(os.path.join(store, "idb", "blobs", "dispatch"))
+        # the prompt hook pours nothing since the p4 layout; a pre-partition store's unregistered pour stands in
+        bdir = os.path.join(store, "idb", "blobs", "dispatch")
+        os.makedirs(bdir, exist_ok=True)
+        shutil.copy(os.path.join(store, "dispatch.md"), os.path.join(bdir, "dispatch-20260929-100000-rb-sessi.md"))
+        poured = os.listdir(bdir)
         unregistered = [n for n in poured if f"dispatch\t03\t{n}" not in keys(store)]
         assert unregistered, "the fresh pour was already registered — the case is not under test"
         original = _crash("splice_section")
@@ -916,15 +895,15 @@ def test_stages():
         assert "engine: idb (index-engine: idb-migrate-gentle, the default)" in out, out
     finally:
         shutil.rmtree(root, ignore_errors=True)
-    # ...and a new store starts on the keyspace: its first pour lands in idb/blobs/, its first turn close writes the
-    # keyspace and the index, and no arc/ ever appears
+    # ...and a new store starts on the keyspace: nothing is poured, its first turn close writes the keyspace and the
+    # index, and no arc/ ever appears
     root, store = th.seed_project()
     try:
         out = th.run_hook("session-open", {"source": "startup", "session_id": "new-session"}, root)
         assert "the keyspace writes it at the first turn close" in out, out
         th.run_hook("prompt-open", {"session_id": "new-session", "prompt": "a first row"}, root)
         th.run_hook("prompt-open", {"session_id": "next-session", "prompt": "hello"}, root)
-        assert os.listdir(os.path.join(store, "idb", "blobs", "dispatch")), "a new store's pour missed idb/blobs/"
+        assert not os.path.isdir(os.path.join(store, "idb", "blobs", "dispatch")), "a new store poured its record"
         th.run_hook("turn-close", {"session_id": "next-session", "cwd": root}, root)
         assert os.path.exists(os.path.join(store, "idb", "keys.tsv")), "a new store's first turn close wrote no keyspace"
         assert os.path.exists(os.path.join(store, "phi-index.md")), "a new store's first turn close wrote no index"
@@ -947,7 +926,7 @@ def test_stages():
 
 
 def test_pool_stamp():
-    root, store = seed_keyspace()
+    root, store = seed_keyspace(sid="pool-session")
     try:
         th.run_hook("turn-close", {"session_id": "pool-session", "cwd": root}, root)
         pool = os.path.join(store, "recall-pool.md")
@@ -1056,13 +1035,13 @@ def test_edges():
         write(os.path.join(broken, "scripts", "idb.py"), "this is not python (\n")
         env = dict(os.environ, CLAUDE_PROJECT_DIR=root, CLAUDE_PLUGIN_ROOT=broken)
         r = subprocess.run([sys.executable, os.path.join(broken, "hooks", "vlds_hooks.py"), "prompt-open"],
-                           input=json.dumps({"session_id": "next-session", "prompt": "hi"}).encode("utf-8"),
+                           input=json.dumps({"session_id": th.CURRENT_SID[0], "prompt": "hi"}).encode("utf-8"),
                            capture_output=True, env=env, timeout=60)
         out = r.stdout.decode("utf-8", "replace")
-        assert "pour: skipped — the store is on the keyspace but scripts/idb.py could not load" in out, out
+        assert 'stamped: dispatch.md row "hi"' in out, out
         assert not os.path.exists(os.path.join(store, "arc")), "(c) the φ road ran on a keyspace store"
         r = subprocess.run([sys.executable, os.path.join(broken, "hooks", "vlds_hooks.py"), "turn-close"],
-                           input=json.dumps({"session_id": "next-session", "cwd": root}).encode("utf-8"),
+                           input=json.dumps({"session_id": th.CURRENT_SID[0], "cwd": root}).encode("utf-8"),
                            capture_output=True, env=env, timeout=60)
         out = r.stdout.decode("utf-8", "replace")
         assert "idb.py failed" in out and not os.path.exists(os.path.join(store, "arc")), f"(c) not reported:\n{out}"

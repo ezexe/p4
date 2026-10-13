@@ -256,7 +256,7 @@ def main(argv):
     for name in ("append", "pick", "show", "widget", "stored"):
         s = sub.add_parser(name)
         if name == "stored":
-            s.add_argument("--store", required=True, help="the VLDS store, <working dir>/.claude/p4/vlds")
+            s.add_argument("--store", required=True, help="the VLDS store, <working dir>/.claude/p4/sessions/<s8>/vlds")
             s.add_argument("--record", help="the turn record scripts/record.py applied")
             s.add_argument("--entry", action="append", default=[], help="FILE:HEAD, one entry by its head line")
             s.add_argument("--round", type=int)
