@@ -1017,9 +1017,10 @@ def cmd_session_open(payload, store):
     print(f"## VLDS recall (SessionStart hook, source={source}, session {tag}) — every item still passes the gc "
           f"read barrier: freed, stale, or unowned → surface it, do not apply it")
     print(now_line(now))
+    if sid != "unknown":
+        seed_session_store(store)   # the session's own dispatch.md and briefs.md, before the check below reads them
     if held:
         if sid != "unknown":
-            os.makedirs(store, exist_ok=True)
             fresh = record_seen(store, sid, now, title)
             print(f"{source}: session {tag} {'recorded as seen' if fresh else 'already seen'} — its next prompt "
                   f"pours nothing; the conversation holds its own recall, so digest and verdict only")
