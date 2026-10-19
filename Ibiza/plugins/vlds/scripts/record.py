@@ -56,10 +56,14 @@ import partition as pt  # noqa: E402 — the p4 layout: a new session store star
 def seed_from_peer(store, fname):
     """A file a new session store lacks, created from another session's copy of it — its header, up to and including
     the first `---` line, entries none: the file's shape is its header, and the header is the same in every session.
-    Nothing is created when no session holds the file, or outside the p4 layout."""
+    A session-local file (virtual.md, session-storage.md) is read from this store alone, so its header comes from
+    any other session's copy under the layout. Nothing is created when no session holds the file, or outside the
+    p4 layout."""
     if not pt.partitioned(store):
         return False
-    for peer, _lb in pt.expand(store, fname):
+    base = os.path.basename(fname)
+    peers = pt.session_stores(store) if base in pt.SESSION_LOCAL else [peer for peer, _lb in pt.expand(store, fname)]
+    for peer in peers:
         src = os.path.join(peer, fname)
         if os.path.normcase(os.path.abspath(peer)) == os.path.normcase(os.path.abspath(store)) or not os.path.exists(src):
             continue

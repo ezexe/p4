@@ -870,6 +870,34 @@ def test_record():
     print("record: green")
 
 
+def test_record_seeds_session_local():
+    # a session-local file (virtual.md) is read from this store alone, so the record script seeds its header from
+    # another session's copy under the layout; before that, the block was refused "file absent" in every new store
+    root, store = seed_project()
+    try:
+        peer = store_of(root, "peer-session")
+        os.makedirs(peer)
+        with open(os.path.join(peer, "virtual.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(VIRTUAL_HEADER + "\n- inference: the peer's own\n  time: 2026-09-03 10:00\n  basis: the peer\n"
+                    "  minted: peer-session turn 1\n  disposition: pending\n")
+        rec = os.path.join(root, "record.md")
+        with open(rec, "w", encoding="utf-8", newline="\n") as f:
+            f.write("# the turn's record\n\n## virtual.md\n- inference: seeded from the peer's header\n"
+                    "  time: 2026-09-03 10:20\n  basis: the test\n  minted: test-session turn 1\n  disposition: pending\n")
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=root, CLAUDE_PLUGIN_ROOT=PLUGIN)
+        r = subprocess.run([sys.executable, os.path.join(HERE, "record.py"), "--store", store, "--session", "test-session",
+                            "--now", "2026-09-03 10:21", "--record", rec], capture_output=True, env=env, timeout=120)
+        out = r.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
+        assert "virtual.md — - inference: seeded from the peer's header" in out and "file absent" not in out, out
+        with open(os.path.join(store, "virtual.md"), encoding="utf-8") as f:
+            v = f.read()
+        assert v.startswith("# VLDS Partition — Virtual"), v[:80]
+        assert "- inference: seeded from the peer's header" in v and "the peer's own" not in v, v
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("record seeds session-local: green")
+
+
 def test_pour():
     root, store = seed_project()
     try:
@@ -1478,6 +1506,7 @@ if __name__ == "__main__":
     test_turn_close()
     test_barrier()
     test_record()
+    test_record_seeds_session_local()
     test_pour()
     test_check_delta()
     test_detail_ask()
