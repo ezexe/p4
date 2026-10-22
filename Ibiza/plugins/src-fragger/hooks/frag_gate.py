@@ -32,6 +32,7 @@ exits 0 — a gate that crashes the call it guards is worse than no gate.
 import json
 import os
 import re
+import subprocess
 import sys
 
 CODE_EXT = {"py", "pyw", "sh", "bash", "zsh", "ps1", "psm1", "bat", "cmd", "js", "mjs", "cjs", "ts", "rb", "pl",
@@ -151,6 +152,34 @@ def is_data(path):
     return os.path.splitext(path)[1].lower().lstrip(".") in DATA_EXT
 
 
+# The notebook's ignorables. The p4 repo tracks the notebook, so a run's log, a build tree or a binary written
+# there lands in the p4 repo's status and, at the next commit, in its history. Those go to the notebook's `.out/`,
+# a directory whose own `.gitignore` of `*` keeps it ignored whatever any other rule says; the SessionStart sweep
+# (`notebook-out`) re-seeds that file and moves any ignorable found elsewhere in the notebook into it.
+OUT_NAME = ".out"
+IGNORABLE_EXT = {"log", "out", "tmp", "dump", "pid", "o", "obj", "pdb", "ilk", "exe", "dll", "lib", "so", "dylib",
+                 "a", "class", "pyc", "pyo", "tlog", "binlog", "etl", "trace", "lastbuildstate"}
+IGNORABLE_DIRS = {"bin", "build", "obj", "logs", "out", "dist", "target", "node_modules", "__pycache__", ".cache",
+                  "cmake-build-debug", "cmake-build-release", "x64", "debug", "release"}
+
+
+def is_ignorable(rel):
+    """True for a notebook path (relative to the notebook) that is a log, a build result or a binary."""
+    parts = [s for s in rel.replace("\\", "/").split("/") if s]
+    if not parts or parts[0] == OUT_NAME:
+        return False
+    if any(s.lower() in IGNORABLE_DIRS for s in parts[:-1]):
+        return True
+    return os.path.splitext(parts[-1])[1].lower().lstrip(".") in IGNORABLE_EXT
+
+
+def pad_relative(path):
+    """The path relative to the p4 notebook (`.claude/p4/scratchpad/`), or None when it is not under it."""
+    p = path.replace("\\", "/")
+    m = re.search(r"(?:^|/)\.claude/p4/scratchpad/(.+)$", p, re.IGNORECASE)
+    return m.group(1) if m else None
+
+
 # A drive-letter path is absolute on every OS, and its backslashes are separators: the owner works on Windows, and a
 # payload's paths keep that form wherever the gate runs — off Windows, os.path alone reads `E:/projects/x/_rows.json`
 # as relative and joins it under the root a second time.
@@ -233,9 +262,18 @@ def cmd_frag_gate(payload):
         name = os.path.basename(p)
         # A build file is code by name, never a `.txt` dump: the project's own CMakeLists.txt is not scratch.
         if in_project_root(p, root) and is_data(p) and not is_code(p) and name.lower() not in KNOWN_ROOT:
+            home = (f"{pad}{os.sep}{OUT_NAME}{os.sep}, the notebook's always-ignored directory" if is_ignorable(name)
+                    else f"{pad}{os.sep}, the notebook the p4 repo tracks")
             reasons.append(f"{name} is a data file headed for the project root ({p}) — scratch data belongs under "
-                           f"{pad}{os.sep}, the notebook the p4 repo tracks, not beside the project's own manifests where "
+                           f"{home}, not beside the project's own manifests where "
                            f"it lands untracked and is found later by the user rather than by whoever wrote it")
+        elif (pad_relative(p) or "") and is_ignorable(pad_relative(p)):
+            # a log, build result or binary outside the notebook's .out/ lands in the p4 repo's status; asked of a
+            # subagent too, since it reaches the p4 repo's history like a root file reaches the project's
+            reasons.append(f"{name} is a log, build result or binary headed for the notebook outside its ignored "
+                           f"directory ({p}) — the p4 repo tracks the notebook, so it belongs under "
+                           f"{pad}{os.sep}{OUT_NAME}{os.sep}{pad_relative(p).replace('/', os.sep)}, which its own "
+                           f".gitignore of * keeps out of every commit")
         elif is_sub:
             continue
         elif in_scratchpad(p):
@@ -347,6 +385,102 @@ def cmd_register_lint(payload):
     return 0
 
 
+# The notebook's `.out/`, kept at every session start: its `.gitignore` of `*` is re-seeded whenever it is missing
+# or changed (the directory always stays ignored), and every ignorable found in the notebook outside it — what an
+# older version wrote beside the notes, before `.out/` existed — is moved into it at the same relative path. A
+# name already taken there gets the move's time as a suffix; nothing is overwritten or removed. A moved file the
+# p4 repo already tracked shows as deleted in its status: the commit that drops it is the owner's word, never the
+# hook's, so the line says how many there were and touches no index. An older `.claude/scratchpad/` is ignored
+# whole by its own `*` and left as it was, the user's to dispose.
+OUT_IGNORE = "*\n"
+
+
+def tracked_in_p4(p4, rels):
+    """The subset of notebook-relative paths the p4 repo's index holds (read-only; empty without git)."""
+    if not rels or not os.path.isdir(os.path.join(p4, ".git")):
+        return set()
+    try:
+        r = subprocess.run(["git", "-C", p4, "ls-files", "-z", "--", "scratchpad"], capture_output=True, timeout=15)
+    except Exception:
+        return set()
+    listed = {s.decode("utf-8", "replace")[len("scratchpad/"):] for s in r.stdout.split(b"\0") if s}
+    return {rel for rel in rels if rel in listed}
+
+
+def sweep_notebook(root, now_tag):
+    """Seed `.out/` and move the notebook's ignorables into it -> (reseeded, [moved rel paths], [tracked rels])."""
+    p4 = os.path.join(root, ".claude", "p4")
+    pad = os.path.join(p4, "scratchpad")
+    out = os.path.join(pad, OUT_NAME)
+    os.makedirs(out, exist_ok=True)
+    ign = os.path.join(out, ".gitignore")
+    try:
+        with open(ign, encoding="utf-8") as f:
+            current = f.read()
+    except OSError:
+        current = None
+    reseeded = current != OUT_IGNORE
+    if reseeded:
+        with open(ign, "w", encoding="utf-8", newline="\n") as f:
+            f.write(OUT_IGNORE)
+    found = []
+    for d, dirs, files in os.walk(pad):
+        rel_d = os.path.relpath(d, pad).replace("\\", "/")
+        if rel_d == OUT_NAME or rel_d.startswith(OUT_NAME + "/"):
+            dirs[:] = []
+            continue
+        if rel_d == ".":
+            dirs[:] = [x for x in dirs if x != OUT_NAME]
+        for name in files:
+            rel = name if rel_d == "." else f"{rel_d}/{name}"
+            if is_ignorable(rel):
+                found.append(rel)
+    tracked = tracked_in_p4(p4, found)
+    moved = []
+    for rel in sorted(found):
+        dest = os.path.join(out, *rel.split("/"))
+        if os.path.exists(dest):
+            stem, ext = os.path.splitext(dest)
+            dest = f"{stem}.{now_tag}{ext}"
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        try:
+            os.replace(os.path.join(pad, *rel.split("/")), dest)
+            moved.append(rel)
+        except OSError:
+            continue
+    # directories the sweep emptied are removed, the empty ones only
+    for d, dirs, files in os.walk(pad, topdown=False):
+        if os.path.normcase(d) in (os.path.normcase(pad), os.path.normcase(out)) or \
+                os.path.normcase(d).startswith(os.path.normcase(out) + os.sep):
+            continue
+        try:
+            os.rmdir(d)
+        except OSError:
+            pass
+    return reseeded, moved, sorted(tracked & set(moved))
+
+
+def cmd_notebook_out(payload):
+    root = project_root(payload)
+    if not os.path.isdir(os.path.join(root, ".claude")):
+        return 0
+    import time
+    reseeded, moved, tracked = sweep_notebook(root, time.strftime("%Y%m%d-%H%M%S"))
+    lines = []
+    if reseeded:
+        lines.append("src-fragger: seeded .claude/p4/scratchpad/.out/.gitignore (`*`) — logs, build results and "
+                     "binaries go there and never reach the p4 repo.")
+    if moved:
+        lines.append(f"src-fragger: moved {len(moved)} log/build/binary file(s) from the notebook into "
+                     f".claude/p4/scratchpad/.out/: " + ", ".join(moved[:6]) + (" …" if len(moved) > 6 else "") + ".")
+    if tracked:
+        lines.append(f"src-fragger: {len(tracked)} of them were tracked by the p4 repo and now show as deleted in its "
+                     f"status — dropping them is a commit, the owner's word.")
+    if lines:
+        print("\n".join(lines))
+    return 0
+
+
 def main():
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
@@ -358,6 +492,8 @@ def main():
             return cmd_frag_gate(payload)
         if sub == "register-lint":
             return cmd_register_lint(payload)
+        if sub == "notebook-out":
+            return cmd_notebook_out(payload)
         print(f"frag_gate.py: unknown subcommand {sub!r}")
         return 0
     except Exception as e:  # noqa: BLE001 — a gate degrades, never raises

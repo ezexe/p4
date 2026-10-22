@@ -53,8 +53,18 @@ def main():
     # the project's own homes pass
     assert run(write(f"{STORE_SRC}/sweep.py")) is None, "store frag asked"
     assert run(write(f"{PROJECT_PAD}/commit-msg.txt")) is None, "project scratchpad asked"
-    assert run(write(f"{PROJECT_PAD}/run.log")) is None, "a log in the project scratchpad asked"
     assert run(write("E:/projects/x/tools/build.py")) is None, "project code asked"
+    # a log, build result or binary goes to the notebook's ignored .out/: outside it asks, naming the .out/ path
+    d = run(write(f"{PROJECT_PAD}/run.log"))
+    assert d and d["permissionDecision"] == "ask" and ".out" in d["permissionDecisionReason"], "a log outside .out/ passed"
+    assert run(write(f"{PROJECT_PAD}/probe/build/CMakeCache.txt")) is not None, "a build tree outside .out/ passed"
+    assert run(bash(f"cmake --build . > {PROJECT_PAD}/build-1.log 2>&1")) is not None, "a redirected build log passed"
+    assert run(dict(write(f"{PROJECT_PAD}/x.log"), agent_id="a1")) is not None, "a subagent's log outside .out/ passed"
+    assert run(write(f"{PROJECT_PAD}/.out/run.log")) is None, "a log inside .out/ asked"
+    assert run(write(f"{PROJECT_PAD}/.out/probe/build/CMakeCache.txt")) is None, "a build tree inside .out/ asked"
+    assert run(write(f"{PROJECT_PAD}/build-notes.md")) is None, "a note named build-… asked"
+    d = run(write("E:/projects/x/trace.log"))
+    assert d and ".out" in d["permissionDecisionReason"], "a root log was not pointed at .out/"
     # code in a project scratchpad asks, and the ask carries the floor
     d = run(write(f"{PROJECT_PAD}/probe.py"))
     assert d and d["permissionDecision"] == "ask" and "probe.py" in d["permissionDecisionReason"], "code in the project scratchpad passed"
@@ -160,8 +170,71 @@ def main():
     assert run(edit) is None, "an Edit of the project's root CMakeLists.txt asked"
     print("test_frag_gate.py: gate cases green")
     register_lint()
+    notebook_out()
     session_open()
     print("test_frag_gate.py: all green")
+
+
+def notebook_out():
+    """The notebook's .out/: its .gitignore of `*` is seeded and re-seeded when changed; every log, build result
+    or binary elsewhere in the notebook moves into it at the same relative path, a taken name suffixed, nothing
+    overwritten; notes stay; a tracked file moved is counted, never unstaged."""
+    root = tempfile.mkdtemp(prefix="src-fragger-out-")
+    pad = os.path.join(root, ".claude", "p4", "scratchpad")
+
+    def put(rel, text="x\n"):
+        path = os.path.join(pad, *rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+
+    def sweep():
+        r = subprocess.run([sys.executable, GATE, "notebook-out"], input=b"{}", capture_output=True, timeout=60,
+                           env=dict(os.environ, CLAUDE_PROJECT_DIR=root))
+        return r.stdout.decode("utf-8", "replace").strip()
+
+    def exists(rel):
+        return os.path.exists(os.path.join(pad, *rel.split("/")))
+
+    put("notes.md")
+    put("run.log", "old\n")
+    put("probe/build/CMakeCache.txt")
+    put("probe/main.txt")
+    put("bin/tool.exe")
+    put(".out/run.log", "kept\n")
+    git = shutil.which("git")
+    if git:
+        p4 = os.path.join(root, ".claude", "p4")
+        subprocess.run([git, "init", "-q", p4], check=True)
+        subprocess.run([git, "-C", p4, "add", "scratchpad/run.log"], check=True)
+    out = sweep()
+    assert "seeded .claude/p4/scratchpad/.out/.gitignore" in out, out
+    assert "moved 3" in out, out
+    with open(os.path.join(pad, ".out", ".gitignore"), encoding="utf-8") as f:
+        assert f.read() == "*\n", "the .out/ ignore is not `*`"
+    assert exists("notes.md") and exists("probe/main.txt"), "a note was moved"
+    assert not exists("run.log") and not exists("probe/build") and not exists("bin"), "an ignorable stayed"
+    assert exists(".out/probe/build/CMakeCache.txt") and exists(".out/bin/tool.exe"), "an ignorable did not land in .out/"
+    with open(os.path.join(pad, ".out", "run.log"), encoding="utf-8") as f:
+        assert f.read() == "kept\n", "an existing .out/ file was overwritten"
+    taken = [n for n in os.listdir(os.path.join(pad, ".out")) if n.startswith("run.") and n != "run.log"]
+    assert len(taken) == 1, os.listdir(os.path.join(pad, ".out"))
+    if git:
+        assert "1 of them were tracked by the p4 repo" in out, out
+        r = subprocess.run([git, "-C", p4, "check-ignore", "-q", "scratchpad/.out/x.log"])
+        assert r.returncode == 0, "the p4 repo does not ignore .out/"
+        staged = subprocess.run([git, "-C", p4, "diff", "--cached", "--name-only"], capture_output=True, text=True).stdout
+        assert "scratchpad/run.log" in staged, "the hook touched the p4 index"
+    # a clean notebook is silent; a changed ignore is re-seeded
+    assert sweep() == "", "a clean notebook spoke"
+    with open(os.path.join(pad, ".out", ".gitignore"), "w", encoding="utf-8") as f:
+        f.write("!keep\n")
+    assert "seeded" in sweep(), "a changed .out/ ignore was not re-seeded"
+    # no .claude at all: silent, nothing created (git's objects are read-only on Windows)
+    shutil.rmtree(os.path.join(root, ".claude"), onerror=lambda f, p, _e: (os.chmod(p, 0o700), f(p)))
+    assert sweep() == "" and not os.path.exists(os.path.join(root, ".claude")), "the sweep created a store"
+    shutil.rmtree(root, ignore_errors=True)
+    print("test_frag_gate.py: notebook-out cases green")
 
 
 def register_lint():

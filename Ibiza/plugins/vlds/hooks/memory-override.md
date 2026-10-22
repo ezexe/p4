@@ -40,6 +40,7 @@ Do not wait to be asked; a store is built by the turns that pass through it.
 
 ```text
 class UserMemories {                       // the base: this session's "# Memory" instructions, verbatim
+  storage = <working dir>/.claude/p4/memory/   // the p4-memory plugin's: tracked by the p4 repo; the AppData path the base names is a junction to it
   virtual read()                           //   recall — load MEMORY.md, apply recalled memories to thinking
   virtual write()                          //   persist — one fact per file, plus its MEMORY.md index line
 }
@@ -63,7 +64,7 @@ The dispatch record is **this session's own `store/dispatch.md`**: seeded on the
 One entry shape per file, defined in the file's own header — title, short description, schema prose, and the yaml shape, dispatch-seed style; the owning instrument's reference carries the why, and on divergence the file wins (a user edit is a ruling).
 
 **What this never does.**
-It never re-homes, renames, or suppresses base memory files; VLDS files never get MEMORY.md index lines, and base memories never move into `store` — extension, not replacement.
+Base memory files keep their shape and are never suppressed; their storage is the p4-memory plugin's `.claude/p4/memory/`, not the device's AppData — a base write through either path lands there, and none stays local only. VLDS files never get MEMORY.md index lines, and base memories never move into `store` — extension, not replacement.
 The store stays plain and user-editable; a user's direct edit is a ruling, and the latest ruling wins.
 A repo-root `.vlds/` found in the tree is read as a legacy source; new writes land in `store`, its entries are migrated into `store` on first sight — announced before and after, logged — and the legacy directory is left for the user to dispose.
 

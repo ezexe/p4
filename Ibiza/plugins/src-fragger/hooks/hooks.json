@@ -17,6 +17,11 @@
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" register-lint",
             "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" notebook-out",
+            "timeout": 20
           }
         ]
       }

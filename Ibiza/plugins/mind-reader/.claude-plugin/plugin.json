@@ -1,0 +1,14 @@
+{
+  "name": "mind-reader",
+  "version": "0.0.1",
+  "description": "mind-reader (starting point) — at every prompt, reads the p4 vlds dispatch records of the current session and every other session in the repository (.claude/p4/sessions/*/vlds/dispatch.md, the owner's own messages only), predicts the session's direction — the earlier session whose run of messages most resembles this one, and what it went on to ask — and the owner's next incoming message — the messages that followed ones resembling the current message, merged and weighted, the owner's adoption tokens filling in — and hands both to the model as context while it works on the current turn. Each prediction is logged to .claude/p4/sessions/<name>/mind-reader/predictions.md and scored against the message that actually arrives next, with a running hit rate, so the plugin measures itself. Lexical resemblance for now; a judged prediction over the vlds pool is the next step. Reads the vlds store, never writes it.",
+  "author": {
+    "name": "ezexe"
+  },
+  "homepage": "https://github.com/ezexe/prompty-prompter-pioneer-puppeteer/tree/main/Ibiza/plugins/mind-reader",
+  "repository": "https://github.com/ezexe/prompty-prompter-pioneer-puppeteer",
+  "license": "MIT",
+  "dependencies": [
+    { "name": "vlds", "version": ">=0.0.59" }
+  ]
+}
