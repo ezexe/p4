@@ -59,7 +59,7 @@
       "name": "p4-memory",
       "source": "./plugins/p4-memory",
       "description": "p4-memory — the built-in per-project memory (the base class the vlds override wraps) is stored in the p4 repo, <project>/.claude/p4/memory/, never only in the device's local AppData: at every session start the AppData memory directory is copied in (a differing file kept in .conflicts/ for the owner's merge), renamed aside whole and replaced by a directory junction (a symlink off Windows) to the p4 copy, so the harness reads and writes p4 through its own fixed path; the rename is retried (the harness can hold the directory open at a session start), and until the link exists a PostToolUse mirror copies every memory written in AppData into p4 at once and the turn's close retries the link. Depends on vlds.",
-      "version": "0.0.2",
+      "version": "0.0.3",
       "category": "prompt-engineering",
       "keywords": ["memory", "persistence", "p4", "vlds"]
     },
@@ -67,7 +67,7 @@
       "name": "mind-reader",
       "source": "./plugins/mind-reader",
       "description": "mind-reader — a side agent, detached from the session's conversation, that predicts what the OWNER will say next (never what the AI wants) and learns from how each prediction scored. The prompt hook scores the previous turn's frozen prediction against the owner's actual message, appends it to the session's vlds partition mind-reader.md (a gc-collectable object store of the keyspace), moves each source's learned weight (follow, progress, direction, adopt — a multiplicative-weights step) in .claude/p4/mrindex/model.json, then spawns a detached watcher and prints nothing, so the session answers uninterrupted. The watcher re-predicts while the turn runs into a rotating draft (sessions/<name>/mind-reader/draft.md) from every session's dispatch record and what the owner will be reacting to; the Stop hook freezes it, and writes gc holds (.claude/p4/vindex/holds.tsv) for the hot entries the owner's predicted direction leans on, which the vlds light pass and judged sweep skip until they expire — retention only, the archive ignoring them. A plain process: no model, no network, nothing written into the conversation.",
-      "version": "0.0.2",
+      "version": "0.0.3",
       "category": "prompt-engineering",
       "keywords": ["prediction", "intent", "p4", "vlds"]
     }

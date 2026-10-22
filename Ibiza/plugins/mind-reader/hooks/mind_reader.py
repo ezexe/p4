@@ -652,14 +652,47 @@ def cmd_finalize(payload):
     return 0
 
 
+def latest_session(root):
+    """The session whose side agent wrote last — what a bare `status` reports."""
+    best = None
+    try:
+        names = os.listdir(sessions_dir(root))
+    except OSError:
+        return None
+    for n in names:
+        try:
+            t = os.path.getmtime(state_path(root, n))
+        except OSError:
+            continue
+        if best is None or t > best[0]:
+            best = (t, n)
+    return best[1] if best else None
+
+
 def cmd_status(payload):
     root = project_root(payload)
-    name = session_name(root, str(payload.get("session_id") or os.environ.get("MIND_READER_SESSION", "")))
-    for f in ("draft.md",):
-        path = os.path.join(work_dir(root, name), f)
-        if os.path.exists(path):
-            with open(path, encoding="utf-8") as fh:
-                print(fh.read())
+    sid = str(payload.get("session_id") or os.environ.get("MIND_READER_SESSION", ""))
+    name = session_name(root, sid) if sid else latest_session(root)
+    if not name:
+        print(f"mind-reader: no session under {sessions_dir(root)} has a side agent yet — it starts at the owner's "
+              "next message after the plugin loads")
+        return 0
+    wd = work_dir(root, name)
+    print(f"mind-reader status — session {name}\n  files: {wd}\n")
+    path = os.path.join(wd, "draft.md")
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as fh:
+            print(fh.read())
+    else:
+        print("no draft yet — the watcher writes one once the owner's message starts a turn\n")
+    part = os.path.join(sessions_dir(root), name, "vlds", PARTITION)
+    try:
+        with open(part, encoding="utf-8") as fh:
+            n = fh.read().split("\n---\n", 1)[-1].count("\n- predicted: ")
+        print(f"scored predictions in this session's partition: {n} ({part})")
+    except OSError:
+        print("scored predictions in this session's partition: 0 — the first lands when the owner's message after "
+              "a frozen prediction arrives")
     try:
         with open(history_path(root), encoding="utf-8") as f:
             rows = [ln.split("\t") for ln in f if not ln.startswith("#")]

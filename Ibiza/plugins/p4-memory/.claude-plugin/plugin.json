@@ -1,6 +1,6 @@
 {
   "name": "p4-memory",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "p4-memory — the built-in per-project memory (the base class the vlds override wraps) is stored in the p4 repo, <project>/.claude/p4/memory/, never only in the device's local AppData. At every session start the AppData memory directory (~/.claude/projects/<project-slug>/memory/) is copied into .claude/p4/memory/ — a file absent there copied, a differing one kept beside it in .conflicts/ for the owner to merge — and once every file is in p4 byte for byte the AppData directory is renamed aside whole (memory.pre-p4-<time>, the owner's to dispose) and replaced by a directory junction (a symlink off Windows) to .claude/p4/memory/, so the harness reads and writes the p4 copy through its own fixed path and every memory rides the p4 repo's history. The rename is retried, since the harness can hold the directory open at a session start; until the link exists a PostToolUse mirror copies every memory written in AppData into p4 at once, the turn's close retries the link, and the session start prints the p4 MEMORY.md when the one the harness loaded is stale. Depends on vlds, which creates and initializes the p4 repo.",
   "author": {
     "name": "ezexe"

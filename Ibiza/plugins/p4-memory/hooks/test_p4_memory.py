@@ -87,8 +87,15 @@ def main():
     app2 = os.path.join(base, "appdata2", "projects", "slug", "memory")
     out = run("migrate", root, app2, {})
     assert "is now a link" in out and os.path.samefile(app2, p4mem), out
+    # a project dir with forward slashes, as a hook payload's cwd carries it: mklink must not read "/x" as a switch
+    root3 = os.path.join(base, "proj3")
+    os.makedirs(os.path.join(root3, ".claude", "p4"))
+    app3 = os.path.join(base, "appdata3", "projects", "slug", "memory")
+    put(os.path.join(app3, "MEMORY.md"), "- [a](a.md) — a\n")
+    out = run("migrate", root3.replace("\\", "/"), app3.replace("\\", "/"), {})
+    assert "is now a link" in out and os.path.samefile(app3, os.path.join(root3, ".claude", "p4", "memory")), out
     # unlink the junctions before removal so rmtree never walks into p4 through them
-    for a in (app, app2):
+    for a in (app, app2, app3):
         (os.rmdir if os.name == "nt" else os.unlink)(a)
     shutil.rmtree(base, ignore_errors=True)
     print("test_p4_memory.py: all green")

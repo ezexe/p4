@@ -103,6 +103,9 @@ def main():
     # status prints the draft and the history for the owner
     st = run(root, "status", {"session_id": "33333333"})
     assert "mind-reader" in st and "history: 1 scored" in st, st
+    # a bare status (no session given) reports the session whose side agent wrote last
+    st = run(root, "status", {})
+    assert "session now--33333333" in st and "scored predictions in this session's partition: 1" in st, st
     # a detached watcher outlives the spawning hook (run through sh, as the harness does) and the next start stops it
     sh = shutil.which("sh")
     if sh:
