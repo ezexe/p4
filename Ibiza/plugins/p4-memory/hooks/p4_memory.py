@@ -14,8 +14,11 @@ and moves what lives behind it:
                           Windows, a symlink elsewhere — so the harness reads and writes the p4 copy through its
                           own path. A link already in place is checked and left. When the link cannot be made, the
                           p4 MEMORY.md is printed, so the session still loads what p4 holds.
-  gate (PreToolUse)       while the AppData directory is not the link, a Write or Edit into it is denied with the
-                          p4 path to write instead; once linked, it passes (it lands in p4).
+                          The harness can hold the directory open while a session starts, so the rename is
+                          retried, and on failure left to the next hook.
+  mirror (PostToolUse)    while the AppData directory is not the link, a Write or Edit into it is copied into p4 at
+                          once — the harness's own memory write is never refused, and none stays local only.
+  relink (Stop)           a link the start could not make is tried again at the turn's close.
 
 Every failure prints a one-line notice and exits 0 — a hook that crashes the call it guards is worse than none.
 """
@@ -30,6 +33,8 @@ import sys
 import time
 
 MEMORY = "memory"
+RENAME_TRIES = 5
+RENAME_WAIT_S = 1.0
 
 
 def payload_from_stdin():
@@ -135,7 +140,17 @@ def migrate(app, p4, stamp):
         return lines, False
     if os.path.isdir(app):
         kept = f"{app}.pre-p4-{stamp}"
-        os.rename(app, kept)
+        # the harness may hold the directory open while a session starts: retry, then leave it to the next hook
+        for attempt in range(RENAME_TRIES):
+            try:
+                os.rename(app, kept)
+                break
+            except OSError:
+                if attempt == RENAME_TRIES - 1:
+                    lines.append(f"p4-memory: {app} is busy and was not linked yet — writes into it are mirrored into "
+                                 f".claude/p4/memory/ meanwhile, and the next turn's close tries the link again.")
+                    return lines, False
+                time.sleep(RENAME_WAIT_S)
     else:
         kept = None
         os.makedirs(os.path.dirname(app), exist_ok=True)
@@ -164,7 +179,9 @@ def cmd_migrate(payload):
     if lines:
         print("\n".join(lines))
     index = os.path.join(p4, "MEMORY.md")
-    if not ok and os.path.isfile(index):
+    app_index = os.path.join(app, "MEMORY.md")
+    stale = not os.path.isfile(app_index) or not filecmp.cmp(app_index, index, shallow=False)
+    if not ok and os.path.isfile(index) and stale:      # the harness loaded no index, or one p4 has moved past
         with open(index, encoding="utf-8", errors="replace") as f:
             print(f"\n### p4 base memory index ({index}) — the harness did not load it; read it as the session's "
                   f"MEMORY.md\n\n" + f.read()[:8000])
@@ -175,7 +192,9 @@ def norm(path):
     return os.path.normcase(os.path.normpath(path.replace("/", os.sep)))
 
 
-def cmd_gate(payload):
+def cmd_mirror(payload):
+    """PostToolUse: while the AppData directory is not yet the link, a memory written there is copied into p4 at
+    once — the harness's own write is never refused, and nothing it writes stays local only."""
     inp = payload.get("tool_input") or {}
     fp = str(inp.get("file_path") or "") if isinstance(inp, dict) else ""
     if not fp:
@@ -185,13 +204,26 @@ def cmd_gate(payload):
     if not os.path.isdir(os.path.join(root, ".claude", "p4")) or linked(app, p4):
         return 0
     n_app, n_fp = norm(app), norm(fp)
-    if n_fp != n_app and not n_fp.startswith(n_app + os.sep):
+    if not n_fp.startswith(n_app + os.sep) or not os.path.isfile(fp):
         return 0
-    target = os.path.join(p4, os.path.relpath(n_fp, n_app))
-    reason = (f"p4-memory: base memories are stored in the p4 repo, not the device's AppData — write {target} "
-              f"instead of {fp} (the AppData directory becomes a link to it at the next session start).")
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                             "permissionDecisionReason": reason}}))
+    dst = os.path.join(p4, os.path.relpath(n_fp, n_app))
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    shutil.copy2(fp, dst)
+    return 0
+
+
+def cmd_relink(payload):
+    """Stop: when the start could not link (the directory was busy), try again at the turn's close — silent unless
+    it links now."""
+    root = project_root(payload)
+    if not os.path.isdir(os.path.join(root, ".claude", "p4")):
+        return 0
+    app, p4 = appdata_memory(payload, root), p4_memory(root)
+    if linked(app, p4):
+        return 0
+    lines, ok = migrate(app, p4, time.strftime("%Y%m%d-%H%M%S"))
+    if ok:
+        print("\n".join(lines))
     return 0
 
 
@@ -204,8 +236,10 @@ def main():
     try:
         if sub == "migrate":
             return cmd_migrate(payload)
-        if sub == "gate":
-            return cmd_gate(payload)
+        if sub == "mirror":
+            return cmd_mirror(payload)
+        if sub == "relink":
+            return cmd_relink(payload)
         print(f"p4_memory.py: unknown subcommand {sub!r}")
         return 0
     except Exception as e:  # noqa: BLE001 — a hook degrades, never raises

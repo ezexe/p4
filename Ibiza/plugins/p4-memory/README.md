@@ -7,7 +7,7 @@ At session start this plugin copies that directory into `.claude/p4/memory/`, re
 The harness keeps reading and writing its own path; the bytes live in the p4 repo.
 
 - A file that differs between the two is copied to `.claude/p4/memory/.conflicts/` and the link waits for the owner's merge.
-- Until the link exists, a PreToolUse gate denies writes into the AppData directory and the session start prints the p4 `MEMORY.md`.
+- The rename is retried (the harness can hold the directory open at a session start); until the link exists, a PostToolUse mirror copies every memory written into AppData into p4 at once, and the Stop hook retries the link.
 - The vlds memory override names `.claude/p4/memory/` as its base class's storage.
 
 Depends on `vlds`, which creates and initializes `.claude/p4/`.

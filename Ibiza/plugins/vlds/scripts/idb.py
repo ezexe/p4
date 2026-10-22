@@ -121,14 +121,20 @@ INDEX_HEAD = ("# VLDS Store — Index\n\nDerived — the hot table is rewritten 
 # hot file -> id prefix; the object store is the file's name without .md
 OBJECT_STORES = {"local-storage.md": "ls", "index.md": "ix", "data-store.md": "ds", "ledger.md": "le",
                  "tombstones.md": "ts", "virtual.md": "vr", "session-storage.md": "ss", "logger.md": "lg",
-                 "briefs.md": "br"}
+                 "briefs.md": "br", "mind-reader.md": "mr"}
 ROOT_FILES = {"local-storage.md", "index.md"}   # where a LIVE entry is a root: the owner's rulings and standing rules
 PREFIX_OS = {p: f[:-3] for f, p in OBJECT_STORES.items()}
 DEFAULT_BUDGET = {"local-storage.md": 21, "index.md": 21, "data-store.md": 34, "ledger.md": 21,
                   "tombstones.md": 21, "virtual.md": 13, "session-storage.md": 13, "logger.md": 34,
-                  "briefs.md": 21}
+                  "briefs.md": 21, "mind-reader.md": 21}
 HOT_ORDER = ["local-storage.md", "index.md", "data-store.md", "ledger.md", "tombstones.md", "virtual.md",
-             "session-storage.md", "logger.md", "briefs.md", "dispatch.md"]
+             "session-storage.md", "logger.md", "briefs.md", "mind-reader.md", "dispatch.md"]
+# The mind-reader plugin's side agent: its scored predictions are a gc-collectable object store (`mind-reader.md`,
+# poured past its budget by the light pass like the logger), and its holds (`<p4>/vindex/holds.tsv`) are a gc
+# safeguard — an entry the owner's predicted direction still leans on is skipped by the light pass and the judged
+# sweep until its hold expires. A hold only retains; the owner's archive ignores holds.
+LIGHT_BUDGETED = ("logger.md", "mind-reader.md")
+HOLDS_FILE = "holds.tsv"
 REC_ORDER = ("v", "sha", "at", "id", "state", "ts")
 BLOB_ORDER = ("blob", "bytes", "sha", "rows", "from")
 ID_RE = re.compile(r"^id: ([a-z]{2})-(\d{4,})( \(tombstoned\))?\s*$")
@@ -1176,20 +1182,55 @@ def pour_summary(plans):
     return n, f"poured {n} ({counts}) into {', '.join(p['run'] for p in plans)}"
 
 
+def hold_key(head):
+    """A hold's key for an entry: its head line's value, unquoted, whitespace folded, the first 32 characters."""
+    v = head.split(":", 1)[1].strip() if ":" in head else head
+    if len(v) >= 2 and v[0] == v[-1] == '"':
+        v = v[1:-1]
+    return " ".join(v.split())[:32]
+
+
+def held(store, now):
+    """{(store/file, hold key)} under an unexpired hold in <p4>/vindex/holds.tsv — empty when there is none."""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(store)))), "vindex",
+                        HOLDS_FILE)
+    out = set()
+    try:
+        with open(path, encoding="utf-8") as f:
+            for ln in f:
+                parts = ln.rstrip("\n").split("\t")
+                if ln.startswith("#") or len(parts) < 4 or parts[0] < now:
+                    continue
+                out.add((parts[2], parts[3]))
+    except OSError:
+        pass
+    return out
+
+
+def is_held(holds, store, fname, b):
+    return bool(holds) and (f"{os.path.basename(os.path.dirname(os.path.abspath(store)))}/{fname}",
+                            hold_key(b.head)) in holds
+
+
 def plan_light(store, session8, now):
-    """({file: [head lines]}, {file: {line index: rewritten line}}) — the light classes, counted, never scored."""
+    """({file: [head lines]}, {file: {line index: rewritten line}}) — the light classes, counted, never scored; an
+    entry under a mind-reader hold is skipped until the hold expires."""
     spec, expire = {}, {}
+    holds = held(store, now)
     for b in hot_blocks(store, "virtual.md") or []:
         m = MINTED_RE.search(b.text)
-        if m and m.group(1)[:8] != session8:
+        if m and m.group(1)[:8] != session8 and not is_held(holds, store, "virtual.md", b):
             spec.setdefault("virtual.md", []).append(b.line1)
             for k, l in enumerate(b.text.split("\n")):
                 if DISPOSITION_RE.match(l):
                     expire.setdefault("virtual.md", {})[b.start + k] = expired_line(now)
-    lb = hot_blocks(store, "logger.md") or []
-    budget = budgets(store).get("logger.md", DEFAULT_BUDGET["logger.md"])
-    if len(lb) > budget:
-        spec["logger.md"] = [b.line1 for b in lb[:len(lb) - int(budget * LOW_WATER)]]
+    for fname in LIGHT_BUDGETED:
+        lb = hot_blocks(store, fname) or []
+        budget = budgets(store).get(fname, DEFAULT_BUDGET[fname])
+        if len(lb) > budget:
+            heads = [b.line1 for b in lb[:len(lb) - int(budget * LOW_WATER)] if not is_held(holds, store, fname, b)]
+            if heads:
+                spec[fname] = heads
     return spec, expire
 
 
@@ -1553,6 +1594,22 @@ def cmd_pour(store, session, now, specs, dry=False, archive=False):
                     print(f"{tag}: refused — {fname}:{l} is a LIVE {kind}, a root; a sweep never pours one "
                           "(only /vlds:gc archive does, through --archive)")
                     return 1
+    if not archive:     # a mind-reader hold retains an entry the owner's predicted direction leans on
+        holds = held(store, now)
+        kept = []
+        for fname in list(spec):
+            blocks = {b.line1: b for b in (hot_blocks(store, fname) or [])}
+            free = [l for l in spec[fname] if not is_held(holds, store, fname, blocks[l])]
+            kept += [f"{fname}:{l}" for l in spec[fname] if l not in free]
+            if free:
+                spec[fname] = free
+            else:
+                del spec[fname]
+        if kept:
+            print(f"{tag}: held — {', '.join(kept)} kept hot under a mind-reader hold (vindex/{HOLDS_FILE}) until it "
+                  "expires")
+        if not spec:
+            return 0
     if dry:
         print(f"{tag}: dry run — would pour " + ", ".join(f"{len(v)} {k}" for k, v in spec.items())
               + "; nothing written")

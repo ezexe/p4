@@ -28,7 +28,7 @@ SINDEX = "sindex"
 LEGACY = "_legacy"            # the session directory a pre-partition store migrates into
 INDEX_FILE = "phi-index.md"
 VINDEX_KEYS = "keys.tsv"
-SESSION_LOCAL = frozenset({"dispatch.md", "virtual.md", "session-storage.md", "recall-pool.md"})
+SESSION_LOCAL = frozenset({"dispatch.md", "virtual.md", "session-storage.md", "recall-pool.md", "mind-reader.md"})
 
 
 def short(session):
@@ -163,7 +163,7 @@ def config_index(store):
 
 
 HOT_NAMES = ("local-storage.md", "index.md", "data-store.md", "ledger.md", "tombstones.md", "virtual.md",
-             "session-storage.md", "logger.md", "briefs.md", "dispatch.md")
+             "session-storage.md", "logger.md", "briefs.md", "mind-reader.md", "dispatch.md")
 VINDEX_KEYS_HEAD = ("# vindex — the cumulative VLDS index: every session store's keyspace line, the session's directory "
                     "first; derived, never a ruling (rebuilt at every turn close)\n")
 VINDEX_SESSIONS_HEAD = "# vindex sessions — session\tentries\tbytes\tlast-write\ttitle\n"

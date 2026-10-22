@@ -1,13 +1,15 @@
 # mind-reader
 
-A starting point: at every prompt, predict the owner's next message and the session's direction from every session's p4 vlds dispatch record, and hand both to the model while it works on the current turn.
+A side agent, detached from the session, that predicts what the owner will say next and learns from how it scored.
 
-- **Corpus:** `.claude/p4/sessions/*/vlds/dispatch.md`, the owner's own messages in time order per session.
-- **Next message:** the followers of messages resembling the current one, merged and weighted; adoption tokens fill in.
-- **Direction:** the earlier session whose run most resembles this one, and what it asked next.
-- **Self-scoring:** each prediction is logged to `.claude/p4/sessions/<name>/mind-reader/predictions.md` and scored by the next prompt.
+- **Detached:** the prompt hook spawns a background watcher and prints nothing; the session answers uninterrupted.
+- **Rotating draft:** the watcher re-predicts while the turn runs, in `.claude/p4/sessions/<name>/mind-reader/draft.md`.
+- **Frozen at the turn's end:** the Stop hook freezes the prediction; the owner's next message scores it.
+- **Evolving:** each source (`follow`, `progress`, `direction`, `adopt`) carries a weight in `.claude/p4/mrindex/model.json`, moved after every score; `history.tsv` keeps every score.
+- **gc partition:** the scored predictions land in the session's vlds `mind-reader.md`, an object store of the keyspace poured past its budget.
+- **gc safeguard:** `.claude/p4/vindex/holds.tsv` holds the entries the owner's predicted direction leans on; the vlds light pass and judged sweep skip them until they expire.
 
-Resemblance is lexical token overlap; see `skills/predict/SKILL.md` for the next steps.
-Depends on `vlds`, whose prompt hook writes the dispatch records.
+Owner, never the AI: the AI's actions are read only as what the owner will react to. No model, no network, nothing written into the conversation.
 
-Tests: `python hooks/test_mind_reader.py`.
+Depends on `vlds` ≥ 0.0.61, which knows the partition and the holds.
+Tests: `python hooks/test_mind_reader.py`; status: `python hooks/mind_reader.py status`.

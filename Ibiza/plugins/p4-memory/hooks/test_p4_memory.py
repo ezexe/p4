@@ -52,24 +52,35 @@ def main():
     assert read(os.path.join(p4mem, ".conflicts", "a.md")) == "fact a\n", "the AppData copy was not kept aside"
     assert read(os.path.join(p4mem, "a.md")) == "fact a, edited elsewhere\n", "the p4 file was overwritten"
     assert read(os.path.join(p4mem, "MEMORY.md")) == "- [a](a.md) — a\n", "an absent file was not copied"
-    assert not os.path.islink(app) and "p4 base memory index" in out, "the unlinked session was not given the index"
-    # the gate denies a write into the unlinked AppData directory, naming the p4 path
-    w = {"tool_name": "Write", "tool_input": {"file_path": os.path.join(app, "b.md"), "content": "x"}}
-    d = json.loads(run("gate", root, app, w))["hookSpecificOutput"]
-    assert d["permissionDecision"] == "deny" and os.path.join(p4mem, "b.md") in d["permissionDecisionReason"], d
+    assert not os.path.islink(app) and "p4 base memory index" not in out, "an index the harness loaded was re-printed"
+    # a write into the unlinked AppData directory is never refused: it is mirrored into p4 at once
+    put(os.path.join(app, "b.md"), "fact b\n")
+    w = {"tool_name": "Write", "tool_input": {"file_path": os.path.join(app, "b.md"), "content": "fact b\n"}}
+    assert run("mirror", root, app, w) == "" and read(os.path.join(p4mem, "b.md")) == "fact b\n", "b.md not mirrored"
+    put(os.path.join(root, "x.md"), "x\n")
     other = {"tool_name": "Write", "tool_input": {"file_path": os.path.join(root, "x.md"), "content": "x"}}
-    assert run("gate", root, app, other) == "", "the gate spoke on an unrelated path"
-    # the owner merges: identical now → renamed aside and linked
+    assert run("mirror", root, app, other) == "" and not os.path.exists(os.path.join(p4mem, "x.md")), "mirrored x.md"
+    # the owner merges: identical now — but the directory is busy (a process sits in it): not linked, said so
     put(os.path.join(p4mem, "a.md"), "fact a\n")
-    out = run("migrate", root, app, {})
+    if os.name == "nt":
+        busy = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(12)"], cwd=app)
+        try:
+            out = run("migrate", root, app, {})
+            assert "is busy and was not linked yet" in out and not os.path.samefile(app, p4mem), out
+        finally:
+            busy.kill()
+            busy.wait()
+    # the turn's close tries again and links, saying so
+    out = run("relink", root, app, {})
     assert "is now a link" in out, out
+    assert run("relink", root, app, {}) == "", "a linked close spoke"
     kept = [n for n in os.listdir(os.path.dirname(app)) if n.startswith("memory.pre-p4-")]
     assert len(kept) == 1 and read(os.path.join(os.path.dirname(app), kept[0], "a.md")) == "fact a\n", kept
     assert os.path.samefile(app, p4mem), "the AppData path does not reach p4"
     # writes through the AppData path land in p4, and the gate passes
     put(os.path.join(app, "c.md"), "fact c\n")
     assert read(os.path.join(p4mem, "c.md")) == "fact c\n", "a write through the link missed p4"
-    assert run("gate", root, app, w) == "", "the gate denied a write into the linked directory"
+    assert run("mirror", root, app, w) == "", "the mirror spoke on a linked directory"
     # a second start is silent
     assert run("migrate", root, app, {}) == "", "a linked start spoke"
     # a fresh device with no AppData memory yet: the link is made straight away

@@ -1070,6 +1070,55 @@ def test_pour_refuses_a_root():
     print("pour refuses a root: green")
 
 
+MIND_READER = """# VLDS Partition — Mind-reader
+
+header
+
+---
+"""
+
+
+def test_mind_reader_partition_and_holds():
+    """The mind-reader partition pours past its budget like the logger; an entry under an unexpired hold in
+    vindex/holds.tsv is skipped by the light pass and by a judged pour, and the archive ignores holds."""
+    root, store = seed_keyspace(logger=40, data=[("a claim the owner's direction leans on", "a read"),
+                                                 ("an unheld claim", "a read")], sid="hold-session")
+    try:
+        with open(os.path.join(store, "mind-reader.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(MIND_READER)
+            for i in range(30):
+                f.write(f"\n- predicted: \"guess {i}\"\n  time: 2026-09-28 {10 + i // 60:02d}:{i % 60:02d}\n"
+                        f"  actual: \"said {i}\"\n  score: 0.5\n")
+        lb = engine.hot_blocks(store, "logger.md")
+        db = engine.hot_blocks(store, "data-store.md")
+        sdir = os.path.basename(os.path.dirname(store))
+        vindex = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(store))), "vindex")
+        os.makedirs(vindex, exist_ok=True)
+        write(os.path.join(vindex, "holds.tsv"),
+              "# holds\n"
+              f"9999-12-31 00:00\tother\t{sdir}/logger.md\t{engine.hold_key(lb[0].head)}\t0.9\tleans on it\n"
+              f"9999-12-31 00:00\tother\t{sdir}/data-store.md\t{engine.hold_key(db[0].head)}\t0.9\tleans on it\n"
+              f"2000-01-01 00:00\tother\t{sdir}/logger.md\t{engine.hold_key(lb[1].head)}\t0.9\texpired\n")
+        out = th.run_hook("turn-close", {"session_id": "hold-session", "cwd": root}, root)
+        assert "poured 29 (14 logger.md, 15 mind-reader.md)" in out, out
+        assert any(b.head == lb[0].head for b in engine.hot_blocks(store, "logger.md")), "a held logger entry poured"
+        assert not any(b.head == lb[1].head for b in engine.hot_blocks(store, "logger.md")), "an expired hold held"
+        assert th.count_entries(os.path.join(store, "mind-reader.md")) == 15, "the partition did not pour to budget"
+        assert any(n.startswith("mind-reader-") for n in os.listdir(os.path.join(store, "idb", "runs"))), "no run"
+        h = heads(store, "data-store.md")
+        rc, out = idb(store, "pour", "--session", "hold-session", "--now", NOW, f"data-store.md:{h[0]}")
+        assert rc == 0 and f"held — data-store.md:{h[0]}" in out and heads(store, "data-store.md") == h, out
+        rc, out = idb(store, "pour", "--session", "hold-session", "--now", NOW,
+                      f"data-store.md:{h[0]}", f"data-store.md:{h[1]}")
+        assert rc == 0 and "poured 1 (1 data-store.md)" in out and len(heads(store, "data-store.md")) == 1, out
+        rc, out = idb(store, "pour", "--session", "hold-session", "--now", NOW, "--archive", f"data-store.md:{h[0]}")
+        assert rc == 0 and "archive: poured 1" in out, out
+        clean_check(store, "after the holds")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("mind-reader partition and holds: green")
+
+
 def test_archive():
     """/vlds:gc archive: every hot object store poured whole, LIVE roots included and nothing exempt; the freed stay
     freed in the keyspace, the cold tombstones still mask the hot tier, and dispatch.md is untouched."""
@@ -1166,6 +1215,7 @@ if __name__ == "__main__":
     test_wrap_and_crlf()
     test_edges()
     test_pour_refuses_a_root()
+    test_mind_reader_partition_and_holds()
     test_archive()
     test_blob_reads()
     print("test_idb.py: all green")

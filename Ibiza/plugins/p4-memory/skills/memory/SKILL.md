@@ -22,7 +22,7 @@ This plugin moves its storage, never its shape: the files, the frontmatter and t
 2. The AppData directory already links to the store → silent.
 3. Otherwise each AppData file is copied into the store: absent there → copied; identical → nothing; different → the AppData copy is kept at `.claude/p4/memory/.conflicts/<name>` and the link waits. Merging a conflict is the owner's edit — the p4 file is never overwritten.
 4. Every file in p4 byte for byte → the AppData directory is renamed `memory.pre-p4-<time>`, kept whole for the owner to dispose, and replaced by the link. A failed link restores the original name.
-5. Until the link exists, the start prints the p4 `MEMORY.md`, so a memory stored only in p4 is still read, and a PreToolUse gate denies a Write or Edit into the AppData directory, naming the p4 path to write instead.
+5. The harness can hold the AppData directory open while a session starts, so the rename is retried; still busy, the link waits. Until it exists, a PostToolUse mirror copies every memory written into AppData into p4 at once (the harness's own write is never refused), the Stop hook tries the link again at every turn's close, and the start prints the p4 `MEMORY.md` when the one the harness loaded is stale.
 
 ## Never
 
