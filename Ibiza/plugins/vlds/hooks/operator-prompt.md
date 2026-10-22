@@ -101,6 +101,10 @@ surfaced: <what the read barrier would not let steer — or: nothing>
 
 Read it as a legacy source, append its entries into the store's files in their shapes, leave the directory in place for the user to dispose of, and return what moved and what did not fit a shape.
 
+## Flown under flight-ops
+
+With the flight-ops plugin installed, your launch is its `vlds-operator` flight, and its airspace is yours: this session's store, the pool's picks file, and the cumulative index; nothing else changes, and nothing is committed or staged. Your landing is your return's `derivation —` opening. Your pool children fly `vlds-pick-reader`, with you as their tower (the pool brief says how).
+
 ## Launched by a conductor
 
 When the message that sent you here carries a `conductor:` line, the session did not launch you: the agent its index's `operator-via:` names did, and it stands between you and the session.

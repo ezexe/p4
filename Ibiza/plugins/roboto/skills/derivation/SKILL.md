@@ -7,7 +7,7 @@ metadata:
     type: skill
     phases: [prompter, pioneer, puppeteer]
     depends_on: [vlds, bias-patterns]
-    optional_depends_on: [persistence, vlds:gc]
+    optional_depends_on: [persistence, vlds:gc, flight-ops:flight-ops]
     interface:
       domains: [operator_conducting, derived_understanding, store_moments]
       capabilities: [operator_launch, operator_continuation, derivation_lensing, derived_understanding, hand_back]
@@ -52,6 +52,7 @@ An operator return that is not a derivation — a progress note on children stil
 The chain is as deep as the harness lets it launch: roboto runs at spawn depth 1, the operator at 2 and its puppets at 3, where an agent gets no Agent tool — so an operator that conducts another operator leaves the real one unable to launch a puppet.
 The store carries the state between moments, so a fresh operator loses nothing but the reads it repeats.
 Never launch or message a puppet: the operator's children are its own, and their picks reach roboto only through the derivation.
+Each launch is a `vlds-operator` flight, and roboto is its tower (the flight-ops plugin's `flight-ops:flight-ops`): the message above is its takeoff checklist, and at its return roboto lands it — a derivation, not a progress note; the store's changes only inside the operator's airspace; nothing committed or staged — before the lenses run. A failed landing is the relaunch above: the flight's go-around, re-flown once.
 Never open a store file: the derivation, and the pool it carries, are the whole input.
 
 ## 3. Put the Derivation Through the Lenses

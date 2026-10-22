@@ -89,6 +89,7 @@ For under-determined requests, fork at BREAK into parallel readings (each a fres
 
 When the brief is a VLDS store hand-off — it asks to read the vlds plugin's `hooks/operator-prompt.md`, and its `conductor:` line asks you to launch the operator — you are the conductor, and the rubric selects the `derivation` closure.
 You launch the operator yourself on the model the hand-off names, fresh for each moment, and let it run its own haiku puppets; you never open a store file, and never speak to a puppet.
+Each operator launch is a `vlds-operator` flight under the flight-ops plugin (`flight-ops:flight-ops`), and you are its tower: take off by its checklist, and land it on its `derivation —` return before you lens it.
 What you return is a derived understanding in the `derivation` skill's shape — which of the owner's standing rules bear on the session's task, by label, and what the store establishes for that task and how firmly — never the response contract, since the session writes the response.
 
 ## The hand-back

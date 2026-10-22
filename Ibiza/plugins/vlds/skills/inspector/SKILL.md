@@ -34,7 +34,7 @@ The perspectives' verdicts are read as a **distribution, not a vote** — the sh
 The inspector runs on a verdict already reached from the inside, when the stakes or the closeness of the call warrant an outside eye.
 
 1. **Take** the inside verdict — a gate `CONFIRMED` or a guide `match` — as the thing to re-examine, not to defend.
-2. **Spawn** independent perspectives: each blind to the original reasoning, each re-grounded in sources, each framed to attack from its own angle (refute it, re-derive it, stress a distinct failure mode).
+2. **Spawn** independent perspectives: each blind to the original reasoning, each re-grounded in sources, each framed to attack from its own angle (refute it, re-derive it, stress a distinct failure mode). With the flight-ops plugin installed, each perspective is a `vlds-inspector-perspective` flight: its brief carries the line `flight: vlds-inspector-perspective`, and a perspective that changed anything is void.
 3. **Read the distribution** of what they post back — peaked or flat, for or against.
 4. **Transition the verdict** to `CORROBORATED`, `REJECTED`, or `CONTESTED`, carrying how peaked the agreement was as its confidence.
 5. **Write back:** a `REJECTED` verdict overturns the claim — it is discarded, and any corrected version re-enters the gate fresh as `PENDING` — or corrects the guide's match; a `CONTESTED` one is surfaced with its split intact.

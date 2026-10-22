@@ -7,7 +7,7 @@ metadata:
     type: skill
     phases: [prompter, pioneer, puppeteer]
     depends_on: []
-    optional_depends_on: [vlds, bias-patterns, templates, isomorphic-operations, sjc-indexer, activation, persistence, vlds:inspector]
+    optional_depends_on: [vlds, bias-patterns, templates, isomorphic-operations, sjc-indexer, activation, persistence, vlds:inspector, flight-ops:flight-ops]
     interface:
       domains: [lifecycle_orchestration, branch_forking, branch_synthesis, run_sequencing]
       capabilities: [puppeteer_lifecycle, break_fork, parallel_branch_play, branch_compile, branch_test, cross_branch_merge, unresolvable_fork_surfacing, physical_virtual_reconciliation]
@@ -69,6 +69,8 @@ This skill never gates actions itself — when a branch wants to act, it defers 
 
 Each branch runs the four lenses (`identity`) under its own resolved closure — `rubric` is re-entered per branch, because each branch is a fresh prompter-prompt.
 The set of branches is bounded by what is actually distinct, not by a fixed number: per the instance's strip-fake-precision rule there is no baked-in branch count, and new branches stop being spawned when new readings stop being distinct.
+
+A branch played out as an agent is an `orchestration-branch` flight (the flight-ops plugin's `flight-ops:flight-ops`): its brief carries the line `flight: orchestration-branch`, and its landing is material for the merge, never an action — a branch that must act defers to `activation`.
 
 ## COMPILE: assembling a branch
 
