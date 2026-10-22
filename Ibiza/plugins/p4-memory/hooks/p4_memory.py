@@ -94,7 +94,9 @@ def linked(app, p4):
 
 def make_link(app, p4):
     if os.name == "nt":
-        r = subprocess.run(["cmd", "/c", "mklink", "/J", app, p4], capture_output=True, timeout=20)
+        # the payload's cwd can carry forward slashes, which mklink reads as switches ("Invalid switch")
+        r = subprocess.run(["cmd", "/c", "mklink", "/J", os.path.normpath(app), os.path.normpath(p4)],
+                           capture_output=True, timeout=20)
         return r.returncode == 0 and linked(app, p4)
     os.symlink(p4, app, target_is_directory=True)
     return linked(app, p4)
