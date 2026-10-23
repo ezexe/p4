@@ -45,7 +45,8 @@ The plugin's PreToolUse hook (`hooks/flight_ops.py takeoff`) checks items 1 to 4
 ## Landing (the tower, at the return)
 
 The return must open with the shape its brief promises (the table above); for the operator the derivation quotes its scripts' verdicts (`phi.py`/`idb.py check: 0 corruption`), and its writes stay inside its airspace — this session's store, the pool's picks file, the cumulative index.
-The plugin's PostToolUse hook (`hooks/flight_ops.py landing`) checks the opening of every foreground return of the operator and of the conductor, and records each flight; a background flight is recorded airborne, its landing being the completion that reaches its tower.
+The plugin's PostToolUse hook (`hooks/flight_ops.py landing`) checks the opening of every foreground return of the operator and of the conductor, and records each flight.
+The harness may run any Agent call asynchronously and answer it with `{isAsync, status: async_launched, agentId}`: that acknowledgment is no return, so the flight is recorded airborne under its agent id, and it lands when its hand-back reaches the tower as an `<agent-message from=…>` prompt — the UserPromptSubmit hook (`hooks/flight_ops.py handback`) matches it by agent id and checks the report's opening there. A flight a subagent launched hands back to that subagent, where no prompt hook runs; it stays airborne in the record, and its tower lands it by hand.
 
 ## Go-around
 
@@ -58,7 +59,7 @@ The plugin's PostToolUse hook (`hooks/flight_ops.py landing`) checks the opening
 
 ## The recorder
 
-Every recognized flight is one line in `.claude/p4/sessions/<name>/flights.tsv` — time, flight, phase (`takeoff`, `bounced`, `airborne`, `landed`, `go-around`), pilot, a fingerprint of the launch, a note — written by the hooks, tracked by the p4 repo beside the session's `vlds/` and `src/`, never a ruling.
+Every recognized flight is one line per phase in `.claude/p4/sessions/<name>/flights.tsv` — time, flight, phase (`takeoff`, `bounced`, `airborne`, `landed`, `go-around`), pilot, a fingerprint of the launch, a note (an asynchronous flight's `agent <id>`) — written by the hooks, tracked by the p4 repo beside the session's `vlds/` and `src/`, never a ruling.
 
 ## The incident loop
 

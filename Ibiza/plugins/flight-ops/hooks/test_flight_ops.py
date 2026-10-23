@@ -86,6 +86,37 @@ def main():
     assert run(root, "takeoff", call("Do the work.", subagent_type="Explore")) is None
     assert run(root, "landing", call("Do the work.", resp="done")) is None
     assert len(rows(root)) == n, "a non-operator launch was recorded"
+    # the incident of 2026-10-23 03:03: the harness launches an Agent asynchronously and answers PostToolUse with
+    # {isAsync, status: async_launched, agentId} — that acknowledgment is no return, so it is recorded airborne,
+    # never a go-around; the flight lands on its hand-back, matched by agent id
+    ack = {"isAsync": True, "status": "async_launched", "agentId": "aec3c7cf", "description": "d", "prompt": cond}
+    assert run(root, "landing", call(cond, subagent_type="mister:roboto", resp=ack)) is None, "an async ack was judged"
+    assert rows(root)[-1][2] == "airborne" and rows(root)[-1][5].startswith("agent aec3c7cf "), rows(root)[-1]
+    # and the foreground return that is only the delivery frame of a SubagentHandback (the operator under roboto)
+    frame = [{"type": "text", "text": "This agent's report was delivered to you as a message from \"a3da6c07\" (its "
+                                       "SubagentHandback call). Read it there; it is not repeated here."}]
+    assert run(root, "landing", call(OP, resp=frame)) is None, "a delivery frame was judged a return"
+    assert rows(root)[-1][2] == "airborne" and rows(root)[-1][5].startswith("agent a3da6c07 "), rows(root)[-1]
+    acks = "Async agent launched successfully.\nagentId: b1b2b3 (internal ID)"
+    assert run(root, "landing", call(OP, resp=acks)) is None and rows(root)[-1][2] == "airborne", rows(root)[-1]
+
+    def handback(agent, report):
+        body = "\n".join("  " + ln for ln in report.split("\n"))
+        return {"session_id": "abcd1234-x", "prompt": f"<agent-message from='{agent}'>\n[Subagent hand-back] The text "
+                f"below is the final report. The report follows:\n{body}\n</agent-message>"}
+    assert run(root, "handback", handback("aec3c7cf", "derived understanding — open, session x, conducted by roboto")) \
+        is None
+    assert rows(root)[-1][1:3] == ["roboto-conductor", "landed"] and "aec3c7cf" in rows(root)[-1][5], rows(root)[-1]
+    n = len(rows(root))
+    assert run(root, "handback", handback("aec3c7cf", "derived understanding — again")) is None
+    assert len(rows(root)) == n, "a flight landed twice"
+    d = run(root, "handback", handback("b1b2b3", "children still running"))
+    assert d and d["hookEventName"] == "UserPromptSubmit" and "go-around" in d["additionalContext"], d
+    assert rows(root)[-1][1:3] == ["vlds-operator", "go-around"], rows(root)[-1]
+    n = len(rows(root))
+    assert run(root, "handback", handback("ffffff", "derivation — open")) is None and len(rows(root)) == n, \
+        "a hand-back from an unknown agent was recorded"
+    assert run(root, "handback", {"session_id": "abcd1234-x", "prompt": "commit"}) is None and len(rows(root)) == n
     # garbage on stdin passes silently
     r = subprocess.run([sys.executable, HOOK, "takeoff"], input=b"not json", capture_output=True, timeout=60,
                        env=dict(os.environ, CLAUDE_PROJECT_DIR=root))

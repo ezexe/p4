@@ -18,8 +18,13 @@ Subcommands, reading the harness's JSON payload on stdin:
                                        check that is wrong costs one re-issue, never a blocked session
   landing (PostToolUse on Agent|Task)  a foreground flight's return is checked against its promised shape; a return
                                        that is not it is a go-around, said in one line with that operator's own
-                                       go-around rule; a background flight is recorded airborne (its landing is
-                                       the completion that reaches its tower)
+                                       go-around rule; an asynchronous launch — the harness's {isAsync,
+                                       async_launched, agentId} acknowledgment, or run_in_background — is recorded
+                                       airborne with its agent id, never judged as a return
+  handback (UserPromptSubmit)          an asynchronous flight's return reaches the session as an agent-message
+                                       hand-back; it is matched to its airborne line by agent id and checked there
+                                       (a flight a subagent launched hands back to that subagent, where no prompt
+                                       hook runs: it stays airborne in the record)
 
 Every flight is one line in `.claude/p4/sessions/<name>/flights.tsv` — time, flight, phase, pilot, fingerprint,
 note — tracked by the p4 repo beside the session's vlds/ and src/. Every failure inside this script passes the
@@ -188,6 +193,36 @@ def response_text(resp):
     return ""
 
 
+def async_agent(resp):
+    """The agent id of an asynchronous launch's acknowledgment — the harness answers every Agent call it runs in
+    the background with {isAsync, status: async_launched, agentId}, and the flight's return reaches the tower later
+    as a hand-back — or None for a foreground return."""
+    if isinstance(resp, dict) and (resp.get("isAsync") is True or resp.get("status") == "async_launched"):
+        return str(resp.get("agentId") or "?")
+    text = response_text(resp)
+    m = (re.search(r"Async agent launched[\s\S]*?agentId:\s*([0-9a-z]+)", text)
+         # a foreground return that only says the report went elsewhere: the agent called SubagentHandback, and its
+         # report reaches the tower as an agent-message (2026-10-23 03:04, the operator under roboto)
+         or re.search(r"report was delivered to you as a message from \\?[\"']?([0-9a-z]+)", text))
+    return m.group(1) if m else None
+
+
+def landing_check(root, name, kind, who, fp, text, event, agent=None):
+    """Record a return as landed, or as a go-around said in one line for the tower; event is the hook's, agent the
+    id an asynchronous flight handed back under."""
+    want = RETURNS.get(kind)
+    text = text.lstrip()
+    tag = f"agent {agent} " if agent else ""
+    if want and not text.startswith(want) and f"\n{want}" not in text[:4000]:
+        head = " ".join(text.split())[:100]
+        record(root, name, kind, "go-around", who, fp, f"{tag}returned {head!r}")
+        msg = (f"flight-ops: the {kind} {('(' + tag.strip() + ') ') if agent else ''}landed without its `{want}` "
+               f"return (it opened {head!r}) — a go-around: {GO_AROUND[kind]}.")
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": msg}}))
+        return
+    record(root, name, kind, "landed", who, fp, f"{tag}— on its hand-back" if agent else "")
+
+
 def cmd_landing(payload):
     inp = payload.get("tool_input") or {}
     kind = classify(inp)
@@ -196,19 +231,38 @@ def cmd_landing(payload):
         return 0
     name = session_name(root, str(payload.get("session_id") or ""))
     fp, who = fingerprint(inp), pilot(inp)
-    if inp.get("run_in_background") is True:
-        record(root, name, kind, "airborne", who, fp, "background — lands as a completion to its tower")
+    resp = payload.get("tool_response")
+    agent = async_agent(resp)
+    if agent or inp.get("run_in_background") is True:
+        record(root, name, kind, "airborne", who, fp, f"agent {agent or '?'} — lands on its hand-back to the tower")
         return 0
-    text = response_text(payload.get("tool_response")).lstrip()
-    want = RETURNS.get(kind)
-    if want and not text.startswith(want) and f"\n{want}" not in text[:4000]:
-        head = " ".join(text.split())[:100]
-        record(root, name, kind, "go-around", who, fp, f"returned {head!r}")
-        msg = (f"flight-ops: the {kind} landed without its `{want}` return (it opened {head!r}) — a go-around: "
-               f"{GO_AROUND[kind]}.")
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": msg}}))
+    landing_check(root, name, kind, who, fp, response_text(resp), "PostToolUse")
+    return 0
+
+
+HANDBACK = re.compile(r"""<agent-message from=["']([0-9a-z]+)["']>""")
+REPORT_START = re.compile(r"The report follows:\s*\n")
+
+
+def cmd_handback(payload):
+    """UserPromptSubmit: an asynchronous flight's return reaches the session as an agent-message hand-back; the
+    flight it belongs to is the airborne line that names its agent id, and its landing is checked here."""
+    prompt = str(payload.get("prompt") or "")
+    m = HANDBACK.search(prompt[:400])
+    root = project_root(payload)
+    if not m or not os.path.isdir(sessions_dir(root)):
         return 0
-    record(root, name, kind, "landed", who, fp)
+    agent = m.group(1)
+    name = session_name(root, str(payload.get("session_id") or ""))
+    rows = records(tsv_path(root, name))
+    flight = next((r for r in reversed(rows) if len(r) > 5 and r[2] == "airborne" and r[5].startswith(f"agent {agent} ")),
+                  None)
+    if not flight or any(r[2] in ("landed", "go-around") and r[4] == flight[4] and r[5].startswith(f"agent {agent}")
+                         for r in rows):
+        return 0
+    s = REPORT_START.search(prompt)
+    report = "\n".join(ln[2:] if ln.startswith("  ") else ln for ln in (prompt[s.end():] if s else prompt).split("\n"))
+    landing_check(root, name, flight[1], flight[3], flight[4], report, "UserPromptSubmit", agent)
     return 0
 
 
@@ -223,6 +277,8 @@ def main():
             return cmd_takeoff(payload)
         if sub == "landing":
             return cmd_landing(payload)
+        if sub == "handback":
+            return cmd_handback(payload)
     except Exception:  # noqa: BLE001 — a safeguard on the operators never stops the work
         return 0
     return 0
