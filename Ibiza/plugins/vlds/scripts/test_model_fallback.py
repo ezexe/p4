@@ -109,6 +109,24 @@ def test_picks_fallbacks():
     print("picks fallbacks: green")
 
 
+def test_fresh_store_ranker_train():
+    """ranker-train on a store with no labelled pool: nothing to learn, exit 0, and no retrain notice."""
+    root, store = th.seed_project("f1e5a7a0-fresh")
+    try:
+        env = dict(os.environ, VLDS_RANKER_PYTHON=sys.executable)
+        r = subprocess.run([sys.executable, PICK, "--store", store, "ranker-train", "--now", "2026-10-27 10:00"],
+                           capture_output=True, timeout=120, env=env)
+        out = r.stdout.decode("utf-8", "replace")
+        if "no interpreter with phi_prune" in out:
+            print("fresh store ranker-train: skipped (no phi_prune here)")
+            return
+        assert r.returncode == 0 and "nothing to learn" in out, out
+        assert not pick_model.open_notices(store)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("fresh store ranker-train: green")
+
+
 def test_dispatch_and_session_open():
     root, store, p4 = td.seed()
     try:
@@ -130,5 +148,6 @@ def test_dispatch_and_session_open():
 if __name__ == "__main__":
     test_notice_and_quiet_window()
     test_picks_fallbacks()
+    test_fresh_store_ranker_train()
     test_dispatch_and_session_open()
     print("test_model_fallback.py: all green")
