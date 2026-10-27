@@ -479,7 +479,7 @@ def cmd_train(args, store):
 
 def write_picks(store, args, m):
     rows, docs, idf, avgdl = corpus(store)
-    barrier = phi.barrier_rows(store, args.session)[0]
+    barrier, files, _spans, missing, _masks = phi.barrier_rows(store, args.session)
     state = {(r["file"], r["line"]): r["state"] for r in barrier}
     keep = [i for i, r in enumerate(rows) if state.get((r["file"], r["line"])) == "LIVE"]
     live = [rows[i] for i in keep]
@@ -487,16 +487,17 @@ def write_picks(store, args, m):
                                          m.get("tokens", False))
     sc = [score(m["w"], x) for x in xs]
     picked = set(select(live, sc, m["threshold"], m.get("per_file", PER_FILE)))
-    files = phi.recall_files(store)
     totals = {}
     for r in barrier:
         totals[r["file"]] = totals.get(r["file"], 0) + 1
     out = []
     for fname in files:
-        if fname == "tombstones.md" or fname not in totals:
+        if fname in missing:
             continue
+        # every file the barrier read gets a head, so the pool credits the model with it: a tombstone is a mask and
+        # never picked, and an empty file has nothing to pick
         mine = sorted((i for i in picked if live[i]["file"] == fname), key=lambda i: -sc[i])
-        out.append(f"picks (model) — {fname}, {len(mine)} of {totals[fname]} entries bear on the task")
+        out.append(f"picks (model) — {fname}, {len(mine)} of {totals.get(fname, 0)} entries bear on the task")
         for i in mine:
             terms = ", ".join(shared[i]) or "no shared term"
             out.append(f"{fname}:{live[i]['line']} || bears: model {sc[i]:.2f}; shares: {terms}")
