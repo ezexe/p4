@@ -16,21 +16,34 @@ The checklists below are the operators' own rules, gathered — the vlds contrac
 
 | Flight | Tower | Pilot | Recognized by | Flies | Returns |
 |---|---|---|---|---|---|
-| `vlds-operator` | the session; or roboto, conducting | `general-purpose` on the moment's model | the brief says to read the vlds plugin's `hooks/operator-prompt.md` | foreground; in the background on the pool's children road | `derivation — <moment>, …` |
-| `roboto-conductor` | the session, when the recall config's `operator-via:` names roboto | `mister:roboto` | the operator brief plus `conductor: launch the operator …` | foreground | `derived understanding — <moment>, …` |
-| `vlds-pick-reader` | the VLDS operator | `vlds:pick-reader` (general-purpose where absent) on the child model | the brief says to read `hooks/pool-child-prompt.md` | background, all in one message | `picks — <file>, …` |
-| `vlds-inspector-perspective` | the inspector | a read-only type where one fits the angle | the line `flight: vlds-inspector-perspective` | foreground | a for / against reading with its sources |
-| `orchestration-branch` | roboto's orchestration | the agent a branch runs as | the line `flight: orchestration-branch` | foreground | the branch's compiled takes, never an action |
+| `vlds-operator` | the session; or roboto, conducting | `general-purpose` on the moment's model (an integrator: sonnet) | the brief says to read the vlds plugin's `hooks/operator-prompt.md` | foreground; in the background on the pool's children road | `derivation — <moment>, …` |
+| `roboto-conductor` | the session, when the recall config's `operator-via:` names roboto | `mister:roboto` on sonnet (an integrator) | the operator brief plus `conductor: launch the operator …` | foreground | `derived understanding — <moment>, …` |
+| `vlds-pick-reader` | the VLDS operator | `vlds:pick-reader` (general-purpose where absent) on the child model (an evidence finder: haiku) | the brief says to read `hooks/pool-child-prompt.md` | background, all in one message | `picks — <file>, …` |
+| `vlds-inspector-perspective` | the inspector | a read-only type where one fits the angle, on sonnet (a cross-check) | the line `flight: vlds-inspector-perspective` | foreground | a for / against reading with its sources |
+| `orchestration-branch` | roboto's orchestration | the agent a branch runs as, on its work's role | the line `flight: orchestration-branch` | foreground | the branch's compiled takes, never an action |
 
 Spawn depth is part of the airspace: the session is depth 0, roboto 1, the operator under roboto 2, its pick-readers 3 — and at depth 3 the harness gives no Agent tool, so nothing below a pick-reader can fly, and an operator under a conductor that finds no Agent tool takes the skeleton road.
 
 Each flight's full checklist is in `references/flights.md`.
 
+## Models by role
+
+Every flight flies on its role's model, decided from the claude-api skill's model reference (its model table cached 2026-10-06) on the owner's words of 2026-10-27 04:37 ("bump the plan docs writers to the most capable plan and code snippet writters model and the rest of the plan-docs tasks to sonnet or haiku whichever is able to follow the instructions laid out in the plans best without diverting to there own judgments calls") and of 05:01 ("update the agentic loop aka vlds operator,roboto,flight orchastration ... and the rest .. to also now flow through" it):
+
+| Role | Model | The work | Why, from the reference |
+|---|---|---|---|
+| Writer | `fable` (Claude Fable 5.1) | writes a plan, a plan's code snippets, a decision that lays out its edits, or a consequential answer as the full reasoning treatment | "Anthropic's most capable widely released model, for the most demanding reasoning and long-horizon agentic work"; the guide notes it can widen a task's scope, so its brief carries the scope line: the brief sets the scope, and the scope is the deliverable — don't quietly narrow, widen, or swap it |
+| Integrator | `sonnet` (Claude Sonnet 5.5) | follows a contract or a plan as written: the VLDS operator, the pool's compose, the sweep's scoring, roboto conducting, a landing pilot | "strongest on multistep agentic coding in a real repository", and its line "interprets prompts literally and explicitly" |
+| Cross-check | `sonnet` (Claude Sonnet 5.5) | re-reads another flight's output from its sources: an inspector perspective, a landing's one cross-check | the same literal reading, held to the sources it re-grounds in |
+| Evidence finder | `haiku` (Claude Haiku 5.5) | reads files for picks, lines, snippets, inventories, with no decision to make: a pick-reader | for "classification, routing, extraction, and sub-agent tasks"; the guide moves reading-heavy sub-tasks to it |
+
+The recall config's `operator-model:`, `pool-model:`, `pool-child-model:` and `sweep-model:` are a store's own ruling and stand where they name another model; absent, each takes its role's model above, which is what the vlds plugin's defaults already are. Roboto's agent definition keeps `fable` for a consequential answer it writes; a session that launches it to conduct passes `model: sonnet`.
+
 ## Takeoff (the tower, before the launch)
 
 1. **The brief is the contract's, whole.** The operator line carries `store:`, `session:`, `now:` and `moment:`, then the facts only the tower holds; a conducted launch adds its `conductor:` line last; a pick-reader's carries `store`, `session`, `now`, `task`, `file` and that file's barrier lines.
 2. **The clock is copied, never guessed.** `now:` is the latest `now:` in the hook stream; the template's `<the latest now:>` is a defect, not a value.
-3. **The pilot is the contract's type and model.** The operator is `general-purpose`; the conductor `mister:roboto`; a pick-reader `vlds:pick-reader`. The model is the recall config's for the moment (`operator-model:`, `pool-model:`, `pool-child-model:`, `sweep-model:`).
+3. **The pilot is the contract's type, on its role's model.** The operator is `general-purpose`; the conductor `mister:roboto`; a pick-reader `vlds:pick-reader`. The model is the recall config's for the moment where it names one (`operator-model:`, `pool-model:`, `pool-child-model:`, `sweep-model:`), else the role's in **Models by role**: the operator, the pool and the sweep integrate (sonnet), a pick-reader finds evidence (haiku), the conductor integrates (sonnet), an inspector perspective cross-checks (sonnet), and an orchestration branch takes the role of the work it is given.
 4. **Foreground or background as the road says.** Pick-readers fly in the background, launched in one message; the operator flies in the background only on the children road.
 5. **Launch once, continue, then relaunch.** The session launches its operator once and continues it by `SendMessage` for at most `operator-moments:` moments, then launches fresh; a conductor launches the operator fresh for every moment and never continues it.
 

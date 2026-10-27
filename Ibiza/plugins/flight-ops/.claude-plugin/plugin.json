@@ -1,6 +1,6 @@
 {
   "name": "flight-ops",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "flight-ops — flight operations for the p4 plugins' own operators, as they run: the VLDS operator, roboto as its conductor, the operator's pick-readers, the inspector's perspectives, and an orchestration branch run as an agent. Each is a flight with its own takeoff checklist (the brief its contract prescribes with the operator line's store, session, copied now and moment; the agent type and the recall config's model; foreground or background as the pool's road says; launch once, continue, then relaunch), its own landing (the return shape its brief promises: derivation, derived understanding, picks), its own go-around and lost-communications rule, a recorder line in the session's .claude/p4/sessions/<name>/flights.tsv, and an incident loop that hands every miss to the vlds ledger as a correction and amends the checklist with a test. A PreToolUse hook checks a recognized operator launch against its takeoff checklist and bounces a failing one once, the re-issue passing; a PostToolUse hook checks a foreground return's opening — an asynchronous one's on its agent-message hand-back, matched by agent id — and says a go-around in one line. Not a plan system: a launch that is not a p4 operator's passes untouched, and a failure inside the hook passes the call.",
   "author": {
     "name": "ezexe"

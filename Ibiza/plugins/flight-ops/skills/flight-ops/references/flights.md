@@ -9,7 +9,7 @@ Each section is one operator as its contract runs it: where its rules come from,
 **Takeoff**
 - [ ] The message is the operator line: `Read <vlds>/hooks/operator-prompt.md and do what it says. store: <store> | session: <s8> | now: <the latest now:> | moment: open|sweep|… | <facts>`.
 - [ ] `now:` copied from the latest hook `now:`.
-- [ ] `subagent_type` general-purpose; `model` the moment's (`operator-model:`, `pool-model:` on open with a pool, `sweep-model:` on sweep).
+- [ ] `subagent_type` general-purpose; `model` the moment's (`operator-model:`, `pool-model:` on open with a pool, `sweep-model:` on sweep), else the integrator's, sonnet (SKILL.md, Models by role).
 - [ ] Foreground, except on the children road, where the session launches it in the background and its progress arrives as its messages.
 - [ ] From the session: once per session; later moments by `SendMessage` to its agent id, at most `operator-moments:` continuations, then fresh. When `operator-via:` names a conductor, the launch goes to the conductor instead (flight `roboto-conductor`).
 
@@ -26,7 +26,7 @@ Each section is one operator as its contract runs it: where its rules come from,
 **Source:** roboto's agent definition (Between the session and its operator) and its `derivation` skill.
 
 **Takeoff**
-- [ ] `subagent_type` mister:roboto, foreground.
+- [ ] `subagent_type` mister:roboto, foreground, `model` sonnet: conducting is an integrator's work (SKILL.md, Models by role), and the agent definition's `fable` is kept for a consequential answer roboto writes.
 - [ ] The operator line as above, then last `conductor: launch the operator with this message on <the moment's model>, and return a derived understanding`.
 
 **Landing**
@@ -43,7 +43,7 @@ Each section is one operator as its contract runs it: where its rules come from,
 
 **Takeoff**
 - [ ] One per file under `inject:` and `digest:`, all in ONE message.
-- [ ] `subagent_type` vlds:pick-reader (no tool that writes), general-purpose only where that type is absent; `model` the `pool-child-model:`.
+- [ ] `subagent_type` vlds:pick-reader (no tool that writes), general-purpose only where that type is absent; `model` the `pool-child-model:`, else the evidence finder's, haiku (SKILL.md, Models by role).
 - [ ] `run_in_background` true.
 - [ ] The message: read `hooks/pool-child-prompt.md`, then `store`, `session`, `now`, `task`, `file`, `barrier` (that file's lines, pasted).
 
@@ -61,7 +61,7 @@ Each section is one operator as its contract runs it: where its rules come from,
 **Takeoff**
 - [ ] The brief carries the line `flight: vlds-inspector-perspective`.
 - [ ] Blind to the original reasoning; re-grounded in sources; framed to one angle — refute, re-derive, or stress one failure mode.
-- [ ] A read-only agent type where one fits the angle.
+- [ ] A read-only agent type where one fits the angle, `model` sonnet: a perspective is a cross-check (SKILL.md, Models by role).
 
 **Landing**
 - [ ] A for / against reading with the sources it re-grounded in.
@@ -75,6 +75,7 @@ Each section is one operator as its contract runs it: where its rules come from,
 
 **Takeoff**
 - [ ] The brief carries the line `flight: orchestration-branch`, and is a fresh prompter-prompt for one reading.
+- [ ] `model` the role of the branch's work (SKILL.md, Models by role): a branch that writes its reading as a plan or code is a writer (fable), one that follows a laid-out procedure an integrator (sonnet), one that only gathers evidence an evidence finder (haiku).
 
 **Landing**
 - [ ] The branch's compiled takes for the merge — never an action.
