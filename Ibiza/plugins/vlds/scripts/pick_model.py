@@ -39,6 +39,7 @@ import random
 import re
 import sys
 import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -236,8 +237,10 @@ def parse_pool(path):
     # a pool whose read: line credits the model was steered by the model's own picks: never a label for it
     by_model = bool(read and MODEL_CREDIT_RE.search(read.group(1)))
     sid = session.group(1)[:8] if session else ""
+    # the id the models record a pool by, never empty: a pool with no session: line takes its store's directory name
+    pid = sid or os.path.basename(os.path.dirname(os.path.dirname(os.path.abspath(path))))
     return {"path": path, "task": task.group(1).strip() if task else "", "pooled": pooled.group(1) if pooled else "",
-            "session": sid, "id": sid, "picks": picks, "by_model": by_model}
+            "session": sid, "id": pid, "picks": picks, "by_model": by_model}
 
 
 def labelled_pool(p):
@@ -527,7 +530,12 @@ def cmd_train(args, store):
     t = best_threshold([([data[0][i] for i in p["rows"]], p["labels"], [score(w, x) for x in f[0]])
                         for f, p in zip(feats, pools)])
     path = model_path(store, args.model)
-    old = load_model(path) if os.path.exists(path) else None
+    try:
+        old = load_model(path) if os.path.exists(path) else None
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+        # a corrupt or conflicted model is what a retrain repairs: start again from round 0, no delta
+        print(f"train — the model in place is unreadable ({type(e).__name__}); training a fresh one")
+        old = None
     rnd = (old.get("round", 0) + 1) if old else 0
     seen = sorted({p["id"] for p in label_pools(store)})
     save_model(path, {"kind": "vlds pick ranker", "round": rnd, "trained": args.now, "dim": DIM,
@@ -551,12 +559,36 @@ def models_root(store):
     return os.path.join(p4 or os.path.dirname(os.path.abspath(store)), "models")
 
 
+def store_root(store):
+    return os.path.dirname(models_root(store))
+
+
+def same_path(a, b):
+    try:
+        return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def neutral_cwd():
+    """The working directory for every ranker process: never the store, whose files `python -m` would put first on
+    sys.path (a phi_prune/ committed into a shared store must not replace the installed package)."""
+    return tempfile.gettempdir()
+
+
 NOTICES = "retrain-needed.tsv"
+RESOLVED = "retrain-resolved.tsv"
 NOTICE_QUIET_S = 6 * 3600       # one notice per component and error kind in this long: a failing model is not a flood
 NOTICES_HEAD = ("# p4 model retrain notices — time\tepoch\tsession\tcomponent\tkind\terror — written by the vlds "
                 "plugin when a model failed unexpectedly and the session fell back (the JSON ranker, the children, the "
                 "operator) and carried on; nothing in the session fixes it: the p4-model skill in the model repository "
-                "(ezexe/phi) retrains and clears them\n")
+                "(ezexe/phi) retrains and clears them, by appending to retrain-resolved.tsv — this file is only ever "
+                "appended to\n")
+
+
+def notice_family(component):
+    """The model a notice is about: ranker (the .pt ranker and its server), dispatch, or json (the pool ranker)."""
+    return "ranker" if "ranker" in component else "dispatch" if "dispatch" in component else "json"
 
 
 def notify_retrain(store, component, err, session=""):
@@ -568,98 +600,186 @@ def notify_retrain(store, component, err, session=""):
         text = f"{type(err).__name__}: {err}" if isinstance(err, BaseException) else str(err)
         text = " ".join(text.replace("\t", " ").split())[:300]
         now = time.time()
-        rows = open_notices(store)
-        if any(r["component"] == component and r["kind"] == kind and now - r["epoch"] < NOTICE_QUIET_S for r in rows):
+        if any(r["component"] == component and r["kind"] == kind and now - r["epoch"] < NOTICE_QUIET_S
+               for r in open_notices(store)):
             return False
         os.makedirs(os.path.dirname(path), exist_ok=True)
         new = not os.path.exists(path)
         with open(path, "a", encoding="utf-8", newline="\n") as f:
             if new:
                 f.write(NOTICES_HEAD)
-            f.write(f"{time.strftime('%Y-%m-%d %H:%M')}\t{int(now)}\t{session[:8]}\t{component}\t{kind}\t{text}\n")
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M')}\t{now:.6f}\t{session[:8]}\t{component}\t{kind}\t{text}\n")
         return True
     except Exception:  # noqa: BLE001 — a notice that cannot be written changes nothing about the fallback
         return False
 
 
-def open_notices(store):
-    """[{time, epoch, session, component, kind, error}] — the retrain notices not yet cleared by the p4-model skill."""
-    path = os.path.join(models_root(store), NOTICES)
+def _rows(path, width):
     out = []
     try:
         with open(path, encoding="utf-8") as f:
             for l in f:
                 parts = l.rstrip("\n").split("\t")
-                if l.startswith("#") or len(parts) != 6:
-                    continue
-                out.append({"time": parts[0], "epoch": float(parts[1] or 0), "session": parts[2],
-                            "component": parts[3], "kind": parts[4], "error": parts[5]})
-    except (OSError, ValueError):
+                if not l.startswith("#") and len(parts) >= width:
+                    out.append(parts)
+    except OSError:
         pass
     return out
 
 
+def notice_key(epoch, component, kind):
+    return f"{float(epoch or 0):.6f}|{component}|{kind}"
+
+
+def open_notices(store):
+    """[{time, epoch, session, component, kind, error}] — the retrain notices no row of retrain-resolved.tsv answers.
+    Both files are append-only, so a hook writing a notice and the p4-model skill resolving one never lose a row."""
+    mdir = models_root(store)
+    resolved = {notice_key(r[1], r[3], r[4]) for r in _rows(os.path.join(mdir, RESOLVED), 6)}
+    out = []
+    for p in _rows(os.path.join(mdir, NOTICES), 6):
+        try:
+            epoch = float(p[1] or 0)
+        except ValueError:
+            continue
+        if notice_key(epoch, p[3], p[4]) in resolved:
+            continue
+        out.append({"time": p[0], "epoch": epoch, "session": p[2], "component": p[3], "kind": p[4],
+                    "error": "\t".join(p[5:])})
+    return out
+
+
+def notice_open(store, family):
+    return any(notice_family(n["component"]) == family for n in open_notices(store))
+
+
 class ServerDown(Exception):
-    """No ranker server answered: an ordinary fallback (the next session start restarts it), never a notice."""
+    """No ranker server of this store answered: an ordinary fallback, never a notice."""
+
+
+def ranker_request(store, path, body=None, timeout=RANKER_TIMEOUT_S):
+    """(status, reply) from this store's ranker server. Raises ServerDown for anything that is not an answer from
+    it: no ranker.server.json, nothing listening, a timeout, a non-HTTP reply on a reused port, a reply cut short,
+    or a server that names another store."""
+    import http.client
+    try:
+        with open(os.path.join(models_root(store), "ranker.server.json"), encoding="utf-8") as f:
+            port = int(json.load(f)["port"])
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        raise ServerDown(str(e))
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data, method="POST" if data else "GET",
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            status, raw = r.status, r.read()
+    except urllib.error.HTTPError as e:
+        status, raw = e.code, e.read()
+    except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as e:
+        raise ServerDown(f"{type(e).__name__}: {e}")
+    try:
+        reply = json.loads(raw)
+    except ValueError as e:
+        raise ServerDown(f"not a ranker reply: {e}")
+    if not isinstance(reply, dict) or not same_path(reply.get("p4", ""), store_root(store)):
+        raise ServerDown("the server on that port is not this store's ranker")
+    return status, reply
 
 
 def ranker_scores(store, task, texts, timeout=RANKER_TIMEOUT_S):
-    """(scores, threshold, round, per_file) from the store's ranker server, or None when no server answers — the
-    JSON ranker then picks. Standard library only: the torch side lives in phi_prune."""
-    info = os.path.join(models_root(store), "ranker.server.json")
+    """(scores, threshold, round, per_file) from this store's ranker server, or None — the JSON ranker then picks.
+    A server that is down is no news; one of this store that answers wrongly is a retrain notice."""
     try:
-        with open(info, encoding="utf-8") as f:
-            port = int(json.load(f)["port"])
-        req = urllib.request.Request(f"http://127.0.0.1:{port}/score", method="POST",
-                                     data=json.dumps({"task": task, "texts": texts}).encode("utf-8"),
-                                     headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            out = json.loads(r.read())
+        status, out = ranker_request(store, "/score", {"task": task, "texts": texts}, timeout)
+    except ServerDown:
+        return None
+    try:
+        if status != 200:
+            raise RuntimeError(f"HTTP {status}: {out.get('error', '')}")
         if len(out["scores"]) != len(texts) or out.get("threshold") is None:
             raise ValueError(f"the server answered {len(out['scores'])} scores for {len(texts)} rows")
-        return out["scores"], float(out["threshold"]), out.get("round"), int(out.get("per_file", PER_FILE))
-    except FileNotFoundError:
-        return None                                  # no server started: the JSON ranker, nothing to report
-    except urllib.error.HTTPError as e:
-        notify_retrain(store, "ranker server", e)    # it answered, and wrongly: a model problem
-        return None
-    except (urllib.error.URLError, ConnectionError, TimeoutError, OSError):
-        return None                                  # down or slow: the next session start restarts it
-    except (ValueError, KeyError, TypeError) as e:
+        return ([float(x) for x in out["scores"]], float(out["threshold"]), out.get("round"),
+                int(out.get("per_file", PER_FILE)))
+    except (RuntimeError, ValueError, KeyError, TypeError) as e:
         notify_retrain(store, "ranker server", e)
         return None
 
 
+def ranker_health(store, timeout=2.0):
+    """The /health reply of this store's ranker server ({ok, round, threshold, p4}), or None when none answers."""
+    try:
+        status, out = ranker_request(store, "/health", timeout=timeout)
+        return out if status == 200 else None
+    except ServerDown:
+        return None
+
+
+RANKER_PYTHON_FILE = ".ranker-python"   # models/.ranker-python: this machine's interpreter for the .pt ranker,
+                                        # written by the p4-model skill's init; untracked (models/.* is ignored)
+
+
 def ranker_python(store):
-    """The interpreter that has phi_prune and torch: $VLDS_RANKER_PYTHON, the recall config's `ranker-python:`, or
-    this one; None when none of them can import phi_prune.p4rank (the JSON ranker then works alone)."""
+    """The interpreter that has phi_prune and torch: $VLDS_RANKER_PYTHON, then models/.ranker-python (local and
+    untracked — never a tracked file another clone could point at an executable), then this one; None when none of
+    them can import phi_prune.p4rank. A passing probe is remembered beside it, so a hook pays it once."""
+    mdir = models_root(store)
     cands = [os.environ.get("VLDS_RANKER_PYTHON", "")]
-    idx = phi.parse_index(os.path.dirname(pt.config_index(store)))
-    m = re.search(r"^ranker-python:\s*(\S.*)$", idx["raw"], re.M) if idx else None
-    cands += [m.group(1).strip() if m else "", sys.executable]
+    try:
+        with open(os.path.join(mdir, RANKER_PYTHON_FILE), encoding="utf-8") as f:
+            cands.append(f.read().strip())
+    except OSError:
+        pass
+    cands.append(sys.executable)
+    cache = os.path.join(mdir, ".ranker-python-ok")
     probe = ("import importlib.util as u, sys; "
              "sys.exit(0 if u.find_spec('torch') and u.find_spec('phi_prune.p4rank') else 3)")
-    for c in cands:
-        if not c:
+    for c in dict.fromkeys(x for x in cands if x):
+        try:
+            stamp = f"{c}\t{os.path.getmtime(c)}"
+        except OSError:
             continue
         try:
-            if subprocess.run([c, "-c", probe], capture_output=True, timeout=20).returncode == 0:
+            with open(cache, encoding="utf-8") as f:
+                if f.read().strip() == stamp:
+                    return c
+        except OSError:
+            pass
+        try:
+            if subprocess.run([c, "-c", probe], capture_output=True, timeout=20, cwd=neutral_cwd()).returncode == 0:
+                try:
+                    write_atomic(cache, stamp + "\n")
+                except OSError:
+                    pass
                 return c
         except (OSError, subprocess.SubprocessError):
             continue
     return None
 
 
-def ranker_health(store, timeout=0.5):
-    """The serving round when the store's ranker server answers /health, else None."""
+def take_lock(path, stale_s):
+    """Create path exclusively (pid and time inside); a lock older than stale_s is taken over. True when held."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    for _ in range(2):
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(f"{os.getpid()}\t{time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            return True
+        except FileExistsError:
+            try:
+                if time.time() - os.path.getmtime(path) < stale_s:
+                    return False
+                os.remove(path)
+            except OSError:
+                return False
+    return False
+
+
+def release_lock(path):
     try:
-        with open(os.path.join(models_root(store), "ranker.server.json"), encoding="utf-8") as f:
-            port = int(json.load(f)["port"])
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=timeout) as r:
-            out = json.loads(r.read())
-        return out.get("round") if out.get("ok") else None
-    except (OSError, ValueError, KeyError, TypeError, urllib.error.URLError):
-        return None
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def spawn_detached(args, cwd, log):
@@ -681,50 +801,150 @@ def spawn_detached(args, cwd, log):
     return subprocess.Popen(args, start_new_session=True, **kw).pid
 
 
+def checkpoint_state(path):
+    """missing, lfs-pointer (a clone without git-lfs: the pointer file, not the weights) or present."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(64)
+    except OSError:
+        return "missing"
+    return "lfs-pointer" if head.startswith(b"version https://git-lfs") else "present"
+
+
+SERVER_START_LOCK = ".server-start"
+SERVER_START_S = 120            # one server start at a time: a start older than this is taken as failed
+
+
 def ensure_server(store):
-    """One line: the ranker server already answering, started now, or why not — '' when there is no .pt yet."""
+    """One line: this store's ranker server answering, started now, or why not — '' when there is no .pt yet. Never
+    a second server: a start lock, and a server that is up but could not load its checkpoint is reported, not
+    restarted (a restart would fail the same way)."""
     mdir = models_root(store)
-    if not os.path.exists(os.path.join(mdir, "ranker.pt")):
+    state = checkpoint_state(os.path.join(mdir, "ranker.pt"))
+    if state == "missing":
         return ""
-    rnd = ranker_health(store)
-    if rnd is not None:
-        return f"ranker: round {rnd} serving (models/ranker.server.json)"
+    if state == "lfs-pointer":
+        return ("ranker: models/ranker.pt is a git LFS pointer, not the checkpoint — run `git lfs pull` in "
+                ".claude/p4; the JSON ranker picks until then")
+    h = ranker_health(store)
+    if h and h.get("ok"):
+        return f"ranker: round {h.get('round')} serving (models/ranker.server.json)"
+    if h:
+        notify_retrain(store, "ranker checkpoint", "LoadError: the server is up but could not load models/ranker.pt")
+        return "ranker: the server could not load models/ranker.pt — a retrain notice is open; the JSON ranker picks"
+    lock = os.path.join(mdir, SERVER_START_LOCK)
+    if not take_lock(lock, SERVER_START_S):
+        return "ranker: a server is already starting"
     py = ranker_python(store)
     if not py:
-        return ("ranker: models/ranker.pt is here but no interpreter has phi_prune and torch (VLDS_RANKER_PYTHON or "
-                "the recall config's `ranker-python:`) — the JSON ranker picks")
-    pid = spawn_detached([py, "-m", "phi_prune.p4serve", "--p4", os.path.dirname(mdir)], os.path.dirname(mdir),
+        release_lock(lock)
+        return ("ranker: models/ranker.pt is here but no interpreter has phi_prune and torch (VLDS_RANKER_PYTHON, or "
+                "models/.ranker-python which the p4-model skill's init writes) — the JSON ranker picks")
+    pid = spawn_detached([py, "-m", "phi_prune.p4serve", "--p4", store_root(store)], neutral_cwd(),
                          os.path.join(mdir, "ranker.log"))
+    if not pid:
+        release_lock(lock)
     return (f"ranker: server started (pid {pid}); it loads models/ranker.pt and picks from the next request, "
             "reloading whenever a retrain swaps the checkpoint" if pid else "ranker: the server failed to start")
 
 
+def session_open_ranker(store):
+    """The SessionStart hook's ranker line, without blocking it: a server already answering is named; otherwise the
+    check and the start (probing an interpreter can take seconds) run detached, through `pick_model.py
+    ensure-server`."""
+    mdir = models_root(store)
+    state = checkpoint_state(os.path.join(mdir, "ranker.pt"))
+    if state == "missing":
+        return ""
+    if state == "lfs-pointer":
+        return ensure_server(store)
+    h = ranker_health(store, timeout=1.0)
+    if h and h.get("ok"):
+        return f"ranker: round {h.get('round')} serving (models/ranker.server.json)"
+    pid = spawn_detached([sys.executable, os.path.abspath(__file__), "--store", store, "ensure-server"], neutral_cwd(),
+                         os.path.join(mdir, "ranker.log"))
+    return (f"ranker: starting this store's server in the background (pid {pid}); the JSON ranker picks until it "
+            "answers" if pid else "ranker: could not start the server check; the JSON ranker picks")
+
+
+def cmd_ensure_server(args, store):
+    print(ensure_server(store) or "ranker: no checkpoint yet")
+    return 0
+
+
+def ranker_seen(store):
+    """The labelled pools the .pt ranker has been trained on or found nothing in (models/ranker.json `seen`), so the
+    turn close and the p4-model skill owe it exactly the pools neither has met."""
+    try:
+        with open(os.path.join(models_root(store), "ranker.json"), encoding="utf-8") as f:
+            meta = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return set(meta.get("seen", meta.get("pools", [])))
+
+
+def record_seen(store, ids):
+    path = os.path.join(models_root(store), "ranker.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            meta = json.load(f)
+    except (OSError, ValueError):
+        meta = {}
+    meta["seen"] = sorted(set(meta.get("seen", [])) | set(ids))
+    write_atomic(path, json.dumps(meta, indent=1) + "\n")
+
+
+RANKER_TRAIN_LOCK = ".ranker-train.lock"
+RANKER_TRAIN_STALE_S = 3 * 3600
+
+
 def cmd_ranker_train(args, store):
     """Export the labelled pools and train the .pt ranker on them with phi_prune.p4rank — run in the background by
-    the turn close; pretraining over the repository's text when the base is missing or the text has grown."""
-    py = ranker_python(store)
-    if not py:
-        print("ranker-train — no interpreter with phi_prune and torch: set VLDS_RANKER_PYTHON or the recall "
-              "config's `ranker-python:`; the JSON ranker works alone")
-        return 3
-    if not label_pools(store):
-        # a fresh store: nothing to learn yet, which is no failure — the turn close trains once BOOTSTRAP_POOLS land
-        print("ranker-train — no labelled pool in the store yet; nothing to learn, nothing written")
+    the turn close and by the p4-model skill alike, one at a time (models/.ranker-train.lock); pretraining over the
+    repository's text when the base is missing, too thin or outgrown."""
+    mdir = models_root(store)
+    lock = os.path.join(mdir, RANKER_TRAIN_LOCK)
+    if not take_lock(lock, RANKER_TRAIN_STALE_S):
+        print("ranker-train — another training holds models/.ranker-train.lock; nothing started")
         return 0
-    p4 = pt.p4_of(store) or os.path.dirname(os.path.abspath(store))
-    pairs = os.path.join(models_root(store), ".pairs.jsonl")
-    args.jsonl = pairs
-    cmd_pairs(args, store)
-    r = subprocess.run([py, "-m", "phi_prune.p4rank", "train", "--p4", p4, "--pairs", pairs, "--now", args.now,
-                        "--minutes", str(args.minutes)])
-    if r.returncode != 0:
-        notify_retrain(store, "ranker train", f"ExitCode: phi_prune.p4rank train exited {r.returncode} "
-                                              "(models/ranker.log holds its output)")
-    if r.returncode == 0:
+    pairs = os.path.join(mdir, f".pairs.{os.getpid()}.jsonl")
+    try:
+        ids = {p["id"] for p in label_pools(store)}
+        if not ids:
+            # a fresh store: nothing to learn yet, which is no failure — the turn close trains once BOOTSTRAP_POOLS land
+            print("ranker-train — no labelled pool in the store yet; nothing to learn, nothing written")
+            return 0
+        py = ranker_python(store)
+        if not py:
+            print("ranker-train — no interpreter with phi_prune and torch: set VLDS_RANKER_PYTHON, or run the p4-model "
+                  "skill's init on this machine (it writes models/.ranker-python); the JSON ranker works alone")
+            return 3
+        pools, _data = build_pairs(store)
+        if not pools:
+            # labelled pools whose picks no longer match a barrier row: nothing the ranker can learn from them
+            record_seen(store, ids)
+            print(f"ranker-train — {len(ids)} labelled pool(s), none whose picks still match the store; nothing to "
+                  "learn, recorded as seen")
+            return 0
+        args.jsonl = pairs
+        cmd_pairs(args, store)
+        r = subprocess.run([py, "-m", "phi_prune.p4rank", "train", "--p4", store_root(store), "--pairs", pairs,
+                            "--now", args.now, "--minutes", str(args.minutes)], cwd=neutral_cwd())
+        if r.returncode != 0:
+            notify_retrain(store, "ranker train", f"ExitCode: phi_prune.p4rank train exited {r.returncode} (its "
+                                                  "output is above, or in models/ranker.log when the turn close ran it)")
+            return r.returncode
+        record_seen(store, ids)
         line = ensure_server(store)     # a first checkpoint gets its server now; a running one reloads on its own
         if line:
             print(line)
-    return r.returncode
+        return 0
+    finally:
+        release_lock(lock)
+        try:
+            os.remove(pairs)
+        except OSError:
+            pass
 
 
 def write_picks(store, args, m):
@@ -837,6 +1057,16 @@ def cmd_label(args, store):
     return 0
 
 
+def picks_source(path):
+    """Which ranker made a model picks file — `ranker rN` (the .pt server) or `json rN` — from its bears clauses."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            m = re.search(r"\((ranker r\S+|json r\S+)\)", f.read())
+        return m.group(1) if m else "unknown"
+    except OSError:
+        return "unknown"
+
+
 def cmd_shadow(args, store):
     child, _, _ = phi.read_picks(args.children)
     model, _, _ = phi.read_picks(args.model_picks)
@@ -849,9 +1079,9 @@ def cmd_shadow(args, store):
     new = not os.path.exists(path)
     with open(path, "a", encoding="utf-8", newline="\n") as f:
         if new:
-            f.write("# pick-model shadow — time\tsession\tchildren\tmodel\tboth\trecall\tprecision\tjudge\n")
+            f.write("# pick-model shadow — time\tsession\tchildren\tmodel\tboth\trecall\tprecision\tjudge\tsource\n")
         f.write(f"{args.now}\t{args.session}\t{len(child)}\t{len(model)}\t{len(both)}\t{rec:.3f}\t{prec:.3f}\t"
-                f"{args.judge}\n")
+                f"{args.judge}\t{picks_source(args.model_picks)}\n")
     who = "children's" if args.judge == "child" else "operator's reviewed"
     print(f"shadow — the model's picks hold {len(both)} of the {who} {len(child)} (recall {rec:.2f}); "
           f"{len(model)} model picks (precision {prec:.2f}) → {path}")
@@ -888,6 +1118,7 @@ def main():
     p = sub.add_parser("ranker-train", help="export the pairs and train the .pt ranker (phi_prune.p4rank)")
     p.add_argument("--now", required=True)
     p.add_argument("--minutes", type=float, default=20, help="pretraining budget when the base is (re)built")
+    sub.add_parser("ensure-server", help="start this store's ranker server unless one answers (detached by the hook)")
     p = sub.add_parser("shadow")
     p.add_argument("--session", required=True)
     p.add_argument("--now", required=True)
@@ -897,7 +1128,7 @@ def main():
                    help="who made the --children picks: the audit's children, or the operator's review")
     args = ap.parse_args()
     cmds = {"pairs": cmd_pairs, "eval": cmd_eval, "train": cmd_train, "picks": cmd_picks, "label": cmd_label,
-            "shadow": cmd_shadow, "ranker-train": cmd_ranker_train}
+            "shadow": cmd_shadow, "ranker-train": cmd_ranker_train, "ensure-server": cmd_ensure_server}
     if args.cmd not in cmds:
         ap.print_help()
         return 2

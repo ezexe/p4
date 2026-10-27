@@ -36,8 +36,9 @@ def run(*args):
     return r.returncode, r.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
 
 
-def fake_server(p4, answer):
-    """A stand-in for phi_prune.p4serve: answer(texts) → (status, body); its port in models/ranker.server.json."""
+def fake_server(p4, answer, names=None):
+    """A stand-in for phi_prune.p4serve: answer(texts) → (status, body), every reply naming its store (names, p4 by
+    default) as the real server does; its port in models/ranker.server.json."""
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
@@ -45,7 +46,7 @@ def fake_server(p4, answer):
         def do_POST(self):
             req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             code, body = answer(req["texts"])
-            data = json.dumps(body).encode()
+            data = json.dumps({**body, "p4": os.path.realpath(names or p4)}).encode()
             self.send_response(code)
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
@@ -127,6 +128,100 @@ def test_fresh_store_ranker_train():
     print("fresh store ranker-train: green")
 
 
+def test_server_identity_and_transport():
+    """Only this store's server is believed: another store's, or anything that is not a ranker on a reused port, is
+    'down' — the JSON ranker, and no notice."""
+    import socket
+    root, p4, stores = tp.seed()
+    try:
+        store = stores["aaaa1111"]
+        run(PICK, "--store", store, "train", "--now", "2026-09-07 10:00")
+        args = (PICK, "--store", store, "picks", "--session", "eeee5555", "--task", TASK, "--now", "2026-09-08 10:00")
+        srv = fake_server(p4, lambda texts: (500, {"error": "boom"}), names=os.path.join(root, "elsewhere"))
+        code, out = run(*args)
+        assert code == 0 and "json r0" in out and not pick_model.open_notices(store), out
+        srv.shutdown()
+        # a non-HTTP process on the port the stale file names (BadStatusLine): down, quietly
+        lst = socket.socket()
+        lst.bind(("127.0.0.1", 0))
+        lst.listen(5)
+        port = lst.getsockname()[1]
+
+        def answer_ssh():
+            while True:
+                try:
+                    c, _ = lst.accept()
+                except OSError:
+                    return
+                c.recv(65536)
+                c.sendall(b"SSH-2.0-OpenSSH_9\r\n")
+                c.close()
+        threading.Thread(target=answer_ssh, daemon=True).start()
+        with open(os.path.join(p4, "models", "ranker.server.json"), "w") as f:
+            json.dump({"port": port, "pid": 1}, f)
+        assert pick_model.ranker_health(store) is None
+        code, out = run(*args)
+        assert code == 0 and "json r0" in out and not pick_model.open_notices(store), out
+        lst.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("server identity and transport: green")
+
+
+def test_checkpoint_states_and_locks():
+    """An LFS pointer is named, never served or respawned; one server start at a time; one training at a time."""
+    root, p4, stores = tp.seed()
+    try:
+        store = stores["aaaa1111"]
+        mdir = os.path.join(p4, "models")
+        os.makedirs(mdir, exist_ok=True)
+        with open(os.path.join(mdir, "ranker.pt"), "w") as f:
+            f.write("version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 34000000\n")
+        assert pick_model.checkpoint_state(os.path.join(mdir, "ranker.pt")) == "lfs-pointer"
+        line = pick_model.ensure_server(store)
+        assert "git LFS pointer" in line and "git lfs pull" in line, line
+        assert not os.path.exists(os.path.join(mdir, pick_model.SERVER_START_LOCK))
+        lock = os.path.join(mdir, "x.lock")
+        assert pick_model.take_lock(lock, 60) and not pick_model.take_lock(lock, 60)
+        os.utime(lock, (1, 1))                     # a lock long past its staleness is taken over
+        assert pick_model.take_lock(lock, 60)
+        pick_model.release_lock(lock)
+        # a training already running: a second one starts nothing and is no failure
+        assert pick_model.take_lock(os.path.join(mdir, pick_model.RANKER_TRAIN_LOCK), 3600)
+        code, out = run(PICK, "--store", store, "ranker-train", "--now", "2026-10-27 10:00")
+        assert code == 0 and "another training holds" in out, out
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("checkpoint states and locks: green")
+
+
+def test_resolved_is_append_only_and_retrain_holds():
+    """A notice is answered by a row in retrain-resolved.tsv; retrain-needed.tsv keeps every row. While a notice of
+    a model is open, the turn close does not retrain that model (the p4-model skill does)."""
+    root, p4, stores = tp.seed()
+    try:
+        store = stores["aaaa1111"]
+        assert pick_model.notify_retrain(store, "pick_model picks", ValueError("x"), "s1")
+        n = pick_model.open_notices(store)[0]
+        assert pick_model.notice_open(store, "json") and not pick_model.notice_open(store, "ranker")
+        th_set_recall = td.set_recall
+        th_set_recall(p4, "pool-road: model-shadow")
+        out = th.run_hook("turn-close", {"session_id": "aaaa1111", "cwd": root, "_keep_sid": True}, root)
+        assert "retraining the pool ranker" not in out, out
+        with open(os.path.join(p4, "models", pick_model.RESOLVED), "a") as f:
+            f.write(f"{n['time']}\t{n['epoch']:.6f}\t{n['session']}\t{n['component']}\t{n['kind']}\t{n['error']}\t"
+                    "retrained now\n")
+        assert pick_model.open_notices(store) == []
+        with open(os.path.join(p4, "models", pick_model.NOTICES)) as f:
+            assert sum(1 for l in f if not l.startswith("#")) == 1
+        # a pool with no session: line still has an id
+        pools = {p["id"] for p in pick_model.label_pools(store)}
+        assert "" not in pools
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("resolved append-only, retrain holds: green")
+
+
 def test_dispatch_and_session_open():
     root, store, p4 = td.seed()
     try:
@@ -149,5 +244,8 @@ if __name__ == "__main__":
     test_notice_and_quiet_window()
     test_picks_fallbacks()
     test_fresh_store_ranker_train()
+    test_server_identity_and_transport()
+    test_checkpoint_states_and_locks()
+    test_resolved_is_append_only_and_retrain_holds()
     test_dispatch_and_session_open()
     print("test_model_fallback.py: all green")

@@ -116,3 +116,10 @@ These are leave-one-pool-out over 21 pools. R-precision is the share of a pool's
 - **Fibonacci gap codes win at 1%** (6.55 bits per position against 7.46 for Elias-gamma) and tie at 10% (4.19 against 4.17).
 
 These are one seed and short runs. They show what the pipeline measures, not final sizes.
+
+## The `.pt` ranker and retrain notices
+
+The model road asks a `.pt` ranker first when one is trained: `phi_prune.p4rank` in ezexe/phi, served on localhost by `phi_prune.p4serve`, which names its store in every reply (the client trusts only its own store's server) and reloads `models/ranker.pt` when a retrain swaps it. Session start checks it in the background and starts it when it is down, one start at a time; the turn close trains it on pools it has not seen. Both need this machine's interpreter in `models/.ranker-python` (untracked, written by the p4-model skill's `init`) or `VLDS_RANKER_PYTHON`; without one the JSON ranker picks alone.
+
+A session never fixes a model. On any unexpected model failure it falls back (the JSON ranker, the children, the operator), appends one row to `models/retrain-needed.tsv` (at most one per component and error kind in 6 hours), and the turn close stops retraining that model until the notice is answered. The p4-model skill in ezexe/phi answers it: `python -m phi_prune.p4model update --project <repo>` retrains and appends the answered notices to `models/retrain-resolved.tsv`. Session start names any open notices as the model repository's to answer.
+
