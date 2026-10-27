@@ -1,3 +1,3 @@
 # Changelog
 
-Prompt it to tell you what changed and what didn't.
+Prompt Pupater Prompter Pretty Prompt Pupateer Prompter.

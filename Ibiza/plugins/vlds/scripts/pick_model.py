@@ -325,6 +325,57 @@ def pool_examples(pool, data, with_tokens):
     return xs, bm, shared
 
 
+# ─── the .pt ranker's score as a feature ────────────────────────────────────────────────────────────────
+
+OOF_FILE = "ranker-oof.json"    # phi_rank's out-of-fold scores of every labelled pool, by pool id and text key
+
+
+def text_key(text):
+    """A candidate's key in the out-of-fold scores — phi_rank.text_key, the same sha1 of the same distilled text."""
+    import hashlib
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
+
+
+def load_oof(store):
+    """{pool id: {text key: score}} from models/ranker-oof.json, {} when there is none or it is unreadable."""
+    try:
+        with open(os.path.join(models_root(store), OOF_FILE), encoding="utf-8") as f:
+            pools = json.load(f).get("pools", {})
+        return pools if isinstance(pools, dict) else {}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def add_pt(xs, scores):
+    """The .pt ranker's scores as one feature, z-scored within the pool: its mean contributes nothing, so a pool
+    scored without it (no server, no out-of-fold score) keeps the JSON ranker's own scale and threshold."""
+    if not scores or len(scores) != len(xs):
+        return xs
+    mu = sum(scores) / len(scores)
+    sd = math.sqrt(sum((x - mu) ** 2 for x in scores) / len(scores)) or 1.0
+    for x, v in zip(xs, scores):
+        x[h("pt-z")] = max(-3.0, min(3.0, (v - mu) / sd)) / 3
+    return xs
+
+
+def pool_pt(pool, data, oof):
+    """A pool's out-of-fold .pt scores in its candidates' order, or None when phi_rank has not scored this pool."""
+    got = oof.get(pool["id"])
+    if not got:
+        return None
+    sc = [got.get(text_key(phi.distilled(data[0][i], 400))) for i in pool["rows"]]
+    return None if any(v is None for v in sc) else sc
+
+
+def loo_rprecision(pools, feats, data):
+    """Mean leave-one-pool-out r-precision of the JSON ranker on these features."""
+    got = []
+    for k, p in enumerate(pools):
+        w = fit([(x, y) for j, q in enumerate(pools) if j != k for x, y in zip(feats[j][0], q["labels"])])
+        got.append(metrics(p["labels"], [score(w, x) for x in feats[k][0]], [])["r-precision"])
+    return sum(got) / len(got) if got else 0.0
+
+
 # ─── selection and metrics ──────────────────────────────────────────────────────────────────────────────
 
 def select(rows, scores, threshold, per_file=PER_FILE):
@@ -517,6 +568,12 @@ def cmd_eval(args, store):
           f"picks: precision {mean(model_m, 'precision'):.3f} recall {mean(model_m, 'recall'):.3f} "
           f"f1 {mean(model_m, 'f1'):.3f} ({mean(model_m, 'picked'):.1f} a pool against {mean(model_m, 'labelled'):.1f})")
     print(f"  term overlap  r-precision {mean(base_m, 'r-precision'):.3f}  recall@20 {mean(base_m, 'recall@20'):.3f}")
+    oof = load_oof(store)
+    pt_scores = [pool_pt(p, data, oof) for p in pools] if oof else []
+    if sum(1 for x in pt_scores if x) >= 3:
+        with_pt = [(add_pt([dict(x) for x in f[0]], sc), f[1], f[2]) for f, sc in zip(feats, pt_scores)]
+        print(f"  with the .pt feature (out-of-fold, {sum(1 for x in pt_scores if x)} pools scored): r-precision "
+              f"{loo_rprecision(pools, with_pt, data):.3f}")
     return 0
 
 
@@ -526,6 +583,17 @@ def cmd_train(args, store):
         print("train — no labelled pool in the store; nothing written")
         return 1
     feats = [pool_examples(p, data, args.tokens) for p in pools]
+    # the .pt ranker's out-of-fold score joins the features only when it raises the held-out r-precision: the JSON
+    # ranker can only gain from it, and a .pt model that ranks worse than word overlap simply carries no weight
+    oof, use_pt, held = load_oof(store), False, None
+    pt_scores = [pool_pt(p, data, oof) for p in pools] if oof else []
+    if sum(1 for x in pt_scores if x) >= 4 and len(pools) >= 4:
+        plain = loo_rprecision(pools, feats, data)
+        with_pt = [(add_pt([dict(x) for x in f[0]], sc), f[1], f[2]) for f, sc in zip(feats, pt_scores)]
+        boosted = loo_rprecision(pools, with_pt, data)
+        use_pt, held = boosted > plain, {"without_pt": round(plain, 4), "with_pt": round(boosted, 4)}
+        if use_pt:
+            feats = with_pt
     w = fit([(x, y) for f, p in zip(feats, pools) for x, y in zip(f[0], p["labels"])])
     t = best_threshold([([data[0][i] for i in p["rows"]], p["labels"], [score(w, x) for x in f[0]])
                         for f, p in zip(feats, pools)])
@@ -540,8 +608,12 @@ def cmd_train(args, store):
     seen = sorted({p["id"] for p in label_pools(store)})
     save_model(path, {"kind": "vlds pick ranker", "round": rnd, "trained": args.now, "dim": DIM,
                       "tokens": bool(args.tokens), "threshold": t, "per_file": PER_FILE,
-                      "pools": [p["session"] for p in pools], "seen": seen, "w": w})
+                      "pools": [p["session"] for p in pools], "seen": seen, "pt": use_pt,
+                      **({"heldout": held} if held else {}), "w": w})
     line = f"train — round {rnd}: {len(pools)} pools, {sum(p['matched'] for p in pools)} picks, threshold {t:.2f} → {path}"
+    if held:
+        line += (f"; .pt feature {'kept' if use_pt else 'left out'} (leave-one-out r-precision "
+                 f"{held['with_pt']:.3f} with it, {held['without_pt']:.3f} without)")
     if old:
         header, payload = encode_round(old["w"], w)
         dpath = os.path.join(os.path.dirname(path), f"pick-model.r{rnd:02d}.phid")
@@ -552,7 +624,7 @@ def cmd_train(args, store):
     return 0
 
 
-# ─── the .pt ranker: phi_prune.p4serve on localhost, this script's client ──────────────────────────────
+# ─── the .pt ranker: phi_serve on localhost, this script's client ──────────────────────────────
 
 def models_root(store):
     p4 = pt.p4_of(store)
@@ -732,7 +804,8 @@ def ranker_python(store):
     cands.append(sys.executable)
     cache = os.path.join(mdir, ".ranker-python-ok")
     probe = ("import importlib.util as u, sys; "
-             "sys.exit(0 if u.find_spec('torch') and u.find_spec('phi_prune.p4rank') else 3)")
+             "sys.exit(0 if u.find_spec('torch') and (u.find_spec('phi_rank') or u.find_spec('phi_prune.p4rank')) "
+             "else 3)")
     for c in dict.fromkeys(x for x in cands if x):
         try:
             stamp = f"{c}\t{os.path.getmtime(c)}"
@@ -754,6 +827,27 @@ def ranker_python(store):
         except (OSError, subprocess.SubprocessError):
             continue
     return None
+
+
+def ranker_module(py, name):
+    """The module to run for `rank` or `serve` with that interpreter: phi_rank / phi_serve, or for a phi installed
+    before they were split out, phi_prune.p4rank / phi_prune.p4serve."""
+    new = {"rank": "phi_rank", "serve": "phi_serve"}[name]
+    try:
+        r = subprocess.run([py, "-c", f"import importlib.util as u, sys; sys.exit(0 if u.find_spec('{new}') else 3)"],
+                           capture_output=True, timeout=20, cwd=neutral_cwd())
+        if r.returncode == 0:
+            return new
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return {"rank": "phi_prune.p4rank", "serve": "phi_prune.p4serve"}[name]
+
+
+def ranker_checkpoint(mdir):
+    """The .pt ranker's state on disk: models/ranker.pt (this machine's build), or failing that the chain's anchor
+    that git keeps, models/ranker-anchor.pt, which the server rebuilds ranker.pt from."""
+    state = checkpoint_state(os.path.join(mdir, "ranker.pt"))
+    return state if state != "missing" else checkpoint_state(os.path.join(mdir, "ranker-anchor.pt"))
 
 
 def take_lock(path, stale_s):
@@ -820,11 +914,11 @@ def ensure_server(store):
     a second server: a start lock, and a server that is up but could not load its checkpoint is reported, not
     restarted (a restart would fail the same way)."""
     mdir = models_root(store)
-    state = checkpoint_state(os.path.join(mdir, "ranker.pt"))
+    state = ranker_checkpoint(mdir)
     if state == "missing":
         return ""
     if state == "lfs-pointer":
-        return ("ranker: models/ranker.pt is a git LFS pointer, not the checkpoint — run `git lfs pull` in "
+        return ("ranker: the .pt ranker's checkpoint is a git LFS pointer, not the checkpoint — run `git lfs pull` in "
                 ".claude/p4; the JSON ranker picks until then")
     h = ranker_health(store)
     if h and h.get("ok"):
@@ -840,7 +934,7 @@ def ensure_server(store):
         release_lock(lock)
         return ("ranker: models/ranker.pt is here but no interpreter has phi_prune and torch (VLDS_RANKER_PYTHON, or "
                 "models/.ranker-python which the p4-model skill's init writes) — the JSON ranker picks")
-    pid = spawn_detached([py, "-m", "phi_prune.p4serve", "--p4", store_root(store)], neutral_cwd(),
+    pid = spawn_detached([py, "-m", ranker_module(py, "serve"), "--p4", store_root(store)], neutral_cwd(),
                          os.path.join(mdir, "ranker.log"))
     if not pid:
         release_lock(lock)
@@ -853,7 +947,7 @@ def session_open_ranker(store):
     check and the start (probing an interpreter can take seconds) run detached, through `pick_model.py
     ensure-server`."""
     mdir = models_root(store)
-    state = checkpoint_state(os.path.join(mdir, "ranker.pt"))
+    state = ranker_checkpoint(mdir)
     if state == "missing":
         return ""
     if state == "lfs-pointer":
@@ -895,6 +989,9 @@ def record_seen(store, ids):
 
 
 RANKER_TRAIN_LOCK = ".ranker-train.lock"
+# the shared p4 base, shipped with the plugin (git LFS): pretrained by phi_rank on this marketplace's own public text —
+# the contracts, the operator's and roboto's briefs, the flight checklists — never on any store's
+SHARED_BASE = os.path.join(os.path.dirname(HERE), "models", "p4-base.pt")
 RANKER_TRAIN_STALE_S = 3 * 3600
 
 
@@ -928,13 +1025,21 @@ def cmd_ranker_train(args, store):
             return 0
         args.jsonl = pairs
         cmd_pairs(args, store)
-        r = subprocess.run([py, "-m", "phi_prune.p4rank", "train", "--p4", store_root(store), "--pairs", pairs,
-                            "--now", args.now, "--minutes", str(args.minutes)], cwd=neutral_cwd())
+        mod = ranker_module(py, "rank")
+        cmd = [py, "-m", mod, "train", "--p4", store_root(store), "--pairs", pairs, "--now", args.now,
+               "--minutes", str(args.minutes)]
+        if mod == "phi_rank" and os.path.exists(SHARED_BASE):
+            cmd += ["--shared-base", SHARED_BASE]   # a store with no base of its own starts from the shared p4 base
+        r = subprocess.run(cmd, cwd=neutral_cwd())
         if r.returncode != 0:
-            notify_retrain(store, "ranker train", f"ExitCode: phi_prune.p4rank train exited {r.returncode} (its "
+            notify_retrain(store, "ranker train", f"ExitCode: {mod} train exited {r.returncode} (its "
                                                   "output is above, or in models/ranker.log when the turn close ran it)")
             return r.returncode
         record_seen(store, ids)
+        # the round wrote new out-of-fold scores: the JSON ranker learns again whether the .pt feature helps
+        if os.path.exists(model_path(store, getattr(args, "model", ""))) and load_oof(store):
+            tr = argparse.Namespace(now=args.now, tokens=False, model=getattr(args, "model", ""))
+            cmd_train(tr, store)
         line = ensure_server(store)     # a first checkpoint gets its server now; a running one reloads on its own
         if line:
             print(line)
@@ -955,15 +1060,16 @@ def write_picks(store, args, m):
     live = [rows[i] for i in keep]
     xs, _bm, shared = candidate_features(args.task, live, [docs[i] for i in keep], idf, avgdl, args.now,
                                          m.get("tokens", False))
-    # the .pt ranker when its server answers, the JSON ranker otherwise: same rows, same selection, same file
-    neural = ranker_scores(store, args.task, [phi.distilled(r, 400) for r in live]) if live else None
-    if neural:
-        sc, threshold, rnd, per_file = neural
-        m["_source"] = f"ranker r{rnd}"
-    else:
-        sc = [score(m["w"], x) for x in xs]
-        threshold, per_file = m["threshold"], m.get("per_file", PER_FILE)
-        m["_source"] = f"json r{m.get('round', 0)}"
+    # the JSON ranker picks; the .pt ranker's score is one of its features when training found it helps and the
+    # store's server answers — without it the feature is absent and the JSON ranker's own scale holds
+    m["_source"] = f"json r{m.get('round', 0)}"
+    if m.get("pt") and live:
+        neural = ranker_scores(store, args.task, [phi.distilled(r, 400) for r in live])
+        if neural:
+            add_pt(xs, neural[0])
+            m["_source"] += f"+pt r{neural[2]}"
+    sc = [score(m["w"], x) for x in xs]
+    threshold, per_file = m["threshold"], m.get("per_file", PER_FILE)
     picked = set(select(live, sc, threshold, per_file))
     review = []
     totals = {}
@@ -1117,7 +1223,7 @@ def main():
     p.add_argument("--picks", required=True, help="the audit children's picks file")
     p = sub.add_parser("ranker-train", help="export the pairs and train the .pt ranker (phi_prune.p4rank)")
     p.add_argument("--now", required=True)
-    p.add_argument("--minutes", type=float, default=20, help="pretraining budget when the base is (re)built")
+    p.add_argument("--minutes", type=float, default=5, help="pretraining budget when the base is (re)built")
     sub.add_parser("ensure-server", help="start this store's ranker server unless one answers (detached by the hook)")
     p = sub.add_parser("shadow")
     p.add_argument("--session", required=True)
