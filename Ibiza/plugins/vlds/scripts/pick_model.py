@@ -707,6 +707,10 @@ def cmd_ranker_train(args, store):
         print("ranker-train — no interpreter with phi_prune and torch: set VLDS_RANKER_PYTHON or the recall "
               "config's `ranker-python:`; the JSON ranker works alone")
         return 3
+    if not label_pools(store):
+        # a fresh store: nothing to learn yet, which is no failure — the turn close trains once BOOTSTRAP_POOLS land
+        print("ranker-train — no labelled pool in the store yet; nothing to learn, nothing written")
+        return 0
     p4 = pt.p4_of(store) or os.path.dirname(os.path.abspath(store))
     pairs = os.path.join(models_root(store), ".pairs.jsonl")
     args.jsonl = pairs
