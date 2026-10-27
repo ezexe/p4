@@ -31,12 +31,25 @@ lock="${CLAUDE_PROJECT_DIR}/.claude/.p4-layout.lock"
 mkdir -p "${CLAUDE_PROJECT_DIR}/.claude" 2>/dev/null
 
 if ! mkdir "$lock" 2>/dev/null; then
-  i=0
-  while [ -d "$lock" ] && [ "$i" -lt "$((LOCK_WAIT * 10))" ]; do
-    sleep 0.1 2>/dev/null || sleep 1
-    i=$((i + 1))
-  done
-  [ -d "$lock" ] && rmdir "$lock" 2>/dev/null   # a holder that outlived the wait is taken as crashed
+  # Once the layout stands (the p4 repo, its index, no flat or older store left to move), a reader needs nothing the
+  # holder is still doing, so a caller finding the lock held leaves at once; every step is idempotent and the next
+  # free caller repeats it. Waiting there spawned a sleep every tenth of a second per caller, which under Git for
+  # Windows is a process and a console each: seven sessions starting together queued over two hundred callers on
+  # 2026-10-27 12:36, each starving the holder of the forks it needed. A lock older than LOCK_WAIT is a crashed
+  # holder's and is taken, the one fork this path makes.
+  if [ -d "$p4/.git" ] && [ -d "$p4/vindex" ] && [ ! -d "$p4/vlds" ] \
+     && { [ ! -d "${CLAUDE_PROJECT_DIR}/.claude/vlds" ] || [ -e "$legacy_dir/vlds" ]; }; then
+    [ -n "$(find "$lock" -maxdepth 0 -mmin +"$(( (LOCK_WAIT + 59) / 60 ))" 2>/dev/null)" ] || exit 0
+    rmdir "$lock" 2>/dev/null
+  else
+    # the first layout: readers need what the holder is making, so wait for it, a second at a time
+    i=0
+    while [ -d "$lock" ] && [ "$i" -lt "$LOCK_WAIT" ]; do
+      sleep 1
+      i=$((i + 1))
+    done
+    [ -d "$lock" ] && rmdir "$lock" 2>/dev/null   # a holder that outlived the wait is taken as crashed
+  fi
   mkdir "$lock" 2>/dev/null || exit 0
 fi
 trap 'rmdir "$lock" 2>/dev/null' EXIT
