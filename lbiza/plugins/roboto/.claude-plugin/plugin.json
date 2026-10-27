@@ -1,0 +1,19 @@
+{
+  "name": "mister",
+  "version": "0.0.8",
+  "description": "Roboto / \"The Init Elegance\" — a four-lens reasoning instance of the P4 prompt-engineering framework, built on the marketplace's standalone plugins. Answers through Claude / Claudio / Claudius / Roboto under a strict response contract: the Roboto lens verifies through the vlds plugin's gate, read barrier and inspector; fences are released under emission-discipline, re-checks are timed by verification-discipline, minted seams are shaped by envelope-discipline, and task scripts land as src-fragger frags. A session whose vlds index names roboto in `operator-via:` hands it every store moment: roboto launches the vlds operator, the operator runs its haiku puppets, and the derivation comes back through roboto's lenses as a derived understanding the session acts on, never a response; its conductor skill fires only on the session's hand-off, never on the brief roboto gives the operator. Each of those plugins is a declared dependency: the harness installs it with roboto, and disables roboto while an installed copy sits below the version roboto is aligned to.",
+  "author": {
+    "name": "ezexe"
+  },
+  "homepage": "https://github.com/ezexe/prompty-prompter-pioneer-puppeteer/tree/main/lbiza/plugins/roboto",
+  "repository": "https://github.com/ezexe/prompty-prompter-pioneer-puppeteer",
+  "license": "MIT",
+  "dependencies": [
+    { "name": "vlds", "version": ">=0.0.51" },
+    { "name": "verification-discipline", "version": ">=0.0.1" },
+    { "name": "emission-discipline", "version": ">=0.0.5" },
+    { "name": "envelope-discipline", "version": ">=0.0.0" },
+    { "name": "src-fragger", "version": ">=0.0.13" },
+    { "name": "flight-ops", "version": ">=0.0.1" }
+  ]
+}
