@@ -1524,17 +1524,20 @@ def test_p4_gitignore():
             kept = subprocess.run(["git", "-C", p4, "ls-files", "-co", "--exclude-standard", "scratchpad"],
                                   capture_output=True).stdout.decode().split()
             assert kept == ["scratchpad/runs/r1/run.log"], kept
-            # the checkpoints are kept (in LFS); the models' runtime files are not
+            # the checkpoints are kept (the chain in LFS); the models' runtime files and the local build are not
             os.makedirs(os.path.join(p4, "models"), exist_ok=True)
-            for name in ("ranker.pt", "pick-model.json", "ranker.server.json", "train.log", ".retrain", "x.123.tmp"):
+            for name in ("ranker.pt", "ranker-anchor.pt", "ranker.r001.phid", "ranker-oof.json", "pick-model.json",
+                         "ranker.server.json", "train.log", ".retrain", "x.123.tmp"):
                 with open(os.path.join(p4, "models", name), "wb") as f:
                     f.write(b"x")
             kept = subprocess.run(["git", "-C", p4, "ls-files", "-co", "--exclude-standard", "models"],
                                   capture_output=True).stdout.decode().split()
-            assert kept == ["models/pick-model.json", "models/ranker.pt"], kept
-            attr = subprocess.run(["git", "-C", p4, "check-attr", "filter", "models/ranker.pt"],
+            assert kept == ["models/pick-model.json", "models/ranker-anchor.pt", "models/ranker-oof.json",
+                            "models/ranker.r001.phid"], kept
+            attr = subprocess.run(["git", "-C", p4, "check-attr", "filter", "models/ranker-anchor.pt",
+                                   "models/ranker.r001.phid"],
                                   capture_output=True).stdout.decode()
-            assert "filter: lfs" in attr, attr
+            assert attr.count("filter: lfs") == 2, attr
         # an owner's .gitignore is never replaced
         with open(gi, "w", encoding="utf-8") as f:
             f.write("# mine\n")

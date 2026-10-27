@@ -56,3 +56,5 @@ models/*.tmp
 models/.*
 models/*.log
 models/ranker.server.json
+# the .pt ranker's local build: git keeps its chain, models/ranker-anchor.pt and the ranker.rNNN.phid deltas
+models/ranker.pt
