@@ -1,0 +1,5 @@
+# .claude/p4 — the models' checkpoints live in git LFS: a .pt ranker is tens of MB and grows a round at a time.
+# Seeded by the vlds plugin (hooks/p4-layout.sh) when the repository has no .gitattributes; the owner's edits win.
+# Needs git-lfs where the commit is made: without it git stores the file whole, and a push over 100 MB is refused.
+models/*.pt filter=lfs diff=lfs merge=lfs -text
+models/ranker*.phid filter=lfs diff=lfs merge=lfs -text

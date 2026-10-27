@@ -341,7 +341,15 @@ def main():
     if args.cmd not in cmds:
         ap.print_help()
         return 2
-    return cmds[args.cmd](args, args.store)
+    if args.cmd in ("rows", "eval", "report"):
+        return cmds[args.cmd](args, args.store)
+    try:
+        return cmds[args.cmd](args, args.store)
+    except Exception as e:  # noqa: BLE001 — falls back to the operator and asks for a retrain, never loops
+        pick_model.notify_retrain(args.store, f"dispatch_model {args.cmd}", e)
+        print(f"{args.cmd} — the dispatch model failed ({type(e).__name__}: {e}); the operator judges; a retrain "
+              f"notice is in models/{pick_model.NOTICES}")
+        return 1
 
 
 if __name__ == "__main__":

@@ -38,7 +38,10 @@ import os
 import random
 import re
 import sys
+import subprocess
 import time
+import urllib.error
+import urllib.request
 import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -52,6 +55,7 @@ TOP_EVAL = 20
 EPOCHS, LR, L2 = 25, 0.1, 1e-4
 REVIEW_ALTS = 4               # runners-up per file on the operator's review sheet
 REVIEW_HEAD_CHARS = 140       # a review line's head: the barrier's own width
+RANKER_TIMEOUT_S = 10          # a ranker server that has not answered by then is down: the JSON ranker picks
 DEFAULT_AUDIT = 5             # `pool-audit:` unnamed — one session in five runs the children beside the model
 DELTA_DIGITS = 12             # Fibonacci digits for a round's delta: 376 levels a side
 POOL_STEER_RE = re.compile(r"^- \[([a-z-]+\.md) (\d{4}-\d\d-\d\d \d\d:\d\d|\(no time\))[^\]]*\] (.*?); bears: (.*)$")
@@ -540,6 +544,185 @@ def cmd_train(args, store):
     return 0
 
 
+# ─── the .pt ranker: phi_prune.p4serve on localhost, this script's client ──────────────────────────────
+
+def models_root(store):
+    p4 = pt.p4_of(store)
+    return os.path.join(p4 or os.path.dirname(os.path.abspath(store)), "models")
+
+
+NOTICES = "retrain-needed.tsv"
+NOTICE_QUIET_S = 6 * 3600       # one notice per component and error kind in this long: a failing model is not a flood
+NOTICES_HEAD = ("# p4 model retrain notices — time\tepoch\tsession\tcomponent\tkind\terror — written by the vlds "
+                "plugin when a model failed unexpectedly and the session fell back (the JSON ranker, the children, the "
+                "operator) and carried on; nothing in the session fixes it: the p4-model skill in the model repository "
+                "(ezexe/phi) retrains and clears them\n")
+
+
+def notify_retrain(store, component, err, session=""):
+    """Record that a model failed unexpectedly and needs retraining — the one thing a session does about it. Never
+    raises; quiet for NOTICE_QUIET_S per component and error kind. True when a row was written."""
+    try:
+        path = os.path.join(models_root(store), NOTICES)
+        kind = type(err).__name__ if isinstance(err, BaseException) else str(err).split(":", 1)[0].strip()
+        text = f"{type(err).__name__}: {err}" if isinstance(err, BaseException) else str(err)
+        text = " ".join(text.replace("\t", " ").split())[:300]
+        now = time.time()
+        rows = open_notices(store)
+        if any(r["component"] == component and r["kind"] == kind and now - r["epoch"] < NOTICE_QUIET_S for r in rows):
+            return False
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        new = not os.path.exists(path)
+        with open(path, "a", encoding="utf-8", newline="\n") as f:
+            if new:
+                f.write(NOTICES_HEAD)
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M')}\t{int(now)}\t{session[:8]}\t{component}\t{kind}\t{text}\n")
+        return True
+    except Exception:  # noqa: BLE001 — a notice that cannot be written changes nothing about the fallback
+        return False
+
+
+def open_notices(store):
+    """[{time, epoch, session, component, kind, error}] — the retrain notices not yet cleared by the p4-model skill."""
+    path = os.path.join(models_root(store), NOTICES)
+    out = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for l in f:
+                parts = l.rstrip("\n").split("\t")
+                if l.startswith("#") or len(parts) != 6:
+                    continue
+                out.append({"time": parts[0], "epoch": float(parts[1] or 0), "session": parts[2],
+                            "component": parts[3], "kind": parts[4], "error": parts[5]})
+    except (OSError, ValueError):
+        pass
+    return out
+
+
+class ServerDown(Exception):
+    """No ranker server answered: an ordinary fallback (the next session start restarts it), never a notice."""
+
+
+def ranker_scores(store, task, texts, timeout=RANKER_TIMEOUT_S):
+    """(scores, threshold, round, per_file) from the store's ranker server, or None when no server answers — the
+    JSON ranker then picks. Standard library only: the torch side lives in phi_prune."""
+    info = os.path.join(models_root(store), "ranker.server.json")
+    try:
+        with open(info, encoding="utf-8") as f:
+            port = int(json.load(f)["port"])
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/score", method="POST",
+                                     data=json.dumps({"task": task, "texts": texts}).encode("utf-8"),
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            out = json.loads(r.read())
+        if len(out["scores"]) != len(texts) or out.get("threshold") is None:
+            raise ValueError(f"the server answered {len(out['scores'])} scores for {len(texts)} rows")
+        return out["scores"], float(out["threshold"]), out.get("round"), int(out.get("per_file", PER_FILE))
+    except FileNotFoundError:
+        return None                                  # no server started: the JSON ranker, nothing to report
+    except urllib.error.HTTPError as e:
+        notify_retrain(store, "ranker server", e)    # it answered, and wrongly: a model problem
+        return None
+    except (urllib.error.URLError, ConnectionError, TimeoutError, OSError):
+        return None                                  # down or slow: the next session start restarts it
+    except (ValueError, KeyError, TypeError) as e:
+        notify_retrain(store, "ranker server", e)
+        return None
+
+
+def ranker_python(store):
+    """The interpreter that has phi_prune and torch: $VLDS_RANKER_PYTHON, the recall config's `ranker-python:`, or
+    this one; None when none of them can import phi_prune.p4rank (the JSON ranker then works alone)."""
+    cands = [os.environ.get("VLDS_RANKER_PYTHON", "")]
+    idx = phi.parse_index(os.path.dirname(pt.config_index(store)))
+    m = re.search(r"^ranker-python:\s*(\S.*)$", idx["raw"], re.M) if idx else None
+    cands += [m.group(1).strip() if m else "", sys.executable]
+    probe = ("import importlib.util as u, sys; "
+             "sys.exit(0 if u.find_spec('torch') and u.find_spec('phi_prune.p4rank') else 3)")
+    for c in cands:
+        if not c:
+            continue
+        try:
+            if subprocess.run([c, "-c", probe], capture_output=True, timeout=20).returncode == 0:
+                return c
+        except (OSError, subprocess.SubprocessError):
+            continue
+    return None
+
+
+def ranker_health(store, timeout=0.5):
+    """The serving round when the store's ranker server answers /health, else None."""
+    try:
+        with open(os.path.join(models_root(store), "ranker.server.json"), encoding="utf-8") as f:
+            port = int(json.load(f)["port"])
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=timeout) as r:
+            out = json.loads(r.read())
+        return out.get("round") if out.get("ok") else None
+    except (OSError, ValueError, KeyError, TypeError, urllib.error.URLError):
+        return None
+
+
+def spawn_detached(args, cwd, log):
+    """args in the background, outliving the caller, its output appended to log; the pid or None."""
+    kw = {"stdin": subprocess.DEVNULL, "close_fds": True, "cwd": cwd}
+    try:
+        kw["stdout"] = open(log, "a", encoding="utf-8")
+    except OSError:
+        kw["stdout"] = subprocess.DEVNULL
+    kw["stderr"] = subprocess.STDOUT
+    if os.name == "nt":
+        base = 0x00000200 | 0x08000000           # CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+        for flags in (base | 0x01000000, base):  # CREATE_BREAKAWAY_FROM_JOB first: outlive the hook's job
+            try:
+                return subprocess.Popen(args, creationflags=flags, **kw).pid
+            except OSError:
+                continue
+        return None
+    return subprocess.Popen(args, start_new_session=True, **kw).pid
+
+
+def ensure_server(store):
+    """One line: the ranker server already answering, started now, or why not — '' when there is no .pt yet."""
+    mdir = models_root(store)
+    if not os.path.exists(os.path.join(mdir, "ranker.pt")):
+        return ""
+    rnd = ranker_health(store)
+    if rnd is not None:
+        return f"ranker: round {rnd} serving (models/ranker.server.json)"
+    py = ranker_python(store)
+    if not py:
+        return ("ranker: models/ranker.pt is here but no interpreter has phi_prune and torch (VLDS_RANKER_PYTHON or "
+                "the recall config's `ranker-python:`) — the JSON ranker picks")
+    pid = spawn_detached([py, "-m", "phi_prune.p4serve", "--p4", os.path.dirname(mdir)], os.path.dirname(mdir),
+                         os.path.join(mdir, "ranker.log"))
+    return (f"ranker: server started (pid {pid}); it loads models/ranker.pt and picks from the next request, "
+            "reloading whenever a retrain swaps the checkpoint" if pid else "ranker: the server failed to start")
+
+
+def cmd_ranker_train(args, store):
+    """Export the labelled pools and train the .pt ranker on them with phi_prune.p4rank — run in the background by
+    the turn close; pretraining over the repository's text when the base is missing or the text has grown."""
+    py = ranker_python(store)
+    if not py:
+        print("ranker-train — no interpreter with phi_prune and torch: set VLDS_RANKER_PYTHON or the recall "
+              "config's `ranker-python:`; the JSON ranker works alone")
+        return 3
+    p4 = pt.p4_of(store) or os.path.dirname(os.path.abspath(store))
+    pairs = os.path.join(models_root(store), ".pairs.jsonl")
+    args.jsonl = pairs
+    cmd_pairs(args, store)
+    r = subprocess.run([py, "-m", "phi_prune.p4rank", "train", "--p4", p4, "--pairs", pairs, "--now", args.now,
+                        "--minutes", str(args.minutes)])
+    if r.returncode != 0:
+        notify_retrain(store, "ranker train", f"ExitCode: phi_prune.p4rank train exited {r.returncode} "
+                                              "(models/ranker.log holds its output)")
+    if r.returncode == 0:
+        line = ensure_server(store)     # a first checkpoint gets its server now; a running one reloads on its own
+        if line:
+            print(line)
+    return r.returncode
+
+
 def write_picks(store, args, m):
     rows, docs, idf, avgdl = corpus(store)
     barrier, files, _spans, missing, _masks = phi.barrier_rows(store, args.session)
@@ -548,8 +731,16 @@ def write_picks(store, args, m):
     live = [rows[i] for i in keep]
     xs, _bm, shared = candidate_features(args.task, live, [docs[i] for i in keep], idf, avgdl, args.now,
                                          m.get("tokens", False))
-    sc = [score(m["w"], x) for x in xs]
-    picked = set(select(live, sc, m["threshold"], m.get("per_file", PER_FILE)))
+    # the .pt ranker when its server answers, the JSON ranker otherwise: same rows, same selection, same file
+    neural = ranker_scores(store, args.task, [phi.distilled(r, 400) for r in live]) if live else None
+    if neural:
+        sc, threshold, rnd, per_file = neural
+        m["_source"] = f"ranker r{rnd}"
+    else:
+        sc = [score(m["w"], x) for x in xs]
+        threshold, per_file = m["threshold"], m.get("per_file", PER_FILE)
+        m["_source"] = f"json r{m.get('round', 0)}"
+    picked = set(select(live, sc, threshold, per_file))
     review = []
     totals = {}
     for r in barrier:
@@ -564,7 +755,7 @@ def write_picks(store, args, m):
         out.append(f"picks (model) — {fname}, {len(mine)} of {totals.get(fname, 0)} entries bear on the task")
         for i in mine:
             terms = ", ".join(shared[i]) or "no shared term"
-            out.append(f"{fname}:{live[i]['line']} || bears: model {sc[i]:.2f}; shares: {terms}")
+            out.append(f"{fname}:{live[i]['line']} || bears: model {sc[i]:.2f} ({m['_source']}); shares: {terms}")
         # the operator's review sheet: the picks and the runners-up, each with its head, so the pass can judge
         # without opening a file
         alts = sorted((i for i in range(len(live)) if live[i]["file"] == fname and i not in picked),
@@ -614,7 +805,7 @@ def cmd_picks(args, store):
         os.makedirs(os.path.dirname(os.path.abspath(args.review)), exist_ok=True)
         with open(args.review, "w", encoding="utf-8", newline="\n") as f:
             f.write(f"# review — model round {m.get('round', 0)}; task: {args.task}\n\n" + "\n".join(review) + "\n")
-    print(f"picks — model round {m.get('round', 0)}, threshold {m['threshold']:.2f}: {n} of {live} LIVE rows"
+    print(f"picks — {m['_source']}: {n} of {live} LIVE rows"
           + (f" → {args.out}" if args.out else "") + (f"; review sheet → {args.review}" if args.review else ""))
     if audit_due(store, args.session):
         print(f"audit: this session is one of the 1 in {audit_every(store)} audited — run the children beside the "
@@ -690,6 +881,9 @@ def main():
     p.add_argument("--task", required=True)
     p.add_argument("--now", required=True)
     p.add_argument("--picks", required=True, help="the audit children's picks file")
+    p = sub.add_parser("ranker-train", help="export the pairs and train the .pt ranker (phi_prune.p4rank)")
+    p.add_argument("--now", required=True)
+    p.add_argument("--minutes", type=float, default=20, help="pretraining budget when the base is (re)built")
     p = sub.add_parser("shadow")
     p.add_argument("--session", required=True)
     p.add_argument("--now", required=True)
@@ -699,11 +893,20 @@ def main():
                    help="who made the --children picks: the audit's children, or the operator's review")
     args = ap.parse_args()
     cmds = {"pairs": cmd_pairs, "eval": cmd_eval, "train": cmd_train, "picks": cmd_picks, "label": cmd_label,
-            "shadow": cmd_shadow}
+            "shadow": cmd_shadow, "ranker-train": cmd_ranker_train}
     if args.cmd not in cmds:
         ap.print_help()
         return 2
-    return cmds[args.cmd](args, args.store)
+    if args.cmd in ("pairs", "eval"):
+        return cmds[args.cmd](args, args.store)       # a person's command: let it fail loudly
+    try:
+        return cmds[args.cmd](args, args.store)
+    except Exception as e:  # noqa: BLE001 — a session's model step falls back and asks for a retrain, never loops
+        notify_retrain(args.store, f"pick_model {args.cmd}", e, getattr(args, "session", ""))
+        print(f"{args.cmd} — the model failed ({type(e).__name__}: {e}); "
+              + ("take the children road" if args.cmd == "picks" else "the model in place stays")
+              + f"; a retrain notice is in models/{NOTICES} for the p4-model skill")
+        return 3 if args.cmd == "picks" else 1
 
 
 if __name__ == "__main__":
