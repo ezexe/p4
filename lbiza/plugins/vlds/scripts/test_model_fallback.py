@@ -5,8 +5,8 @@ The sessions of a store's repository only use its models; building and fixing th
 model repository (ezexe/phi). So every model failure a session meets ends the same way: the session falls back (the
 JSON ranker, the children, the operator), one row lands in models/retrain-needed.tsv, and the session carries on.
 These tests break each model path and check exactly that: the notice and its quiet window; picks on a broken JSON
-model (exit 3, the children road); the .pt ranker's server down (the JSON ranker, no notice), answering wrongly (the
-JSON ranker, a notice) and answering well (its picks); a broken dispatch model at the prompt hook (the barrier as it
+model (exit 3, the children road); the .pt ranker's server down (the JSON ranker alone, no notice), answering wrongly
+(the JSON ranker alone, a notice) and answering well (its score one of the JSON ranker's features); a broken dispatch model at the prompt hook (the barrier as it
 was, a notice); and the SessionStart line that tells a session the notices are open and not its to fix.
 
 Run from anywhere:  python scripts/test_model_fallback.py
@@ -37,7 +37,7 @@ def run(*args):
 
 
 def fake_server(p4, answer, names=None):
-    """A stand-in for phi_prune.p4serve: answer(texts) → (status, body), every reply naming its store (names, p4 by
+    """A stand-in for phi_serve: answer(texts) → (status, body), every reply naming its store (names, p4 by
     default) as the real server does; its port in models/ranker.server.json."""
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -57,6 +57,17 @@ def fake_server(p4, answer, names=None):
     with open(os.path.join(p4, "models", "ranker.server.json"), "w") as f:
         json.dump({"port": srv.server_address[1], "pid": os.getpid(), "round": 7}, f)
     return srv
+
+
+def enable_pt(p4, weight=2.0):
+    """A JSON model whose training found the .pt feature helps: `pt` set and a weight on it."""
+    path = os.path.join(p4, "models", "pick-model.json")
+    with open(path, encoding="utf-8") as f:
+        m = json.load(f)
+    m["pt"] = True
+    m["w"][str(pick_model.h("pt-z"))] = weight
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(m, f)
 
 
 def test_notice_and_quiet_window():
@@ -81,19 +92,27 @@ def test_picks_fallbacks():
         store = stores["aaaa1111"]
         run(PICK, "--store", store, "train", "--now", "2026-09-07 10:00")
         args = (PICK, "--store", store, "picks", "--session", "eeee5555", "--task", TASK, "--now", "2026-09-08 10:00")
-        # no server: the JSON ranker, nothing to report
+        answer_well = lambda texts: (200, {"scores": [0.9 if "ring buffer" in t else -0.5 for t in texts],  # noqa: E731
+                                           "threshold": 0.5, "round": 7, "per_file": 6})
+        # a JSON model trained without the feature never asks the server, even one that answers
+        srv = fake_server(p4, answer_well)
         code, out = run(*args)
-        assert code == 0 and "json r0" in out and not pick_model.open_notices(store), out
-        # a server that answers well: its scores pick
-        srv = fake_server(p4, lambda texts: (200, {"scores": [0.9 if "ring buffer" in t else -0.5 for t in texts],
-                                                   "threshold": 0.5, "round": 7, "per_file": 6}))
-        code, out = run(*args)
-        assert code == 0 and "ranker r7" in out and "(ranker r7)" in out and "ring buffer" not in out, out
+        assert code == 0 and "(json r0)" in out and "+pt" not in out, out
         srv.shutdown()
-        # a server that answers wrongly: the JSON ranker, and a notice
+        enable_pt(p4)
+        # no server: the JSON ranker alone, nothing to report
+        os.remove(os.path.join(p4, "models", "ranker.server.json"))
+        code, out = run(*args)
+        assert code == 0 and "(json r0)" in out and not pick_model.open_notices(store), out
+        # a server that answers well: its score joins the JSON ranker's features
+        srv = fake_server(p4, answer_well)
+        code, out = run(*args)
+        assert code == 0 and "(json r0+pt r7)" in out, out
+        srv.shutdown()
+        # a server that answers wrongly: the JSON ranker alone, and a notice
         srv = fake_server(p4, lambda texts: (500, {"error": "boom"}))
         code, out = run(*args)
-        assert code == 0 and "json r0" in out, out
+        assert code == 0 and "(json r0)" in out, out
         assert [r["component"] for r in pick_model.open_notices(store)] == ["ranker server"]
         srv.shutdown()
         # a server gone, its port file left behind: the JSON ranker, no new notice
@@ -136,6 +155,7 @@ def test_server_identity_and_transport():
     try:
         store = stores["aaaa1111"]
         run(PICK, "--store", store, "train", "--now", "2026-09-07 10:00")
+        enable_pt(p4)
         args = (PICK, "--store", store, "picks", "--session", "eeee5555", "--task", TASK, "--now", "2026-09-08 10:00")
         srv = fake_server(p4, lambda texts: (500, {"error": "boom"}), names=os.path.join(root, "elsewhere"))
         code, out = run(*args)

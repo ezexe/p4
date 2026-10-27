@@ -1,0 +1,2 @@
+# the vlds plugin's shared p4 base (phi_rank shared): a checkpoint, kept in git LFS
+lbiza/plugins/vlds/models/*.pt filter=lfs diff=lfs merge=lfs -text

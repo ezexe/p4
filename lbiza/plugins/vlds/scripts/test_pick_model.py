@@ -316,6 +316,30 @@ def test_roads():
     print("roads: green")
 
 
+def test_pt_feature_kept_only_when_it_helps():
+    """phi_rank's out-of-fold scores reach the JSON ranker's training; the .pt feature is kept only when it raises
+    the leave-one-out r-precision — on a tie (here both are perfect) it is left out, and the figures are recorded."""
+    import argparse
+    root, p4, stores = seed()
+    try:
+        store = stores["aaaa1111"]
+        pools, data = pick_model.build_pairs(store)
+        oof = {p["id"]: {pick_model.text_key(phi.distilled(data[0][i], 400)): float(y)
+                         for i, y in zip(p["rows"], p["labels"])} for p in pools}
+        os.makedirs(os.path.join(p4, "models"), exist_ok=True)
+        with open(os.path.join(p4, "models", "ranker-oof.json"), "w", encoding="utf-8") as f:
+            json.dump({"round": 0, "pools": oof}, f)
+        pick_model.cmd_train(argparse.Namespace(now="2026-09-07 10:00", tokens=False, model=""), store)
+        with open(os.path.join(p4, "models", "pick-model.json"), encoding="utf-8") as f:
+            m = json.load(f)
+        assert m["heldout"] == {"without_pt": 1.0, "with_pt": 1.0} and m["pt"] is False, m.get("heldout")
+        # a pool phi_rank never scored carries no feature: no out-of-fold score is made up for it
+        assert pick_model.pool_pt({**pools[0], "id": "unscored"}, data, oof) is None
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print(".pt feature kept only when it helps: green")
+
+
 if __name__ == "__main__":
     test_pairs()
     test_train_and_round_delta()
@@ -324,4 +348,5 @@ if __name__ == "__main__":
     test_review_and_audit()
     test_shadow()
     test_roads()
+    test_pt_feature_kept_only_when_it_helps()
     print("test_pick_model.py: all green")
