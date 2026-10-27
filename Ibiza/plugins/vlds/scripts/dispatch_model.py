@@ -8,9 +8,9 @@ script learns from them and answers one narrow question: is this resembling mess
 operator need not be asked? It never proposes ECHO or SUPERSEDED: a wrong ECHO drops the owner's request, so the
 model may only take the safe side, and only below a threshold under which no repeat it trained on fell.
 
-The index's `## recall` section rules it with `dispatch-model:` — off (the default), shadow (the hook names the
-model's proposal and logs it, the operator still judges), on (the hook writes FRESH when the model is sure, and
-the operator judges the rest). Standard library only.
+The index's `## recall` section rules it with `dispatch-model:` — off, shadow (the hook names the model's proposal
+and logs it, the operator still judges), on (the hook writes FRESH when the model is sure, and the operator judges
+the rest). Unnamed, it is on once models/dispatch-model.json exists and off until then. Standard library only.
 
 Subcommands:
   rows    the labelled rows: every turn row of every session whose state is FRESH, ECHO or SUPERSEDED and that

@@ -153,6 +153,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from collections import Counter
 
@@ -1058,7 +1059,7 @@ def cmd_session_open(payload, store):
         seed_session_store(store)   # the session's own dispatch.md and briefs.md, before the check below reads them
     try:
         pm = scripts_module("pick_model")
-        line = pm.ensure_server(store) if pm else ""
+        line = pm.session_open_ranker(store) if pm else ""
         if line:
             print("- " + line)
         notices = pm.open_notices(store) if pm else []
@@ -1471,18 +1472,16 @@ def spawn_detached(args, cwd, log):
 
 
 def ranker_owed(store, stamp, pm):
-    """The .pt ranker's share of the turn close: a labelled pool its checkpoint has not trained on (models/ranker.json),
-    or none yet with BOOTSTRAP_POOLS to learn from, starts `pick_model.py ranker-train` in the background — the
-    export, phi_prune.p4rank's fine-tune (and its pretraining over the repository's text when due), then the server —
-    once per RANKER_LOCK_S, and only where an interpreter has phi_prune and torch."""
+    """The .pt ranker's share of the turn close: a labelled pool it has not seen (models/ranker.json `seen`), or none
+    seen yet with BOOTSTRAP_POOLS to learn from, starts `pick_model.py ranker-train` in the background — the export,
+    phi_prune.p4rank's fine-tune (and its pretraining when due), then the server — at most once per RANKER_LOCK_S, and
+    not while a ranker notice is open: a failure is the p4-model skill's to answer, never this hook's to retry."""
     mdir = models_dir(store)
-    meta_path = os.path.join(mdir, "ranker.json")
-    try:
-        trained = set(json.loads(read_text(meta_path)).get("pools", [])) if os.path.exists(meta_path) else None
-    except ValueError:
-        trained = None
+    seen = pm.ranker_seen(store)
     pools = {p["id"] for p in pm.label_pools(store)}
-    if not ((trained is None and len(pools) >= BOOTSTRAP_POOLS) or (trained is not None and pools - trained)):
+    if not ((seen is None and len(pools) >= BOOTSTRAP_POOLS) or (seen is not None and pools - seen)):
+        return []
+    if pm.notice_open(store, "ranker"):
         return []
     lock = os.path.join(mdir, ".ranker-train")
     if os.path.exists(lock) and time.time() - os.path.getmtime(lock) < RANKER_LOCK_S:
@@ -1492,9 +1491,9 @@ def ranker_owed(store, stamp, pm):
     os.makedirs(mdir, exist_ok=True)
     with open(lock, "w", encoding="utf-8") as f:
         f.write(stamp + "\n")
-    new = len(pools - (trained or set()))
+    new = len(pools - (seen or set()))
     pid = spawn_detached([sys.executable, os.path.join(plugin_root(), "scripts", "pick_model.py"), "--store", store,
-                          "ranker-train", "--now", stamp], os.path.dirname(mdir), os.path.join(mdir, "ranker.log"))
+                          "ranker-train", "--now", stamp], tempfile.gettempdir(), os.path.join(mdir, "ranker.log"))
     return [f"turn-close: training the .pt ranker on {new} labelled pool(s) it has not seen — started in the background"
             + (f" (pid {pid}), its output in models/ranker.log; the server picks up the new checkpoint by itself"
                if pid else " failed to start")]
@@ -1515,12 +1514,13 @@ def retrain_owed(store, stamp):
         old = pm.load_model(path) if os.path.exists(path) else None
         pools = {p["id"] for p in pm.label_pools(store)}
         new = pools - set((old or {}).get("seen", []))
-        if (old is None and len(pools) >= BOOTSTRAP_POOLS) or (old is not None and new):
+        if ((old is None and len(pools) >= BOOTSTRAP_POOLS) or (old is not None and new)) \
+                and not pm.notice_open(store, "json"):
             args = ["pick_model.py", "--store", store, "train", "--now", stamp] + \
                    (["--tokens"] if old and old.get("tokens") else [])
             jobs.append((args, path, f"the pool ranker: {len(new)} labelled pool(s) it has not seen"))
     dm = scripts_module("dispatch_model")
-    if dm:
+    if dm and not (pm and pm.notice_open(store, "dispatch")):
         # the dispatch model the same: retrained every DISPATCH_RETRAIN_ROWS judged rows, and a store with none
         # trains its first once BOOTSTRAP_REPEATS judged repeats exist (counted once per DISPATCH_RETRAIN_ROWS rows)
         path = dm.model_path(store)
@@ -1548,7 +1548,7 @@ def retrain_owed(store, stamp):
     os.makedirs(mdir, exist_ok=True)
     lock = os.path.join(mdir, ".retrain")
     if os.path.exists(lock) and time.time() - os.path.getmtime(lock) < RETRAIN_LOCK_S:
-        return []
+        return ranker
     with open(lock, "w", encoding="utf-8") as f:
         f.write(stamp + "\n")
     out = []
