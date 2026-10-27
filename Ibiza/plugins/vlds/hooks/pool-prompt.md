@@ -6,7 +6,7 @@ The message that sent you here carries four values: `store` (the session's own s
 
 ## The road
 
-The index's `## recall` section names the read list (defaults when it has none), the road (`pool-road: children | skeleton | single`, children by default) and the child model (`pool-child-model:`, haiku by default); its hot table names the masked spans no reader opens. The script reads the index for you and says the road on its first line — run it, or the barrier, first; open `store/phi-index.md` only when a road's step needs what neither printed.
+The index's `## recall` section names the read list (defaults when it has none), the road (`pool-road: children | skeleton | single | model | model-shadow`, children by default) and the child model (`pool-child-model:`, haiku by default); its hot table names the masked spans no reader opens. The script reads the index for you and says the road on its first line — run it, or the barrier, first; open `store/phi-index.md` only when a road's step needs what neither printed.
 
 ### skeleton — one judged pass
 
@@ -24,6 +24,18 @@ The skeleton with the judgment parallel: the script writes the structure, one ch
 4. After the last child: `python <plugin root>/scripts/phi.py --store <store> pool --session <short id> --title "<title>" --task "<task>" --now "<now>" --picks <the picks file> --out <store>/recall-pool.md`. The script moves every picked entry into steering with its clause, keeps the form and every-turn lines standing, groups the rest under the cap, writes the pool, and prints it. Make the UNOWNED call from the printed lines — an index rule with no user ruling at its root, a claim marked unsourced: edit that one line into `## surfaced` in the written file — and, unless a conductor launched you, send the session the derivation by SendMessage to `main` before returning it. Read no file a child covered.
 
 Without the Agent tool — the harness gives none to an agent at spawn depth 3, and a conductor already puts you at depth 2 — no child can run: take the skeleton road. When some children's picks landed before the tool was out of reach (a relaunch one link too deep, say), keep them, and pick for each file still missing yourself, from the barrier's lines, under a `picks (pass) — <file>, <n> of <total> entries bear on the task` head in the same picks file; then fold. The script credits each file to the head that names it — `child`, `pass`, or `none landed` when no block names it — in the pool's `read:` line and its summary, so a file no child read is never credited to a child. A child's picks are never yours to write: when its completion is lost, the file is `none landed` or your pass, and the derivation says which.
+
+### model — `pool-road: model`
+
+The children road with a script in each child's seat: `scripts/pick_model.py`, a ranker trained on the store's own earlier pools, picks what bears on the task from the barrier's LIVE rows — no agent, no model reading a file, so it runs at any spawn depth. Launched in the foreground; nothing streams.
+
+1. Run: `python <plugin root>/scripts/pick_model.py --store <store> picks --session <short id> --task "<task>" --now "<now>" --out <working dir>/.claude/p4/scratchpad/pool-picks-<short id>.md`. It writes one `picks (model) — <file>, <n> of <total> …` head per file and one `<file>:<line> || bears: model <score>; shares: <terms>` line per pick, at most six a file, strongest first. Exit 3 — no model trained yet (`pick_model.py train`) — means take the skeleton road and say so.
+2. Fold, as the children road's step 4: `phi.py … pool … --picks <that file> --out <store>/recall-pool.md`; the `read:` line credits each file to `model`. Make the UNOWNED call from the printed lines, as there.
+3. A model's `bears:` clause names its score and the shared terms, never how the entry bears: the pool says what the store holds, and the main session judges. Rewrite no clause and add no pick; when the steering looks thin for the task, say so in the derivation, and the owner can set the road back to children.
+
+### model-shadow — `pool-road: model-shadow`
+
+The children road, unchanged, with the model run beside it so the switch to `model` is measured before it is made. Before launching the children, run the model road's step 1 with `--out <working dir>/.claude/p4/scratchpad/pool-picks-<short id>.model.md`; take the children road through its last child; then, before the fold, run `python <plugin root>/scripts/pick_model.py --store <store> shadow --session <short id> --now "<now>" --children <the children's picks file> --model-picks <the model's picks file>` — one row in `.claude/p4/models/shadow.tsv` and one line, which the derivation carries. Fold the children's picks alone. Exit 3 at step 1 means no model yet: the children road alone, and the derivation says so.
 
 ### single — `pool-road: single`, and every road's fallback
 

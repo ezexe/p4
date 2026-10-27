@@ -185,8 +185,9 @@ DEFAULT_OPERATOR_MODEL = "sonnet"   # the operator's open moment (barrier, inten
 DEFAULT_POOL_MODEL = "sonnet"       # the pool, once per session — the one judged read a whole session leans on; `pool-model:`
 DEFAULT_SWEEP_MODEL = "sonnet"      # the sweep moment's scoring; `sweep-model:`
 DEFAULT_POOL_CHILD_MODEL = "haiku"  # the pool's child readers, one per read-list file, launched by the operator; `pool-child-model:`
-POOL_ROADS = ("children", "skeleton", "single")   # `pool-road:` — the skeleton with one child pick-reader per file,
-DEFAULT_POOL_ROAD = "children"                    # streamed; the skeleton for one judged pass; or the operator alone
+POOL_ROADS = ("children", "skeleton", "single", "model", "model-shadow")  # `pool-road:` — the skeleton with one child
+DEFAULT_POOL_ROAD = "children"    # pick-reader per file, streamed; the skeleton for one judged pass; the operator alone;
+                                  # scripts/pick_model.py's picks in place of the children; or both, compared
 DEFAULT_OPERATOR_MOMENTS = 4        # continuations before a fresh launch, so a grown context stops compounding; `operator-moments:`
 DEFAULT_OPERATOR_VIA = None          # the agent a session hands every operator moment to, which launches the operator itself
                                      # and returns a derived understanding; `operator-via:` names its agent type, absent = none
@@ -609,7 +610,7 @@ def recall_lists(index_text):
     or the defaults: `pool: subagent` (the hot files pooled by the operator subagent, not injected) or
     `pool: inject` (every inject file chunked into the slots); `operator-model:` the open moment's model,
     `pool-model:` the pool's compose, `pool-child-model:` its child readers', `sweep-model:` the sweep's,
-    `pool-road:` the pool's road (skeleton, children, single), `operator-moments:` the continuations before a
+    `pool-road:` the pool's road (skeleton, children, single, model, model-shadow), `operator-moments:` the continuations before a
     fresh launch, `operator-via:` the agent type a session hands every operator moment to (it launches the operator
     and returns a derived understanding) — `models` carries all seven."""
     inject, digest, pool = None, None, None
@@ -710,7 +711,9 @@ def operator_directive(store, tag, now, models, keyspace=False):
         f"{models['child']}, launched by the operator in the background to pick what bears on the task, the picks "
         f"folded in by the script, composed on {models['pool']} — the operator launched in the background then, "
         "its progress lines arriving as its messages and its derivation with its completion; single: the operator "
-        f"alone on {models['pool']}) — the session speaks to the operator, the operator to its children; the barrier "
+        f"alone on {models['pool']}; model: scripts/pick_model.py picks in place of the children, no child, the operator in the "
+        "foreground; model-shadow: the children road with the model's picks written beside theirs and compared, the "
+        "children's folded) — the session speaks to the operator, the operator to its children; the barrier "
         f"when the prompt hook names a candidate row, and the intent of an unknown short message, on "
         f"{models['operator']}) " + sweep + "Send it one message:\n"
         f"  Read {brief} and do what it says. store: {store} | session: {tag} | now: <the latest now:> | "
@@ -736,7 +739,7 @@ def operator_directive(store, tag, now, models, keyspace=False):
         "ask the operator for the entry, never open the file here. No Agent tool in this session → the degraded "
         "path: do the operation here and say so. The index's ## recall section rules it: `pool: inject` restores "
         "the slot injection of every inject file; `operator-model:`, `pool-model:`, `pool-child-model:`, "
-        "`sweep-model:` pick the models; `pool-road:` the pool's road (skeleton, children, single); "
+        "`sweep-model:` pick the models; `pool-road:` the pool's road (skeleton, children, single, model, model-shadow); "
         "`operator-moments:` the continuations before a fresh launch; `operator-via:` an agent that conducts the "
         "operator for you and returns a derived understanding."
     )

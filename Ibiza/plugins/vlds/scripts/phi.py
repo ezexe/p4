@@ -995,14 +995,15 @@ def distilled(r, width=POOL_LINE_CHARS):
 
 PICK_RE = re.compile(r"^\s*([a-z-]+\.md):(\d+)\s*\|\|\s*bears:\s*(.+?)\s*$")
 # a block's head names who picked: `picks — <file>, …` a child reader, `picks (pass) — <file>, …` the operator's own
-# judged pass, written for a file no child could cover — so the pool credits the pass and never a child it did not have
-PICKS_HEAD_RE = re.compile(r"^\s*picks(?:\s*\((pass)\))?\s*—\s*(?:([a-z-]+\.md)\b)?")
+# judged pass, written for a file no child could cover — so the pool credits the pass and never a child it did not have;
+# `picks (model) — <file>, …` scripts/pick_model.py, on the model road
+PICKS_HEAD_RE = re.compile(r"^\s*picks(?:\s*\((pass|model)\))?\s*—\s*(?:([a-z-]+\.md)\b)?")
 
 
 def read_picks(path):
     """{(file, line): clause} from a picks file — the child readers' whole output, one `<file>:<line> || bears:
     <clause>` per line; a line outside that shape (a block's head line excepted) is counted, never applied — and
-    {file: {"child" | "pass"}}, who picked each file: its block's head, or a child when its pick lines have none."""
+    {file: {"child" | "pass" | "model"}}, who picked each file: its block's head, or a child when its pick lines have none."""
     picks, ignored, sources = {}, 0, {}
     with open(path, encoding="utf-8") as f:
         for l in f:
@@ -1021,6 +1022,11 @@ def read_picks(path):
     return picks, ignored, sources
 
 
+# `pool-road:` — model picks by scripts/pick_model.py in place of the children; model-shadow runs the children and
+# the model side by side, the children's picks folded and the two compared in models/shadow.tsv
+POOL_ROADS = ("skeleton", "children", "single", "model", "model-shadow")
+
+
 def index_road(store):
     """The config index's `pool-road:` — children when absent or unknown."""
     idx = parse_index(os.path.dirname(pt.config_index(store)))
@@ -1031,8 +1037,8 @@ def index_road(store):
         if l.startswith("## "):
             in_recall = l[3:].strip().lower() == "recall"
             continue
-        m = re.match(r"^pool-road:\s*(\w+)", l.strip()) if in_recall else None
-        if m and m.group(1).lower() in ("skeleton", "children", "single"):
+        m = re.match(r"^pool-road:\s*([\w-]+)", l.strip()) if in_recall else None
+        if m and m.group(1).lower() in POOL_ROADS:
             return m.group(1).lower()
     return "children"
 
@@ -1072,7 +1078,7 @@ def cmd_pool(args, store):
         # whose block names it, and a file no block names landed nothing — never credited to a child
         if not args.picks:
             return "script"
-        return "+".join(s for s in ("child", "pass") if s in sources[fname]) if fname in sources else "none landed"
+        return "+".join(s for s in ("child", "pass", "model") if s in sources[fname]) if fname in sources else "none landed"
     live = [r for r in rows if r["state"] == "LIVE"]
     first = [r for r in live if r["kind"] in ("form", "every-turn") and r["file"] != "tombstones.md"]
     # a tombstone is a mask, never a steering line: a child's pick of one is dropped, as a FREED entry's is
@@ -1223,7 +1229,7 @@ def cmd_pool(args, store):
                + (f", {ignored} pick line(s) ignored" if ignored else "")
                + (("; picks per file: " + ", ".join(
                    f"{label} {sum(1 for f in present if read_label(f) == label)}"
-                   for label in ("child", "pass", "child+pass", "none landed")
+                   for label in ("child", "pass", "child+pass", "model", "none landed")
                    if any(read_label(f) == label for f in present))) if args.picks else "")
                + (f"; appendix {len(text) - len(pool_part)} characters" if len(text) > len(pool_part) else "")
                + ")" + (f" → {args.out}" if args.out else ""))
