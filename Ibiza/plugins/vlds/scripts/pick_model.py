@@ -452,9 +452,11 @@ def cmd_train(args, store):
     path = model_path(store, args.model)
     old = load_model(path) if os.path.exists(path) else None
     rnd = (old.get("round", 0) + 1) if old else 0
+    seen = sorted({p["session"] for p in (parse_pool(x) for x in all_pools(store))
+                   if p["picks"] and p["task"] and p["pooled"]})
     save_model(path, {"kind": "vlds pick ranker", "round": rnd, "trained": args.now, "dim": DIM,
                       "tokens": bool(args.tokens), "threshold": t, "per_file": PER_FILE,
-                      "pools": [p["session"] for p in pools], "w": w})
+                      "pools": [p["session"] for p in pools], "seen": seen, "w": w})
     line = f"train — round {rnd}: {len(pools)} pools, {sum(p['matched'] for p in pools)} picks, threshold {t:.2f} → {path}"
     if old:
         header, payload = encode_round(old["w"], w)
