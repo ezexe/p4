@@ -109,6 +109,13 @@ if command -v git >/dev/null 2>&1 && [ ! -e "$p4/.git" ]; then
     echo "vlds: initialized .claude/p4/ as its own git repository — the sessions and the indexes are tracked there, never in the project's repo."
   fi
 fi
+# what git keeps is what the store's models train on: a repository with no .gitignore gets the plugin's, which
+# ignores by type only what no text model can learn from (audio, images, builds, caches, dumps); one that has a
+# .gitignore keeps it — the owner's rules win
+if [ ! -e "$p4/.gitignore" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/p4-gitignore" ]; then
+  cp "${CLAUDE_PLUGIN_ROOT}/hooks/p4-gitignore" "$p4/.gitignore" 2>/dev/null \
+    && echo "vlds: seeded .claude/p4/.gitignore — audio, images, builds, caches and dumps stay out of git, so what git keeps is what the models train on."
+fi
 if command -v git >/dev/null 2>&1; then
   exclude=$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --git-path info/exclude 2>/dev/null)
   if [ -n "$exclude" ] && [ "$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --show-toplevel 2>/dev/null)" != "$(git -C "$p4" rev-parse --show-toplevel 2>/dev/null)" ]; then

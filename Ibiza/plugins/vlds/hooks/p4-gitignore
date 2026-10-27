@@ -1,0 +1,55 @@
+# .claude/p4 — what git keeps is what the store's models train on (phi_prune.p4rank reads `git ls-files`).
+# Ignored here: what no text model can learn from. Ignored by TYPE, never by directory, so a run's logs,
+# readings, tables and notes are kept wherever they land and only its binaries stay out.
+# Seeded by the vlds plugin (hooks/p4-layout.sh) when the repository has no .gitignore; the owner's edits win.
+
+# audio and video captures (the measurements' text — readings, tables, logs — is kept beside them)
+*.wav
+*.flac
+*.mp3
+*.ogg
+*.aiff
+*.mp4
+*.webm
+# images
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.ico
+# builds: plugins, libraries, executables, debug symbols, CEF/ICU data
+*.vst3
+*.component
+*.dll
+*.exe
+*.pdb
+*.lib
+*.exp
+*.obj
+*.o
+*.so
+*.dylib
+*.a
+*.pak
+*.dat
+*.bin
+*.wasm
+# browser profile and cache stores (Chromium/CEF), crash dumps
+*.ldb
+*.dmp
+*.blob
+GPUCache/
+Code Cache/
+Cache_Data/
+# archives
+*.zip
+*.7z
+*.gz
+*.tar
+# installs and caches
+__pycache__/
+node_modules/
+# the models' own checkpoints are trained output, kept by the store's turn close, not trained on
+models/*.pt
+models/*.tmp
