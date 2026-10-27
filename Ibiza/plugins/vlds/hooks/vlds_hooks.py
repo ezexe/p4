@@ -122,11 +122,12 @@ whatever the console codepage says):
                           budget — every step through phi.py's gates — then leave its one-line report in
                           store/.turn-close for the next prompt hook to print, since a Stop hook's stdout never
                           reaches the model. Nothing to move: silent. Lock held elsewhere: skipped, said so.
-                          Then the model pass: under a model road (`pool-road: model | model-shadow`) or the
-                          dispatch model (`dispatch-model: shadow | on`), a model missing or behind the store —
-                          a labelled pool it has not seen, or DISPATCH_RETRAIN_ROWS judged rows since it trained
-                          — is retrained in the background (scripts/pick_model.py or dispatch_model.py train,
-                          detached, its output in models/train.log), once per RETRAIN_LOCK_S; one line each.
+                          Then the model pass, whatever the index names: a model behind the store — a labelled
+                          pool it has not seen, or DISPATCH_RETRAIN_ROWS judged rows since it trained — or a
+                          store with none yet and enough to learn from (BOOTSTRAP_POOLS, BOOTSTRAP_REPEATS) is
+                          trained in the background (scripts/pick_model.py or dispatch_model.py train, detached,
+                          its output in models/train.log), once per RETRAIN_LOCK_S; one line each. A trained
+                          model is on by default: an unnamed `pool-road:` reads model, `dispatch-model:` on.
 
 Everything here is mechanical. The stamp carries no judgment; the pour moves a file whose every entry belongs to
 a conversation that is not this one (a new id that reaches its first prompt unrecorded) and destroys nothing (the
@@ -201,6 +202,10 @@ DEFAULT_OPERATOR_MOMENTS = 4        # continuations before a fresh launch, so a 
 DISPATCH_MODES = ("off", "shadow", "on")   # `dispatch-model:` — scripts/dispatch_model.py at the dispatch barrier: off;
 DEFAULT_DISPATCH_MODE = "off"              # shadow (its proposal named and logged, the operator judging); on (FRESH
                                            # written when it is sure, the operator judging the rest)
+DEFAULT_POOL_AUDIT = 5                     # `pool-audit:` — on the model road, 1 session in N also runs the children,
+                                           # their picks an unbiased label and an agreement row; 0 never
+BOOTSTRAP_POOLS = 5                        # labelled pools before a store with no pool ranker trains its first
+BOOTSTRAP_REPEATS = 5                      # judged repeats before a store with no dispatch model trains its first
 RETRAIN_LOCK_S = 15 * 60                   # a retrain started at a turn close holds models/.retrain this long
 DISPATCH_RETRAIN_ROWS = 20                 # judged turn rows added since the dispatch model's training before it retrains
 DEFAULT_OPERATOR_VIA = None          # the agent a session hands every operator moment to, which launches the operator itself
@@ -631,7 +636,8 @@ def recall_lists(index_text):
     inject, digest, pool = None, None, None
     models = {"operator": DEFAULT_OPERATOR_MODEL, "pool": DEFAULT_POOL_MODEL, "child": DEFAULT_POOL_CHILD_MODEL,
               "sweep": DEFAULT_SWEEP_MODEL, "moments": DEFAULT_OPERATOR_MOMENTS, "road": DEFAULT_POOL_ROAD,
-              "via": DEFAULT_OPERATOR_VIA, "dispatch": DEFAULT_DISPATCH_MODE}
+              "via": DEFAULT_OPERATOR_VIA, "dispatch": DEFAULT_DISPATCH_MODE, "audit": DEFAULT_POOL_AUDIT,
+              "road_set": False, "dispatch_set": False}
     in_recall = False
     for l in index_text.split("\n"):
         if l.startswith("## "):
@@ -640,7 +646,7 @@ def recall_lists(index_text):
         if not in_recall:
             continue
         m = re.match(r"^(inject|digest|pool|pool-road|pool-model|pool-child-model|operator-model|sweep-model|"
-                     r"operator-moments|operator-via|dispatch-model):\s*(.*)$", l.strip())
+                     r"operator-moments|operator-via|dispatch-model|pool-audit):\s*(.*)$", l.strip())
         if not m:
             continue
         key, value = m.group(1), m.group(2).strip()
@@ -650,10 +656,15 @@ def recall_lists(index_text):
             models["via"] = value or None
         elif key == "pool-road":
             if value.lower() in POOL_ROADS:
-                models["road"] = value.lower()
+                models["road"], models["road_set"] = value.lower(), True
         elif key == "dispatch-model":
             if value.lower() in DISPATCH_MODES:
-                models["dispatch"] = value.lower()
+                models["dispatch"], models["dispatch_set"] = value.lower(), True
+        elif key == "pool-audit":
+            try:
+                models["audit"] = max(0, int(value))
+            except ValueError:
+                pass
         elif key == "operator-moments":
             try:
                 models["moments"] = max(0, int(value))
@@ -729,7 +740,8 @@ def operator_directive(store, tag, now, models, keyspace=False):
         f"{models['child']}, launched by the operator in the background to pick what bears on the task, the picks "
         f"folded in by the script, composed on {models['pool']} — the operator launched in the background then, "
         "its progress lines arriving as its messages and its derivation with its completion; single: the operator "
-        f"alone on {models['pool']}; model: scripts/pick_model.py picks in place of the children, no child, the operator in the "
+        f"alone on {models['pool']}; model (the default once a pool ranker is trained): scripts/pick_model.py proposes picks and the "
+        "operator's one judged pass decides them, no child but on 1 session in N (`pool-audit:`), the operator in the "
         "foreground; model-shadow: the children road with the model's picks written beside theirs and compared, the "
         "children's folded) — the session speaks to the operator, the operator to its children; the barrier "
         f"when the prompt hook names a candidate row, and the intent of an unknown short message, on "
@@ -1059,6 +1071,7 @@ def cmd_session_open(payload, store):
         print("no phi-index.md yet — the keyspace writes it at the first turn close; until then the hooks' defaults "
               "apply")
     inject, digest, from_index, pool, models = recall_lists(index_text)
+    resolve_models(store, models)
     via_note = f"; via {models['via']}" if models.get("via") else ""
     model_note = (f" (operator {models['operator']}, pool {models['pool']}, children {models['child']}, "
                   f"sweep {models['sweep']}; road {models['road']}; {models['moments']} continuations{via_note})"
@@ -1364,6 +1377,23 @@ def take_turn_close_reports(store, sid):
     return out
 
 
+def models_dir(store):
+    """<p4>/models — where the trained models live, every session's one copy."""
+    p4 = pt.p4_of(store)
+    return os.path.join(p4 or os.path.dirname(os.path.abspath(store)), "models")
+
+
+def resolve_models(store, models):
+    """The models always on once trained: a road or a dispatch mode the index does not name is `model` / `on` when
+    that model exists in models/, the hooks' defaults otherwise. A setting the index names always wins."""
+    d = models_dir(store)
+    if not models.get("road_set") and os.path.exists(os.path.join(d, "pick-model.json")):
+        models["road"] = "model"
+    if not models.get("dispatch_set") and os.path.exists(os.path.join(d, "dispatch-model.json")):
+        models["dispatch"] = "on"
+    return models
+
+
 def scripts_module(name):
     """A module of the plugin's scripts/ directory, imported on demand; None when it cannot be."""
     d = os.path.join(plugin_root(), "scripts")
@@ -1381,7 +1411,7 @@ def dispatch_verdict(store, prompt, now, sid):
     is FRESH or ask, never a repeat; every verdict is logged to models/dispatch-shadow.tsv."""
     try:
         cfg = pt.config_index(store)
-        mode = recall_lists(read_text(cfg) if os.path.exists(cfg) else "")[4]["dispatch"]
+        mode = resolve_models(store, recall_lists(read_text(cfg) if os.path.exists(cfg) else "")[4])["dispatch"]
         if mode == "off":
             return None
         dm = scripts_module("dispatch_model")
@@ -1423,38 +1453,51 @@ def spawn_detached(args, cwd, log):
 
 
 def retrain_owed(store, stamp):
-    """The turn close's model pass: when the index runs a model road (`pool-road: model | model-shadow`) or the
-    dispatch model (`dispatch-model: shadow | on`) and its model is missing or behind the store — a labelled pool it
-    has not seen, or DISPATCH_RETRAIN_ROWS judged rows since it trained — start its training in the background,
-    once per RETRAIN_LOCK_S; one report line per training started, none when nothing is owed."""
-    cfg = pt.config_index(store)
-    models = recall_lists(read_text(cfg) if os.path.exists(cfg) else "")[4]
+    """The turn close's model pass, whatever the index names: a model behind the store — a labelled pool the ranker
+    has not seen, DISPATCH_RETRAIN_ROWS judged rows since the dispatch model trained — or a store with none yet and
+    enough to learn from (BOOTSTRAP_POOLS labelled pools, BOOTSTRAP_REPEATS judged repeats) starts its training in
+    the background, once per RETRAIN_LOCK_S; one report line per training started, none when nothing is owed. A
+    trained model is then on by default (resolve_models)."""
     jobs = []
-    if models["road"] in ("model", "model-shadow"):
-        pm = scripts_module("pick_model")
-        if pm:
-            path = pm.model_path(store, "")
-            pools = {p["session"] for p in (pm.parse_pool(x) for x in pm.all_pools(store)) if pm.labelled_pool(p)}
-            old = pm.load_model(path) if os.path.exists(path) else None
-            new = pools - set((old or {}).get("seen", []))
-            if pools and (old is None or new):
-                args = ["pick_model.py", "--store", store, "train", "--now", stamp] + \
-                       (["--tokens"] if old and old.get("tokens") else [])
-                jobs.append((args, path, f"the pool ranker: {len(new)} labelled pool(s) it has not seen"))
-    if models["dispatch"] in ("shadow", "on"):
-        dm = scripts_module("dispatch_model")
-        if dm:
-            path = dm.model_path(store)
-            count = dm.turn_rows_count(store)
-            trained = json.loads(read_text(path)).get("turn_rows", 0) if os.path.exists(path) else None
-            if trained is None or count - trained >= DISPATCH_RETRAIN_ROWS:
+    pm = scripts_module("pick_model")
+    if pm:
+        # the ranker learns whatever road runs: every labelled pool it has not seen retrains it, and a store with
+        # none trains its first at BOOTSTRAP_POOLS
+        path = pm.model_path(store, "")
+        old = pm.load_model(path) if os.path.exists(path) else None
+        pools = {p["id"] for p in pm.label_pools(store)}
+        new = pools - set((old or {}).get("seen", []))
+        if (old is None and len(pools) >= BOOTSTRAP_POOLS) or (old is not None and new):
+            args = ["pick_model.py", "--store", store, "train", "--now", stamp] + \
+                   (["--tokens"] if old and old.get("tokens") else [])
+            jobs.append((args, path, f"the pool ranker: {len(new)} labelled pool(s) it has not seen"))
+    dm = scripts_module("dispatch_model")
+    if dm:
+        # the dispatch model the same: retrained every DISPATCH_RETRAIN_ROWS judged rows, and a store with none
+        # trains its first once BOOTSTRAP_REPEATS judged repeats exist (counted once per DISPATCH_RETRAIN_ROWS rows)
+        path = dm.model_path(store)
+        count = dm.turn_rows_count(store)
+        if os.path.exists(path):
+            trained = json.loads(read_text(path)).get("turn_rows", 0)
+            if count - trained >= DISPATCH_RETRAIN_ROWS:
                 jobs.append((["dispatch_model.py", "--store", store, "train", "--now", stamp], path,
-                             f"the dispatch model: {count - (trained or 0)} judged row(s) since it trained"))
+                             f"the dispatch model: {count - trained} judged row(s) since it trained"))
+        else:
+            marker = os.path.join(models_dir(store), ".dispatch-checked")
+            last = int(read_text(marker).strip() or 0) if os.path.exists(marker) else -DISPATCH_RETRAIN_ROWS
+            if count - last >= DISPATCH_RETRAIN_ROWS:
+                os.makedirs(models_dir(store), exist_ok=True)
+                with open(marker, "w", encoding="utf-8") as f:
+                    f.write(f"{count}\n")
+                repeats = sum(r[3] for r in dm.labelled(store))
+                if repeats >= BOOTSTRAP_REPEATS:
+                    jobs.append((["dispatch_model.py", "--store", store, "train", "--now", stamp], path,
+                                 f"the dispatch model's first: {repeats} judged repeats to learn from"))
     if not jobs:
         return []
-    models_dir = os.path.dirname(jobs[0][1])
-    os.makedirs(models_dir, exist_ok=True)
-    lock = os.path.join(models_dir, ".retrain")
+    mdir = os.path.dirname(jobs[0][1])
+    os.makedirs(mdir, exist_ok=True)
+    lock = os.path.join(mdir, ".retrain")
     if os.path.exists(lock) and time.time() - os.path.getmtime(lock) < RETRAIN_LOCK_S:
         return []
     with open(lock, "w", encoding="utf-8") as f:
@@ -1462,8 +1505,8 @@ def retrain_owed(store, stamp):
     out = []
     for args, _path, why in jobs:
         script = os.path.join(plugin_root(), "scripts", args[0])
-        pid = spawn_detached([sys.executable, script] + args[1:], os.path.dirname(models_dir),
-                             os.path.join(models_dir, "train.log"))
+        pid = spawn_detached([sys.executable, script] + args[1:], os.path.dirname(mdir),
+                             os.path.join(mdir, "train.log"))
         out.append(f"turn-close: retraining {why} — started in the background"
                    + (f" (pid {pid}), its output in models/train.log" if pid else " failed to start"))
     return out
