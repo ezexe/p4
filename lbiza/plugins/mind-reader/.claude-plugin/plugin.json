@@ -1,0 +1,14 @@
+{
+  "name": "mind-reader",
+  "version": "0.0.3",
+  "description": "mind-reader — a side agent, detached from the session's conversation, that predicts what the OWNER will say next (never what the AI wants) and learns from how each prediction scored. The prompt hook scores the previous turn's frozen prediction against the owner's actual message, appends it to the session's vlds partition mind-reader.md (a gc-collectable object store of the keyspace), moves each source's learned weight (follow, progress, direction, adopt — a multiplicative-weights step) in .claude/p4/mrindex/model.json, then spawns a detached watcher and prints nothing, so the session answers uninterrupted. The watcher re-predicts while the turn runs into a rotating draft (sessions/<name>/mind-reader/draft.md) from every session's dispatch record and what the owner will be reacting to; the Stop hook freezes it, and writes gc holds (.claude/p4/vindex/holds.tsv) for the hot entries the owner's predicted direction leans on, which the vlds light pass and judged sweep skip until they expire — retention only, the archive ignoring them. A plain process: no model, no network, nothing written into the conversation.",
+  "author": {
+    "name": "ezexe"
+  },
+  "homepage": "https://github.com/ezexe/prompty-prompter-pioneer-puppeteer/tree/main/lbiza/plugins/mind-reader",
+  "repository": "https://github.com/ezexe/prompty-prompter-pioneer-puppeteer",
+  "license": "MIT",
+  "dependencies": [
+    { "name": "vlds", "version": ">=0.0.61" }
+  ]
+}
