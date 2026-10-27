@@ -124,6 +124,11 @@ def test_train_and_hook():
         with open(os.path.join(p4, "models", "dispatch-shadow.tsv"), encoding="utf-8") as f:
             log = [l.split("\t") for l in f.read().strip().split("\n")[1:]]
         assert [l[2] for l in log] == ["shadow", "on", "on"] and [l[3] for l in log] == ["FRESH", "FRESH", "ask"], log
+        # the row the model wrote FRESH is never a label for it; the rows the operator judged are
+        sys.path.insert(0, HERE)
+        import dispatch_model as dm  # noqa: E402
+        fps = [r[1] for r in dm.labelled(store)]
+        assert asks[2] not in fps and asks[0] in fps and asks[1] in fps, fps
         code, out = run(DM, "--store", store, "report")
         assert "proposed FRESH: 2 the operator's FRESH too" in out and "1 left to the operator" in out, out
     finally:

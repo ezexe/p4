@@ -65,6 +65,8 @@ pool-road: model-shadow
 
 The Stop hook retrains on its own once a store opts in. Under `pool-road: model` or `model-shadow`, it retrains the pool ranker when a labelled pool exists that the model hasn't seen. Under `dispatch-model: shadow` or `on`, it retrains the dispatch model once 20 more judged rows exist than it trained on. Training runs detached in the background, so the turn close isn't held. Output is appended to `.claude/p4/models/train.log`, and a `models/.retrain` lock allows at most one start every 15 minutes. Each pool-ranker retrain writes the next `pick-model.rNN.phid`. On the default roads, with `dispatch-model` off, nothing is trained.
 
+**Neither model learns from its own output.** A pool whose `read:` line credits `model` was steered by the ranker's own picks, so it's never a training label. A row the hook wrote FRESH under `dispatch-model: on` is logged in `models/dispatch-shadow.tsv` and left out of the dispatch model's labels. This means `pool-road: model` gives the ranker no new labels: only sessions on `children` or `model-shadow` teach it. The dispatch model keeps learning under `on`, because every row it leaves to the operator is still judged there.
+
 ## The dispatch model
 
 The prompt hook stamps every message's dispatch row. When an earlier row of the session resembles the message, the state is left for the operator, which judges FRESH, ECHO or SUPERSEDED. That's one operator launch per resembling message, though most of those messages are fresh asks that only read alike. `scripts/dispatch_model.py` learns from the rows the operator already judged and answers one narrow question: is this message so plainly fresh that the operator doesn't need to be asked?

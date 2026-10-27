@@ -1434,8 +1434,7 @@ def retrain_owed(store, stamp):
         pm = scripts_module("pick_model")
         if pm:
             path = pm.model_path(store, "")
-            pools = {p["session"] for p in (pm.parse_pool(x) for x in pm.all_pools(store))
-                     if p["picks"] and p["task"] and p["pooled"]}
+            pools = {p["session"] for p in (pm.parse_pool(x) for x in pm.all_pools(store)) if pm.labelled_pool(p)}
             old = pm.load_model(path) if os.path.exists(path) else None
             new = pools - set((old or {}).get("seen", []))
             if pools and (old is None or new):

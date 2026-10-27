@@ -99,6 +99,15 @@ def test_pairs():
         # a row timed after the pool is no candidate for it
         late = [i for i, r in enumerate(data[0]) if r["time"] > "2026-09-06 09:00"]
         assert not late or not set(late) & set(pools[0]["rows"])
+        # a pool the model steered is never a label for it
+        mpath = os.path.join(stores["dddd4444"], "recall-pool.md")
+        with open(mpath, encoding="utf-8") as f:
+            text = f.read()
+        with open(mpath, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text.replace("read: x", "read: local-storage.md (10, model), ledger.md (0, model)"))
+        assert len(pick_model.build_pairs(store)[0]) == 3
+        with open(mpath, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
         code, out = run(PICK, "--store", store, "pairs", "--jsonl", os.path.join(root, "pairs.jsonl"))
         assert code == 0 and "8 of 8 steering lines matched" in out, out
         with open(os.path.join(root, "pairs.jsonl"), encoding="utf-8") as f:
