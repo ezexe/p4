@@ -38,6 +38,7 @@ import os
 import random
 import re
 import sys
+import time
 import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -376,14 +377,27 @@ def load_model(path):
 
 def write_atomic(path, text):
     """Write text to path whole or not at all: a temp file beside it, flushed, then os.replace — so a hook reading
-    the model while a background retrain writes it sees the old file or the new one, never half of either."""
+    the model while a background retrain writes it sees the old file or the new one, never half of either.
+    On Windows os.replace is refused (PermissionError) while any reader holds the target open, so the replace is
+    retried with a short backoff; a refusal that outlasts it leaves no temp file behind and raises."""
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
         f.flush()
         os.fsync(f.fileno())
-    os.replace(tmp, path)
+    for attempt in range(50):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == 49:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+                raise
+            time.sleep(min(0.002 * (attempt + 1), 0.05))
 
 
 def save_model(path, m):

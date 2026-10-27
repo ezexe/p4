@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PLUGIN = os.path.dirname(HERE)
@@ -229,12 +230,17 @@ def test_atomic_write():
                     bad.append(e)
                 except OSError:
                     pass
-        t = threading.Thread(target=reader)
+                # a hook reads the model once and exits; a reader that reopens with no gap at all would hold the
+                # file open for ever, and Windows refuses a replace over an open file however long it retries
+                time.sleep(0.001)
+        t = threading.Thread(target=reader, daemon=True)
         t.start()
-        for n in range(300):
-            pick_model.write_atomic(path, json.dumps({"w": {str(i): i * 0.5 for i in range(2000)}, "n": n}))
-        stop.set()
-        t.join()
+        try:
+            for n in range(300):
+                pick_model.write_atomic(path, json.dumps({"w": {str(i): i * 0.5 for i in range(2000)}, "n": n}))
+        finally:
+            stop.set()
+            t.join()
         assert not bad, bad[:1]
         assert not [f for f in os.listdir(os.path.dirname(path)) if f.endswith(".tmp")]
     finally:
