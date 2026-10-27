@@ -129,15 +129,31 @@ def session_dispatch_paths(store):
     return [os.path.join(s, "dispatch.md") for s in stores if os.path.exists(os.path.join(s, "dispatch.md"))]
 
 
+def model_written(store):
+    """{(time, fingerprint)} of the rows the hook wrote FRESH on the model's word (`on` mode), from the
+    log: those rows carry the model's verdict, not the operator's, and are never a label for it."""
+    path = shadow_path(store)
+    out = set()
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            for l in f:
+                parts = l.rstrip("\n").split("\t", 5)
+                if len(parts) == 6 and not l.startswith("#") and parts[2] == "on" and parts[3] == "FRESH":
+                    out.add((parts[0], " ".join(parts[5].split())))
+    return out
+
+
 def labelled(store):
     """[(session dir, fingerprint, x, label, guarded)] — label 1 for ECHO or SUPERSEDED; guarded when the rule keeps
     the row the operator's whatever the model scores."""
     out = []
+    mine = model_written(store)
     for path in session_dispatch_paths(store):
         rows = parse_rows(path)
         sess = os.path.basename(os.path.dirname(os.path.dirname(path)))
         for i, r in enumerate(rows):
-            if r["state"] not in STATES or not r["arrival"].startswith("turn"):
+            if r["state"] not in STATES or not r["arrival"].startswith("turn") or \
+                    (r["time"], " ".join(r["fp"].split())) in mine:
                 continue
             x, cands = features(r["fp"], r["time"], rows[:i])
             if x is not None:
@@ -273,8 +289,8 @@ def log_shadow(store, now, sid, fp, proposal, p, mode):
     new = not os.path.exists(path)
     with open(path, "a", encoding="utf-8", newline="\n") as f:
         if new:
-            f.write("# dispatch-model log — time\tsession\tmode\tproposal\tp\tfingerprint (first 60)\n")
-        f.write(f"{now}\t{sid}\t{mode}\t{proposal}\t{p:.3f}\t{fp[:60]}\n")
+            f.write("# dispatch-model log — time\tsession\tmode\tproposal\tp\tfingerprint\n")
+        f.write(f"{now}\t{sid}\t{mode}\t{proposal}\t{p:.3f}\t{' '.join(fp.split())}\n")
 
 
 def cmd_report(args, store):
@@ -285,7 +301,7 @@ def cmd_report(args, store):
     final = {}
     for dpath in session_dispatch_paths(store):
         for r in parse_rows(dpath):
-            final[(r["time"], " ".join(r["fp"].split())[:60])] = r["state"]
+            final[(r["time"], " ".join(r["fp"].split()))] = r["state"]
     agree = disagree = open_ = asked = 0
     with open(path, encoding="utf-8") as f:
         for l in f:

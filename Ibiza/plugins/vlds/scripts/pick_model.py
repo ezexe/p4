@@ -51,6 +51,7 @@ TOP_EVAL = 20
 EPOCHS, LR, L2 = 25, 0.1, 1e-4
 DELTA_DIGITS = 12             # Fibonacci digits for a round's delta: 376 levels a side
 POOL_STEER_RE = re.compile(r"^- \[([a-z-]+\.md) (\d{4}-\d\d-\d\d \d\d:\d\d|\(no time\))[^\]]*\] (.*?); bears: (.*)$")
+MODEL_CREDIT_RE = re.compile(r"\(\d+, [a-z+]*\bmodel\b")   # `read: <file> (<n>, model)` — a file the model picked
 TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|\d+(?:\.\d+)+")
 STOP = frozenset("""the and for that this with from are was were not but its his her their them they you your our
 into onto than then when what which who whom how why where there here have has had been being its it's out off
@@ -217,14 +218,22 @@ def parse_pool(path):
     task = re.search(r"^task:\s*(.*)$", text, re.M)
     pooled = re.search(r"^pooled:\s*(\d{4}-\d\d-\d\d \d\d:\d\d)", text, re.M)
     session = re.search(r"^session:\s*(\S+)", text, re.M)
+    read = re.search(r"^read:\s*(.*)$", text, re.M)
     steer = text.split("## steering", 1)[1].split("\n## ", 1)[0] if "## steering" in text else ""
     picks = []
     for l in steer.splitlines():
         m = POOL_STEER_RE.match(l)
         if m:
             picks.append((m.group(1), m.group(2), m.group(3).rstrip("…").strip()))
+    # a pool whose read: line credits the model was steered by the model's own picks: never a label for it
+    by_model = bool(read and MODEL_CREDIT_RE.search(read.group(1)))
     return {"path": path, "task": task.group(1).strip() if task else "", "pooled": pooled.group(1) if pooled else "",
-            "session": session.group(1)[:8] if session else "", "picks": picks}
+            "session": session.group(1)[:8] if session else "", "picks": picks, "by_model": by_model}
+
+
+def labelled_pool(p):
+    """A pool the ranker may learn from: a task, a time, steering picks, and no pick of its own making."""
+    return bool(p["task"] and p["pooled"] and p["picks"] and not p["by_model"])
 
 
 def corpus(store):
@@ -242,7 +251,7 @@ def build_pairs(store):
     pools = []
     for path in all_pools(store):
         p = parse_pool(path)
-        if not p["task"] or not p["pooled"] or not p["picks"]:
+        if not labelled_pool(p):
             continue
         cand = [i for i, r in enumerate(rows) if not r["time"] or r["time"][:16] <= p["pooled"]]
         labels, matched = [0] * len(cand), 0
@@ -452,8 +461,7 @@ def cmd_train(args, store):
     path = model_path(store, args.model)
     old = load_model(path) if os.path.exists(path) else None
     rnd = (old.get("round", 0) + 1) if old else 0
-    seen = sorted({p["session"] for p in (parse_pool(x) for x in all_pools(store))
-                   if p["picks"] and p["task"] and p["pooled"]})
+    seen = sorted({p["session"] for p in (parse_pool(x) for x in all_pools(store)) if labelled_pool(p)})
     save_model(path, {"kind": "vlds pick ranker", "round": rnd, "trained": args.now, "dim": DIM,
                       "tokens": bool(args.tokens), "threshold": t, "per_file": PER_FILE,
                       "pools": [p["session"] for p in pools], "seen": seen, "w": w})
