@@ -1,3 +1,3 @@
 # 🤝 Contributing
 
-Prompt it to do whats left to contribute.
+No Super only Artificial Intelligences. 
