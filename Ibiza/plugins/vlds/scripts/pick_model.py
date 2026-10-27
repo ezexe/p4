@@ -374,12 +374,21 @@ def load_model(path):
     return m
 
 
+def write_atomic(path, text):
+    """Write text to path whole or not at all: a temp file beside it, flushed, then os.replace — so a hook reading
+    the model while a background retrain writes it sees the old file or the new one, never half of either."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
 def save_model(path, m):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
     out = {**m, "w": {str(k): round(v, 6) for k, v in sorted(m["w"].items()) if abs(v) > 1e-9}}
-    with open(path, "w", encoding="utf-8", newline="\n") as f:
-        json.dump(out, f, indent=1)
-        f.write("\n")
+    write_atomic(path, json.dumps(out, indent=1) + "\n")
 
 
 # ─── a round's delta, in phi_prune.delta's format ───────────────────────────────────────────────────────
@@ -510,8 +519,7 @@ def cmd_train(args, store):
     if old:
         header, payload = encode_round(old["w"], w)
         dpath = os.path.join(os.path.dirname(path), f"pick-model.r{rnd:02d}.phid")
-        with open(dpath, "w", encoding="utf-8", newline="\n") as f:
-            f.write(json.dumps(header) + "\n" + payload)
+        write_atomic(dpath, json.dumps(header) + "\n" + payload)
         n = header["tensors"][0]["n_kept"]
         line += f"; delta {n} weights, {len(payload) / max(1, n):.1f} bits each → {dpath}"
     print(line)

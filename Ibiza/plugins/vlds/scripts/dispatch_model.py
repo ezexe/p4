@@ -256,12 +256,9 @@ def cmd_train(args, store):
     t = threshold_for(w, examples)
     below = sum(1 for _s, _fp, x, y, g in data if not y and not g and pick_model.score(w, x) < t)
     path = model_path(store, args.model)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="\n") as f:
-        json.dump({"kind": "vlds dispatch model", "trained": args.now, "rows": len(examples),
+    pick_model.write_atomic(path, json.dumps({"kind": "vlds dispatch model", "trained": args.now, "rows": len(examples),
                    "repeats": sum(y for _x, y in examples), "turn_rows": turn_rows_count(store),
-                   "threshold": t, "w": {str(k): round(v, 6) for k, v in sorted(w.items())}}, f, indent=1)
-        f.write("\n")
+                   "threshold": t, "w": {str(k): round(v, 6) for k, v in sorted(w.items())}}, indent=1) + "\n")
     print(f"train — {len(examples)} resembling rows, {sum(y for _x, y in examples)} repeats; threshold {t:.3f} "
           f"(FRESH for {below} of the {len(examples) - sum(y for _x, y in examples)} fresh rows it trained on) → {path}")
     return 0

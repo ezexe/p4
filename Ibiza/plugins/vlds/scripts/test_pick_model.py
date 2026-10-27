@@ -211,6 +211,37 @@ def test_picks_fold_and_barrier():
     print("picks, fold and barrier: green")
 
 
+def test_atomic_write():
+    """A reader racing a writer sees the old model or the new one, never a partial file."""
+    import threading
+    root = tempfile.mkdtemp(prefix="vlds-atomic-")
+    try:
+        path = os.path.join(root, "models", "m.json")
+        pick_model.write_atomic(path, json.dumps({"w": {}, "n": 0}))
+        bad, stop = [], threading.Event()
+
+        def reader():
+            while not stop.is_set():
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        json.load(f)
+                except ValueError as e:
+                    bad.append(e)
+                except OSError:
+                    pass
+        t = threading.Thread(target=reader)
+        t.start()
+        for n in range(300):
+            pick_model.write_atomic(path, json.dumps({"w": {str(i): i * 0.5 for i in range(2000)}, "n": n}))
+        stop.set()
+        t.join()
+        assert not bad, bad[:1]
+        assert not [f for f in os.listdir(os.path.dirname(path)) if f.endswith(".tmp")]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("atomic write: green")
+
+
 def test_review_and_audit():
     root, p4, stores = seed()
     try:
@@ -283,6 +314,7 @@ if __name__ == "__main__":
     test_pairs()
     test_train_and_round_delta()
     test_picks_fold_and_barrier()
+    test_atomic_write()
     test_review_and_audit()
     test_shadow()
     test_roads()
