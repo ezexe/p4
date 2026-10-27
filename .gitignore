@@ -142,6 +142,7 @@ experiment/data
 experiment/quick
 experiment/__pycache__
 
+.ai/
 .claude/
 .vlds/
 
