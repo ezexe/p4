@@ -206,6 +206,7 @@ DEFAULT_POOL_AUDIT = 5                     # `pool-audit:` — on the model road
                                            # their picks an unbiased label and an agreement row; 0 never
 BOOTSTRAP_POOLS = 5                        # labelled pools before a store with no pool ranker trains its first
 BOOTSTRAP_REPEATS = 5                      # judged repeats before a store with no dispatch model trains its first
+RANKER_LOCK_S = 3 * 3600                   # a .pt ranker training (pretraining included) holds models/.ranker-train
 RETRAIN_LOCK_S = 15 * 60                   # a retrain started at a turn close holds models/.retrain this long
 DISPATCH_RETRAIN_ROWS = 20                 # judged turn rows added since the dispatch model's training before it retrains
 DEFAULT_OPERATOR_VIA = None          # the agent a session hands every operator moment to, which launches the operator itself
@@ -1055,6 +1056,20 @@ def cmd_session_open(payload, store):
     print(now_line(now))
     if sid != "unknown":
         seed_session_store(store)   # the session's own dispatch.md and briefs.md, before the check below reads them
+    try:
+        pm = scripts_module("pick_model")
+        line = pm.ensure_server(store) if pm else ""
+        if line:
+            print("- " + line)
+        notices = pm.open_notices(store) if pm else []
+        if notices:
+            last = notices[-1]
+            print(f"- p4 model: {len(notices)} retrain notice(s) open (latest {last['time']}: {last['component']} — "
+                  f"{last['kind']}) — this session falls back (the JSON ranker, the children, the operator) and carries "
+                  "on; nothing here to fix or retry: the p4-model skill in the model repository (ezexe/phi) retrains "
+                  "and clears them")
+    except Exception:  # noqa: BLE001 — no ranker is a JSON-ranker session, never a broken one
+        pass
     if held:
         if sid != "unknown":
             fresh = record_seen(store, sid, now, title)
@@ -1428,7 +1443,10 @@ def dispatch_verdict(store, prompt, now, sid):
             return None
         dm.log_shadow(store, f"{now:{NOW_FMT}}", sid[:8], fp, proposal, p, mode)
         return mode, proposal, p, m["threshold"]
-    except Exception:  # noqa: BLE001 — the barrier stands without the model
+    except Exception as e:  # noqa: BLE001 — the barrier stands without the model, and the model is reported
+        pm = scripts_module("pick_model")
+        if pm:
+            pm.notify_retrain(store, "dispatch model", e, sid)
         return None
 
 
@@ -1450,6 +1468,36 @@ def spawn_detached(args, cwd, log):
                 continue
         return None
     return subprocess.Popen(args, start_new_session=True, **kw).pid
+
+
+def ranker_owed(store, stamp, pm):
+    """The .pt ranker's share of the turn close: a labelled pool its checkpoint has not trained on (models/ranker.json),
+    or none yet with BOOTSTRAP_POOLS to learn from, starts `pick_model.py ranker-train` in the background — the
+    export, phi_prune.p4rank's fine-tune (and its pretraining over the repository's text when due), then the server —
+    once per RANKER_LOCK_S, and only where an interpreter has phi_prune and torch."""
+    mdir = models_dir(store)
+    meta_path = os.path.join(mdir, "ranker.json")
+    try:
+        trained = set(json.loads(read_text(meta_path)).get("pools", [])) if os.path.exists(meta_path) else None
+    except ValueError:
+        trained = None
+    pools = {p["id"] for p in pm.label_pools(store)}
+    if not ((trained is None and len(pools) >= BOOTSTRAP_POOLS) or (trained is not None and pools - trained)):
+        return []
+    lock = os.path.join(mdir, ".ranker-train")
+    if os.path.exists(lock) and time.time() - os.path.getmtime(lock) < RANKER_LOCK_S:
+        return []
+    if not pm.ranker_python(store):
+        return []
+    os.makedirs(mdir, exist_ok=True)
+    with open(lock, "w", encoding="utf-8") as f:
+        f.write(stamp + "\n")
+    new = len(pools - (trained or set()))
+    pid = spawn_detached([sys.executable, os.path.join(plugin_root(), "scripts", "pick_model.py"), "--store", store,
+                          "ranker-train", "--now", stamp], os.path.dirname(mdir), os.path.join(mdir, "ranker.log"))
+    return [f"turn-close: training the .pt ranker on {new} labelled pool(s) it has not seen — started in the background"
+            + (f" (pid {pid}), its output in models/ranker.log; the server picks up the new checkpoint by itself"
+               if pid else " failed to start")]
 
 
 def retrain_owed(store, stamp):
@@ -1493,8 +1541,9 @@ def retrain_owed(store, stamp):
                 if repeats >= BOOTSTRAP_REPEATS:
                     jobs.append((["dispatch_model.py", "--store", store, "train", "--now", stamp], path,
                                  f"the dispatch model's first: {repeats} judged repeats to learn from"))
+    ranker = ranker_owed(store, stamp, pm) if pm else []
     if not jobs:
-        return []
+        return ranker
     mdir = os.path.dirname(jobs[0][1])
     os.makedirs(mdir, exist_ok=True)
     lock = os.path.join(mdir, ".retrain")
@@ -1509,7 +1558,7 @@ def retrain_owed(store, stamp):
                              os.path.join(mdir, "train.log"))
         out.append(f"turn-close: retraining {why} — started in the background"
                    + (f" (pid {pid}), its output in models/train.log" if pid else " failed to start"))
-    return out
+    return out + ranker
 
 
 def cmd_prompt_open(payload, store):
@@ -2041,8 +2090,12 @@ def cmd_turn_close(payload, store):
                     reports.append(f"turn-close: {line}")
     try:
         reports += retrain_owed(store, stamp)
-    except Exception as e:  # noqa: BLE001 — a model that cannot retrain keeps the one it has
-        reports.append(f"turn-close: model retrain skipped — {type(e).__name__}: {e}")
+    except Exception as e:  # noqa: BLE001 — a model that cannot retrain keeps the one it has, and is reported
+        pm = scripts_module("pick_model")
+        if pm:
+            pm.notify_retrain(store, "turn-close retrain", e, sid)
+        reports.append(f"turn-close: model retrain skipped — {type(e).__name__}: {e}; a retrain notice is in "
+                       "models/retrain-needed.tsv")
     try:
         pt.build_vindex(store)      # the cumulative index over every session store; silent, never a report line
     except Exception:  # noqa: BLE001 — a hook degrades, never raises; the next turn close rebuilds it

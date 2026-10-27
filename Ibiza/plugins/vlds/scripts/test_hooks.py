@@ -1506,6 +1506,12 @@ def test_p4_gitignore():
         with open(os.path.join(PLUGIN, "hooks", "p4-gitignore"), encoding="utf-8") as f:
             template = f.read()
         assert os.path.exists(gi) and "seeded .claude/p4/.gitignore" in out, out
+        ga = os.path.join(root, ".claude", "p4", ".gitattributes")
+        with open(ga, encoding="utf-8") as f:
+            assert "models/*.pt filter=lfs" in f.read() and "seeded .claude/p4/.gitattributes" in out, out
+        if subprocess.run(["git", "lfs", "version"], capture_output=True).returncode == 0:
+            with open(os.path.join(root, ".claude", "p4", ".git", "hooks", "pre-push"), encoding="utf-8") as f:
+                assert "git lfs" in f.read(), "git lfs install --local did not run"
         with open(gi, encoding="utf-8") as f:
             assert f.read() == template
         p4 = os.path.join(root, ".claude", "p4")
@@ -1518,6 +1524,17 @@ def test_p4_gitignore():
             kept = subprocess.run(["git", "-C", p4, "ls-files", "-co", "--exclude-standard", "scratchpad"],
                                   capture_output=True).stdout.decode().split()
             assert kept == ["scratchpad/runs/r1/run.log"], kept
+            # the checkpoints are kept (in LFS); the models' runtime files are not
+            os.makedirs(os.path.join(p4, "models"), exist_ok=True)
+            for name in ("ranker.pt", "pick-model.json", "ranker.server.json", "train.log", ".retrain", "x.123.tmp"):
+                with open(os.path.join(p4, "models", name), "wb") as f:
+                    f.write(b"x")
+            kept = subprocess.run(["git", "-C", p4, "ls-files", "-co", "--exclude-standard", "models"],
+                                  capture_output=True).stdout.decode().split()
+            assert kept == ["models/pick-model.json", "models/ranker.pt"], kept
+            attr = subprocess.run(["git", "-C", p4, "check-attr", "filter", "models/ranker.pt"],
+                                  capture_output=True).stdout.decode()
+            assert "filter: lfs" in attr, attr
         # an owner's .gitignore is never replaced
         with open(gi, "w", encoding="utf-8") as f:
             f.write("# mine\n")

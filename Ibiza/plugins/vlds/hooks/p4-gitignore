@@ -50,6 +50,9 @@ Cache_Data/
 # installs and caches
 __pycache__/
 node_modules/
-# the models' own checkpoints are trained output, kept by the store's turn close, not trained on
-models/*.pt
+# the models' runtime files: temp writes, locks, logs, the server's port, the exported pairs
+# (the checkpoints themselves are kept, in git LFS — see .gitattributes)
 models/*.tmp
+models/.*
+models/*.log
+models/ranker.server.json

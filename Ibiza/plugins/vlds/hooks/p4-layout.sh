@@ -116,6 +116,19 @@ if [ ! -e "$p4/.gitignore" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/p4-gitignore" 
   cp "${CLAUDE_PLUGIN_ROOT}/hooks/p4-gitignore" "$p4/.gitignore" 2>/dev/null \
     && echo "vlds: seeded .claude/p4/.gitignore — audio, images, builds, caches and dumps stay out of git, so what git keeps is what the models train on."
 fi
+# the checkpoints in git LFS: .gitattributes seeded when absent, and LFS's hooks installed in this repository
+if [ ! -e "$p4/.gitattributes" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/p4-gitattributes" ]; then
+  cp "${CLAUDE_PLUGIN_ROOT}/hooks/p4-gitattributes" "$p4/.gitattributes" 2>/dev/null \
+    && echo "vlds: seeded .claude/p4/.gitattributes — the models' checkpoints (models/*.pt) are stored in git LFS."
+fi
+if [ -e "$p4/.git" ] && grep -q "filter=lfs" "$p4/.gitattributes" 2>/dev/null; then
+  if git lfs version >/dev/null 2>&1; then
+    [ -f "$p4/.git/hooks/pre-push" ] && grep -q "git lfs" "$p4/.git/hooks/pre-push" 2>/dev/null \
+      || git -C "$p4" lfs install --local >/dev/null 2>&1
+  elif ls "$p4"/models/*.pt >/dev/null 2>&1; then
+    echo "vlds: .claude/p4/models holds a .pt checkpoint but git-lfs is not installed — install it (https://git-lfs.com) before committing the store, or git stores the checkpoint whole."
+  fi
+fi
 if command -v git >/dev/null 2>&1; then
   exclude=$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --git-path info/exclude 2>/dev/null)
   if [ -n "$exclude" ] && [ "$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --show-toplevel 2>/dev/null)" != "$(git -C "$p4" rev-parse --show-toplevel 2>/dev/null)" ]; then
