@@ -49,6 +49,9 @@ DIM = 1 << 18                 # hashed feature space
 PER_FILE = 6                  # a child's cap, kept
 TOP_EVAL = 20
 EPOCHS, LR, L2 = 25, 0.1, 1e-4
+REVIEW_ALTS = 4               # runners-up per file on the operator's review sheet
+REVIEW_HEAD_CHARS = 140       # a review line's head: the barrier's own width
+DEFAULT_AUDIT = 5             # `pool-audit:` unnamed — one session in five runs the children beside the model
 DELTA_DIGITS = 12             # Fibonacci digits for a round's delta: 376 levels a side
 POOL_STEER_RE = re.compile(r"^- \[([a-z-]+\.md) (\d{4}-\d\d-\d\d \d\d:\d\d|\(no time\))[^\]]*\] (.*?); bears: (.*)$")
 MODEL_CREDIT_RE = re.compile(r"\(\d+, [a-z+]*\bmodel\b")   # `read: <file> (<n>, model)` — a file the model picked
@@ -227,13 +230,54 @@ def parse_pool(path):
             picks.append((m.group(1), m.group(2), m.group(3).rstrip("…").strip()))
     # a pool whose read: line credits the model was steered by the model's own picks: never a label for it
     by_model = bool(read and MODEL_CREDIT_RE.search(read.group(1)))
+    sid = session.group(1)[:8] if session else ""
     return {"path": path, "task": task.group(1).strip() if task else "", "pooled": pooled.group(1) if pooled else "",
-            "session": session.group(1)[:8] if session else "", "picks": picks, "by_model": by_model}
+            "session": sid, "id": sid, "picks": picks, "by_model": by_model}
 
 
 def labelled_pool(p):
     """A pool the ranker may learn from: a task, a time, steering picks, and no pick of its own making."""
     return bool(p["task"] and p["pooled"] and p["picks"] and not p["by_model"])
+
+
+def labels_dir(store):
+    p4 = pt.p4_of(store)
+    return os.path.join(p4 or os.path.dirname(os.path.abspath(store)), "models", "labels")
+
+
+def parse_label_file(path):
+    """An audit's labels, written by `label`: the children's picks for a task, by file, time and head."""
+    task = pooled = session = ""
+    picks = []
+    with open(path, encoding="utf-8") as f:
+        for l in f:
+            l = l.rstrip("\n")
+            if l.startswith("# task: "):
+                task = l[8:]
+            elif l.startswith("# pooled: "):
+                pooled = l[10:][:16]
+            elif l.startswith("# session: "):
+                session = l[11:]
+            elif l and not l.startswith("#"):
+                parts = l.split("\t", 2)
+                if len(parts) == 3:
+                    picks.append((parts[0], parts[1], parts[2]))
+    return {"path": path, "task": task, "pooled": pooled, "session": session, "id": session + "/audit",
+            "picks": picks, "by_model": False}
+
+
+def label_pools(store):
+    """Every pool the ranker may learn from: each session's recall pool a child or the operator's pass picked (never
+    one the model picked alone), and each audit's children labels in models/labels/."""
+    out = [p for p in (parse_pool(x) for x in all_pools(store)) if labelled_pool(p)]
+    d = labels_dir(store)
+    if os.path.isdir(d):
+        for name in sorted(os.listdir(d)):
+            if name.endswith(".tsv"):
+                p = parse_label_file(os.path.join(d, name))
+                if labelled_pool(p):
+                    out.append(p)
+    return out
 
 
 def corpus(store):
@@ -249,10 +293,7 @@ def build_pairs(store):
     """[{task, pooled, session, rows: [row index], labels: [0/1], matched, steering}] — one per pool with picks."""
     rows, docs, idf, avgdl = corpus(store)
     pools = []
-    for path in all_pools(store):
-        p = parse_pool(path)
-        if not labelled_pool(p):
-            continue
+    for p in label_pools(store):
         cand = [i for i, r in enumerate(rows) if not r["time"] or r["time"][:16] <= p["pooled"]]
         labels, matched = [0] * len(cand), 0
         for f, tm, head in p["picks"]:
@@ -461,7 +502,7 @@ def cmd_train(args, store):
     path = model_path(store, args.model)
     old = load_model(path) if os.path.exists(path) else None
     rnd = (old.get("round", 0) + 1) if old else 0
-    seen = sorted({p["session"] for p in (parse_pool(x) for x in all_pools(store)) if labelled_pool(p)})
+    seen = sorted({p["id"] for p in label_pools(store)})
     save_model(path, {"kind": "vlds pick ranker", "round": rnd, "trained": args.now, "dim": DIM,
                       "tokens": bool(args.tokens), "threshold": t, "per_file": PER_FILE,
                       "pools": [p["session"] for p in pools], "seen": seen, "w": w})
@@ -487,6 +528,7 @@ def write_picks(store, args, m):
                                          m.get("tokens", False))
     sc = [score(m["w"], x) for x in xs]
     picked = set(select(live, sc, m["threshold"], m.get("per_file", PER_FILE)))
+    review = []
     totals = {}
     for r in barrier:
         totals[r["file"]] = totals.get(r["file"], 0) + 1
@@ -501,7 +543,37 @@ def write_picks(store, args, m):
         for i in mine:
             terms = ", ".join(shared[i]) or "no shared term"
             out.append(f"{fname}:{live[i]['line']} || bears: model {sc[i]:.2f}; shares: {terms}")
-    return out, len(picked), len(live)
+        # the operator's review sheet: the picks and the runners-up, each with its head, so the pass can judge
+        # without opening a file
+        alts = sorted((i for i in range(len(live)) if live[i]["file"] == fname and i not in picked),
+                      key=lambda i: -sc[i])[:REVIEW_ALTS]
+        review.append(f"## {fname} — {totals.get(fname, 0)} entries; {len(mine)} model picks, {len(alts)} runners-up")
+        for tag, idx in (("pick", mine), ("alt ", alts)):
+            for i in idx:
+                r = live[i]
+                review.append(f"{tag} {fname}:{r['line']}  {sc[i]:.2f}  [{r['time'] or '(no time)'}] "
+                              f"{phi.distilled(r, REVIEW_HEAD_CHARS)}")
+    return out, len(picked), len(live), review
+
+
+def audit_every(store):
+    """The index's `pool-audit:` (1 session in N runs the children beside the model), DEFAULT_AUDIT when unnamed."""
+    idx = phi.parse_index(os.path.dirname(pt.config_index(store)))
+    in_recall = False
+    for l in (idx["raw"] if idx else "").split("\n"):
+        if l.startswith("## "):
+            in_recall = l[3:].strip().lower() == "recall"
+            continue
+        m = re.match(r"^pool-audit:\s*(\d+)", l.strip()) if in_recall else None
+        if m:
+            return int(m.group(1))
+    return DEFAULT_AUDIT
+
+
+def audit_due(store, session):
+    """Whether this session is one of the 1 in N audited: decided by its id alone, so every reader agrees."""
+    n = audit_every(store)
+    return n > 0 and zlib.crc32(session[:8].encode("utf-8")) % n == 0
 
 
 def cmd_picks(args, store):
@@ -510,16 +582,41 @@ def cmd_picks(args, store):
         print(f"picks — no model at {path}: run `pick_model.py train`, or take the skeleton road")
         return 3
     m = load_model(path)
-    lines, n, live = write_picks(store, args, m)
+    lines, n, live, review = write_picks(store, args, m)
     text = "\n".join(lines) + "\n"
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         with open(args.out, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
+    if args.review:
+        os.makedirs(os.path.dirname(os.path.abspath(args.review)), exist_ok=True)
+        with open(args.review, "w", encoding="utf-8", newline="\n") as f:
+            f.write(f"# review — model round {m.get('round', 0)}; task: {args.task}\n\n" + "\n".join(review) + "\n")
     print(f"picks — model round {m.get('round', 0)}, threshold {m['threshold']:.2f}: {n} of {live} LIVE rows"
-          + (f" → {args.out}" if args.out else ""))
+          + (f" → {args.out}" if args.out else "") + (f"; review sheet → {args.review}" if args.review else ""))
+    if audit_due(store, args.session):
+        print(f"audit: this session is one of the 1 in {audit_every(store)} audited — run the children beside the "
+              "model (hooks/pool-prompt.md, the model road's audit step)")
     if not args.out:
         print(text, end="")
+    return 0
+
+
+def cmd_label(args, store):
+    """An audit's children picks as labels by content, models/labels/<session>.tsv: the virtual line numbers in a
+    picks file hold only while the store stands as it is, so each pick is written as its file, time and head."""
+    picks, ignored, _sources = phi.read_picks(args.picks)
+    rows = {(r["file"], r["line"]): r for r in phi.barrier_rows(store, args.session)[0]}
+    found = [rows[k] for k in picks if k in rows and k[0] != "tombstones.md"]
+    path = os.path.join(labels_dir(store), f"{args.session[:8]}.tsv")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(f"# pick-model labels — the children's picks of an audit, by file, time and head\n"
+                f"# session: {args.session[:8]}\n# task: {args.task}\n# pooled: {args.now}\n")
+        for r in found:
+            f.write(f"{r['file']}\t{r['time'] or '(no time)'}\t{phi.distilled(r, 400)}\n")
+    print(f"label — {len(found)} of {len(picks)} children picks written as labels"
+          + (f", {ignored} line(s) ignored" if ignored else "") + f" → {path}")
     return 0
 
 
@@ -535,9 +632,11 @@ def cmd_shadow(args, store):
     new = not os.path.exists(path)
     with open(path, "a", encoding="utf-8", newline="\n") as f:
         if new:
-            f.write("# pick-model shadow — time\tsession\tchildren\tmodel\tboth\trecall\tprecision\n")
-        f.write(f"{args.now}\t{args.session}\t{len(child)}\t{len(model)}\t{len(both)}\t{rec:.3f}\t{prec:.3f}\n")
-    print(f"shadow — the model's picks hold {len(both)} of the children's {len(child)} (recall {rec:.2f}); "
+            f.write("# pick-model shadow — time\tsession\tchildren\tmodel\tboth\trecall\tprecision\tjudge\n")
+        f.write(f"{args.now}\t{args.session}\t{len(child)}\t{len(model)}\t{len(both)}\t{rec:.3f}\t{prec:.3f}\t"
+                f"{args.judge}\n")
+    who = "children's" if args.judge == "child" else "operator's reviewed"
+    print(f"shadow — the model's picks hold {len(both)} of the {who} {len(child)} (recall {rec:.2f}); "
           f"{len(model)} model picks (precision {prec:.2f}) → {path}")
     return 0
 
@@ -563,13 +662,22 @@ def main():
     p.add_argument("--task", required=True)
     p.add_argument("--now", required=True)
     p.add_argument("--out", default="")
+    p.add_argument("--review", default="", help="write the operator's review sheet here: picks and runners-up, with heads")
+    p = sub.add_parser("label")
+    p.add_argument("--session", required=True)
+    p.add_argument("--task", required=True)
+    p.add_argument("--now", required=True)
+    p.add_argument("--picks", required=True, help="the audit children's picks file")
     p = sub.add_parser("shadow")
     p.add_argument("--session", required=True)
     p.add_argument("--now", required=True)
     p.add_argument("--children", required=True, help="the children's picks file")
     p.add_argument("--model-picks", required=True, help="the model's picks file")
+    p.add_argument("--judge", default="child", choices=("child", "pass"),
+                   help="who made the --children picks: the audit's children, or the operator's review")
     args = ap.parse_args()
-    cmds = {"pairs": cmd_pairs, "eval": cmd_eval, "train": cmd_train, "picks": cmd_picks, "shadow": cmd_shadow}
+    cmds = {"pairs": cmd_pairs, "eval": cmd_eval, "train": cmd_train, "picks": cmd_picks, "label": cmd_label,
+            "shadow": cmd_shadow}
     if args.cmd not in cmds:
         ap.print_help()
         return 2

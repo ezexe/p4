@@ -211,6 +211,33 @@ def test_picks_fold_and_barrier():
     print("picks, fold and barrier: green")
 
 
+def test_review_and_audit():
+    root, p4, stores = seed()
+    try:
+        store = stores["aaaa1111"]
+        run(PICK, "--store", store, "train", "--now", "2026-09-07 10:00")
+        review = os.path.join(root, "review.md")
+        code, out = run(PICK, "--store", store, "picks", "--session", "eeee5555", "--task",
+                        "the audio ring buffer drain order", "--now", "2026-09-08 10:00",
+                        "--out", os.path.join(root, "m.md"), "--review", review)
+        with open(review, encoding="utf-8") as f:
+            sheet = f.read()
+        assert code == 0 and "## local-storage.md" in sheet and "\npick local-storage.md:" in sheet, sheet
+        assert "\nalt  local-storage.md:" in sheet and "ring buffer" in sheet, sheet
+        # the audit: decided by the session id alone, one in N; pool-audit: 0 never
+        due = [s for s in (f"{i:08x}" for i in range(200)) if pick_model.audit_due(store, s)]
+        assert 20 <= len(due) <= 60, len(due)
+        os.makedirs(os.path.join(p4, "vindex"), exist_ok=True)
+        with open(os.path.join(p4, "vindex", "phi-index.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("# idx\n\n## recall\n\npool-audit: 0\n")
+        assert not any(pick_model.audit_due(store, s) for s in due)
+        # an operator-reviewed pool (credited `pass`) is a label; a model-only one is not
+        assert pick_model.labelled_pool({**pick_model.parse_pool(os.path.join(stores["bbbb2222"], "recall-pool.md"))})
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("review and audit: green")
+
+
 def test_shadow():
     root, p4, stores = seed()
     try:
@@ -256,6 +283,7 @@ if __name__ == "__main__":
     test_pairs()
     test_train_and_round_delta()
     test_picks_fold_and_barrier()
+    test_review_and_audit()
     test_shadow()
     test_roads()
     print("test_pick_model.py: all green")

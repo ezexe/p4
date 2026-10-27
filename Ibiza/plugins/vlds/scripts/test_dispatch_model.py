@@ -103,9 +103,10 @@ def test_train_and_hook():
         assert code == 0 and "repeats wrongly written FRESH" in out, out
 
         asks = [f"run the gamma build again and report the gamma timings for the {h} host?"
-                for h in ("editor", "mixer", "render")]
+                for h in ("editor", "mixer", "render", "export")]
         echo = "check the delta log for errors in the delta session"
-        # off (no index key): the barrier as it was, no model named
+        # off, named: the barrier as it was, no model named, though a model is trained
+        set_recall(p4, "dispatch-model: off")
         out = th.run_hook("prompt-open", {"session_id": "dddd0000-test", "prompt": asks[0]}, root)
         assert "dispatch model" not in out and "state: left open" in out and last_state(store) is None, out
         complete_last(store)
@@ -118,19 +119,27 @@ def test_train_and_hook():
         set_recall(p4, "dispatch-model: on")
         out = th.run_hook("prompt-open", {"session_id": "dddd0000-test", "prompt": asks[2]}, root)
         assert "scores it plainly fresh" in out and last_state(store) == "FRESH", out
+        with open(os.path.join(store, "dispatch.md"), "a", encoding="utf-8", newline="\n") as f:
+            f.write("  addressed: answered (the record's, at the turn's close)\n")
         # on: an echo of an open row stays the operator's
         out = th.run_hook("prompt-open", {"session_id": "dddd0000-test", "prompt": echo}, root)
         assert "dispatch model (on): asks" in out and "state: left open" in out and last_state(store) is None, out
+        complete_last(store)
+        # unnamed: a trained model is on by default
+        set_recall(p4, "pool-road: children")
+        out = th.run_hook("prompt-open", {"session_id": "dddd0000-test", "prompt": asks[3]}, root)
+        assert "scores it plainly fresh" in out and last_state(store) == "FRESH", out
         with open(os.path.join(p4, "models", "dispatch-shadow.tsv"), encoding="utf-8") as f:
             log = [l.split("\t") for l in f.read().strip().split("\n")[1:]]
-        assert [l[2] for l in log] == ["shadow", "on", "on"] and [l[3] for l in log] == ["FRESH", "FRESH", "ask"], log
+        assert [l[2] for l in log] == ["shadow", "on", "on", "on"] and \
+            [l[3] for l in log] == ["FRESH", "FRESH", "ask", "FRESH"], log
         # the row the model wrote FRESH is never a label for it; the rows the operator judged are
         sys.path.insert(0, HERE)
         import dispatch_model as dm  # noqa: E402
         fps = [r[1] for r in dm.labelled(store)]
-        assert asks[2] not in fps and asks[0] in fps and asks[1] in fps, fps
+        assert asks[2] not in fps and asks[3] not in fps and asks[0] in fps and asks[1] in fps, fps
         code, out = run(DM, "--store", store, "report")
-        assert "proposed FRESH: 2 the operator's FRESH too" in out and "1 left to the operator" in out, out
+        assert "proposed FRESH: 3 the operator's FRESH too" in out and "1 left to the operator" in out, out
     finally:
         shutil.rmtree(root, ignore_errors=True)
     print("dispatch model and the prompt hook: green")
@@ -149,25 +158,37 @@ def wait_for(path, seconds=60):
 def test_turn_close_retrain():
     root, p4, stores = tp.seed()
     try:
-        set_recall(p4, "pool-road: model-shadow")
-        payload = {"session_id": "aaaa1111", "cwd": root}
-        out = th.run_hook("turn-close", dict(payload, _keep_sid=True), root)
+        payload = {"session_id": "aaaa1111", "cwd": root, "_keep_sid": True}
         model = os.path.join(p4, "models", "pick-model.json")
-        assert "retraining the pool ranker: 4 labelled pool(s) it has not seen" in out, out
+        # four labelled pools: under the bootstrap's five, nothing trains, whatever the road
+        set_recall(p4, "pool-road: model-shadow")
+        out = th.run_hook("turn-close", dict(payload), root)
+        assert "retraining" not in out and not os.path.exists(model), out
+        # an audit's children labels make the fifth: the first model trains, with no road named
+        store = stores["aaaa1111"]
+        picks = os.path.join(root, "audit.md")
+        rows = [r for r in tp.phi.barrier_rows(store, "eeee5555")[0] if r["file"] == "local-storage.md"]
+        with open(picks, "w", encoding="utf-8") as f:
+            f.write("picks — local-storage.md, 1 of 10 entries bear on the task\n"
+                    f"local-storage.md:{rows[8]['line']} || bears: the crash dump\n")
+        code, out = run(tp.PICK, "--store", store, "label", "--session", "eeee5555", "--task",
+                        "read the crash dump", "--now", "2026-09-08 10:00", "--picks", picks)
+        assert code == 0 and "1 of 1 children picks" in out, out
+        set_recall(p4, "")
+        assert tp.phi.index_road(store) == "children"
+        out = th.run_hook("turn-close", dict(payload), root)
+        assert "retraining the pool ranker: 5 labelled pool(s) it has not seen" in out, out
         assert wait_for(model), "the background training wrote no model"
         with open(model, encoding="utf-8") as f:
-            assert len(json.load(f)["seen"]) == 4
-        # the lock holds a second turn close, and a trained model owes nothing
-        out = th.run_hook("turn-close", dict(payload, _keep_sid=True), root)
+            assert "eeee5555/audit" in json.load(f)["seen"]
+        # trained: the road unnamed is the model's now
+        assert tp.phi.index_road(store) == "model"
+        # the lock holds a second turn close, and a model that has seen every pool owes nothing
+        out = th.run_hook("turn-close", dict(payload), root)
         assert "retraining" not in out, out
         os.remove(os.path.join(p4, "models", ".retrain"))
-        out = th.run_hook("turn-close", dict(payload, _keep_sid=True), root)
+        out = th.run_hook("turn-close", dict(payload), root)
         assert "retraining" not in out, out
-        # the default road owes no training at all
-        set_recall(p4, "pool-road: children")
-        os.remove(model)
-        out = th.run_hook("turn-close", dict(payload, _keep_sid=True), root)
-        assert "retraining" not in out and not os.path.exists(model), out
     finally:
         shutil.rmtree(root, ignore_errors=True)
     print("turn close retrain: green")

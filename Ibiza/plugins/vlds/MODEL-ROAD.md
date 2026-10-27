@@ -28,7 +28,7 @@ The prose stays the source of truth. The model only chooses which LIVE rows to s
 
 ## Setup
 
-All commands run from the project root. `<store>` is the session's store, `.claude/p4/sessions/<s8>/vlds`. Any session's store works for `pairs`, `eval` and `train`, since the barrier reads every session.
+No setup is needed: the turn close trains both models once the store holds enough, and a trained model is on by default (see *Always on, always learning*). The commands below are for looking in, or for training by hand. All commands run from the project root. `<store>` is the session's store, `.claude/p4/sessions/<s8>/vlds`. Any session's store works for `pairs`, `eval` and `train`, since the barrier reads every session.
 
 ```bash
 PICK=<plugin root>/scripts/pick_model.py
@@ -47,25 +47,28 @@ python $PICK --store $STORE train --now "<the latest now:>"
 python $PICK --store $STORE picks --session <s8> --task "<one-line task>" --now "<the latest now:>"
 ```
 
-Then choose the road in the `## recall` section of the cumulative index (`.claude/p4/vindex/phi-index.md`). An edit there is a ruling, so it's the owner's to make:
+The `## recall` section of the cumulative index (`.claude/p4/vindex/phi-index.md`) can name a road to override the default. An edit there is a ruling, so it's the owner's to make:
 
 ```
 ## recall
 
-pool-road: model-shadow
+pool-road: model        # the default once trained; or model-shadow, children
+pool-audit: 5           # 1 session in 5 also runs the children; 0 never
 ```
 
-- **`model-shadow`**: the children road, unchanged. Before launching the children, the operator writes the model's picks beside them. After the last child lands, `pick_model.py shadow` appends one row to `.claude/p4/models/shadow.tsv` with the time, the session, both counts, the overlap, recall and precision. Only the children's picks are folded, so nothing about the pool changes. Every shadow session also leaves a new labelled pool to train on.
-- **`model`**: no children. The model's picks file is folded directly, and the operator runs in the foreground with nothing streamed. Because it needs no Agent tool, it also works where the children can't run, such as a conducted operator at spawn depth 2. If no model is trained yet (exit 3), the operator takes the skeleton road and says so.
-- **`children`**: back to the default at any time. The roads share everything below the picks file.
+- **`model`** (the default once a pool ranker is trained): the model proposes picks and writes a review sheet with each pick's head and four runners-up per file. The operator, already launched for the pool, makes one judged pass over the sheet: it keeps, drops or adds (at most six a file), and its reviewed picks are what the pool folds. The pool credits `pass`, so every model-road session leaves a label. `pick_model.py shadow --judge pass` logs how far the model's proposal moved. If no model is trained yet (exit 3), the operator takes the children road, which gathers the pools the first model trains on.
+- **The audit.** One session in N (`pool-audit:`, five by default, `0` for never) also runs the Haiku children in the background. Their picks are never folded: `pick_model.py label` writes them to `models/labels/<s8>.tsv` as labels, and `shadow --judge child` logs their agreement with the model. These labels come from readers that never saw the model's picks, which keeps the operator's review from simply agreeing with the model. Which sessions are audited is decided by the session id alone.
+- **`model-shadow`**: the children road, with the model's picks written beside theirs and compared in `shadow.tsv`. Only the children's picks are folded.
+- **`children`**: no model in the pool. Its pools still teach the ranker.
 
-**Switching rule.** Stay on `model-shadow` until `shadow.tsv`'s recall holds steady across sessions at a level the owner accepts.
+## Always on, always learning
 
-## Retraining at the turn's close
+- **On by default.** Once `models/pick-model.json` exists, an unnamed `pool-road:` reads `model`. Once `models/dispatch-model.json` exists, an unnamed `dispatch-model:` reads `on`. A setting the index names always wins.
+- **Trained from the start.** The Stop hook trains the first pool ranker as soon as the store holds 5 labelled pools, and the first dispatch model once 5 judged repeats exist. It doesn't wait for any setting.
+- **Retrained continuously.** After that, the ranker retrains at every turn close that brings a labelled pool it hasn't seen: an operator-reviewed pool, an audit's labels, or a children pool. The dispatch model retrains every 20 judged rows.
+- **In the background.** Training runs detached, so the turn close isn't held. Output goes to `.claude/p4/models/train.log`, and a `models/.retrain` lock allows at most one start every 15 minutes. Each ranker round writes the next `pick-model.rNN.phid`.
 
-The Stop hook retrains on its own once a store opts in. Under `pool-road: model` or `model-shadow`, it retrains the pool ranker when a labelled pool exists that the model hasn't seen. Under `dispatch-model: shadow` or `on`, it retrains the dispatch model once 20 more judged rows exist than it trained on. Training runs detached in the background, so the turn close isn't held. Output is appended to `.claude/p4/models/train.log`, and a `models/.retrain` lock allows at most one start every 15 minutes. Each pool-ranker retrain writes the next `pick-model.rNN.phid`. On the default roads, with `dispatch-model` off, nothing is trained.
-
-**Neither model learns from its own output.** A pool whose `read:` line credits `model` was steered by the ranker's own picks, so it's never a training label. A row the hook wrote FRESH under `dispatch-model: on` is logged in `models/dispatch-shadow.tsv` and left out of the dispatch model's labels. This means `pool-road: model` gives the ranker no new labels: only sessions on `children` or `model-shadow` teach it. The dispatch model keeps learning under `on`, because every row it leaves to the operator is still judged there.
+**Neither model learns from its own output.** A pool steered by the model's picks alone (its `read:` line credits `model`) is never a label. A row the hook wrote FRESH under `dispatch-model: on` is logged in `models/dispatch-shadow.tsv` and left out of the dispatch model's labels. On the model road the labels come from the operator's review every session and from the audit's children one session in N. The dispatch model learns from every row it leaves to the operator. The operator's review sees the model's proposal, so it leans toward it; the audit is the check on that.
 
 ## The dispatch model
 
@@ -76,15 +79,15 @@ The prompt hook stamps every message's dispatch row. When an earlier row of the 
 - **The threshold sits under every repeat it trained on**, at 0.4 of the lowest repeat's score.
 - **Features** are word overlap with the resembling rows, how many there are, whether any is still open, the minutes since the latest one, the message's length, a question mark, and whether a resembling row was itself a repeat.
 
-Turn it on in the same `## recall` section:
+It is on by default once trained. The same `## recall` section can name another mode:
 
 ```
-dispatch-model: shadow
+dispatch-model: on      # the default once trained; or shadow, off
 ```
 
 - **`shadow`**: the hook's line names the model's proposal (`would write FRESH p=…` or `asks`) and logs it to `models/dispatch-shadow.tsv`. The operator still judges every row. `python <plugin root>/scripts/dispatch_model.py --store <store> report` joins the log to the operator's final states. It exits 1 if a proposed FRESH was later judged a repeat.
 - **`on`**: the hook writes `state: FRESH` itself when the model is sure, and says so in one line. Everything else goes to the operator as before.
-- **`off`**: the default; the barrier works exactly as before.
+- **`off`**: the barrier works exactly as before. This is the default only until a dispatch model is trained.
 
 On AudioPlugin-p4 (2026-10-27): of 2,243 judged turn rows, 232 resembled an earlier row, and 25 of those were repeats. 89 of the 232 fall under the rule. Leave-one-session-out over 40 sessions, the model would have written FRESH for **28 of the 207 fresh rows (14% of those operator launches)** and for **0 of the 25 repeats**.
 
@@ -100,9 +103,9 @@ These are leave-one-pool-out over 21 pools. R-precision is the share of a pool's
 ## Limits
 
 - **21 pools is small.** The model mainly learns overlap and file-rank weighting; it can't read meaning. A task phrased with words the entries don't use will miss.
-- **The `bears:` clause is mechanical.** It reads `model 0.71; shares: toolbar, latency`, not how an entry constrains the task. The main session still judges.
+- **The review is the operator's, and it's anchored.** On the model road the `bears:` clauses are the operator's words, but it judges from the model's sheet: a relevant entry outside the picks and the four runners-up per file isn't seen. The audit is what catches that.
 - **The dispatch model only saves launches.** With 25 repeats to learn from, it clears 14% of the plainly fresh messages and leaves every judgment call to the operator. It can't find a repeat the hook's overlap rule missed.
-- **Retraining is mechanical.** A retrain picks up new labels; nothing checks whether a new model is better than the last one. Run `eval` after a retrain to see.
+- **Retraining is mechanical.** A retrain picks up new labels; nothing checks whether a new model is better than the last. `shadow.tsv` shows the trend: the `pass` rows say how much the operator corrects the model, and the `child` rows give the unanchored agreement. Run `eval` to compare rounds.
 
 ## The phi side: continual training on a store
 

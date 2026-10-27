@@ -1027,11 +1027,19 @@ def read_picks(path):
 POOL_ROADS = ("skeleton", "children", "single", "model", "model-shadow")
 
 
+def default_road(store):
+    """The road when the index names none: model once a pool ranker is trained (<p4>/models/pick-model.json), children
+    until then — the children's pools are what the first model trains on."""
+    p4 = pt.p4_of(store)
+    trained = os.path.join(p4 or os.path.dirname(os.path.abspath(store)), "models", "pick-model.json")
+    return "model" if os.path.exists(trained) else "children"
+
+
 def index_road(store):
-    """The config index's `pool-road:` — children when absent or unknown."""
+    """The config index's `pool-road:` — default_road() when absent or unknown."""
     idx = parse_index(os.path.dirname(pt.config_index(store)))
     if not idx:
-        return "children"
+        return default_road(store)
     in_recall = False
     for l in idx["raw"].split("\n"):
         if l.startswith("## "):
@@ -1040,7 +1048,7 @@ def index_road(store):
         m = re.match(r"^pool-road:\s*([\w-]+)", l.strip()) if in_recall else None
         if m and m.group(1).lower() in POOL_ROADS:
             return m.group(1).lower()
-    return "children"
+    return default_road(store)
 
 
 def clip(text, width):
