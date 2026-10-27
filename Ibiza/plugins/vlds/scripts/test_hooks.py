@@ -1493,6 +1493,42 @@ def test_standing_rules():
     print("standing rules: green")
 
 
+def test_p4_gitignore():
+    """p4-layout.sh seeds .claude/p4/.gitignore from hooks/p4-gitignore when the store has none — audio, images,
+    builds and caches ignored by type, a run's text kept — and never touches one the owner has."""
+    root, store = seed_project()
+    try:
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=root, CLAUDE_PLUGIN_ROOT=PLUGIN)
+        layout = os.path.join(PLUGIN, "hooks", "p4-layout.sh")
+        r = subprocess.run(["sh", layout], capture_output=True, env=env, timeout=60)
+        out = r.stdout.decode("utf-8", "replace")
+        gi = os.path.join(root, ".claude", "p4", ".gitignore")
+        with open(os.path.join(PLUGIN, "hooks", "p4-gitignore"), encoding="utf-8") as f:
+            template = f.read()
+        assert os.path.exists(gi) and "seeded .claude/p4/.gitignore" in out, out
+        with open(gi, encoding="utf-8") as f:
+            assert f.read() == template
+        p4 = os.path.join(root, ".claude", "p4")
+        if shutil.which("git"):
+            for rel, data in (("scratchpad/runs/r1/take.wav", b"RIFF\0\0"), ("scratchpad/runs/r1/run.log", b"ok\n"),
+                              ("scratchpad/runs/r1/GPUCache/data_1", b"\0"), ("scratchpad/shot.png", b"\x89PNG")):
+                os.makedirs(os.path.dirname(os.path.join(p4, rel)), exist_ok=True)
+                with open(os.path.join(p4, rel), "wb") as f:
+                    f.write(data)
+            kept = subprocess.run(["git", "-C", p4, "ls-files", "-co", "--exclude-standard", "scratchpad"],
+                                  capture_output=True).stdout.decode().split()
+            assert kept == ["scratchpad/runs/r1/run.log"], kept
+        # an owner's .gitignore is never replaced
+        with open(gi, "w", encoding="utf-8") as f:
+            f.write("# mine\n")
+        r = subprocess.run(["sh", layout], capture_output=True, env=env, timeout=60)
+        with open(gi, encoding="utf-8") as f:
+            assert f.read() == "# mine\n" and "seeded" not in r.stdout.decode()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("p4 gitignore: green")
+
+
 if __name__ == "__main__":
     test_pre_write()
     test_stray_scan()
@@ -1518,4 +1554,5 @@ if __name__ == "__main__":
     test_move()
     test_pool_skeleton()
     test_standing_rules()
+    test_p4_gitignore()
     print("test_hooks.py: all green")

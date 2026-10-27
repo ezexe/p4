@@ -458,7 +458,7 @@ def cmd_pairs(args, store):
             for p in pools:
                 for i, y in zip(p["rows"], p["labels"]):
                     r = rows[i]
-                    f.write(json.dumps({"pool": p["session"], "pooled": p["pooled"], "task": p["task"],
+                    f.write(json.dumps({"pool": p["session"], "pool_id": p["id"], "pooled": p["pooled"], "task": p["task"],
                                         "file": r["file"], "time": r["time"], "kind": r["kind"],
                                         "state": r["state"], "text": phi.distilled(r, 400), "label": y},
                                        ensure_ascii=False) + "\n")
