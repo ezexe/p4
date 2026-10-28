@@ -61,12 +61,16 @@ def fake_server(p4, answer, names=None, seen=None):
     return srv
 
 
-def enable_pt(p4, weight=2.0):
-    """A JSON model whose training found the .pt feature helps: `pt` set and a weight on it."""
+def enable_pt(p4, weight=2.0, effort=""):
+    """A JSON model whose training found the .pt feature helps: `pt` set and a weight on it, fitted on the source
+    `effort` names (the tree at medium or high, the single ranker when empty)."""
     path = os.path.join(p4, "models", "pick-model.json")
     with open(path, encoding="utf-8") as f:
         m = json.load(f)
     m["pt"] = True
+    m.pop("pt_effort", None)
+    if effort:
+        m["pt_effort"] = effort
     m["w"][str(pick_model.h("pt-z"))] = weight
     with open(path, "w", encoding="utf-8") as f:
         json.dump(m, f)
@@ -132,8 +136,8 @@ def test_picks_fallbacks():
 
 
 def test_pool_effort():
-    """The index's `pool-effort:` chooses who answers for the .pt: unnamed sends no effort (the single ranker), low
-    never asks the server, medium and high are sent as the request's effort and a tree's answer is named in the tag."""
+    """`pool-effort: low` never asks the server; otherwise the server is asked at the effort the model's pt weight was
+    fitted on (its pt_effort), whatever the index names now, and a tree's answer is named in the tag."""
     root, p4, stores = tp.seed()
     try:
         store = stores["aaaa1111"]
@@ -149,20 +153,23 @@ def test_pool_effort():
         srv = fake_server(p4, answer, seen=seen)
         os.makedirs(os.path.join(p4, "vindex"), exist_ok=True)
 
-        def effort_is(v):
+        def effort_is(v, fitted=""):
+            enable_pt(p4, effort=fitted)
             with open(os.path.join(p4, "vindex", "phi-index.md"), "w", encoding="utf-8", newline="\n") as f:
                 f.write("# idx\n\n## recall\n\n" + (f"pool-effort: {v}\n" if v else ""))
             del seen[:]
             return run(*args)
         code, out = effort_is("")
         assert code == 0 and "(json r0+pt r7)" in out and "effort" not in seen[0], out
-        code, out = effort_is("low")
+        code, out = effort_is("low", "high")                     # low skips the .pt whatever it was fitted on
         assert code == 0 and "(json r0)" in out and not seen, out
-        code, out = effort_is("medium")
+        code, out = effort_is("medium", "medium")
         assert code == 0 and "(json r0+pt r7 tree:medium:101)" in out and seen[0]["effort"] == "medium", out
-        code, out = effort_is("high")
+        code, out = effort_is("high", "high")
         assert code == 0 and seen[0]["effort"] == "high" and "tree:high" in out, out
-        code, out = effort_is("extreme")                         # not an effort: the single ranker, as unnamed
+        code, out = effort_is("high")                            # named, but the weight was fitted on the ranker
+        assert code == 0 and "effort" not in seen[0] and "(json r0+pt r7)" in out, out
+        code, out = effort_is("extreme")                         # not an effort: as unnamed
         assert code == 0 and "effort" not in seen[0], out
         assert pick_model.pool_effort(store) == "" and not pick_model.open_notices(store)
         srv.shutdown()
