@@ -330,6 +330,7 @@ def pool_examples(pool, data, with_tokens):
 # ─── the .pt ranker's score as a feature ────────────────────────────────────────────────────────────────
 
 OOF_FILE = "ranker-oof.json"    # phi_rank's out-of-fold scores of every labelled pool, by pool id and text key
+TREE_OOF_FILE = "tree-oof.json"  # phi_rank.tree's: the same, per effort (medium, high), from fold trees
 
 
 def text_key(text):
@@ -338,14 +339,25 @@ def text_key(text):
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
 
 
-def load_oof(store):
-    """{pool id: {text key: score}} from models/ranker-oof.json, {} when there is none or it is unreadable."""
+def load_oof(store, effort=""):
+    """{pool id: {text key: score}} for the .pt source `effort` names: the tree's scores at medium or high from
+    models/tree-oof.json, the single ranker's from models/ranker-oof.json otherwise; {} when there is none or it is
+    unreadable."""
     try:
-        with open(os.path.join(models_root(store), OOF_FILE), encoding="utf-8") as f:
-            pools = json.load(f).get("pools", {})
+        if effort in ("medium", "high"):
+            with open(os.path.join(models_root(store), TREE_OOF_FILE), encoding="utf-8") as f:
+                pools = json.load(f).get("efforts", {}).get(effort, {})
+        else:
+            with open(os.path.join(models_root(store), OOF_FILE), encoding="utf-8") as f:
+                pools = json.load(f).get("pools", {})
         return pools if isinstance(pools, dict) else {}
     except (OSError, ValueError, AttributeError):
         return {}
+
+
+def pt_source(effort):
+    """The name of the .pt source an effort asks for, as the model records it."""
+    return f"tree:{effort}" if effort in ("medium", "high") else "ranker"
 
 
 def add_pt(xs, scores):
@@ -570,11 +582,13 @@ def cmd_eval(args, store):
           f"picks: precision {mean(model_m, 'precision'):.3f} recall {mean(model_m, 'recall'):.3f} "
           f"f1 {mean(model_m, 'f1'):.3f} ({mean(model_m, 'picked'):.1f} a pool against {mean(model_m, 'labelled'):.1f})")
     print(f"  term overlap  r-precision {mean(base_m, 'r-precision'):.3f}  recall@20 {mean(base_m, 'recall@20'):.3f}")
-    oof = load_oof(store)
+    effort = pool_effort(store)
+    oof = load_oof(store, effort)
     pt_scores = [pool_pt(p, data, oof) for p in pools] if oof else []
     if sum(1 for x in pt_scores if x) >= 3:
         with_pt = [(add_pt([dict(x) for x in f[0]], sc), f[1], f[2]) for f, sc in zip(feats, pt_scores)]
-        print(f"  with the .pt feature (out-of-fold, {sum(1 for x in pt_scores if x)} pools scored): r-precision "
+        print(f"  with the .pt feature ({pt_source(effort)}, out-of-fold, {sum(1 for x in pt_scores if x)} pools "
+              f"scored): r-precision "
               f"{loo_rprecision(pools, with_pt, data):.3f}")
     return 0
 
@@ -586,14 +600,18 @@ def cmd_train(args, store):
         return 1
     feats = [pool_examples(p, data, args.tokens) for p in pools]
     # the .pt ranker's out-of-fold score joins the features only when it raises the held-out r-precision: the JSON
-    # ranker can only gain from it, and a .pt model that ranks worse than word overlap simply carries no weight
-    oof, use_pt, held = load_oof(store), False, None
+    # ranker can only gain from it, and a .pt model that ranks worse than word overlap simply carries no weight.
+    # The source is the one the index's pool-effort names: the tree at medium or high, the single ranker otherwise
+    effort = pool_effort(store)
+    effort = effort if effort in ("medium", "high") else ""
+    oof, use_pt, held = load_oof(store, effort), False, None
     pt_scores = [pool_pt(p, data, oof) for p in pools] if oof else []
     if sum(1 for x in pt_scores if x) >= 4 and len(pools) >= 4:
         plain = loo_rprecision(pools, feats, data)
         with_pt = [(add_pt([dict(x) for x in f[0]], sc), f[1], f[2]) for f, sc in zip(feats, pt_scores)]
         boosted = loo_rprecision(pools, with_pt, data)
-        use_pt, held = boosted > plain, {"without_pt": round(plain, 4), "with_pt": round(boosted, 4)}
+        use_pt, held = boosted > plain, {"without_pt": round(plain, 4), "with_pt": round(boosted, 4),
+                                         "pt_from": pt_source(effort)}
         if use_pt:
             feats = with_pt
     w = fit([(x, y) for f, p in zip(feats, pools) for x, y in zip(f[0], p["labels"])])
@@ -611,10 +629,11 @@ def cmd_train(args, store):
     save_model(path, {"kind": "vlds pick ranker", "round": rnd, "trained": args.now, "dim": DIM,
                       "tokens": bool(args.tokens), "threshold": t, "per_file": PER_FILE,
                       "pools": [p["session"] for p in pools], "seen": seen, "pt": use_pt,
+                      **({"pt_effort": effort} if use_pt and effort else {}),
                       **({"heldout": held} if held else {}), "w": w})
     line = f"train — round {rnd}: {len(pools)} pools, {sum(p['matched'] for p in pools)} picks, threshold {t:.2f} → {path}"
     if held:
-        line += (f"; .pt feature {'kept' if use_pt else 'left out'} (leave-one-out r-precision "
+        line += (f"; .pt feature from {held['pt_from']} {'kept' if use_pt else 'left out'} (leave-one-out r-precision "
                  f"{held['with_pt']:.3f} with it, {held['without_pt']:.3f} without)")
     if old:
         header, payload = encode_round(old["w"], w)
@@ -1044,7 +1063,8 @@ def cmd_ranker_train(args, store):
             return r.returncode
         record_seen(store, ids)
         # the round wrote new out-of-fold scores: the JSON ranker learns again whether the .pt feature helps
-        if os.path.exists(model_path(store, getattr(args, "model", ""))) and load_oof(store):
+        if os.path.exists(model_path(store, getattr(args, "model", ""))) and (load_oof(store)
+                                                                            or load_oof(store, pool_effort(store))):
             tr = argparse.Namespace(now=args.now, tokens=False, model=getattr(args, "model", ""))
             cmd_train(tr, store)
         line = ensure_server(store)     # a first checkpoint gets its server now; a running one reloads on its own
@@ -1069,11 +1089,12 @@ def write_picks(store, args, m):
                                          m.get("tokens", False))
     # the JSON ranker picks; the .pt ranker's score is one of its features when training found it helps and the
     # store's server answers — without it the feature is absent and the JSON ranker's own scale holds
-    # the index's `pool-effort:` chooses who answers for the .pt: low skips it, medium and high ask for the tree
+    # the index's `pool-effort:` low skips the .pt; otherwise the server is asked at the effort the pt weight was
+    # fitted on (the model's pt_effort: the tree at medium or high, the single ranker when unnamed), so the feature
+    # keeps the scale it was learned at — a changed pool-effort reaches the picks at the JSON ranker's next train
     m["_source"] = f"json r{m.get('round', 0)}"
-    effort = pool_effort(store)
-    if m.get("pt") and live and effort != "low":
-        neural = ranker_scores(store, args.task, [phi.distilled(r, 400) for r in live], effort=effort)
+    if m.get("pt") and live and pool_effort(store) != "low":
+        neural = ranker_scores(store, args.task, [phi.distilled(r, 400) for r in live], effort=m.get("pt_effort", ""))
         if neural:
             add_pt(xs, neural[0])
             m["_source"] += f"+pt r{neural[2]}" + (f" {neural[4]}" if neural[4].startswith("tree:") else "")

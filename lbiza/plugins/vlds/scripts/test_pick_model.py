@@ -332,7 +332,19 @@ def test_pt_feature_kept_only_when_it_helps():
         pick_model.cmd_train(argparse.Namespace(now="2026-09-07 10:00", tokens=False, model=""), store)
         with open(os.path.join(p4, "models", "pick-model.json"), encoding="utf-8") as f:
             m = json.load(f)
-        assert m["heldout"] == {"without_pt": 1.0, "with_pt": 1.0} and m["pt"] is False, m.get("heldout")
+        assert m["heldout"] == {"without_pt": 1.0, "with_pt": 1.0, "pt_from": "ranker"} and m["pt"] is False, m
+        assert "pt_effort" not in m
+        # pool-effort naming the tree: the weight is fitted on the tree's out-of-fold scores at that effort
+        with open(os.path.join(p4, "models", "tree-oof.json"), "w", encoding="utf-8") as f:
+            json.dump({"k": 4, "folds": 4, "efforts": {"medium": {}, "high": oof}}, f)
+        os.makedirs(os.path.join(p4, "vindex"), exist_ok=True)
+        with open(os.path.join(p4, "vindex", "phi-index.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("# idx\n\n## recall\n\npool-effort: high\n")
+        assert pick_model.load_oof(store, "high") == oof and pick_model.load_oof(store, "medium") == {}
+        pick_model.cmd_train(argparse.Namespace(now="2026-09-07 11:00", tokens=False, model=""), store)
+        with open(os.path.join(p4, "models", "pick-model.json"), encoding="utf-8") as f:
+            m = json.load(f)
+        assert m["heldout"]["pt_from"] == "tree:high", m.get("heldout")
         # a pool phi_rank never scored carries no feature: no out-of-fold score is made up for it
         assert pick_model.pool_pt({**pools[0], "id": "unscored"}, data, oof) is None
     finally:
