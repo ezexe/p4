@@ -44,7 +44,7 @@ Each section is one operator as its contract runs it: where its rules come from,
 **Takeoff**
 - [ ] One per file under `inject:` and `digest:`, all in ONE message.
 - [ ] `subagent_type` vlds:pick-reader (no tool that writes), general-purpose only where that type is absent; `model` the `pool-child-model:`, else the evidence finder's, haiku (SKILL.md, Models by role).
-- [ ] `run_in_background` true.
+- [ ] `run_in_background` true where the Agent tool has the parameter; never false (a harness without it runs every launch in the background).
 - [ ] The message: read `hooks/pool-child-prompt.md`, then `store`, `session`, `now`, `task`, `file`, `barrier` (that file's lines, pasted).
 
 **Landing**

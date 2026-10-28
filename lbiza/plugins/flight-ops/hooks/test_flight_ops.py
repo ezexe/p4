@@ -68,9 +68,11 @@ def main():
     # an operator return that is a progress note is a go-around
     d = run(root, "landing", call(OP, resp="three children are still running"))
     assert d and "relaunch it once" in d["additionalContext"], d
-    # pick-readers fly in the background; a foreground one is bounced
-    d = run(root, "takeoff", call(CHILD, subagent_type="vlds:pick-reader"))
+    # pick-readers fly in the background; an explicit foreground one is bounced, and a launch without the parameter
+    # (a harness whose Agent tool has none) passes
+    d = run(root, "takeoff", call(CHILD, subagent_type="vlds:pick-reader", run_in_background=False))
     assert d and "background" in d["permissionDecisionReason"], d
+    assert run(root, "takeoff", call(CHILD + " ", subagent_type="vlds:pick-reader")) is None
     assert run(root, "takeoff", call(CHILD, subagent_type="vlds:pick-reader", run_in_background=True)) is None
     assert run(root, "landing", call(CHILD, subagent_type="vlds:pick-reader", run_in_background=True,
                                      resp="Async agent launched")) is None

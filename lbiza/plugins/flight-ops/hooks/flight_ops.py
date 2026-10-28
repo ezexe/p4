@@ -115,7 +115,9 @@ def fingerprint(inp):
 def takeoff_reasons(kind, inp):
     """The takeoff checklist of each flight; [] when it holds."""
     prompt, typ = text_of(inp, "prompt"), text_of(inp, "subagent_type") or "general-purpose"
-    bg = inp.get("run_in_background") is True
+    # only an explicit foreground launch fails: a harness whose Agent tool has no run_in_background parameter runs
+    # every launch in the background and sends the key not at all (2026-10-28, the bounce cost a re-issue per child)
+    foreground = inp.get("run_in_background") is False
     reasons = []
     if kind in ("vlds-operator", "roboto-conductor"):
         missing = [f for f in OPERATOR_FIELDS if f not in prompt]
@@ -133,7 +135,7 @@ def takeoff_reasons(kind, inp):
         if typ not in ("vlds:pick-reader", "general-purpose"):
             reasons.append(f"a pick-reader flies as vlds:pick-reader (general-purpose where that type is absent), "
                            f"not {typ}")
-        if not bg:
+        if foreground:
             reasons.append("pick-readers fly in the background, all in one message (run_in_background true), so "
                            "the operator folds each as it lands")
     return reasons

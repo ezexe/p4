@@ -40,7 +40,7 @@ Do not wait to be asked; a store is built by the turns that pass through it.
 
 ```text
 class UserMemories {                       // the base: this session's "# Memory" instructions, verbatim
-  storage = <working dir>/.claude/p4/memory/   // the p4-memory plugin's: tracked by the p4 repo; the AppData path the base names is a junction to it
+  storage = <working dir>/.claude/p4/memory/   // the p4-memory plugin's: tracked by the p4 repo; the AppData path the base names holds only a pointer MEMORY.md to it
   virtual read()                           //   recall — load MEMORY.md, apply recalled memories to thinking
   virtual write()                          //   persist — one fact per file, plus its MEMORY.md index line
 }
