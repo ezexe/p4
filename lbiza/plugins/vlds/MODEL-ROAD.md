@@ -55,6 +55,7 @@ The `## recall` section of the cumulative index (`.claude/p4/vindex/phi-index.md
 
 pool-road: model        # the default once trained; or model-shadow, children
 pool-audit: 5           # 1 session in 5 also runs the children; 0 never
+pool-effort: medium     # who answers for the .pt: low, medium, high; unnamed, the single ranker
 ```
 
 - **`model`** (the default once a pool ranker is trained): the model proposes picks and writes a review sheet with each pick's head and four runners-up per file. The operator, already launched for the pool, makes one judged pass over the sheet: it keeps, drops or adds (at most six a file), and its reviewed picks are what the pool folds. The pool credits `pass`, so every model-road session leaves a label. `pick_model.py shadow --judge pass` logs how far the model's proposal moved. If no model is trained yet (exit 3), the operator takes the children road, which gathers the pools the first model trains on.
@@ -124,6 +125,12 @@ The `.pt` ranker is `phi_rank` in ezexe/phi, served on localhost by `phi_serve`,
 
 - **Out-of-fold scores.** Each `phi_rank` training writes `models/ranker-oof.json`: every labelled pool scored by a fold model that never trained on it. The JSON ranker's `train` learns the feature from those scores, so it never learns from a score that saw its own label. It compares leave-one-out r-precision with and without the feature, keeps the feature only when it is strictly better, and records both figures in `pick-model.json` (`heldout`, `pt`).
 - **At pick time.** When `pt` is set and the server answers, its scores join the features and the picks are tagged `json rN+pt rM`. When the server is down the feature is simply absent. Being z-scored, its absence leaves the JSON ranker's scale and threshold as they were.
+- **Effort.** The recall section's `pool-effort:` chooses who answers for the `.pt` (the p4-model skill's effort tiers, measured in ezexe/phi's `.docs/p4/nested-store.md`):
+  - `low`: the JSON ranker alone; the server is never asked.
+  - `medium`: one node of the store's tree (`phi_rank.tree`), the node its pruning mask routes the task to.
+  - `high`: every node of the tree, each node's scores z-scored and averaged.
+  - Unnamed: the single ranker, as before.
+  - The effort goes to `/score` as `effort`. A tree's answer is named in the tag (`json rN+pt rM tree:medium:101`). A server with no tree answers from its single ranker. The `pt` weight was fitted on the single ranker's out-of-fold scores, so a store that switches to the tree should re-check its held-out figure.
 - **Small and continual.** A new base is 2^15 × 64 (4 MB at fp16) and pretrains for 5 minutes. Git keeps a chain: `models/ranker-anchor.pt`, then each round's change as `models/ranker.rNNN.phid`. Each delta holds the largest 10% of the entries that moved, positions in Fibonacci gap codes, values on the Zeckendorf grid, packed eight bits to a byte. `models/ranker.pt` is each machine's own fp32 build of the chain, ignored by git. The server rebuilds it when a pull brings rounds it has not seen. A round ships whole, as a new anchor, when the cut costs more than 0.02 training r-precision, every 8 rounds, or when the base changes.
 - **The shared p4 base.** `models/p4-base.pt` in this plugin (git LFS) is pretrained by `phi_rank shared` on this marketplace's own public text: the contracts, the operator's and roboto's briefs, the flight checklists, with `legacy/` left out. A store with no base of its own starts from it and continues on its own text. No store's text ever goes into it. A clone without git-lfs has only a pointer there, and the store then starts from nothing, as before.
 
