@@ -36,15 +36,17 @@ def run(*args):
     return r.returncode, r.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
 
 
-def fake_server(p4, answer, names=None):
+def fake_server(p4, answer, names=None, seen=None):
     """A stand-in for phi_serve: answer(texts) → (status, body), every reply naming its store (names, p4 by
-    default) as the real server does; its port in models/ranker.server.json."""
+    default) as the real server does; its port in models/ranker.server.json. `seen` collects each request body."""
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
 
         def do_POST(self):
             req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            if seen is not None:
+                seen.append(req)
             code, body = answer(req["texts"])
             data = json.dumps({**body, "p4": os.path.realpath(names or p4)}).encode()
             self.send_response(code)
@@ -127,6 +129,46 @@ def test_picks_fallbacks():
     finally:
         shutil.rmtree(root, ignore_errors=True)
     print("picks fallbacks: green")
+
+
+def test_pool_effort():
+    """The index's `pool-effort:` chooses who answers for the .pt: unnamed sends no effort (the single ranker), low
+    never asks the server, medium and high are sent as the request's effort and a tree's answer is named in the tag."""
+    root, p4, stores = tp.seed()
+    try:
+        store = stores["aaaa1111"]
+        run(PICK, "--store", store, "train", "--now", "2026-09-07 10:00")
+        enable_pt(p4)
+        args = (PICK, "--store", store, "picks", "--session", "eeee5555", "--task", TASK, "--now", "2026-09-08 10:00")
+        seen = []
+
+        def answer(texts):
+            effort = seen[-1].get("effort", "")
+            return 200, {"scores": [0.9 if "ring buffer" in t else -0.5 for t in texts], "threshold": 0.0, "round": 7,
+                         "per_file": 6, "source": f"tree:{effort}:101" if effort else "ranker"}
+        srv = fake_server(p4, answer, seen=seen)
+        os.makedirs(os.path.join(p4, "vindex"), exist_ok=True)
+
+        def effort_is(v):
+            with open(os.path.join(p4, "vindex", "phi-index.md"), "w", encoding="utf-8", newline="\n") as f:
+                f.write("# idx\n\n## recall\n\n" + (f"pool-effort: {v}\n" if v else ""))
+            del seen[:]
+            return run(*args)
+        code, out = effort_is("")
+        assert code == 0 and "(json r0+pt r7)" in out and "effort" not in seen[0], out
+        code, out = effort_is("low")
+        assert code == 0 and "(json r0)" in out and not seen, out
+        code, out = effort_is("medium")
+        assert code == 0 and "(json r0+pt r7 tree:medium:101)" in out and seen[0]["effort"] == "medium", out
+        code, out = effort_is("high")
+        assert code == 0 and seen[0]["effort"] == "high" and "tree:high" in out, out
+        code, out = effort_is("extreme")                         # not an effort: the single ranker, as unnamed
+        assert code == 0 and "effort" not in seen[0], out
+        assert pick_model.pool_effort(store) == "" and not pick_model.open_notices(store)
+        srv.shutdown()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("pool effort: green")
 
 
 def test_fresh_store_ranker_train():
@@ -263,6 +305,7 @@ def test_dispatch_and_session_open():
 if __name__ == "__main__":
     test_notice_and_quiet_window()
     test_picks_fallbacks()
+    test_pool_effort()
     test_fresh_store_ranker_train()
     test_server_identity_and_transport()
     test_checkpoint_states_and_locks()

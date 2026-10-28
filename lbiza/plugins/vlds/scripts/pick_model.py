@@ -58,6 +58,8 @@ REVIEW_ALTS = 4               # runners-up per file on the operator's review she
 REVIEW_HEAD_CHARS = 140       # a review line's head: the barrier's own width
 RANKER_TIMEOUT_S = 10          # a ranker server that has not answered by then is down: the JSON ranker picks
 DEFAULT_AUDIT = 5             # `pool-audit:` unnamed — one session in five runs the children beside the model
+EFFORTS = ("low", "medium", "high")   # `pool-effort:` — low: the JSON ranker alone; medium: one node of the store's
+                                      # tree; high: the tree's ensemble; unnamed: the single .pt ranker, as before
 DELTA_DIGITS = 12             # Fibonacci digits for a round's delta: 376 levels a side
 POOL_STEER_RE = re.compile(r"^- \[([a-z-]+\.md) (\d{4}-\d\d-\d\d \d\d:\d\d|\(no time\))[^\]]*\] (.*?); bears: (.*)$")
 MODEL_CREDIT_RE = re.compile(r"\(\d+, [a-z+]*\bmodel\b")   # `read: <file> (<n>, model)` — a file the model picked
@@ -758,11 +760,16 @@ def ranker_request(store, path, body=None, timeout=RANKER_TIMEOUT_S):
     return status, reply
 
 
-def ranker_scores(store, task, texts, timeout=RANKER_TIMEOUT_S):
-    """(scores, threshold, round, per_file) from this store's ranker server, or None — the JSON ranker then picks.
-    A server that is down is no news; one of this store that answers wrongly is a retrain notice."""
+def ranker_scores(store, task, texts, timeout=RANKER_TIMEOUT_S, effort=""):
+    """(scores, threshold, round, per_file, source) from this store's ranker server, or None — the JSON ranker then
+    picks. `effort` (medium, high) asks the server for its node tree; a server with no tree answers from its single
+    ranker, source `ranker`. A server that is down is no news; one of this store that answers wrongly is a retrain
+    notice."""
+    body = {"task": task, "texts": texts}
+    if effort:
+        body["effort"] = effort
     try:
-        status, out = ranker_request(store, "/score", {"task": task, "texts": texts}, timeout)
+        status, out = ranker_request(store, "/score", body, timeout)
     except ServerDown:
         return None
     try:
@@ -771,7 +778,7 @@ def ranker_scores(store, task, texts, timeout=RANKER_TIMEOUT_S):
         if len(out["scores"]) != len(texts) or out.get("threshold") is None:
             raise ValueError(f"the server answered {len(out['scores'])} scores for {len(texts)} rows")
         return ([float(x) for x in out["scores"]], float(out["threshold"]), out.get("round"),
-                int(out.get("per_file", PER_FILE)))
+                int(out.get("per_file", PER_FILE)), str(out.get("source") or "ranker"))
     except (RuntimeError, ValueError, KeyError, TypeError) as e:
         notify_retrain(store, "ranker server", e)
         return None
@@ -1062,12 +1069,14 @@ def write_picks(store, args, m):
                                          m.get("tokens", False))
     # the JSON ranker picks; the .pt ranker's score is one of its features when training found it helps and the
     # store's server answers — without it the feature is absent and the JSON ranker's own scale holds
+    # the index's `pool-effort:` chooses who answers for the .pt: low skips it, medium and high ask for the tree
     m["_source"] = f"json r{m.get('round', 0)}"
-    if m.get("pt") and live:
-        neural = ranker_scores(store, args.task, [phi.distilled(r, 400) for r in live])
+    effort = pool_effort(store)
+    if m.get("pt") and live and effort != "low":
+        neural = ranker_scores(store, args.task, [phi.distilled(r, 400) for r in live], effort=effort)
         if neural:
             add_pt(xs, neural[0])
-            m["_source"] += f"+pt r{neural[2]}"
+            m["_source"] += f"+pt r{neural[2]}" + (f" {neural[4]}" if neural[4].startswith("tree:") else "")
     sc = [score(m["w"], x) for x in xs]
     threshold, per_file = m["threshold"], m.get("per_file", PER_FILE)
     picked = set(select(live, sc, threshold, per_file))
@@ -1099,18 +1108,30 @@ def write_picks(store, args, m):
     return out, len(picked), len(live), review
 
 
-def audit_every(store):
-    """The index's `pool-audit:` (1 session in N runs the children beside the model), DEFAULT_AUDIT when unnamed."""
+def recall_setting(store, key):
+    """The value the index's `## recall` section names for `key:`, or None when unnamed."""
     idx = phi.parse_index(os.path.dirname(pt.config_index(store)))
     in_recall = False
     for l in (idx["raw"] if idx else "").split("\n"):
         if l.startswith("## "):
             in_recall = l[3:].strip().lower() == "recall"
             continue
-        m = re.match(r"^pool-audit:\s*(\d+)", l.strip()) if in_recall else None
+        m = re.match(rf"^{re.escape(key)}:\s*(\S+)", l.strip()) if in_recall else None
         if m:
-            return int(m.group(1))
-    return DEFAULT_AUDIT
+            return m.group(1)
+    return None
+
+
+def audit_every(store):
+    """The index's `pool-audit:` (1 session in N runs the children beside the model), DEFAULT_AUDIT when unnamed."""
+    v = recall_setting(store, "pool-audit")
+    return int(v) if v and v.isdigit() else DEFAULT_AUDIT
+
+
+def pool_effort(store):
+    """The index's `pool-effort:` (low, medium, high), "" when unnamed or not one of them."""
+    v = (recall_setting(store, "pool-effort") or "").lower()
+    return v if v in EFFORTS else ""
 
 
 def audit_due(store, session):
