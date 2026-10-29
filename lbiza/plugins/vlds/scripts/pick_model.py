@@ -258,6 +258,7 @@ def labels_dir(store):
 def parse_label_file(path):
     """An audit's labels, written by `label`: the children's picks for a task, by file, time and head."""
     task = pooled = session = ""
+    reader = "children"
     picks = []
     with open(path, encoding="utf-8") as f:
         for l in f:
@@ -268,12 +269,14 @@ def parse_label_file(path):
                 pooled = l[10:][:16]
             elif l.startswith("# session: "):
                 session = l[11:]
+            elif l.startswith("# reader: "):
+                reader = l[10:]
             elif l and not l.startswith("#"):
                 parts = l.split("\t", 2)
                 if len(parts) == 3:
                     picks.append((parts[0], parts[1], parts[2]))
     return {"path": path, "task": task, "pooled": pooled, "session": session, "id": session + "/audit",
-            "picks": picks, "by_model": False}
+            "picks": picks, "by_model": False, "reader": reader}
 
 
 def label_pools(store):
@@ -1149,6 +1152,12 @@ def audit_every(store):
     return int(v) if v and v.isdigit() else DEFAULT_AUDIT
 
 
+def audit_via(store):
+    """The index's `pool-audit-via:` — the agent type that reads an audit's pools in the children's seat, the teacher
+    whose picks the ranker learns from on those sessions; "" (the Haiku children) when unnamed."""
+    return recall_setting(store, "pool-audit-via") or ""
+
+
 def pool_effort(store):
     """The index's `pool-effort:` (low, medium, high), "" when unnamed or not one of them."""
     v = (recall_setting(store, "pool-effort") or "").lower()
@@ -1180,8 +1189,10 @@ def cmd_picks(args, store):
     print(f"picks — {m['_source']}: {n} of {live} LIVE rows"
           + (f" → {args.out}" if args.out else "") + (f"; review sheet → {args.review}" if args.review else ""))
     if audit_due(store, args.session):
-        print(f"audit: this session is one of the 1 in {audit_every(store)} audited — run the children beside the "
-              "model (hooks/pool-prompt.md, the model road's audit step)")
+        via = audit_via(store)
+        print(f"audit: this session is one of the 1 in {audit_every(store)} audited — run "
+              + (f"{via} (pool-audit-via) as the audit's reader" if via else "the children")
+              + " beside the model (hooks/pool-prompt.md, the model road's audit step)")
     if not args.out:
         print(text, end="")
     return 0
@@ -1196,11 +1207,11 @@ def cmd_label(args, store):
     path = os.path.join(labels_dir(store), f"{args.session[:8]}.tsv")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as f:
-        f.write(f"# pick-model labels — the children's picks of an audit, by file, time and head\n"
-                f"# session: {args.session[:8]}\n# task: {args.task}\n# pooled: {args.now}\n")
+        f.write(f"# pick-model labels — the audit reader's picks, by file, time and head\n"
+                f"# session: {args.session[:8]}\n# task: {args.task}\n# pooled: {args.now}\n# reader: {args.reader}\n")
         for r in found:
             f.write(f"{r['file']}\t{r['time'] or '(no time)'}\t{phi.distilled(r, 400)}\n")
-    print(f"label — {len(found)} of {len(picks)} children picks written as labels"
+    print(f"label — {len(found)} of {len(picks)} picks by {args.reader} written as labels"
           + (f", {ignored} line(s) ignored" if ignored else "") + f" → {path}")
     return 0
 
@@ -1262,7 +1273,8 @@ def main():
     p.add_argument("--session", required=True)
     p.add_argument("--task", required=True)
     p.add_argument("--now", required=True)
-    p.add_argument("--picks", required=True, help="the audit children's picks file")
+    p.add_argument("--picks", required=True, help="the audit reader's picks file")
+    p.add_argument("--reader", default="children", help="who picked: children, or the pool-audit-via agent type")
     p = sub.add_parser("ranker-train", help="export the pairs and train the .pt ranker (phi_prune.p4rank)")
     p.add_argument("--now", required=True)
     p.add_argument("--minutes", type=float, default=5, help="pretraining budget when the base is (re)built")
