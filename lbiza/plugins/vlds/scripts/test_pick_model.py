@@ -274,7 +274,7 @@ def test_review_and_audit():
         assert pick_model.audit_via(store) == "mister:roboto"
         code, out = run(PICK, "--store", store, "picks", "--session", "eeee5555", "--task",
                         "the audio ring buffer drain order", "--now", "2026-09-08 10:00")
-        assert "run mister:roboto (pool-audit-via) as the audit's reader" in out, out
+        assert "run mister:roboto (the teacher) as the audit's reader" in out, out
         picks = os.path.join(root, "roboto-picks.md")
         with open(picks, "w", encoding="utf-8") as f:
             f.write(out)
@@ -283,6 +283,19 @@ def test_review_and_audit():
         assert code == 0 and "by mister:roboto" in out, out
         lab = pick_model.parse_label_file(os.path.join(p4, "models", "labels", "eeee5555.tsv"))
         assert lab["reader"] == "mister:roboto", lab
+        # the teacher is the reader whatever the index names: the measured configuration, not a setting
+        with open(os.path.join(p4, "vindex", "phi-index.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("# idx\n\n## recall\n\npool-audit-via: somebody-else\n")
+        assert pick_model.audit_via(store) == "mister:roboto"
+        # a session the teacher audited learns from the teacher's labels alone: its own pool drops out
+        sessions = {p["session"][:8] for p in pick_model.label_pools(store) if not p["id"].endswith("/audit")}
+        assert "aaaa1111" in sessions
+        code, out = run(PICK, "--store", store, "label", "--session", "aaaa1111", "--task", "the ring buffer",
+                        "--now", "2026-09-08 10:00", "--picks", picks, "--reader", "mister:roboto")
+        assert code == 0, out
+        pools_now = pick_model.label_pools(store)
+        assert "aaaa1111" not in {p["session"][:8] for p in pools_now if not p["id"].endswith("/audit")}
+        assert "aaaa1111/audit" in {p["id"] for p in pools_now}
         # an operator-reviewed pool (credited `pass`) is a label; a model-only one is not
         assert pick_model.labelled_pool({**pick_model.parse_pool(os.path.join(stores["bbbb2222"], "recall-pool.md"))})
     finally:
@@ -335,6 +348,7 @@ def test_pt_feature_kept_only_when_it_helps():
     """phi_rank's out-of-fold scores reach the JSON ranker's training; the .pt feature is kept only when it raises
     the leave-one-out r-precision — on a tie (here both are perfect) it is left out, and the figures are recorded."""
     import argparse
+    pick_model.PT_RANKER = True               # the .pt feature is an experiment now: on for this test only
     root, p4, stores = seed()
     try:
         store = stores["aaaa1111"]
@@ -363,6 +377,7 @@ def test_pt_feature_kept_only_when_it_helps():
         # a pool phi_rank never scored carries no feature: no out-of-fold score is made up for it
         assert pick_model.pool_pt({**pools[0], "id": "unscored"}, data, oof) is None
     finally:
+        pick_model.PT_RANKER = False
         shutil.rmtree(root, ignore_errors=True)
     print(".pt feature kept only when it helps: green")
 
