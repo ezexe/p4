@@ -268,6 +268,21 @@ def test_review_and_audit():
         with open(os.path.join(p4, "vindex", "phi-index.md"), "w", encoding="utf-8", newline="\n") as f:
             f.write("# idx\n\n## recall\n\npool-audit: 0\n")
         assert not any(pick_model.audit_due(store, s) for s in due)
+        # the audit's reader: the children by default, the agent pool-audit-via names when set, recorded in the labels
+        with open(os.path.join(p4, "vindex", "phi-index.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("# idx\n\n## recall\n\npool-audit: 1\npool-audit-via: mister:roboto\n")
+        assert pick_model.audit_via(store) == "mister:roboto"
+        code, out = run(PICK, "--store", store, "picks", "--session", "eeee5555", "--task",
+                        "the audio ring buffer drain order", "--now", "2026-09-08 10:00")
+        assert "run mister:roboto (pool-audit-via) as the audit's reader" in out, out
+        picks = os.path.join(root, "roboto-picks.md")
+        with open(picks, "w", encoding="utf-8") as f:
+            f.write(out)
+        code, out = run(PICK, "--store", store, "label", "--session", "eeee5555", "--task", "the ring buffer",
+                        "--now", "2026-09-08 10:00", "--picks", picks, "--reader", "mister:roboto")
+        assert code == 0 and "by mister:roboto" in out, out
+        lab = pick_model.parse_label_file(os.path.join(p4, "models", "labels", "eeee5555.tsv"))
+        assert lab["reader"] == "mister:roboto", lab
         # an operator-reviewed pool (credited `pass`) is a label; a model-only one is not
         assert pick_model.labelled_pool({**pick_model.parse_pool(os.path.join(stores["bbbb2222"], "recall-pool.md"))})
     finally:

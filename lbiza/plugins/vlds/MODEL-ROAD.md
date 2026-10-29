@@ -55,6 +55,7 @@ The `## recall` section of the cumulative index (`.claude/p4/vindex/phi-index.md
 
 pool-road: model        # the default once trained; or model-shadow, children
 pool-audit: 5           # 1 session in 5 also runs the children; 0 never
+pool-audit-via: mister:roboto   # the audit's reader, the teacher; unnamed, the Haiku children
 pool-effort: medium     # who answers for the .pt: low, medium, high; unnamed, the single ranker
 ```
 
@@ -62,6 +63,25 @@ pool-effort: medium     # who answers for the .pt: low, medium, high; unnamed, t
 - **The audit.** One session in N (`pool-audit:`, five by default, `0` for never) also runs the Haiku children in the background. Their picks are never folded: `pick_model.py label` writes them to `models/labels/<s8>.tsv` as labels, and `shadow --judge child` logs their agreement with the model. These labels come from readers that never saw the model's picks, which keeps the operator's review from simply agreeing with the model. Which sessions are audited is decided by the session id alone.
 - **`model-shadow`**: the children road, with the model's picks written beside theirs and compared in `shadow.tsv`. Only the children's picks are folded.
 - **`children`**: no model in the pool. Its pools still teach the ranker.
+
+## The p4 roboto models: one teacher, four tiers
+
+The `.pt` models are partitioned the way Anthropic partitions its own model family. Anthropic's current family, as of the claude-api skill's model table cached on 2026-10-06:
+- **Haiku 5.5** ($0.10 / $0.50 per million tokens) for high-volume work and sub-agents' reading.
+- **Sonnet 5.5** ($2 / $10) for everyday work.
+- **Opus 5.5** ($4 / $20), the default for demanding work.
+- **Fable 5.1** ($10 / $50), the most capable widely released model, for the hardest long-horizon work.
+
+Within a model, **effort** (low to max) is the dial. The guidance is to try the most capable model at lower effort before building a cascade of models.
+
+The p4 side follows the same shape:
+- **The teacher is roboto.** The `mister:roboto` agent runs on `model: fable`, an alias that follows the newest Fable, at high effort. Named in `pool-audit-via:`, it reads an audited session's store in the children's seat, without seeing the model's picks. Its picks become the labels in `models/labels/<s8>.tsv`, with `# reader: mister:roboto`, and the ranker trains on them. Teaching only on the 1 in N audited sessions keeps the most capable model's cost bounded.
+- **The students are the `.pt` tiers**, chosen by `pool-effort:` as the effort dial:
+  - `low`: the JSON ranker alone, the Haiku seat (always on, nearly free).
+  - `medium`: one mask-routed node, the Sonnet seat.
+  - `high`: the node ensemble, the Opus seat, for quality.
+  - The grown tree, the Fable seat, is not built yet.
+- **Not yet measured:** whether roboto's labels teach better than the Haiku children's. `models/shadow.tsv` records the reader's agreement with the model either way. Compare the held-out figures before and after a store switches its teacher.
 
 ## Always on, always learning
 
