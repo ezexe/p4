@@ -173,7 +173,7 @@ def test_turn_close_retrain():
                     f"local-storage.md:{rows[8]['line']} || bears: the crash dump\n")
         code, out = run(tp.PICK, "--store", store, "label", "--session", "eeee5555", "--task",
                         "read the crash dump", "--now", "2026-09-08 10:00", "--picks", picks)
-        assert code == 0 and "1 of 1 children picks" in out, out
+        assert code == 0 and "1 of 1 picks by children" in out, out
         set_recall(p4, "")
         assert tp.phi.index_road(store) == "children"
         out = th.run_hook("turn-close", dict(payload), root)

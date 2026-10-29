@@ -58,6 +58,15 @@ REVIEW_ALTS = 4               # runners-up per file on the operator's review she
 REVIEW_HEAD_CHARS = 140       # a review line's head: the barrier's own width
 RANKER_TIMEOUT_S = 10          # a ranker server that has not answered by then is down: the JSON ranker picks
 DEFAULT_AUDIT = 5             # `pool-audit:` unnamed — one session in five runs the children beside the model
+# The measured configuration, not a setting (ezexe/phi .docs/p4/nested-store.md, "Replications on Colab", 2026-10-29):
+# - no .pt model raised the JSON ranker's picks in any run (single ranker, tree tiers, every suite arm, every
+#   pretraining budget), so the JSON ranker picks alone and the .pt ranker is neither trained, served nor asked;
+#   `pool-effort:` is retired. VLDS_PT_RANKER=1 turns it back on for experiments and tests only
+# - two Claude teachers agreed with each other far more than with the store's own labels, and their labels were
+#   more learnable, so the audit's reader is always the teacher, roboto (on the most capable model), and a session
+#   it audited trains the ranker on its labels in place of that session's noisier pass
+PT_RANKER = os.environ.get("VLDS_PT_RANKER") == "1"
+AUDIT_VIA = "mister:roboto"
 EFFORTS = ("low", "medium", "high")   # `pool-effort:` — low: the JSON ranker alone; medium: one node of the store's
                                       # tree; high: the tree's ensemble; unnamed: the single .pt ranker, as before
 DELTA_DIGITS = 12             # Fibonacci digits for a round's delta: 376 levels a side
@@ -281,16 +290,20 @@ def parse_label_file(path):
 
 def label_pools(store):
     """Every pool the ranker may learn from: each session's recall pool a child or the operator's pass picked (never
-    one the model picked alone), and each audit's children labels in models/labels/."""
-    out = [p for p in (parse_pool(x) for x in all_pools(store)) if labelled_pool(p)]
+    one the model picked alone), and each audit's labels in models/labels/. A session the teacher audited (a label
+    file whose reader is not the children) learns from the teacher's labels alone: its own pool is left out."""
+    audits = []
     d = labels_dir(store)
     if os.path.isdir(d):
         for name in sorted(os.listdir(d)):
             if name.endswith(".tsv"):
                 p = parse_label_file(os.path.join(d, name))
                 if labelled_pool(p):
-                    out.append(p)
-    return out
+                    audits.append(p)
+    taught = {p["session"][:8] for p in audits if p.get("reader", "children") != "children"}
+    out = [p for p in (parse_pool(x) for x in all_pools(store)) if labelled_pool(p)
+           and (p.get("session") or "")[:8] not in taught]
+    return out + audits
 
 
 def corpus(store):
@@ -586,7 +599,7 @@ def cmd_eval(args, store):
           f"f1 {mean(model_m, 'f1'):.3f} ({mean(model_m, 'picked'):.1f} a pool against {mean(model_m, 'labelled'):.1f})")
     print(f"  term overlap  r-precision {mean(base_m, 'r-precision'):.3f}  recall@20 {mean(base_m, 'recall@20'):.3f}")
     effort = pool_effort(store)
-    oof = load_oof(store, effort)
+    oof = load_oof(store, effort) if PT_RANKER else {}
     pt_scores = [pool_pt(p, data, oof) for p in pools] if oof else []
     if sum(1 for x in pt_scores if x) >= 3:
         with_pt = [(add_pt([dict(x) for x in f[0]], sc), f[1], f[2]) for f, sc in zip(feats, pt_scores)]
@@ -607,7 +620,7 @@ def cmd_train(args, store):
     # The source is the one the index's pool-effort names: the tree at medium or high, the single ranker otherwise
     effort = pool_effort(store)
     effort = effort if effort in ("medium", "high") else ""
-    oof, use_pt, held = load_oof(store, effort), False, None
+    oof, use_pt, held = (load_oof(store, effort) if PT_RANKER else {}), False, None
     pt_scores = [pool_pt(p, data, oof) for p in pools] if oof else []
     if sum(1 for x in pt_scores if x) >= 4 and len(pools) >= 4:
         plain = loo_rprecision(pools, feats, data)
@@ -974,7 +987,9 @@ def ensure_server(store):
 def session_open_ranker(store):
     """The SessionStart hook's ranker line, without blocking it: a server already answering is named; otherwise the
     check and the start (probing an interpreter can take seconds) run detached, through `pick_model.py
-    ensure-server`."""
+    ensure-server`. Nothing at all while the .pt ranker is off (PT_RANKER), the measured configuration."""
+    if not PT_RANKER:
+        return ""
     mdir = models_root(store)
     state = ranker_checkpoint(mdir)
     if state == "missing":
@@ -1096,7 +1111,7 @@ def write_picks(store, args, m):
     # fitted on (the model's pt_effort: the tree at medium or high, the single ranker when unnamed), so the feature
     # keeps the scale it was learned at — a changed pool-effort reaches the picks at the JSON ranker's next train
     m["_source"] = f"json r{m.get('round', 0)}"
-    if m.get("pt") and live and pool_effort(store) != "low":
+    if PT_RANKER and m.get("pt") and live and pool_effort(store) != "low":
         neural = ranker_scores(store, args.task, [phi.distilled(r, 400) for r in live], effort=m.get("pt_effort", ""))
         if neural:
             add_pt(xs, neural[0])
@@ -1153,9 +1168,10 @@ def audit_every(store):
 
 
 def audit_via(store):
-    """The index's `pool-audit-via:` — the agent type that reads an audit's pools in the children's seat, the teacher
-    whose picks the ranker learns from on those sessions; "" (the Haiku children) when unnamed."""
-    return recall_setting(store, "pool-audit-via") or ""
+    """The agent type that reads an audit's pools in the children's seat: the teacher, AUDIT_VIA, always — the
+    measured configuration, not a setting. Where that agent type is not installed the operator falls back to the
+    children (hooks/pool-prompt.md, the model road's audit step)."""
+    return AUDIT_VIA
 
 
 def pool_effort(store):
@@ -1191,7 +1207,7 @@ def cmd_picks(args, store):
     if audit_due(store, args.session):
         via = audit_via(store)
         print(f"audit: this session is one of the 1 in {audit_every(store)} audited — run "
-              + (f"{via} (pool-audit-via) as the audit's reader" if via else "the children")
+              + (f"{via} (the teacher) as the audit's reader" if via else "the children")
               + " beside the model (hooks/pool-prompt.md, the model road's audit step)")
     if not args.out:
         print(text, end="")

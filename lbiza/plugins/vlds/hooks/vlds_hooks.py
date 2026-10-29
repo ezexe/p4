@@ -1476,6 +1476,8 @@ def ranker_owed(store, stamp, pm):
     seen yet with BOOTSTRAP_POOLS to learn from, starts `pick_model.py ranker-train` in the background — the export,
     phi_prune.p4rank's fine-tune (and its pretraining when due), then the server — at most once per RANKER_LOCK_S, and
     not while a ranker notice is open: a failure is the p4-model skill's to answer, never this hook's to retry."""
+    if not getattr(pm, "PT_RANKER", False):   # the .pt ranker is off in the measured configuration
+        return []
     mdir = models_dir(store)
     seen = pm.ranker_seen(store)
     pools = {p["id"] for p in pm.label_pools(store)}

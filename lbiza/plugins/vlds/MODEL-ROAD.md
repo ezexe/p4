@@ -55,16 +55,24 @@ The `## recall` section of the cumulative index (`.claude/p4/vindex/phi-index.md
 
 pool-road: model        # the default once trained; or model-shadow, children
 pool-audit: 5           # 1 session in 5 also runs the children; 0 never
-pool-audit-via: mister:roboto   # the audit's reader, the teacher; unnamed, the Haiku children
-pool-effort: medium     # who answers for the .pt: low, medium, high; unnamed, the single ranker
 ```
 
+Nothing needs naming: the defaults are the measured configuration (next section). `pool-audit-via:` and `pool-effort:` are retired, and a line naming either is ignored.
+
 - **`model`** (the default once a pool ranker is trained): the model proposes picks and writes a review sheet with each pick's head and four runners-up per file. The operator, already launched for the pool, makes one judged pass over the sheet: it keeps, drops or adds (at most six a file), and its reviewed picks are what the pool folds. The pool credits `pass`, so every model-road session leaves a label. `pick_model.py shadow --judge pass` logs how far the model's proposal moved. If no model is trained yet (exit 3), the operator takes the children road, which gathers the pools the first model trains on.
-- **The audit.** One session in N (`pool-audit:`, five by default, `0` for never) also runs the Haiku children in the background. Their picks are never folded: `pick_model.py label` writes them to `models/labels/<s8>.tsv` as labels, and `shadow --judge child` logs their agreement with the model. These labels come from readers that never saw the model's picks, which keeps the operator's review from simply agreeing with the model. Which sessions are audited is decided by the session id alone.
+- **The audit.** One session in N (`pool-audit:`, five by default, `0` for never) also runs the teacher, roboto, in the children's seat, without seeing the model's picks. Where roboto isn't installed, the Haiku children read instead. The picks are never folded: `pick_model.py label` writes them to `models/labels/<s8>.tsv` as labels, with their reader, and `shadow --judge child` logs their agreement with the model. A session roboto audited trains the ranker on roboto's labels in place of that session's own pool. Which sessions are audited is decided by the session id alone.
 - **`model-shadow`**: the children road, with the model's picks written beside theirs and compared in `shadow.tsv`. Only the children's picks are folded.
 - **`children`**: no model in the pool. Its pools still teach the ranker.
 
-## The p4 roboto models: one teacher, four tiers
+## The measured configuration (vlds 0.0.77)
+
+Three Colab runs on AudioPlugin-p4 on 2026-10-29 settled what p4 runs. The figures are in ezexe/phi's `.docs/p4/nested-store.md`, under "Replications on Colab". p4 now runs that configuration always, with nothing for the owner to set:
+- **The JSON ranker picks alone.** It beat plain word overlap (0.379 against 0.313 held out). No `.pt` model raised it in any run: not the single ranker, not the tree at medium or high, not any suite arm, not any pretraining budget. So the `.pt` ranker is no longer trained at the turn close, started at session start, or asked at pick time, and `pool-effort:` is retired.
+- **The teacher labels the audits.** Two Claude teachers (Fable 5.1 and Opus 5.5) agreed with each other at F1 0.754, but with the store's own labels at only 0.50–0.53. Their labels were also more learnable. So roboto, on Anthropic's most capable model, is the audit's reader whatever the index says, and its labels replace the audited session's own pool in training.
+- **What remains a setting:** the pool's road, the audit's frequency (`pool-audit:`), the dispatch model and the index engine. The runs didn't measure these, and their defaults already need nothing named.
+- **Experiments only:** the environment variable `VLDS_PT_RANKER=1` turns the `.pt` path back on, for experiments and the plugin's own tests. A store needs nothing.
+
+## The p4 roboto models: one teacher, four tiers (the design the runs tested)
 
 The `.pt` models are partitioned the way Anthropic partitions its own model family. Anthropic's current family, as of the claude-api skill's model table cached on 2026-10-06:
 - **Haiku 5.5** ($0.10 / $0.50 per million tokens) for high-volume work and sub-agents' reading.
@@ -81,7 +89,7 @@ The p4 side follows the same shape:
   - `medium`: one mask-routed node, the Sonnet seat.
   - `high`: the node ensemble, the Opus seat, for quality.
   - The grown tree, the Fable seat, is not built yet.
-- **Not yet measured:** whether roboto's labels teach better than the Haiku children's. `models/shadow.tsv` records the reader's agreement with the model either way. Compare the held-out figures before and after a store switches its teacher.
+- **Measured since:** the `.pt` tiers never raised the JSON ranker, so vlds 0.0.77 retired them (above). Claude teachers' labels were cleaner and more learnable than the store's, so the teacher stayed.
 
 ## Always on, always learning
 
@@ -139,9 +147,9 @@ These are leave-one-pool-out over 21 pools. R-precision is the share of a pool's
 
 These are one seed and short runs. They show what the pipeline measures, not final sizes.
 
-## The `.pt` ranker and retrain notices
+## The `.pt` ranker and retrain notices (off since vlds 0.0.77)
 
-The `.pt` ranker is `phi_rank` in ezexe/phi, served on localhost by `phi_serve`, which names its store in every reply (the client trusts only its own store's server). It never picks on its own. Its score is one feature of the JSON ranker, `pt-z` (the score z-scored within the pool), and the JSON ranker keeps it only when it raises the leave-one-pool-out r-precision:
+Everything in this section is off in the measured configuration. It runs only under `VLDS_PT_RANKER=1`, for experiments. The `.pt` ranker is `phi_rank` in ezexe/phi, served on localhost by `phi_serve`, which names its store in every reply (the client trusts only its own store's server). It never picks on its own. Its score is one feature of the JSON ranker, `pt-z` (the score z-scored within the pool), and the JSON ranker keeps it only when it raises the leave-one-pool-out r-precision:
 
 - **Out-of-fold scores.** Each `phi_rank` training writes `models/ranker-oof.json`: every labelled pool scored by a fold model that never trained on it. The JSON ranker's `train` learns the feature from those scores, so it never learns from a score that saw its own label. It compares leave-one-out r-precision with and without the feature, keeps the feature only when it is strictly better, and records both figures in `pick-model.json` (`heldout`, `pt`).
 - **At pick time.** When `pt` is set and the server answers, its scores join the features and the picks are tagged `json rN+pt rM`. When the server is down the feature is simply absent. Being z-scored, its absence leaves the JSON ranker's scale and threshold as they were.

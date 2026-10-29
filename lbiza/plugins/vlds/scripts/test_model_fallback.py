@@ -94,6 +94,7 @@ def test_notice_and_quiet_window():
 
 def test_picks_fallbacks():
     root, p4, stores = tp.seed()
+    os.environ["VLDS_PT_RANKER"] = "1"                 # the .pt path is an experiment now: on for this test only
     try:
         store = stores["aaaa1111"]
         run(PICK, "--store", store, "train", "--now", "2026-09-07 10:00")
@@ -131,6 +132,7 @@ def test_picks_fallbacks():
         assert code == 3 and "take the children road" in out and "Traceback" not in out, out
         assert "pick_model picks" in [r["component"] for r in pick_model.open_notices(store)]
     finally:
+        os.environ.pop("VLDS_PT_RANKER", None)
         shutil.rmtree(root, ignore_errors=True)
     print("picks fallbacks: green")
 
@@ -152,6 +154,14 @@ def test_pool_effort():
                          "per_file": 6, "source": f"tree:{effort}:101" if effort else "ranker"}
         srv = fake_server(p4, answer, seen=seen)
         os.makedirs(os.path.join(p4, "vindex"), exist_ok=True)
+        # the measured configuration: the JSON ranker alone, the server never asked, whatever the model or index say
+        enable_pt(p4, effort="high")
+        with open(os.path.join(p4, "vindex", "phi-index.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("# idx\n\n## recall\n\npool-effort: high\n")
+        code, out = run(*args)
+        assert code == 0 and "(json r0)" in out and not seen, out
+        assert pick_model.session_open_ranker(store) == ""
+        os.environ["VLDS_PT_RANKER"] = "1"                 # the experiments' switch, for the rest of this test
 
         def effort_is(v, fitted=""):
             enable_pt(p4, effort=fitted)
@@ -174,6 +184,7 @@ def test_pool_effort():
         assert pick_model.pool_effort(store) == "" and not pick_model.open_notices(store)
         srv.shutdown()
     finally:
+        os.environ.pop("VLDS_PT_RANKER", None)
         shutil.rmtree(root, ignore_errors=True)
     print("pool effort: green")
 
