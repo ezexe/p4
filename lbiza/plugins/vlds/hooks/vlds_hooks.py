@@ -541,6 +541,8 @@ WRITE_RES = [
 ]
 COPY_RE = re.compile(r"\b(?:cp|mv|Copy-Item|Move-Item)\b((?:[ \t]+(?:-\S+|\"[^\"\n]*\"|'[^'\n]*'|[^\s;&|>]+))+)")
 CD_RE = re.compile(r"(?:^|&&|\|\||;|\n)[ \t]*(?:cd|Set-Location|pushd)[ \t]+(?:\"([^\"\n]+)\"|'([^'\n]+)'|([^\s;&|]+))")
+ASSIGN_RE = re.compile(r"(?:^|&&|\|\||;|\n)[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)=(?:\"([^\"\n]*)\"|'([^'\n]*)'|([^\s;&|]*))")
+VAR_RE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
 HEREDOC_RE = re.compile(r"<<-?[ \t]*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1[^\n]*\n(.*?)\n[ \t]*\2[ \t]*(?=\r?\n|$)", re.S)
 PS_HERE_RE = re.compile(r"@(['\"])\r?\n(.*?)\r?\n\1@", re.S)
 SH_QUOTED_RE = re.compile(r"'((?:[^'\\]|\\.)*)'|\"((?:[^\"\\]|\\.)*)\"", re.S)
@@ -592,6 +594,8 @@ def write_targets(payload):
     if not any(f in cmd for f in STORE_FILES):
         return []
     events = []
+    for m in ASSIGN_RE.finditer(cmd):
+        events.append((m.start(), "set", (m.group(1), next((g for g in m.groups()[1:] if g is not None), ""))))
     for m in CD_RE.finditer(cmd):
         events.append((m.start(), "cd", _first_group(m)))
     for rx in WRITE_RES:
@@ -603,12 +607,27 @@ def write_targets(payload):
             dest = args[-1].strip("\"'")
             if os.path.basename(dest) in STORE_FILES:
                 events.append((m.start(), "write", dest))
-    out, seen = [], set()
+    out, seen, shell_vars = [], set(), {}
+
+    def expand(v):
+        # a variable the same command assigned earlier, else the environment's; None when one stays unknown, since
+        # a path the hook cannot spell is not one it may call stray
+        v = VAR_RE.sub(lambda m: shell_vars.get(m.group(1) or m.group(2), os.environ.get(m.group(1) or m.group(2),
+                                                                                         "\0")), v)
+        return None if "\0" in v else v
     for _off, kind, value in sorted(events, key=lambda e: e[0]):
+        if kind == "set":
+            shell_vars[value[0]] = expand(value[1]) or ""
+            continue
         if kind == "cd":
-            cwd = _resolve(value, cwd)
+            value = expand(value)
+            if value is not None:
+                cwd = _resolve(value, cwd)
             continue
         if not value or os.path.basename(value) not in STORE_FILES:
+            continue
+        value = expand(value)
+        if value is None:
             continue
         a = _resolve(value, cwd)
         key = os.path.normcase(a)

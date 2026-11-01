@@ -76,6 +76,17 @@ def seed_from_peer(store, fname):
         with open(os.path.join(store, fname), "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(lines[:lines.index("---") + 1]) + "\n")
         return True
+    # no peer holds the file in its shape (none at all, or only copies with no `---` separator): the plugin's own
+    # seed, hooks/<name>-seed.md, where it ships one
+    seed = os.path.join(PLUGIN, "hooks", base[:-len(".md")] + "-seed.md")
+    if os.path.exists(seed):
+        os.makedirs(store, exist_ok=True)
+        with open(seed, encoding="utf-8") as f:
+            lines = f.read().replace("\r\n", "\n").split("\n")
+        if "---" in lines:
+            with open(os.path.join(store, fname), "w", encoding="utf-8", newline="\n") as f:
+                f.write("\n".join(lines[:lines.index("---") + 1]) + "\n")
+            return True
     return False
 
 STORE_FILES = {"dispatch.md", "index.md", "ledger.md", "logger.md", "tombstones.md", "virtual.md",

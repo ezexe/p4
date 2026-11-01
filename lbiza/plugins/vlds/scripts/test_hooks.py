@@ -614,6 +614,87 @@ def test_host_closing():
     print("host closing: green")
 
 
+def test_correction_keeps_its_ruling():
+    """A correction never disables the ruling it produced: the tombstone that freed the wrong reading carries the
+    owner's words, and so does the right ruling written at the same time — that ruling stays LIVE, while an earlier
+    entry with the same words is still masked, and a head within the tombstone's freed: is masked whatever its time
+    (findings.md 17, from the ap-p4_mac store)."""
+    root, store = seed_project("mask-session")
+    try:
+        words = "audioplugin-p4 is the audioplugin/.claude/p4 repo correct its in there?"
+        with open(os.path.join(store, "tombstones.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(TOMBSTONES + f'\n- freed: AudioPlugin-p4 at ~/code/AudioPlugin-p4, a sibling of the project\n'
+                    f'  time: 2026-10-29 02:17\n  cause: superseded\n  owner-words: "{words}"\n  swept: moved\n')
+        with open(os.path.join(store, "local-storage.md"), "a", encoding="utf-8", newline="\n") as f:
+            f.write(f'\n- ruling: "the p4 repo is nested in the project, at ~/code/AudioPlugin/.claude/p4"\n'
+                    f'  time: 2026-10-29 02:17\n  owner-words: "{words}"\n  scope: the project\n  status: LIVE\n'
+                    f'\n- ruling: "an older reading that leaned on the same words"\n  time: 2026-10-29 01:00\n'
+                    f'  owner-words: "{words}"\n  scope: the project\n  status: LIVE\n'
+                    '\n- ruling: "AudioPlugin-p4 at ~/code/AudioPlugin-p4, a sibling of the project"\n'
+                    '  time: 2026-10-29 03:00\n  owner-words: "later words"\n  scope: the project\n  status: LIVE\n')
+        r = subprocess.run([sys.executable, PHI, "--store", store, "barrier"], capture_output=True, timeout=60)
+        bar = r.stdout.decode("utf-8", "replace")
+        state = {k: next(l for l in bar.split("\n") if k in l).split()[1] for k in
+                 ("the p4 repo is nested", "an older reading", "a sibling of the project")}
+        assert state == {"the p4 repo is nested": "LIVE", "an older reading": "FREED",
+                         "a sibling of the project": "FREED"}, (state, bar)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("a correction keeps its ruling: green")
+
+
+def test_record_seeds_from_plugin():
+    """record.py seeds a file the session store lacks from a peer's header — and when the only peer's copy has no
+    `---` separator, from the plugin's own seed (hooks/ledger-seed.md), so a correction is written, never refused as
+    'file absent' (findings.md 18)."""
+    root, store = seed_project("seed-session")
+    try:
+        os.remove(os.path.join(store, "ledger.md"))
+        peer = store_of(root, "peer-session")
+        os.makedirs(peer)
+        shutil.copy(SEED, os.path.join(peer, "dispatch.md"))
+        with open(os.path.join(peer, "ledger.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("# VLDS Ledger\n\nBackfilled.\n\n```yaml\ncorrection:\n  key: p4-location\n  time: 2026-10-29 02:17\n"
+                    "  match: a\n  meant: b\n  delta: c\n```\n")
+        rec = os.path.join(root, "rec.md")
+        with open(rec, "w", encoding="utf-8", newline="\n") as f:
+            f.write("## ledger.md\n- correction: p4-location\n  time: 2026-09-03 10:00\n  match: a sibling checkout\n"
+                    "  meant: nested at .claude/p4\n  delta: moved\n")
+        r = subprocess.run([sys.executable, os.path.join(HERE, "record.py"), "--store", store, "--session", "seed-ses",
+                            "--now", "2026-09-03 10:05", "--record", rec], capture_output=True, timeout=60)
+        out = r.stdout.decode("utf-8", "replace")
+        assert r.returncode == 0 and "refused: nothing" in out, out
+        with open(os.path.join(store, "ledger.md"), encoding="utf-8") as f:
+            text = f.read()
+        with open(os.path.join(PLUGIN, "hooks", "ledger-seed.md"), encoding="utf-8") as f:
+            assert text.startswith(f.read().rstrip("\n") + "\n"), "(a) the plugin's header not the seed"
+        assert "- correction: p4-location" in text, text
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("record seeds from the plugin: green")
+
+
+def test_store_path_variables():
+    """A write spelled through a shell variable the same command assigned (`S=.claude/p4/sessions/…/vlds; … > $S/ledger.md`,
+    the ap-p4_mac operator's own call) resolves to the store, so post-write never calls it OUTSIDE and pre-write never
+    asks; a variable pointing outside the store is still stray; one the hook cannot expand is never called stray
+    (findings.md 19)."""
+    root, store = seed_project("var-session")
+    try:
+        rel = os.path.relpath(store, root).replace(os.sep, "/")
+        cmd = f'cd "{root}"; S={rel}; R=/tmp/rec.md; printf \'%s\\n\' "# VLDS Ledger" "" "---" > $S/ledger.md; echo $R'
+        assert decision(run_hook("pre-write", bash(cmd, "/"), root)) is None, "(a) pre-write asked about the store"
+        ctx = decision(run_hook("post-write", bash(cmd, "/"), root))["additionalContext"]
+        assert "OUTSIDE" not in ctx, f"(a) post-write called the store outside:\n{ctx}"
+        out = decision(run_hook("pre-write", bash(f'cd "{root}"; S=docs; echo x > "${{S}}/ledger.md"', "/"), root))
+        assert out and out["permissionDecision"] == "ask" and "docs" in out["permissionDecisionReason"], out
+        assert decision(run_hook("pre-write", bash('echo x > "$NOT_SET_ANYWHERE_42/ledger.md"', root), root)) is None, \
+            "(c) an unexpandable path was called stray"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("store paths through variables: green")
+
+
 def test_cross_session_reads():
     """The p4 layout's reads: a ruling one session recorded is a standing rule in another session's start and its
     barrier; another session's inferences and dispatch rows never reach this one; the barrier's virtual lines map back
@@ -1786,6 +1867,9 @@ if __name__ == "__main__":
     test_turn_close_rows()
     test_label_completeness()
     test_host_closing()
+    test_correction_keeps_its_ruling()
+    test_record_seeds_from_plugin()
+    test_store_path_variables()
     test_cross_session_reads()
     test_session_title()
     test_pool_mode()

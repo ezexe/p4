@@ -5,6 +5,12 @@ and a SessionStart check of the register against src/.
 Subcommand `register-lint`, run at SessionStart: one line when src/ holds code the register does not name, or the
 register names a path that is gone without a retired / superseded / moved / deleted state; silent otherwise.
 
+Subcommand `repo-uses`, run at SessionStart: one line when the project repo's tracked files — its code, build,
+docs or CI — reference a frag under any session's src/ or a code file in the notebook by name: that file is code
+the repo works with, relies on or depends on, so it moves into the repo (its scripts/, or wherever the repo keeps
+that kind of code) and its register entry is marked moved; src/ keeps only what the repo does not use. Silent when
+nothing is referenced, outside a git repo, or when git is missing.
+
 Subcommand `frag-gate`, reading the harness's JSON payload on stdin (decoded as UTF-8): for a Write or Edit,
 the file_path; for a Bash or PowerShell command, every write-position path (redirects, tee, the PowerShell
 content cmdlets, python's open() in a write mode, cp / mv destinations). Three cases ask — never deny:
@@ -385,6 +391,74 @@ def cmd_register_lint(payload):
     return 0
 
 
+REPO_USES_MIN_NAME = 6     # a basename shorter than this (`a.py`, `run.sh`) matches too much to call it a use
+REPO_USES_MAX = 200        # candidate names one git grep carries
+
+
+def repo_use_candidates(root):
+    """{basename: [p4-relative paths]} — every code file under a session's src/ (a task's out/ excluded) and in the
+    notebook (its .out/ excluded) whose name is distinctive enough to look for."""
+    p4 = os.path.join(root, ".claude", "p4")
+    found = {}
+    tops = [src for _n, src in all_session_srcs(root)] + [os.path.join(p4, "scratchpad")]
+    for top in tops:
+        for d, dirs, files in os.walk(top):
+            dirs[:] = [x for x in dirs if x not in ("out", OUT_NAME) and not x.startswith(".")]
+            for name in files:
+                path = os.path.join(d, name)
+                if name == "frags.md" or not is_code(path) or len(name) < REPO_USES_MIN_NAME:
+                    continue
+                found.setdefault(name, []).append(os.path.relpath(path, p4).replace("\\", "/"))
+    return dict(sorted(found.items())[:REPO_USES_MAX])
+
+
+def repo_uses(root):
+    """[(p4-relative path, [repo files that reference its name])] — read-only, one `git grep` over the project
+    repo's tracked files; .claude/p4 is its own repository and never in the project's index, so a frag's own
+    register or notes never count as a use."""
+    cands = repo_use_candidates(root)
+    if not cands:
+        return []
+    args = ["git", "-C", root, "grep", "-I", "-F", "-l", "-z"]
+    for name in cands:
+        args += ["-e", name]
+    try:
+        r = subprocess.run(args + ["--", ".", ":(exclude).claude/p4"], capture_output=True, timeout=15)
+    except Exception:
+        return []
+    if r.returncode not in (0, 1):
+        return []
+    files = [f.decode("utf-8", "replace") for f in r.stdout.split(b"\0") if f]
+    out = []
+    for name, paths in cands.items():
+        users = []
+        for f in files:
+            try:
+                with open(os.path.join(root, f), encoding="utf-8", errors="replace") as fh:
+                    if re.search(r"(?<![\w.-])" + re.escape(name) + r"(?![\w-])", fh.read()):
+                        users.append(f)
+            except OSError:
+                continue
+        if users:
+            out += [(p, users) for p in paths]
+    return out
+
+
+def cmd_repo_uses(payload):
+    root = project_root(payload)
+    if not os.path.isdir(os.path.join(root, ".claude", "p4")):
+        return 0
+    used = repo_uses(root)
+    if not used:
+        return 0
+    items = [f"{p} (named in {', '.join(u[:2])}{' …' if len(u) > 2 else ''})" for p, u in used[:6]]
+    print("src-fragger: the repo uses " + "; ".join(items) + (f" (+{len(used) - 6} more)" if len(used) > 6 else "")
+          + " — code the repo works with, relies on or depends on belongs in the repo itself (its scripts/, or "
+          "wherever it keeps that kind of code), not in p4 src/: move it there, point the reference at the new "
+          "path, and mark its register entry moved.")
+    return 0
+
+
 # The notebook's `.out/`, kept at every session start: its `.gitignore` of `*` is re-seeded whenever it is missing
 # or changed (the directory always stays ignored), and every ignorable found in the notebook outside it — what an
 # older version wrote beside the notes, before `.out/` existed — is moved into it at the same relative path. A
@@ -492,6 +566,8 @@ def main():
             return cmd_frag_gate(payload)
         if sub == "register-lint":
             return cmd_register_lint(payload)
+        if sub == "repo-uses":
+            return cmd_repo_uses(payload)
         if sub == "notebook-out":
             return cmd_notebook_out(payload)
         print(f"frag_gate.py: unknown subcommand {sub!r}")

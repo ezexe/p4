@@ -172,6 +172,7 @@ def main():
     register_lint()
     notebook_out()
     session_open()
+    repo_uses()
     print("test_frag_gate.py: all green")
 
 
@@ -235,6 +236,46 @@ def notebook_out():
     assert sweep() == "" and not os.path.exists(os.path.join(root, ".claude")), "the sweep created a store"
     shutil.rmtree(root, ignore_errors=True)
     print("test_frag_gate.py: notebook-out cases green")
+
+
+def repo_uses():
+    """The SessionStart check `repo-uses`: a frag under src/ or a code file in the notebook that the project repo's
+    tracked code, build, docs or CI names is code the repo uses — one line, prompting the move into the repo; a frag
+    the repo does not name, a short generic name, the p4 repo's own files, and a project outside git stay silent."""
+    if not shutil.which("git"):
+        print("test_frag_gate.py: repo-uses cases skipped (no git on PATH)")
+        return
+    root = tempfile.mkdtemp(prefix="frag-uses-")
+    try:
+        def put(rel, text):
+            path = os.path.join(root, *rel.split("/"))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
+        put(".claude/p4/sessions/port--2c09be2c/src/port/compdb.py", "print(1)\n")
+        put(".claude/p4/sessions/port--2c09be2c/src/port/probe_cef.py", "print(2)\n")
+        put(".claude/p4/sessions/port--2c09be2c/src/port/go.sh", "echo\n")
+        put(".claude/p4/scratchpad/dow_mac.sh", "echo\n")
+        put(".claude/p4/sessions/port--2c09be2c/src/frags.md", "# frags\n\n---\n\n- path: port/probe_cef.py\n")
+        put(".gitignore", ".claude/p4/\n")
+        put("README.md", "Build the compile database with `python scripts/compdb.py` (see compdb.py) and run go.sh.\n")
+        put(".github/workflows/ci.yml", "steps:\n  - run: sh dow_mac.sh\n")
+
+        def lint():
+            r = subprocess.run([sys.executable, GATE, "repo-uses"], input=json.dumps({"cwd": root}).encode(),
+                               capture_output=True, timeout=60, env=dict(os.environ, CLAUDE_PROJECT_DIR=root))
+            return r.stdout.decode("utf-8", "replace").strip()
+        assert lint() == "", "(a) a project outside git spoke"
+        subprocess.run(["git", "-C", root, "init", "-q"], check=True)
+        subprocess.run(["git", "-C", root, "add", "-A"], check=True)
+        out = lint()
+        assert out.startswith("src-fragger: the repo uses ") and "sessions/port--2c09be2c/src/port/compdb.py (named in README.md)" \
+            in out and "scratchpad/dow_mac.sh (named in .github/workflows/ci.yml)" in out and "scripts/" in out, out
+        assert "probe_cef.py" not in out and "go.sh" not in out, f"(b) an unused or generic frag named:\n{out}"
+        assert len(out.split("\n")) == 1, out
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("test_frag_gate.py: repo-uses cases green")
 
 
 def register_lint():

@@ -851,8 +851,11 @@ def tombstone_hit(value, fields, masks):
     freed: (or the reverse), the shorter side at least MASK_MIN characters — or None. `masks` is tombstone_masks()'
     shape; its first element is whatever the caller locates a tombstone by (a line here, a key in idb.py)."""
     head, own = norm_text(value), norm_text(fields.get("owner-words", ""))
+    stamp = str(fields.get("time", "")).strip()
     for ref, freed, words, when in masks:
-        if own and words and own == words:
+        # shared words mask only what the free came after: a correction writes its replacement ruling with the
+        # freeing message's own words, at the free's time or later, and a free never disables the ruling it produced
+        if own and words and own == words and not (stamp and when and stamp >= str(when).strip()):
             return ref, when, "the same owner-words"
         short, long_ = (head, freed) if len(head) <= len(freed) else (freed, head)
         if len(short) >= MASK_MIN and short in long_:
