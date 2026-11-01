@@ -19,6 +19,21 @@ HOOK = os.path.join(HERE, "mind_reader.py")
 HEAD = "# VLDS Partition — Dispatch\n\nheader\n\n---\n"
 
 
+def pid_alive(pid):
+    """True while the process runs: tasklist on Windows; signal 0 elsewhere — macOS has no /proc, so a /proc probe
+    read every live watcher there as dead."""
+    if os.name == "nt":
+        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True).stdout
+        return str(pid) in out
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def row(fp, t, arrival="turn (stamped by the prompt hook)"):
     return f"\n- fingerprint: \"{fp}\"\n  time: {t}\n  arrival: {arrival}\n  state: FRESH\n  addressed: done\n"
 
@@ -115,15 +130,11 @@ def main():
         logp = os.path.join(root, ".claude", "p4", "scratchpad", ".out", "mind-reader", "now--33333333.log")
         pid = int(read(logp).strip().split("pid=")[-1])
         time.sleep(4)
-        alive = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True).stdout \
-            if os.name == "nt" else ("x" if os.path.exists(f"/proc/{pid}") else "")
-        assert str(pid) in alive or (os.name != "nt" and alive), f"the watcher {pid} died with its hook"
+        assert pid_alive(pid), f"the watcher {pid} died with its hook"
         put(os.path.join(now, "mind-reader", "stop"), "x\n")
         for _ in range(20):
             time.sleep(0.5)
-            gone = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True).stdout \
-                if os.name == "nt" else ""
-            if str(pid) not in gone:
+            if not pid_alive(pid):
                 break
         else:
             raise AssertionError(f"the watcher {pid} ignored its stop")
