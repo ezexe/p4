@@ -1,31 +1,26 @@
 #!/usr/bin/env python3
-"""p4_memory.py — the p4-memory plugin's mechanical half: the built-in per-project memory (the base class the
-vlds override wraps) is stored in the p4 repo, `<project>/.claude/p4/memory/`, and nowhere else.
+"""p4_memory.py — the p4-memory plugin: Claude Code's built-in per-project memory is stored in the p4 repo,
+`<project>/.claude/p4/memory/`, and nowhere else. A storage move only: nothing here tells the model how to behave.
 
-The harness loads and names base memories at `~/.claude/projects/<project-slug>/memory/` — the device's local
-AppData on Windows — and that path is fixed by the system prompt. This plugin empties it: every memory moves into
-p4, and the AppData directory keeps one file, a pointer `MEMORY.md` telling the session where its memory is and
-where to write it. The rest of `~/.claude/projects/<project-slug>/` (the harness's transcripts and per-session
-directories) is the harness's own and is never touched.
+The harness loads and names memories at `~/.claude/projects/<project-slug>/memory/` (AppData). This plugin empties
+that directory into p4 and leaves one file there, a pointer `MEMORY.md` that says where the memory is and to write
+there. The rest of `~/.claude/projects/<project-slug>/` (transcripts, per-session directories) is never touched.
+`.claude/p4/` is created when absent (a plain directory; p4-recall's layout hook makes it a git repository).
 
-  migrate (SessionStart)  every AppData memory source — the `memory/` directory, a junction or symlink an earlier
-                          version left there, and every `memory.pre-p4-<time>` directory it renamed aside — is
-                          merged into `.claude/p4/memory/` and then deleted: a file identical in p4 → dropped; a
-                          file of the live `memory/` absent in p4 → moved in; any other (a differing file, or one a
-                          renamed-aside directory still holds that p4 no longer does) → kept in p4 at
-                          `.conflicts/<source>/<path>` for the owner's merge, never overwriting the p4 file. A link
-                          to p4 is removed as a link (its target untouched). Then the pointer `MEMORY.md` is written
-                          in AppData and the p4 `MEMORY.md` is printed, since the harness loaded only the pointer.
-                          The harness can hold the directory open while a session starts, so a deletion is retried,
-                          and on failure left to the turn's close.
-  mirror (PostToolUse)    a Write or Edit into the AppData memory directory is moved into p4 at once — the
-                          harness's own write is never refused: a memory file lands at the same path in p4 (a p4
-                          file it replaces kept in `.conflicts/`), lines added to the pointer are appended to the
-                          p4 `MEMORY.md`, and the pointer is restored; the session is told where the file went.
-  sweep (Stop)            whatever the start could not delete is tried again at the turn's close — silent unless
-                          it moved something. `relink`, its name before 0.0.4, is still accepted.
+  migrate (SessionStart)  every AppData memory source (the `memory/` directory, a junction or symlink an earlier
+                          version left, every `memory.pre-p4-<time>` directory) is merged into `.claude/p4/memory/`
+                          and deleted: identical in p4 -> dropped; a live file absent in p4 -> moved in; any other ->
+                          kept at `.conflicts/<source>/<path>`, never overwriting the p4 file. A link to p4 is removed
+                          as a link. Then the pointer is written and the p4 `MEMORY.md` is printed as the built-in
+                          prints its own (the first BUILTIN_LINES lines), plus at most one notice line when a file
+                          was moved or a conflict kept.
+  mirror (PostToolUse)    a Write or Edit into the AppData memory directory is moved into p4 at once (a p4 file it
+                          replaces kept in `.conflicts/replaced/`; index lines added to the pointer appended to the
+                          p4 `MEMORY.md`, the pointer restored); one line says where it went.
+  sweep (Stop)            whatever the start could not delete is tried again; prints nothing. `relink` is accepted
+                          as its old name.
 
-Every failure prints a one-line notice and exits 0 — a hook that crashes the call it guards is worse than none.
+Every failure prints a one-line notice and exits 0.
 """
 
 import filecmp
@@ -40,6 +35,7 @@ import time
 MEMORY = "memory"
 CONFLICTS = ".conflicts"
 POINTER_MARK = "<!-- p4-memory: pointer"
+BUILTIN_LINES = 200          # the built-in loads the first 200 lines of MEMORY.md
 RETRIES = 5
 RETRY_WAIT_S = 1.0
 
@@ -105,15 +101,10 @@ def remove_link(path):
 
 def pointer_text(p4):
     p = os.path.normpath(p4)
-    return (f"{POINTER_MARK} — rewritten at every session start; anything written in this directory is moved into "
-            f"the p4 store -->\n"
-            f"# This project's memory lives in the p4 repo\n\n"
-            f"This directory is not the memory store; it holds only this pointer.\n"
-            f"The memory store is `{p}` — its `MEMORY.md` index is printed by the p4-memory SessionStart hook, and "
-            f"every memory file is read there.\n"
-            f"Write every memory file and its `MEMORY.md` index line in `{p}`, never in this directory.\n"
-            f"A file written here anyway is moved into `{p}` by the p4-memory PostToolUse hook, and this pointer is "
-            f"restored.\n")
+    return (f"{POINTER_MARK} -->\n"
+            f"# Memory location\n\n"
+            f"This project's memory is stored in `{p}`.\n"
+            f"Write memory files and their `MEMORY.md` index lines in `{p}`.\n")
 
 
 def is_pointer(path):
@@ -196,14 +187,13 @@ def migrate(app, p4, stamp):
     os.makedirs(p4, exist_ok=True)
     if is_link(app):
         if not same_dir(app, p4):                       # a link somewhere else: the owner's arrangement
-            return [f"p4-memory: {app} is a link that does not reach {p4} — left as it is; base memories are not "
-                    f"moved into p4 until it is removed."], False
+            return [f"{app} is a link that does not reach .claude/p4/memory/; left as it is, nothing moved"], False
         if not retry(remove_link, app):
-            return [f"p4-memory: {app} is a link to the p4 store and is busy — the turn's close removes it."], False
-        lines.append(f"p4-memory: removed the link {app} → .claude/p4/memory/ (its target untouched).")
+            return [f"{app} is a link to .claude/p4/memory/ and is busy, retried at the turn's close"], False
+        lines.append(f"removed the link {app} -> .claude/p4/memory/ (its target untouched)")
     sources = [app] if os.path.isdir(app) else []
     sources += sorted(d for d in glob.glob(glob.escape(app) + ".pre-p4-*") if os.path.isdir(d) and not is_link(d))
-    moved, aside, dropped, left, emptied = [], [], 0, [], []
+    moved, aside, left = [], [], []
     for src_dir in sources:
         live = src_dir == app
         name = os.path.basename(src_dir)
@@ -214,7 +204,7 @@ def migrate(app, p4, stamp):
             if live and rel == "MEMORY.md" and is_pointer(src):
                 continue
             if os.path.isfile(dst) and filecmp.cmp(src, dst, shallow=False):
-                dropped += 1
+                pass                                    # identical in p4: dropped
             elif live and not os.path.exists(dst) and rel.split(os.sep)[0] != CONFLICTS:
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copy2(src, dst)
@@ -223,42 +213,45 @@ def migrate(app, p4, stamp):
                 keep_aside(p4, name, rel, src, stamp)
                 aside.append(f"{name}/{rel}")
         ok = empty_live_dir(src_dir) if live else retry(shutil.rmtree, src_dir)
-        (emptied if ok else left).append(src_dir)
-    if moved:
-        lines.append(f"p4-memory: moved {len(moved)} base memory file(s) from AppData into .claude/p4/memory/.")
-    if aside:
-        lines.append(f"p4-memory: {len(aside)} file(s) differ from p4 or are no longer in it ("
-                     + ", ".join(aside[:5]) + (", …" if len(aside) > 5 else "")
-                     + ") — kept in .claude/p4/memory/.conflicts/ for the owner's merge; the p4 files were not "
-                       "overwritten.")
-    if emptied:
-        lines.append(f"p4-memory: emptied the AppData memory ({', '.join(map(os.path.basename, emptied))}; {dropped} file(s) already "
-                     f"identical in p4) — it now holds only the pointer MEMORY.md.")
-    if left:
-        lines.append(f"p4-memory: {', '.join(left)} could not be deleted (busy) — its content is in p4; the turn's "
-                     f"close tries again.")
+        if not ok:
+            left.append(src_dir)
     try:
         write_pointer(app, p4)
     except OSError as e:
-        lines.append(f"p4-memory: could not write the pointer MEMORY.md in {app}: {e}")
-        return lines, False
+        lines.append(f"could not write the pointer MEMORY.md in {app} ({e})")
+    if moved:
+        lines.append(f"moved {len(moved)} memory file(s) from AppData into .claude/p4/memory/")
+    if aside:
+        lines.append(f"kept {len(aside)} differing file(s) in .claude/p4/memory/.conflicts/ ("
+                     + ", ".join(aside[:5]) + (", …" if len(aside) > 5 else "") + ")")
+    if left:
+        lines.append(f"{', '.join(map(os.path.basename, left))} busy, retried at the turn's close")
     return lines, not left
+
+
+def builtin_index(memdir):
+    """What the built-in prints from a memory directory: the first BUILTIN_LINES lines of its MEMORY.md."""
+    index = os.path.join(memdir, "MEMORY.md")
+    if not os.path.isfile(index):
+        return ""
+    with open(index, encoding="utf-8", errors="replace") as f:
+        return "".join(f.readlines()[:BUILTIN_LINES])
+
+
+def notice(parts):
+    return ("p4-memory: " + "; ".join(parts) + ".") if parts else ""
 
 
 def cmd_migrate(payload):
     root = project_root(payload)
-    if not os.path.isdir(os.path.join(root, ".claude", "p4")):
-        return 0                                        # no p4 repo here: nothing to store into
     app, p4 = appdata_memory(payload, root), p4_memory(root)
-    lines, _ = migrate(app, p4, time.strftime("%Y%m%d-%H%M%S"))
-    if lines:
-        print("\n".join(lines))
-    index = os.path.join(p4, "MEMORY.md")
-    if os.path.isfile(index):                           # the harness loaded only the pointer
-        with open(index, encoding="utf-8", errors="replace") as f:
-            print(f"\n### p4 base memory index ({os.path.normpath(index)}) — the session's MEMORY.md; the harness "
-                  f"loaded only the AppData pointer. Read and write memories in {os.path.normpath(p4)}.\n\n"
-                  + f.read()[:8000])
+    parts, _ = migrate(app, p4, time.strftime("%Y%m%d-%H%M%S"))
+    out = notice(parts)
+    if out:
+        print(out)
+    index = builtin_index(p4)          # the harness loaded only the pointer: print what it would have printed
+    if index:
+        sys.stdout.write(index if index.endswith("\n") else index + "\n")
     return 0
 
 
@@ -281,7 +274,7 @@ def cmd_mirror(payload):
         return 0
     root = project_root(payload)
     app, p4 = appdata_memory(payload, root), p4_memory(root)
-    if not os.path.isdir(os.path.join(root, ".claude", "p4")) or is_link(app):
+    if is_link(app):
         return 0
     n_app, n_fp = norm(app), norm(fp)
     if not n_fp.startswith(n_app + os.sep) or not os.path.isfile(fp):
@@ -303,34 +296,27 @@ def cmd_mirror(payload):
             with open(dst, "a", encoding="utf-8", newline="\n") as f:
                 f.write(("\n" if old and not old.endswith("\n") else "") + "\n".join(add) + "\n")
         write_pointer(app, p4)
-        note = (f"p4-memory: {len(add)} index line(s) written into the AppData pointer were appended to "
-                f"{os.path.normpath(dst)} and the pointer restored — edit that MEMORY.md, never the AppData one.")
+        note = (f"p4-memory: {len(add)} index line(s) written to the AppData MEMORY.md were appended to "
+                f"{os.path.normpath(dst)}; the AppData file is the pointer again.")
     else:
         if os.path.isfile(dst) and not filecmp.cmp(fp, dst, shallow=False):
             keep_aside(p4, "replaced", rel, dst, stamp)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(fp, dst)
         retry(os.remove, fp)
-        note = (f"p4-memory: {fp} was moved to {os.path.normpath(dst)} — the memory store is "
-                f"{os.path.normpath(p4)}; read and edit it there.")
+        note = f"p4-memory: {fp} was moved to {os.path.normpath(dst)}."
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": note}}))
     return 0
 
 
 def cmd_sweep(payload):
-    """Stop: whatever the start could not move or delete is tried again at the turn's close — silent unless it
-    did something."""
+    """Stop: whatever the start could not move or delete is tried again at the turn's close. Prints nothing."""
     root = project_root(payload)
-    if not os.path.isdir(os.path.join(root, ".claude", "p4")):
-        return 0
     app, p4 = appdata_memory(payload, root), p4_memory(root)
     pending = is_link(app) or glob.glob(glob.escape(app) + ".pre-p4-*") or (
         os.path.isdir(app) and any(n != "MEMORY.md" or not is_pointer(os.path.join(app, n)) for n in os.listdir(app)))
-    if not pending and os.path.isdir(app):
-        return 0
-    lines, _ = migrate(app, p4, time.strftime("%Y%m%d-%H%M%S"))
-    if lines:
-        print("\n".join(lines))
+    if pending or not os.path.isdir(app):
+        migrate(app, p4, time.strftime("%Y%m%d-%H%M%S"))
     return 0
 
 

@@ -1,14 +1,11 @@
 {
   "name": "p4-memory",
-  "version": "0.0.4",
-  "description": "p4-memory — the built-in per-project memory (the base class the vlds override wraps) is stored in the p4 repo, <project>/.claude/p4/memory/, and nowhere else. At every session start every AppData memory source under ~/.claude/projects/<project-slug>/ — the memory/ directory, a junction or symlink to p4 an earlier version left (removed as a link, its target untouched), and every memory.pre-p4-<time> directory — is merged into .claude/p4/memory/ (identical → dropped; a live file absent in p4 → moved in; any other → kept at .conflicts/<source>/<path> for the owner's merge, a p4 file never overwritten) and then deleted, leaving one file in AppData: a pointer MEMORY.md telling the session that its memory lives in .claude/p4/memory/ and must be read and written there; the start prints the p4 MEMORY.md, since the harness loaded only the pointer. A Write or Edit into AppData is moved into p4 at once by a PostToolUse hook (index lines added to the pointer appended to the p4 MEMORY.md, the pointer restored) and the session told where it went; a deletion the harness blocks is retried and swept at the turn's close. The harness's transcripts and per-session directories beside it are never touched. Depends on vlds, which creates and initializes the p4 repo.",
+  "version": "0.1.0",
+  "description": "Stores Claude Code's built-in per-project memory in <project>/.claude/p4/memory/ instead of AppData. AppData keeps a pointer MEMORY.md; the session start prints the p4 MEMORY.md index, as the built-in would, and a write into AppData is moved into p4.",
   "author": {
     "name": "ezexe"
   },
-  "homepage": "https://github.com/ezexe/prompty-prompter-pioneer-puppeteer/tree/main/lbiza/plugins/p4-memory",
-  "repository": "https://github.com/ezexe/prompty-prompter-pioneer-puppeteer",
-  "license": "MIT",
-  "dependencies": [
-    { "name": "vlds", "version": ">=0.0.60" }
-  ]
+  "homepage": "https://github.com/ezexe/p4/tree/main/lbiza/plugins/p4-memory",
+  "repository": "https://github.com/ezexe/p4",
+  "license": "MIT"
 }
