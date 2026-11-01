@@ -21,7 +21,8 @@ HOOK = os.path.join(HERE, "p4_memory.py")
 RUNNER = os.path.join(HERE, "run-hook.sh")
 MARK = "<!-- p4-memory: pointer"
 BUILTIN_LINES = 200     # the built-in loads the first 200 lines of MEMORY.md or the first 25KB, whichever comes
-BUILTIN_BYTES = 25 * 1024   # first (docs: memory); kept here independently of the hook
+BUILTIN_BYTES = 25_000      # first, cut at whole lines (docs: memory; measured by test_live_memory_limit.py);
+                            # kept here independently of the hook
 
 
 def run(sub, root, app, payload):
@@ -68,11 +69,13 @@ def builtin_print(memdir):
     path = os.path.join(memdir, "MEMORY.md")
     if not os.path.isfile(path):
         return []
-    text = "".join(read(path).splitlines(keepends=True)[:BUILTIN_LINES])
-    data = text.encode("utf-8")
-    if len(data) > BUILTIN_BYTES:
-        text = data[:BUILTIN_BYTES].decode("utf-8", errors="ignore")
-    return text.splitlines()
+    kept, size = [], 0
+    for line in read(path).splitlines(keepends=True)[:BUILTIN_LINES]:
+        size += len(line.encode("utf-8"))
+        if size > BUILTIN_BYTES:
+            break
+        kept.append(line)
+    return "".join(kept).splitlines()
 
 
 def behavior():

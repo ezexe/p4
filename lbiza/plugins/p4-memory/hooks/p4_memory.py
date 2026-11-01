@@ -35,8 +35,9 @@ import time
 MEMORY = "memory"
 CONFLICTS = ".conflicts"
 POINTER_MARK = "<!-- p4-memory: pointer"
-BUILTIN_LINES = 200          # the built-in loads the first 200 lines of MEMORY.md, or the first 25KB,
-BUILTIN_BYTES = 25 * 1024    # whichever comes first (docs: memory); the byte reading of "25KB" is a live test's
+BUILTIN_LINES = 200          # the built-in loads the first 200 lines of MEMORY.md, or the first 25KB, whichever
+BUILTIN_BYTES = 25_000       # comes first (docs: memory); "25KB" is 25,000 bytes cut at whole lines, as measured
+                             # twice on Claude Code 2.1.309 by test_live_memory_limit.py (2026-11-01: M166 both runs)
 RETRIES = 5
 RETRY_WAIT_S = 1.0
 
@@ -232,15 +233,21 @@ def migrate(app, p4, stamp):
 
 def builtin_index(memdir):
     """What the built-in prints from a memory directory: the first BUILTIN_LINES lines of its MEMORY.md, or the first
-    BUILTIN_BYTES, whichever comes first (https://code.claude.com/docs/en/memory: "The first 200 lines of `MEMORY.md`,
-    or the first 25KB, whichever comes first"). The byte value of "25KB" is measured by test_live_memory_limit.py."""
+    BUILTIN_BYTES cut at a whole line, whichever comes first (https://code.claude.com/docs/en/memory: "The first 200
+    lines of `MEMORY.md`, or the first 25KB, whichever comes first"; the byte value and the whole-line cut are measured
+    by test_live_memory_limit.py)."""
     index = os.path.join(memdir, "MEMORY.md")
     if not os.path.isfile(index):
         return ""
     with open(index, encoding="utf-8", errors="replace") as f:
-        text = "".join(f.readlines()[:BUILTIN_LINES])
-    data = text.encode("utf-8")
-    return data[:BUILTIN_BYTES].decode("utf-8", errors="ignore") if len(data) > BUILTIN_BYTES else text
+        lines = f.readlines()[:BUILTIN_LINES]
+    kept, size = [], 0
+    for line in lines:
+        size += len(line.encode("utf-8"))
+        if size > BUILTIN_BYTES:
+            break
+        kept.append(line)
+    return "".join(kept)
 
 
 def notice(parts):
