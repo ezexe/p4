@@ -69,11 +69,15 @@ __pycache__/
 *.pt
 *.phid
 """
-# inject: false is the measured default. The paid validation of 2026-11-01 (Opus 5.5, two seeds, Haiku judge) found
-# recall's lines never better than the built-in on any category and one lesson task worse on both seeds, and on
-# held-out short turns 0.373 against 0.393: section 0's rule keeps them out of the model's context. With it off, the
-# query still runs and what it would have shown is logged, so usage labels keep teaching the model.
-CONFIG = {"teacher-model": "claude-fable-5-1", "inject": False}
+# inject: "rules-facts" is the measured default. The paid validation of 2026-11-01 (Opus 5.5, two seeds, Haiku judge):
+# - every line (inject: true): never better than the built-in on the general tasks, the same lesson task worse on
+#   both seeds, and held-out short turns 0.373/0.360 against 0.393/0.373; it gains on newer-than-the-model tasks
+#   (0.75 against 0.50), but section 0's rule keeps it off
+# - only the rule and fact lines: silent wherever every line cost (identical to the built-in there), and on the
+#   newer-than-the-model tasks 0.667 against 0.50 on both seeds with nothing lost
+# With the other lines held back, the query still runs and what it would have shown is logged, so usage labels keep
+# teaching the model. inject: false turns it off entirely.
+CONFIG = {"teacher-model": "claude-fable-5-1", "inject": "rules-facts"}
 
 
 RULES_FACTS = re.compile(r"^- \S+ (rule|fact): ")
@@ -85,11 +89,11 @@ def inject_mode(p4):
     env = os.environ.get("P4_RECALL_INJECT")
     if env in ("0", "1", "rules-facts"):
         return {"0": "off", "1": "all"}.get(env, env)
-    try:
+    try:                                  # no config, or no inject key: the measured default
         with open(os.path.join(p4, "models", "config.json"), encoding="utf-8") as f:
-            v = json.load(f).get("inject", False)
+            v = json.load(f).get("inject", CONFIG["inject"])
     except (OSError, ValueError):
-        return "off"
+        v = CONFIG["inject"]
     return "rules-facts" if v == "rules-facts" else ("all" if v is True else "off")
 
 

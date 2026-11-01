@@ -2,6 +2,25 @@
 
 Everything found while building the overrides notebook, with where each one is used. "Measured" means the notebook (`.docs/p4/overrides_colab.ipynb`) tests it; "code" means it changes hooks, scripts or the store, which a single API call cannot test and the plugins' own tests must cover.
 
+## The fresh marketplace's paid validation, and what ships (2026-11-01, $9.94)
+
+Opus 5.5 answering, two seeds, Haiku 5.5 judging after it passed the grader check on every hand-written key (`scripts/session/fresh_validation.py`; results in `~/.cache/p4-fresh-validation/results/`).
+
+| measure | built-in | recall, every line | recall, rules and facts only |
+|---|---|---|---|
+| general and lesson tasks (accuracy, both seeds) | 0.672 / 0.672 | 0.656 / 0.656 | the same as the built-in (silent) |
+| held-out short turns | 0.393 / 0.373 | 0.373 / 0.360 | the same as the built-in (silent) |
+| newer than the model | 0.50 / 0.50 | 0.75 / 0.75 | 0.667 / 0.667, nothing lost |
+
+| # | finding | what ships |
+|---|---|---|
+| 26 | Every recall line together is never better than the built-in on the general tasks and costs the same lesson task on both seeds (`api-removal-readers`: the correction it was made from, recalled cut at 160 characters). | not shipped |
+| 27 | On held-out short turns, recall's history and repeat lines make the reading worse: 1–2 right where the built-in was wrong, 4 wrong where it was right, on each seed. Goal 1 (short turns read right) is not met by recall lines; the rows keep being recorded and labelled for a later measurement. | not shipped |
+| 28 | Recall helps where the purpose says it should: facts newer than the model. Rule and fact lines alone keep that gain (0.667 against 0.50, both seeds) and are silent everywhere else. | **shipped on: `inject: "rules-facts"`** |
+| 29 | The plain-words emission rewrite loses the same two simple questions on both seeds. | not shipped |
+| 30 | The trained ranker printed lines for 88–92% of ordinary prompts; training on silence tasks takes it to 92% silent with R-precision 0.371 → 0.372. | shipped (upgrade 01) |
+| 31 | The judge prompt never showed a task's earlier turns, so the Opus audit graded m2 and m3 without them; short-turn answer keys made from their own rubric cannot validate a judge. | fixed in the suite |
+
 ## From the session that ported dow.sh and compdb.py to macOS
 
 | # | finding | status |

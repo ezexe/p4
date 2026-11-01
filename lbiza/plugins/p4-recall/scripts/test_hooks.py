@@ -188,6 +188,23 @@ class Recall(Base):
                      self.proj, {"P4_RECALL_INJECT": "0"})
         self.assertEqual((r.returncode, r.stdout), (0, ""))
 
+    def test_default_is_rules_and_facts(self):
+        """With no override the repo's mode is the measured default: only rule and fact lines reach the model, and the
+        rest of what recall found is logged."""
+        import hook
+        text = "does the quokka harness run the zebrafish plotter golden images on every push?"
+        r = run_hook("recall", {"hook_event_name": "UserPromptSubmit", "session_id": SESSION, "prompt": text,
+                                "cwd": self.proj}, self.proj, {"P4_RECALL_INJECT": ""})
+        self.assertEqual(r.returncode, 0)
+        shown = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"].split("\n") if r.stdout else []
+        self.assertTrue(all(hook.RULES_FACTS.match(l) for l in shown), shown)
+        served = lb.read_served(self.p4, f"turn-{SESSION}")
+        self.assertEqual(served["shown"], len(shown))
+        self.assertGreaterEqual(served["lines"], served["shown"])
+        self.assertEqual(hook.inject_mode(self.p4), "rules-facts")
+        self.assertEqual(hook.injected(self.p4, ["- 2026-11-01 rule: a", "- 2026-11-01 correction: b",
+                                                 "- you have said \"x\" 3 times"]), ["- 2026-11-01 rule: a"])
+
     def test_ordinary_message_silent(self):
         for text in ("hi", "what is the weather like today"):
             r = run_hook("recall", {"session_id": SESSION, "prompt": text, "cwd": self.proj}, self.proj)
