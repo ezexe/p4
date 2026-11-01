@@ -358,7 +358,9 @@ def test_fresh_validation_fake():
             assert short and all(t["category"] == "short" and t["held_cut"] for t in short)
             assert any(t["history"] for t in short), "the rows before a turn ride as its conversation"
             for t in short:
-                said = t["reference"][len("I take it as: "):]
+                prefix = "You mean this, and I'll act on it now: "
+                assert t["reference"].startswith(prefix), t["reference"][:60]
+                said = t["reference"][len(prefix):].rstrip(".")
                 for f in p["ctx"].glob(f"*.{t['id']}.md"):
                     assert said not in f.read_text(), (t["id"], "the held-out reading leaked into recall")
             newer = [json.loads(l) for l in open(p["newer"], encoding="utf-8")]
