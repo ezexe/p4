@@ -263,8 +263,14 @@ def judge(client, model, task, answer, fake=False):
     if fake:
         ok = answer.strip() == task.get("reference", "").strip()
         return ok, "fake judge: equals the reference" if ok else "fake judge: differs from the reference", 0.0
-    prompt = (f"Task given to the assistant:\n<task>\n{task['prompt']}\n</task>\n\nRubric:\n{task['grader']['rubric']}"
-              f"\n\nThe assistant's answer:\n<answer>\n{answer}\n</answer>\n\nDoes the answer pass the rubric?")
+    # the earlier turns the assistant saw are part of the task: without them a repeat, a retraction or a short
+    # turn's context is invisible to the judge (the m2-repeat fault of 2026-11-01)
+    earlier = "".join(f"<{m['role']}>\n{m['content'] if isinstance(m['content'], str) else m['content']}\n</{m['role']}>\n"
+                      for m in task.get("history", []))
+    convo = f"Earlier turns of the conversation:\n<conversation>\n{earlier}</conversation>\n\n" if earlier else ""
+    prompt = (f"{convo}Task given to the assistant:\n<task>\n{task['prompt']}\n</task>\n\nRubric:\n"
+              f"{task['grader']['rubric']}\n\nThe assistant's answer:\n<answer>\n{answer}\n</answer>\n\n"
+              "Does the answer pass the rubric?")
     oc = {"format": {"type": "json_schema", "schema": JUDGE_SCHEMA}}
     if model not in NO_EFFORT:
         oc["effort"] = "medium"
@@ -297,11 +303,15 @@ def check_graders(tasks, fake_judge=True, client=None, judge_model=None, spent=N
     judge grades these tasks as the references say; `spent` (a list) collects the judge's dollars."""
     bad = []
     for t in tasks:
-        ok, why, usd = grade(t, t["reference"], client, judge_model, fake=fake_judge)
-        if spent is not None:
-            spent.append(usd)
-        if not ok:
-            bad.append(f"{t['id']}: reference fails ({why})")
+        # a key derived mechanically from the task's own rubric (key: derived) is a copy of what the judge is told,
+        # so a real judge rightly fails it as no interpretation; it cannot validate a judge, and only its bad
+        # answers are checked against one
+        if not (t.get("key") == "derived" and not fake_judge and t["grader"]["type"] == "judge"):
+            ok, why, usd = grade(t, t["reference"], client, judge_model, fake=fake_judge)
+            if spent is not None:
+                spent.append(usd)
+            if not ok:
+                bad.append(f"{t['id']}: reference fails ({why})")
         for b in t.get("bad", []):
             if t["grader"]["type"] == "judge" and fake_judge:
                 continue                       # a fake judge passes only the reference; nothing to learn here
