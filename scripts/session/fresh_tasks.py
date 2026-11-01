@@ -92,7 +92,10 @@ def short_tasks(stores, work, n_total=N_SHORT, now=None):
                     + "\". Passes if the answer takes the message the same way: the same act or intent (the wording "
                     "may differ, and doing it or saying it will do it both count). Fails if it reads the message as "
                     "something else, or only asks what it means when the earlier turns settle it.")},
-                "reference": "I take it as: " + addressed[:400], "bad": [BAD]})
+                # the answer key states the reading and what follows from it; `addressed:` is often a log of what
+                # was done, which pasted bare after "I take it as:" failed three of the Haiku judge's checks
+                "reference": ("You mean this, and I'll act on it now: " + addressed[:400].rstrip(" .;,") + "."),
+                "bad": [BAD]})
     return tasks, info
 
 
