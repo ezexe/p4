@@ -35,7 +35,8 @@ import time
 MEMORY = "memory"
 CONFLICTS = ".conflicts"
 POINTER_MARK = "<!-- p4-memory: pointer"
-BUILTIN_LINES = 200          # the built-in loads the first 200 lines of MEMORY.md
+BUILTIN_LINES = 200          # the built-in loads the first 200 lines of MEMORY.md, or the first 25KB,
+BUILTIN_BYTES = 25 * 1024    # whichever comes first (docs: memory); the byte reading of "25KB" is a live test's
 RETRIES = 5
 RETRY_WAIT_S = 1.0
 
@@ -230,12 +231,16 @@ def migrate(app, p4, stamp):
 
 
 def builtin_index(memdir):
-    """What the built-in prints from a memory directory: the first BUILTIN_LINES lines of its MEMORY.md."""
+    """What the built-in prints from a memory directory: the first BUILTIN_LINES lines of its MEMORY.md, or the first
+    BUILTIN_BYTES, whichever comes first (https://code.claude.com/docs/en/memory: "The first 200 lines of `MEMORY.md`,
+    or the first 25KB, whichever comes first"). The byte value of "25KB" is measured by test_live_memory_limit.py."""
     index = os.path.join(memdir, "MEMORY.md")
     if not os.path.isfile(index):
         return ""
     with open(index, encoding="utf-8", errors="replace") as f:
-        return "".join(f.readlines()[:BUILTIN_LINES])
+        text = "".join(f.readlines()[:BUILTIN_LINES])
+    data = text.encode("utf-8")
+    return data[:BUILTIN_BYTES].decode("utf-8", errors="ignore") if len(data) > BUILTIN_BYTES else text
 
 
 def notice(parts):

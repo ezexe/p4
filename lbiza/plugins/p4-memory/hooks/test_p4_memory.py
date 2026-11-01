@@ -20,7 +20,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, "p4_memory.py")
 RUNNER = os.path.join(HERE, "run-hook.sh")
 MARK = "<!-- p4-memory: pointer"
-BUILTIN_LINES = 200     # the built-in loads the first 200 lines of MEMORY.md; kept here independently of the hook
+BUILTIN_LINES = 200     # the built-in loads the first 200 lines of MEMORY.md or the first 25KB, whichever comes
+BUILTIN_BYTES = 25 * 1024   # first (docs: memory); kept here independently of the hook
 
 
 def run(sub, root, app, payload):
@@ -62,11 +63,16 @@ def link(app, target):
 
 
 def builtin_print(memdir):
-    """The reference: what the built-in prints from a memory directory — the first 200 lines of its MEMORY.md."""
+    """The reference: what the built-in prints from a memory directory — the first 200 lines of its MEMORY.md, or
+    the first 25KB, whichever comes first."""
     path = os.path.join(memdir, "MEMORY.md")
     if not os.path.isfile(path):
         return []
-    return read(path).splitlines()[:BUILTIN_LINES]
+    text = "".join(read(path).splitlines(keepends=True)[:BUILTIN_LINES])
+    data = text.encode("utf-8")
+    if len(data) > BUILTIN_BYTES:
+        text = data[:BUILTIN_BYTES].decode("utf-8", errors="ignore")
+    return text.splitlines()
 
 
 def behavior():
@@ -190,6 +196,8 @@ def gate2_a():
             "moved": ({"MEMORY.md": "- [a](a.md) — a\n- [b](b.md) — b\n", "b.md": "fact b\n", "a.md": "other a\n"},
                       {"a.md": "fact a\n"}),
             "long": ({}, {"MEMORY.md": index}),
+            # under 200 lines but over 25KB: the byte cut decides
+            "wide": ({}, {"MEMORY.md": "".join(f"- [w{i}](w{i}.md) — {'x' * 300}\n" for i in range(150))}),
             "empty": ({}, {}),
         }
         for name, (in_app, in_p4) in cases.items():
@@ -219,6 +227,8 @@ def gate2_a():
                 assert extra == 1 and "moved" in out[0] and "kept 1" in out[0], out[0]
             if name == "long":
                 assert len(out) == BUILTIN_LINES, len(out)
+            if name == "wide":
+                assert len("\n".join(out).encode("utf-8")) <= BUILTIN_BYTES and len(out) < 150, len(out)
             if name == "empty":
                 assert out == [], out
     finally:
