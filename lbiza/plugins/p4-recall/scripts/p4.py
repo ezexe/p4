@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
 """p4.py: the recall's one script (fresh-marketplace.md 3.4).
 
-  index [--force]                      rebuild models/index.json when a store, memory or src file is newer
+  index [--force] [--repo [--project D]]  rebuild models/index.json when a store, memory or src file is newer;
+                                       --repo first brings the repository's entries up to date (repo.py, 4.1a)
   query --text T [--session S]         the recall lines for one message: 0 lines for an ordinary message,
                                        otherwise at most 5, each `- <date> <kind>: <text> (<file>:<line>)`
+  row open|close --session S ...       stamp a message row; complete it from the reply (rows.py)
+  serve-log --key K --ids ...          record what was served to a turn or a subagent (models/served/)
+  usage --key K --reply-file F         the served lines' usage labels, from the reply (and --transcript)
+  signals [--session S]                the dictionary's signals into vocabulary.md (pending entries)
+  labels [--from-pools OLD] [--from-history] [--from-transcripts --project D --slug DIR ...] [--reexploration]
+                                       list the label set with counts per source; import or derive labels
+  train [--if-owed], eval              fit, evaluate held out, promote past the floor (train.py)
+  dictionary check [--dry]             every vocabulary entry's two tests; a failing entry set off
   check                                store health: counts, statuses, orphan labels, the jargon rate
   migrate [--apply] ...                the old layout into the new (scripts/migrate.py)
 
 Every subcommand takes `--p4 <dir>` (the .claude/p4 directory; default from CLAUDE_PROJECT_DIR or the cwd).
-`row`, `serve-log`, `usage`, `signals`, `labels`, `train`, `eval`, `dictionary check` and `teacher` are not built yet
-and exit 2.
+`teacher` (the paid batches, build step 9) is not built yet and exits 2.
 """
 
 import argparse
@@ -30,9 +38,24 @@ PER_FILE = 2
 TEXT_CHARS = 160
 HISTORY_CHARS = 120
 CANDIDATES = 200
-MIN_RARE = 2                  # without a trained ranker a line must share this many rare terms with the message
+MIN_RARE = 2                  # without a trained ranker a line must share this many of the message's terms...
+# ...and those shared terms must carry this much idf between them, cover this share of the message's content
+# terms (or at least FALLBACK_ABS of them), and be dense enough in the entry. Chosen on a held-out split (test_query.FallbackTuning, the report in
+# scripts/tune_fallback.py): the pools and history labels of AudioPlugin-p4 and ap-p4_mac as the lines that should
+# print, the suite's general prompts as the messages that must stay silent.
+FALLBACK_IDF = 0.0            # the shared words' idf summed (the tuning found no floor that kept the cases below)
+FALLBACK_TERM_IDF = 0.0       # a shared word counts only at this idf or above
+FALLBACK_COVER = 0.5          # half the message's content words...
+FALLBACK_ABS = 6              # ...or six of them
+FALLBACK_DENSE = 0.35         # shared words per square root of the entry's length: a long entry needs more of them
+# lines in the order of how many of the message's words they share, BM25 within a tie; a same-minute ruling stands in
+# for its correction or retraction (standing_first). Chosen 2026-11-01 by tune_fallback.py over ap-p4_mac and
+# AudioPlugin-p4 with the regression cases of test_query.Regressions as a constraint: held-out F1 0.072 (before
+# 0.077), tasks with a right line 25% (before 21%), suite prompts that printed 18% (before 24%).
+VARIANT_WEIGHT = 0.5          # another form of a message's word (commits / committed / commit) counts half
+SUFFIXES = ("ings", "ing", "ied", "ies", "ed", "es", "s")
 EXPAND_WEIGHT = 0.5
-STUBS = ("row", "serve-log", "usage", "signals", "labels", "train", "eval", "dictionary", "teacher")
+STUBS = ("teacher",)
 
 
 def clip(s, n):
@@ -89,6 +112,38 @@ def dictionary_hits(idx, tok, terms):
     return out
 
 
+def stem(t):
+    """A crude stem, enough to meet `commits` with `committed`: one suffix off, a doubled last consonant undone."""
+    if not t.isalpha():
+        return t
+    for suf in SUFFIXES:
+        if t.endswith(suf) and len(t) - len(suf) >= 4:
+            t = t[:-len(suf)]
+            break
+    if len(t) > 4 and t[-1] == t[-2] and t[-1] not in "aeiouls":
+        t = t[:-1]
+    return t
+
+
+def variants(idx, t):
+    """The index's other forms of a word (same stem), built once per loaded index."""
+    m = idx.get("_stems")
+    if m is None:
+        m = {}
+        for w in idx["post"]:
+            if w.isalpha():
+                m.setdefault(stem(w), []).append(w)
+        idx["_stems"] = m
+    return [v for v in m.get(stem(t), []) if v != t]
+
+
+def content_terms(idx, terms):
+    """The message's own content words: not common, not bare numbers, and present in the index (directly or in
+    another form)."""
+    return [t for t in terms if t not in st.COMMON and not t.isdigit()
+            and (t in idx["post"] or variants(idx, t))]
+
+
 def bm25_scores(idx, terms, weights):
     n, avgdl = idx["n"], idx["avgdl"] or 1.0
     post, docs = idx["post"], idx["docs"]
@@ -112,9 +167,132 @@ def idf_map(idx, terms):
 
 
 def entry_line(d):
+    if d.get("file") == "repo":                   # 4.1a: never a file's contents
+        return f"- file: {clip(d['show'], TEXT_CHARS)}" + (f" (line {d['line']})" if d.get("line", 1) > 1 else "")
+    if d.get("file") == "commit":
+        return f"- commit {d['time'][:10]}: {clip(d['show'], TEXT_CHARS)}"
     text = clip(d["show"], TEXT_CHARS)
     date = d["time"][:10] if d.get("time") else "undated"
     return f"- {date} {d['kind']}: {text} ({d['path']}:{d['line']})"
+
+
+def superseded_ids(idx, now):
+    """Facts a newer fact supersedes, for a message dated after the newer one (1a): never printed."""
+    out = set()
+    for d in idx["docs"]:
+        old = d.get("supersedes")
+        if old and (not d.get("time") or not now or d["time"][:16] <= now[:16]):
+            out.add(old)
+    return out
+
+
+def rank(p4, text, idx=None, model=None, k=5, now=None):
+    """The ids of the top k candidates for a message, the threshold aside: the trained ranker's order when there is
+    one, BM25's otherwise, the dictionary applied. The dictionary check and the re-exploration measure read it."""
+    if idx is None:
+        idx, _ = st.ensure_index(p4)
+    if model is None:
+        model = ranker.load(os.path.join(p4, "models", "ranker.json")) or {}
+    now = now or time.strftime("%Y-%m-%d %H:%M")
+    tok = st.norm_token(text)
+    terms = list(dict.fromkeys(ranker.tokens(text)))
+    weights = {}
+    hits = dictionary_hits(idx, tok, terms)
+    for v in hits:
+        for t in v.get("means_toks", []):
+            if t not in weights and t not in terms:
+                weights[t] = EXPAND_WEIGHT
+    qterms = terms + [t for t in weights if t not in terms]
+    if not qterms:
+        return []
+    scores = bm25_scores(idx, qterms, weights)
+    docs = idx["docs"]
+    gone = superseded_ids(idx, now)
+    cand = [i for i in sorted(scores, key=lambda i: (-scores[i], i)) if docs[i]["id"] not in gone][:CANDIDATES]
+    points = {p for v in hits for p in v.get("points-at", [])}
+    if not model or not model.get("w"):
+        return [docs[i]["id"] for i in cand[:k]]      # BM25 over the expanded query: the expansion has to earn it
+    idf = idf_map(idx, qterms)
+    cds = [{"file": docs[i]["file"], "kind": docs[i]["kind"], "state": docs[i]["state"], "time": docs[i]["time"],
+            "toks": docs[i]["toks"].split(), "head": docs[i]["head"].split(), "dl": docs[i]["dl"],
+            "fkind": docs[i].get("fkind")} for i in cand]
+    extra = {"dict-hit": {j for j, i in enumerate(cand) if docs[i]["id"] in points}}
+    xs, _, _ = ranker.candidate_features(qterms, cds, idf, idx["avgdl"], now, scores=[scores[i] for i in cand],
+                                         weights=weights, extra=extra)
+    sc = [ranker.score(model["w"], x) for x in xs]
+    order = sorted(range(len(cand)), key=lambda j: (-sc[j], j))
+    return [docs[cand[j]]["id"] for j in order[:k]]
+
+
+def fallback_order(idx, terms, weights, points, gone, min_shared=None, min_idf=None, cover=None, abs_n=None,
+                   term_idf=None, dense=None):
+    """The no-ranker road (4.5: a fresh repo): BM25 over the message's words, their other forms at half weight and
+    the dictionary's expansions; a line prints when it shares at least `min_shared` of the message's content words
+    (a word or another form of it), those words carry `min_idf` idf between them, and they cover `cover` of the
+    message's content words or number at least `abs_n`. An entry a dictionary hit points at needs no more."""
+    min_shared = MIN_RARE if min_shared is None else min_shared
+    min_idf = FALLBACK_IDF if min_idf is None else min_idf
+    cover = FALLBACK_COVER if cover is None else cover
+    abs_n = FALLBACK_ABS if abs_n is None else abs_n
+    term_idf = FALLBACK_TERM_IDF if term_idf is None else term_idf
+    dense = FALLBACK_DENSE if dense is None else dense
+    docs, n = idx["docs"], idx["n"]
+    q = content_terms(idx, terms)
+    forms = {t: [t] + variants(idx, t) for t in q}
+    w = dict(weights)
+    for t in q:
+        for v in forms[t][1:]:
+            if v not in w and v not in terms:
+                w[v] = VARIANT_WEIGHT
+    qterms = list(dict.fromkeys(list(terms) + list(w)))
+    scores = bm25_scores(idx, qterms, w)
+    cand = [i for i in sorted(scores, key=lambda i: (-scores[i], i)) if docs[i]["id"] not in gone][:CANDIDATES]
+    idf = {v: ranker.idf_of(len(st.postings(idx, v) or []) // 2, n) for t in q for v in forms[t]
+           if st.postings(idx, v)}
+    out = []
+    for i in cand:
+        d = docs[i]
+        if d["id"] in points:
+            out.append((i, len(q) + 1))          # an entry the dictionary points at needs no more
+            continue
+        toks = set(d["toks"].split())
+        got = [max(idf.get(v, 0.0) for v in forms[t] if v in toks) for t in q if any(v in toks for v in forms[t])]
+        got = [x for x in got if x >= term_idf]
+        if len(got) < min_shared or sum(got) < min_idf:
+            continue
+        if len(got) / max(1, len(q)) < cover and len(got) < abs_n:
+            continue
+        if len(got) / max(1.0, d["dl"]) ** 0.5 < dense:
+            continue
+        out.append((i, len(got)))
+    out.sort(key=lambda x: -x[1])          # stable: BM25's order within a tie
+    return standing_first(idx, [i for i, _ in out])
+
+
+def standing_first(idx, order):
+    """A correction or retraction written in the same minute as a ruling is the reading that ruling settled: the
+    ruling, the standing form, takes its place in the order (once), so one fact is not printed three ways."""
+    rules = idx.get("_rule_at")
+    if rules is None:
+        rules = {}
+        for i, d in enumerate(idx["docs"]):
+            if d["file"] == "rules.md" and d.get("time"):
+                rules.setdefault(d["time"][:16], []).append(i)
+        idx["_rule_at"] = rules
+    out, seen = [], set()
+    for i in order:
+        d = idx["docs"][i]
+        if d["file"] in ("corrections.md", "retractions.md") and d.get("time"):
+            for r in rules.get(d["time"][:16], []):
+                if r not in seen:
+                    seen.add(r)
+                    out.append(r)
+            if rules.get(d["time"][:16]):
+                continue
+        if i not in seen:
+            seen.add(i)
+            out.append(i)
+    return out
 
 
 def query(p4, text, session=None, now=None, idx=None, model=None):
@@ -169,11 +347,9 @@ def query(p4, text, session=None, now=None, idx=None, model=None):
     if not scores:
         return {"lines": out, "ids": ids, "jargon_dropped": dropped, "road": "+".join(road) or "no match"}
     docs = idx["docs"]
-    cand = sorted(scores, key=lambda i: (-scores[i], i))[:CANDIDATES]
+    gone = superseded_ids(idx, now)
+    cand = [i for i in sorted(scores, key=lambda i: (-scores[i], i)) if docs[i]["id"] not in gone][:CANDIDATES]
     idf = idf_map(idx, qterms)
-    rare_q = {t for t in qterms if t in idx["post"] and ranker.is_rare(len(st.postings(idx, t)) // 2, idx["n"])
-              and t not in st.COMMON and not t.isdigit()}
-    need = max(MIN_RARE, (len(rare_q) + 1) // 2)
     room = MAX_LINES - len(out)
     points = {p for v in hits for p in v.get("points-at", [])}
     if model:
@@ -182,7 +358,8 @@ def query(p4, text, session=None, now=None, idx=None, model=None):
         for i in cand:
             d = docs[i]
             cds.append({"file": d["file"], "kind": d["kind"], "state": d["state"], "time": d["time"],
-                        "toks": d["toks"].split(), "head": d["head"].split(), "dl": d["dl"]})
+                        "toks": d["toks"].split(), "head": d["head"].split(), "dl": d["dl"],
+                        "fkind": d.get("fkind")})
         extra = {"dict-hit": {k for k, i in enumerate(cand) if docs[i]["id"] in points}} \
             if "dict-hit" in model.get("features", []) else None
         xs, _bm, _sh = ranker.candidate_features(qterms, cds, idf, idx["avgdl"], now,
@@ -193,13 +370,7 @@ def query(p4, text, session=None, now=None, idx=None, model=None):
         order = [cand[k] for k in picked]
     else:
         road.append("bm25")
-        order, per = [], {}
-        for i in cand:
-            d = docs[i]
-            shared = set(d["toks"].split()) & rare_q
-            if d["id"] not in points and len(shared) < need:   # an entry a hit term points at needs no more
-                continue
-            order.append(i)
+        order = fallback_order(idx, terms, weights, points, gone)
     per = {}
     for i in order:
         if room <= 0:
@@ -225,6 +396,14 @@ def p4_dir(args):
 
 def cmd_index(args):
     p4 = p4_dir(args)
+    if args.repo:
+        import repo
+        project = args.project or repo.project_of(p4)
+        s = repo.build(p4, project)
+        print(f"index --repo: {s['changed']} files read again ({s['reread']} kept, {s['removed']} removed), "
+              f"{s['new_commits']} new commits; {s['files']} files, {s['entries']} file entries, {s['commits']} "
+              f"commits; excluded " + ", ".join(f"{k} {v}" for k, v in sorted(s["excluded"].items()))
+              + (f"; {s['cut']} files past the {repo.MAX_FILE_ENTRIES:,}-entry cap" if s["cut"] else ""))
     if args.force or st.index_stale(p4):
         idx = st.build_index(p4)
         print(f"index: rebuilt, {idx['n']} entries -> {st.index_path(p4)}")
@@ -281,12 +460,112 @@ def cmd_check(args):
                 orphan += c[1] not in ids and not c[1].startswith("archive/")
         print(f"  labels-raw.tsv: " + ", ".join(f"{k} {v}" for k, v in sorted(per.items()))
               + f"; {orphan} labels name no indexed entry")
+    import repo
+    rl = repo.stats_line(p4)
+    if rl:
+        print("  " + rl)
     jar = sum(1 for d in idx["docs"] if not d.get("plain") and st.JARGON.search(entry_line(d)))
     rate = jar / len(idx["docs"]) if idx["docs"] else 0.0
     print(f"  index: {idx['n']} entries ({'rebuilt' if rebuilt else 'fresh'}); excluded "
           + ", ".join(f"{k} {v}" for k, v in sorted(idx.get("excluded", {}).items()))
           + f"; jargon rate of what recall would print {rate:.1%} ({jar} entries without plain:; target under 10%)")
     return 0
+
+
+def cmd_row(args):
+    import rows
+    p4 = p4_dir(args)
+    if args.action == "open":
+        print(rows.row_open(p4, args.session, args.text, args.now or None))
+    else:
+        reply = open(args.reply_file, encoding="utf-8").read() if args.reply_file else args.text
+        e, done = rows.row_close(p4, args.session, reply, args.now or None)
+        print(f"row close: {e.id if e else 'no open row'}{'' if done else ' (not completed)'}")
+    return 0
+
+
+def cmd_serve_log(args):
+    import labels as lb
+    p4 = p4_dir(args)
+    lb.write_served(p4, args.key, {"ids": args.ids, "text": args.text, "task": args.task})
+    print(f"serve-log: {len(args.ids)} ids -> {lb.served_path(p4, args.key)}")
+    return 0
+
+
+def cmd_usage(args):
+    import labels as lb
+    import transcript as tr
+    p4 = p4_dir(args)
+    served = lb.read_served(p4, args.key)
+    if not served:
+        print("usage: nothing was served under that key")
+        return 0
+    reply = open(args.reply_file, encoding="utf-8").read() if args.reply_file else ""
+    turn = None
+    if args.transcript:
+        ts = tr.turns(args.transcript)
+        turn = ts[-1] if ts else None
+    idx, _ = st.ensure_index(p4)
+    rows_ = lb.usage_labels(p4, idx, served, reply, turn, served.get("task", ""), time.strftime("%Y-%m-%d %H:%M"))
+    if not args.dry:
+        lb.append_tsv(lb.mpath(p4, lb.TRAIN), lb.TRAIN_HEAD, rows_)
+    print(f"usage: {sum(1 for r in rows_ if r['label'] == '1')} used, {sum(1 for r in rows_ if r['label'] == '0')} "
+          f"unused")
+    return 0
+
+
+def cmd_signals(args):
+    import labels as lb
+    p4 = p4_dir(args)
+    r = lb.signals(p4, session=args.session or None, write=not args.dry)
+    print(f"signals: {sum(r['signals'].values())} signals ({', '.join(f'{k} {v}' for k, v in r['signals'].items())}), "
+          f"{sum(r['yielded'].values())} with a term; {r['new_terms']} new pending entries, {r['appended']} "
+          f"because: lines added, {r['no_term']} without a rare term")
+    return 0
+
+
+def cmd_labels(args):
+    import labels as lb
+    p4 = p4_dir(args)
+    if args.from_pools:
+        r = lb.from_pools(p4, args.from_pools)
+        print(f"labels --from-pools: {r['tasks']} tasks, {r['labels']} labels, {r['unresolved']} picks unresolved")
+    if args.from_history:
+        r = lb.from_history(p4)
+        print(f"labels --from-history: {r['rows']} completed rows; {r['history_tasks']} tasks with "
+              f"{r['history_labels']} store labels; {r['short_tasks']} short tasks with {r['short_labels']} labels")
+    if args.from_transcripts:
+        project = args.project or __import__("repo").project_of(p4)
+        r = lb.from_transcripts(p4, project, args.slug, all_sessions=args.all_sessions)
+        print(f"labels --from-transcripts: {r['transcripts']} transcripts, {r['turns']} turns ({r['matched_rows']} "
+              f"matched to rows), {r['tasks']} tasks, {r['rows']} repo labels: "
+              + ", ".join(f"{k} {v}" for k, v in sorted(r["labels"].items())))
+    if args.reexploration:
+        project = args.project or __import__("repo").project_of(p4)
+        r = lb.reexploration(p4, project, args.slug)
+        if not r["turns"]:
+            print("re-exploration: no turn opened a file it later edited or cited")
+        else:
+            print(f"re-exploration (free half, {r['turns']} turns): before the first relevant file was opened "
+                  f"{r['calls']:.2f} tool calls and {r['tokens']:,.0f} input tokens on average; recall's top 5 named "
+                  f"that file in {r['hit_rate']:.0%} of turns; with it, {r['cf_calls']:.2f} calls and "
+                  f"{r['cf_tokens']:,.0f} tokens")
+    for (f, src), (pos, neg) in sorted(lb.per_source(p4).items()):
+        print(f"  {f} {src or '(none)'}: {pos} positive, {neg} negative")
+    print(f"  tasks: {len(lb.read_tasks(p4))}")
+    return 0
+
+
+def cmd_train_eval(args, which):
+    import train
+    args.p4 = p4_dir(args)
+    return train.cmd_train(args) if which == "train" else train.cmd_eval(args)
+
+
+def cmd_dictionary(args):
+    import train
+    args.p4 = p4_dir(args)
+    return train.cmd_dictionary(args)
 
 
 def cmd_migrate(args, rest):
@@ -312,6 +591,54 @@ def main(argv=None):
     p = sub.add_parser("index")
     p.add_argument("--p4")
     p.add_argument("--force", action="store_true")
+    p.add_argument("--repo", action="store_true")
+    p.add_argument("--project", default="")
+    p = sub.add_parser("row")
+    p.add_argument("action", choices=("open", "close"))
+    p.add_argument("--p4")
+    p.add_argument("--session", required=True)
+    p.add_argument("--text", default="")
+    p.add_argument("--reply-file", default="")
+    p.add_argument("--now", default="")
+    p = sub.add_parser("serve-log")
+    p.add_argument("--p4")
+    p.add_argument("--key", required=True)
+    p.add_argument("--ids", nargs="*", default=[])
+    p.add_argument("--text", default="")
+    p.add_argument("--task", default="")
+    p = sub.add_parser("usage")
+    p.add_argument("--p4")
+    p.add_argument("--key", required=True)
+    p.add_argument("--reply-file", default="")
+    p.add_argument("--transcript", default="")
+    p.add_argument("--dry", action="store_true")
+    p = sub.add_parser("signals")
+    p.add_argument("--p4")
+    p.add_argument("--session", default="")
+    p.add_argument("--dry", action="store_true")
+    p = sub.add_parser("labels")
+    p.add_argument("--p4")
+    p.add_argument("--from-pools", default="")
+    p.add_argument("--from-history", action="store_true")
+    p.add_argument("--from-transcripts", action="store_true")
+    p.add_argument("--reexploration", action="store_true")
+    p.add_argument("--all-sessions", action="store_true", help="also transcripts no message row names")
+    p.add_argument("--project", default="")
+    p.add_argument("--slug", nargs="*", default=[])
+    for name in ("train", "eval"):
+        p = sub.add_parser(name)
+        p.add_argument("--p4")
+        p.add_argument("--now", default="")
+        p.add_argument("--sources", default="")
+        if name == "train":
+            p.add_argument("--if-owed", action="store_true")
+        else:
+            p.add_argument("--json", action="store_true")
+            p.add_argument("--no-dictionary", action="store_true")
+    p = sub.add_parser("dictionary")
+    p.add_argument("action", choices=("check",))
+    p.add_argument("--p4")
+    p.add_argument("--dry", action="store_true")
     p = sub.add_parser("query")
     p.add_argument("--p4")
     p.add_argument("--text", required=True)
@@ -331,6 +658,20 @@ def main(argv=None):
         return cmd_query(args)
     if args.cmd == "check":
         return cmd_check(args)
+    if args.cmd == "row":
+        return cmd_row(args)
+    if args.cmd == "serve-log":
+        return cmd_serve_log(args)
+    if args.cmd == "usage":
+        return cmd_usage(args)
+    if args.cmd == "signals":
+        return cmd_signals(args)
+    if args.cmd == "labels":
+        return cmd_labels(args)
+    if args.cmd in ("train", "eval"):
+        return cmd_train_eval(args, args.cmd)
+    if args.cmd == "dictionary":
+        return cmd_dictionary(args)
     ap.print_help()
     return 2
 

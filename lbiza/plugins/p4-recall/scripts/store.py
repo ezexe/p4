@@ -36,7 +36,7 @@ import ranker  # noqa: E402
 STORE_FILES = ("rules.md", "corrections.md", "retractions.md", "facts.md")
 VOCABULARY = "vocabulary.md"
 MESSAGES = "messages"
-INDEX_VERSION = 3
+INDEX_VERSION = 5
 MASK_MIN = 24
 SHORT_WORDS = 5
 KNOWN_SHORT_MIN = 2
@@ -112,7 +112,8 @@ wide wish within word words world write writing written wrote year""".split())
 HEAD_RE = re.compile(r"^- ([a-z][a-z0-9_-]*):(?: (.*))?$")
 FIELD_RE = re.compile(r"^  ([a-z][a-z0-9_-]*):(?: (.*))?$")
 CONT_PREFIX = "    "
-NOT_TEXT = frozenset(("time", "status", "from", "arrival", "pinned", "added", "id", "session", "points-at"))
+NOT_TEXT = frozenset(("time", "status", "from", "arrival", "pinned", "added", "id", "session", "points-at",
+                      "supersedes", "resembles"))
 
 
 # --- entries ---------------------------------------------------------------------------------------------
@@ -342,6 +343,15 @@ def resembles(new, old):
     return len(new) >= BARRIER_MIN_TOKENS and len(new & old) / len(new | old) >= BARRIER_JACCARD
 
 
+NOT_OWNER_ARRIVAL = re.compile(r"(?i)\s*(task notification|notification|agent message|hook injection)")
+
+
+def owner_message(e, fp=None):
+    """A row of the owner's own words: not a notification, an agent's message or a harness injection (`<...>`)."""
+    fp = unquote(e.fields.get("fingerprint", e.value)) if fp is None else fp
+    return not NOT_OWNER_ARRIVAL.match(e.fields.get("arrival", "")) and not fp.lstrip().startswith("<")
+
+
 def completed(e):
     return bool(e.fields.get("addressed", "").strip())
 
@@ -376,6 +386,17 @@ def show_text(fname, e):
     if fname == MESSAGES or fname.startswith(MESSAGES + "/"):
         return f"\"{collapse(f.get('fingerprint', e.value))}\" was answered: {collapse(f.get('addressed', ''))}"
     return collapse(e.value)
+
+
+def feature_kind(fname, e):
+    """The kind the ranker's `kind=` feature sees, finer than the printed one where the old barrier was: a ruling
+    with a `form:` is a form; a fact is sourced or unsourced."""
+    if fname == "rules.md":
+        return "form" if e.fields.get("form", "").strip() else "rule"
+    if fname == "facts.md":
+        return "fact sourced" if e.fields.get("verified", "").strip() or e.fields.get("source", "").strip() \
+            else "fact unsourced"
+    return kind_of(fname, e)
 
 
 def entry_text(e):
@@ -476,6 +497,11 @@ def index_path(p4):
 def sources_signature(p4):
     """(count, newest mtime_ns) over every file and directory under store/, memory/ and src/."""
     count, newest = 0, 0
+    try:
+        st_ = os.stat(os.path.join(p4, "models", "repo.json"))     # the repository's entries (repo.py)
+        count, newest = 1, st_.st_mtime_ns
+    except OSError:
+        pass
     for sub in ("store", "memory", "src"):
         top = os.path.join(p4, sub)
         if not os.path.isdir(top):
@@ -534,7 +560,10 @@ def build_index(p4, write=True):
                      "time": e.time, "state": e.state, "show": show_text(fname, e)[:240],
                      "plain": bool(e.fields.get("plain", "").strip()), "dl": len(toks), "_tf": tf,
                      "toks": " ".join(tf), "head": " ".join(dict.fromkeys(head)),
-                     **({"match": collapse(e.fields.get("match", ""))[:300]} if fname == "corrections.md" else {})})
+                     **({"match": collapse(e.fields.get("match", ""))[:300]} if fname == "corrections.md" else {}),
+                     **({"supersedes": e.fields["supersedes"].strip()} if e.fields.get("supersedes", "").strip()
+                        else {}),
+                     **({"fkind": feature_kind(fname, e)} if feature_kind(fname, e) != kind else {})})
 
     for fname in STORE_FILES:
         for e in files.get(fname, []):
@@ -547,6 +576,11 @@ def build_index(p4, write=True):
         rows = session_rows.setdefault(s8, [])
         for e in files[rel]:
             fp = unquote(e.fields.get("fingerprint", e.value))
+            if not owner_message(e, fp):
+                # a notification, an agent's message or a harness injection is not the owner speaking: never a line,
+                # never a short turn or a repeat
+                excluded["not the owner's"] = excluded.get("not the owner's", 0) + 1
+                continue
             tok = norm_token(fp)
             done = completed(e)
             addressed = collapse(e.fields.get("addressed", ""))
@@ -562,6 +596,15 @@ def build_index(p4, write=True):
         add(e, "memory", KIND_NAMES["memory"])
     for e in src_entries(p4):
         add(e, "src", KIND_NAMES["src"])
+    for d in repo_docs(p4):
+        toks = ranker.tokens(d["text"])
+        tf = {}
+        for t in toks:
+            tf[t] = tf.get(t, 0) + 1
+        docs.append({"id": d["id"], "path": d["path"], "line": d["line"], "file": d["kind"] if d["kind"] == "commit"
+                     else "repo", "kind": d["kind"], "time": d["time"], "state": "LIVE", "show": d["show"][:400],
+                     "plain": True, "dl": len(toks), "_tf": tf, "toks": " ".join(tf),
+                     "head": " ".join(dict.fromkeys(ranker.tokens(d["head"][:400])))})
     for v in short.values():
         v.sort(key=lambda r: (r[0], r[1], r[5]))
     post, df, total = {}, {}, 0
@@ -589,7 +632,20 @@ def build_index(p4, write=True):
     return out
 
 
-DOC_FIELDS = ("id", "path", "line", "file", "kind", "time", "state", "show", "plain", "dl", "toks", "head", "match")
+DOC_FIELDS = ("id", "path", "line", "file", "kind", "time", "state", "show", "plain", "dl", "toks", "head", "match",
+              "supersedes", "fkind")
+
+
+def repo_docs(p4):
+    """The repository's entries (4.1a) from models/repo.json, when `p4.py index --repo` has run."""
+    try:
+        import repo
+    except ImportError:
+        return []
+    try:
+        return repo.entries(p4)
+    except (OSError, ValueError, KeyError):
+        return []
 
 
 def load_index(p4):

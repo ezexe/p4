@@ -37,14 +37,15 @@ during without within upon across whose those these ever never always still yet 
 # --- text ------------------------------------------------------------------------------------------------
 
 def tokens(text):
-    """Lower-cased words of three letters or more (and dotted numbers like 3.15), stop words out; a camelCase or
+    """Lower-cased words of three letters or more (and dotted numbers like 3.15, and a letter with a digit like p4),
+    stop words out; a camelCase or
     snake_case name also yields its parts, so kServiceLeadMs meets 'service lead'."""
     out = []
     for t in TOKEN_RE.findall(text or ""):
         parts = [t] + [p for p in PART_RE.findall(t) if p != t] if not t[0].isdigit() else [t]
         for p in parts:
             p = p.lower()
-            if (len(p) >= 3 or "." in p) and p not in STOP:
+            if (len(p) >= 3 or "." in p or len(p) == 2 and p[0].isalpha() and p[1].isdigit()) and p not in STOP:
                 out.append(p)
     return out
 
@@ -147,7 +148,7 @@ def candidate_features(task_terms, cands, idf, avgdl, now, scores=None, weights=
             h("rare"): min(len(rare), 5) / 5,
             h("length"): math.log1p(c.get("dl", len(d))) / 5,
             h("file=" + c["file"]): 1.0,
-            h("kind=" + c["kind"]): 1.0,
+            h("kind=" + (c.get("fkind") or c["kind"])): 1.0,
             h("state=" + c.get("state", "LIVE")): 1.0,
         }
         if age is None:

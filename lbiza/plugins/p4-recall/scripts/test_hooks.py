@@ -1,0 +1,326 @@
+#!/usr/bin/env python3
+"""Tests for the p4-recall hooks (fresh-marketplace.md 3.3, 4.7, 8.1's hooks, row and usage bullets).
+
+Run: python3 test_hooks.py   (stdlib unittest, offline, a few seconds)
+
+Each hook runs as the harness runs it: `sh hooks/run-hook.sh <name>` with the JSON payload on stdin,
+CLAUDE_PLUGIN_ROOT and CLAUDE_PROJECT_DIR set, on a small git project holding the fixture store. Checked: the
+hooks.json events, matchers, timeouts and async flag; each output's JSON shape against the docs; silence where 3.3
+says nothing; `updatedInput` carrying every original Agent field; the row opened and completed from
+`last_assistant_message`; a notification complete on arrival; usage labels (used when the served entry's path
+appears in an Edit input, unused otherwise); the repo labels of a turn; exit 0 and one notice on a corrupt store;
+the pinned block cut at 1,500 characters; the `.git/info/exclude` line added once.
+"""
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import labels as lb  # noqa: E402
+import store as st  # noqa: E402
+from test_store import make_store, write  # noqa: E402
+
+ROOT = os.path.dirname(HERE)
+RUN = os.path.join(ROOT, "hooks", "run-hook.sh")
+HOOKS_JSON = os.path.join(ROOT, "hooks", "hooks.json")
+SESSION = "cccc3333-0000-4000-8000-000000000000"
+
+
+def git(cwd, *args):
+    subprocess.run(["git", "-C", cwd] + list(args), check=True, capture_output=True,
+                   env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+                        "GIT_COMMITTER_EMAIL": "t@t"})
+
+
+def make_project(root):
+    """A git project with a few tracked files and one commit, and the fixture store at .claude/p4."""
+    proj = os.path.join(root, "proj")
+    os.makedirs(proj)
+    git(proj, "init", "-q")
+    write(os.path.join(proj, "src", "narwhal_port.py"), "def open_narwhal_port():\n    return 1\n\n"
+          "class NarwhalProbe:\n    pass\n")
+    write(os.path.join(proj, "README.md"), "# Narwhal tools\n\nProbe the narwhal port.\n\n## Building\n\nRun make.\n")
+    write(os.path.join(proj, "docs", "zebrafish.md"), "# The zebrafish plotter\n\nGolden images.\n")
+    git(proj, "add", "-A")
+    git(proj, "commit", "-q", "-m", "add the narwhal port probe")
+    make_store(proj)
+    return proj
+
+
+def run_hook(name, payload, proj, extra_env=None):
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
+    env.update({"CLAUDE_PLUGIN_ROOT": ROOT, "CLAUDE_PROJECT_DIR": proj, **(extra_env or {})})
+    r = subprocess.run(["sh", RUN, name], input=json.dumps(payload), capture_output=True, text=True, env=env,
+                       timeout=60)
+    return r
+
+
+def transcript(path, prompt, calls, reply, cwd, sidechain=False):
+    """A transcript file in Claude Code's JSON-lines shape: the prompt, one assistant message per tool call with its
+    result, the reply text."""
+    lines = [{"type": "user", "message": {"role": "user", "content": prompt}, "timestamp": "2026-11-01T18:00:00.000Z",
+              "cwd": cwd, "isSidechain": sidechain, "uuid": "u0", **({} if sidechain else {"origin": {"kind": "human"}})}]
+    for k, (name, inp, result) in enumerate(calls):
+        lines.append({"type": "assistant", "isSidechain": sidechain, "message": {
+            "id": f"m{k}", "content": [{"type": "tool_use", "id": f"t{k}", "name": name, "input": inp}],
+            "usage": {"input_tokens": 100, "cache_read_input_tokens": 1000 * (k + 1)}}})
+        lines.append({"type": "user", "isSidechain": sidechain, "message": {"content": [
+            {"type": "tool_result", "tool_use_id": f"t{k}", "content": result}]}})
+    lines.append({"type": "assistant", "isSidechain": sidechain, "message": {"id": "mz", "content": [
+        {"type": "text", "text": reply}], "usage": {"input_tokens": 50}}})
+    write(path, "\n".join(json.dumps(l) for l in lines) + "\n")
+    return path
+
+
+class Base(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.proj = make_project(self.tmp.name)
+        self.p4 = os.path.join(self.proj, ".claude", "p4")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def out(self, r):
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout) if r.stdout.strip() else None
+
+
+class HooksJson(unittest.TestCase):
+    def test_events_matchers_timeouts(self):
+        with open(HOOKS_JSON, encoding="utf-8") as f:
+            h = json.load(f)["hooks"]
+        self.assertEqual(set(h), {"SessionStart", "UserPromptSubmit", "PreToolUse", "Stop", "SubagentStop"})
+        self.assertEqual(h["SessionStart"][0]["matcher"], "startup|resume|clear|compact")
+        self.assertEqual(h["SessionStart"][0]["hooks"][0]["timeout"], 15)
+        self.assertEqual(h["UserPromptSubmit"][0]["hooks"][0]["timeout"], 10)
+        self.assertEqual(h["PreToolUse"][0]["matcher"], "Agent")
+        self.assertEqual(h["PreToolUse"][0]["hooks"][0]["timeout"], 10)
+        stop = h["Stop"][0]["hooks"]
+        self.assertEqual([x["command"].split()[-1] for x in stop], ["close", "train"])
+        self.assertEqual(stop[0]["timeout"], 30)
+        self.assertIs(stop[1]["async"], True)
+        self.assertEqual(h["SubagentStop"][0]["matcher"], ".*")
+        for ev in h.values():
+            for m in ev:
+                for x in m["hooks"]:
+                    self.assertEqual(x["type"], "command")
+                    self.assertIn("${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh", x["command"])
+
+    def test_runner_runs_isolated_and_never_fails(self):
+        with open(RUN, encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn('-I "${CLAUDE_PLUGIN_ROOT}/scripts/hook.py"', text)
+        self.assertIn("exit 0", text)
+        r = subprocess.run(["sh", RUN, "no-such-hook"], input="{}", capture_output=True, text=True,
+                           env={**os.environ, "CLAUDE_PLUGIN_ROOT": ROOT})
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("systemMessage", r.stdout)
+
+
+class Layout(Base):
+    def test_silent_and_idempotent(self):
+        shutil.rmtree(self.p4)
+        r = run_hook("layout", {"hook_event_name": "SessionStart", "source": "startup", "cwd": self.proj}, self.proj)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, "", "SessionStart prints nothing when no rule is pinned")
+        for sub in ("store", "memory", "scratchpad", "src", "models", ".git"):
+            self.assertTrue(os.path.exists(os.path.join(self.p4, sub)), sub)
+        self.assertTrue(os.path.exists(os.path.join(self.p4, ".gitignore")))
+        self.assertTrue(os.path.exists(os.path.join(self.p4, "models", "index.json")))
+        self.assertTrue(os.path.exists(os.path.join(self.p4, "models", "repo.json")), "the repo indexed")
+        run_hook("layout", {"source": "resume", "cwd": self.proj}, self.proj)
+        with open(os.path.join(self.proj, ".git", "info", "exclude"), encoding="utf-8") as f:
+            self.assertEqual(f.read().count(".claude/p4/"), 1, "the exclude line added once")
+        status = subprocess.run(["git", "-C", self.proj, "status", "--porcelain"], capture_output=True, text=True)
+        self.assertNotIn(".claude", status.stdout, "the nested p4 repo stays out of the project's index")
+
+    def test_pinned_block_cut_at_1500(self):
+        rules = [[("ruling", f"pinned rule number {k} " + "x" * 120), ("status", "LIVE"), ("pinned", "yes"),
+                  ("time", f"2026-10-{10 + k:02d} 10:00")] for k in range(20)]
+        write(os.path.join(self.p4, "store", "rules.md"), st.render("rules.md", rules))
+        o = self.out(run_hook("layout", {"source": "startup", "cwd": self.proj}, self.proj))
+        ctx = o["hookSpecificOutput"]["additionalContext"]
+        self.assertEqual(o["hookSpecificOutput"]["hookEventName"], "SessionStart")
+        self.assertTrue(ctx.startswith("Standing rules from the owner:"))
+        self.assertLessEqual(len(ctx), 1500)
+        self.assertIn("pinned rule number 19", ctx.split("\n")[1], "newest first")
+
+
+class Recall(Base):
+    def test_lines_shape_and_row(self):
+        text = "does the quokka harness run the zebrafish plotter golden images on every push?"
+        o = self.out(run_hook("recall", {"hook_event_name": "UserPromptSubmit", "session_id": SESSION,
+                                         "prompt": text, "cwd": self.proj}, self.proj))
+        self.assertEqual(set(o), {"hookSpecificOutput"})
+        self.assertEqual(o["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit")
+        lines = o["hookSpecificOutput"]["additionalContext"].split("\n")
+        self.assertTrue(1 <= len(lines) <= 5, lines)
+        for l in lines:
+            self.assertTrue(l.startswith("- "), l)
+        rows = st.load_file(self.p4, f"messages/{SESSION[:8]}.md")
+        self.assertEqual(len(rows), 1)
+        self.assertIn("quokka", rows[0].fields["fingerprint"])
+        self.assertFalse(st.completed(rows[0]))
+        served = lb.read_served(self.p4, f"turn-{SESSION}")
+        self.assertTrue(served["ids"])
+        self.assertEqual(served["task"], rows[0].id)
+
+    def test_ordinary_message_silent(self):
+        for text in ("hi", "what is the weather like today"):
+            r = run_hook("recall", {"session_id": SESSION, "prompt": text, "cwd": self.proj}, self.proj)
+            self.assertEqual(r.returncode, 0)
+            self.assertEqual(r.stdout, "", text)
+
+    def test_notification_complete_on_arrival(self):
+        r = run_hook("recall", {"session_id": SESSION, "prompt": "<task-notification>the quokka harness zebrafish "
+                                "plotter golden images</task-notification>", "cwd": self.proj}, self.proj)
+        self.assertEqual(r.stdout, "", "a harness message gets no recall")
+        self.assertIsNone(lb.read_served(self.p4, f"turn-{SESSION}"))
+        rows = st.load_file(self.p4, f"messages/{SESSION[:8]}.md")
+        self.assertEqual(rows[0].fields["arrival"], "notification")
+        self.assertTrue(st.completed(rows[0]))
+
+    def test_corrupt_store_exit_0_one_notice(self):
+        os.makedirs(os.path.join(self.p4, "models"), exist_ok=True)
+        with open(os.path.join(self.p4, "models", "index.json"), "w") as f:
+            f.write('{"version": 5, "sources": [0, 0], "docs": [[')
+        shutil.rmtree(os.path.join(self.p4, "store", "messages"))
+        write(os.path.join(self.p4, "store", "messages"), "not a directory")   # the row cannot be written
+        r = run_hook("recall", {"session_id": SESSION, "prompt": "the quokka harness zebrafish plotter",
+                                "cwd": self.proj}, self.proj)
+        self.assertEqual(r.returncode, 0)
+        o = json.loads(r.stdout)
+        self.assertEqual(list(o), ["systemMessage"], "a notice for the user, nothing for the model")
+        self.assertEqual(o["systemMessage"].count("\n"), 0)
+
+
+class Agent(Base):
+    INPUT = {"prompt": "check whether the quokka harness runs the zebrafish plotter golden images on every push",
+             "description": "Check the harness", "subagent_type": "Explore", "model": "haiku"}
+
+    def test_updated_input_keeps_every_field(self):
+        o = self.out(run_hook("agent", {"hook_event_name": "PreToolUse", "tool_name": "Agent",
+                                        "tool_input": dict(self.INPUT), "tool_use_id": "toolu_1",
+                                        "session_id": SESSION, "cwd": self.proj}, self.proj))
+        hso = o["hookSpecificOutput"]
+        self.assertEqual(hso["hookEventName"], "PreToolUse")
+        up = hso["updatedInput"]
+        self.assertEqual(set(up), set(self.INPUT))
+        for k in ("description", "subagent_type", "model"):
+            self.assertEqual(up[k], self.INPUT[k])
+        self.assertTrue(up["prompt"].startswith(self.INPUT["prompt"]))
+        notes = up["prompt"][len(self.INPUT["prompt"]):]
+        self.assertTrue(notes.startswith("\n\nNotes from this repo's memory:\n- "), notes)
+        self.assertLessEqual(notes.count("\n- "), 5)
+        self.assertNotIn("permissionDecision", hso, "no permission decision unless P4_AGENT_ALLOW=1")
+        o2 = self.out(run_hook("agent", {"tool_name": "Agent", "tool_input": dict(self.INPUT), "cwd": self.proj},
+                               self.proj, {"P4_AGENT_ALLOW": "1"}))
+        self.assertEqual(o2["hookSpecificOutput"]["permissionDecision"], "allow")
+
+    def test_unrelated_task_untouched(self):
+        r = run_hook("agent", {"tool_name": "Agent", "tool_input": {"prompt": "what is the weather like today",
+                                                                    "description": "x"}, "cwd": self.proj},
+                     self.proj)
+        self.assertEqual(r.stdout, "")
+
+    def test_subagent_start_fallback_reads_the_parent(self):
+        parent = os.path.join(self.tmp.name, "parent.jsonl")
+        write(parent, json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Agent", "id": "t1", "input": dict(self.INPUT)}]}}) + "\n")
+        o = self.out(run_hook("subagent-start", {"hook_event_name": "SubagentStart", "agent_id": "a1",
+                                                 "agent_type": "Explore", "transcript_path": parent,
+                                                 "cwd": self.proj}, self.proj))
+        self.assertEqual(o["hookSpecificOutput"]["hookEventName"], "SubagentStart")
+        self.assertTrue(o["hookSpecificOutput"]["additionalContext"].startswith("Notes from this repo's memory:"))
+
+
+class Close(Base):
+    def turn(self, prompt, calls, reply):
+        run_hook("layout", {"source": "startup", "cwd": self.proj}, self.proj)
+        run_hook("recall", {"session_id": SESSION, "prompt": prompt, "cwd": self.proj}, self.proj)
+        tp = transcript(os.path.join(self.tmp.name, "t.jsonl"), prompt, calls, reply, self.proj)
+        r = run_hook("close", {"hook_event_name": "Stop", "session_id": SESSION, "transcript_path": tp,
+                               "last_assistant_message": reply, "stop_hook_active": False, "cwd": self.proj},
+                     self.proj)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, "", "Stop prints nothing")
+        return lb.read_tsv(lb.mpath(self.p4, lb.TRAIN))
+
+    def test_row_completed_from_reply(self):
+        self.turn("probe the narwhal port and open it", [],
+                  "Opened the narwhal port with open_narwhal_port.\n\nDetails follow.")
+        rows = st.load_file(self.p4, f"messages/{SESSION[:8]}.md")
+        self.assertTrue(st.completed(rows[-1]))
+        self.assertEqual(rows[-1].fields["addressed"], "Opened the narwhal port with open_narwhal_port.")
+        self.assertEqual(rows[-1].fields["state"], "FRESH")
+
+    def test_usage_used_by_an_edit_and_repo_labels(self):
+        f = os.path.join(self.proj, "src", "narwhal_port.py")
+        got = self.turn("probe the narwhal port and open it", [
+            ("Read", {"file_path": f}, "def open_narwhal_port()"),
+            ("Read", {"file_path": os.path.join(self.proj, "docs", "zebrafish.md")}, "# The zebrafish plotter"),
+            ("Grep", {"pattern": "narwhal"}, os.path.join(self.proj, "README.md")),
+            ("Edit", {"file_path": f, "old_string": "return 1", "new_string": "return 2"}, "ok")],
+            "Changed open_narwhal_port to return 2.")
+        usage = [r for r in got if r["source"] == "usage"]
+        self.assertTrue(usage, got)
+        by = {r["entry"]: r for r in usage}
+        if "repo:src/narwhal_port.py" in by:
+            self.assertEqual(by["repo:src/narwhal_port.py"]["label"], "1", "its path is in the Edit input")
+        self.assertTrue(all(r["weight"] == "0.3" for r in usage))
+        repo = {r["entry"]: r for r in got if r["source"] == "repo"}
+        self.assertEqual(repo["repo:src/narwhal_port.py"]["label"], "1")
+        self.assertEqual(repo["repo:src/narwhal_port.py"]["weight"], "1.0")
+        self.assertEqual(repo["repo:docs/zebrafish.md"]["note"], "dropped")
+        self.assertEqual(repo["repo:docs/zebrafish.md"]["weight"], "0.3")
+        self.assertEqual(repo["repo:README.md"]["note"], "unopened")
+        self.assertEqual(repo["repo:README.md"]["weight"], "0.2")
+        self.assertIn(st.load_file(self.p4, f"messages/{SESSION[:8]}.md")[-1].id,
+                      lb.read_tasks(self.p4), "the task recorded")
+        self.assertIsNone(lb.read_served(self.p4, f"turn-{SESSION}"), "the served log consumed")
+
+    def test_unused_when_nothing_cites_it(self):
+        got = self.turn("does the quokka harness run the zebrafish plotter golden images on every push", [],
+                        "I will look later.")
+        usage = [r for r in got if r["source"] == "usage"]
+        self.assertTrue(usage)
+        self.assertTrue(all(r["label"] == "0" for r in usage), usage)
+
+    def test_train_hook_prints_nothing(self):
+        r = run_hook("train", {"session_id": SESSION, "cwd": self.proj}, self.proj)
+        self.assertEqual((r.returncode, r.stdout), (0, ""))
+
+
+class SubagentStop(Base):
+    def test_usage_for_the_subagent(self):
+        inp = dict(Agent.INPUT, prompt="look at the quokka harness setup")
+        o = self.out(run_hook("agent", {"tool_name": "Agent", "tool_input": inp, "cwd": self.proj}, self.proj))
+        prompt = o["hookSpecificOutput"]["updatedInput"]["prompt"]
+        at = transcript(os.path.join(self.tmp.name, "agent-a1.jsonl"), prompt,
+                        [("Read", {"file_path": os.path.join(self.proj, "docs", "zebrafish.md")}, "# z")],
+                        "The quokka harness checks the zebrafish plotter's golden images.", self.proj,
+                        sidechain=True)
+        r = run_hook("subagent-stop", {"hook_event_name": "SubagentStop", "agent_id": "a1", "agent_type": "Explore",
+                                       "agent_transcript_path": at, "session_id": SESSION,
+                                       "last_assistant_message": "The quokka harness checks the zebrafish "
+                                                                 "plotter's golden images.",
+                                       "cwd": self.proj}, self.proj)
+        self.assertEqual((r.returncode, r.stdout), (0, ""))
+        got = lb.read_tsv(lb.mpath(self.p4, lb.TRAIN))
+        usage = [x for x in got if x["source"] == "usage"]
+        self.assertTrue(usage)
+        self.assertTrue(usage[0]["task"].startswith("agent:"))
+        self.assertTrue(any(x["label"] == "1" for x in usage),
+                        "the reply carries two of a served entry's rare terms the task did not")
+        self.assertTrue(any(t["kind"] == "agent" for t in lb.read_tasks(self.p4).values()))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=1)
