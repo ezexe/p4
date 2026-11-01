@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cat \"${CLAUDE_PLUGIN_ROOT}/hooks/emission-gate.md\""
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/gate-open.sh\""
           }
         ]
       }

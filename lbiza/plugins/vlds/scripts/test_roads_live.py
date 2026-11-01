@@ -136,9 +136,10 @@ def test_dispatch_switches_live():
             if mode is None:
                 assert "dispatch model" not in out, (lines, out)
             elif mode == "shadow":
-                assert "dispatch model (shadow)" in out and td.last_state(store) is None, (lines, out)
-            else:
-                assert "scores it plainly fresh" in out or "dispatch model (on)" in out, (lines, out)
+                assert "the dispatch model leans" in out and td.last_state(store) is None, (lines, out)
+            else:   # on: silent when it writes FRESH, its lean named when it hands the row to the operator
+                assert (out.strip() == "" and td.last_state(store) == "FRESH") or "the dispatch model leans" in out, \
+                    (lines, out)
             if td.last_state(store) is None:
                 td.complete_last(store)
             else:

@@ -29,10 +29,11 @@ whatever the console codepage says):
                           first prompt (a new id over a live conversation) and a pre-hook session's next prompt
                           do not pour rows that are still live.
   session-open --standing N
-                          SessionStart, the owner's standing rules whole (the pooled mode only): every LIVE form
-                          ruling and every-turn index rule, uncut, as `phi.py standing` prints them, in an output
-                          of its own so the harness's per-hook cap is its only limit; part N when they outgrow
-                          one output, nothing past the end. Every source prints it, since a resumed or compacted
+                          SessionStart, the owner's every-turn rules (the pooled mode only): every LIVE form
+                          ruling, every ruling the owner tagged always-on in its scope:, and every every-turn
+                          index rule, newest first under the fixed STANDING_FIXED budget, as `phi.py standing
+                          --fixed` prints them, what did not fit counted; part 0 only. Task-scoped rulings never
+                          print here: the operator's reply names the ones that bear on the task. Every source prints it, since a resumed or compacted
                           conversation may predate the block or have summarized it away.
   session-open --slot N   SessionStart, one chunk slot (the `pool: inject` mode only; silent when pooled): the
                           index's `inject:` files are split at entry boundaries into chunks under the harness's
@@ -42,7 +43,9 @@ whatever the console codepage says):
                           characters: one process printing everything would be spilled to a file and replaced by
                           a preview. A single entry over the cap, or a chunk beyond the registered slots, arrives
                           as a marker line to read by hand.
-  prompt-open             UserPromptSubmit: print the clock, stamp the message's dispatch row (fingerprint /
+  prompt-open             UserPromptSubmit: print NOTHING for a message no earlier row resembles, and two lines
+                          for a flagged one (the barrier's verdict with the operator's SendMessage target, and the
+                          matched row) — every store write below runs whatever is printed. Stamp the message's dispatch row (fingerprint /
                           time / arrival) and run the mechanical half of the dispatch barrier: when no earlier
                           row's fingerprint resembles the message (token overlap under BARRIER_JACCARD, or not
                           identical for a message under BARRIER_MIN_TOKENS tokens) the row gets `state: FRESH`
@@ -96,7 +99,8 @@ whatever the console codepage says):
                           briefs.md — the judgment no hook can make, since transcripts keep no reasoning; a
                           picker's submit or skip whose resembling rows are all addressed is written FRESH by
                           construction, never handed to the operator.
-  pre-agent               PreToolUse on Agent: when the index's `operator-via:` names a conductor, a main-context
+  pre-agent               PreToolUse on Agent: an operator launch (its prompt names hooks/operator-prompt.md) is
+                          recorded in .operator, so the Stop hook's launch block owes nothing. When the index's `operator-via:` names a conductor, a main-context
                           Agent call carrying the operator brief (hooks/operator-prompt.md) to any other agent
                           type, or to the conductor without its `conductor: launch the operator …` line, is
                           DENIED with the call to make instead — once per call fingerprint in store/.pre-agent,
@@ -114,20 +118,27 @@ whatever the console codepage says):
                           — a new entry a tombstone masks (freed garbage allocated again), or a new tombstone's
                           reach and the live entries holding a handle to what it freed (their pre-finalizers owed
                           this turn). Nothing found: no line.
-  turn-close              Stop: first the always-on collector's finalization — the write barrier's trace once
+  post-agent              PostToolUse on Agent: an operator launch is recorded in .operator with the agent id its
+                          result names — the SendMessage target for every later moment. Silent.
+  turn-close              Stop: first the mechanical close — every row the prompt hook wrote FRESH gets its
+                          `addressed:` from the turn's reply, a flagged row (.flagged) left for the operator; then
+                          the always-on collector's finalization — the write barrier's trace once
                           more, for any write no post-write saw (a hand edit, a script outside a tool call) — then
                           the light normalize sweep, mechanical — scripts/normalize.py --light under the
                           sweep lock: attach a hook-poured dispatch record where a live segment has room, expire
                           and pour the virtual entries another session minted, pour the logger's oldest past its
-                          budget — every step through phi.py's gates — then leave its one-line report in
-                          store/.turn-close for the next prompt hook to print, since a Stop hook's stdout never
-                          reaches the model. Nothing to move: silent. Lock held elsewhere: skipped, said so.
+                          budget — every step through phi.py's gates — then keep its one-line report in
+                          store/.turn-close for the operator (nothing prints it into the session). Nothing to move: silent. Lock held elsewhere: skipped, said so.
                           Then the model pass, whatever the index names: a model behind the store — a labelled
                           pool it has not seen, or DISPATCH_RETRAIN_ROWS judged rows since it trained — or a
                           store with none yet and enough to learn from (BOOTSTRAP_POOLS, BOOTSTRAP_REPEATS) is
                           trained in the background (scripts/pick_model.py or dispatch_model.py train, detached,
                           its output in models/train.log), once per RETRAIN_LOCK_S; one line each. A trained
                           model is on by default: an unnamed `pool-road:` reads model, `dispatch-model:` on.
+                          Last, the block, on every pool road: a session whose operator never ran has its first stop
+                          blocked once with the exact launch line; a turn that left flagged rows open has its stop
+                          blocked once per row with the SendMessage close to the operator, which writes their state,
+                          match and addressed in the background.
 
 Everything here is mechanical. The stamp carries no judgment; the pour moves a file whose every entry belongs to
 a conversation that is not this one (a new id that reaches its first prompt unrecorded) and destroys nothing (the
@@ -216,7 +227,15 @@ KNOWN_SHORT_MIN = 2                 # a short message seen this many times in th
 BARRIER_MIN_TOKENS = 3      # a message with fewer tokens matches an earlier row only when identical
 BARRIER_JACCARD = 0.5       # token overlap at or above which an earlier row is a candidate for the operator's judgment
 SHORT_WORDS = 5             # a message of at most this many words is called short: the operator derives its intent
-TURN_CLOSE = ".turn-close"          # the Stop hook's reports, one line per session, printed by the next prompt hook
+TURN_CLOSE = ".turn-close"          # the Stop hook's reports, one line each, kept for the operator — never printed to the session
+STANDING_FIXED = 3000               # the always-on standing block's budget, in characters (phi.py standing --fixed)
+TURN_CLOSE_KEEP = 200               # the report lines .turn-close keeps, newest last
+OPERATOR_SEEN = ".operator"         # `sid time agent-id|launching` per operator launch the Agent hooks saw
+FLAGGED = ".flagged"                # `sid sha12(fingerprint)` per row the prompt hook left for a judged close
+CLOSE_ASKED = ".close-asked"        # `sid sha12(fingerprint)` per judged row the Stop hook already sent to the operator
+OPERATOR_REPLY_LINES = 5            # the operator's reply to the session: at most this many plain lines
+ADDRESSED_QUOTE = 160               # what of the turn's reply a mechanical `addressed:` quotes
+DESKTOP_ENTRYPOINTS = ("claude-desktop",)   # CLAUDE_CODE_ENTRYPOINT values of the Claude desktop app's Code tab
 TURN_CLOSE_BUDGET_S = 55            # the Stop hook's own deadline, under the 60 s hooks.json gives it; every call shares it
 TURN_CLOSE_MIN_CALL_S = 5           # a call with less time left than this waits for the next turn close
 VERDICT_MAX_AGE_S = 86400           # a cached shadow or refusal verdict is re-earned at least once a day
@@ -372,6 +391,45 @@ def session_tag(payload, store=None):
     sid = str(payload.get("session_id") or "unknown")
     title = session_title(payload) or ledger_title(store, sid)
     return sid, (f'{sid[:8]} "{title}"' if title else sid[:8]), title
+
+
+def host():
+    """'desktop' in the Claude desktop app's Code tab, whose own wrap-up box and question panel are the closing; 'cli'
+    anywhere else. One closing protocol per host: the acts page and the popup-last order are the CLI's."""
+    entry = os.environ.get("CLAUDE_CODE_ENTRYPOINT", "")
+    return "desktop" if entry in DESKTOP_ENTRYPOINTS or os.environ.get("CLAUDE_CODE_DESKTOP_APP_VERSION") else "cli"
+
+
+def fp_key(fp):
+    """A row's key in the sidecar files: the fingerprint's sha, so a quote or a newline never breaks a line."""
+    return sha12(str(fp).encode("utf-8"))
+
+
+def sidecar_has(store, name, sid, key):
+    path = os.path.join(store, name)
+    if not os.path.exists(path):
+        return False
+    return any(l.split()[:2] == [sid, key] for l in read_text(path).split("\n") if l.strip())
+
+
+def sidecar_add(store, name, *fields):
+    with open(os.path.join(store, name), "a", encoding="utf-8", newline="\n") as f:
+        f.write(" ".join(str(x) for x in fields) + "\n")
+
+
+def operator_agent(store, sid):
+    """(ran, agent id or None) — whether an operator launch was seen for this session (the Agent hooks' record in
+    .operator, or a pool written for it), and the agent id its launch result named, the latest one."""
+    path = os.path.join(store, OPERATOR_SEEN)
+    ran, agent = pool_session(store) == sid[:8], None
+    if os.path.exists(path):
+        for l in read_text(path).split("\n"):
+            parts = l.split()
+            if len(parts) >= 4 and parts[0] == sid:
+                ran = True
+                if parts[3] != "launching":
+                    agent = parts[3]
+    return ran, agent
 
 
 def now_line(now):
@@ -700,81 +758,51 @@ def pool_session(store):
     return None
 
 
-def operator_directive(store, tag, now, models, keyspace=False):
-    """The one block the pooled mode injects in place of the hot files: judged operations are the operator
-    subagent's and its derivation is what the model acts on; the close is the record script's, mechanical."""
-    root = plugin_root()
-    brief = os.path.join(root, "hooks", "operator-prompt.md")
-    pool = os.path.join(root, "hooks", "pool-prompt.md")
-    record = os.path.join(root, "scripts", "record.py")
-    normalize = os.path.join(root, "scripts", "normalize.py")
-    idb = os.path.join(root, "scripts", "idb.py")
+def launch_line(store, sid, now, models):
+    """The operator launch, as the one exact Agent call the session makes — printed whole at SessionStart and in the
+    Stop hook's block when the launch never ran, so the session copies it rather than composing it. Background on
+    the children roads (the operator streams nothing to the session; its reply comes with its completion), foreground
+    otherwise; through the conductor when the index's `operator-via:` names one, with its `conductor:` line."""
+    brief = os.path.join(plugin_root(), "hooks", "operator-prompt.md")
     via = models.get("via")
-    sweep = (
-        f"and sweep (naming what is cold when the check shows judged debt, on {models['sweep']}; the placement is "
-        f"`python {idb} --store <store> pour --session <id> --now <the latest now:> <file>:<head lines>` — any "
-        "count pours, the keyspace opens no position). "
-    ) if keyspace else (
-        "and sweep (naming what is cold when the check shows judged debt — held when the "
-        "last sweep's `[gc]` line found no count opening one position and nothing cold has landed since — on "
-        f"{models['sweep']}; the placement is `python {normalize} --store <store> --session <id> --pour "
-        "<file>:<head lines>`). "
-    )
-    conducted = (
-        f"CONDUCTED — the index's `operator-via:` names {via}: every operator moment goes to it instead (the Agent "
-        f"tool, subagent_type {via}, in the foreground), the same one message with one more line — `conductor: launch "
-        "the operator with this message on <the moment's model>, and return a derived understanding` — and it "
-        "launches the operator on that model, fresh for each moment, and receives its derivation (the operator then "
-        "sends nothing to `main`); what comes back to you is its DERIVED UNDERSTANDING — the barrier, the intent, the "
-        "standing rules that bear on the task by label (the rules themselves arrive whole in their own SessionStart "
-        "block), what the store establishes for the task and how firmly — which you act on as you would the "
-        "derivation, never a response to the owner: the response stays yours. Continue the conductor, not the "
-        f"operator, for later moments; when {via} is not among your agent types, launch the operator directly and "
-        "say so.\n"
-    ) if via else ""
-    return (
-        "### recall, and every store operation — the operator subagent, never this context\n"
-        "The hot files are not in this context, and no store file is read or written here. Two instruments carry "
-        "the work. The OPERATOR — the Agent tool, subagent_type general-purpose, in the foreground — for what needs "
-        f"judgment: open (the pool at the first prompt, by the index's road, {models['road']} (skeleton: "
-        f"`phi.py pool` writes the skeleton from the barrier's own lines and the operator makes one judged pass on "
-        f"{models['pool']}, no model reading a file; children: the same skeleton with one reader per file on "
-        f"{models['child']}, launched by the operator in the background to pick what bears on the task, the picks "
-        f"folded in by the script, composed on {models['pool']} — the operator launched in the background then, "
-        "its progress lines arriving as its messages and its derivation with its completion; single: the operator "
-        f"alone on {models['pool']}; model (the default once a pool ranker is trained): scripts/pick_model.py proposes picks and the "
-        "operator's one judged pass decides them, no child but on 1 session in N (`pool-audit:`), the operator in the "
-        "foreground; model-shadow: the children road with the model's picks written beside theirs and compared, the "
-        "children's folded) — the session speaks to the operator, the operator to its children; the barrier "
-        f"when the prompt hook names a candidate row, and the intent of an unknown short message, on "
-        f"{models['operator']}) " + sweep + "Send it one message:\n"
-        f"  Read {brief} and do what it says. store: {store} | session: {tag} | now: <the latest now:> | "
-        "moment: open or sweep | <the facts only this context holds>\n"
-        "With the flight-ops plugin installed, this launch is its `vlds-operator` flight (`roboto-conductor` when it "
-        "goes to the conductor): the message above is its takeoff checklist, a launch that fails it is bounced once, "
-        "and its landing is the return's `derivation —` opening.\n"
-        f"{conducted}"
-        "Launch it once per session; continue it for later moments with SendMessage (to: the launch result's agent "
-        f"id; message: the moment, the latest now:, the facts) — at most {models['moments']} continuations, then "
-        "launch fresh, and fresh whenever a continuation fails; its derivation is what you act on — listed in one line "
-        "at the top of the reply, and once the reply's final plan is settled, before its first act, one fence with no "
-        "shell tag lists that plan as a short-form bulleted prose summary — both process text, carrying no "
-        "deliverable: every fence, every copyable block and the answer itself go in the FINAL message, after the "
-        "turn's last tool call, since the Code tab does not reliably show what sits before the closing tool calls; "
-        "the popup is that last call, and the final message names what it asks. The CLOSE — every "
-        "turn, before the final message — is mechanical: write the turn's record to the notebook (one `## <file>` block per "
-        "entry in the file's own shape; a dispatch row by its fingerprint's opening plus the fields to add) and run "
-        f"`python {record} --store {store} --session <id> --now <the latest now:> --record <path>`; its derivation "
-        "is what you report. A known short command needs no operator: the prompt hook derives it from the store's own "
-        f"adoption tokens. The pool per {pool} is the recall, every item still through the gc read barrier; the "
-        f"operator writes store/{POOL_FILE}, which a compact re-injects. When a derivation is not enough to steer, "
-        "ask the operator for the entry, never open the file here. No Agent tool in this session → the degraded "
-        "path: do the operation here and say so. The index's ## recall section rules it: `pool: inject` restores "
-        "the slot injection of every inject file; `operator-model:`, `pool-model:`, `pool-child-model:`, "
-        "`sweep-model:` pick the models; `pool-road:` the pool's road (skeleton, children, single, model, model-shadow); "
-        "`operator-moments:` the continuations before a fresh launch; `operator-via:` an agent that conducts the "
-        "operator for you and returns a derived understanding."
-    )
+    background = models.get("road") in ("children", "model-shadow") and not via
+    prompt = (f"Read {brief} and do what it says. store: {store} | session: {sid[:8]} | now: {now:{NOW_FMT}} | "
+              "moment: open | task: <the task in one line> | message: <the owner's words, verbatim>")
+    if via:
+        prompt += (f" | conductor: launch the operator with this message on {models['pool']}, and return a derived "
+                   "understanding")
+    return (f'Agent(subagent_type="{via or "general-purpose"}", '
+            + ("" if via else f'model="{models["pool"]}", ')
+            + f'run_in_background={"true" if background else "false"}, description="VLDS operator", '
+            f'prompt="{prompt}")')
+
+
+def operator_directive(store, tag, now, models, keyspace=False):
+    """The one block the pooled mode injects in place of the hot files: the operator's exact launch, what its reply
+    is, how later moments reach it, and the closing protocol of this host. The operator's own brief
+    (hooks/operator-prompt.md) carries everything else, in its context, never this one."""
+    sid = tag.split()[0]
+    record = os.path.join(plugin_root(), "scripts", "record.py")
+    via = models.get("via")
+    lines = [
+        "### the operator — launched once per session, before the first answer",
+        "Copy this call, filling in the two <> fields; the first stop of a session that never launched it is blocked:",
+        "  " + launch_line(store, sid, now, models),
+        f"Its reply is at most {OPERATOR_REPLY_LINES} plain lines: whether the message repeats an earlier one, the "
+        "owner's rules, corrections and retractions that bear on the task, and anything stale. Act on them; never "
+        "open a store file here — ask the operator.",
+        ("Later moments go to the conductor again (" + via + "), fresh each time." if via else
+         "Later moments continue it: SendMessage(to: its agent id, message: \"moment: <open|close|sweep> | now: <the "
+         f"latest now:> | <the facts>\") — {models['moments']} at most, then launch fresh; fresh too when one fails."),
+        "Dispatch rows close themselves at the turn's end; a row the prompt hook flagged as resembling an earlier one "
+        "is closed by the operator, which the Stop hook asks for. A ruling, correction, verified claim or retraction "
+        f"this turn goes in a record run through `python {record} --store {store} --session {sid[:8]} --now <the "
+        "latest now:> --record <path>`.",
+    ]
+    if host() == "desktop":
+        lines.append("Host: the Claude desktop Code tab — the turn closes with the app's own wrap-up box and question "
+                     "panel; the acts page, the closing popup and its \"popup last\" order are not this host's.")
+    return "\n".join(lines)
 
 
 def known_short(store, preview):
@@ -919,7 +947,8 @@ def cmd_session_standing(payload, store, part):
     sid, _label, _title = session_tag(payload, store)
     try:
         r = subprocess.run([sys.executable or "python3", phi, "--store", store, "standing", "--session", sid[:8],
-                            "--part", str(part)], capture_output=True, timeout=60)
+                            "--part", str(part), "--fixed", "--budget", str(STANDING_FIXED)], capture_output=True,
+                           timeout=60)
     except (OSError, subprocess.SubprocessError) as e:
         if part == 0:
             print(f"### standing rules — not printed: phi.py standing could not run ({e})")
@@ -1371,28 +1400,6 @@ def ensure_dispatch_shape(store):
     return True
 
 
-def take_turn_close_reports(store, sid):
-    """This session's lines from store/.turn-close, removed as they are taken — the Stop hook wrote them, and
-    the prompt that follows is where the model and the user learn what the light sweep did."""
-    path = os.path.join(store, TURN_CLOSE)
-    if not os.path.exists(path):
-        return []
-    mine, others = [], []
-    for l in read_text(path).split("\n"):
-        if not l.strip():
-            continue
-        parts = l.split(" ", 3)
-        (mine if parts[0] == sid else others).append(l)
-    with open(path, "w", encoding="utf-8", newline="\n") as f:
-        f.write("\n".join(others) + ("\n" if others else ""))
-    out = []
-    for l in mine:
-        parts = l.split(" ", 3)
-        if len(parts) > 3:
-            out.append(f"- turn-close ({parts[2]}): {parts[3]}")
-    return out
-
-
 def models_dir(store):
     """<p4>/models — where the trained models live, every session's one copy."""
     p4 = pt.p4_of(store)
@@ -1564,40 +1571,25 @@ def retrain_owed(store, stamp):
 
 
 def cmd_prompt_open(payload, store):
+    """UserPromptSubmit. Every store write runs as before — the session directory named, the session recorded, the
+    row stamped with its barrier state and its detail-ask fields — but what reaches the session is at most two lines:
+    nothing for a message no earlier row resembles (and for a notification, an agent's message, a known short
+    command, or a message the dispatch model or a served picker makes FRESH), and for a flagged one the barrier's
+    verdict and the row it matched. A flagged row, and a detail-ask, is listed in .flagged, so the Stop hook leaves
+    its close to the operator instead of closing it mechanically."""
     prompt = payload.get("prompt") or payload.get("user_input") or ""
     if not str(prompt).strip():
         return 0
     sid, tag, title = session_tag(payload, store)
     now = datetime.datetime.now()
-    renamed = None
     p4 = pt.p4_of(store)
     if p4 and title and sid != "unknown":
         # the session directory is named by the session's first title, once, at the start of a turn
-        renamed = pt.name_session(p4, sid, title)
-        if renamed:
+        if pt.name_session(p4, sid, title):
             store = pt.session_store(p4, sid)
     os.makedirs(store, exist_ok=True)
-    lines = [f"## VLDS prompt hook (session {tag})", "- " + now_line(now)]
-    if renamed:
-        lines.append(f"- session directory named by its first title: {session_store_label(store)} (was "
-                     f".claude/p4/sessions/{sid[:8]}/) — every path below is the new one; the name sticks")
-    if not title:
-        lines.append("- title: none yet — no custom-title record in the transcript at hook time (it is written "
-                     "asynchronously) and none recorded in .sessions; re-read at the next prompt")
-    lines += take_turn_close_reports(store, sid)
     seed_session_store(store)
-    if record_seen(store, sid, now, title):
-        lines.append(f"- session store: {session_store_label(store)} — this session's own directory holds every entry "
-                     "it writes; nothing is poured or dated")
-        index_path = pt.config_index(store)
-        index_txt = read_text(index_path) if os.path.exists(index_path) else (
-            "" if store_engine(store)[0] == "idb" else None)
-        if index_txt is not None and recall_lists(index_txt)[3] == "subagent":
-            lines.append("- operator (open) owed now: the pool — not yet pooled for this session; derive this first "
-                         "prompt's task in one line and launch the operator before answering, per the SessionStart "
-                         "directive (the Agent tool, the brief at hooks/operator-prompt.md, the pool's model); its "
-                         "derivation carries the recall; once the reply's final plan is settled, before its first act, one "
-                         "untagged fence lists that plan as short bullets")
+    record_seen(store, sid, now, title)
     preview = " ".join(str(prompt).split())
     if preview.startswith(NOTIFICATION_PREFIX) or preview.startswith(AGENT_MESSAGE_PREFIX):
         # a background task's completion is not an ask, and neither is a message from the session's own agent (the
@@ -1605,16 +1597,11 @@ def cmd_prompt_open(payload, store):
         # would be closed by an operator whose own completion arrives the same way — a loop; the row is the hook's
         # whole, stamped complete on arrival
         notice = preview.startswith(NOTIFICATION_PREFIX)
-        fp = stamp(store, prompt, tag, now, state="FRESH", arrival="task notification" if notice else "agent message",
-                   addressed=NOTIFICATION_ADDRESSED if notice else AGENT_MESSAGE_ADDRESSED)
-        if fp is not None:
-            lines.append(f'- stamped: dispatch.md row "{fp[:80]}" at {now:{NOW_FMT}} — '
-                         f"{'a task notification' if notice else 'an agent message'}: its row is complete on arrival "
-                         "(FRESH, consumed); nothing for the operator")
-        print("\n".join(lines))
+        stamp(store, prompt, tag, now, state="FRESH", arrival="task notification" if notice else "agent message",
+              addressed=NOTIFICATION_ADDRESSED if notice else AGENT_MESSAGE_ADDRESSED)
         return 0
     words = len(preview.split())
-    known, prior = known_short(store, preview) if words <= SHORT_WORDS else (0, None)
+    known, _prior = known_short(store, preview) if words <= SHORT_WORDS else (0, None)
     # a known short command is a repeated act by nature — the owner's own adoption token — never an echo: the
     # barrier has no question to put, and its intent is the store's to give
     rows = [] if known else barrier_rows(store, preview)
@@ -1626,13 +1613,13 @@ def cmd_prompt_open(payload, store):
     picker = last_picker(payload, preview)
     fields = {}
     if shape is not None:
-        kind, title, riding = shape
+        _kind, ptitle, riding = shape
         if riding:
-            fields = {"kind": "submit+detail-ask", "on": f"widget «{title}»"}
+            fields = {"kind": "submit+detail-ask", "on": f"widget «{ptitle}»"}
     elif picker is not None:
         fields = {"kind": "detail-ask", "on": f"{picker[0]} «{picker[1]}»"}
-    if fields and ensure_dispatch_shape(store):
-        lines.append("- dispatch.md header: `kind:` and `on:` added to the row shape (the detail-ask recorder's fields)")
+    if fields:
+        ensure_dispatch_shape(store)
     # a picker's submit or skip resembling an earlier row: served fresh after that row was addressed, it is FRESH
     # by construction (the owner's ruling of 2026-09-22) — the hook writes FRESH when every resembling row is
     # addressed; an open one leaves the call to this context, never the operator
@@ -1643,58 +1630,27 @@ def cmd_prompt_open(payload, store):
     state = "FRESH" if (not cands or fresh_by_construction or model_fresh) else None
     fp = stamp(store, prompt, tag, now, state=state, fields=fields)
     if fp is None:
-        lines.append("- stamp: dispatch.md absent — the row is the operator's to append")
-    elif model_fresh:
-        lines.append(f'- stamped: dispatch.md row "{fp[:80]}" at {now:{NOW_FMT}} — barrier: it resembles '
-                     f'{len(cands)} earlier row{"s" if len(cands) > 1 else ""} (latest: "{cands[-1]}"); the dispatch '
-                     f"model scores it plainly fresh (p={verdict[2]:.3f}, under {verdict[3]:.3f}, below every repeat it "
-                     "trained on) — state: FRESH written, nothing for the operator; `dispatch-model: off` in the "
-                     "index's ## recall section hands every such message back to the operator")
-    elif cands and fresh_by_construction:
-        lines.append(f'- stamped: dispatch.md row "{fp[:80]}" at {now:{NOW_FMT}} — barrier: it resembles '
-                     f'{len(cands)} earlier row{"s" if len(cands) > 1 else ""} (latest: "{cands[-1]}"), every one '
-                     "addressed — a picker's submit served after them is FRESH by construction; state: FRESH written, "
-                     "nothing for the operator")
-    elif cands and shape is not None:
-        lines.append(f'- stamped: dispatch.md row "{fp[:80]}" at {now:{NOW_FMT}} — barrier: it resembles '
-                     f'{len(cands)} earlier row{"s" if len(cands) > 1 else ""} (latest: "{cands[-1]}"), at least one '
-                     "still open — a picker's submit is judged HERE, in one line, never by the operator: FRESH "
-                     "unless it re-submits the very picker the open row came from; complete the row at the close")
-    elif cands:
-        lines.append(f'- stamped: dispatch.md row "{fp[:80]}" at {now:{NOW_FMT}} — barrier: it resembles '
-                     f'{len(cands)} earlier row{"s" if len(cands) > 1 else ""} (latest: "{cands[-1]}"); state: left '
-                     "open — hand the message to the operator (open) before answering; its derivation says FRESH, "
-                     "ECHO, or SUPERSEDED, and the operator completes the row"
-                     + (f"; dispatch model ({verdict[0]}): {'would write FRESH' if verdict[1] == 'FRESH' else 'asks'} "
-                        f"(p={verdict[2]:.3f}, threshold {verdict[3]:.3f}) — a proposal, never the state"
-                        if verdict else ""))
+        return 0
+    if state is None or fields:
+        # the judged close: the operator writes state, match and addressed (or the briefs.md entry), never the hook
+        sidecar_add(store, FLAGGED, sid, fp_key(fp))
+    if state is not None:
+        return 0
+    more = f" (+{len(cands) - 1} more)" if len(cands) > 1 else ""
+    if shape is not None:
+        first = ("VLDS: this form answer resembles an earlier message that is still open — decide it here, in one "
+                 "line: new, unless it re-submits that very form.")
     else:
-        lines.append(f'- stamped: dispatch.md row "{fp[:80]}" at {now:{NOW_FMT}} — barrier: no earlier row '
-                     "resembles it; state: FRESH written; addressed: is the record's at the turn's close")
-    if fp is not None and fields:
-        on = fields["on"]
-        what = ("a question riding on the submit's textbox" if fields["kind"] == "submit+detail-ask"
-                else "a question about the picker, not its submit")
-        lines.append(f"- detail-ask on {on}: {what} — answer it, and the close owes store/briefs.md an entry: "
-                     "`asked:` verbatim, `on:` as stamped, `at:` closing or fork, `omitted:` the class the picker's "
-                     "briefs left out, as one label; the second instance of a class → the closing picker offers to "
-                     "make that label standing")
-    standing = standing_labels(store)
-    if standing:
-        lines.append("- standing brief lines: " + ", ".join(f"`{k}:` (×{v})" for k, v in sorted(standing.items()))
-                     + " — every option of a picker carries one line per label; the pre-ask gate bounces a picker "
-                     "missing one, once")
-    if fp is not None and words <= SHORT_WORDS:
-        if known:
-            lines.append(f"- short message, known: \"{preview[:40]}\" ×{known} in this store's owner corpus — derive "
-                         "it as before, no operator" + (f"; the last time it was addressed: {prior[:160]}" if prior
-                                                         else "; no earlier row records what was done"))
-        else:
-            lines.append(f"- short message ({words} word{'s' if words != 1 else ''}), not a known command: the "
-                         "operator (open) derives its intent from the store before you answer; state the derivation "
-                         "in one line at the top of the reply, then — the final plan settled, before the first act — one "
-                         "untagged fence with the plan as short bullets")
-    print("\n".join(lines))
+        ran, agent = operator_agent(store, sid)
+        how = (f'SendMessage(to: "{agent}", message: "moment: open | now: {now:{NOW_FMT}} | message: <the owner\'s '
+               'words>")' if agent else
+               "SendMessage to the operator (moment: open)" if ran else
+               "launching the operator with the SessionStart line (moment: open)")
+        first = (f"VLDS: this message resembles an earlier one — the operator decides whether it is new, a repeat "
+                 f"or superseded: hand it over by {how} before answering, and answer what it says"
+                 + (f"; the dispatch model leans {'new' if verdict[1] == 'FRESH' else 'repeat'} (p={verdict[2]:.2f})"
+                    if verdict else "") + ".")
+    print(first + "\n" + f'matched: "{cands[-1]}"{more}')
     return 0
 
 
@@ -1851,12 +1807,16 @@ def cmd_pre_agent(payload, store):
     prompt = str(inp.get("prompt") or "")
     if "operator-prompt.md" not in prompt:
         return 0
+    sid = str(payload.get("session_id") or "unknown")
+    if sid != "unknown" and os.path.isdir(store):
+        # the launch is seen: the Stop hook's launch block no longer owes it (post-agent adds the agent id)
+        sidecar_add(store, OPERATOR_SEEN, sid, f"{datetime.datetime.now():{NOW_FMT}}", "launching")
     index_path = pt.config_index(store)
     via = recall_lists(read_text(index_path))[4].get("via") if os.path.exists(index_path) else None
     if not via:
         return 0
     to_conductor = _agent_matches(inp.get("subagent_type"), via)
-    if to_conductor and re.search(r"(?m)^\s*conductor:\s*launch the operator\b", prompt):
+    if to_conductor and re.search(r"(?m)(?:^|\|)\s*conductor:\s*launch the operator\b", prompt):
         return 0
     fp = sha12(("pre-agent\n" + str(inp.get("subagent_type") or "") + "\n" + prompt).encode("utf-8"))
     seen_path = os.path.join(store, PRE_AGENT_SEEN)
@@ -1877,6 +1837,24 @@ def cmd_pre_agent(payload, store):
         "permissionDecisionReason": (f"VLDS pre-agent: {why}. When {via} is not among this session's agent types, "
                                      "re-issue this call unchanged — the re-issue passes — and say in the reply that "
                                      "the operator was launched directly.")}}))
+    return 0
+
+
+AGENT_ID_RE = re.compile(r"agentId\W{0,4}([A-Za-z0-9_-]{6,})")
+
+
+def cmd_post_agent(payload, store):
+    """PostToolUse on Agent: an operator launch (its prompt carries hooks/operator-prompt.md) is recorded in
+    .operator with the agent id its result names, so the prompt hook and the Stop hook can name the SendMessage
+    target for later moments. Silent always — the launch's own result is what the session reads."""
+    if str(payload.get("tool_name") or "") not in ("Agent", "Task"):
+        return 0
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    sid = str(payload.get("session_id") or "unknown")
+    if "operator-prompt.md" not in str(inp.get("prompt") or "") or sid == "unknown" or not os.path.isdir(store):
+        return 0
+    m = AGENT_ID_RE.search(json.dumps(payload.get("tool_response"), ensure_ascii=False))
+    sidecar_add(store, OPERATOR_SEEN, sid, f"{datetime.datetime.now():{NOW_FMT}}", m.group(1) if m else "launching")
     return 0
 
 
@@ -2053,6 +2031,10 @@ def cmd_turn_close(payload, store):
     now = datetime.datetime.now()
     stamp = f"{now:{NOW_FMT}}"
     deadline = time.monotonic() + TURN_CLOSE_BUDGET_S
+    try:
+        close_fresh_rows(payload, store, sid, now)     # the labels first: nothing below may cost a completed row
+    except Exception:  # noqa: BLE001 — a hook degrades, never raises; the next turn close completes the row
+        pass
 
     def left():
         return deadline - time.monotonic()
@@ -2104,10 +2086,8 @@ def cmd_turn_close(payload, store):
         pass
     kept = [r for r in reports if r and not (r.startswith("turn-close: nothing to move") and "owed" not in r)]
     if kept:
-        with open(os.path.join(store, TURN_CLOSE), "a", encoding="utf-8", newline="\n") as f:
-            for r in kept:
-                f.write(f"{sid} {stamp} {r[len('turn-close: '):]}\n")
-    block = conductor_owed(payload, store, sid, stamp)
+        keep_reports(store, [f"{sid} {stamp} {r[len('turn-close: '):]}" for r in kept])
+    block = operator_owed(payload, store, sid, now)
     if block:
         print(json.dumps({"decision": "block", "reason": block}))
     elif kept:
@@ -2115,36 +2095,173 @@ def cmd_turn_close(payload, store):
     return 0
 
 
-POOL_OWED = ".pool-owed"    # the session ids whose first unpooled stop was blocked once — the second stop passes
+POOL_OWED = ".pool-owed"    # the session ids whose first stop without an operator was blocked once — the second stop passes
+ROW_RE = re.compile(r'^- fingerprint:[ \t]*"?(.*?)"?[ \t]*$')
 
 
-def conductor_owed(payload, store, sid, stamp):
-    """The reason to block this stop once, or None: the recall config names a conductor (`operator-via:`) on the
-    pooled road and this session has no pool of its own yet, so its first moment never ran — the launch no hook can
-    make (a hook has no channel to spawn a subagent), owed by the session before its turn ends. Once per session:
-    a stop the hook already continued (`stop_hook_active`) and a session already blocked both pass, so a session
-    without the conductor agent is never held in a loop."""
+def keep_reports(store, lines):
+    """Append the turn close's report lines to .turn-close, keeping the newest TURN_CLOSE_KEEP — the operator's to
+    read; nothing prints them into the session."""
+    path = os.path.join(store, TURN_CLOSE)
+    old = [l for l in read_text(path).split("\n") if l.strip()] if os.path.exists(path) else []
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join((old + lines)[-TURN_CLOSE_KEEP:]) + "\n")
+
+
+def last_reply(payload):
+    """The turn's final reply text: the Stop payload's `last_assistant_message` when the harness gives it, else the
+    transcript's last assistant text block; '' when neither is readable."""
+    text = payload.get("last_assistant_message")
+    if isinstance(text, str) and text.strip():
+        return text
+    path = payload.get("transcript_path")
+    if not path or not os.path.exists(str(path)):
+        return ""
+    text = ""
+    try:
+        with open(str(path), encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if '"assistant"' not in line or '"text"' not in line:
+                    continue
+                try:
+                    msg = json.loads(line).get("message") or {}
+                except (ValueError, AttributeError):
+                    continue
+                if msg.get("role") != "assistant" or not isinstance(msg.get("content"), list):
+                    continue
+                for b in msg["content"]:
+                    if isinstance(b, dict) and b.get("type") == "text" and str(b.get("text") or "").strip():
+                        text = str(b["text"])
+    except OSError:
+        return ""
+    return text
+
+
+def reply_quote(text):
+    """The reply's first non-empty line that is not a fence or a heading, quoted for an `addressed:` value."""
+    for l in str(text).split("\n"):
+        l = " ".join(l.strip().lstrip("#>*- ").split())
+        if l and not l.startswith("```"):
+            l = l.replace('"', "'")
+            return l if len(l) <= ADDRESSED_QUOTE else l[:ADDRESSED_QUOTE - 1] + "…"
+    return ""
+
+
+def dispatch_rows(lines):
+    """[(start, end, fingerprint, fields)] for the row blocks of a dispatch record's lines, after the header's `---`."""
+    try:
+        i = lines.index("---") + 1
+    except ValueError:
+        i = 0
+    out = []
+    while i < len(lines):
+        m = ROW_RE.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        j, fields = i + 1, {}
+        while j < len(lines) and lines[j].startswith("  "):
+            mm = re.match(r"^  ([a-z-]+):[ \t]*(.*?)[ \t]*$", lines[j])
+            if mm:
+                fields[mm.group(1)] = mm.group(2)
+            j += 1
+        out.append((i, j, m.group(1), fields))
+        i = j
+    return out
+
+
+def close_fresh_rows(payload, store, sid, now):
+    """The mechanical close: every row the prompt hook wrote FRESH and nothing addressed yet gets its `addressed:`
+    line here — this turn's rows quote the turn's reply, an older one left open by a turn that never closed says so.
+    A flagged row (.flagged: a barrier candidate or a detail-ask) is the operator's judged close and is left alone.
+    Returns the count completed."""
+    path = os.path.join(store, "dispatch.md")
+    if not os.path.exists(path):
+        return 0
+    raw = read_text(path)
+    nl = "\r\n" if "\r\n" in raw else "\n"
+    lines = raw.replace("\r\n", "\n").split("\n")
+    rows = dispatch_rows(lines)
+    turn_start = 0      # the first row after the last turn row something already addressed: this turn's
+    for k, (_s, _e, _fp, f) in enumerate(rows):
+        if f.get("addressed") and not f.get("arrival", "").startswith(("task notification", "agent message")):
+            turn_start = k + 1
+    quote = reply_quote(last_reply(payload))
+    done = 0
+    for k in range(len(rows) - 1, -1, -1):
+        s, e, fp, f = rows[k]
+        if f.get("state") != "FRESH" or f.get("addressed") or sidecar_has(store, FLAGGED, sid, fp_key(fp)):
+            continue
+        if k >= turn_start:
+            text = (f'answered — "{quote}"' if quote else "answered") + \
+                   f" (closed at the turn's end by the Stop hook, {now:{NOW_FMT}})"
+        else:
+            text = f"left open by a turn that ended without a close; closed late by the Stop hook, {now:{NOW_FMT}}"
+        lines.insert(e, f"  addressed: {text}")
+        done += 1
+    if done:
+        write_bytes(path, nl.join(lines).encode("utf-8"))
+    return done
+
+
+def judged_open(store, sid):
+    """[(fingerprint, kind)] for this session's flagged rows still lacking `addressed:` that the Stop hook has not
+    yet sent to the operator."""
+    path = os.path.join(store, "dispatch.md")
+    if not os.path.exists(path):
+        return []
+    out = []
+    for _s, _e, fp, f in dispatch_rows(read_text(path).replace("\r\n", "\n").split("\n")):
+        key = fp_key(fp)
+        if f.get("addressed") or not sidecar_has(store, FLAGGED, sid, key) or sidecar_has(store, CLOSE_ASKED, sid, key):
+            continue
+        out.append((fp, f.get("kind") or "resembles an earlier row"))
+    return out
+
+
+def operator_owed(payload, store, sid, now):
+    """The reason to block this stop, or None. Two cases, on every pool road and with or without a conductor:
+    (1) the session's operator never ran — no launch the Agent hooks saw and no pool of its own — so its first moment
+    is owed, a launch no hook can make: blocked once per session, the exact launch line spelled out; (2) the turn
+    left flagged rows open (a barrier candidate, a detail-ask): their close is judged, the operator's, so the session
+    sends it one close moment in the background — blocked once per row. A stop the hook already continued
+    (`stop_hook_active`) passes, so no session is held in a loop; the inject mode has no operator to owe."""
     if payload.get("stop_hook_active") or sid == "unknown" or not os.path.isdir(store):
         return None
     cfg = pt.config_index(store)
     _inject, _digest, _from, pool, models = recall_lists(read_text(cfg) if os.path.exists(cfg) else "")
-    via = models.get("via")
-    if pool != "subagent" or not via or pool_session(store) == sid[:8]:
+    if pool != "subagent":
         return None
+    resolve_models(store, models)
+    rows = judged_open(store, sid)
+    ran, agent = operator_agent(store, sid)
     marker = os.path.join(store, POOL_OWED)
-    seen = set(read_text(marker).split()) if os.path.exists(marker) else set()
-    if sid in seen:
+    blocked = set(read_text(marker).split()) if os.path.exists(marker) else set()
+    stamp = f"{now:{NOW_FMT}}"
+    listed = "; ".join(f'"{fp[:60]}" ({kind})' for fp, kind in rows[:6])
+    if not ran and sid not in blocked:
+        sidecar_add(store, POOL_OWED, sid)
+        for fp, _k in rows:
+            sidecar_add(store, CLOSE_ASKED, sid, fp_key(fp))
+        via = models.get("via")
+        return ("VLDS: this session never launched its operator, and the training labels it writes (the pool, the "
+                "barrier verdicts, the judged closes) are owed. Before ending the turn, make this call, the <> fields "
+                f"filled in{' (through the conductor ' + via + ')' if via else ''}:\n"
+                + launch_line(store, sid, now, models)
+                + (f"\nTell it also to close these flagged rows: {listed}, with one line each on what this turn did."
+                   if rows else "")
+                + "\nThen end the turn; its reply is at most five lines. This stop is blocked once per session; if "
+                "the Agent tool is missing, say so and stop.")
+    if not rows:
         return None
-    with open(marker, "a", encoding="utf-8", newline="\n") as f:
-        f.write(sid + "\n")
-    brief = os.path.join(plugin_root(), "hooks", "operator-prompt.md")
-    return (f"VLDS: this session's first moment never ran — the recall config names {via} as the conductor and "
-            f"this session has no pool ({session_store_label(store)}recall-pool.md). Before ending the turn, launch "
-            f"it: the Agent tool, subagent_type {via}, in the foreground, with one message — `Read {brief} and do what "
-            f"it says. store: {store} | session: {sid[:8]} | now: {stamp} | moment: open | <this session's task in "
-            f"one line, and the owner's words>` — and a last line `conductor: launch the operator with this message "
-            f"on {models['pool']}, and return a derived understanding`; act on the derivation it returns, then finish "
-            "the reply. This stop is blocked once per session; if the agent type is not available, say so and stop.")
+    for fp, _k in rows:
+        sidecar_add(store, CLOSE_ASKED, sid, fp_key(fp))
+    to = f'"{agent}"' if agent else "the operator's agent id from its launch result"
+    return (f"VLDS: {len(rows)} message row{'s' if len(rows) > 1 else ''} this turn need{'' if len(rows) > 1 else 's'} "
+            f"a judged close — {listed}. Send the operator the close in the background, then end the turn: "
+            f'SendMessage(to: {to}, message: "moment: close | now: {stamp} | rows: <each row\'s opening words> | '
+            'done: <one line per row on what this turn did about it; for a detail-ask, the question and what the '
+            'form left out>"). Its reply arrives later; nothing else is owed.')
 
 
 def main():
@@ -2182,6 +2299,8 @@ def main():
             return cmd_pre_ask(payload, store)
         if sub == "pre-agent":
             return cmd_pre_agent(payload, store)
+        if sub == "post-agent":
+            return cmd_post_agent(payload, store)
         if sub == "post-write":
             return cmd_post_write(payload, store)
         if sub == "turn-close":

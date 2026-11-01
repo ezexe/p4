@@ -108,27 +108,27 @@ def test_train_and_hook():
         # off, named: the barrier as it was, no model named, though a model is trained
         set_recall(p4, "dispatch-model: off")
         out = th.run_hook("prompt-open", {"session_id": "dddd0000-test", "prompt": asks[0]}, root)
-        assert "dispatch model" not in out and "state: left open" in out and last_state(store) is None, out
+        assert "dispatch model" not in out and "the operator decides" in out and last_state(store) is None, out
         complete_last(store)
         # shadow: named and logged, never the state
         set_recall(p4, "dispatch-model: shadow")
         out = th.run_hook("prompt-open", {"session_id": "dddd0000-test", "prompt": asks[1]}, root)
-        assert "dispatch model (shadow): would write FRESH" in out and last_state(store) is None, out
+        assert "the dispatch model leans new" in out and last_state(store) is None, out
         complete_last(store)
         # on: FRESH written for the plain fresh ask, nothing for the operator
         set_recall(p4, "dispatch-model: on")
         out = th.run_hook("prompt-open", {"session_id": "dddd0000-test", "prompt": asks[2]}, root)
-        assert "scores it plainly fresh" in out and last_state(store) == "FRESH", out
+        assert out.strip() == "" and last_state(store) == "FRESH", out
         with open(os.path.join(store, "dispatch.md"), "a", encoding="utf-8", newline="\n") as f:
             f.write("  addressed: answered (the record's, at the turn's close)\n")
         # on: an echo of an open row stays the operator's
         out = th.run_hook("prompt-open", {"session_id": "dddd0000-test", "prompt": echo}, root)
-        assert "dispatch model (on): asks" in out and "state: left open" in out and last_state(store) is None, out
+        assert "the dispatch model leans repeat" in out and "the operator decides" in out and last_state(store) is None, out
         complete_last(store)
         # unnamed: a trained model is on by default
         set_recall(p4, "pool-road: children")
         out = th.run_hook("prompt-open", {"session_id": "dddd0000-test", "prompt": asks[3]}, root)
-        assert "scores it plainly fresh" in out and last_state(store) == "FRESH", out
+        assert out.strip() == "" and last_state(store) == "FRESH", out
         with open(os.path.join(p4, "models", "dispatch-shadow.tsv"), encoding="utf-8") as f:
             log = [l.split("\t") for l in f.read().strip().split("\n")[1:]]
         assert [l[2] for l in log] == ["shadow", "on", "on", "on"] and \

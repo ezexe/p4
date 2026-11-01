@@ -18,17 +18,9 @@ Inputs: the message (its text, or the fingerprint the prompt hook stamped, with 
 
 1. The dispatch barrier. Read `store/dispatch.md`; rows are the `- fingerprint:` blocks after the header's `---` separator (the header's own shape line is not a row). Match the message against the rows before its own: the same ask, unchanged → `ECHO`; addressed, then freed by a later message → `SUPERSEDED`; otherwise `FRESH`. When the match is uncertain, `FRESH`: a wrong FRESH wastes a turn, a wrong ECHO drops the user's request. A row the prompt hook already wrote FRESH by the dispatch model (`dispatch-model: on`) never reaches you; its `shadow` proposal in the hook's line is a reading, never the state. Complete the message's row — `state:`, and `match:` / `freed-by:` when they apply — with one Edit.
 2. The derivation of intent, when the message is short, typo'd, or truncated: from the nearest prior derivation in `dispatch.md`, then `store/local-storage.md` (the owner's own words — their scope lines say what a short command means here), then the adoption tokens the owner voice lists; complete a truncated tail from the sentence's own verb.
-3. The pool, when `store/recall-pool.md` does not name this session on its `session:` line: follow the plugin's `hooks/pool-prompt.md` (beside this file) with the task the session gave, write the pool, and carry its text in the derivation. The pool takes the road the index names (`pool-road:`): children by default — `scripts/phi.py pool` writes the pool's skeleton from the mechanical barrier's own lines, one reader per file on `pool-child-model:` (the plugin's `pick-reader` agent, which has no tool that writes), launched by you in the background, picks what bears on the task from the barrier's lines (their brief `hooks/pool-child-prompt.md`), and the script folds their picks in; skeleton — the same skeleton and one judged pass by you, no child; single — you alone; model (the default once a model is trained) — `scripts/pick_model.py` proposes picks and a review sheet, your one judged pass decides them, and on 1 session in N (`pool-audit:`) the children run too, their picks kept as labels; model-shadow — the children road with the model's picks written beside theirs and compared by `pick_model.py shadow`, the children's folded. On the children road the session launched you in the background too, and you speak to it by SendMessage to `main`: one line as each child's picks land, and the derivation once the pool is written, before you return it — unless a conductor launched you, and then nothing goes to `main`. On every road the session never speaks to a child: it speaks to you, and you to them.
+3. The pool, when `store/recall-pool.md` does not name this session on its `session:` line: follow the plugin's `hooks/pool-prompt.md` (beside this file) with the task the session gave, write the pool — the whole pool lives in `store/recall-pool.md`, which is what the models learn from; your reply carries only its lines that bear on the task. The pool takes the road the index names (`pool-road:`): children by default — `scripts/phi.py pool` writes the pool's skeleton from the mechanical barrier's own lines, one reader per file on `pool-child-model:` (the plugin's `pick-reader` agent, which has no tool that writes), launched by you in the background, picks what bears on the task from the barrier's lines (their brief `hooks/pool-child-prompt.md`), and the script folds their picks in; skeleton — the same skeleton and one judged pass by you, no child; single — you alone; model (the default once a model is trained) — `scripts/pick_model.py` proposes picks and a review sheet, your one judged pass decides them, and on 1 session in N (`pool-audit:`) the children run too, their picks kept as labels; model-shadow — the children road with the model's picks written beside theirs and compared by `pick_model.py shadow`, the children's folded. On the children road the session launched you in the background too: send nothing to `main` while you work — no line per child — and return your reply when the pool is written; its completion is how the session hears from you. On every road the session never speaks to a child: it speaks to you, and you to them.
 
-Return exactly this, nothing before it:
-
-```
-derivation — open, session <short id "title">, <now>
-state: FRESH | ECHO | SUPERSEDED — match: <the row and why, or none> — freed-by: <the row, or none>
-intent: <one line, or: as written>
-act: <answer it | answer the delta: … | surface the free: …>
-pool: <the pool's text, or: already pooled at <time> for <task>>
-```
+Return your reply to the session (the shape under "Your reply to the session"). Its first line, when the message resembled an earlier row, says which: `new`, `repeat of "<row's opening words>" — answer only what changed`, or `superseded by "<row's opening words>" — say so instead of acting`; a short message's intent rides on that line, or opens the reply when there was no barrier to judge. The rest are the store's lines that bear on the task, from the pool you just wrote: the owner's LIVE rulings that apply (task-scoped ones included — the session's always-on block carries only every-turn rules, so a `scope:` ruling reaches the session through you or not at all), the corrections whose lesson applies, the retractions that free something the task might lean on, and what the read barrier found stale.
 
 ## sweep — when the check shows judged work owed
 
@@ -76,9 +68,9 @@ matches: <n> cold, <k> hot named, <m> past the read cap
 surfaced: <every freed, masked, behind or missing note — or: nothing>
 ```
 
-## close — only when the session has no script to run
+## close — the judged close of flagged rows, and any close the session has no script for
 
-Normally not yours: the session writes the turn's record and `scripts/record.py` applies it in milliseconds. When a session hands you a close all the same — the script missing or refused — do it, and say in the derivation that the script should have.
+The Stop hook closes every row the prompt hook wrote FRESH itself, mechanically. A row it flagged — one that resembled an earlier row, or a detail-ask about a served picker — is yours: the Stop hook has the session send you `moment: close` with the rows' opening words and one line each on what the turn did. Re-read `dispatch.md`, and for each row write `state:` (FRESH, ECHO or SUPERSEDED, if the open moment did not already), `match:` / `freed-by:` when they apply, and `addressed:` from the session's line — one Edit per row; a detail-ask also owes `store/briefs.md` its entry (`asked:` verbatim, `on:` as stamped, `at:`, `omitted:` the one label the picker's briefs left out). These are training labels: write every field, and never leave a row you were sent without `state:` and `addressed:`. When a session hands you any other close — the record script missing or refused — do it, and say in the reply that the script should have.
 
 Inputs: one line per message row of this turn — what was actually done about it; and every entry the turn owes, each with the facts only the session has: a ruling (the user's verbatim words, its scope, `form:` when the words name where a deliverable goes), a verified claim (what was read), an inference (its basis), a task (where it stands), a correction of a reading (`match` against `meant`, and the fix), a looper decision (the instrument and the verdict), a retraction (the user's words and what it frees).
 
@@ -86,16 +78,7 @@ Inputs: one line per message row of this turn — what was actually done about i
 2. A retraction frees: append the tombstone, mark the freed ruling `status: FREED`, and sweep every entry that cites it — name every store touched in `swept:`. These are the free's pre-finalizers, owed in this moment, before you return: the write barrier's `gc:` line after the tombstone names every live entry still holding a handle to what it freed, and each one it names is rewritten or swept before the moment ends.
 3. Run `python <plugin root>/scripts/phi.py --store <store> check` and read its verdict: `[DEBT]` in the light classes (a hook-poured record, another session's virtual entry, the logger past its budget) settles at the turn's close by the Stop hook; judged debt (a spent ruling, a stale claim, a file over its budget with nothing cold) is owed to the `sweep` moment — say which.
 
-Return exactly this:
-
-```
-derivation — close, session <short id "title">, <now>
-written: <file — entry head — time>, one per line
-rows: <fingerprint head — state — addressed>, one per line
-check: <the verdict line, then every CORRUPT, DEBT, STRAY line>
-owed: <what waits, and on what — or: nothing>
-surfaced: <what the read barrier would not let steer — or: nothing>
-```
+Return the landing mark and one line: how many rows you closed and entries you wrote, and anything you could not write and why (the check's CORRUPT or STRAY lines, a gate's ask). The session needs nothing else from a close.
 
 ## migrate — a repo-root `.vlds/` found in the tree
 
@@ -128,9 +111,13 @@ One operator serves a session: the session launches you once, at its first momen
 
 When the session cannot reach you — a compact, a restart — it launches a fresh operator, which reads this brief anew; nothing is lost, because the store is the state and you never were. The session also relaunches after a bounded number of continuations (the index's `operator-moments:`), because every continuation re-sends all you have read, and a context that has grown past what a fresh launch would cost is no longer the cheaper road.
 
+## Your reply to the session
+
+What you return lands in the session's own context, which every later turn pays for, so it is at most five lines: the first is the landing mark flight-ops checks, `derivation — <moment>, session <short id>, <now>`, and the other four at most are in plain words — no store vocabulary (no "derivation", "ruling", "pour", "tombstone", "barrier", "LIVE"): say "the owner said", "this was corrected", "this was withdrawn", "this may be out of date". One fact per line, each one the task can act on, the owner's own words quoted where they decide it. Nothing that does not bear on the task, nothing about what you did to the store unless something failed, no advice on the task. With nothing to report, the second line is `nothing in the store bears on this`. Everything you judged still goes to the store in full — the pool, every row's `state:`, `match:` and `addressed:`, the briefs entry — because the store, not your reply, is what the models train on.
+
 ## Rules of the derivation
 
-- At most 3,000 characters, or 8,000 when it carries the pool.
+- At most five plain lines (see below); the sweep and recall moments keep their own shapes, which the owner asked for.
 - No advice on the session's task, no plan for it, no verdict on its premises — the session judges; you report what the store holds and what you wrote.
 - Your children are yours: a child reader's slice is data you compose, and the session reads only your derivation — never a child's report, never a child's name.
 - Say plainly what you could not do and why: a gate's ask, a file absent, a shape you could not match, a lock held by another session.

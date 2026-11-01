@@ -110,6 +110,8 @@ def seed_project(sid="test-session"):
         f.write(LEDGER_HEADER)
     with open(os.path.join(store, "local-storage.md"), "w", encoding="utf-8", newline="\n") as f:
         f.write(LOCAL_STORAGE)
+    with open(os.path.join(store, ".operator"), "w", encoding="utf-8", newline="\n") as f:
+        f.write(f"{sid} 2026-09-03 10:00 seededagent\n")    # the operator ran: the Stop hook's launch block owes nothing
     return root, store
 
 
@@ -245,7 +247,7 @@ def test_clock_and_post_write():
         out = run_hook("session-open", {"source": "startup", "session_id": "test-session"}, root)
         assert NOW_RE.search(out), f"session-open carries no now: line:\n{out}"
         out = run_hook("prompt-open", {"session_id": "test-session", "prompt": "hello"}, root)
-        assert NOW_RE.search(out), f"prompt-open carries no now: line:\n{out}"
+        assert out.strip() == "", f"prompt-open printed for a new message (the clock rides in session-open and post-write):\n{out}"
         # post-write on the incident fence: the widened trigger runs the check, and [STRAY] names the file
         with open(os.path.join(root, "ledger.md"), "w", encoding="utf-8", newline="\n") as f:
             f.write("\n- correction: a reading that landed wrong\n  time: 2026-09-02 11:27\n")
@@ -338,7 +340,9 @@ def test_gc_trace():
         assert "turn-close: gc: a free (tombstones.md:" in out and "no live entry holds a handle" in out, \
             f"(e) the close's trace:\n{out}"
         out = run_hook("prompt-open", {"session_id": "trace-session", "prompt": "next"}, root)
-        assert "- turn-close (" in out and "gc: a free" in out, f"(e) the report not printed at the next prompt:\n{out}"
+        assert out.strip() == "", f"(e) the report printed into the session:\n{out}"
+        with open(os.path.join(store, ".turn-close"), encoding="utf-8") as f:
+            assert "gc: a free" in f.read(), "(e) the report not kept for the operator"
         # (f) a free whose target is not in the hot tier says so; phi.py trace --dry records nothing
         append(tomb, '\n- freed: "a memory file outside the store that said to warn before audio tests"\n'
                      '  time: 2026-10-02 12:10\n  cause: retraction\n  owner-words: "that gate was a hallucination"\n')
@@ -388,43 +392,226 @@ def test_owner_voice():
     print("owner voice: green")
 
 
-def test_conductor_owed():
-    """The Stop hook's one block: with operator-via set and no pool of this session's own, the first stop is blocked
-    with the conductor launch spelled out; the next stop passes, as does a stop the hook already continued; a session
-    whose pool is built, and a config with no conductor, are never blocked."""
-    root, store = seed_project("owed-session")
+def block_of(out):
+    """The Stop hook's block decision, or None."""
+    line = next((l for l in out.splitlines() if l.startswith("{")), None)
+    d = json.loads(line) if line else {}
+    return d.get("reason") if d.get("decision") == "block" else None
+
+
+def test_launch_enforced():
+    """The operator launch, on every road: a session whose operator never ran has its first stop blocked with the one
+    exact launch line — the conductor's through operator-via, the plain operator's without, on the children and the
+    skeleton roads alike — and the next stop passes, as does a stop the hook already continued; a launch the Agent
+    hooks saw (pre-agent or post-agent), or a pool of the session's own, owes nothing; the inject mode has no operator."""
+    def fresh(name, recall=""):
+        root, store = seed_project(name)
+        os.remove(os.path.join(store, ".operator"))
+        if recall:
+            vindex = os.path.join(root, ".claude", "p4", "vindex")
+            os.makedirs(vindex)
+            with open(os.path.join(vindex, "phi-index.md"), "w", encoding="utf-8", newline="\n") as f:
+                f.write("# idx\n\n## recall\n\n" + recall)
+        return root, store
+    roots = []
     try:
-        vindex = os.path.join(root, ".claude", "p4", "vindex")
-        os.makedirs(vindex)
-        with open(os.path.join(vindex, "phi-index.md"), "w", encoding="utf-8", newline="\n") as f:
-            f.write("# idx\n\n## recall\n\noperator-via: mister:roboto\n")
-        out = run_hook("turn-close", {"cwd": root, "stop_hook_active": True}, root)
-        assert '"decision": "block"' not in out, f"(a) a continued stop was blocked:\n{out}"
-        out = run_hook("turn-close", {"cwd": root}, root)
-        d = json.loads(next(l for l in out.splitlines() if l.startswith("{")))
-        assert d["decision"] == "block" and "subagent_type mister:roboto" in d["reason"] \
-            and "conductor: launch the operator" in d["reason"] and "operator-prompt.md" in d["reason"], d
-        out = run_hook("turn-close", {"cwd": root}, root)
-        assert '"decision": "block"' not in out, f"(b) the second stop was blocked:\n{out}"
-        root2, store2 = seed_project("pooled-session")
-        try:
-            os.makedirs(os.path.join(root2, ".claude", "p4", "vindex"))
-            shutil.copy(os.path.join(vindex, "phi-index.md"), os.path.join(root2, ".claude", "p4", "vindex", "phi-index.md"))
-            with open(os.path.join(store2, "recall-pool.md"), "w", encoding="utf-8", newline="\n") as f:
-                f.write("# VLDS Recall Pool\n\nsession: pooled-s\n")
-            out = run_hook("turn-close", {"cwd": root2}, root2)
-            assert '"decision": "block"' not in out, f"(c) a pooled session was blocked:\n{out}"
-        finally:
-            shutil.rmtree(root2, ignore_errors=True)
-        root3, _store3 = seed_project("plain-session")
-        try:
-            out = run_hook("turn-close", {"cwd": root3}, root3)
-            assert '"decision": "block"' not in out, f"(d) a config with no conductor was blocked:\n{out}"
-        finally:
-            shutil.rmtree(root3, ignore_errors=True)
+        for recall, want in (("operator-via: mister:roboto\n", 'Agent(subagent_type="mister:roboto"'),
+                             ("", 'Agent(subagent_type="general-purpose", model="sonnet", run_in_background=true'),
+                             ("pool-road: skeleton\n", 'Agent(subagent_type="general-purpose", model="sonnet", '
+                                                        'run_in_background=false')):
+            root, store = fresh("owed-session", recall)
+            roots.append(root)
+            assert block_of(run_hook("turn-close", {"cwd": root, "stop_hook_active": True}, root)) is None, \
+                f"(a) a continued stop was blocked ({recall!r})"
+            reason = block_of(run_hook("turn-close", {"cwd": root}, root))
+            assert reason and want in reason and "operator-prompt.md" in reason and "| moment: open |" in reason, \
+                f"(a) the first stop not blocked with the launch line ({recall!r}):\n{reason}"
+            if "roboto" in recall:
+                assert "| conductor: launch the operator with this message on sonnet" in reason, reason
+            assert block_of(run_hook("turn-close", {"cwd": root}, root)) is None, f"(b) the second stop was blocked ({recall!r})"
+        # (c) a launch the pre-agent hook saw, the post-agent hook's record with the agent id, or a pool: nothing owed
+        launch = {"tool_name": "Agent", "tool_input": {"subagent_type": "general-purpose",
+                                                       "prompt": "Read /p/hooks/operator-prompt.md and do what it says."}}
+        root, store = fresh("seen-session"); roots.append(root)
+        run_hook("pre-agent", launch, root)
+        assert block_of(run_hook("turn-close", {"cwd": root}, root)) is None, "(c) a launch pre-agent saw still owed"
+        root, store = fresh("id-session"); roots.append(root)
+        run_hook("post-agent", dict(launch, tool_response={"agentId": "ab12cd34ef56", "status": "async_launched"}), root)
+        with open(os.path.join(store, ".operator"), encoding="utf-8") as f:
+            assert f.read().split()[-1] == "ab12cd34ef56", "(c) post-agent did not record the agent id"
+        assert block_of(run_hook("turn-close", {"cwd": root}, root)) is None, "(c) a recorded launch still owed"
+        root, store = fresh("pooled-session"); roots.append(root)
+        with open(os.path.join(store, "recall-pool.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("# VLDS Recall Pool\n\nsession: pooled-s\n")
+        assert block_of(run_hook("turn-close", {"cwd": root}, root)) is None, "(c) a pooled session was blocked"
+        # (d) an Agent call that is not the operator records nothing
+        root, store = fresh("other-agent"); roots.append(root)
+        run_hook("post-agent", {"tool_name": "Agent", "tool_input": {"prompt": "explore the tree"},
+                                "tool_response": {"agentId": "zz99zz99zz99"}}, root)
+        assert not os.path.exists(os.path.join(store, ".operator")), "(d) a plain agent counted as the operator"
+        # (e) the inject mode has no operator to owe
+        root, store = fresh("inject-session", "pool: inject\n"); roots.append(root)
+        assert block_of(run_hook("turn-close", {"cwd": root}, root)) is None, "(e) the inject mode was blocked"
+        # (f) SessionStart prints the same line the block spells
+        root, store = fresh("open-session", "pool-road: skeleton\n"); roots.append(root)
+        out = run_hook("session-open", {"source": "startup"}, root)
+        line = next(l.strip() for l in out.split("\n") if l.strip().startswith("Agent("))
+        reason = block_of(run_hook("turn-close", {"cwd": root}, root))
+        assert re.sub(r"now: [^|]+", "now:", line) in re.sub(r"now: [^|]+", "now:", reason), \
+            f"(f) SessionStart's launch line and the block's differ:\n{line}\n{reason}"
+    finally:
+        for r in roots:
+            shutil.rmtree(r, ignore_errors=True)
+    print("launch enforced: green")
+
+
+def rows_of(dispatch):
+    """{fingerprint: {field: value}} for every row of a dispatch record."""
+    with open(dispatch, encoding="utf-8") as f:
+        lines = f.read().replace("\r\n", "\n").split("\n")
+    out, cur = {}, None
+    for l in lines[lines.index("---") + 1:]:
+        m = re.match(r'^- fingerprint: "(.*)"$', l)
+        if m:
+            cur = out.setdefault(m.group(1), {})
+        elif cur is not None and re.match(r"^  [a-z-]+:", l):
+            k, v = l.strip().split(":", 1)
+            cur[k] = v.strip()
+    return out
+
+
+def test_turn_close_rows():
+    """The close at the turn's end: a row the prompt hook wrote FRESH is completed by the Stop hook — `addressed:`
+    quoting the turn's reply, an older orphan said to be closed late — without the session writing a record; a row the
+    hook flagged keeps its judged close: left open, and the stop blocked once with the SendMessage close to the
+    operator (its agent id named), the next stop passing; a detail-ask the same, the briefs entry the operator's."""
+    root, store = seed_project("close-session")
+    dispatch = os.path.join(store, "dispatch.md")
+    try:
+        with open(os.path.join(store, ".operator"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("close-session 2026-09-03 10:00 a0b1c2d3e4f5\n")
+        run_hook("prompt-open", {"prompt": "write the release notes for the plugin"}, root)
+        reason = block_of(run_hook("turn-close", {"cwd": root, "last_assistant_message":
+                                                  "## Notes\n\nThe release notes are in NOTES.md, three sections."}, root))
+        assert reason is None, f"(a) a FRESH-only turn was blocked:\n{reason}"
+        row = rows_of(dispatch)["write the release notes for the plugin"]
+        assert row.get("state") == "FRESH" and row.get("addressed", "").startswith(
+            'answered — "Notes"'), f"(a) the FRESH row not closed from the reply: {row}"
+        # (b) a flagged row: left open for the operator, the stop blocked once with the SendMessage close
+        run_hook("prompt-open", {"prompt": "write the release notes for the plugin again"}, root)
+        out = run_hook("turn-close", {"cwd": root, "last_assistant_message": "Rewrote them."}, root)
+        reason = block_of(out)
+        row = rows_of(dispatch)["write the release notes for the plugin again"]
+        assert "addressed" not in row and "state" not in row, f"(b) the hook judged a flagged row: {row}"
+        assert reason and 'SendMessage(to: "a0b1c2d3e4f5", message: "moment: close' in reason \
+            and "write the release notes for the plugin again" in reason, f"(b) no judged-close block:\n{reason}"
+        assert block_of(run_hook("turn-close", {"cwd": root}, root)) is None, "(b) the judged close was asked twice"
+        # (c) a FRESH row after the flagged one closes; an earlier FRESH orphan (a turn that ended unclosed) closes late
+        with open(dispatch, "a", encoding="utf-8", newline="\n") as f:
+            f.write('\n- fingerprint: "an orphan from a crashed turn"\n  time: 2026-09-03 09:00\n  arrival: turn\n'
+                    "  state: FRESH\n\n- fingerprint: \"a later row someone closed\"\n  time: 2026-09-03 09:01\n"
+                    "  arrival: turn\n  state: FRESH\n  addressed: done by hand\n")
+        run_hook("prompt-open", {"prompt": "now bump the version"}, root)
+        run_hook("turn-close", {"cwd": root, "last_assistant_message": "Bumped to 0.0.78."}, root)
+        rows = rows_of(dispatch)
+        assert rows["now bump the version"]["addressed"].startswith('answered — "Bumped to 0.0.78."'), rows
+        assert rows["an orphan from a crashed turn"]["addressed"].startswith("left open by a turn"), rows
+        assert rows["a later row someone closed"]["addressed"] == "done by hand", "(c) an addressed row was rewritten"
+        # (d) no operator id recorded yet: the block names where to find it
+        os.remove(os.path.join(store, ".operator"))
+        with open(os.path.join(store, "recall-pool.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("# pool\n\nsession: close-se\n")
+        run_hook("prompt-open", {"prompt": "now bump the version please"}, root)
+        reason = block_of(run_hook("turn-close", {"cwd": root}, root))
+        assert reason and "the operator's agent id from its launch result" in reason, reason
     finally:
         shutil.rmtree(root, ignore_errors=True)
-    print("conductor owed: green")
+    print("turn-close rows: green")
+
+
+def test_label_completeness():
+    """Every dispatch row ends a session with `state:` and `addressed:` — the labels the dispatch model trains on —
+    with the session writing no record: FRESH rows by the Stop hook, a flagged row by the operator's close (here played
+    by its record run), notifications on arrival; store_lessons.labels counts every row completed."""
+    root, store = seed_project("label-session")
+    dispatch = os.path.join(store, "dispatch.md")
+    try:
+        prompts = ["port the build script to macOS", "<task-notification> <task-id>t1</task-id> done </task-notification>",
+                   "port the build script to macOS again", "and now the compile database", "thanks"]
+        for i, p in enumerate(prompts):
+            run_hook("prompt-open", {"prompt": p}, root)
+            out = run_hook("turn-close", {"cwd": root, "last_assistant_message": f"Reply {i}."}, root)
+            if block_of(out):
+                # the operator's judged close, as its record run would write it
+                rec = os.path.join(root, f"rec{i}.md")
+                with open(rec, "w", encoding="utf-8", newline="\n") as f:
+                    f.write(f'## dispatch.md\n- fingerprint: "{p}"\n  state: ECHO\n  match: the earlier port, unchanged\n'
+                            "  addressed: answered the delta only\n")
+                now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                r = subprocess.run([sys.executable, os.path.join(HERE, "record.py"), "--store", store, "--session",
+                                    "label-se", "--now", now, "--record", rec], capture_output=True, timeout=60)
+                assert r.returncode == 0, r.stdout.decode()
+        rows = rows_of(dispatch)
+        assert len(rows) == len(prompts), rows
+        open_rows = {fp: f for fp, f in rows.items() if not (f.get("state") and f.get("addressed"))}
+        assert not open_rows, f"rows left without state and addressed: {open_rows}"
+        assert rows["port the build script to macOS again"]["match"] == "the earlier port, unchanged", rows
+        lessons = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(PLUGIN))), "scripts", "session",
+                               "store_lessons.py")    # the notebook's measure, where the checkout carries it
+        if os.path.exists(lessons):
+            r = subprocess.run([sys.executable, lessons, "--p4", os.path.join(root, ".claude", "p4")],
+                               capture_output=True, timeout=60)
+            got = r.stdout.decode()
+            assert f"dispatch rows completed {len(prompts)} of {len(prompts)}" in got, got
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("label completeness: green")
+
+
+def test_host_closing():
+    """One closing protocol per host: in the Claude desktop Code tab the contract's acts row and the gate's R22 give
+    way to the app's wrap-up and question panel, and the operator block says so; in the CLI both print as written."""
+    plugin_root = os.path.dirname(PLUGIN)
+    contract = os.path.join(PLUGIN, "hooks", "memory-override.md")
+    with open(contract, encoding="utf-8") as f:
+        assert "| **the reply ends with acts not done**" in f.read(), "the contract's acts row moved"
+
+    def parts(env):
+        e = dict(os.environ, CLAUDE_PLUGIN_ROOT=PLUGIN, CLAUDE_PROJECT_DIR=tempfile.mkdtemp(prefix="vlds-host-"), **env)
+        text = ""
+        for n in range(1, 6):    # part 0 also runs the layout; the acts row is never in it
+            text += subprocess.run(["sh", os.path.join(PLUGIN, "hooks", "session-open.sh"), "--part", str(n)],
+                                   capture_output=True, env=e, timeout=60).stdout.decode("utf-8", "replace")
+        shutil.rmtree(e["CLAUDE_PROJECT_DIR"], ignore_errors=True)
+        return text
+    cli = {"CLAUDE_CODE_ENTRYPOINT": "cli", "CLAUDE_CODE_DESKTOP_APP_VERSION": ""}
+    desk = {"CLAUDE_CODE_ENTRYPOINT": "claude-desktop"}
+    assert "acts page in chat is the owner's to ask for" in parts(cli), "(a) the CLI lost the acts row"
+    d = parts(desk)
+    assert "acts page in chat" not in d and "this host is the Claude desktop Code tab" in d, "(a) the desktop kept the acts row"
+    gate = os.path.join(plugin_root, "emission-discipline", "hooks")
+
+    def gate_out(env):
+        e = dict(os.environ, CLAUDE_PLUGIN_ROOT=os.path.dirname(gate), **env)
+        return subprocess.run(["sh", os.path.join(gate, "gate-open.sh")], capture_output=True, env=e,
+                              timeout=60).stdout.decode("utf-8", "replace")
+    with open(os.path.join(gate, "emission-gate.md"), encoding="utf-8") as f:
+        assert gate_out(cli) == f.read(), "(b) the CLI gate is not the file as written"
+    g = gate_out(desk)
+    assert "| R22 |" in g and "no popup to serve last" in g and "the popup — a prompt generator" not in g, "(b) R22 kept"
+    root, _store = seed_project("host-session")
+    try:
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=root, CLAUDE_PLUGIN_ROOT=PLUGIN, **desk)
+        r = subprocess.run([sys.executable, HOOKS, "session-open"], input=json.dumps(
+            {"source": "startup", "session_id": "host-session"}).encode(), capture_output=True, env=env, timeout=60)
+        assert "Host: the Claude desktop Code tab" in r.stdout.decode(), "(c) the operator block lacks the host line"
+        env.update(cli)
+        r = subprocess.run([sys.executable, HOOKS, "session-open"], input=json.dumps(
+            {"source": "startup", "session_id": "host-session"}).encode(), capture_output=True, env=env, timeout=60)
+        assert "Host:" not in r.stdout.decode(), "(c) the CLI got the desktop host line"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("host closing: green")
 
 
 def test_cross_session_reads():
@@ -484,11 +671,10 @@ def test_session_title():
                     '{"type":"user","message":"a line that is not a title"}\n'
                     '{"type":"custom-title","customTitle":"First  session:  the real title","sessionId":"first-session"}\n')
         out = run_hook("prompt-open", {"session_id": "first-session", "prompt": "hello", "transcript_path": transcript}, root)
-        assert 'session first-se "First session: the real title"' in out, f"(a) id + title not in the prompt-hook header:\n{out}"
+        assert out.strip() == "", f"(a) the prompt hook printed for a new message:\n{out}"
         # (a2) the session directory is named by that first title, once, and the stamp lands in the named store
         store = store_of(root, "first-session")
         assert os.path.basename(os.path.dirname(store)) == "first-session-the-real-title--first-se", store
-        assert "session directory named by its first title" in out, f"(a2) the rename not announced:\n{out}"
         with open(transcript, "a", encoding="utf-8", newline="\n") as f:
             f.write('{"type":"custom-title","customTitle":"A later name","sessionId":"first-session"}\n')
         run_hook("prompt-open", {"session_id": "first-session", "prompt": "again", "transcript_path": transcript}, root)
@@ -502,8 +688,9 @@ def test_session_title():
         # nothing is poured or dated anywhere: the first session's record stays whole in its own directory
         first_rows = open(os.path.join(store, "dispatch.md"), encoding="utf-8").read()
         out = run_hook("prompt-open", {"session_id": "second-session", "prompt": "hi", "_keep_sid": True}, root)
-        assert "session second-s" in out and '"' not in out.split("\n")[0], f"(c) short id alone expected:\n{out}"
         second = store_of(root, "second-session")
+        assert "(stamped by the prompt hook, session second-s)" in open(os.path.join(second, "dispatch.md"),
+                                                                         encoding="utf-8").read(), "(c) short id alone expected"
         assert '- fingerprint: "hi"' in open(os.path.join(second, "dispatch.md"), encoding="utf-8").read(), \
             "(c) the second session's row not in its own store"
         assert open(os.path.join(store, "dispatch.md"), encoding="utf-8").read() == first_rows, \
@@ -524,11 +711,12 @@ def test_session_title():
             f.write("third-session 2026-09-03 20:00 Ledger title\n")
         out = run_hook("prompt-open", {"session_id": "third-session", "prompt": "hey", "transcript_path": empty,
                                        "_keep_sid": True}, root)
-        assert 'session third-se "Ledger title"' in out, f"(e) the ledger's title not used when the transcript lags:\n{out}"
-        assert "title: none yet" not in out, "(e) the none-yet line printed although the ledger had a title"
+        assert 'session third-se "Ledger title")' in last_row(os.path.join(store_of(root, "third-session"), "dispatch.md")), \
+            "(e) the ledger's title not used when the transcript lags"
         out = run_hook("prompt-open", {"session_id": "fourth-session", "prompt": "yo", "transcript_path": empty,
                                        "_keep_sid": True}, root)
-        assert "session fourth-s" in out and "title: none yet" in out, f"(f) the none-yet line missing:\n{out}"
+        assert "session fourth-s)" in last_row(os.path.join(store_of(root, "fourth-session"), "dispatch.md")), \
+            "(f) the short id alone expected with no title anywhere"
     finally:
         shutil.rmtree(root, ignore_errors=True)
     print("session title: green")
@@ -611,15 +799,18 @@ def test_pool_mode():
         seed_register(store)
         # (a) the default is the pooled mode: the directive, no hot-file text, silent slots
         out = run_hook("session-open", {"source": "startup", "session_id": "pool-session"}, root)
-        assert "the operator subagent, never this context" in out, f"(a) no operator directive:\n{out}"
-        assert "operator-prompt.md" in out and "pool-prompt.md" in out and "record.py" in out, \
-            f"(a) a brief or the record script missing:\n{out}"
-        assert "by the index's road, children (skeleton:" in out and "one judged pass on sonnet" in out \
-            and "one reader per file on haiku" in out and "on sonnet)" in out and "at most 4 continuations" in out, \
-            f"(a) the per-moment models, the road, or the continuation bound missing:\n{out}"
-        assert "Launch it once" in out and "SendMessage" in out, f"(a) the one-per-session continuation missing:\n{out}"
-        assert "CONDUCTED" not in out and "; via " not in out, f"(a) a conductor named with no operator-via set:\n{out}"
-        assert "`operator-via:` an agent that conducts the operator" in out, f"(a) the operator-via key unlisted:\n{out}"
+        assert "### the operator — launched once per session" in out, f"(a) no operator block:\n{out}"
+        launch = [l.strip() for l in out.split("\n") if l.strip().startswith("Agent(")]
+        assert len(launch) == 1 and launch[0].startswith('Agent(subagent_type="general-purpose", model="sonnet", '
+                                                        'run_in_background=true, description="VLDS operator", prompt="Read ') \
+            and "operator-prompt.md and do what it says. store: " in launch[0] and "| moment: open |" in launch[0] \
+            and launch[0].endswith('message: <the owner\'s words, verbatim>")'), f"(a) the one exact launch line:\n{out}"
+        assert "record.py" in out and "4 at most" in out and "SendMessage(to: its agent id" in out, \
+            f"(a) the continuation bound or the record script missing:\n{out}"
+        assert "at most 5 plain lines" in out, f"(a) the reply's cap not stated:\n{out}"
+        assert "conductor" not in out and "; via " not in out, f"(a) a conductor named with no operator-via set:\n{out}"
+        block = out[out.index("### the operator"):out.index("### keyspace") if "### keyspace" in out else out.index("### phi-index")]
+        assert len(block) < 2000, f"(a) the operator block grew to {len(block)} characters:\n{block}"
         assert "pool: subagent (operator sonnet, pool sonnet, children haiku, sweep sonnet; road children; 4 continuations)" \
             in out, f"(a) the mode line missing:\n{out}"
         assert "the plan goes in the reply" not in out, "(a) a hot-file entry was injected in the pooled mode"
@@ -627,11 +818,9 @@ def test_pool_mode():
         assert "### owner voice" in out, "(a) the owner voice missing in the pooled mode"
         assert run_hook("session-open", {"source": "startup", "session_id": "pool-session"}, root) and \
             run_hook_slot(0, root).strip() == "", "(a) slot 0 printed in the pooled mode"
-        # (b) the first prompt carries the nudge; the second does not
+        # (b) the first prompt prints nothing: the launch is the SessionStart line's, and the Stop hook enforces it
         out = run_hook("prompt-open", {"session_id": "pool-session", "prompt": "hello"}, root)
-        assert "not yet pooled" in out, f"(b) no nudge on the first prompt:\n{out}"
-        out = run_hook("prompt-open", {"session_id": "pool-session", "prompt": "again"}, root)
-        assert "not yet pooled" not in out, f"(b) nudge repeated on the second prompt:\n{out}"
+        assert out.strip() == "", f"(b) the first prompt printed:\n{out}"
         # (c) a compact re-injects this session's pool, and names another session's as not this one's
         with open(os.path.join(store, "recall-pool.md"), "w", encoding="utf-8", newline="\n") as f:
             f.write("# VLDS Recall Pool\n\nsession: pool-ses \"A title\"\ntask: test the pool\npooled: 2026-09-03 10:00\n\n## steering\n\n- [local-storage 2026-09-03 10:00 LIVE] the plan goes in the reply as one fence\n")
@@ -649,22 +838,22 @@ def test_pool_mode():
         seed_register(store, recall="operator-model: opus\npool-model: haiku\npool-child-model: sonnet\nsweep-model: opus\n"
                                     "pool-road: skeleton\noperator-moments: 2\n")
         out = run_hook("session-open", {"source": "startup", "session_id": "pool-session"}, root)
-        assert "by the index's road, skeleton (skeleton:" in out and "one judged pass on haiku" in out \
-            and "one reader per file on sonnet" in out and "on opus)" in out and "at most 2 continuations" in out, \
-            f"(d) the model keys, the road, or the continuation bound not honoured:\n{out}"
+        assert 'Agent(subagent_type="general-purpose", model="haiku", run_in_background=false,' in out \
+            and "2 at most" in out, f"(d) the pool model, the road, or the continuation bound not honoured:\n{out}"
         assert "operator opus, pool haiku, children sonnet, sweep opus; road skeleton; 2 continuations" in out, \
             f"(d) the mode line lacks the models or the road:\n{out}"
         # (e) `operator-via:` hands every operator moment to a conducting agent, named in the directive and the mode line
         seed_register(store, recall="operator-via: mister:roboto\n")
         out = run_hook("session-open", {"source": "startup", "session_id": "pool-session"}, root)
-        assert "CONDUCTED — the index's `operator-via:` names mister:roboto" in out \
-            and "subagent_type mister:roboto, in the foreground" in out and "DERIVED UNDERSTANDING" in out \
-            and "the response stays yours" in out and "launch the operator directly and say so" in out, \
+        assert 'Agent(subagent_type="mister:roboto", run_in_background=false, description="VLDS operator"' in out \
+            and "| conductor: launch the operator with this message on sonnet, and return a derived understanding\")" \
+            in out and "Later moments go to the conductor again (mister:roboto)" in out, \
             f"(e) the conducted hand-off missing:\n{out}"
         assert "road children; 4 continuations; via mister:roboto)" in out, f"(e) the mode line lacks the conductor:\n{out}"
         seed_register(store, recall="operator-via:\n")
         out = run_hook("session-open", {"source": "startup", "session_id": "pool-session"}, root)
-        assert "CONDUCTED" not in out, f"(e) an empty operator-via still named a conductor:\n{out}"
+        assert 'Agent(subagent_type="general-purpose"' in out and "conductor" not in out, \
+            f"(e) an empty operator-via still named a conductor:\n{out}"
     finally:
         shutil.rmtree(root, ignore_errors=True)
     print("pool mode: green")
@@ -710,8 +899,9 @@ def test_turn_close():
         assert "inject: local-storage.md" in index, "(a) the recall section was lost in the rewrite"
         # (b) the next prompt prints the report and takes it; a second Stop with nothing to move is silent
         out = run_hook("prompt-open", {"session_id": "test-session", "prompt": "next"}, root)
-        assert "- turn-close (" in out and "poured 13" in out, f"(b) report not printed at the next prompt:\n{out}"
-        assert not os.path.getsize(os.path.join(store, ".turn-close")), "(b) the report was not taken"
+        assert out.strip() == "", f"(b) the report printed into the session:\n{out}"
+        with open(os.path.join(store, ".turn-close"), encoding="utf-8") as f:
+            assert "poured 13" in f.read(), "(b) the report not kept for the operator"
         out = run_hook("turn-close", {"session_id": "test-session", "cwd": root}, root)
         assert out.strip() == "", f"(b) a Stop with nothing to move printed:\n{out}"
         # (c) another session's Stop runs on its own store and touches nothing in this one: this session's entry
@@ -734,52 +924,60 @@ def test_turn_close():
 
 
 def test_barrier():
+    """The prompt hook's barrier and what it prints: nothing for a message no earlier row resembles (FRESH written in
+    the row), two lines for a flagged one (the verdict, the matched row; state left open and the row listed for the
+    operator's judged close), nothing for a known short command, a notification or an agent's message."""
     root, store = seed_project()
     dispatch = os.path.join(store, "dispatch.md")
     try:
-        # (a) a first message resembles no row: FRESH written by the hook, addressed left to the operator
+        # (a) a first message resembles no row: FRESH written by the hook, and not one line printed
         out = run_hook("prompt-open", {"session_id": "barrier-session", "prompt": "run the acceptance tests again"}, root)
-        assert "no earlier row resembles it" in out and "state: FRESH written" in out, f"(a) barrier line:\n{out}"
+        assert out.strip() == "", f"(a) a new message printed:\n{out}"
         with open(dispatch, encoding="utf-8") as f:
             assert f.read().count("  state: FRESH\n") == 1, "(a) FRESH not written into the row"   # the header's shape line reads 'FRESH | ECHO …'
-        # (b) a near-repeat: the candidate is named, state left open for the operator
+        # (b) a near-repeat: two lines — the verdict and the matched row — and state left open for the operator
         out = run_hook("prompt-open", {"session_id": "barrier-session", "prompt": "run the acceptance tests again please"}, root)
-        assert "resembles 1 earlier row" in out and "state: left open" in out, f"(b) candidate not named:\n{out}"
+        lines = out.strip().split("\n")
+        assert len(lines) == 2 and "resembles an earlier one" in lines[0] \
+            and lines[1] == 'matched: "run the acceptance tests again"', f"(b) flagged lines:\n{out}"
         with open(dispatch, encoding="utf-8") as f:
             assert f.read().count("  state: FRESH\n") == 1, "(b) FRESH written despite a candidate"
-        # (c) a short, unknown message: FRESH, called short and unknown; the identical short message next is a
-        # candidate (seen once — not yet a known command); by its third arrival it is a known command: no
-        # candidate, FRESH written, the derivation printed from the last row that carried it
+        with open(os.path.join(store, ".flagged"), encoding="utf-8") as f:
+            assert len(f.read().split("\n")) == 2, "(b) the flagged row not listed for the judged close"
+        # (c) a short, unknown message: silent and FRESH; the identical short message next is a candidate (seen once
+        # — not yet a known command); by its third arrival it is a known command: silent, FRESH, no candidate
         out = run_hook("prompt-open", {"session_id": "barrier-session", "prompt": "ship"}, root)
-        assert "short message (1 word), not a known command" in out and "no earlier row resembles it" in out, f"(c) short line:\n{out}"
+        assert out.strip() == "", f"(c) a short new message printed:\n{out}"
         out = run_hook("prompt-open", {"session_id": "barrier-session", "prompt": "ship"}, root)
-        assert "resembles 1 earlier row" in out and 'latest: "ship"' in out, f"(c) identical short message not a candidate:\n{out}"
+        assert 'matched: "ship"' in out and len(out.strip().split("\n")) == 2, f"(c) identical short message not a candidate:\n{out}"
         with open(dispatch, "a", encoding="utf-8", newline="\n") as f:
             f.write("  state: FRESH\n  addressed: shipped the build to staging\n")
         out = run_hook("prompt-open", {"session_id": "barrier-session", "prompt": "ship"}, root)
-        assert 'short message, known: "ship" ×2' in out and "shipped the build to staging" in out, f"(c) known command not derived:\n{out}"
-        assert "state: FRESH written" in out and "state: left open" not in out, \
-            f"(c) a known command was treated as a candidate:\n{out}"
+        assert out.strip() == "", f"(c) a known command printed:\n{out}"
         with open(dispatch, encoding="utf-8") as f:
             assert f.read().count("  state: FRESH\n") == 4, "(c) FRESH not written for the known command"   # rows a, c1, the manual c2 completion, c3
-        # (d) a task notification is stamped complete on arrival — no barrier, no short line, nothing for the operator
+        # (d) a task notification is stamped complete on arrival — silent, nothing for the operator
         note = "<task-notification> <task-id>abc</task-id> <status>completed</status> <result>done</result> </task-notification>"
         out = run_hook("prompt-open", {"session_id": "barrier-session", "prompt": note}, root)
-        assert "a task notification: its row is complete on arrival" in out, f"(d) notification line missing:\n{out}"
-        assert "barrier:" not in out and "short message" not in out, f"(d) barrier or short line printed for a notification:\n{out}"
+        assert out.strip() == "", f"(d) a notification printed:\n{out}"
         with open(dispatch, encoding="utf-8") as f:
             text = f.read()
         assert "  arrival: task notification (stamped" in text and "  addressed: a task notification" in text, \
             "(d) the notification's row not stamped complete"
-        # (e) a message from the session's own agent — the operator's stream line — is stamped complete the same way
+        # (e) a message from the session's own agent is stamped complete the same way
         msg = "<agent-message from=\"a567fef5349c11851\"> pool stream: index.md — 4 picks; 2 of 9 in </agent-message>"
         out = run_hook("prompt-open", {"session_id": "barrier-session", "prompt": msg}, root)
-        assert "an agent message: its row is complete on arrival" in out, f"(e) agent-message line missing:\n{out}"
-        assert "barrier:" not in out and "short message" not in out, f"(e) barrier or short line printed for an agent message:\n{out}"
+        assert out.strip() == "", f"(e) an agent message printed:\n{out}"
         with open(dispatch, encoding="utf-8") as f:
             text = f.read()
         assert "  arrival: agent message (stamped" in text and "  addressed: an agent's message" in text, \
             "(e) the agent message's row not stamped complete"
+        # (f) the operator's agent id, once a launch recorded it, is the SendMessage target the flagged line names
+        run_hook("post-agent", {"tool_name": "Agent", "tool_input": {"prompt": "Read /x/hooks/operator-prompt.md and do"},
+                                "tool_response": {"content": [{"type": "text", "text": "agentId: a1b2c3d4e5f6 (internal)"}]}},
+                 root)
+        out = run_hook("prompt-open", {"session_id": "barrier-session", "prompt": "run the acceptance tests again now"}, root)
+        assert 'SendMessage(to: "a1b2c3d4e5f6"' in out.split("\n")[0], f"(f) the agent id not named:\n{out}"
     finally:
         shutil.rmtree(root, ignore_errors=True)
     print("barrier: green")
@@ -972,11 +1170,25 @@ def _prompt(root, text, transcript):
     return {"session_id": "detail-test", "cwd": root, "prompt": text, "transcript_path": transcript}
 
 
+def last_row(dispatch):
+    """The dispatch record's last row block, as text."""
+    with open(dispatch, encoding="utf-8") as f:
+        text = f.read().replace("\r\n", "\n")
+    return text[text.rindex("\n- fingerprint:") + 1:]
+
+
+def flagged_count(store):
+    path = os.path.join(store, ".flagged")
+    return len([l for l in open(path, encoding="utf-8").read().split("\n") if l.strip()]) if os.path.exists(path) else 0
+
+
 def test_detail_ask():
-    """The recorder: a question right after a served picker is stamped kind: detail-ask / on: <picker>; the
-    shell's submit and skip are not; a submit whose textbox carries a question is submit+detail-ask; a later
-    tool call or a later prompt means the picker was not the turn's close; a picker's submit resembling an
-    addressed row is FRESH by construction; an old dispatch header gains kind:/on: once."""
+    """The recorder: a question right after a served picker is stamped kind: detail-ask / on: <picker> and listed for
+    the operator's judged close; the shell's submit and skip are not; a submit whose textbox carries a question is
+    submit+detail-ask; a later tool call or a later prompt means the picker was not the turn's close; a picker's
+    submit resembling an addressed row is FRESH by construction (silent), resembling an open one is this context's
+    call (two lines); an old dispatch header gains kind:/on: once. The session sees nothing for a detail-ask: its
+    close, the briefs.md entry included, is the operator's."""
     root, store = seed_project()
     try:
         dispatch = os.path.join(store, "dispatch.md")
@@ -988,49 +1200,50 @@ def test_detail_ask():
         t = _transcript(root, [_user("fix the widget"), _asst({"type": "text", "text": "done"}, WIDGET_USE),
                                _asst({"type": "text", "text": "the picker carries the acts"})])
         out = run_hook("prompt-open", _prompt(root, "what are the diffs of each selection?", t), root)
-        assert "detail-ask on widget «release_acts_picker»" in out, out
-        assert "header: `kind:` and `on:` added" in out, out
+        assert out.strip() == "", f"(detail-ask) printed:\n{out}"
         rows = open(dispatch, encoding="utf-8").read()
         assert "  kind: detail-ask\n" in rows.replace("\r\n", "\n") and "  on: widget «release_acts_picker»" in rows, rows[-600:]
         assert "  kind: [detail-ask" in rows.split("---")[0], "(detail-ask) the header did not gain the fields"
-        out2 = run_hook("prompt-open", _prompt(root, "and the second question?", t), root)
-        assert "header:" not in out2, "(detail-ask) the header migration ran twice"
+        assert flagged_count(store) == 1, "(detail-ask) not listed for the operator's close"
+        run_hook("prompt-open", _prompt(root, "and the second question?", t), root)
+        assert open(dispatch, encoding="utf-8").read().split("---")[0].count("  kind: [detail-ask") == 1, \
+            "(detail-ask) the header migration ran twice"
         # the shell's submit line and its skip are not detail-asks
-        out = run_hook("prompt-open", _prompt(root, "Release acts details — Acts: Commit, Push", t), root)
-        assert "detail-ask" not in out, out
-        out = run_hook("prompt-open", _prompt(root, "(Skipped the form — proceed with defaults or ask me in plain text)", t), root)
-        assert "detail-ask" not in out, out
+        run_hook("prompt-open", _prompt(root, "Release acts details — Acts: Commit, Push", t), root)
+        assert "  kind:" not in last_row(dispatch), last_row(dispatch)
+        run_hook("prompt-open", _prompt(root, "(Skipped the form — proceed with defaults or ask me in plain text)", t), root)
+        assert "  kind:" not in last_row(dispatch), last_row(dispatch)
         # a question riding in a submitted textbox
-        out = run_hook("prompt-open", _prompt(root, "Release acts details — Acts: Commit · Notes: why is push separate?", t), root)
-        assert "detail-ask on widget «Release acts»" in out and "riding on the submit" in out, out
-        assert "  kind: submit+detail-ask" in open(dispatch, encoding="utf-8").read(), "(detail-ask) submit+detail-ask not stamped"
+        run_hook("prompt-open", _prompt(root, "Release acts details — Acts: Commit · Notes: why is push separate?", t), root)
+        assert "  kind: submit+detail-ask" in last_row(dispatch) and "  on: widget «Release acts»" in last_row(dispatch), \
+            "(detail-ask) submit+detail-ask not stamped"
         # a later tool call: the picker was not the turn's close
         t2 = _transcript(root, [_user("fix it"), _asst(WIDGET_USE), _asst(BASH_USE), _asst({"type": "text", "text": "ok"})])
-        out = run_hook("prompt-open", _prompt(root, "what about the diffs?", t2), root)
-        assert "detail-ask" not in out, out
+        run_hook("prompt-open", _prompt(root, "what about the diffs?", t2), root)
+        assert "  kind:" not in last_row(dispatch), last_row(dispatch)
         # a later prompt: the picker belongs to an earlier turn
         t3 = _transcript(root, [_user("fix it"), _asst(WIDGET_USE), _user("thanks"), _asst({"type": "text", "text": "welcome"})])
-        out = run_hook("prompt-open", _prompt(root, "what about the diffs?", t3), root)
-        assert "detail-ask" not in out, out
+        run_hook("prompt-open", _prompt(root, "what about the costs?", t3), root)
+        assert "  kind:" not in last_row(dispatch), last_row(dispatch)
         # the native panel as the turn's last act
         t4 = _transcript(root, [_user("fix it"), _asst(PANEL_USE)])
-        out = run_hook("prompt-open", _prompt(root, "what do the roads cost?", t4), root)
-        assert "detail-ask on panel «Road»" in out, out
+        run_hook("prompt-open", _prompt(root, "what do the roads cost?", t4), root)
+        assert "  on: panel «Road»" in last_row(dispatch), last_row(dispatch)
         # a picker's submit resembling an ADDRESSED row is FRESH by construction; resembling an OPEN one is this context's call
         with open(dispatch, "a", encoding="utf-8", newline="\n") as f:
             f.write('\n- fingerprint: "Acts details — Acts: All of the above"\n  time: 2026-09-22 05:08\n  arrival: turn\n'
                     "  state: FRESH\n  addressed: both acts done\n")
         out = run_hook("prompt-open", _prompt(root, "Acts details — Acts: All of the above", t), root)
-        assert "FRESH by construction" in out and "state: FRESH written" in out and "hand the message to the operator" not in out, out
+        assert out.strip() == "" and "  state: FRESH" in last_row(dispatch), out
         with open(dispatch, "a", encoding="utf-8", newline="\n") as f:
             f.write('\n- fingerprint: "Acts details — Acts: Other"\n  time: 2026-09-22 05:09\n  arrival: turn\n')
         out = run_hook("prompt-open", _prompt(root, "Acts details — Acts: Other", t), root)
-        assert "judged HERE" in out and "never by the operator" in out, out
+        assert "decide it here" in out and len(out.strip().split("\n")) == 2, out
         # a plain resembling message still goes to the operator
         with open(dispatch, "a", encoding="utf-8", newline="\n") as f:
             f.write('\n- fingerprint: "please rebuild the whole tree now"\n  time: 2026-09-22 05:10\n  arrival: turn\n  state: FRESH\n  addressed: rebuilt\n')
         out = run_hook("prompt-open", _prompt(root, "please rebuild the whole tree now", t), root)
-        assert "hand the message to the operator" in out, out
+        assert "the operator decides" in out and len(out.strip().split("\n")) == 2, out
     finally:
         shutil.rmtree(root, ignore_errors=True)
     print("detail-ask recorder: green")
@@ -1126,8 +1339,6 @@ def test_pre_ask():
         with open(os.path.join(store, "briefs.md"), "a", encoding="utf-8", newline="\n") as f:
             f.write('\n- asked: "show me each option\'s diff"\n  time: 2026-09-22 06:00\n  on: widget «release_acts»\n'
                     "  at: closing\n  omitted: diff\n  standing: 2026-09-22 06:05\n")
-        out = run_hook("prompt-open", {"session_id": "s", "cwd": root, "prompt": "hello there friend"}, root)
-        assert "standing brief lines: `diff:` (×2)" in out, out
         d = decision(run_hook("pre-ask", payload, root))
         assert d and d["permissionDecision"] == "deny", d
         assert "`diff:`" in d["permissionDecisionReason"] and "Commit lacks diff" in d["permissionDecisionReason"], d
@@ -1472,8 +1683,8 @@ def test_standing_rules():
                     f"- key: (closing + popup)\n  decision: rule\n  directive: {long_directive.strip()}\n\n"
                     "- key: (edits + check)\n  decision: rule\n  directive: check the user's edits first\n")
         out = run_hook_standing(0, root)
-        assert out.startswith("### standing rules — the owner's 2 form rulings and every-turn rules, whole "
-                              "(SessionStart hook;"), out[:300]
+        assert out.startswith("### standing rules — the owner's every-turn rules (2 of 2, newest first, under 3,000 "
+                              "characters; SessionStart hook)"), out[:300]
         assert long_ruling.strip() in out and long_directive.strip() in out, f"a rule was cut:\n{out}"
         assert "form: picker]" in out and "a plain ruling" not in out and "a freed form ruling" not in out \
             and "check the user's edits first" not in out, out
@@ -1485,6 +1696,22 @@ def test_standing_rules():
         assert "part 1 of 2" in parts[0] and long_ruling.strip() in parts[0], parts[0][:300]
         assert "part 2 of 2" in parts[1] and long_directive.strip() in parts[1], parts[1][:300]
         assert parts[2].strip() == "", parts[2]
+        # the fixed budget: a task-scoped ruling stays out (the operator's reply carries it), one the owner tags
+        # always-on comes in, and what does not fit is counted, never printed past the budget
+        with open(os.path.join(store, "local-storage.md"), "a", encoding="utf-8", newline="\n") as f:
+            f.write('\n- ruling: "an always-on rule the owner tagged"\n  time: 2026-09-17 09:00\n  owner-words: "a"\n'
+                    "  scope: always-on\n  status: LIVE\n")
+            for i in range(40):
+                f.write(f'\n- ruling: "an old long form ruling {i} ' + "padding " * 12 + f'"\n  time: 2026-08-01 10:{i:02d}\n'
+                        '  owner-words: "o"\n  scope: durable\n  status: LIVE\n  form: fence\n')
+            f.write('\n- ruling: "a task-scoped ruling"\n  time: 2026-09-18 09:00\n  owner-words: "t"\n'
+                    "  scope: this repository's build\n  status: LIVE\n")
+        out = run_hook_standing(0, root)
+        body = out.split("\n", 1)[1]
+        assert len(body) <= 3300 and "an always-on rule the owner tagged" in out and "a task-scoped ruling" not in out, \
+            f"the fixed budget or the always-on tag not honoured ({len(body)} characters):\n{out[:600]}"
+        assert re.search(r"\(\d+ older every-turn rules past the budget", out), f"the left-out rules not counted:\n{out[-400:]}"
+        assert out.index("an always-on rule the owner tagged") < out.index("an old long form ruling"), "not newest first"
         # the inject mode's slots carry the files whole already: no standing block
         seed_register(store, recall="pool: inject\n")
         assert run_hook_standing(0, root).strip() == "", "the standing block printed in the inject mode"
@@ -1555,7 +1782,10 @@ if __name__ == "__main__":
     test_clock_and_post_write()
     test_gc_trace()
     test_owner_voice()
-    test_conductor_owed()
+    test_launch_enforced()
+    test_turn_close_rows()
+    test_label_completeness()
+    test_host_closing()
     test_cross_session_reads()
     test_session_title()
     test_pool_mode()

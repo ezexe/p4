@@ -310,7 +310,7 @@ def test_dispatch_and_session_open():
             f.write('{"w": "not weights", "threshold": 0.3}')
         out = th.run_hook("prompt-open", {"session_id": "dddd0000-test",
                                           "prompt": "run the gamma build again and report the gamma timings for x?"}, root)
-        assert "state: left open" in out and "dispatch model" not in out, out
+        assert "the operator decides" in out and "dispatch model" not in out, out
         assert [r["component"] for r in pick_model.open_notices(store)] == ["dispatch model"]
         out = th.run_hook("session-open", {"session_id": "dddd0000-test", "source": "startup"}, root)
         line = next(l for l in out.split("\n") if "retrain notice" in l)

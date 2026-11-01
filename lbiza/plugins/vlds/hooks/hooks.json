@@ -45,11 +45,6 @@
           },
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" session-open --standing 1",
-            "timeout": 30
-          },
-          {
-            "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" session-open --slot 0",
             "timeout": 30
           },
@@ -161,6 +156,16 @@
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" post-write",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" post-agent",
             "timeout": 30
           }
         ]

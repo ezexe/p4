@@ -37,7 +37,15 @@ if [ "$part" -eq 0 ]; then
   sh "${CLAUDE_PLUGIN_ROOT}/hooks/p4-layout.sh"
 fi
 
-LC_ALL=C awk -v want="$part" -v budget=9500 -v head=200 '
+# One closing protocol per host: in the Claude desktop app's Code tab the app's own wrap-up box and question panel
+# close the turn, so the contract's acts row (the acts page, the closing popup, "popup last") is replaced by a row
+# that gives way to them; anywhere else the row prints as written.
+host=cli
+case "${CLAUDE_CODE_ENTRYPOINT:-}" in claude-desktop) host=desktop ;; esac
+[ -n "${CLAUDE_CODE_DESKTOP_APP_VERSION:-}" ] && host=desktop
+acts_row='| **the reply ends with acts not done** — held on the per-act word (commit, push, cache reconcile, the disposal of what the user authored), `blocked-by-<mechanism>`, or optional follow-ups | this host is the Claude desktop Code tab: the app closes the turn — its wrap-up box carries the recap and the one question, its buttons the acts; the acts page, the closing popup and the "popup last" order are not this host'"'"'s. Run the bookkeeping first, then the wrap-up, then the final message; it opens with the **Deviations** line (emission-discipline rule 23). No VLDS operation is an option: it ran (The word) |'
+
+LC_ALL=C awk -v want="$part" -v budget=9500 -v head=200 -v host="$host" -v actsrow="$acts_row" '
   function out(s) {
     if (!started) {
       started = 1
@@ -48,7 +56,7 @@ LC_ALL=C awk -v want="$part" -v budget=9500 -v head=200 '
     }
     print s
   }
-  { L[NR] = $0 }
+  { L[NR] = (host == "desktop" && index($0, "| **the reply ends with acts not done**") == 1) ? actsrow : $0 }
   END {
     n = NR; p = 0; size = 0; room = budget - head; i = 1
     while (i <= n) {

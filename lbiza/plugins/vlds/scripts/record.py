@@ -5,7 +5,8 @@ Run, from anywhere:
   python record.py --store <store> --session <id> --now "YYYY-MM-DD HH:MM" --record <path> [--dry]
   python record.py --store <store> --session <id> --now "YYYY-MM-DD HH:MM" - < record.md        (stdin)
 
-The judgment of a close — what was addressed, which ruling the user made and in what words, which claim was
+Dispatch rows need no record any more: the Stop hook closes every row the prompt hook wrote FRESH, and the operator
+closes a flagged one; a record still completes a row when it names one. The judgment of a close — what was addressed, which ruling the user made and in what words, which claim was
 verified, which task moved — is the session's, composed once as the record; the labor of a close — appending each
 entry in its file's shape, completing the dispatch rows, running the check — needs no judgment, so it runs here
 in milliseconds and no model reads or writes the store for it. The derivation this prints is what the session

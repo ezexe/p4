@@ -339,7 +339,8 @@ def test_light_through_the_hook():
         assert "disposition: expired (turn close" in read(os.path.join(store, "idb", "runs", virt)), "no expiry reason"
         assert not os.path.isdir(os.path.join(store, "arc")), "the keyspace wrote into arc/"
         out = th.run_hook("prompt-open", {"session_id": "light-session", "prompt": "next"}, root)
-        assert "- turn-close (" in out and "poured 16" in out, f"(b) the report at the next prompt:\n{out}"
+        assert out.strip() == "" and "poured 16" in read(os.path.join(store, ".turn-close")), \
+            f"(b) the report printed into the session, or not kept for the operator:\n{out}"
         out = th.run_hook("turn-close", {"session_id": "light-session", "cwd": root}, root)
         assert out.strip() == "", f"(b) a pass with nothing to move printed:\n{out}"
         # (c) a fresh lock held by another session skips the pass and says so
@@ -365,14 +366,16 @@ def test_dispatch_blob():
         out = th.run_hook("prompt-open", {"session_id": "second-session", "prompt": "hello there", "_keep_sid": True},
                           root)
         second = th.store_of(root, "second-session")
-        assert "session store: .claude/p4/sessions/second-s/vlds/" in out, out
+        assert out.strip() == "" and second.endswith(os.path.join("sessions", "second-s", "vlds")), (out, second)
         assert '- fingerprint: "hello there"' in read(os.path.join(second, "dispatch.md")), "no row in the second store"
         assert read(os.path.join(store, "dispatch.md")) == before, "the first session's record changed"
         for d in (store, second):
             assert not os.path.isdir(os.path.join(d, "idb", "blobs", "dispatch")), f"a dated pour in {d}"
         # the owner voice and a known command read across both sessions' records
         out = th.run_hook("prompt-open", {"session_id": "second-session", "prompt": "commit", "_keep_sid": True}, root)
-        assert "known" in out and "commit" in out, f"a known command not derived across sessions:{out}"
+        rows = read(os.path.join(second, "dispatch.md"))
+        assert out.strip() == "" and rows.rstrip().endswith("state: FRESH"), \
+            f"a known command across sessions was not FRESH and silent:{out}\n{rows[-300:]}"
     finally:
         shutil.rmtree(root, ignore_errors=True)
     print("dispatch per session: green")
@@ -567,7 +570,9 @@ def test_migration():
         out = th.run_hook("session-open", {"source": "startup", "session_id": "mig-session"}, root)
         assert "### keyspace — digest" in out and "engine: idb (index-engine: idb-migrate-gentle)" in out, out
         assert "migrated: " in out and "### idb.py check" in out and "idb.py check: 0 corruption" in out, out
-        assert "idb.py --store <store> pour" in out and "held when the last sweep" not in out, out
+        assert "held when the last sweep" not in out and "normalize.py" not in out, out
+        with open(os.path.join(th.PLUGIN, "hooks", "operator-prompt.md"), encoding="utf-8") as f:
+            assert "scripts/idb.py --store <store> pour" in f.read(), "the operator brief lost the keyspace's placement"
     finally:
         shutil.rmtree(root, ignore_errors=True)
     print("migration: green")
@@ -1038,7 +1043,7 @@ def test_edges():
                            input=json.dumps({"session_id": th.CURRENT_SID[0], "prompt": "hi"}).encode("utf-8"),
                            capture_output=True, env=env, timeout=60)
         out = r.stdout.decode("utf-8", "replace")
-        assert 'stamped: dispatch.md row "hi"' in out, out
+        assert out.strip() == "" and '- fingerprint: "hi"' in read(os.path.join(store, "dispatch.md")), out
         assert not os.path.exists(os.path.join(store, "arc")), "(c) the φ road ran on a keyspace store"
         r = subprocess.run([sys.executable, os.path.join(broken, "hooks", "vlds_hooks.py"), "turn-close"],
                            input=json.dumps({"session_id": th.CURRENT_SID[0], "cwd": root}).encode("utf-8"),

@@ -892,6 +892,7 @@ def barrier_state(fname, field, value, fields, session, masks):
 
 
 STAMP_RE = re.compile(r"\b(20\d\d-\d\d-\d\d(?: \d\d:\d\d)?)\b")
+ALWAYS_ON_RE = re.compile(r"\balways[ -]on\b", re.I)   # a ruling the owner tagged always-on, in its scope: line
 EVERY_TURN_RE = re.compile(r"\b(every|each) (closing|turn|reply)\b|\bat every\b", re.I)
 KIND_BY_FILE = {"data-store.md": "claim", "virtual.md": "inference", "session-storage.md": "task",
                 "briefs.md": "ask", "tombstones.md": "freed", "logger.md": "log"}
@@ -904,7 +905,9 @@ def entry_kind(fname, field, fields):
     """One word per entry, by rule: form (a ruling carrying form:), every-turn (an index rule whose text names
     every closing or turn), ruling, rule, claim, correction, event, inference, task, ask, freed, log."""
     if fname == "local-storage.md":
-        return "form" if fields.get("form", "").strip() else "ruling"
+        if fields.get("form", "").strip():
+            return "form"
+        return "every-turn" if ALWAYS_ON_RE.search(fields.get("scope", "")) else "ruling"
     if fname == "index.md":
         return "every-turn" if EVERY_TURN_RE.search(" ".join(fields.values())) else "rule"
     if fname == "ledger.md":
@@ -1282,6 +1285,7 @@ def cmd_lint(plugin_root):
 
 
 STANDING_BUDGET = 9300      # one hook output's room for the standing rules, under the harness's 10,000 cap
+STANDING_FIXED = 3000       # the always-on block's fixed budget (--fixed): every-turn rules only, newest first
 
 
 def cmd_standing(args, store):
@@ -1294,6 +1298,10 @@ def cmd_standing(args, store):
     first = [r for r in rows if r["state"] == "LIVE" and r["kind"] in ("form", "every-turn")
              and r["file"] != "tombstones.md"]
     budget = max(400, args.budget)
+    if args.fixed:
+        # the always-on block: one part under the budget, the latest ruling first (the latest ruling wins), and what
+        # does not fit counted — the operator's task-scoped reply carries the ones that bear on the task
+        first = sorted(first, key=lambda r: r["fields"].get("time", ""), reverse=True)
     lines = []
     for r in first:
         line = pool_line(r, f", form: {r['fields']['form'].strip()}" if r["kind"] == "form" else "", 10 ** 6)
@@ -1309,6 +1317,17 @@ def cmd_standing(args, store):
         size += len(line) + 1
     if cur:
         parts.append(cur)
+    if args.fixed and parts:
+        if args.part:
+            return 0
+        left = sum(len(p) for p in parts[1:])
+        print(f"### standing rules — the owner's every-turn rules ({len(parts[0])} of {len(lines)}, newest first, "
+              f"under {budget:,} characters; SessionStart hook)")
+        print("\n".join(parts[0]))
+        if left:
+            print(f"({left} older every-turn rule{'s' if left > 1 else ''} past the budget, and every task-scoped "
+                  "ruling: the operator's reply names the ones that bear on the task)")
+        return 0
     if args.part >= len(parts):
         return 0
     where = f", part {args.part + 1} of {len(parts)}" if len(parts) > 1 else ""
@@ -1540,6 +1559,7 @@ def main():
     p.add_argument("--session", default="", help="this session's short id, for the barrier's expiry of virtual entries")
     p.add_argument("--part", type=int, default=0, help="which part to print when the rules outgrow one hook output")
     p.add_argument("--budget", type=int, default=STANDING_BUDGET, help="one part's size in characters")
+    p.add_argument("--fixed", action="store_true", help="one part under --budget, newest first, the rest counted")
     p = sub.add_parser("trace")
     p.add_argument("--session", default="", help="this session's short id, for the barrier's expiry of virtual entries")
     p.add_argument("--json", action="store_true")
