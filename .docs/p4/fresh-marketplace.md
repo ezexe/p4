@@ -10,6 +10,8 @@ The owner's words that shape it, in order of weight:
 - 16:45: "everything in lbiza/* deleted the design goes into fresh lbiza/* and its based on the successful tests that found improvements and the most optimal design of the phi model acting as the ai model trained on the repository its installed on".
 - 16:47, on labels: "not just fable label over stores / store labels edited to optimal fable dictionary the store is to label and learn its users vocabulary".
 - 16:49, on the dictionary: "only map it if it caused confusion not if you were able to work it out already without user followup".
+- 17:25, on recency: "run update on the phi model design to remember to keep up with the desipline to train on data thats more updated the the data you were trained on".
+- 17:26, on the teacher: "and its trained on decisions the lates most capable model of the moment would make based on if it would have been trained at that point".
 - 15:29, on where code goes: "its for when a frag turns into code the repo works/relies/depends/works better with".
 - Earlier: "the entire point of the session open hook ceremony is also integral fo the phi models to work properly" — the ceremony's labels must keep coming, from somewhere as good or better.
 
@@ -39,6 +41,27 @@ The training data already exists in every store, and the hooks keep producing it
 What the model returns for a short turn is a recall, not a prompt: one or two lines drawn from that owner's own history, in ordinary words, for example `- you have said "keep going" 6 times; last time (2026-10-29) it was taken as: continue the running CEF build as configured, nothing to change`. The vocabulary dictionary (section 5.3, misreadings only) covers the markers that caused confusion.
 
 The measure of success is section 8.3's held-out test: the newest sessions' short turns, scored on whether the built-in plus recall reads them as `addressed:` says they were read, against the built-in alone. The success line is fewer injected words and more short turns read right. Nothing in the design is justified by anything else.
+
+## 1a. Newer than the model
+
+The repo-trained model earns its place by knowing what the answering Claude model cannot: what changed after that model's training data ends. Newer versions, APIs, model ids, tool behavior, the repo's current state, and the owner's rulings since. The discipline (the owner's 17:25 direction) is to prefer and train on data newer than the answering model's training data, and to treat the model's own prior as stale whenever the repo holds something newer and verified.
+
+Why it matters, from this project: the claude-api skill carries a drift table of API shapes that changed in 2025–2026 and that a model's prior gets wrong; the old verification-discipline plugin's whole point was that a stale prior must be re-checked before it drives an action; and today's live measurement settled a fact the docs left open, that the built-in loads `MEMORY.md` up to 25,000 bytes, cut at whole lines. None of that is in any model's training data, and all of it is the kind of line recall should print.
+
+What it changes, each detailed where it lands:
+- the store: a fact carries when it became true or was last checked, and can be marked as contradicting a likely training-era prior (3.5);
+- the ranker: a per-model feature for "newer than the answering model's cutoff", from a small cutoff table, shipped only if `eval` earns it (4.3);
+- training: the newer verified version of a fact is the positive; a label resting on an entry a newer entry contradicts is dropped; Fable's label edits are told the rule (5.2);
+- a test: tasks whose right answer depends on a repo fact newer than the model's training, scored recall-plus-built-in against built-in alone (8.4).
+
+**The teacher, under the same discipline** (the owner's 17:26 direction): the labels are the decisions the most capable model of the moment would make if it had been trained up to the task's date.
+
+- The teacher is not a fixed model. One line in `models/config.json`, `teacher-model:`, names it; today `claude-fable-5-1`. When a more capable model ships, the owner changes the line, and the cutoff table in `ranker.py` (4.3) carries the new model's cutoff beside the others.
+- The teacher decides as if trained up to that point. Its own training stops at its cutoff, so every label-edit and dictionary prompt (5.2, 5.3) carries the repo's entries newer than that cutoff that bear on the task: the facts marked in 3.5, the rulings and corrections dated after it. The prompt states the task's date, so the teacher judges what was true then, not only what is true now.
+- Labels carry their teacher. `labels.tsv` and `label-edits.md` record the teacher model id and the edit's date on every row (5.2). When the teacher changes, the newest tasks are re-edited first, within the budget; the older teacher's edits stay until replaced; `eval` compares the re-edited batch against the old one on held-out data before it replaces it, as raw against edited today (5.6).
+- The answering model's prior is never the reference, and neither is the teacher's. Where the teacher and a stored label disagree about a fact newer than the teacher's cutoff, the stored, verified entry wins (`facts.md` with `verified:` and `checked:`); the teacher's job there is judging relevance, not recalling facts. The prompt says so.
+
+Section 0 still governs: the lines are additive, silent when nothing newer applies, and removed if they cost a category.
 
 ## 2. What the evidence settles
 
@@ -148,13 +171,14 @@ Every hook reads the harness payload on stdin, resolves `.claude/p4/` from `CLAU
     rules.md                 the owner's rulings (ruling, owner-words, scope, form, status, time, pinned, plain)
     corrections.md           a reading that steered work and was wrong (key, time, match, meant, delta) and a detail the owner had to ask for (asked, time, omitted)
     retractions.md           what the owner freed (freed, time, cause, owner-words, swept, lesson)
-    facts.md                 claims verified against a source (claim, source, verified, time)
+    facts.md                 claims verified against a source (claim, source, verified, since, checked, time, supersedes, prior)
     vocabulary.md            the owner's terms that caused confusion, each with its proof (5.3); user-editable
     messages/<s8>.md         one file per session: every owner message (fingerprint, time, arrival, state, addressed, match, freed-by, resembles)
   models/
     index.json               derived: every entry tokenized, with its id and its dictionary expansions
+    config.json              teacher-model: (claude-fable-5-1 today), and nothing else the owner has not set
     ranker.json              weights, threshold, round, the floor it passed
-    labels.tsv               the training set: task id, entry id, label, source, weight, time (the store's labels as edited)
+    labels.tsv               the training set: task id, entry id, label, source, weight, time, teacher (model id), edited (date)
     labels-raw.tsv           the store's labels before editing, kept for the comparison in 5.2
     label-edits.md           every keep / drop / add Fable made, with its reason, by task
     tasks.tsv                the tasks (id, session, time, text, kind: first | new | short)
@@ -164,6 +188,8 @@ Every hook reads the harness payload on stdin, resolves `.claude/p4/` from `CLAU
 ```
 
 Field names inside entries are the old store's (`ruling:`, `match:`, `meant:`, `freed:`, `state:`, `addressed:`), for training continuity (finding 4). File names are plain words, and the hook translates at the boundary: `rules.md` prints as `rule`, `corrections.md` as `correction` or `missed detail`, `retractions.md` as `retracted`, `facts.md` as `fact`, `memory/` as `memory`, `messages/` as `earlier message`, `vocabulary.md` as `your word`.
+
+A fact's recency fields (1a): `since:` is the date the fact became true where known (a release date, a commit, a ruling's time), `checked:` the date it was last verified against its `source:`, `supersedes:` the id of the older fact it replaces, and `prior:` marks a fact that contradicts what a training-era model would likely assume, with the kind: `prior: version | api-shape | model-id | limit | behavior`. Examples from this project: `claim: the built-in loads MEMORY.md up to 25,000 bytes, cut at whole lines; source: live measurement 2026-11-01; since: unknown; checked: 2026-11-01; prior: limit` and `claim: the current model ids are claude-fable-5-1, claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5; prior: model-id`. The close hook fills `checked:` when a fact is verified again; a fact without `checked:` within 90 days prints with `(last checked <date>)` so the reader knows its age. The extraction batch sets `prior:` where the claim names a version, an API field, a model id or a numeric limit; the owner edits it like any field.
 
 An entry's id is `<file>:<time>:<sha8 of its first field's text>`, stable when lines move. The status rule, from the held branch's finding-17 fix: an entry is FREED only by a retraction whose `freed:` head matches it, or by shared owner-words with a retraction dated after the entry; `SPENT` is a field, never inferred.
 
@@ -184,7 +210,8 @@ The logistic ranker of `pick_model.py`: stdlib, hashed features in a 2^18 space,
 Added, each **untested** until `eval` shows the set at or above the kept features:
 - `dict-hit`: the query matched a vocabulary entry and this candidate is one the entry points at, or shares the entry's `means:` terms;
 - `used=<n>`: how many earlier turns used this entry (log-scaled), from the usage labels;
-- `corrects`: a correction whose `match:` overlaps another candidate, so it outranks what it corrected.
+- `corrects`: a correction whose `match:` overlaps another candidate, so it outranks what it corrected;
+- `newer-than-model` (1a): set when the entry's `since:` (or its `time:` when it has none) is later than the answering model's training cutoff, read from a small table in `ranker.py` keyed by model id (`claude-fable-5-1`, `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`, with the cutoff month each; unknown model → the table's oldest cutoff), the model id taken from the hook payload where the harness gives it and from `CLAUDE_MODEL` otherwise; `prior=<kind>` set from the fact's `prior:` field. Both are features the ranker learns a weight for, never a hand-set boost, so the eval decides; a subagent's recall uses the `model` field of the Agent call when it names one.
 
 The threshold is chosen on held-out tasks for the highest F1 with precision ≥ 0.6: a wrong line costs accuracy (finding 21), so the threshold leans toward silence.
 
@@ -246,8 +273,11 @@ Per repo: its own `store/`, `vocabulary.md`, `labels.tsv`, `ranker.json` and `ev
 The store is the source and stays the source; Fable does not compete with it. For each task in `tasks.tsv`:
 
 1. **The store labels first, mechanically.** A task with an old pool takes the pool's picks. A task without one (most sessions never ran the ceremony) takes the history label: the entries whose rare terms the turn's `addressed:` text, its corrections and its edited paths share, by the same rule as the usage labels. Written to `labels-raw.tsv`, source `store`.
-2. **Fable edits.** `teacher edit-labels` sends Fable 5.1 the task, the store's picks, and the candidates (union of BM25 top 60 and ranker top 60, each distilled to 140 characters), and asks for each stored pick `keep` or `drop` with a reason, and for `add` any candidate that bears on the task with a reason. The reply is written to `label-edits.md` (by task, every decision and reason) and the edited set to `labels.tsv`, source `store+edited`. A dropped pick stays in `labels-raw.tsv`.
+2. **The teacher edits.** `teacher edit-labels` sends the model `teacher-model:` names (Fable 5.1 today; "Fable" below means that model) the task and its date, the repo's entries newer than the teacher's cutoff that bear on it (1a), the store's picks, and the candidates (union of BM25 top 60 and ranker top 60, each distilled to 140 characters), and asks for each stored pick `keep` or `drop` with a reason, and for `add` any candidate that bears on the task with a reason. The reply is written to `label-edits.md` (by task, every decision and reason, the teacher's model id and the date) and the edited set to `labels.tsv`, source `store+edited`, with the same `teacher` and `edited` columns. A dropped pick stays in `labels-raw.tsv`.
+   **On a teacher change** (`teacher-model:` edited): `teacher edit-labels --re-edit` takes the newest tasks first, as many as `--max-usd` allows; a task keeps the older teacher's edit until a newer one replaces it, and `eval` scores the re-edited batch against the old edits on held-out raw labels before it is trained on (5.6).
 3. **The edit must earn its place.** `eval` trains on raw and on edited labels and scores both on held-out store labels, the Colab method: edited must be at or above raw (Colab: 0.199 vs 0.186 for Fable's labels on AudioPlugin-p4). A batch below that is held, not trained on, and listed in `eval.tsv`.
+
+**The recency rule in training** (1a), applied by `labels` before every round and stated in Fable's edit-labels prompt: when two facts cover the same claim (one `supersedes:` the other, or the same `source:` with different `checked:` dates), the newer verified one is the positive for any task dated after it, and the older is a negative; a label that rests on an entry a newer entry contradicts is dropped and listed in `label-edits.md` with `dropped: superseded by <id>`. A stored label never beats a newer verified fact. Fable is told, in the prompt, that the task's date is the reference and that an entry newer than the answering model's cutoff is to be kept when it bears on the task even if the model's own knowledge would answer differently.
 
 The reasons in `label-edits.md` are what the owner reads to see what Fable thinks the store got wrong; they are also where the dictionary's seeds come from when the reason names a word the owner uses.
 
@@ -317,7 +347,9 @@ Prices per million tokens: Fable 5.1 $10 in / $50 out; Opus 5.5 $4 / $20; Sonnet
 | extraction: rules, corrections, retractions, ECHO/SUPERSEDED verdicts and `plain:` rewrites of jargon entries from the message rows of sessions the ceremony never ran in (≈ 3,500 rows), 30 rows per call | Sonnet 5.5 | ≈ $0.03 | ≈ 120 calls | **≈ $4** |
 | the short-turn test (8.3) | Opus 5.5 answers, Haiku 5.5 judge | ≈ $0.006 per answer | 150 turns × 2 pathways × 2 seeds | **≈ $4** |
 | the validation run (8.2) | Opus 5.5 answers, Haiku 5.5 judge (Sonnet 5.5 if Haiku fails the grader check) | ≈ $3 per pathway-seed | 3 pathways × 2 seeds, built-in cached | **≈ $20** |
+| the newer-than-the-model test (8.4) | Opus 5.5 answers, Haiku 5.5 judge | ≈ $0.006 per answer | 12 tasks × 2 pathways × 2 seeds = 48 | **≈ $0.30** |
 | total | | | | **≈ $42**; reserve $28 inside the $70 cap; $60 of the $130 untouched |
+| per teacher change (1a), not in the total: re-edit the newest tasks, same prompt as the edit step | the new teacher | ≈ $0.08 per task at Fable's prices; a new model's price sets it | as many as the owner approves; 50 tasks ≈ $4, all 156 ≈ $12 | **$0 until the owner approves it** |
 
 Every paid script has `--fake` for tests and `--max-usd`, counting the input with the API's token counter before spending, as `overrides_suite.py` does. Hooks never call the API; the owner runs each batch (open question 2).
 
@@ -406,6 +438,12 @@ From each repo's `messages/`, the newest sessions' short rows (≤ 5 words, comp
 
 Pass: recall reads more short turns right than the built-in alone on both seeds, and never fewer, with at most 2 lines injected on average. The free half (5.4) runs on every training round so the number is watched between paid runs.
 
+### 8.4 Newer than the model, measured
+
+About 12 tasks whose right answer depends on a repo fact newer than the answering model's training, taken from what this project already holds: the current model ids and their prices (the suite's `PRICES` table), the 25,000-byte whole-line `MEMORY.md` cut, the hooks' 10,000-character output cap and its file-and-preview behavior, the `SubagentStart` input fields, the `.phid`/`.pt` retirement (vlds 0.0.77), the CMake 4.4 floor and the `_mac` branch rulings from ap-p4_mac. Each task is a question a 2025-trained prior answers wrong, with the right answer and a `bad` answer for `--check-graders`, in the suite's task format with category `newer`. The facts are entered in each fixture's `facts.md` with `since:`, `checked:` and `prior:`.
+
+Pathways: the built-in alone, and the built-in plus the recall lines for the task; Opus 5.5 answers, Haiku 5.5 judges; two seeds; **≈ $0.30**. Pass: recall-plus-built-in answers more of them right on both seeds and never fewer; the `newer-than-model` and `prior=` features ship only if `eval` on the labelled tasks (the 12 here plus every `prior:` fact's own task) is at or above the kept feature set, as 4.3 says. The free half runs in 8.1: a unit test that a fact with `supersedes:` outranks the fact it replaces for a task dated after it, and that `labels` drops a label resting on the superseded one.
+
 ## 9. Build order
 
 Each step is testable alone and leaves the tree runnable.
@@ -420,8 +458,9 @@ Each step is testable alone and leaves the tree runnable.
 8. The history labels for tasks without a pool (`labels-raw.tsv`), usage labels, `signals`, SubagentStop, the async train hook, `dictionary check`.
 9. `teacher.py` with `--fake`; then the paid batches: edit-labels and the second opinion (≈ $13), dictionary meanings (≈ $1); the agreement and the raw-vs-edited numbers in `eval.tsv`.
 10. The extraction batch (≈ $4); `plain:` fields; `check`'s jargon rate under 10%.
-11. The suite change; the validation run (≈ $20) and the short-turn test (≈ $4); the pinned-block and emission decisions from the numbers; anything failing a category removed.
+11. The suite change; the validation run (≈ $20), the short-turn test (≈ $4) and the newer-than-the-model test (≈ $0.30); the pinned-block and emission decisions from the numbers; anything failing a category removed.
 12. `migrate --apply` on the four repos and the live AudioPlugin store; one commit each by the owner.
+13. Only when the owner changes `teacher-model:` and approves the spend: `teacher edit-labels --re-edit --max-usd <approved>`, newest tasks first; `eval` must show the re-edited batch at or above the old edits before `train` uses it.
 
 ## 10. Open questions for the owner
 
