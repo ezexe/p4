@@ -17,6 +17,15 @@ R-precision, recall@20 and the precision of the threshold's picks, so the 0.379 
 
 Weights per source (5.5): store+edited 1.0, pool 0.7, short 1.0, usage 0.3 (until 8.1's agreement test raises
 it), miss 1.0, store 0.5 (the raw history labels, which agree with teachers at 0.50-0.53), repo as the row says.
+
+The silence tasks. Every labelled task has an answer in the store, so a ranker fit on them alone never learns what
+no match looks like: its features are relative (BM25 over the top candidate's, the rank), so the top candidate of
+an ordinary message scores like the top candidate of a real one, and the trained road printed lines for 88% of the
+suite's general prompts (the no-ranker road: 0%). A silence task is an ordinary message with no positive: its
+candidates are what `p4.py query` would hand the ranker (the top CANDIDATES of BM25 over the whole index), every one
+a negative. They come from models/silent.jsonl when the store has one, else from the plugin's silent-prompts.jsonl
+(the suite's general prompts of its train split; its test split stays held out). They are always in the training
+half, never a held-out fold, and the threshold is still chosen on the labelled tasks alone.
 """
 
 import datetime
@@ -35,7 +44,9 @@ import ranker  # noqa: E402
 import store as st  # noqa: E402
 
 SOURCE_WEIGHT = {"store+edited": 1.0, "pool": 0.7, "short": 1.0, "usage": 0.3, "miss": 1.0, "store": 0.5,
-                 "repo": 1.0}
+                 "repo": 1.0, "silent": 1.0}
+SILENT = "silent.jsonl"                                   # models/silent.jsonl: {"prompt": ...} per line
+SILENT_DEFAULT = os.path.join(HERE, "silent-prompts.jsonl")
 CANDIDATES = 200
 POOL_CANDIDATES = 0           # 0: every eligible entry, as the old pools' barrier rows
 TRAIN_NEG = 60                # negatives kept per task when fitting (the top of BM25), so a round stays in seconds
@@ -104,6 +115,59 @@ def task_examples(idx, task, positives, limit=CANDIDATES, files=None, docs_by=No
     return xs, ys, cand, sc
 
 
+def silent_prompts(p4):
+    """The ordinary messages a round trains silence on: models/silent.jsonl, else the plugin's default list."""
+    path = os.path.join(p4, "models", SILENT)
+    if not os.path.exists(path):
+        path = SILENT_DEFAULT
+    out = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                p = (r.get("prompt") if isinstance(r, dict) else r) or ""
+                if isinstance(p, str) and p.strip():
+                    out.append(p.strip())
+    except OSError:
+        return []
+    return out
+
+
+def silent_sets(idx, prompts, now):
+    """One all-negative set per ordinary message, its candidates and features exactly as p4.query builds them for
+    the ranker road (BM25 over the whole index, the superseded out, the top CANDIDATES)."""
+    import p4 as cli
+    docs = idx["docs"]
+    gone = cli.superseded_ids(idx, now)
+    out = []
+    for text in prompts:
+        terms = list(dict.fromkeys(ranker.tokens(text)))
+        if not terms:
+            continue
+        scores = cli.bm25_scores(idx, terms, {})
+        cand = [i for i in sorted(scores, key=lambda i: (-scores[i], i)) if docs[i]["id"] not in gone][:CANDIDATES]
+        if not cand:
+            continue
+        idf = cli.idf_map(idx, terms)
+        cds = [{"file": docs[i]["file"], "kind": docs[i]["kind"], "state": docs[i]["state"], "time": docs[i]["time"],
+                "toks": docs[i]["toks"].split(), "head": docs[i]["head"].split(), "dl": docs[i]["dl"],
+                "fkind": docs[i].get("fkind")} for i in cand]
+        sc = [scores[i] for i in cand]
+        xs, _, _ = ranker.candidate_features(terms, cds, idf, idx["avgdl"], now, scores=sc)
+        w = SOURCE_WEIGHT["silent"]
+        out.append({"task": "silent:" + st.sha8(text), "xs": xs, "ys": [0] * len(cand), "w": [w] * len(cand),
+                    "files": [docs[i]["path"] for i in cand], "bm25": sc, "n_pos": 0, "source": "silent",
+                    "missed": False, "kind": "silent", "time": now, "sources": ["silent"],
+                    "cand_ids": [docs[i]["id"] for i in cand]})
+    return out
+
+
 def head_tokens(p4):
     """{entry id: tokens of its head value cut at 140 characters, with repeats}: what an old pool child read of an
     entry, the `head-bm25` feature's text as pick_model.py computed it."""
@@ -165,8 +229,9 @@ def pool_like(r):
     return r["source"] == "pool" or (r["source"] == "store+edited" and "from:pool" in (r.get("note") or ""))
 
 
-def build_sets(p4, idx=None, sources=None, max_tasks=MAX_TASKS, rows=None):
-    """[{task, xs, ys, w, files, bm25, n_pos, source}] for every task with at least one positive that is indexed.
+def build_sets(p4, idx=None, sources=None, max_tasks=MAX_TASKS, rows=None, now=None):
+    """[{task, xs, ys, w, files, bm25, n_pos, source}] for every task with at least one positive that is indexed,
+    then the silence tasks (source `silent`, no positive) unless `sources` leaves them out.
 
     Each task's positives are its labels with label 1 (weighted by source); a label 0 is a hard negative: kept in
     the candidates at its weight even when BM25 would not have drawn it. `rows` stands in for the training labels
@@ -225,6 +290,8 @@ def build_sets(p4, idx=None, sources=None, max_tasks=MAX_TASKS, rows=None):
                     "kind": task.get("kind", ""), "time": task.get("time", ""), "pool_like": is_pool,
                     "sources": sorted({r["source"] for r in labs}),
                     "cand_ids": [idx["docs"][i]["id"] for i in cand]})
+    if out and (not sources or "silent" in sources):
+        out.extend(silent_sets(idx, silent_prompts(p4), now or datetime.datetime.now().strftime("%Y-%m-%d %H:%M")))
     return out
 
 
@@ -243,7 +310,7 @@ def fit_sets(sets, seed=0):
 def trim(s):
     """The examples of one task a round fits on: every positive, and the TRAIN_NEG negatives BM25 ranked highest
     (a pool task keeps every candidate, as pick_model.py fit on every barrier row)."""
-    if (s.get("source") == "pool" or s.get("pool_like")) and POOL_CANDIDATES == 0:
+    if s.get("source") == "silent" or ((s.get("source") == "pool" or s.get("pool_like")) and POOL_CANDIDATES == 0):
         return range(len(s["ys"]))
     order = sorted(range(len(s["ys"])), key=lambda k: (-s["bm25"][k], k))
     negs = [k for k in order if not s["ys"][k]][:TRAIN_NEG]
@@ -266,7 +333,8 @@ def folds(sets):
 
 def evaluate(sets, per_file=ranker.PER_FILE, quiet=True):
     """Held-out numbers over the sets: {r-precision, recall@20, precision, f1, baseline, n, per-subset, rows}."""
-    live = [s for s in sets if not s["missed"]]
+    silent = [s for s in sets if s.get("source") == "silent"]
+    live = [s for s in sets if not s["missed"] and s.get("source") != "silent"]
     missed = [s for s in sets if s["missed"]]
     if len(live) < 3:
         return None
@@ -274,7 +342,7 @@ def evaluate(sets, per_file=ranker.PER_FILE, quiet=True):
     for fold in folds(live):
         held = set(fold)
         train = [s for k, s in enumerate(live) if k not in held]
-        w = fit_sets(train)
+        w = fit_sets(train + silent)      # the silence tasks train every fold and are held out of none
         t = ranker.best_threshold([(s["files"], s["ys"], scored(w, s)) for s in train], per_file, MIN_PRECISION)
         for k in fold:
             s = live[k]
@@ -291,6 +359,8 @@ def evaluate(sets, per_file=ranker.PER_FILE, quiet=True):
             rows[s["task"]] = m
     out = summarize(list(rows.values()), len(missed))
     out["rows"] = rows
+    if silent:
+        out["silent"] = {"n": len(silent)}
     for name, keep in (("pool", lambda s: s["source"] == "pool"), ("repo", lambda s: "repo" in s.get("sources", [])),
                        ("history", lambda s: s["source"] == "store")):
         sub = [rows[s["task"]] for s in live if keep(s) and s["task"] in rows]
@@ -403,7 +473,7 @@ def run_round(p4, write=True, now=None, idx=None, sources=None, quiet=False, dic
     if cmp and cmp.get("ok") is False and write:
         hold_batches(p4, cmp["batches"], f"edited {cmp['edited']:.3f} below raw {cmp['raw']:.3f} on held-out raw "
                                          f"labels ({now})")
-    sets = build_sets(p4, idx, sources)
+    sets = build_sets(p4, idx, sources, now=now)
     ev = evaluate(sets)
     per_source = {}
     for r in lb.training_labels(p4, idx):
@@ -466,9 +536,14 @@ def run_round(p4, write=True, now=None, idx=None, sources=None, quiet=False, dic
         row["why"] += "; " + fmt_compare(cmp)
     if ev is not None:
         w = fit_sets([s for s in sets if not s["missed"]])
-        live = [s for s in sets if not s["missed"]]
+        live = [s for s in sets if not s["missed"] and s.get("source") != "silent"]
         t = ranker.best_threshold([(s["files"], s["ys"], scored(w, s)) for s in live], 2, MIN_PRECISION)
         row["threshold"] = f"{t:.2f}"
+        silent = [s for s in sets if s.get("source") == "silent"]
+        if silent:
+            # fitted, so an optimistic number: the share of the silence tasks the round's own model would print for
+            loud = sum(1 for s in silent if ranker.select(s["files"], scored(w, s), t, 2, limit=1))
+            ev["silent"] = {"n": len(silent), "loud": loud / len(silent)}
         if write and promote:
             ranker.save(os.path.join(p4, "models", "ranker.json"), w, t, round_=int(row["round"]), trained=now,
                         per_file=2, floor={"r-precision": round(ev["r-precision"], 4),
@@ -505,10 +580,12 @@ def raw_vs_edited(p4, idx=None):
     batches = sorted({lb.batch_of(r.get("note", "")) for r in edited} - {""})
     raw = [lb.as_label(r) for r in lb.read_tsv(lb.mpath(p4, lb.RAW))]
     etasks = {r["task"] for r in edited}
-    raw_sets = {s["task"]: s for s in build_sets(p4, idx, rows=lb.recency(p4, raw)) if not s["missed"]}
+    # two label sets compared on the same tasks: the silence tasks (no positive, the same on both sides) stay out
+    raw_sets = {s["task"]: s for s in build_sets(p4, idx, rows=lb.recency(p4, raw))
+                if not s["missed"] and s.get("source") != "silent"}
     ed_sets = {s["task"]: s for s in build_sets(p4, idx, rows=lb.recency(p4, [r for r in raw if r["task"] not in
                                                                               etasks] + edited))
-               if not s["missed"]}
+               if not s["missed"] and s.get("source") != "silent"}
     live = sorted(raw_sets, key=lambda t: (raw_sets[t].get("time", ""), t))
     out = {"n": len(live), "edited_tasks": len(etasks), "held_edited": 0, "raw": None, "edited": None,
            "raw_on_edited": None, "edited_on_edited": None, "ok": None, "batches": batches}
@@ -691,6 +768,9 @@ def fmt(ev):
     for k in ("pool", "history", "repo"):
         if k in ev:
             s += f"; {k} subset r-precision {ev[k]['r-precision']:.3f}, top-5 hit {ev[k]['top5']:.2f} (n {ev[k]['n']})"
+    if ev.get("silent"):
+        s += f"; {ev['silent']['n']} silence tasks" + (f", {ev['silent']['loud']:.0%} printed for (fitted)"
+                                                       if "loud" in ev["silent"] else "")
     return s
 
 
