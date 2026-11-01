@@ -168,10 +168,10 @@ class Cli(Fixture):
         self.assertIn("fresh", run_cli("index", "--p4", self.p4).stdout)
 
     def test_stubs(self):
-        for name in ("teacher",):            # step 9, the paid batches; every other subcommand is built
-            r = run_cli(name)
-            self.assertEqual(r.returncode, 2, name)
-            self.assertIn("not built yet", r.stderr)
+        # step 9's teacher is built (test_teacher.py); its extraction batch (step 10) is the one stub left
+        r = run_cli("teacher", "extract", "--p4", self.p4)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not built yet", r.stderr)
 
     def test_check(self):
         r = run_cli("check", "--p4", self.p4)

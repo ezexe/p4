@@ -159,18 +159,25 @@ def with_held(idx, p4):
     return out
 
 
-def build_sets(p4, idx=None, sources=None, max_tasks=MAX_TASKS):
+def pool_like(r):
+    """A pool label, or a teacher's edit of a pool task (its note says `from:pool`): drawn from the store's entries
+    alone, as the old barrier was, so a task's edited set and its raw set share their candidates."""
+    return r["source"] == "pool" or (r["source"] == "store+edited" and "from:pool" in (r.get("note") or ""))
+
+
+def build_sets(p4, idx=None, sources=None, max_tasks=MAX_TASKS, rows=None):
     """[{task, xs, ys, w, files, bm25, n_pos, source}] for every task with at least one positive that is indexed.
 
     Each task's positives are its labels with label 1 (weighted by source); a label 0 is a hard negative: kept in
-    the candidates at its weight even when BM25 would not have drawn it."""
+    the candidates at its weight even when BM25 would not have drawn it. `rows` stands in for the training labels
+    (raw_vs_edited's two label sets)."""
     if idx is None:
         idx, _ = st.ensure_index(p4)
     tasks = lb.read_tasks(p4)
-    rows = lb.training_labels(p4, idx)
+    rows = lb.training_labels(p4, idx) if rows is None else rows
     if sources:
         rows = [r for r in rows if r["source"] in sources]
-    if any(r["source"] == "pool" for r in rows):
+    if any(pool_like(r) for r in rows):
         idx = with_held(idx, p4)
     by_task = {}
     for r in rows:
@@ -197,7 +204,7 @@ def build_sets(p4, idx=None, sources=None, max_tasks=MAX_TASKS):
                 pos[r["entry"]] = max(pos.get(r["entry"], 0.0), r["weight"])
         if not pos:
             continue
-        is_pool = all(r["source"] == "pool" for r in labs)
+        is_pool = all(pool_like(r) for r in labs)
         limit = POOL_CANDIDATES if is_pool else CANDIDATES
         files = store_files if is_pool else None
         xs, ys, cand, sc = task_examples(idx, task, pos, limit=limit, files=files, docs_by=extra)
@@ -215,7 +222,7 @@ def build_sets(p4, idx=None, sources=None, max_tasks=MAX_TASKS):
                 ws[k] = max(ws[k], neg_w[idx["docs"][i]["id"]] * 2)   # a stated negative counts more than a drawn one
         out.append({"task": tid, "xs": xs, "ys": ys, "w": ws, "files": [idx["docs"][i]["path"] for i in cand],
                     "bm25": sc, "n_pos": len(pos), "source": labs[0]["source"], "missed": False,
-                    "kind": task.get("kind", ""), "time": task.get("time", ""),
+                    "kind": task.get("kind", ""), "time": task.get("time", ""), "pool_like": is_pool,
                     "sources": sorted({r["source"] for r in labs}),
                     "cand_ids": [idx["docs"][i]["id"] for i in cand]})
     return out
@@ -236,7 +243,7 @@ def fit_sets(sets, seed=0):
 def trim(s):
     """The examples of one task a round fits on: every positive, and the TRAIN_NEG negatives BM25 ranked highest
     (a pool task keeps every candidate, as pick_model.py fit on every barrier row)."""
-    if s.get("source") == "pool" and POOL_CANDIDATES == 0:
+    if (s.get("source") == "pool" or s.get("pool_like")) and POOL_CANDIDATES == 0:
         return range(len(s["ys"]))
     order = sorted(range(len(s["ys"])), key=lambda k: (-s["bm25"][k], k))
     negs = [k for k in order if not s["ys"][k]][:TRAIN_NEG]
@@ -390,6 +397,12 @@ def run_round(p4, write=True, now=None, idx=None, sources=None, quiet=False, dic
     if idx is None:
         idx, _ = st.ensure_index(p4)
     t0 = time.time()
+    # 5.2 step 3: when the teacher's edits exist, they must score at or above the raw labels on held-out raw labels;
+    # a round that finds them below holds their batches (written only by `train`), so the sets below leave them out
+    cmp = raw_vs_edited(p4, idx) if has_edited(p4) else None
+    if cmp and cmp.get("ok") is False and write:
+        hold_batches(p4, cmp["batches"], f"edited {cmp['edited']:.3f} below raw {cmp['raw']:.3f} on held-out raw "
+                                         f"labels ({now})")
     sets = build_sets(p4, idx, sources)
     ev = evaluate(sets)
     per_source = {}
@@ -449,6 +462,8 @@ def run_round(p4, write=True, now=None, idx=None, sources=None, quiet=False, dic
            "repo": f"{ev['repo']['top5']:.4f}/{ev['repo']['n']}" if ev and "repo" in ev else "",
            "dictionary": ",".join(f"{k}:{v}" for k, v in dict_counts.items()),
            "promoted": "promoted" if promote else "kept old", "why": "; ".join(why) or "past the floor"}
+    if cmp:
+        row["why"] += "; " + fmt_compare(cmp)
     if ev is not None:
         w = fit_sets([s for s in sets if not s["missed"]])
         live = [s for s in sets if not s["missed"]]
@@ -469,7 +484,76 @@ def run_round(p4, write=True, now=None, idx=None, sources=None, quiet=False, dic
         with open(path, "a", encoding="utf-8", newline="\n") as f:
             f.write(head + "\t".join(row.get(c, "").replace("\t", " ") for c in cols) + "\n")
     row["eval"] = ev
+    row["compare"] = cmp
     return row
+
+
+# --- raw against edited (5.2 step 3, 5.6) ----------------------------------------------------------------
+
+def has_edited(p4):
+    return any(r.get("source") == "store+edited" for r in lb.read_tsv(lb.mpath(p4, lb.TRAIN)))
+
+
+def raw_vs_edited(p4, idx=None):
+    """The Colab method: fit once on the raw labels and once on the edited ones (the teacher's rows in place of
+    their tasks' raw labels), and score both on held-out raw labels, the same folds for both. Every teacher row
+    counts here, held or not, so a held batch can be judged again. {n, edited_tasks, held_edited, raw, edited,
+    raw_on_edited, edited_on_edited, ok, batches}; ok is None when fewer than 3 tasks have raw labels."""
+    if idx is None:
+        idx, _ = st.ensure_index(p4)
+    edited = [lb.as_label(r) for r in lb.read_tsv(lb.mpath(p4, lb.TRAIN)) if r.get("source") == "store+edited"]
+    batches = sorted({lb.batch_of(r.get("note", "")) for r in edited} - {""})
+    raw = [lb.as_label(r) for r in lb.read_tsv(lb.mpath(p4, lb.RAW))]
+    etasks = {r["task"] for r in edited}
+    raw_sets = {s["task"]: s for s in build_sets(p4, idx, rows=lb.recency(p4, raw)) if not s["missed"]}
+    ed_sets = {s["task"]: s for s in build_sets(p4, idx, rows=lb.recency(p4, [r for r in raw if r["task"] not in
+                                                                              etasks] + edited))
+               if not s["missed"]}
+    live = sorted(raw_sets, key=lambda t: (raw_sets[t].get("time", ""), t))
+    out = {"n": len(live), "edited_tasks": len(etasks), "held_edited": 0, "raw": None, "edited": None,
+           "raw_on_edited": None, "edited_on_edited": None, "ok": None, "batches": batches}
+    if len(live) < 3:
+        return out
+    got = {"raw": {}, "edited": {}}
+    for fold in folds([raw_sets[t] for t in live]):
+        held = {live[k] for k in fold}
+        ws = {"raw": fit_sets([raw_sets[t] for t in live if t not in held]),
+              "edited": fit_sets([s for t, s in ed_sets.items() if t not in held])}
+        for t in held:
+            s = raw_sets[t]
+            n = sum(s["ys"])
+            for name, w in ws.items():
+                m = ranker.metrics(s["ys"], scored(w, s), [])
+                got[name][t] = m["r-precision"] * n / max(n, s["n_pos"])
+    mean_of = lambda d, ks: sum(d[k] for k in ks) / len(ks) if ks else None  # noqa: E731
+    on_edited = [t for t in live if t in etasks]
+    out.update(raw=mean_of(got["raw"], live), edited=mean_of(got["edited"], live), held_edited=len(on_edited),
+               raw_on_edited=mean_of(got["raw"], on_edited), edited_on_edited=mean_of(got["edited"], on_edited))
+    out["ok"] = out["edited"] + 1e-9 >= out["raw"]
+    return out
+
+
+def fmt_compare(c):
+    if c is None:
+        return "no teacher edits yet"
+    if c["ok"] is None:
+        return f"raw against edited: fewer than 3 tasks with raw labels ({c['n']}), not compared"
+    s = (f"raw against edited on held-out raw labels: raw {c['raw']:.3f}, edited {c['edited']:.3f} r-precision over "
+         f"{c['n']} tasks ({c['edited_tasks']} edited")
+    if c["held_edited"]:
+        s += f"; on the {c['held_edited']} edited tasks raw {c['raw_on_edited']:.3f}, edited {c['edited_on_edited']:.3f}"
+    return s + ("): edited at or above raw" if c["ok"] else "): edited BELOW raw; `train` holds its batches")
+
+
+def hold_batches(p4, batches, why):
+    """Mark teacher batches held in models/teacher-batches.json (the owner sets `status` back to ok to release)."""
+    cur = lb.read_batches(p4)
+    for b in batches:
+        e = cur.setdefault(b, {})
+        if e.get("status") != "held":
+            e["status"] = "held"
+            e["why"] = why
+    ranker.write_atomic(lb.mpath(p4, lb.BATCHES), json.dumps(cur, indent=1, ensure_ascii=False) + "\n")
 
 
 # --- the dictionary check (5.3) --------------------------------------------------------------------------
@@ -628,10 +712,15 @@ def cmd_eval(args):
     row = run_round(args.p4, write=False, now=args.now or None,
                     sources=set(args.sources.split(",")) if args.sources else None, dictionary=not args.no_dictionary)
     print(f"eval: {fmt(row['eval'])}; short {row['short']}; would be {row['promoted']} ({row['why']})")
+    if row.get("compare"):
+        print(f"eval: {fmt_compare(row['compare'])}")
     if args.json:
         ev = dict(row["eval"] or {})
         ev.pop("rows", None)
-        print(json.dumps({"eval": ev, "short": row["short"], "promoted": row["promoted"]}))
+        out = {"eval": ev, "short": row["short"], "promoted": row["promoted"]}
+        if row.get("compare"):
+            out["compare"] = row["compare"]
+        print(json.dumps(out))
     return 0
 
 

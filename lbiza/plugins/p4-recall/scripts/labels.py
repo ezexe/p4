@@ -119,9 +119,38 @@ def as_label(r):
             "source": src, "weight": w, "time": r.get("time", ""), "note": r.get("note", "")}
 
 
+BATCHES = "teacher-batches.json"
+BATCH_RE = re.compile(r"(?:^|;\s*)batch:([^\s;]+)")
+
+
+def batch_of(note):
+    """The teacher batch a `store+edited` row came from (its note's `batch:<id>`), or ''."""
+    m = BATCH_RE.search(note or "")
+    return m.group(1) if m else ""
+
+
+def read_batches(p4):
+    """{batch id: {teacher, time, tasks, status: ok | held, why, ...}} from models/teacher-batches.json."""
+    try:
+        with open(mpath(p4, BATCHES), encoding="utf-8") as f:
+            got = json.load(f)
+        return got if isinstance(got, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def held_batches(p4):
+    """The teacher batches held for the owner (5.6: a second opinion below 0.65, or edited below raw): their rows
+    are not trained on, and the raw labels of their tasks stand in."""
+    return {k for k, v in read_batches(p4).items() if isinstance(v, dict) and v.get("status") == "held"}
+
+
 def training_labels(p4, idx=None):
-    """Every label a round trains on (module docstring), the recency rule applied."""
-    train = [as_label(r) for r in read_tsv(mpath(p4, TRAIN))]
+    """Every label a round trains on (module docstring), the recency rule applied. A held teacher batch's rows are
+    left out (its tasks keep their raw labels)."""
+    held = held_batches(p4)
+    train = [as_label(r) for r in read_tsv(mpath(p4, TRAIN))
+             if not (held and r.get("source") == "store+edited" and batch_of(r.get("note", "")) in held)]
     edited = {r["task"] for r in train if r["source"] == "store+edited"}
     raw = [as_label(r) for r in read_tsv(mpath(p4, RAW)) if r.get("task") not in edited]
     return recency(p4, raw + train)

@@ -40,6 +40,7 @@ The output shapes, from https://code.claude.com/docs/en/hooks (read 2026-11-01):
 
 import json
 import os
+import re
 import sys
 import time
 
@@ -68,7 +69,43 @@ __pycache__/
 *.pt
 *.phid
 """
-CONFIG = {"teacher-model": "claude-fable-5-1"}
+# inject: false is the measured default. The paid validation of 2026-11-01 (Opus 5.5, two seeds, Haiku judge) found
+# recall's lines never better than the built-in on any category and one lesson task worse on both seeds, and on
+# held-out short turns 0.373 against 0.393: section 0's rule keeps them out of the model's context. With it off, the
+# query still runs and what it would have shown is logged, so usage labels keep teaching the model.
+CONFIG = {"teacher-model": "claude-fable-5-1", "inject": False}
+
+
+RULES_FACTS = re.compile(r"^- \S+ (rule|fact): ")
+
+
+def inject_mode(p4):
+    """"off", "rules-facts" or "all": what reaches the main agent or a subagent. P4_RECALL_INJECT (0, 1 or
+    rules-facts) overrides the repo's models/config.json `inject` (false, "rules-facts" or true)."""
+    env = os.environ.get("P4_RECALL_INJECT")
+    if env in ("0", "1", "rules-facts"):
+        return {"0": "off", "1": "all"}.get(env, env)
+    try:
+        with open(os.path.join(p4, "models", "config.json"), encoding="utf-8") as f:
+            v = json.load(f).get("inject", False)
+    except (OSError, ValueError):
+        return "off"
+    return "rules-facts" if v == "rules-facts" else ("all" if v is True else "off")
+
+
+def inject_on(p4):
+    return inject_mode(p4) != "off"
+
+
+def injected(p4, lines):
+    """The lines that may reach the model under the repo's mode: all of them, only the rule and fact lines (the
+    kind that read right on the newer-than-the-model tasks), or none."""
+    mode = inject_mode(p4)
+    if mode == "all":
+        return list(lines)
+    if mode == "rules-facts":
+        return [l for l in lines if RULES_FACTS.match(l)]
+    return []
 
 
 def project_of(payload):
@@ -206,12 +243,14 @@ def h_recall(payload):
     r = cli.query(p4, prompt, session[:8] if session else None, now())
     rid = rows.row_open(p4, session, prompt, now())
     ids = [i for i in r["ids"] if not i.startswith(("history:", "repeat"))]
+    shown = injected(p4, r["lines"])
+    shadow = not shown
     lb.write_served(p4, f"turn-{session}", {"ids": ids, "text": prompt[:2000], "task": rid, "session": session,
-                                            "time": now(), "lines": len(r["lines"])})
-    if not r["lines"]:
+                                            "time": now(), "lines": len(r["lines"]), "shown": len(shown),
+                                            "shadow": shadow})
+    if shadow:
         return None
-    return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
-                                   "additionalContext": "\n".join(r["lines"])}}
+    return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "\n".join(shown)}}
 
 
 # --- subagent recall (PreToolUse Agent; SubagentStart fallback) ------------------------------------------
@@ -236,11 +275,15 @@ def h_agent(payload):
     r = agent_lines(p4, prompt)
     if not r["lines"]:
         return None
-    updated = dict(inp)                   # every original field, unchanged, as updatedInput requires
-    updated["prompt"] = prompt.rstrip() + "\n\n" + NOTES_HEAD + "\n" + "\n".join(r["lines"])
+    shown = injected(p4, r["lines"])
+    shadow = not shown
     lb.write_served(p4, f"agent-{sha8(prompt)}", {"ids": [i for i in r["ids"] if ":" in i], "text": prompt[:2000],
                                                   "task": f"agent:{sha8(prompt)}", "time": now(),
-                                                  "tool_use_id": payload.get("tool_use_id", "")})
+                                                  "tool_use_id": payload.get("tool_use_id", ""), "shadow": shadow})
+    if shadow:
+        return None
+    updated = dict(inp)                   # every original field, unchanged, as updatedInput requires
+    updated["prompt"] = prompt.rstrip() + "\n\n" + NOTES_HEAD + "\n" + "\n".join(shown)
     out = {"hookEventName": "PreToolUse", "updatedInput": updated}
     if os.environ.get("P4_AGENT_ALLOW") == "1":
         out["permissionDecision"] = "allow"

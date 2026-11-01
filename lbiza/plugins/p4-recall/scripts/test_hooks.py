@@ -55,7 +55,9 @@ def make_project(root):
 
 def run_hook(name, payload, proj, extra_env=None):
     env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
-    env.update({"CLAUDE_PLUGIN_ROOT": ROOT, "CLAUDE_PROJECT_DIR": proj, **(extra_env or {})})
+    # injection is off by default (the measured config); these tests check what is injected, so they turn it on,
+    # and DefaultOff checks the default with P4_RECALL_INJECT=0
+    env.update({"CLAUDE_PLUGIN_ROOT": ROOT, "CLAUDE_PROJECT_DIR": proj, "P4_RECALL_INJECT": "1", **(extra_env or {})})
     r = subprocess.run(["sh", RUN, name], input=json.dumps(payload), capture_output=True, text=True, env=env,
                        timeout=60)
     return r
@@ -171,6 +173,20 @@ class Recall(Base):
         served = lb.read_served(self.p4, f"turn-{SESSION}")
         self.assertTrue(served["ids"])
         self.assertEqual(served["task"], rows[0].id)
+
+    def test_default_off_prints_nothing_but_logs_shadow(self):
+        """The measured default: no line reaches the model; what recall would have shown is logged as shadow, so the
+        close hook's usage labels still learn from it. The same holds for a subagent's prompt."""
+        text = "does the quokka harness run the zebrafish plotter golden images on every push?"
+        r = run_hook("recall", {"hook_event_name": "UserPromptSubmit", "session_id": SESSION, "prompt": text,
+                                "cwd": self.proj}, self.proj, {"P4_RECALL_INJECT": "0"})
+        self.assertEqual((r.returncode, r.stdout), (0, ""))
+        served = lb.read_served(self.p4, f"turn-{SESSION}")
+        self.assertTrue(served["ids"] and served["shadow"])
+        r = run_hook("agent", {"hook_event_name": "PreToolUse", "tool_name": "Agent", "cwd": self.proj,
+                               "tool_input": {"prompt": text, "description": "d", "subagent_type": "general-purpose"}},
+                     self.proj, {"P4_RECALL_INJECT": "0"})
+        self.assertEqual((r.returncode, r.stdout), (0, ""))
 
     def test_ordinary_message_silent(self):
         for text in ("hi", "what is the weather like today"):
