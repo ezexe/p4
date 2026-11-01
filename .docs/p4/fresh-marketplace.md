@@ -2,6 +2,12 @@
 
 A design, not a build. Everything under `lbiza/` is deleted and replaced by what this document describes; git history keeps the old marketplace. Nothing here is a contract the model reads: the main context sees at most a few plain lines, and every piece of bookkeeping is a hook or a script.
 
+## The purpose
+
+The owner's statement of what the phi model is (17:30): "the phi model is what the anthropick model would be of it were trained exactly on the repository and not had to relearn it as work on something it needs to address from nill".
+
+So: the model is what Claude would be if it had been trained on this repository, so that a session does not relearn the repo from nothing each time. "The repository" means all of it: the owner's rulings, corrections and vocabulary in `.claude/p4/`, the model's own memory, and the repository itself, its files, their symbols and headings, its history and its conventions, and which of those each kind of task has needed before. Section 0 still governs how that is delivered: as a few added lines, silent when nothing applies, never an override. The measure of success has three parts (section 8.5): short turns read right, less re-exploration before the first relevant file is opened, and nothing worse than the built-in on any category.
+
 The owner's words that shape it, in order of weight:
 
 - 16:53, the governing rule: "the biggest point is to not override and make claude code desktop aps and how it works already possibly worse but to only enhance it where evidence shows it will".
@@ -40,7 +46,7 @@ The training data already exists in every store, and the hooks keep producing it
 
 What the model returns for a short turn is a recall, not a prompt: one or two lines drawn from that owner's own history, in ordinary words, for example `- you have said "keep going" 6 times; last time (2026-10-29) it was taken as: continue the running CEF build as configured, nothing to change`. The vocabulary dictionary (section 5.3, misreadings only) covers the markers that caused confusion.
 
-The measure of success is section 8.3's held-out test: the newest sessions' short turns, scored on whether the built-in plus recall reads them as `addressed:` says they were read, against the built-in alone. The success line is fewer injected words and more short turns read right. Nothing in the design is justified by anything else.
+The measure of success is section 8.3's held-out test: the newest sessions' short turns, scored on whether the built-in plus recall reads them as `addressed:` says they were read, against the built-in alone. The success line is fewer injected words and more short turns read right, together with the two other parts of 8.5. Nothing in the design is justified by anything else.
 
 ## 1a. Newer than the model
 
@@ -199,6 +205,18 @@ An entry's id is `<file>:<time>:<sha8 of its first field's text>`, stable when l
 
 Every entry of `store/*.md` except `vocabulary.md` (which expands queries instead), every section of `memory/*.md` (one entry per heading), every row of `store/messages/*.md` that has `addressed:`, and the one-line head of each file under `src/`. Not indexed: `scratchpad/`, `archive/`, FREED and EXPIRED entries (kept, never recalled; the retraction that freed them is recalled in their place). AudioPlugin-p4 holds about 4,900 indexable entries; the other three under 600.
 
+### 4.1a The repository itself
+
+A model trained on the repository knows the repository, not only the notes about it. Indexed mechanically, free, by `p4.py index --repo`, rebuilt incrementally from `git ls-files` and `git log <last indexed commit>..HEAD`, so a rebuild after one commit touches only that commit's files:
+
+- **paths and headings**: every tracked file's path as one entry; for Markdown, each heading as an entry (path, heading text, the first line under it); for code, each top-level definition and class by a cheap regex per language (`def`/`class` in Python, `function`/`class`/`export` in JS and TS, `fn`/`struct`/`impl` in Rust, functions and classes by signature in C/C++/Java/C#/Swift, `func` in Go, shell functions), as `path:line symbol`; for build files (`CMakeLists.txt`, `*.cmake`, `Makefile`, `package.json` scripts, `pyproject.toml`), each target or script name;
+- **history**: each commit's subject line and the files it touched, newest first, one entry per commit (`<date> <sha8> <subject>; touched: <paths>`), capped at the last 2,000 commits;
+- **conventions**: `CLAUDE.md` and `CLAUDE.local.md` at every level, `AGENTS.md`, `README*`, `CONTRIBUTING*`, `.github/*.md`, indexed by section like any Markdown.
+
+Excluded: anything `.gitignore`d (build output, caches, `scratchpad/.out/`), LFS pointers, binaries by the `.gitignore` type list, vendored and generated code (`node_modules/`, `third_party/`, `vendor/`, `*.min.*`, `*.generated.*`, files whose first line says `generated`, any directory a `.p4ignore` names), and any file over 512 KB. The index stops adding file entries at 50,000 and says so in `check`, keeping the newest-touched files first.
+
+These entries print as `- file: <path> — <symbol or heading>` and `- commit <date>: <subject> (<paths>)`, never a file's contents. The `kind=` feature tells the ranker a file entry from a rule, and the repo labels of 5.1a teach it which files a kind of task has needed. The index is a cache, ignored by git (`models/index.json` already is).
+
 ### 4.2 The store format
 
 Markdown files of dash-led entries, one field per line, the shape `local-storage.md` and `ledger.md` already use and `store_lessons.py` already parses. Each file starts with three lines in ordinary words (what it holds, who writes it) and no schema block with placeholders.
@@ -210,6 +228,7 @@ The logistic ranker of `pick_model.py`: stdlib, hashed features in a 2^18 space,
 Added, each **untested** until `eval` shows the set at or above the kept features:
 - `dict-hit`: the query matched a vocabulary entry and this candidate is one the entry points at, or shares the entry's `means:` terms;
 - `used=<n>`: how many earlier turns used this entry (log-scaled), from the usage labels;
+- `edited=<n>`, `cited=<n>`: how many earlier tasks edited, or read and then cited, this file (log-scaled), from the repo labels of 5.1a;
 - `corrects`: a correction whose `match:` overlaps another candidate, so it outranks what it corrected;
 - `newer-than-model` (1a): set when the entry's `since:` (or its `time:` when it has none) is later than the answering model's training cutoff, read from a small table in `ranker.py` keyed by model id (`claude-fable-5-1`, `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`, with the cutoff month each; unknown model → the table's oldest cutoff), the model id taken from the hook payload where the harness gives it and from `CLAUDE_MODEL` otherwise; `prior=<kind>` set from the fact's `prior:` field. Both are features the ranker learns a weight for, never a hand-set boost, so the eval decides; a subagent's recall uses the `model` field of the Agent call when it names one.
 
@@ -231,7 +250,7 @@ The resemblance rule of the old hook (`BARRIER_JACCARD` 0.5 over the fingerprint
 
 1. The hook reads the message (UserPromptSubmit `prompt`, or the Agent call's `prompt`).
 2. `p4.py query` loads `models/index.json` (about 30 ms for 4,900 entries), runs 4.4 for a short message, expands the query through the dictionary, scores BM25 over all entries, takes the top 200 as candidates, builds features, applies `ranker.json`. Without a trained ranker (a fresh repo) BM25 alone picks, showing only lines that share at least two rare terms with the message.
-3. Entries above the threshold, at most 5 in all including the history and repeat lines, strongest first, at most 2 from one file. Each line: date, kind, the entry's `plain:` text when it has one and its text otherwise, cut at 160 characters, and `(<file>:<line>)` so one Read opens it whole.
+3. Entries above the threshold, at most 5 in all including the history and repeat lines, strongest first, at most 2 from one file. Each line: date, kind, the entry's `plain:` text when it has one and its text otherwise, cut at 160 characters, and `(<file>:<line>)` so one Read opens it whole. A repo entry prints as a starting point with its label count: `- for this, start at src/foo/bar.cc (edited for 4 similar tasks)` or `- commit 2026-10-29 a1b2c3d4: CMake 4.4 floor (CMakeLists.txt, scripts/BuildCEF.cmake)`.
 4. Served ids go to `models/served/<prompt id or agent id>.json` for the usage labels.
 5. Every line is checked against the suite's jargon list before printing; a line that would print an invented word and has no `plain:` is counted by `check` (target under 10%, the built-in's rate being 5%).
 
@@ -267,6 +286,21 @@ Per repo: its own `store/`, `vocabulary.md`, `labels.tsv`, `ranker.json` and `ev
 | (none) | **misses**: a new correction whose `match:` names a reading an existing entry would have prevented becomes a positive label for that entry on that turn's task, and a dictionary signal (5.3) | close hook | the store's own failures become labels, not only lessons |
 | (none) | **short-turn labels**: every completed short row is a task whose positive is its own earlier reading (the row the history line would have shown) when the two `addressed:` agree by the resemblance rule | close hook | the data of section 1, free |
 | old pools and audit files | imported once (`labels --from-pools`), source `pool`, then edited like the rest | migration | nothing already learned is lost |
+
+### 5.1a The labels that teach it the repo
+
+Every session's transcript already shows which files it read, searched and edited for which task, and what it found to be the answer. The close hook's `usage` step turns that into free labels, the practical meaning of "trained on the repo": for this kind of task, these files and entries were the ones that mattered.
+
+From the turn's transcript (`transcript_path`, or `agent_transcript_path` on SubagentStop), per task (the message row): every `Read`, `Grep`/`Glob` hit path, `Edit`/`Write` path and `Bash` path argument is a candidate; its label and weight:
+
+| what the session did with the file | label | weight |
+|---|---|---|
+| edited it (Edit, Write, a Bash write) | positive | 1.0 |
+| read it and then cited it (its path or a symbol from it appears in the reply or in a later edit) | positive | 0.7 |
+| read it and dropped it (never cited, never edited) | negative | 0.3 |
+| a search hit never opened | negative | 0.2 |
+
+The task text is the message row's fingerprint; the entries are the repo index's path, symbol and commit entries (4.1a), so a file label also lands on the symbols the turn's edits touched (by line range) and on the commits that last touched the file. Rows go to `labels.tsv` with source `repo`. Imported for history by `labels --from-transcripts`, over every transcript under `~/.claude/projects/<slug>/` that a migrated message row names (the old `backfill_dispatch.py` on ap-p4_mac already read transcripts this way), so the four repos start with labels from every session they have, free. **Untested** as a feature set: it ships through `eval` like the rest, with the repo-label subset reported separately (held-out tasks: does the ranker's top 5 contain a file the session edited), and the re-exploration measure of 8.5 is its check.
 
 ### 5.2 The store labels, edited by Fable (the owner's 16:47 direction)
 
@@ -444,18 +478,26 @@ About 12 tasks whose right answer depends on a repo fact newer than the answerin
 
 Pathways: the built-in alone, and the built-in plus the recall lines for the task; Opus 5.5 answers, Haiku 5.5 judges; two seeds; **≈ $0.30**. Pass: recall-plus-built-in answers more of them right on both seeds and never fewer; the `newer-than-model` and `prior=` features ship only if `eval` on the labelled tasks (the 12 here plus every `prior:` fact's own task) is at or above the kept feature set, as 4.3 says. The free half runs in 8.1: a unit test that a fact with `supersedes:` outranks the fact it replaces for a task dated after it, and that `labels` drops a label resting on the superseded one.
 
+### 8.5 The measure of success, in three parts
+
+1. **Short turns read right**: 8.3.
+2. **Less re-exploration**: on held-out sessions, the tool calls and input tokens spent before the first relevant file is opened, with recall against without. A relevant file is one the session later edited or cited (the 5.1a labels). The history half is free, computed from transcripts: for each held-out task, the tool calls and tokens from the message to the first Read of a relevant file, and whether that file was in recall's top 5 for the message (if so, the counterfactual cost is one Read). The live half runs on a handful of tasks (about 6, from the newest sessions of two repos) with `claude -p` on the signed-in account, with and without the marketplace, counting tool calls and tokens to the first relevant Read from the transcript; it spends subscription usage, not API credit, so the budget table is unchanged. Pass: fewer calls and tokens to the first relevant file with recall on both halves, never more.
+3. **Nothing worse than the built-in**: 8.2, on every category.
+
+A release ships only when all three hold; a part that fails one is removed, not tuned.
+
 ## 9. Build order
 
 Each step is testable alone and leaves the tree runnable.
 
 1. Empty `lbiza/`; `marketplace.json` and the three `plugin.json`s; p4-memory copied with its test; `claude plugin validate` passes.
 2. p4-scratchpad: the storage half on, the two asks behind the switch, tests, the gate-2 checks (a)–(d) as tests.
-3. `store.py`, `p4.py index|query` over the new format; the ap-p4_mac fixture converted by hand; latency, cap, jargon and short-turn tests.
+3. `store.py`, `p4.py index|query` over the new format; the ap-p4_mac fixture converted by hand; latency, cap, jargon and short-turn tests. Then `index --repo` (4.1a): paths, headings, symbols, build targets, commits and conventions from `git ls-files` and `git log`, incremental, with the exclusions and caps; tested on the p4 repo itself and on a fixture holding a generated file, an LFS pointer and a `node_modules/` directory, none of which may appear.
 4. `migrate.py` dry over the four clones; section 6's counts, finding 17, the dictionary seeds.
 5. The recall and close hooks (SessionStart silent, UserPromptSubmit, Stop); the smoke test on a fixture repo, including the "must not trigger" prompt.
 6. The `Agent` PreToolUse hook; the subagent transcript check. If it fails, the SubagentStart fallback with the same test.
 7. `labels --from-pools`, `ranker.py`, `train|eval` with the floor; ≥ 0.36 reproduced on AudioPlugin-p4.
-8. The history labels for tasks without a pool (`labels-raw.tsv`), usage labels, `signals`, SubagentStop, the async train hook, `dictionary check`.
+8. The history labels for tasks without a pool (`labels-raw.tsv`), usage labels, `signals`, SubagentStop, the async train hook, `dictionary check`. Then the repo labels (5.1a): `usage` reading the turn's transcript for read, searched, edited and cited files; `labels --from-transcripts` over the four repos' history; `eval`'s repo-label subset and the free half of the re-exploration measure (8.5) on held-out sessions.
 9. `teacher.py` with `--fake`; then the paid batches: edit-labels and the second opinion (≈ $13), dictionary meanings (≈ $1); the agreement and the raw-vs-edited numbers in `eval.tsv`.
 10. The extraction batch (≈ $4); `plain:` fields; `check`'s jargon rate under 10%.
 11. The suite change; the validation run (≈ $20), the short-turn test (≈ $4) and the newer-than-the-model test (≈ $0.30); the pinned-block and emission decisions from the numbers; anything failing a category removed.
