@@ -273,6 +273,26 @@ class Synthetic(unittest.TestCase):
             self.assertTrue(e.fields["because"].strip())
             self.assertRegex(e.fields["because"], r'you wrote ".+"')
 
+    def test_pool_picks_resolve_as_pick_model_did(self):
+        """The imported labels are the old ranker's labels: a pick of a freed ruling stays on that ruling (the old
+        barrier listed it with its state), and a pick whose head is the reader's own words is unresolved, never
+        guessed from its file and time (pick_model.build_pairs matched file, time and head prefix alone)."""
+        os.remove(os.path.join(self.old, "models", "labels", "a3ac5de6.tsv"))
+        pool = os.path.join(self.old, "sessions", "a3ac5de6", "vlds", "recall-pool.md")
+        with open(pool, "a", encoding="utf-8") as f:
+            f.write("- [local-storage.md 2026-10-20 09:00 LIVE] the old harness keeps its flag in the test runner; "
+                    "bears: the harness\n"
+                    "- [local-storage.md 2026-10-29 10:44 LIVE] tidy the home directory; bears: the move\n")
+        r = migrate.run(self.old, os.path.join(self.tmp.name, "n4"), now=NOW)
+        ids = [x[1] for x in r["label_rows"]]
+        freed = [x for x in r["label_rows"] if x[1].startswith("rules.md:2026-10-20 09:00:")]
+        self.assertEqual(len(freed), 1, ids)
+        self.assertIn("picked while FREED", freed[0][6])
+        self.assertFalse(any(i.startswith("rules.md:2026-10-29 10:44:") for i in ids),
+                         "the one entry at that time is not taken for a head that does not match it")
+        self.assertTrue(any("tidy the home directory" in u for u in r["pools"]["unresolved"]))
+        self.assertEqual(r["pools"]["to_freed"], 1)
+
     def test_apply_out(self):
         r = migrate.run(self.old, self.out, apply=True, now=NOW)
         self.assertTrue(all(ok for _n, ok, _d in r["checks"]), [c for c in r["checks"] if not c[1]])

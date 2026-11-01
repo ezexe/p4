@@ -7,15 +7,20 @@ What should print: each store's pool tasks (labels-raw.tsv, source `pool`) and i
 whose reply shares rare terms with an entry, labels.from_history, computed in memory), each a message with the
 entries that bore on it. What must stay silent: the suite's general prompts (every category but `lessons`), the
 messages a session would send that the store has nothing for. Tasks are split by a hash of their id: the even half
-chooses the gate, the odd half reports it. The gate is the one with the best F1 of the printed lines on the tuning
-half among those that print for at most 5% of the silent prompts on it; the order of the lines is BM25's, or the
-number of message words matched first ("cover"), whichever the tuning half prefers.
+chooses the gate, the odd half reports it.
+
+The gate (p4.fallback_order): a line shares at least 2 of the message's words, covering `cover` of them and `icover`
+of their idf (a word the store lacks counts at the highest idf), at `dense` shared words per root of its length.
+The choice, silence first (section 0, gate 3; a wrong line costs accuracy, findings 21-22): among the gates that pass
+the regression cases and leave every store's tuning-half prompts silent, those within a fifth of the best tuning F1,
+and of those the one printing the fewest lines on the tuning half.
 
 Read-only on the stores: the history labels are computed in memory, nothing is written.
 """
 
 import argparse
 import hashlib
+import itertools
 import json
 import os
 import sys
@@ -27,11 +32,10 @@ import p4 as cli  # noqa: E402
 import ranker  # noqa: E402
 import store as st  # noqa: E402
 
-GRID_IDF = (0.0, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0, 10.0)
-GRID_COVER = (0.0, 0.2, 0.34, 0.5, 0.67, 0.8, 1.0)
-GRID_ABS = (4, 6, 99)
-GRID_DENSE = (0.0, 0.15, 0.25, 0.35)
-GRID_TERM = (0.0, 1.0, 1.5, 2.5, 3.5)
+GRID_COVER = (0.0, 0.4, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75)
+GRID_ICOVER = (0.0, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65)
+GRID_DENSE = (0.0, 0.2, 0.35, 0.4, 0.45)
+F1_TOLERANCE = 0.2            # a fifth of the best tuning F1 may be traded for fewer lines
 SILENT_MAX = 0.05
 # regression cases (the coordinator's, 2026-11-01, on ap-p4_mac): a gate is eligible only when each message recalls
 # an entry whose text starts with one of the prefixes in its top 5, and the ordinary messages print nothing. They
@@ -47,68 +51,26 @@ def half(tid):
 
 
 def candidates(idx, text):
-    """[(doc index, matched, idf sum, cover, path)] in BM25 order, ungated."""
+    """[(doc index, shared, cover, icover, density)] in p4.fallback_order's candidate order, ungated."""
     terms = list(dict.fromkeys(ranker.tokens(text)))
-    q = cli.content_terms(idx, terms)
-    if not terms:
+    if not terms or not cli.content_terms(idx, terms):
         return []
-    order = cli.fallback_order(idx, terms, {}, set(), set(), min_shared=0, min_idf=0, cover=0, abs_n=0,
-                               term_idf=0, dense=0)
-    forms = {t: [t] + cli.variants(idx, t) for t in q}
-    n = idx["n"]
-    idf = {v: ranker.idf_of(len(st.postings(idx, v) or []) // 2, n) for t in q for v in forms[t]
-           if st.postings(idx, v)}
-    rare_q = {t for t in terms if t in idx["post"] and ranker.is_rare(len(st.postings(idx, t)) // 2, n)
-              and t not in st.COMMON and not t.isdigit()}
-    need = max(2, (len(rare_q) + 1) // 2)
-    out = []
-    for i in order:
-        d = idx["docs"][i]
-        toks = set(d["toks"].split())
-        got = [max(idf.get(v, 0.0) for v in forms[t] if v in toks) for t in q if any(v in toks for v in forms[t])]
-        out.append((i, got, len(q), d["dl"], d["path"], len(toks & rare_q) >= need))
-    return out
+    return cli.fallback_order(idx, terms, {}, set(), set(), with_stats=True)
 
 
-def standing(idx, keep):
-    """p4.standing_first over gated candidates: a same-minute ruling stands in for its correction or retraction,
-    carrying the stats of the entry it replaced."""
-    pos = {c[0]: c for c in keep}
-    order = cli.standing_first(idx, [c[0] for c in keep])
-    out = []
-    for i in order:
-        if i in pos:
-            out.append(pos[i])
-        else:
-            d = idx["docs"][i]
-            out.append((i, 0, 0, d["dl"], d["path"]))
-    return out
-
-
-def lines(cands, g, idx=None):
-    min_idf, cover, abs_n, order, tau, dense = g
-    order_standing = order != "old"
-    if order == "old":                       # the gate as committed: 2 rare terms and half the message's, BM25
-        keep = [c for c in cands if c[5]]    # (its candidates scored without the other word forms)
-        order = "bm25"
-    else:
-        keep = []
-        for c in cands:
-            got = [x for x in c[1] if x >= tau]
-            if len(got) >= 2 and sum(got) >= min_idf and (len(got) / max(1, c[2]) >= cover or len(got) >= abs_n) \
-                    and len(got) / max(1.0, c[3]) ** 0.5 >= dense:
-                keep.append((c[0], len(got)) + c[2:])
-    if order == "cover":
-        keep = sorted(keep, key=lambda c: -c[1])     # stable: BM25 within a tie
-    if idx is not None and order_standing:
-        keep = standing(idx, keep)
+def lines(cands, g, idx):
+    """The doc indices p4.fallback_order would print under gate g = (cover, icover, dense), at most 5, 2 a file."""
+    cover, icover, dense = g
+    keep = [c for c in cands if c[1] >= cli.MIN_RARE and c[2] >= cover and c[3] >= icover and c[4] >= dense]
+    keep.sort(key=lambda c: -c[1])           # stable: BM25 within a tie
     out, per = [], {}
-    for c in keep:
-        if per.get(c[4], 0) >= 2:
+    for i in cli.standing_first(idx, [c[0] for c in keep]):
+        path = idx["docs"][i]["path"]
+        if per.get(path, 0) >= cli.PER_FILE:
             continue
-        per[c[4]] = per.get(c[4], 0) + 1
-        out.append(c[0])
-        if len(out) >= 5:
+        per[path] = per.get(path, 0) + 1
+        out.append(i)
+        if len(out) >= cli.MAX_LINES:
             break
     return out
 
@@ -124,13 +86,25 @@ def score(tasks, silent, g):
         printed += len(got)
         want += min(5, len(pos))
         found += h > 0
-    noisy = sum(1 for idx, cands in silent if lines(cands, g, idx))
+    noisy = 0
     for idx, cands in silent:
-        printed += len(lines(cands, g, idx))
+        n = len(lines(cands, g, idx))
+        printed += n
+        noisy += n > 0
     p = hit / printed if printed else 0.0
     r = hit / want if want else 0.0
     return {"precision": p, "recall": r, "f1": 2 * p * r / (p + r) if p + r else 0.0,
-            "found": found / max(1, len(tasks)), "silent_broken": noisy / max(1, len(silent))}
+            "found": found / max(1, len(tasks)), "silent_broken": noisy / max(1, len(silent)), "printed": printed}
+
+
+def silent_by_store(silent, g):
+    """{store index id: share of its prompts that printed nothing}."""
+    out = {}
+    for idx, cands in silent:
+        a = out.setdefault(id(idx), [0, 0])
+        a[0] += not lines(cands, g, idx)
+        a[1] += 1
+    return {k: a / b for k, (a, b) in out.items()}
 
 
 def regressions_ok(idx_cands, g):
@@ -210,52 +184,53 @@ def history_in_memory(p4, idx, files, limit):
     return {k: (tmp.get(k, ""), got[k]) for k in keys if tmp.get(k)}
 
 
+def choose(tune, reg):
+    """The gate, silence first (module docstring); None when no gate passes the regression cases."""
+    ok = []
+    for g in itertools.product(GRID_COVER, GRID_ICOVER, GRID_DENSE):
+        if reg["must"] and not regressions_ok(reg, g):
+            continue
+        if min(silent_by_store(tune[1], g).values() or [1.0]) < 1.0:
+            continue
+        ok.append((score(tune[0], tune[1], g), g))
+    if not ok:
+        return None
+    best = max(m["f1"] for m, _ in ok)
+    near = [(m, g) for m, g in ok if m["f1"] >= best * (1 - F1_TOLERANCE) - 1e-12]
+    return min(near, key=lambda x: (x[0]["printed"], -x[0]["f1"], x[1]))[1]
+
+
+def report(name, data, reg, g):
+    both = data[0][1] + data[1][1]
+    held = score(data[1][0], data[1][1], g)
+    print(f"  {name}: held " + json.dumps({k: round(v, 3) for k, v in held.items()}))
+    print(f"    every suite prompt silent, by store: "
+          + ", ".join(f"{v:.0%}" for v in silent_by_store(both, g).values())
+          + (f"; regression cases pass: {regressions_ok(reg, g)}" if reg["must"] else ""))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("p4", nargs="+")
-    ap.add_argument("--suite", default="/Users/ez/gritz/p4/scripts/session/overrides_tasks.jsonl")
+    ap.add_argument("--suite", default=os.path.join(HERE, "..", "..", "..", "..", "scripts", "session",
+                                                    "overrides_tasks.jsonl"))
     ap.add_argument("--history", type=int, default=300)
     a = ap.parse_args(argv)
     data = load(a.p4, a.suite, a.history)
     tune, held = data[0], data[1]
     reg = regression_data(a.p4)
-    best, best_g = None, None
-    floor_seen = []
-    for order in ("bm25", "cover"):
-        for i in GRID_IDF:
-            for c in GRID_COVER:
-                for n in GRID_ABS:
-                  for tau in GRID_TERM:
-                   for dn in GRID_DENSE:
-                    g = (i, c, n, order, tau, dn)
-                    m = score(tune[0], tune[1], g)
-                    if reg["must"] and not regressions_ok(reg, g):
-                        continue
-                    floor_seen.append((m["silent_broken"], -m["f1"], g))
-                    if m["silent_broken"] > SILENT_MAX:
-                        continue
-                    if best is None or m["f1"] > best["f1"] + 1e-12:
-                        best, best_g = m, g
-    if best is None and floor_seen:
-        # no gate both passes the regression cases and keeps 95% of the silent prompts silent: the quietest that
-        # passes, best F1 among the quietest
-        floor_seen.sort()
-        best_g = floor_seen[0][2]
-        best = score(tune[0], tune[1], best_g)
-        print(f"no gate keeps {1 - SILENT_MAX:.0%} silent while passing the regression cases; the quietest that "
-              f"passes is chosen")
+    g = choose(tune, reg)
     print(f"regression cases: {len(reg['must'])} must recall, {len(reg['silent'])} must stay silent")
     print(f"tuning half: {len(tune[0])} tasks, {len(tune[1])} silent prompts; held-out half: {len(held[0])} tasks, "
           f"{len(held[1])} silent prompts")
-    print(f"chosen gate: idf sum {best_g[0]}, each word's idf {best_g[4]}, cover {best_g[1]} or {best_g[2]} words; "
-          f"order {best_g[3]}; words per root of the entry's length {best_g[5]}")
-    print("  tuning  " + json.dumps({k: round(v, 3) for k, v in best.items()}))
-    print("  held    " + json.dumps({k: round(v, 3) for k, v in score(held[0], held[1], best_g).items()}))
-    old = (0, 0, 0, "old", 0, 0)
-    if reg["must"]:
-        print(f"  regression cases pass: chosen {regressions_ok(reg, best_g)}, before {regressions_ok(reg, old)}")
-    print("  held, the gate before (2 shared rare terms and half the message's): "
-          + json.dumps({k: round(v, 3) for k, v in score(held[0], held[1], old).items()}))
+    if g is None:
+        print("no gate passes the regression cases with the tuning half silent")
+        return 1
+    print(f"chosen gate: cover {g[0]}, icover {g[1]}, dense {g[2]}; in p4.py: cover {cli.FALLBACK_COVER}, icover "
+          f"{cli.FALLBACK_ICOVER}, dense {cli.FALLBACK_DENSE}")
+    print("  tuning  " + json.dumps({k: round(v, 3) for k, v in score(tune[0], tune[1], g).items()}))
+    report("chosen", data, reg, g)
+    report("in p4.py", data, reg, (cli.FALLBACK_COVER, cli.FALLBACK_ICOVER, cli.FALLBACK_DENSE))
     return 0
 
 

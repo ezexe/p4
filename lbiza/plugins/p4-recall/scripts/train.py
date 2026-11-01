@@ -131,6 +131,9 @@ def sub_corpus(idx, files):
         for j in range(0, len(p), 2):
             if p[j] in want:
                 tf[p[j]][t] = p[j + 1]
+    for i, htf in idx.get("_held", {}).items():
+        if i in want:
+            tf[i] = dict(htf)
     df = {}
     for i in ids:
         for t in tf[i]:
@@ -139,6 +142,20 @@ def sub_corpus(idx, files):
     out = {"ids": ids, "idf": {t: ranker.idf_of(c, n) for t, c in df.items()},
            "avgdl": sum(docs[i]["dl"] for i in ids) / max(1, n), "tf": tf}
     idx[key] = out
+    return out
+
+
+def with_held(idx, p4):
+    """The index with the store's held entries (store.held_docs: freed, spent, expired) appended after its docs, for
+    pool tasks alone: they carry no postings, so BM25 over the index never draws them, and sub_corpus takes their
+    term frequencies from `_held`. The caller's index is left as it was."""
+    held = st.held_docs(p4)
+    if not held:
+        return idx
+    out = {k: v for k, v in idx.items() if not k.startswith("_sub:")}
+    base = len(idx["docs"])
+    out["docs"] = list(idx["docs"]) + held
+    out["_held"] = {base + k: d["_tf"] for k, d in enumerate(held)}
     return out
 
 
@@ -153,6 +170,8 @@ def build_sets(p4, idx=None, sources=None, max_tasks=MAX_TASKS):
     rows = lb.training_labels(p4, idx)
     if sources:
         rows = [r for r in rows if r["source"] in sources]
+    if any(r["source"] == "pool" for r in rows):
+        idx = with_held(idx, p4)
     by_task = {}
     for r in rows:
         by_task.setdefault(r["task"], []).append(r)

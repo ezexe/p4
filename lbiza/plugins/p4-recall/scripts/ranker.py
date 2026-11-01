@@ -60,6 +60,31 @@ def idf_table(docs):
     return {t: idf_of(c, n) for t, c in df.items()}, n
 
 
+SUFFIXES = ("ings", "ing", "ied", "ies", "ed", "es", "s")
+
+
+def stem(t):
+    """A crude stem, enough to meet `commits` with `committed`: one suffix off, a doubled last consonant undone."""
+    if not t.isalpha():
+        return t
+    for suf in SUFFIXES:
+        if t.endswith(suf) and len(t) - len(suf) >= 4:
+            t = t[:-len(suf)]
+            break
+    if len(t) > 4 and t[-1] == t[-2] and t[-1] not in "aeiouls":
+        t = t[:-1]
+    return t
+
+
+def stem_table(words):
+    """{stem: [words]} for the stems more than one word shares (a word alone has no other form to offer)."""
+    m = {}
+    for w in words:
+        if w.isalpha():
+            m.setdefault(stem(w), []).append(w)
+    return {k: v for k, v in m.items() if len(v) > 1}
+
+
 def idf_of(df, n):
     return math.log(1 + (n - df + 0.5) / (df + 0.5))
 

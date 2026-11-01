@@ -38,22 +38,21 @@ PER_FILE = 2
 TEXT_CHARS = 160
 HISTORY_CHARS = 120
 CANDIDATES = 200
-MIN_RARE = 2                  # without a trained ranker a line must share this many of the message's terms...
-# ...and those shared terms must carry this much idf between them, cover this share of the message's content
-# terms (or at least FALLBACK_ABS of them), and be dense enough in the entry. Chosen on a held-out split (test_query.FallbackTuning, the report in
-# scripts/tune_fallback.py): the pools and history labels of AudioPlugin-p4 and ap-p4_mac as the lines that should
-# print, the suite's general prompts as the messages that must stay silent.
-FALLBACK_IDF = 0.0            # the shared words' idf summed (the tuning found no floor that kept the cases below)
-FALLBACK_TERM_IDF = 0.0       # a shared word counts only at this idf or above
-FALLBACK_COVER = 0.5          # half the message's content words...
-FALLBACK_ABS = 6              # ...or six of them
+MIN_RARE = 2                  # without a trained ranker a line must share this many of the message's words...
+# ...cover this share of the message's words (every word not common and not a number, counted even when the store
+# has never seen it, so a message about something else covers little), cover this share of their idf (a word the
+# store lacks weighs the most a word can), and be dense enough in the entry. Chosen 2026-11-01 by tune_fallback.py
+# on a held-out split (the pools and history labels of AudioPlugin-p4 and ap-p4_mac should print; the suite's
+# general prompts must stay silent), with the regression cases of test_query.Regressions as a constraint. Before
+# (half the store-known words or six of them): suite prompts silent 84% on ap-p4_mac and 89% on AudioPlugin-p4,
+# held-out F1 0.065, a right line for 23% of held-out tasks. After: silent 100% on both, held-out F1 0.079, a right
+# line for 20% (tune_fallback.py prints the numbers).
+FALLBACK_COVER = 0.75         # shared words over the message's words
+FALLBACK_ICOVER = 0.65        # their idf over the message's idf
 FALLBACK_DENSE = 0.35         # shared words per square root of the entry's length: a long entry needs more of them
 # lines in the order of how many of the message's words they share, BM25 within a tie; a same-minute ruling stands in
-# for its correction or retraction (standing_first). Chosen 2026-11-01 by tune_fallback.py over ap-p4_mac and
-# AudioPlugin-p4 with the regression cases of test_query.Regressions as a constraint: held-out F1 0.072 (before
-# 0.077), tasks with a right line 25% (before 21%), suite prompts that printed 18% (before 24%).
+# for its correction or retraction (standing_first).
 VARIANT_WEIGHT = 0.5          # another form of a message's word (commits / committed / commit) counts half
-SUFFIXES = ("ings", "ing", "ied", "ies", "ed", "es", "s")
 EXPAND_WEIGHT = 0.5
 STUBS = ("teacher",)
 
@@ -112,28 +111,18 @@ def dictionary_hits(idx, tok, terms):
     return out
 
 
-def stem(t):
-    """A crude stem, enough to meet `commits` with `committed`: one suffix off, a doubled last consonant undone."""
-    if not t.isalpha():
-        return t
-    for suf in SUFFIXES:
-        if t.endswith(suf) and len(t) - len(suf) >= 4:
-            t = t[:-len(suf)]
-            break
-    if len(t) > 4 and t[-1] == t[-2] and t[-1] not in "aeiouls":
-        t = t[:-1]
-    return t
+stem = ranker.stem
 
 
 def variants(idx, t):
-    """The index's other forms of a word (same stem), built once per loaded index."""
-    m = idx.get("_stems")
+    """The index's other forms of a word (same stem): from the index's `stems` table (built with it), or built once
+    per loaded index from the postings when the index has none."""
+    m = idx.get("stems")
     if m is None:
-        m = {}
-        for w in idx["post"]:
-            if w.isalpha():
-                m.setdefault(stem(w), []).append(w)
-        idx["_stems"] = m
+        m = idx.get("_stems")
+        if m is None:
+            m = ranker.stem_table(idx["post"])
+            idx["_stems"] = m
     return [v for v in m.get(stem(t), []) if v != t]
 
 
@@ -147,6 +136,7 @@ def content_terms(idx, terms):
 def bm25_scores(idx, terms, weights):
     n, avgdl = idx["n"], idx["avgdl"] or 1.0
     post, docs = idx["post"], idx["docs"]
+    dls = idx.get("dl") or [d["dl"] for d in docs]
     scores = {}
     k1, b = 1.2, 0.75
     for t in terms:
@@ -157,7 +147,7 @@ def bm25_scores(idx, terms, weights):
         w = weights.get(t, 1.0)
         for j in range(0, len(p), 2):
             i, f = p[j], p[j + 1]
-            scores[i] = scores.get(i, 0.0) + w * idf * f * (k1 + 1) / (f + k1 * (1 - b + b * docs[i]["dl"] / avgdl))
+            scores[i] = scores.get(i, 0.0) + w * idf * f * (k1 + 1) / (f + k1 * (1 - b + b * dls[i] / avgdl))
     return scores
 
 
@@ -178,12 +168,10 @@ def entry_line(d):
 
 def superseded_ids(idx, now):
     """Facts a newer fact supersedes, for a message dated after the newer one (1a): never printed."""
-    out = set()
-    for d in idx["docs"]:
-        old = d.get("supersedes")
-        if old and (not d.get("time") or not now or d["time"][:16] <= now[:16]):
-            out.add(old)
-    return out
+    sup = idx.get("sup")
+    if sup is None:
+        sup = [[d.get("time") or "", d["supersedes"]] for d in idx["docs"] if d.get("supersedes")]
+    return {old for t, old in sup if not t or not now or t[:16] <= now[:16]}
 
 
 def rank(p4, text, idx=None, model=None, k=5, now=None):
@@ -224,20 +212,25 @@ def rank(p4, text, idx=None, model=None, k=5, now=None):
     return [docs[cand[j]]["id"] for j in order[:k]]
 
 
-def fallback_order(idx, terms, weights, points, gone, min_shared=None, min_idf=None, cover=None, abs_n=None,
-                   term_idf=None, dense=None):
+def message_words(terms):
+    """The message's words a line must account for: not common, not bare numbers, whether or not the store has them."""
+    return [t for t in terms if t not in st.COMMON and not t.isdigit()]
+
+
+def fallback_order(idx, terms, weights, points, gone, min_shared=None, cover=None, icover=None, dense=None,
+                   with_stats=False):
     """The no-ranker road (4.5: a fresh repo): BM25 over the message's words, their other forms at half weight and
-    the dictionary's expansions; a line prints when it shares at least `min_shared` of the message's content words
-    (a word or another form of it), those words carry `min_idf` idf between them, and they cover `cover` of the
-    message's content words or number at least `abs_n`. An entry a dictionary hit points at needs no more."""
+    the dictionary's expansions; a line prints when it shares at least `min_shared` of the message's words (a word
+    or another form of it), and those cover `cover` of the message's words and `icover` of their idf, densely
+    enough in the entry (`dense`). An entry a dictionary hit points at needs no more. `with_stats` returns
+    [(doc, shared, cover, icover, density)] for every candidate, ungated (tune_fallback.py)."""
     min_shared = MIN_RARE if min_shared is None else min_shared
-    min_idf = FALLBACK_IDF if min_idf is None else min_idf
     cover = FALLBACK_COVER if cover is None else cover
-    abs_n = FALLBACK_ABS if abs_n is None else abs_n
-    term_idf = FALLBACK_TERM_IDF if term_idf is None else term_idf
+    icover = FALLBACK_ICOVER if icover is None else icover
     dense = FALLBACK_DENSE if dense is None else dense
     docs, n = idx["docs"], idx["n"]
     q = content_terms(idx, terms)
+    words = message_words(terms)
     forms = {t: [t] + variants(idx, t) for t in q}
     w = dict(weights)
     for t in q:
@@ -249,22 +242,28 @@ def fallback_order(idx, terms, weights, points, gone, min_shared=None, min_idf=N
     cand = [i for i in sorted(scores, key=lambda i: (-scores[i], i)) if docs[i]["id"] not in gone][:CANDIDATES]
     idf = {v: ranker.idf_of(len(st.postings(idx, v) or []) // 2, n) for t in q for v in forms[t]
            if st.postings(idx, v)}
-    out = []
+    unseen = ranker.idf_of(0, n)
+    widf = {t: max(idf.get(v, 0.0) for v in forms[t]) if t in forms else unseen for t in words}
+    total = sum(widf.values()) or 1.0
+    out, stats = [], []
     for i in cand:
         d = docs[i]
+        toks = set(d["toks"].split())
+        got = [t for t in q if any(v in toks for v in forms[t])]
+        c = len(got) / max(1, len(words))
+        ic = sum(widf.get(t, 0.0) for t in got) / total
+        dn = len(got) / max(1.0, d["dl"]) ** 0.5
+        if with_stats:
+            stats.append((i, len(got), c, ic, dn))
+            continue
         if d["id"] in points:
             out.append((i, len(q) + 1))          # an entry the dictionary points at needs no more
             continue
-        toks = set(d["toks"].split())
-        got = [max(idf.get(v, 0.0) for v in forms[t] if v in toks) for t in q if any(v in toks for v in forms[t])]
-        got = [x for x in got if x >= term_idf]
-        if len(got) < min_shared or sum(got) < min_idf:
-            continue
-        if len(got) / max(1, len(q)) < cover and len(got) < abs_n:
-            continue
-        if len(got) / max(1.0, d["dl"]) ** 0.5 < dense:
+        if len(got) < min_shared or c < cover or ic < icover or dn < dense:
             continue
         out.append((i, len(got)))
+    if with_stats:
+        return stats
     out.sort(key=lambda x: -x[1])          # stable: BM25's order within a tie
     return standing_first(idx, [i for i, _ in out])
 
@@ -272,13 +271,9 @@ def fallback_order(idx, terms, weights, points, gone, min_shared=None, min_idf=N
 def standing_first(idx, order):
     """A correction or retraction written in the same minute as a ruling is the reading that ruling settled: the
     ruling, the standing form, takes its place in the order (once), so one fact is not printed three ways."""
-    rules = idx.get("_rule_at")
+    rules = idx.get("rule_at")
     if rules is None:
-        rules = {}
-        for i, d in enumerate(idx["docs"]):
-            if d["file"] == "rules.md" and d.get("time"):
-                rules.setdefault(d["time"][:16], []).append(i)
-        idx["_rule_at"] = rules
+        rules = idx["rule_at"] = st.rule_minutes(idx["docs"])
     out, seen = [], set()
     for i in order:
         d = idx["docs"][i]

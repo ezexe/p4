@@ -128,6 +128,27 @@ class Rounds(unittest.TestCase):
         os.utime(os.path.join(self.p4, "models", "eval.tsv"), (old, old))
         self.assertTrue(train.owed(self.p4)[0])
 
+    def test_pool_candidates_keep_held_entries(self):
+        """A pool's reader saw freed and spent entries on the old barrier and could pick one; the label stays on it
+        (migrate.import_pools) and the entry is among the pool task's candidates, though the index never holds it."""
+        path = os.path.join(self.p4, "store", "rules.md")
+        rules = [list(e.pairs) for e in st.load_file(self.p4, "rules.md")]
+        rules.append([("ruling", "the axolotl relay once kept the bandicoot gauge by hand"), ("status", "FREED"),
+                      ("time", "2026-10-02 09:00")])
+        write(path, st.render("rules.md", rules))
+        idx = st.build_index(self.p4)
+        held = next(e for e in st.load_store(self.p4)["rules.md"] if e.state == "FREED")
+        self.assertNotIn(held.id, {d["id"] for d in idx["docs"]}, "never indexed, so never recalled")
+        lb.append_tsv(lb.mpath(self.p4, lb.RAW), lb.RAW_HEAD,
+                      [{"task": "pool:t00", "entry": held.id, "label": "1", "source": "pool", "weight": "0.7",
+                        "time": "2026-10-30 12:00", "note": "picked while FREED"}])
+        sets = {s["task"]: s for s in train.build_sets(self.p4, idx=idx, sources={"pool"})}
+        s = sets["pool:t00"]
+        self.assertIn(held.id, s["cand_ids"])
+        self.assertEqual(s["ys"][s["cand_ids"].index(held.id)], 1)
+        self.assertEqual(sum(s["ys"]), s["n_pos"], "every positive drawn")
+        self.assertNotIn(held.id, {d["id"] for d in idx["docs"]}, "the caller's index is unchanged")
+
     def test_weights_by_source(self):
         self.assertEqual(train.SOURCE_WEIGHT["store+edited"], 1.0)
         self.assertEqual(train.SOURCE_WEIGHT["pool"], 0.7)
@@ -202,6 +223,9 @@ class AudioPluginFloor(unittest.TestCase):
             ev = train.evaluate(train.build_sets(out, sources={"pool"}))
             print(f"\nAudioPlugin-p4 imported pools: {train.fmt(ev)}")
             self.assertEqual(ev["n"], 24)
+            labs = [r for r in lb.read_tsv(lb.mpath(out, lb.RAW)) if r["source"] == "pool"]
+            self.assertEqual(len(labs), 274, "pick_model.py pairs: 274 of 280 steering lines matched")
+            self.assertEqual(sum(1 for r in labs if r["task"] == "pool:a3ac5de6"), 1, "1/4 picks, as pick_model")
             self.assertGreater(ev["r-precision"], ev["baseline"], "above word overlap")
             self.assertGreaterEqual(ev["r-precision"], train.FIRST_FLOOR)
 

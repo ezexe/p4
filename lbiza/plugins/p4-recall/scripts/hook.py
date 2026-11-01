@@ -38,14 +38,13 @@ The output shapes, from https://code.claude.com/docs/en/hooks (read 2026-11-01):
 - `systemMessage` (a common JSON field) is shown to the user; the 10,000-character cap applies per string.
 """
 
-import contextlib
-import hashlib
-import io
 import json
 import os
-import subprocess
 import sys
 import time
+
+# subprocess, hashlib, contextlib and io are imported where they are used: the recall hook runs on every message
+# and its whole budget is 300 ms (fresh-marketplace.md 4.5)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -91,10 +90,12 @@ def now():
 
 
 def sha8(s):
+    import hashlib
     return hashlib.sha1((s or "").encode("utf-8")).hexdigest()[:8]
 
 
 def git(*args, cwd, timeout=10):
+    import subprocess
     return subprocess.run(["git"] + list(args), cwd=cwd, capture_output=True, text=True, timeout=timeout)
 
 
@@ -103,6 +104,7 @@ def git(*args, cwd, timeout=10):
 def init_layout(project):
     """Create .claude/p4/ with its folders, .gitignore, config and git repository once; add its line to the
     project's .git/info/exclude. Returns the p4 path."""
+    import subprocess
     p4 = os.path.join(project, ".claude", "p4")
     for sub in ("store", "store/messages", "memory", "scratchpad", "src", "models", "archive"):
         os.makedirs(os.path.join(p4, sub), exist_ok=True)
@@ -125,6 +127,7 @@ def init_layout(project):
 
 def exclude_line(project):
     """The one line `.claude/p4/` in the project's info/exclude (a worktree's common git dir), added once."""
+    import subprocess
     try:
         r = git("rev-parse", "--git-path", "info/exclude", cwd=project)
     except (OSError, subprocess.SubprocessError):
@@ -148,6 +151,7 @@ def exclude_line(project):
 def refresh_index(p4, project, deadline_s=REPO_DEADLINE_S):
     """The repository's entries brought up to date (incrementally, within the deadline), then the index rebuilt
     when any source is newer."""
+    import subprocess
     import repo
     import store as st
     if project and repo.is_repo(project):
@@ -382,6 +386,8 @@ def h_subagent_stop(payload):
 
 
 def h_train(payload):
+    import contextlib
+    import io
     import train
     p4 = ready(payload)
     if not p4:

@@ -201,6 +201,58 @@ class Recall(Base):
         self.assertEqual(o["systemMessage"].count("\n"), 0)
 
 
+@unittest.skipUnless(__import__("test_store").fixture("AudioPlugin-p4"), "the AudioPlugin-p4 clone is not here")
+class RecallLatency(unittest.TestCase):
+    """4.5's budget: the recall hook, as the harness runs it (sh run-hook.sh, a new interpreter), answers within
+    300 ms on AudioPlugin-p4 (5,000 entries) when the index is fresh, as it is after the Stop hook's rebuild. Measured
+    2026-11-01 under a load average near 50: 0.41 s before (min of 9), 0.27 s after; the best of 5 is asserted, so
+    another process's burst does not fail it."""
+
+    @classmethod
+    def setUpClass(cls):
+        import migrate
+        from test_store import NOW, fixture
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.proj = os.path.join(cls.tmp.name, "proj")
+        os.makedirs(cls.proj)
+        git(cls.proj, "init", "-q")
+        cls.p4 = os.path.join(cls.proj, ".claude", "p4")
+        migrate.run(fixture("AudioPlugin-p4"), cls.p4, apply=True, now=NOW,
+                    report_path=os.path.join(cls.tmp.name, "report.md"))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_warm_recall_within_300ms(self):
+        import time
+        text = "the CEF build keeps failing on the proprietary codecs patch, how do I rebuild incrementally?"
+        times = []
+        for _ in range(5):
+            st.build_index(self.p4)               # what the Stop hook leaves: a fresh index and its cache
+            self.assertTrue(os.path.exists(st.cache_path(self.p4)))
+            t = time.perf_counter()
+            r = run_hook("recall", {"hook_event_name": "UserPromptSubmit", "session_id": SESSION, "prompt": text,
+                                    "cwd": self.proj}, self.proj)
+            times.append(time.perf_counter() - t)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertNotIn("systemMessage", r.stdout)
+        self.assertLess(min(times), 0.300, f"recall hook took {[round(x, 3) for x in times]} s")
+
+    def test_cache_follows_the_index(self):
+        """The cache is keyed on index.json: an index rebuilt with other entries is never read from a stale cache."""
+        idx = st.build_index(self.p4)
+        n = idx["n"]
+        got = st.load_index(self.p4)
+        self.assertEqual(len(got["docs"]), n)
+        self.assertEqual(got["docs"][n - 1]["id"], idx["docs"][n - 1]["id"])
+        with open(st.cache_path(self.p4), "r+b") as f:     # a corrupt cache falls back to the JSON
+            f.write(b"\0\0\0\0")
+        self.assertEqual(len(st.load_index(self.p4)["docs"]), n)
+        os.utime(st.index_path(self.p4), ns=(1, 1))        # a cache keyed on another index.json is not used
+        self.assertEqual(len(st.load_index(self.p4)["docs"]), n)
+
+
 class Agent(Base):
     INPUT = {"prompt": "check whether the quokka harness runs the zebrafish plotter golden images on every push",
              "description": "Check the harness", "subagent_type": "Explore", "model": "haiku"}
@@ -300,7 +352,7 @@ class Close(Base):
 
 class SubagentStop(Base):
     def test_usage_for_the_subagent(self):
-        inp = dict(Agent.INPUT, prompt="look at the quokka harness setup")
+        inp = dict(Agent.INPUT, prompt="look at the quokka harness")
         o = self.out(run_hook("agent", {"tool_name": "Agent", "tool_input": inp, "cwd": self.proj}, self.proj))
         prompt = o["hookSpecificOutput"]["updatedInput"]["prompt"]
         at = transcript(os.path.join(self.tmp.name, "agent-a1.jsonl"), prompt,

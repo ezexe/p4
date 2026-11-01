@@ -688,10 +688,8 @@ def archived_entries(path, new_rel):
 def import_pools(plan, files):
     """(tasks rows, label rows, stats) for every labelled pool and audit, each pick resolved to an entry id."""
     look = pick_lookup(plan, files)
-    ms = st.masks(files.get("retractions.md", []))
-    by_id = {e.id: e for ents in files.values() for e in ents}
     tasks, labels = [], []
-    stats = {"pools": 0, "labelled": 0, "audits": 0, "picks": 0, "resolved": 0, "to_archive": 0, "to_retraction": 0,
+    stats = {"pools": 0, "labelled": 0, "audits": 0, "picks": 0, "resolved": 0, "to_archive": 0, "to_freed": 0,
              "unresolved": []}
     sources = [parse_pool(os.path.join(plan.p4, r)) for r in plan.pools if r.count("/") == 3]
     stats["pools"] = len(sources)
@@ -718,11 +716,9 @@ def import_pools(plan, files):
                 if dist.startswith(head[:40]):
                     got = (eid, e)
                     break
-            if not got:
-                same = look.get((f, tm[:16]), [])
-                if len(same) == 1:
-                    got = (same[0][1], same[0][2])
-                    stats["by_time"] = stats.get("by_time", 0) + 1
+            # pick_model.build_pairs matched a pick by file, time and head prefix alone: a pick whose head the reader
+            # wrote in its own words was never a label, so it is listed, not resolved by its time (a guess that gave
+            # pool a3ac5de6 three labels the old ranker never had)
             if not got:
                 stats["unresolved"].append(f"{os.path.relpath(p['path'], plan.p4)}: [{f} {tm}] {head[:80]}")
                 continue
@@ -731,13 +727,12 @@ def import_pools(plan, files):
             if e is None:
                 stats["to_archive"] += 1
                 note = (note + " " if note else "") + "archived (not indexed)"
-            elif e.state == "FREED":
-                hit = st.mask_hit(e.value, e.fields, ms) if not (e.fields.get("status") or "").upper().startswith(
-                    "FREED") else None
-                if hit and hit[0] in by_id:
-                    note = (note + " " if note else "") + f"freed pick {eid}"
-                    eid = hit[0]
-                    stats["to_retraction"] += 1
+            elif e.state != "LIVE":
+                # the old barrier listed a freed or spent entry with its state, and the pool's reader picked it: the
+                # label stays on that entry (train.py keeps such entries among a pool's candidates), never moved to
+                # the retraction, which is dated after the pool and so could never be drawn for it
+                stats["to_freed"] += 1
+                note = (note + " " if note else "") + f"picked while {e.state}"
             stats["resolved"] += 1
             if eid in done:
                 continue
@@ -1093,8 +1088,8 @@ def run(p4, out=None, apply=False, now=None, project=None, report_path=None):
           f"{pstats['taught_out']} left out for a teacher's audit; {pstats['audits']} audits")
     check("pools: picks resolved", True,
           f"{pstats['resolved']} of {pstats['picks']} picks resolved ({pstats['to_archive']} to archived entries, "
-          f"{pstats['to_retraction']} freed picks to their retraction, {pstats.get('by_time', 0)} by file and time alone "
-          f"where the pool's head was the reader's own words); {len(pstats['unresolved'])} unresolved, listed")
+          f"{pstats['to_freed']} picked while freed or spent, kept on that entry; matched by file, time and head as "
+          f"pick_model.build_pairs did); {len(pstats['unresolved'])} unresolved, listed")
     sig_total = sum(vstats["signals"][k] for k in ("correction", "retraction", "missed", "repeat"))
     old_sig = oc["correction"] + oc["retraction"] + oc["missed"] + oc["repeat"]
     check("dictionary: every signal an entry or listed", sig_total == old_sig,

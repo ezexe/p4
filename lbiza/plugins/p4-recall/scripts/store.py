@@ -36,7 +36,7 @@ import ranker  # noqa: E402
 STORE_FILES = ("rules.md", "corrections.md", "retractions.md", "facts.md")
 VOCABULARY = "vocabulary.md"
 MESSAGES = "messages"
-INDEX_VERSION = 5
+INDEX_VERSION = 6
 MASK_MIN = 24
 SHORT_WORDS = 5
 KNOWN_SHORT_MIN = 2
@@ -495,29 +495,33 @@ def index_path(p4):
 
 
 def sources_signature(p4):
-    """(count, newest mtime_ns) over every file and directory under store/, memory/ and src/."""
+    """(count, newest mtime_ns) over every file and directory under store/, memory/ and src/ (os.scandir: one stat
+    per entry, no path joins, the hot path of every message's staleness check)."""
     count, newest = 0, 0
     try:
         st_ = os.stat(os.path.join(p4, "models", "repo.json"))     # the repository's entries (repo.py)
         count, newest = 1, st_.st_mtime_ns
     except OSError:
         pass
-    for sub in ("store", "memory", "src"):
-        top = os.path.join(p4, sub)
-        if not os.path.isdir(top):
+    stack = [os.path.join(p4, sub) for sub in ("store", "memory", "src")]
+    while stack:
+        top = stack.pop()
+        try:
+            newest = max(newest, os.stat(top).st_mtime_ns)
+            it = os.scandir(top)
+        except OSError:
             continue
-        for root, dirs, files in os.walk(top):
-            try:
-                newest = max(newest, os.stat(root).st_mtime_ns)
-            except OSError:
-                pass
-            for name in files:
+        with it:
+            for ent in it:
                 try:
-                    st = os.stat(os.path.join(root, name))
+                    if ent.is_dir(follow_symlinks=False):
+                        stack.append(ent.path)
+                        continue
+                    m = ent.stat().st_mtime_ns
                 except OSError:
                     continue
                 count += 1
-                newest = max(newest, st.st_mtime_ns)
+                newest = max(newest, m)
     return count, newest
 
 
@@ -542,6 +546,32 @@ def display_path(e):
     return (f"store/{e.file}" if not e.file.startswith(("memory/", "src/")) else e.file)
 
 
+def make_doc(e, fname, kind):
+    """One index doc for an entry, its term frequencies under `_tf` (turned into postings by build_index)."""
+    toks = ranker.tokens(entry_text(e))
+    head = ranker.tokens(e.value[:400])
+    tf = {}
+    for t in toks:
+        tf[t] = tf.get(t, 0) + 1
+    return {"id": e.id, "path": display_path(e), "line": e.line, "file": fname, "kind": kind,
+            "time": e.time, "state": e.state, "show": show_text(fname, e)[:240],
+            "plain": bool(e.fields.get("plain", "").strip()), "dl": len(toks), "_tf": tf,
+            "toks": " ".join(tf), "head": " ".join(dict.fromkeys(head)),
+            **({"match": collapse(e.fields.get("match", ""))[:300]} if fname == "corrections.md" else {}),
+            **({"supersedes": e.fields["supersedes"].strip()} if e.fields.get("supersedes", "").strip()
+               else {}),
+            **({"fkind": feature_kind(fname, e)} if feature_kind(fname, e) != kind else {})}
+
+
+def held_docs(p4, files=None):
+    """The store entries the index leaves out (FREED, SPENT, EXPIRED) as docs with their `_tf`: never recalled, but
+    an old pool's reader saw them on the barrier with their state and could pick one, so train.py keeps them among
+    a pool task's candidates, as pick_model.py's barrier rows did."""
+    files = files if files is not None else load_store(p4)
+    return [make_doc(e, fname, kind_of(fname, e)) for fname in STORE_FILES for e in files.get(fname, [])
+            if e.state != "LIVE"]
+
+
 def build_index(p4, write=True):
     """The index recall reads: every LIVE entry of the store files, every completed message row, every memory
     section and every src head, tokenized, with BM25's postings; plus the short-turn table, each session's rows
@@ -551,19 +581,7 @@ def build_index(p4, write=True):
     session_rows, short = {}, {}
 
     def add(e, fname, kind):
-        toks = ranker.tokens(entry_text(e))
-        head = ranker.tokens(e.value[:400])
-        tf = {}
-        for t in toks:
-            tf[t] = tf.get(t, 0) + 1
-        docs.append({"id": e.id, "path": display_path(e), "line": e.line, "file": fname, "kind": kind,
-                     "time": e.time, "state": e.state, "show": show_text(fname, e)[:240],
-                     "plain": bool(e.fields.get("plain", "").strip()), "dl": len(toks), "_tf": tf,
-                     "toks": " ".join(tf), "head": " ".join(dict.fromkeys(head)),
-                     **({"match": collapse(e.fields.get("match", ""))[:300]} if fname == "corrections.md" else {}),
-                     **({"supersedes": e.fields["supersedes"].strip()} if e.fields.get("supersedes", "").strip()
-                        else {}),
-                     **({"fkind": feature_kind(fname, e)} if feature_kind(fname, e) != kind else {})})
+        docs.append(make_doc(e, fname, kind))
 
     for fname in STORE_FILES:
         for e in files.get(fname, []):
@@ -620,7 +638,11 @@ def build_index(p4, write=True):
     sig = sources_signature(p4)
     out = {"version": INDEX_VERSION, "sources": list(sig), "n": len(docs),
            "avgdl": (total / len(docs)) if docs else 1.0, "excluded": excluded, "docs": docs, "post": post,
-           "short": short, "sessions": session_rows, "vocab": vocab}
+           "short": short, "sessions": session_rows, "vocab": vocab, "stems": ranker.stem_table(post),
+           # what a query reads of every doc, kept apart so a query never decodes all of them (load_index's Docs)
+           "dl": [d["dl"] for d in docs],
+           "sup": [[d.get("time") or "", d["supersedes"]] for d in docs if d.get("supersedes")],
+           "rule_at": rule_minutes(docs)}
     if write:
         # on disk the docs are rows and the postings strings, decoded only for a query's terms: half the load time
         disk = dict(out)
@@ -629,6 +651,7 @@ def build_index(p4, write=True):
         disk["post"] = {t: " ".join(map(str, v)) for t, v in post.items()}
         text = json.dumps(disk, separators=(",", ":"), ensure_ascii=False)
         ranker.write_atomic(index_path(p4), text)
+        write_cache(p4, disk)          # the next message's load is warm (load_index)
     return out
 
 
@@ -648,13 +671,84 @@ def repo_docs(p4):
         return []
 
 
+def cache_path(p4):
+    # named under the seeded .gitignore's `models/*.tmp`, so a store seeded before the cache existed ignores it too
+    return os.path.join(p4, "models", "index-cache.tmp")
+
+
 def load_index(p4):
-    with open(index_path(p4), encoding="utf-8") as f:
-        idx = json.load(f)
+    """The index as build_index wrote it, its docs as dicts. A hook is a new process every message, so the decoded
+    index is kept beside the JSON in models/index-cache.tmp (marshal: about a third of json.load's time on
+    AudioPlugin-p4), keyed on the JSON's mtime and size; a cache that does not match, or does not read, is rebuilt
+    from the JSON and written again."""
+    import marshal
+    path = index_path(p4)
+    s = os.stat(path)
+    key = [s.st_mtime_ns, s.st_size, INDEX_VERSION]
+    idx = None
+    try:
+        with open(cache_path(p4), "rb") as f:
+            got = marshal.loads(f.read())
+        if isinstance(got, dict) and got.get("_key") == key:
+            idx = got
+    except (OSError, EOFError, ValueError, TypeError):
+        idx = None
+    if idx is None:
+        with open(path, encoding="utf-8") as f:
+            idx = json.load(f)
+        write_cache(p4, idx)
+    idx.pop("_key", None)
     fields = idx.pop("doc_fields", None)
     if fields:
-        idx["docs"] = [dict(zip(fields, row)) for row in idx["docs"]]
+        idx["docs"] = Docs(idx["docs"], fields)
     return idx
+
+
+def write_cache(p4, disk):
+    """models/index-cache.tmp: the on-disk index (rows, posting strings) in marshal, keyed on index.json's mtime
+    and size; best effort."""
+    import marshal
+    try:
+        s = os.stat(index_path(p4))
+        tmp = cache_path(p4) + f".{os.getpid()}.tmp"
+        with open(tmp, "wb") as f:
+            f.write(marshal.dumps({**disk, "_key": [s.st_mtime_ns, s.st_size, INDEX_VERSION]}))
+        os.replace(tmp, cache_path(p4))
+    except (OSError, ValueError):
+        pass
+
+
+class Docs:
+    """The index's docs, each decoded from its on-disk row into a dict the first time it is read: a query reads a
+    few hundred of AudioPlugin-p4's 5,000, so the rest are never built."""
+    __slots__ = ("rows", "fields", "got")
+
+    def __init__(self, rows, fields):
+        self.rows, self.fields, self.got = rows, tuple(fields), [None] * len(rows)
+
+    def __len__(self):
+        return len(self.rows)
+
+    def __getitem__(self, i):
+        if isinstance(i, slice):
+            return [self[k] for k in range(*i.indices(len(self.rows)))]
+        d = self.got[i]
+        if d is None:
+            d = self.got[i] = dict(zip(self.fields, self.rows[i]))
+        return d
+
+    def __iter__(self):
+        for i in range(len(self.rows)):
+            yield self[i]
+
+
+def rule_minutes(docs):
+    """{minute: [doc index]} of the rulings, by the minute they were written (p4.standing_first)."""
+    out = {}
+    for i, d in enumerate(docs):
+        if d["file"] == "rules.md" and d.get("time"):
+            out.setdefault(d["time"][:16], []).append(i)
+    return out
 
 
 def postings(idx, term):

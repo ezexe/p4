@@ -291,17 +291,23 @@ def grade(task, answer, client=None, judge_model=None, fake=False):
     return ok, why, usd
 
 
-def check_graders(tasks, fake_judge=True):
-    """Every reference must pass and every bad answer must fail: the instrument checked before the pathways."""
+def check_graders(tasks, fake_judge=True, client=None, judge_model=None, spent=None):
+    """Every reference must pass and every bad answer must fail: the instrument checked before the pathways. With a
+    `client` and `judge_model` the judged tasks go to that judge for real (`--judge-check`): the check that a cheap
+    judge grades these tasks as the references say; `spent` (a list) collects the judge's dollars."""
     bad = []
     for t in tasks:
-        ok, why, _ = grade(t, t["reference"], fake=fake_judge)
+        ok, why, usd = grade(t, t["reference"], client, judge_model, fake=fake_judge)
+        if spent is not None:
+            spent.append(usd)
         if not ok:
             bad.append(f"{t['id']}: reference fails ({why})")
         for b in t.get("bad", []):
             if t["grader"]["type"] == "judge" and fake_judge:
                 continue                       # a fake judge passes only the reference; nothing to learn here
-            ok, why, _ = grade(t, b, fake=fake_judge)
+            ok, why, usd = grade(t, b, client, judge_model, fake=fake_judge)
+            if spent is not None:
+                spent.append(usd)
             if ok:
                 bad.append(f"{t['id']}: a bad answer passes ({why})")
     return bad
@@ -314,7 +320,7 @@ class FakeClient:
     its first bad answer unless the context carries FAKE-FIX:<category> — so a context can measurably help, for the
     tests and a smoke run. Counts a token per four characters."""
 
-    FAKE_HARD = ("honesty", "judgment", "memory")
+    FAKE_HARD = ("honesty", "judgment", "memory", "short", "newer")
 
     def __init__(self, tasks):
         self.by_prompt = {t["prompt"]: t for t in tasks}
@@ -384,10 +390,31 @@ def estimate(client, model, paths, tasks, seeds=1):
     return total * seeds
 
 
+def context_dir(d, task_ids=()):
+    """({"=<pathway>": text}, {"=<pathway>": {task id: text}}) from a context directory: each `<pathway>.md` is a
+    pathway's context; each `<pathway>.<task id>.md` beside it is that pathway's context for that one task (so a
+    recall pathway carries the lines `p4.py query` printed for each task), the pathway's own file, or nothing, for
+    every other task. A per-task file names a pathway even when `<pathway>.md` is absent; a dotted name whose tail is
+    not one of `task_ids` is a pathway of its own, as before."""
+    base, per = {}, {}
+    ids = set(task_ids)
+    for f in sorted(Path(d).glob("*.md")):
+        name, _, tail = f.stem.partition(".")
+        if tail and tail in ids:
+            per.setdefault(f"={name}", {})[tail] = f.read_text(encoding="utf-8")
+        else:
+            base[f"={f.stem}"] = f.read_text(encoding="utf-8")
+    for n in per:
+        base.setdefault(n, "")
+    return base, per
+
+
 def load_tasks(path, extra=""):
-    ts = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
-    if extra and Path(extra).exists():
-        ts += [json.loads(l) for l in open(extra, encoding="utf-8") if l.strip()]
+    """The tasks of `path` (empty for an empty path) and of each comma-separated `extra` file that exists."""
+    ts = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()] if path else []
+    for x in [e for e in (extra or "").split(",") if e]:
+        if Path(x).exists():
+            ts += [json.loads(l) for l in open(x, encoding="utf-8") if l.strip()]
     return ts
 
 
@@ -399,11 +426,16 @@ def run(args):
         tasks = [t for t in tasks if t["category"] in args.categories.split(",")]
     us = units(args.p4, skills=args.skills)
     paths = pathways(us, [p for p in args.pathways.split(",") if p], args.edits)
+    per_task = {}
     if args.context_dir:                       # a context written elsewhere, e.g. a rebuild's trial: one pathway a file
-        for f in sorted(Path(args.context_dir).glob("*.md")):
-            paths[f"={f.stem}"] = f.read_text(encoding="utf-8")
+        base, per_task = context_dir(args.context_dir, {t["id"] for t in tasks})
+        paths.update(base)
     if args.only:
         paths = {k: v for k, v in paths.items() if k in args.only.split(",")}
+
+    def ctx_of(n, t):
+        """The context pathway n gives task t: its per-task file when there is one, the pathway's own otherwise."""
+        return per_task.get(n, {}).get(t["id"], paths[n])
     client = client_for(args.fake, tasks, args.workspace)
     cache = Path(args.cache)
     cache.mkdir(parents=True, exist_ok=True)
@@ -411,13 +443,18 @@ def run(args):
     def key(name, ctx, t):
         return sha(json.dumps([args.model, args.effort, BUILTIN, ctx, t.get("history", []), t["prompt"], args.seed]))
 
-    todo = [(n, ctx, t) for n, ctx in paths.items() for t in tasks if not (cache / f"{key(n, ctx, t)}.json").exists()]
+    todo = [(n, ctx_of(n, t), t) for n in paths for t in tasks
+            if not (cache / f"{key(n, ctx_of(n, t), t)}.json").exists()]
     say(f"{args.model} seed {args.seed}: {len(paths)} pathways x {len(tasks)} tasks; {len(todo)} answers to ask "
         f"({len(paths) * len(tasks) - len(todo)} on the cache)")
     if todo and not args.fake:
         names = {n for n, _, _ in todo}
         est = estimate(client, args.model, {n: c for n, c in paths.items() if n in names},
                        [t for t in tasks if any(t is x for _, _, x in todo)] or tasks)
+        # a per-task context is sent once, uncached: its tokens at the input price, over what the estimate counted
+        p_in = PRICES.get(args.model, (10.0, 50.0, 1.0))[0]
+        extra_chars = sum(len(c) for n, c, t in todo if t["id"] in per_task.get(n, {}))
+        est += extra_chars / 4 * p_in / 1e6
         judged = sum(1 for _, _, t in todo if t["grader"]["type"] == "judge")
         est_judge = judged * judge_cost(args.judge)
         say(f"estimated ${est + est_judge:.2f}: ${est:.2f} for the answers (thinking counted as {OUT_EST:,} output "
@@ -472,8 +509,10 @@ def run(args):
                      for k, u in us.items()},
            "pathways": {}, "unanswered": len(failed)}
     for n, ctx in paths.items():
-        recs = [json.loads((cache / f"{key(n, ctx, t)}.json").read_text(encoding="utf-8")) for t in tasks
-                if (cache / f"{key(n, ctx, t)}.json").exists()]
+        recs = [json.loads((cache / f"{key(n, ctx_of(n, t), t)}.json").read_text(encoding="utf-8")) for t in tasks
+                if (cache / f"{key(n, ctx_of(n, t), t)}.json").exists()]
+        mine = per_task.get(n, {})
+        lines = [len([l for l in ctx_of(n, t).splitlines() if l.startswith("- ")]) for t in tasks]
         cats = {}
         for r in recs:
             cats.setdefault(r["category"], []).append(r["passed"])
@@ -483,6 +522,9 @@ def run(args):
         jargon = [r["task"] for r in plain if JARGON.search(r["answer"])]
         out["pathways"][n] = {
             "context_chars": len(ctx), "answered": len(recs), "of": len(tasks),
+            "per_task_contexts": len([t for t in tasks if t["id"] in mine]),
+            "lines_mean": round(sum(lines) / max(1, len(lines)), 3),
+            "silent_tasks": sum(1 for t in tasks if not ctx_of(n, t).strip()),
             "accuracy": round(sum(gen) / len(gen), 4) if gen else None,
             "by_category": {c: round(sum(v) / len(v), 4) for c, v in sorted(cats.items())},
             "simple_output_tokens": round(sum(simple) / len(simple), 1) if simple else None,
@@ -502,15 +544,17 @@ def run(args):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--p4", default=".", help="the p4 repository (lbiza/plugins under it)")
-    ap.add_argument("--tasks", required=True)
-    ap.add_argument("--extra-tasks", default="", help="more tasks in the same shape, e.g. the lesson tasks a store made")
+    ap.add_argument("--tasks", required=True, help="a tasks file ('' for none: --extra-tasks alone)")
+    ap.add_argument("--extra-tasks", default="", help="more task files in the same shape, comma-separated, e.g. the "
+                    "lesson tasks a store made")
     ap.add_argument("--model", default="claude-opus-5-5")
     ap.add_argument("--effort", default="high")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--pathways", default="builtin,all,loo,solo,pad")
     ap.add_argument("--only", default="", help="keep only these pathway names (after building them)")
     ap.add_argument("--edits", default="")
-    ap.add_argument("--context-dir", default="", help="each *.md in it is one more pathway, named =<stem>")
+    ap.add_argument("--context-dir", default="", help="each <name>.md in it is one more pathway, named =<name>; a "
+                    "<name>.<task id>.md is that pathway's context for that task alone")
     ap.add_argument("--split", default="all", choices=["all", "train", "test"])
     ap.add_argument("--categories", default="")
     ap.add_argument("--skills", action="store_true")
@@ -522,6 +566,8 @@ def main(argv=None):
     ap.add_argument("--out", default="")
     ap.add_argument("--fake", action="store_true")
     ap.add_argument("--check-graders", action="store_true")
+    ap.add_argument("--judge-check", action="store_true", help="with --check-graders: grade the judged tasks' "
+                    "references and bad answers with --judge for real (--fake: offline)")
     ap.add_argument("--list-units", action="store_true")
     args = ap.parse_args(argv)
     if args.list_units:
@@ -530,10 +576,26 @@ def main(argv=None):
         return 0
     if args.check_graders:
         tasks = load_tasks(args.tasks, args.extra_tasks)
-        bad = check_graders(tasks)
+        if args.categories:
+            tasks = [t for t in tasks if t["category"] in args.categories.split(",")]
+        spent = []
+        if args.judge_check:
+            judged = [t for t in tasks if t["grader"]["type"] == "judge"]
+            est = sum(1 + len(t.get("bad", [])) for t in judged) * judge_cost(args.judge)
+            print(f"judge check: {len(judged)} judged tasks on {args.judge}, estimated ${est:.2f}")
+            if est > args.max_usd and not args.fake:
+                raise SystemExit(f"estimated ${est:.2f} is above --max-usd {args.max_usd}")
+            bad = check_graders(tasks, fake_judge=args.fake, client=client_for(args.fake, tasks, args.workspace),
+                                judge_model=args.judge, spent=spent)
+        else:
+            bad = check_graders(tasks)
         for b in bad:
             print("grader fault:", b)
-        print(f"graders: {len(tasks)} tasks, {len(bad)} faults")
+        print(f"graders: {len(tasks)} tasks, {len(bad)} faults" + (f"; judge ${sum(spent):.4f}" if spent else ""))
+        if args.out:
+            Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+            Path(args.out).write_text(json.dumps({"judge": args.judge if args.judge_check else "fake", "tasks":
+                                                  len(tasks), "faults": bad, "usd": round(sum(spent), 6)}, indent=1))
         return 1 if bad else 0
     if not (args.cache and args.out):
         ap.error("--cache and --out are required for a run")
