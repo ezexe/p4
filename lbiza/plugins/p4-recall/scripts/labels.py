@@ -655,7 +655,7 @@ def reexploration(p4, project, slug_dirs, idx=None, k=5):
             for i, t in enumerate(ts):
                 later = set()
                 for ev in evs[i:]:
-                    later |= {p for p, e in ev.items() if e["label"] in ("edited", "cited")}
+                    later |= {p for p, e in ev.items() if e["label"] in ("edited", "invoked", "cited")}
                 got = tr.exploration(t, evs[i], later)
                 if got is None:
                     continue

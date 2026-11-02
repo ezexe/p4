@@ -8,14 +8,18 @@ A transcript is JSON lines. The ones read here:
   {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id", "content"}]}}
 An assistant message is written one line per content block under the same message id; its usage is counted once.
 
-A turn runs from one owner prompt to the next. For each turn, per repository path (relative to the project):
+A turn runs from one owner prompt to the next; an owner's /<name> command line (the harness's tags, so not a
+prompt) opens a turn too, `/name args` its prompt, and a local command (after its caveat line) does not. For each turn, per repository path (relative to the project):
   edited     an Edit, Write, MultiEdit or NotebookEdit of it, or a Bash write (a redirect into it, sed -i, tee,
              cp/mv onto it)
   read       a Read of it, or a Bash read naming it (cat, head, tail, sed -n, less, wc, grep on it)
   hit        a Grep or Glob result listing it
+  invoked    its skill run by a Skill call or the owner's /<name> command: .claude/skills/<name>/SKILL.md, or
+             .claude/commands/<name>.md; `dir:name` is dir/.claude/skills/name/SKILL.md (a skill's body reaches the
+             context without a Read, so it is a use like a cite)
   cited      after it was read, its path, its distinctive file name or one of its symbols appears in the turn's reply
              text or in a later edit's input
-and the label of 5.1a's table: edited 1.0; read then cited 0.7; read and dropped -0.3; a search hit never opened -0.2.
+and the label of 5.1a's table: edited 1.0; invoked 0.7; read then cited 0.7; read and dropped -0.3; a search hit never opened -0.2.
 """
 
 import json
@@ -26,8 +30,11 @@ import shlex
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 READ_TOOLS = ("Read", "NotebookRead")
 SEARCH_TOOLS = ("Grep", "Glob")
+SKILL_TOOLS = ("Skill",)
 BASH_READ = ("cat", "head", "tail", "less", "more", "wc", "grep", "rg", "sed", "awk", "diff", "bat", "nl", "file")
-WEIGHTS = {"edited": (1, 1.0), "cited": (1, 0.7), "dropped": (0, 0.3), "unopened": (0, 0.2)}
+WEIGHTS = {"edited": (1, 1.0), "invoked": (1, 0.7), "cited": (1, 0.7), "dropped": (0, 0.3), "unopened": (0, 0.2)}
+COMMAND_RE = re.compile(r"<command-name>\s*/?([\w.:/-]+)\s*</command-name>")
+ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
 PATHISH = re.compile(r"(?:[\w.~-]+/)+[\w.-]+|[\w-]+\.[A-Za-z][\w]{0,7}")
 
 
@@ -68,6 +75,28 @@ def prompt_text(d):
     return c
 
 
+def command_text(d):
+    """The text of an owner's slash-command line, or '': a user line, not a sidechain or meta, from a human (where
+    the transcript says), whose text starts with the command tags (so prompt_text skips it as the harness's)."""
+    if d.get("type") != "user" or d.get("isSidechain") or d.get("isMeta"):
+        return ""
+    if (d.get("origin") or {}).get("kind") not in (None, "human"):
+        return ""
+    c = (d.get("message") or {}).get("content")
+    if isinstance(c, list):
+        c = "\n".join(b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text")
+    if not isinstance(c, str) or not c.lstrip().startswith(("<command-name>", "<command-message>")):
+        return ""
+    return c if COMMAND_RE.search(c) else ""
+
+
+def add_commands(turn, text):
+    """A Skill call for each /<name> command in the command line's text, as if the turn had run it."""
+    for name in COMMAND_RE.findall(text or ""):
+        turn["calls"].append({"name": "Skill", "input": {"skill": name}, "id": "", "result": "",
+                              "tokens_before": turn["tokens"], "text_index": len(turn["texts"])})
+
+
 def result_text(block):
     c = block.get("content")
     if isinstance(c, list):
@@ -83,12 +112,20 @@ def turns(path_or_lines):
     out, cur = [], None
     seen_msg = set()
     results = {}
+    caveat = False                 # the line before was a local command's caveat: the command is not a skill
     for d in lines:
         p = prompt_text(d)
-        if p is not None:
+        cmd = "" if p is not None or caveat else command_text(d)
+        if d.get("type") == "user":
+            caveat = bool(d.get("isMeta")) and "<local-command-caveat>" in json.dumps(d.get("message") or {})
+        if cmd:                    # an owner's /<name> command is a turn of its own: `/name args` its prompt
+            args = " ".join(a.strip() for a in ARGS_RE.findall(cmd) if a.strip())
+            p = " ".join(["/" + n for n in COMMAND_RE.findall(cmd)[:1]] + ([args] if args else []))
+        if p is not None or cmd:
             cur = {"prompt": p, "time": (d.get("timestamp") or "")[:19].replace("T", " "), "cwd": d.get("cwd", ""),
                    "calls": [], "texts": [], "tokens": 0, "uuid": d.get("uuid", "")}
             out.append(cur)
+            add_commands(cur, cmd)
             continue
         if cur is None:
             continue
@@ -179,6 +216,18 @@ def bash_paths(cmd, project, cwd, known):
     return reads - writes, writes
 
 
+def skill_paths(name, known):
+    """The repository paths a skill name runs: `dir:name` is dir/.claude/skills/name/SKILL.md, a bare name the
+    project's skill or legacy command. A plugin's `plugin:name` resolves to nothing here, as do user skills."""
+    if not isinstance(name, str) or not name.strip():
+        return []
+    name = name.strip().lstrip("/")
+    d, _, base = name.rpartition(":")
+    pre = d.strip("/") + "/" if d else ""
+    cand = [f"{pre}.claude/skills/{base}/SKILL.md", f"{pre}.claude/commands/{base}.md"]
+    return [p for p in cand if p in known]
+
+
 def result_paths(text, project, cwd, known):
     out = []
     for l in (text or "").splitlines():
@@ -195,15 +244,15 @@ def result_paths(text, project, cwd, known):
 # --- the labels of one turn (5.1a) -----------------------------------------------------------------------
 
 def file_events(turn, project, known, symbols=None, reply=""):
-    """{path: {"edited", "read", "hit", "cited", "first_open": call index or None, "label": edited|cited|dropped|
-    unopened}} for one turn. `known` is the set of repository paths; `symbols` {path: [symbol names]}."""
+    """{path: {"edited", "read", "hit", "cited", "first_open": call index or None, "label": edited|invoked|cited|
+    dropped|unopened}} for one turn. `known` is the set of repository paths; `symbols` {path: [symbol names]}."""
     symbols = symbols or {}
     ev = {}
     cwd = turn.get("cwd") or project
 
     def get(p):
-        return ev.setdefault(p, {"edited": False, "read": False, "hit": False, "cited": False, "first_open": None,
-                                 "read_at": None})
+        return ev.setdefault(p, {"edited": False, "read": False, "hit": False, "cited": False, "invoked": False,
+                                 "first_open": None, "read_at": None})
 
     later_inputs = []          # (call index, text) of every edit input and Bash command, to find cites after a read
     for k, c in enumerate(turn["calls"]):
@@ -225,6 +274,12 @@ def file_events(turn, project, known, symbols=None, reply=""):
                     e["first_open"] = k
                 if e["read_at"] is None:
                     e["read_at"] = k
+        elif name in SKILL_TOOLS:
+            for r in skill_paths(inp.get("skill") or inp.get("command") or "", known):
+                e = get(r)
+                e["invoked"] = True
+                if e["first_open"] is None:
+                    e["first_open"] = k
         elif name in SEARCH_TOOLS:
             for r in result_paths(c.get("result", ""), project, cwd, known):
                 get(r)["hit"] = True
@@ -254,8 +309,8 @@ def file_events(turn, project, known, symbols=None, reply=""):
         if cites(p, hay, symbols.get(p, [])):
             e["cited"] = True
     for p, e in ev.items():
-        e["label"] = ("edited" if e["edited"] else "cited" if e["cited"] else "dropped" if e["read"]
-                      else "unopened")
+        e["label"] = ("edited" if e["edited"] else "invoked" if e["invoked"] else "cited" if e["cited"]
+                      else "dropped" if e["read"] else "unopened")
     return ev
 
 
