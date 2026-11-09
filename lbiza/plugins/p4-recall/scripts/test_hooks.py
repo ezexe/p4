@@ -143,6 +143,44 @@ class Layout(Base):
         status = subprocess.run(["git", "-C", self.proj, "status", "--porcelain"], capture_output=True, text=True)
         self.assertNotIn(".claude", status.stdout, "the nested p4 repo stays out of the project's index")
 
+    def gitignore(self, text=None):
+        gi = os.path.join(self.p4, ".gitignore")
+        if text is not None:
+            write(gi, text)
+        run_hook("layout", {"source": "startup", "cwd": self.proj}, self.proj)
+        with open(gi, encoding="utf-8") as f:
+            return f.read()
+
+    def test_gitignore_missing_seeded_lines_are_appended_under_a_marker(self):
+        import hook
+        old = "# seeded once by p4-recall; your edits win\nscratchpad/.out/\nmodels/served/\nmodels/index.json\n" \
+              "models/repo.json\nmodels/*.tmp\n__pycache__/\n*.png\n*.jpg\n*.zip\n*.gz\n# mine\nbuild/\n"
+        got = self.gitignore(old)
+        self.assertTrue(got.startswith(old), "what was there is untouched and in its order")
+        tail = got[len(old):].splitlines()
+        self.assertRegex(tail[0], r"^# seeded by p4-recall \d{4}-\d{2}-\d{2}$")
+        self.assertEqual(tail[1:], ["*.pyc", "*.pt", "*.phid"])
+        self.assertEqual(self.gitignore(), got, "a second run adds nothing")
+        self.assertEqual(hook.seed_gitignore(os.path.join(self.p4, ".gitignore")), [])
+
+    def test_gitignore_vlds_header_counts_as_a_marker(self):
+        got = self.gitignore("# Seeded by the vlds plugin (hooks/p4-layout.sh) when the repository has no .gitignore; "
+                             "the owner's edits win.\n*.wav\nmodels/index.json\nmodels/repo.json\n")
+        self.assertIn("\n# seeded by p4-recall ", got)
+        self.assertTrue(got.endswith("*.phid\n"))
+        self.assertIn("scratchpad/.out/\n", got)
+
+    def test_gitignore_without_marker_is_the_owners(self):
+        theirs = "*.wav\nmodels/index.json\nbuild/\n"
+        self.assertEqual(self.gitignore(theirs), theirs, "a seeded line present and no marker: the owner's edits win")
+        own = "# my rules\nbuild/\n*.log\n"
+        got = self.gitignore(own)
+        self.assertTrue(got.startswith(own) and "# seeded by p4-recall " in got and got.endswith("*.phid\n"),
+                        "no seeded line at all: the whole block, under the marker")
+        # the owner deletes the marker block: nothing comes back
+        cut = got[:got.index("# seeded by p4-recall")] + "*.pt\n"
+        self.assertEqual(self.gitignore(cut), cut)
+
     def test_pinned_block_cut_at_1500(self):
         rules = [[("ruling", f"pinned rule number {k} " + "x" * 120), ("status", "LIVE"), ("pinned", "yes"),
                   ("time", f"2026-10-{10 + k:02d} 10:00")] for k in range(20)]

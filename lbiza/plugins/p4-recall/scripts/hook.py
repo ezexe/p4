@@ -5,7 +5,12 @@ its row of 3.3 allows, and on any failure exits 0 with one notice for the user (
 
   layout         SessionStart startup|resume|clear|compact  silent; .claude/p4/ and its git repository once, the
                  `.git/info/exclude` line, the index when owed; only when the owner pinned rules, the block
-                 `Standing rules from the owner:` (<= 1,500 characters)
+                 `Standing rules from the owner:` (<= 1,500 characters). The store's .gitignore is seeded whole
+                 when there is none; later, any seeded line the file lacks is appended under its own marker line
+                 (`# seeded by p4-recall <date>`), nothing else touched or reordered. A line the owner deleted on
+                 purpose is indistinguishable from one a newer plugin added, so the marker decides: with no seed
+                 marker in the file (the owner deleted the marker block) and some seeded line present, nothing is
+                 added; with no marker and no seeded line (the owner's own file), the whole block is appended.
   recall         UserPromptSubmit   additionalContext: 0-5 lines; opens the message row; logs what it served
   agent          PreToolUse Agent   updatedInput: the Agent call's input as received, its `prompt` with the lines
                  appended under "Notes from this repo's memory:"; nothing when no line clears the threshold
@@ -55,6 +60,9 @@ import p4conf  # noqa: E402
 PINNED_CHARS = 1500
 NOTES_HEAD = "Notes from this repo's memory:"
 REPO_DEADLINE_S = 8.0
+SEED_MARKER = "# seeded by p4-recall"
+# a seed marker of this plugin (either header) or of the vlds plugin's layout hook, whose stores this one inherits
+SEED_MARKER_RE = re.compile(r"(?i)^#\s*seeded (once )?by (p4-recall|the vlds plugin)\b")
 GITIGNORE = """# seeded once by p4-recall; your edits win
 scratchpad/.out/
 models/served/
@@ -150,10 +158,7 @@ def init_layout(project):
     p4 = os.path.join(project, ".claude", "p4")
     for sub in ("store", "store/messages", "memory", "scratchpad", "models"):
         os.makedirs(os.path.join(p4, sub), exist_ok=True)
-    gi = os.path.join(p4, ".gitignore")
-    if not os.path.exists(gi):
-        with open(gi, "w", encoding="utf-8", newline="\n") as f:
-            f.write(GITIGNORE)
+    seed_gitignore(os.path.join(p4, ".gitignore"))
     p4conf.load(p4)                       # p4.json: every plugin's settings, written when missing
     if not os.path.exists(os.path.join(p4, ".git")):
         try:
@@ -162,6 +167,36 @@ def init_layout(project):
             pass
     exclude_line(project)
     return p4
+
+
+def seeded_lines():
+    return [l for l in GITIGNORE.splitlines() if l and not l.startswith("#")]
+
+
+def seed_gitignore(gi, today=None):
+    """The store's .gitignore: written whole when absent; otherwise the seeded lines it lacks are appended under
+    `# seeded by p4-recall <date>`, when the file carries a seed marker or none of the seeded lines (module
+    docstring, layout). Returns the lines added."""
+    if not os.path.exists(gi):
+        with open(gi, "w", encoding="utf-8", newline="\n") as f:
+            f.write(GITIGNORE)
+        return seeded_lines()
+    try:
+        text = open(gi, encoding="utf-8").read()
+    except OSError:
+        return []
+    have = {l.strip() for l in text.splitlines()}
+    missing = [l for l in seeded_lines() if l not in have]
+    if not missing:
+        return []
+    marked = any(SEED_MARKER_RE.match(l.strip()) for l in text.splitlines())
+    if not marked and len(missing) < len(seeded_lines()):
+        return []                          # the owner removed the marker block: their edits win
+    today = today or time.strftime("%Y-%m-%d")
+    with open(gi, "a", encoding="utf-8", newline="\n") as f:
+        f.write(("" if not text or text.endswith("\n") else "\n") + f"{SEED_MARKER} {today}\n"
+                + "".join(l + "\n" for l in missing))
+    return missing
 
 
 def exclude_line(project):
