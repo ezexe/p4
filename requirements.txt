@@ -1,0 +1,5 @@
+# p4's own Python needs beyond phi and torch, which scripts/make_venv.py installs first (torch from the CPU wheels).
+#   python3 scripts/make_venv.py
+anthropic>=2.6
+ipykernel
+matplotlib

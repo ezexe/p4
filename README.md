@@ -48,3 +48,16 @@ _"Puppeteer... the final frontier. These are the operations of Prompty Enterpris
 # Prompty
     
 </div>
+
+## Python environment
+
+The plugins' hooks need nothing beyond the system `python3` (standard library only).
+Everything else (the p4-model skill's `phi_model`, the `.pt` ranker and node tree, the teacher, the notebooks) runs from this checkout's own `.venv/`, built by one script:
+
+```bash
+python3 scripts/make_venv.py            # create or top up .venv: torch (CPU), phi, anthropic, ipykernel, matplotlib
+python3 scripts/make_venv.py --check    # what .venv can and cannot import
+.venv/bin/python -m phi_model check --project <repository>     # Windows: .venv\Scripts\python.exe
+```
+
+phi installs editable from a [phi](https://github.com/ezexe/phi) checkout beside this one (`../phi`) when there is one, else from GitHub; `--phi <path>` names another.
