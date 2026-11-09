@@ -170,6 +170,8 @@ class Layout(Base):
         self.assertTrue(got.endswith("models/ranker.pt\n"))
         self.assertIn("scratchpad/.out/\n", got)
         self.assertNotIn("*.pt\n", got, "the anchor and the chain are tracked in LFS: no blanket *.pt")
+        for line in ("models/index.json", "models/repo.json"):
+            self.assertEqual(got.count(line + "\n"), 1, f"{line}: a line the file already holds is never appended again")
 
     def test_gitignore_without_marker_is_the_owners(self):
         theirs = "*.wav\nmodels/index.json\nbuild/\n"
