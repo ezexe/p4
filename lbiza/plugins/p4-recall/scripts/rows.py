@@ -5,10 +5,13 @@ open   the prompt hook stamps a row: `fingerprint:` (the message, quoted, at mos
        `arrival:` (turn, or notification for a harness message), and `resembles:` when an earlier completed row of
        the session resembles it (the old barrier's rule). A notification or agent message is complete on arrival:
        `state: FRESH` and an `addressed:` saying so.
-close  the close hook completes the session's last open row from the reply: `state: FRESH`, `addressed:` (the
-       reply's first paragraph, at most 300 characters) and `recommended:` (the reply's first sentence that
-       recommends something, at most 300 characters; empty when none). Every row closed here is FRESH: no script
-       of the plugin judges ECHO or SUPERSEDED yet (migrate.py carries an old store's states over as they were).
+close  the close hook completes the session's last open row from the reply: `state:`, `addressed:` (the reply's
+       first paragraph, at most 300 characters), `recommended:` (the reply's first sentence that recommends
+       something, at most 300 characters; empty when none) and, when the row resembles an earlier one, `match:`.
+       The state is judged here, from the row's `resembles:` and the earlier row's `addressed:`: ECHO when the
+       same answer came again (the two paragraphs' tokens at Jaccard >= 0.5, the barrier's rule), SUPERSEDED when
+       the earlier row was answered anew, FRESH when no completed row resembles it. `match:` names the earlier
+       row by its time and says which of the two it was, in plain words.
 Rows are appended or extended in place: no other line of the file is rewritten.
 
 Why `recommended:`: 300 characters of the first paragraph rarely hold the recommendation the session handed the
@@ -117,11 +120,30 @@ def row_close(p4, session, reply, now=None):
     while j < len(lines) and lines[j].startswith("  "):
         j += 1
     add = []
+    state, match = judge_state(e, ents, addressed)
     if not e.fields.get("state", "").strip():
-        add.append("  state: FRESH")
+        add.append(f"  state: {state}")
     add.append(f"  addressed: {addressed}")
     rec = recommended_sentence(reply)
     add.append(f"  recommended: {rec}" if rec else "  recommended:")
+    if match:
+        add.append(f"  match: {match}")
     lines[j:j] = add
     ranker.write_atomic(path, "\n".join(lines))
     return e, True
+
+
+def judge_state(e, ents, addressed):
+    """(state, match) for a row being completed: ECHO when the earlier row its `resembles:` names got the same
+    answer again (the two `addressed:` paragraphs share tokens at Jaccard >= 0.5, st.resembles), SUPERSEDED when
+    that earlier row was answered anew, FRESH when it resembles no completed row. `match` names the earlier row
+    and why, in plain words; '' for FRESH."""
+    rid = e.fields.get("resembles", "").strip()
+    prior = next((x for x in ents if rid and x.id == rid and st.completed(x)), None)
+    if prior is None:
+        return "FRESH", ""
+    new = set(st.norm_token(addressed).split())
+    old = set(st.norm_token(prior.fields.get("addressed", "")).split())
+    if st.resembles(new, old):
+        return "ECHO", f"the {prior.time} row, the same answer again"
+    return "SUPERSEDED", f"the {prior.time} row, answered anew"

@@ -409,6 +409,44 @@ class Close(Base):
         self.assertEqual((r.returncode, r.stdout), (0, ""))
 
 
+class Judged(Base):
+    """row_close judges the row it completes from its `resembles:`: ECHO, SUPERSEDED or FRESH, with `match:`."""
+
+    def close(self, prompt, reply, when):
+        import rows
+        rows.row_open(self.p4, SESSION, prompt, when)
+        rows.row_close(self.p4, SESSION, reply, when)
+        return st.load_file(self.p4, f"messages/{SESSION[:8]}.md")[-1]
+
+    def test_echo_supersede_fresh(self):
+        first = self.close("rename the walrus branch to walrus-mac", "Renamed the walrus branch to walrus-mac.",
+                           "2026-11-01 10:00")
+        self.assertEqual(first.fields["state"], "FRESH")
+        self.assertNotIn("match", first.fields)
+        echo = self.close("rename the walrus branch to walrus-mac", "Renamed the walrus branch to walrus-mac; "
+                          "nothing else changed.", "2026-11-01 10:05")
+        self.assertEqual(echo.fields["resembles"], first.id)
+        self.assertEqual(echo.fields["state"], "ECHO")
+        self.assertEqual(echo.fields["match"], "the 2026-11-01 10:00 row, the same answer again")
+        sup = self.close("rename the walrus branch to walrus-mac", "Moved it under the release branch instead "
+                         "and pushed; the old name is gone.", "2026-11-01 10:09")
+        self.assertEqual(sup.fields["state"], "SUPERSEDED")
+        self.assertTrue(sup.fields["match"].endswith("row, answered anew"), sup.fields)
+        self.assertIn(sup.fields["match"].split(" row")[0][4:], ("2026-11-01 10:00", "2026-11-01 10:05"),
+                      "it names the earlier row it resembled")
+        fresh = self.close("measure the axolotl latency on the second rig", "Measured: 3 ms.", "2026-11-01 10:20")
+        self.assertEqual(fresh.fields["state"], "FRESH")
+        self.assertNotIn("match", fresh.fields)
+        text = st.read_text(os.path.join(self.p4, "store", "messages", f"{SESSION[:8]}.md"))
+        self.assertEqual(text.count("- fingerprint:"), 4, "rows are extended in place, never rewritten")
+
+    def test_identical_short_answer_is_an_echo(self):
+        self.close("ship it", "Pushed the branch.", "2026-11-01 10:00")
+        self.close("ship it", "Pushed the branch.", "2026-11-01 10:01")
+        rows_ = st.load_file(self.p4, f"messages/{SESSION[:8]}.md")
+        self.assertEqual([r.fields["state"] for r in rows_], ["FRESH", "ECHO"], "identical token sets, under three")
+
+
 class Recommended(unittest.TestCase):
     """rows.recommended_sentence: the reply's first sentence that recommends, any paragraph, code blocks out."""
 
