@@ -32,6 +32,11 @@ import shutil
 import sys
 import time
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+import p4conf  # noqa: E402  (the settings file, .claude/p4/p4.json)
+
 MEMORY = "memory"
 CONFLICTS = ".conflicts"
 POINTER_MARK = "<!-- p4-memory: pointer"
@@ -47,6 +52,12 @@ def payload_from_stdin():
         return json.loads(sys.stdin.buffer.read().decode("utf-8", errors="replace"))
     except Exception:
         return {}
+
+
+def configure(payload):
+    """The memory section of <project>/.claude/p4/p4.json over the constants (the file written when missing)."""
+    p4 = os.path.join(project_root(payload), ".claude", "p4")
+    p4conf.configure(globals(), p4, "memory", {"retries": "RETRIES", "retry_wait_s": "RETRY_WAIT_S"})
 
 
 def project_root(payload):
@@ -339,6 +350,7 @@ def main():
     sub = sys.argv[1] if len(sys.argv) > 1 else ""
     payload = payload_from_stdin()
     try:
+        configure(payload)
         if sub == "migrate":
             return cmd_migrate(payload)
         if sub == "mirror":

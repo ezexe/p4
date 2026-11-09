@@ -50,6 +50,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 
 PINNED_CHARS = 1500
 NOTES_HEAD = "Notes from this repo's memory:"
@@ -85,15 +86,11 @@ RULES_FACTS = re.compile(r"^- \S+ (rule|fact): ")
 
 def inject_mode(p4):
     """"off", "rules-facts" or "all": what reaches the main agent or a subagent. P4_RECALL_INJECT (0, 1 or
-    rules-facts) overrides the repo's models/config.json `inject` (false, "rules-facts" or true)."""
+    rules-facts) overrides p4.json's recall.inject (false, "rules-facts" or true)."""
     env = os.environ.get("P4_RECALL_INJECT")
     if env in ("0", "1", "rules-facts"):
         return {"0": "off", "1": "all"}.get(env, env)
-    try:                                  # no config, or no inject key: the measured default
-        with open(os.path.join(p4, "models", "config.json"), encoding="utf-8") as f:
-            v = json.load(f).get("inject", CONFIG["inject"])
-    except (OSError, ValueError):
-        v = CONFIG["inject"]
+    v = p4conf.section(p4, "recall", write=False).get("inject", CONFIG["inject"])
     return "rules-facts" if v == "rules-facts" else ("all" if v is True else "off")
 
 
@@ -123,7 +120,11 @@ def p4_of(payload):
 def ready(payload):
     """The .claude/p4 directory when it holds a store (the layout hook made it); None otherwise."""
     p4 = p4_of(payload)
-    return p4 if os.path.isdir(os.path.join(p4, "store")) or os.path.isdir(os.path.join(p4, "models")) else None
+    if not (os.path.isdir(os.path.join(p4, "store")) or os.path.isdir(os.path.join(p4, "models"))):
+        return None
+    p4conf.configure(globals(), p4, "recall", {"pinned_chars": "PINNED_CHARS",
+                                                          "repo_deadline_s": "REPO_DEADLINE_S"})
+    return p4
 
 
 def now():
@@ -153,10 +154,7 @@ def init_layout(project):
     if not os.path.exists(gi):
         with open(gi, "w", encoding="utf-8", newline="\n") as f:
             f.write(GITIGNORE)
-    cfg = os.path.join(p4, "models", "config.json")
-    if not os.path.exists(cfg):
-        with open(cfg, "w", encoding="utf-8", newline="\n") as f:
-            f.write(json.dumps(CONFIG, indent=1) + "\n")
+    p4conf.load(p4)                       # p4.json: every plugin's settings, written when missing
     if not os.path.exists(os.path.join(p4, ".git")):
         try:
             git("init", "-q", cwd=p4)
@@ -189,9 +187,10 @@ def exclude_line(project):
     return True
 
 
-def refresh_index(p4, project, deadline_s=REPO_DEADLINE_S):
+def refresh_index(p4, project, deadline_s=None):
     """The repository's entries brought up to date (incrementally, within the deadline), then the index rebuilt
     when any source is newer."""
+    deadline_s = REPO_DEADLINE_S if deadline_s is None else deadline_s
     import subprocess
     import repo
     import store as st

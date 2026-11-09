@@ -31,6 +31,11 @@ import subprocess
 import sys
 import time
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+import p4conf  # noqa: E402  (the settings file, .claude/p4/p4.json)
+
 ASKS_ENV = "P4_SCRATCHPAD_ASKS"
 
 CODE_EXT = {"py", "pyw", "sh", "bash", "zsh", "ps1", "psm1", "bat", "cmd", "js", "mjs", "cjs", "ts", "rb", "pl",
@@ -73,8 +78,21 @@ def project_root(payload):
     return os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
 
 
+ASKS = False                # p4.json scratchpad.asks; P4_SCRATCHPAD_ASKS=1 or 0 wins for one run
+
+
+def configure(payload):
+    """The scratchpad section of <project>/.claude/p4/p4.json over the constants (the file written when missing)."""
+    p4 = os.path.join(project_root(payload), ".claude", "p4")
+    p4conf.configure(globals(), p4, "scratchpad", {
+        "asks": "ASKS", "ignorable_ext": "IGNORABLE_EXT", "ignorable_dirs": "IGNORABLE_DIRS",
+        "repo_uses_min_name": "REPO_USES_MIN_NAME", "repo_uses_max": "REPO_USES_MAX",
+        "repo_uses_lines": "REPO_USES_LINES"})
+
+
 def asks_on():
-    return os.environ.get(ASKS_ENV, "").strip() == "1"
+    env = os.environ.get(ASKS_ENV, "").strip()
+    return env == "1" if env in ("0", "1") else bool(ASKS)
 
 
 def is_code(path):
@@ -325,6 +343,7 @@ def main():
     sub = sys.argv[1] if len(sys.argv) > 1 else ""
     payload = payload_from_stdin()
     try:
+        configure(payload)
         if sub == "notebook-out":
             return cmd_notebook_out(payload)
         if sub == "repo-uses":

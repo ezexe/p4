@@ -89,7 +89,7 @@ Section 0 still governs: the lines are additive, silent when nothing newer appli
 
 ```
 lbiza/
-  .claude-plugin/marketplace.json      three plugins, in this order
+  .claude-plugin/marketplace.json      four plugins, in this order
   plugins/
     p4-memory/                          Claude Code's memory, stored in the repo (carried over)
       .claude-plugin/plugin.json
@@ -106,9 +106,19 @@ lbiza/
       scripts/migrate.py                old layout → new, dry by default
       scripts/teacher.py                the paid batches; never run by a hook
       scripts/test_*.py
+    p4-plans/                           two skills, no hooks (added 2026-11-09, below)
+      .claude-plugin/plugin.json
+      skills/plan-planner/SKILL.md  skills/plan-planner/flight-ops.md
+      skills/plan-planner/scripts/settings.py  skills/plan-planner/scripts/check_evidence.py
+      skills/sub-agentic/SKILL.md
+      tests/test_p4_plans.py
 ```
 
-No `skills/`, no `agents/`, no `commands/`. `run-hook.sh` is the old plugins' wrapper: find `python3`, run with `-I`, exit 0 on any failure so a broken hook never blocks a call.
+The first three plugins have no `skills/`, no `agents/`, no `commands/`.
+p4-plans is the one exception, added on 2026-11-09 on the owner's words ("adopting and migrating them it into the p4 marketplace generically and being able to remove them from the repos listed handwritten skills"): AudioPlugin's handwritten plan-planner and sub-agentic skills, made generic, their repository-specific values moved into the `plans` section of `<project>/.claude/p4/p4.json`, and `flights/` kept in place by the migration instead of archived, since the flight loop writes it and phi_store trains on its `plan.md` files.
+The handwritten skills leave AudioPlugin only after the probe in the shared experiments project (`experiments/keep_or_go`) scores the generic skills with the settings within about 5 points of the handwritten ones.
+
+`run-hook.sh` is the old plugins' wrapper: find `python3`, run with `-I`, exit 0 on any failure so a broken hook never blocks a call.
 
 ### 3.1 p4-memory (carried over; a storage move)
 
@@ -410,7 +420,8 @@ Why this loop is the best the evidence supports: the ranker is the only model th
 | `sessions/*/src/<task>/*`, `frags.md`, `sindex/` | `src/<s8>-<task>/…`; register lines become each file's one-line head comment; repo-used frags listed for the owner, not moved | file count equal; the list names each frag's users (`compdb.py` already left for `scripts/python/`) |
 | `memory/` | untouched (p4-memory owns it) | tree identical |
 | `scratchpad/` | untouched; ignorables moved into `.out/` | tracked file count unchanged |
-| `session-storage.md`, `virtual.md`, `logger.md`, `mind-reader.md`, `sessions/*/mind-reader/`, `mrindex/`, `flights/` | `archive/<same path>` verbatim, not indexed | byte-identical; nothing deleted before the dry report shows zero unplaced entries |
+| `flights/` | untouched (p4-plans' flight loop owns it; phi_store trains on its `plan.md`) | tree identical |
+| `session-storage.md`, `virtual.md`, `logger.md`, `mind-reader.md`, `sessions/*/mind-reader/`, `mrindex/` | `archive/<same path>` verbatim, not indexed | byte-identical; nothing deleted before the dry report shows zero unplaced entries |
 | `vindex/`, `sindex/`, `idb/`, `phi-index.md`, `.sessions`, `.gc-heads`, `.turn-close`, `ranker.server.json`, `ranker-base.pt` | dropped: derived files the new scripts rebuild, or the retired `.pt` | the `## recall` section of `vindex/phi-index.md` copied into the report so no setting vanishes silently |
 | `.git/info/exclude` line, `.claude/p4/.git` | kept | `git -C .claude/p4 status` clean after `--apply` and one commit |
 

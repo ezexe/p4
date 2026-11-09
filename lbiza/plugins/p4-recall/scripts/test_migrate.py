@@ -180,6 +180,8 @@ read: local-storage.md (children)
     write(os.path.join(p4, "memory", "MEMORY.md"), "- [a](a.md)\n")
     write(os.path.join(p4, "memory", "a.md"), "# A\n\nbody\n")
     write(os.path.join(p4, "scratchpad", "notes.md"), "notes\n")
+    write(os.path.join(p4, "flights", "20261102-0445-s1", "plan.md"), "flight: 20261102-0445-s1\n")
+    write(os.path.join(p4, "flights", "board.tsv"), "id\tplan\tsection\tairspace\tstate\ttower\n")
     write(os.path.join(p4, ".gitignore"), "scratchpad/.out/\n")
     return p4
 
@@ -300,7 +302,8 @@ class Synthetic(unittest.TestCase):
                   "store/vocabulary.md", "store/messages/150e7eb7.md", "store/messages/a3ac5de6.md",
                   "models/labels-raw.tsv", "models/tasks.tsv", "archive/index-rules.md",
                   "archive/models/pick-model.json", "archive/sessions/mac-setup--150e7eb7/vlds/logger.md",
-                  "archive/ledger-events.md", "src/a3ac5de6-probe/probe.py", "memory/a.md", "scratchpad/notes.md"):
+                  "archive/ledger-events.md", "src/a3ac5de6-probe/probe.py", "memory/a.md", "scratchpad/notes.md",
+                  "flights/20261102-0445-s1/plan.md", "flights/board.tsv"):
             self.assertTrue(os.path.exists(os.path.join(self.out, f)), f)
         self.assertFalse(os.path.exists(os.path.join(self.out, "archive", "models", "ranker-base.pt")))
         with open(os.path.join(self.out, "src/a3ac5de6-probe/probe.py"), encoding="utf-8") as f:
@@ -321,6 +324,9 @@ class Synthetic(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.old, "models", "pick-model.json")))
         self.assertTrue(os.path.exists(os.path.join(self.old, "store", "rules.md")))
         self.assertTrue(os.path.exists(os.path.join(self.old, "memory", "a.md")))
+        self.assertTrue(os.path.exists(os.path.join(self.old, "flights", "20261102-0445-s1", "plan.md")),
+                        "flights/ stays in place: p4-plans writes it, phi_store reads it")
+        self.assertFalse(os.path.exists(os.path.join(self.old, "archive", "flights")))
         with self.assertRaises(SystemExit):
             migrate.run(self.old, None, apply=True, now=NOW)
 

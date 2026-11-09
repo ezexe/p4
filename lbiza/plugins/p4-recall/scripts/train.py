@@ -76,9 +76,10 @@ def eligible(doc, task):
     return True
 
 
-def task_examples(idx, task, positives, limit=CANDIDATES, files=None, docs_by=None):
+def task_examples(idx, task, positives, limit=None, files=None, docs_by=None):
     """(xs, ys, cand doc indices, bm25 scores) for one task: features of its candidates and their 0/1 labels."""
     import p4 as cli
+    limit = CANDIDATES if limit is None else limit
     terms = list(dict.fromkeys(ranker.tokens(task["text"])))
     if not terms:
         return [], [], [], []
@@ -229,7 +230,7 @@ def pool_like(r):
     return r["source"] == "pool" or (r["source"] == "store+edited" and "from:pool" in (r.get("note") or ""))
 
 
-def build_sets(p4, idx=None, sources=None, max_tasks=MAX_TASKS, rows=None, now=None):
+def build_sets(p4, idx=None, sources=None, max_tasks=None, rows=None, now=None):
     """[{task, xs, ys, w, files, bm25, n_pos, source}] for every task with at least one positive that is indexed,
     then the silence tasks (source `silent`, no positive) unless `sources` leaves them out.
 
@@ -260,7 +261,7 @@ def build_sets(p4, idx=None, sources=None, max_tasks=MAX_TASKS, rows=None, now=N
             continue
         if tid not in keep_all:
             n_other += 1
-            if n_other > max_tasks:
+            if n_other > (MAX_TASKS if max_tasks is None else max_tasks):
                 continue
         labs = by_task[tid]
         pos = {}
@@ -460,10 +461,20 @@ def owed(p4, now_s=None):
     return True, f"{n - before} new labels, last round {int(age)} s old"
 
 
+def configure(p4):
+    """recall.train of the store's p4.json over the training constants (read, never written, here)."""
+    import p4conf
+    p4conf.configure(globals(), p4, "recall.train", {
+        "candidates": "CANDIDATES", "train_neg": "TRAIN_NEG", "folds": "FOLDS", "floor_drop": "FLOOR_DROP",
+        "min_precision": "MIN_PRECISION", "first_floor": "FIRST_FLOOR", "owed_labels": "OWED_LABELS",
+        "owed_age_s": "OWED_AGE_S", "max_tasks": "MAX_TASKS"}, write=False)
+
+
 def run_round(p4, write=True, now=None, idx=None, sources=None, quiet=False, dictionary=True):
     """One round: build the sets, evaluate held out, fit on all, decide promotion by the floor. Returns the
     eval row as a dict; writes models/ranker.json (only when promoted) and appends models/eval.tsv when `write`."""
     now = now or datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    configure(p4)
     if idx is None:
         idx, _ = st.ensure_index(p4)
     t0 = time.time()

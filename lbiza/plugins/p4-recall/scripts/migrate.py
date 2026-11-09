@@ -198,7 +198,9 @@ DROP_SESSION_FILES = {"phi-index.md": "the per-session φ register; derived", ".
                       ".pool-owed": "the retired pool's flag"}
 DROP_TOP = {"vindex": "the cumulative vlds index; derived (its ## recall section is copied below)",
             "sindex": "the cumulative frags index; derived, rebuilt from src/"}
-ARCHIVE_TOP = ("mrindex", "flights")
+ARCHIVE_TOP = ("mrindex",)
+# flights/ is kept where it is: p4-plans' flight loop writes it and phi_store trains on its plan.md files.
+KEEP_TOP = ("flights",)
 COMMENT = {".py": "#", ".sh": "#", ".ps1": "#", ".cmake": "#", ".rb": "#", ".pl": "#", ".r": "#", ".yml": "#",
            ".yaml": "#", ".toml": "#", ".js": "//", ".ts": "//", ".mjs": "//", ".cjs": "//", ".c": "//", ".cc": "//",
            ".cpp": "//", ".h": "//", ".hh": "//", ".hpp": "//", ".cs": "//", ".go": "//", ".rs": "//",
@@ -253,7 +255,7 @@ def build_plan(p4, now):
         if rel_root == ".":
             rel_root = ""
         parts = rel_root.split("/") if rel_root else []
-        if parts[:1] in (["memory"], ["scratchpad"], [".git"], ["store"], ["archive"], ["src"]):
+        if parts[:1] in (["memory"], ["scratchpad"], [".git"], ["store"], ["archive"], ["src"], *([k] for k in KEEP_TOP)):
             if root == os.path.join(p4, parts[0]):
                 plan.kept.append(parts[0] + "/")
             dirs[:] = []
@@ -1118,7 +1120,7 @@ def run(p4, out=None, apply=False, now=None, project=None, report_path=None):
         check("archives byte-identical", all(archived_ok), f"{sum(archived_ok)} of {len(archived_ok)} identical")
         if not in_place:
             for k in plan.kept:
-                if k.rstrip("/") in ("memory", "scratchpad"):
+                if k.rstrip("/") in ("memory", "scratchpad", *KEEP_TOP):
                     check(f"{k} tree identical", same_tree(os.path.join(p4, k), os.path.join(out, k)), "copied as is")
     else:
         check("archives byte-identical", True, f"{len(plan.archive)} files to copy verbatim (checked on --apply)")
@@ -1210,7 +1212,7 @@ def write_new(plan, texts, tasks, labels, out, in_place):
 
 def remove_old(plan, p4):
     """In place, once nothing is unplaced: the old paths go (git history and archive/ keep them)."""
-    for top in ("sessions", "vindex", "sindex", "mrindex", "flights"):
+    for top in ("sessions", "vindex", "sindex", "mrindex"):
         path = os.path.join(p4, top)
         if os.path.isdir(path):
             shutil.rmtree(path)

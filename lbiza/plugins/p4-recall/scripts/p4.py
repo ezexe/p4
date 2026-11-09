@@ -57,6 +57,18 @@ VARIANT_WEIGHT = 0.5          # another form of a message's word (commits / comm
 EXPAND_WEIGHT = 0.5
 STUBS = ()
 
+QUERY_SETTINGS = {"max_lines": "MAX_LINES", "per_file": "PER_FILE", "text_chars": "TEXT_CHARS",
+                  "history_chars": "HISTORY_CHARS", "candidates": "CANDIDATES", "min_rare": "MIN_RARE",
+                  "fallback_cover": "FALLBACK_COVER", "fallback_icover": "FALLBACK_ICOVER",
+                  "fallback_dense": "FALLBACK_DENSE", "variant_weight": "VARIANT_WEIGHT",
+                  "expand_weight": "EXPAND_WEIGHT"}
+
+
+def configure(p4):
+    """recall.query of the store's p4.json over the query constants (read, never written, here)."""
+    import p4conf
+    p4conf.configure(globals(), p4, "recall.query", QUERY_SETTINGS, write=False)
+
 
 def clip(s, n):
     s = re.sub(r"\s+", " ", s or "").strip()
@@ -293,6 +305,7 @@ def standing_first(idx, order):
 
 def query(p4, text, session=None, now=None, idx=None, model=None):
     """{"lines": [...], "ids": [...], "jargon_dropped": n, "road": "..."}: the recall for one message."""
+    configure(p4)
     if idx is None:
         idx, _ = st.ensure_index(p4)
     if model is None:

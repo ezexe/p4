@@ -94,12 +94,13 @@ def cost(model, usage):
 
 
 def read_config(p4):
-    try:
-        with open(lb.mpath(p4, "config.json"), encoding="utf-8") as f:
-            got = json.load(f)
-        return got if isinstance(got, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    """recall.teacher of p4.json (the retired models/config.json's values when p4.json is absent), under the
+    old key names, after setting the teacher's constants from it."""
+    import p4conf
+    t = p4conf.configure(globals(), p4, "recall.teacher", {"second_opinion": "SECOND_OPINION", "effort": "EFFORT", "max_tokens": "MAX_TOKENS",
+                                "agree_min": "AGREE_MIN", "newer_max": "NEWER_MAX", "cand_k": "CAND_K",
+                                "dict_batch": "DICT_BATCH"}, write=False)
+    return {"teacher-model": t.get("model"), "teacher-cutoff": t.get("cutoff")}
 
 
 def teacher_of(p4, override=""):
@@ -920,6 +921,7 @@ def main(argv=None, p4=None):
     if not p4 or not os.path.isdir(p4):
         print("p4: no .claude/p4 directory found", file=sys.stderr)
         return 1
+    read_config(p4)
     if args.action == "extract":
         print("p4.py teacher extract: not built yet (build step 10)", file=sys.stderr)
         return 2
