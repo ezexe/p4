@@ -171,7 +171,7 @@ Every hook reads the harness payload on stdin, resolves `.claude/p4/` from `CLAU
 | `dictionary check` | every entry's two tests (5.3); turns a failing entry off | `train`, tests |
 | `check` | store health: counts, statuses, orphan labels, the jargon rate of what recall would print | tests, migration |
 | `migrate [--apply]` | old layout → new (section 6) | by hand, once per repo |
-| `teacher edit-labels\|dictionary\|extract` | the paid batches (5.7), each with `--fake` and `--max-usd` | by hand, with a key |
+| `teacher edit-labels\|dictionary\|extract` | the paid batches (5.7), each with `--fake` and `--max-usd`; `extract` is accepted and answers "not built yet" (build step 10) | by hand, with a key |
 
 ### 3.5 The files under `.claude/p4/`
 

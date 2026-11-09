@@ -46,14 +46,14 @@ BARRIER_MIN_TOKENS = 3
 HEADERS = {
     "rules.md": ("The owner's rulings: what holds past the turn, in the owner's own words.",
                  "Written when the owner rules something; a later retraction frees a ruling, never an edit here.",
-                 "Fields: ruling, owner-words, scope, form, status, time, pinned, plain."),
+                 "Fields: ruling, owner-words, scope, form, status, time, pinned, plain; from (migrated entries)."),
     "corrections.md": ("Readings that steered work and were wrong, and details the owner had to ask for.",
                        "Written when the owner corrects a reading (match, meant) or asks for what was left out "
                        "(asked, omitted).",
-                       "Fields: key, time, match, meant, delta; asked, time, omitted."),
+                       "Fields: key, time, match, meant, delta; asked, time, omitted; correction, from (migrated entries)."),
     "retractions.md": ("What the owner freed: a rule or reading no longer in force, and the lesson kept from it.",
                        "Written when the owner takes something back; recall shows these in place of what they freed.",
-                       "Fields: freed, time, cause, owner-words, swept, lesson."),
+                       "Fields: freed, time, cause, owner-words, swept, lesson; from (migrated entries)."),
     "facts.md": ("Claims checked against a source, with where and when they were checked.",
                  "Written when a claim is verified; a claim without a source stays out.",
                  "Fields: claim, source, verified, time."),
@@ -62,7 +62,7 @@ HEADERS = {
                  "Fields: term, means, because, source, points-at, added, status (on or off)."),
     MESSAGES: ("Every owner message of one session: when it came, how it arrived, and what was done about it.",
                "Opened by the prompt hook and completed by the close hook from the reply.",
-               "Fields: fingerprint, time, arrival, state, addressed, recommended, match, freed-by, resembles."),
+               "Fields: fingerprint, time, arrival, state, addressed, recommended, match, freed-by, resembles; from (migrated rows)."),
 }
 
 # what each file prints as at the boundary (3.5): plain words, never the file's name
