@@ -377,6 +377,21 @@ class Close(Base):
         usage = [r for r in got if r["source"] == "usage"]
         self.assertTrue(usage)
         self.assertTrue(all(r["label"] == "0" for r in usage), usage)
+        self.assertTrue(all(r["note"] == "unused; shown" for r in usage), "injection is on in these tests")
+
+    def test_usage_note_says_shadow_when_nothing_was_injected(self):
+        prompt = "does the quokka harness run the zebrafish plotter golden images on every push"
+        run_hook("layout", {"source": "startup", "cwd": self.proj}, self.proj)
+        run_hook("recall", {"session_id": SESSION, "prompt": prompt, "cwd": self.proj}, self.proj,
+                 {"P4_RECALL_INJECT": "0"})
+        tp = transcript(os.path.join(self.tmp.name, "t.jsonl"), prompt, [], "I will look later.", self.proj)
+        r = run_hook("close", {"hook_event_name": "Stop", "session_id": SESSION, "transcript_path": tp,
+                               "last_assistant_message": "I will look later.", "stop_hook_active": False,
+                               "cwd": self.proj}, self.proj, {"P4_RECALL_INJECT": "0"})
+        self.assertEqual((r.returncode, r.stdout), (0, ""))
+        usage = [x for x in lb.read_tsv(lb.mpath(self.p4, lb.TRAIN)) if x["source"] == "usage"]
+        self.assertTrue(usage)
+        self.assertTrue(all(x["note"] == "unused; shadow" for x in usage), usage)
 
     def test_train_hook_prints_nothing(self):
         r = run_hook("train", {"session_id": SESSION, "cwd": self.proj}, self.proj)

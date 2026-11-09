@@ -7,8 +7,9 @@ Two files under models/:
                   later correction shows would have prevented a misreading)
                   columns: task, entry, label, source, weight, time, note
   labels.tsv      the training set: the teacher's `store+edited` rows (step 9, paid, not built here) and the labels
-                  the hooks write every turn: `usage` (served lines used or not) and `repo` (the files a turn
-                  edited, cited, dropped or never opened)
+                  the hooks write every turn: `usage` (served lines used or not; the note says whether they were
+                  shown to the model or logged in shadow: `used; shown`, `unused; shadow`) and `repo` (the files
+                  a turn edited, cited, dropped or never opened)
                   columns: task, entry, label, source, weight, time, teacher, edited, note
 `training_labels` joins them: every labels.tsv row, and the labels-raw.tsv rows of every task the teacher has not
 edited; then the recency rule (1a, 5.2) drops a label resting on a fact a newer fact supersedes and adds the newer
@@ -370,13 +371,26 @@ def tool_inputs(turn):
     return "\n".join(out)
 
 
+def served_mode(served):
+    """"shown" when the served lines reached the model, "shadow" when they were only logged (the record's `shown`
+    count or `shadow` flag, hook.py h_recall / h_agent), "" for a record from before the fields."""
+    if served.get("shadow") is True:
+        return "shadow"
+    if served.get("shadow") is False or served.get("shown"):
+        return "shown"
+    return ""
+
+
 def usage_labels(p4, idx, served, reply, turn=None, task_id="", now=""):
-    """[label row] for each entry served: used (1) or unused (0), source `usage`, weight USAGE_WEIGHT."""
+    """[label row] for each entry served: used (1) or unused (0), source `usage`, weight USAGE_WEIGHT. The note
+    keeps whether the lines were shown or shadow (`used; shown`, `unused; shadow`): the served record is deleted
+    at Stop, and a label on a line the model never saw measures recall's ranking, not the model's uptake."""
     by = {d["id"]: d for d in idx["docs"]}
     hay = (reply or "") + "\n" + tool_inputs(turn)
     hay_toks = set(ranker.tokens(hay))
     prompt = served.get("text", "")
     prompt_toks = set(ranker.tokens(prompt))
+    mode = served_mode(served)
     out = []
     for eid in served.get("ids", []):
         d = by.get(eid)
@@ -386,7 +400,7 @@ def usage_labels(p4, idx, served, reply, turn=None, task_id="", now=""):
         u = used(d, rd, hay_toks, hay, prompt, prompt_toks)
         out.append({"task": task_id or served.get("task", ""), "entry": eid, "label": "1" if u else "0",
                     "source": "usage", "weight": str(USAGE_WEIGHT), "time": now, "teacher": "", "edited": "",
-                    "note": "used" if u else "unused"})
+                    "note": ("used" if u else "unused") + (f"; {mode}" if mode else "")})
     return out
 
 

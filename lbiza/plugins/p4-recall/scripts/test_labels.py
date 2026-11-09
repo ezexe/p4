@@ -148,6 +148,23 @@ class Usage(Base):
                               "t", NOW)
         self.assertEqual({r["entry"]: r["label"] for r in got}[rule["id"]], "1", "two rare terms in the reply")
 
+    def test_note_keeps_whether_the_lines_were_shown(self):
+        """The served record is deleted at Stop; its shown / shadow fields survive in each usage label's note."""
+        idx, _ = st.ensure_index(self.p4)
+        rule = next(d for d in idx["docs"] if d["file"] == "rules.md" and "keychain" in d["show"])
+        reply = "the sweeper keeps the keychain flag in the tombstone"
+        shown = {"ids": [rule["id"]], "text": "probe it", "task": "t", "lines": 2, "shown": 2, "shadow": False}
+        self.assertEqual(lb.usage_labels(self.p4, idx, shown, reply, None, "t", NOW)[0]["note"], "used; shown")
+        shadow = {"ids": [rule["id"]], "text": "probe it", "task": "t", "lines": 2, "shown": 0, "shadow": True}
+        self.assertEqual(lb.usage_labels(self.p4, idx, shadow, "done", None, "t", NOW)[0]["note"], "unused; shadow")
+        self.assertEqual(lb.usage_labels(self.p4, idx, shadow, reply, None, "t", NOW)[0]["note"], "used; shadow")
+        agent = {"ids": [rule["id"]], "text": "probe it", "task": "agent:x", "shadow": False}
+        self.assertEqual(lb.usage_labels(self.p4, idx, agent, "done", None, "t", NOW)[0]["note"], "unused; shown",
+                         "an agent record carries shadow alone")
+        old = {"ids": [rule["id"]], "text": "probe it", "task": "t"}
+        self.assertEqual(lb.usage_labels(self.p4, idx, old, "done", None, "t", NOW)[0]["note"], "unused",
+                         "a record from before the fields says nothing")
+
 
 class Transcripts(unittest.TestCase):
     def setUp(self):
