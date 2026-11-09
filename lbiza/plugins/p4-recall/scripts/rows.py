@@ -133,6 +133,20 @@ def row_close(p4, session, reply, now=None):
     return e, True
 
 
+def task_kind(p4, session, row, prompt):
+    """The task kind of a closed turn, as labels.task_of_row names it: `short` (at most SHORT_WORDS words),
+    `first` (the session's first owner row: none of the owner's before it in the session's file), else `new`."""
+    if len(st.norm_token(prompt).split()) <= st.SHORT_WORDS:
+        return "short"
+    if row is not None:
+        path = session_file(p4, session)
+        ents = st.parse(st.read_text(path), f"{st.MESSAGES}/{os.path.basename(path)}") if os.path.exists(path) else []
+        owner = [e for e in ents if st.owner_message(e)]
+        if owner and owner[0].id == row.id:
+            return "first"
+    return "new"
+
+
 def judge_state(e, ents, addressed):
     """(state, match) for a row being completed: ECHO when the earlier row its `resembles:` names got the same
     answer again (the two `addressed:` paragraphs share tokens at Jaccard >= 0.5, st.resembles), SUPERSEDED when

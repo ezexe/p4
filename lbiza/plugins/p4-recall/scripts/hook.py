@@ -382,7 +382,7 @@ def h_close(payload):
     got = labels_for_turn(p4, project, idx, task_id, served, reply, turn, when)
     if got or served:
         lb.add_tasks(p4, [{"id": task_id, "session": session[:8], "time": when, "text": st.collapse(prompt)[:2000],
-                           "kind": "short" if len(st.norm_token(prompt).split()) <= st.SHORT_WORDS else "new"}])
+                           "kind": rows.task_kind(p4, session, row, prompt)}])
     if served:
         try:
             os.remove(lb.served_path(p4, f"turn-{session}"))

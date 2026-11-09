@@ -382,6 +382,18 @@ class Close(Base):
                       lb.read_tasks(self.p4), "the task recorded")
         self.assertIsNone(lb.read_served(self.p4, f"turn-{SESSION}"), "the served log consumed")
 
+    def test_task_kinds_first_then_new_then_short(self):
+        f = os.path.join(self.proj, "src", "narwhal_port.py")
+        edit = [("Edit", {"file_path": f, "old_string": "return 1", "new_string": "return 2"}, "ok")]
+        self.turn("probe the narwhal port and open it", edit, "Changed open_narwhal_port to return 2.")
+        row_id = st.load_file(self.p4, f"messages/{SESSION[:8]}.md")[-1].id
+        self.assertEqual(lb.read_tasks(self.p4)[row_id]["kind"], "first", "the session's first owner message")
+        self.turn("does the quokka harness run the zebrafish plotter golden images on every push", edit,
+                  "I will look later.")
+        self.turn("ship it", edit, "Pushed.")
+        kinds = [t["kind"] for t in lb.read_tasks(self.p4).values() if t["session"] == SESSION[:8]]
+        self.assertEqual(sorted(kinds), ["first", "new", "short"])
+
     def test_unused_when_nothing_cites_it(self):
         got = self.turn("does the quokka harness run the zebrafish plotter golden images on every push", [],
                         "I will look later.")

@@ -15,8 +15,9 @@ Two files under models/:
 edited; then the recency rule (1a, 5.2) drops a label resting on a fact a newer fact supersedes and adds the newer
 one in its place.
 
-tasks.tsv holds the tasks: id, session, time, text, kind (new | short | agent as the hooks write them; `first`
-only in tasks migrated from an old store's pools).
+tasks.tsv holds the tasks: id, session, time, text, kind (first | new | short | agent: the close hook writes
+`first` for a session's first owner message, `short` for one of at most SHORT_WORDS words, `new` otherwise;
+`agent` is a subagent's task).
 """
 
 import datetime
