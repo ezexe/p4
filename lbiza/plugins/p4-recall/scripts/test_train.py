@@ -157,6 +157,19 @@ class Rounds(unittest.TestCase):
         self.assertEqual(train.SOURCE_WEIGHT["miss"], 1.0)
 
 
+class BaselineScaling(unittest.TestCase):
+    def test_baseline_counts_undrawn_positives_like_the_ranker(self):
+        # each task: 4 candidates, its one drawn positive is BM25's top, and it has 2 labelled positives
+        sets = []
+        for k in range(4):
+            xs = [{ranker.h("bias"): 1.0, ranker.h("bm25"): v} for v in (1.0, 0.5, 0.3, 0.1)]
+            sets.append({"task": f"t{k}", "xs": xs, "ys": [1, 0, 0, 0], "w": [1.0] * 4, "files": ["a", "b", "c", "d"],
+                         "bm25": [4.0, 2.0, 1.0, 0.5], "n_pos": 2, "source": "repo", "missed": False, "time": str(k)})
+        ev = train.evaluate(sets)
+        self.assertAlmostEqual(ev["baseline"], 0.5, msg="BM25 found 1 of the 2 labelled positives")
+        self.assertLessEqual(ev["r-precision"], 0.5, msg="the ranker is held to the same denominator")
+
+
 class DictionaryCheck(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

@@ -126,6 +126,20 @@ class HooksJson(unittest.TestCase):
         self.assertIn("systemMessage", r.stdout)
 
 
+class Payload(unittest.TestCase):
+    def test_bare_windows_path_is_read_not_failed(self):
+        import hook
+        self.assertEqual(hook.parse_payload('{"cwd":"E:\\projects\\p4-phi","source":"startup"}'),
+                         {"cwd": "E:\\projects\\p4-phi", "source": "startup"})
+
+    def test_valid_json_and_empty_are_unchanged(self):
+        import hook
+        self.assertEqual(hook.parse_payload(json.dumps({"cwd": "E:\\new\\t", "x": "a\nb"})), {"cwd": "E:\\new\\t", "x": "a\nb"})
+        self.assertEqual(hook.parse_payload("  "), {})
+        with self.assertRaises(json.JSONDecodeError):
+            hook.parse_payload('{"cwd": ')
+
+
 class Layout(Base):
     def test_silent_and_idempotent(self):
         shutil.rmtree(self.p4)

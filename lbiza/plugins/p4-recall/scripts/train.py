@@ -32,9 +32,11 @@ import datetime
 import json
 import math
 import os
+import random
 import re
 import sys
 import time
+import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -309,12 +311,16 @@ def fit_sets(sets, seed=0):
 
 
 def trim(s):
-    """The examples of one task a round fits on: every positive, and the TRAIN_NEG negatives BM25 ranked highest
-    (a pool task keeps every candidate, as pick_model.py fit on every barrier row)."""
+    """The examples of one task a round fits on: every positive, and TRAIN_NEG of its negatives drawn at random
+    (seeded by the task, so a round is deterministic); a pool task keeps every candidate, as pick_model.py fit on
+    every barrier row. The negatives were once the TRAIN_NEG BM25 ranked highest: with the positives kept wherever
+    BM25 put them, that taught the ranker a high BM25 is a negative (on a 97-pool store its bm25 weight fit at -1.05,
+    against +0.28 with every candidate) and halved its held-out R-precision."""
     if s.get("source") == "silent" or ((s.get("source") == "pool" or s.get("pool_like")) and POOL_CANDIDATES == 0):
         return range(len(s["ys"]))
-    order = sorted(range(len(s["ys"])), key=lambda k: (-s["bm25"][k], k))
-    negs = [k for k in order if not s["ys"][k]][:TRAIN_NEG]
+    negs = [k for k in range(len(s["ys"])) if not s["ys"][k]]
+    if len(negs) > TRAIN_NEG:
+        negs = random.Random(zlib.crc32(str(s.get("task", "")).encode("utf-8"))).sample(negs, TRAIN_NEG)
     return sorted([k for k in range(len(s["ys"])) if s["ys"][k]] + negs)
 
 
@@ -352,11 +358,13 @@ def evaluate(sets, per_file=ranker.PER_FILE, quiet=True):
             n = sum(s["ys"])
             bm = s["bm25"]
             base = ranker.metrics(s["ys"], bm, sorted(range(len(bm)), key=lambda i: (-bm[i], i))[:n])
-            m["baseline"] = base["r-precision"]
             m["threshold"] = t
             m["top5"] = sum(s["ys"][i] for i in sorted(range(len(sc)), key=lambda i: (-sc[i], i))[:5]) > 0
-            # R-precision counts the labelled entries BM25 never drew as misses, as the old pools did
-            m["r-precision"] = m["r-precision"] * n / max(n, s["n_pos"])
+            # R-precision counts the labelled entries BM25 never drew as misses, as the old pools did; the baseline
+            # ranks the same drawn candidates, so it counts them the same way, or it reads up to n_pos / n too high
+            drawn = n / max(n, s["n_pos"])
+            m["r-precision"] = m["r-precision"] * drawn
+            m["baseline"] = base["r-precision"] * drawn
             rows[s["task"]] = m
     out = summarize(list(rows.values()), len(missed))
     out["rows"] = rows

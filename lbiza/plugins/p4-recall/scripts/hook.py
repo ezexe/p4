@@ -491,13 +491,26 @@ HANDLERS = {"layout": h_layout, "recall": h_recall, "agent": h_agent, "subagent-
             "close": h_close, "subagent-stop": h_subagent_stop, "train": h_train}
 
 
+def parse_payload(raw: str):
+    """The hook's stdin as JSON; a payload written by hand with bare Windows paths ({"cwd":"E:\\projects"}) is read
+    with every backslash that does not escape a quote or a backslash taken literally, rather than failing the hook."""
+    if not raw.strip():
+        return {}
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        if "escape" not in e.msg:
+            raise
+        return json.loads(re.sub(r'\\(?![\\"])', r"\\\\", raw))
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     name = argv[0] if argv else ""
     payload = {}
     try:
         raw = sys.stdin.read()
-        payload = json.loads(raw) if raw.strip() else {}
+        payload = parse_payload(raw)
         if not isinstance(payload, dict):
             payload = {}
         out = HANDLERS[name](payload)
