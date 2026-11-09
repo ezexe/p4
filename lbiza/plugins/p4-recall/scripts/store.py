@@ -62,7 +62,7 @@ HEADERS = {
                  "Fields: term, means, because, source, points-at, added, status (on or off)."),
     MESSAGES: ("Every owner message of one session: when it came, how it arrived, and what was done about it.",
                "Opened by the prompt hook and completed by the close hook from the reply.",
-               "Fields: fingerprint, time, arrival, state, addressed, match, freed-by, resembles."),
+               "Fields: fingerprint, time, arrival, state, addressed, recommended, match, freed-by, resembles."),
 }
 
 # what each file prints as at the boundary (3.5): plain words, never the file's name

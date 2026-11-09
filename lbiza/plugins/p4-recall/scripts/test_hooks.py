@@ -345,6 +345,17 @@ class Close(Base):
         self.assertTrue(st.completed(rows[-1]))
         self.assertEqual(rows[-1].fields["addressed"], "Opened the narwhal port with open_narwhal_port.")
         self.assertEqual(rows[-1].fields["state"], "FRESH")
+        self.assertEqual(rows[-1].fields["recommended"], "", "a reply that recommends nothing leaves it empty")
+
+    def test_row_keeps_the_recommending_sentence(self):
+        self.turn("should the narwhal port stay open or be closed after each probe", [],
+                  "Here is what the probe showed, in four parts.\n\nThe port stays open now. I'd keep it open and "
+                  "close it only at exit, since reopening costs 40 ms. The tests pass either way.")
+        rows = st.load_file(self.p4, f"messages/{SESSION[:8]}.md")
+        self.assertEqual(rows[-1].fields["addressed"], "Here is what the probe showed, in four parts.")
+        self.assertEqual(rows[-1].fields["recommended"],
+                         "I'd keep it open and close it only at exit, since reopening costs 40 ms.")
+
 
     def test_usage_used_by_an_edit_and_repo_labels(self):
         f = os.path.join(self.proj, "src", "narwhal_port.py")
@@ -396,6 +407,29 @@ class Close(Base):
     def test_train_hook_prints_nothing(self):
         r = run_hook("train", {"session_id": SESSION, "cwd": self.proj}, self.proj)
         self.assertEqual((r.returncode, r.stdout), (0, ""))
+
+
+class Recommended(unittest.TestCase):
+    """rows.recommended_sentence: the reply's first sentence that recommends, any paragraph, code blocks out."""
+
+    def test_sentences(self):
+        import rows
+        self.assertEqual(rows.recommended_sentence("Done. Pinned CMake 4.4.\n\nYou should pin it everywhere rather "
+                                                   "than keep 3.x working. Tests pass."),
+                         "You should pin it everywhere rather than keep 3.x working.")
+        self.assertEqual(rows.recommended_sentence("Use git worktree instead of a second clone; it shares objects."),
+                         "Use git worktree instead of a second clone; it shares objects.")
+        self.assertEqual(rows.recommended_sentence("Two files changed.\n\n```\nwe should never see this\n```\n\n"
+                                                   "The fix is to pin the runner image."),
+                         "The fix is to pin the runner image.")
+        self.assertEqual(rows.recommended_sentence("I read the file. It has 40 lines. Nothing to change."), "")
+        self.assertEqual(rows.recommended_sentence("Should I run the tests now?"), "",
+                         "a question back is not a recommendation")
+        self.assertEqual(rows.recommended_sentence(""), "")
+        long = "I recommend " + "a very long clause " * 40 + "here."
+        got = rows.recommended_sentence(long)
+        self.assertLessEqual(len(got), rows.RECOMMENDED_CHARS)
+        self.assertTrue(got.endswith("…"))
 
 
 class SubagentStop(Base):
