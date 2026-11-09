@@ -75,9 +75,11 @@ __pycache__/
 *.jpg
 *.zip
 *.gz
-*.pt
-*.phid
+models/ranker.pt
 """
+# models/ranker.pt is each machine's own build of the .pt ranker's chain (phi_rank): never tracked. The chain itself,
+# models/ranker-anchor.pt and models/ranker.rNNN.phid, and the pretrained base are tracked, in git LFS (the store's
+# .gitattributes), so a blanket *.pt or *.phid here would hide the very files the other machines pull.
 # inject: "rules-facts" is the measured default. The paid validation of 2026-11-01 (Opus 5.5, two seeds, Haiku judge):
 # - every line (inject: true): never better than the built-in on the general tasks, the same lesson task worse on
 #   both seeds, and held-out short turns 0.373/0.360 against 0.393/0.373; it gains on newer-than-the-model tasks

@@ -159,7 +159,7 @@ class Layout(Base):
         self.assertTrue(got.startswith(old), "what was there is untouched and in its order")
         tail = got[len(old):].splitlines()
         self.assertRegex(tail[0], r"^# seeded by p4-recall \d{4}-\d{2}-\d{2}$")
-        self.assertEqual(tail[1:], ["*.pyc", "*.pt", "*.phid"])
+        self.assertEqual(tail[1:], ["*.pyc", "models/ranker.pt"])
         self.assertEqual(self.gitignore(), got, "a second run adds nothing")
         self.assertEqual(hook.seed_gitignore(os.path.join(self.p4, ".gitignore")), [])
 
@@ -167,18 +167,19 @@ class Layout(Base):
         got = self.gitignore("# Seeded by the vlds plugin (hooks/p4-layout.sh) when the repository has no .gitignore; "
                              "the owner's edits win.\n*.wav\nmodels/index.json\nmodels/repo.json\n")
         self.assertIn("\n# seeded by p4-recall ", got)
-        self.assertTrue(got.endswith("*.phid\n"))
+        self.assertTrue(got.endswith("models/ranker.pt\n"))
         self.assertIn("scratchpad/.out/\n", got)
+        self.assertNotIn("*.pt\n", got, "the anchor and the chain are tracked in LFS: no blanket *.pt")
 
     def test_gitignore_without_marker_is_the_owners(self):
         theirs = "*.wav\nmodels/index.json\nbuild/\n"
         self.assertEqual(self.gitignore(theirs), theirs, "a seeded line present and no marker: the owner's edits win")
         own = "# my rules\nbuild/\n*.log\n"
         got = self.gitignore(own)
-        self.assertTrue(got.startswith(own) and "# seeded by p4-recall " in got and got.endswith("*.phid\n"),
+        self.assertTrue(got.startswith(own) and "# seeded by p4-recall " in got and got.endswith("models/ranker.pt\n"),
                         "no seeded line at all: the whole block, under the marker")
         # the owner deletes the marker block: nothing comes back
-        cut = got[:got.index("# seeded by p4-recall")] + "*.pt\n"
+        cut = got[:got.index("# seeded by p4-recall")] + "models/ranker.pt\n"
         self.assertEqual(self.gitignore(cut), cut)
 
     def test_pinned_block_cut_at_1500(self):
