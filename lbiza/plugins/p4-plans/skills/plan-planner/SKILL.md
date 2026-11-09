@@ -64,13 +64,14 @@ A plan written by a flight adds `Writer: <model>, flight <id>.` as the next line
 - **Sections** are cut by disjoint airspace (the paths each may change), so every section can take off at once (flight-ops.md).
 - **The flights table** `| Section | Airspace | Pilot | Builds on |` gives each section its row; "Builds on" is the plan's base commit, unless the section needs another's files, which its row states with that section's home commit.
 - **Rollup:** an edit several sections want in one file (a list entry, a README row) is a `### Rollup` part of each section that wants it; the tower lands it at the section's home, never in the section's airspace.
-- **Fences:** every step lays out its edits as fenced code, one fence per edit, the file (and function or region) named on the line above, tagged with the file's language; the code as it will read after the edit, or a `diff` fence when the surroundings matter; complete, with no `...` standing in for code. A step with no code edit says so in one line.
+- **Fences:** every step lays out its edits as fenced code, one fence per edit, the file (and function or region) named on the line above, tagged with the file's language; the code as it will read after the edit, or a `diff` fence when the surroundings matter; complete, with no `...` standing in for code (an identifier the snippet uses is shown, defined in the plan, or marked missing). A step with no code edit says so in one line.
+- **Without the tree in view**, a writer still writes: it cuts the section so it needs nothing unread (a new unit with its own tests, wired in by a later section), defines what it uses in the plan, and lists every premise about the tree as a question with the file that answers it; it never stops at asking.
 - **Links:** every `file:line` link is `[path:N](<link_prefix>path:N)` or `[path:N-M](<link_prefix>path:N-M)`, read from the current file, and never rewritten when the plan moves onto the archive.
 - **Decisions:** every decision a plan leaves the owner ends with a `Documented:` sentence naming the upstream page read live (from `documented`, or the standard the decision rests on) and what it settles, or `Documented: none`. Only what the documentation does not settle is the owner's call.
 
 ## Tests first, then the least code
 
-A section that changes behaviour opens with its tests, before any implementation fence: each case states one behaviour the code must have as its caller sees it, through the unit's public face alone.
+A section that changes behaviour opens with its tests, before any implementation fence: each case states one behaviour the code must have as its caller sees it, through the unit's public face alone, knowing nothing of the body; clean, clear, concise and minimal, so the cases read as the unit's contract.
 A test the change retires or rewrites is laid out first the same way, and the cases that stay are named as what stays true.
 The implementation fences follow and are the least code that passes those cases: a line no case needs is not written, and a design the cases cannot tell apart from a simpler one takes the simpler one; where a ruling of the owner's, not a case, holds a line, the step says which.
 A section that changes no behaviour (a rename, a split, a move) adds no test and names the existing cases that hold it.
