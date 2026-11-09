@@ -311,7 +311,16 @@ def query(p4, text, session=None, now=None, idx=None, model=None):
     if idx is None:
         idx, _ = st.ensure_index(p4)
     if model is None:
-        model = ranker.load(os.path.join(p4, "models", "ranker.json"))
+        rpath = os.path.join(p4, "models", "ranker.json")
+        model = ranker.load(rpath)
+        if model is None and os.path.exists(rpath):
+            # a file that is there and not a readable ranker of this kind: the no-ranker road, and one notice a day
+            # for the p4-model skill (notices.py), never a failure in the hook's own time
+            try:
+                import notices
+                notices.notify(p4, "json ranker", ValueError("models/ranker.json is unreadable or not a p4 recall ranker"), session or "")
+            except Exception:  # noqa: BLE001
+                pass
     now = now or time.strftime("%Y-%m-%d %H:%M")
     message = (text or "").strip()
     tok = st.norm_token(message)

@@ -473,6 +473,8 @@ def h_train(payload):
     p4 = ready(payload)
     if not p4:
         return None
+    if not p4conf.section(p4, "recall", write=False).get("learn", True):
+        return None             # mode off (phi_model mode off): the models stay on disk, untouched
 
     class A:
         pass
@@ -490,6 +492,7 @@ HANDLERS = {"layout": h_layout, "recall": h_recall, "agent": h_agent, "subagent-
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     name = argv[0] if argv else ""
+    payload = {}
     try:
         raw = sys.stdin.read()
         payload = json.loads(raw) if raw.strip() else {}
@@ -498,6 +501,13 @@ def main(argv=None):
         out = HANDLERS[name](payload)
     except Exception as e:  # noqa: BLE001 — a broken hook never blocks a call
         out = {"systemMessage": f"p4-recall ({name or '?'}): {type(e).__name__}: {str(e)[:200]}; nothing was added"}
+        try:                # one retrain notice for the p4-model skill (notices.py), never a second failure here
+            import notices
+            p4 = p4_of(payload if isinstance(payload, dict) else {})
+            if os.path.isdir(os.path.join(p4, "store")) or os.path.isdir(os.path.join(p4, "models")):
+                notices.notify(p4, f"hook {name or '?'}", e, (payload.get("session_id") or "") if isinstance(payload, dict) else "")
+        except Exception:  # noqa: BLE001
+            pass
     if out:
         sys.stdout.write(json.dumps(out, ensure_ascii=False))
     return 0

@@ -34,6 +34,8 @@ DEFAULTS = {
     },
     "recall": {
         "inject": "rules-facts",         # false, "rules-facts" or true (P4_RECALL_INJECT=0|1|rules-facts for one run)
+        "learn": True,                   # false: the Stop hook trains nothing (phi_model mode off); labels are still written
+        "updated": None,                 # who last set inject/learn, and when (phi_model mode writes it)
         "pinned_chars": 1500,
         "repo_deadline_s": 8.0,
         "query": {
