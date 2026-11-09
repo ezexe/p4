@@ -19,6 +19,17 @@
       alone. Only an entry still pending when its batch is written is filled; an entry the owner wrote or edited is
       never overwritten (`means-by:` records the model, the date and a hash of the meaning it wrote, so an owner's
       later edit is seen; --re-edit redoes only meanings another teacher wrote that nobody has edited since).
+  p4.py teacher facts [--limit N] [--max-usd X] [--estimate] [--fake]
+      Writes store/facts.md, the file recall serves under `inject: rules-facts` and the one every branch of ap-p4
+      left empty because nothing wrote it. For each owner message that asked for a recommendation (a question with
+      should / best / which way / recommend, ASK_RE; newest first; one not yet answered, by its `from:`) the model
+      is sent the message with the `web_search_20260209` tool and told to find the current official documentation
+      and recommend what it says; a second, structured call turns that answer into a claim and a source. The
+      source URL is one the search results returned (never one the model only named): an answer that cites none,
+      or says the documentation does not settle it, writes nothing (a claim without a source stays out). Written:
+      one entry of claim, source, verified (now), by (the model that answered), time (the owner's message), from
+      (the message row's id), appended to store/facts.md. A search costs SEARCH_USD on top of the tokens and the
+      estimate assumes every allowed search is run.
 
 Cost control, as scripts/session/overrides_suite.py: every request is built first and its input counted with the
 API's token counter (`client.messages.count_tokens`, free); the estimate (input at the model's price, plus
@@ -67,7 +78,14 @@ NEWER_MAX = 12                # entries newer than the cutoff sent with a task
 DICT_BATCH = 20
 MAX_TOKENS = 16000
 EFFORT = "high"
-OUT_EST = {"edit-labels": 3000, "dictionary": 4000}   # output tokens a call, adaptive thinking included (assumed)
+OUT_EST = {"edit-labels": 3000, "dictionary": 4000, "facts": 4000, "facts-extract": 600}   # output tokens a call,
+                                                                                            # thinking included (assumed)
+SEARCH_MAX_USES = 5           # web searches a facts call may run
+SEARCH_USD = 0.01             # per search, on top of the tokens ($10 per 1,000 searches)
+# an owner message asking for a recommendation (served_back.ASK_RE), with a question mark
+ASK_RE = re.compile(r"(?i)\b(should|better|best|recommend|suggest|which (one|way|approach|option)|what (do|would) you "
+                    r"(think|suggest|recommend|do)|or (should|just)|is it (worth|better|ok|fine|right)|do (i|we) need|"
+                    r"proper|optimal|correct way)\b")
 AGREE_MIN = 0.65              # 5.6: Colab's two teachers agreed at 0.754
 EDITS_MD = "label-edits.md"
 SPEND = "spend.json"
@@ -198,8 +216,15 @@ class FakeClient:
                                    stop_details=SimpleNamespace(type="refusal", category="fake",
                                                                 explanation="the fake client refuses this task"),
                                    usage=SimpleNamespace(input_tokens=n_in, output_tokens=0))
+        if kw.get("tools"):
+            return self.fake_search(prompt, answered, n_in)
         props = kw["output_config"]["format"]["schema"]["properties"]
-        out = self.fake_edit(prompt, model) if "picks" in props else self.fake_dictionary(prompt)
+        if "picks" in props:
+            out = self.fake_edit(prompt, model)
+        elif "claim" in props:
+            out = self.fake_fact(prompt)
+        else:
+            out = self.fake_dictionary(prompt)
         body = json.dumps(out)
         return SimpleNamespace(content=[SimpleNamespace(type="thinking", thinking=""),
                                         SimpleNamespace(type="text", text=body)],
@@ -221,6 +246,37 @@ class FakeClient:
             elif shared >= need:
                 adds.append({"id": h, "reason": f"shares {shared} words with the task"})
         return {"picks": picks, "adds": adds}
+
+    @staticmethod
+    def fake_search(prompt, answered, n_in):
+        """A grounded answer: one web_search_tool_result block naming a documentation page made from the message's
+        first words, and a text block citing it; FAKE-UNSETTLED in the message makes the answer say the
+        documentation does not settle it."""
+        words = sorted(fake_words(prompt.split("\n")[-1]))[:2] or ["docs"]
+        url = "https://docs.example.org/" + "-".join(words)
+        if "FAKE-UNSETTLED" in prompt:
+            text = "The documentation does not settle this; it names no default."
+        else:
+            text = f"The current documentation says: use the {' '.join(words)} default (version 4.4, 2026-01). "
+        hit = SimpleNamespace(type="web_search_result", url=url, title="docs")
+        return SimpleNamespace(content=[SimpleNamespace(type="server_tool_use", name="web_search"),
+                                        SimpleNamespace(type="web_search_tool_result", content=[hit]),
+                                        SimpleNamespace(type="text", text=text,
+                                                        citations=[SimpleNamespace(type="web_search_result_location",
+                                                                                   url=url)])],
+                               stop_reason="end_turn", stop_details=None, model=answered,
+                               usage=SimpleNamespace(input_tokens=n_in, output_tokens=len(text) // 4 + 200,
+                                                     cache_read_input_tokens=0, cache_creation_input_tokens=0,
+                                                     server_tool_use=SimpleNamespace(web_search_requests=1)))
+
+    @staticmethod
+    def fake_fact(prompt):
+        m = re.search(r"^The current documentation says: (.*?)\s*\(version ([^,]+), ([^)]+)\)", prompt, re.M)
+        urls = re.findall(r"https?://\S+", prompt)
+        if not m:
+            return {"settled": False, "claim": "", "source": urls[0] if urls else "", "as_of": ""}
+        return {"settled": True, "claim": m.group(1).rstrip("."), "source": urls[0] if urls else "",
+                "as_of": f"{m.group(2)}, {m.group(3)}"}
 
     @staticmethod
     def fake_dictionary(prompt):
@@ -246,8 +302,10 @@ def request(model, system, user, schema):
 
 
 def count(client, kw):
+    extra = {k: kw[k] for k in ("tools",) if k in kw}
     return client.messages.count_tokens(model=kw["model"], messages=kw["messages"], system=kw["system"],
-                                        thinking=kw["thinking"], output_config=kw["output_config"]).input_tokens
+                                        thinking=kw["thinking"], output_config=kw["output_config"],
+                                        **extra).input_tokens
 
 
 def estimate_of(model, n_in, kind):
@@ -895,14 +953,206 @@ def dictionary(p4, args, client=None, out=print):
     return summary
 
 
+# --- facts (the file recall serves under inject: rules-facts; nothing else writes it) -------------------------
+
+FACTS_SYSTEM = (
+    "You are answering a software project's owner, and you must not answer from memory. Search for the current "
+    "official documentation or primary source for what the message asks about (the project's own docs, the "
+    "vendor's reference, the standard, the release notes), read it, and recommend what it says, in two or three "
+    "sentences. Quote the documented approach's date or version. Cite every source you used by URL. When the "
+    "documentation does not settle it, say so instead of recommending.")
+
+FACT_EXTRACT_SYSTEM = "You extract structured fields from text; you add nothing."
+
+FACT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "settled": {"type": "boolean", "description": "true when the answer recommends from documentation it read"},
+        "claim": {"type": "string", "description": "one sentence stating the documented fact, written so it holds "
+                                                   "without the conversation; empty when not settled"},
+        "source": {"type": "string", "description": "the URL of the source the claim rests on, from the answer"},
+        "as_of": {"type": "string", "description": "the date or version the documentation is current to"},
+    },
+    "required": ["settled", "claim", "source", "as_of"], "additionalProperties": False,
+}
+
+
+def asks_recommendation(text):
+    return "?" in (text or "") and bool(ASK_RE.search(text))
+
+
+def fact_targets(p4, limit=None, files=None):
+    """The owner message rows that asked for a recommendation and have no facts.md entry pointing at them
+    (`from:`), newest first; `limit` keeps the newest N."""
+    files = files if files is not None else st.load_store(p4)
+    done = {e.fields.get("from", "").strip() for e in files.get("facts.md", [])}
+    rows = []
+    for rel, entries in files.items():
+        if not rel.startswith(st.MESSAGES + "/"):
+            continue
+        for e in entries:
+            fp = st.unquote(e.fields.get("fingerprint", e.value))
+            if st.owner_message(e, fp) and st.completed(e) and asks_recommendation(fp) and e.id not in done:
+                rows.append(e)
+    rows.sort(key=lambda e: (e.time, e.id), reverse=True)
+    return rows[:limit] if limit is not None and limit >= 0 else rows
+
+
+def search_request(model, user):
+    return {"model": model, "max_tokens": MAX_TOKENS, "system": FACTS_SYSTEM,
+            "messages": [{"role": "user", "content": user}],
+            "tools": [{"type": "web_search_20260209", "name": "web_search", "max_uses": SEARCH_MAX_USES}],
+            "thinking": {"type": "adaptive"}, "output_config": {"effort": EFFORT}}
+
+
+def search_call(client, kw):
+    """(status, text, urls, searches, responses): the answer's text, the URLs the search results returned (tool
+    result blocks and citations: never a URL the model only named), the searches run. A pause_turn is continued,
+    up to three times."""
+    messages = list(kw["messages"])
+    text, urls, searches, responses = "", [], 0, []
+    for _ in range(3):
+        try:
+            r = client.messages.create(**{**kw, "messages": messages})
+        except Exception as e:  # noqa: BLE001 - the SDK has retried what is retryable
+            name = type(e).__name__
+            if name in ("BadRequestError", "AuthenticationError", "PermissionDeniedError", "NotFoundError"):
+                raise Fatal(f"{name}: {e}") from e
+            return "error", f"{name}: {clip(str(e), 200)}", urls, searches, responses
+        responses.append(r)
+        for b in r.content:
+            kind = getattr(b, "type", "")
+            if kind == "web_search_tool_result":
+                content = getattr(b, "content", None)
+                if isinstance(content, list):
+                    searches += 1
+                    urls += [getattr(x, "url", "") for x in content if getattr(x, "url", "")]
+            elif kind == "text":
+                text += getattr(b, "text", "") or ""
+                for cit in getattr(b, "citations", None) or []:
+                    if getattr(cit, "url", ""):
+                        urls.append(cit.url)
+        if r.stop_reason == "refusal":
+            return "refusal", text, urls, searches, responses
+        if r.stop_reason != "pause_turn":
+            break
+        messages.append({"role": "assistant", "content": r.content})
+    return "ok", text, list(dict.fromkeys(urls)), searches, responses
+
+
+def fact_entry(claim, source, when, model, row):
+    return [("claim", clip(claim, 600)), ("source", source), ("verified", when), ("by", model),
+            ("time", row.time), ("from", row.id)]
+
+
+def append_facts(p4, entries):
+    path = os.path.join(st.store_dir(p4), "facts.md")
+    text = st.read_text(path) if os.path.exists(path) else st.render("facts.md", [])
+    text = text.rstrip("\n") + "".join("\n\n" + st.format_entry(p) for p in entries) + "\n"
+    ranker.write_atomic(path, text)
+
+
+def facts(p4, args, client=None, out=print):
+    """The facts batch. Returns a summary dict (also for the tests)."""
+    teacher = teacher_of(p4, args.teacher)
+    client = client or client_for(args.fake)
+    rows = fact_targets(p4, args.limit)
+    plan, n_in = [], 0
+    for e in rows:
+        fp = st.unquote(e.fields.get("fingerprint", e.value))
+        when_asked = e.time
+        user = f"The owner's message ({when_asked}):\n\n{fp}"
+        kw = search_request(teacher, user)
+        c = count(client, kw)
+        n_in += c
+        est = (estimate_of(teacher, c, "facts") + SEARCH_USD * SEARCH_MAX_USES
+               + estimate_of(teacher, c + 2000, "facts-extract"))
+        plan.append((e, kw, est))
+    est = sum(x for _, _, x in plan)
+    summary = {"teacher": teacher, "tasks": len(rows), "estimate": est, "input_tokens": n_in, "written": 0,
+               "unsettled": 0, "unsourced": 0, "refused": 0, "failed": 0, "searches": 0, "spent": 0.0, "status": ""}
+    out(f"teacher facts: {len(rows)} recommendation questions for {teacher}, {n_in:,} input tokens + "
+        f"{OUT_EST['facts']:,} output a call, up to {SEARCH_MAX_USES} searches each at ${SEARCH_USD}, plus one "
+        f"extraction call; estimated ${est:.2f}; --max-usd {args.max_usd}")
+    if args.estimate:
+        summary["status"] = "estimate"
+        return summary
+    if est > args.max_usd:
+        summary["status"] = "refused"
+        out(f"teacher: estimated ${est:.2f} is above --max-usd {args.max_usd}; nothing was sent")
+        return summary
+    budget = Budget(args.max_usd)
+    when = args.now or stamp()
+    step = f"facts {datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}-{teacher}"
+    try:
+        for e, kw, est_one in plan:
+            if not budget.room(est_one):
+                out(f"teacher: stopped before {e.id}: ${budget.spent:.2f} spent, this call's ${est_one:.3f} would "
+                    f"pass --max-usd {args.max_usd}")
+                break
+            status, text, urls, searches, responses = search_call(client, kw)
+            model = teacher
+            for r in responses:
+                usd = cost(kw["model"], r.usage) + SEARCH_USD * searches / max(1, len(responses))
+                budget.spent += usd
+                model = getattr(r, "model", None) or teacher
+                add_spend(p4, step, model, r.usage, usd, note=f"{e.id}; {searches} searches")
+            summary["searches"] += searches
+            if status != "ok":
+                summary["refused" if status == "refusal" else "failed"] += 1
+                out(f"  {e.id}: {status} {text if status == 'error' else ''}".rstrip())
+                continue
+            if not urls:
+                summary["unsourced"] += 1
+                out(f"  {e.id}: the search returned no source; nothing written")
+                continue
+            ekw = request(teacher, FACT_EXTRACT_SYSTEM,
+                          "Below is an agent's answer written after searching documentation, then the URLs the "
+                          "search returned. Put it into the schema: settled (it recommends from documentation it "
+                          "read), the claim as one sentence that holds without this conversation, the source URL it "
+                          "rests on (one of the URLs listed), the date or version it says the documentation is "
+                          f"current to.\n\nAnswer:\n{text}\n\nURLs the search returned:\n" + "\n".join(urls),
+                          FACT_SCHEMA)
+            xstatus, data, xr = call(client, ekw)
+            if xr is not None:
+                usd = cost(ekw["model"], xr.usage)
+                budget.spent += usd
+                add_spend(p4, step, getattr(xr, "model", None) or teacher, xr.usage, usd, note=f"{e.id}; extract")
+            if xstatus != "ok":
+                summary["refused" if xstatus == "refusal" else "failed"] += 1
+                out(f"  {e.id}: extraction {xstatus}")
+                continue
+            claim = (data.get("claim") or "").strip()
+            if not data.get("settled") or not claim:
+                summary["unsettled"] += 1
+                out(f"  {e.id}: the documentation does not settle it; nothing written")
+                continue
+            source = data.get("source", "").strip()
+            if source not in urls:
+                source = urls[0]
+            append_facts(p4, [fact_entry(claim, source, when, model, e)])
+            summary["written"] += 1
+            out(f"  {e.id}: {clip(claim, 100)} ({source})")
+    except Fatal as ex:
+        out(f"teacher: stopped, the API rejected the request: {ex}")
+        summary["status"] = "fatal"
+    summary["spent"] = budget.spent
+    summary["status"] = summary["status"] or "done"
+    out(f"teacher facts: {summary['written']} facts written, {summary['unsettled']} unsettled, "
+        f"{summary['unsourced']} unsourced, {summary['refused']} refused, {summary['failed']} failed; "
+        f"{summary['searches']} searches; ${budget.spent:.2f} spent (models/{SPEND})")
+    return summary
+
+
 # --- the command line ------------------------------------------------------------------------------------
 
 def parser():
     ap = argparse.ArgumentParser(prog="p4.py teacher", description="the paid batches (build step 9)")
-    ap.add_argument("action", choices=("edit-labels", "dictionary", "extract"))
+    ap.add_argument("action", choices=("edit-labels", "dictionary", "facts", "extract"))
     ap.add_argument("--p4")
     ap.add_argument("--limit", type=int, default=None,
-                    help="edit-labels: the newest N tasks; dictionary: the first N batches of 20")
+                    help="edit-labels: the newest N tasks; dictionary: the first N batches of 20; facts: the newest "
+                         "N recommendation questions")
     ap.add_argument("--re-edit", action="store_true")
     ap.add_argument("--second-opinion", type=int, default=0, metavar="N")
     ap.add_argument("--max-usd", type=float, default=1.0)
@@ -929,7 +1179,7 @@ def main(argv=None, p4=None):
                                                     or os.environ.get("ANTHROPIC_AUTH_TOKEN")
                                                     or os.environ.get("ANTHROPIC_PROFILE")):
         print("teacher: no ANTHROPIC_API_KEY in the environment; the SDK will try a stored profile", file=sys.stderr)
-    s = edit_labels(p4, args) if args.action == "edit-labels" else dictionary(p4, args)
+    s = {"edit-labels": edit_labels, "dictionary": dictionary, "facts": facts}[args.action](p4, args)
     return 3 if s["status"] in ("refused", "fatal") else 0
 
 

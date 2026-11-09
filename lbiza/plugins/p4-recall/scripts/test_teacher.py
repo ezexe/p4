@@ -32,6 +32,10 @@ def dargs(*a):
     return te.parser().parse_args(["dictionary", "--fake", "--now", NOW, "--max-usd", "100"] + list(a))
 
 
+def fargs(*a):
+    return te.parser().parse_args(["facts", "--fake", "--now", NOW, "--max-usd", "100"] + list(a))
+
+
 def quiet(*_a, **_k):
     pass
 
@@ -399,6 +403,102 @@ class Eval(Base):
         self.assertIn("edited BELOW raw", row["why"])
         self.assertEqual(lb.held_batches(self.p4), set(c["batches"]))
         self.assertFalse(any(r["source"] == "store+edited" for r in lb.training_labels(self.p4)))
+
+
+class Facts(Base):
+    ROWS = [
+        [("fingerprint", '"should we pin cmake 4.4 everywhere or keep 3.x working?"'), ("time", "2026-10-29 11:00"),
+         ("arrival", "turn"), ("state", "FRESH"), ("addressed", "Pinned 4.4 everywhere."),
+         ("recommended", "You should pin 4.4 rather than keep 3.x working.")],
+        [("fingerprint", '"which way is best for the mac branch name, _mac or mac?"'), ("time", "2026-11-01 11:00"),
+         ("arrival", "turn"), ("state", "FRESH"), ("addressed", "Renamed it.")],
+        [("fingerprint", '"fix the build"'), ("time", "2026-11-01 12:00"), ("arrival", "turn"), ("state", "FRESH"),
+         ("addressed", "Fixed.")],
+        [("fingerprint", '"should the worktree be deleted after the merge?"'), ("time", "2026-11-01 13:00"),
+         ("arrival", "turn")],
+        [("fingerprint", '"<task-notification>should it?</task-notification>"'), ("time", "2026-11-01 14:00"),
+         ("arrival", "notification"), ("state", "FRESH"), ("addressed", "(a notification; complete on arrival)")],
+    ]
+
+    def setUp(self):
+        super().setUp()
+        self.messages(self.ROWS)
+
+    def messages(self, rows, s8="eeee5555"):
+        write(os.path.join(self.p4, "store", "messages", f"{s8}.md"), st.render(f"messages/{s8}.md", rows))
+
+    def facts_entries(self):
+        return st.load_file(self.p4, "facts.md")
+
+    def test_targets_are_completed_owner_questions_newest_first(self):
+        got = te.fact_targets(self.p4)
+        self.assertEqual([e.time for e in got], ["2026-11-01 11:00", "2026-10-29 11:00"],
+                         "a plain request, an open row and a notification are not targets")
+        self.assertEqual(len(te.fact_targets(self.p4, limit=1)), 1)
+        self.assertTrue(te.asks_recommendation("which approach should we take?"))
+        self.assertFalse(te.asks_recommendation("we should pin it"), "a statement is not a question")
+        self.assertFalse(te.asks_recommendation("what time is it?"))
+
+    def test_writes_sourced_facts_and_never_twice(self):
+        client = te.FakeClient()
+        s = te.facts(self.p4, fargs(), client=client, out=quiet)
+        self.assertEqual((s["tasks"], s["written"], s["status"]), (2, 2, "done"), s)
+        self.assertEqual(s["searches"], 2)
+        self.assertGreater(s["spent"], 2 * te.SEARCH_USD, "a search costs on top of the tokens")
+        ents = self.facts_entries()
+        self.assertEqual(len(ents), 2)
+        rows = {e.id: e for e in st.load_file(self.p4, "messages/eeee5555.md")}
+        by_from = {e.fields["from"]: e for e in ents}
+        cmake = next(e for f, e in by_from.items() if rows[f].time == "2026-10-29 11:00")
+        self.assertTrue(cmake.value.startswith("use the"), cmake.value)
+        self.assertTrue(cmake.fields["source"].startswith("https://docs.example.org/"), cmake.fields)
+        self.assertEqual(cmake.fields["verified"], NOW)
+        self.assertEqual(cmake.fields["time"], "2026-10-29 11:00", "the fact is timed by the owner's question")
+        self.assertEqual(cmake.fields["by"], "claude-fable-5-1")
+        self.assertEqual(st.feature_kind("facts.md", cmake), "fact sourced")
+        with open(lb.mpath(self.p4, te.SPEND), encoding="utf-8") as f:
+            spend = json.load(f)
+        self.assertTrue(any(k.startswith("facts ") for k in spend["steps"]))
+        self.assertEqual(len([c for c in spend["calls"] if "searches" in c["note"]]), 2)
+        again = te.facts(self.p4, fargs(), client=client, out=quiet)
+        self.assertEqual((again["tasks"], again["written"]), (0, 0), "a question answered is not asked again")
+        self.assertEqual(len(self.facts_entries()), 2)
+        idx = st.build_index(self.p4)
+        self.assertTrue(any(d["file"] == "facts.md" and d.get("fkind") == "fact sourced" for d in idx["docs"]),
+                        "recall indexes the new facts")
+
+    def test_unsettled_and_unsourced_write_nothing(self):
+        self.messages(self.ROWS[:1] + [
+            [("fingerprint", '"FAKE-UNSETTLED which linker should the mac build use?"'), ("time", "2026-11-02 09:00"),
+             ("arrival", "turn"), ("state", "FRESH"), ("addressed", "lld.")]])
+        s = te.facts(self.p4, fargs(), client=te.FakeClient(), out=quiet)
+        self.assertEqual((s["tasks"], s["written"], s["unsettled"]), (2, 1, 1), s)
+        self.assertEqual(len(self.facts_entries()), 1)
+        self.assertNotIn("linker", open(os.path.join(self.p4, "store", "facts.md"), encoding="utf-8").read())
+
+    def test_estimate_and_budget(self):
+        s = te.facts(self.p4, fargs("--estimate"), client=te.FakeClient(), out=quiet)
+        self.assertEqual(s["status"], "estimate")
+        self.assertGreater(s["estimate"], 2 * te.SEARCH_MAX_USES * te.SEARCH_USD, "every allowed search is assumed")
+        self.assertEqual(self.facts_entries(), [])
+        s = te.facts(self.p4, fargs("--max-usd", "0.001"), client=te.FakeClient(), out=quiet)
+        self.assertEqual(s["status"], "refused")
+        self.assertEqual(self.facts_entries(), [])
+        s = te.facts(self.p4, fargs("--limit", "1"), client=te.FakeClient(), out=quiet)
+        self.assertEqual((s["tasks"], s["written"]), (1, 1))
+
+    def test_refusal_is_counted(self):
+        self.messages([[("fingerprint", '"FAKE-REFUSE should we?"'), ("time", "2026-11-02 09:00"),
+                        ("arrival", "turn"), ("state", "FRESH"), ("addressed", "no")]])
+        s = te.facts(self.p4, fargs(), client=te.FakeClient(), out=quiet)
+        self.assertEqual((s["refused"], s["written"]), (1, 0))
+
+    def test_cli(self):
+        import subprocess
+        r = subprocess.run([sys.executable, os.path.join(HERE, "p4.py"), "teacher", "facts", "--p4", self.p4,
+                            "--fake", "--max-usd", "5"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("2 facts written", r.stdout)
 
 
 class Cli(Base):

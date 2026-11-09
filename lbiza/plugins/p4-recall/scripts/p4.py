@@ -15,8 +15,10 @@
   dictionary check [--dry]             every vocabulary entry's two tests; a failing entry set off
   check                                store health: counts, statuses, orphan labels, the jargon rate
   migrate [--apply] ...                the old layout into the new (scripts/migrate.py)
-  teacher edit-labels|dictionary [--re-edit] [--second-opinion N] [--max-usd X] [--estimate] [--fake]
-                                       the paid batches (scripts/teacher.py, build step 9); never run by a hook
+  teacher edit-labels|dictionary|facts [--re-edit] [--second-opinion N] [--max-usd X] [--estimate] [--fake]
+                                       the paid batches (scripts/teacher.py, build step 9); never run by a hook;
+                                       facts answers the owner's recommendation questions from the current
+                                       documentation (web search) into store/facts.md
 
 Every subcommand takes `--p4 <dir>` (the .claude/p4 directory; default from CLAUDE_PROJECT_DIR or the cwd).
 """
@@ -661,7 +663,7 @@ def main(argv=None):
     p = sub.add_parser("check")
     p.add_argument("--p4")
     sub.add_parser("migrate", help="old layout into new: p4.py migrate --p4 <old tree> [--out DIR] [--apply]")
-    sub.add_parser("teacher", help="the paid batches: p4.py teacher edit-labels|dictionary [--fake] [--max-usd X]")
+    sub.add_parser("teacher", help="the paid batches: p4.py teacher edit-labels|dictionary|facts [--fake] [--max-usd X]")
     for s in STUBS:
         sub.add_parser(s, help="not built yet")
     args = ap.parse_args(argv)
