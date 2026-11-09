@@ -132,7 +132,7 @@ class Layout(Base):
         r = run_hook("layout", {"hook_event_name": "SessionStart", "source": "startup", "cwd": self.proj}, self.proj)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout, "", "SessionStart prints nothing when no rule is pinned")
-        for sub in ("store", "memory", "scratchpad", "src", "models", ".git"):
+        for sub in ("store", "memory", "scratchpad", "models", ".git"):
             self.assertTrue(os.path.exists(os.path.join(self.p4, sub)), sub)
         self.assertTrue(os.path.exists(os.path.join(self.p4, ".gitignore")))
         self.assertTrue(os.path.exists(os.path.join(self.p4, "models", "index.json")))

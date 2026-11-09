@@ -182,7 +182,7 @@ Every hook reads the harness payload on stdin, resolves `.claude/p4/` from `CLAU
   .gitignore                 seeded once: scratchpad/.out/, models/served/, models/*.tmp, __pycache__/, the binary types; the owner's edits win
   memory/                    p4-memory: MEMORY.md and the topic files Claude Code writes itself
   scratchpad/                the notebook, tracked; scratchpad/.out/ ignored
-  src/                       code the repo does not use; flat
+  src/                       code the repo does not use; flat; made on first save, not seeded
   store/
     rules.md                 the owner's rulings (ruling, owner-words, scope, form, status, time, pinned, plain)
     corrections.md           a reading that steered work and was wrong (key, time, match, meant, delta) and a detail the owner had to ask for (asked, time, omitted)
@@ -200,7 +200,7 @@ Every hook reads the harness payload on stdin, resolves `.claude/p4/` from `CLAU
     tasks.tsv                the tasks (id, session, time, text, kind: first | new | short)
     eval.tsv                 one row per round: counts per source, held-out numbers, dictionary check, promoted or kept old
     served/                  ignored: what each turn or subagent was shown, until its usage labels are written
-  archive/                   migrated material recall does not index (section 6)
+  archive/                   migrated material recall does not index (section 6); made by migrate, not seeded
 ```
 
 Field names inside entries are the old store's (`ruling:`, `match:`, `meant:`, `freed:`, `state:`, `addressed:`), for training continuity (finding 4). File names are plain words, and the hook translates at the boundary: `rules.md` prints as `rule`, `corrections.md` as `correction` or `missed detail`, `retractions.md` as `retracted`, `facts.md` as `fact`, `memory/` as `memory`, `messages/` as `earlier message`, `vocabulary.md` as `your word`.

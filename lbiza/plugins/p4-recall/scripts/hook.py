@@ -148,7 +148,7 @@ def init_layout(project):
     project's .git/info/exclude. Returns the p4 path."""
     import subprocess
     p4 = os.path.join(project, ".claude", "p4")
-    for sub in ("store", "store/messages", "memory", "scratchpad", "src", "models", "archive"):
+    for sub in ("store", "store/messages", "memory", "scratchpad", "models"):
         os.makedirs(os.path.join(p4, sub), exist_ok=True)
     gi = os.path.join(p4, ".gitignore")
     if not os.path.exists(gi):
