@@ -705,6 +705,9 @@ def main(argv=None):
     p.add_argument("--project", default="")
     p = sub.add_parser("view", help="what a session has in view, for another session to read (view.py)")
     p.add_argument("session", nargs="?", default="", help="a session id or its first 8 characters; none lists them")
+    p.add_argument("--backfill", action="store_true", help="build the record of every session whose transcript is here")
+    p.add_argument("--project", default="")
+    p.add_argument("--slug", nargs="*", default=[])
     p.add_argument("--p4")
     p = sub.add_parser("said", help="a session's statement about a line it was shown (said.py)")
     p.add_argument("act", choices=("applied", "set-aside", "lacked"))
@@ -783,6 +786,13 @@ def main(argv=None):
         return cmd_sync(args)
     if args.cmd == "view":
         import view
+        if args.backfill:
+            import repo
+            where = p4_dir(args)
+            r = view.backfill(where, args.project or repo.project_of(where), args.slug or None)
+            print(f"view --backfill: {r['sessions']} sessions, {r['files']} files in their records, {r['commits']} commits, "
+                  f"{r['compactions']} compactions")
+            return 0
         print("\n".join(view.describe(p4_dir(args), args.session)))
         return 0
     if args.cmd == "said":

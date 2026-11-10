@@ -245,3 +245,27 @@ def size_lines(s):
     return [f"  context: {s['last'] // 1000}k tokens now, {s['baseline'] // 1000}k when it began, peak {s['peak'] // 1000}k, "
             f"{s['compactions']} compactions over {s['calls']} calls; a turn that grew it added {med // 1000}k at the median",
             f"  what filled it: {top or 'nothing recorded'}"]
+
+
+def slug_dir(project):
+    """Where Claude Code keeps a project's transcripts: ~/.claude/projects/<the path, every other character a dash>."""
+    return os.path.join(os.path.expanduser("~"), ".claude", "projects", re.sub(r"[^A-Za-z0-9]", "-", os.path.abspath(project)))
+
+
+def backfill(p4, project, slug_dirs=None):
+    """The record of every session whose transcript is on this machine, built as refresh builds it: the sessions
+    that ran before the plugin kept records. Returns {sessions, files, commits, compactions}."""
+    out = {"sessions": 0, "files": 0, "commits": 0, "compactions": 0}
+    for d in slug_dirs or [slug_dir(project)]:
+        try:
+            names = sorted(n for n in os.listdir(d) if n.endswith(".jsonl"))
+        except OSError:
+            continue
+        for n in names:
+            v = refresh(p4, project, n[:-6], os.path.join(d, n))
+            if v.get("turns"):
+                out["sessions"] += 1
+                out["files"] += len(v["files"])
+                out["commits"] += len(v["commits"])
+                out["compactions"] += max(len(v["marks"]), (v.get("size") or {}).get("compactions", 0))
+    return out

@@ -99,6 +99,20 @@ class View(unittest.TestCase):
         self.assertEqual(view.sizes([])["calls"], 0)
         self.assertEqual(view.size_lines(view.sizes([])), [])
 
+    def test_backfill_builds_a_record_for_each_transcript(self):
+        import json
+        d = os.path.join(self.tmp.name, "slug")
+        os.makedirs(d)
+        for name in ("aaaaaaaa-1.jsonl", "bbbbbbbb-2.jsonl"):
+            with open(os.path.join(d, name), "w", encoding="utf-8") as f:
+                f.write(json.dumps({"type": "user", "cwd": self.proj, "message": {"role": "user", "content": "look"}}) + "\n")
+                f.write(json.dumps({"type": "assistant", "message": {"id": "m1", "usage": {"input_tokens": 50000}, "content": [
+                    {"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": os.path.join(self.proj, "src", "port.py")}}]}}) + "\n")
+        got = view.backfill(self.p4, self.proj, [d])
+        self.assertEqual((got["sessions"], got["files"]), (2, 2))
+        self.assertEqual(view.describe(self.p4)[0], "aaaaaaaa: 1 turns, 1 files in view, 0 commits, 0 compactions")
+        self.assertEqual(view.load(self.p4, "bbbbbbbb")["size"]["baseline"], 50000)
+
     def test_refresh_writes_and_reads_back(self):
         self.assertIsNone(view.load(self.p4, "abcdef12"))
         self.assertEqual(view.refresh(self.p4, self.proj, "abcdef12-rest", "", None), view.empty(), "no transcript: nothing")
