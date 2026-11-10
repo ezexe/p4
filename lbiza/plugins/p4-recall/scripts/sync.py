@@ -52,6 +52,7 @@ MODEL_PREFIX = ("models/ranker",)
 MODEL_EXT = (".pt", ".phid")
 INDEX_LINE = re.compile(rb"^- \[[^\]]+\]\([^)]+\)")        # `- [Title](file.md) ...`, as memory/MEMORY.md lists
 NAME, EMAIL = "p4-sync", "p4-sync@users.noreply.github.com"
+SEED = 7      # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
 
 
 def git(*args, check=True, cwd=None):
@@ -381,6 +382,7 @@ def cmd_pull(main, push, snap=False):
 
 
 WORKFLOW = """# seeded by p4-recall; remove this line to keep your own edits (a copy with it is replaced when the plugin's changes)
+# seed {seed}
 # A push to any branch of this store merges every machine's branch into main and moves each branch up to it
 # (.github/p4_sync.py says how a file two machines both changed is settled).
 name: p4 sync
@@ -407,12 +409,18 @@ jobs:
 
 def seed(p4, main="main"):
     """Write the workflow and this script into the store's .github/ when they are absent, or carry the seed line and
-    differ from the plugin's (an owner who removed the line keeps theirs). Returns the paths written."""
+    differ from the plugin's (an owner who removed the line keeps theirs). A copy seeded by a newer plugin (a higher
+    SEED, which another machine's sync brought in) is left alone. Returns the paths written."""
     here = os.path.abspath(__file__)
     with open(here, encoding="utf-8") as f:
         script = f.read()
     wrote = []
-    for rel, text in ((os.path.join(".github", "workflows", "p4-sync.yml"), WORKFLOW.replace("{main}", main)),
+
+    def seed_of(text):
+        m = re.search(r"(?m)^(?:SEED = |# seed )(\d+)", text)
+        return int(m.group(1)) if m else 0
+    for rel, text in ((os.path.join(".github", "workflows", "p4-sync.yml"),
+                       WORKFLOW.replace("{main}", main).replace("{seed}", str(SEED))),
                       (os.path.join(".github", "p4_sync.py"), script)):
         path = os.path.join(p4, rel)
         try:
@@ -421,6 +429,8 @@ def seed(p4, main="main"):
         except OSError:
             old = None
         if old == text or (old is not None and "# seeded by p4-recall" not in "\n".join(old.splitlines()[:2])):
+            continue
+        if old is not None and seed_of(old) > SEED:
             continue
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8", newline="\n") as f:

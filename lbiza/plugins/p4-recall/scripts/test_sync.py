@@ -249,6 +249,12 @@ class Sync(unittest.TestCase):
         self.assertEqual(sync.seed(p4, "trunk"), [])
         write(p4, ".github/workflows/p4-sync.yml", wf + "# drifted\n")
         self.assertEqual(sync.seed(p4, "trunk"), [".github/workflows/p4-sync.yml"], "a seeded copy that differs is replaced")
+        self.assertNotIn("{seed}", wf)
+        newer = wf.replace(f"# seed {sync.SEED}", f"# seed {sync.SEED + 1}") + "# from a newer plugin\n"
+        write(p4, ".github/workflows/p4-sync.yml", newer)
+        self.assertEqual(sync.seed(p4, "trunk"), [], "a copy a newer plugin seeded is never replaced by this one")
+        self.assertEqual(read(p4, ".github/workflows/p4-sync.yml"), newer)
+        write(p4, ".github/workflows/p4-sync.yml", wf)
         mine = "name: mine\n"
         write(p4, ".github/workflows/p4-sync.yml", mine)
         self.assertEqual(sync.seed(p4, "trunk"), [])
