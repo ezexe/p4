@@ -12,13 +12,19 @@ on every push; a machine catches up with `p4.py sync` (fetch, merge `origin/main
                                            # --snapshot first commits the tracked files the hooks have changed
     sync.py catch-up                       # a machine: move the current branch up to its remote, when that is ahead
 
-`all` works in a temporary worktree, so it never moves the checkout it is run from. GitHub refuses a push made with
-a workflow's own token when it changes a file under .github/workflows (the token cannot hold that permission), so
-the first sync after the workflow is seeded or changed has to be pushed by a person: `p4.py sync --all --push` on
-any machine. After that every branch carries the same workflow file and the workflow's pushes go through.
+`all` works in a temporary worktree, so it never moves the checkout it is run from. When the remote moved while it
+merged (the workflow and a machine can run at once), it fetches and merges once more. Measured 2026-11-10 on a
+private three-branch store: the first push of a branch carrying the seeded workflow ran it, and its own token's
+push of main, with the workflow file in it, went through. GitHub documents that a workflow's token cannot change
+files under .github/workflows; should a repository refuse that push, the error says so and `p4.py sync --all
+--push` on a machine does the same merge with the owner's credentials.
 
 Two machines write the same files, so a plain merge conflicts. Each conflicted file is settled by its kind:
-  store and memory text (*.md), tables (*.tsv, *.jsonl), .gitignore   both sides' lines (git merge-file --union); a
+  the store's entries (store/**/*.md)   entry by entry, field by field, against the common ancestor: an entry only
+                    one machine has is kept, a field only one machine changed takes its value, and when both changed
+                    a `status:` the one that is no longer LIVE wins, so a merge never brings back what the owner
+                    freed (measured: a union of lines kept both status lines and the rule read LIVE again)
+  other text (*.md), tables (*.tsv, *.jsonl), .gitignore   both sides' lines (git merge-file --union); a
                     table's repeated rows and an index's repeated link lines (memory/MEMORY.md) are dropped
   settings (*.json)  key by key against the common ancestor; a list is both sides' items, so p4.json's
                     recall.deps.roots holds every machine's paths (a root that is not on a machine is skipped there)
@@ -86,6 +92,83 @@ def union(base, ours, theirs, table):
     return b"".join(keep)
 
 
+ENTRY_HEAD = re.compile(r"^- \S")
+FIELD = re.compile(r"^\s+([A-Za-z][\w-]*):(\s|$)")
+
+
+def parse_entries(text):
+    """(the lines before the first entry, [(key, head line, [(field name, [its lines])])]) of a store file. An entry
+    starts at a `- ` in column 0; its key is that line and its `time:` value (a correction's key can repeat)."""
+    header, entries, cur = [], [], None
+    for line in text.splitlines():
+        if ENTRY_HEAD.match(line):
+            cur = [line, []]
+            entries.append(cur)
+        elif cur is None:
+            header.append(line)
+        elif not line.strip():
+            continue
+        else:
+            m = FIELD.match(line)
+            if m or not cur[1]:
+                cur[1].append((m.group(1) if m else "", [line]))
+            else:
+                cur[1][-1][1].append(line)                # a field's continuation line
+    out = []
+    for head, fields in entries:
+        time = next((" ".join(l).split(":", 1)[1].strip() for n, l in fields if n == "time"), "")
+        out.append((head + "\0" + time, head, fields))
+    return header, out
+
+
+def three_way(base, ours, theirs, status=False):
+    if ours == theirs or base == theirs:
+        return ours
+    if base == ours:
+        return theirs
+    if status and ours and theirs:                         # both changed it: what is no longer LIVE stays that way
+        live = lambda v: " ".join(v).split(":", 1)[1].strip().upper().startswith("LIVE")
+        return theirs if live(ours) and not live(theirs) else ours
+    return ours if ours is not None else theirs
+
+
+def merge_entries(base, ours, theirs):
+    """The store file both sides' entries make, or None when it holds no entries (the caller falls back to lines)."""
+    (hb, eb), (ho, eo), (ht, et) = (parse_entries((x or b"").decode("utf-8", "replace")) for x in (base, ours, theirs))
+    if not eo and not et:
+        return None
+    def grouped(fields):                                   # {name: [each occurrence's lines]}: a name can repeat
+        g = {}                                             # (vocabulary.md keeps one `because:` line a sighting)
+        for n, v in fields:
+            g.setdefault(n, []).append(v)
+        return g
+    b, o, t = ({k: (h, grouped(f)) for k, h, f in e} for e in (eb, eo, et))
+    order = [k for k, _, _ in eo] + [k for k, _, _ in et if k not in o]
+    lines = list(ho if ho else ht)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    for k in order:
+        if k in o and k in t:
+            fo, ft, fb = o[k][1], t[k][1], b.get(k, ("", {}))[1]
+            names = list(fo) + [n for n in ft if n not in fo]
+            fields = []
+            for n in names:
+                vo, vt, vb = fo.get(n, []), ft.get(n, []), fb.get(n, [])
+                if max(len(vo), len(vt), len(vb)) > 1:     # a repeated field is a list: both sides' occurrences
+                    fields += [(n, v) for v in vo + [x for x in vt if x not in vo]]
+                else:
+                    fields.append((n, three_way(vb[0] if vb else None, vo[0] if vo else None, vt[0] if vt else None,
+                                                status=(n == "status"))))
+            head = o[k][0]
+        else:
+            side = o if k in o else t
+            if k in b and b[k][1] == side[k][1]:           # the other machine removed it and this one left it alone
+                continue
+            head, fields = side[k][0], [(n, v) for n, vs in side[k][1].items() for v in vs]
+        lines += ["", head] + [l for _n, v in fields if v for l in v]
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
 def merge_json(base, ours, theirs):
     if isinstance(ours, dict) and isinstance(theirs, dict):
         b = base if isinstance(base, dict) else {}
@@ -114,6 +197,10 @@ def settle(path, ref, model_side):
     if is_model(path):
         return (theirs if model_side == "theirs" else ours), f"model: the {'incoming' if model_side == 'theirs' else 'current'} side, whole"
     low = path.lower()
+    if low.startswith("store/") and low.endswith(".md"):
+        got = merge_entries(base, ours, theirs)
+        if got is not None:
+            return got, "entries: field by field"
     if low.endswith(".json"):
         try:
             got = merge_json(json.loads(base) if base else None, json.loads(ours), json.loads(theirs))
@@ -178,7 +265,16 @@ def cmd_all(main, push):
     git("worktree", "add", "-q", "--detach", wt, f"origin/{main if have_main else branches[0]}")
     try:
         os.chdir(wt)
-        return _all_in_worktree(main, branches, push)
+        try:
+            return _all_in_worktree(main, branches, push)
+        except RuntimeError as e:
+            if "rejected" not in str(e) and "fetch first" not in str(e):
+                raise
+            # the remote moved while this merged (the workflow, or another machine): take it in and merge once more
+            print("p4 sync: the remote moved meanwhile; merging once more")
+            git("fetch", "-q", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*")
+            git("checkout", "-q", "--detach", f"origin/{main}")
+            return _all_in_worktree(main, store_branches(main), push)
     finally:
         os.chdir(home)
         git("worktree", "remove", "--force", wt, check=False)
@@ -195,8 +291,8 @@ def _all_in_worktree(main, branches, push):
     if r.returncode != 0:
         why = (r.stderr or r.stdout).strip()
         if "workflow" in why:
-            why += ("\np4 sync: this push changes a workflow file, which GitHub does not let a workflow's own token "
-                    "do. Run `p4.py sync --all --push` once on a machine; later pushes go through.")
+            why += ("\np4 sync: if this push was refused for changing a workflow file with the workflow's own token, "
+                    "run `p4.py sync --all --push` once on a machine.")
         raise RuntimeError(f"push of {main}: {why[:700]}")
     late = []
     for b in branches:                       # each machine's branch moves up to main; never forced

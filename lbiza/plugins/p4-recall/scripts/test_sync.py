@@ -168,6 +168,29 @@ class Sync(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.win, ".github", "workflows", "p4-sync.yml")))
         self.assertEqual(sh(self.win, "git", "status", "--porcelain").strip(), "")
 
+    def test_entries_merge_field_by_field_and_a_freeing_stays(self):
+        head = "The owner's rulings.\nWritten when the owner rules.\nFields: ruling, status, time.\n"
+        ent = lambda name, status, extra="": f"\n- ruling: the {name} rule\n  scope: everywhere\n  status: {status}\n  time: 2026-11-02 10:00\n{extra}"
+        base = (head + ent("au", "LIVE") + ent("old", "LIVE")).encode()
+        ours = (head + ent("au", "LIVE") + ent("old", "LIVE") + ent("mac", "LIVE")).encode()
+        theirs = (head + ent("au", 'FREED (2026-11-09, "lift it")', "  plain: lifted\n") + ent("win", "LIVE")).encode()
+        for a, b in ((ours, theirs), (theirs, ours)):
+            got = sync.merge_entries(base, a, b).decode()
+            self.assertEqual(got.count("status:"), 3, "one status line an entry")
+            self.assertIn('- ruling: the au rule\n  scope: everywhere\n  status: FREED (2026-11-09, "lift it")\n  time: 2026-11-02 10:00\n  plain: lifted', got)
+            self.assertNotIn("the old rule", got, "one machine removed it, the other left it alone: gone")
+            self.assertEqual((got.count("the mac rule"), got.count("the win rule")), (1, 1))
+            self.assertTrue(got.startswith(head))
+        both = sync.merge_entries(base, (head + ent("au", "SPENT")).encode(), (head + ent("au", "LIVE (again)")).encode()).decode()
+        self.assertIn("status: SPENT", both, "both changed it: what is no longer LIVE stays that way")
+        self.assertIsNone(sync.merge_entries(b"", b"plain text\n", b"other text\n"), "no entries: the caller unions lines")
+        voc = lambda *why: ("Terms.\n\n- term: lmk\n  means: let me know\n" + "".join(f"  because: {w}\n" for w in why)).encode()
+        got = sync.merge_entries(voc("first"), voc("first", "on mac"), voc("first", "on win")).decode()
+        self.assertEqual([l.strip() for l in got.splitlines() if "because" in l],
+                         ["because: first", "because: on mac", "because: on win"], "a repeated field keeps every occurrence")
+        twice = (head + "\n- key: cmake\n  time: 2026-11-01 10:00\n  meant: a\n\n- key: cmake\n  time: 2026-11-05 10:00\n  meant: b\n").encode()
+        self.assertEqual(sync.merge_entries(twice, twice, twice).decode().count("- key: cmake"), 2, "a repeated key is two entries")
+
     def test_merge_json(self):
         m = sync.merge_json
         self.assertEqual(m({"a": 1, "b": 2}, {"a": 1, "b": 2, "c": 3}, {"a": 9, "b": 2}), {"a": 9, "b": 2, "c": 3})
