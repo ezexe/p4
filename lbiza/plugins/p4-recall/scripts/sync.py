@@ -219,6 +219,9 @@ def merge(ref, into):
     """Merge `ref` into the checked-out branch, settling every conflict; returns what was done, in lines."""
     if git("merge-base", "--is-ancestor", ref, "HEAD", check=False).returncode == 0:
         return [f"{ref}: already in {into}"]
+    if git("merge-base", "--is-ancestor", "HEAD", ref, check=False).returncode == 0:
+        git("merge", "-q", "--ff-only", ref)           # nothing of ours it lacks: move up, no merge commit
+        return [f"{ref}: {into} moved up to it"]
     r = git("-c", f"user.name={NAME}", "-c", f"user.email={EMAIL}", "merge", "--no-ff", "--no-commit",
             "--allow-unrelated-histories", ref, check=False)
     paths = [p for p in git("diff", "--name-only", "--diff-filter=U", "-z").stdout.split("\0") if p]
