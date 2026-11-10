@@ -106,6 +106,12 @@ def task_examples(idx, task, positives, limit=None, files=None, docs_by=None):
             if (files is None or docs[i]["file"] in files) and eligible(docs[i], task)]
     pool.sort(key=lambda i: (-scores.get(i, 0.0), i))
     cand = pool[:limit] if limit else pool
+    mem, feats = (docs_by or {}).get("near") if files is None else None, None
+    if mem:
+        # near.py: the entries earlier, similar tasks of other sessions used join BM25's, with a feature saying so
+        import near
+        got = near.entries(mem, task["text"], task.get("time") or "", task.get("session") or "")
+        cand, feats = near.extend(docs, docs_by["id_at"], cand, got, lambda i: eligible(docs[i], task))
     if not cand:
         return [], [], [], []
     heads = (docs_by or {}).get("head140", {})
@@ -113,7 +119,8 @@ def task_examples(idx, task, positives, limit=None, files=None, docs_by=None):
             "toks": docs[i]["toks"].split(), "head": heads.get(docs[i]["id"]) or docs[i]["head"].split(),
             "dl": docs[i]["dl"], "fkind": docs[i].get("fkind")} for i in cand]
     sc = [scores.get(i, 0.0) for i in cand]
-    xs, _, _ = ranker.candidate_features(terms, cds, idf, avgdl, task["time"] or "", scores=sc)
+    xs, _, _ = ranker.candidate_features(terms, cds, idf, avgdl, task["time"] or "", scores=sc,
+                                         extra={"near": feats} if feats is not None else None)
     ys = [1 if docs[i]["id"] in positives else 0 for i in cand]
     return xs, ys, cand, sc
 
@@ -142,9 +149,10 @@ def silent_prompts(p4):
     return out
 
 
-def silent_sets(idx, prompts, now):
+def silent_sets(idx, prompts, now, mem=None, id_at=None):
     """One all-negative set per ordinary message, its candidates and features exactly as p4.query builds them for
-    the ranker road (BM25 over the whole index, the superseded out, the top CANDIDATES)."""
+    the ranker road (BM25 over the whole index, the superseded out, the top CANDIDATES, then near.py's entries when
+    the round uses them: a near entry on an ordinary message has to learn silence too)."""
     import p4 as cli
     docs = idx["docs"]
     gone = cli.superseded_ids(idx, now)
@@ -155,14 +163,19 @@ def silent_sets(idx, prompts, now):
             continue
         scores = cli.bm25_scores(idx, terms, {})
         cand = [i for i in sorted(scores, key=lambda i: (-scores[i], i)) if docs[i]["id"] not in gone][:CANDIDATES]
+        feats = None
+        if mem:
+            import near
+            cand, feats = near.extend(docs, id_at, cand, near.entries(mem, text), lambda i: docs[i]["id"] not in gone)
         if not cand:
             continue
         idf = cli.idf_map(idx, terms)
         cds = [{"file": docs[i]["file"], "kind": docs[i]["kind"], "state": docs[i]["state"], "time": docs[i]["time"],
                 "toks": docs[i]["toks"].split(), "head": docs[i]["head"].split(), "dl": docs[i]["dl"],
                 "fkind": docs[i].get("fkind")} for i in cand]
-        sc = [scores[i] for i in cand]
-        xs, _, _ = ranker.candidate_features(terms, cds, idf, idx["avgdl"], now, scores=sc)
+        sc = [scores.get(i, 0.0) for i in cand]
+        xs, _, _ = ranker.candidate_features(terms, cds, idf, idx["avgdl"], now, scores=sc,
+                                             extra={"near": feats} if feats is not None else None)
         w = SOURCE_WEIGHT["silent"]
         out.append({"task": "silent:" + st.sha8(text), "xs": xs, "ys": [0] * len(cand), "w": [w] * len(cand),
                     "files": [docs[i]["path"] for i in cand], "bm25": sc, "n_pos": 0, "source": "silent",
@@ -232,7 +245,7 @@ def pool_like(r):
     return r["source"] == "pool" or (r["source"] == "store+edited" and "from:pool" in (r.get("note") or ""))
 
 
-def build_sets(p4, idx=None, sources=None, max_tasks=None, rows=None, now=None):
+def build_sets(p4, idx=None, sources=None, max_tasks=None, rows=None, now=None, keep_near=False):
     """[{task, xs, ys, w, files, bm25, n_pos, source}] for every task with at least one positive that is indexed,
     then the silence tasks (source `silent`, no positive) unless `sources` leaves them out.
 
@@ -242,6 +255,7 @@ def build_sets(p4, idx=None, sources=None, max_tasks=None, rows=None, now=None):
     if idx is None:
         idx, _ = st.ensure_index(p4)
     tasks = lb.read_tasks(p4)
+    given = rows
     rows = lb.training_labels(p4, idx) if rows is None else rows
     if sources:
         rows = [r for r in rows if r["source"] in sources]
@@ -253,6 +267,13 @@ def build_sets(p4, idx=None, sources=None, max_tasks=None, rows=None, now=None):
     ids = {d["id"]: i for i, d in enumerate(idx["docs"])}
     store_files = set(st.STORE_FILES)
     extra = {"head140": head_tokens(p4)}
+    import near
+    near.configure(p4)
+    if near.ON:
+        # the memory of what earlier tasks used: built from this round's own labels, and kept for the queries only
+        # when a writing round built it from the store's whole training set (not an eval, one source, or stand-ins)
+        extra["near"] = near.build(p4, idx, labels=rows, write=keep_near and given is None and not sources)
+        extra["id_at"] = near.id_index(idx["docs"])
     out = []
     order = sorted(by_task, key=lambda t: (tasks.get(t, {}).get("time", ""), t), reverse=True)
     keep_all = {t for t in order if any(r["source"] in ("pool", "store+edited") for r in by_task[t])}
@@ -294,7 +315,8 @@ def build_sets(p4, idx=None, sources=None, max_tasks=None, rows=None, now=None):
                     "sources": sorted({r["source"] for r in labs}),
                     "cand_ids": [idx["docs"][i]["id"] for i in cand]})
     if out and (not sources or "silent" in sources):
-        out.extend(silent_sets(idx, silent_prompts(p4), now or datetime.datetime.now().strftime("%Y-%m-%d %H:%M")))
+        out.extend(silent_sets(idx, silent_prompts(p4), now or datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                               mem=extra.get("near"), id_at=extra.get("id_at")))
     return out
 
 
@@ -499,7 +521,7 @@ def run_round(p4, write=True, now=None, idx=None, sources=None, quiet=False, dic
     if cmp and cmp.get("ok") is False and write:
         hold_batches(p4, cmp["batches"], f"edited {cmp['edited']:.3f} below raw {cmp['raw']:.3f} on held-out raw "
                                          f"labels ({now})")
-    sets = build_sets(p4, idx, sources, now=now)
+    sets = build_sets(p4, idx, sources, now=now, keep_near=write)
     ev = evaluate(sets)
     per_source = {}
     for r in lb.training_labels(p4, idx):
@@ -575,7 +597,7 @@ def run_round(p4, write=True, now=None, idx=None, sources=None, quiet=False, dic
                         per_file=2, floor={"r-precision": round(ev["r-precision"], 4),
                                            "precision": round(ev["precision"], 4),
                                            "short": round(short["rate"], 4)},
-                        features=["base"], tasks=len(live))
+                        features=["base"] + (["near"] if __import__("near").ON else []), tasks=len(live))
     row["seconds"] = f"{time.time() - t0:.1f}"
     if write:
         path = os.path.join(p4, "models", "eval.tsv")

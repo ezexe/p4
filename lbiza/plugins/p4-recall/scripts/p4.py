@@ -218,15 +218,32 @@ def rank(p4, text, idx=None, model=None, k=5, now=None):
     if not model or not model.get("w"):
         return [docs[i]["id"] for i in cand[:k]]      # BM25 over the expanded query: the expansion has to earn it
     idf = idf_map(idx, qterms)
+    cand, near_feats = near_candidates(p4, model, docs, cand, text, "", gone)
     cds = [{"file": docs[i]["file"], "kind": docs[i]["kind"], "state": docs[i]["state"], "time": docs[i]["time"],
             "toks": docs[i]["toks"].split(), "head": docs[i]["head"].split(), "dl": docs[i]["dl"],
             "fkind": docs[i].get("fkind")} for i in cand]
     extra = {"dict-hit": {j for j, i in enumerate(cand) if docs[i]["id"] in points}}
-    xs, _, _ = ranker.candidate_features(qterms, cds, idf, idx["avgdl"], now, scores=[scores[i] for i in cand],
+    if near_feats is not None:
+        extra["near"] = near_feats
+    xs, _, _ = ranker.candidate_features(qterms, cds, idf, idx["avgdl"], now, scores=[scores.get(i, 0.0) for i in cand],
                                          weights=weights, extra=extra)
     sc = [ranker.score(model["w"], x) for x in xs]
     order = sorted(range(len(cand)), key=lambda j: (-sc[j], j))
     return [docs[cand[j]]["id"] for j in order[:k]]
+
+
+def near_candidates(p4, model, docs, cand, text, session, gone):
+    """(the candidates with near.py's entries appended, their features) when the served model was trained with
+    them; (the candidates as they are, None) otherwise, or when no round has left a memory yet."""
+    if "near" not in (model or {}).get("features", []):
+        return cand, None
+    import near
+    near.configure(p4)
+    mem = near.load(p4)
+    if not mem:
+        return cand, None
+    got = near.entries(mem, text, "", session or "")
+    return near.extend(docs, near.id_index(docs), cand, got, lambda i: docs[i]["id"] not in gone)
 
 
 def message_words(terms):
@@ -376,6 +393,7 @@ def query(p4, text, session=None, now=None, idx=None, model=None):
     points = {p for v in hits for p in v.get("points-at", [])}
     if model:
         road.append("ranker")
+        cand, near_feats = near_candidates(p4, model, docs, cand, message, session, gone)
         cds = []
         for i in cand:
             d = docs[i]
@@ -384,8 +402,10 @@ def query(p4, text, session=None, now=None, idx=None, model=None):
                         "fkind": d.get("fkind")})
         extra = {"dict-hit": {k for k, i in enumerate(cand) if docs[i]["id"] in points}} \
             if "dict-hit" in model.get("features", []) else None
+        if near_feats is not None:
+            extra = {**(extra or {}), "near": near_feats}
         xs, _bm, _sh = ranker.candidate_features(qterms, cds, idf, idx["avgdl"], now,
-                                                 scores=[scores[i] for i in cand], weights=weights, extra=extra)
+                                                 scores=[scores.get(i, 0.0) for i in cand], weights=weights, extra=extra)
         sc = [ranker.score(model["w"], x) for x in xs]
         files = [docs[i]["path"] for i in cand]
         picked = ranker.select(files, sc, model["threshold"], per_file=PER_FILE)

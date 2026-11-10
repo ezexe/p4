@@ -139,7 +139,7 @@ def candidate_features(task_terms, cands, idf, avgdl, now, scores=None, weights=
     `cands` are dicts with `file`, `kind`, `state`, `time`, `toks` (the entry's tokens) and `head` (the tokens of its
     head line, the part an old child read). `scores` are the candidates' BM25 when the caller has them.
     `extra` turns on the added features: {"dict-hit": set of candidate indices, "used": [n per candidate],
-    "corrects": set of candidate indices}."""
+    "corrects": set of candidate indices, "near": {candidate index: (score, 1 / (1 + rank))} (near.extend)}."""
     terms = list(dict.fromkeys(task_terms))
     if scores is None:
         scores = [bm25(terms, c["toks"], idf, avgdl, weights=weights) for c in cands]
@@ -187,6 +187,12 @@ def candidate_features(task_terms, cands, idf, avgdl, now, scores=None, weights=
             x[h("used=")] = math.log1p(extra["used"][i]) / 3
         if "corrects" in extra and i in extra["corrects"]:
             x[h("corrects")] = 1.0
+        if "near" in extra and i in extra["near"]:        # near.py: an entry earlier, similar tasks used
+            nf = extra["near"][i]
+            x[h("near")], x[h("near-rank")], x[h("near-hit")] = nf[0], nf[1], 1.0
+            if len(nf) > 2:                               # how like the prompt that task really was
+                x[h("near-like")] = nf[2]
+                x[h("near-strong")] = 1.0 if nf[2] >= 0.5 else 0.0
         out.append(x)
         shared_terms.append(sorted(shared, key=lambda t: (-idf.get(t, 0), t))[:4])
     return out, scores, shared_terms

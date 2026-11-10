@@ -70,6 +70,7 @@ models/served/
 models/index.json
 models/repo.json
 models/deps.json
+models/near.json
 models/*.tmp
 __pycache__/
 *.pyc

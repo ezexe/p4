@@ -48,6 +48,12 @@ DEFAULTS = {
             "scan": 20000,               # directory entries one package's walk looks at
             "depth": 6,
         },
+        "near": {                        # candidates from what earlier, similar tasks used (near.py)
+            "on": True,
+            "neighbours": 20,            # earlier tasks whose entries are taken
+            "max": 100,                  # entries added to a task's candidates
+            "same_session": False,       # the session's own earlier tasks too: scores well, tells it nothing
+        },
         "sync": {                        # every machine's branch of the store kept in step (sync.py)
             "seed": True,                # the layout hook writes .github/workflows/p4-sync.yml and .github/p4_sync.py
             "main": "main",              # the branch the machines' branches are merged into
