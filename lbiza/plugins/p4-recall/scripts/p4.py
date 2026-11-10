@@ -703,6 +703,9 @@ def main(argv=None):
     p.add_argument("--repo", action="store_true")
     p.add_argument("--deps", action="store_true")
     p.add_argument("--project", default="")
+    p = sub.add_parser("view", help="what a session has in view, for another session to read (view.py)")
+    p.add_argument("session", nargs="?", default="", help="a session id or its first 8 characters; none lists them")
+    p.add_argument("--p4")
     p = sub.add_parser("said", help="a session's statement about a line it was shown (said.py)")
     p.add_argument("act", choices=("applied", "set-aside", "lacked"))
     p.add_argument("handles", nargs="*")
@@ -778,6 +781,10 @@ def main(argv=None):
         return cmd_index(args)
     if args.cmd == "sync":
         return cmd_sync(args)
+    if args.cmd == "view":
+        import view
+        print("\n".join(view.describe(p4_dir(args), args.session)))
+        return 0
     if args.cmd == "said":
         import said
         lines, code = said.state(p4_dir(args), args.session, args.act, args.handles, args.why)

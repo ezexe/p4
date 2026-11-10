@@ -128,6 +128,37 @@ def dropped(v):
     return ({p for p, f in v["files"].items() if f["turn"] < cut}, {e for e, k in v["entries"].items() if k < cut})
 
 
+def describe(p4, session="", limit=12):
+    """Lines saying what a session has in view, for another session to read: its newest files (edited ones
+    marked), its commits and its compactions. With no session, one line for each session the store has a record of."""
+    d = os.path.join(p4, "models", "view")
+    try:
+        names = sorted(n[:-5] for n in os.listdir(d) if n.endswith(".json"))
+    except OSError:
+        names = []
+    if not session:
+        out = []
+        for n in names:
+            v = load(p4, n) or empty()
+            files, _ = in_view(v)
+            out.append(f"{n}: {v['turns']} turns, {len(files)} files in view, {len(v['commits'])} commits, {len(v['marks'])} compactions")
+        return out or ["no session has a record yet"]
+    v = load(p4, session)
+    if not v:
+        return [f"no record for session {session[:8]}" + (f" (records: {', '.join(names)})" if names else "")]
+    files, entries = in_view(v)
+    gone, _ = dropped(v)
+    newest = sorted(files, key=lambda p: (-v["files"][p]["turn"], p))[:limit]
+    out = [f"session {session[:8]}: {v['turns']} turns, {len(files)} files in view, {len(gone)} dropped at a compaction"]
+    out += [f"  {'edited' if v['files'][p]['edited'] else 'read  '} turn {v['files'][p]['turn']:3}  {p}" for p in newest]
+    if len(files) > limit:
+        out.append(f"  ... and {len(files) - limit} more")
+    out += [f"  commit turn {c['turn']:3}  {c['repo']} {c['sha']}  {c['subject']}" for c in v["commits"][-limit:]]
+    if entries:
+        out.append(f"  store lines shown: {len(entries)}")
+    return out
+
+
 def stats_line(p4):
     d = os.path.join(p4, "models", "view")
     try:

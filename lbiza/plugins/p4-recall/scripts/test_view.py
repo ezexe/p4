@@ -66,6 +66,20 @@ class View(unittest.TestCase):
         v = view.build([turn("p", [("Read", {"file_path": out}, "")], self.proj)], self.proj)
         self.assertEqual(list(v["files"]), [out.replace(os.sep, "/")])
 
+    def test_describe_is_names_for_another_session_to_read(self):
+        import json
+        v = view.build(self.turns[:2], self.proj)
+        os.makedirs(os.path.dirname(view.path(self.p4, "abcdef12")))
+        with open(view.path(self.p4, "abcdef12"), "w", encoding="utf-8") as f:
+            json.dump(v, f)
+        self.assertEqual(view.describe(self.p4), ["abcdef12: 2 turns, 2 files in view, 1 commits, 0 compactions"])
+        got = view.describe(self.p4, "abcdef12-and-the-rest")
+        self.assertEqual(got[0], "session abcdef12: 2 turns, 2 files in view, 0 dropped at a compaction")
+        self.assertIn("  edited turn   1  src/port.py", got)
+        self.assertIn("  read   turn   0  docs/notes.md", got)
+        self.assertIn("  commit turn   1  lib 1a2b3c4d  port: stay open", got)
+        self.assertEqual(view.describe(self.p4, "zzzzzzzz"), ["no record for session zzzzzzzz (records: abcdef12)"])
+
     def test_refresh_writes_and_reads_back(self):
         self.assertIsNone(view.load(self.p4, "abcdef12"))
         self.assertEqual(view.refresh(self.p4, self.proj, "abcdef12-rest", "", None), view.empty(), "no transcript: nothing")
