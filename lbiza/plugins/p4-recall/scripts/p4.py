@@ -442,6 +442,40 @@ def cmd_index(args):
     return 0
 
 
+def cmd_sync(args):
+    """Seed the store's workflow and script and commit them when they changed; commit the tracked files the hooks
+    have changed; then `sync.py pull` (this machine's branch takes in main) or, with --all, push this branch,
+    `sync.py all` (every branch into main and up to it, in a worktree) and move this branch up to the result."""
+    import p4conf
+    import sync
+    p4 = p4_dir(args)
+    conf = p4conf.section(p4, "recall", write=False).get("sync", {})
+    main = args.main or conf.get("main", "main")
+    here = os.getcwd()
+    os.chdir(p4)
+    try:
+        wrote = sync.seed(p4, main)
+        if wrote:
+            sync.git("add", "--", ".github")
+            sync.git("-c", f"user.name={sync.NAME}", "-c", f"user.email={sync.EMAIL}", "commit", "-q", "--no-verify",
+                     "-m", "p4 sync: the workflow and its script", "--", ".github")
+            print("sync: seeded and committed " + ", ".join(wrote))
+        if not args.all:
+            return sync.main(["pull", "--snapshot", "--main", main] + (["--push"] if args.push else []))
+        branch = sync.git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+        if sync.snapshot(branch):
+            print(f"sync: committed {branch}'s changed files first")
+        if args.push:                         # the merge reads the remote's branches: this one has to be there
+            sync.git("fetch", "-q", "origin")
+            if sync.git("merge-base", "--is-ancestor", f"origin/{branch}", "HEAD", check=False).returncode != 0:
+                print("\n".join(sync.merge(f"origin/{branch}", branch)))
+            sync.git("push", "-q", "origin", f"HEAD:refs/heads/{branch}")
+        rc = sync.main(["all", "--main", main] + (["--push"] if args.push else []))
+        return rc or (sync.main(["catch-up"]) if args.push else 0)
+    finally:
+        os.chdir(here)
+
+
 def cmd_query(args):
     p4 = p4_dir(args)
     r = query(p4, args.text, args.session, args.now or None)
@@ -641,6 +675,11 @@ def main(argv=None):
     p.add_argument("--repo", action="store_true")
     p.add_argument("--deps", action="store_true")
     p.add_argument("--project", default="")
+    p = sub.add_parser("sync", help="keep every machine's branch of the store in step (sync.py)")
+    p.add_argument("--p4")
+    p.add_argument("--all", action="store_true", help="merge every machine's branch into main and move them up to it")
+    p.add_argument("--push", action="store_true")
+    p.add_argument("--main", default="")
     p = sub.add_parser("row")
     p.add_argument("action", choices=("open", "close"))
     p.add_argument("--p4")
@@ -703,6 +742,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
     if args.cmd == "index":
         return cmd_index(args)
+    if args.cmd == "sync":
+        return cmd_sync(args)
     if args.cmd == "query":
         return cmd_query(args)
     if args.cmd == "check":

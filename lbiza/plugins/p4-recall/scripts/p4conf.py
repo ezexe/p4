@@ -48,6 +48,10 @@ DEFAULTS = {
             "scan": 20000,               # directory entries one package's walk looks at
             "depth": 6,
         },
+        "sync": {                        # every machine's branch of the store kept in step (sync.py)
+            "seed": True,                # the layout hook writes .github/workflows/p4-sync.yml and .github/p4_sync.py
+            "main": "main",              # the branch the machines' branches are merged into
+        },
         "query": {
             "max_lines": 5, "per_file": 2, "text_chars": 160, "history_chars": 120, "candidates": 200,
             "min_rare": 2, "fallback_cover": 0.75, "fallback_icover": 0.65, "fallback_dense": 0.35,

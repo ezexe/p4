@@ -170,6 +170,13 @@ def init_layout(project):
         except (OSError, subprocess.SubprocessError):
             pass
     exclude_line(project)
+    try:                                  # the store's sync workflow and its script (sync.py), unless turned off
+        conf = p4conf.section(p4, "recall", write=False).get("sync", {})
+        if conf.get("seed", True):
+            import sync
+            sync.seed(p4, conf.get("main", "main"))
+    except (OSError, ImportError):
+        pass
     return p4
 
 

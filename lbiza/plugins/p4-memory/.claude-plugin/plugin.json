@@ -1,6 +1,6 @@
 {
   "name": "p4-memory",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Stores Claude Code's built-in per-project memory in <project>/.claude/p4/memory/ instead of AppData. AppData keeps a pointer MEMORY.md; the session start prints the p4 MEMORY.md index, as the built-in would, and a write into AppData is moved into p4.",
   "author": {
     "name": "ezexe"
