@@ -193,6 +193,43 @@ class Sync(unittest.TestCase):
         twice = (head + "\n- key: cmake\n  time: 2026-11-01 10:00\n  meant: a\n\n- key: cmake\n  time: 2026-11-05 10:00\n  meant: b\n").encode()
         self.assertEqual(sync.merge_entries(twice, twice, twice).decode().count("- key: cmake"), 2, "a repeated key is two entries")
 
+    def test_settings_git_merged_cleanly_are_still_merged_by_key(self):
+        """Two machines each add a `deps` block to p4.json, far enough apart that git merges the lines without a
+        conflict and the file holds the key twice; and both change the same line of a script, which is then one side whole, never both sides' lines."""
+        def strict(pairs):
+            keys = [k for k, _ in pairs]
+            self.assertEqual(len(keys), len(set(keys)), f"a key twice: {keys}")
+            return dict(pairs)
+        long = {"recall": {**{f"k{i}": i for i in range(12)}}}
+        for d in (self.win, self.mac):
+            sh(d, "git", "pull", "-q")
+        write(self.win, "p4.json", json.dumps(long, indent=1) + "\n")
+        write(self.win, ".github/p4_sync.py", "# seeded\nA = 1\nB = 1\nC = 1\n")
+        sh(self.win, "git", "add", "-A")
+        sh(self.win, "git", "commit", "-q", "-m", "long settings")
+        sh(self.win, "git", "push", "-q", "origin", "HEAD:win", "HEAD:mac", "HEAD:main")
+        sh(self.mac, "git", "pull", "-q", "origin", "mac")
+        text = read(self.win, "p4.json")
+        write(self.win, "p4.json", text.replace('  "k0": 0,', '  "deps": {\n   "roots": ["Z:/c"]\n  },\n  "k0": 0,'))
+        write(self.win, ".github/p4_sync.py", "# seeded\nA = 2\nB = 1\nC = 1\n")
+        sh(self.win, "git", "commit", "-q", "-am", "win deps")
+        sh(self.win, "git", "push", "-q", "origin", "HEAD")
+        write(self.mac, "p4.json", text.replace('  "k11": 11', '  "k11": 11,\n  "deps": {\n   "roots": ["/Users/x/c"]\n  }'))
+        write(self.mac, ".github/p4_sync.py", "# seeded\nA = 3\nB = 1\nC = 1\n")        # the same line: a conflict
+        sh(self.mac, "git", "commit", "-q", "-am", "mac deps")
+        sh(self.mac, "git", "push", "-q", "origin", "HEAD")
+        plain = os.path.join(os.path.dirname(self.origin), "plain")          # what git alone does with it
+        sh(os.path.dirname(self.origin), "git", "clone", "-q", "-b", "mac", self.origin, plain)
+        subprocess.run(["git", "merge", "-q", "--no-edit", "origin/win"], cwd=plain, capture_output=True, env=ENV)   # stops on the script
+        self.assertEqual(read(plain, "p4.json").count('"deps"'), 2, "git merges the lines cleanly and the key is there twice")
+        self.assertEqual(self.run_all("--push"), 0)
+        out = os.path.join(os.path.dirname(self.origin), "out2")
+        sh(os.path.dirname(self.origin), "git", "clone", "-q", self.origin, out)
+        cfg = json.loads(read(out, "p4.json"), object_pairs_hook=strict)
+        self.assertEqual(cfg["recall"]["deps"]["roots"], ["/Users/x/c", "Z:/c"])
+        self.assertIn(read(out, ".github/p4_sync.py"), ("# seeded\nA = 2\nB = 1\nC = 1\n", "# seeded\nA = 3\nB = 1\nC = 1\n"),
+                      "a conflicted script is one machine's whole, never both sides' lines")
+
     def test_merge_json(self):
         m = sync.merge_json
         self.assertEqual(m({"a": 1, "b": 2}, {"a": 1, "b": 2, "c": 3}, {"a": 9, "b": 2}), {"a": 9, "b": 2, "c": 3})

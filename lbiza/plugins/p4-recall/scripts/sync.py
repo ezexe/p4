@@ -30,7 +30,10 @@ Two machines write the same files, so a plain merge conflicts. Each conflicted f
                     recall.deps.roots holds every machine's paths (a root that is not on a machine is skipped there)
   a trained model (models/ranker*, *.pt, *.phid) and its record (models/eval.tsv)   one side whole, the one whose
                     last training round is the later: two machines' weights are never mixed
-  anything else     the side that changed it last
+  anything else     the side that changed it last, whole: a script, a workflow or anything under .github/ is never
+                    stitched from two versions
+Settings and store entries are merged this way whenever both machines changed the file, conflict or not: git merges
+two machines' p4.json line by line without complaint and leaves a key twice (measured 2026-11-10).
 A file one side deleted and the other changed is kept. Stdlib and git only: the workflow needs no install.
 """
 
@@ -190,9 +193,17 @@ def merge_json(base, ours, theirs):
     return theirs if base == ours else ours                 # both changed it: ours (main's, in the workflow)
 
 
-def settle(path, ref, model_side):
-    """The merged bytes of one conflicted path and the rule that gave them."""
-    base, ours, theirs = show(f":1:{path}"), show(f":2:{path}"), show(f":3:{path}")
+def structured(path):
+    """A file whose lines git must never merge by itself: settings (a clean textual merge of two machines' p4.json
+    left `recall` holding its keys twice, measured 2026-11-10) and the store's entries."""
+    low = path.lower()
+    return low.endswith(".json") or (low.startswith("store/") and low.endswith(".md"))
+
+
+def settle(path, ref, model_side, sides=None):
+    """The merged bytes of one path both sides changed and the rule that gave them. `sides` is (base, ours, theirs)
+    when git saw no conflict; a conflicted path's are read from the index."""
+    base, ours, theirs = sides or (show(f":1:{path}"), show(f":2:{path}"), show(f":3:{path}"))
     if ours is None or theirs is None:
         return (ours if ours is not None else theirs), "kept (the other side deleted it)"
     if is_model(path):
@@ -208,12 +219,15 @@ def settle(path, ref, model_side):
             return (json.dumps(got, indent=1, ensure_ascii=False) + "\n").encode("utf-8"), "settings: key by key"
         except ValueError:
             pass
-    if low.endswith(TEXT_EXT) or os.path.basename(low) in (".gitignore", ".gitattributes") or b"\0" not in (ours + theirs)[:8192]:
+    name = os.path.basename(low)
+    prose = low.endswith(TEXT_EXT) or name in (".gitignore", ".gitattributes") or "." not in name.lstrip(".")
+    if prose and not low.startswith(".github/") and b"\0" not in (ours + theirs)[:8192]:
         return union(base, ours, theirs, low.endswith((".tsv", ".jsonl"))), "both sides' lines"
+    # code and configuration (a script, a workflow, anything under .github/) is never stitched from two versions
     t_ours = git("log", "-1", "--format=%ct", "HEAD", "--", path, check=False).stdout.strip() or "0"
     t_theirs = git("log", "-1", "--format=%ct", ref, "--", path, check=False).stdout.strip() or "0"
     side = "theirs" if int(t_theirs) > int(t_ours) else "ours"
-    return (theirs if side == "theirs" else ours), f"binary: the {'incoming' if side == 'theirs' else 'current'} side (changed last)"
+    return (theirs if side == "theirs" else ours), f"whole: the {'incoming' if side == 'theirs' else 'current'} side (changed last)"
 
 
 def merge(ref, into):
@@ -237,6 +251,27 @@ def merge(ref, into):
             f.write(data)
         git("add", "--", p)
         log.append(f"  {p}: {rule}")
+    # a structured file both sides changed is merged by its structure even where git merged its lines cleanly
+    mb = git("merge-base", "HEAD", ref, check=False).stdout.strip()
+    if mb:
+        changed = lambda tip: {p for p in git("diff", "--name-only", "-z", mb, tip).stdout.split("\0") if p}
+        for p in sorted((changed("HEAD") & changed(ref)) - set(paths)):
+            if not structured(p) or is_model(p):
+                continue
+            sides = (show(f"{mb}:{p}"), show(f"HEAD:{p}"), show(f"{ref}:{p}"))
+            if sides[1] is None or sides[2] is None:
+                continue
+            data, rule = settle(p, ref, model_side, sides)
+            try:
+                with open(p, "rb") as f:
+                    same = f.read().replace(b"\r\n", b"\n") == data.replace(b"\r\n", b"\n")
+            except OSError:
+                same = False
+            if not same:
+                with open(p, "wb") as f:
+                    f.write(data)
+                git("add", "--", p)
+                log.append(f"  {p}: {rule} (git had merged its lines)")
     if git("diff", "--cached", "--quiet", check=False).returncode == 0 and not os.path.exists(
             os.path.join(git("rev-parse", "--git-dir").stdout.strip(), "MERGE_HEAD")):
         return [f"{ref}: nothing to merge"]
