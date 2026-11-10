@@ -60,6 +60,7 @@ import p4conf  # noqa: E402
 PINNED_CHARS = 1500
 NOTES_HEAD = "Notes from this repo's memory:"
 REPO_DEADLINE_S = 8.0
+HOOK_BUDGET_S = 11.0             # the layout hook's 15 s, less the index build: what the two reads share
 SEED_MARKER = "# seeded by p4-recall"
 # a seed marker of this plugin (either header) or of the vlds plugin's layout hook, whose stores this one inherits
 SEED_MARKER_RE = re.compile(r"(?i)^#\s*seeded (once )?by (p4-recall|the vlds plugin)\b")
@@ -68,6 +69,7 @@ scratchpad/.out/
 models/served/
 models/index.json
 models/repo.json
+models/deps.json
 models/*.tmp
 __pycache__/
 *.pyc
@@ -225,16 +227,26 @@ def exclude_line(project):
 
 
 def refresh_index(p4, project, deadline_s=None):
-    """The repository's entries brought up to date (incrementally, within the deadline), then the index rebuilt
-    when any source is newer."""
+    """The repository's entries, then the dependencies' (a package installed or updated since the last look is read
+    again), brought up to date incrementally within their deadlines; then the index rebuilt when any source is
+    newer."""
     deadline_s = REPO_DEADLINE_S if deadline_s is None else deadline_s
     import subprocess
+    import deps
     import repo
     import store as st
+    t0 = time.time()
     if project and repo.is_repo(project):
         try:
             repo.build(p4, project, deadline_s=deadline_s)
         except (RuntimeError, OSError, subprocess.SubprocessError):
+            pass
+    if project:
+        try:
+            deps.configure(p4)
+            left = HOOK_BUDGET_S - (time.time() - t0)
+            deps.build(p4, project, deadline_s=max(1.0, min(deps.DEADLINE_S, left)))
+        except (RuntimeError, OSError, ValueError):
             pass
     if st.index_stale(p4):
         st.build_index(p4)
@@ -393,8 +405,13 @@ def labels_for_turn(p4, project, idx, task_id, served, reply, turn, when):
     if turn is not None:
         ri = lb.repo_index(idx)
         if ri[0]:
-            got, _ = lb.turn_repo_labels(turn, project, ri, task_id, reply, when)
+            got, _ = lb.turn_repo_labels(turn, project, ri, task_id, reply, when, p4=p4)
             rows_out += got
+        try:                    # a dependency file the turn opened that the index lacks: read with its package next time
+            import deps
+            deps.note_opened(p4, [p for p in deps.opened_in_turn(turn, project) if p not in ri[0]])
+        except (ImportError, OSError, ValueError, KeyError):
+            pass
     lb.append_tsv(lb.mpath(p4, lb.TRAIN), lb.TRAIN_HEAD, rows_out)
     return rows_out
 

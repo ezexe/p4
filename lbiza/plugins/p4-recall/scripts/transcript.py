@@ -158,8 +158,11 @@ def turns(path_or_lines):
 
 # --- paths -----------------------------------------------------------------------------------------------
 
+EXTERNAL = {}          # {dependency root outside the project: its path prefix} (deps.externals), set by the caller
+
+
 def rel(path, project, cwd=""):
-    """A path relative to the project, or '' when it is outside it."""
+    """A path relative to the project; under a dependency root outside it, `<prefix>/<path in the root>`; else ''."""
     if not path or not isinstance(path, str):
         return ""
     p = path.strip().strip("'\"")
@@ -170,6 +173,9 @@ def rel(path, project, cwd=""):
     p = os.path.normpath(p)
     proj = os.path.normpath(project)
     if p == proj or not p.startswith(proj + os.sep):
+        for root, prefix in EXTERNAL.items():
+            if p.startswith(root + os.sep):
+                return prefix + "/" + p[len(root) + 1:].replace(os.sep, "/")
         return ""
     return p[len(proj) + 1:].replace(os.sep, "/")
 

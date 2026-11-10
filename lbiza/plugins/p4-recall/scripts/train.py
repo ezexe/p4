@@ -449,7 +449,8 @@ def last_promoted(p4):
 
 
 def owed(p4, now_s=None):
-    """(owed?, why): >= OWED_LABELS labels landed since the last round, and the last round older than an hour."""
+    """(owed?, why): >= OWED_LABELS labels landed since the last round, and the last round older than an hour; or a
+    dependency was installed or updated since the last round (its entries are new candidates), whatever the age."""
     now_s = now_s or time.time()
     rows = eval_rows(p4)
     n = lb.count_labels(p4)
@@ -462,6 +463,12 @@ def owed(p4, now_s=None):
         before = 0
     path = os.path.join(p4, "models", "eval.tsv")
     age = now_s - os.path.getmtime(path)
+    try:                                   # deps.py: a package installed or updated after the last round
+        import deps
+        if deps.changed_at(p4) > os.path.getmtime(path):
+            return True, "a dependency was installed or updated since the last round"
+    except (ImportError, OSError, ValueError):
+        pass
     if n - before < OWED_LABELS:
         return False, f"{n - before} labels since the last round (need {OWED_LABELS})"
     if age < OWED_AGE_S:

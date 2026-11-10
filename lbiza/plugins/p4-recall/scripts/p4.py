@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """p4.py: the recall's one script (fresh-marketplace.md 3.4).
 
-  index [--force] [--repo [--project D]]  rebuild models/index.json when a store, memory or src file is newer;
-                                       --repo first brings the repository's entries up to date (repo.py, 4.1a)
+  index [--force] [--repo] [--deps] [--project D]  rebuild models/index.json when a store, memory or src file is
+                                       newer; --repo first brings the repository's entries up to date (repo.py,
+                                       4.1a), --deps the dependencies' (deps.py: frameworks, library packages,
+                                       external modules; a package installed or updated is read again)
   query --text T [--session S]         the recall lines for one message: 0 lines for an ordinary message,
                                        otherwise at most 5, each `- <date> <kind>: <text> (<file>:<line>)`
   row open|close --session S ...       stamp a message row; complete it from the reply (rows.py)
@@ -424,6 +426,14 @@ def cmd_index(args):
               f"{s['new_commits']} new commits; {s['files']} files, {s['entries']} file entries, {s['commits']} "
               f"commits; excluded " + ", ".join(f"{k} {v}" for k, v in sorted(s["excluded"].items()))
               + (f"; {s['cut']} files past the {repo.MAX_FILE_ENTRIES:,}-entry cap" if s["cut"] else ""))
+    if args.deps:
+        import deps
+        import repo
+        deps.configure(p4)
+        s = deps.build(p4, args.project or repo.project_of(p4))
+        print(f"index --deps: {s['packages']} packages in {s['roots']} roots, {s['read']} read again "
+              f"({s['installed']} installed, {s['updated']} updated, {s['removed']} removed); {s['entries']} entries"
+              + (f"; {s['cut']} packages past the {deps.MAX_ENTRIES:,}-entry cap" if s["cut"] else ""))
     if args.force or st.index_stale(p4):
         idx = st.build_index(p4)
         print(f"index: rebuilt, {idx['n']} entries -> {st.index_path(p4)}")
@@ -484,6 +494,10 @@ def cmd_check(args):
     rl = repo.stats_line(p4)
     if rl:
         print("  " + rl)
+    import deps
+    dl = deps.stats_line(p4)
+    if dl:
+        print("  " + dl)
     jar = sum(1 for d in idx["docs"] if not d.get("plain") and st.JARGON.search(entry_line(d)))
     rate = jar / len(idx["docs"]) if idx["docs"] else 0.0
     print(f"  index: {idx['n']} entries ({'rebuilt' if rebuilt else 'fresh'}); excluded "
@@ -615,6 +629,7 @@ def main(argv=None):
     p.add_argument("--p4")
     p.add_argument("--force", action="store_true")
     p.add_argument("--repo", action="store_true")
+    p.add_argument("--deps", action="store_true")
     p.add_argument("--project", default="")
     p = sub.add_parser("row")
     p.add_argument("action", choices=("open", "close"))

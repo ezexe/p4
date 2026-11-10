@@ -464,11 +464,14 @@ def repo_index(idx):
     return known, syms, path_id, sym_ids, {p: v[0] for p, v in commit_of.items()}
 
 
-def turn_repo_labels(turn, project, ri, task_id, reply="", now=""):
+def turn_repo_labels(turn, project, ri, task_id, reply="", now="", p4=""):
     """[label row] for one turn: each file the turn touched, by 5.1a's table, on its path entry; an edited or cited
     file's label also lands on the symbols its edits name and on the newest commit that touched it."""
     import transcript as tr
     known, syms, path_id, sym_ids, commit_of = ri
+    if p4:
+        import deps
+        tr.EXTERNAL = deps.externals(p4)
     ev = tr.file_events(turn, project, known, syms, reply)
     out = []
     edit_text = tool_inputs(turn)
@@ -539,7 +542,7 @@ def from_transcripts(p4, project, slug_dirs, idx=None, write=True, all_sessions=
                     tid = e.id
                 else:
                     tid = f"turn:{s8}:{turn['time']}"
-                labs, _ = turn_repo_labels(turn, project, ri, tid, tr.reply_of(turn), turn["time"])
+                labs, _ = turn_repo_labels(turn, project, ri, tid, tr.reply_of(turn), turn["time"], p4=p4)
                 if not labs:
                     continue
                 tasks_out.append({"id": tid, "session": s8, "time": turn["time"][:16],

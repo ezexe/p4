@@ -38,6 +38,16 @@ DEFAULTS = {
         "updated": None,                 # who last set inject/learn, and when (phi_model mode writes it)
         "pinned_chars": 1500,
         "repo_deadline_s": 8.0,
+        "deps": {                        # frameworks, library packages and external modules as entries (deps.py)
+            "auto": True,                # node_modules, vendor, third_party, _deps, vcpkg_installed, site-packages
+            "roots": [],                 # more roots: paths relative to the project, or absolute (outside it)
+            "deadline_s": 6.0,           # what one hook spends reading changed packages; the rest waits for the next
+            "max_entries": 20000,
+            "package_files": 400,        # files read of one package the project asks for by name
+            "package_entries": 1500,
+            "scan": 20000,               # directory entries one package's walk looks at
+            "depth": 6,
+        },
         "query": {
             "max_lines": 5, "per_file": 2, "text_chars": 160, "history_chars": 120, "candidates": 200,
             "min_rare": 2, "fallback_cover": 0.75, "fallback_icover": 0.65, "fallback_dense": 0.35,

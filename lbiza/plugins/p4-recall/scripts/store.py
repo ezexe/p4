@@ -498,11 +498,12 @@ def sources_signature(p4):
     """(count, newest mtime_ns) over every file and directory under store/, memory/ and src/ (os.scandir: one stat
     per entry, no path joins, the hot path of every message's staleness check)."""
     count, newest = 0, 0
-    try:
-        st_ = os.stat(os.path.join(p4, "models", "repo.json"))     # the repository's entries (repo.py)
-        count, newest = 1, st_.st_mtime_ns
-    except OSError:
-        pass
+    for name in ("repo.json", "deps.json"):                        # the repository's entries (repo.py), the dependencies' (deps.py)
+        try:
+            st_ = os.stat(os.path.join(p4, "models", name))
+            count, newest = count + 1, max(newest, st_.st_mtime_ns)
+        except OSError:
+            pass
     stack = [os.path.join(p4, sub) for sub in ("store", "memory", "src")]
     while stack:
         top = stack.pop()
@@ -666,9 +667,16 @@ def repo_docs(p4):
     except ImportError:
         return []
     try:
-        return repo.entries(p4)
+        out = repo.entries(p4)
     except (OSError, ValueError, KeyError):
-        return []
+        out = []
+    try:                               # the dependencies (deps.py); a path the repository tracks keeps its own entry
+        import deps
+        have = {d["id"] for d in out}
+        out += [d for d in deps.entries(p4) if d["id"] not in have]
+    except (ImportError, OSError, ValueError, KeyError):
+        pass
+    return out
 
 
 def cache_path(p4):
