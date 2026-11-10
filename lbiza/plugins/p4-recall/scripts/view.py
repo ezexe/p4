@@ -173,7 +173,7 @@ def stats_line(p4):
     files = commits = marks = 0
     for n in names:
         v = load(p4, n[:-5]) or empty()
-        files, commits, marks = files + len(v["files"]), commits + len(v["commits"]), marks + len(v["marks"])
+        files, commits, marks = files + len(v["files"]), commits + len(v["commits"]), marks + compactions(v)
     return f"view: {len(names)} sessions, {files} files in their records, {commits} commits, {marks} compactions"
 
 
@@ -247,6 +247,23 @@ def size_lines(s):
             f"  what filled it: {top or 'nothing recorded'}"]
 
 
+def compactions(v):
+    """How often a session's context was compacted: the larger of the two ways it shows (a continuation message,
+    a fall in the context's size), so every count of it agrees."""
+    return max(len(v.get("marks") or []), (v.get("size") or {}).get("compactions", 0))
+
+
+def slug_dirs_of(project):
+    """A project's transcript folder and those of its worktrees (the same name followed by `--claude-worktrees-`)."""
+    base = slug_dir(project)
+    try:
+        sibs = [os.path.join(os.path.dirname(base), n) for n in os.listdir(os.path.dirname(base))
+                if n.startswith(os.path.basename(base) + "--claude-worktrees-")]
+    except OSError:
+        sibs = []
+    return [base] + sorted(sibs)
+
+
 def slug_dir(project):
     """Where Claude Code keeps a project's transcripts: ~/.claude/projects/<the path, every other character a dash>."""
     return os.path.join(os.path.expanduser("~"), ".claude", "projects", re.sub(r"[^A-Za-z0-9]", "-", os.path.abspath(project)))
@@ -256,7 +273,7 @@ def backfill(p4, project, slug_dirs=None):
     """The record of every session whose transcript is on this machine, built as refresh builds it: the sessions
     that ran before the plugin kept records. Returns {sessions, files, commits, compactions}."""
     out = {"sessions": 0, "files": 0, "commits": 0, "compactions": 0}
-    for d in slug_dirs or [slug_dir(project)]:
+    for d in slug_dirs or slug_dirs_of(project):
         try:
             names = sorted(n for n in os.listdir(d) if n.endswith(".jsonl"))
         except OSError:
@@ -267,5 +284,5 @@ def backfill(p4, project, slug_dirs=None):
                 out["sessions"] += 1
                 out["files"] += len(v["files"])
                 out["commits"] += len(v["commits"])
-                out["compactions"] += max(len(v["marks"]), (v.get("size") or {}).get("compactions", 0))
+                out["compactions"] += compactions(v)
     return out
