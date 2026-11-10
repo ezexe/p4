@@ -569,8 +569,9 @@ def run_round(p4, write=True, now=None, idx=None, sources=None, quiet=False, dic
         if newly_harmed:
             promote = False
             why.append(f"{len(newly_harmed)} dictionary entries harm working messages and are still on")
-    row = {"round": str(int(prev["round"]) + 1 if prev and prev.get("round", "").isdigit() else
-                        len(eval_rows(p4))),
+    # past every round in the log, not only the last row's: a synced log holds another machine's rounds too
+    seen = [int(r["round"]) for r in eval_rows(p4) if r.get("round", "").isdigit()]
+    row = {"round": str(max(seen) + 1 if seen else 0),
            "time": now, "labels": str(lb.count_labels(p4)), "tasks": str(len(sets)),
            "per_source": ",".join(f"{k}:{v}" for k, v in sorted(per_source.items())),
            "r_precision": f"{ev['r-precision']:.4f}" if ev else "", "recall20": f"{ev['recall@20']:.4f}" if ev else "",
