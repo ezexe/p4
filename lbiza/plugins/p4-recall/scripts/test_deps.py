@@ -71,7 +71,7 @@ class Deps(unittest.TestCase):
         return {d["id"]: d for d in deps.entries(self.p4)}
 
     def test_roots_and_packages(self):
-        got = dict(deps.roots(self.proj))
+        got = {r: p for r, p, _split in deps.roots(self.proj)}
         self.assertEqual(sorted(got.values()), ["@framework", "library_packages", "node_modules"],
                          "the _deps inside a configured root is not a root of its own")
         s = deps.build(self.p4, self.proj)
@@ -193,6 +193,31 @@ class Deps(unittest.TestCase):
         self.assertGreater(s["cut"], 0)
         self.assertLessEqual(len([d for d in deps.entries(self.p4) if d["kind"] == "file"]), 6)
         self.assertIn("cut at 6 entries", deps.stats_line(self.p4))
+
+    def test_a_named_root_inside_another_is_read_by_its_directories(self):
+        part = os.path.join(self.ext, "src", "part")
+        write(os.path.join(part, "BUILD.gn"), "group(\"part\") {}\n")
+        write(os.path.join(part, "README.md"), "# part\n\n## Overview\n\nThe part.\n")
+        write(os.path.join(part, "core", "ports.h"), "class NodePort {\n};\n")
+        write(os.path.join(part, "public", "cpp", "remote.h"), "class Remote {\n};\n")
+        write(os.path.join(part, "test", "only.h"), "class TestOnly {\n};\n")
+        deps.ROOTS = ["library_packages", self.ext, part, os.path.join(self.ext, "not-there")]
+        got = {p: split for _r, p, split in deps.roots(self.proj)}
+        self.assertEqual(got["@framework/src/part"], True, "the outer root's prefix and the path below it")
+        self.assertEqual(got["@framework"], False)
+        self.assertEqual(len(got), 4, "a root that is not on this machine is skipped")
+        deps.build(self.p4, self.proj)
+        p = self.pkgs()
+        self.assertEqual(p["part"]["light"], True, "the part itself: its own documents")
+        self.assertEqual((p["core"]["path"], p["public"]["path"]), ("@framework/src/part/core", "@framework/src/part/public"))
+        self.assertNotIn("test", p)
+        ids = self.ids()
+        self.assertIn("repo:@framework/src/part/core/ports.h", ids)
+        self.assertIn("repo:@framework/src/part/public/cpp/remote.h", ids)
+        self.assertIn("repo:@framework/src/part/README.md", ids)
+        self.assertEqual(len(ids), len(deps.entries(self.p4)), "no entry twice, though the outer root holds the part too")
+        self.assertEqual(tr.rel(os.path.join(part, "core", "ports.h"), self.proj) or "@framework/src/part/core/ports.h",
+                         "@framework/src/part/core/ports.h")
 
     def test_index_labels_and_owed_round(self):
         deps.build(self.p4, self.proj, now_s=time.time() - 50)

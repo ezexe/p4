@@ -11,7 +11,8 @@ Roots (`recall.deps` of p4.json):
   auto    true: every directory named node_modules, vendor, third_party, _deps, vcpkg_installed or site-packages
           found within AUTO_DEPTH levels of the project root (dot directories are not entered, .venv and venv are)
   roots   more of them, each a path (relative to the project, or absolute: a tree outside the project, such as a
-          framework's own checkout)
+          framework's own checkout). A path inside another root names the part of it that matters: it is kept
+          as a root of its own and read by its directories, each one a package, whatever manifest it carries
 
 Packages of a root, by its name:
   node_modules     each <name>/package.json and @scope/<name>/package.json
@@ -133,20 +134,26 @@ def auto_roots(project):
 
 
 def roots(project):
-    """[(absolute root, the prefix its entries' paths carry)], the configured ones first, none inside another."""
+    """[(absolute root, the prefix its entries' paths carry, split)], the configured ones first. A found root inside
+    another is dropped; a configured one inside another is kept, the owner's word that the part matters: it carries
+    the outer root's prefix and its path below it, and is split (each of its directories a package of its own)."""
     found = []
     for r in ROOTS:
         r = os.path.expanduser(str(r))
         found.append(os.path.normpath(r if os.path.isabs(r) else os.path.join(project, r)))
     if AUTO:
         found += auto_roots(project)
-    out, proj, seen = [], os.path.normpath(project), []
-    for r in found:
-        if not os.path.isdir(r) or any(r == s or r.startswith(s + os.sep) for s in seen):
+    out, proj, seen, named = [], os.path.normpath(project), {}, len(ROOTS)
+    for i, r in enumerate(found):
+        if not os.path.isdir(r) or r in seen:
             continue
-        seen.append(r)
+        outer = max((s for s in seen if r.startswith(s + os.sep)), key=len, default="")
+        if outer and i >= named:
+            continue
         inside = r.startswith(proj + os.sep)
-        out.append((r, posix(r[len(proj) + 1:]) if inside else "@" + os.path.basename(r.rstrip("\\/"))))
+        seen[r] = (seen[outer] + "/" + posix(r[len(outer) + 1:]) if outer else
+                   posix(r[len(proj) + 1:]) if inside else "@" + os.path.basename(r.rstrip("\\/")))
+        out.append((r, seen[r], bool(outer)))
     return out
 
 
@@ -171,8 +178,9 @@ def kind_of(root):
     return {"node_modules": "node", "site-packages": "site", "_deps": "fetch"}.get(base, "tree")
 
 
-def packages(root, prefix):
-    """[{name, dir (absolute, '' when the package is only a record), path (shown), kind, meta}] of one root."""
+def packages(root, prefix, split=False):
+    """[{name, dir (absolute, '' when the package is only a record), path (shown), kind, meta}] of one root. A split
+    root is its directories, each a package, and itself read lightly (its own documents), whatever manifest it has."""
     kind = kind_of(root)
     out = []
 
@@ -201,6 +209,12 @@ def packages(root, prefix):
         for n in subdirs(root):
             if n.endswith("-src"):
                 add(n[:-4], os.path.join(root, n))
+    elif split:
+        add(os.path.basename(root.rstrip("\\/")), root)
+        out[-1]["light"] = True
+        for n in subdirs(root):
+            if not n.startswith(".") and n.lower() not in SKIP_DIRS:
+                add(n, os.path.join(root, n))
     elif any(os.path.exists(os.path.join(root, m)) for m in MANIFESTS):
         add(os.path.basename(root.rstrip("\\/")), root)
     else:
@@ -535,12 +549,12 @@ def build(p4, project=None, deadline_s=None, now=None, now_s=None):
         stats["removed"] += len(s["roots"][r]["packages"])
         del s["roots"][r]
         moved = True
-    for root, prefix in live:
+    for root, prefix, split in live:
         stats["roots"] += 1
         first = root not in s["roots"]
         rs = s["roots"].setdefault(root, {"prefix": prefix, "packages": {}})
         rs["prefix"] = prefix
-        pkgs = packages(root, prefix)
+        pkgs = packages(root, prefix, split)
         direct = direct_names(project, root)
         names = {p["name"] for p in pkgs}
         for gone in [n for n in rs["packages"] if n not in names]:
@@ -559,7 +573,7 @@ def build(p4, project=None, deadline_s=None, now=None, now_s=None):
             old = rs["packages"].get(pkg["name"])
             if old and old.get("sig") == sig:
                 continue
-            light = direct is not None and pkg["name"].lower().replace("_", "-") not in {n.lower() for n in direct}
+            light = pkg.get("light", False) or direct is not None and pkg["name"].lower().replace("_", "-") not in {n.lower() for n in direct}
             rs["packages"][pkg["name"]] = {"sig": sig, "version": version, "path": pkg["path"], "at": now,
                                            "light": light,
                                            "entries": package_entries(pkg, version, desc, light, opened)}
@@ -600,7 +614,7 @@ def build(p4, project=None, deadline_s=None, now=None, now_s=None):
 def entries(p4):
     """The docs the index adds for the dependencies, in repo.entries' form: file entries, then the updates."""
     s = load_state(p4)
-    out, known = [], set()
+    out, known, seen = [], set(), set()
     for r in sorted(s.get("roots", {})):
         for name in sorted(s["roots"][r]["packages"]):
             v = s["roots"][r]["packages"][name]
@@ -608,6 +622,9 @@ def entries(p4):
                 continue
             known.add(v["path"])
             for e in v["entries"]:
+                if e["id"] in seen:                      # a root named inside another: the same file from both
+                    continue
+                seen.add(e["id"])
                 pkg = e["id"] == f"repo:{v['path']}"
                 show = (f"{e['path']} ({name} {v.get('version', '')}".rstrip() + ", a dependency)" if pkg
                         else f"{e['path']} — {e['sym']}" if e["sym"] else e["path"])
