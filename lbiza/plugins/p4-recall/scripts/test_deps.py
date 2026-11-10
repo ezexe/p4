@@ -208,7 +208,14 @@ class Deps(unittest.TestCase):
         self.assertEqual(len(got), 4, "a root that is not on this machine is skipped")
         deps.build(self.p4, self.proj)
         p = self.pkgs()
-        self.assertEqual(p["part"]["light"], True, "the part itself: its own documents")
+        self.assertEqual(p["part"]["light"], False)
+        for n in ("z1", "z2", "z3"):
+            write(os.path.join(part, n + ".h"), "class " + n.upper() + " {};" + chr(10))
+        deps.build(self.p4, self.proj)
+        mine = [e["id"] for e in self.pkgs()["part"]["entries"]]
+        self.assertIn("repo:@framework/src/part/z3.h", mine, "the named folder's own files: past the cap, by name")
+        self.assertNotIn("repo:@framework/src/part/z3.h#" + deps.sha8("Z3"), mine)
+        self.assertFalse([i for i in mine if "/core/" in i], "a directory of it is that directory's package")
         self.assertEqual((p["core"]["path"], p["public"]["path"]), ("@framework/src/part/core", "@framework/src/part/public"))
         self.assertNotIn("test", p)
         ids = self.ids()

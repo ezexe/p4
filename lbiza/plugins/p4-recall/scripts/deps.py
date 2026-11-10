@@ -79,6 +79,7 @@ PER_FILE = 12                        # entries of one file: its path and its fir
 LIGHT_FILES, LIGHT_ENTRIES = 2, 30   # of a transitive one
 SCAN, DEPTH = 20000, 6
 OPENED = 200                         # files a session opened in one package, remembered and always read
+LISTED = 600                         # entries of a named folder's own files: read within the caps, the rest by name
 USED = 400                           # files of one package the project's own sources include, always read
 UP = 8                               # directories above a package an include path may start from
 SOURCE_EXT = (".h", ".hh", ".hpp", ".hxx", ".inl", ".c", ".cc", ".cpp", ".cxx", ".m", ".mm", ".mojom")
@@ -185,7 +186,8 @@ def kind_of(root):
 
 def packages(root, prefix, split=False):
     """[{name, dir (absolute, '' when the package is only a record), path (shown), kind, meta}] of one root. A split
-    root is its directories, each a package, and itself read lightly (its own documents), whatever manifest it has."""
+    root is its directories, each a package, and itself for the files directly in it (`flat`: read within the caps,
+    the rest listed by name), whatever manifest it has."""
     kind = kind_of(root)
     out = []
 
@@ -217,7 +219,7 @@ def packages(root, prefix, split=False):
     elif split:
         add(os.path.basename(root.rstrip("\\/")), root)
         own = out[-1]
-        own["light"] = True
+        own["flat"] = True
         for n in subdirs(root):
             if not n.startswith(".") and n.lower() not in SKIP_DIRS:
                 add(n, os.path.join(root, n))
@@ -351,7 +353,7 @@ def describe(pkg):
 def signature(pkg, version, opened=()):
     """The version and the top-level files' names, sizes and times: it moves when the package is put there again.
     The files a session opened in it are part of it, so a newly opened one has the package read again."""
-    asked, rows = sorted("opened:" + f for f in opened) + [f"caps:{FILES}:{ENTRIES}:{DEPTH}:{SCAN}"], []
+    asked, rows = sorted("opened:" + f for f in opened) + [f"caps:{FILES}:{ENTRIES}:{DEPTH}:{SCAN}" + (f":flat:{LISTED}" if pkg.get("flat") else "")], []
     for d in (pkg["dir"], pkg["meta"]):
         if not d:
             continue
@@ -386,10 +388,11 @@ def rank_file(rel, entry_points):
     return (2 if public and header else 3 if public or header else 4, len(parts), rel)
 
 
-def walk(d):
-    """Relative paths of a package's readable files, breadth first, bounded by SCAN entries and DEPTH levels."""
+def walk(d, flat=False):
+    """Relative paths of a package's readable files, breadth first, bounded by SCAN entries and DEPTH levels; `flat`
+    is its own directory only."""
     out, level, seen = [], [""], 0
-    for _ in range(DEPTH + 1):
+    for _ in range(1 if flat else DEPTH + 1):
         nxt = []
         for sub in level:
             try:
@@ -462,7 +465,7 @@ def package_entries(pkg, version, desc, light=False, opened=()):
         return out
     max_files, max_entries = (LIGHT_FILES, LIGHT_ENTRIES) if light else (FILES, ENTRIES)
     eps = entry_points(d)
-    files = spread(walk(d), eps)
+    files = spread(walk(d, pkg.get("flat", False)), eps)
     if light:
         files = [r for r in files if rank_file(r, eps)[0] <= 1]
     mine = [r for r in opened if os.path.isfile(os.path.join(d, r.replace("/", os.sep)))]
@@ -477,6 +480,13 @@ def package_entries(pkg, version, desc, light=False, opened=()):
         read += 1
         for e in repo.file_entries(f"{p}/{rel}", text)[:PER_FILE if asked else max(1, min(PER_FILE, max_entries - len(out)))]:
             out.append({"id": e["id"], "path": f"{p}/{rel}", "line": e["line"], "sym": e["sym"], "text": e["text"]})
+    if pkg.get("flat"):                                  # the folder the owner named: every file of its own, by name
+        have = {e["path"] for e in out}
+        for rel in files:
+            if len(out) >= LISTED:
+                break
+            if f"{p}/{rel}" not in have:
+                out.append({"id": f"repo:{p}/{rel}", "path": f"{p}/{rel}", "line": 1, "sym": "", "text": f"{p}/{rel}"})
     return out
 
 

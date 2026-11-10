@@ -55,6 +55,14 @@ MIN_RARE = 2                  # without a trained ranker a line must share this 
 FALLBACK_COVER = 0.75         # shared words over the message's words
 FALLBACK_ICOVER = 0.65        # their idf over the message's idf
 FALLBACK_DENSE = 0.35         # shared words per square root of the entry's length: a long entry needs more of them
+# A file entry is a path and a symbol's name: a sentence asking about it never covers three quarters of itself with
+# one, so the question whose best entries were the right headers (4 of its 7 words each) printed nothing. A file
+# entry also prints on this second gate. Measured 2026-11-11 on a store's 301 labelled tasks and 38 general prompts:
+# precision 0.076 -> 0.075, lines 473 -> 494, one more task with a right line, every general prompt still silent
+# (3 shared words, or cover 0.40 with density 0.60, broke one or cost a tenth of the precision).
+FILE_SHARED = 4               # a file entry: this many of the message's words...
+FILE_COVER = 0.55             # ...covering this share of them...
+FILE_DENSE = 0.75             # ...and making up most of the entry
 # lines in the order of how many of the message's words they share, BM25 within a tie; a same-minute ruling stands in
 # for its correction or retraction (standing_first).
 VARIANT_WEIGHT = 0.5          # another form of a message's word (commits / committed / commit) counts half
@@ -64,7 +72,8 @@ STUBS = ()
 QUERY_SETTINGS = {"max_lines": "MAX_LINES", "per_file": "PER_FILE", "text_chars": "TEXT_CHARS",
                   "history_chars": "HISTORY_CHARS", "candidates": "CANDIDATES", "min_rare": "MIN_RARE",
                   "fallback_cover": "FALLBACK_COVER", "fallback_icover": "FALLBACK_ICOVER",
-                  "fallback_dense": "FALLBACK_DENSE", "variant_weight": "VARIANT_WEIGHT",
+                  "fallback_dense": "FALLBACK_DENSE", "file_shared": "FILE_SHARED", "file_cover": "FILE_COVER",
+                  "file_dense": "FILE_DENSE", "variant_weight": "VARIANT_WEIGHT",
                   "expand_weight": "EXPAND_WEIGHT"}
 
 
@@ -294,7 +303,8 @@ def fallback_order(idx, terms, weights, points, gone, min_shared=None, cover=Non
             out.append((i, len(q) + 1))          # an entry the dictionary points at needs no more
             continue
         if len(got) < min_shared or c < cover or ic < icover or dn < dense:
-            continue
+            if not (d["kind"] == "file" and len(got) >= FILE_SHARED and c >= FILE_COVER and dn >= FILE_DENSE):
+                continue
         out.append((i, len(got)))
     if with_stats:
         return stats
