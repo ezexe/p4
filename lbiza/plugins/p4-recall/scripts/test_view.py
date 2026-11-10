@@ -80,6 +80,25 @@ class View(unittest.TestCase):
         self.assertIn("  commit turn   1  lib 1a2b3c4d  port: stay open", got)
         self.assertEqual(view.describe(self.p4, "zzzzzzzz"), ["no record for session zzzzzzzz (records: abcdef12)"])
 
+    def test_sizes_are_the_context_at_every_step(self):
+        def user(text):
+            return {"type": "user", "message": {"role": "user", "content": text}}
+
+        def call(mid, size, tools=()):
+            return {"type": "assistant", "message": {"id": mid, "usage": {"input_tokens": 10, "cache_read_input_tokens": size - 10},
+                                                     "content": [{"type": "tool_use", "name": t, "id": mid + t, "input": {}} for t in tools]}}
+        lines = [user("first"), call("a", 50000, ["Bash"]), call("b", 90000, ["Read", "Read"]), call("b", 90000),
+                 call("c", 100000), user("second"), call("d", 101000, ["Bash"]), call("e", 30000), call("f", 31000)]
+        s = view.sizes(lines)
+        self.assertEqual((s["baseline"], s["last"], s["peak"], s["calls"], s["compactions"]), (50000, 31000, 101000, 6, 1))
+        self.assertEqual(s["by_tool"], {"Bash": 40000, "Read": 10000}, "what the context grew by after each tool's calls; a drop is not growth")
+        self.assertEqual(s["turns"], [[0, 50000, 100000], [1, 101000, 31000]])
+        text = "\n".join(view.size_lines(s))
+        self.assertIn("31k tokens now, 50k when it began, peak 101k, 1 compactions over 6 calls", text)
+        self.assertIn("what filled it: Bash 40k, Read 10k", text)
+        self.assertEqual(view.sizes([])["calls"], 0)
+        self.assertEqual(view.size_lines(view.sizes([])), [])
+
     def test_refresh_writes_and_reads_back(self):
         self.assertIsNone(view.load(self.p4, "abcdef12"))
         self.assertEqual(view.refresh(self.p4, self.proj, "abcdef12-rest", "", None), view.empty(), "no transcript: nothing")

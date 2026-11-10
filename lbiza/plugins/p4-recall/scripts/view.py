@@ -11,6 +11,7 @@ This keeps, per session, a record of what is in view: names and sizes, never con
     entries   each store line recall showed it, and the turn
     commits   each `git commit` a command made: the repository's folder name and the subject git printed
     marks     where the context was compacted: the turn, and how many files were in view before it
+    size      how big the context was at every step, what it began at and what filled it (sizes, below)
 
 It is rebuilt from the session's transcript, which already records every change, at the two moments the plugin
 wakes anyway; nothing new runs on a tool call. `models/view/<session>.json` is a cache the store ignores.
@@ -91,6 +92,10 @@ def refresh(p4, project, session, transcript_path, served_now=None):
     if not turns:
         return old
     v = build(turns, project)
+    try:
+        v["size"] = sizes(transcript_path)
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
     v["entries"] = dict(old.get("entries", {}))
     for e in served_now or []:
         v["entries"][e] = len(turns) - 1
@@ -156,7 +161,7 @@ def describe(p4, session="", limit=12):
     out += [f"  commit turn {c['turn']:3}  {c['repo']} {c['sha']}  {c['subject']}" for c in v["commits"][-limit:]]
     if entries:
         out.append(f"  store lines shown: {len(entries)}")
-    return out
+    return out + size_lines(v.get("size"))
 
 
 def stats_line(p4):
@@ -170,3 +175,73 @@ def stats_line(p4):
         v = load(p4, n[:-5]) or empty()
         files, commits, marks = files + len(v["files"]), commits + len(v["commits"]), marks + len(v["marks"])
     return f"view: {len(names)} sessions, {files} files in their records, {commits} commits, {marks} compactions"
+
+
+# --- the size of the context, as the transcript records it ---------------------------------------------------
+
+DROP = 0.7            # a call whose context is under this share of the one before it follows a compaction
+TURNS_KEPT = 300
+
+
+def sizes(path_or_lines):
+    """How big a session's context was at every step, from the usage each API call reports (its input tokens:
+    fresh, cache write and cache read): numbers only.
+        baseline     the first call's context: the system prompt, the tools, the skills and the memory files a
+                     session starts with, and its first message
+        last, peak   the context at the latest call, and the largest it has been
+        compactions  how often it fell to under DROP of the call before
+        by_tool      the tokens the context grew by after each tool's calls, the largest first: what filled it
+        turns        [[turn, context when the turn began, context when it ended]], the last TURNS_KEPT
+    The split the app's context panel shows inside the baseline (system tools, MCP tools, skills, memory) is the
+    app's own count and is not in a transcript; the whole baseline is."""
+    import transcript as tr
+    lines = tr.read_lines(path_or_lines) if isinstance(path_or_lines, str) else path_or_lines
+    seen, series, turn = set(), [], -1
+    for d in lines:
+        if tr.prompt_text(d) is not None:
+            turn += 1
+            continue
+        m = d.get("message") or {}
+        if d.get("type") != "assistant":
+            continue
+        mid = m.get("id") or d.get("uuid")
+        u = m.get("usage") or {}
+        size = sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+        tools = [b.get("name", "") for b in m.get("content") or [] if isinstance(b, dict) and b.get("type") == "tool_use"]
+        if mid in seen:
+            if series:
+                series[-1][2] += tools                       # the same call, streamed in parts
+            continue
+        seen.add(mid)
+        if size:
+            series.append([max(turn, 0), size, tools])
+    out = {"baseline": 0, "last": 0, "peak": 0, "calls": len(series), "compactions": 0, "by_tool": {}, "turns": []}
+    if not series:
+        return out
+    out.update({"baseline": series[0][1], "last": series[-1][1], "peak": max(s[1] for s in series)})
+    by, spans = {}, {}
+    for i, (t, size, tools) in enumerate(series):
+        spans.setdefault(t, [size, size])[1] = size
+        if i + 1 < len(series):
+            nxt = series[i + 1][1]
+            if nxt < DROP * size:
+                out["compactions"] += 1
+            elif nxt > size and tools:
+                for name in tools:
+                    by[name] = by.get(name, 0) + (nxt - size) // len(tools)
+    out["by_tool"] = dict(sorted(by.items(), key=lambda kv: -kv[1])[:12])
+    out["turns"] = [[t, a, b] for t, (a, b) in sorted(spans.items())][-TURNS_KEPT:]
+    return out
+
+
+def size_lines(s):
+    """What sizes() found, in words."""
+    if not s or not s.get("calls"):
+        return []
+    grew = [b - a for _t, a, b in s["turns"] if b > a]
+    grew.sort()
+    med = grew[len(grew) // 2] if grew else 0
+    top = ", ".join(f"{k} {v // 1000}k" for k, v in list(s["by_tool"].items())[:5])
+    return [f"  context: {s['last'] // 1000}k tokens now, {s['baseline'] // 1000}k when it began, peak {s['peak'] // 1000}k, "
+            f"{s['compactions']} compactions over {s['calls']} calls; a turn that grew it added {med // 1000}k at the median",
+            f"  what filled it: {top or 'nothing recorded'}"]
