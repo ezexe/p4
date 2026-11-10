@@ -148,15 +148,54 @@ def held_batches(p4):
     return {k for k, v in read_batches(p4).items() if isinstance(v, dict) and v.get("status") == "held"}
 
 
+def follow(entry, ids, renames):
+    """A repo label's entry as the index holds it today: itself when it is there; else the same entry under the
+    path git renamed its file to; else that file's own entry, when only the symbol is gone. Unchanged when none is
+    there (the file was deleted, or never on this machine)."""
+    if entry in ids or not entry.startswith("repo:"):
+        return entry
+    path, _, sym = entry[5:].partition("#")
+    now = renames.get(path, path)
+    for cand in ((f"repo:{now}#{sym}",) if sym else ()) + (f"repo:{now}",):
+        if cand in ids:
+            return cand
+    return entry
+
+
+def followed(p4, rows, idx):
+    """The rows with every repo entry moved to where the index holds it (follow); (rows, how many moved)."""
+    import repo
+    ids = {d["id"] for d in idx["docs"]}
+    ren = repo.rename_map(p4)
+    out, moved = [], 0
+    for r in rows:
+        e = follow(r["entry"], ids, ren)
+        moved += e != r["entry"]
+        out.append(r if e == r["entry"] else {**r, "entry": e})
+    return out, moved
+
+
 def training_labels(p4, idx=None):
     """Every label a round trains on (module docstring), the recency rule applied. A held teacher batch's rows are
-    left out (its tasks keep their raw labels)."""
+    left out (its tasks keep their raw labels). With the index given, a label on a file that was renamed since, or
+    on a symbol that is gone from a file still there, is moved to where the index holds it (follow). Measured on
+    one store (2026-11-10, 6,988 positive file labels): 52% named an entry the index no longer had, and 2,010 of
+    those were a rename or a vanished symbol. Following them gave the newest 400 tasks 270 more positives and 7
+    more usable tasks (91 to 98) and left the held-out scores where they were (r-precision 0.021 to 0.020,
+    recall@20 0.125 to 0.126): the limit there is the candidate stage, which drew 339 of 3,420 labelled positives."""
+    if idx is not None:
+        got = recency(p4, _training_rows(p4))
+        return followed(p4, got, idx)[0]
+    return recency(p4, _training_rows(p4))
+
+
+def _training_rows(p4):
     held = held_batches(p4)
     train = [as_label(r) for r in read_tsv(mpath(p4, TRAIN))
              if not (held and r.get("source") == "store+edited" and batch_of(r.get("note", "")) in held)]
     edited = {r["task"] for r in train if r["source"] == "store+edited"}
     raw = [as_label(r) for r in read_tsv(mpath(p4, RAW)) if r.get("task") not in edited]
-    return recency(p4, raw + train)
+    return raw + train
 
 
 def superseding(p4):

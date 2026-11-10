@@ -142,6 +142,31 @@ def commits(project, since="", limit=MAX_COMMITS):
     return out
 
 
+def renames(project, since=""):
+    """{old path: the path it has now} for every rename git detects in `since..HEAD` (the whole history when
+    `since` is empty). A file renamed twice maps straight to its last name."""
+    rng = [f"{since}..HEAD"] if since else ["HEAD"]
+    text = git(project, "log", *rng, "-M", "--diff-filter=R", "--name-status", "--format=", "-z", timeout=120)
+    toks = [t.strip(chr(10)) for t in text.split(chr(0))]
+    out, i = {}, 0
+    while i + 2 < len(toks):                     # newest first: a later rename of the new name is already known
+        if len(toks[i]) > 1 and toks[i][0] == "R" and toks[i][1:].isdigit():
+            old, new = toks[i + 1], toks[i + 2]
+            out[old] = out.get(new, new)
+            i += 3
+        else:
+            i += 1
+    return out
+
+
+def merge_renames(known, newer):
+    """The map after more history: what was known, moved along by the newer renames, and the newer ones."""
+    out = {old: newer.get(now, now) for old, now in known.items()}
+    for old, now in newer.items():
+        out.setdefault(old, now)
+    return {old: now for old, now in out.items() if old != now}
+
+
 # --- exclusions ------------------------------------------------------------------------------------------
 
 def p4ignore(project):
@@ -342,6 +367,18 @@ def build(p4, project=None, deadline_s=None, now=None):
     known = {c[0] for c in s["commits"]}
     fresh = [c for c in new if c[0] not in known]
     s["commits"] = (fresh + s["commits"])[:MAX_COMMITS]
+    # the renames, so a label on a file's old path still reaches it (labels.follow): the history once, then only
+    # what is new since the head they were read at
+    if s.get("renames_head") != hd:
+        try:
+            try:
+                got = renames(project, s.get("renames_head", "") if "renames" in s else "")
+                s["renames"] = merge_renames(s.get("renames", {}), got)
+            except RuntimeError:                   # a rewritten history: read it whole again
+                s["renames"] = renames(project)
+            s["renames_head"] = hd
+        except (RuntimeError, OSError, subprocess.SubprocessError):
+            pass
     touched = {}
     for sha, date, subject, paths in reversed(s["commits"]):
         for p in paths:
@@ -422,6 +459,11 @@ def entries(p4):
     return out
 
 
+def rename_map(p4):
+    """{old path: current path} as the last build read it; {} before one has."""
+    return load_state(p4).get("renames", {})
+
+
 def stats_line(p4):
     s = load_state(p4)
     if not s.get("files"):
@@ -430,4 +472,4 @@ def stats_line(p4):
     return (f"repo: {kept} files, {s.get('entries', 0)} file entries, {len(s.get('commits', []))} commits; excluded "
             + ", ".join(f"{k} {v}" for k, v in sorted(s.get("excluded", {}).items()))
             + (f"; cut at {MAX_FILE_ENTRIES} file entries: {s['cut']} files left out (oldest-touched)"
-               if s.get("cut") else ""))
+               if s.get("cut") else "") + f"; {len(s.get('renames', {}))} renamed paths followed")
