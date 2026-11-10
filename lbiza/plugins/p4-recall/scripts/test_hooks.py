@@ -118,7 +118,7 @@ class HooksJson(unittest.TestCase):
     def test_runner_runs_isolated_and_never_fails(self):
         with open(RUN, encoding="utf-8") as f:
             text = f.read()
-        self.assertIn('-I "${CLAUDE_PLUGIN_ROOT}/scripts/hook.py"', text)
+        self.assertIn('-I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/hook.py"', text, "isolated, and in UTF-8 mode whatever the code page")
         self.assertIn("exit 0", text)
         r = subprocess.run(["sh", RUN, "no-such-hook"], input="{}", capture_output=True, text=True,
                            env={**os.environ, "CLAUDE_PLUGIN_ROOT": ROOT})
