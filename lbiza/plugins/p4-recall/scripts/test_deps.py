@@ -219,6 +219,35 @@ class Deps(unittest.TestCase):
         self.assertEqual(tr.rel(os.path.join(part, "core", "ports.h"), self.proj) or "@framework/src/part/core/ports.h",
                          "@framework/src/part/core/ports.h")
 
+    def test_the_files_the_project_includes_are_read_first(self):
+        import subprocess
+        part = os.path.join(self.ext, "src", "part")
+        for i in range(90):                                      # more files than the signature counts
+            write(os.path.join(part, "core", f"a{i:02d}.h"), f"class A{i} {{\n}};\n")
+        write(os.path.join(part, "core", "zz_used.h"), "class UsedByTheProject {\n};\n")
+        write(os.path.join(part, "public", "cpp", "remote.h"), "class Remote {\n};\n")
+        write(os.path.join(self.proj, "library_packages", "cef", "include", "inner.h"), '#include "part/core/a50.h"\n')
+        deps.ROOTS = ["library_packages", self.ext, part]
+        deps.build(self.p4, self.proj)
+        self.assertNotIn("repo:@framework/src/part/core/zz_used.h", self.ids(), "past the cap, and nothing asks for it")
+        write(os.path.join(self.proj, "src", "mine.cc"),
+              '#include "part/core/zz_used.h"\n  #include <part/public/cpp/remote.h>\n// #include "part/core/a70.h"\n')
+        for a in (["init", "-q"], ["add", "-A", "src", "library_packages/cef"],
+                  ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x"]):
+            subprocess.run(["git", "-C", self.proj] + a, capture_output=True, check=True)
+        self.assertEqual(deps.project_includes(self.proj, [os.path.join(self.proj, "library_packages")]),
+                         ["part/core/zz_used.h", "part/public/cpp/remote.h"],
+                         "the project's own lines; a comment is not one, a package checked in under a named root is not its own")
+        s = deps.build(self.p4, self.proj)
+        self.assertEqual(s["read"], 2, "the two packages the project includes from are read again, though core has more "
+                                       "files than a signature counts")
+        ids = self.ids()
+        self.assertIn("repo:@framework/src/part/core/zz_used.h", ids)
+        self.assertNotIn("repo:@framework/src/part/core/a50.h", ids)
+        self.assertEqual(deps.build(self.p4, self.proj)["read"], 0)
+        outer = self.pkgs()["framework"]
+        self.assertFalse([e for e in outer["entries"] if e["path"].endswith("zz_used.h")], "the part's file is the part's")
+
     def test_index_labels_and_owed_round(self):
         deps.build(self.p4, self.proj, now_s=time.time() - 50)
         idx = st.build_index(self.p4)

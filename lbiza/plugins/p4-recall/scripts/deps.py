@@ -79,6 +79,11 @@ PER_FILE = 12                        # entries of one file: its path and its fir
 LIGHT_FILES, LIGHT_ENTRIES = 2, 30   # of a transitive one
 SCAN, DEPTH = 20000, 6
 OPENED = 200                         # files a session opened in one package, remembered and always read
+USED = 400                           # files of one package the project's own sources include, always read
+UP = 8                               # directories above a package an include path may start from
+SOURCE_EXT = (".h", ".hh", ".hpp", ".hxx", ".inl", ".c", ".cc", ".cpp", ".cxx", ".m", ".mm", ".mojom")
+SOURCE_BYTES = 262144
+INCLUDE = re.compile(r'^[ \t]*(?:#[ \t]*(?:include|import)[ \t]*[<"]([^">\n]+)[">]|import[ \t]+"([^"\n]+)"[ \t]*;)', re.M)
 MAX_UPDATES = 500
 MANIFESTS = (".git", "package.json", "CMakeLists.txt", "DEPS", "pyproject.toml", "setup.py", "Cargo.toml", "go.mod",
              "BUILD.gn", "vcpkg.json", "VERSION", "VERSION.txt", "version.txt", "VERSION.in")
@@ -211,10 +216,12 @@ def packages(root, prefix, split=False):
                 add(n[:-4], os.path.join(root, n))
     elif split:
         add(os.path.basename(root.rstrip("\\/")), root)
-        out[-1]["light"] = True
+        own = out[-1]
+        own["light"] = True
         for n in subdirs(root):
             if not n.startswith(".") and n.lower() not in SKIP_DIRS:
                 add(n, os.path.join(root, n))
+        own["inner"] = [p["dir"] for p in out if p is not own]
     elif any(os.path.exists(os.path.join(root, m)) for m in MANIFESTS):
         add(os.path.basename(root.rstrip("\\/")), root)
     else:
@@ -344,7 +351,7 @@ def describe(pkg):
 def signature(pkg, version, opened=()):
     """The version and the top-level files' names, sizes and times: it moves when the package is put there again.
     The files a session opened in it are part of it, so a newly opened one has the package read again."""
-    rows = ["opened:" + f for f in opened] + [f"caps:{FILES}:{ENTRIES}:{DEPTH}:{SCAN}"]
+    asked, rows = sorted("opened:" + f for f in opened) + [f"caps:{FILES}:{ENTRIES}:{DEPTH}:{SCAN}"], []
     for d in (pkg["dir"], pkg["meta"]):
         if not d:
             continue
@@ -359,7 +366,7 @@ def signature(pkg, version, opened=()):
                         continue
         except OSError:
             continue
-    return sha8(version + "|" + "|".join(sorted(rows)[:SIG_FILES + OPENED]))
+    return sha8(version + "|" + "|".join(asked + sorted(rows)[:SIG_FILES]))     # asked whole: never cut by the files
 
 
 # --- entries of one package ------------------------------------------------------------------------------
@@ -512,6 +519,70 @@ def opened_in_turn(turn, project):
     return out
 
 
+# --- what the project itself uses ------------------------------------------------------------------------
+
+def project_includes(project, named=()):
+    """The paths the project's own sources include or import (`#include "a/b.h"`, `import "a/b.mojom";`), most
+    included first. Its own are the files git tracks outside the roots the settings name (`named`, absolute): a
+    patch the project keeps over a vendored tree is its own, a package checked in whole under a named root is not.
+    [] when it is not a repository."""
+    try:
+        if not repo.is_repo(project):
+            return []
+        paths = sorted(repo.tracked(project))
+    except (OSError, RuntimeError):
+        return []
+    proj = os.path.normpath(project) + os.sep
+    inside = [posix(r[len(proj):]) + "/" for r in named if r.startswith(proj)]
+    count = {}
+    for path in paths:
+        if not path.lower().endswith(SOURCE_EXT) or any(path.startswith(i) for i in inside):
+            continue
+        try:
+            with open(os.path.join(project, path), encoding="utf-8", errors="replace") as f:
+                text = f.read(SOURCE_BYTES)
+        except OSError:
+            continue
+        for m in INCLUDE.finditer(text):
+            inc = posix(m.group(1) or m.group(2)).lstrip("/")
+            if "/" in inc and ".." not in inc:
+                count[inc] = count.get(inc, 0) + 1
+    return sorted(count, key=lambda k: (-count[k], k))
+
+
+def used_in(pkg, includes, others=()):
+    """The files of one package the project includes, as paths in the package, most included first. An include is
+    relative to the package, to its src/, or to a directory above it (`media/audio/x.h` names a file of the package
+    at .../src/media/audio); a file under one of `others` (a root or package inside this one) is theirs."""
+    d = pkg["dir"]
+    if not d or not includes:
+        return []
+    leads, a, lead = [], d, ""
+    for _ in range(UP):
+        parent = os.path.dirname(a)
+        if parent == a:
+            break
+        lead = os.path.basename(a) + ("/" + lead if lead else "")
+        leads.append(lead + "/")
+        a = parent
+    tops, src = set(subdirs(d)), set(subdirs(os.path.join(d, "src")))
+    skip = [os.path.normpath(o) + os.sep for o in list(others) + pkg.get("inner", [])]
+    out = []
+    for inc in includes:
+        first = inc.split("/", 1)[0]
+        cands = [inc[len(l):] for l in leads if inc.startswith(l)]
+        cands += [inc] if first in tops else []
+        cands += ["src/" + inc] if first in src else []
+        for rel in cands:
+            full = os.path.normpath(os.path.join(d, rel))
+            if not any(full.startswith(s) for s in skip) and os.path.isfile(full):
+                out.append(rel)
+                break
+        if len(out) >= USED:
+            break
+    return out
+
+
 # --- the incremental build -------------------------------------------------------------------------------
 
 def state_path(p4):
@@ -549,6 +620,7 @@ def build(p4, project=None, deadline_s=None, now=None, now_s=None):
         stats["removed"] += len(s["roots"][r]["packages"])
         del s["roots"][r]
         moved = True
+    includes = project_includes(project, [os.path.normpath(os.path.join(project, os.path.expanduser(str(r)))) for r in ROOTS])
     for root, prefix, split in live:
         stats["roots"] += 1
         first = root not in s["roots"]
@@ -568,7 +640,9 @@ def build(p4, project=None, deadline_s=None, now=None, now_s=None):
                 stats["complete"] = False
                 continue
             version, desc = describe(pkg)
-            opened = s.get("opened", {}).get(pkg["path"], [])
+            nested = [r for r, _p, _s in live if pkg["dir"] and r != root and
+                      (r + os.sep).startswith(os.path.normpath(pkg["dir"]) + os.sep)]
+            opened = list(dict.fromkeys(s.get("opened", {}).get(pkg["path"], []) + used_in(pkg, includes, nested)))
             sig = signature(pkg, version, opened)
             old = rs["packages"].get(pkg["name"])
             if old and old.get("sig") == sig:
