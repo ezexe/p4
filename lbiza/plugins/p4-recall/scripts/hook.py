@@ -71,6 +71,7 @@ models/index.json
 models/repo.json
 models/deps.json
 models/near.json
+models/view/
 models/*.tmp
 __pycache__/
 *.pyc
@@ -461,6 +462,12 @@ def h_close(payload):
         except OSError:
             pass
     lb.signals(p4, session=session, now=when)
+    try:                        # view.py: what this session has in view, brought up to date with its transcript
+        import view
+        view.refresh(p4, project, session, payload.get("transcript_path") or "",
+                     served_now=list(((served or {}).get("handles") or {}).values()))
+    except (OSError, ValueError, KeyError, ImportError):
+        pass
     refresh_index(p4, project)
     return None
 

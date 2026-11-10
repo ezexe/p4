@@ -232,6 +232,12 @@ class Sync(unittest.TestCase):
 
     def test_merge_json(self):
         m = sync.merge_json
+        d = {"said": {"mode": "off"}}
+        self.assertEqual(m({}, {"said": {"mode": "off"}}, {"said": {"mode": "shadow"}}, d), {"said": {"mode": "shadow"}},
+                         "a key new on both sides: the written default loses to the value a person set")
+        self.assertEqual(m({}, {"said": {"mode": "shadow"}}, {"said": {"mode": "off"}}, d), {"said": {"mode": "shadow"}})
+        self.assertEqual(m({"said": {"mode": "shadow"}}, {"said": {"mode": "off"}}, {"said": {"mode": "shadow"}}, d),
+                         {"said": {"mode": "off"}}, "a key that was there and was set back to the default is a choice")
         self.assertEqual(m({"a": 1, "b": 2}, {"a": 1, "b": 2, "c": 3}, {"a": 9, "b": 2}), {"a": 9, "b": 2, "c": 3})
         self.assertEqual(m({"a": 1}, {"a": 2}, {"a": 3}), {"a": 2}, "both changed it: ours")
         self.assertEqual(m({"a": 1, "b": 1}, {"a": 1}, {"a": 1, "b": 1}), {"a": 1}, "we removed b, they left it: gone")
@@ -240,7 +246,8 @@ class Sync(unittest.TestCase):
     def test_seed_writes_updates_and_respects_the_owner(self):
         p4 = os.path.join(os.path.dirname(self.origin), "p4")
         os.makedirs(p4)
-        self.assertEqual(sync.seed(p4, "trunk"), [".github/workflows/p4-sync.yml", ".github/p4_sync.py"])
+        self.assertEqual(sync.seed(p4, "trunk"), [".github/p4_defaults.json", ".github/workflows/p4-sync.yml", ".github/p4_sync.py"])
+        self.assertEqual(json.loads(read(p4, ".github/p4_defaults.json"))["recall"]["said"], {"mode": "off"})
         wf = read(p4, ".github/workflows/p4-sync.yml")
         self.assertIn("python3 .github/p4_sync.py all --main trunk --push", wf)
         self.assertIn("contents: write", wf)

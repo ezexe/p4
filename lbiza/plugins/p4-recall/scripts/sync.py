@@ -52,7 +52,7 @@ MODEL_PREFIX = ("models/ranker",)
 MODEL_EXT = (".pt", ".phid")
 INDEX_LINE = re.compile(rb"^- \[[^\]]+\]\([^)]+\)")        # `- [Title](file.md) ...`, as memory/MEMORY.md lists
 NAME, EMAIL = "p4-sync", "p4-sync@users.noreply.github.com"
-SEED = 7      # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
+SEED = 8      # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
 
 
 def git(*args, check=True, cwd=None):
@@ -174,13 +174,17 @@ def merge_entries(base, ours, theirs):
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
-def merge_json(base, ours, theirs):
+def merge_json(base, ours, theirs, dflt=None):
+    """`dflt` is the plugin's default at this place (settings only): when a key is new on both sides, a value that
+    is just the default a settings load wrote loses to one a person set (measured 2026-11-10: a machine's freshly
+    written "off" overrode the other machine's "shadow")."""
     if isinstance(ours, dict) and isinstance(theirs, dict):
         b = base if isinstance(base, dict) else {}
+        d = dflt if isinstance(dflt, dict) else {}
         out = {}
         for k in list(ours) + [k for k in theirs if k not in ours]:
             if k in ours and k in theirs:
-                out[k] = merge_json(b.get(k), ours[k], theirs[k])
+                out[k] = merge_json(b.get(k), ours[k], theirs[k], d.get(k))
             elif k in ours:
                 if not (k in b and b[k] == ours[k]):        # they removed a key we left alone: it goes
                     out[k] = ours[k]
@@ -191,7 +195,21 @@ def merge_json(base, ours, theirs):
         return ours + [x for x in theirs if x not in ours]
     if ours == theirs or base == theirs:
         return ours
-    return theirs if base == ours else ours                 # both changed it: ours (main's, in the workflow)
+    if base == ours:
+        return theirs
+    if base is None and dflt is not None and ours == dflt and theirs != dflt:
+        return theirs                                       # ours is only the written default: theirs was set
+    return ours                                             # both changed it: ours (main's, in the workflow)
+
+
+def seeded_defaults():
+    """The plugin's settings defaults as the layout hook seeded them beside this script (.github/p4_defaults.json),
+    or None: the workflow has no plugin to ask."""
+    try:
+        with open(os.path.join(".github", "p4_defaults.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
 
 
 def structured(path):
@@ -216,7 +234,8 @@ def settle(path, ref, model_side, sides=None):
             return got, "entries: field by field"
     if low.endswith(".json"):
         try:
-            got = merge_json(json.loads(base) if base else None, json.loads(ours), json.loads(theirs))
+            got = merge_json(json.loads(base) if base else None, json.loads(ours), json.loads(theirs),
+                             seeded_defaults() if low == "p4.json" else None)
             return (json.dumps(got, indent=1, ensure_ascii=False) + "\n").encode("utf-8"), "settings: key by key"
         except ValueError:
             pass
@@ -419,6 +438,27 @@ def seed(p4, main="main"):
     def seed_of(text):
         m = re.search(r"(?m)^(?:SEED = |# seed )(\d+)", text)
         return int(m.group(1)) if m else 0
+    try:
+        import p4conf
+        dflt = json.dumps({"_seed": SEED, **p4conf.DEFAULTS}, indent=1, ensure_ascii=False) + "\n"
+        dpath = os.path.join(p4, ".github", "p4_defaults.json")
+        try:
+            with open(dpath, encoding="utf-8") as f:
+                old_d = f.read()
+        except OSError:
+            old_d = None
+        newer = False
+        try:
+            newer = old_d is not None and int(json.loads(old_d).get("_seed", 0)) > SEED
+        except (ValueError, AttributeError, TypeError):
+            pass
+        if old_d != dflt and not newer:
+            os.makedirs(os.path.dirname(dpath), exist_ok=True)
+            with open(dpath, "w", encoding="utf-8", newline="\n") as f:
+                f.write(dflt)
+            wrote.append(".github/p4_defaults.json")
+    except ImportError:
+        pass
     for rel, text in ((os.path.join(".github", "workflows", "p4-sync.yml"),
                        WORKFLOW.replace("{main}", main).replace("{seed}", str(SEED))),
                       (os.path.join(".github", "p4_sync.py"), script)):

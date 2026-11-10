@@ -552,6 +552,10 @@ def cmd_check(args):
     dl = deps.stats_line(p4)
     if dl:
         print("  " + dl)
+    import view
+    vl = view.stats_line(p4)
+    if vl:
+        print("  " + vl)
     import said
     sl = said.stats_line(p4)
     if sl:
