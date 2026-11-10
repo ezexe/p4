@@ -108,8 +108,13 @@ class View(unittest.TestCase):
                 f.write(json.dumps({"type": "user", "cwd": self.proj, "message": {"role": "user", "content": "look"}}) + "\n")
                 f.write(json.dumps({"type": "assistant", "message": {"id": "m1", "usage": {"input_tokens": 50000}, "content": [
                     {"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": os.path.join(self.proj, "src", "port.py")}}]}}) + "\n")
+        with open(os.path.join(d, "cccccccc-3.jsonl"), "w", encoding="utf-8") as f:      # started by another session
+            f.write(json.dumps({"type": "user", "cwd": self.proj, "origin": {"kind": "agent"}, "message": {"role": "user", "content": "go"}}) + chr(10))
+            f.write(json.dumps({"type": "assistant", "message": {"id": "m9", "usage": {"input_tokens": 70000}, "content": [
+                {"type": "tool_use", "id": "t9", "name": "Read", "input": {"file_path": os.path.join(self.proj, "docs", "notes.md")}}]}}) + chr(10))
         got = view.backfill(self.p4, self.proj, [d])
-        self.assertEqual((got["sessions"], got["files"]), (2, 2))
+        self.assertEqual((got["sessions"], got["files"]), (3, 3), "a session with no owner message has a context too")
+        self.assertEqual(list(view.load(self.p4, "cccccccc")["files"]), ["docs/notes.md"])
         self.assertEqual(view.describe(self.p4)[0], "aaaaaaaa: 1 turns, 1 files in view, 0 commits, 0 compactions")
         self.assertEqual(view.load(self.p4, "bbbbbbbb")["size"]["baseline"], 50000)
 

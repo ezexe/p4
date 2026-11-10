@@ -89,6 +89,15 @@ def refresh(p4, project, session, transcript_path, served_now=None):
         turns = tr.turns(transcript_path) if transcript_path else []
     except (OSError, ValueError):
         turns = []
+    if not turns and transcript_path:
+        # a session another session started has no message from the owner, and it has a context all the same: its
+        # calls are read as one turn (measured: 7 of one machine's 79 transcripts, each with 50 to 70 API calls)
+        try:
+            lines = tr.read_lines(transcript_path)
+        except (OSError, ValueError):
+            lines = []
+        if any(d.get("type") == "assistant" for d in lines):
+            turns = tr.turns([{"type": "user", "message": {"role": "user", "content": "(not started by the owner)"}}] + lines)
     if not turns:
         return old
     v = build(turns, project)
