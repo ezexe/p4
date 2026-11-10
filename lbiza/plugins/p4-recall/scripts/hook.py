@@ -461,7 +461,10 @@ def h_close(payload):
             os.remove(lb.served_path(p4, f"turn-{session}"))
         except OSError:
             pass
-    lb.signals(p4, session=session, now=when)
+    # The term dictionary is no longer grown (0.8.0): the owner ruled it the wrong conception on 2026-11-10. A message
+    # is understood whole, with what was in view when it came (view.py), not word by word: a judge could show a
+    # meaning for 1 of 18 pending terms, and most were how the owner writes, not terms at all. labels.signals and
+    # the reading side stay for stores that still hold a vocabulary.md; nothing calls them here.
     try:                        # view.py: what this session has in view, brought up to date with its transcript
         import view
         view.refresh(p4, project, session, payload.get("transcript_path") or "",
