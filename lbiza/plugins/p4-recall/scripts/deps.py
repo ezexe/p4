@@ -38,7 +38,8 @@ A path inside the project is relative to it; a root outside it is shown as `@<ro
 A file a session opened in a package that the index does not hold is remembered (`note_opened`, from the close
 hook) and read first, past the caps, at the next build: the entries follow what the sessions actually use.
 
-Bounds: a package's files are read one directory at a time in turn, FILES at most; a package's walk stops after
+Bounds: a package's files are read one directory at a time in turn, FILES at most (3 by default: the measured
+setting, see FILES; a changed cap has every package read again); a package's walk stops after
 SCAN entries or DEPTH levels; a transitive node or Python package (one the
 project's own manifest does not name) gets its package entry and its README only; the whole stops at MAX_ENTRIES,
 the most recently updated packages first; `build` stops at its deadline and goes on from there next time.
@@ -66,7 +67,13 @@ MAX_ENTRIES = 20000
 AUTO_NAMES = ("node_modules", "vendor", "third_party", "_deps", "vcpkg_installed", "site-packages")
 AUTO_DEPTH = 3
 ENTER_DOT = (".venv", "venv")
-FILES, ENTRIES = 400, 1500           # of a direct package: files read, entries kept
+FILES, ENTRIES = 3, 40               # of a direct package: files read, entries kept. Measured on a store of 712
+                                     # tasks (2026-11-10, p4.py eval on copies): with no dependency entries the
+                                     # ranker printed for 9% of ordinary prompts and scored r-precision 0.044; with
+                                     # these caps (409 entries) 13% and 0.038; with 400 files and 1,500 entries a
+                                     # package (9,070 entries) 30% and 0.035. Only 39 of 2,222 repo labels fell on a
+                                     # dependency file. So a package is its entry, its documents and what a session
+                                     # opened in it; recall.deps.package_files raises it for a store that gains.
 PER_FILE = 12                        # entries of one file: its path and its first symbols
 LIGHT_FILES, LIGHT_ENTRIES = 2, 30   # of a transitive one
 SCAN, DEPTH = 20000, 6
@@ -323,7 +330,7 @@ def describe(pkg):
 def signature(pkg, version, opened=()):
     """The version and the top-level files' names, sizes and times: it moves when the package is put there again.
     The files a session opened in it are part of it, so a newly opened one has the package read again."""
-    rows = ["opened:" + f for f in opened]
+    rows = ["opened:" + f for f in opened] + [f"caps:{FILES}:{ENTRIES}:{DEPTH}:{SCAN}"]
     for d in (pkg["dir"], pkg["meta"]):
         if not d:
             continue

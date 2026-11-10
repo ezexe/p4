@@ -43,8 +43,8 @@ DEFAULTS = {
             "roots": [],                 # more roots: paths relative to the project, or absolute (outside it)
             "deadline_s": 6.0,           # what one hook spends reading changed packages; the rest waits for the next
             "max_entries": 20000,
-            "package_files": 400,        # files read of one package the project asks for by name
-            "package_entries": 1500,
+            "package_files": 3,          # files read of one package beyond those a session opened (deps.py FILES:
+            "package_entries": 40,       # more of them measured worse on the ranker's silence and precision)
             "scan": 20000,               # directory entries one package's walk looks at
             "depth": 6,
         },

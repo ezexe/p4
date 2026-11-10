@@ -511,10 +511,26 @@ def match_row(rows, turn):
     return None
 
 
+_DEP_PATHS = {}
+
+
+def is_dep_entry(p4, entry):
+    """True when a label's entry is a dependency's (deps.py): its path sits in a package the dependency index holds."""
+    import deps
+    if p4 not in _DEP_PATHS:
+        s = deps.load_state(p4)
+        _DEP_PATHS[p4] = tuple(v["path"] for rs in s.get("roots", {}).values() for v in rs["packages"].values())
+    p = entry[5:].split("#", 1)[0] if entry.startswith("repo:") else ""
+    return bool(p) and any(p == d or p.startswith(d + "/") for d in _DEP_PATHS[p4])
+
+
 def from_transcripts(p4, project, slug_dirs, idx=None, write=True, all_sessions=False):
     """`labels --from-transcripts`: the repo labels of every turn of every transcript a message row names (by its
     session's first 8 characters), under the given ~/.claude/projects/<slug>/ directories. Rewrites the `repo`
-    source in labels.tsv; adds the tasks (a turn no row matches becomes a task of its own)."""
+    source in labels.tsv; adds the tasks (a turn no row matches becomes a task of its own). The dependency files
+    those turns opened that the index does not hold are remembered (deps.note_opened; `dep_opened` counts the new
+    ones), so the next `index --deps` reads them and a second pass labels them."""
+    import deps
     import transcript as tr
     if idx is None:
         idx, _ = st.ensure_index(p4)
@@ -522,7 +538,7 @@ def from_transcripts(p4, project, slug_dirs, idx=None, write=True, all_sessions=
     files = st.load_store(p4)
     sessions = {rel[len(st.MESSAGES) + 1:-3]: ents for rel, ents in files.items() if rel.startswith(st.MESSAGES + "/")}
     stats = {"transcripts": 0, "turns": 0, "tasks": 0, "labels": {}, "matched_rows": 0}
-    rows_out, tasks_out = [], []
+    rows_out, tasks_out, opened = [], [], []
     names = set()
     for d in slug_dirs:
         try:
@@ -543,6 +559,7 @@ def from_transcripts(p4, project, slug_dirs, idx=None, write=True, all_sessions=
                 else:
                     tid = f"turn:{s8}:{turn['time']}"
                 labs, _ = turn_repo_labels(turn, project, ri, tid, tr.reply_of(turn), turn["time"], p4=p4)
+                opened += [p for p in deps.opened_in_turn(turn, project) if p not in ri[0]]
                 if not labs:
                     continue
                 tasks_out.append({"id": tid, "session": s8, "time": turn["time"][:16],
@@ -554,6 +571,8 @@ def from_transcripts(p4, project, slug_dirs, idx=None, write=True, all_sessions=
                 rows_out += labs
     stats["tasks"] = len({t["id"] for t in tasks_out})
     stats["rows"] = len(rows_out)
+    stats["dep_rows"] = sum(1 for r in rows_out if is_dep_entry(p4, r["entry"]))
+    stats["dep_opened"] = deps.note_opened(p4, list(dict.fromkeys(opened)))
     if write:
         replace_source(p4, TRAIN, TRAIN_HEAD, "repo", rows_out)
         add_tasks(p4, tasks_out)

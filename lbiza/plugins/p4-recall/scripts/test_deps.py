@@ -58,6 +58,7 @@ class Deps(unittest.TestCase):
         write(os.path.join(self.ext, ".git", "refs", "heads", "main"), "1111111111111111111111111111111111111111\n")
         write(os.path.join(self.ext, "include", "api.h"), "class FrameworkApi {\n};\n")
         deps.AUTO, deps.ROOTS, deps.MAX_ENTRIES = True, ["library_packages", self.ext], 20000
+        deps.FILES, deps.ENTRIES = 3, 40
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -142,10 +143,43 @@ class Deps(unittest.TestCase):
         self.assertIn("DeepThing", self.ids()["repo:@framework/a/b/c/d/e/f/g/deep.h#" + deps.repo.sha8("DeepThing")]["show"])
         self.assertEqual(deps.build(self.p4, self.proj)["read"], 0)
 
+    def test_transcript_backfill_notes_what_turns_opened(self):
+        deps.build(self.p4, self.proj)
+        st.build_index(self.p4)
+        deep = os.path.join(self.ext, "a", "b", "c", "d", "e", "f", "g", "deep.h")
+        write(deep, "class DeepThing {\n};\n")
+        slug = os.path.join(os.path.dirname(self.proj), "slug")
+        line = lambda **d: json.dumps(d) + "\n"
+        write(os.path.join(slug, "abcdef12-0000.jsonl"),
+              line(type="user", sessionId="abcdef12-0000", timestamp="2026-11-10T12:00:00Z", cwd=self.proj,
+                   message={"role": "user", "content": "where is the deep thing declared"})
+              + line(type="assistant", sessionId="abcdef12-0000", timestamp="2026-11-10T12:00:05Z",
+                     message={"role": "assistant", "content": [
+                         {"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": deep}},
+                         {"type": "tool_use", "id": "t2", "name": "Read",
+                          "input": {"file_path": os.path.join(self.ext, "include", "api.h")}}]})
+              + line(type="assistant", sessionId="abcdef12-0000", timestamp="2026-11-10T12:00:09Z",
+                     message={"role": "assistant", "content": [{"type": "text", "text": "DeepThing is in deep.h, beside FrameworkApi."}]}))
+        r = lb.from_transcripts(self.p4, self.proj, [slug], all_sessions=True)
+        self.assertEqual(r["dep_opened"], 1, "deep.h: opened, not indexed")
+        first = r["dep_rows"]
+        self.assertGreaterEqual(first, 1, "api.h: indexed, labelled (its path, and the symbol the reply names)")
+        deps.build(self.p4, self.proj)
+        lb._DEP_PATHS.clear()
+        r = lb.from_transcripts(self.p4, self.proj, [slug], idx=st.build_index(self.p4), all_sessions=True)
+        self.assertEqual(r["dep_opened"], 0)
+        self.assertGreater(r["dep_rows"], first, "the second pass labels deep.h too")
+
     def test_spread_takes_from_every_directory(self):
         files = [f"modules/a/f{i}.h" for i in range(5)] + [f"modules/z/g{i}.h" for i in range(5)] + ["README.md"]
         got = deps.spread(files, set())
         self.assertEqual(got[:5], ["README.md", "modules/a/f0.h", "modules/z/g0.h", "modules/a/f1.h", "modules/z/g1.h"])
+
+    def test_a_changed_cap_reads_every_package_again(self):
+        deps.build(self.p4, self.proj)
+        deps.FILES = 50
+        s = deps.build(self.p4, self.proj)
+        self.assertEqual((s["read"], s["updated"], s["installed"]), (6, 0, 0), "read again, and not as an update")
 
     def test_deadline_resumes(self):
         s = deps.build(self.p4, self.proj, deadline_s=-1.0)

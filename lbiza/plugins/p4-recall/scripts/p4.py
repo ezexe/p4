@@ -571,6 +571,16 @@ def cmd_labels(args):
     if args.from_transcripts:
         project = args.project or __import__("repo").project_of(p4)
         r = lb.from_transcripts(p4, project, args.slug, all_sessions=args.all_sessions)
+        if r["dep_opened"]:          # dependency files the turns opened that the index lacked: read them, label again
+            import deps
+            deps.configure(p4)
+            d = deps.build(p4, project)
+            idx = st.build_index(p4)
+            lb._DEP_PATHS.clear()
+            print(f"labels --from-transcripts: {r['dep_opened']} dependency files the turns opened were not indexed; "
+                  f"{d['read']} packages read again, the turns labelled a second time")
+            r = lb.from_transcripts(p4, project, args.slug, idx=idx, all_sessions=args.all_sessions)
+        print(f"labels --from-transcripts: {r['dep_rows']} of the {r['rows']} repo labels are on dependency entries")
         print(f"labels --from-transcripts: {r['transcripts']} transcripts, {r['turns']} turns ({r['matched_rows']} "
               f"matched to rows), {r['tasks']} tasks, {r['rows']} repo labels: "
               + ", ".join(f"{k} {v}" for k, v in sorted(r["labels"].items())))
