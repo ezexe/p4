@@ -48,6 +48,9 @@ DEFAULTS = {
             "scan": 20000,               # directory entries one package's walk looks at
             "depth": 6,
         },
+        "said": {                        # what a session states about the lines it was shown (said.py)
+            "mode": "off",               # off | shadow (asked and written down) | on (training reads it too)
+        },
         "near": {                        # candidates from what earlier, similar tasks used (near.py)
             "on": True,
             "neighbours": 20,            # earlier tasks whose entries are taken

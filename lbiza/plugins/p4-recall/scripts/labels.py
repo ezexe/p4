@@ -191,8 +191,11 @@ def training_labels(p4, idx=None):
 
 def _training_rows(p4):
     held = held_batches(p4)
+    import said
+    stated = said.mode(p4) == "on"          # what sessions state trains only once the store says so (said.py)
     train = [as_label(r) for r in read_tsv(mpath(p4, TRAIN))
-             if not (held and r.get("source") == "store+edited" and batch_of(r.get("note", "")) in held)]
+             if not (held and r.get("source") == "store+edited" and batch_of(r.get("note", "")) in held)
+             and (stated or r.get("source") != "said")]
     edited = {r["task"] for r in train if r["source"] == "store+edited"}
     raw = [as_label(r) for r in read_tsv(mpath(p4, RAW)) if r.get("task") not in edited]
     return raw + train

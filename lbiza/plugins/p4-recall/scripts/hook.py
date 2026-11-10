@@ -305,9 +305,19 @@ def h_recall(payload):
     ids = [i for i in r["ids"] if not i.startswith(("history:", "repeat"))]
     shown = injected(p4, r["lines"])
     shadow = not shown
+    handles = {}
+    if shown:
+        import said
+        if said.mode(p4) != "off":
+            # said.py: the store's lines get handles and the session is asked to state what it did with them
+            keep = set(shown)
+            shown, handles = said.tag([(l, i) for l, i in zip(r["lines"], r["ids"]) if l in keep])
+            if handles:
+                shown.append(said.instruction(handles, session, p4))
+                said.asked(p4, session, rid, handles, now())
     lb.write_served(p4, f"turn-{session}", {"ids": ids, "text": prompt[:2000], "task": rid, "session": session,
                                             "time": now(), "lines": len(r["lines"]), "shown": len(shown),
-                                            "shadow": shadow})
+                                            "shadow": shadow, "handles": handles})
     if shadow:
         return None
     return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "\n".join(shown)}}

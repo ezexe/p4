@@ -552,6 +552,10 @@ def cmd_check(args):
     dl = deps.stats_line(p4)
     if dl:
         print("  " + dl)
+    import said
+    sl = said.stats_line(p4)
+    if sl:
+        print("  " + sl)
     jar = sum(1 for d in idx["docs"] if not d.get("plain") and st.JARGON.search(entry_line(d)))
     rate = jar / len(idx["docs"]) if idx["docs"] else 0.0
     print(f"  index: {idx['n']} entries ({'rebuilt' if rebuilt else 'fresh'}); excluded "
@@ -695,6 +699,12 @@ def main(argv=None):
     p.add_argument("--repo", action="store_true")
     p.add_argument("--deps", action="store_true")
     p.add_argument("--project", default="")
+    p = sub.add_parser("said", help="a session's statement about a line it was shown (said.py)")
+    p.add_argument("act", choices=("applied", "set-aside", "lacked"))
+    p.add_argument("handles", nargs="*")
+    p.add_argument("--session", required=True)
+    p.add_argument("--why", default="")
+    p.add_argument("--p4")
     p = sub.add_parser("sync", help="keep every machine's branch of the store in step (sync.py)")
     p.add_argument("--p4")
     p.add_argument("--all", action="store_true", help="merge every machine's branch into main and move them up to it")
@@ -764,6 +774,11 @@ def main(argv=None):
         return cmd_index(args)
     if args.cmd == "sync":
         return cmd_sync(args)
+    if args.cmd == "said":
+        import said
+        lines, code = said.state(p4_dir(args), args.session, args.act, args.handles, args.why)
+        print("\n".join(lines))
+        return code
     if args.cmd == "query":
         return cmd_query(args)
     if args.cmd == "check":

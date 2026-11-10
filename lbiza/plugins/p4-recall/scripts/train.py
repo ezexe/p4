@@ -45,7 +45,7 @@ import labels as lb  # noqa: E402
 import ranker  # noqa: E402
 import store as st  # noqa: E402
 
-SOURCE_WEIGHT = {"store+edited": 1.0, "pool": 0.7, "short": 1.0, "usage": 0.3, "miss": 1.0, "store": 0.5,
+SOURCE_WEIGHT = {"said": 1.0, "store+edited": 1.0, "pool": 0.7, "short": 1.0, "usage": 0.3, "miss": 1.0, "store": 0.5,
                  "repo": 1.0, "silent": 1.0}
 SILENT = "silent.jsonl"                                   # models/silent.jsonl: {"prompt": ...} per line
 SILENT_DEFAULT = os.path.join(HERE, "silent-prompts.jsonl")

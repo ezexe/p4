@@ -1,6 +1,6 @@
 {
   "name": "p4-plans",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Two skills: plan-planner (where plans live, written once, tests first, evidence checked against the tree, closed onto an archive branch, flown section by section by the flight loop) and sub-agentic (whether to delegate, how many agents, the shape said first, a model per role, the brief, the spend). A repository's own values live in the plans section of .claude/p4/p4.json; scripts/settings.py prints them merged over the defaults.",
   "author": {
     "name": "ezexe"

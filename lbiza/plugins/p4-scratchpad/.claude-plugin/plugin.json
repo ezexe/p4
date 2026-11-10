@@ -1,6 +1,6 @@
 {
   "name": "p4-scratchpad",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Keeps the notebook in <project>/.claude/p4/scratchpad/: the session start re-seeds its ignored .out/ and sweeps logs, build results and binaries into it. Two asks about where code belongs ship off; P4_SCRATCHPAD_ASKS=1 turns them on.",
   "author": {
     "name": "ezexe"
