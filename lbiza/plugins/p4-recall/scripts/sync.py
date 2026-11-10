@@ -38,6 +38,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -282,6 +283,7 @@ def cmd_all(main, push):
         os.chdir(home)
         git("worktree", "remove", "--force", wt, check=False)
         git("worktree", "prune", check=False)
+        shutil.rmtree(tmp, ignore_errors=True)       # the worktree's parent: nothing of a run stays in the temp folder
 
 
 def _all_in_worktree(main, branches, push):

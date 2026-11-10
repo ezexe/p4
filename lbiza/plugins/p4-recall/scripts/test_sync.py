@@ -133,6 +133,8 @@ class Sync(unittest.TestCase):
         self.assertEqual(self.run_all(), 0)
         self.assertEqual(self.tip("main"), main)
         self.assertNotIn("p4-sync", sh(self.runner, "git", "worktree", "list"), "the worktree is gone")
+        import glob
+        self.assertEqual(glob.glob(os.path.join(tempfile.gettempdir(), "p4-sync-*")), [], "and so is its temp folder")
 
     def test_pull_brings_main_into_a_machine_with_its_own_commit(self):
         self.machine(self.mac, "mac", "2026-11-07 10:00", "/Users/x/c", [3, 3])
