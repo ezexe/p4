@@ -28,8 +28,11 @@ Two machines write the same files, so a plain merge conflicts. Each conflicted f
                     table's repeated rows and an index's repeated link lines (memory/MEMORY.md) are dropped
   settings (*.json)  key by key against the common ancestor; a list is both sides' items, so p4.json's
                     recall.deps.roots holds every machine's paths (a root that is not on a machine is skipped there)
-  a trained model (models/ranker*, *.pt, *.phid) and its record (models/eval.tsv)   one side whole, the one whose
-                    last training round is the later: two machines' weights are never mixed
+  a trained model (models/ranker*, *.pt, *.phid)   one side whole, the one whose last training round is the
+                    later: two machines' weights are never mixed
+  the training log (models/eval.tsv)   both machines' rounds, in time order. It was once taken whole with the
+                    model, and each sync swapped one machine's log for the other's (measured 2026-11-10: a
+                    64-round log replaced by a 39-round one)
   anything else     the side that changed it last, whole: a script, a workflow or anything under .github/ is never
                     stitched from two versions
 Settings and store entries are merged this way whenever both machines changed the file, conflict or not: git merges
@@ -47,12 +50,13 @@ import sys
 import tempfile
 
 TEXT_EXT = (".md", ".tsv", ".jsonl", ".txt", ".log")
-MODEL_UNIT = ("models/eval.tsv",)
+MODEL_UNIT = ()
+LOG = "models/eval.tsv"            # the training log: every machine's rounds are history, none is replaced
 MODEL_PREFIX = ("models/ranker",)
 MODEL_EXT = (".pt", ".phid")
 INDEX_LINE = re.compile(rb"^- \[[^\]]+\]\([^)]+\)")        # `- [Title](file.md) ...`, as memory/MEMORY.md lists
 NAME, EMAIL = "p4-sync", "p4-sync@users.noreply.github.com"
-SEED = 8      # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
+SEED = 9      # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
 
 
 def git(*args, check=True, cwd=None):
@@ -202,6 +206,17 @@ def merge_json(base, ours, theirs, dflt=None):
     return ours                                             # both changed it: ours (main's, in the workflow)
 
 
+def merge_log(base, ours, theirs):
+    """A training log both machines appended to: every round of either, once, ordered by its time (the second
+    column), under the one header."""
+    lines = union(base, ours, theirs, True).decode("utf-8", "replace").splitlines()
+    if not lines:
+        return b""
+    head, rows = lines[0], [l for l in lines[1:] if l.strip()]
+    rows.sort(key=lambda l: (l.split(chr(9)) + [""])[1])
+    return (chr(10).join([head] + rows) + chr(10)).encode("utf-8")
+
+
 def seeded_defaults():
     """The plugin's settings defaults as the layout hook seeded them beside this script (.github/p4_defaults.json),
     or None: the workflow has no plugin to ask."""
@@ -225,6 +240,8 @@ def settle(path, ref, model_side, sides=None):
     base, ours, theirs = sides or (show(f":1:{path}"), show(f":2:{path}"), show(f":3:{path}"))
     if ours is None or theirs is None:
         return (ours if ours is not None else theirs), "kept (the other side deleted it)"
+    if path == LOG:
+        return merge_log(base, ours, theirs), "training log: both sides' rounds, by time"
     if is_model(path):
         return (theirs if model_side == "theirs" else ours), f"model: the {'incoming' if model_side == 'theirs' else 'current'} side, whole"
     low = path.lower()

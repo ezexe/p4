@@ -116,8 +116,9 @@ class Sync(unittest.TestCase):
                          "every machine's roots (mac was merged first: alphabetical)")
         self.assertIs(cfg["recall"]["inject"], False, "one side changed the key: its value")
         self.assertEqual(json.loads(read(out, "models/ranker.json")), {"w": [3, 3]}, "the later round's model, whole")
-        self.assertEqual(read(out, "models/eval.tsv").splitlines()[-1], "1\t2026-11-07 10:00\t9")
-        self.assertNotIn("2026-11-05", read(out, "models/eval.tsv"), "and its record with it, not a mix")
+        self.assertEqual(read(out, "models/eval.tsv").splitlines(),
+                         ["round\ttime\tlabels", "0\t2026-11-01 10:00\t1", "1\t2026-11-05 10:00\t9", "1\t2026-11-07 10:00\t9"],
+                         "the training log keeps both machines' rounds in time order: neither history is replaced")
         index = read(out, "memory/MEMORY.md")
         self.assertEqual((index.count("- [Shared](shared.md)"), index.count("- [Of win]"), index.count("- [Of mac]")), (1, 1, 1),
                          "an index line both machines wrote is kept once")
