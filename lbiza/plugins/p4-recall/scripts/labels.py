@@ -368,7 +368,7 @@ def tool_inputs(turn):
         inp = c.get("input") if isinstance(c.get("input"), dict) else {}
         if c["name"] in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
             out.append(" ".join(str(inp.get(k, "")) for k in ("file_path", "new_string", "content", "edits")))
-        elif c["name"] == "Bash":
+        elif c["name"] in ("Bash", "PowerShell"):
             out.append(str(inp.get("command", "")))
     return "\n".join(out)
 

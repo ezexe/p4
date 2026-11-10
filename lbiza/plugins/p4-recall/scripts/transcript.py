@@ -29,6 +29,7 @@ import shlex
 
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 READ_TOOLS = ("Read", "NotebookRead")
+SHELL_TOOLS = ("Bash", "PowerShell")     # a command's paths are read the same way, whichever shell ran it
 SEARCH_TOOLS = ("Grep", "Glob")
 SKILL_TOOLS = ("Skill",)
 BASH_READ = ("cat", "head", "tail", "less", "more", "wc", "grep", "rg", "sed", "awk", "diff", "bat", "nl", "file")
@@ -184,7 +185,12 @@ def bash_paths(cmd, project, cwd, known):
     """(read paths, written paths) a Bash command names among the `known` repository paths."""
     reads, writes = set(), set()
     try:
-        parts = shlex.split(cmd, posix=True)
+        if os.sep == "\\" and "\\" in cmd:
+            # a Windows path: POSIX splitting would eat its backslashes, so split without it and drop the quotes
+            parts = [t[1:-1] if len(t) > 1 and t[0] == t[-1] and t[0] in "'\"" else t
+                     for t in shlex.split(cmd, posix=False)]
+        else:
+            parts = shlex.split(cmd, posix=True)
     except ValueError:
         parts = cmd.split()
     # redirect targets
@@ -240,7 +246,9 @@ def result_paths(text, project, cwd, known):
         l = l.strip()
         if not l:
             continue
-        cand = l.split(":", 1)[0] if not os.path.isabs(l) or ":" in l[1:] else l
+        drive = l[:2] if re.match(r"^[A-Za-z]:[\\/]", l) else ""     # a drive's colon is not the one before a line number
+        rest = l[len(drive):]
+        cand = drive + (rest.split(":", 1)[0] if not os.path.isabs(l) or ":" in rest[1:] else rest)
         r = rel(cand, project, cwd)
         if r in known and r not in out:
             out.append(r)
@@ -289,7 +297,7 @@ def file_events(turn, project, known, symbols=None, reply=""):
         elif name in SEARCH_TOOLS:
             for r in result_paths(c.get("result", ""), project, cwd, known):
                 get(r)["hit"] = True
-        elif name == "Bash":
+        elif name in SHELL_TOOLS:
             cmd = str(inp.get("command", ""))
             reads, writes = bash_paths(cmd, project, cwd, known)
             for r in writes:

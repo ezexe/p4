@@ -200,7 +200,8 @@ class Synthetic(unittest.TestCase):
 
     def test_dry_writes_only_the_report(self):
         r = self.run_dry()
-        files = [os.path.relpath(os.path.join(a, f), self.out) for a, _d, fs in os.walk(self.out) for f in fs]
+        files = [os.path.relpath(os.path.join(a, f), self.out).replace(os.sep, "/")
+                 for a, _d, fs in os.walk(self.out) for f in fs]
         self.assertEqual(files, ["archive/migration-2026-11-01.md"])
         self.assertTrue(all(ok for _n, ok, _d in r["checks"]), [c for c in r["checks"] if not c[1]])
         self.assertEqual(r["plan"].unplaced, [])

@@ -1,6 +1,6 @@
 {
   "name": "p4-recall",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "A small ranker trained on the repo's own store (rules, corrections, retractions, facts, messages, memory). It adds a few lines from the owner's history next to a message or a subagent's task when it is confident, and nothing otherwise.",
   "author": {
     "name": "ezexe"
