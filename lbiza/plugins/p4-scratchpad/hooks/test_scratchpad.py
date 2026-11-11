@@ -293,11 +293,116 @@ def tmp_cases():
     print("test_scratchpad.py: tmp cases green")
 
 
+def tmp_keep_cases():
+    """The tmp is always staged, and deleted only after it is committed: tmp-sweep stages the session's files in the
+    p4 repo (never an ignored file, never one over the size cap) and says nothing; tmp-close commits them alone,
+    leaving what else is staged as it was, deletes what the commit holds, and commits the removal; a file no commit
+    holds stays on disk; the link still works; a session that starts again gets its files back; another session's
+    tmp left idle past the limit is closed the same way at a start; without a git repository nothing is deleted."""
+    if not shutil.which("git"):
+        print("test_scratchpad.py: tmp keep cases skipped (no git on PATH)")
+        return
+    root = tempfile.mkdtemp(prefix="p4-scratchpad-keep-")
+    temp = tempfile.mkdtemp(prefix="p4-scratchpad-temp-")
+    sid, old, live = "aaaa1111-0000-4000-8000-000000000001", "bbbb2222-0000-4000-8000-000000000002", \
+        "cccc3333-0000-4000-8000-000000000003"
+    tmp_env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp}
+    p4 = os.path.join(root, ".claude", "p4")
+
+    def git(*args):
+        r = subprocess.run(["git", "-C", p4] + list(args), capture_output=True, text=True)
+        assert r.returncode == 0, (args, r.stderr)
+        return r.stdout
+
+    try:
+        harness = os.path.join(temp, "claude", "30ad6e18862a20e8", sid, "scratchpad")
+        target = os.path.join(p4, "tmp", sid)
+        payload = {"cwd": root, "session_id": sid}
+
+        def run(sub, extra=None):
+            return run_sub(sub, payload, dict(tmp_env, **(extra or {})), CLAUDE_PROJECT_DIR=root)
+
+        # no git repository at .claude/p4: nothing is staged, nothing is deleted
+        put(harness, "notes.md", "- a note\n")
+        run("tmp-link")
+        assert run("tmp-sweep") == "" and run("tmp-close") == "", "no repository, and a hook spoke"
+        assert os.path.isfile(os.path.join(target, "notes.md")), "a file was deleted with no commit to hold it"
+
+        os.makedirs(p4, exist_ok=True)
+        subprocess.run(["git", "init", "-q", p4], check=True)
+        git("config", "user.name", "t")
+        git("config", "user.email", "t@t")
+        put(p4, ".gitignore", "*.pyc\n")
+        put(p4, "p4.json", json.dumps({"version": 1, "scratchpad": {"tmp_max_file_mb": 0.001}}))
+        put(p4, "store/first.md", "first\n")
+        git("add", ".gitignore", "store/first.md")
+        git("commit", "-q", "-m", "first")
+        put(p4, "store/other.md", "another session's work, staged\n")
+        git("add", "store/other.md")
+        put(harness, "sub/part.md", "part\n")
+        put(harness, "big.bin", "x" * 5000)                       # over the cap of 0.001 MB
+        put(harness, "mod.pyc", "ignored\n")
+
+        assert run("tmp-sweep") == "", "the sweep spoke"
+        staged = set(git("diff", "--cached", "--name-only").split())
+        assert {f"tmp/{sid}/notes.md", f"tmp/{sid}/sub/part.md"} <= staged, staged
+        assert not any(n.endswith(("big.bin", "mod.pyc")) for n in staged), staged
+
+        commits = int(git("rev-list", "--count", "HEAD"))
+        assert run("tmp-close") == "", "the close spoke"
+        assert int(git("rev-list", "--count", "HEAD")) == commits + 2, "not one commit to keep and one to remove"
+        kept = git("show", "--name-only", "--format=", "HEAD~1").split()
+        assert sorted(kept) == [f"tmp/{sid}/notes.md", f"tmp/{sid}/sub/part.md"], kept
+        assert git("show", f"HEAD~1:tmp/{sid}/notes.md") == "- a note\n", "the commit does not hold the note"
+        assert git("ls-files", "tmp").strip() == "", "the removal is not committed"
+        assert git("diff", "--cached", "--name-only").split() == ["store/other.md"], "another staged file was swept in"
+        assert not os.path.exists(os.path.join(target, "notes.md")), "the committed note is still on disk"
+        assert not os.path.exists(os.path.join(target, "sub")), "an emptied directory is still there"
+        for name in ("big.bin", "mod.pyc"):
+            assert os.path.isfile(os.path.join(target, name)), f"{name} was deleted though no commit holds it"
+        put(harness, "after.md", "after\n")
+        assert os.path.isfile(os.path.join(target, "after.md")), "the link no longer reaches the tmp"
+
+        # the session starts again: what the close removed is back, and staged
+        out = run("tmp-link")
+        assert "restored" in out, out
+        with open(os.path.join(target, "notes.md"), encoding="utf-8") as f:
+            assert f.read() == "- a note\n", "the note did not come back"
+        assert os.path.isfile(os.path.join(target, "sub", "part.md")), "a subdirectory did not come back"
+        assert run("tmp-link") == "", "a second start spoke"
+
+        # another session's tmp, idle past the limit, is closed at a start; one written today is left
+        put(os.path.join(p4, "tmp", old), "old.md", "old\n")
+        put(os.path.join(p4, "tmp", live), "live.md", "live\n")
+        long_ago = os.path.getmtime(os.path.join(p4, "tmp", old, "old.md")) - 30 * 86400
+        os.utime(os.path.join(p4, "tmp", old, "old.md"), (long_ago, long_ago))
+        os.utime(os.path.join(p4, "tmp", old), (long_ago, long_ago))
+        run("tmp-link")
+        assert not os.path.exists(os.path.join(p4, "tmp", old, "old.md")), "an idle tmp was not removed"
+        assert "old\n" == git("show", f"HEAD~1:tmp/{old}/old.md"), "an idle tmp was removed without its commit"
+        assert os.path.isfile(os.path.join(p4, "tmp", live, "live.md")), "a tmp written today was removed"
+        assert os.path.isfile(os.path.join(target, "notes.md")), "the session's own tmp was removed at its start"
+
+        with open(HOOKS_JSON, encoding="utf-8") as f:
+            ends = json.load(f)["hooks"]["SessionEnd"][0]["hooks"]
+        assert ends[0]["command"].split()[-1] == "tmp-close", ends
+    finally:
+        if os.path.lexists(harness):
+            try:
+                os.rmdir(harness) if os.name == "nt" else os.unlink(harness)
+            except OSError:
+                pass
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(temp, ignore_errors=True)
+    print("test_scratchpad.py: tmp keep cases green")
+
+
 def main():
     asks()
     notebook_out()
     repo_uses()
     tmp_cases()
+    tmp_keep_cases()
     gate2_d()
     print("test_scratchpad.py: all green")
 

@@ -17,7 +17,17 @@ The session's temp directory, ON unless p4.json's scratchpad.tmp is false or P4_
                                what the session writes there is kept; what it already held is moved in first (a taken
                                name gets the time as a suffix). One line names the link when it is made.
   tmp-sweep (Stop)             the same, silent: a scratchpad the start could not link, or that appeared after it, is
-                               moved and linked at the turn's close.
+                               moved and linked at the turn's close. Then the session's tmp is staged in the p4 repo
+                               (`git add`), every turn: never a file the repo ignores, one over
+                               scratchpad.tmp_max_file_mb, or a clone's contents.
+  tmp-close (SessionEnd)       a tmp is deleted only after it is committed: the session's staged tmp is committed
+                               alone (whatever else is staged stays staged), the files that commit holds are deleted,
+                               and the removal is committed too. A file no commit holds stays on disk. The same is done
+                               at a start for another session's tmp nothing has written to for
+                               scratchpad.tmp_idle_days (a session that ended without a SessionEnd). A session that
+                               starts again after its tmp was closed gets its files back from that commit.
+                               Nothing is staged, committed or deleted unless `.claude/p4` is a git repository of
+                               its own.
 
 Two asks, OFF unless the environment sets P4_SCRATCHPAD_ASKS=1 (design section 3.2, untested until measured):
 
@@ -97,13 +107,18 @@ def project_root(payload):
 
 ASKS = False                # p4.json scratchpad.asks; P4_SCRATCHPAD_ASKS=1 or 0 wins for one run
 TMP = True                  # p4.json scratchpad.tmp; P4_SCRATCHPAD_TMP=1 or 0 wins for one run
+TMP_IDLE_DAYS = 7           # another session's tmp untouched this long is committed and deleted at a start
+TMP_MAX_FILE_MB = 20        # a larger file is never staged, so never deleted
+TMP_MAX_FILES = 5000        # a tmp with more files is left alone: not staged, not deleted
+TMP_IDLE_CLOSES = 5         # idle tmps closed at one start, at most
 
 
 def configure(payload):
     """The scratchpad section of <project>/.claude/p4/p4.json over the constants (the file written when missing)."""
     p4 = os.path.join(project_root(payload), ".claude", "p4")
     p4conf.configure(globals(), p4, "scratchpad", {
-        "asks": "ASKS", "tmp": "TMP", "ignorable_ext": "IGNORABLE_EXT", "ignorable_dirs": "IGNORABLE_DIRS",
+        "asks": "ASKS", "tmp": "TMP", "tmp_idle_days": "TMP_IDLE_DAYS", "tmp_max_file_mb": "TMP_MAX_FILE_MB",
+        "tmp_max_files": "TMP_MAX_FILES", "ignorable_ext": "IGNORABLE_EXT", "ignorable_dirs": "IGNORABLE_DIRS",
         "repo_uses_min_name": "REPO_USES_MIN_NAME", "repo_uses_max": "REPO_USES_MAX",
         "repo_uses_lines": "REPO_USES_LINES"})
 
@@ -312,13 +327,207 @@ def link_tmp(harness, target, stamp):
     return "linked", moved
 
 
+def git_p4(p4, *args, stdin=None, timeout=20):
+    """One git command in the p4 repo -> the finished process, or None when git is missing or too slow."""
+    try:
+        return subprocess.run(["git", "-C", p4, *args], input=stdin, capture_output=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def git_out(p4, *args, stdin=None):
+    r = git_p4(p4, *args, stdin=stdin)
+    return r.stdout.decode("utf-8", "replace") if r and r.returncode == 0 else None
+
+
+def p4_repo(root):
+    """`<root>/.claude/p4` when it is a git repository of its own (never the project's repo around it), else None."""
+    p4 = os.path.join(root, ".claude", "p4")
+    if not os.path.isdir(p4):
+        return None
+    top = git_out(p4, "rev-parse", "--show-toplevel")
+    return p4 if top and same_dir(top.strip(), p4) else None
+
+
+def tmp_rel(sid):
+    return f"{TMP_DIR}/{sid}"
+
+
+def tmp_files(target):
+    """The files of a tmp that may be staged, as absolute paths: not a link, not over the size cap, not inside a
+    clone (a directory with its own .git). None when there are more than TMP_MAX_FILES: such a tmp is left alone."""
+    out, cap = [], TMP_MAX_FILE_MB * 1024 * 1024
+    for d, dirs, names in os.walk(target):
+        if ".git" in dirs or ".git" in names:
+            dirs[:] = []
+            continue
+        for n in names:
+            p = os.path.join(d, n)
+            try:
+                if os.path.islink(p) or os.path.getsize(p) > cap:
+                    continue
+            except OSError:
+                continue
+            out.append(p)
+            if len(out) > TMP_MAX_FILES:
+                return None
+    return out
+
+
+def nul(paths):
+    return "\0".join(paths).encode("utf-8", "surrogateescape")
+
+
+def stage_tmp(p4, sid):
+    """`git add` the session's tmp: every file tmp_files allows that the repo does not ignore, and the removal of a
+    tracked file that is gone. False when the tmp is too large to stage."""
+    target = os.path.join(p4, TMP_DIR, sid)
+    files = tmp_files(target) if os.path.isdir(target) else []
+    if files is None:
+        return False
+    git_p4(p4, "add", "-u", "--", tmp_rel(sid))
+    rels = [os.path.relpath(f, p4).replace("\\", "/") for f in files]
+    if rels:
+        ignored = git_p4(p4, "check-ignore", "-z", "--stdin", stdin=nul(rels))
+        skip = set(ignored.stdout.decode("utf-8", "surrogateescape").split("\0")) if ignored else set()
+        rels = [r for r in rels if r not in skip]
+    if rels:
+        git_p4(p4, "add", "--pathspec-from-file=-", "--pathspec-file-nul", stdin=nul(rels), timeout=25)
+    return True
+
+
+def closed_mark(p4, sid):
+    """Where a closed tmp's commit is noted: inside the repo's own git directory, out of the working tree."""
+    gd = git_out(p4, "rev-parse", "--absolute-git-dir")
+    return os.path.join(gd.strip(), "p4-tmp-closed", sid) if gd else None
+
+
+def close_tmp(p4, sid):
+    """A tmp that is done: staged, committed alone (what else is staged stays staged), and only then deleted, the
+    removal committed too. A file no commit holds (ignored, over the cap, changed since) stays on disk. Returns the
+    commit that holds the files, or '' when nothing was removed."""
+    rel, target = tmp_rel(sid), os.path.join(p4, TMP_DIR, sid)
+    if not os.path.isdir(target) or stage_tmp(p4, sid) is False:
+        return ""
+    r = git_p4(p4, "diff", "--cached", "--quiet", "--", rel)
+    if r is None:
+        return ""
+    if r.returncode == 1:
+        c = git_p4(p4, "commit", "-q", "-m", f"tmp: session {sid[:8]}, kept before its removal", "--", rel)
+        if c is None or c.returncode != 0:
+            return ""                                  # not committed: nothing is deleted
+    tracked = git_out(p4, "ls-files", "-z", "--", rel)
+    changed = git_out(p4, "diff", "--name-only", "-z", "HEAD", "--", rel)
+    head = git_out(p4, "rev-parse", "HEAD")
+    if not tracked or changed is None or not head:
+        return ""
+    head = head.strip()
+    changed = set(changed.split("\0"))
+    removed = 0
+    for name in tracked.split("\0"):
+        if not name or name in changed:
+            continue
+        try:
+            os.remove(os.path.join(p4, *name.split("/")))
+            removed += 1
+        except OSError:
+            continue
+    if not removed:
+        return ""
+    for d, _, _ in sorted(os.walk(target), key=lambda t: -len(t[0])):
+        if not same_dir(d, target):
+            try:
+                os.rmdir(d)                            # only when emptied
+            except OSError:
+                pass
+    git_p4(p4, "add", "-u", "--", rel)
+    git_p4(p4, "commit", "-q", "-m", f"tmp: session {sid[:8]} removed; its files are in {head[:8]}", "--", rel)
+    mark = closed_mark(p4, sid)
+    if mark:
+        try:
+            os.makedirs(os.path.dirname(mark), exist_ok=True)
+            with open(mark, "w", encoding="utf-8") as f:
+                f.write(head + "\n")
+        except OSError:
+            pass
+    return head
+
+
+def restore_tmp(p4, sid):
+    """A session that goes on after its tmp was closed gets the files back from the commit that holds them: each
+    one that is not on disk now, staged again. Returns the commit, or ''."""
+    mark = closed_mark(p4, sid)
+    if not mark or not os.path.isfile(mark):
+        return ""
+    try:
+        with open(mark, encoding="utf-8") as f:
+            head = f.read().strip()
+    except OSError:
+        return ""
+    names = git_out(p4, "ls-tree", "-r", "-z", "--name-only", head, "--", tmp_rel(sid))
+    if names is None:
+        return ""
+    missing = [n for n in names.split("\0") if n and not os.path.exists(os.path.join(p4, *n.split("/")))]
+    if missing:
+        r = git_p4(p4, "checkout", head, "--pathspec-from-file=-", "--pathspec-file-nul", stdin=nul(missing))
+        if r is None or r.returncode != 0:
+            return ""
+    try:
+        os.remove(mark)
+    except OSError:
+        pass
+    return head if missing else ""
+
+
+def newest(path):
+    """The latest modification time under a directory (its own when it holds nothing)."""
+    try:
+        t = os.path.getmtime(path)
+    except OSError:
+        return time.time()
+    seen = 0
+    for d, _, names in os.walk(path):
+        for n in names:
+            try:
+                t = max(t, os.path.getmtime(os.path.join(d, n)))
+            except OSError:
+                pass
+            seen += 1
+            if seen > TMP_MAX_FILES:
+                return time.time()                     # too large to judge: not idle
+    return t
+
+
+def close_idle(p4, own):
+    """Other sessions' tmps nothing has written to for TMP_IDLE_DAYS: sessions that ended without a SessionEnd.
+    At most TMP_IDLE_CLOSES a start."""
+    base = os.path.join(p4, TMP_DIR)
+    if TMP_IDLE_DAYS is None or TMP_IDLE_DAYS < 0 or not os.path.isdir(base):
+        return 0
+    limit, done = time.time() - TMP_IDLE_DAYS * 86400, 0
+    for sid in sorted(os.listdir(base)):
+        d = os.path.join(base, sid)
+        if sid == own or done >= TMP_IDLE_CLOSES or not os.path.isdir(d) or not re.fullmatch(r"[A-Za-z0-9_-]+", sid):
+            continue
+        if not os.listdir(d) or newest(d) > limit:
+            continue
+        if close_tmp(p4, sid):
+            done += 1
+            try:
+                os.rmdir(d)                            # when nothing uncommitted is left in it
+            except OSError:
+                pass
+    return done
+
+
 def cmd_tmp_link(payload):
     if not tmp_on():
         return 0
     harness = harness_scratchpad(payload)
     if not harness:
         return 0
-    target = p4_tmp(project_root(payload), payload)
+    root = project_root(payload)
+    target = p4_tmp(root, payload)
     state, moved = link_tmp(harness, target, time.strftime("%Y%m%d-%H%M%S"))
     here, there = os.path.normpath(harness), os.path.normpath(target)
     line = {"linked": f"this session's scratchpad {here} is a link to {there}, tracked by the p4 repo",
@@ -326,18 +535,40 @@ def cmd_tmp_link(payload):
             "failed": f"{here} could not be linked to {there}; its files move there at each turn's close"}.get(state, "")
     if moved:
         line += ("; " if line else "") + f"moved {len(moved)} file(s) it held into {there}"
+    p4, sid = p4_repo(root), session_id(payload)
+    if p4 and sid:
+        back = restore_tmp(p4, sid)
+        if back:
+            line += ("; " if line else "") + f"this session's tmp files were restored from commit {back[:8]} into {there}"
+        close_idle(p4, sid)
     if line:
         print("p4-scratchpad: " + line + ".")
     return 0
 
 
 def cmd_tmp_sweep(payload):
-    """Stop: a scratchpad that is not the link yet is moved and linked. Prints nothing."""
+    """Stop: a scratchpad that is not the link yet is moved and linked, and the session's tmp is staged in the p4
+    repo. Prints nothing."""
     if not tmp_on():
         return 0
+    root = project_root(payload)
     harness = harness_scratchpad(payload)
     if harness and not is_link(harness):
-        link_tmp(harness, p4_tmp(project_root(payload), payload), time.strftime("%Y%m%d-%H%M%S"))
+        link_tmp(harness, p4_tmp(root, payload), time.strftime("%Y%m%d-%H%M%S"))
+    p4, sid = p4_repo(root), session_id(payload)
+    if p4 and sid:
+        restore_tmp(p4, sid)
+        stage_tmp(p4, sid)
+    return 0
+
+
+def cmd_tmp_close(payload):
+    """SessionEnd: the session's tmp is committed, then deleted. Prints nothing."""
+    if not tmp_on():
+        return 0
+    p4, sid = p4_repo(project_root(payload)), session_id(payload)
+    if p4 and sid:
+        close_tmp(p4, sid)
     return 0
 
 
@@ -500,6 +731,8 @@ def main():
             return cmd_tmp_link(payload)
         if sub == "tmp-sweep":
             return cmd_tmp_sweep(payload)
+        if sub == "tmp-close":
+            return cmd_tmp_close(payload)
         print(f"scratchpad.py: unknown subcommand {sub!r}")
         return 0
     except Exception as e:  # noqa: BLE001 — a hook degrades, never raises

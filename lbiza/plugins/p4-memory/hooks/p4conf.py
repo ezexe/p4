@@ -25,6 +25,9 @@ DEFAULTS = {
     "scratchpad": {
         "asks": False,                   # the two asks about where code belongs (P4_SCRATCHPAD_ASKS=1 for one run)
         "tmp": True,                     # the session scratchpad as a link into .claude/p4/tmp/<session> (P4_SCRATCHPAD_TMP=0 for one run)
+        "tmp_idle_days": 7,              # another session's tmp untouched this long is committed, then deleted
+        "tmp_max_file_mb": 20,           # a larger tmp file is never staged, so never deleted
+        "tmp_max_files": 5000,           # a tmp with more files is left alone
         "ignorable_ext": ["log", "out", "tmp", "dump", "pid", "o", "obj", "pdb", "ilk", "exe", "dll", "lib", "so",
                           "dylib", "a", "class", "pyc", "pyo", "tlog", "binlog", "etl", "trace", "lastbuildstate"],
         "ignorable_dirs": ["bin", "build", "obj", "logs", "out", "dist", "target", "node_modules", "__pycache__",
@@ -64,11 +67,6 @@ DEFAULTS = {
             "shown_chars": 1500,         # shown of it
             "epochs_web": 30,            # training rounds of the web model, and passes of the
             "epochs_shell": 6,           # failure model (lookups.py: the sweep that set them)
-        },
-        "phi": {                         # what a session is told before it works (phi.py)
-            "traps": True,               # the environment's known traps, at SessionStart and under a subagent's task
-            "traps_max": 5,              # kinds of failure listed at most
-            "traps_min_sessions": 3,     # a kind fewer sessions met is not listed
         },
         "near": {                        # candidates from what earlier, similar tasks used (near.py)
             "on": True,
