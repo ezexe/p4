@@ -9,6 +9,16 @@ nothing here tells the model how to behave unless the owner turns the two asks o
                                removed). Silent unless it re-seeded or moved something, then one line. The first seed
                                of a new notebook is silent.
 
+The session's temp directory, ON unless p4.json's scratchpad.tmp is false or P4_SCRATCHPAD_TMP=0:
+
+  tmp-link (SessionStart)      the harness's per-session scratchpad (`%TEMP%/claude/<project>/<session>/scratchpad` on
+                               Windows, `/private/tmp/claude-<uid>/<project>/<session>/scratchpad` on macOS) becomes a
+                               link (a junction on Windows) to `.claude/p4/tmp/<session>/`, tracked by the p4 repo, so
+                               what the session writes there is kept; what it already held is moved in first (a taken
+                               name gets the time as a suffix). One line names the link when it is made.
+  tmp-sweep (Stop)             the same, silent: a scratchpad the start could not link, or that appeared after it, is
+                               moved and linked at the turn's close.
+
 Two asks, OFF unless the environment sets P4_SCRATCHPAD_ASKS=1 (design section 3.2, untested until measured):
 
   repo-uses (SessionStart)     one line per file under `.claude/p4/src/` that the project repo's tracked code, build,
@@ -26,9 +36,12 @@ Every failure prints a one-line notice and exits 0.
 
 import json
 import os
+import glob
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -37,6 +50,10 @@ if HERE not in sys.path:
 import p4conf  # noqa: E402  (the settings file, .claude/p4/p4.json)
 
 ASKS_ENV = "P4_SCRATCHPAD_ASKS"
+TMP_ENV = "P4_SCRATCHPAD_TMP"
+HARNESS_ENV = "P4_SCRATCHPAD_HARNESS"   # tests and odd installs name the harness's scratchpad themselves
+TMP_DIR = "tmp"
+TEMP_ROOTS = ("/tmp", "/private/tmp")   # beside tempfile.gettempdir(): where the harness puts its claude*
 
 CODE_EXT = {"py", "pyw", "sh", "bash", "zsh", "ps1", "psm1", "bat", "cmd", "js", "mjs", "cjs", "ts", "rb", "pl",
             "lua", "php", "go", "rs", "c", "cc", "cpp", "h", "hpp", "cs", "java", "kt", "swift", "sql", "awk",
@@ -79,13 +96,14 @@ def project_root(payload):
 
 
 ASKS = False                # p4.json scratchpad.asks; P4_SCRATCHPAD_ASKS=1 or 0 wins for one run
+TMP = True                  # p4.json scratchpad.tmp; P4_SCRATCHPAD_TMP=1 or 0 wins for one run
 
 
 def configure(payload):
     """The scratchpad section of <project>/.claude/p4/p4.json over the constants (the file written when missing)."""
     p4 = os.path.join(project_root(payload), ".claude", "p4")
     p4conf.configure(globals(), p4, "scratchpad", {
-        "asks": "ASKS", "ignorable_ext": "IGNORABLE_EXT", "ignorable_dirs": "IGNORABLE_DIRS",
+        "asks": "ASKS", "tmp": "TMP", "ignorable_ext": "IGNORABLE_EXT", "ignorable_dirs": "IGNORABLE_DIRS",
         "repo_uses_min_name": "REPO_USES_MIN_NAME", "repo_uses_max": "REPO_USES_MAX",
         "repo_uses_lines": "REPO_USES_LINES"})
 
@@ -193,6 +211,133 @@ def cmd_notebook_out(payload):
         parts.append(f"{len(tracked)} of them were tracked by the p4 repo and now show as deleted there")
     if parts:
         print("p4-scratchpad: " + "; ".join(parts) + ".")
+    return 0
+
+
+# ---- tmp ------------------------------------------------------------------------------------------------------
+
+def tmp_on():
+    env = os.environ.get(TMP_ENV, "").strip()
+    return env == "1" if env in ("0", "1") else bool(TMP)
+
+
+def session_id(payload):
+    sid = str(payload.get("session_id") or "")
+    return sid if re.fullmatch(r"[A-Za-z0-9_-]+", sid) else ""
+
+
+def harness_scratchpad(payload):
+    """The harness's scratchpad for this session, `<temp>/claude*/<project>/<session>/scratchpad` under the system temp
+    directory, /tmp or /private/tmp; it need not exist yet. None without a session id or that session's directory."""
+    if os.environ.get(HARNESS_ENV):
+        return os.environ[HARNESS_ENV]
+    sid = session_id(payload)
+    if not sid:
+        return None
+    seen = set()
+    for r in (tempfile.gettempdir(), *TEMP_ROOTS):
+        key = os.path.normcase(os.path.realpath(r))
+        if key in seen or not os.path.isdir(r):
+            continue
+        seen.add(key)
+        hits = sorted(glob.glob(os.path.join(glob.escape(r), "claude*", "*", sid)))
+        if hits:
+            return os.path.join(hits[0], "scratchpad")
+    return None
+
+
+def p4_tmp(root, payload):
+    return os.path.join(root, ".claude", "p4", TMP_DIR, session_id(payload) or "session")
+
+
+def is_link(path):
+    """A symlink or a Windows junction."""
+    if os.path.islink(path):
+        return True
+    isj = getattr(os.path, "isjunction", None)        # 3.12+
+    if isj:
+        return isj(path)
+    try:
+        return bool(os.lstat(path).st_file_attributes & 0x400)   # FILE_ATTRIBUTE_REPARSE_POINT
+    except (OSError, AttributeError):
+        return False
+
+
+def same_dir(a, b):
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+def make_link(link, target):
+    """`link` -> `target`: a junction on Windows, which needs no privilege; a directory symlink elsewhere."""
+    if os.name == "nt":
+        import _winapi
+        _winapi.CreateJunction(os.path.abspath(target), os.path.abspath(link))
+    else:
+        os.symlink(os.path.abspath(target), link, target_is_directory=True)
+
+
+def link_tmp(harness, target, stamp):
+    """Make `harness` a link to `target`, moving what it holds into `target` first -> (state, [moved names]):
+    "linked" (made now), "kept" (already a link to `target`), "foreign" (a link elsewhere, left as it is) or
+    "failed" (something in it could not move, or no link could be made; a plain directory stays in its place)."""
+    os.makedirs(target, exist_ok=True)
+    if is_link(harness):
+        return ("kept" if same_dir(harness, target) else "foreign"), []
+    moved = []
+    if os.path.isdir(harness):
+        for name in sorted(os.listdir(harness)):
+            dest = os.path.join(target, name)
+            if os.path.exists(dest):
+                stem, ext = os.path.splitext(dest)
+                dest = f"{stem}.{stamp}{ext}"
+            try:
+                shutil.move(os.path.join(harness, name), dest)
+                moved.append(name)
+            except OSError:
+                continue
+        try:
+            os.rmdir(harness)
+        except OSError:
+            return "failed", moved
+    else:
+        os.makedirs(os.path.dirname(harness), exist_ok=True)
+    try:
+        make_link(harness, target)
+    except OSError:
+        os.makedirs(harness, exist_ok=True)              # the harness still finds a directory to write to
+        return "failed", moved
+    return "linked", moved
+
+
+def cmd_tmp_link(payload):
+    if not tmp_on():
+        return 0
+    harness = harness_scratchpad(payload)
+    if not harness:
+        return 0
+    target = p4_tmp(project_root(payload), payload)
+    state, moved = link_tmp(harness, target, time.strftime("%Y%m%d-%H%M%S"))
+    here, there = os.path.normpath(harness), os.path.normpath(target)
+    line = {"linked": f"this session's scratchpad {here} is a link to {there}, tracked by the p4 repo",
+            "foreign": f"{here} is a link that does not reach {there}; left as it is",
+            "failed": f"{here} could not be linked to {there}; its files move there at each turn's close"}.get(state, "")
+    if moved:
+        line += ("; " if line else "") + f"moved {len(moved)} file(s) it held into {there}"
+    if line:
+        print("p4-scratchpad: " + line + ".")
+    return 0
+
+
+def cmd_tmp_sweep(payload):
+    """Stop: a scratchpad that is not the link yet is moved and linked. Prints nothing."""
+    if not tmp_on():
+        return 0
+    harness = harness_scratchpad(payload)
+    if harness and not is_link(harness):
+        link_tmp(harness, p4_tmp(project_root(payload), payload), time.strftime("%Y%m%d-%H%M%S"))
     return 0
 
 
@@ -318,7 +463,8 @@ def cmd_ask(payload):
             continue
         seen.add(p)
         if in_harness_scratchpad(p):
-            where = "the harness's per-session scratchpad, which is gone with the session"
+            where = ("the harness's per-session scratchpad, kept in .claude/p4/tmp/ for notes and output"
+                     if tmp_on() else "the harness's per-session scratchpad, which is gone with the session")
         elif in_notebook(p):
             where = "the notebook .claude/p4/scratchpad/, which is for notes, logs and output"
         elif in_temp(p):
@@ -350,6 +496,10 @@ def main():
             return cmd_repo_uses(payload)
         if sub == "ask":
             return cmd_ask(payload)
+        if sub == "tmp-link":
+            return cmd_tmp_link(payload)
+        if sub == "tmp-sweep":
+            return cmd_tmp_sweep(payload)
         print(f"scratchpad.py: unknown subcommand {sub!r}")
         return 0
     except Exception as e:  # noqa: BLE001 — a hook degrades, never raises

@@ -234,10 +234,70 @@ def gate2_d():
     print("test_scratchpad.py: gate 2 (d) green")
 
 
+def tmp_cases():
+    """tmp-link: the harness's scratchpad, found under the temp directory by the session id, becomes a link into
+    .claude/p4/tmp/<session>/ with what it held moved in; a second start is silent; a write through the old path lands
+    in p4; a link elsewhere is left; P4_SCRATCHPAD_TMP=0 does nothing; tmp-sweep links a scratchpad made after the start."""
+    root = tempfile.mkdtemp(prefix="p4-scratchpad-tmp-")
+    temp = tempfile.mkdtemp(prefix="p4-scratchpad-temp-")
+    sid = "d419de0b-c6f0-4894-899a-bdbe514efa5d"
+    tmp_env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp}
+    try:
+        harness = os.path.join(temp, "claude", "30ad6e18862a20e8", sid, "scratchpad")
+        target = os.path.join(root, ".claude", "p4", "tmp", sid)
+        put(harness, "notes.md", "- a note\n")
+        put(harness, "sub/part.md", "part\n")
+        payload = {"cwd": root, "session_id": sid}
+
+        def run(sub, extra=None):
+            return run_sub(sub, payload, dict(tmp_env, **(extra or {})), CLAUDE_PROJECT_DIR=root)
+
+        assert run("tmp-link", {"P4_SCRATCHPAD_TMP": "0"}) == "", "the switch off still spoke"
+        assert not os.path.exists(target), "the switch off still made .claude/p4/tmp/"
+        out = run("tmp-link")
+        assert "is a link to" in out and "moved 2 file(s)" in out, out
+        with open(os.path.join(target, "notes.md"), encoding="utf-8") as f:
+            assert f.read() == "- a note\n", "the scratchpad's note did not move"
+        assert os.path.isfile(os.path.join(target, "sub", "part.md")), "a subdirectory did not move"
+        put(harness, "later.md", "later\n")
+        assert os.path.isfile(os.path.join(target, "later.md")), "a write through the link did not land in p4"
+        assert run("tmp-link") == "", "a second start spoke"
+        assert run("tmp-sweep") == "", "the sweep spoke"
+        assert run_sub("tmp-link", {"cwd": root}, tmp_env, CLAUDE_PROJECT_DIR=root) == "", "no session id spoke"
+
+        # a scratchpad made after the start (the link removed, a plain directory in its place) is linked at the close
+        os.rmdir(harness) if os.name == "nt" else os.unlink(harness)
+        put(harness, "after.md", "after\n")
+        assert run("tmp-sweep") == "", "the sweep spoke"
+        assert os.path.isfile(os.path.join(target, "after.md")), "the sweep did not move a late file"
+        put(harness, "after2.md", "again\n")
+        assert os.path.isfile(os.path.join(target, "after2.md")), "the sweep did not link the scratchpad again"
+
+        # a link elsewhere is the owner's: left as it is
+        other = tempfile.mkdtemp(prefix="p4-scratchpad-other-")
+        try:
+            os.rmdir(harness) if os.name == "nt" else os.unlink(harness)
+            if os.name == "nt":
+                import _winapi
+                _winapi.CreateJunction(other, harness)
+            else:
+                os.symlink(other, harness, target_is_directory=True)
+            assert "does not reach" in run("tmp-link"), "a foreign link was not named"
+            assert os.path.samefile(harness, other), "a foreign link was changed"
+        finally:
+            os.rmdir(harness) if os.name == "nt" else os.unlink(harness)
+            shutil.rmtree(other, ignore_errors=True)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(temp, ignore_errors=True)
+    print("test_scratchpad.py: tmp cases green")
+
+
 def main():
     asks()
     notebook_out()
     repo_uses()
+    tmp_cases()
     gate2_d()
     print("test_scratchpad.py: all green")
 
