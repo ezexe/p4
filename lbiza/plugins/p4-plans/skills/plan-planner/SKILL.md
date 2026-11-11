@@ -13,8 +13,12 @@ Run this from the repository root before anything else; its values fill the name
 python3 -I <this skill's directory>/scripts/settings.py
 ```
 
-It reads the `plans` section of `.claude/p4/p4.json` (every p4 plugin's settings; written with every default when missing) over the defaults: `plans_dir`, `archive_branch`, `archive_worktree`, `changelog`, `flights_dir`, `store_dir`, `tests`, `exclusive`, `documented`, `code_style_rule`, `role_models`, `owner_title`, and `link_prefix` (from `plans_dir` up to the root).
-`owner_title` names the person whose words clear work; below it is "the owner".
+It reads the `plans` section of `.claude/p4/p4.json` (every p4 plugin's settings; written with every default when missing) over the defaults: `plans_dir`, `archive_branch`, `archive_worktree`, `changelog`, and `link_prefix` (from `plans_dir` up to the root).
+Those four say where plans live and nothing else is a setting.
+The flight records, the board and everything else the flight loop writes are in `plans_dir` itself, beside the plan they fly and by the same convention as the plan file (no folder of their own for flights); the owner's rulings are in `.claude/p4/store`.
+The test commands, the runs held one at a time, the upstream documentation and the code-style rule are whatever the repository's own skills and CLAUDE.md state; where they state none, there is none.
+The model for each role is the sub-agentic skill's table.
+"The owner" below is the person whose words clear work.
 
 ## Where a plan lives
 
@@ -67,7 +71,7 @@ A plan written by a flight adds `Writer: <model>, flight <id>.` as the next line
 - **Fences:** every step lays out its edits as fenced code, one fence per edit, the file (and function or region) named on the line above, tagged with the file's language; the code as it will read after the edit, or a `diff` fence when the surroundings matter; complete, with no `...` standing in for code (an identifier the snippet uses is shown, defined in the plan, or marked missing). A step with no code edit says so in one line.
 - **Without the tree in view**, a writer still writes: it cuts the section so it needs nothing unread (a new unit with its own tests, wired in by a later section), defines what it uses in the plan, and lists every premise about the tree as a question with the file that answers it; it never stops at asking.
 - **Links:** every `file:line` link is `[path:N](<link_prefix>path:N)` or `[path:N-M](<link_prefix>path:N-M)`, read from the current file, and never rewritten when the plan moves onto the archive.
-- **Decisions:** every decision a plan leaves the owner ends with a `Documented:` sentence naming the upstream page read live (from `documented`, or the standard the decision rests on) and what it settles, or `Documented: none`. Only what the documentation does not settle is the owner's call.
+- **Decisions:** every decision a plan leaves the owner ends with a `Documented:` sentence naming the upstream page read live (from the documentation the repository's skills name, or the standard the decision rests on) and what it settles, or `Documented: none`. Only what the documentation does not settle is the owner's call.
 
 ## Tests first, then the least code
 
@@ -79,7 +83,7 @@ A behaviour-changing section comes home through two flights, red then green (fli
 
 ## The evidence section
 
-Each section's implementer writes its entry right after its implementation and returns it in its report; the tower writes it into the flight record (`flights_dir`/`<id>`/`evidence.md`) and appends it at the section's home to `# <PLAN>: every layer in source`, last in the plan, entries in the plan's order.
+Each section's implementer writes its entry right after its implementation and returns it in its report; the tower writes it into the flight record (`plans_dir`/`<id>`/`evidence.md`) and appends it at the section's home to `# <PLAN>: every layer in source`, last in the plan, entries in the plan's order.
 An entry is a `- ` bullet (or `## ` heading) naming its section or step, all its `path:N` links on that first line, a fenced snippet of those lines beneath it; a short sha where source cannot show it (a build installed, files deleted); what source cannot prove (a run, a measurement) said plainly with what it rests on; a dropped step in one line with the commit or ruling that settled it.
 After each append, the checker runs from the root and must print `done: 0 finding(s)`:
 
@@ -98,12 +102,14 @@ On the owner's words a plan closes without the section, its STATUS line quoting 
 4. **The checker** until it prints `done: 0 finding(s)`; no placeholder added inside a fence; fences balanced (`grep -c '^```' <PLAN>.md` is even).
 5. **STATUS** on line 2, under the H1: `STATUS: COMPLETED <YYYY-MM-DD HH:MM> (<each section's landing by short sha; what was built or run and where; what was not run>)`.
 6. **Onto the archive**, by the attach above, copying the plan byte for byte (links untouched): `cp <plans_dir>/<PLAN>.md <archive_worktree>/complete/<PLAN>.md`, `git -C <archive_worktree> add complete/<PLAN>.md`; message `<PLAN>.md completes into complete/, on the owner's words of <date> ("<quote>")`.
+   The plan's flight records go with it in the same commit, and this is the only time they are committed: every flight folder whose board row names the plan is copied whole to `<archive_worktree>/complete/<id>/`, beside the plan there as it was beside it here, and those board rows are appended to `<archive_worktree>/complete/board.tsv` (its header written when the file is new); `git -C <archive_worktree> add complete/<id> complete/board.tsv`.
 7. **The changelog bullet**, first under `## [Unreleased]` in `changelog`: `- **The <subject> plan closed on <date>: <what is now true>.** <What landed, section by section, with short shas>. The plan moved to <archive_branch>:complete/<PLAN>.md (commit <sha>). Run on <machine> on <date>: <what ran and its result>. Not run: <the checks not made and where>.`
-8. **Remove it from the code branch:** `git rm <plans_dir>/<PLAN>.md`; `git status --porcelain` names only the plan and `changelog`; one commit by explicit paths, `git commit -- <plans_dir>/<PLAN>.md <changelog>`, naming what ran where and `Not run: ...`. The plan is never touched again.
+8. **Remove it from the code branch:** `git rm <plans_dir>/<PLAN>.md`, and delete the plan's flight folders from `plans_dir` (they were never tracked here, so this is no part of the commit; the board keeps its rows); `git status --porcelain` names only the plan, `changelog` and other plans' flight records; one commit by explicit paths, `git commit -- <plans_dir>/<PLAN>.md <changelog>`, naming what ran where and `Not run: ...`. The plan is never touched again.
 
 ## Parking in todo/
 
 On the owner's word only, and adding nothing to the changelog: the plan gets `STATUS: TODO <date> (<one line: what landed, what did not>)` under its title and one footer, then is copied byte for byte into `todo/` by the attach and `git rm`'d from the code branch in one commit.
+Its flight records go with it as in "Completing a plan", into `todo/` beside it, and come back to `plans_dir` when the plan is resumed.
 
 - `# <PLAN>: left to complete`: one entry per section in order; landed → its `path:N` or commit; not done → what is left, what it waits on, what it would touch now.
 - `# <PLAN>: unplanned`: the reading line (`Read from the working tree on <date> after <sha>.`), why it is unplanned (the owner's words), what of it landed, what it would take to revive, its open items.
@@ -112,7 +118,7 @@ Out of `todo/`, on the owner's word only: resumed (written back to `plans_dir`, 
 
 ## Launching agents for a plan
 
-Before launching any agent that writes, lands, triages or closes a plan, read [flight-ops.md](flight-ops.md) and the sub-agentic skill. Each agent flies on its role's model from `role_models`, chosen by what it decides:
+Before launching any agent that writes, lands, triages or closes a plan, read [flight-ops.md](flight-ops.md) and the sub-agentic skill. Each agent flies on its role's model from the sub-agentic skill's table, chosen by what it decides:
 
 | Role | What it decides |
 |---|---|

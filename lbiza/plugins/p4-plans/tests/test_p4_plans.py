@@ -38,27 +38,29 @@ class Settings(unittest.TestCase):
     def test_defaults_without_a_config(self):
         s = settings.load(repo(self.tmp))
         self.assertIsNone(s["config"])
-        self.assertEqual((s["plans_dir"], s["owner_title"], s["link_prefix"]), (".claude/plans", "the user", "../../"))
-        self.assertIsNone(s["tests"]["build"])
+        self.assertEqual((s["plans_dir"], s["link_prefix"]), (".claude/plans", "../../"))
+        self.assertEqual(set(settings.DEFAULTS), {"plans_dir", "archive_branch", "archive_worktree", "changelog"})
 
     def test_config_merges_nested_and_reports_unknown_keys(self):
-        repo(self.tmp, {"plans_dir": ".claude/skills/plan-planner", "tests": {"build": "make t"},
-                        "role_models": {"writer": "general-purpose/opus/high"}, "gates": 4})
+        # an older p4.json still carries the settings that were retired: they are unknown keys now, printed by
+        # nothing and reported once
+        repo(self.tmp, {"plans_dir": ".claude/skills/plan-planner", "archive_branch": "done",
+                        "role_models": {"writer": "general-purpose/opus/high"}, "owner_title": "the boss", "gates": 4})
         r = run("settings.py", "--json", cwd=self.tmp)
         s = json.loads(r.stdout)
         self.assertEqual(s["link_prefix"], "../../../")
-        self.assertEqual((s["tests"]["build"], s["tests"]["run"]), ("make t", None))
-        self.assertEqual(s["role_models"]["writer"], "general-purpose/opus/high")
-        self.assertEqual(s["role_models"]["evidence_finder"], "general-purpose/haiku/low")
-        self.assertNotIn("gates", s)
+        self.assertEqual((s["archive_branch"], s["changelog"]), ("done", "CHANGELOG.md"))
+        for retired in ("role_models", "owner_title", "gates"):
+            self.assertNotIn(retired, s)
         self.assertIn("unknown key(s)", r.stderr)
 
     def test_one_value_bare_and_a_missing_one_fails(self):
-        repo(self.tmp, {"owner_title": "the boss"})
+        repo(self.tmp, {"changelog": "HISTORY.md", "archive_branch": None})
         sub = self.tmp / "deep"
         sub.mkdir()
-        self.assertEqual(run("settings.py", "owner_title", cwd=sub).stdout.strip(), "the boss")
-        self.assertEqual(run("settings.py", "tests.run", cwd=sub).stdout.strip(), "null")
+        self.assertEqual(run("settings.py", "changelog", cwd=sub).stdout.strip(), "HISTORY.md")
+        self.assertEqual(run("settings.py", "archive_branch", cwd=sub).stdout.strip(), "null")
+        self.assertEqual(run("settings.py", "owner_title", cwd=sub).returncode, 1)
         self.assertEqual(run("settings.py", "nope", cwd=sub).returncode, 1)
 
 
@@ -100,7 +102,7 @@ class Skills(unittest.TestCase):
         for f in ["skills/plan-planner/SKILL.md", "skills/plan-planner/flight-ops.md", "skills/sub-agentic/SKILL.md"]:
             text = (PLUGIN / f).read_text(encoding="utf-8")
             for name in re.findall(r"`([a-z_]+)(?:\.[a-z_]+)?`(?:/|,|\s|\)|\.|$)", text):
-                not_settings = {"none", "complete", "todo", "subagent_type"} | set(settings.DEFAULTS["role_models"])
+                not_settings = {"none", "complete", "todo", "subagent_type", "cross_check", "evidence_finder"}
                 if name in not_settings or "_" not in name and name not in names:
                     continue
                 self.assertIn(name, names, f"{f}: `{name}` is no setting")

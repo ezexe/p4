@@ -49,11 +49,12 @@ class P4Conf(unittest.TestCase):
 
     def test_missing_keys_are_added_and_set_values_kept(self):
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({"plans": {"owner_title": "the boss", "tests": {"build": "make"}}, "extra": 1}, f)
+            json.dump({"plans": {"changelog": "HISTORY.md", "owner_title": "the boss"}, "extra": 1}, f)
         s = p4conf.load(self.p4, warn=False)
         on_disk = self.read()
-        self.assertEqual(on_disk["plans"]["owner_title"], "the boss")
-        self.assertEqual(on_disk["plans"]["tests"], {"build": "make", "run": None})
+        self.assertEqual(on_disk["plans"]["changelog"], "HISTORY.md")
+        self.assertEqual(on_disk["plans"]["archive_branch"], "plans", "a missing key is added")
+        self.assertEqual(on_disk["plans"]["owner_title"], "the boss", "a retired key stays on disk, read by nothing")
         self.assertEqual(on_disk["memory"], p4conf.DEFAULTS["memory"])
         self.assertEqual(on_disk["extra"], 1, "an unknown key survives the rewrite")
         self.assertEqual(s["plans"]["plans_dir"], ".claude/plans")

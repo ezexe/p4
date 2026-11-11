@@ -5,7 +5,8 @@ description: How to delegate work to agents - decide whether to delegate at all,
 
 # sub-agentic: the right agent, the right number, said before it runs
 
-Apply the rules as written. The repository's values come from p4-plans' settings (`python3 -I <plan-planner skill dir>/scripts/settings.py`): `role_models`, `reserved_models`, `code_style_rule`, `scratch_dir`, `owner_title`.
+Apply the rules as written.
+Nothing here is a setting: the models are the table in rule 5, and the code-style rule is whatever the repository's own style skill or CLAUDE.md states.
 Read these pages live only for a question the rules do not settle; a live page wins over anything recalled:
 
 | Question | Page |
@@ -26,18 +27,18 @@ Read these pages live only for a question the rules do not settle; a live page w
 4. **Bound every loop.** A verify-and-fix loop names its maximum rounds; loop-until-dry stops after two dry rounds; a baseline runs only when the owner asked for the comparison. One workflow is one phase: launch the next after reading the result, never queued ahead.
 5. **Set model and effort on every agent by its role; nothing inherits by default.** On an Agent call: `subagent_type`, `model` (an alias: `opus`, `sonnet`, `haiku`) and `effort`; in a Workflow script, `agent(prompt, {model, effort})`. A fork runs on the session model.
 
-   | Role | `role_models` key (default) | The work |
+   | Role | Agent type / model / effort | The work |
    |---|---|---|
-   | writer | `writer` (opus/medium) | content the tree does not hold yet: a plan, a section, a skill, a decision with its sources; the brief carries the scope |
-   | integrator, fixer | `integrator` (sonnet/medium) | lands written fences or verified findings; its brief names the check that proves the landing |
-   | cross-check, judge, grader, truth check | `cross_check` (sonnet/medium) | re-reads another agent's output from the sources against stated criteria, nothing of the first agent's report |
-   | evidence finder | `evidence_finder` (haiku/low) | paths, line numbers, snippets, inventories, link checks, counts: no decision |
+   | writer | general-purpose / opus / medium | content the tree does not hold yet: a plan, a section, a skill, a decision with its sources; the brief carries the scope |
+   | integrator, fixer | general-purpose / sonnet / medium | lands written fences or verified findings; its brief names the check that proves the landing |
+   | cross-check, judge, grader, truth check | general-purpose / sonnet / medium | re-reads another agent's output from the sources against stated criteria, nothing of the first agent's report |
+   | evidence finder | general-purpose / haiku / low | paths, line numbers, snippets, inventories, link checks, counts: no decision |
    | a run exercising a skill or the product as the day-to-day agent would | the session model | a test of what the everyday agent does |
    | orchestrator, fork | the session model | the main loop and a fork of it |
-   | anything in `reserved_models` | only when the owner names it | never the default planner or writer |
+   | fable | only when the owner names it | never the default planner or writer |
 
-6. **The brief is the agent's only context.** It carries the objective; the output form (a schema when the result feeds code); the files and pages to read; the boundaries (the directory it may write, the read-only list, no commit, no build, no apply); the done-when it runs itself; and every premise about the tree as a question with the file that answers it. A code-writing brief makes `code_style_rule` part of its done-when, and the cross-check's brief checks it.
-7. **Large outputs go to files.** An agent writes its report or spec to `scratch_dir` (or the session scratchpad) and returns the path and a ten-line summary; structured results use a schema.
+6. **The brief is the agent's only context.** It carries the objective; the output form (a schema when the result feeds code); the files and pages to read; the boundaries (the directory it may write, the read-only list, no commit, no build, no apply); the done-when it runs itself; and every premise about the tree as a question with the file that answers it. A code-writing brief makes the repository's code-style rule part of its done-when, and the cross-check's brief checks it.
+7. **Large outputs go to files.** An agent writes its report or spec to the session scratchpad and returns the path and a ten-line summary; structured results use a schema.
 8. **Report the spend.** After a run: the agents launched and finished, the tool calls and tokens (the completion notice, `/workflows`, `/usage`), and what the next phase will cost before it starts.
 9. **Ultracode changes the opt-in, not the duty.** It drops the warnings, the first-launch approval and the subagent concurrency limit, and tokens are spent faster; rules 2, 3 and 5 still hold.
 10. **Writers never share files.** Two agents that write take disjoint paths or their own worktrees; verifiers and finders are read-only and say so in their brief.
