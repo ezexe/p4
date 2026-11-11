@@ -592,6 +592,70 @@ class NeverFails(unittest.TestCase):
                     self.assertEqual(r.stderr.strip(), "", (name, host))
 
 
+def memory(p4, name, kind, body):
+    write(os.path.join(p4, "memory", name + ".md"),
+          f"---\nname: {name}\ndescription: about {name}\nmetadata:\n  type: {kind}\n---\n\n{body}\n")
+
+
+class Rules(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP, title="Narwhal exporter")
+        self.t.record(KID, TOP, "Fix the dropped row")
+        p4 = self.t.p4
+        memory(p4, "tabs-not-spaces", "feedback",
+               "Indent with tabs in the exporter.\n\n**Why:** the boss's editor.\n\n**How to apply:** every file.")
+        memory(p4, "long-rule", "feedback", "Run the ports check before a commit. " * 200)
+        memory(p4, "where-the-build-is", "project", "The build lives in out/Narwhal.")
+        write(os.path.join(p4, "memory", "MEMORY.md"), "# Memory index\n\n- [Long](long-rule.md) — x\n"
+              "- [Tabs](tabs-not-spaces.md) — y\n")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def start(self, host, source="startup"):
+        return context(self.t.hook(START, host, {"hook_event_name": "SessionStart", "source": source}))
+
+    def test_every_session_starts_with_the_rules_and_not_the_projects_facts(self):
+        for host in (TOP, KID):
+            text = self.start(host)
+            self.assertIn("standing rules", text)
+            self.assertIn("- tabs-not-spaces: Indent with tabs in the exporter. **How to apply:** every file.", text)
+            self.assertNotIn("the boss's editor", text)                 # the Why stays on the page
+            self.assertNotIn("out/Narwhal", text)                       # a project memory is no rule
+            self.assertLess(text.index("long-rule"), text.index("tabs-not-spaces"))     # the index's order
+            self.assertLessEqual(len(text), phi.HOOK_CHARS)
+            self.assertIn("...", text)
+
+    def test_the_page_holds_every_rule_in_full(self):
+        self.start(TOP)
+        page = read(os.path.join(self.t.p4, "phi", "rules.md"))
+        self.assertIn("**Why:** the boss's editor.", page)
+        self.assertEqual(page.count("Run the ports check"), 200)
+        self.assertNotIn("out/Narwhal", page)
+
+    def test_a_resume_is_not_told_again_and_a_compaction_is(self):
+        self.start(TOP)
+        self.assertNotIn("standing rules", self.start(TOP, "resume"))
+        self.assertIn("standing rules", self.start(TOP, "compact"))
+
+    def test_rules_and_background_share_the_hooks_room(self):
+        self.t.say(TOP, TASK)
+        text = self.start(KID)
+        self.assertIn("standing rules", text)
+        self.assertIn("background for this session", text)
+        self.assertLessEqual(len(text), phi.HOOK_CHARS)
+
+    def test_no_memories_and_off_are_silence(self):
+        write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"rules": False}))
+        self.assertEqual(self.start(TOP), "")
+        os.remove(os.path.join(self.t.p4, "phi", "phi.json"))
+        for f in os.listdir(os.path.join(self.t.p4, "memory")):
+            os.remove(os.path.join(self.t.p4, "memory", f))
+        self.assertEqual(self.start(TOP), "")
+
+
 class Wiring(unittest.TestCase):
     def test_hooks_json(self):
         d = jload(HOOKS_JSON)["hooks"]

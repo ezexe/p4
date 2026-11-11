@@ -34,8 +34,8 @@
     {
       "name": "p4-phi",
       "source": "./plugins/p4-phi",
-      "description": "What linked sessions hand each other, in the app's own words: a started session is given the tasks and notes of the sessions above it, every finished turn's report reaches the session that started it in full, and a message about something else gets a forked session while this one stays with its task.",
-      "version": "0.3.0",
+      "description": "What linked sessions hand each other, in the app's own words: every session starts with the store's rules, a started session is given the tasks and notes of the sessions above it, every finished turn's report reaches the session that started it in full, and a message about something else gets a forked session while this one stays with its task.",
+      "version": "0.4.0",
       "category": "productivity",
       "keywords": ["phi", "sessions", "memo", "p4"]
     }

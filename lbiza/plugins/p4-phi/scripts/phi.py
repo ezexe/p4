@@ -24,7 +24,11 @@ given; notes. Nothing is renamed.
   home     the store the linked sessions' files live in: the top session's <project>/.claude/p4. A session in a
            worktree or another folder has no store of its own and uses that of the session that started it.
   session- SessionStart: session.json is made if new. A forked session, a session after a compaction or a
-  start    clear, and a session no app runs are given their background here.
+  start    clear, and a session no app runs are given their background here. Every session, except on a resume,
+           is given the store's rules: each feedback and user memory in <home>/memory without its **Why:**, a
+           line each, the long ones cut evenly so the hook stays under the 10,000 characters Claude Code keeps,
+           and <home>/phi/rules.md holds them all in full. Sessions had opened those memories one by one before
+           their work; the index alone did not say enough.
   user-    UserPromptSubmit: the first request becomes the session's task. The session is given its background
   prompt-  if the start did not give it: the tasks of the sessions above it, their notes, the last turn of each
   submit   other session started by the same session (for a top session, of the top sessions before it), and
@@ -41,8 +45,8 @@ Commands for a session: `note "<claim>" --source "<where checked>"`, `done "<wha
 `reparent <sessionId> <under sessionId>`.
 
 Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `new_task` (false: off),
-`background_chars`, `reports_chars`, `wait_s`. P4_PHI=0 turns the plugin off, P4_PHI_NEW_TASK=0 the standing
-instruction.
+`rules`, `background_chars`, `reports_chars`, `wait_s`. P4_PHI=0 turns the plugin off, P4_PHI_NEW_TASK=0 the
+standing instruction, P4_PHI_RULES=0 the rules.
 
 Nothing here matches a request to an earlier turn by its words: that was built in p4-recall 0.8.17 to 0.8.20,
 measured (the nearest earlier turn's files touched again 0.06 to 0.13 of the time) and removed.
@@ -60,6 +64,8 @@ BACKGROUND = True
 REPORTS = True
 TURNS = True
 NEW_TASK = True
+RULES = True
+HOOK_CHARS = 9500                # Claude Code keeps 10,000 characters of a hook's context and files the rest away
 BACKGROUND_CHARS = 3000
 REPORTS_CHARS = 6000
 REPORT_CHARS = 4000              # of one report, kept
@@ -75,7 +81,7 @@ TRANSCRIPT_BYTES = 8 * 1024 * 1024
 WAIT_S = 2.0                     # how long a handed-over first message waits for the app's record
 SCAN_RECORDS = 60                # the newest records searched for a CLI session id, when the host id is missing
 SETTINGS = {"background": "BACKGROUND", "reports": "REPORTS", "turns": "TURNS", "new_task": "NEW_TASK",
-            "background_chars": "BACKGROUND_CHARS", "reports_chars": "REPORTS_CHARS", "wait_s": "WAIT_S"}
+            "rules": "RULES", "background_chars": "BACKGROUND_CHARS", "reports_chars": "REPORTS_CHARS", "wait_s": "WAIT_S"}
 SHELL_TOOLS = ("Bash", "PowerShell")
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 LOOKING = frozenset("""cat head tail sed grep rg ls find wc awk echo cd for printf date sleep tr file which where test
@@ -196,6 +202,8 @@ def configure(home):
     for key, name in SETTINGS.items():
         if key in d and type(d[key]) is type(globals()[name]):
             globals()[name] = d[key]
+    if os.environ.get("P4_PHI_RULES") in ("0", "1"):
+        globals()["RULES"] = os.environ["P4_PHI_RULES"] == "1"
     for env in ("P4_PHI_NEW_TASK", "P4_PHI_STEER"):
         if os.environ.get(env) in ("0", "1"):
             globals()["NEW_TASK"] = os.environ[env] == "1"
@@ -727,6 +735,95 @@ def render_page(home, sid):
     write_atomic(page_path(home, sid), "\n".join(out))
 
 
+# --- the store's rules -----------------------------------------------------------------------------------------------
+
+FRONT = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?(.*)\Z", re.S)
+INDEX_LINK = re.compile(r"\]\(([^)]+\.md)\)")
+WHY = re.compile(r"\A\s*\*\*Why")
+
+
+def memory_rules(home):
+    """The store's rules: (name, body) for each memory of type feedback or user in <home>/memory, in the order
+    MEMORY.md lists them, then the ones it does not list."""
+    mem = os.path.join(home, "memory")
+    try:
+        files = sorted(f for f in os.listdir(mem) if f.endswith(".md") and f != "MEMORY.md")
+    except OSError:
+        return []
+    try:
+        with open(os.path.join(mem, "MEMORY.md"), encoding="utf-8") as f:
+            listed = [os.path.basename(m) for m in INDEX_LINK.findall(f.read())]
+    except (OSError, UnicodeDecodeError):
+        listed = []
+    out = []
+    for f in [f for f in dict.fromkeys(listed) if f in files] + [f for f in files if f not in listed]:
+        try:
+            with open(os.path.join(mem, f), encoding="utf-8") as h:
+                m = FRONT.match(h.read().replace("\r\n", "\n"))
+        except (OSError, UnicodeDecodeError):
+            continue
+        kind = re.search(r"(?m)^\s*type:\s*(\w+)", m.group(1)) if m else None
+        if not kind or kind.group(1) not in ("feedback", "user"):
+            continue
+        name = re.search(r"(?m)^name:\s*(.+)$", m.group(1))
+        out.append((name.group(1).strip() if name else f[:-3], m.group(2).strip()))
+    return out
+
+
+def rule_of(body):
+    """A rule on one line: its body without the **Why:** paragraph."""
+    return clean(" ".join(p for p in re.split(r"\n\s*\n|\n(?=\*\*)", body) if p.strip() and not WHY.match(p)))
+
+
+def fair_cut(texts, room):
+    """Each text cut so that all fit in `room`: the short ones whole, the long ones sharing what is left evenly."""
+    n, left, out = len(texts), room, {}
+    for k, t in sorted(enumerate(texts), key=lambda kt: len(kt[1])):
+        share = left // max(1, n)
+        out[k] = t if len(t) <= share else cut(t, max(40, share))
+        left -= len(out[k])
+        n -= 1
+    return [out[k] for k in range(len(texts))]
+
+
+def rules_page(home, rules):
+    """<home>/phi/rules.md: every rule in full on one page, written only when a memory changed."""
+    path = os.path.join(home, "phi", "rules.md")
+    mem = os.path.join(home, "memory").replace("\\", "/")
+    text = "\n".join([f"# The store's rules, in full", "",
+                      f"Written by p4-phi from the feedback and user memories in {mem}. Edit those files, not this "
+                      f"page.", ""] + [f"## {name}\n\n{body}\n" for name, body in rules])
+    try:
+        with open(path, encoding="utf-8") as f:
+            same = f.read() == text
+    except (OSError, UnicodeDecodeError):
+        same = False
+    if not same:
+        write_atomic(path, text)
+    return path.replace("\\", "/")
+
+
+def rules_text(home, room):
+    """The store's rules for a session's start, a line each, in at most `room` characters. '' with none."""
+    rules = memory_rules(home) if RULES and home else []
+    if not rules or room < 600:
+        return ""
+    page = rules_page(home, rules)
+    mem = os.path.join(home, "memory").replace("\\", "/")
+    head = (f"phi (p4-phi): this project's standing rules, from the feedback and user memories in {mem}. They are "
+            f"in your context now, as are CLAUDE.md and the memory index, so do not open the memory files or "
+            f"CLAUDE.md to learn the rules before the work. A rule cut short with ... is whole, with its Why, on "
+            f"one page: {page}. Read that page, not the files, when a rule's reason matters. A session you start "
+            f"with `mcp__ccd_session__start_session` is given these same rules, CLAUDE.md and the memory index at "
+            f"its start, and your task and notes beside its first message, so its brief does not tell it to read "
+            f"CLAUDE.md, MEMORY.md or any memory file: the brief names only what this task needs, such as a skill, "
+            f"a plan or source files.")
+    names = [f"- {name}: " for name, _ in rules]
+    room -= len(head) + sum(len(x) + 1 for x in names) + 2
+    RAN["rules"] = len(rules)
+    return "\n".join([head] + [a + b for a, b in zip(names, fair_cut([rule_of(b) for _, b in rules], room))])
+
+
 # --- the hooks -------------------------------------------------------------------------------------------------------
 
 def given(s, me, home, own=False):
@@ -759,14 +856,17 @@ def h_session_start(payload):
     ran_for(s, me)
     source = payload.get("source") or "startup"
     RAN["start"] = source
-    if source == "startup" and not spawned_from(s) and not s.get("task") \
-            and os.environ.get("CLAUDE_CODE_HOST_SESSION_ID"):
-        return None             # the app has not recorded yet which session started this one: the first message tells
     lost = source in ("compact", "clear")
-    text = given(s, me, me.home, own=lost or len(s.get("cliSessionIds") or []) > 1)
-    rule = new_task_text(me.home, s, me, user=False, again=lost) if lost else ""
+    text = rule = ""
+    if not (source == "startup" and not spawned_from(s) and not s.get("task")
+            and os.environ.get("CLAUDE_CODE_HOST_SESSION_ID")):
+        # with a host id and nothing recorded, the app has not yet written which session started this one, and
+        # the first message tells
+        text = given(s, me, me.home, own=lost or len(s.get("cliSessionIds") or []) > 1)
+        rule = new_task_text(me.home, s, me, user=False, again=lost) if lost else ""
+    rules = rules_text(me.home, HOOK_CHARS - len(text) - len(rule) - 4) if source != "resume" else ""
     save_session(me.home, s)
-    return "\n\n".join(p for p in (text, rule) if p)
+    return "\n\n".join(p for p in (rules, text, rule) if p) or None
 
 
 def started_by(me, payload):
