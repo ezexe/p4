@@ -326,7 +326,7 @@ class Synthetic(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.old, "store", "rules.md")))
         self.assertTrue(os.path.exists(os.path.join(self.old, "memory", "a.md")))
         self.assertTrue(os.path.exists(os.path.join(self.old, "flights", "20261102-0445-s1", "plan.md")),
-                        "flights/ stays in place: p4-plans writes it, phi_store reads it")
+                        "flights/ stays in place at migration: the repository's plan-planner says where planned work lives")
         self.assertFalse(os.path.exists(os.path.join(self.old, "archive", "flights")))
         with self.assertRaises(SystemExit):
             migrate.run(self.old, None, apply=True, now=NOW)

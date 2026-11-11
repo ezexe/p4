@@ -16,8 +16,7 @@ sys.path.insert(0, str(HERE))
 import p4conf  # noqa: E402
 
 PLUGINS = HERE.parents[1]
-COPIES = [PLUGINS / "p4-memory" / "hooks" / "p4conf.py", PLUGINS / "p4-scratchpad" / "hooks" / "p4conf.py",
-          PLUGINS / "p4-plans" / "skills" / "plan-planner" / "scripts" / "p4conf.py"]
+COPIES = [PLUGINS / "p4-memory" / "hooks" / "p4conf.py", PLUGINS / "p4-scratchpad" / "hooks" / "p4conf.py"]
 
 
 class P4Conf(unittest.TestCase):
@@ -37,7 +36,7 @@ class P4Conf(unittest.TestCase):
         s = p4conf.load(self.p4)
         self.assertEqual(s, p4conf.DEFAULTS)
         self.assertEqual(self.read(), p4conf.DEFAULTS)
-        self.assertEqual(set(s), {"version", "memory", "scratchpad", "recall", "plans"})
+        self.assertEqual(set(s), {"version", "memory", "scratchpad", "recall"})
 
     def test_the_retired_config_json_seeds_it(self):
         os.makedirs(os.path.join(self.p4, "models"))
@@ -49,15 +48,26 @@ class P4Conf(unittest.TestCase):
 
     def test_missing_keys_are_added_and_set_values_kept(self):
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({"plans": {"changelog": "HISTORY.md", "owner_title": "the boss"}, "extra": 1}, f)
+            json.dump({"recall": {"pinned_chars": 900, "once_was": "kept"}, "extra": 1}, f)
         s = p4conf.load(self.p4, warn=False)
         on_disk = self.read()
-        self.assertEqual(on_disk["plans"]["changelog"], "HISTORY.md")
-        self.assertEqual(on_disk["plans"]["archive_branch"], "plans", "a missing key is added")
-        self.assertEqual(on_disk["plans"]["owner_title"], "the boss", "a retired key stays on disk, read by nothing")
+        self.assertEqual(on_disk["recall"]["pinned_chars"], 900)
+        self.assertEqual(on_disk["recall"]["inject"], "rules-facts", "a missing key is added")
+        self.assertEqual(on_disk["recall"]["once_was"], "kept", "an unknown key stays on disk, read by nothing")
         self.assertEqual(on_disk["memory"], p4conf.DEFAULTS["memory"])
         self.assertEqual(on_disk["extra"], 1, "an unknown key survives the rewrite")
-        self.assertEqual(s["plans"]["plans_dir"], ".claude/plans")
+        self.assertEqual(s["recall"]["pinned_chars"], 900)
+
+    def test_a_retired_section_is_dropped_from_the_file(self):
+        """No plugin reads `plans` any more (the two skills went back to their repositories): a p4.json that still
+        holds the section loses it at the next load, and nothing writes it again."""
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump({**p4conf.DEFAULTS, "plans": {"plans_dir": ".claude/plans", "owner_title": "the boss"}}, f)
+        s = p4conf.load(self.p4, warn=False)
+        self.assertNotIn("plans", s)
+        self.assertNotIn("plans", self.read())
+        self.assertNotIn("plans", p4conf.DEFAULTS)
+        self.assertEqual(self.read(), p4conf.DEFAULTS)
 
     def test_a_broken_file_is_never_overwritten(self):
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:

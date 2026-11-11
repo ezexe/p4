@@ -88,18 +88,12 @@ DEFAULTS = {
             "max_tokens": 16000, "agree_min": 0.65, "newer_max": 12, "cand_k": 60, "dict_batch": 20,
         },
     },
-    # Where plans live, and nothing else (the owner's ruling of 2026-11-11). What this section once also held is not
-    # a setting: the flight records sit in plans_dir beside the plan they fly, and the store is .claude/p4/store; the
-    # test commands, the exclusive runs, the upstream docs and the code-style rule are the repository's own skills'
-    # to state; the model for each role is the sub-agentic skill's table. An older p4.json's extra keys are kept on
-    # disk as unknown keys and read by nothing.
-    "plans": {
-        "plans_dir": ".claude/plans",                  # plans in flight, relative to the project root
-        "archive_branch": "plans",                     # complete/ and todo/; null: a finished plan is deleted
-        "archive_worktree": ".claude/plans-archive",   # attached only for a move, removed the same turn
-        "changelog": "CHANGELOG.md",
-    },
 }
+
+# Sections no plugin reads any more: dropped from a p4.json that still holds one. `plans` was the p4-plans
+# plugin's; its two skills went back to the repositories that wrote them (2026-11-11), which state their own
+# values, so no settings file holds any.
+RETIRED = ("plans",)
 
 LEGACY = {"teacher-model": ("recall", "teacher", "model"), "teacher-cutoff": ("recall", "teacher", "cutoff"),
           "inject": ("recall", "inject")}
@@ -161,11 +155,13 @@ def load(p4, write=True, warn=True):
             return copy.deepcopy(DEFAULTS)
     else:
         over = _legacy(p4)
+    had = dict(over)
+    over = {k: v for k, v in over.items() if k not in RETIRED}
     unknown = []
     merged = _merge(DEFAULTS, over, unknown)
     if warn and unknown:
         print(f"p4: unknown key(s) in {path(p4)}, kept but unused: {', '.join(unknown)}", file=sys.stderr)
-    if write and os.path.isdir(p4) and (not existed or merged != over):
+    if write and os.path.isdir(p4) and (not existed or merged != had):
         try:
             _write(p4, merged)
         except OSError:

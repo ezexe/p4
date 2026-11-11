@@ -4,7 +4,7 @@
     "name": "ezexe"
   },
   "metadata": {
-    "description": "P4: three plugins that keep Claude Code's memory and notebook in the repo and recall the repo's own history next to each message, and p4-plans, two skills for planning and delegating; the design is .docs/p4/fresh-marketplace.md."
+    "description": "P4: three plugins that keep Claude Code's memory and notebook in the repo and recall the repo's own history next to each message; the design is .docs/p4/fresh-marketplace.md."
   },
   "plugins": [
     {
@@ -30,14 +30,6 @@
       "version": "0.1.0",
       "category": "productivity",
       "keywords": ["recall", "memory", "p4"]
-    },
-    {
-      "name": "p4-plans",
-      "source": "./plugins/p4-plans",
-      "description": "Two skills: plan-planner (plans written once in one place, tests first, evidence checked against the tree, closed onto an archive branch, flown by the flight loop) and sub-agentic (when and how to delegate). A repository's own values live in the plans section of .claude/p4/p4.json.",
-      "version": "0.1.1",
-      "category": "productivity",
-      "keywords": ["plans", "agents", "delegation", "p4"]
     }
   ]
 }
