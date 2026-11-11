@@ -35,6 +35,7 @@ ADDRESSED_CHARS = 300
 RECOMMENDED_CHARS = 300
 HARNESS_RE = re.compile(r"^\s*<(task-notification|system-reminder|local-command|command-name|command-message|"
                         r"bash-input|bash-stdout|user-prompt-submit-hook)", re.I)
+PEER_RE = re.compile(r"^\s*(Another Claude session sent a message:\s*)?<cross-session-message\b", re.I)
 # a sentence that hands the owner a recommendation (served_back.RECOMMEND_RE): recommendation phrasing only, not
 # every `should`
 RECOMMEND_RE = re.compile(r"(?i)\b(recommend|suggest|better to|prefer(red|able)?|the right way|instead of|rather than|"
@@ -81,17 +82,19 @@ def row_open(p4, session, prompt, now=None, arrival=None):
     path = session_file(p4, session)
     rel = f"{st.MESSAGES}/{os.path.basename(path)}"
     is_harness = bool(HARNESS_RE.match(prompt or ""))
-    arrival = arrival or ("notification" if is_harness else "turn")
+    # another session's message arrives as a turn and is answered like one, but its words are not the owner's
+    is_peer = bool(PEER_RE.match(prompt or ""))
+    arrival = arrival or ("notification" if is_harness else "agent message" if is_peer else "turn")
     pairs = [("fingerprint", quote(prompt, FP_CHARS)), ("time", now), ("arrival", arrival)]
     old = st.parse(st.read_text(path), rel) if os.path.exists(path) else []
-    if not is_harness:
+    if not is_harness and not is_peer:
         new = set(st.norm_token(prompt).split())
         for e in reversed(old):
             if st.completed(e) and st.owner_message(e) and st.resembles(
                     new, set(st.norm_token(st.unquote(e.fields.get("fingerprint", e.value))).split())):
                 pairs.append(("resembles", e.id))
                 break
-    if arrival != "turn":
+    if arrival != "turn" and not is_peer:
         pairs += [("state", "FRESH"), ("addressed", f"(a {arrival}; complete on arrival)")]
     text = st.read_text(path) if os.path.exists(path) else st.render(rel, [])
     text = text.rstrip("\n") + "\n\n" + st.format_entry(pairs) + "\n"

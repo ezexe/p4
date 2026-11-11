@@ -71,6 +71,7 @@ models/index.json
 models/repo.json
 models/deps.json
 models/near.json
+models/lookups.db*
 models/view/
 models/*.tmp
 __pycache__/
@@ -513,6 +514,30 @@ def h_subagent_stop(payload):
     return None
 
 
+# --- lookups (PreToolUse and PostToolUse on every tool) --------------------------------------------------
+
+def h_lookup_check(payload):
+    """lookups.py: an earlier finding in place of a web call, an earlier failure before a command expected to fail."""
+    import lookups
+    p4 = ready(payload)
+    if not p4:
+        return None
+    return lookups.check(p4, payload, now())
+
+
+def h_lookup_record(payload):
+    """lookups.py: the call's row; a failure other sessions already met is told what they did about it."""
+    import lookups
+    p4 = ready(payload)
+    if not p4:
+        return None
+    text = lookups.record(p4, payload, now())
+    if not text:
+        return None
+    return {"hookSpecificOutput": {"hookEventName": payload.get("hook_event_name") or "PostToolUse",
+                                   "additionalContext": text}}
+
+
 def h_train(payload):
     import contextlib
     import io
@@ -533,7 +558,8 @@ def h_train(payload):
 
 
 HANDLERS = {"layout": h_layout, "recall": h_recall, "agent": h_agent, "subagent-start": h_subagent_start,
-            "close": h_close, "subagent-stop": h_subagent_stop, "train": h_train}
+            "close": h_close, "subagent-stop": h_subagent_stop, "train": h_train,
+            "lookup-check": h_lookup_check, "lookup-record": h_lookup_record}
 
 
 def parse_payload(raw: str):

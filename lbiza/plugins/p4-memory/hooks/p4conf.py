@@ -51,6 +51,19 @@ DEFAULTS = {
         "said": {                        # what a session states about the lines it was shown (said.py)
             "mode": "off",               # off | shadow (asked and written down) | on (training reads it too)
         },
+        "lookups": {                     # every tool call recorded, and checked before the next one like it (lookups.py)
+            "on": True,
+            "web": "answer",             # an earlier finding for the same question: "answer" (in place of the call,
+            "shell": "shadow",           # once), "note" (beside the result), "shadow" (logged only) or "off"
+            "after": True,               # a failure other sessions met is told what they did about it
+            "threshold": None,           # None: the trained threshold (0.6 before a first round)
+            "min_precision": 0.85,       # how often an answered call must be right for a threshold to be taken
+            "max_age_days": 30,          # an older finding is not handed back
+            "finding_chars": 4000,       # kept of a web call's answer
+            "shown_chars": 1500,         # shown of it
+            "epochs_web": 30,            # training rounds of the web model, and passes of the
+            "epochs_shell": 6,           # failure model (lookups.py: the sweep that set them)
+        },
         "near": {                        # candidates from what earlier, similar tasks used (near.py)
             "on": True,
             "neighbours": 20,            # earlier tasks whose entries are taken

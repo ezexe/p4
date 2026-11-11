@@ -57,7 +57,8 @@ def run_hook(name, payload, proj, extra_env=None):
     env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
     # injection is off by default (the measured config); these tests check what is injected, so they turn it on,
     # and DefaultOff checks the default with P4_RECALL_INJECT=0
-    env.update({"CLAUDE_PLUGIN_ROOT": ROOT, "CLAUDE_PROJECT_DIR": proj, "P4_RECALL_INJECT": "1", **(extra_env or {})})
+    env.update({"CLAUDE_PLUGIN_ROOT": ROOT, "CLAUDE_PROJECT_DIR": proj, "P4_RECALL_INJECT": "1", "P4_RECALL_SYNC": "1",
+                **(extra_env or {})})
     r = subprocess.run(["sh", RUN, name], input=json.dumps(payload), capture_output=True, text=True, env=env,
                        timeout=60)
     return r
@@ -98,7 +99,8 @@ class HooksJson(unittest.TestCase):
     def test_events_matchers_timeouts(self):
         with open(HOOKS_JSON, encoding="utf-8") as f:
             h = json.load(f)["hooks"]
-        self.assertEqual(set(h), {"SessionStart", "UserPromptSubmit", "PreToolUse", "Stop", "SubagentStop"})
+        self.assertEqual(set(h), {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop",
+                                  "SubagentStop"})
         self.assertEqual(h["SessionStart"][0]["matcher"], "startup|resume|clear|compact")
         self.assertEqual(h["SessionStart"][0]["hooks"][0]["timeout"], 15)
         self.assertEqual(h["UserPromptSubmit"][0]["hooks"][0]["timeout"], 10)
@@ -173,7 +175,8 @@ class Layout(Base):
         self.assertTrue(got.startswith(old), "what was there is untouched and in its order")
         tail = got[len(old):].splitlines()
         self.assertRegex(tail[0], r"^# seeded by p4-recall \d{4}-\d{2}-\d{2}$")
-        self.assertEqual(tail[1:], ["models/deps.json", "models/near.json", "models/view/", "*.pyc", "models/ranker.pt"])
+        self.assertEqual(tail[1:], ["models/deps.json", "models/near.json", "models/lookups.db*", "models/view/", "*.pyc",
+                                    "models/ranker.pt"])
         self.assertEqual(self.gitignore(), got, "a second run adds nothing")
         self.assertEqual(hook.seed_gitignore(os.path.join(self.p4, ".gitignore")), [])
 
