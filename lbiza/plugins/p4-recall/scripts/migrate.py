@@ -199,7 +199,8 @@ DROP_SESSION_FILES = {"phi-index.md": "the per-session φ register; derived", ".
 DROP_TOP = {"vindex": "the cumulative vlds index; derived (its ## recall section is copied below)",
             "sindex": "the cumulative frags index; derived, rebuilt from src/"}
 ARCHIVE_TOP = ("mrindex",)
-# flights/ is kept where it is: p4-plans' flight loop writes it and phi_store trains on its plan.md files.
+# flights/ is kept where the old store has it: where planned work lives is p4-plans' to say (its plans directory),
+# and training reads a folder of planned work by the files it holds, wherever it is kept (phi_store.work_folders).
 KEEP_TOP = ("flights",)
 COMMENT = {".py": "#", ".sh": "#", ".ps1": "#", ".cmake": "#", ".rb": "#", ".pl": "#", ".r": "#", ".yml": "#",
            ".yaml": "#", ".toml": "#", ".js": "//", ".ts": "//", ".mjs": "//", ".cjs": "//", ".c": "//", ".cc": "//",
