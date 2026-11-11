@@ -9,19 +9,27 @@ by its memo so anything memoized gets executed if as you exit theres nothing tha
 memo moment fed by the context the birthed ghost adorned".
 
   node     <home>/phi/nodes/<node id>/: node.json (parent, title, goal, what it was told), plays.jsonl, notes.jsonl,
-           rollup.jsonl (its children's exits) and memo.md, the same things as one page anyone can read. The node id
+           rollup.jsonl (its children's exits), log.jsonl (a line a hook call) and memo.md, the same things as one page
+           anyone can read. The node id
            is the app's session id (CLAUDE_CODE_HOST_SESSION_ID, in a hook's environment), or the CLI's session id
            where no app runs it.
   parent   a hook's payload names no parent. The app keeps a record for each session,
            claude-code-sessions/<account>/<organization>/<node id>.json, whose `spawnedFrom.sessionId` is the
-           session that started it. That is read once and kept in node.json, which is the tree from then on:
-           `reparent` moves a node by rewriting it, whatever the app shows.
+           session that started it. The app writes that field a moment after the session exists: at a child's
+           SessionStart it is not there, and at its first message it may not be yet (seen live, 2026-11-11). So
+           a session in the app is told nothing at its start. At a handed-over first message with no recorded
+           starter, the starter is read from the message's own shared notes folder, which the app names after
+           it (three of three live sessions), and the record corrects it when it comes (it had come by the
+           turn's end in each). A handed-over message that names no folder waits for the record (`wait_s`,
+           2 s; live, a wait of 2 s once ended without it). Once read from the record the parent is kept in
+           node.json, which is the tree from then on: `reparent` moves a node by rewriting it, whatever the
+           app shows.
   home     the store the family's nodes live in: the top session's <project>/.claude/p4. A child in a worktree or
            another folder has no store of its own and uses its parent's, found through the parent's record.
-  arrive   SessionStart: the node is made if new, and the session is told what it starts from (the ghost): the
-           goals of the line above it, the notes kept there, the plays its siblings made, and after a compaction
-           its own plays. Nothing where nothing is memoized.
-  prompt   UserPromptSubmit: the first request becomes the node's goal; the ghost, if the start could not give it;
+  arrive   SessionStart: the node is made if new. After a compaction or a clear, and at the start of a session no
+           app runs, the session is told what it starts from (the ghost): the goals of the line above it, the
+           notes kept there, the plays its siblings made, and its own plays. Nothing where nothing is memoized.
+  prompt   UserPromptSubmit: the first request becomes the node's goal; the ghost, where the start did not give it;
            and the exits of this node's children since it last looked, whole (the app relays 400 characters).
   exit     Stop: the turn is memoized as a play, scored or not: the request, the files edited, the commands that
            worked, the sessions started, the failures, the reply. `closed` when the session ran `close --check`
@@ -31,13 +39,12 @@ Commands for a session: `note "<claim>" --source "<where checked>"`, `close --ch
 `memo [node]`, `tree`, `ghost`, `reparent <node> <new parent>`.
 
 Settings: <home>/phi/phi.json, every key optional: `ghost`, `rollup`, `exit` (false: off), `ghost_chars`,
-`rollup_chars`. P4_PHI=0 in the environment turns the plugin off.
+`rollup_chars`, `wait_s`. P4_PHI=0 in the environment turns the plugin off.
 
 Nothing here matches a request to a play by its words: that was built in p4-recall 0.8.17 to 0.8.20, measured
 (the nearest earlier play's files touched again 0.06 to 0.13 of the time) and removed.
 """
 
-import argparse
 import glob
 import hashlib
 import json
@@ -59,10 +66,11 @@ SIBLINGS = 5
 OWN = 3
 TAIL_BYTES = 256 * 1024          # of a rollup, for a ghost
 TRANSCRIPT_BYTES = 8 * 1024 * 1024
+WAIT_S = 2.0                     # how long a handed-over first message waits for the app to record its starter
 SCAN_RECORDS = 60                # the newest app records searched for a CLI session id, when the host id is missing
 ROOT = "root"
 SETTINGS = {"ghost": "GHOST", "rollup": "ROLLUP", "exit": "EXIT", "ghost_chars": "GHOST_CHARS",
-            "rollup_chars": "ROLLUP_CHARS"}
+            "rollup_chars": "ROLLUP_CHARS", "wait_s": "WAIT_S"}
 SHELL_TOOLS = ("Bash", "PowerShell")
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 LOOKING = frozenset("""cat head tail sed grep rg ls find wc awk echo cd for printf date sleep tr file which where test
@@ -87,6 +95,8 @@ KINDS = (
 )
 REMINDER = re.compile(r"\A\s*<system-reminder>.*?</system-reminder>\s*", re.S)
 TASK_MARK = re.compile(r"(?m)^Task:\s*$")
+NOTES_TAIL = re.compile(r"\n\s*Shared notes folder for this group of sessions.*\Z", re.S)
+NOTES_ID = re.compile(r"side-session-notes[\\/]+(local_[0-9A-Za-z-]+)")
 LEAD = re.compile(r"^(?:cd\s+\S+\s*(?:&&|;)\s*)+")
 WS = re.compile(r"\s+")
 SAFE = re.compile(r"[^A-Za-z0-9_.-]")
@@ -208,6 +218,16 @@ def app_record(host):
     name = safe_id(host) + ".json"
     if not host or not name.startswith("local_"):
         return {}
+    if host in RECORDS:
+        return RECORDS[host]
+    RECORDS[host] = d = read_record(name)
+    return d
+
+
+RECORDS = {}
+
+
+def read_record(name):
     acct, org = os.environ.get("CLAUDE_CODE_ACCOUNT_UUID") or "", os.environ.get("CLAUDE_CODE_ORGANIZATION_UUID") or ""
     for root in app_roots():
         if acct and org:
@@ -272,8 +292,9 @@ def home_of_record(rec, depth=0):
 class Me:
     """Who a hook or a command is running for: its node id, its CLI session, the app's record, its home."""
 
-    def __init__(self, payload=None, node="", p4=""):
+    def __init__(self, payload=None, node="", p4="", hint=""):
         payload = payload or {}
+        self.hint = ""
         self.cli = str(payload.get("session_id") or os.environ.get("CLAUDE_CODE_SESSION_ID") or "")
         host = os.environ.get("CLAUDE_CODE_HOST_SESSION_ID") or ""
         self.rec = app_record(node or host) if (node or host) else record_of_cli(self.cli)
@@ -282,6 +303,8 @@ class Me:
         self.home = p4 or ""
         if not self.home:
             parent = parent_of_record(self.rec)
+            if not parent and hint and hint != self.id:
+                parent = self.hint = hint
             self.home = (home_of_record(app_record(parent)) if parent else "") or store_at(project) \
                 or home_of_record(self.rec)
 
@@ -297,7 +320,7 @@ def save_node(home, node):
                  json.dumps(node, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
 
 
-def ensure_node(home, nid, rec=None, cli="", depth=0):
+def ensure_node(home, nid, rec=None, cli="", depth=0, hint=""):
     """The node, made if new, with its line above it made too (an ancestor this plugin never ran in gets its node
     from the app's record). node.json's parent is the tree: the record is read for a new node, and for a node that
     was hung on the base node before its record could be read."""
@@ -313,18 +336,22 @@ def ensure_node(home, nid, rec=None, cli="", depth=0):
         node = {"id": nid, "parent": "", "title": "", "created": now(), "sessions": [], "goal": "", "seen": 0,
                 "ghosted": {}}
         changed = True
-    if not node.get("parent") or (node["parent"] == ROOT and not node.get("moved")):
+    if not node.get("parent") or (node["parent"] == ROOT or node.get("parent_from") == "hint") and not node.get("moved"):
         rec = rec if rec is not None else app_record(nid)
-        parent = safe_id(parent_of_record(rec)) or ROOT
-        if parent == nid:
-            parent = ROOT
-        if parent != node.get("parent"):
-            node["parent"] = parent
+        parent, source = safe_id(parent_of_record(rec)), "record"
+        if not parent and node.get("parent_from") == "hint":
+            parent, source = node["parent"], "hint"
+        if not parent and hint:
+            parent, source = safe_id(hint), "hint"
+        if not parent or parent == nid:
+            parent, source = ROOT, ""
+        if parent != node.get("parent") or source != node.get("parent_from", ""):
+            node["parent"], node["parent_from"] = parent, source
             changed = True
-        title = clean(rec.get("title"))[:120] if rec else ""
-        if title and title != node.get("title"):
-            node["title"] = title
-            changed = True
+    title = clean(rec.get("title"))[:120] if rec else ""
+    if title and title != node.get("title"):      # the app titles a session after it has started
+        node["title"] = title
+        changed = True
     if cli and cli not in node.setdefault("sessions", []):
         node["sessions"].append(cli)
         changed = True
@@ -391,8 +418,19 @@ def request_of(prompt):
     m = TASK_MARK.search(text)
     if m and text.lstrip().startswith("Background"):
         text = text[m.end():]
-    text = text.strip()
+    text = NOTES_TAIL.sub("", text).strip()
     return "" if text.startswith("<") else text
+
+
+def handed_over(prompt):
+    """Does a message look like a task another session handed over: the wrapper, the family reminder, or the
+    shared notes folder. Such a session has a starter, whether or not the app has recorded it yet."""
+    text = prompt if isinstance(prompt, str) else ""
+    body = text
+    while REMINDER.match(body):
+        body = REMINDER.sub("", body, count=1)
+    return bool(body.lstrip().startswith("Background") and TASK_MARK.search(body)
+                or NOTES_ID.search(text) or "Linked sessions now" in text[:4000])
 
 
 def result_text(block):
@@ -542,7 +580,8 @@ def ghost_text(home, node, own=False):
             notes.append(f"- {cut(clean(r.get('claim')), 300)} ({kind}source: {cut(clean(r.get('source')), 120)})")
     if notes:
         body += ["Established above (do not work these out again):"] + notes[:12]
-    exits = latest_exits(load_rollup(home, parent, TAIL_BYTES), skip=nid)[:SIBLINGS]
+    exits = [r for r in latest_exits(load_rollup(home, parent, TAIL_BYTES), skip=nid)[:SIBLINGS * 3]
+             if (load_node(home, r["child"]).get("parent") or ROOT) == parent][:SIBLINGS]
     if exits:
         where = "by this repository's sessions before this one" if parent == ROOT else \
             f"under \"{title_of(line[0]) if line else parent}\" before this session"
@@ -647,18 +686,54 @@ def h_arrive(payload):
         return None
     configure(me.home)
     node = ensure_node(me.home, me.id, me.rec, me.cli)
+    RAN.update(home=me.home, node=node["id"], parent=node.get("parent"), cli=me.cli)
     source = payload.get("source") or "startup"
+    RAN["source"] = source
+    if source == "startup" and node.get("parent") == ROOT and not node.get("goal") \
+            and os.environ.get("CLAUDE_CODE_HOST_SESSION_ID"):
+        return None             # the app has not recorded this session's starter yet: the first message tells it
     text = told(node, me, me.home, own=source in ("compact", "clear") or len(node.get("sessions") or []) > 1)
     save_node(me.home, node)
     return text
 
 
+def starter(me, payload):
+    """A handed-over message whose session has no recorded starter yet: wait for the app to write it, and failing
+    that take the starter from the message's notes folder. Returns the Me to go on with."""
+    prompt = payload.get("prompt")
+    if parent_of_record(me.rec) or not me.id.startswith("local_") or not handed_over(prompt):
+        return me
+    if me.home:
+        node = load_node(me.home, me.id)
+        if node.get("goal") or node.get("moved") or node.get("parent") not in (None, "", ROOT):
+            return me
+    m = NOTES_ID.search(prompt if isinstance(prompt, str) else "")
+    if m and m.group(1) != me.id:
+        return Me(payload, hint=m.group(1))
+    wait = WAIT_S
+    try:
+        wait = float(os.environ.get("P4_PHI_WAIT", wait))
+    except ValueError:
+        pass
+    started = time.time()
+    while time.time() - started < wait:
+        time.sleep(0.1)
+        RECORDS.clear()
+        if parent_of_record(app_record(me.id)):
+            RAN["waited_ms"] = round((time.time() - started) * 1000)
+            return Me(payload)
+    RAN["waited_ms"] = round((time.time() - started) * 1000)
+    return me
+
+
 def h_prompt(payload):
-    me = Me(payload)
+    me = starter(Me(payload), payload)
     if not me.home or not me.id:
         return None
     configure(me.home)
-    node = ensure_node(me.home, me.id, me.rec, me.cli)
+    node = ensure_node(me.home, me.id, me.rec, me.cli, hint=me.hint)
+    RAN.update(home=me.home, node=node["id"], parent=node.get("parent"), cli=me.cli,
+               parent_from=node.get("parent_from", ""))
     req = request_of(payload.get("prompt"))
     if req and not node.get("goal"):
         node["goal"] = cut(req, GOAL_CHARS)
@@ -680,6 +755,7 @@ def h_exit(payload):
     if not EXIT:
         return None
     node = ensure_node(me.home, me.id, me.rec, me.cli)
+    RAN.update(home=me.home, node=node["id"], parent=node.get("parent"), cli=me.cli)
     reply = payload.get("last_assistant_message") or ""
     turn = last_turn(payload.get("transcript_path") or "")
     if not turn and node.get("goal"):
@@ -704,7 +780,22 @@ def h_exit(payload):
     save_node(me.home, node)
     render_memo(me.home, node["id"])
     render_memo(me.home, parent)
+    RAN.update(play=play["id"], state=play["state"])
     return None
+
+
+RAN = {}       # what the running hook learned, for its line in the node's log
+
+
+def log_run(name, text, started):
+    """One line a hook call in <node>/log.jsonl: what ran, for whom, how much it said and how long it took. This
+    is what the plugin is measured from."""
+    if not RAN.get("home") or not RAN.get("node"):
+        return
+    row = {"time": now(), "hook": name, "said": len(text or ""), "ms": round((time.time() - started) * 1000),
+           "host_in_env": bool(os.environ.get("CLAUDE_CODE_HOST_SESSION_ID"))}
+    row.update({k: v for k, v in RAN.items() if k not in ("home", "node")})
+    append_line(os.path.join(node_dir(RAN["home"], RAN["node"]), "log.jsonl"), row)
 
 
 HOOKS = {"arrive": ("SessionStart", h_arrive), "prompt": ("UserPromptSubmit", h_prompt), "exit": ("Stop", h_exit)}
@@ -720,7 +811,9 @@ def hook_main(name):
         if not isinstance(payload, dict):
             return 0
         event, fn = HOOKS[name]
+        started = time.time()
         text = fn(payload)
+        log_run(name, text, started)
         if text:
             sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}))
     except Exception:  # noqa: BLE001
@@ -798,6 +891,7 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["hook"]:
         return hook_main(argv[1] if len(argv) > 1 else "")
+    import argparse
     ap = argparse.ArgumentParser(description="phi: the memo on the session tree")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "close", "memo", "tree", "ghost", "reparent"):

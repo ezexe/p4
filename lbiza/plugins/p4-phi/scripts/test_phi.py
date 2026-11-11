@@ -72,7 +72,7 @@ class Tree:
     def env(self, host, proj=None, **more):
         env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE_", "P4_PHI"))}
         env.update({"CLAUDE_PLUGIN_ROOT": ROOT, "CLAUDE_PROJECT_DIR": proj or self.proj,
-                    "P4_PHI_APP_SESSIONS": os.path.join(self.tmp, "app"), **more})
+                    "P4_PHI_APP_SESSIONS": os.path.join(self.tmp, "app"), "P4_PHI_WAIT": "0", **more})
         if host:
             env["CLAUDE_CODE_HOST_SESSION_ID"] = host
             env["CLAUDE_CODE_SESSION_ID"] = CLI.get(host, host)
@@ -212,6 +212,44 @@ class Nodes(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         self.assertEqual(self.t.node(KID)["parent"], TOP)
 
+    def test_a_starter_the_app_records_late_is_waited_for(self):
+        late = "local_late0001"
+        write(os.path.join(self.t.app, late + ".json"), json.dumps({"sessionId": late, "cwd": self.t.proj}))
+        self.t.hook("arrive", late, {"hook_event_name": "SessionStart", "source": "startup"})
+        self.assertEqual(self.t.node(late)["parent"], "root")
+        import threading
+        threading.Timer(0.4, lambda: self.t.record(late, TOP, "Late child")).start()
+        self.t.hook("prompt", late, {"hook_event_name": "UserPromptSubmit", "prompt": HANDED}, P4_PHI_WAIT="5")
+        n = self.t.node(late)
+        self.assertEqual((n["parent"], n["parent_from"], n["title"]), (TOP, "record", "Late child"))
+        log = phi.read_rows(os.path.join(self.t.p4, "phi", "nodes", late, "log.jsonl"))
+        self.assertLess(log[-1]["waited_ms"], 3000)
+
+    def test_a_starter_never_recorded_is_read_from_the_notes_folder(self):
+        lost = "local_lost0001"
+        write(os.path.join(self.t.app, lost + ".json"), json.dumps({"sessionId": lost, "cwd": self.t.proj}))
+        prompt = HANDED + "\n\nShared notes folder for this group of sessions (outside the repo): " \
+            "C:\\Users\\x\\AppData\\Local\\Claude-Data\\c\\side-session-notes\\" + KID
+        self.t.hook("prompt", lost, {"hook_event_name": "UserPromptSubmit", "prompt": prompt}, P4_PHI_WAIT="30")
+        n = self.t.node(lost)
+        self.assertEqual((n["parent"], n["parent_from"]), (KID, "hint"))
+        log = phi.read_rows(os.path.join(self.t.p4, "phi", "nodes", lost, "log.jsonl"))
+        self.assertNotIn("waited_ms", log[-1])                      # the folder names the starter: nothing to wait for
+        self.assertNotIn("Shared notes folder", n["goal"])
+        self.t.hook("prompt", lost, {"hook_event_name": "UserPromptSubmit", "prompt": "go on"})
+        self.assertEqual(self.t.node(lost)["parent"], KID)          # a record that still says nothing changes nothing
+        self.t.record(lost, KID2, "Lost child")
+        self.t.hook("prompt", lost, {"hook_event_name": "UserPromptSubmit", "prompt": "go on"})
+        n = self.t.node(lost)
+        self.assertEqual((n["parent"], n["parent_from"]), (KID2, "record"))      # the record wins over the folder
+
+    def test_an_owners_message_waits_for_nothing(self):
+        self.t.record("local_plain001")
+        self.t.hook("prompt", "local_plain001", {"hook_event_name": "UserPromptSubmit", "prompt": GOAL},
+                    P4_PHI_WAIT="5")
+        log = phi.read_rows(os.path.join(self.t.p4, "phi", "nodes", "local_plain001", "log.jsonl"))
+        self.assertNotIn("waited_ms", log[-1])
+
     def test_a_child_with_no_store_lives_in_its_parents(self):
         work = os.path.join(self.t.tmp, "worktree")
         os.makedirs(work)
@@ -350,6 +388,9 @@ class Ghosts(unittest.TestCase):
         self.assertLessEqual(len(text), phi.GHOST_CHARS)
         self.assertEqual(self.t.hook("prompt", KID, {"hook_event_name": "UserPromptSubmit", "prompt": HANDED}
                                      ).stdout.strip(), "")       # told once
+        log = phi.read_rows(os.path.join(self.t.p4, "phi", "nodes", KID, "log.jsonl"))
+        self.assertEqual([(r["hook"], r["said"] > 0, r["parent"]) for r in log],
+                         [("arrive", True, TOP), ("prompt", False, TOP)])
 
     def test_a_ghost_missed_at_the_start_arrives_with_the_first_message(self):
         text = context(self.t.hook("prompt", KID, {"hook_event_name": "UserPromptSubmit", "prompt": HANDED}))
@@ -371,9 +412,22 @@ class Ghosts(unittest.TestCase):
         self.t.exit(TOP, GOAL, [("Edit", {"file_path": "src/export/flush.py"}, "ok")], "Half done.")
         other = "local_top00002"
         self.t.record(other, title="Something else entirely")
-        text = self.start(other)
+        self.assertEqual(self.start(other), "")        # in the app a start is told nothing: its starter is unknown
+        text = context(self.t.hook("prompt", other, {"hook_event_name": "UserPromptSubmit",
+                                                     "prompt": "paint the fence green"}))
         self.assertIn(GOAL, text)
         self.assertIn("Half done.", text)
+
+    def test_a_session_no_app_runs_is_told_at_its_start(self):
+        self.t.exit(TOP, GOAL, [], "Half done.")
+        cli = "eeee5555-0000-4000-8000-000000000000"
+        text = context(self.t.hook("arrive", "", {"hook_event_name": "SessionStart", "source": "startup"}, cli=cli))
+        self.assertIn("Half done.", text)
+
+    def test_a_play_that_left_is_not_shown_under_its_old_parent(self):
+        self.t.exit(KID, HANDED, [], "Half done.")
+        self.t.cli(TOP, "reparent", KID, "root")
+        self.assertNotIn("Half done.", self.start(KID2))
 
     def test_a_note_needs_its_source(self):
         r = self.t.cli(TOP, "note", "The ports table is written by flush_rows")
