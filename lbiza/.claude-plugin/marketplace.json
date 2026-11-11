@@ -30,6 +30,14 @@
       "version": "0.1.0",
       "category": "productivity",
       "keywords": ["recall", "memory", "p4"]
+    },
+    {
+      "name": "p4-phi",
+      "source": "./plugins/p4-phi",
+      "description": "The memo on the session tree: every session is a node under the session that started it, every exit is kept as a play and handed whole to the parent, and a new session starts from the goals, notes and plays above and beside it.",
+      "version": "0.1.0",
+      "category": "productivity",
+      "keywords": ["phi", "sessions", "memo", "p4"]
     }
   ]
 }
