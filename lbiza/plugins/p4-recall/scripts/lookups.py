@@ -650,9 +650,11 @@ def backfill(p4, roots, keep_tracked=True):
     con = connect(p4)
     written = 0
     try:
-        for r in done:
+        for k, r in enumerate(done):
             if insert(con, r, p4 if keep_tracked else None):
                 written += 1
+            if k % 500 == 499:
+                con.commit()               # in short transactions: a live session's hook waits 3 s for the database
         con.commit()
     finally:
         con.close()
