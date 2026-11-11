@@ -1,45 +1,47 @@
 ---
 name: phi
-description: Work on the session tree's memo. Use when a message steers off this session's goal, when starting a session for part of a goal, when a session you started has ended a turn, when a finding should outlive this session, when something showed the goal scored, or when asked what the tree holds, to print it, or to move a session under another one.
+description: What linked sessions hand each other. Use when a message from the user is about something other than this session's task, when starting a session for part of the task, when a session you started has finished a turn, when a finding should outlast this session, when something showed the task done, or when asked what the sessions hold, to print the tree, or to detach or reparent a session.
 ---
 
-# phi: the memo on the session tree
+# phi: what linked sessions hand each other
 
-Every session is a node.
-The session that started it is its parent.
-A session nobody started hangs under the store's base node.
-The tree lives in `<project>/.claude/p4/phi/nodes/<node id>/`, in the store of the top session's project.
+The words here are the app's own.
+A session is started by another session, or it is a top session.
+A session has a task.
+When it finishes a turn it gives a report.
+The files are in `<project>/.claude/p4/phi/sessions/<sessionId>/`, in the store of the top session's project.
 
 Three things happen without you:
 
-- At your start you are told what you start from: the goals above you, the notes kept there, and the plays made beside you.
-- At every turn's end your turn is kept as a play, scored or not, and handed to your parent.
-- At your next message you are handed, whole, the plays of the sessions you started that ended since you last looked.
+- Beside your first message you are given background: the tasks of the sessions above this one, their notes, and the last turn of the other sessions started beside it.
+- When you finish a turn, the turn and its report are kept, done or not, and reach the session that started this one.
+- Beside your next message you are given, in full, the reports of the sessions you started that finished a turn since you last looked.
 
-## Hold the goal
+## Stay with the task
 
-This session has one goal, its first request.
-When a message of the owner's steers off it, do not turn this session to the new thing.
+This session's task is its first request.
+When a message from the user is about something else, do not turn this session to it.
 
-- **Ship it:** start a child session for it with context `fork`, so the child has this session's exact state and shares its checkout. Start it; do not offer a card.
-- **Say so in one line:** name the session that has it.
-- **Stay:** go on with the goal. The child's exit comes back here whole at your next message.
-- **Answer small things here:** what a few tool calls settle is not a steer.
-- **Re-aim when the goal itself changed:** `goal "<the new goal>"`. The goal before it is kept.
+- **Start a session for it** with context `fork`, so it has this whole conversation and shares this checkout. Start it; do not offer a card.
+- **Tell the user in one line** which session has it.
+- **Stay with the task.** That session's report comes back here in full beside your next message.
+- **A quick thing stays here:** a question, or what a few tool calls settle.
+- **When the user says the task itself has changed:** `task "<the new task>"`. The task before it is kept.
 
-## What you do
+## Commands
 
 Run these with `python -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/phi.py"`.
 
-- **Execute the memo.** What you were told at your start was already worked out. Use it where it fits and say where it does not.
-- **Keep a finding:** `note "<claim>" --source "<file and line, command, or measurement>"`. Every session you start, and every session they start, begins with it. A note without a source is refused.
-- **Close a play:** `close --check "<what was run and what it showed>"` when something showed the goal scored. The turn's play is then kept closed. Without it the play is kept open, and the next session starts from where it stopped.
-- **Start a session for a part of the goal** with the app's own tool. Write the brief as usual. The child gets your goal, your notes and its siblings' plays by itself, so the brief need not repeat them.
-- **Read the tree:** `tree` prints every node with its state. `memo [node id]` prints a node's page. `ghost` prints what this session starts from.
-- **Move a node:** `reparent <node id> <new parent id>` hangs a node, with everything under it, on another node. The app's sidebar does not follow. The memo does.
+- **Use the background.** What you were given was already worked out. Use it where it fits and say where it does not.
+- **Keep a finding:** `note "<claim>" --source "<file and line, command, or measurement>"`. Every session you start, and every session they start, is given it. A note without a source is refused.
+- **Say the task is done:** `done "<what was run and what it showed>"`. This turn is then kept as done. Without it the turn is kept as not shown done.
+- **Start a session for part of the task** with the app's own tool, and write the brief as usual. The session is given your task, your notes and the last turns of the sessions beside it, so the brief need not repeat them.
+- **Read the tree:** `tree` prints every session with its state. `show [sessionId]` prints a session's page. `background` prints what this session was given.
+- **Detach a session:** `detach <sessionId>` makes it a top session.
+- **Reparent a session:** `reparent <sessionId> <under sessionId>` puts it, with every session it started, under another. The app's sidebar does not follow either command.
 
 ## What it does not do
 
-- It does not find a play by the words of a request. A play is found by where its session stands in the tree.
-- It does not start, stop or message sessions.
+- It does not find an earlier turn by the words of a request. A session is given what the sessions linked to it kept.
+- It does not start, stop or message sessions itself.
 - It does not reach subagents started with the Agent tool.

@@ -1,57 +1,51 @@
 #!/usr/bin/env python3
-"""phi.py: the memo on the session tree.
+"""phi.py: what linked sessions hand each other, kept on the app's own session tree.
 
-A session is a node. The session that started it is its parent, and a session nobody started is a child of the
-store's base node, `root`. A node's memo is what its children start from; a child's play belongs to its parent's
-goal by where it stands, not by its words; a child's exit rolls up into its parent. In the owner's words: "a kept
-play weather it scores or not is always memorized. from the first memorization on you revisit it ghosted tainted
-by its memo so anything memoized gets executed if as you exit theres nothing that closed the request thats a new
-memo moment fed by the context the birthed ghost adorned".
+The words here are the Claude Code desktop app's, as it uses them: a session; the session that started it
+(`spawnedFrom.sessionId` in the app's record); the sessions it started; a top session, which nobody started; a
+session's task; a turn; the report a session gives when it finishes a turn; the background a started session is
+given; notes. Nothing is renamed.
 
-  node     <home>/phi/nodes/<node id>/: node.json (parent, title, goal, what it was told), plays.jsonl, notes.jsonl,
-           rollup.jsonl (its children's exits), log.jsonl (a line a hook call) and memo.md, the same things as one page
-           anyone can read. The node id
-           is the app's session id (CLAUDE_CODE_HOST_SESSION_ID, in a hook's environment), or the CLI's session id
-           where no app runs it.
-  parent   a hook's payload names no parent. The app keeps a record for each session,
-           claude-code-sessions/<account>/<organization>/<node id>.json, whose `spawnedFrom.sessionId` is the
-           session that started it. The app writes that field a moment after the session exists: at a child's
-           SessionStart it is not there, and at its first message it may not be yet (seen live, 2026-11-11). So
-           a session in the app is told nothing at its start. At a handed-over first message with no recorded
-           starter, the starter is read from the message's own shared notes folder, which the app names after
-           it (three of three live sessions), and the record corrects it when it comes (it had come by the
-           turn's end in each). A handed-over message that names no folder waits for the record (`wait_s`,
-           2 s; live, a wait of 2 s once ended without it). Once read from the record the parent is kept in
-           node.json, which is the tree from then on: `reparent` moves a node by rewriting it, whatever the
-           app shows.
-  home     the store the family's nodes live in: the top session's <project>/.claude/p4. A child in a worktree or
-           another folder has no store of its own and uses its parent's, found through the parent's record.
-  arrive   SessionStart: the node is made if new. After a compaction or a clear, and at the start of a session no
-           app runs, the session is told what it starts from (the ghost): the goals of the line above it, the
-           notes kept there, the plays its siblings made, and its own plays. Nothing where nothing is memoized.
-  prompt   UserPromptSubmit: the first request becomes the node's goal; the ghost, where the start did not give it;
-           and the exits of this node's children since it last looked, whole (the app relays 400 characters).
-  exit     Stop: the turn is memoized as a play, scored or not: the request, the files edited, the commands that
-           worked, the sessions started, the failures, the reply. `closed` when the session ran `close --check`
-           in the turn, `open` otherwise. It is appended to the parent's rollup.
+  session  <home>/phi/sessions/<sessionId>/: session.json (the app's fields for it: sessionId, cliSessionIds,
+           title, cwd, spawnedFrom, startChain; and its task), turns.jsonl (a line a finished turn),
+           notes.jsonl, reports.jsonl (the reports of the sessions it started), log.jsonl (a line a hook call)
+           and session.md, the same as one page. The sessionId is the app's (CLAUDE_CODE_HOST_SESSION_ID, in a
+           hook's environment), or the CLI's session id where no app runs it. The reports of top sessions are
+           in <home>/phi/reports.jsonl.
+  started  a hook's payload does not say which session started this one. The app's record of a session,
+  by       claude-code-sessions/<account>/<organization>/<sessionId>.json, says it in `spawnedFrom.sessionId`.
+           For a session started "fresh" the app writes that field after the session exists: it was absent at
+           SessionStart in 3 of 3 live sessions and at the first message in 2 of 3. Such a session's first
+           message ends with the shared notes folder, which the app names after the session that started it
+           (3 of 3), so that is read first and the record corrects it when it comes. A forked session's record
+           has the field at its SessionStart. A handed-over message that names no folder waits for the record
+           (`wait_s`). session.json then holds it; `detach` and `reparent` rewrite it there, whatever the app
+           shows.
+  home     the store the linked sessions' files live in: the top session's <project>/.claude/p4. A session in a
+           worktree or another folder has no store of its own and uses that of the session that started it.
+  session- SessionStart: session.json is made if new. A forked session, a session after a compaction or a
+  start    clear, and a session no app runs are given their background here.
+  user-    UserPromptSubmit: the first request becomes the session's task. The session is given its background
+  prompt-  if the start did not give it: the tasks of the sessions above it, their notes, the last turn of each
+  submit   other session started by the same session (for a top session, of the top sessions before it), and
+           after a compaction its own turns. It is given, in full, the reports of the sessions it started that
+           finished a turn since it last looked (the app relays the first 400 characters). And the user's
+           standing instruction for a message about something else (`new_task`): start a forked session for it
+           and stay with the task; once in full, then a line beside each of the user's messages.
+  stop     Stop: the turn is kept in turns.jsonl whether or not the task is done: the prompt, the files edited,
+           the commands that worked, the sessions started, what failed, the report. It is appended to the
+           reports of the session that started this one.
 
-  steer    a session holds one goal, its first request. Turning it to whatever the owner says next is how a session
-           ends up spun around its target, and a new session started by hand for the new thing lacks the state
-           this one built. So the session is told its goal and the rule once (and again after a compaction): a
-           message of the owner's that steers off the goal is shipped to a child session forked from this one,
-           which has this session's exact state and shares its checkout, and this session stays where it was;
-           the child's exit comes back whole. Beside each later message of the owner's goes one line with the
-           goal. The session judges what is off its goal; the hook matches nothing. `goal "<new goal>"` re-aims
-           the node when the owner says the goal itself has changed.
+Commands for a session: `note "<claim>" --source "<where checked>"`, `done "<what was run and what it showed>"`,
+`task "<the new task>"`, `show [sessionId]`, `tree`, `background`, `detach <sessionId>`,
+`reparent <sessionId> <under sessionId>`.
 
-Commands for a session: `note "<claim>" --source "<where checked>"`, `close --check "<what showed it scored>"`,
-`goal "<the new goal>"`, `memo [node]`, `tree`, `ghost`, `reparent <node> <new parent>`.
+Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `new_task` (false: off),
+`background_chars`, `reports_chars`, `wait_s`. P4_PHI=0 turns the plugin off, P4_PHI_NEW_TASK=0 the standing
+instruction.
 
-Settings: <home>/phi/phi.json, every key optional: `ghost`, `rollup`, `exit`, `steer` (false: off),
-`ghost_chars`, `rollup_chars`, `wait_s`. P4_PHI=0 in the environment turns the plugin off, P4_PHI_STEER=0 the steer.
-
-Nothing here matches a request to a play by its words: that was built in p4-recall 0.8.17 to 0.8.20, measured
-(the nearest earlier play's files touched again 0.06 to 0.13 of the time) and removed.
+Nothing here matches a request to an earlier turn by its words: that was built in p4-recall 0.8.17 to 0.8.20,
+measured (the nearest earlier turn's files touched again 0.06 to 0.13 of the time) and removed.
 """
 
 import glob
@@ -62,27 +56,26 @@ import re
 import sys
 import time
 
-GHOST = True
-ROLLUP = True
-EXIT = True
-STEER = True
-STEER_GOAL = 400                 # of the goal, in the rule
-STEER_LINE = 160                 # of the goal, in the line beside a message
-GHOST_CHARS = 3000
-ROLLUP_CHARS = 6000
-CLOSING_CHARS = 4000
-GOAL_CHARS = 1200
-PLAY_STEPS = 12
-LINE_MAX = 8                     # ancestors followed, from a node up
-SIBLINGS = 5
+BACKGROUND = True
+REPORTS = True
+TURNS = True
+NEW_TASK = True
+BACKGROUND_CHARS = 3000
+REPORTS_CHARS = 6000
+REPORT_CHARS = 4000              # of one report, kept
+TASK_CHARS = 1200
+RULE_TASK = 400                  # of the task, in the standing instruction
+LINE_TASK = 160                  # of the task, in the line beside a message
+TURN_STEPS = 12
+CHAIN_MAX = 8                    # sessions followed upward from a session
+OTHERS = 5
 OWN = 3
-TAIL_BYTES = 256 * 1024          # of a rollup, for a ghost
+TAIL_BYTES = 256 * 1024          # of a reports file, for a background
 TRANSCRIPT_BYTES = 8 * 1024 * 1024
-WAIT_S = 2.0                     # how long a handed-over first message waits for the app to record its starter
-SCAN_RECORDS = 60                # the newest app records searched for a CLI session id, when the host id is missing
-ROOT = "root"
-SETTINGS = {"steer": "STEER", "ghost": "GHOST", "rollup": "ROLLUP", "exit": "EXIT", "ghost_chars": "GHOST_CHARS",
-            "rollup_chars": "ROLLUP_CHARS", "wait_s": "WAIT_S"}
+WAIT_S = 2.0                     # how long a handed-over first message waits for the app's record
+SCAN_RECORDS = 60                # the newest records searched for a CLI session id, when the host id is missing
+SETTINGS = {"background": "BACKGROUND", "reports": "REPORTS", "turns": "TURNS", "new_task": "NEW_TASK",
+            "background_chars": "BACKGROUND_CHARS", "reports_chars": "REPORTS_CHARS", "wait_s": "WAIT_S"}
 SHELL_TOOLS = ("Bash", "PowerShell")
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 LOOKING = frozenset("""cat head tail sed grep rg ls find wc awk echo cd for printf date sleep tr file which where test
@@ -180,12 +173,22 @@ def read_rows(path, tail=None):
     return out
 
 
-def safe_id(nid):
-    return SAFE.sub("_", str(nid or ""))[:80]
+def safe_id(sid):
+    return SAFE.sub("_", str(sid or ""))[:80]
 
 
-def node_dir(home, nid):
-    return os.path.join(home, "phi", "nodes", safe_id(nid))
+def session_dir(home, sid):
+    return os.path.join(home, "phi", "sessions", safe_id(sid))
+
+
+def reports_path(home, sid):
+    """The reports of the sessions `sid` started; with no `sid`, of the top sessions."""
+    return os.path.join(session_dir(home, sid), "reports.jsonl") if sid else os.path.join(home, "phi", "reports.jsonl")
+
+
+def page_path(home, sid):
+    p = os.path.join(session_dir(home, sid), "session.md") if sid else os.path.join(home, "phi", "sessions.md")
+    return p.replace("\\", "/")
 
 
 def configure(home):
@@ -193,11 +196,13 @@ def configure(home):
     for key, name in SETTINGS.items():
         if key in d and type(d[key]) is type(globals()[name]):
             globals()[name] = d[key]
-    if os.environ.get("P4_PHI_STEER") in ("0", "1"):
-        globals()["STEER"] = os.environ["P4_PHI_STEER"] == "1"
+    for env in ("P4_PHI_NEW_TASK", "P4_PHI_STEER"):
+        if os.environ.get(env) in ("0", "1"):
+            globals()["NEW_TASK"] = os.environ[env] == "1"
+            break
 
 
-# --- the app's records: who started whom ---------------------------------------------------------------------------
+# --- the app's records: which session started which ----------------------------------------------------------------
 
 def app_roots():
     """The folders that may hold the app's session records (claude-code-sessions), likeliest first."""
@@ -205,8 +210,7 @@ def app_roots():
     if given:
         return [given]
     out = []
-    exe = os.environ.get("CLAUDE_CODE_EXECPATH") or ""
-    d = os.path.dirname(exe)
+    d = os.path.dirname(os.environ.get("CLAUDE_CODE_EXECPATH") or "")
     for _ in range(6):
         if not d or d == os.path.dirname(d):
             break
@@ -228,18 +232,17 @@ def app_roots():
     return out
 
 
-def app_record(host):
-    """The app's record of a session, {} when there is none to read."""
-    name = safe_id(host) + ".json"
-    if not host or not name.startswith("local_"):
-        return {}
-    if host in RECORDS:
-        return RECORDS[host]
-    RECORDS[host] = d = read_record(name)
-    return d
-
-
 RECORDS = {}
+
+
+def app_record(sid):
+    """The app's record of a session, {} when there is none to read. Read once a process."""
+    name = safe_id(sid) + ".json"
+    if not sid or not name.startswith("local_"):
+        return {}
+    if sid not in RECORDS:
+        RECORDS[sid] = read_record(name)
+    return RECORDS[sid]
 
 
 def read_record(name):
@@ -280,9 +283,10 @@ def record_of_cli(cli):
     return {}
 
 
-def parent_of_record(rec):
-    s = rec.get("spawnedFrom") if isinstance(rec, dict) else None
-    return str(s.get("sessionId") or "") if isinstance(s, dict) else ""
+def spawned_from(d):
+    """The sessionId in a record's or a session.json's `spawnedFrom`, '' for a top session."""
+    s = d.get("spawnedFrom") if isinstance(d, dict) else None
+    return safe_id(s.get("sessionId")) if isinstance(s, dict) and s.get("sessionId") else ""
 
 
 def store_at(folder):
@@ -293,131 +297,141 @@ def store_at(folder):
 
 
 def home_of_record(rec, depth=0):
-    """The store a session's family lives in: its starter's, and its own folder's where nobody started it."""
-    if not rec or depth > LINE_MAX:
+    """The store a session's linked sessions live in: that of the session that started it, and its own folder's
+    for a top session."""
+    if not rec or depth > CHAIN_MAX:
         return ""
-    parent = parent_of_record(rec)
-    if parent:
-        h = home_of_record(app_record(parent), depth + 1)
+    above = spawned_from(rec)
+    if above:
+        h = home_of_record(app_record(above), depth + 1)
         if h:
             return h
     return store_at(rec.get("cwd")) or store_at(rec.get("originCwd"))
 
 
 class Me:
-    """Who a hook or a command is running for: its node id, its CLI session, the app's record, its home."""
+    """The session a hook or a command is running for: its sessionId, its CLI session, the app's record, its home."""
 
-    def __init__(self, payload=None, node="", p4="", hint=""):
+    def __init__(self, payload=None, session="", p4="", hint=""):
         payload = payload or {}
         self.hint = ""
         self.cli = str(payload.get("session_id") or os.environ.get("CLAUDE_CODE_SESSION_ID") or "")
         host = os.environ.get("CLAUDE_CODE_HOST_SESSION_ID") or ""
-        self.rec = app_record(node or host) if (node or host) else record_of_cli(self.cli)
-        self.id = node or host or str(self.rec.get("sessionId") or "") or self.cli
+        self.rec = app_record(session or host) if (session or host) else record_of_cli(self.cli)
+        self.id = session or host or str(self.rec.get("sessionId") or "") or self.cli
         project = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
         self.home = p4 or ""
         if not self.home:
-            parent = parent_of_record(self.rec)
-            if not parent and hint and hint != self.id:
-                parent = self.hint = hint
-            self.home = (home_of_record(app_record(parent)) if parent else "") or store_at(project) \
+            above = spawned_from(self.rec)
+            if not above and hint and hint != self.id:
+                above = self.hint = hint
+            self.home = (home_of_record(app_record(above)) if above else "") or store_at(project) \
                 or home_of_record(self.rec)
 
 
-# --- nodes ---------------------------------------------------------------------------------------------------
+# --- sessions --------------------------------------------------------------------------------------------------------
 
-def load_node(home, nid):
-    return read_json(os.path.join(node_dir(home, nid), "node.json"))
-
-
-def save_node(home, node):
-    write_atomic(os.path.join(node_dir(home, node["id"]), "node.json"),
-                 json.dumps(node, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
+def load_session(home, sid):
+    return read_json(os.path.join(session_dir(home, sid), "session.json")) if sid else {}
 
 
-def ensure_node(home, nid, rec=None, cli="", depth=0, hint=""):
-    """The node, made if new, with its line above it made too (an ancestor this plugin never ran in gets its node
-    from the app's record). node.json's parent is the tree: the record is read for a new node, and for a node that
-    was hung on the base node before its record could be read."""
-    nid = safe_id(nid)
-    node = load_node(home, nid)
-    if nid == ROOT:
-        if not node:
-            node = {"id": ROOT, "parent": "", "title": "the base node of this store", "created": now()}
-            save_node(home, node)
-        return node
+def save_session(home, s):
+    write_atomic(os.path.join(session_dir(home, s["sessionId"]), "session.json"),
+                 json.dumps(s, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
+
+
+def ensure_session(home, sid, rec=None, cli="", depth=0, hint=""):
+    """session.json, made if new, with those of the sessions above it made too (a session this plugin never ran
+    in gets its file from the app's record). `spawnedFrom` there is what the tree is read from: the record sets
+    it for a new session, for one that looked like a top session before its record said otherwise, and for one
+    read from the notes folder. One that was detached or reparented is left as set."""
+    sid = safe_id(sid)
+    s = load_session(home, sid)
     changed = False
-    if not node.get("id"):
-        node = {"id": nid, "parent": "", "title": "", "created": now(), "sessions": [], "goal": "", "seen": 0,
-                "ghosted": {}}
+    if not s.get("sessionId"):
+        s = {"sessionId": sid, "title": "", "createdAt": now(), "cliSessionIds": [], "task": "", "reportsSeen": 0}
         changed = True
-    if not node.get("parent") or (node["parent"] == ROOT or node.get("parent_from") == "hint") and not node.get("moved"):
-        rec = rec if rec is not None else app_record(nid)
-        parent, source = safe_id(parent_of_record(rec)), "record"
-        if not parent and node.get("parent_from") == "hint":
-            parent, source = node["parent"], "hint"
-        if not parent and hint:
-            parent, source = safe_id(hint), "hint"
-        if not parent or parent == nid:
-            parent, source = ROOT, ""
-        if parent != node.get("parent") or source != node.get("parent_from", ""):
-            node["parent"], node["parent_from"] = parent, source
+    held = s.get("spawnedFrom") if isinstance(s.get("spawnedFrom"), dict) else {}
+    source = held.get("source", "")
+    if rec is None and (not held or source == "notes folder"):
+        rec = app_record(sid)
+    if source not in ("detached", "reparented") and (not held or source == "notes folder"):
+        above, src = spawned_from(rec or {}), "record"
+        if not above and source == "notes folder":
+            above, src = spawned_from(s), "notes folder"
+        if not above and hint:
+            above, src = safe_id(hint), "notes folder"
+        if above == sid:
+            above = ""
+        new = {"sessionId": above, "source": src} if above else None
+        if new != (held or None):
+            if new:
+                s["spawnedFrom"] = new
+                chain = (rec or {}).get("startChain")
+                if isinstance(chain, dict):
+                    s["startChain"] = {k: chain.get(k) for k in ("firstSessionId", "depth")}
+            else:
+                s.pop("spawnedFrom", None)
             changed = True
-    title = clean(rec.get("title"))[:120] if rec else ""
-    if title and title != node.get("title"):      # the app titles a session after it has started
-        node["title"] = title
-        changed = True
-    if cli and cli not in node.setdefault("sessions", []):
-        node["sessions"].append(cli)
+    if rec:
+        title = clean(rec.get("title"))[:120]
+        if title and title != s.get("title"):      # the app titles a session after it has started
+            s["title"] = title
+            changed = True
+        if rec.get("cwd") and rec.get("cwd") != s.get("cwd"):
+            s["cwd"] = rec["cwd"]
+            changed = True
+    if cli and cli not in s.setdefault("cliSessionIds", []):
+        s["cliSessionIds"].append(cli)
         changed = True
     if changed:
-        save_node(home, node)
-    if depth < LINE_MAX:
-        if not load_node(home, node["parent"]).get("id"):
-            ensure_node(home, node["parent"], depth=depth + 1)
-    return node
+        save_session(home, s)
+    above = spawned_from(s)
+    if above and depth < CHAIN_MAX and not load_session(home, above).get("sessionId"):
+        ensure_session(home, above, depth=depth + 1)
+    return s
 
 
-def title_of(node):
-    return node.get("title") or cut(clean(node.get("goal")), 60) or str(node.get("id") or "")[:14]
+def title_of(s):
+    return s.get("title") or cut(clean(s.get("task")), 60) or str(s.get("sessionId") or "")[:14]
 
 
-def line_of(home, nid):
-    """The ids above a node, nearest first, the base node left out."""
-    out, cur = [], load_node(home, nid).get("parent") or ""
-    while cur and cur != ROOT and cur not in out and len(out) < LINE_MAX:
+def chain_of(home, sid):
+    """The sessionIds above a session, nearest first: the session that started it, the one that started that."""
+    out, cur = [], spawned_from(load_session(home, sid))
+    while cur and cur not in out and len(out) < CHAIN_MAX:
         out.append(cur)
-        cur = load_node(home, cur).get("parent") or ""
+        cur = spawned_from(load_session(home, cur))
     return out
 
 
-def load_plays(home, nid):
-    """A node's plays, oldest first, each turn once (its latest exit)."""
+def load_turns(home, sid):
+    """A session's turns, oldest first, each turn once (as it last finished)."""
     by = {}
-    for r in read_rows(os.path.join(node_dir(home, nid), "plays.jsonl")):
+    for r in read_rows(os.path.join(session_dir(home, sid), "turns.jsonl")):
         if r.get("id"):
             by[r["id"]] = r
     return list(by.values())
 
 
-def load_notes(home, nid):
-    return read_rows(os.path.join(node_dir(home, nid), "notes.jsonl"))
+def load_notes(home, sid):
+    return read_rows(os.path.join(session_dir(home, sid), "notes.jsonl"))
 
 
-def load_rollup(home, nid, tail=None):
-    return read_rows(os.path.join(node_dir(home, nid), "rollup.jsonl"), tail)
+def load_reports(home, sid, tail=None):
+    return read_rows(reports_path(home, sid), tail)
 
 
-def latest_exits(rows, skip=""):
-    """From rollup rows, each child's latest exit, newest first. A child moved away is dropped."""
+def latest_reports(rows, skip=""):
+    """From the rows of a reports file, each session's latest turn, newest first. A session that left is dropped."""
     by = {}
     for r in rows:
-        child = r.get("child") or r.get("moved")
-        if not child:
+        sid = r.get("sessionId") or r.get("left")
+        if not sid:
             continue
-        by.pop(child, None)
-        if r.get("child") and isinstance(r.get("play"), dict):
-            by[child] = r
+        by.pop(sid, None)
+        if r.get("sessionId") and isinstance(r.get("turn"), dict):
+            by[sid] = r
     return [r for c, r in reversed(list(by.items())) if c != skip]
 
 
@@ -440,8 +454,8 @@ def request_of(prompt):
 
 
 def handed_over(prompt):
-    """Does a message look like a task another session handed over: the wrapper, the family reminder, or the
-    shared notes folder. Such a session has a starter, whether or not the app has recorded it yet."""
+    """Does a message look like a task another session handed over: the wrapper, the linked-sessions reminder, or
+    the shared notes folder. Such a session was started by one, whether or not the app has recorded it yet."""
     text = prompt if isinstance(prompt, str) else ""
     body = text
     while REMINDER.match(body):
@@ -466,7 +480,7 @@ def read_transcript(path):
 
 def last_turn(path):
     """The transcript's last turn whoever asked for it: the last message that carries a request, and every tool
-    call after it. A message of the harness (a child's exit relayed, a notification) opens no turn."""
+    call after it. A message of the harness (a session's report relayed, a notification) opens no turn."""
     cur, calls = None, {}
     for d in read_transcript(path):
         if d.get("isSidechain") or d.get("isMeta"):
@@ -505,7 +519,7 @@ def path_key(p):
 
 
 def run_shape(cmd):
-    """A command as a play's step: past its `cd x &&`, up to its first pipe."""
+    """A command as a turn's step: past its `cd x &&`, up to its first pipe."""
     c = LEAD.sub("", clean(cmd))
     c = re.split(r"\s*(?:2>&1\s*)?\|\s*", c)[0]
     return re.sub(r"\s*2>&1\s*$", "", c).strip()[:200]
@@ -527,10 +541,10 @@ def failure_note(cmd, result):
     return f"`{cut(run_shape(cmd), 80)}` failed: {cut(last, 160)}"
 
 
-def play_of(turn, reply):
-    """A turn as a play: what was asked, the files edited and the commands that worked and the sessions started,
-    in order, the failures met, and how it ended."""
-    steps, avoid = [], []
+def turn_of(turn, report):
+    """A transcript's turn as the row kept for it: the prompt, the files edited and the commands that worked and
+    the sessions started, in order, what failed, and the report."""
+    steps, failed = [], []
 
     def add(to, s):
         if s and s not in to:
@@ -542,36 +556,34 @@ def play_of(turn, reply):
         elif name in SHELL_TOOLS:
             cmd = str(inp.get("command") or "")
             if c.get("failed"):
-                add(avoid, failure_note(cmd, c.get("result")))
+                add(failed, failure_note(cmd, c.get("result")))
             elif program(cmd) not in LOOKING and "<<" not in cmd and len(cmd) <= 400:
                 add(steps, f"ran `{run_shape(cmd)}`")
         elif name.endswith("start_session"):
             add(steps, f"started the session \"{cut(clean(inp.get('title') or inp.get('name')), 80)}\"")
         elif name in ("Agent", "Task"):
             add(steps, f"ran a subagent: {cut(clean(inp.get('description')), 80)}")
-    goal = cut(turn.get("prompt") or "", GOAL_CHARS)
+    prompt = cut(turn.get("prompt") or "", TASK_CHARS)
     uuid = turn.get("uuid") or ""
-    return {"id": uuid or "play-" + hashlib.sha1(goal.encode("utf-8", "replace")).hexdigest()[:12],
-            "goal": goal, "steps": steps[:PLAY_STEPS], "avoid": avoid[:4],
-            "closing": (reply or "").strip()[:CLOSING_CHARS], "state": "open", "check": ""}
+    return {"id": uuid or "turn-" + hashlib.sha1(prompt.encode("utf-8", "replace")).hexdigest()[:12],
+            "prompt": prompt, "steps": steps[:TURN_STEPS], "failed": failed[:4],
+            "report": (report or "").strip()[:REPORT_CHARS], "done": ""}
 
 
-# --- what a session is told ------------------------------------------------------------------------------------------
+# --- what a session is given -----------------------------------------------------------------------------------------
 
-def play_lines(title, p, closing=300, goal=200):
-    how = p.get("state") or "open"
-    if how == "closed" and p.get("check"):
-        how += ", checked by: " + cut(clean(p["check"]), 160)
-    out = [f"- \"{title}\" ({how}; {p.get('time', '')}): {cut(clean(p.get('goal')), goal)}"]
-    if p.get("steps"):
-        out.append("  steps: " + cut("; ".join(p["steps"]), 400))
-    if p.get("children"):
-        out.append("  its sessions: " + cut("; ".join(p["children"]), 300))
-    if p.get("avoid"):
-        out.append("  avoid: " + cut("; ".join(p["avoid"]), 300))
-    if p.get("closing"):
-        text = p["closing"] if closing >= CLOSING_CHARS else clean(p["closing"])
-        out.append("  ended: " + cut(text, closing))
+def turn_lines(title, t, report=300, prompt=200):
+    how = "done: " + cut(clean(t["done"]), 160) if t.get("done") else "not shown done"
+    out = [f"- \"{title}\" ({how}; {t.get('time', '')}): {cut(clean(t.get('prompt')), prompt)}"]
+    if t.get("steps"):
+        out.append("  steps: " + cut("; ".join(t["steps"]), 400))
+    if t.get("sessions"):
+        out.append("  sessions it started: " + cut("; ".join(t["sessions"]), 300))
+    if t.get("failed"):
+        out.append("  failed: " + cut("; ".join(t["failed"]), 300))
+    if t.get("report"):
+        text = t["report"] if report >= REPORT_CHARS else clean(t["report"])
+        out.append("  reported: " + cut(text, report))
     return out
 
 
@@ -580,181 +592,192 @@ def commands():
     return f'python -I -X utf8 "{script}"'
 
 
-def ghost_text(home, node, own=False):
-    """What a session starts from: the goals of the line above it, the notes kept there, the plays made under its
-    parent before it, and with `own` its own plays. '' when none of that exists."""
-    nid, parent = node["id"], node.get("parent") or ROOT
-    line = [load_node(home, x) for x in line_of(home, nid)]
+def background_text(home, s, own=False):
+    """The background a session is given: the tasks of the sessions above it, their notes, the last turn of each
+    other session the same session started (for a top session, of the top sessions before it), and with `own`
+    its own turns. '' when none of that exists."""
+    sid, above = s["sessionId"], spawned_from(s)
+    chain = [load_session(home, x) for x in chain_of(home, sid)]
     body = []
-    goals = [f"- \"{title_of(n)}\": {cut(clean(n.get('goal')), 500 if k == 0 else 200)}"
-             for k, n in enumerate(line) if n.get("goal")]
-    if goals:
-        body += ["The goals above this session, nearest first (this session's task serves the first):"] + goals
+    tasks = [f"- \"{title_of(n)}\": {cut(clean(n.get('task')), 500 if k == 0 else 200)}"
+             for k, n in enumerate(chain) if n.get("task")]
+    if tasks:
+        body += ["Tasks of the sessions above this one, nearest first (this session's task is part of the first):"]
+        body += tasks
     notes = []
-    for n in line:
-        for r in load_notes(home, n["id"]):
+    for n in chain:
+        for r in load_notes(home, n["sessionId"]):
             kind = f"{r['kind']}; " if r.get("kind") else ""
             notes.append(f"- {cut(clean(r.get('claim')), 300)} ({kind}source: {cut(clean(r.get('source')), 120)})")
     if notes:
-        body += ["Established above (do not work these out again):"] + notes[:12]
-    exits = [r for r in latest_exits(load_rollup(home, parent, TAIL_BYTES), skip=nid)[:SIBLINGS * 3]
-             if (load_node(home, r["child"]).get("parent") or ROOT) == parent][:SIBLINGS]
-    if exits:
-        where = "by this repository's sessions before this one" if parent == ROOT else \
-            f"under \"{title_of(line[0]) if line else parent}\" before this session"
-        body += [f"Plays made {where} (a closed one scored; an open one stopped where it says):"]
-        for r in exits:
-            body += play_lines(r.get("title") or r["child"][:14], r["play"])
+        body += ["Notes of the sessions above (already checked; do not work these out again):"] + notes[:12]
+    others = [r for r in latest_reports(load_reports(home, above, TAIL_BYTES), skip=sid)[:OTHERS * 3]
+              if spawned_from(load_session(home, r["sessionId"])) == above][:OTHERS]
+    if others:
+        who = f"the other sessions \"{title_of(chain[0])}\" started" if chain else \
+            "the top sessions in this project before this one"
+        body += [f"The last turn of {who}:"]
+        for r in others:
+            body += turn_lines(r.get("title") or r["sessionId"][:14], r["turn"])
     if own:
-        mine = load_plays(home, nid)[-OWN:]
+        mine = load_turns(home, sid)[-OWN:]
         if mine:
-            body += ["This session's own plays so far:"]
-            for p in reversed(mine):
-                body += play_lines(title_of(node), p)
+            body += ["This session's own turns so far:"]
+            for t in reversed(mine):
+                body += turn_lines(title_of(s), t)
     if not body:
         return ""
-    if parent == ROOT:
-        head = ("phi (p4-phi): this repository's sessions keep their plays on a tree, and this session starts "
-                "from them. Execute what a play holds where it fits; do not work it out again.")
+    if chain:
+        head = (f"phi (p4-phi): background for this session, \"{title_of(s)}\", from the session that started it, "
+                f"\"{title_of(chain[0])}\", and the sessions linked to it. Use what is here where it fits; do not "
+                f"work it out again.")
     else:
-        head = (f"phi (p4-phi): this session is the node \"{title_of(node)}\" of a session tree, started by "
-                f"\"{title_of(line[0]) if line else parent}\". It starts from the memo above it: execute what the "
-                f"memo holds where it fits; do not work it out again.")
-    memo = os.path.join(node_dir(home, parent), "memo.md").replace("\\", "/")
-    tail = (f"The memo above, whole: {memo}. Keep a finding the next session would have to rediscover: "
-            f"`{commands()} note \"<claim>\" --source \"<where it was checked>\"`. When something shows the goal "
-            f"scored: `{commands()} close --check \"<what was run and what it showed>\"`. The exit is memoized "
-            f"either way and handed to the session above.")
-    room = GHOST_CHARS - len(head) - len(tail) - 2
+        head = ("phi (p4-phi): background for this session from the sessions in this project before it. Use what "
+                "is here where it fits; do not work it out again.")
+    tail = (f"The page this comes from: {page_path(home, above)}. Keep a finding the next session would have to "
+            f"work out again: `{commands()} note \"<claim>\" --source \"<where it was checked>\"`. When something "
+            f"shows the task done: `{commands()} done \"<what was run and what it showed>\"`. Each turn's report "
+            f"is kept either way" + (" and reaches the session that started this one in full." if chain else "."))
+    room = BACKGROUND_CHARS - len(head) - len(tail) - 2
     text = "\n".join(body)
     if len(text) > room:
         text = text[:max(0, room - 4)].rsplit("\n", 1)[0] + "\n..."
-    return "\n".join((head, text, tail))[:GHOST_CHARS]
+    return "\n".join((head, text, tail))[:BACKGROUND_CHARS]
 
 
-def rollup_text(home, node):
-    """The exits of this node's children since it last looked, whole, and how many rows that covers."""
-    rows = load_rollup(home, node["id"])
-    seen = node.get("seen") if isinstance(node.get("seen"), int) else 0
-    new = latest_exits(rows[seen:])
+def reports_text(home, s):
+    """The reports of the sessions this session started that finished a turn since it last looked, in full, and
+    how many rows that covers."""
+    rows = load_reports(home, s["sessionId"])
+    seen = s.get("reportsSeen") if isinstance(s.get("reportsSeen"), int) else 0
+    new = latest_reports(rows[seen:])
     if not new:
         return "", len(rows)
-    out = ["phi (p4-phi): exits of the sessions this one started, since it last looked. The app relays 400 "
-           "characters of a report; this is the play."]
-    room = ROLLUP_CHARS - len(out[0])
-    each = max(600, room // len(new))
+    out = ["phi (p4-phi): reports of the sessions this session started that finished a turn since it last looked. "
+           "The app relays the first 400 characters of a report; these are in full."]
+    each = max(600, (REPORTS_CHARS - len(out[0])) // len(new))
     for r in reversed(new):
-        lines = play_lines(r.get("title") or r["child"][:14], r["play"], closing=CLOSING_CHARS, goal=300)
-        text = cut("\n".join(lines), each)
-        memo = os.path.join(node_dir(home, r["child"]), "memo.md").replace("\\", "/")
-        out += [text, f"  its memo: {memo}"]
+        lines = turn_lines(r.get("title") or r["sessionId"][:14], r["turn"], report=REPORT_CHARS, prompt=300)
+        out += [cut("\n".join(lines), each), f"  its page: {page_path(home, r['sessionId'])}"]
     return "\n".join(out), len(rows)
 
 
-def render_memo(home, nid):
-    """memo.md: the node as one page (its goal, notes, plays and children), rewritten from the node's files."""
-    node = load_node(home, nid)
-    if not node.get("id"):
-        return
-    out = [f"# {title_of(node)}", ""]
-    if nid != ROOT:
-        out += [f"Node `{nid}` under `{node.get('parent') or ROOT}`.", ""]
-        if node.get("goal"):
-            out += ["## Goal", "", node["goal"].strip(), ""]
-        notes = load_notes(home, nid)
+def new_task_text(home, s, me, user=True, again=False):
+    """The user's standing instruction for a message about something else: once in full for a CLI session that
+    has a task (and again after a compaction), then a line with the task beside each of the user's messages.
+    '' with no task, and beside the harness's messages."""
+    task = clean(s.get("task"))
+    if not NEW_TASK or not task:
+        return ""
+    told = s.setdefault("newTaskToldAt", {})
+    if not isinstance(told, dict):
+        told = s["newTaskToldAt"] = {}
+    if again or not told.get(me.cli):
+        told[me.cli] = now()
+        RAN["new_task"] = "instruction"
+        return (f"phi (p4-phi): this session's task: \"{cut(task, RULE_TASK)}\" When a message from the user is "
+                f"about something else, do not turn this session to it. Start a session for it with "
+                f"`mcp__ccd_session__start_session` (initiation `user_asked`, context `fork`, so it has this whole "
+                f"conversation and shares this checkout), tell the user in one line which session has it, and "
+                f"stay with the task. This is the user's standing instruction for this project, so the session "
+                f"is started, not offered as a card. Its report comes back here in full. A quick thing (a "
+                f"question, a few tool calls) stays here. When the user says the task itself has changed: "
+                f"`{commands()} task \"<the new task>\"`. This session's page: {page_path(home, s['sessionId'])}.")
+    if not user:
+        return ""
+    RAN["new_task"] = "line"
+    return (f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" If this message is about something "
+            f"else, start a forked session for it and stay with the task; otherwise carry on.")
+
+
+def render_page(home, sid):
+    """session.md: a session as one page (its task, notes, turns and the sessions it started), rewritten from its
+    files. With no `sid`, sessions.md: the top sessions of the project."""
+    out = []
+    if sid:
+        s = load_session(home, sid)
+        if not s.get("sessionId"):
+            return
+        above = spawned_from(s)
+        out = [f"# {title_of(s)}", "",
+               f"Session `{sid}`, started by `{above}`." if above else f"Session `{sid}`, a top session.", ""]
+        if s.get("task"):
+            out += ["## Task", "", s["task"].strip(), ""]
+        notes = load_notes(home, sid)
         if notes:
             out += ["## Notes", ""]
             out += [f"- {clean(r.get('claim'))} (source: {clean(r.get('source'))}; {r.get('time', '')})" for r in notes]
             out.append("")
-        plays = load_plays(home, nid)
-        if plays:
-            out += ["## Plays", ""]
-            for p in plays:
-                out += play_lines(title_of(node), p, closing=1200, goal=400)
+        turns = load_turns(home, sid)
+        if turns:
+            out += ["## Turns", ""]
+            for t in turns:
+                out += turn_lines(title_of(s), t, report=1200, prompt=400)
             out.append("")
-    exits = latest_exits(load_rollup(home, nid, TAIL_BYTES))[:40]
-    if exits:
-        out += ["## Sessions under this node, newest first", ""]
-        for r in exits:
-            out += play_lines(r.get("title") or r["child"][:14], r["play"], closing=600, goal=300)
-            out.append(f"  node: `{r['child']}`")
+    else:
+        out = ["# Top sessions of this project", ""]
+    rows = latest_reports(load_reports(home, sid, TAIL_BYTES))[:40]
+    if rows:
+        if sid:
+            out += ["## Sessions this session started, newest first", ""]
+        for r in rows:
+            out += turn_lines(r.get("title") or r["sessionId"][:14], r["turn"], report=600, prompt=300)
+            out.append(f"  session: `{r['sessionId']}`")
         out.append("")
-    write_atomic(os.path.join(node_dir(home, nid), "memo.md"), "\n".join(out))
+    write_atomic(page_path(home, sid), "\n".join(out))
 
 
 # --- the hooks -------------------------------------------------------------------------------------------------------
 
-def told(node, me, home, own=False):
-    """The ghost, when this CLI session has not been given it under this parent; marks it given."""
-    if not GHOST:
+def given(s, me, home, own=False):
+    """The background, when this CLI session has not been given it under the session that started it; marks it
+    given."""
+    if not BACKGROUND:
         return ""
-    ghosted = node.setdefault("ghosted", {})
-    if not isinstance(ghosted, dict):
-        ghosted = node["ghosted"] = {}
-    if not own and ghosted.get(me.cli) == node.get("parent"):
+    told = s.setdefault("backgroundGivenFor", {})
+    if not isinstance(told, dict):
+        told = s["backgroundGivenFor"] = {}
+    above = spawned_from(s)
+    if not own and told.get(me.cli) == above:
         return ""
-    ghosted[me.cli] = node.get("parent")
-    return ghost_text(home, node, own=own)
+    told[me.cli] = above
+    return background_text(home, s, own=own)
 
 
-def steer_text(home, node, me, owner=True, again=False):
-    """The steer: the rule in full the first time this CLI session has a goal to hold (and again after a
-    compaction), then one line with the goal beside each message of the owner's. '' with no goal, and beside
-    the harness's messages."""
-    goal = clean(node.get("goal"))
-    if not STEER or not goal:
-        return ""
-    steered = node.setdefault("steered", {})
-    if not isinstance(steered, dict):
-        steered = node["steered"] = {}
-    if again or not steered.get(me.cli):
-        steered[me.cli] = now()
-        RAN["steer"] = "rule"
-        memo = os.path.join(node_dir(home, node["id"]), "memo.md").replace("\\", "/")
-        return (f"phi (p4-phi): this session is a node with one goal: \"{cut(goal, STEER_GOAL)}\" "
-                f"When a message of the owner's steers off that goal, do not turn this session to it. Ship it: "
-                f"start a child session for it with `mcp__ccd_session__start_session` (initiation `user_asked`, "
-                f"context `fork`, so the child has this session's exact state and shares its checkout), tell the "
-                f"owner in one line which session has it, and stay on the goal. This is the owner's standing "
-                f"instruction for this repository, so it is started, not offered as a card. The child's exit "
-                f"comes back here whole. What a few tool calls settle is answered here. When the owner says the "
-                f"goal itself has changed, re-aim: `{commands()} goal \"<the new goal>\"`. This node's page: "
-                f"{memo}.")
-    if not owner:
-        return ""
-    RAN["steer"] = "line"
-    return (f"phi (p4-phi): this session's goal is \"{cut(goal, STEER_LINE)}\" If this message steers off it, "
-            f"ship it to a forked child session and stay; otherwise go on.")
+def ran_for(s, me):
+    held = s.get("spawnedFrom") if isinstance(s.get("spawnedFrom"), dict) else {}
+    RAN.update(home=me.home, session=s["sessionId"], spawnedFrom=held.get("sessionId", ""),
+               source=held.get("source", ""), cli=me.cli)
 
 
-def h_arrive(payload):
+def h_session_start(payload):
     me = Me(payload)
     if not me.home or not me.id:
         return None
     configure(me.home)
-    node = ensure_node(me.home, me.id, me.rec, me.cli)
-    RAN.update(home=me.home, node=node["id"], parent=node.get("parent"), cli=me.cli)
+    s = ensure_session(me.home, me.id, me.rec, me.cli)
+    ran_for(s, me)
     source = payload.get("source") or "startup"
-    RAN["source"] = source
-    if source == "startup" and node.get("parent") == ROOT and not node.get("goal") \
+    RAN["start"] = source
+    if source == "startup" and not spawned_from(s) and not s.get("task") \
             and os.environ.get("CLAUDE_CODE_HOST_SESSION_ID"):
-        return None             # the app has not recorded this session's starter yet: the first message tells it
+        return None             # the app has not recorded yet which session started this one: the first message tells
     lost = source in ("compact", "clear")
-    text = told(node, me, me.home, own=lost or len(node.get("sessions") or []) > 1)
-    rule = steer_text(me.home, node, me, owner=False, again=lost) if lost else ""
-    save_node(me.home, node)
+    text = given(s, me, me.home, own=lost or len(s.get("cliSessionIds") or []) > 1)
+    rule = new_task_text(me.home, s, me, user=False, again=lost) if lost else ""
+    save_session(me.home, s)
     return "\n\n".join(p for p in (text, rule) if p)
 
 
-def starter(me, payload):
-    """A handed-over message whose session has no recorded starter yet: wait for the app to write it, and failing
-    that take the starter from the message's notes folder. Returns the Me to go on with."""
+def started_by(me, payload):
+    """A handed-over message whose session has no recorded `spawnedFrom` yet: read it from the message's notes
+    folder, and where the message names none wait for the app to write the record. Returns the Me to go on with."""
     prompt = payload.get("prompt")
-    if parent_of_record(me.rec) or not me.id.startswith("local_") or not handed_over(prompt):
+    if spawned_from(me.rec) or not me.id.startswith("local_") or not handed_over(prompt):
         return me
     if me.home:
-        node = load_node(me.home, me.id)
-        if node.get("goal") or node.get("moved") or node.get("parent") not in (None, "", ROOT):
+        s = load_session(me.home, me.id)
+        if s.get("task") or s.get("spawnedFrom"):
             return me
     m = NOTES_ID.search(prompt if isinstance(prompt, str) else "")
     if m and m.group(1) != me.id:
@@ -768,92 +791,96 @@ def starter(me, payload):
     while time.time() - started < wait:
         time.sleep(0.1)
         RECORDS.clear()
-        if parent_of_record(app_record(me.id)):
+        if spawned_from(app_record(me.id)):
             RAN["waited_ms"] = round((time.time() - started) * 1000)
             return Me(payload)
     RAN["waited_ms"] = round((time.time() - started) * 1000)
     return me
 
 
-def h_prompt(payload):
-    me = starter(Me(payload), payload)
+def h_user_prompt_submit(payload):
+    me = started_by(Me(payload), payload)
     if not me.home or not me.id:
         return None
     configure(me.home)
-    node = ensure_node(me.home, me.id, me.rec, me.cli, hint=me.hint)
-    RAN.update(home=me.home, node=node["id"], parent=node.get("parent"), cli=me.cli,
-               parent_from=node.get("parent_from", ""))
+    s = ensure_session(me.home, me.id, me.rec, me.cli, hint=me.hint)
+    ran_for(s, me)
     req = request_of(payload.get("prompt"))
-    if req and not node.get("goal"):
-        node["goal"] = cut(req, GOAL_CHARS)
-        node["goal_time"] = now()
-    parts = [told(node, me, me.home)]
-    if ROLLUP:
-        text, seen = rollup_text(me.home, node)
-        node["seen"] = seen
+    if req and not s.get("task"):
+        s["task"] = cut(req, TASK_CHARS)
+        s["taskAt"] = now()
+    parts = [given(s, me, me.home)]
+    if REPORTS:
+        text, seen = reports_text(me.home, s)
+        s["reportsSeen"] = seen
         parts.append(text)
-    parts.append(steer_text(me.home, node, me, owner=bool(req)))
-    save_node(me.home, node)
+    parts.append(new_task_text(me.home, s, me, user=bool(req)))
+    save_session(me.home, s)
     return "\n\n".join(p for p in parts if p)
 
 
-def h_exit(payload):
+def h_stop(payload):
     me = Me(payload)
     if not me.home or not me.id:
         return None
     configure(me.home)
-    if not EXIT:
+    if not TURNS:
         return None
-    node = ensure_node(me.home, me.id, me.rec, me.cli)
-    RAN.update(home=me.home, node=node["id"], parent=node.get("parent"), cli=me.cli)
-    reply = payload.get("last_assistant_message") or ""
+    s = ensure_session(me.home, me.id, me.rec, me.cli)
+    ran_for(s, me)
+    report = payload.get("last_assistant_message") or ""
     turn = last_turn(payload.get("transcript_path") or "")
-    if not turn and node.get("goal"):
-        turn = {"prompt": node["goal"], "uuid": "", "calls": []}
+    if not turn and s.get("task"):
+        turn = {"prompt": s["task"], "uuid": "", "calls": []}
     if not turn:
         return None
-    play = play_of(turn, reply if isinstance(reply, str) else "")
-    play.update({"time": now(), "node": node["id"], "session": me.cli})
-    check = node.get("check") if isinstance(node.get("check"), dict) else None
-    if check and clean(check.get("text")):
-        play.update({"state": "closed", "check": clean(check["text"])[:400]})
-    play["children"] = [f"\"{r.get('title') or r['child'][:14]}\": {r['play'].get('state', 'open')}"
-                        for r in latest_exits(load_rollup(me.home, node["id"]))][:PLAY_STEPS]
-    append_line(os.path.join(node_dir(me.home, node["id"]), "plays.jsonl"), play)
-    parent = node.get("parent") or ROOT
-    append_line(os.path.join(node_dir(me.home, parent), "rollup.jsonl"),
-                {"time": play["time"], "child": node["id"], "title": title_of(node), "play": play})
-    node.pop("check", None)
-    if not node.get("goal"):
-        node["goal"] = play["goal"]
-        node["goal_time"] = play["time"]
-    save_node(me.home, node)
-    render_memo(me.home, node["id"])
-    render_memo(me.home, parent)
-    RAN.update(play=play["id"], state=play["state"])
+    row = turn_of(turn, report if isinstance(report, str) else "")
+    row.update({"time": now(), "sessionId": s["sessionId"], "cliSessionId": me.cli})
+    done = s.get("done") if isinstance(s.get("done"), dict) else None
+    if done and clean(done.get("text")):
+        row["done"] = clean(done["text"])[:400]
+    row["sessions"] = [f"\"{r.get('title') or r['sessionId'][:14]}\": "
+                       f"{'done' if r['turn'].get('done') else 'not shown done'}"
+                       for r in latest_reports(load_reports(me.home, s["sessionId"]))][:TURN_STEPS]
+    append_line(os.path.join(session_dir(me.home, s["sessionId"]), "turns.jsonl"), row)
+    above = spawned_from(s)
+    append_line(reports_path(me.home, above),
+                {"time": row["time"], "sessionId": s["sessionId"], "title": title_of(s), "turn": row})
+    s.pop("done", None)
+    if not s.get("task"):
+        s["task"], s["taskAt"] = row["prompt"], row["time"]
+    save_session(me.home, s)
+    render_page(me.home, s["sessionId"])
+    render_page(me.home, above)
+    RAN.update(turn=row["id"], done=bool(row["done"]))
     return None
 
 
-RAN = {}       # what the running hook learned, for its line in the node's log
+RAN = {}       # what the running hook learned, for its line in the session's log
 
 
 def log_run(name, text, started):
-    """One line a hook call in <node>/log.jsonl: what ran, for whom, how much it said and how long it took. This
-    is what the plugin is measured from."""
-    if not RAN.get("home") or not RAN.get("node"):
+    """One line a hook call in <session>/log.jsonl: what ran, for which session, how much it said and how long
+    it took. This is what the plugin is measured from."""
+    if not RAN.get("home") or not RAN.get("session"):
         return
     row = {"time": now(), "hook": name, "said": len(text or ""), "ms": round((time.time() - started) * 1000),
            "host_in_env": bool(os.environ.get("CLAUDE_CODE_HOST_SESSION_ID"))}
-    row.update({k: v for k, v in RAN.items() if k not in ("home", "node")})
-    append_line(os.path.join(node_dir(RAN["home"], RAN["node"]), "log.jsonl"), row)
+    row.update({k: v for k, v in RAN.items() if k not in ("home", "session")})
+    append_line(os.path.join(session_dir(RAN["home"], RAN["session"]), "log.jsonl"), row)
 
 
-HOOKS = {"arrive": ("SessionStart", h_arrive), "prompt": ("UserPromptSubmit", h_prompt), "exit": ("Stop", h_exit)}
+HOOKS = {"session-start": ("SessionStart", h_session_start),
+         "user-prompt-submit": ("UserPromptSubmit", h_user_prompt_submit),
+         "stop": ("Stop", h_stop)}
+OLD_NAMES = {"arrive": "session-start", "prompt": "user-prompt-submit", "exit": "stop"}   # hooks.json of 0.1 and 0.2,
+#                                                                         still loaded in sessions that began then
 
 
 def hook_main(name):
     """A hook never fails a call and says nothing without something to say."""
     try:
+        name = OLD_NAMES.get(name, name)
         if os.environ.get("P4_PHI") == "0" or name not in HOOKS:
             return 0
         raw = sys.stdin.read()
@@ -873,67 +900,70 @@ def hook_main(name):
 
 # --- the commands ----------------------------------------------------------------------------------------------------
 
-def note_add(home, nid, claim, source, kind="", session=""):
+def note_add(home, sid, claim, source, kind="", cli=""):
     claim, source = clean(claim), clean(source)
     if len(claim) < 12:
         raise ValueError("a note is a whole sentence")
     if not source:
         raise ValueError("a note needs its source: the file and line, the command, or the measurement that showed it")
-    if any(clean(r.get("claim")).lower() == claim.lower() for r in load_notes(home, nid)):
+    if any(clean(r.get("claim")).lower() == claim.lower() for r in load_notes(home, sid)):
         return False
-    append_line(os.path.join(node_dir(home, nid), "notes.jsonl"),
-                {"time": now(), "claim": claim[:600], "source": source[:300], "kind": clean(kind), "session": session})
-    render_memo(home, nid)
+    append_line(os.path.join(session_dir(home, sid), "notes.jsonl"),
+                {"time": now(), "claim": claim[:600], "source": source[:300], "kind": clean(kind),
+                 "cliSessionId": cli})
+    render_page(home, sid)
     return True
 
 
-def reparent(home, nid, new):
-    """Move a node under another parent: node.json's parent is rewritten, its latest play is handed to the new
-    parent, and the old parent's rollup notes that it left. The app's own nesting does not follow."""
-    nid, new = safe_id(nid), safe_id(new)
-    node = load_node(home, nid)
-    if not node.get("id") or nid == ROOT:
-        raise ValueError(f"no node {nid}")
-    if new != ROOT:
-        ensure_node(home, new)
-    if new == nid or nid in line_of(home, new):
-        raise ValueError("a node cannot hang under itself or under a node below it")
-    old = node.get("parent") or ROOT
-    if old == new:
+def reparent(home, sid, under, source="reparented"):
+    """Put a session under another one, or with no `under` detach it to a top session: session.json's
+    `spawnedFrom` is rewritten, its latest turn is handed to where it now belongs, and the reports it left behind
+    note that it left. The app's own nesting does not follow, and the app's record does not move it back."""
+    sid, under = safe_id(sid), safe_id(under)
+    s = load_session(home, sid)
+    if not s.get("sessionId"):
+        raise ValueError(f"no session {sid}")
+    if under:
+        ensure_session(home, under)
+        if under == sid or sid in chain_of(home, under):
+            raise ValueError("a session cannot be put under itself or under a session it started")
+    old = spawned_from(s)
+    if old == under:
         return False
-    node["parent"], node["moved"] = new, {"from": old, "time": now()}
-    node.pop("ghosted", None)
-    save_node(home, node)
-    append_line(os.path.join(node_dir(home, old), "rollup.jsonl"), {"time": now(), "moved": nid, "to": new})
-    plays = load_plays(home, nid)
-    if plays:
-        append_line(os.path.join(node_dir(home, new), "rollup.jsonl"),
-                    {"time": now(), "child": nid, "title": title_of(node), "play": plays[-1]})
-    for x in (nid, old, new):
-        render_memo(home, x)
+    s["spawnedFrom"] = {"sessionId": under, "source": source, "from": old, "time": now()}
+    s.pop("backgroundGivenFor", None)
+    save_session(home, s)
+    append_line(reports_path(home, old), {"time": now(), "left": sid, "to": under})
+    turns = load_turns(home, sid)
+    if turns:
+        append_line(reports_path(home, under),
+                    {"time": now(), "sessionId": sid, "title": title_of(s), "turn": turns[-1]})
+    for x in (sid, old, under):
+        render_page(home, x)
     return True
 
 
 def tree_text(home):
-    nodes = {}
-    for p in glob.glob(os.path.join(home, "phi", "nodes", "*", "node.json")):
+    sessions = {}
+    for p in glob.glob(os.path.join(home, "phi", "sessions", "*", "session.json")):
         d = read_json(p)
-        if d.get("id") and d["id"] != ROOT:
-            nodes[d["id"]] = d
-    kids = {}
-    for n in sorted(nodes.values(), key=lambda n: n.get("created", "")):
-        parent = n.get("parent") if n.get("parent") in nodes else ROOT
-        kids.setdefault(parent, []).append(n)
+        if d.get("sessionId"):
+            sessions[d["sessionId"]] = d
+    started = {}
+    for s in sorted(sessions.values(), key=lambda s: s.get("createdAt", "")):
+        above = spawned_from(s)
+        started.setdefault(above if above in sessions else "", []).append(s)
     out = []
 
-    def walk(pid, depth):
-        for n in kids.get(pid, []):
-            plays = load_plays(home, n["id"])
-            state = plays[-1].get("state", "open") if plays else "no play yet"
-            out.append(f"{'  ' * depth}- {title_of(n)} ({n['id']}): {state}, {len(plays)} play{'s' * (len(plays) != 1)}")
+    def walk(above, depth):
+        for s in started.get(above, []):
+            turns = load_turns(home, s["sessionId"])
+            state = ("done" if turns[-1].get("done") else "not shown done") if turns else "no turn yet"
+            out.append(f"{'  ' * depth}- {title_of(s)} ({s['sessionId']}): {state}, "
+                       f"{len(turns)} turn{'s' * (len(turns) != 1)}")
             if depth < 30:
-                walk(n["id"], depth + 1)
-    walk(ROOT, 0)
+                walk(s["sessionId"], depth + 1)
+    walk("", 0)
     return "\n".join(out)
 
 
@@ -942,74 +972,75 @@ def main(argv=None):
     if argv[:1] == ["hook"]:
         return hook_main(argv[1] if len(argv) > 1 else "")
     import argparse
-    ap = argparse.ArgumentParser(description="phi: the memo on the session tree")
+    ap = argparse.ArgumentParser(description="phi: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("note", "close", "goal", "memo", "tree", "ghost", "reparent"):
-        s = sub.add_parser(name)
-        s.add_argument("--p4", default="", help="the store the tree lives in (default: this session's)")
-        s.add_argument("--node", default="", help="the node (default: this session's)")
+    for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent"):
+        p = sub.add_parser(name)
+        p.add_argument("--p4", default="", help="the store the sessions' files live in (default: this session's)")
+        p.add_argument("--session", default="", help="the sessionId (default: this session's)")
         if name == "note":
-            s.add_argument("claim")
-            s.add_argument("--source", default="")
-            s.add_argument("--kind", default="", help="ruled-out, decision, machine, code")
-        if name == "close":
-            s.add_argument("--check", required=True, help="what was run or read that showed the goal scored")
-        if name == "goal":
-            s.add_argument("text")
-        if name == "memo":
-            s.add_argument("which", nargs="?", default="")
+            p.add_argument("claim")
+            p.add_argument("--source", default="")
+            p.add_argument("--kind", default="", help="ruled-out, decision, machine, code")
+        if name in ("done", "task"):
+            p.add_argument("text")
+        if name == "show":
+            p.add_argument("which", nargs="?", default="")
+        if name in ("detach", "reparent"):
+            p.add_argument("moved")
         if name == "reparent":
-            s.add_argument("moved")
-            s.add_argument("parent")
+            p.add_argument("under")
     a = ap.parse_args(argv)
-    me = Me(node=a.node, p4=a.p4)
+    me = Me(session=a.session, p4=a.p4)
     if not me.home or not os.path.isdir(me.home):
         print("phi: no store found; pass --p4 <repository>/.claude/p4", file=sys.stderr)
         return 2
     configure(me.home)
     try:
         if a.cmd == "tree":
-            print(tree_text(me.home) or "no nodes yet")
+            print(tree_text(me.home) or "no sessions yet")
+            return 0
+        if a.cmd == "detach":
+            print("detached: it is a top session now" if reparent(me.home, a.moved, "", "detached")
+                  else "already a top session")
             return 0
         if a.cmd == "reparent":
-            print("moved" if reparent(me.home, a.moved, a.parent) else "already there")
+            print("reparented" if reparent(me.home, a.moved, a.under) else "already there")
             return 0
-        if a.cmd == "memo":
-            nid = safe_id(a.which or me.id)
-            render_memo(me.home, nid)
-            path = os.path.join(node_dir(me.home, nid), "memo.md")
-            if not os.path.exists(path):
-                print(f"phi: no node {nid}", file=sys.stderr)
+        if a.cmd == "show":
+            sid = safe_id(a.which or me.id)
+            render_page(me.home, sid)
+            if not os.path.exists(page_path(me.home, sid)):
+                print(f"phi: no session {sid}", file=sys.stderr)
                 return 2
-            with open(path, encoding="utf-8") as f:
+            with open(page_path(me.home, sid), encoding="utf-8") as f:
                 sys.stdout.write(f.read())
             return 0
         if not me.id:
-            print("phi: this is not a session (no session id in the environment); pass --node", file=sys.stderr)
+            print("phi: this is not a session (no session id in the environment); pass --session", file=sys.stderr)
             return 2
-        node = ensure_node(me.home, me.id, me.rec, me.cli)
+        s = ensure_session(me.home, me.id, me.rec, me.cli)
         if a.cmd == "note":
-            kept = note_add(me.home, node["id"], a.claim, a.source, a.kind, me.cli)
-            print("kept" if kept else "already kept")
-        elif a.cmd == "close":
-            if len(clean(a.check)) < 8:
-                raise ValueError("a check says what was run and what it showed")
-            node["check"] = {"text": clean(a.check)[:400], "time": now()}
-            save_node(me.home, node)
-            print("this turn's play will be kept closed")
-        elif a.cmd == "goal":
-            goal = cut(a.text.strip(), GOAL_CHARS)
-            if len(clean(goal)) < 12:
-                raise ValueError("a goal is a whole sentence")
-            if node.get("goal"):
-                node.setdefault("goals", []).append({"goal": node["goal"], "until": now()})
-            node["goal"], node["goal_time"] = goal, now()
-            node.pop("steered", None)
-            save_node(me.home, node)
-            render_memo(me.home, node["id"])
-            print("this node's goal is changed; the goal before it is kept in node.json")
+            print("kept" if note_add(me.home, s["sessionId"], a.claim, a.source, a.kind, me.cli) else "already kept")
+        elif a.cmd == "done":
+            if len(clean(a.text)) < 8:
+                raise ValueError("say what was run and what it showed")
+            s["done"] = {"text": clean(a.text)[:400], "time": now()}
+            save_session(me.home, s)
+            print("this turn will be kept as done")
+        elif a.cmd == "task":
+            task = cut(a.text.strip(), TASK_CHARS)
+            if len(clean(task)) < 12:
+                raise ValueError("a task is a whole sentence")
+            if s.get("task"):
+                s.setdefault("earlierTasks", []).append({"task": s["task"], "until": now()})
+            s["task"], s["taskAt"] = task, now()
+            s.pop("newTaskToldAt", None)
+            save_session(me.home, s)
+            render_page(me.home, s["sessionId"])
+            print("this session's task is changed; the task before it is kept in session.json")
         else:
-            print(ghost_text(me.home, node, own=True) or "nothing is memoized above this session")
+            print(background_text(me.home, s, own=True) or "the sessions above this one have kept nothing yet")
     except ValueError as e:
         print(f"phi: {e}", file=sys.stderr)
         return 2
