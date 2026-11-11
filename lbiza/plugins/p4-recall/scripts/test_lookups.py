@@ -203,6 +203,15 @@ class Check(Base):
         self.assertIsNone(again)
         self.assertEqual(self.checks(), ["answer", "again"])
 
+    def test_two_earlier_answers_to_the_question_are_both_shown(self):
+        self.record_fetch("t1", found="The page was cut off before the timeout section; nothing about the default "
+                          "value of the narwhal port timeout was in the part received, only the heading of it.")
+        self.record_fetch("t2", ask=ASK + ", reading on from the cut")
+        hso = self.out(run_hook("lookup-check", pre("WebFetch", {"url": URL, "prompt": ASK}, proj=self.proj),
+                                self.proj))["hookSpecificOutput"]
+        self.assertIn("cut off", hso["permissionDecisionReason"])
+        self.assertIn("30 seconds", hso["permissionDecisionReason"])
+
     def test_another_question_about_the_page_runs(self):
         self.record_fetch()
         o = self.out(run_hook("lookup-check", pre("WebFetch", {"url": URL, "prompt": "List the kelp anchor mooring "

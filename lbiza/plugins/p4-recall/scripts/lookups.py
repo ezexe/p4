@@ -74,6 +74,7 @@ MIN_PRECISION = 0.85
 MAX_AGE_DAYS = 30
 FINDING_CHARS = 4000
 SHOWN_CHARS = 1500
+SHOWN_ROWS = 2                   # earlier findings shown for one web call
 LABEL_COS = 0.35                 # a later result this like an earlier finding: the finding would have answered.
 #                                  Measured on the owner's history: the same page asked the same question twice
 #                                  gives results 0.52 alike at the median (a small model writes each answer), and
@@ -464,10 +465,11 @@ def web_match(con, p4, tool, inp, when):
     rows = web_rows(con)
     target, ask = target_of(tool, inp), ranker.tokens(ask_of(tool, inp))
     cands = web_candidates(rows, tool, target)
+    web_match.also = []
     if not cands or not ask:
         return 0.0, None, thr
     idf = idf_from([ranker.tokens(r["ask"]) for r in rows])
-    best, best_row = 0.0, None
+    best, best_row, passed = 0.0, None, []
     for r in cands:
         days = ranker.days_between(r["time"], when)
         if days is not None and days > MAX_AGE_DAYS:
@@ -477,8 +479,13 @@ def web_match(con, p4, tool, inp, when):
             s = lin(web["w"], pair_features(ask, tool, old, ranker.tokens(r["finding"]), days, idf))
         else:
             s = cos(ask, old, idf)
+        if s >= thr:
+            passed.append((s, r))
         if s >= best:                          # the newest of equals
             best, best_row = s, r
+    # a page asked the same thing more than once (a long page read in parts, a first answer that fell short): the
+    # runner-up is shown too, since the best match by the question is not always the fullest answer
+    web_match.also = [r for _, r in sorted(passed, key=lambda t: -t[0]) if r is not best_row][:SHOWN_ROWS - 1]
     return best, best_row, thr
 
 
@@ -561,7 +568,8 @@ def check(p4, payload, when):
             else:
                 if k == "web":
                     score, row, thr = web_match(con, p4, tool, inp, when)
-                    text = web_text(row) if row is not None and score >= thr else ""
+                    found = [row] + getattr(web_match, "also", []) if row is not None and score >= thr else []
+                    text = "\n\n".join(web_text(r) for r in found)
                     shown = row["id"] if text else ""
                 else:
                     score, row, thr = shell_match(con, p4, tool, inp)
