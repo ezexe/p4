@@ -1,7 +1,7 @@
 {
   "name": "p4-phi",
-  "version": "0.1.0",
-  "description": "The memo on the session tree. Every session is a node under the session that started it; every turn's exit is kept as a play, scored or not, and handed whole to the parent; a new session starts from the goals, notes and plays above and beside it. Kept in <project>/.claude/p4/phi/. Nothing is matched by its words.",
+  "version": "0.2.0",
+  "description": "The memo on the session tree. Every session is a node under the session that started it; every turn's exit is kept as a play, scored or not, and handed whole to the parent; a new session starts from the goals, notes and plays above and beside it; a session holds one goal and ships a message that steers off it to a forked child. Kept in <project>/.claude/p4/phi/. Nothing is matched by its words.",
   "author": {
     "name": "ezexe"
   },

@@ -1,6 +1,6 @@
 ---
 name: phi
-description: Work on the session tree's memo. Use when starting a session for part of a goal, when a session you started has ended a turn, when a finding should outlive this session, when something showed the goal scored, or when asked what the tree holds, to print it, or to move a session under another one.
+description: Work on the session tree's memo. Use when a message steers off this session's goal, when starting a session for part of a goal, when a session you started has ended a turn, when a finding should outlive this session, when something showed the goal scored, or when asked what the tree holds, to print it, or to move a session under another one.
 ---
 
 # phi: the memo on the session tree
@@ -15,6 +15,17 @@ Three things happen without you:
 - At your start you are told what you start from: the goals above you, the notes kept there, and the plays made beside you.
 - At every turn's end your turn is kept as a play, scored or not, and handed to your parent.
 - At your next message you are handed, whole, the plays of the sessions you started that ended since you last looked.
+
+## Hold the goal
+
+This session has one goal, its first request.
+When a message of the owner's steers off it, do not turn this session to the new thing.
+
+- **Ship it:** start a child session for it with context `fork`, so the child has this session's exact state and shares its checkout. Start it; do not offer a card.
+- **Say so in one line:** name the session that has it.
+- **Stay:** go on with the goal. The child's exit comes back here whole at your next message.
+- **Answer small things here:** what a few tool calls settle is not a steer.
+- **Re-aim when the goal itself changed:** `goal "<the new goal>"`. The goal before it is kept.
 
 ## What you do
 

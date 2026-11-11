@@ -35,11 +35,20 @@ memo moment fed by the context the birthed ghost adorned".
            worked, the sessions started, the failures, the reply. `closed` when the session ran `close --check`
            in the turn, `open` otherwise. It is appended to the parent's rollup.
 
-Commands for a session: `note "<claim>" --source "<where checked>"`, `close --check "<what showed it scored>"`,
-`memo [node]`, `tree`, `ghost`, `reparent <node> <new parent>`.
+  steer    a session holds one goal, its first request. Turning it to whatever the owner says next is how a session
+           ends up spun around its target, and a new session started by hand for the new thing lacks the state
+           this one built. So the session is told its goal and the rule once (and again after a compaction): a
+           message of the owner's that steers off the goal is shipped to a child session forked from this one,
+           which has this session's exact state and shares its checkout, and this session stays where it was;
+           the child's exit comes back whole. Beside each later message of the owner's goes one line with the
+           goal. The session judges what is off its goal; the hook matches nothing. `goal "<new goal>"` re-aims
+           the node when the owner says the goal itself has changed.
 
-Settings: <home>/phi/phi.json, every key optional: `ghost`, `rollup`, `exit` (false: off), `ghost_chars`,
-`rollup_chars`, `wait_s`. P4_PHI=0 in the environment turns the plugin off.
+Commands for a session: `note "<claim>" --source "<where checked>"`, `close --check "<what showed it scored>"`,
+`goal "<the new goal>"`, `memo [node]`, `tree`, `ghost`, `reparent <node> <new parent>`.
+
+Settings: <home>/phi/phi.json, every key optional: `ghost`, `rollup`, `exit`, `steer` (false: off),
+`ghost_chars`, `rollup_chars`, `wait_s`. P4_PHI=0 in the environment turns the plugin off, P4_PHI_STEER=0 the steer.
 
 Nothing here matches a request to a play by its words: that was built in p4-recall 0.8.17 to 0.8.20, measured
 (the nearest earlier play's files touched again 0.06 to 0.13 of the time) and removed.
@@ -56,6 +65,9 @@ import time
 GHOST = True
 ROLLUP = True
 EXIT = True
+STEER = True
+STEER_GOAL = 400                 # of the goal, in the rule
+STEER_LINE = 160                 # of the goal, in the line beside a message
 GHOST_CHARS = 3000
 ROLLUP_CHARS = 6000
 CLOSING_CHARS = 4000
@@ -69,7 +81,7 @@ TRANSCRIPT_BYTES = 8 * 1024 * 1024
 WAIT_S = 2.0                     # how long a handed-over first message waits for the app to record its starter
 SCAN_RECORDS = 60                # the newest app records searched for a CLI session id, when the host id is missing
 ROOT = "root"
-SETTINGS = {"ghost": "GHOST", "rollup": "ROLLUP", "exit": "EXIT", "ghost_chars": "GHOST_CHARS",
+SETTINGS = {"steer": "STEER", "ghost": "GHOST", "rollup": "ROLLUP", "exit": "EXIT", "ghost_chars": "GHOST_CHARS",
             "rollup_chars": "ROLLUP_CHARS", "wait_s": "WAIT_S"}
 SHELL_TOOLS = ("Bash", "PowerShell")
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
@@ -95,6 +107,7 @@ KINDS = (
 )
 REMINDER = re.compile(r"\A\s*<system-reminder>.*?</system-reminder>\s*", re.S)
 TASK_MARK = re.compile(r"(?m)^Task:\s*$")
+FORK_HEAD = re.compile(r"\A\s*Task \(from the session that started this one\):\s*")
 NOTES_TAIL = re.compile(r"\n\s*Shared notes folder for this group of sessions.*\Z", re.S)
 NOTES_ID = re.compile(r"side-session-notes[\\/]+(local_[0-9A-Za-z-]+)")
 LEAD = re.compile(r"^(?:cd\s+\S+\s*(?:&&|;)\s*)+")
@@ -180,6 +193,8 @@ def configure(home):
     for key, name in SETTINGS.items():
         if key in d and type(d[key]) is type(globals()[name]):
             globals()[name] = d[key]
+    if os.environ.get("P4_PHI_STEER") in ("0", "1"):
+        globals()["STEER"] = os.environ["P4_PHI_STEER"] == "1"
 
 
 # --- the app's records: who started whom ---------------------------------------------------------------------------
@@ -410,14 +425,16 @@ def latest_exits(rows, skip=""):
 
 def request_of(prompt):
     """The request inside a message. A session started by another session gets its task under leading
-    <system-reminder> blocks and a `Background ... Task:` wrapper; this takes those off. '' when nothing is left or
-    what is left is the harness speaking."""
+    <system-reminder> blocks and a `Background ... Task:` wrapper, and a forked one under the line `Task (from the
+    session that started this one):`; this takes those off. '' when nothing is left or what is left is the
+    harness speaking."""
     text = prompt if isinstance(prompt, str) else ""
     while REMINDER.match(text):
         text = REMINDER.sub("", text, count=1)
     m = TASK_MARK.search(text)
     if m and text.lstrip().startswith("Background"):
         text = text[m.end():]
+    text = FORK_HEAD.sub("", text, count=1)
     text = NOTES_TAIL.sub("", text).strip()
     return "" if text.startswith("<") else text
 
@@ -429,7 +446,7 @@ def handed_over(prompt):
     body = text
     while REMINDER.match(body):
         body = REMINDER.sub("", body, count=1)
-    return bool(body.lstrip().startswith("Background") and TASK_MARK.search(body)
+    return bool(body.lstrip().startswith("Background") and TASK_MARK.search(body) or FORK_HEAD.match(body)
                 or NOTES_ID.search(text) or "Linked sessions now" in text[:4000])
 
 
@@ -680,6 +697,36 @@ def told(node, me, home, own=False):
     return ghost_text(home, node, own=own)
 
 
+def steer_text(home, node, me, owner=True, again=False):
+    """The steer: the rule in full the first time this CLI session has a goal to hold (and again after a
+    compaction), then one line with the goal beside each message of the owner's. '' with no goal, and beside
+    the harness's messages."""
+    goal = clean(node.get("goal"))
+    if not STEER or not goal:
+        return ""
+    steered = node.setdefault("steered", {})
+    if not isinstance(steered, dict):
+        steered = node["steered"] = {}
+    if again or not steered.get(me.cli):
+        steered[me.cli] = now()
+        RAN["steer"] = "rule"
+        memo = os.path.join(node_dir(home, node["id"]), "memo.md").replace("\\", "/")
+        return (f"phi (p4-phi): this session is a node with one goal: \"{cut(goal, STEER_GOAL)}\" "
+                f"When a message of the owner's steers off that goal, do not turn this session to it. Ship it: "
+                f"start a child session for it with `mcp__ccd_session__start_session` (initiation `user_asked`, "
+                f"context `fork`, so the child has this session's exact state and shares its checkout), tell the "
+                f"owner in one line which session has it, and stay on the goal. This is the owner's standing "
+                f"instruction for this repository, so it is started, not offered as a card. The child's exit "
+                f"comes back here whole. What a few tool calls settle is answered here. When the owner says the "
+                f"goal itself has changed, re-aim: `{commands()} goal \"<the new goal>\"`. This node's page: "
+                f"{memo}.")
+    if not owner:
+        return ""
+    RAN["steer"] = "line"
+    return (f"phi (p4-phi): this session's goal is \"{cut(goal, STEER_LINE)}\" If this message steers off it, "
+            f"ship it to a forked child session and stay; otherwise go on.")
+
+
 def h_arrive(payload):
     me = Me(payload)
     if not me.home or not me.id:
@@ -692,9 +739,11 @@ def h_arrive(payload):
     if source == "startup" and node.get("parent") == ROOT and not node.get("goal") \
             and os.environ.get("CLAUDE_CODE_HOST_SESSION_ID"):
         return None             # the app has not recorded this session's starter yet: the first message tells it
-    text = told(node, me, me.home, own=source in ("compact", "clear") or len(node.get("sessions") or []) > 1)
+    lost = source in ("compact", "clear")
+    text = told(node, me, me.home, own=lost or len(node.get("sessions") or []) > 1)
+    rule = steer_text(me.home, node, me, owner=False, again=lost) if lost else ""
     save_node(me.home, node)
-    return text
+    return "\n\n".join(p for p in (text, rule) if p)
 
 
 def starter(me, payload):
@@ -743,6 +792,7 @@ def h_prompt(payload):
         text, seen = rollup_text(me.home, node)
         node["seen"] = seen
         parts.append(text)
+    parts.append(steer_text(me.home, node, me, owner=bool(req)))
     save_node(me.home, node)
     return "\n\n".join(p for p in parts if p)
 
@@ -894,7 +944,7 @@ def main(argv=None):
     import argparse
     ap = argparse.ArgumentParser(description="phi: the memo on the session tree")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("note", "close", "memo", "tree", "ghost", "reparent"):
+    for name in ("note", "close", "goal", "memo", "tree", "ghost", "reparent"):
         s = sub.add_parser(name)
         s.add_argument("--p4", default="", help="the store the tree lives in (default: this session's)")
         s.add_argument("--node", default="", help="the node (default: this session's)")
@@ -904,6 +954,8 @@ def main(argv=None):
             s.add_argument("--kind", default="", help="ruled-out, decision, machine, code")
         if name == "close":
             s.add_argument("--check", required=True, help="what was run or read that showed the goal scored")
+        if name == "goal":
+            s.add_argument("text")
         if name == "memo":
             s.add_argument("which", nargs="?", default="")
         if name == "reparent":
@@ -945,6 +997,17 @@ def main(argv=None):
             node["check"] = {"text": clean(a.check)[:400], "time": now()}
             save_node(me.home, node)
             print("this turn's play will be kept closed")
+        elif a.cmd == "goal":
+            goal = cut(a.text.strip(), GOAL_CHARS)
+            if len(clean(goal)) < 12:
+                raise ValueError("a goal is a whole sentence")
+            if node.get("goal"):
+                node.setdefault("goals", []).append({"goal": node["goal"], "until": now()})
+            node["goal"], node["goal_time"] = goal, now()
+            node.pop("steered", None)
+            save_node(me.home, node)
+            render_memo(me.home, node["id"])
+            print("this node's goal is changed; the goal before it is kept in node.json")
         else:
             print(ghost_text(me.home, node, own=True) or "nothing is memoized above this session")
     except ValueError as e:

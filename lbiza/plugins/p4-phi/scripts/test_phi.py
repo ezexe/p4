@@ -10,7 +10,9 @@ as a play, open without a check and closed with one, once per turn; the exit rol
 to the parent whole at its next message, once; a child starting from its parent's goal, notes and its siblings'
 plays; a top session starting from the plays of the sessions before it, with no likeness of words involved; a note
 refused without a source; a node moved under another parent; a node's own plays after a compaction; silence where
-there is nothing to say; a hook never failing a call; hooks.json's shape.
+there is nothing to say; a session told its one goal and what to do with a message that steers off it (ship it
+to a forked child and stay), once in full and then in a line beside each of the owner's messages, never beside the
+harness's; the goal changed by its command; a hook never failing a call; hooks.json's shape.
 """
 
 import json
@@ -72,7 +74,7 @@ class Tree:
     def env(self, host, proj=None, **more):
         env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE_", "P4_PHI"))}
         env.update({"CLAUDE_PLUGIN_ROOT": ROOT, "CLAUDE_PROJECT_DIR": proj or self.proj,
-                    "P4_PHI_APP_SESSIONS": os.path.join(self.tmp, "app"), "P4_PHI_WAIT": "0", **more})
+                    "P4_PHI_APP_SESSIONS": os.path.join(self.tmp, "app"), "P4_PHI_WAIT": "0", "P4_PHI_STEER": "0", **more})
         if host:
             env["CLAUDE_CODE_HOST_SESSION_ID"] = host
             env["CLAUDE_CODE_SESSION_ID"] = CLI.get(host, host)
@@ -134,6 +136,10 @@ class Requests(unittest.TestCase):
     def test_a_handed_over_task_is_read_out_of_its_wrapper(self):
         self.assertTrue(phi.request_of(HANDED).startswith(BRIEF))
         self.assertEqual(phi.request_of("fix the port"), "fix the port")
+        forked = "Task (from the session that started this one):\n" + BRIEF
+        self.assertEqual(phi.request_of(forked), BRIEF)
+        self.assertTrue(phi.handed_over(forked))
+        self.assertFalse(phi.handed_over("fix the port"))
         self.assertEqual(phi.request_of("<side-sessions-event>a child ended</side-sessions-event>"), "")
         self.assertEqual(phi.request_of("<system-reminder>x</system-reminder>"), "")
         self.assertEqual(phi.request_of(None), "")
@@ -467,6 +473,73 @@ class Ghosts(unittest.TestCase):
         r = self.t.hook("arrive", KID, {"hook_event_name": "SessionStart", "source": "startup"}, P4_PHI="0")
         self.assertEqual(r.stdout.strip(), "")
         self.assertFalse(os.path.exists(os.path.join(self.t.p4, "phi", "nodes", KID)))
+
+
+class Steer(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP, title="Narwhal exporter")
+        self.t.record(KID, TOP, "Fix the dropped row")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def say(self, host, prompt, **more):
+        return context(self.t.hook("prompt", host, {"hook_event_name": "UserPromptSubmit", "prompt": prompt},
+                                   P4_PHI_STEER="1", **more))
+
+    def test_the_rule_comes_once_with_the_goal_and_then_a_line(self):
+        first = self.say(TOP, GOAL)
+        self.assertIn(GOAL, first)
+        self.assertIn("start_session", first)
+        self.assertIn("fork", first)
+        self.assertIn("stay", first)
+        second = self.say(TOP, "also, what colour should the fence be?")
+        self.assertIn(GOAL, second)
+        self.assertLess(len(second), 400)
+        self.assertNotIn("start_session", second)
+        self.assertNotIn("fence", second)                 # the goal is the first request, not the newest words
+        log = phi.read_rows(os.path.join(self.t.p4, "phi", "nodes", TOP, "log.jsonl"))
+        self.assertEqual([r.get("steer") for r in log], ["rule", "line"])
+
+    def test_the_harness_speaking_gets_no_line(self):
+        self.say(TOP, GOAL)
+        self.assertEqual(self.say(TOP, "<side-sessions-event>a child ended</side-sessions-event>"), "")
+        self.assertEqual(self.say(TOP, "<task-notification>done</task-notification>"), "")
+
+    def test_a_child_is_told_its_goal_is_its_brief(self):
+        self.say(TOP, GOAL)
+        text = self.say(KID, HANDED)
+        self.assertIn(BRIEF, text)
+        self.assertIn("start_session", text)
+
+    def test_the_rule_comes_again_after_a_compaction(self):
+        self.say(TOP, GOAL)
+        r = self.t.hook("arrive", TOP, {"hook_event_name": "SessionStart", "source": "compact"}, P4_PHI_STEER="1")
+        text = context(r)
+        self.assertIn(GOAL, text)
+        self.assertIn("start_session", text)
+
+    def test_the_goal_is_changed_by_its_command(self):
+        self.say(TOP, GOAL)
+        r = self.t.cli(TOP, "goal", "Make the narwhal importer read the ports table back")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        n = self.t.node(TOP)
+        self.assertEqual(n["goal"], "Make the narwhal importer read the ports table back")
+        self.assertEqual(n["goals"][0]["goal"], GOAL)             # the goal before it is kept
+        self.assertIn("importer", self.say(TOP, "go on"))
+        self.assertNotEqual(self.t.cli(TOP, "goal", "x").returncode, 0)
+
+    def test_off_in_the_stores_settings(self):
+        write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"steer": False}))
+        r = self.t.hook("prompt", TOP, {"hook_event_name": "UserPromptSubmit", "prompt": GOAL})
+        self.assertEqual(r.stdout.strip(), "")
+        env = {k: v for k, v in self.t.env(TOP).items() if k != "P4_PHI_STEER"}
+        r = subprocess.run(["sh", RUN, "prompt"], input=json.dumps({"session_id": CLI[TOP], "cwd": self.t.proj,
+                                                                    "prompt": "and the next part"}),
+                           capture_output=True, text=True, env=env, timeout=60)
+        self.assertEqual(r.stdout.strip(), "")
 
 
 class NeverFails(unittest.TestCase):
