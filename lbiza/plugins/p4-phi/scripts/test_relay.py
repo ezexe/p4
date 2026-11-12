@@ -17,6 +17,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import pathfilter  # noqa: E402
 import relay  # noqa: E402
 from test_phi import GRAND, KID, KID2, TOP, Tree, context, write  # noqa: E402
 
@@ -222,6 +223,24 @@ class ThreeSessions(unittest.TestCase):
         staged = subprocess.run(["git", "-C", t.p4, "diff", "--cached", "--name-only"], capture_output=True,
                                 text=True).stdout
         self.assertIn(f"phi/sessions/{B}/notes.jsonl", staged, "after the first time, staged for the next commit")
+        root = pathfilter.project_of(t.p4)
+        committed = subprocess.run(["git", "-C", t.p4, "show", f"HEAD:phi/sessions/{A}/session.json"],
+                                   capture_output=True, text=True).stdout
+        on_disk = open(os.path.join(t.p4, "phi", "sessions", A, "session.json"), encoding="utf-8").read()
+        self.assertIn(root, on_disk.replace("\\\\", "/"), "the file on disk names this machine's root")
+        self.assertIn("{project}", committed, "PL1: git holds the root as {project}")
+        self.assertNotIn(root.lower(), committed.lower().replace("\\\\", "/"))
+
+    def test_the_path_filter_round_trips_every_spelling(self):
+        root = "E:/projects/x"
+        text = ('{"cwd": "E:\\\\projects\\\\x", "a": "e:/projects/x/lib/a.py", "b": "/e/projects/x/b", '
+                '"c": "/mnt/e/projects/x", "d": "E:/projects/xy/no", "e": "C:/Users/me/tmp/f"}')
+        out = pathfilter.clean(text, root)
+        self.assertEqual(out.count("{project}"), 4)
+        self.assertIn("E:/projects/xy/no", out, "a longer name is not the root")
+        self.assertIn("C:/Users/me/tmp/f", out, "a path outside the project stays")
+        self.assertIn('"a": "E:/projects/x/lib/a.py"', pathfilter.smudge(out, root))
+        self.assertEqual(pathfilter.project_of("E:/projects/x/.claude/p4"), root)
 
     def test_overlapping_shards_are_told_on_both_sides(self):
         t = self.t

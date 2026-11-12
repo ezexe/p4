@@ -32,6 +32,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 
 MARKS = ("deprecates:", "replaces:")
 PATH_RE = re.compile(r"`([^`\s]+)`|((?:[A-Za-z]:)?[\w.~-]*[\\/][\w.\\/*~-]+)")
@@ -736,6 +737,33 @@ IGNORED = ("phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/session
 TRACKED_MARK = "p4-phi-tracked"
 
 
+FILTER_ATTR = "phi/** filter=p4path"
+
+
+def _path_filter(home):
+    """The store's git runs pathfilter.py on phi/ (PL1): set in this machine's git config, which names this machine's
+    python and plugin, and in .gitattributes, which every machine shares. True when .gitattributes changed."""
+    py = sys.executable.replace("\\", "/")
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pathfilter.py").replace("\\", "/")
+    for kind in ("clean", "smudge"):
+        want = f'"{py}" -I "{script}" {kind}'
+        have = _git(home, "config", "--local", "--get", f"filter.p4path.{kind}")
+        if not have or have.stdout.strip() != want:
+            _git(home, "config", "--local", f"filter.p4path.{kind}", want)
+    ga = os.path.join(home, ".gitattributes")
+    try:
+        with open(ga, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        text = ""
+    if FILTER_ATTR in {x.strip() for x in text.splitlines()}:
+        return False
+    with open(ga, "a", encoding="utf-8", newline="\n") as f:
+        f.write(("" if not text or text.endswith("\n") else "\n") + "# the project's root as {project} in git (p4-phi)\n"
+                + FILTER_ATTR + "\n")
+    return True
+
+
 def _ignore_lines(home):
     gi = os.path.join(home, ".gitignore")
     try:
@@ -754,8 +782,8 @@ def _ignore_lines(home):
 
 def track(home, first_only=False):
     """Stage phi/ in the store's git; the first time, commit it on its own. Returns True when it committed. Only
-    when the store's p4.json sets phi.track: until the tracked files hold no path of this machine (PL1 of the
-    marketplace test session), a store that syncs to a remote must not take them."""
+    when the store's p4.json sets phi.track. The project's root goes into git as {project} through the store's
+    path filter (PL1), so another machine's checkout names its own files."""
     try:
         import p4conf
         if not (p4conf.section(home, "phi", write=False) or {}).get("track"):
@@ -771,10 +799,11 @@ def track(home, first_only=False):
     if first_only and not first:
         return False
     changed = _ignore_lines(home)
-    _git(home, "add", "-A", "--", "phi", ".gitignore" if changed else "phi")
+    attrs = _path_filter(home)
+    _git(home, "add", "-A", "--", "phi", *([".gitignore"] if changed else []), *([".gitattributes"] if attrs else []))
     if not first:
         return False
-    paths = ["phi"] + ([".gitignore"] if changed else [])
+    paths = ["phi"] + ([".gitignore"] if changed else []) + ([".gitattributes"] if attrs else [])
     staged = _git(home, "diff", "--cached", "--name-only", "--", *paths)
     if staged and staged.stdout.strip():
         _git(home, "-c", "user.name=p4", "-c", "user.email=p4@localhost", "commit", "-q", "--no-verify", "-m",
