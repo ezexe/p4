@@ -346,9 +346,17 @@ DEPENDS = re.compile(r"\b(after|then|once|using|uses|based on|depends? on|follow
 WAITS = re.compile(r"\b(wait(?:s|ing)?|until|confirm\w*|verif\w*|can go|when\b[^.]*\blands?|tell|notify|relay\w*|"
                    r"send|ask|hand (?:off|over)|report back)\b", re.I)   # SP2: a step that waits on or relays work
 QUICK_WORDS = 4               # a step of fewer content words is a quick thing, done here
-LANDS = re.compile(r"^\W*(?:run\b[^,.;]*\b(?:tests?|suites?|checks?)|tests?|verify|check|report|review|wrap)\b"
-                   r"|\b(?:commit|merge|push|ship|release|land|fast-forward)\b", re.I)   # checks or lands others' work
-MANAGES = re.compile(r"\b(?:un)?(?:archiv|relay|messag|start|stop|review|check|brief|spawn|ask|tell|nudg)\w*\b"
+LANDS = re.compile(r"^\W*(?:run\b[^,.;]*\b(?:tests?|suites?|checks?)|report|wrap)\b"
+                   r"|^\W*(?:tests?|verify|check|review)\b(?!\s*#?\d)(?=[^.;:]*\b(?:own|landed|merged|committed|"
+                   r"pushed|work|changes?|diff|results?|commits?|suites?|tests?|build|outcome|fix(?:es)?|it|them)\b)"
+                   r"|\b(?:commit|merge|push|ship|release|land|fast-forward)\b", re.I)
+# checks or lands the session's own work. A check of anything else is work: "Check 1: nothing hidden in AppData" was
+# kept on a top session as landing work, though it was one of the checks its children were for
+ORCHESTRATES = re.compile(r"^\W*(?:start|run|kick\s*off|launch)\s+(?!writing|adding|implementing|making)"
+                          r"(?:[\w'’-]+\s+){0,5}?(?:checks?|tests?|sessions?)\b", re.I)
+# starts a check, test or session, which is orchestration: "Start the owner's-eye acceptance check" was advised as work
+MANAGES = re.compile(r"\b(?:un)?(?:archiv|relay|messag|start|stop|review|check|brief|spawn|ask|tell|nudg|queu|send|"
+                     r"sent|pass|hand)\w*\b"
                      r"[^.;]*?\b(?:child(?:ren)?|(?:sub-?)?sessions?)\b", re.I)   # manages a child session: orchestration
 
 
@@ -369,6 +377,8 @@ def judge(plan, cwd):
             kept.append((a, f"waits on or relays other work (\"{wait.group(0)}\")"))
         elif LANDS.search(text):
             kept.append((a, "checks or lands the other steps' work"))
+        elif ORCHESTRATES.search(text):
+            kept.append((a, "starts a check, test or session, which is orchestration"))
         elif MANAGES.search(text):
             kept.append((a, "manages a child session"))
         elif shared:
@@ -409,8 +419,9 @@ def split_advice(home, s, plan, owner_turn, cap):
                 f"Every step stays here as a sub-step. {judged}")
     route = ("Start each now with `mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, "
              "`use_worktree: false`, on this session's branch" if owner_turn else
-             "This turn was started by another session, so propose each as a card: `initiation` `own_initiative`, "
-             "`context` `fork`, `use_worktree: false`, which the user starts with a click")
+             "This turn was started by another session, so the app refuses `user_asked`: write each as a start "
+             "request, `phi.py request \"<title>\" --brief \"<the whole brief>\"`, which the next turn the user "
+             "begins, in any session of this store, starts as this session's child; ask the user nothing")
     stay = ("; ".join(f"{a} ({why})" for a, why in kept)) or "none"
     return (f"phi (p4-phi): steps {named} can each run on their own: no path another step names, nothing leaning "
             f"on another step, more than a quick thing. {route}; one child per step, its brief that step's slice: "
@@ -434,6 +445,8 @@ def top_groups(plan, cwd):
         wait = WAITS.search(text)
         if LANDS.search(text):
             kept.append((st["addr"], "checks or lands the work"))
+        elif ORCHESTRATES.search(text):
+            kept.append((st["addr"], "starts a check, test or session, which is orchestration"))
         elif MANAGES.search(text):
             kept.append((st["addr"], "manages a child session, which is orchestration"))
         elif wait:
@@ -483,8 +496,9 @@ def top_advice(home, s, plan, owner_turn, cap):
                 f"Staying here meanwhile: every step.")
     route = ("Start each now with `mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, "
              "`use_worktree: false`, on this session's branch" if owner_turn else
-             "This turn was started by another session, so propose each as a card: `initiation` `own_initiative`, "
-             "`context` `fork`, `use_worktree: false`, which the user starts with a click")
+             "This turn was started by another session, so the app refuses `user_asked`: write each as a start "
+             "request, `phi.py request \"<title>\" --brief \"<the whole brief>\"`, which the next turn the user "
+             "begins, in any session of this store, starts as this session's child; ask the user nothing")
     return (f"{head} Hand its work steps to child sessions, one child each: {named}. {route}. Each brief is its "
             f"steps' words, their paths and what they must leave done, and says \"archive when done\", so the child "
             f"leaves its outcome here as a replaces: note and is named for archiving when it finishes. Staying "

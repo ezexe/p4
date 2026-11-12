@@ -1,0 +1,146 @@
+"""starts.py: start requests, the children a session wants but cannot start, carried by the store.
+
+The app refuses `mcp__ccd_session__start_session` with `initiation` `user_asked` in a turn the user did not begin:
+a child's turn that another session's message started, or an app event. Such a session used to fall back to a card
+or ask the user to type "go". Instead it writes each child it wants as a start request into the store,
+`phi.py request "<title>" --brief "<brief>"`, and carries on. At the next turn the user's own words begin, in any
+session of the same store, that session is handed every pending request, one line each with the exact call. When
+the start happens, the brief's marker line tells phi, at the child's first message, whose child it is: phi records
+the requester as its parent, so the child's spawnedFrom, its relays and its archive line go there. The app keeps
+the starter as the parent in its own nesting, claude-code#109282. A request not started within EXPIRE_S is dropped.
+
+<home>/phi/start-requests.jsonl holds one row a change: `request` with the brief, `claimed` when a start_session
+call carrying its marker is about to run, `started` when the child's first message arrived.
+"""
+
+import hashlib
+import json
+import os
+import re
+import time
+
+import relay
+
+EXPIRE_S = 24 * 3600            # a request no user's turn has started by then is dropped
+CLAIM_S = 15 * 60               # a claimed request whose child never arrived is handed again after this
+MARK_RE = re.compile(r"phi start request (req-[0-9a-f]{10}) for (\S+?)\.?(?:\s|$)")
+ISSUE = "claude-code#109282"
+
+
+def path_of(home):
+    return os.path.join(home, "phi", "start-requests.jsonl")
+
+
+def _append(home, row):
+    p = path_of(home)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def marker(rid, requester):
+    return f"phi start request {rid} for {requester}."
+
+
+def state(home, at=None):
+    """{id: request row, with `claimed` (by, at) and `started` (child) folded in} of every request on file."""
+    out = {}
+    for r in relay._rows(path_of(home)):
+        rid = r.get("id")
+        if not isinstance(rid, str):
+            continue
+        if r.get("kind") == "request":
+            out[rid] = dict(r)
+        elif rid in out and r.get("kind") == "claimed":
+            out[rid]["claimed"] = {"by": r.get("by"), "at": r.get("at")}
+        elif rid in out and r.get("kind") == "started":
+            out[rid]["started"] = r.get("child")
+    return out
+
+
+def pending(home, at=None):
+    """The requests still to start, oldest first: not started, not past EXPIRE_S, and not claimed in the last
+    CLAIM_S."""
+    at = time.time() if at is None else at
+    out = []
+    for r in state(home).values():
+        if r.get("started") or at - float(r.get("at") or 0) > EXPIRE_S:
+            continue
+        c = r.get("claimed") or {}
+        if c and at - float(c.get("at") or 0) < CLAIM_S:
+            continue
+        out.append(r)
+    return sorted(out, key=lambda r: float(r.get("at") or 0))
+
+
+def add(home, requester, title, brief, context="fresh", at=None):
+    """Keep a start request -> (its id, True when new). The same brief from the same session, still pending, is
+    kept once."""
+    title, brief = " ".join(str(title or "").split()), str(brief or "").strip()
+    if len(title) < 3:
+        raise ValueError("a start request needs the child's title")
+    if len(" ".join(brief.split())) < 20:
+        raise ValueError("a start request needs the child's whole brief")
+    rid = "req-" + hashlib.sha1(f"{requester}\n{title}\n{brief}".encode("utf-8", "replace")).hexdigest()[:10]
+    if any(r.get("id") == rid for r in pending(home, at)):
+        return rid, False
+    at = time.time() if at is None else at
+    _append(home, {"kind": "request", "id": rid, "at": at, "time": time.strftime("%Y-%m-%d %H:%M"),
+                   "requester": requester, "requesterTitle": relay._title(relay._session(home, requester)),
+                   "title": title, "brief": brief, "context": "fork" if context == "fork" else "fresh"})
+    return rid, True
+
+
+def call_of(r):
+    """The exact start_session input that starts a request. Always fresh: a fork would carry the starter's
+    conversation, not the requester's."""
+    return {"initiation": "user_asked", "title": r["title"], "context": "fresh", "use_worktree": False,
+            "prompt": r["brief"] + "\n\n" + marker(r["id"], r["requester"])}
+
+
+def hand_text(home, sid, at=None):
+    """The lines a session is handed at a turn the user began: each pending request with its exact call. ''
+    when none is pending."""
+    rows = pending(home, at)
+    if not rows:
+        return ""
+    lines = [f"- \"{r['title']}\" for \"{r.get('requesterTitle') or r['requester']}\" ({r['requester']}): "
+             f"`mcp__ccd_session__start_session` with {json.dumps(call_of(r), ensure_ascii=False)}" for r in rows]
+    return ("phi (p4-phi): start requests from sessions whose turns the user did not begin, so the app refused "
+            "them `user_asked`. This turn the user began, so start each now, with exactly the call given, before "
+            "the rest of this turn's work:\n" + "\n".join(lines) + "\n"
+            f"The app keeps this session as each child's parent in its own nesting, {ISSUE}; phi records the "
+            f"requester as the parent, so the child's spawnedFrom, its relays and its archive line go to the "
+            f"requester. Pass nothing on: the requester gets the child's reports in full.")
+
+
+def requested_text(rid, new):
+    return ((f"kept as start request {rid}" if new else f"start request {rid} was already kept") +
+            ": the next turn the user begins, in any session of this store, starts it with `user_asked`, and phi "
+            "makes it this session's child, its spawnedFrom, relays and archive line coming here. Do not ask the "
+            "user to type anything or click a card; carry on with the rest of the task.")
+
+
+def claim(home, prompt, by, at=None):
+    """A start_session call carrying a request's marker is about to run: the request is not handed again for
+    CLAIM_S. Returns the request id, '' when the prompt carries none."""
+    m = MARK_RE.search(str(prompt or ""))
+    if not m or m.group(1) not in state(home):
+        return ""
+    _append(home, {"kind": "claimed", "id": m.group(1), "by": by, "at": time.time() if at is None else at})
+    return m.group(1)
+
+
+def requester_of(home, prompt):
+    """(request id, requester) a started session's first message names by its marker; ('', '') for none."""
+    m = MARK_RE.search(str(prompt or ""))
+    if not m:
+        return "", ""
+    r = state(home).get(m.group(1))
+    if not r or r.get("requester") != m.group(2):
+        return "", ""
+    return m.group(1), r["requester"]
+
+
+def started(home, rid, child, at=None):
+    _append(home, {"kind": "started", "id": rid, "child": child, "at": time.time() if at is None else at})

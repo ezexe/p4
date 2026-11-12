@@ -52,7 +52,7 @@ def _read_json(path):
 
 def _write_json(path, d):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
+    tmp = f"{path}.{os.getpid()}.tmp"            # one writer's temp file never another's
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(d, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
     os.replace(tmp, path)
@@ -589,10 +589,23 @@ def _short(s, n):
 
 # --- routing ---------------------------------------------------------------------------------------------------------
 
+def names_nothing(p, home, base=""):
+    """True when a path names no one shard or scope: the project's root, the store, a folder above either, or a
+    drive's root. A brief that names the project names everything in it, so it is no route and no fork's share (the
+    owner's acceptance check of 2026-11-12: the project root routed a brief falsely and advised fork six times)."""
+    p = norm(p)
+    if not p or p == "/" or re.fullmatch(r"[a-z]:/?", p, re.I):
+        return True
+    h = norm(home) if home else ""
+    roots = [x for x in (h, norm(os.path.dirname(os.path.dirname(h))) if h else "", norm(base) if base else "") if x]
+    return any(covers(p, r) for r in roots)
+
+
 def owners(home, sid, text, base):
-    """[(sessionId, title, pattern)] of the other sessions whose shard holds a path the message names, the deepest
-    shard first: those are the nodes the message belongs to."""
-    named = paths_in(text, base)
+    """[(sessionId, title, pattern)] of the other live sessions whose shard holds a path the message names, the
+    deepest shard first: those are the nodes the message belongs to. An archived or retired session owns nothing,
+    and a path naming the whole project names no shard."""
+    named = [n for n in paths_in(text, base) if not names_nothing(n, home, base)]
     if not named:
         return []
     every = _sessions(home)
@@ -608,9 +621,11 @@ def owners(home, sid, text, base):
         below |= grow
     out = []
     for oid, s in every.items():
-        if oid == sid or oid in above or oid in below:
+        if oid == sid or oid in above or oid in below or gone(home, s):
             continue
         for pat in shard_of(s):
+            if names_nothing(pat, home, base):
+                continue
             if any(covers(pat, n) or covers(n, pat) for n in named):
                 out.append((oid, _title(s), pat))
                 break
@@ -630,7 +645,7 @@ def shards_line(home, sid):
     """The other sessions' shards in a few words, for the standing instruction; '' when none declared one."""
     every = _sessions(home)
     out = [f"\"{_title(s)}\" ({oid}): {', '.join(shard_of(s)[:3])}" for oid, s in sorted(every.items())
-           if oid != sid and shard_of(s)]
+           if oid != sid and shard_of(s) and not gone(home, s)]
     return "; ".join(out[:6])
 
 
@@ -668,8 +683,8 @@ def advise_start(home, parent, tool_input, transcript_bytes):
     s = _session(home, parent)
     base = s.get("cwd") or ""
     brief = " ".join(str(tool_input.get(k) or "") for k in ("prompt", "background", "title"))
-    child = paths_in(brief, base)
-    scope = scope_of(home, parent)
+    child = [c for c in paths_in(brief, base) if not names_nothing(c, home, base)]
+    scope = [p for p in scope_of(home, parent) if not names_nothing(p, home, base)]
     share = (sum(1 for p in scope if any(overlap(p, c) for c in child)) / len(scope)) if scope and child else 0.0
     short = transcript_bytes <= FORK_MAX_BYTES
     mb = transcript_bytes / (1024 * 1024)
@@ -985,9 +1000,9 @@ def retire(home, parent, sid, s, by, version, now):
     left = ", ".join(show(f, base) for f in (d.get("files") or [])[:8]) or "no file changes"
     heads = ", ".join(show_head(h, base) for h in d.get("heads") or []) or "no heads"
     claim = (f"replaces: \"{_title(s)}\" ({sid}) as a live node. What it left in place stays true: {left}, at "
-             f"{heads}; its last report: \"{_short(last.get('report'), 300)}\". Its picture of the tree is "
+             f"{heads}. " + findings_of(last) + " Its picture of the tree is "
              f"superseded by \"{title}\": \"{_short(m.get('claim'), 300)}\".")
-    row = {"time": now, "claim": claim[:1200], "source": f"phi stale-node retirement, anchor v{version}",
+    row = {"time": now, "claim": claim[:FINDINGS_CHARS + 1600], "source": f"phi stale-node retirement, anchor v{version}",
            "kind": "decision", "cliSessionId": ""}
     path = os.path.join(_dir(home, parent), "notes.jsonl")
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1000,16 +1015,62 @@ def retire(home, parent, sid, s, by, version, now):
     _pend_archive(home, parent, sid, s, "stale")
 
 
+class locked:
+    """A lock file beside `path`, held while a read-modify-write of it runs. Waits up to LOCK_WAIT_S, and takes over
+    a lock older than LOCK_STALE_S, so a crashed hook never blocks the next one."""
+
+    def __init__(self, path):
+        self.lock = path + ".lock"
+        self.held = False
+
+    def __enter__(self):
+        import time
+        os.makedirs(os.path.dirname(self.lock), exist_ok=True)
+        end = time.time() + LOCK_WAIT_S
+        while True:
+            try:
+                os.close(os.open(self.lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                self.held = True
+                return self
+            except FileExistsError:
+                try:
+                    if time.time() - os.path.getmtime(self.lock) > LOCK_STALE_S:
+                        os.remove(self.lock)
+                        continue
+                except OSError:
+                    continue
+                if time.time() > end:
+                    return self                   # never block a hook for good: go on unlocked
+                time.sleep(0.02)
+            except OSError:
+                return self
+
+    def __exit__(self, *exc):
+        if self.held:
+            try:
+                os.remove(self.lock)
+            except OSError:
+                pass
+        return False
+
+
+LOCK_WAIT_S = 3.0
+LOCK_STALE_S = 10.0
+
+
 def _pend_archive(home, parent, sid, s, kind):
-    """The parent's next message names this child to archive (stale_text)."""
+    """The parent's next message names this child to archive (stale_text). Under a lock: two children retired at
+    the same minute each read-modify-wrote the parent's session.json, and the later write lost the earlier child,
+    so the parent was never told to archive it (check 6, 2026-11-12)."""
     ppath = os.path.join(_dir(home, parent), "session.json")
-    pd = _read_json(ppath)
-    if pd:
-        pend = pd.setdefault("staleChildren", [])
-        pend[:] = [x for x in pend if not (isinstance(x, dict) and x.get("id") == sid)]
-        pend.append({"id": sid, "title": _title(s), "kind": kind})
-        pd["staleTold"] = [x for x in pd.get("staleTold") or [] if x != sid]
-        _write_json(ppath, pd)
+    with locked(ppath):
+        pd = _read_json(ppath)
+        if pd:
+            pend = pd.setdefault("staleChildren", [])
+            pend[:] = [x for x in pend if not (isinstance(x, dict) and x.get("id") == sid)]
+            pend.append({"id": sid, "title": _title(s), "kind": kind})
+            pd["staleTold"] = [x for x in pd.get("staleTold") or [] if x != sid]
+            _write_json(ppath, pd)
 
 
 DISPOSABLE = re.compile(r"\barchive(?:d)?\s+(?:it\s+|this session\s+)?when\s+(?:it(?:'s| is)\s+|you(?:'re| are)\s+)?"
@@ -1052,6 +1113,28 @@ def outcome(home, sid, s):
     return files, heads_, commits, still
 
 
+FINDINGS_CHARS = 3000          # of a retired child's final report, kept in its replaces: note
+BARE = re.compile(r"^\W*(?:\w+\s+){0,4}(?:is\s+)?(?:done|finished|complete[d]?)(?:\s+and\s+reported)?\W*$", re.I)
+
+
+def findings_of(last):
+    """A retired child's findings from its final turn: the shown-done line, and its report in full up to
+    FINDINGS_CHARS, from the turn's earlier messages when the last one only says it is done. Says so when the turn
+    left none; never a bare "done"."""
+    done = " ".join(str(last.get("done") or "").split())
+    report = str(last.get("report") or "").strip()
+    said = str(last.get("said") or "").strip()
+    if said and (not report or len(report) < 400 or BARE.match(report)):
+        report = said
+    if BARE.match(report or ""):
+        report = ""
+    out = f"Shown done: \"{_short(done, 400)}\". " if done and not BARE.match(done) else ""
+    if report:
+        cut = report if len(report) <= FINDINGS_CHARS else "... " + report[-(FINDINGS_CHARS - 4):]
+        return out + f"Its findings, from its final report: \"{cut}\"."
+    return out + "Its final turn left no report text with findings: read its transcript before relying on it."
+
+
 def retire_done(home, parent, sid, s, now):
     """A disposable child whose work is over: its outcome kept as one replaces: note on its parent, it left out of
     the relay, the anchors and the down-lines, and the parent told at its next message to archive it. Returns True
@@ -1067,9 +1150,9 @@ def retire_done(home, parent, sid, s, now):
     claim = (f"replaces: \"{_title(disk)}\" ({sid}) as a live node: it finished and was started to be archived "
              f"when done. Changed: " + (", ".join(show(f, base) for f in files[:10]) or "no files")
              + (" ..." if len(files) > 10 else "") + ". Heads: " + (", ".join(heads_) or "none") + ". Commits: "
-             + ("; ".join(commits) or "none") + ". Still open: " + ("; ".join(still) or "nothing") +
-             f". Its last report: \"{_short(last.get('done') or last.get('report'), 300)}\".")
-    row = {"time": now, "claim": claim[:1600], "source": "phi archive-when-done retirement",
+             + ("; ".join(commits) or "none") + ". Still open: " + ("; ".join(still) or "nothing") + ". "
+             + findings_of(last))
+    row = {"time": now, "claim": claim[:FINDINGS_CHARS + 2000], "source": "phi archive-when-done retirement",
            "kind": "decision", "cliSessionId": ""}
     npath = os.path.join(_dir(home, parent), "notes.jsonl")
     os.makedirs(os.path.dirname(npath), exist_ok=True)

@@ -73,6 +73,7 @@ import node as nd  # noqa: E402  (a session's place in the tree, which recall re
 import p4conf  # noqa: E402  (the store's layout: each plugin's files in .claude/p4/<plugin>/)
 import plans  # noqa: E402  (each session's plan with step addresses; the parent's anchor is the plan tree)
 import relay  # noqa: E402  (shards, deltas, anchors: linked sessions kept in step while they work)
+import starts  # noqa: E402  (start requests: children a session wants but cannot start, carried by the store)
 
 BACKGROUND = True
 REPORTS = True
@@ -443,7 +444,7 @@ def ensure_session(home, sid, rec=None, cli="", depth=0, hint=""):
     source = held.get("source", "")
     if rec is None and (not held or source == "notes folder"):
         rec = app_record(sid)
-    if source not in ("detached", "reparented") and (not held or source == "notes folder"):
+    if source not in ("detached", "reparented", "requested") and (not held or source == "notes folder"):
         above, src = spawned_from(rec or {}), "record"
         if not above and source == "notes folder":
             above, src = spawned_from(s), "notes folder"
@@ -593,10 +594,14 @@ def last_turn(path):
                 c = "\n".join(b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text")
             req = request_of(c)
             if req:
-                cur = {"prompt": req, "uuid": str(d.get("uuid") or ""), "calls": [],
+                cur = {"prompt": req, "uuid": str(d.get("uuid") or ""), "calls": [], "texts": [],
                        "time": str(d.get("timestamp") or "")[:16].replace("T", " ")}
         elif d.get("type") == "assistant" and cur is not None:
+            if isinstance(c, str) and c.strip():
+                cur["texts"].append(c.strip())
             for b in c if isinstance(c, list) else []:
+                if isinstance(b, dict) and b.get("type") == "text" and str(b.get("text") or "").strip():
+                    cur["texts"].append(str(b["text"]).strip())
                 if isinstance(b, dict) and b.get("type") == "tool_use":
                     call = {"name": str(b.get("name") or ""), "result": "", "failed": False,
                             "input": b.get("input") if isinstance(b.get("input"), dict) else {}}
@@ -660,6 +665,19 @@ def turn_of(turn, report):
     return {"id": uuid or "turn-" + hashlib.sha1(prompt.encode("utf-8", "replace")).hexdigest()[:12],
             "prompt": prompt, "steps": steps[:TURN_STEPS], "failed": failed[:4],
             "report": (report or "").strip()[:REPORT_CHARS], "done": ""}
+
+
+def said_of(turn, report):
+    """Every message the turn wrote, joined and cut from the front to REPORT_CHARS, for when its findings came in a
+    message before its last. Check 2's kept report was only "Check 2 is done and reported", and its findings were in
+    the message before. '' when the last message is all the turn wrote."""
+    texts = [t for t in turn.get("texts") or [] if isinstance(t, str) and t.strip()]
+    if not texts or (len(texts) == 1 and texts[0].strip() == (report or "").strip()):
+        return ""
+    whole = "\n\n".join(texts)
+    if whole.strip() == (report or "").strip():
+        return ""
+    return whole[-REPORT_CHARS:]
 
 
 # --- what a session is given -----------------------------------------------------------------------------------------
@@ -787,14 +805,20 @@ def new_top_first_act():
 def new_top_route(owner_turn=True):
     """How a top session starts a new top session for a topic outside its task."""
     how = ("Start it with `mcp__ccd_session__start_session`, `initiation` `user_asked`" if owner_turn else
-           "This turn was started by another session, so propose it as a card: `mcp__ccd_session__start_session`, "
-           "`initiation` `own_initiative`, which the user starts with a click")
+           f"This turn was started by another session, so the app refuses `user_asked`: write it as a start request, "
+           f"{request_cmd()}, which the next turn the user begins in any session of this store starts, without "
+           f"asking the user anything")
     return (f"{how}, `context` `fresh`, `use_worktree: false`; its brief: the topic, the user's words quoted, and "
             f"the lines \"{NEW_TOP_BRIEF} {new_top_first_act()}\" Both moves are needed: the app's detach, else it "
             f"stays nested under this session and reports here, and phi's, which phi also makes at its first hook "
             f"on that line. If it has not left this session's family by its first report, call "
             f"`mcp__ccd_session_mgmt__detach_session` with its id yourself. In the root every top session relays to "
             f"the others as siblings.")
+
+
+def request_cmd():
+    """The command that keeps a start request, as the lines that advise it give it."""
+    return f'`{commands()} request "<title>" --brief "<the whole brief>"`'
 
 
 def depth_of(home, s):
@@ -836,8 +860,9 @@ def split_text(home, s, prompt):
                 "chain can settle is answered, not waited on.")
     return ("phi (p4-phi): this turn was started by another session, not the user, so the app refuses "
             "`mcp__ccd_session__start_session` with `user_asked`. Work in it that is a task of its own, outside "
-            "this session's task, goes on a card: `initiation` `own_initiative`, `context` `fork`, which the user "
-            "starts with a click. Do the rest here; a question the chain can settle is answered, not waited on.")
+            f"this session's task, is written as a start request, {request_cmd()}: the next turn the user begins, "
+            "in any session of this store, starts it as this session's child. Do not ask the user to type anything "
+            "or click a card. Do the rest here; a question the chain can settle is answered, not waited on.")
 
 
 def new_task_text(home, s, me, user=True, again=False):
@@ -1127,7 +1152,7 @@ def nudge_step(home, s):
     plan = plans.load(home, s["sessionId"])
     st = plans.step_of(plan, plan.get("current") or "") if plan.get("steps") else None
     text = str((st or {}).get("content") or "")
-    if (not st or st.get("status") == "completed" or plans.LANDS.search(text) or plans.WAITS.search(text)
+    if (not st or st.get("status") == "completed" or plans.LANDS.search(text) or plans.ORCHESTRATES.search(text) or plans.WAITS.search(text)
             or plans.MANAGES.search(text)):
         return None
     return None if nudge_key(st) in (s.get("nudged") or []) else st
@@ -1374,6 +1399,17 @@ def h_user_prompt_submit(payload):
         s = load_session(me.home, s["sessionId"])
         RAN["new_top"] = True
         detached_now = True
+    rid, asker = starts.requester_of(me.home, payload.get("prompt")) if not load_turns(me.home, s["sessionId"]) \
+        else ("", "")
+    if rid:                                        # a start request's child: the requester's, not the starter's
+        if not detached_now and asker != s["sessionId"] and spawned_from(s) != asker:
+            try:
+                reparent(me.home, s["sessionId"], asker, "requested")
+                RAN["requested_by"] = asker
+            except ValueError:
+                pass
+            s = load_session(me.home, s["sessionId"])
+        starts.started(me.home, rid, s["sessionId"])
     req = request_of(payload.get("prompt"))
     s["turnBy"] = "user" if req else (
         "session" if re.search(r"<cross-session-message\b", str(payload.get("prompt") or "")) else "event")
@@ -1404,6 +1440,10 @@ def h_user_prompt_submit(payload):
     s["staleTold"] = (list(s.get("staleTold") or []) + [x.get("id") for x in pend if isinstance(x, dict)])[-50:]
     if stale:
         parts.insert(0, stale)
+    asked = starts.hand_text(me.home, s["sessionId"]) if req and not handed_over(payload.get("prompt")) else ""
+    if asked:                                      # the owner began this turn: it carries the sessions' start requests
+        parts.insert(0, asked)
+        RAN["start_requests"] = asked.count("\n- ")
     if detached_now:
         parts.insert(0, "phi (p4-phi): this session's brief marks it a new top session, so phi detached it into the "
                         "root at this first message. Now call `mcp__ccd_session_mgmt__detach_session` with `\"self\"` "
@@ -1442,6 +1482,9 @@ def h_stop(payload):
         return None
     row = turn_of(turn, report if isinstance(report, str) else "")
     row.update({"time": now(), "sessionId": s["sessionId"], "cliSessionId": me.cli})
+    said = said_of(turn, row["report"])
+    if said:
+        row["said"] = said
     done = s.get("done") if isinstance(s.get("done"), dict) else None
     if done and clean(done.get("text")):
         row["done"] = clean(done["text"])[:400]
@@ -1516,6 +1559,9 @@ def h_start_advice(payload):
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     if inp.get("proposal_id") and not inp.get("prompt"):
         return None                                 # starting a proposal already made: nothing to decide
+    if starts.claim(me.home, inp.get("prompt"), me.id):
+        RAN["claimed"] = True                       # a start request's call, given exactly: the requester decided
+        return None
     wanted = "fork" if str(inp.get("context") or "fresh") == "fork" else "fresh"
     try:
         size = os.path.getsize(payload.get("transcript_path") or "")
@@ -1864,7 +1910,8 @@ def main(argv=None):
     import argparse
     ap = argparse.ArgumentParser(description="phi: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable"):
+    for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
+                 "request"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in (default: this session's)")
         p.add_argument("--session", default="", help="the sessionId (default: this session's)")
@@ -1884,6 +1931,11 @@ def main(argv=None):
             p.add_argument("paths", nargs="*", help="paths or globs this session alone may change; none shows it")
         if name == "reparent":
             p.add_argument("under")
+        if name == "request":
+            p.add_argument("title", help="the child's title")
+            p.add_argument("--brief", default="", help="the child's whole brief")
+            p.add_argument("--brief-file", default="", help="a file holding the brief")
+            p.add_argument("--context", default="fresh", choices=("fresh", "fork"))
     a = ap.parse_args(argv)
     me = Me(session=a.session, p4=a.p4)
     if not me.home or not os.path.isdir(me.home):
@@ -1927,6 +1979,18 @@ def main(argv=None):
             print("kept as this session's shard: " + ", ".join(relay.shard_of(load_session(me.home, s["sessionId"]))))
             for line in lines:
                 print("phi: " + line)
+            return 0
+        if a.cmd == "request":
+            brief = a.brief
+            if a.brief_file:
+                with open(a.brief_file, encoding="utf-8") as f:
+                    brief = f.read()
+            save_session(me.home, s)
+            rid, new = starts.add(me.home, s["sessionId"], a.title, brief, a.context)
+            print(starts.requested_text(rid, new))
+            if a.context == "fork":
+                print("phi: a start request is always fresh: a fork would carry the starter's conversation, not "
+                      "this session's, so the brief must say all the child needs.")
             return 0
         if a.cmd == "disposable":
             s["disposable"] = True

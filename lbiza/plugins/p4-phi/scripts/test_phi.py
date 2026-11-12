@@ -595,17 +595,18 @@ class NewTask(unittest.TestCase):
         self.assertEqual(self.say(TOP, "<side-sessions-event>a session finished a turn</side-sessions-event>"), "")
         self.assertEqual(self.say(TOP, "<task-notification>done</task-notification>"), "")
 
-    def test_a_turn_another_session_started_is_told_to_split_by_a_card(self):
-        """The app refuses user_asked in a turn the user's words did not start: a split goes on an own_initiative card."""
+    def test_a_turn_another_session_started_is_told_to_split_by_a_start_request(self):
+        """The app refuses user_asked in a turn the user's words did not start: a split is a start request in the store."""
         self.say(TOP, TASK)
         text = self.say(TOP, '<cross-session-message from="local_x">please also look at Y</cross-session-message>')
-        self.assertIn("own_initiative", text)
-        self.assertIn("`context` `fresh`", text, "a top session's card is a new top session")
+        self.assertIn(" request \"<title>\" --brief", text, "a start request, not a card")
+        self.assertNotIn("own_initiative", text)
         self.assertIn(phi.NEW_TOP_BRIEF, text)
         self.assertEqual(self.say(TOP, "<side-sessions-event>a session finished</side-sessions-event>"), "")
         self.say(KID, HANDED)
         kid = self.say(KID, '<cross-session-message from="local_x">please also look at Y</cross-session-message>')
-        self.assertIn("`context` `fork`", kid, "a child's card is unchanged")
+        self.assertIn(" request \"<title>\" --brief", kid, "a child's split is a start request too")
+        self.assertIn("Do not ask the user to type anything", kid)
 
     def test_a_deep_or_full_session_starts_no_session(self):
         """The caps: three deep in the tree, or eight live children."""

@@ -290,6 +290,34 @@ class ThreeSessions(unittest.TestCase):
         self.assertNotIn("Send it there", context(t.say(TOP, f"look at {self.x('lib', 'y.py')}")),
                          "a parent's shard covers its children's: the parent is not routed down")
 
+    def test_an_archived_session_owns_no_shard_and_is_not_listed(self):
+        """Check 6: archived local_42ccf928 was still a routing target and still in the shards-now list."""
+        t = self.t
+        t.cli(A, "shard", self.x("lib"))
+        self.assertIn(A, relay.shards_line(t.p4, B))
+        rec = os.path.join(t.app, A + ".json")
+        d = json.loads(open(rec, encoding="utf-8").read())
+        d["isArchived"] = True
+        write(rec, json.dumps(d))
+        self.assertEqual(relay.owners(t.p4, B, f"please fix {self.x('lib', 'y.py')}", t.proj), [])
+        self.assertNotIn(A, relay.shards_line(t.p4, B))
+        self.assertNotIn("Send it there", context(t.say(B, f"please fix {self.x('lib', 'y.py')} too")))
+
+    def test_the_project_root_the_store_and_a_drive_name_no_shard(self):
+        """Check 6: a brief naming the project root was routed to a shard under it, and fork advised six times."""
+        t = self.t
+        t.cli(A, "shard", self.x("lib"))
+        for whole in (t.proj, t.p4, os.path.dirname(t.proj), os.path.splitdrive(t.proj)[0] + "/"):
+            self.assertEqual(relay.owners(t.p4, B, f"work in `{whole}` on the docs", t.proj), [], whole)
+        self.assertEqual(len(relay.owners(t.p4, B, f"work in `{t.proj}` on `{self.x('lib', 'y.py')}`", t.proj)), 1,
+                         "a real path beside the root is still routed")
+        t.cli(TOP, "shard", self.x("docs"))
+        advised, why = relay.advise_start(t.p4, TOP, {"prompt": f"Check one thing in `{t.proj}`, read-only"}, 10 * 1024)
+        self.assertEqual(advised, "fresh", why)
+        self.assertIn("names no path", why)
+        self.assertTrue(relay.names_nothing(relay.norm(t.proj), t.p4, t.proj))
+        self.assertFalse(relay.names_nothing(self.x("lib"), t.p4, t.proj))
+
     def test_nothing_new_is_quiet(self):
         t = self.t
         t.stop(A, "plain turn", uuid="a1")

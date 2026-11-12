@@ -276,12 +276,13 @@ class TreeOfPlans(unittest.TestCase):
         self.assertIn("Every step stays here as a sub-step", ctx)
         self.assertNotIn("user_asked", ctx)
 
-    def test_in_a_turn_another_session_began_the_advice_is_cards(self):
+    def test_in_a_turn_another_session_began_the_advice_is_start_requests(self):
         self.t.say(B, "Do the three parts")
         self.t.say(B, '<cross-session-message from="local_x">go on</cross-session-message>')
         ctx = self.plan(B, self.three())
-        self.assertIn("`initiation` `own_initiative`", ctx)
-        self.assertNotIn("user_asked", ctx)
+        self.assertIn("write each as a start request, `phi.py request", ctx)
+        self.assertNotIn("`initiation` `user_asked`", ctx)
+        self.assertNotIn("own_initiative", ctx)
 
     def test_a_child_waiting_on_a_question_the_chain_can_settle_is_flagged_up(self):
         """Act-don't-wait: the parent hears of a child's open question that is not the user's to answer."""
@@ -648,6 +649,72 @@ class TopOrchestrates(unittest.TestCase):
         self.assertIn("Archive them now with `mcp__ccd_session_mgmt__archive_session`", line)
         self.assertIn(C, line.split("finished, started to be archived when done")[1])
         self.assertNotIn("finished, started to be archived", context(t.say(TOP, "and then")), "said once")
+
+    def test_a_numbered_check_is_work_and_starting_a_check_is_orchestration(self):
+        """Check 6: "Check 1: nothing hidden in AppData" was kept on the top as landing work, and "Start the
+        owner's-eye acceptance check" was advised as work."""
+        groups, kept = plans.top_groups({"steps": [
+            {"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate((
+                "Check 1: nothing hidden in AppData", "Start the owner's-eye acceptance check",
+                "Check the session's own landed work", "Kick off the review session",
+                "Run the docs check", "Start the dev server and port the CLI in src/cli.py"))]}, "")
+        self.assertEqual([[st["addr"] for st in g] for g in groups], [["1"], ["6"]])
+        why = dict(kept)
+        self.assertEqual(why["2"], "starts a check, test or session, which is orchestration")
+        self.assertEqual(why["3"], "checks or lands the work")
+        self.assertIn("4", why)
+        self.assertIn("5", why)
+
+    def test_queueing_sending_passing_or_handing_to_a_session_is_orchestration(self):
+        groups, kept = plans.top_groups({"steps": [
+            {"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate((
+                "Queue the memory-patch flag for the p4-phi fixer session",
+                "Pass the scratchpad findings to the temportal session", "Hand step 3 to a child",
+                "Pass the parser output to the formatter in src/fmt.py"))]}, "")
+        self.assertEqual([[st["addr"] for st in g] for g in groups], [["4"]])
+        self.assertEqual([a for a, _ in kept], ["1", "2", "3"])
+
+    def test_two_children_retired_at_once_are_both_named_for_archiving(self):
+        """Check 6: two unlocked read-modify-writes of the parent's session.json lost one child."""
+        import threading
+        home = self.t.p4
+        ids = [f"local_race{k:04d}" for k in range(8)]
+        threads = [threading.Thread(target=relay._pend_archive, args=(home, TOP, i, {"title": i}, "done"))
+                   for i in ids]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
+        pend = relay._session(home, TOP).get("staleChildren") or []
+        self.assertEqual(sorted(x["id"] for x in pend), ids)
+        self.assertFalse(os.path.exists(os.path.join(relay._dir(home, TOP), "session.json.lock")))
+
+    def test_a_retired_childs_note_keeps_the_findings_of_its_final_report(self):
+        """Check 2: the replaces: note kept only "Check 2 is done and reported", the findings being in the message
+        before it."""
+        t, C = self.t, self.C
+        t.record(C, TOP, title="check 2")
+        t.say(C, HANDED_DISPOSABLE)
+        t.cli(C, "done", "Check 2 is done and reported")
+        findings = "Finding: the relay drops the third row because flush_rows stops one short."
+        path = os.path.join(self._tmp.name, "c2.jsonl")
+        lines = [{"type": "user", "message": {"role": "user", "content": "Run check 2"}, "uuid": "c2",
+                  "timestamp": "2026-11-12T19:00:00.000Z"},
+                 {"type": "assistant", "message": {"content": [{"type": "text", "text": findings}]}},
+                 {"type": "assistant", "message": {"content": [{"type": "text", "text": "Check 2 is done and reported."}]}}]
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(json.dumps(x) for x in lines) + "\n")
+        r = t.hook("stop", C, {"hook_event_name": "Stop", "transcript_path": path,
+                               "last_assistant_message": "Check 2 is done and reported."})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        notes = [n["claim"] for n in relay._rows(os.path.join(relay._dir(t.p4, TOP), "notes.jsonl"))
+                 if n["claim"].startswith("replaces:") and C in n["claim"]]
+        self.assertEqual(len(notes), 1, notes)
+        self.assertIn(findings, notes[0])
+        self.assertIn("Its findings, from its final report", notes[0])
+        bare = relay.findings_of({"done": "done", "report": "Done."})
+        self.assertIn("left no report text", bare)
+        self.assertNotIn('"Done."', bare)
 
     def test_phi_disposable_marks_a_child_and_done_retires_it(self):
         t, C = self.t, self.C
