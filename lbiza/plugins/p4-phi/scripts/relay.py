@@ -208,8 +208,15 @@ def warn(home, sid, key, text):
         return False
     pend = s.setdefault("relayPending", [])
     pend.append({"key": key, "text": text})
+    turns = [w for w in pend if isinstance(w, dict) and str(w.get("key", "")).startswith("turn:")]
+    for old in turns[:-TURN_WARNINGS]:                  # R6: the newest relayed turn reports only
+        pend.remove(old)
+        told.append(old.get("key"))
     _write_json(path, s)
     return True
+
+
+TURN_WARNINGS = 3          # relayed turn reports kept for one session's next message; older ones are dropped as told
 
 
 # --- deltas ----------------------------------------------------------------------------------------------------------

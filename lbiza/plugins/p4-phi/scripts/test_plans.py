@@ -232,5 +232,35 @@ class TreeOfPlans(unittest.TestCase):
         self.assertIn("It is for step 2 of its parent's plan; its own steps are 2.1, 2.2", later)
 
 
+class OwnLines(unittest.TestCase):
+    """R6: a report quoting phi's relay must not be relayed again, and queued turn reports stay few."""
+
+    def test_phi_lines_are_taken_out_of_a_report(self):
+        report = ("I wrote x.txt and marked step x done.\n"
+                  "phi (p4-phi): step 1.1 starts now, \"x: write nodetest/split/x.txt\". What bears on it:\n"
+                  "- across: \"Live node test A\" is on 1.3, \"Ask a sub-agent to summarise nodetest/a1.txt\".\n"
+                  "B ended a turn whose words bear on your open step(s): 1.1. Check whether those steps still hold.")
+        got = plans.own_removed(report)
+        self.assertIn("I wrote x.txt", got)
+        for gone in ("phi (p4-phi)", "across:", "bear on your open step", "nodetest/a1.txt"):
+            self.assertNotIn(gone, got)
+
+    def test_only_the_newest_turn_reports_wait(self):
+        home = tempfile.mkdtemp(prefix="p4-phi-own-")
+        try:
+            sid = "local_own"
+            os.makedirs(relay._dir(home, sid))
+            relay._write_json(os.path.join(relay._dir(home, sid), "session.json"), {"sessionId": sid})
+            for k in range(6):
+                relay.warn(home, sid, f"turn:x:{k}", f"report {k}")
+            relay.warn(home, sid, "mark:y", "a deprecation")
+            s = relay._read_json(os.path.join(relay._dir(home, sid), "session.json"))
+            keys = [w["key"] for w in s["relayPending"]]
+            self.assertEqual(keys, ["turn:x:3", "turn:x:4", "turn:x:5", "mark:y"])
+            self.assertIn("turn:x:0", s["relayWarned"], "a dropped report counts as told, so it is not queued again")
+        finally:
+            shutil.rmtree(home, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

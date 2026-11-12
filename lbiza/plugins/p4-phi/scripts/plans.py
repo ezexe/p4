@@ -336,6 +336,18 @@ def slice_for(home, s):
 # in a plain turn report, and never told the child. Notes and plan changes were relayed; the report was not.
 
 SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
+# R6: a report that quotes what phi told the session would be matched again and relayed again, growing each round.
+# phi's own lines, and any sentence quoting them, are taken out of a report before it is matched.
+OWN_LINE = re.compile(r"^\s*(?:[-*>`\"]\s*)*(?:phi \(p4-phi\)|p4-phi[ :(]|p4-temportal:|(?:up|across|down):)", re.I)
+OWN_WORDS = ("phi (p4-phi)", "words bear on your open step", "check whether those steps still hold",
+             "stop before any tool runs")
+
+
+def own_removed(text):
+    """`text` without phi's own relay lines and the sentences that quote them."""
+    keep = [ln for ln in str(text or "").splitlines() if not OWN_LINE.match(ln)]
+    sents = [x for x in SENTENCE.split("\n".join(keep)) if x.strip()]
+    return "\n".join(x for x in sents if not any(w in x.lower() for w in OWN_WORDS))
 ADDR_RE = re.compile(r"\b(?:step\s+)?(\d+(?:\.\d+)+|(?<=step )\d+)\b", re.I)
 
 
@@ -372,7 +384,7 @@ def turn_relay(home, s, row, calls):
     its siblings (across). Each match is relayed with the turn's own words quoted. Returns the children a match
     reached that the turn sent no SendMessage to, as [(child id, addresses)], for the parent's next message."""
     sid, title = s["sessionId"], relay._title(s)
-    report = str(row.get("report") or "")
+    report = own_removed(row.get("report"))
     mine = load(home, sid)
     text = report + "\n" + "\n".join(f"{x['addr']} {x.get('content', '')}" for x in mine.get("steps") or []
                                       if x.get("status") == "in_progress")
