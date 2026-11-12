@@ -81,7 +81,7 @@ class Tree:
         env.update({"CLAUDE_PLUGIN_ROOT": ROOT, "CLAUDE_PROJECT_DIR": proj or self.proj,
                     "P4_PHI_APP_SESSIONS": os.path.join(self.tmp, "app"), "P4_PHI_WAIT": "0",
                     "P4_PHI_STORES": os.path.join(self.tmp, "p4-stores.json"),
-                    "P4_PHI_NEW_TASK": "0", **more})
+                    "P4_PHI_NEW_TASK": "0", "P4_PHI_WATCH": "0", **more})
         if host:
             env["CLAUDE_CODE_HOST_SESSION_ID"] = host
             env["CLAUDE_CODE_SESSION_ID"] = CLI.get(host, host)

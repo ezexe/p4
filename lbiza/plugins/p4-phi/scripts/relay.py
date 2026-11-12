@@ -792,7 +792,10 @@ def child_paths(home, s):
 # rest of .gitignore runs beside this one at a start.
 
 IGNORED = ("phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/sessions.md", "phi/rules.md",
-           "phi/catchup.json", "phi/**/*.tmp", "phi/sessions/*/.calls/", "phi/.agents/", "phi/.nudge/")
+           "phi/catchup.json", "phi/**/*.tmp", "phi/sessions/*/.calls/", "phi/.agents/", "phi/.nudge/",
+           # #38: the puppeteer's pages are made again from the records; routes.jsonl is kept
+           "phi/sessions/*/ledger.md", "phi/sessions/*/ledger.json", "phi/sessions/*/ledger.sig",
+           "phi/sessions/*/watcher.json", "phi/meta-ledger.md", "phi/.issue-states.json", "phi/.routes-checked")
 TRACKED_MARK = "p4-phi-tracked"
 
 

@@ -11,6 +11,9 @@ the starter as the parent in its own nesting, claude-code#109282. A request not 
 
 <home>/phi/start-requests.jsonl holds one row a change: `request` with the brief, `claimed` when a start_session
 call carrying its marker is about to run, `started` when the child's first message arrived.
+
+A request can wait behind a busy writer (#38): pioneer queues a draft whose files a running session holds with
+`after`, that session's id, and the request is handed out only once that session is no longer busy.
 """
 
 import hashlib
@@ -70,8 +73,18 @@ def pending(home, at=None):
         c = r.get("claimed") or {}
         if c and at - float(c.get("at") or 0) < CLAIM_S:
             continue
+        if r.get("after") and _busy(home, r["after"]):
+            continue                              # queued behind a writer that is still at work
         out.append(r)
     return sorted(out, key=lambda r: float(r.get("at") or 0))
+
+
+def _busy(home, sid):
+    try:
+        import puppeteer
+        return puppeteer.busy(home, sid)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def background_of(home, requester, given=""):
@@ -90,19 +103,22 @@ def background_of(home, requester, given=""):
     return text
 
 
-def add(home, requester, title, brief, context="fresh", at=None, background=""):
+def add(home, requester, title, brief, context="fresh", at=None, background="", after=""):
     """Keep a start request -> (its id, True when new). The same brief from the same session, still pending, is
-    kept once. Its background is the one given or one built from the requester (#37)."""
+    kept once. Its background is the one given or one built from the requester (#37). With `after`, it waits
+    behind that session while it is a busy writer (#38)."""
     title, brief = " ".join(str(title or "").split()), str(brief or "").strip()
     if len(title) < 3:
         raise ValueError("a start request needs the child's title")
     if len(" ".join(brief.split())) < 20:
         raise ValueError("a start request needs the child's whole brief")
     rid = "req-" + hashlib.sha1(f"{requester}\n{title}\n{brief}".encode("utf-8", "replace")).hexdigest()[:10]
-    if any(r.get("id") == rid for r in pending(home, at)):
+    held = state(home).get(rid)
+    if held and not held.get("started") and (time.time() if at is None else at) - float(held.get("at") or 0) <= EXPIRE_S:
         return rid, False
     at = time.time() if at is None else at
     _append(home, {"kind": "request", "id": rid, "at": at, "time": time.strftime("%Y-%m-%d %H:%M"),
+                   **({"after": after} if after else {}),
                    "requester": requester, "requesterTitle": relay._title(relay._session(home, requester)),
                    "title": title, "brief": brief, "context": "fork" if context == "fork" else "fresh",
                    "background": background_of(home, requester, background)})

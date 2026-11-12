@@ -54,12 +54,20 @@ children's latest deltas under a version; every message a session gets, side-ses
 newer anchor changed, deprecations first and in full, and a warning before any tool runs when its uncommitted files
 or shard meet a deprecated path or another node's shard; a message about another node's shard is routed there.
 
+The puppeteer (puppeteer.py, #38), p4's four P's on this tree: an orchestrator's background watcher writes its
+ledger.md from these files and the app's records; ezexe's message is read against it (prompty), drafted as the exact
+next session (prompter) and gate-checked into a start, a route or a queue (pioneer); a landed topic registers its
+route, which the next message is scored against; an under-determined message becomes one child a reading; a top
+session's meta pass reconciles every top's ledger into meta-ledger.md.
+
 Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `new_task` (false: off),
 `rules`, `background_chars`, `reports_chars`, `wait_s`. P4_PHI=0 turns the plugin off, P4_PHI_NEW_TASK=0 the
 standing instruction, P4_PHI_RULES=0 the rules.
 
 Nothing here matches a request to an earlier turn by its words: that was built in p4-recall 0.8.17 to 0.8.20,
-measured (the nearest earlier turn's files touched again 0.06 to 0.13 of the time) and removed.
+measured (the nearest earlier turn's files touched again 0.06 to 0.13 of the time) and removed. A registered route is
+not a turn: it is a whole topic whose issue closed, whose commit is pushed and whose sessions are archived, and a
+message is scored only against those.
 """
 
 import glob
@@ -79,6 +87,9 @@ import plans  # noqa: E402  (each session's plan with step addresses; the parent
 import relay  # noqa: E402  (shards, deltas, anchors: linked sessions kept in step while they work)
 import starts  # noqa: E402  (start requests: children a session wants but cannot start, carried by the store)
 import issues  # noqa: E402  (#28: a writing child's loop of issue, Closes #N, proving test, push, archive)
+import puppeteer  # noqa: E402  (#38: the watcher's ledger, prompty, prompter, pioneer, routes, readings, meta)
+
+puppeteer.PHI = sys.modules[__name__]   # phi runs as a script, so the puppeteer is handed this module, not a copy
 
 BACKGROUND = True
 REPORTS = True
@@ -958,7 +969,10 @@ def new_task_text(home, s, me, user=True, again=False, req=""):
                          f"inside another session's shard is that session's: send it there with SendMessage instead, "
                          f"and start a new session only for what no shard covers{shards}. This is ezexe's standing "
                          f"instruction for this project, so the session is started, not offered as a card. Its "
-                         f"report comes back here in full. A quick thing (a ")
+                         f"report comes back here in full. "
+                         + (f"This session's ledger is written for it by phi's watcher, "
+                            f"{puppeteer.ledger_path(home, s['sessionId'])}: read that, and keep none by hand. "
+                            if puppeteer.on(home) else "") + "A quick thing (a ")
         return (f"phi (p4-phi): this session's task: \"{cut(task, RULE_TASK)}\" When a message from ezexe is "
                 f"about something else, " + elsewhere +
                 f"question, a few tool calls) stays here. When ezexe says the task itself has changed: "
@@ -1519,6 +1533,7 @@ def h_session_start(payload):
     s = ensure_session(me.home, me.id, me.rec, me.cli)
     ran_for(s, me)
     mark_fork(s, me, payload)
+    watch_over(me.home, s)
     source = payload.get("source") or "startup"
     RAN["start"] = source
     lost = source in ("compact", "clear")
@@ -1541,6 +1556,15 @@ def h_session_start(payload):
                                                f"tree stays in this project's store.") if p)
     save_session(me.home, s)
     return "\n\n".join(p for p in (rules, text, rule) if p) or None
+
+
+def watch_over(home, s):
+    """#38: an orchestrator's one background watcher, started when none is alive. Never fails the hook."""
+    try:
+        if puppeteer.ensure_watcher(home, s):
+            RAN["watcher"] = "started"
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def started_by(me, payload):
@@ -1606,6 +1630,8 @@ def h_user_prompt_submit(payload):
                 pass
             s = load_session(me.home, s["sessionId"])
         starts.started(me.home, rid, s["sessionId"])
+    if not load_turns(me.home, s["sessionId"]) and puppeteer.arrived(me.home, s, payload.get("prompt")):
+        RAN["drafted"] = s.get("draft") or (s.get("reading") or {}).get("group", "")   # #38: its draft, its reading
     req = request_of(payload.get("prompt"))
     said = str(payload.get("prompt") or "")
     if spawned_from(s) and not s.get("landingGiven") and LANDING_GIVEN.search(said) \
@@ -1667,8 +1693,24 @@ def h_user_prompt_submit(payload):
         parts.insert(0, "phi (p4-phi): " + " ".join(
             f"your last turn changed step(s) {', '.join(u.get('steps') or [])} of \"{relay._title(load_session(me.home, u['child']))}\" "
             f"and sent it nothing; relay it with SendMessage (`to`: {u['child']})." for u in unsent))
-    route = relay.route_text(me.home, s["sessionId"], req, s.get("cwd") or "") if req else ""
-    parts.append(route or new_task_text(me.home, s, me, user=bool(req), req=req) or split_text(me.home, s, payload.get("prompt")))
+    pup = verdict = ""
+    if req and not handed_over(payload.get("prompt")):
+        try:                                       # #38: meta pass, ledger, then prompty, prompter and pioneer
+            size = os.path.getsize(payload.get("transcript_path") or "")
+        except OSError:
+            size = 0
+        try:
+            pup, verdict = puppeteer.on_prompt(me.home, s, req, s.get("cwd") or payload.get("cwd") or "", size)
+        except Exception:  # noqa: BLE001
+            pup = verdict = ""
+        RAN["puppeteer"] = verdict or bool(pup)
+    watch_over(me.home, s)
+    route = relay.route_text(me.home, s["sessionId"], req, s.get("cwd") or "") if req and not verdict else ""
+    rule = "" if route else new_task_text(me.home, s, me, user=bool(req), req=req)
+    if verdict and RAN.get("new_task") in ("line", "feature"):
+        rule = ""                                  # pioneer's verdict says where the message goes
+    parts.append(pup)
+    parts.append(route or rule or split_text(me.home, s, payload.get("prompt")))
     save_session(me.home, s)
     # the rebase check, on every message: what the nodes beside this one changed, and the warnings, first
     used = sum(len(p) for p in parts if p)
@@ -1722,6 +1764,12 @@ def h_stop(payload):
     if not s.get("task"):
         s["task"], s["taskAt"] = row["prompt"], row["time"]
     save_session(me.home, s)
+    if above and isinstance(s.get("reading"), dict):
+        try:                                       # #38: a reading reported: the puppeteer above merges
+            RAN["merged"] = len(puppeteer.merge_all(me.home, above))
+        except Exception:  # noqa: BLE001
+            pass
+    watch_over(me.home, s)
     replay(me, s, payload.get("transcript_path") or "")
     s = load_session(me.home, s["sessionId"]) or s
     plans.pickup(me.home, s["sessionId"], plans.transcript_tail(payload.get("transcript_path") or ""))
@@ -2272,6 +2320,11 @@ def main(argv=None):
             p.add_argument("--context", default="fresh", choices=("fresh", "fork"))
             p.add_argument("--background", default="", help="the child's background (default: one built from this "
                                                               "session's task and the project)")
+
+    def common(p):
+        p.add_argument("--p4", default="", help="the store the sessions' files live in (default: this session's)")
+        p.add_argument("--session", default="", help="the sessionId (default: this session's)")
+    puppeteer.add_parsers(sub, common)
     a = ap.parse_args(argv)
     me = Me(session=a.session, p4=a.p4)
     if not me.home or not os.path.isdir(me.home):
@@ -2279,6 +2332,8 @@ def main(argv=None):
         return 2
     configure(me.home)
     try:
+        if a.cmd in puppeteer.COMMANDS:
+            return puppeteer.command(a, me)
         if a.cmd == "tree":
             print(tree_text(me.home) or "no sessions yet")
             return 0

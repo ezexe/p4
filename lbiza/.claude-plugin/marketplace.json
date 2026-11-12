@@ -25,7 +25,7 @@
       "name": "p4-phi",
       "source": "./plugins/p4-phi",
       "description": "What linked sessions hand each other, and recall from the repo's own history, in one plugin. Every session starts with the store's rules; a started session is given the tasks and notes of the sessions above it, ordered by its own task, and the last turn of the sessions beside it; every finished turn's report reaches the session that started it in full; a message about something else gets a forked session. Recall, the p4-recall plugin until 0.7.0, adds a few lines from the store beside a message or a subagent's task when its ranker is confident, and nothing otherwise. Kept in <project>/.claude/p4/phi/.",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "category": "productivity",
       "keywords": [
         "phi",
