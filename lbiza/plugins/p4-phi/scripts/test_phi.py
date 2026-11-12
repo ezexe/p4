@@ -660,6 +660,22 @@ class Rules(unittest.TestCase):
         self.assertEqual(self.start(TOP), "")
 
 
+class Ids(unittest.TestCase):
+    def test_the_hosts_id_without_its_prefix_is_no_cli_session(self):
+        old = {k: os.environ.get(k) for k in ("CLAUDE_CODE_HOST_SESSION_ID", "CLAUDE_CODE_SESSION_ID")}
+        os.environ["CLAUDE_CODE_HOST_SESSION_ID"] = "local_26c9fe71-aaaa"
+        try:
+            me = phi.Me({"session_id": "26c9fe71-aaaa"}, p4=tempfile.mkdtemp())
+            self.assertEqual(me.cli, "")
+            self.assertEqual(me.id, "local_26c9fe71-aaaa")
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+
 class Wiring(unittest.TestCase):
     def test_hooks_json(self):
         d = {ev: [g for g in gs if all("/hooks/run-hook.sh" in x["command"] for x in g["hooks"])]

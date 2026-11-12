@@ -872,6 +872,8 @@ def superseded(home, sid, s, others_marks):
     for nid, title, m in others_marks:
         if str(m.get("time") or "") < since:
             continue
+        if s.get("unstaled") and str(m.get("time") or "") <= str(s.get("unstaled")):
+            continue                                  # it re-based onto this note already
         hits = [p for p in m.get("paths") or [] if not too_broad(p, home)
                 and (any(covers(p, f) or covers(f, p) for f in files) or any(overlap(p, x) for x in shard))]
         if hits or (root_text and plans.bears(m.get("claim"), root_text)):

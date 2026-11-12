@@ -271,12 +271,21 @@ class TreeOfPlans(unittest.TestCase):
         self.assertNotIn("Archive them now", context(t.say(TOP, "and next")), "said once")
         told = context(t.say(A, "are you still on it?"))
         self.assertIn("this session's work is superseded and it is stale", told)
+        t.record(KID2 + "x", TOP, title="a pathless child")
+        whole = context(t.say(KID2 + "x", "Help out wherever needed"))
+        turns = whole.split("The last turn of", 1)[1].split("The page this comes from", 1)[0]             if "The last turn of" in whole else ""
+        self.assertNotIn("the layout child", turns, "a stale node's last turn is no background (ST3)")
         t.record(GRAND, TOP, title="a later child")
         self.assertNotIn("the layout child", context(t.say(GRAND, "Write `docs/exporter.md`, step 2")),
                          "left out of a fresh child's start")
         self.plan(TOP, items("Move the store layout into recall", "Write the exporter docs for phi", at=1))
         self.assertIn("your root step 2 in the plan of \"top\" was revised", self.plan(B, {"advance": True}),
                       "the other two keep relaying")
+        t.stop(A, "re-based", report="Re-based onto phi/.", uuid="a2")
+        self.assertNotIn("stale", t.session(A), "told and a turn of its own ended since: live again (ST1)")
+        t.stop(B, "another turn", uuid="b2")
+        kept = [json.loads(l) for l in open(os.path.join(t.dir(TOP), "notes.jsonl"), encoding="utf-8")]
+        self.assertEqual(sum(1 for k in kept if "as a live node" in k["claim"]), 1, "never retired twice (ST2)")
 
     def test_a_fresh_child_starts_with_its_root_step_and_a_fork_has_it_pinned(self):
         t = self.t

@@ -339,6 +339,8 @@ class Me:
         self.hint = ""
         self.cli = str(payload.get("session_id") or os.environ.get("CLAUDE_CODE_SESSION_ID") or "")
         host = os.environ.get("CLAUDE_CODE_HOST_SESSION_ID") or ""
+        if self.cli and host and host == "local_" + self.cli:
+            self.cli = ""                              # the host's own id, its prefix dropped: not a CLI session
         self.rec = app_record(session or host) if (session or host) else record_of_cli(self.cli)
         self.id = session or host or str(self.rec.get("sessionId") or "") or self.cli
         project = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
@@ -362,6 +364,31 @@ def load_session(home, sid):
 
 
 def save_session(home, s):
+    """session.json written from `s`, keeping what another hook wrote into it meanwhile: a sibling's Stop marks a
+    session stale or queues a warning while this hook holds the copy it read at its start (ST1, ST2)."""
+    disk = load_session(home, s.get("sessionId"))
+    if "relayPending" in disk:                    # queued and consumed on disk only, by relay.warn and the checks
+        s["relayPending"] = disk["relayPending"]
+    told = set(s.get("staleTold") or [])
+    s["staleChildren"] = [x for x in disk.get("staleChildren") or [] if isinstance(x, dict) and x.get("id") not in told]
+    if not s["staleChildren"]:
+        s.pop("staleChildren", None)
+    st = disk.get("stale")
+    if isinstance(st, dict) and "stale" not in s and str(st.get("time") or "") > str(s.get("unstaled") or ""):
+        s["stale"] = st                           # marked stale by a sibling's Stop while this hook ran
+    elif isinstance(st, dict) and isinstance(s.get("stale"), dict) and st.get("told"):
+        s["stale"]["told"] = True
+    for k in ("relayWarned", "marksGiven"):
+        if isinstance(disk.get(k), list):
+            s[k] = list(s.get(k) or []) + [x for x in disk[k] if x not in (s.get(k) or [])]
+    for k in ("othersGiven", "plansSeen"):
+        if isinstance(disk.get(k), dict):
+            s[k] = {**disk[k], **(s.get(k) or {})}
+    for k in ("rootStep", "shard"):
+        if k in disk and k not in s:
+            s[k] = disk[k]
+    if int(disk.get("anchorSeen") or 0) > int(s.get("anchorSeen") or 0):
+        s["anchorSeen"] = disk["anchorSeen"]
     write_atomic(os.path.join(session_dir(home, s["sessionId"]), "session.json"),
                  json.dumps(s, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
 
@@ -640,7 +667,8 @@ def background_text(home, s, own=False, slim=False):
     if notes:
         body += ["Notes of the sessions above (already checked; do not work these out again):"] + notes[:12]
     others = [r for r in latest_reports(load_reports(home, above, TAIL_BYTES), skip=sid)[:OTHERS * 3]
-              if spawned_from(load_session(home, r["sessionId"])) == above][:OTHERS]
+              if spawned_from(load_session(home, r["sessionId"])) == above
+              and not load_session(home, r["sessionId"]).get("stale")][:OTHERS]
     others = [] if slim else nd.by_overlap(others, own_task,
                                            key=lambda r: f"{r.get('title', '')} {r.get('turn', {}).get('prompt', '')}")
     if others:
@@ -1021,7 +1049,9 @@ def h_user_prompt_submit(payload):
     s = load_session(me.home, s["sessionId"]) or s
     if step:
         parts.append(step)
-    stale = relay.stale_text(s.pop("staleChildren", None))   # children to archive, said once
+    pend = s.pop("staleChildren", None) or []
+    stale = relay.stale_text(pend)                # children to archive, said once
+    s["staleTold"] = (list(s.get("staleTold") or []) + [x.get("id") for x in pend if isinstance(x, dict)])[-50:]
     if stale:
         parts.insert(0, stale)
     unsent = [u for u in s.pop("unsentRelay", None) or [] if isinstance(u, dict)]
@@ -1079,9 +1109,9 @@ def h_stop(payload):
     replay(me, s, payload.get("transcript_path") or "")
     s = load_session(me.home, s["sessionId"]) or s
     plans.pickup(me.home, s["sessionId"], plans.transcript_tail(payload.get("transcript_path") or ""))
-    if isinstance(s.get("stale"), dict) and s["stale"].get("told") and \
-            int(s.get("anchorSeen") or 0) >= int(s["stale"].get("anchorVersion") or 0):
-        s.pop("stale", None)                       # it re-based onto the anchor that superseded it
+    if isinstance(s.get("stale"), dict) and s["stale"].get("told"):
+        s.pop("stale", None)                       # told what superseded it, and a turn of its own ended since
+        s["unstaled"] = now()
     unsent = plans.turn_relay(me.home, s, row, turn.get("calls") or [])
     if unsent:                                     # what this turn changed for a child and did not tell it
         s["unsentRelay"] = [{"child": c, "steps": a, "time": row["time"]} for c, a in unsent]
