@@ -336,6 +336,8 @@ def boundary(home, s, plan, started, transcript=""):
 DEPENDS = re.compile(r"\b(after|then|once|using|uses|based on|depends? on|following|built on|with the results?|"
                      r"results? of|output of|from (?:the )?(?:step|previous|last)|step \d+)\b", re.I)
 QUICK_WORDS = 4               # a step of fewer content words is a quick thing, done here
+LANDS = re.compile(r"^\W*(?:run (?:the |all )?tests?|tests?|verify|check|commit|merge|push|ship|release|land|"
+                   r"fast-forward|report|review|wrap)\b", re.I)   # a step that checks or lands the others' work
 
 
 def judge(plan, cwd):
@@ -350,6 +352,8 @@ def judge(plan, cwd):
                   if any(relay.overlap(p, q) for q in paths[o["addr"]])]
         if dep:
             kept.append((a, f"leans on another step (\"{dep.group(0)}\")"))
+        elif LANDS.search(text):
+            kept.append((a, "checks or lands the other steps' work"))
         elif shared:
             kept.append((a, f"shares {relay.show(shared[0][1], cwd)} with step {shared[0][0]}"))
         elif len(words(text)) < QUICK_WORDS:
@@ -364,13 +368,15 @@ def split_advice(home, s, plan, owner_turn, cap):
     free, kept = judge(plan, s.get("cwd") or "")
     if len(free) < 2:
         return ""
-    key = sorted(st.get("content", "") for st in free)
     path = os.path.join(relay._dir(home, s["sessionId"]), "session.json")
     disk = relay._read_json(path)
-    if disk.get("splitAdvised") == key:
-        return ""
-    disk["splitAdvised"] = s["splitAdvised"] = key
+    told = [x for x in disk.get("splitAdvised") or [] if isinstance(x, str)]
+    new = [st for st in free if st.get("content", "") not in told]
+    if not new:
+        return ""                                 # SP1: a step advised once is never advised again
+    disk["splitAdvised"] = s["splitAdvised"] = told + [st.get("content", "") for st in new]
     relay._write_json(path, disk)
+    free = new
     named = "; ".join(f"{st['addr']} \"{relay._short(st.get('content'), 90)}\"" for st in free)
     judged = ("Judged by the paths each step names, wording that leans on another step (after, then, once, using, "
               "the result of, step N), and size: fewer than four content words is a quick thing.")

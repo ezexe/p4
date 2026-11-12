@@ -209,6 +209,20 @@ class TreeOfPlans(unittest.TestCase):
         self.assertIn("use_worktree: false", ctx)
         self.assertIn("Judged by", ctx)
         self.assertNotIn("can each run", self.plan(B, {"advance": True}) or "", "said once per set")
+        done = self.three()
+        done["items"][0]["status"] = "completed"
+        done["items"][1]["status"] = "in_progress"
+        self.assertNotIn("can each run", self.plan(B, done) or "", "SP1: steps advised before are not again")
+        more = self.three(f"Draw the import graph of {self.t.proj}/tools/graph.py for the docs site")
+        again = self.plan(B, more) or ""
+        self.assertIn("2.4", again.split("can each run")[0], "a new free step is named")
+        self.assertNotIn("2.2 \"", again.split("can each run")[0])
+
+    def test_a_step_that_checks_or_lands_the_others_stays(self):
+        self.t.say(B, "Do the parts")
+        ctx = self.plan(B, self.three("Test, commit and fast-forward main after review"))
+        self.assertIn("2.4 (", ctx)
+        self.assertNotIn("2.4 \"", ctx.split("can each run")[0])
 
     def test_a_step_using_anothers_results_stays_in_place(self):
         self.t.say(B, "Do the parts")

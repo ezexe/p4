@@ -280,9 +280,11 @@ class Sessions(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             t = Tree(tmp, store=False)
             t.record(TOP)
+            r = t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"})
+            self.assertEqual((r.returncode, context(r)), (0, phi.builtin_text()), "AW1: the built-in rule, no store")
             r = t.say(TOP, TASK)
             self.assertEqual((r.returncode, r.stdout.strip()), (0, ""))
-            self.assertFalse(os.path.exists(os.path.join(t.proj, ".claude")))
+            self.assertFalse(os.path.exists(os.path.join(t.proj, ".claude")), "nothing written")
 
     def test_the_first_session_of_a_store_hears_nothing(self):
         r = self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"})

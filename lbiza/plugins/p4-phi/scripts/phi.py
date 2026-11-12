@@ -381,13 +381,13 @@ def save_session(home, s):
         s["stale"] = st                           # marked stale by a sibling's Stop while this hook ran
     elif isinstance(st, dict) and isinstance(s.get("stale"), dict) and st.get("told"):
         s["stale"]["told"] = True
-    for k in ("relayWarned", "marksGiven", "upTold"):
+    for k in ("relayWarned", "marksGiven", "upTold", "splitAdvised"):
         if isinstance(disk.get(k), list):
             s[k] = list(s.get(k) or []) + [x for x in disk[k] if x not in (s.get(k) or [])]
     for k in ("othersGiven", "plansSeen"):
         if isinstance(disk.get(k), dict):
             s[k] = {**disk[k], **(s.get(k) or {})}
-    for k in ("rootStep", "shard", "splitAdvised"):
+    for k in ("rootStep", "shard"):
         if k in disk and k not in s:
             s[k] = disk[k]
     if int(disk.get("anchorSeen") or 0) > int(s.get("anchorSeen") or 0):
@@ -750,8 +750,8 @@ def caps_text(home, s):
                 f"work here, or send it to the session that started you with SendMessage.")
     kids = len(plans._children(home, s["sessionId"]))
     if kids >= MAX_CHILDREN:
-        return (f"This session has {kids} live sessions of its own, the most phi allows: send the work to the one "
-                f"whose task it fits with SendMessage, or archive a finished one first.")
+        return (f"This session has {kids} live sessions of its own, the most phi allows: start no session; send the "
+                f"work to the one whose task it fits with SendMessage, or archive a finished one first.")
     return ""
 
 
@@ -1044,7 +1044,10 @@ def ran_for(s, me):
 def h_session_start(payload):
     me = Me(payload)
     if not me.home or not me.id:
-        return None
+        # AW1: a project with no .claude/p4 yet still gets the rule phi carries itself; the SessionStart hooks run
+        # side by side, so p4-temportal making the folder first is not to be counted on
+        RAN["start"] = "no store"
+        return builtin_text() if RULES and payload.get("source") != "resume" else None
     p4conf.migrate_layout(me.store)       # the memory read below is where the other plugins will have moved it
     relay.track(me.home, first_only=True)  # the session tree, committed on its own the first time
     configure(me.home)
