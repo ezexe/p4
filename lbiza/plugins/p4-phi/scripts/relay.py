@@ -193,7 +193,8 @@ def _siblings(home, s):
     p = _parent(s)
     if not p:
         return {}
-    return {k: v for k, v in _sessions(home).items() if k != s.get("sessionId") and _parent(v) == p}
+    return {k: v for k, v in _sessions(home).items() if k != s.get("sessionId") and _parent(v) == p
+            and not v.get("stale")}
 
 
 def warn(home, sid, key, text):
@@ -271,7 +272,7 @@ def make_anchor(home, parent, now):
     every = _sessions(home)
     nodes = {}
     for sid, s in every.items():
-        if _parent(s) != parent:
+        if _parent(s) != parent or s.get("stale"):
             continue
         last = None
         for r in reversed(_rows(os.path.join(_dir(home, sid), "turns.jsonl"))):
@@ -288,6 +289,17 @@ def make_anchor(home, parent, now):
                           "shard": shard_of(s), "plan": plan, "root": str(s.get("rootStep") or "")}
     own = {} if root else {"title": _title(every.get(parent, {})), "marks": _all_marks(home, parent),
                            "shard": shard_of(every.get(parent, {})), "plan": plans.summary(home, parent)}
+    if not root:                                  # a finished child a newer note supersedes is fenced off now
+        marks_now = [(k, n.get("title") or k, m) for k, n in nodes.items() for m in n.get("marks") or []]
+        marks_now += [(parent, own.get("title") or parent, m) for m in own.get("marks") or []]
+        for k in list(nodes):
+            if not finished(home, k):
+                continue
+            by = superseded(home, k, every[k], [x for x in marks_now if x[0] != k])
+            if by:
+                old_v = int(_read_json(anchor_path(home, parent)).get("version") or 0)
+                retire(home, parent, k, every[k], by, old_v + 1, now)
+                del nodes[k]
     body = {"nodes": nodes, "parent": own}
     digest = hashlib.sha1(json.dumps(body, sort_keys=True).encode("utf-8")).hexdigest()
     path = anchor_path(home, parent)
@@ -387,6 +399,16 @@ def rebase(home, sid, room, fair_cut):
     if not s:
         return "", False
     base = s.get("cwd") or ""
+    if s.get("stale"):
+        st = s["stale"]
+        if st.get("told"):
+            return "", False
+        st["told"] = True
+        s["anchorSeen"] = max(int(s.get("anchorSeen") or 0), int(st.get("anchorVersion") or 0))
+        _write_json(path, s)
+        return (f"phi (p4-phi): this session's work is superseded and it is stale in the session tree: "
+                f"\"{st.get('note')}\". Re-base onto that before going on; the session that started it was told "
+                f"to archive it, and its outcome is kept there."), True
     warnings = [w["text"] for w in s.get("relayPending") or [] if isinstance(w, dict)]
     told = s.setdefault("relayWarned", [])
     told.extend(w["key"] for w in s.get("relayPending") or [] if isinstance(w, dict) and w.get("key") not in told)
@@ -770,3 +792,89 @@ def tree_home(store):
     if found and os.path.isdir(found):
         return found, ""
     return store, str(named)
+
+
+# --- stale nodes ---------------------------------------------------------------------------------------------------------
+#
+# A finished child whose work a newer note supersedes holds a picture of the tree that is no longer true. Relayed to, or
+# relayed from, it can only push the others back to that picture: the user's "uncertainty loop", met when a migration
+# session's recall/ plus temportal/ store was superseded by the fold into phi/. So it is fenced off at once: its
+# still-true outcome kept as one note on its parent, it left out of the anchor, the slices and the relay, and the parent
+# told to archive it. A stale child that is messaged again is handed what superseded it, and is un-staled only when its
+# next turn ends having seen that anchor.
+
+def finished(home, sid):
+    """True when a session's work is over: its last turn was shown done or its plan has steps and none still open,
+    and nothing it changed is left uncommitted. A session with no plan and no done turn is never taken as finished."""
+    import plans
+    turns = _rows(os.path.join(_dir(home, sid), "turns.jsonl"))
+    if not turns:
+        return False
+    steps = plans.load(home, sid).get("steps") or []
+    over = bool(turns[-1].get("done")) or (bool(steps) and all(x.get("status") == "completed" for x in steps))
+    return over and not uncommitted(edited_files(home, sid))
+
+
+def superseded(home, sid, s, others_marks):
+    """The newer note that supersedes a finished session's work: one naming a file of its last delta or its shard,
+    or sharing words with its root step. None when there is none."""
+    import plans
+    turns = _rows(os.path.join(_dir(home, sid), "turns.jsonl"))
+    last = turns[-1] if turns else {}
+    since = str(last.get("time") or "")
+    files = (last.get("delta") or {}).get("files") or []
+    shard = shard_of(s)
+    root = str(s.get("rootStep") or "")
+    root_text = ""
+    if root and _parent(s):
+        st = plans.step_of(plans.load(home, _parent(s)), root)
+        root_text = (st or {}).get("content", "") or plans.load(home, sid).get("rootText", "")
+    for nid, title, m in others_marks:
+        if str(m.get("time") or "") < since:
+            continue
+        hits = [p for p in m.get("paths") or [] if not too_broad(p, home)
+                and (any(covers(p, f) or covers(f, p) for f in files) or any(overlap(p, x) for x in shard))]
+        if hits or (root_text and plans.bears(m.get("claim"), root_text)):
+            return nid, title, m
+    return None
+
+
+def retire(home, parent, sid, s, by, version, now):
+    """Mark a session stale and keep its still-true outcome as one replaces: note on its parent."""
+    nid, title, m = by
+    turns = _rows(os.path.join(_dir(home, sid), "turns.jsonl"))
+    last = turns[-1] if turns else {}
+    d = last.get("delta") or {}
+    base = s.get("cwd") or ""
+    left = ", ".join(show(f, base) for f in (d.get("files") or [])[:8]) or "no file changes"
+    heads = ", ".join(show_head(h, base) for h in d.get("heads") or []) or "no heads"
+    claim = (f"replaces: \"{_title(s)}\" ({sid}) as a live node. What it left in place stays true: {left}, at "
+             f"{heads}; its last report: \"{_short(last.get('report'), 300)}\". Its picture of the tree is "
+             f"superseded by \"{title}\": \"{_short(m.get('claim'), 300)}\".")
+    row = {"time": now, "claim": claim[:1200], "source": f"phi stale-node retirement, anchor v{version}",
+           "kind": "decision", "cliSessionId": ""}
+    path = os.path.join(_dir(home, parent), "notes.jsonl")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    spath = os.path.join(_dir(home, sid), "session.json")
+    disk = _read_json(spath)
+    disk["stale"] = {"anchorVersion": version, "by": nid, "note": _short(m.get("claim"), 300), "time": now}
+    _write_json(spath, disk)
+    ppath = os.path.join(_dir(home, parent), "session.json")
+    pd = _read_json(ppath)
+    if pd:
+        pend = pd.setdefault("staleChildren", [])
+        if sid not in [x.get("id") for x in pend]:
+            pend.append({"id": sid, "title": _title(s)})
+        _write_json(ppath, pd)
+
+
+def stale_text(pend):
+    """The parent's one line about the stale children in `pend`; '' for none."""
+    pend = [x for x in pend or [] if isinstance(x, dict)]
+    if not pend:
+        return ""
+    names = ", ".join(f"\"{x.get('title')}\" ({x.get('id')})" for x in pend)
+    return (f"phi (p4-phi): stale, their work superseded by a newer note, their outcome kept as a replaces: note "
+            f"on this session: {names}. Archive them now with `mcp__ccd_session_mgmt__archive_session`.")

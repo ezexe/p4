@@ -178,3 +178,11 @@ The code is `lbiza/plugins/p4-phi/scripts/plans.py`, run by a PostToolUse hook o
 - **What goes there:** a project with a home writes its session tree into the home store's `phi/`: sessions, plans, anchors, notes and reports. Its memory, rules and recall data, `phi/store` and `phi/models`, stay in its own store.
 - **The root anchor:** sessions of different repositories are top sessions, which nobody started, so the home keeps `phi/anchor.json` for them: their marks and plans, never their heads or files. A top session's rebase check reads it as a child reads its parent's.
 - **When the home is not found here:** the session tree stays in the project's own store, and the start says so in one line.
+
+## Stale nodes
+
+- **Detected** when a parent's anchor is made again: a child whose work is over, its last turn shown done or its plan with steps and none open and nothing it changed left uncommitted, is stale when a sibling's or the parent's newer `deprecates:` or `replaces:` note names a file of its last delta or its shard, or shares words with its root step. A session with no plan and no done turn is never taken as finished.
+- **Its outcome kept:** before it is marked, one note on the parent, beginning `replaces:`, says what it left in place, with its files, heads and last report, and what superseded it.
+- **Fenced off:** marked `stale` in its `session.json` with the anchor version and the note, it is left out of the anchor, of every fresh child's slice and of the relay up, across and down.
+- **Handed to the parent:** the parent's next message names the stale children with their ids, once, and says to archive them with `mcp__ccd_session_mgmt__archive_session`; a hook cannot archive a session itself.
+- **Reactivated:** a stale session messaged again is handed what superseded it, once, and is un-staled when its next turn ends having seen that anchor.

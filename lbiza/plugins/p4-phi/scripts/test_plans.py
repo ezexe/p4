@@ -183,6 +183,37 @@ class TreeOfPlans(unittest.TestCase):
         self.assertEqual(r.stdout.strip(), "")
         self.assertFalse(any(st.get("tasks") for st in plans.load(self.t.p4, B).get("steps") or []))
 
+    def test_a_finished_child_a_newer_note_supersedes_is_retired(self):
+        t = self.t
+        self.plan(TOP, items("Move the store layout into recall", "Write the exporter docs", at=0))
+        t.say(A, "Move the store layout into recall")
+        self.plan(A, {"items": [{"content": "Rename the folders", "status": "completed"},
+                                {"content": "Commit the move", "status": "completed"}]})
+        t.stop(A, "the move", report="Moved store/ and models/ under recall/ at cb3b6d2.", uuid="a1")
+        self.plan(TOP, {"advance": True})
+        t.say(B, "Write the exporter docs, step 2")
+        self.plan(B, items("Draft the exporter docs", "Publish them"))
+        t.cli(B, "note", "replaces: the store layout move into recall with the move into phi", "--source", "57e7c99")
+        t.stop(B, "supersede", uuid="b1")
+        anchor = json.load(open(relay.anchor_path(t.p4, TOP), encoding="utf-8"))
+        self.assertNotIn(A, anchor["nodes"], "left out of the anchor")
+        self.assertIn(B, anchor["nodes"])
+        self.assertEqual(t.session(A)["stale"]["by"], B)
+        kept = [json.loads(l) for l in open(os.path.join(t.dir(TOP), "notes.jsonl"), encoding="utf-8")]
+        self.assertTrue(kept[-1]["claim"].startswith(f"replaces: \"the layout child\" ({A}) as a live node."))
+        self.assertIn("cb3b6d2", kept[-1]["claim"], "its still-true outcome, with its report")
+        ctx = context(t.say(TOP, "next"))
+        self.assertIn(f"\"the layout child\" ({A}). Archive them now with `mcp__ccd_session_mgmt__archive_session`", ctx)
+        self.assertNotIn("Archive them now", context(t.say(TOP, "and next")), "said once")
+        told = context(t.say(A, "are you still on it?"))
+        self.assertIn("this session's work is superseded and it is stale", told)
+        t.record(GRAND, TOP, title="a later child")
+        self.assertNotIn("the layout child", context(t.say(GRAND, "Write `docs/exporter.md`, step 2")),
+                         "left out of a fresh child's start")
+        self.plan(TOP, items("Move the store layout into recall", "Write the exporter docs for phi", at=1))
+        self.assertIn("your root step 2 in the plan of \"top\" was revised", self.plan(B, {"advance": True}),
+                      "the other two keep relaying")
+
     def test_a_fresh_child_starts_with_its_root_step_and_a_fork_has_it_pinned(self):
         t = self.t
         t.record(GRAND, TOP, title="the step child")

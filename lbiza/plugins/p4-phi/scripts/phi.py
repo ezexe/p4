@@ -1016,6 +1016,9 @@ def h_user_prompt_submit(payload):
         text, seen = reports_text(me.home, s)
         s["reportsSeen"] = seen
         parts.append(text)
+    stale = relay.stale_text(s.pop("staleChildren", None))   # children to archive, said once
+    if stale:
+        parts.insert(0, stale)
     unsent = [u for u in s.pop("unsentRelay", None) or [] if isinstance(u, dict)]
     if unsent:
         parts.insert(0, "phi (p4-phi): " + " ".join(
@@ -1068,6 +1071,9 @@ def h_stop(payload):
     if not s.get("task"):
         s["task"], s["taskAt"] = row["prompt"], row["time"]
     plans.pickup(me.home, s["sessionId"], plans.transcript_tail(payload.get("transcript_path") or ""))
+    if isinstance(s.get("stale"), dict) and s["stale"].get("told") and \
+            int(s.get("anchorSeen") or 0) >= int(s["stale"].get("anchorVersion") or 0):
+        s.pop("stale", None)                       # it re-based onto the anchor that superseded it
     unsent = plans.turn_relay(me.home, s, row, turn.get("calls") or [])
     if unsent:                                     # what this turn changed for a child and did not tell it
         s["unsentRelay"] = [{"child": c, "steps": a, "time": row["time"]} for c, a in unsent]

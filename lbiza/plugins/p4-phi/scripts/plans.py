@@ -185,7 +185,7 @@ def _siblings(home, s):
 
 
 def _children(home, sid):
-    return {k: v for k, v in relay._sessions(home).items() if relay._parent(v) == sid}
+    return {k: v for k, v in relay._sessions(home).items() if relay._parent(v) == sid and not v.get("stale")}
 
 
 def relay_revision(home, s, plan, rev):
