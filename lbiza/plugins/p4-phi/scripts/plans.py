@@ -356,8 +356,13 @@ ORCHESTRATES = re.compile(r"^\W*(?:start|run|kick\s*off|launch)\s+(?!writing|add
                           r"(?:[\w'’-]+\s+){0,5}?(?:checks?|tests?|sessions?)\b", re.I)
 # starts a check, test or session, which is orchestration: "Start the owner's-eye acceptance check" was advised as work
 MANAGES = re.compile(r"\b(?:un)?(?:archiv|relay|messag|start|stop|review|check|brief|spawn|ask|tell|nudg|queu|send|"
-                     r"sent|pass|hand)\w*\b"
-                     r"[^.;]*?\b(?:child(?:ren)?|(?:sub-?)?sessions?)\b", re.I)   # manages a child session: orchestration
+                     r"sent|pass|hand|forward)\w*\b"
+                     r"[^.;]*?\b(?:child(?:ren)?|(?:sub-?)?sessions?)\b"   # manages a child session: orchestration
+                     # queues, sends, passes, hands or forwards something to a session named by its id, its quoted
+                     # title or its role: "Queue issues #19-#24 to p4-phi fixer" was advised as work
+                     r"|\b(?:queu|send|sent|pass|hand|forward)\w*\b[^.;]*?\b(?:to|for)\s+(?:the\s+)?"
+                     r"(?:local_[\w-]+|[\"“'][^\"”']+[\"”']|(?:[\w-]+\s+){0,3}?(?:top|parent|orchestrator|fixer|"
+                     r"tester|starter|owner of)\b)", re.I)
 
 
 def judge(plan, cwd):

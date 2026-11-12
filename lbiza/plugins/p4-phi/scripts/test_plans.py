@@ -592,6 +592,17 @@ class TopOrchestrates(unittest.TestCase):
         groups, kept = plans.top_groups(landing, "")
         self.assertEqual((groups, [a for a, _ in kept]), ([], ["1", "2", "3"]))
 
+    def test_handing_something_to_a_named_session_is_orchestration(self):
+        """Steps that queue, send, pass, hand or forward something to a named session stay at the top."""
+        named = ("Queue issues #19-#24 to p4-phi fixer", "Send the findings to local_06483534-0275",
+                 "Pass the audit to \"Raise memory patches\"", "Hand the leftover queue to the new owner of p4-phi",
+                 "Forward the issue links to the top session", "Relay issue links and queue to top")
+        work = ("Pass the parser output to the formatter in src/fmt.py", "Write the queue module in src/queue.py")
+        plan = {"steps": [{"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate(named + work)]}
+        groups, kept = plans.top_groups(plan, "")
+        self.assertEqual([a for a, _ in kept], [str(k + 1) for k in range(len(named))])
+        self.assertEqual([st["content"] for g in groups for st in g], list(work), "work goes to children")
+
     def test_a_project_can_keep_its_work_in_the_top_session(self):
         """#24: p4.json phi.top_orchestrates false leaves out the top rule, its split advice and its nudge."""
         with open(os.path.join(self.t.p4, "p4.json"), "w", encoding="utf-8") as f:
