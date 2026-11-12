@@ -920,6 +920,20 @@ class KeepGoing(unittest.TestCase):
         self.assertEqual(self.stop("All done."), {})
 
 
+class DoerAndObject(unittest.TestCase):
+    """#32: messaging or handing to sessions stays at the top; running checks yourself goes to a child."""
+
+    def kept(self, text):
+        _, kept = plans.top_groups({"steps": [{"addr": "1", "content": text, "status": "pending"}]}, "")
+        return bool(kept)
+
+    def test_the_doer_and_the_object_decide(self):
+        self.assertTrue(self.kept("Hand fixes to sibling's fixers, stop duplicates"))
+        self.assertFalse(self.kept("Re-run failed checks 1, 2, 6"))
+        self.assertTrue(self.kept("Start the acceptance session"))
+        self.assertTrue(self.kept("Start ezexe's-eye acceptance check"))
+
+
 class OwnLines(unittest.TestCase):
     """R6: a report quoting phi's relay must not be relayed again, and queued turn reports stay few."""
 

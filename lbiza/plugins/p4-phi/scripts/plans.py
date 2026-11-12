@@ -361,9 +361,12 @@ LANDS = re.compile(r"^\W*(?:run\b[^,.;]*\b(?:tests?|suites?|checks?)|report|wrap
                    r"|\b(?:commit|merge|push|ship|release|land|fast-forward)\b", re.I)
 # checks or lands the session's own work. A check of anything else is work: "Check 1: nothing hidden in AppData" was
 # kept on a top session as landing work, though it was one of the checks its children were for
-ORCHESTRATES = re.compile(r"^\W*(?:start|run|re-?run|kick\s*off|launch)\s+(?!writing|adding|implementing|making)"
-                          r"(?:[\w'’-]+\s+){0,5}?(?:checks?|tests?|sessions?)\b", re.I)
-# starts a check, test or session, which is orchestration: "Start ezexe's-eye acceptance check" was advised as work
+ORCHESTRATES = re.compile(r"^\W*(?:start|kick\s*off|launch)\s+(?!writing|adding|implementing|making)"
+                          r"(?:[\w'’-]+\s+){0,5}?(?:checks?|tests?|sessions?)\b"
+                          r"|^\W*(?:run|re-?run)\s+(?:[\w'’-]+\s+){0,5}?sessions?\b", re.I)
+# starts a check, test or session, which is orchestration: "Start ezexe's-eye acceptance check" was advised as work.
+# #32: the doer and the object decide. Running or re-running checks or tests oneself is work for a child: "Re-run
+# failed checks 1, 2, 6" stayed at the top; only starting them in a session, or running sessions, is orchestration.
 MANAGES = re.compile(r"\b(?:un)?(?:archiv|relay|messag|start|stop|review|check|brief|spawn|ask|tell|nudg|queu|send|"
                      r"sent|pass|hand|forward)\w*\b"
                      r"[^.;]*?\b(?:child(?:ren)?|(?:sub-?)?sessions?)\b(?!\s+(?:tree|page|record|files?|json|logs?|"
@@ -371,8 +374,9 @@ MANAGES = re.compile(r"\b(?:un)?(?:archiv|relay|messag|start|stop|review|check|b
                      # queues, sends, passes, hands or forwards something to a session named by its id, its quoted
                      # title or its role: "Queue issues #19-#24 to p4-phi fixer" was advised as work
                      r"|\b(?:queu|send|sent|pass|hand|forward)\w*\b[^.;]*?\b(?:to|for)\s+(?:the\s+)?"
-                     r"(?:local_[\w-]+|[\"“'][^\"”']+[\"”']|(?:[\w-]+\s+){0,3}?(?:top|parent|orchestrator|fixer|"
-                     r"tester|starter|owner of)\b)", re.I)
+                     r"(?:local_[\w-]+|[\"“'][^\"”']+[\"”']|(?:[\w'’-]+\s+){0,3}?(?:top|parent|orchestrator|fixer|"
+                     r"tester|starter|builder|sibling|checker|owner of)(?:s|'s|’s)?\b)", re.I)
+# #32: "Hand fixes to sibling's fixers, stop duplicates" is messaging sessions, so it stays at the top
 # tracks what another does: a ledger line, a step whose doer is another session, a fixer, a top session, or ezexe,
 # or that ezexe decides (#31: "Ledger: p4-phi fixer pushes #25" and "ezexe updates the Mac's plugins" were work)
 TRACKS = re.compile(r"^\W*(?:ledger|track(?:s|ing)?)\b"
