@@ -85,6 +85,7 @@ phi/catchup.json
 phi/**/*.tmp
 phi/sessions/*/.calls/
 phi/.agents/
+phi/.nudge/
 __pycache__/
 *.pyc
 *.png
@@ -555,7 +556,8 @@ def h_subagent_stop(payload):
 # --- lookups (PreToolUse and PostToolUse on every tool) --------------------------------------------------
 
 PHI_CHECK = {"mcp__ccd_session__start_session": "start-advice", "EnterWorktree": "branch-guard",
-             "Bash": "branch-guard", "PowerShell": "branch-guard"}
+             "Bash": ("branch-guard", "nudge"), "PowerShell": ("branch-guard", "nudge"), "Edit": "nudge",
+             "Write": "nudge", "MultiEdit": "nudge", "NotebookEdit": "nudge"}
 PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "Bash": "task", "Monitor": "task", "Agent": "task",
               "Workflow": "task", "TaskStop": "task", "KillShell": "task"}
 
@@ -564,19 +566,21 @@ def phi_route(payload, table):
     """phi's handler for this tool, run in this process: the hooks.json entries every open session froze at its
     start are recall's, so new phi checks ride on them and hooks.json never needs a new entry (L3 of the
     marketplace test session). None when phi has nothing to say; a failure in phi never touches recall."""
-    name = table.get(str(payload.get("tool_name") or ""))
-    if not name:
-        return None
-    try:
-        import phi
-        return phi.routed(name, payload)
-    except Exception:  # noqa: BLE001
-        return None
+    names = table.get(str(payload.get("tool_name") or ""))
+    for name in (names,) if isinstance(names, str) else names or ():
+        try:
+            import phi
+            out = phi.routed(name, payload)
+        except Exception:  # noqa: BLE001
+            out = None
+        if out:
+            return out
+    return None
 
 
 def h_lookup_check(payload):
     """lookups.py: an earlier finding in place of a web call, an earlier failure before a command expected to fail.
-    First phi's checks before a tool runs: start-advice, branch-guard."""
+    First phi's checks before a tool runs: start-advice, branch-guard, and the nudge of a top session doing a work step itself."""
     if payload.get("agent_id"):                   # a sub-agent's call: phi warns it of what changed since its launch
         text = phi_text("agent-pre", payload)
         if text:

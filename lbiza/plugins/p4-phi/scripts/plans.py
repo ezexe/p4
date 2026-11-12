@@ -212,7 +212,7 @@ def _siblings(home, s):
 
 
 def _children(home, sid):
-    return {k: v for k, v in relay._sessions(home).items() if relay._parent(v) == sid and not v.get("stale")}
+    return {k: v for k, v in relay._sessions(home).items() if relay._parent(v) == sid and not relay.gone(home, v)}
 
 
 def relay_revision(home, s, plan, rev):
@@ -411,6 +411,77 @@ def split_advice(home, s, plan, owner_turn, cap):
     return (f"phi (p4-phi): steps {named} can each run on their own: no path another step names, nothing leaning "
             f"on another step, more than a quick thing. {route}; one child per step, its brief that step's slice: "
             f"the step's words, its paths and what it must leave done. Staying here as sub-steps: {stay}. {judged}")
+
+
+# --- the top session orchestrates ----------------------------------------------------------------------------------
+#
+# A session with no parent keeps itself free for orchestration: planning, relaying between sessions, decisions with
+# the user, and landing work. Every work step of its plan goes to a fresh child, not only the independent ones; a run
+# of serial work steps (one leaning on the step before it, or sharing a path with it) is one child that does them in
+# order. A step that checks or lands work (test-and-commit, merge, push, release) or waits on and relays work stays.
+
+def top_groups(plan, cwd):
+    """The open steps of a top session's plan -> ([[work steps one child does in order]], [(address, why it stays)])."""
+    steps = [st for st in plan.get("steps") or [] if st.get("status") != "completed"]
+    groups, kept, run = [], [], []
+    for st in steps:
+        text = st.get("content", "")
+        wait = WAITS.search(text)
+        if LANDS.search(text):
+            kept.append((st["addr"], "checks or lands the work"))
+        elif wait:
+            kept.append((st["addr"], f"waits on or relays work (\"{wait.group(0)}\")"))
+        else:
+            mine = relay.paths_in(text, cwd)
+            serial = run and (DEPENDS.search(text) or any(relay.overlap(p, q) for p in mine for o in run
+                                                          for q in relay.paths_in(o.get("content"), cwd)))
+            if run and not serial:
+                groups.append(run)
+                run = []
+            run.append(st)
+            continue
+        if run:
+            groups.append(run)
+            run = []
+    if run:
+        groups.append(run)
+    return groups, kept
+
+
+def top_advice(home, s, plan, owner_turn, cap):
+    """The top session's line: each work step, or run of serial ones, to one fresh child; said once per set. ''
+    when no work step is new."""
+    groups, kept = top_groups(plan, s.get("cwd") or "")
+    path = os.path.join(relay._dir(home, s["sessionId"]), "session.json")
+    disk = relay._read_json(path)
+    told = [x for x in disk.get("splitAdvised") or [] if isinstance(x, str)]
+    new = [g for g in groups if any(st.get("content", "") not in told for st in g)]
+    if not new:
+        return ""
+    disk["splitAdvised"] = s["splitAdvised"] = told + [st.get("content", "") for g in new for st in g
+                                                        if st.get("content", "") not in told]
+    relay._write_json(path, disk)
+
+    def child(g):
+        if len(g) == 1:
+            return f"step {g[0]['addr']} \"{relay._short(g[0].get('content'), 90)}\""
+        return (f"steps {', '.join(st['addr'] for st in g)} in order, as one child: "
+                + ", ".join(f"\"{relay._short(st.get('content'), 70)}\"" for st in g))
+    named = "; ".join(f"({chr(97 + k)}) {child(g)}" for k, g in enumerate(new[:26]))
+    head = ("phi (p4-phi): this is the top session of its tree, so it keeps itself free for orchestration: "
+            "planning, relaying between sessions, decisions with the user, and landing the work, meaning merge and push.")
+    stay = ("; ".join(f"{a} ({why})" for a, why in kept)) or "none"
+    if cap:
+        return (f"{head} Its work steps would each go to a child: {named}. But {cap[0].lower() + cap[1:]} "
+                f"Staying here meanwhile: every step.")
+    route = ("Start each now with `mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, "
+             "`use_worktree: false`, on this session's branch" if owner_turn else
+             "This turn was started by another session, so propose each as a card: `initiation` `own_initiative`, "
+             "`context` `fork`, `use_worktree: false`, which the user starts with a click")
+    return (f"{head} Hand its work steps to child sessions, one child each: {named}. {route}. Each brief is its "
+            f"steps' words, their paths and what they must leave done, and says \"archive when done\", so the child "
+            f"leaves its outcome here as a replaces: note and is named for archiving when it finishes. Staying "
+            f"here: {stay}.")
 
 
 # --- sub-agents as child nodes of the step that launched them ------------------------------------------------------

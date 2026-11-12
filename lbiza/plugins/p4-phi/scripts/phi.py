@@ -267,18 +267,41 @@ def app_record(sid):
     return RECORDS[sid]
 
 
+FOUND_IN = {}       # sessionId -> the app folder its record was read from, kept in session.json as appRoot
+
+
 def read_record(name):
     acct, org = os.environ.get("CLAUDE_CODE_ACCOUNT_UUID") or "", os.environ.get("CLAUDE_CODE_ORGANIZATION_UUID") or ""
     for root in app_roots():
         if acct and org:
             d = read_json(os.path.join(root, acct, org, name))
             if d:
+                FOUND_IN[name[:-5]] = root
                 return d
         for p in glob.glob(os.path.join(root, "*", "*", name)):
             d = read_json(p)
             if d:
+                FOUND_IN[name[:-5]] = root
                 return d
     return {}
+
+
+def record_in(root, sid):
+    """The app's record of a session in one app folder, {} when it is not there (archived sessions keep theirs, with
+    `isArchived`; a deleted session's is gone)."""
+    acct, org = os.environ.get("CLAUDE_CODE_ACCOUNT_UUID") or "", os.environ.get("CLAUDE_CODE_ORGANIZATION_UUID") or ""
+    if acct and org:
+        d = read_json(os.path.join(root, acct, org, safe_id(sid) + ".json"))
+        if d:
+            return d
+    for p in glob.glob(os.path.join(root, "*", "*", safe_id(sid) + ".json")):
+        d = read_json(p)
+        if d:
+            return d
+    return {}
+
+
+relay.RECORD, relay.ROOTED = app_record, record_in     # relay.gone reads the app's records through these
 
 
 def record_of_cli(cli):
@@ -387,7 +410,7 @@ def save_session(home, s):
     for k in ("othersGiven", "plansSeen"):
         if isinstance(disk.get(k), dict):
             s[k] = {**disk[k], **(s.get(k) or {})}
-    for k in ("rootStep", "shard"):
+    for k in ("rootStep", "shard", "disposable", "doneRetired", "archived", "appRoot", "nudged"):
         if k in disk and k not in s:
             s[k] = disk[k]
     if int(disk.get("anchorSeen") or 0) > int(s.get("anchorSeen") or 0):
@@ -430,6 +453,10 @@ def ensure_session(home, sid, rec=None, cli="", depth=0, hint=""):
                 s.pop("spawnedFrom", None)
             changed = True
     if rec:
+        root = FOUND_IN.get(sid, "")
+        if root and root != s.get("appRoot"):        # where an archive or a deletion is looked for later (relay.gone)
+            s["appRoot"] = root
+            changed = True
         title = clean(rec.get("title"))[:120]
         if title and title != s.get("title"):      # the app titles a session after it has started
             s["title"] = title
@@ -671,7 +698,7 @@ def background_text(home, s, own=False, slim=False):
         body += ["Notes of the sessions above (already checked; do not work these out again):"] + notes[:12]
     others = [r for r in latest_reports(load_reports(home, above, TAIL_BYTES), skip=sid)[:OTHERS * 3]
               if spawned_from(load_session(home, r["sessionId"])) == above
-              and not load_session(home, r["sessionId"]).get("stale")][:OTHERS]
+              and not relay.gone(home, load_session(home, r["sessionId"]))][:OTHERS]
     others = [] if slim else nd.by_overlap(others, own_task,
                                            key=lambda r: f"{r.get('title', '')} {r.get('turn', {}).get('prompt', '')}")
     if others:
@@ -730,6 +757,12 @@ BUILT_IN = ("built-in, act-don't-wait: a next step the chain can settle (the tas
             "Only a matter of the user's authority goes to the user: permissions or security settings, credentials, "
             "spending, and actions that cannot be undone or publish outward. A child asks the session that started it "
             "with SendMessage, and never ends its turn waiting on a question the chain can settle.")
+
+
+TOP_RULE = ("This is the top session of its tree, so it keeps itself free for orchestration: planning, relaying "
+            "between sessions, decisions with the user, and landing the work, meaning merge and push. Its work "
+            "steps go to fresh child sessions, a run of serial ones to one child, each brief saying \"archive when "
+            "done\"; the steps that test-and-commit, merge, push or release stay here.")
 
 
 def depth_of(home, s):
@@ -795,6 +828,7 @@ def new_task_text(home, s, me, user=True, again=False):
                 f"is started, not offered as a card. Its report comes back here in full. A quick thing (a "
                 f"question, a few tool calls) stays here. When the user says the task itself has changed: "
                 f"`{commands()} task \"<the new task>\"`. This session's page: {page_path(home, s['sessionId'])}."
+                + (" " + TOP_RULE if not spawned_from(s) else "")
                 + (" " + caps_text(home, s) if caps_text(home, s) else ""))
     if not user:
         return ""
@@ -999,12 +1033,132 @@ def h_plan(payload):
     if isinstance(inp.get("items"), list):        # a plan's first whole list, or a revision of it
         s = load_session(me.home, me.id) or s
         cap = caps_text(me.home, s)
-        advice = plans.split_advice(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user",
-                                    cap)
+        advise = plans.split_advice if spawned_from(s) else plans.top_advice
+        advice = advise(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user", cap)
         RAN["split"] = "advised" if advice else ""
         text = "\n\n".join(p for p in (advice, text) if p)
+    nudge_arm(me, load_session(me.home, me.id) or s)
     RAN["plan"] = len(text)
     return text or None
+
+
+# --- the nudge: a top session doing a work step itself ------------------------------------------------------------
+#
+# The marker <store>/phi/.nudge/<CLI session id> exists while a top session's step in progress is a work step it has
+# not been nudged on; recall-hook.sh lets an Edit, Write or shell call through to python only while a marker names
+# the call's session, so every other call pays nothing.
+
+NUDGE_LOOKING = (LOOKING | frozenset("""uniq basename dirname realpath stat du df env type command jq less more nl
+column od xxd sha1sum sha256sum md5sum cmp comm false read set ps tasklist whoami hostname uname history
+select-object where-object foreach-object measure-object format-table format-list out-string sort-object
+get-process get-command resolve-path join-path split-path get-date get-location convertfrom-json get-filehash
+compare-object""".split())) - {"mkdir"}
+GIT_READ = frozenset("status log diff show branch rev-parse remote fetch ls-files blame shortlog describe reflog "
+                     "config grep cat-file show-ref ls-tree".split())
+GIT_LANDS = frozenset("add commit merge push pull tag rebase cherry-pick stash notes".split())
+REDIRECT = re.compile(r"(?<![0-9&>])>>?\s*(?!&|/dev/null|\$null|nul\b)\S", re.I)
+
+
+def nudge_marker(me):
+    return os.path.join(me.store or me.home, "phi", ".nudge", SAFE.sub("_", str(me.cli))[:80])
+
+
+def nudge_key(step):
+    return f"{step.get('addr')}:" + hashlib.sha1(str(step.get("content") or "").encode("utf-8")).hexdigest()[:10]
+
+
+def nudge_step(home, s):
+    """The top session's step in progress when it is a work step not nudged on yet, else None."""
+    if not s or spawned_from(s):
+        return None
+    plan = plans.load(home, s["sessionId"])
+    st = plans.step_of(plan, plan.get("current") or "") if plan.get("steps") else None
+    text = str((st or {}).get("content") or "")
+    if not st or st.get("status") == "completed" or plans.LANDS.search(text) or plans.WAITS.search(text):
+        return None
+    return None if nudge_key(st) in (s.get("nudged") or []) else st
+
+
+def nudge_arm(me, s):
+    """The marker made while a nudge is owed, removed otherwise."""
+    if not me.cli:
+        return
+    path = nudge_marker(me)
+    try:
+        if nudge_step(me.home, s):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(s["sessionId"] + "\n")
+        elif os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
+def work_command(cmd):
+    """True when a shell command builds, tests or changes files: anything past reading, git's reading and landing
+    commands, and phi's own commands."""
+    c = QUOTED.sub("''", str(cmd or ""))
+    if REDIRECT.search(c):
+        return True
+    for part in re.split(r"&&|\|\||;|\n|\|", c):
+        part = part.strip()
+        prog = program(part)
+        if prog in NUDGE_LOOKING:
+            if prog == "sed" and re.search(r"\s-i", part):
+                return True
+            continue
+        if prog == "git":
+            words = [w for w in part.split()[1:] if not w.startswith("-")]
+            sub = words[0] if words else ""
+            if not sub or sub in GIT_READ or sub in GIT_LANDS:
+                continue
+            return True
+        if prog == "gh" or (prog in ("python", "python3", "py") and "phi.py" in str(cmd)):
+            continue
+        return True
+    return False
+
+
+def work_call(s, name, inp):
+    """True for an Edit or Write to the project's own files, outside its .claude folder, or a working command."""
+    if name in EDIT_TOOLS:
+        f = relay.norm(inp.get("file_path") or inp.get("notebook_path") or "")
+        proj = relay.norm(s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or "")
+        if not f or "/.claude/" in f + "/":
+            return False
+        return not proj or relay.covers(proj, f)
+    if name in SHELL_TOOLS:
+        return work_command(inp.get("command"))
+    return False
+
+
+def h_nudge(payload):
+    """PreToolUse on Edit, Write and shell commands in a top session with a plan: one line, once per step, that the
+    work goes to a child session. Never a block; reading, git's reading and landing commands are never nudged."""
+    me = Me(payload)
+    if not me.home or not me.id or not me.cli or not os.path.exists(nudge_marker(me)):
+        return None
+    s = load_session(me.home, me.id)
+    st = nudge_step(me.home, s)
+    if not st:
+        try:
+            os.remove(nudge_marker(me))
+        except OSError:
+            pass
+        return None
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    if not work_call(s, str(payload.get("tool_name") or ""), inp):
+        return None
+    s["nudged"] = (list(s.get("nudged") or []) + [nudge_key(st)])[-50:]
+    save_session(me.home, s)
+    nudge_arm(me, s)
+    RAN["nudge"] = st.get("addr")
+    return (f"phi (p4-phi): this is the top session, kept free for orchestration, and step {st.get('addr')}, "
+            f"\"{cut(clean(st.get('content')), 120)}\", is work: hand it to a child session with "
+            f"`mcp__ccd_session__start_session`, `context` `fresh`, `use_worktree: false`, its brief that step and "
+            f"\"archive when done\", and keep this session for planning, relaying and landing. Said once for this "
+            f"step.")
 
 
 def h_task(payload):
@@ -1128,6 +1282,12 @@ def h_user_prompt_submit(payload):
         "session" if re.search(r"<cross-session-message\b", str(payload.get("prompt") or "")) else "event")
     plans.pickup(me.home, s["sessionId"], payload.get("prompt") or "")
     mark_fork(s, me, payload)
+    if not s.get("disposable") and relay.DISPOSABLE.search(str(payload.get("prompt") or "")) \
+            and not load_turns(me.home, s["sessionId"]):
+        s["disposable"] = True                     # its brief or its first message: archive when done
+        RAN["disposable"] = True
+    if s.get("doneRetired") or s.get("archived"):
+        s["doneRetired"] = s["archived"] = False   # messaged again: a live node once more
     if req and not s.get("task"):
         s["task"] = cut(req, TASK_CHARS)
         s["taskAt"] = now()
@@ -1208,6 +1368,11 @@ def h_stop(payload):
     if unsent:                                     # what this turn changed for a child and did not tell it
         s["unsentRelay"] = [{"child": c, "steps": a, "time": row["time"]} for c, a in unsent]
     save_session(me.home, s)
+    steps = plans.load(me.home, s["sessionId"]).get("steps") or []
+    if s.get("disposable") and above and (row.get("done") or (steps and all(x.get("status") == "completed"
+                                                                              for x in steps))):
+        if relay.retire_done(me.home, above, s["sessionId"], s, row["time"]):
+            RAN["retired"] = "done"
     for node in (above, s["sessionId"]):           # the anchor of the node above, and this node's own for its children
         a = relay.make_anchor(me.home, node, row["time"])
         if a and node == above:
@@ -1479,6 +1644,7 @@ HOOKS = {"session-start": ("SessionStart", h_session_start),
          "plan": ("PostToolUse", h_plan),
          "task": ("PostToolUse", h_task)}
 ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "plan", "task")})
+ROUTED["nudge"] = ("PreToolUse", h_nudge)
 ROUTED.update({"agent-launch": ("PreToolUse", h_agent_launch), "agent-pre": ("PreToolUse", h_agent_call),
                "agent-post": ("PostToolUse", h_agent_call), "agent-stop": ("SubagentStop", h_agent_stop)})
 OLD_NAMES = {"arrive": "session-start", "prompt": "user-prompt-submit", "exit": "stop"}   # hooks.json of 0.1 and 0.2,
@@ -1591,7 +1757,7 @@ def main(argv=None):
     import argparse
     ap = argparse.ArgumentParser(description="phi: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard"):
+    for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in (default: this session's)")
         p.add_argument("--session", default="", help="the sessionId (default: this session's)")
@@ -1648,6 +1814,12 @@ def main(argv=None):
             print("kept as this session's shard: " + ", ".join(relay.shard_of(load_session(me.home, s["sessionId"]))))
             for line in lines:
                 print("phi: " + line)
+            return 0
+        if a.cmd == "disposable":
+            s["disposable"] = True
+            save_session(me.home, s)
+            print("this session is retired when its work is done: its outcome kept as a replaces: note on the "
+                  "session that started it, which is told to archive it")
             return 0
         if a.cmd == "note":
             print("kept" if note_add(me.home, s["sessionId"], a.claim, a.source, a.kind, me.cli) else "already kept")

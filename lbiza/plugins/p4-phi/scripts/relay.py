@@ -106,6 +106,47 @@ def _title(s):
     return str(s.get("title") or s.get("sessionId") or "")[:60]
 
 
+RECORD = None                    # phi.app_record, set by phi at import; read lazily otherwise
+ROOTED = None                    # phi.record_in, the record looked up in the app folder it was first found in
+
+
+def archived_in_app(s):
+    """True when the app archived a session (`isArchived` in its record), or its record has gone from the app folder
+    it was first found in on this machine. A session no app runs, or one whose folder this machine lacks (a store
+    synced from another machine), is never taken as archived by a missing record."""
+    sid = str(s.get("sessionId") or "")
+    if not sid.startswith("local_"):
+        return False
+    global RECORD, ROOTED
+    if RECORD is None:
+        import phi
+        RECORD, ROOTED = phi.app_record, phi.record_in
+    root = str(s.get("appRoot") or "")
+    if root and os.path.isdir(root):
+        rec = ROOTED(root, sid)
+        return not rec or bool(rec.get("isArchived"))
+    return bool(RECORD(sid).get("isArchived"))
+
+
+def gone(home, s):
+    """True when a session is out of the live tree: stale, finished and disposable, or archived in the app. An
+    archive seen in the app is kept in its session.json, so the other machines a store syncs to see it too."""
+    if not isinstance(s, dict) or not s.get("sessionId"):
+        return True
+    if s.get("stale") or s.get("doneRetired") or s.get("archived"):
+        return True
+    if archived_in_app(s):
+        path = os.path.join(_dir(home, s["sessionId"]), "session.json")
+        disk = _read_json(path)
+        if disk and not disk.get("archived"):
+            import time
+            disk["archived"] = time.strftime("%Y-%m-%d %H:%M")
+            _write_json(path, disk)
+        s["archived"] = True
+        return True
+    return False
+
+
 # --- paths -----------------------------------------------------------------------------------------------------------
 
 def norm(p, base=""):
@@ -198,7 +239,7 @@ def _siblings(home, s):
     if not p:
         return {}
     return {k: v for k, v in _sessions(home).items() if k != s.get("sessionId") and _parent(v) == p
-            and not v.get("stale")}
+            and not gone(home, v)}
 
 
 def warn(home, sid, key, text):
@@ -308,7 +349,7 @@ def make_anchor(home, parent, now):
     every = _sessions(home)
     nodes = {}
     for sid, s in every.items():
-        if _parent(s) != parent or s.get("stale"):
+        if _parent(s) != parent or gone(home, s):
             continue
         last = None
         for r in reversed(_rows(os.path.join(_dir(home, sid), "turns.jsonl"))):
@@ -735,7 +776,7 @@ def child_paths(home, s):
 # rest of .gitignore runs beside this one at a start.
 
 IGNORED = ("phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/sessions.md", "phi/rules.md",
-           "phi/catchup.json", "phi/**/*.tmp", "phi/sessions/*/.calls/", "phi/.agents/")
+           "phi/catchup.json", "phi/**/*.tmp", "phi/sessions/*/.calls/", "phi/.agents/", "phi/.nudge/")
 TRACKED_MARK = "p4-phi-tracked"
 
 
@@ -956,20 +997,104 @@ def retire(home, parent, sid, s, by, version, now):
     disk = _read_json(spath)
     disk["stale"] = {"anchorVersion": version, "by": nid, "note": _short(m.get("claim"), 300), "time": now}
     _write_json(spath, disk)
+    _pend_archive(home, parent, sid, s, "stale")
+
+
+def _pend_archive(home, parent, sid, s, kind):
+    """The parent's next message names this child to archive (stale_text)."""
     ppath = os.path.join(_dir(home, parent), "session.json")
     pd = _read_json(ppath)
     if pd:
         pend = pd.setdefault("staleChildren", [])
-        if sid not in [x.get("id") for x in pend]:
-            pend.append({"id": sid, "title": _title(s)})
+        pend[:] = [x for x in pend if not (isinstance(x, dict) and x.get("id") == sid)]
+        pend.append({"id": sid, "title": _title(s), "kind": kind})
+        pd["staleTold"] = [x for x in pd.get("staleTold") or [] if x != sid]
         _write_json(ppath, pd)
 
 
+DISPOSABLE = re.compile(r"\barchive(?:d)?\s+(?:it\s+|this session\s+)?when\s+(?:it(?:'s| is)\s+|you(?:'re| are)\s+)?"
+                        r"(?:done|finished)\b", re.I)
+
+
+def commits_between(repo, old, new):
+    """The one-line subjects of the commits from `old` to `new` in a repository, newest first, at most 8."""
+    if not old or not new or old == new:
+        return []
+    r = _git(repo, "log", "--format=%h %s", "-8", f"{old}..{new}")
+    return [x.strip() for x in r.stdout.splitlines() if x.strip()] if r and r.returncode == 0 else []
+
+
+def outcome(home, sid, s):
+    """What a finished session leaves: (files changed, heads with the commits made since its first turn, what is
+    still open)."""
+    import plans
+    turns = _rows(os.path.join(_dir(home, sid), "turns.jsonl"))
+    base = s.get("cwd") or ""
+    files = edited_files(home, sid)
+    first, last = {}, {}
+    for r in turns:
+        for h in (r.get("delta") or {}).get("heads") or []:
+            repo, _, sha = str(h).rpartition(" ")
+            first.setdefault(repo, sha)
+            last[repo] = sha
+    heads_, commits = [], []
+    for repo, sha in last.items():
+        heads_.append(show_head(f"{repo} {sha}", base))
+        commits += commits_between(repo.rsplit("@", 1)[0], first.get(repo), sha)
+    p = plans.load(home, sid)
+    still = [f"step {x['addr']} \"{_short(x.get('content'), 80)}\" {x.get('status') or 'pending'}"
+             for x in p.get("steps") or [] if x.get("status") != "completed"]
+    still += [f"task {t.get('id')} ({_short(t.get('what'), 60)}) open" for _, t in plans._tasks(p)
+              if t.get("status") == "open"]
+    dirty = uncommitted(files)
+    if dirty:
+        still.append("uncommitted: " + ", ".join(show(f, base) for f in dirty[:8]))
+    return files, heads_, commits, still
+
+
+def retire_done(home, parent, sid, s, now):
+    """A disposable child whose work is over: its outcome kept as one replaces: note on its parent, it left out of
+    the relay, the anchors and the down-lines, and the parent told at its next message to archive it. Returns True
+    when it was retired now."""
+    path = os.path.join(_dir(home, sid), "session.json")
+    disk = _read_json(path)
+    if not parent or not disk or disk.get("doneRetired"):
+        return False
+    files, heads_, commits, still = outcome(home, sid, disk)
+    base = disk.get("cwd") or ""
+    turns = _rows(os.path.join(_dir(home, sid), "turns.jsonl"))
+    last = turns[-1] if turns else {}
+    claim = (f"replaces: \"{_title(disk)}\" ({sid}) as a live node: it finished and was started to be archived "
+             f"when done. Changed: " + (", ".join(show(f, base) for f in files[:10]) or "no files")
+             + (" ..." if len(files) > 10 else "") + ". Heads: " + (", ".join(heads_) or "none") + ". Commits: "
+             + ("; ".join(commits) or "none") + ". Still open: " + ("; ".join(still) or "nothing") +
+             f". Its last report: \"{_short(last.get('done') or last.get('report'), 300)}\".")
+    row = {"time": now, "claim": claim[:1600], "source": "phi archive-when-done retirement",
+           "kind": "decision", "cliSessionId": ""}
+    npath = os.path.join(_dir(home, parent), "notes.jsonl")
+    os.makedirs(os.path.dirname(npath), exist_ok=True)
+    with open(npath, "a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    disk["doneRetired"] = {"time": now}
+    _write_json(path, disk)
+    _pend_archive(home, parent, sid, disk, "done")
+    return True
+
+
 def stale_text(pend):
-    """The parent's one line about the stale children in `pend`; '' for none."""
+    """The parent's one line about the children in `pend` to archive, stale or done; '' for none."""
     pend = [x for x in pend or [] if isinstance(x, dict)]
     if not pend:
         return ""
-    names = ", ".join(f"\"{x.get('title')}\" ({x.get('id')})" for x in pend)
-    return (f"phi (p4-phi): stale, their work superseded by a newer note, their outcome kept as a replaces: note "
-            f"on this session: {names}. Archive them now with `mcp__ccd_session_mgmt__archive_session`.")
+    out = []
+    done = [x for x in pend if x.get("kind") == "done"]
+    stale = [x for x in pend if x.get("kind") != "done"]
+    if stale:
+        names = ", ".join(f"\"{x.get('title')}\" ({x.get('id')})" for x in stale)
+        out.append(f"phi (p4-phi): stale, their work superseded by a newer note, their outcome kept as a replaces: "
+                   f"note on this session: {names}. Archive them now with `mcp__ccd_session_mgmt__archive_session`.")
+    if done:
+        names = ", ".join(f"\"{x.get('title')}\" ({x.get('id')})" for x in done)
+        out.append(f"phi (p4-phi): finished, started to be archived when done, their outcome kept as a replaces: "
+                   f"note on this session: {names}. Archive them now with `mcp__ccd_session_mgmt__archive_session`.")
+    return "\n".join(out)

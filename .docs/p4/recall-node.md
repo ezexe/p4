@@ -189,11 +189,29 @@ The code is `lbiza/plugins/p4-phi/scripts/plans.py`, run by a PostToolUse hook o
 - **Handed to the parent:** the parent's next message names the stale children with their ids, once, and says to archive them with `mcp__ccd_session_mgmt__archive_session`; a hook cannot archive a session itself.
 - **Reactivated:** a stale session messaged again is handed what superseded it, once, and is un-staled when its next turn ends having seen that anchor.
 
+## Archive-when-done children
+
+- **Marked:** a child whose brief or first message says "archive when done", or that runs `phi.py disposable`, is disposable in its `session.json`.
+- **Retired:** when such a child's turn ends with its plan all completed or with `phi.py done` said, one note on the parent, beginning `replaces:`, says what it changed, its heads and the commits since its first turn, and what is still open: open steps, open background tasks and uncommitted files. It is marked `doneRetired` and left out of the anchor, the slices, the relay and the down-lines, like a stale node.
+- **Handed to the parent:** the parent's next message names it with its id, once, and says to archive it with `mcp__ccd_session_mgmt__archive_session`. The same pending list as stale nodes carries it, with its own wording.
+- **Reactivated:** a retired child messaged again is a live node once more, and its next finish writes a new note.
+
+## Archived children leave the tree
+
+- **Read from the app:** a session whose app record has `isArchived` true, or whose record has gone from the app folder it was first read from, is out of the relay, the anchors, the slices and the down-lines. Found live: a parent's boundary kept saying an archived child "has 0 of 4 steps done".
+- **Kept for the other machines:** the app folder a record was read from is kept as `appRoot`, and an archive seen there is kept as `archived` in `session.json`, so a store synced to another machine, where that folder does not exist, still leaves the child out. A missing record on a machine without that folder counts for nothing.
+
+## The top session orchestrates
+
+- **The rule:** a session nobody started, the root of its tree, keeps itself free for orchestration: planning, relaying between sessions, decisions with the user, and landing the work, meaning merge and push. Its standing instruction says so.
+- **Split advice at depth 0:** every open work step goes to a fresh child, not only the independent ones. A run of work steps where one leans on the step before it, by the same wording the split advice reads, or shares a path with the run, is one child doing them in order. A step that checks or lands work, such as test-and-commit, merge, push or release, or that waits on and relays work, stays at the top. Each brief is told to say "archive when done". Children below the top keep the split rules below.
+- **The nudge:** while a top session's step in progress is a work step, `phi/.nudge/<CLI session id>` exists, and `recall-hook.sh` lets an Edit, Write or shell call of that session reach Python. Its first Edit or Write to the project's own files outside `.claude/`, or a command that builds, tests or changes files, gets one line: hand the work to a child. That is once per step, never a block. Reading commands, git's reading and landing commands and phi's own commands are never nudged, and a landing step owes no nudge.
+
 ## Routing through the hooks every session already has
 
 - **What was found,** by the marketplace test session: Claude Code reads a session's `hooks.json` once, at its start, while the scripts its entries call are read from the plugin folder at every call. So the `start-advice`, `branch-guard`, `plan` and `task` entries added after 13:30 never ran in any session open before them; neither a marketplace update nor disabling and enabling the plugin reloaded them.
-- **The rule from here:** `hooks.json` stays at the entries every open session holds, the list of 13:30. A new check runs inside an entry that already fires: recall's `lookup-check`, PreToolUse on every tool, hands `start_session` to start-advice and `EnterWorktree`, Bash and PowerShell to branch-guard; recall's `lookup-record`, PostToolUse on every tool, hands `update_plan` to the plan check and background Bash, Monitor, Agent and Workflow to task registration.
-- **The shell fast paths:** `recall-hook.sh` lets `start_session`, `EnterWorktree` and any command naming git reach Python, and never runs an `update_plan` record detached, since its answer goes beside the result.
+- **The rule from here:** `hooks.json` stays at the entries every open session holds, the list of 13:30. A new check runs inside an entry that already fires: recall's `lookup-check`, PreToolUse on every tool, hands `start_session` to start-advice, `EnterWorktree`, Bash and PowerShell to branch-guard, and Edit, Write, Bash and PowerShell to the top session's nudge; recall's `lookup-record`, PostToolUse on every tool, hands `update_plan` to the plan check and background Bash, Monitor, Agent and Workflow to task registration.
+- **The shell fast paths:** `recall-hook.sh` lets `start_session`, `EnterWorktree` and any command naming git reach Python, and an Edit, Write or command only while `phi/.nudge/` holds a marker named by the call's session, and never runs an `update_plan` record detached, since its answer goes beside the result.
 - **Once per call:** a session started while the dedicated entries were in `hooks.json` holds both; each check marks the call's `tool_use_id` in its session folder's `.calls/`, which is never tracked, so it runs once whichever entry reaches it first.
 - **Seen:** each routed check writes its line in the session's `log.jsonl`.
 - **Sessions older than the lookup entries,** found live 2026-11-12: a session started before 13:30 that day holds a hook list naming p4-recall's folder, which the fold into p4-phi removed, so recall's lookup hooks never run in it and nothing routed reaches it. phi's own three entries still run there, so at each message and each Stop phi reads the transcript's `update_plan` calls and background launches that no hook handled, in order, each once by its `tool_use_id`: the plan is kept and a step boundary is answered at the next message instead of beside the call.

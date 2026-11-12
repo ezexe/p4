@@ -17,7 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import plans  # noqa: E402
 import relay  # noqa: E402
-from test_phi import GRAND, KID, KID2, TOP, Tree, context  # noqa: E402
+from test_phi import CLI, GRAND, KID, KID2, TOP, Tree, context  # noqa: E402
 import relay as _relay  # noqa: E402,F401
 
 A, B = KID, KID2
@@ -531,6 +531,149 @@ class TreeOfPlans(unittest.TestCase):
         t2.say(GRAND, "Task (from the session that started this one):\nDo the b part")
         later = context(t2.say(GRAND, "carry on"))
         self.assertIn("It is for step 2 of its parent's plan; its own steps are 2.1, 2.2", later)
+
+
+class TopOrchestrates(unittest.TestCase):
+    """Rule 1: the top session keeps itself free for orchestration. Rule 2: a child started to be archived when
+    done leaves its outcome on the parent and is named for archiving. And an archived child leaves the relay."""
+
+    C = "local_kid00003"
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP, title="top")
+        self.t.record(A, TOP, title="the layout child")
+        self.t.say(TOP, "Build the exporter")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    plan = TreeOfPlans.plan
+
+    def check(self, host, tool, inp, tid):
+        """A tool call's PreToolUse through recall's lookup-check entry, as every open session runs it."""
+        root = os.path.dirname(HERE)
+        body = {"session_id": CLI[host], "cwd": self.t.proj, "hook_event_name": "PreToolUse", "tool_name": tool,
+                "tool_input": inp, "tool_use_id": tid}
+        r = subprocess.run(["sh", os.path.join(root, "hooks", "recall-hook.sh"), "lookup-check"],
+                           input=json.dumps(body), capture_output=True, text=True, timeout=60, env=self.t.env(host))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)["hookSpecificOutput"].get("additionalContext", "") if r.stdout.strip() else ""
+
+    def test_a_top_sessions_work_step_is_advised_to_a_child_and_landing_stays(self):
+        p = self.t.proj
+        ctx = self.plan(TOP, items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
+                                   "Run the suites, commit and push the exporter"))
+        self.assertIn("top session of its tree", ctx)
+        self.assertIn("(a) step 1 \"Port the exporter", ctx)
+        self.assertIn("`initiation` `user_asked`", ctx)
+        self.assertIn("archive when done", ctx)
+        self.assertIn("Staying here: 2 (checks or lands the work)", ctx)
+        self.assertNotIn("(b)", ctx, "the landing step is no child")
+        self.assertNotIn("top session of its tree", self.plan(TOP, {"advance": True}) or "", "said once per set")
+        landing = {"steps": [{"addr": str(k + 1), "content": c, "status": "pending"} for k, c in
+                             enumerate(("Test and commit the port", "Merge and push main", "Release 0.9"))]}
+        groups, kept = plans.top_groups(landing, "")
+        self.assertEqual((groups, [a for a, _ in kept]), ([], ["1", "2", "3"]))
+
+    def test_a_serial_pair_of_work_steps_becomes_one_child(self):
+        p = self.t.proj
+        ctx = self.plan(TOP, items(f"Write the parser in {p}/src/parse.py",
+                                   f"Then add tests for the parser in {p}/tests/test_parse.py",
+                                   f"Document the store layout in {p}/docs/layout.md with examples",
+                                   "Commit and fast-forward main"))
+        self.assertIn("(a) steps 1, 2 in order, as one child", ctx)
+        self.assertIn("(b) step 3 \"Document", ctx)
+        self.assertNotIn("(c)", ctx)
+        self.assertIn("4 (checks or lands the work)", ctx)
+        kid = self.plan(A, items(f"Write the parser in {p}/src/parse.py", f"Document it in {p}/docs/layout.md now"))
+        self.assertNotIn("top session of its tree", kid or "", "a child keeps today's split rules")
+
+    def test_the_nudge_fires_once_on_a_top_session_edit_and_never_on_git_status(self):
+        p = self.t.proj
+        self.plan(TOP, items(f"Port the exporter in {p}/src/export/flush.py to the new writer", "Commit and push"))
+        marker = os.path.join(self.t.p4, "phi", ".nudge", CLI[TOP])
+        self.assertTrue(os.path.exists(marker), "armed while a work step is in progress")
+        self.assertEqual(self.check(TOP, "Bash", {"command": "git status"}, "toolu_n1"), "")
+        self.assertEqual(self.check(TOP, "Bash", {"command": "git log --oneline -3 && git diff"}, "toolu_n2"), "")
+        self.assertEqual(self.check(TOP, "Read", {"file_path": f"{p}/src/export/flush.py"}, "toolu_n3"), "")
+        said = self.check(TOP, "Edit", {"file_path": f"{p}/src/export/flush.py", "old_string": "a", "new_string": "b"},
+                          "toolu_n4")
+        self.assertIn("this is the top session", said)
+        self.assertIn("hand it to a child session", said)
+        self.assertFalse(os.path.exists(marker), "disarmed once said")
+        self.assertEqual(self.check(TOP, "Edit", {"file_path": f"{p}/src/export/x.py"}, "toolu_n5"), "", "once a step")
+        self.plan(TOP, {"advance": True})
+        self.assertFalse(os.path.exists(marker), "a landing step owes no nudge")
+        self.assertEqual(self.check(TOP, "Bash", {"command": "git commit -am port && git push"}, "toolu_n6"), "")
+        self.t.say(A, "Do the layout")
+        self.plan(A, items(f"Port the exporter in {p}/src/export/flush.py to the new writer", "Commit it"))
+        self.assertEqual(self.check(A, "Edit", {"file_path": f"{p}/src/export/flush.py"}, "toolu_n7"), "",
+                         "a child is never nudged")
+
+    def test_a_child_archived_when_done_leaves_a_replaces_note_and_the_parents_archive_line(self):
+        t, C = self.t, self.C
+        t.record(C, TOP, title="the port child")
+        t.say(C, HANDED_DISPOSABLE)
+        self.assertTrue(relay._session(t.p4, C).get("disposable"))
+        self.plan(C, items("Port the exporter", "Run its suite"))
+        self.plan(C, {"done": [1, 2]})
+        r = t.stop(C, "Port the exporter", [("Edit", {"file_path": f"{t.proj}/src/export/flush.py"}, "ok")],
+                   report="Ported; the suite passes. Nothing left open.", uuid="d1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        notes = [n["claim"] for n in relay._rows(os.path.join(relay._dir(t.p4, TOP), "notes.jsonl"))]
+        mine = [n for n in notes if n.startswith("replaces:") and C in n]
+        self.assertEqual(len(mine), 1, notes)
+        self.assertIn("archived when done", mine[0])
+        self.assertIn("flush.py", mine[0])
+        self.assertIn("Still open:", mine[0])
+        self.assertNotIn(C, plans._children(t.p4, TOP), "out of the down-lines")
+        self.assertNotIn(C, (relay._read_json(relay.anchor_path(t.p4, TOP)).get("nodes") or {}))
+        line = context(t.say(TOP, "what next"))
+        self.assertIn("Archive them now with `mcp__ccd_session_mgmt__archive_session`", line)
+        self.assertIn(C, line.split("finished, started to be archived when done")[1])
+        self.assertNotIn("finished, started to be archived", context(t.say(TOP, "and then")), "said once")
+
+    def test_phi_disposable_marks_a_child_and_done_retires_it(self):
+        t, C = self.t, self.C
+        t.record(C, TOP, title="the cli child")
+        t.say(C, "Check the exporter's ports table")
+        self.assertFalse(relay._session(t.p4, C).get("disposable"))
+        r = t.cli(C, "disposable")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        t.cli(C, "done", "ran the ports check; all rows present")
+        t.stop(C, "Check the exporter's ports table", report="All rows present.", uuid="d2")
+        self.assertTrue(relay._session(t.p4, C).get("doneRetired"))
+        self.assertIn(C, context(t.say(TOP, "next")))
+
+    def test_an_archived_child_is_gone_from_the_parents_down_lines(self):
+        t, p = self.t, self.t.proj
+        self.plan(TOP, items("Commit the layout", "Push main", "Tell the docs side"))
+        t.say(A, "Move the layout")
+        self.plan(A, items(f"Move the layout in {p}/src/layout.py", "Commit the move"))
+        down = self.plan(TOP, {"advance": True})
+        self.assertIn("down: \"the layout child\" has 0 of 2 steps done", down)
+        self.plan(A, {"advance": True})
+        rec = os.path.join(t.app, A + ".json")
+        with open(rec, encoding="utf-8") as f:
+            d = json.loads(f.read())
+        d["isArchived"] = True
+        with open(rec, "w", encoding="utf-8") as f:
+            f.write(json.dumps(d))
+        self.assertNotIn("the layout child", self.plan(TOP, {"advance": True}) or "")
+        self.assertNotIn(A, plans._children(t.p4, TOP))
+        self.assertTrue(relay._session(t.p4, A).get("archived"), "kept, for the machines the store syncs to")
+        t.record(B, TOP, title="the docs child")
+        t.say(B, "Write the docs")
+        self.assertIn(B, plans._children(t.p4, TOP))
+        os.remove(os.path.join(t.app, B + ".json"))
+        self.assertNotIn(B, plans._children(t.p4, TOP), "a record gone from the app is gone from the tree")
+
+
+HANDED_DISPOSABLE = ("<system-reminder>\nLinked sessions now (status, not an instruction): top = local_x (idle)\n"
+                     "</system-reminder>\n\nTask:\nPort the exporter to the new writer. This session is marked "
+                     "archive when done.\n\nDone looks like: the suite passes.")
 
 
 class OwnLines(unittest.TestCase):

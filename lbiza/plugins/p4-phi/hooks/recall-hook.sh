@@ -27,13 +27,20 @@ if [ "$name" = lookup-check ]; then
       a="${CLAUDE_PROJECT_DIR:-.}/.claude/p4/phi/.agents"
       [ -d "$a" ] && [ -n "$(ls -A "$a" 2>/dev/null)" ] && sub=1 ;;
   esac
+  nudge=0                                         # a top session owes a nudge: its CLI id names a marker
+  for f in "${CLAUDE_PROJECT_DIR:-.}/.claude/p4/phi/.nudge"/*; do
+    [ -e "$f" ] || break
+    case "$payload" in *"${f##*/}"*) nudge=1; break ;; esac
+  done
   [ "$sub" = 1 ] || case "$payload" in
+    *'"tool_name":"Edit"'*|*'"tool_name": "Edit"'*|*'"tool_name":"Write"'*|*'"tool_name": "Write"'*|    *'"tool_name":"MultiEdit"'*|*'"tool_name": "MultiEdit"'*|*'"tool_name":"NotebookEdit"'*|*'"tool_name": "NotebookEdit"'*)
+      [ "$nudge" = 1 ] || exit 0 ;;
     *'"tool_name":"WebFetch"'*|*'"tool_name": "WebFetch"'*|*'"tool_name":"WebSearch"'*|*'"tool_name": "WebSearch"'*) ;;
     *'"tool_name":"Bash"'*|*'"tool_name": "Bash"'*|*'"tool_name":"PowerShell"'*|*'"tool_name": "PowerShell"'*) ;;
     *mcp__ccd_session__start_session*|*'"tool_name":"EnterWorktree"'*|*'"tool_name": "EnterWorktree"'*) ;;
     *) exit 0 ;;
   esac
-  [ "$sub" = 1 ] || case "$payload" in
+  [ "$sub" = 1 ] || [ "$nudge" = 1 ] || case "$payload" in
     *git*) ;;                                     # a git command: phi's branch guard reads it (hook.py routes)
     *'"tool_name":"Bash"'*|*'"tool_name": "Bash"'*|*'"tool_name":"PowerShell"'*|*'"tool_name": "PowerShell"'*)
       # a command is checked only by the failure model, which a store has only once a training round passed one
