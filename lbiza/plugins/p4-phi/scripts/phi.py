@@ -1286,7 +1286,8 @@ def nudge_step(home, s):
     st = plans.step_of(plan, plan.get("current") or "") if plan.get("steps") else None
     text = str((st or {}).get("content") or "")
     if (not st or st.get("status") == "completed" or plans.LANDS.search(text) or plans.ORCHESTRATES.search(text) or plans.WAITS.search(text)
-            or plans.MANAGES.search(text) or plans.TABULATES.search(text)):
+            or plans.MANAGES.search(text) or plans.TABULATES.search(text)
+            or plans.TRACKS.search(text)):
         return None
     return None if nudge_key(st) in (s.get("nudged") or []) else st
 

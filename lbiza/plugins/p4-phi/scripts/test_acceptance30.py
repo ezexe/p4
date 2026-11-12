@@ -38,6 +38,19 @@ class SplitReads(unittest.TestCase):
         self.assertTrue(plans.LANDS.search("Check our own work before the push"), "a check of its own work lands")
 
 
+class Tracking(unittest.TestCase):
+    def test_a_step_another_does_or_ezexe_decides_stays_at_the_top(self):
+        """#31: tracking steps stay at the top."""
+        groups, kept = plans.top_groups(plan_of(
+            "Ledger: p4-phi fixer pushes #25", "ezexe updates the Mac's plugins", "Track the #28 builder's progress",
+            "The top session merges the fold branch", "Write the sync script in src/sync.py"), "")
+        self.assertEqual([a for a, why in kept if "tracks" in why], ["1", "2", "3", "4"])
+        self.assertEqual([[st["content"] for st in g] for g in groups], [["Write the sync script in src/sync.py"]])
+        free, kept = plans.judge(plan_of("Ledger: p4-phi fixer pushes #25 in src/a.py",
+                                         "Write the store sync script and its workflow in src/sync.py"), "")
+        self.assertEqual([st["addr"] for st in free], ["2"])
+
+
 class SiblingWords(unittest.TestCase):
     def test_phi_and_session_alone_never_bear_on_a_sibling(self):
         step = "Check the phi session tree page for archived nodes"

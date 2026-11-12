@@ -373,6 +373,12 @@ MANAGES = re.compile(r"\b(?:un)?(?:archiv|relay|messag|start|stop|review|check|b
                      r"|\b(?:queu|send|sent|pass|hand|forward)\w*\b[^.;]*?\b(?:to|for)\s+(?:the\s+)?"
                      r"(?:local_[\w-]+|[\"“'][^\"”']+[\"”']|(?:[\w-]+\s+){0,3}?(?:top|parent|orchestrator|fixer|"
                      r"tester|starter|owner of)\b)", re.I)
+# tracks what another does: a ledger line, a step whose doer is another session, a fixer, a top session, or ezexe,
+# or that ezexe decides (#31: "Ledger: p4-phi fixer pushes #25" and "ezexe updates the Mac's plugins" were work)
+TRACKS = re.compile(r"^\W*(?:ledger|track(?:s|ing)?)\b"
+                    r"|^\W*(?:[\w'-]+\s+){0,3}?(?:fixer|top session|other session|another session|parent|"
+                    r"orchestrator|builder|tester|ezexe)\s+(?:will\s+|to\s+)?(?:\w+s|decides?|approves?)\b"
+                    r"|\bezexe\s+(?:decides|approves|chooses|signs off|rules)\b|\bfor ezexe to\b", re.I)
 # compiles, reports or tabulates the other steps' results: "Final six-row pass/fail table" was handed to a child
 TABULATES = re.compile(r"^\W*(?:final\s+)?(?:[\w/-]+\s+){0,3}?(?:pass/fail\s+)?(?:table|tally|summary|scorecard)\b"
                        r"|\b(?:compil|tabulat|collat|summari[sz]|tall(?:y|ies))\w*\b[^.;]*\b(?:results?|outcomes?|"
@@ -402,6 +408,8 @@ def judge(plan, cwd):
             kept.append((a, "manages a child session"))
         elif TABULATES.search(text):
             kept.append((a, "compiles or reports the other steps' results"))
+        elif TRACKS.search(text):
+            kept.append((a, "tracks what another session or ezexe does or decides"))
         elif shared:
             kept.append((a, f"shares {relay.show(shared[0][1], cwd)} with step {shared[0][0]}"))
         elif len(words(text)) < QUICK_WORDS:
@@ -472,6 +480,8 @@ def top_groups(plan, cwd):
             kept.append((st["addr"], "manages a child session, which is orchestration"))
         elif TABULATES.search(text):
             kept.append((st["addr"], "compiles or reports the other steps' results"))
+        elif TRACKS.search(text):
+            kept.append((st["addr"], "tracks what another session or ezexe does or decides"))
         elif wait:
             kept.append((st["addr"], f"waits on or relays work (\"{wait.group(0)}\")"))
         else:
