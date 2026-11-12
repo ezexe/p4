@@ -1587,11 +1587,17 @@ QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
 BRANCH_MOVE = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b[^\n|;&]*?\b(switch\b|checkout\s+(?!--)(?!-[^bB])(?![\w./-]*\.\w{1,6}\s*$)[\w./-]+\s*$)")
 BRANCHING = re.compile(r"\bgit\b[^\n|;&]*?\b(worktree\s+add|switch\s+(-c|--create|-C)|checkout\s+(-b|-B)|"
                        r"branch\s+(?!-)[\w./-]+\s*$|branch\s+(?!-)[\w./-]+\s+[\w./-]+)")
+LANDING = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b[^\n|;&]*?\b(push|merge|rebase|pull)(?![\w-])")
+# a brief that hands the child the landing itself: "then push main yourself", "you merge and push"
+LANDING_GIVEN = re.compile(r"\b(?:push|merg|land)\w*\b[^.\n]{0,60}\byourself\b|\byou (?:may |can |then )?"
+                           r"(?:merge|push|land)\b", re.I)
 
 
 def h_branch_guard(payload):
     """PreToolUse on EnterWorktree and Bash in a session another one started: making a worktree or a branch of its
-    own is asked first, the user's rule being that a child works on its parent's branch. Silent otherwise."""
+    own is asked first, the user's rule being that a child works on its parent's branch. So is landing work, a git
+    push, merge, rebase or pull, which the parent does, unless the child's brief handed it the landing. Silent
+    otherwise."""
     me = Me(payload)
     if not me.home or not me.id:
         return None
@@ -1607,6 +1613,18 @@ def h_branch_guard(payload):
         what = "making a worktree or branch of its own"
     elif name in SHELL_TOOLS and BRANCH_MOVE.search(QUOTED.sub("''", str(inp.get("command") or ""))):
         what = "moving the checkout to another branch, which in a shared checkout moves the parent's too"
+    elif name in SHELL_TOOLS and LANDING.search(QUOTED.sub("''", str(inp.get("command") or ""))) \
+            and not LANDING_GIVEN.search(str(s.get("task") or "")):
+        verb = LANDING.search(QUOTED.sub("''", str(inp.get("command") or ""))).group(1)
+        RAN["branch_guard"] = f"git {verb}"
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
+                                       "permissionDecisionReason": f"p4-phi: this session is a child, and `git {verb}` "
+                                                                   f"lands work, which its parent does: a child commits "
+                                                                   f"on its parent's branch and reports, and the "
+                                                                   f"session that started it ({spawned_from(s)}) "
+                                                                   f"merges and pushes. Ask it with SendMessage "
+                                                                   f"instead, unless its brief gave this session the "
+                                                                   f"landing."}}
     else:
         return None
     RAN["branch_guard"] = what

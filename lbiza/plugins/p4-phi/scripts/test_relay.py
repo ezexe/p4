@@ -390,6 +390,23 @@ class ForkOrFresh(ThreeSessions):
         self.assertIn("moves the parent's too", guard(B, "git checkout feature/x")["permissionDecisionReason"])
         self.assertIsNone(guard(TOP, "git switch -c mine"), "a top session decides its own branches")
 
+    def test_a_child_landing_work_is_asked_unless_its_brief_gave_it_the_landing(self):
+        """#19: only the parent merges and pushes."""
+        def guard(host, cmd):
+            r = self.t.hook("branch-guard", host, {"tool_name": "Bash", "tool_input": {"command": cmd}})
+            return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
+        for cmd in ("git push origin main", "cd /x && git merge feature", "git -C p4 rebase main", "git pull"):
+            out = guard(B, cmd)
+            self.assertEqual(out["permissionDecision"], "ask", cmd)
+            self.assertIn("merges and pushes", out["permissionDecisionReason"])
+        self.assertIsNone(guard(B, "git merge-base --is-ancestor a b"), "merge-base lands nothing")
+        self.assertIsNone(guard(B, "git log --grep 'push'"), "quoted words are not a command")
+        self.assertIsNone(guard(TOP, "git push origin main"), "the top session lands the work")
+        s = relay._session(self.t.p4, B)
+        s["task"] = "Fix it, run the suites, then push main yourself."
+        relay._write_json(os.path.join(relay._dir(self.t.p4, B), "session.json"), s)
+        self.assertIsNone(guard(B, "git push origin main"), "a brief that hands over the landing")
+
     def test_a_fresh_child_starts_with_only_its_shards_slice(self):
         t = self.t
         t.cli(A, "note", f"deprecates: `{self.x('lib', 'x.py')}`; use p4conf", "--source", "commit aaa111")
