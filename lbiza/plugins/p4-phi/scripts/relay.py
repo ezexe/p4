@@ -261,6 +261,7 @@ def anchor_path(home, parent):
 
 
 def make_anchor(home, parent, now):
+    import plans                                  # the plan tree: each node's steps, statuses and current step
     """Make <parent>/anchor.json again from the latest delta of each child and the parent's own marked notes; its
     version goes up only when that content changed. Returns the anchor."""
     if not parent:
@@ -276,13 +277,14 @@ def make_anchor(home, parent, now):
                 last = r
                 break
         marks = _all_marks(home, sid)
-        if last or marks or shard_of(s):
+        plan = plans.summary(home, sid)
+        if last or marks or shard_of(s) or plan:
             d = (last or {}).get("delta") or {}
             nodes[sid] = {"title": _title(s), "time": str((last or {}).get("time") or ""),
                           "heads": d.get("heads") or [], "files": d.get("files") or [], "marks": marks,
-                          "shard": shard_of(s)}
+                          "shard": shard_of(s), "plan": plan, "root": str(s.get("rootStep") or "")}
     own = {"title": _title(every.get(parent, {})), "marks": _all_marks(home, parent),
-           "shard": shard_of(every.get(parent, {}))}
+           "shard": shard_of(every.get(parent, {})), "plan": plans.summary(home, parent)}
     body = {"nodes": nodes, "parent": own}
     digest = hashlib.sha1(json.dumps(body, sort_keys=True).encode("utf-8")).hexdigest()
     path = anchor_path(home, parent)
@@ -406,7 +408,9 @@ def rebase(home, sid, room, fair_cut):
             if n.get("files"):
                 bits.append(f"{len(n['files'])} file(s) changed: " + ", ".join(show(f, base) for f in n["files"][:12])
                             + (" ..." if len(n["files"]) > 12 else ""))
-            if bits:
+            mark = hashlib.sha1(json.dumps([n.get("heads"), n.get("files")]).encode()).hexdigest()[:10]
+            if bits and (s.setdefault("othersGiven", {}).get(nid) != mark):
+                s["othersGiven"][nid] = mark
                 others.append(f"- \"{n.get('title') or nid}\" ({nid}): " + "; ".join(bits))
         s["anchorSeen"] = version
         del given[:-400]                               # the newest keys are enough to tell a mark already given

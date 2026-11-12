@@ -71,6 +71,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import node as nd  # noqa: E402  (a session's place in the tree, which recall reads too)
 import p4conf  # noqa: E402  (the store's layout: each plugin's files in .claude/p4/<plugin>/)
+import plans  # noqa: E402  (each session's plan with step addresses; the parent's anchor is the plan tree)
 import relay  # noqa: E402  (shards, deltas, anchors: linked sessions kept in step while they work)
 
 BACKGROUND = True
@@ -861,13 +862,38 @@ def given(s, me, home, own=False):
     text = background_text(home, s, own=own)
     if above and not s.get("forked"):
         piece = relay.slice_text(home, s)          # a fresh child starts with exactly what the parent has for it
-        text = "\n\n".join(p for p in (text, piece) if p)
+        step = plans.slice_for(home, s)            # its root step and the parent's plan around it
+        text = "\n\n".join(p for p in (text, step, piece) if p)
     if above and "anchorSeen" not in s:
         # the start is the child's base: a fresh child's slice or a fork's inherited conversation already holds the
         # anchor as it is now, so the rebase check hands over only what changes after it
         s["anchorSeen"] = relay.anchor_version(home, above)
         s["marksGiven"] = relay.mark_keys(home, above)
     return text
+
+
+def pin_of(home, s):
+    """A forked child's own task, shard and root step, above the conversation it inherited; '' for others."""
+    if not s.get("forked"):
+        return ""
+    line = relay.pin_text(s)
+    root = plans.root_of(home, s)
+    return (line + f" It is for step {root} of its parent's plan; its own steps are {root}.1, {root}.2, and so on.") \
+        if line and root else line
+
+
+def h_plan(payload):
+    """PostToolUse on mcp__ccd_turn__update_plan: the session's plan.json, the parent's plan tree, a revision
+    relayed, and at a step boundary what bears on the step starting now (plans.py)."""
+    me = Me(payload)
+    if not me.home or not me.id:
+        return None
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    s = ensure_session(me.home, me.id, me.rec, me.cli)
+    save_session(me.home, s)
+    text = plans.record(me.home, s, inp)
+    RAN["plan"] = len(text)
+    return text or None
 
 
 def mark_fork(s, me, payload):
@@ -903,7 +929,7 @@ def h_session_start(payload):
         # the first message tells
         text = given(s, me, me.home, own=lost or len(s.get("cliSessionIds") or []) > 1)
         rule = new_task_text(me.home, s, me, user=False, again=lost) if lost else ""
-    pin = relay.pin_text(s) if s.get("forked") else ""
+    pin = pin_of(me.home, s)
     text = "\n\n".join(p for p in (pin, text) if p)
     rules = rules_text(me.home, HOOK_CHARS - len(text) - len(rule) - 4) if source != "resume" else ""
     save_session(me.home, s)
@@ -951,7 +977,7 @@ def h_user_prompt_submit(payload):
     if req and not s.get("task"):
         s["task"] = cut(req, TASK_CHARS)
         s["taskAt"] = now()
-    parts = [relay.pin_text(s) if s.get("forked") else "", given(s, me, me.home)]
+    parts = [pin_of(me.home, s), given(s, me, me.home)]
     if REPORTS:
         text, seen = reports_text(me.home, s)
         s["reportsSeen"] = seen
@@ -1095,7 +1121,8 @@ HOOKS = {"session-start": ("SessionStart", h_session_start),
          "user-prompt-submit": ("UserPromptSubmit", h_user_prompt_submit),
          "stop": ("Stop", h_stop),
          "start-advice": ("PreToolUse", h_start_advice),
-         "branch-guard": ("PreToolUse", h_branch_guard)}
+         "branch-guard": ("PreToolUse", h_branch_guard),
+         "plan": ("PostToolUse", h_plan)}
 OLD_NAMES = {"arrive": "session-start", "prompt": "user-prompt-submit", "exit": "stop"}   # hooks.json of 0.1 and 0.2,
 #                                                                         still loaded in sessions that began then
 
