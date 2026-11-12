@@ -499,7 +499,8 @@ def sweep_cases():
 def tmp_empty_and_cap_cases():
     """An empty tmp of another session, quiet past tmp_empty_idle_hours with its transcript, is removed at a start
     with the scratchpad link that points at it, and comes back at that session's next turn close; an empty one written
-    now stays. A bare repository and a skipped directory are never staged. A tmp over tmp_max_files has only its
+    now stays. A bare repository, a skipped directory, a clone of a store, a store copied alone and a git work tree
+    are never staged; an ordinary folder beside them is. A tmp over tmp_max_files has only its
     tracked files' changes staged: a file staged earlier and deleted since leaves the index, and no new file is added."""
     if not shutil.which("git"):
         print("test_scratchpad.py: tmp empty and cap cases skipped (no git on PATH)")
@@ -550,6 +551,24 @@ def tmp_empty_and_cap_cases():
         subprocess.run(["git", "init", "-q", "--bare", os.path.join(mine, "remote.git")], check=True)
         put(os.path.join(mine, "suite", "pytest-of-someone", "t0"), "x.txt", "x\n")
         put(os.path.join(mine, ".pytest_cache"), "v.txt", "v\n")
+        # a clone of the store (no .git, holding .claude/p4), a store copied alone (p4.json beside phi/) and a git
+        # work tree (a .git file) are never staged; an ordinary folder beside them is
+        put(os.path.join(mine, "storeclone", ".claude", "p4", "phi"), "rules.md", "r\n")
+        put(os.path.join(mine, "storeclone"), "top.md", "t\n")
+        put(os.path.join(mine, "storecopy"), "p4.json", "{}\n")
+        put(os.path.join(mine, "storecopy", "phi"), "rules.md", "r\n")
+        put(os.path.join(mine, "worktree"), ".git", "gitdir: elsewhere\n")
+        put(os.path.join(mine, "worktree"), "w.md", "w\n")
+        put(os.path.join(mine, "plain"), "b.md", "b\n")
+        os.remove(os.path.join(mine, "b.md"))
+        run("tmp-sweep", own)
+        staged = git("diff", "--cached", "--name-only").split()
+        assert staged == [f"temportal/tmp/{own}/a.md", f"temportal/tmp/{own}/plain/b.md"], staged
+        for d in ("storeclone", "storecopy", "worktree"):
+            shutil.rmtree(os.path.join(mine, d))
+        git("rm", "-q", "--cached", f"temportal/tmp/{own}/plain/b.md")
+        shutil.rmtree(os.path.join(mine, "plain"))
+        put(mine, "b.md", "b\n")
         run("tmp-sweep", own)
         staged = git("diff", "--cached", "--name-only").split()
         assert staged == [f"temportal/tmp/{own}/a.md", f"temportal/tmp/{own}/b.md"], staged

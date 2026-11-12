@@ -26,8 +26,9 @@ The session's temp directory, ON unless p4.json's scratchpad.tmp is false or P4_
   tmp-sweep (Stop)             the same, silent: a scratchpad the start could not link, or that appeared after it, is
                                moved and linked at the turn's close. Then the session's tmp is staged in the p4 repo
                                (`git add`), every turn: never a file the repo ignores, one over
-                               scratchpad.tmp_max_file_mb, a clone's or a bare repository's contents, or a directory
-                               named in scratchpad.tmp_skip_dirs. A tmp over scratchpad.tmp_max_files has only its
+                               scratchpad.tmp_max_file_mb, the contents of a clone, a work tree, a bare repository,
+                               a folder holding .claude/p4 or a store (p4.json beside phi/), or a directory named in
+                               scratchpad.tmp_skip_dirs. A tmp over scratchpad.tmp_max_files has only its
                                tracked files' changes staged, so no file added earlier stays staged after it is gone.
   tmp-close (SessionEnd)       a tmp is deleted only after it is committed: the session's staged tmp is committed
                                alone (whatever else is staged stays staged), the files that commit holds are deleted,
@@ -436,11 +437,12 @@ def tmp_rel(sid):
 
 
 def tmp_files(target):
-    """The files of a tmp that may be staged, as absolute paths: not a link, not over the size cap, not inside a
-    clone (a directory with its own .git). None when there are more than TMP_MAX_FILES: such a tmp is left alone."""
+    """The files of a tmp that may be staged, as absolute paths: not a link, not over the size cap, not inside a copy
+    of a repository or a store (see nested_repo). None when there are more than TMP_MAX_FILES: such a tmp is left
+    alone."""
     out, cap = [], TMP_MAX_FILE_MB * 1024 * 1024
     for d, dirs, names in os.walk(target):
-        if ".git" in dirs or ".git" in names or is_bare_repo(d):
+        if nested_repo(d, dirs, names):
             dirs[:] = []
             continue
         dirs[:] = [x for x in dirs if not skipped_dir(x)]
@@ -455,6 +457,16 @@ def tmp_files(target):
             if len(out) > TMP_MAX_FILES:
                 return None
     return out
+
+
+def nested_repo(d, dirs, names):
+    """A folder holding a repository or a store, which a tmp never stages: a clone or work tree (a .git folder or
+    file), a bare repository, a project or copy holding .claude/p4, or a store itself (p4.json beside phi/). Such a
+    copy duplicates thousands of files into the store's history, and it is the working copy of the session that
+    made it."""
+    return (".git" in dirs or ".git" in names or is_bare_repo(d)
+            or os.path.isdir(os.path.join(d, ".claude", "p4"))
+            or ("p4.json" in names and "phi" in dirs))
 
 
 def is_bare_repo(d):
