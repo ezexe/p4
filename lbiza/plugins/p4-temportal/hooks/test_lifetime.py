@@ -222,6 +222,23 @@ class Layout(unittest.TestCase):
         self.assertEqual(read(os.path.join(self.p4, ".gitignore")),
                          "phi/models/served/\ntemportal/scratchpad/.out/\n", "rewritten, and not left twice")
 
+    def test_differing_ignored_caches_are_never_set_aside(self):
+        """L1 of the marketplace test session: two copies of an ignored cache left in .layout-conflicts/ and
+        committed, 5.4 MB of one machine's caches in the live store."""
+        if not self.git:
+            self.skipTest("no git")
+        put(os.path.join(self.p4, ".gitignore"), "recall/models/index.json\n")
+        put(os.path.join(self.p4, "phi", "models", "index.json"), "new", age_days=0)
+        put(os.path.join(self.p4, "recall", "models", "index.json"), "old", age_days=1)
+        put(os.path.join(self.p4, "recall", "store", "facts.md"), "f\n")
+        self.g("init", "-q")
+        self.g("add", "-A")
+        self.g("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "split")
+        p4conf.migrate_layout(self.p4)
+        self.assertEqual(read(os.path.join(self.p4, "phi", "models", "index.json")), "new", "the newer stays")
+        self.assertFalse(os.path.exists(os.path.join(self.p4, "phi", ".layout-conflicts")), "nothing set aside")
+        self.assertNotIn(".layout-conflicts", self.g("ls-files"))
+
     def test_an_old_plugin_writing_after_the_move_is_merged(self):
         put(os.path.join(self.p4, "temportal", "memory", "a.md"), "new\n")
         put(os.path.join(self.p4, "temportal", "memory", "same.md"), "s\n")

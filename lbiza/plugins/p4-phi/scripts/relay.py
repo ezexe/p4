@@ -346,6 +346,13 @@ def mark_key(nid, m):
     return f"{nid}:{m.get('time')}:" + hashlib.sha1(str(m.get('claim') or '').encode('utf-8')).hexdigest()[:10]
 
 
+def show_head(h, base):
+    """`<repo>@<branch> <sha>` with the repository shown as show() shows a path; the project itself by its name."""
+    repo, at, rest = str(h).partition("@")
+    r = show(repo, base)
+    return (os.path.basename(repo) if r == "." else r) + at + rest
+
+
 def show(p, base):
     """A path as a message shows it: relative to the session's project when it lies there (R2)."""
     b = norm(base) if base else ""
@@ -404,7 +411,7 @@ def rebase(home, sid, room, fair_cut):
                 continue
             bits = []
             if n.get("heads"):
-                bits.append("heads " + ", ".join(show(h, base) for h in n["heads"]))
+                bits.append("heads " + ", ".join(show_head(h, base) for h in n["heads"]))
             if n.get("files"):
                 bits.append(f"{len(n['files'])} file(s) changed: " + ", ".join(show(f, base) for f in n["files"][:12])
                             + (" ..." if len(n["files"]) > 12 else ""))
@@ -637,3 +644,9 @@ def mark_keys(home, parent):
     a = _read_json(anchor_path(home, parent)) if parent else {}
     nodes = list((a.get("nodes") or {}).items()) + [(parent, a.get("parent") or {})]
     return [mark_key(nid, m) for nid, n in nodes for m in n.get("marks") or []]
+
+
+def child_paths(home, s):
+    """The paths a child's start is cut to: its shard, else those its task names; [] when neither names any."""
+    base = s.get("cwd") or _session(home, _parent(s)).get("cwd") or ""
+    return shard_of(s) or paths_in(s.get("task") or "", base)

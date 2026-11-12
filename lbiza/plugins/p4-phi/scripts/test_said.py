@@ -89,7 +89,10 @@ class Said(unittest.TestCase):
         self.assertRegex(first, r"^- \[r1\] \S+ rule: keep the narwhal port open")
         self.assertIn("where SAID is: ", text)
         self.assertIn("said --session " + SESSION, text)
-        self.assertLess(len(text.split("If a line above")[1]), 620, "the instruction stays short: the command once")
+        words = text.split("If a line above")[1]
+        for p in (self.p4.replace("\\", "/"), HERE.replace("\\", "/")):     # the paths are as long as the install's (T1)
+            words = words.replace(p, "")
+        self.assertLess(len(words), 500, "the instruction stays short: the command once")
         self.assertIn("SAID applied r1", text)
         self.assertIn("--p4 " + self.p4.replace("\\", "/"), text, "the command names the store, so any folder will do")
         self.assertNotIn("\\", text.split("If a line above")[1], "forward slashes: Bash and PowerShell both take it")

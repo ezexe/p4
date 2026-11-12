@@ -212,6 +212,19 @@ def _harness_links(sid):
 
 # The files a move put in a new place in this process, so the layout commit holds those and nothing else.
 _LANDED = []
+_STORE = []                                       # the store being moved, for _ignored
+
+
+def _ignored(path):
+    """True when the store's git ignores `path`: a cache, never set aside (L1)."""
+    if not _STORE:
+        return False
+    try:
+        r = subprocess.run(["git", "-C", _STORE[0], "check-ignore", "-q", "--no-index", path], capture_output=True,
+                           timeout=10)
+        return r.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def _merge_tree(src, dst, aside):
@@ -231,6 +244,12 @@ def _merge_tree(src, dst, aside):
                     _LANDED.append(t)
                 elif os.path.isfile(t) and filecmp.cmp(s, t, shallow=False):
                     os.remove(s)
+                elif _ignored(t):
+                    # a cache git ignores (L1): the newer stays, the older goes, nothing is set aside to be committed
+                    if os.path.getmtime(s) > os.path.getmtime(t):
+                        os.replace(s, t)
+                    else:
+                        os.remove(s)
                 else:
                     old = t if os.path.getmtime(s) > os.path.getmtime(t) else s
                     a = os.path.join(aside, r)
@@ -449,6 +468,11 @@ def _git_in(p4, args, paths):
 def _migrate(p4, commit):
     lines, done = [], {}
     del _LANDED[:]
+    _STORE[:] = [p4] if _own_repo(p4) else []
+    # the ignore rules first, so a cache is known as one at its new place before anything moves (L1); every older
+    # place, moved now, before or never there, since an older plugin may append its line again (B3b)
+    places = {old: LAYOUT[k] for k, olds in OLDER.items() for old in olds}
+    changed = [f for f in (".gitignore", ".gitattributes") if _rewrite_paths(os.path.join(p4, f), places)]
     own = commit and _own_repo(p4)
     gone = [f for _, rel in _olds(p4) for f in _tracked(p4, rel)] if own else []
     for k, rel in _olds(p4):
@@ -477,10 +501,6 @@ def _migrate(p4, commit):
             os.rmdir(g)
         except OSError:
             pass
-    # every older place, moved now, before, or never there: a flat line names a place that no longer exists either
-    # way, and an older plugin may append it again (B3b: a flat store with no scratchpad/ kept `scratchpad/.out/`)
-    places = {old: LAYOUT[k] for k, olds in OLDER.items() for old in olds}
-    changed = [f for f in (".gitignore", ".gitattributes") if _rewrite_paths(os.path.join(p4, f), places)]
     if own and done:
         _commit_moves(p4, gone, _LANDED, changed)
     return lines

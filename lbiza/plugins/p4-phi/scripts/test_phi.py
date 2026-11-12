@@ -404,17 +404,17 @@ class Background(unittest.TestCase):
         r = self.t.cli(TOP, "note", "The ports table is written by flush_rows in export/flush.py",
                        "--source", "export/flush.py:40")
         self.assertEqual(r.returncode, 0, r.stderr)
-        text = self.start(KID)
+        self.assertNotIn("background for this session", self.start(KID), "a fresh child's start waits for its brief")
+        text = context(self.t.say(KID, HANDED))
         self.assertIn("background for this session", text)
         self.assertIn("the session that started it", text)
         self.assertIn(TASK, text)
         self.assertIn("flush_rows in export/flush.py", text)
         self.assertIn("export/flush.py:40", text)
         self.assertIn("Narwhal exporter", text)
-        self.assertLessEqual(len(text), phi.BACKGROUND_CHARS)
-        self.assertEqual(self.t.say(KID, HANDED).stdout.strip(), "")       # given once
-        self.assertEqual([(r["hook"], r["said"] > 0, r["spawnedFrom"]) for r in self.t.log(KID)],
-                         [(START, True, TOP), (PROMPT, False, TOP)])
+        self.assertNotIn("background for this session", context(self.t.say(KID, "go on")), "given once")
+        self.assertEqual([(r["hook"], r["spawnedFrom"]) for r in self.t.log(KID)],
+                         [(START, TOP), (PROMPT, TOP), (PROMPT, TOP)])
 
     def test_background_missed_at_the_start_comes_with_the_first_message(self):
         self.assertIn(TASK, context(self.t.say(KID, HANDED)))
@@ -423,7 +423,8 @@ class Background(unittest.TestCase):
         self.t.stop(KID, HANDED, [("Edit", {"file_path": "src/export/flush.py"}, "ok"),
                                   ("Bash", {"command": "python -c \"x\""}, "No module named 'numpy'", 1)],
                     "Stopped: the fix needs the owner's word on the format.")
-        text = self.start(KID2)
+        self.start(KID2)
+        text = context(self.t.say(KID2, "Check the ports table"))          # no path named: the whole background
         self.assertIn("the other sessions \"Narwhal exporter\" started", text)
         self.assertIn("Fix the dropped row", text)
         self.assertIn("not shown done", text)
@@ -644,8 +645,10 @@ class Rules(unittest.TestCase):
         self.t.say(TOP, TASK)
         text = self.start(KID)
         self.assertIn("standing rules", text)
-        self.assertIn("background for this session", text)
         self.assertLessEqual(len(text), phi.HOOK_CHARS)
+        first = context(self.t.say(KID, HANDED))                         # a fresh child's background: its first message
+        self.assertIn("background for this session", first)
+        self.assertLessEqual(len(first), phi.HOOK_CHARS)
 
     def test_no_memories_and_off_are_silence(self):
         write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"rules": False}))

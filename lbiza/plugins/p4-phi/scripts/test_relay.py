@@ -220,6 +220,10 @@ class ForkOrFresh(ThreeSessions):
         self.assertEqual(guard(B, "git switch -c mine")["permissionDecision"], "ask")
         self.assertIsNotNone(guard(B, "", tool="EnterWorktree"))
         self.assertIsNone(guard(B, "git status && git commit -qm x"), "ordinary git is never asked")
+        self.assertIsNone(guard(B, "grep -n 'git checkout -b' docs.md"), "quoted text is not a command (G1)")
+        self.assertIsNone(guard(B, "git checkout -- lib/x.py"), "restoring a file is not a branch change")
+        self.assertEqual(guard(B, "git switch main")["permissionDecision"], "ask", "a branch change in a child (G2)")
+        self.assertIn("moves the parent's too", guard(B, "git checkout feature/x")["permissionDecisionReason"])
         self.assertIsNone(guard(TOP, "git switch -c mine"), "a top session decides its own branches")
 
     def test_a_fresh_child_starts_with_only_its_shards_slice(self):
@@ -234,6 +238,21 @@ class ForkOrFresh(ThreeSessions):
         self.assertIn("(source: commit aaa111)", ctx)
         self.assertNotIn("bbb222", ctx, "what does not touch the child's paths is left out")
         self.assertIn("Heads to build on:", ctx)
+
+    def test_a_fresh_childs_start_waits_for_its_brief_and_replaces_the_parents_background(self):
+        """F1 and F2 of the marketplace test session."""
+        t = self.t
+        t.cli(TOP, "note", f"the docs keep their old layout in `{self.x('docs', 'd.md')}`", "--source", "fff666")
+        t.cli(TOP, "note", f"the lib reads `{self.x('lib', 'x.py')}` first", "--source", "ggg777")
+        t.stop(A, "a sibling's turn", uuid="a1")
+        t.record(GRAND, TOP, title="the lib child")
+        start = context(t.hook("session-start", GRAND, {"hook_event_name": "SessionStart", "source": "startup"}))
+        self.assertNotIn("has for this session's paths", start, "no slice before the brief (F1)")
+        ctx = context(t.say(GRAND, f"Make `{self.x('lib')}` read its paths from p4conf"))
+        self.assertIn("has for this session's paths", ctx)
+        self.assertIn("ggg777", ctx, "the parent's note on the child's paths")
+        self.assertNotIn("fff666", ctx, "the parent's note on other paths is left out (F2)")
+        self.assertNotIn("The last turn of", ctx, "the siblings' last turns are left out (F2)")
 
     def test_a_fresh_child_the_parent_has_nothing_for_is_told_in_one_line(self):
         t = self.t

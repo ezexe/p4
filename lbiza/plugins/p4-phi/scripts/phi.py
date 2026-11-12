@@ -614,7 +614,7 @@ def commands():
     return f'python -I -X utf8 "{script}"'
 
 
-def background_text(home, s, own=False):
+def background_text(home, s, own=False, slim=False):
     """The background a session is given: the tasks of the sessions above it, their notes, the last turn of each
     other session the same session started (for a top session, of the top sessions before it), and with `own`
     its own turns. '' when none of that exists."""
@@ -632,12 +632,13 @@ def background_text(home, s, own=False):
         for r in load_notes(home, n["sessionId"]):
             kind = f"{r['kind']}; " if r.get("kind") else ""
             notes.append(f"- {cut(clean(r.get('claim')), 300)} ({kind}source: {cut(clean(r.get('source')), 120)})")
-    notes = nd.by_overlap(notes, own_task)      # with this session's task known, the notes nearest it come first
+    notes = [] if slim else nd.by_overlap(notes, own_task)   # nearest the task first; a fresh child gets its slice
     if notes:
         body += ["Notes of the sessions above (already checked; do not work these out again):"] + notes[:12]
     others = [r for r in latest_reports(load_reports(home, above, TAIL_BYTES), skip=sid)[:OTHERS * 3]
               if spawned_from(load_session(home, r["sessionId"])) == above][:OTHERS]
-    others = nd.by_overlap(others, own_task, key=lambda r: f"{r.get('title', '')} {r.get('turn', {}).get('prompt', '')}")
+    others = [] if slim else nd.by_overlap(others, own_task,
+                                           key=lambda r: f"{r.get('title', '')} {r.get('turn', {}).get('prompt', '')}")
     if others:
         who = f"the other sessions \"{title_of(chain[0])}\" started" if chain else \
             "the top sessions in this project before this one"
@@ -858,11 +859,17 @@ def given(s, me, home, own=False):
     above = spawned_from(s)
     if not own and told.get(me.cli) == above:
         return ""
+    fresh = bool(above) and not s.get("forked") and not own
+    if fresh and not clean(s.get("task")):
+        return ""                                  # its brief comes with its first message: built then (F1)
     told[me.cli] = above
-    text = background_text(home, s, own=own)
-    if above and not s.get("forked"):
-        piece = relay.slice_text(home, s)          # a fresh child starts with exactly what the parent has for it
-        step = plans.slice_for(home, s)            # its root step and the parent's plan around it
+    # a fresh child starts with exactly what the parent has for it (F2): the tasks above it, its root step and the
+    # parent's plan around it, and the parent's anchor cut to its paths, never the parent's whole background
+    cut_to = relay.child_paths(home, s) if fresh else []
+    text = background_text(home, s, own=own, slim=bool(cut_to))   # nothing to cut by: the parent's whole background
+    if fresh:
+        step = plans.slice_for(home, s)
+        piece = relay.slice_text(home, s) if cut_to else ""
         text = "\n\n".join(p for p in (text, step, piece) if p)
     if above and "anchorSeen" not in s:
         # the start is the child's base: a fresh child's slice or a fork's inherited conversation already holds the
@@ -1088,6 +1095,8 @@ def h_start_advice(payload):
                                    "permissionDecisionReason": " ".join(reasons)}}
 
 
+QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
+BRANCH_MOVE = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b[^\n|;&]*?\b(switch\b|checkout\s+(?!--)(?!-[^bB])(?![\w./-]*\.\w{1,6}\s*$)[\w./-]+\s*$)")
 BRANCHING = re.compile(r"\bgit\b[^\n|;&]*?\b(worktree\s+add|switch\s+(-c|--create|-C)|checkout\s+(-b|-B)|"
                        r"branch\s+(?!-)[\w./-]+\s*$|branch\s+(?!-)[\w./-]+\s+[\w./-]+)")
 
@@ -1105,8 +1114,11 @@ def h_branch_guard(payload):
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     if name == "EnterWorktree":
         what = "entering a worktree of its own"
-    elif name in SHELL_TOOLS and BRANCHING.search(str(inp.get("command") or "")):
+    elif name in SHELL_TOOLS and BRANCHING.search(QUOTED.sub("''", str(inp.get("command") or ""))) \
+            and re.search(r"(?:^|&&|\|\||;|\||\n)\s*git\b", QUOTED.sub("''", str(inp.get("command") or ""))):
         what = "making a worktree or branch of its own"
+    elif name in SHELL_TOOLS and BRANCH_MOVE.search(QUOTED.sub("''", str(inp.get("command") or ""))):
+        what = "moving the checkout to another branch, which in a shared checkout moves the parent's too"
     else:
         return None
     RAN["branch_guard"] = what
