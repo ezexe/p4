@@ -61,6 +61,7 @@ if [ "$name" = lookup-record ]; then
   if [ "${P4_RECALL_SYNC:-0}" != 1 ]; then
     case "$payload" in
       *mcp__ccd_turn__update_plan*) ;;            # phi's plan check answers beside the result: never detached
+      *temportal*memory*) ;;                      # a memory written: phi's plugin-gap check answers beside it
       *PostToolUseFailure*|*Traceback*|*Error*|*Exception*|*"not found"*|*"not recognized"*|*"No such file"*) ;;
       *fatal:*|*denied*|*ENAMETOOLONG*|*"unexpected EOF"*|*"cannot access"*|*unterminated*) ;;
       *) detach=1 ;;

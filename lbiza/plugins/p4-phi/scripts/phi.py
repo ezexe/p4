@@ -1307,6 +1307,24 @@ def h_nudge(payload):
             f"step.")
 
 
+def h_memory_gap(payload):
+    """PostToolUse on Write and Edit: a feedback memory written into the project's store whose rule describes
+    session or plugin behaviour gets the advice to start a new top session for that plugin gap (gaps.py)."""
+    me = Me(payload)
+    if not me.home or not me.id or not me.store:
+        return None
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    path = str(inp.get("file_path") or "")
+    if not path:
+        return None
+    import gaps
+    s = load_session(me.home, me.id) or ensure_session(me.home, me.id, me.rec, me.cli)
+    text = gaps.advice(me.home, me.store, s, path, s.get("turnBy", "user") == "user", commands(),
+                       NEW_TOP_BRIEF + " " + new_top_first_act())
+    RAN["memory_gap"] = bool(text)
+    return text or None
+
+
 def h_task(payload):
     """PostToolUse on Bash, Monitor, Agent and Workflow: a background task recorded under the step in progress,
     with the heads, paths and words it runs against (plans.register). Prints nothing."""
@@ -1921,8 +1939,9 @@ HOOKS = {"session-start": ("SessionStart", h_session_start),
          "branch-guard": ("PreToolUse", h_branch_guard),
          "store-guard": ("PreToolUse", h_store_guard),
          "plan": ("PostToolUse", h_plan),
+         "memory-gap": ("PostToolUse", h_memory_gap),
          "task": ("PostToolUse", h_task)}
-ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "store-guard", "plan", "task")})
+ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "store-guard", "plan", "task", "memory-gap")})
 ROUTED["nudge"] = ("PreToolUse", h_nudge)
 ROUTED.update({"agent-launch": ("PreToolUse", h_agent_launch), "agent-pre": ("PreToolUse", h_agent_call),
                "agent-post": ("PostToolUse", h_agent_call), "agent-stop": ("SubagentStop", h_agent_stop)})

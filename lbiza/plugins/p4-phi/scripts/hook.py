@@ -560,7 +560,8 @@ PHI_CHECK = {"mcp__ccd_session__start_session": "start-advice", "EnterWorktree":
              "PowerShell": ("branch-guard", "store-guard", "nudge"), "Edit": "nudge",
              "Write": "nudge", "MultiEdit": "nudge", "NotebookEdit": "nudge"}
 PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "Bash": "task", "Monitor": "task", "Agent": "task",
-              "Workflow": "task", "TaskStop": "task", "KillShell": "task"}
+              "Workflow": "task", "TaskStop": "task", "KillShell": "task", "Write": "memory-gap", "Edit": "memory-gap",
+              "MultiEdit": "memory-gap"}
 
 
 def phi_route(payload, table):
@@ -602,7 +603,7 @@ def h_lookup_record(payload):
     if payload.get("agent_id"):
         phi_text("agent-post", payload)            # phi: the sub-agent's id bound to its node
     out = phi_route(payload, PHI_RECORD)
-    if out and str(payload.get("tool_name") or "") == "mcp__ccd_turn__update_plan":
+    if out and str(payload.get("tool_name") or "") in ("mcp__ccd_turn__update_plan", "Write", "Edit", "MultiEdit"):
         return out
     import lookups
     p4 = ready(payload)
