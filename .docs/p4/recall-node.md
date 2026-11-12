@@ -168,13 +168,14 @@ The code is `lbiza/plugins/p4-phi/scripts/plans.py`, run by a PostToolUse hook o
 
 - **Tracked:** the session tree, `session.json`, `turns.jsonl`, `notes.jsonl`, `reports.jsonl`, `plan.json` and `anchor.json`, so it reaches the other machines with the rest of the store. Recall's `phi/store` stays tracked and `phi/models` keeps its ignored caches.
 - **Ignored:** what is per machine or made again: each session's `log.jsonl` and `session.md`, `sessions.md`, `rules.md`, the catch-up mark `catchup.json` and every `*.tmp`. phi makes sure of those lines itself before it adds anything, since the recall hook that seeds the rest of `.gitignore` runs beside it at a start.
+- **Switched on per store:** only when the store's `p4.json` sets `phi.track`, off by default until no tracked file holds a path of this machine; the test session found `cwd`, delta files and heads stored absolute.
 - **Committed:** on its own the first time phi starts in a store, marked in the store's git folder; after that each Stop stages `phi/`, and the store's own sync snapshot commits it.
 - **Merged across machines,** by the store's sync script at seed 12: a session's `turns.jsonl`, `notes.jsonl` and `reports.jsonl` as both sides' rows, each once, in time order; `plan.json` step by step by address, the later status winning, the rest from the side with the higher version; `anchor.json` from the side with the higher version, since the next Stop makes it again.
 
 ## A shared home store
 
 - **The setting:** a project's `p4.json` may name `phi.home`, the home store's git remote, so the same value holds on every machine. It ships unset; this project and AudioPlugin get one only with the user's go-ahead.
-- **Finding it on a machine:** every phi start keeps this machine's folder for the starting store's remote in a per-user map, `p4-stores.json` beside Claude Code's settings and in no repository. `P4_PHI_STORES` points it elsewhere, which the tests do. Remotes are compared as host/owner/name, whatever the scheme or `.git` suffix.
+- **Finding it on a machine:** every phi start in a store whose `p4.json` names a home, the home store naming itself, keeps this machine's folder for the starting store's remote in a per-user map, `p4-stores.json` beside Claude Code's settings and in no repository. `P4_PHI_STORES` points it elsewhere, which the tests do. Remotes are compared as host/owner/name, whatever the scheme or `.git` suffix.
 - **What goes there:** a project with a home writes its session tree into the home store's `phi/`: sessions, plans, anchors, notes and reports. Its memory, rules and recall data, `phi/store` and `phi/models`, stay in its own store.
 - **The root anchor:** sessions of different repositories are top sessions, which nobody started, so the home keeps `phi/anchor.json` for them: their marks and plans, never their heads or files. A top session's rebase check reads it as a child reads its parent's.
 - **When the home is not found here:** the session tree stays in the project's own store, and the start says so in one line.

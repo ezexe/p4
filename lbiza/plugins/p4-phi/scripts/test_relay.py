@@ -165,6 +165,8 @@ class ThreeSessions(unittest.TestCase):
         for args in (("init", "-q"), ("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty",
                                        "-m", "store")):
             subprocess.run(["git", "-C", t.p4, *args], check=True, capture_output=True)
+        self.assertFalse(relay.track(t.p4, first_only=True), "off until p4.json sets phi.track")
+        write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"track": True}}))
         self.assertTrue(relay.track(t.p4, first_only=True))
         shown = subprocess.run(["git", "-C", t.p4, "show", "--name-only", "--format=%s", "HEAD"],
                                capture_output=True, text=True).stdout.split()
@@ -346,6 +348,7 @@ class SharedHome(unittest.TestCase):
         self.stores = os.path.join(base, "p4-stores.json")
         for t in (self.home, self.a, self.b):
             t.stores = self.stores
+        write(os.path.join(self.home.p4, "p4.json"), json.dumps({"phi": {"home": "https://example.com/team/home.git"}}))
         self.home.record(TOP, title="the home")
         self.assertEqual(self.home.hook("session-start", TOP, {"source": "startup"},
                                         P4_PHI_STORES=self.stores).returncode, 0)
@@ -373,6 +376,15 @@ class SharedHome(unittest.TestCase):
         ctx = context(b.say(B, "next", P4_PHI_STORES=self.stores))
         self.assertIn("deprecates: the exporter's v1 table", ctx)
         self.assertIn("(source: commit iii999)", ctx)
+
+    def test_no_map_is_written_by_a_store_that_names_no_home(self):
+        other = Tree(os.path.join(self._tmp.name, "plain"))
+        subprocess.run(["git", "-C", other.p4, "init", "-q"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", other.p4, "remote", "add", "origin", "https://example.com/team/plain.git"],
+                       check=True, capture_output=True)
+        other.record(TOP, title="plain")
+        other.hook("session-start", TOP, {"source": "startup"}, P4_PHI_STORES=self.stores)
+        self.assertNotIn("example.com/team/plain", json.load(open(self.stores, encoding="utf-8")))
 
     def test_a_home_this_machine_has_not_seen_is_said_once_and_the_tree_stays_home(self):
         a = self.a

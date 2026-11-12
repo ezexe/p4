@@ -731,7 +731,15 @@ def _ignore_lines(home):
 
 
 def track(home, first_only=False):
-    """Stage phi/ in the store's git; the first time, commit it on its own. Returns True when it committed."""
+    """Stage phi/ in the store's git; the first time, commit it on its own. Returns True when it committed. Only
+    when the store's p4.json sets phi.track: until the tracked files hold no path of this machine (PL1 of the
+    marketplace test session), a store that syncs to a remote must not take them."""
+    try:
+        import p4conf
+        if not (p4conf.section(home, "phi", write=False) or {}).get("track"):
+            return False
+    except Exception:  # noqa: BLE001
+        return False
     top = _git(home, "rev-parse", "--show-toplevel")
     if not top or top.returncode != 0 or norm(top.stdout.strip()) != norm(home):
         return False
@@ -784,7 +792,14 @@ def remote_of(store):
 
 
 def remember_store(store):
-    """Keep this machine's folder for the store's remote in the per-user map; quiet on any failure."""
+    """Keep this machine's folder for the store's remote in the per-user map, only for a store whose p4.json names a
+    home (the home names itself): no file outside a repository for anyone who never set one. Quiet on any failure."""
+    try:
+        import p4conf
+        if not (p4conf.section(store, "phi", write=False) or {}).get("home"):
+            return
+    except Exception:  # noqa: BLE001
+        return
     key = remote_of(store) if store and os.path.isdir(store) else ""
     if not key:
         return
