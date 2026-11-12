@@ -32,6 +32,35 @@ class Paths(unittest.TestCase):
         self.assertFalse(relay.overlap("e:/w/lib", "e:/w/docs"))
         self.assertEqual(relay.norm("/e/projects/x/", ""), relay.norm("E:/projects/x", ""))
 
+    def test_git_bash_and_wsl_paths_are_absolute(self):
+        """P5: /e/x as Git Bash writes it is E:/x, not a path under the base."""
+        self.assertEqual(relay.paths_in("cat /e/projects/p4-phi/x/a1.txt", "E:/projects/p4-phi"),
+                         [relay.norm("E:/projects/p4-phi/x/a1.txt")])
+        self.assertEqual(relay.norm("/mnt/e/projects/x"), relay.norm("E:/projects/x"))
+
+    def test_a_path_on_a_missing_drive_never_hangs(self):
+        """H1: a stored mark path on a drive this machine lacks looped repo_of forever and hung every message."""
+        import time
+        t0 = time.time()
+        self.assertEqual(relay.repo_of("s:/replaces"), "")
+        self.assertTrue(relay.too_broad("s:/replaces", "E:/x"))
+        self.assertLess(time.time() - t0, 5)
+        tmp = tempfile.mkdtemp()
+        try:
+            home = os.path.join(tmp, "p4")
+            write(os.path.join(home, "phi", "sessions", "kid", "session.json"),
+                  json.dumps({"sessionId": "kid", "spawnedFrom": {"sessionId": "top"}}))
+            write(os.path.join(home, "phi", "sessions", "top", "anchor.json"), json.dumps({
+                "version": 3, "changedAt": {"sib": 3}, "parent": {},
+                "nodes": {"sib": {"title": "sib", "marks": [{"claim": "replaces: x", "time": "2026-11-12 14:00",
+                                                             "paths": ["s:/replaces"]}]}}}))
+            text, _ = relay.rebase(home, "kid", 9000, lambda xs, n: xs)
+            self.assertIn("replaces: x", text, "the mark is still relayed")
+            self.assertNotIn("stop before any tool", text)
+            self.assertLess(time.time() - t0, 10)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_the_paths_a_note_names(self):
         got = relay.paths_in("deprecates: `lib/x.py` and docs/old.md, see https://example.com/a", "E:/w")
         self.assertEqual(got, [relay.norm("E:/w/lib/x.py"), relay.norm("E:/w/docs/old.md")])

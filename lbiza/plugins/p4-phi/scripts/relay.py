@@ -113,10 +113,13 @@ def norm(p, base=""):
     p = str(p or "").strip().strip("'\"")
     if not p:
         return ""
-    if base and not os.path.isabs(p) and not re.match(r"^[A-Za-z]:", p):
-        p = os.path.join(base, p)
     p = p.replace("\\", "/")
-    p = re.sub(r"^/([a-zA-Z])/", lambda m: m.group(1).upper() + ":/", p)     # /e/x as git bash writes E:/x
+    # /e/x as Git Bash writes E:/x, and /mnt/e/x as WSL does, before the absolute test: on Windows since Python 3.13 a
+    # path with one leading slash is not absolute, so /e/x was joined onto the base (P5)
+    p = re.sub(r"^/mnt/([a-zA-Z])(?=/|$)", lambda m: m.group(1).upper() + ":", p)
+    p = re.sub(r"^/([a-zA-Z])(?=/|$)", lambda m: m.group(1).upper() + ":", p)
+    if base and not os.path.isabs(p) and not re.match(r"^[A-Za-z]:", p):
+        p = os.path.join(base, p).replace("\\", "/")
     p = re.sub(r"/+", "/", p).rstrip("/")
     return p.lower() if os.name == "nt" else p
 
@@ -151,7 +154,7 @@ def paths_in(text, base=""):
         p = m.group(1) or m.group(2)
         if p and ("/" in p or "\\" in p or "." in p) and not p.startswith(("http:", "https:")):
             n = norm(p.rstrip(".,;:)"), base)
-            if n and n not in out:
+            if n and n not in out and drive_ok(n):
                 out.append(n)
     return out
 
@@ -228,7 +231,16 @@ def _git(cwd, *args):
         return None
 
 
+def drive_ok(p):
+    """False for a path on a drive this machine does not have: a stored mark's path read wrongly once, such as
+    `s:/replaces`, must never reach a filesystem walk (H1)."""
+    m = re.match(r"^([A-Za-z]):", str(p or ""))
+    return not m or os.path.isdir(m.group(1) + ":/")
+
+
 def repo_of(path):
+    if not drive_ok(path):
+        return ""
     d = path if os.path.isdir(path) else os.path.dirname(path)
     while d and not os.path.isdir(d):
         up = os.path.dirname(d)
@@ -388,7 +400,10 @@ def show(p, base):
 
 def too_broad(p, home):
     """A path no warning is raised for: the store itself or a folder above it, a repository's top folder, or a
-    drive. A note that names one of those names everything in it, which is no conflict with any one file."""
+    drive. A note that names one of those names everything in it, which is no conflict with any one file. A path on
+    a drive this machine does not have is no conflict either."""
+    if not drive_ok(p):
+        return True
     h = norm(home)
     if covers(p, h) or re.fullmatch(r"[a-z]:", p or "", re.I):
         return True
