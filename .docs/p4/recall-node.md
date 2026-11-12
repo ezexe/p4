@@ -130,3 +130,13 @@ The code is `lbiza/plugins/p4-phi/scripts/relay.py`, called from phi's hooks.
 - **Routing:** a message that names a path inside another node's shard is that node's, and the session is told to send it there by SendMessage. Only a message no shard covers gets a new forked session. A parent is never routed down to its own children.
 
 `test_relay.py` runs it through phi's hooks on a three-session tree: one child deprecates a path its sibling holds uncommitted edits in, and the sibling's next message starts with the warning.
+
+## Fork or fresh
+
+Every `mcp__ccd_session__start_session` call passes a PreToolUse hook, `start-advice`, before it runs.
+
+- **The rule:** a fork is advised only when the parent's transcript is at most 1 MB and the brief's paths cover at least half of the parent's scope, its shard or else the files its latest delta and anchor name. Otherwise a fresh session is advised.
+- **Why those numbers:** on this machine's app records, 84 children with a parent transcript on disk, a fork started from a parent of median 2.9 MB and a fresh session from 2.1 MB. Above 1 MB a parent had a median of 2 to 27 of the owner's turns behind it and already held 0.76 to 0.86 of the brief's words, so a fork carries the rest of the parent's work while a brief carries most of what the child needs.
+- **What the hook does:** nothing when the call already does what is advised. Otherwise it answers with a permission `ask` and the reason, so the person decides. It never blocks and never rewrites the call, since a fresh start needs a brief only the caller can write. The hooks documentation gives PreToolUse `allow`, `deny` or `ask` with a reason, and `updatedInput`. How an ask shows in a mode that asks for no permission was not measured.
+- **A forked child keeps its agenda:** phi marks it as a fork from the app's record or its first message, and pins its own task and shard above the inherited conversation, at its start and beside each message. Its rebase check relays only what touches its own shard.
+- **A fresh child starts with exactly what the parent has for it:** its background ends with the parent's anchor cut to the child's paths, its shard or those its task names: the parent's task, the anchor version, the deprecations, replacements and notes that touch those paths, and the heads that changed them. Nothing else of the anchor is given, and one line says so when the parent has nothing for them. That start counts as having seen the anchor, so the rebase check hands over only what changes after it.

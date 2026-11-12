@@ -858,7 +858,23 @@ def given(s, me, home, own=False):
     if not own and told.get(me.cli) == above:
         return ""
     told[me.cli] = above
-    return background_text(home, s, own=own)
+    text = background_text(home, s, own=own)
+    if above and not s.get("forked"):
+        piece = relay.slice_text(home, s)          # a fresh child starts with exactly what the parent has for it
+        text = "\n\n".join(p for p in (text, piece) if p)
+    if above and "anchorSeen" not in s:
+        # the start is the child's base: a fresh child's slice or a fork's inherited conversation already holds the
+        # anchor as it is now, so the rebase check hands over only what changes after it
+        s["anchorSeen"] = relay.anchor_version(home, above)
+    return text
+
+
+def mark_fork(s, me, payload):
+    """A session the app records as a fork, or whose first message is a fork's, is kept as one."""
+    if s.get("forked"):
+        return
+    if (me.rec or {}).get("forkedFromSessionId") or FORK_HEAD.match(str(payload.get("prompt") or "")):
+        s["forked"] = True
 
 
 def ran_for(s, me):
@@ -875,6 +891,7 @@ def h_session_start(payload):
     configure(me.home)
     s = ensure_session(me.home, me.id, me.rec, me.cli)
     ran_for(s, me)
+    mark_fork(s, me, payload)
     source = payload.get("source") or "startup"
     RAN["start"] = source
     lost = source in ("compact", "clear")
@@ -885,6 +902,8 @@ def h_session_start(payload):
         # the first message tells
         text = given(s, me, me.home, own=lost or len(s.get("cliSessionIds") or []) > 1)
         rule = new_task_text(me.home, s, me, user=False, again=lost) if lost else ""
+    pin = relay.pin_text(s) if s.get("forked") else ""
+    text = "\n\n".join(p for p in (pin, text) if p)
     rules = rules_text(me.home, HOOK_CHARS - len(text) - len(rule) - 4) if source != "resume" else ""
     save_session(me.home, s)
     return "\n\n".join(p for p in (rules, text, rule) if p) or None
@@ -927,10 +946,11 @@ def h_user_prompt_submit(payload):
     s = ensure_session(me.home, me.id, me.rec, me.cli, hint=me.hint)
     ran_for(s, me)
     req = request_of(payload.get("prompt"))
+    mark_fork(s, me, payload)
     if req and not s.get("task"):
         s["task"] = cut(req, TASK_CHARS)
         s["taskAt"] = now()
-    parts = [given(s, me, me.home)]
+    parts = [relay.pin_text(s) if s.get("forked") else "", given(s, me, me.home)]
     if REPORTS:
         text, seen = reports_text(me.home, s)
         s["reportsSeen"] = seen
@@ -1006,9 +1026,38 @@ def log_run(name, text, started):
     append_line(os.path.join(session_dir(RAN["home"], RAN["session"]), "log.jsonl"), row)
 
 
+def h_start_advice(payload):
+    """PreToolUse on mcp__ccd_session__start_session: fork or fresh, advised from the parent's transcript size and
+    how much of the parent's scope the brief's paths cover (relay.advise_start). Silent when the call already does
+    what is advised; otherwise a permission "ask" with the reason, so the person sees it and decides, never a
+    block. The hooks documentation read for p4-recall (2026-11-01) gives PreToolUse `permissionDecision` allow,
+    deny or ask with a reason, and `updatedInput`; the input is never rewritten here, since a fresh start needs a
+    brief and background only the caller can write. How an ask shows in a mode that asks for no permission was
+    not measured."""
+    me = Me(payload)
+    if not me.home or not me.id:
+        return None
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    if inp.get("proposal_id") and not inp.get("prompt"):
+        return None                                 # starting a proposal already made: nothing to decide
+    wanted = "fork" if str(inp.get("context") or "fresh") == "fork" else "fresh"
+    try:
+        size = os.path.getsize(payload.get("transcript_path") or "")
+    except OSError:
+        size = 0
+    advised, why = relay.advise_start(me.home, me.id, inp, size)
+    RAN.update(advice=advised, wanted=wanted, transcript=size)
+    if advised == wanted:
+        return None
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
+                                   "permissionDecisionReason": f"p4-phi advises context \"{advised}\" here, not "
+                                                               f"\"{wanted}\": {why}."}}
+
+
 HOOKS = {"session-start": ("SessionStart", h_session_start),
          "user-prompt-submit": ("UserPromptSubmit", h_user_prompt_submit),
-         "stop": ("Stop", h_stop)}
+         "stop": ("Stop", h_stop),
+         "start-advice": ("PreToolUse", h_start_advice)}
 OLD_NAMES = {"arrive": "session-start", "prompt": "user-prompt-submit", "exit": "stop"}   # hooks.json of 0.1 and 0.2,
 #                                                                         still loaded in sessions that began then
 
@@ -1026,6 +1075,10 @@ def hook_main(name):
         event, fn = HOOKS[name]
         started = time.time()
         text = fn(payload)
+        if isinstance(text, dict):                  # a hook that answers with its own JSON (start-advice)
+            log_run(name, json.dumps(text), started)
+            sys.stdout.write(json.dumps(text))
+            return 0
         log_run(name, text, started)
         if text:
             sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}))

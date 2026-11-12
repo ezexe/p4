@@ -376,6 +376,10 @@ def rebase(home, sid, room, fair_cut):
             for m in par.get("marks") or []:
                 marks.append((parent, par.get("title") or parent, m))
         s["anchorSeen"] = version
+        if s.get("forked") and shard_of(s):          # a fork keeps its own agenda: only what touches its shard
+            own = shard_of(s)
+            marks = [x for x in marks if any(overlap(p, o) for p in x[2].get("paths") or [] for o in own)]
+            others = [line for line in others if any(o in line for o in own)]
     # the direct warnings: uncommitted files and shard paths against what is deprecated, and against other shards
     mine = uncommitted(edited_files(home, sid))
     shard = shard_of(s)
@@ -473,3 +477,116 @@ def shards_line(home, sid):
     out = [f"\"{_title(s)}\" ({oid}): {', '.join(shard_of(s)[:3])}" for oid, s in sorted(every.items())
            if oid != sid and shard_of(s)]
     return "; ".join(out[:6])
+
+
+# --- fork or fresh -----------------------------------------------------------------------------------------------------
+#
+# Measured 2026-11-12 on this machine's app records, 84 children with a parent transcript on disk: the parent's
+# transcript held a median 2.9 MB when a fork started (quartiles 1.9 and 4.4 MB) and 2.1 MB when a fresh session
+# did. Above 1 MB a parent had a median of 2 to 27 of the owner's turns behind it, and already held 0.76 to 0.86 of
+# the brief's words: a fork there carries the rest of the parent's work into the child, while a brief carries most
+# of what the child needs. Under 1 MB, 17 of 22 children were fresh and the parent held little. So a fork is advised
+# only from a parent whose transcript is at most FORK_MAX_BYTES, for a child whose paths cover at least
+# FORK_SHARE of the parent's scope; otherwise a fresh session.
+
+FORK_MAX_BYTES = 1024 * 1024
+FORK_SHARE = 0.5
+
+
+def scope_of(home, sid):
+    """What a session covers: its shard, else the files its latest delta and its children's anchor name."""
+    s = _session(home, sid)
+    if shard_of(s):
+        return shard_of(s)
+    files = set()
+    for r in reversed(_rows(os.path.join(_dir(home, sid), "turns.jsonl"))):
+        if isinstance(r.get("delta"), dict):
+            files.update(r["delta"].get("files") or [])
+            break
+    for n in (_read_json(anchor_path(home, sid)).get("nodes") or {}).values():
+        files.update(n.get("files") or [])
+    return sorted(files)
+
+
+def advise_start(home, parent, tool_input, transcript_bytes):
+    """(what is advised, "fork" or "fresh", and why) for a start_session call from `parent`."""
+    s = _session(home, parent)
+    base = s.get("cwd") or ""
+    brief = " ".join(str(tool_input.get(k) or "") for k in ("prompt", "background", "title"))
+    child = paths_in(brief, base)
+    scope = scope_of(home, parent)
+    share = (sum(1 for p in scope if any(overlap(p, c) for c in child)) / len(scope)) if scope and child else 0.0
+    short = transcript_bytes <= FORK_MAX_BYTES
+    mb = transcript_bytes / (1024 * 1024)
+    if short and share >= FORK_SHARE:
+        return "fork", (f"the parent's transcript is {mb:.1f} MB, under {FORK_MAX_BYTES // (1024 * 1024)} MB, and the "
+                        f"brief's paths cover {share:.0%} of the parent's scope: the child's work is the parent's")
+    why = []
+    if not short:
+        why.append(f"the parent's transcript is {mb:.1f} MB, over {FORK_MAX_BYTES // (1024 * 1024)} MB: a fork "
+                   f"would carry all of it into the child's context")
+    if share < FORK_SHARE:
+        why.append(f"the brief's paths cover {share:.0%} of the parent's scope" + ("" if child else
+                                                                                    " (the brief names no path)"))
+    return "fresh", "; ".join(why) + ". A fresh session given a brief and phi's slice of the anchor starts on its " \
+                                      "own task alone"
+
+
+def pin_text(s):
+    """The line that keeps a forked child on its own agenda, above the conversation it inherited."""
+    task = _short(s.get("task") or "", 300)
+    if not task:
+        return ""
+    shard = shard_of(s)
+    return (f"phi (p4-phi): this session is a fork; the conversation above its first message is the parent's and "
+            f"is background, not its agenda. Its own task: \"{task}\""
+            + (f"; its shard: {', '.join(shard[:5])}." if shard else ". It has declared no shard yet: "
+               f"`phi.py shard <paths>` names what it alone changes."))
+
+
+def slice_text(home, s):
+    """A fresh child's start: what its parent's anchor holds for the child's paths, its shard or those its task
+    names, and nothing else. One line when the parent has nothing for them."""
+    parent = _parent(s)
+    if not parent:
+        return ""
+    anchor = _read_json(anchor_path(home, parent))
+    ps = _session(home, parent)
+    base = s.get("cwd") or ps.get("cwd") or ""
+    mine = shard_of(s) or paths_in(s.get("task") or "", base)
+    ver = int(anchor.get("version") or 0)
+    head = (f"phi (p4-phi): what the parent, \"{_title(ps)}\", has for this session's paths "
+            f"({', '.join(mine[:5]) or 'none named'}), from its anchor v{ver}. Its task: \""
+            f"{_short(ps.get('task') or '', 300)}\".")
+    if not mine:
+        return head + " The task names no path, so nothing of the anchor is given; `phi.py shard <paths>` names them."
+    marks, heads, files = [], set(), []
+    every = list((anchor.get("nodes") or {}).items()) + [(parent, anchor.get("parent") or {})]
+    for nid, n in every:
+        if nid == s.get("sessionId"):
+            continue
+        for m in n.get("marks") or []:
+            if any(overlap(p, x) for p in m.get("paths") or [] for x in mine):
+                marks.append(f"- \"{n.get('title') or nid}\": {m.get('claim')} (source: {m.get('source')})")
+        touched = [f for f in n.get("files") or [] if any(covers(x, f) for x in mine)]
+        if touched:
+            files.append(f"- \"{n.get('title') or nid}\" changed {', '.join(touched[:8])}")
+            heads.update(n.get("heads") or [])
+    notes = [f"- {_short(r.get('claim'), 300)} (source: {_short(r.get('source'), 120)})"
+             for r in _rows(os.path.join(_dir(home, parent), "notes.jsonl"))
+             if not str(r.get("claim") or "").lower().startswith(MARKS)
+             and any(overlap(p, x) for p in paths_in(r.get("claim"), base) for x in mine)]
+    if not (marks or files or notes):
+        return head + " It has nothing for them yet."
+    out = [head]
+    if marks:
+        out += ["Deprecated or replaced there, in full:"] + marks
+    if notes:
+        out += ["Notes about them:"] + notes
+    if files:
+        out += ["Changed there:"] + files + (["Heads to build on: " + ", ".join(sorted(heads))] if heads else [])
+    return "\n".join(out)
+
+
+def anchor_version(home, parent):
+    return int(_read_json(anchor_path(home, parent)).get("version") or 0) if parent else 0

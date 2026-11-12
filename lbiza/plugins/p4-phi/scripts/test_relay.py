@@ -18,7 +18,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import relay  # noqa: E402
-from test_phi import KID, KID2, TOP, Tree, context, write  # noqa: E402
+from test_phi import GRAND, KID, KID2, TOP, Tree, context, write  # noqa: E402
 
 A, B = KID, KID2
 
@@ -137,6 +137,77 @@ class ThreeSessions(unittest.TestCase):
         ctx = context(t.say(B, "second look"))
         self.assertNotIn("phi (p4-phi): what", ctx)
         self.assertNotIn("stop before", ctx)
+
+
+
+class ForkOrFresh(ThreeSessions):
+    """The advice on start_session, a fork's pinned agenda, and a fresh child's slice of the parent's anchor."""
+
+    def advise(self, host, context_, prompt, size):
+        path = os.path.join(self._tmp.name, host + "-transcript.jsonl")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("x" * size)
+        r = self.t.hook("start-advice", host, {"hook_event_name": "PreToolUse",
+                                               "tool_name": "mcp__ccd_session__start_session",
+                                               "tool_input": {"initiation": "user_asked", "context": context_,
+                                                              "title": "a child", "prompt": prompt},
+                                               "transcript_path": path})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
+
+    def test_a_fork_of_a_long_parent_is_advised_fresh(self):
+        self.t.cli(TOP, "shard", self.x("lib"))
+        out = self.advise(TOP, "fork", f"Fix `{self.x('lib', 'x.py')}`", 3 * 1024 * 1024)
+        self.assertEqual(out["permissionDecision"], "ask", "asked, never blocked")
+        self.assertIn('advises context "fresh"', out["permissionDecisionReason"])
+        self.assertIn("3.0 MB", out["permissionDecisionReason"])
+
+    def test_a_fork_whose_shard_is_the_parents_is_allowed(self):
+        self.t.cli(TOP, "shard", self.x("lib"))
+        self.assertIsNone(self.advise(TOP, "fork", f"Rework `{self.x('lib')}`", 200 * 1024))
+
+    def test_a_fork_of_a_short_parent_for_other_paths_is_advised_fresh(self):
+        self.t.cli(TOP, "shard", self.x("lib"))
+        out = self.advise(TOP, "fork", f"Write `{self.x('docs', 'new.md')}`", 10 * 1024)
+        self.assertIn('advises context "fresh"', out["permissionDecisionReason"])
+        self.assertIn("cover 0%", out["permissionDecisionReason"])
+
+    def test_a_fresh_start_where_a_fork_fits_is_asked_too(self):
+        self.t.cli(TOP, "shard", self.x("lib"))
+        out = self.advise(TOP, "fresh", f"Rework `{self.x('lib')}`", 10 * 1024)
+        self.assertIn('advises context "fork"', out["permissionDecisionReason"])
+
+    def test_a_fresh_child_starts_with_only_its_shards_slice(self):
+        t = self.t
+        t.cli(A, "note", f"deprecates: `{self.x('lib', 'x.py')}`; use p4conf", "--source", "commit aaa111")
+        t.cli(A, "note", f"replaces: `{self.x('docs', 'd.md')}` with the README", "--source", "commit bbb222")
+        t.stop(A, "two decisions", [("Edit", {"file_path": self.x("lib", "x.py")}, "ok")], uuid="a1")
+        t.record(GRAND, TOP, title="the lib child")
+        ctx = context(t.say(GRAND, f"Make `{self.x('lib')}` read its paths from p4conf"))
+        self.assertIn("what the parent, \"top\", has for this session's paths", ctx)
+        self.assertIn("deprecates: `", ctx)
+        self.assertIn("(source: commit aaa111)", ctx)
+        self.assertNotIn("bbb222", ctx, "what does not touch the child's paths is left out")
+        self.assertIn("Heads to build on:", ctx)
+
+    def test_a_fresh_child_the_parent_has_nothing_for_is_told_in_one_line(self):
+        t = self.t
+        t.record(GRAND, TOP, title="the docs child")
+        ctx = context(t.say(GRAND, f"Write `{self.x('docs', 'new.md')}`"))
+        self.assertIn("It has nothing for them yet.", ctx)
+
+    def test_a_forked_child_keeps_its_own_task_above_the_inherited_conversation(self):
+        t = self.t
+        t.record(GRAND, TOP, title="the forked child")
+        brief = f"Fix `{self.x('lib', 'y.py')}` and nothing else"
+        first = context(t.say(GRAND, "Task (from the session that started this one):\n" + brief))
+        self.assertIn("this session is a fork", first)
+        self.assertTrue(t.session(GRAND)["forked"])
+        t.cli(GRAND, "shard", self.x("lib", "y.py"))
+        later = context(t.say(GRAND, "carry on"))
+        self.assertIn(f"Its own task: \"{brief}\"", later)
+        self.assertIn("its shard: " + relay.norm(self.x("lib", "y.py")), later)
+        self.assertNotIn("what the parent", later, "a fork is not given the fresh child's slice")
 
 
 if __name__ == "__main__":
