@@ -11,7 +11,7 @@
       "name": "p4-temportal",
       "source": "./plugins/p4-temportal",
       "description": "Keeps every file Claude Code would otherwise write under AppData or the system temp directory in <project>/.claude/p4/temportal/: the memory, the notebook, each session's scratchpad and saved code. Files get lifetimes like a browser's cache and cookies, and what has expired is cleared. Replaces p4-memory and p4-scratchpad.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "category": "productivity",
       "keywords": [
         "memory",

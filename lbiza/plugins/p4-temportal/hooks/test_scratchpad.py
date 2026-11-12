@@ -397,12 +397,188 @@ def tmp_keep_cases():
     print("test_scratchpad.py: tmp keep cases green")
 
 
+def link(path, target):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.name == "nt":
+        import _winapi
+        _winapi.CreateJunction(os.path.abspath(target), os.path.abspath(path))
+    else:
+        os.symlink(os.path.abspath(target), path, target_is_directory=True)
+
+
+def unlink(path):
+    os.rmdir(path) if os.name == "nt" else os.unlink(path)
+
+
+def points_at(path):
+    t = os.readlink(path)
+    return os.path.normcase(os.path.normpath(t[4:] if t.startswith("\\\\?\\") else t))
+
+
+def age(*paths, hours=2):
+    for p in paths:
+        t = os.path.getmtime(p) - hours * 3600
+        os.utime(p, (t, t))
+
+
+def sweep_cases():
+    """tmp-link sweeps the project's other scratchpads under the same temp folder: a real empty one quiet past the
+    limit is removed with a session folder it leaves empty, a fresh one or one whose transcript is fresh is left, a
+    real one with files is linked into p4 with its files moved, a dangling link to the old `.claude/p4/tmp/<session>`
+    is re-pointed at that session's tmp, one with nothing in p4 to point at is removed, a foreign link is left;
+    this session's own stale link is repaired and named."""
+    root = tempfile.mkdtemp(prefix="p4-scratchpad-sweep-")
+    temp = tempfile.mkdtemp(prefix="p4-scratchpad-temp-")
+    cfg = tempfile.mkdtemp(prefix="p4-scratchpad-cfg-")
+    other = tempfile.mkdtemp(prefix="p4-scratchpad-other-")
+    sids = {k: f"{k * 8}-0000-4000-8000-00000000000{i}" for i, k in enumerate("sabcdefgh")}
+    tmp_env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp, "CLAUDE_CONFIG_DIR": cfg}
+    hashdir = os.path.join(temp, "claude", "ffccc31c49e17720")
+    p4 = os.path.join(root, ".claude", "p4")
+    pad = {k: os.path.join(hashdir, s, "scratchpad") for k, s in sids.items()}
+    new = {k: os.path.join(p4, "temportal", "tmp", s) for k, s in sids.items()}
+    old = {k: os.path.join(p4, "tmp", s) for k, s in sids.items()}
+    links = []
+    try:
+        # s: this session, its link left by the old layout, whose target is gone
+        os.makedirs(old["s"])
+        link(pad["s"], old["s"]); links.append(pad["s"])
+        os.rmdir(old["s"])
+        # a: an app helper's real empty scratchpad, quiet two hours; its session folder holds nothing else
+        os.makedirs(pad["a"]); age(pad["a"], os.path.dirname(pad["a"]))
+        # b: the same, made a minute ago
+        os.makedirs(pad["b"])
+        # c: a real scratchpad with a note, quiet two hours
+        put(pad["c"], "note.md", "kept\n"); age(os.path.join(pad["c"], "note.md"), pad["c"], os.path.dirname(pad["c"]))
+        # d: a dangling link to the old layout, nothing in p4 for it
+        os.makedirs(old["d"]); link(pad["d"], old["d"]); links.append(pad["d"]); os.rmdir(old["d"])
+        # e: a dangling link to the old layout, and p4 holds that session's tmp at the new place
+        put(new["e"], "new.md", "new\n")
+        os.makedirs(old["e"]); link(pad["e"], old["e"]); links.append(pad["e"])
+        shutil.rmtree(os.path.join(p4, "tmp"))
+        # f: a link elsewhere, the owner's
+        link(pad["f"], other); links.append(pad["f"])
+        # g: an empty real scratchpad quiet two hours whose transcript was written now
+        os.makedirs(pad["g"]); age(pad["g"], os.path.dirname(pad["g"]))
+        put(os.path.join(cfg, "projects", "E--x"), sids["g"] + ".jsonl", "{}\n")
+        # h: an empty real scratchpad beside the harness's tasks folder, quiet two hours
+        os.makedirs(pad["h"]); os.makedirs(os.path.join(os.path.dirname(pad["h"]), "tasks"))
+        age(pad["h"], os.path.dirname(pad["h"]))
+
+        out = run_sub("tmp-link", {"cwd": root, "session_id": sids["s"]}, tmp_env, CLAUDE_PROJECT_DIR=root)
+        assert "was a stale link and now reaches" in out, out
+        assert "other sessions' scratchpads: 1 linked, 3 removed, 1 repaired" in out, out
+        assert points_at(pad["s"]) == os.path.normcase(new["s"]), "this session's stale link was not repaired"
+        assert not os.path.exists(os.path.dirname(pad["a"])), "a quiet empty scratchpad was not removed"
+        assert os.path.isdir(pad["b"]) and os.path.isdir(pad["g"]), "a fresh scratchpad was removed"
+        with open(os.path.join(new["c"], "note.md"), encoding="utf-8") as f:
+            assert f.read() == "kept\n", "a quiet scratchpad's note did not move into p4"
+        assert points_at(pad["c"]) == os.path.normcase(new["c"]), "a quiet scratchpad with files was not linked"
+        assert not os.path.lexists(pad["d"]), "a dangling link with nothing to point at was left"
+        assert points_at(pad["e"]) == os.path.normcase(new["e"]), "a link to the old layout was not repaired"
+        assert os.path.isfile(os.path.join(pad["e"], "new.md")), "the repaired link does not reach the tmp"
+        assert os.path.samefile(pad["f"], other), "a foreign link was changed"
+        assert not os.path.exists(pad["h"]) and os.path.isdir(os.path.join(os.path.dirname(pad["h"]), "tasks")), \
+            "the empty scratchpad beside tasks/ was not removed alone"
+        assert run_sub("tmp-link", {"cwd": root, "session_id": sids["s"]}, tmp_env, CLAUDE_PROJECT_DIR=root) == "", \
+            "a second start spoke"
+        # the switch off leaves the folder alone
+        os.makedirs(pad["a"]); age(pad["a"], os.path.dirname(pad["a"]))
+        run_sub("tmp-link", {"cwd": root, "session_id": sids["s"]}, dict(tmp_env, P4_SCRATCHPAD_TMP="0"),
+                CLAUDE_PROJECT_DIR=root)
+        assert os.path.isdir(pad["a"]), "the switch off still swept"
+    finally:
+        for k in sids:
+            if os.path.lexists(pad[k]) and (os.path.islink(pad[k]) or getattr(os.path, "isjunction", lambda p: False)(pad[k])):
+                unlink(pad[k])
+        for d in (root, temp, cfg, other):
+            shutil.rmtree(d, ignore_errors=True)
+    print("test_scratchpad.py: sweep cases green")
+
+
+def tmp_empty_and_cap_cases():
+    """An empty tmp of another session, quiet past tmp_empty_idle_hours with its transcript, is removed at a start
+    with the scratchpad link that points at it, and comes back at that session's next turn close; an empty one written
+    now stays. A bare repository and a skipped directory are never staged. A tmp over tmp_max_files has only its
+    tracked files' changes staged: a file staged earlier and deleted since leaves the index, and no new file is added."""
+    if not shutil.which("git"):
+        print("test_scratchpad.py: tmp empty and cap cases skipped (no git on PATH)")
+        return
+    root = tempfile.mkdtemp(prefix="p4-scratchpad-empty-")
+    temp = tempfile.mkdtemp(prefix="p4-scratchpad-temp-")
+    cfg = tempfile.mkdtemp(prefix="p4-scratchpad-cfg-")
+    own, gone, fresh = ("1111aaaa-0000-4000-8000-000000000001", "2222bbbb-0000-4000-8000-000000000002",
+                        "3333cccc-0000-4000-8000-000000000003")
+    tmp_env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp, "CLAUDE_CONFIG_DIR": cfg}
+    hashdir = os.path.join(temp, "claude", "30ad6e18862a20e8")
+    p4 = os.path.join(root, ".claude", "p4")
+    tmp = os.path.join(p4, "temportal", "tmp")
+
+    def git(*args):
+        r = subprocess.run(["git", "-C", p4] + list(args), capture_output=True, text=True)
+        assert r.returncode == 0, (args, r.stderr)
+        return r.stdout
+
+    def run(sub, sid):
+        return run_sub(sub, {"cwd": root, "session_id": sid}, tmp_env, CLAUDE_PROJECT_DIR=root)
+
+    try:
+        os.makedirs(p4)
+        subprocess.run(["git", "init", "-q", p4], check=True)
+        git("config", "user.name", "t")
+        git("config", "user.email", "t@t")
+        put(p4, "p4.json", json.dumps({"version": 1, "scratchpad": {"tmp_max_files": 3}}))
+        put(p4, "first.md", "first\n")
+        git("add", "first.md")
+        git("commit", "-q", "-m", "first")
+        os.makedirs(os.path.join(hashdir, own, "scratchpad"))
+        for sid in (gone, fresh):
+            os.makedirs(os.path.join(tmp, sid))
+            link(os.path.join(hashdir, sid, "scratchpad"), os.path.join(tmp, sid))
+        age(os.path.join(tmp, gone))
+        run("tmp-link", own)
+        assert not os.path.exists(os.path.join(tmp, gone)), "a quiet empty tmp was not removed"
+        assert not os.path.lexists(os.path.join(hashdir, gone, "scratchpad")), "the link to a removed tmp was left"
+        assert os.path.isdir(os.path.join(tmp, fresh)), "an empty tmp written now was removed"
+        # that session, if it goes on, gets its tmp back at its turn's close
+        run("tmp-sweep", gone)
+        assert os.path.isdir(os.path.join(tmp, gone)), "the tmp did not come back"
+
+        mine = os.path.join(tmp, own)
+        put(mine, "a.md", "a\n")
+        put(mine, "b.md", "b\n")
+        subprocess.run(["git", "init", "-q", "--bare", os.path.join(mine, "remote.git")], check=True)
+        put(os.path.join(mine, "suite", "pytest-of-someone", "t0"), "x.txt", "x\n")
+        put(os.path.join(mine, ".pytest_cache"), "v.txt", "v\n")
+        run("tmp-sweep", own)
+        staged = git("diff", "--cached", "--name-only").split()
+        assert staged == [f"temportal/tmp/{own}/a.md", f"temportal/tmp/{own}/b.md"], staged
+        # over the cap: b.md is deleted and three files are added; b.md leaves the index, nothing new is added
+        os.remove(os.path.join(mine, "b.md"))
+        for n in ("c", "d", "e"):
+            put(mine, f"{n}.md", n + "\n")
+        run("tmp-sweep", own)
+        staged = git("diff", "--cached", "--name-only").split()
+        assert staged == [f"temportal/tmp/{own}/a.md"], staged
+    finally:
+        for sid in (own, gone, fresh):
+            p = os.path.join(hashdir, sid, "scratchpad")
+            if os.path.lexists(p) and not os.path.isdir(p) or os.path.islink(p) or \
+                    getattr(os.path, "isjunction", lambda q: False)(p):
+                unlink(p)
+        for d in (root, temp, cfg):
+            shutil.rmtree(d, ignore_errors=True)
+    print("test_scratchpad.py: tmp empty and cap cases green")
+
+
 def main():
     asks()
     notebook_out()
     repo_uses()
     tmp_cases()
     tmp_keep_cases()
+    sweep_cases()
+    tmp_empty_and_cap_cases()
     gate2_d()
     print("test_scratchpad.py: all green")
 

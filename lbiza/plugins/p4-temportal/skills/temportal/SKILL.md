@@ -9,7 +9,7 @@ Every file this session would otherwise leave in AppData or the system temp dire
 Each p4 plugin writes only in its own directory under `.claude/p4/`: `temportal/`, `recall/`, `phi/`.
 
 - `temportal/memory/` holds the project's memory. The AppData memory directory keeps only a pointer to it. Nothing here is ever cleared.
-- `temportal/tmp/<session>/` is this session's scratchpad. The harness's scratchpad path is a link to it, so write there by either path. It is committed and removed after the session ends.
+- `temportal/tmp/<session>/` is this session's scratchpad. The harness's scratchpad path is a link to it, so write there by either path. It is committed and removed after the session ends. At a start, other sessions' scratchpads that never got a link are linked, or removed when empty, and an empty tmp of a quiet session is removed.
 - `temportal/scratchpad/` is the notebook that lasts across sessions. Logs, build output and binaries in it are swept into `scratchpad/.out/`.
 - `temportal/src/` holds code kept for reuse that the project repository does not use.
 
