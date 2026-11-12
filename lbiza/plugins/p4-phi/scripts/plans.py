@@ -471,7 +471,11 @@ TASK_ID = re.compile(r"(?:background with ID|task[_ -]?id|agentId|ID)[\"':\s=]+(
 NOTICE = re.compile(r"<task-id>\s*([^<\s]+)\s*</task-id>.*?<status>\s*([^<\s]+)\s*</status>"
                     r"(?:.*?<summary>(.*?)</summary>)?", re.S)
 NEAR_DONE_S = 600             # a task older than this may be near done: finish and record rather than stop
-STALE_TASK_S = 6 * 3600       # an open task older than this with no completion notice read is taken as unknown
+JOB_GAP_S = 3600              # the job-gap budget: an open task this far past its own timeout with no notice read is
+                              # taken as unknown, never flagged (a stopped task, an expired Monitor, a lost notice)
+STOPPED = re.compile(r'"name"\s*:\s*"(?:TaskStop|KillShell)"\s*,\s*"input"\s*:\s*\{[^{}]*?'
+                     r'"(?:task_id|shell_id|id)"\s*:\s*"([A-Za-z0-9_-]{6,})"')
+BACKGROUND_AGENT = re.compile(r"(?:launched|running|runs) in the background|async agent|run_in_background", re.I)
 
 
 def register(home, s, tool, inp, response, cwd, at_epoch=None):
@@ -479,8 +483,8 @@ def register(home, s, tool, inp, response, cwd, at_epoch=None):
     foreground or names no task id."""
     if tool == "Bash" and not inp.get("run_in_background"):
         return None
-    if tool == "Agent" and not inp.get("run_in_background") and "background" not in str(response).lower():
-        return None
+    if tool == "Agent" and not inp.get("run_in_background") and not BACKGROUND_AGENT.search(str(response)):
+        return None                               # a foreground agent has finished by its result
     text = response if isinstance(response, str) else json.dumps(response, default=str)
     m = TASK_ID.search(text)
     if not m:
@@ -490,6 +494,9 @@ def register(home, s, tool, inp, response, cwd, at_epoch=None):
     repos = {relay.repo_of(p) for p in paths} | ({relay.repo_of(cwd)} if cwd else set())
     task = {"id": m.group(1) or m.group(2), "tool": tool, "what": relay._short(what, 200), "heads": relay.heads(repos),
             "paths": paths, "status": "open"}
+    limit = inp.get("timeout_ms") or inp.get("timeout")
+    if isinstance(limit, (int, float)) and limit > 0:
+        task["timeoutS"] = int(limit / 1000) if inp.get("timeout_ms") or limit > 100000 else int(limit)
     import time as _t
     epoch = int(at_epoch or _t.time())
     task["epoch"], task["at"] = epoch, _t.strftime("%Y-%m-%d %H:%M", _t.localtime(epoch))
@@ -519,6 +526,8 @@ def pickup(home, sid, text):
     p = load(home, sid)
     closed = []
     found = {m.group(1): (m.group(2).lower(), (m.group(3) or "").strip()) for m in NOTICE.finditer(str(text or ""))}
+    for m in STOPPED.finditer(str(text or "")):   # RB1: a TaskStop sends no notice; its call closes the task
+        found.setdefault(m.group(1), ("stopped", "stopped by TaskStop"))
     if not found:
         return closed
     for st, t in _tasks(p):
@@ -552,10 +561,12 @@ def check_tasks(home, s, plan):
     for st, t in _tasks(plan):
         if t.get("status") != "open":
             continue
-        if _t.time() - int(t.get("epoch") or 0) > STALE_TASK_S:
-            t["status"] = "unknown"               # long past with no notice read: finished, stopped or expired
+        if _t.time() - int(t.get("epoch") or 0) > int(t.get("timeoutS") or 0) + JOB_GAP_S:
+            t["status"] = "unknown"               # past its budget with no notice read: finished, stopped or expired
             changed = True
             continue
+        if st is None:
+            continue                              # a loose task has no step to be checked against
         why = []
         for h in t.get("heads") or []:
             repo, _, rest = h.partition("@")

@@ -81,6 +81,34 @@ class Tasks(unittest.TestCase):
         p = plans.load(home, TOP)
         self.assertEqual(p["steps"][0]["tasks"][0]["status"], "open", "check_tasks reads; the boundary writes")
 
+    def test_a_stopped_task_closes_and_a_foreground_agent_is_no_task(self):
+        """RB1's rest: TaskStop sends no notice, and a finished agent's words may name the background."""
+        home = self.t.p4
+        plans.record(home, self.s, items("Watch the build", "Write the report"))
+        plans.register(home, self.s, "Monitor", {"command": "tail -f log", "timeout_ms": 300000},
+                       "Monitor started (task bwatch001, timeout 300000ms).", "")
+        task = plans.load(home, TOP)["steps"][0]["tasks"][0]
+        self.assertEqual(task["timeoutS"], 300)
+        raw = '{"type":"tool_use","id":"toolu_1","name":"TaskStop","input":{"task_id":"bwatch001"}}'
+        self.assertEqual(plans.pickup(home, TOP, raw), ["bwatch001"])
+        self.assertEqual(plans.load(home, TOP)["steps"][0]["tasks"][0]["status"], "stopped")
+        self.assertIsNone(plans.register(home, self.s, "Agent", {"prompt": "look"},
+                                         "Done. The background tasks agentId: abec142e99 were fine.", ""))
+
+    def test_loose_tasks_are_never_flagged_and_any_task_past_its_budget_is_unknown(self):
+        import time as _t
+        home = self.t.p4
+        plans.register(home, self.s, "Bash", {"command": f"sh {home}/x.sh", "run_in_background": True},
+                       "Command running in background with ID: bloose001.", "")
+        p = plans.load(home, TOP)
+        self.assertEqual([t["id"] for t in p["loose"]], ["bloose001"])
+        p["loose"][0]["heads"] = ["somewhere@0000000"]
+        lines, _ = plans.check_tasks(home, self.s, p)
+        self.assertEqual(lines, [], "a loose task has no step to be checked against")
+        p["loose"][0]["epoch"] = int(_t.time()) - plans.JOB_GAP_S - 60
+        plans.check_tasks(home, self.s, p)
+        self.assertEqual(p["loose"][0]["status"], "unknown")
+
 
 class TreeOfPlans(unittest.TestCase):
     def setUp(self):

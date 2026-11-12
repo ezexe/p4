@@ -533,7 +533,7 @@ def h_subagent_stop(payload):
 PHI_CHECK = {"mcp__ccd_session__start_session": "start-advice", "EnterWorktree": "branch-guard",
              "Bash": "branch-guard", "PowerShell": "branch-guard"}
 PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "Bash": "task", "Monitor": "task", "Agent": "task",
-              "Workflow": "task"}
+              "Workflow": "task", "TaskStop": "task", "KillShell": "task"}
 
 
 def phi_route(payload, table):

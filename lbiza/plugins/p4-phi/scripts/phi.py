@@ -360,7 +360,10 @@ class Me:
 # --- sessions --------------------------------------------------------------------------------------------------------
 
 def load_session(home, sid):
-    return read_json(os.path.join(session_dir(home, sid), "session.json")) if sid else {}
+    s = read_json(os.path.join(session_dir(home, sid), "session.json")) if sid else {}
+    if isinstance(s.get("backgroundGivenFor"), dict):
+        s["backgroundGivenFor"].pop("", None)     # R8: an empty key stored before the fix
+    return s
 
 
 def save_session(home, s):
@@ -948,6 +951,10 @@ def h_task(payload):
     if not s:
         return None
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    if str(payload.get("tool_name") or "") in ("TaskStop", "KillShell"):
+        tid = inp.get("task_id") or inp.get("shell_id") or inp.get("id")
+        RAN["task"] = ",".join(plans.pickup(me.home, me.id, json.dumps({"name": "TaskStop", "input": {"task_id": tid}})))
+        return None
     t = plans.register(me.home, s, str(payload.get("tool_name") or ""), inp, payload.get("tool_response") or "",
                        s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or "")
     RAN["task"] = (t or {}).get("id", "")
@@ -1270,7 +1277,7 @@ def replay(me, s, transcript):
     own entries, so its calls are read back here, at each message and each Stop, each once by its tool_use_id."""
     if not transcript or not os.path.exists(transcript):
         return ""
-    calls, results, notices, when = [], {}, [], {}
+    calls, results, notices, when, stops = [], {}, [], {}, []
     for d in read_transcript(transcript):
         c = (d.get("message") or {}).get("content")
         if d.get("type") == "user" and "<task-notification>" in json.dumps(c, default=str):
@@ -1278,7 +1285,10 @@ def replay(me, s, transcript):
         for b in c if isinstance(c, list) else []:
             if not isinstance(b, dict):
                 continue
-            if d.get("type") == "assistant" and b.get("type") == "tool_use" and b.get("name") in (
+            if d.get("type") == "assistant" and b.get("type") == "tool_use" and b.get("name") in ("TaskStop",
+                                                                                                "KillShell"):
+                stops.append(json.dumps({"name": "TaskStop", "input": b.get("input") or {}}))
+            elif d.get("type") == "assistant" and b.get("type") == "tool_use" and b.get("name") in (
                     "mcp__ccd_turn__update_plan", "Bash", "PowerShell", "Monitor", "Agent", "Workflow"):
                 calls.append(b)
                 when[b.get("id")] = str(d.get("timestamp") or "")
@@ -1304,6 +1314,7 @@ def replay(me, s, transcript):
             plans.register(me.home, load_session(me.home, me.id) or s, b["name"], payload["tool_input"],
                            payload["tool_response"], s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or "",
                            at_epoch=epoch_of(when.get(tid)))
+    notices += stops                               # RB1: a stop sends no notice; its call closes the task
     if notices:                                    # every completion notice of the transcript, not only its tail
         plans.pickup(me.home, me.id, "\n".join(notices))
     RAN["replayed"] = len(calls)

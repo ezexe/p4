@@ -66,6 +66,9 @@ class Paths(unittest.TestCase):
                  "backgroundGivenFor": {"": "top"}}
             me = type("Me", (), {"cli": ""})()
             self.assertEqual(phi.given(s, me, home), "")
+            write(os.path.join(home, "phi", "sessions", "kid", "session.json"),
+                  json.dumps({"sessionId": "kid", "backgroundGivenFor": {"": "top", "c1": "top"}}))
+            self.assertEqual(phi.load_session(home, "kid")["backgroundGivenFor"], {"c1": "top"}, "dropped on load")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
