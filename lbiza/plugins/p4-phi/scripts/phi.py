@@ -33,9 +33,9 @@ given; notes. Nothing is renamed.
   prompt-  if the start did not give it: the tasks of the sessions above it, their notes, the last turn of each
   submit   other session started by the same session (for a top session, of the top sessions before it), and
            after a compaction its own turns. It is given, in full, the reports of the sessions it started that
-           finished a turn since it last looked (the app relays the first 400 characters). And the user's
+           finished a turn since it last looked (the app relays the first 400 characters). And ezexe's
            standing instruction for a message about something else (`new_task`): start a forked session for it
-           and stay with the task; once in full, then a line beside each of the user's messages.
+           and stay with the task; once in full, then a line beside each of ezexe's messages.
   stop     Stop: the turn is kept in turns.jsonl whether or not the task is done: the prompt, the files edited,
            the commands that worked, the sessions started, what failed, the report. It is appended to the
            reports of the session that started this one.
@@ -787,10 +787,10 @@ MAX_DEPTH = 3                 # a session this deep in the tree starts no sessio
 MAX_CHILDREN = 8              # nor one that has this many live children already
 BUILT_IN = ("built-in, act-don't-wait: a next step the chain can settle (the task, the parent's plan and notes, "
             "siblings' work, the project's rules) is decided and done, with one line saying what was chosen and why. "
-            "Only a matter of the user's authority goes to the user: permissions or security settings, credentials, "
+            "Only a matter of ezexe's authority goes to ezexe: permissions or security settings, credentials, "
             "spending, and actions that cannot be undone or publish outward. A child asks the session that started it "
             "with SendMessage, and never ends its turn waiting on a question the chain can settle. Where the project's "
-            "rules ask for the user's go before a kind of step, such as a plan's edits, that go is the user's to give: "
+            "rules ask for ezexe's go before a kind of step, such as a plan's edits, that go is ezexe's to give: "
             "wait for it on those steps, and act on the rest.")
 ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves the built-in rule out in a project (#23)
 TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps a top session's work in it (#24)
@@ -808,7 +808,7 @@ def project_conf(store):
 
 
 TOP_RULE = ("This is the top session of its tree, so it keeps itself free for orchestration: planning, relaying "
-            "between sessions, decisions with the user, and landing the work, meaning merge and push. Its work "
+            "between sessions, decisions with ezexe, and landing the work, meaning merge and push. Its work "
             "steps go to fresh child sessions, a run of serial ones to one child, each brief saying \"archive when "
             "done\"; the steps that test-and-commit, merge, push or release stay here.")
 
@@ -827,9 +827,9 @@ def new_top_route(owner_turn=True):
     """How a top session starts a new top session for a topic outside its task."""
     how = ("Start it with `mcp__ccd_session__start_session`, `initiation` `user_asked`" if owner_turn else
            f"This turn was started by another session, so the app refuses `user_asked`: write it as a start request, "
-           f"{request_cmd()}, which the next turn the user begins in any session of this store starts, without "
-           f"asking the user anything")
-    return (f"{how}, `context` `fresh`, `use_worktree: false`; its brief: the topic, the user's words quoted, and "
+           f"{request_cmd()}, which the next turn ezexe begins in any session of this store starts, without "
+           f"asking ezexe anything")
+    return (f"{how}, `context` `fresh`, `use_worktree: false`; its brief: the topic, ezexe's words quoted, and "
             f"the lines \"{NEW_TOP_BRIEF} {new_top_first_act()}\" Both moves are needed: the app's detach, else it "
             f"stays nested under this session and reports here, and phi's, which phi also makes at its first hook "
             f"on that line. If it has not left this session's family by its first report, call "
@@ -866,29 +866,29 @@ def caps_text(home, s):
 
 
 def split_text(home, s, prompt):
-    """A turn another session's message started: the app refuses `user_asked` there, so a split is a card the user
-    starts. '' for the user's own turns, the app's events and a session with no task."""
+    """A turn another session's message started: the app refuses `user_asked` there, so a split is a card ezexe
+    starts. '' for ezexe's own turns, the app's events and a session with no task."""
     if not clean(s.get("task")) or not re.search(r"<cross-session-message\b", str(prompt or "")):
         return ""
     cap = caps_text(home, s)
     RAN["split"] = "cap" if cap else "card"
     if cap:
-        return "phi (p4-phi): this turn was started by another session, not the user. " + cap
+        return "phi (p4-phi): this turn was started by another session, not ezexe. " + cap
     if not spawned_from(s):
-        return ("phi (p4-phi): this turn was started by another session, not the user, so the app refuses "
+        return ("phi (p4-phi): this turn was started by another session, not ezexe, so the app refuses "
                 "`mcp__ccd_session__start_session` with `user_asked`. A topic in it outside this top session's task "
                 "gets a new top session of its own. " + new_top_route(False) + " Do the rest here; a question the "
                 "chain can settle is answered, not waited on.")
-    return ("phi (p4-phi): this turn was started by another session, not the user, so the app refuses "
+    return ("phi (p4-phi): this turn was started by another session, not ezexe, so the app refuses "
             "`mcp__ccd_session__start_session` with `user_asked`. Work in it that is a task of its own, outside "
-            f"this session's task, is written as a start request, {request_cmd()}: the next turn the user begins, "
-            "in any session of this store, starts it as this session's child. Do not ask the user to type anything "
+            f"this session's task, is written as a start request, {request_cmd()}: the next turn ezexe begins, "
+            "in any session of this store, starts it as this session's child. Do not ask ezexe to type anything "
             "or click a card. Do the rest here; a question the chain can settle is answered, not waited on.")
 
 
 def new_task_text(home, s, me, user=True, again=False):
-    """The user's standing instruction for a message about something else: once in full for a CLI session that
-    has a task (and again after a compaction), then a line with the task beside each of the user's messages.
+    """ezexe's standing instruction for a message about something else: once in full for a CLI session that
+    has a task (and again after a compaction), then a line with the task beside each of ezexe's messages.
     '' with no task, and beside the harness's messages."""
     task = clean(s.get("task"))
     if not NEW_TASK or not task:
@@ -904,22 +904,22 @@ def new_task_text(home, s, me, user=True, again=False):
         parent = spawned_from(s)
         if parent:
             elsewhere = (f"do not turn this session to it, and start no session for it: hand it up to the session "
-                         f"that started this one with SendMessage (`to`: {parent}), the user's words quoted, tell "
-                         f"the user in one line that it went up, and stay with the task. Only a top session starts "
+                         f"that started this one with SendMessage (`to`: {parent}), ezexe's words quoted, tell "
+                         f"ezexe in one line that it went up, and stay with the task. Only a top session starts "
                          f"a session for a new topic. A message about a path inside another session's shard is that "
-                         f"session's: send it there with SendMessage instead{shards}. This is the user's standing "
+                         f"session's: send it there with SendMessage instead{shards}. This is ezexe's standing "
                          f"instruction for this project. A quick thing (a ")
         else:
             elsewhere = (f"do not turn this session to it. A new topic gets a new top session of its own, a sibling "
-                         f"of this one, so this session stays orchestrating its topic. {new_top_route(True)} Tell the "
-                         f"user in one line which session has it, and stay with the task. A message about a path "
+                         f"of this one, so this session stays orchestrating its topic. {new_top_route(True)} Tell "
+                         f"ezexe in one line which session has it, and stay with the task. A message about a path "
                          f"inside another session's shard is that session's: send it there with SendMessage instead, "
-                         f"and start a new session only for what no shard covers{shards}. This is the user's standing "
+                         f"and start a new session only for what no shard covers{shards}. This is ezexe's standing "
                          f"instruction for this project, so the session is started, not offered as a card. Its "
                          f"report comes back here in full. A quick thing (a ")
-        return (f"phi (p4-phi): this session's task: \"{cut(task, RULE_TASK)}\" When a message from the user is "
+        return (f"phi (p4-phi): this session's task: \"{cut(task, RULE_TASK)}\" When a message from ezexe is "
                 f"about something else, " + elsewhere +
-                f"question, a few tool calls) stays here. When the user says the task itself has changed: "
+                f"question, a few tool calls) stays here. When ezexe says the task itself has changed: "
                 f"`{commands()} task \"<the new task>\"`. This session's page: {page_path(home, s['sessionId'])}."
                 + (" " + TOP_RULE if not spawned_from(s) and TOP_ORCHESTRATES else "")
                 + (" " + caps_text(home, s) if caps_text(home, s) else ""))
@@ -929,7 +929,7 @@ def new_task_text(home, s, me, user=True, again=False):
     parent = spawned_from(s)
     if parent:
         return (f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" If this message is about something "
-                f"else, hand it up to {parent} with SendMessage, the user's words quoted, and stay with the task; "
+                f"else, hand it up to {parent} with SendMessage, ezexe's words quoted, and stay with the task; "
                 f"otherwise carry on.")
     return (f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" If this message is about something "
             f"else, start a new top session for it (`context` `fresh`, its brief ending \"{NEW_TOP_BRIEF}\") and stay "
@@ -1497,7 +1497,7 @@ def h_user_prompt_submit(payload):
             if wt:
                 parts.insert(1, wt)
     asked = starts.hand_text(me.home, s["sessionId"]) if req and not handed_over(payload.get("prompt")) else ""
-    if asked:                                      # the owner began this turn: it carries the sessions' start requests
+    if asked:                                      # ezexe began this turn: it carries the sessions' start requests
         parts.insert(0, asked)
         RAN["start_requests"] = asked.count("\n- ")
     if detached_now:
@@ -1648,8 +1648,8 @@ def h_start_advice(payload):
     if advised != wanted:
         reasons.append(f"p4-phi advises context \"{advised}\" here, not \"{wanted}\": {why}.")
     if inp.get("use_worktree") is True or inp.get("branch_name") or inp.get("source_branch"):
-        # the user's rule: a child works on the parent's branch in the parent's checkout
-        reasons.append("p4-phi: the user's rule is no worktrees and no branches of a child's own; pass "
+        # ezexe's rule: a child works on the parent's branch in the parent's checkout
+        reasons.append("p4-phi: ezexe's rule is no worktrees and no branches of a child's own; pass "
                        "`use_worktree: false`, leave out branch_name and source_branch, and let the child work on "
                        "this session's branch in this checkout.")
     if not reasons:
@@ -1672,7 +1672,7 @@ LANDING_GIVEN = re.compile(r"\b(?:push|merg|land)\w*\b[^.\n]{0,60}\byourself\b|\
 
 def h_branch_guard(payload):
     """PreToolUse on EnterWorktree and Bash in a session another one started: making a worktree or a branch of its
-    own is asked first, the user's rule being that a child works on its parent's branch. So is landing work, a git
+    own is asked first, ezexe's rule being that a child works on its parent's branch. So is landing work, a git
     push, merge, rebase or pull, which the parent does, unless the child's brief handed it the landing. Silent
     otherwise."""
     me = Me(payload)
@@ -1707,7 +1707,7 @@ def h_branch_guard(payload):
     RAN["branch_guard"] = what
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
                                    "permissionDecisionReason": f"p4-phi: this session is a child, and {what} goes "
-                                                               f"against the user's rule: a child works on its "
+                                                               f"against ezexe's rule: a child works on its "
                                                                f"parent's branch in the parent's checkout, so its work "
                                                                f"needs no merge."}}
 

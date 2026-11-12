@@ -5,7 +5,7 @@
                       models/eval.tsv; --if-owed returns at once unless >= 10 labels landed since the last round and
                       the last round is older than an hour (the async Stop hook's road)
   eval                the same numbers, nothing written
-  dictionary check    every vocabulary entry's two tests; a failing entry is set `status: off` (an owner's entry is
+  dictionary check    every vocabulary entry's two tests; a failing entry is set `status: off` (ezexe's entry is
                       listed, never changed)
 
 How a task becomes examples. A task (models/tasks.tsv) has a text and a time; its candidates are the indexed entries
@@ -724,7 +724,7 @@ def fmt_compare(c):
 
 
 def hold_batches(p4, batches, why):
-    """Mark teacher batches held in models/teacher-batches.json (the owner sets `status` back to ok to release)."""
+    """Mark teacher batches held in models/teacher-batches.json (ezexe sets `status` back to ok to release)."""
     cur = lb.read_batches(p4)
     for b in batches:
         e = cur.setdefault(b, {})
@@ -787,7 +787,7 @@ def is_owner_entry(v):
 def dictionary_check(p4, idx=None, write=True, harm_max=0.05):
     """Each `on` entry with a meaning: (1) a query on the misread message ranks a `points-at:` entry in the top 5
     with the entry on; (2) over the working messages the top 5 is unchanged for >= 95% with it on. A failing entry
-    is set `status: off` in vocabulary.md, unless the owner wrote it (listed, left as it is)."""
+    is set `status: off` in vocabulary.md, unless ezexe wrote it (listed, left as it is)."""
     if idx is None:
         idx, _ = st.ensure_index(p4)
     vocab = list(idx.get("vocab", []))
@@ -838,7 +838,7 @@ def dictionary_check(p4, idx=None, write=True, harm_max=0.05):
 
 def set_status_off(p4, lines):
     """Turn the entries opening at these lines `status: off`, editing only their status line: every other byte of
-    vocabulary.md (the owner's edits) stays as it was."""
+    vocabulary.md (ezexe's edits) stays as it was."""
     path = os.path.join(st.store_dir(p4), st.VOCABULARY)
     text = st.read_text(path)
     ls = text.split("\n")
@@ -908,7 +908,7 @@ def cmd_eval(args):
 def cmd_dictionary(args):
     res = dictionary_check(args.p4, write=not args.dry)
     for r in res["entries"]:
-        flag = "ok" if r["fixed"] and not r["harmed"] else ("kept (owner's)" if r["owner"] else "set off")
+        flag = "ok" if r["fixed"] and not r["harmed"] else ("kept (ezexe's)" if r["owner"] else "set off")
         print(f"  {r['term']}: fixes its message {'yes' if r['fixed'] else 'no'}, changes {r['changed']} of "
               f"{r['working']} working messages -> {flag}")
     c = res["counts"]

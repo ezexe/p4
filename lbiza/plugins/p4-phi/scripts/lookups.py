@@ -25,7 +25,7 @@ checks a call before it runs (PreToolUse):
 Modes (`recall.lookups` in p4.json): `web` and `shell` are each "answer" (deny once, the finding as the reason),
 "note" (the finding beside the result; the call runs), "shadow" (logged only) or "off".
 
-Measured on one owner's history (2026-11-11: 121,469 distinct calls of 241 sessions of one project, backfilled):
+Measured on ezexe's history (2026-11-11: 121,469 distinct calls of 241 sessions of one project, backfilled):
   - the same shell command twice: 1.4% of 67,240. A key match answers almost nothing; likeness has to.
   - web: 1,663 calls, 892 with an earlier call for the same page or an earlier search. Held out by session, the
     matcher answers 535 (32%) at 0.85 precision and 716 (43%) at 0.80; the fitted model 341 and 706, so the
@@ -77,7 +77,7 @@ FINDING_CHARS = 4000
 SHOWN_CHARS = 1500
 SHOWN_ROWS = 2                   # earlier findings shown for one web call
 LABEL_COS = 0.35                 # a later result this like an earlier finding: the finding would have answered.
-#                                  Measured on the owner's history: the same page asked the same question twice
+#                                  Measured on ezexe's history: the same page asked the same question twice
 #                                  gives results 0.52 alike at the median (a small model writes each answer), and
 #                                  two unrelated pages 0.06 at the 90th percentile, so 0.5 calls half the true
 #                                  repeats wrong; 0.35 keeps about seven in ten of them and none of the unrelated

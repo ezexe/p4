@@ -181,7 +181,7 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn("finished with commits that close issues", ctx)
         self.assertIn("closes #5", ctx)
         self.assertNotIn("tidy y", ctx, "a commit closing nothing is not named")
-        self.assertIn("without asking the user", ctx)
+        self.assertIn("without asking ezexe", ctx)
         t.stop(A, "again", report="Nothing more.", uuid="c4")
         self.assertNotIn("close issues", context(t.say(TOP, "and now?")), "told once per commit")
 

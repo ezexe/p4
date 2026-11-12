@@ -4,7 +4,7 @@
     python3 -I lbiza/plugins/p4-phi/scripts/test_starts.py
 
 The tree: two top sessions and a child of the first. The child's turn is started by its parent's message, so the
-app would refuse it `user_asked`: it is told to write a start request, and writes one. The owner then speaks in the
+app would refuse it `user_asked`: it is told to write a start request, and writes one. ezexe then speaks in the
 other top session, which is handed the request with its exact call; its start_session call claims it; the child
 that call starts arrives with the marker and is recorded as the requester's child, not the starter's, so its
 reports and its archive line go to the requester. A request is dropped after a day.
@@ -50,20 +50,20 @@ class StartRequests(unittest.TestCase):
         ctx = context(self.t.say(KID, CROSS, P4_PHI_NEW_TASK="1"))
         self.assertIn(" request \"<title>\" --brief", ctx)
         self.assertNotIn("own_initiative", ctx)
-        self.assertNotIn("which the user starts with a click", ctx)
-        self.assertIn("Do not ask the user to type anything", ctx)
+        self.assertNotIn("which ezexe starts with a click", ctx)
+        self.assertIn("Do not ask ezexe to type anything", ctx)
 
     def test_a_request_is_started_by_the_next_owner_turn_and_the_child_is_the_requesters(self):
         t = self.t
         r = t.cli(KID, "request", "the flush port", "--brief", BRIEF)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("kept as start request req-", r.stdout)
-        self.assertIn("Do not ask the user", r.stdout)
+        self.assertIn("Do not ask ezexe", r.stdout)
         self.assertIn("was already kept", t.cli(KID, "request", "the flush port", "--brief", BRIEF).stdout)
         self.assertEqual(context(t.say(KID, CROSS)).count("start requests from sessions"), 0,
                          "a turn another session began carries no request")
         line = context(t.say(TOP2, "How are the docs coming?"))
-        self.assertIn("start requests from sessions whose turns the user did not begin", line)
+        self.assertIn("start requests from sessions whose turns ezexe did not begin", line)
         self.assertIn("claude-code#109282", line)
         call = json.loads(line.split("`mcp__ccd_session__start_session` with ", 1)[1].split("\n", 1)[0])
         self.assertEqual((call["initiation"], call["context"], call["use_worktree"]), ("user_asked", "fresh", False))

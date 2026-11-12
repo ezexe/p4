@@ -1,6 +1,6 @@
 """plans.py: each session's plan as numbered steps, and the plan tree its parent's anchor holds.
 
-The user's words, 2026-11-12: "i plan to do this in xyz steps ... step x becomes something you split into 'x' num
+ezexe's words, 2026-11-12: "i plan to do this in xyz steps ... step x becomes something you split into 'x' num
 steps ... and then for each step of x in xyz double check your parent to relay up accross or down if that step needs
 to be revised based on where there currently up to in there x of xyz".
 
@@ -354,7 +354,7 @@ LANDS = re.compile(r"^\W*(?:run\b[^,.;]*\b(?:tests?|suites?|checks?)|report|wrap
 # kept on a top session as landing work, though it was one of the checks its children were for
 ORCHESTRATES = re.compile(r"^\W*(?:start|run|kick\s*off|launch)\s+(?!writing|adding|implementing|making)"
                           r"(?:[\w'’-]+\s+){0,5}?(?:checks?|tests?|sessions?)\b", re.I)
-# starts a check, test or session, which is orchestration: "Start the owner's-eye acceptance check" was advised as work
+# starts a check, test or session, which is orchestration: "Start ezexe's-eye acceptance check" was advised as work
 MANAGES = re.compile(r"\b(?:un)?(?:archiv|relay|messag|start|stop|review|check|brief|spawn|ask|tell|nudg|queu|send|"
                      r"sent|pass|hand|forward)\w*\b"
                      r"[^.;]*?\b(?:child(?:ren)?|(?:sub-?)?sessions?)\b"   # manages a child session: orchestration
@@ -425,8 +425,8 @@ def split_advice(home, s, plan, owner_turn, cap):
     route = ("Start each now with `mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, "
              "`use_worktree: false`, on this session's branch" if owner_turn else
              "This turn was started by another session, so the app refuses `user_asked`: write each as a start "
-             "request, `phi.py request \"<title>\" --brief \"<the whole brief>\"`, which the next turn the user "
-             "begins, in any session of this store, starts as this session's child; ask the user nothing")
+             "request, `phi.py request \"<title>\" --brief \"<the whole brief>\"`, which the next turn ezexe "
+             "begins, in any session of this store, starts as this session's child; ask ezexe nothing")
     stay = ("; ".join(f"{a} ({why})" for a, why in kept)) or "none"
     return (f"phi (p4-phi): steps {named} can each run on their own: no path another step names, nothing leaning "
             f"on another step, more than a quick thing. {route}; one child per step, its brief that step's slice: "
@@ -436,7 +436,7 @@ def split_advice(home, s, plan, owner_turn, cap):
 # --- the top session orchestrates ----------------------------------------------------------------------------------
 #
 # A session with no parent keeps itself free for orchestration: planning, relaying between sessions, decisions with
-# the user, and landing work. Every work step of its plan goes to a fresh child, not only the independent ones; a run
+# ezexe, and landing work. Every work step of its plan goes to a fresh child, not only the independent ones; a run
 # of serial work steps (one leaning on the step before it, or sharing a path with it) is one child that does them in
 # order. A step that checks or lands work (test-and-commit, merge, push, release), waits on and relays work, or
 # manages a child session (archives, relays to, messages, starts, reviews or checks one) stays.
@@ -494,7 +494,7 @@ def top_advice(home, s, plan, owner_turn, cap):
                 + ", ".join(f"\"{relay._short(st.get('content'), 70)}\"" for st in g))
     named = "; ".join(f"({chr(97 + k)}) {child(g)}" for k, g in enumerate(new[:26]))
     head = ("phi (p4-phi): this is the top session of its tree, so it keeps itself free for orchestration: "
-            "planning, relaying between sessions, decisions with the user, and landing the work, meaning merge and push.")
+            "planning, relaying between sessions, decisions with ezexe, and landing the work, meaning merge and push.")
     stay = ("; ".join(f"{a} ({why})" for a, why in kept)) or "none"
     if cap:
         return (f"{head} Its work steps would each go to a child: {named}. But {cap[0].lower() + cap[1:]} "
@@ -502,8 +502,8 @@ def top_advice(home, s, plan, owner_turn, cap):
     route = ("Start each now with `mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, "
              "`use_worktree: false`, on this session's branch" if owner_turn else
              "This turn was started by another session, so the app refuses `user_asked`: write each as a start "
-             "request, `phi.py request \"<title>\" --brief \"<the whole brief>\"`, which the next turn the user "
-             "begins, in any session of this store, starts as this session's child; ask the user nothing")
+             "request, `phi.py request \"<title>\" --brief \"<the whole brief>\"`, which the next turn ezexe "
+             "begins, in any session of this store, starts as this session's child; ask ezexe nothing")
     return (f"{head} Hand its work steps to child sessions, one child each: {named}. {route}. Each brief is its "
             f"steps' words, their paths and what they must leave done, and says \"archive when done\", so the child "
             f"leaves its outcome here as a replaces: note and is named for archiving when it finishes. Staying "
@@ -671,7 +671,7 @@ def slice_for(home, s):
 
 # --- a turn is a delta too ---------------------------------------------------------------------------------------------
 #
-# The miss of 2026-11-12 that this closes: a parent told the user which of a child's checks its new design would void,
+# The miss of 2026-11-12 that this closes: a parent told ezexe which of a child's checks its new design would void,
 # in a plain turn report, and never told the child. Notes and plan changes were relayed; the report was not.
 
 SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
@@ -790,7 +790,7 @@ def turn_relay(home, s, row, calls):
     if parent and ask:
         relay.warn(home, parent, f"wait:{sid}:{stamp}",
                    f"\"{title}\", a session you started, ended its turn on a question: \"{relay._short(ask, 240)}\". "
-                   f"It names no matter of the user's authority, so answer it with SendMessage (`to`: {sid}) "
+                   f"It names no matter of ezexe's authority, so answer it with SendMessage (`to`: {sid}) "
                    f"from what the chain knows, rather than leaving it waiting.")
     return unsent
 
@@ -801,7 +801,7 @@ AUTHORITY = re.compile(r"\b(push|force|merge|publish|post|deploy|release|credent
 
 
 def waiting_on(report):
-    """The question a turn's report ends on, when it is not a matter of the user's authority; '' otherwise."""
+    """The question a turn's report ends on, when it is not a matter of ezexe's authority; '' otherwise."""
     tail = str(report or "").strip()[-600:]
     qs = [q.strip() for q in re.findall(r"[^.!?\n]*\?", tail) if len(q.strip()) > 8]
     if not qs or not tail.rstrip().endswith("?") and tail.rfind("?") < len(tail) - 200:
@@ -812,17 +812,17 @@ def waiting_on(report):
 
 # --- a turn that ends with open steps the chain can settle (#20) ------------------------------------------------------
 #
-# A session that ends its turn with plan steps still open, none of them waiting on the user's authority, costs the
-# owner a message just to restart agreed work. At Stop it is sent back once or twice a turn with the next open step.
+# A session that ends its turn with plan steps still open, none of them waiting on ezexe's authority, costs ezexe
+# a message just to restart agreed work. At Stop it is sent back once or twice a turn with the next open step.
 
 KEEP_GOING_MAX = 2             # times one turn is sent back
-WAITS_ON_OWNER = re.compile(r"\b(?:wait\w*|blocked|need\w*|until)\b[^.\n]{0,80}\b(?:user|owner|boss|your|you)\b|"
-                            r"\b(?:your|the (?:user|owner)'s?) (?:go|ok|okay|approval|answer|decision|sign-?off)\b", re.I)
+WAITS_ON_OWNER = re.compile(r"\b(?:wait\w*|blocked|need\w*|until)\b[^.\n]{0,80}\b(?:user|owner|boss|ezexe|your|you)\b|"
+                            r"\b(?:your|ezexe's|the (?:user|owner)'s?) (?:go|ok|okay|approval|answer|decision|sign-?off)\b", re.I)
 
 
 def keep_going(home, s, report, calls, turn_id, active=False):
     """The Stop hook's reason to send the session back to its next open step; '' when the turn may end: no open
-    step, the turn wrapped up or asked the user a matter of authority, the next step is one, a background task is
+    step, the turn wrapped up or asked ezexe a matter of authority, the next step is one, a background task is
     still open (its notice starts the next turn), or this turn was sent back KEEP_GOING_MAX times already."""
     p = load(home, s["sessionId"])
     steps = [x for x in p.get("steps") or [] if x.get("status") != "completed"]
@@ -851,7 +851,7 @@ def keep_going(home, s, report, calls, turn_id, active=False):
     others = len(steps) - 1
     return (f"phi (p4-phi): step {nxt.get('addr')} \"{relay._short(nxt.get('content'), 120)}\" is still "
             f"{nxt.get('status') or 'pending'}" + (f", with {others} more open after it" if others else "") +
-            ", and nothing in this turn's end waits on the user's authority. Carry on with it now. If it truly waits "
+            ", and nothing in this turn's end waits on ezexe's authority. Carry on with it now. If it truly waits "
             "on a permission, a credential, spending, a push or another outward or irreversible step, say which in "
             "one line and end the turn; if the step is done or dropped, update the plan.")
 

@@ -19,7 +19,7 @@
   migrate [--apply] ...                the old layout into the new (scripts/migrate.py)
   teacher edit-labels|dictionary|facts [--re-edit] [--second-opinion N] [--max-usd X] [--estimate] [--fake]
                                        the paid batches (scripts/teacher.py, build step 9); never run by a hook;
-                                       facts answers the owner's recommendation questions from the current
+                                       facts answers ezexe's recommendation questions from the current
                                        documentation (web search) into store/facts.md
 
 Every subcommand takes `--p4 <dir>` (the .claude/p4 directory; default from CLAUDE_PROJECT_DIR or the cwd).

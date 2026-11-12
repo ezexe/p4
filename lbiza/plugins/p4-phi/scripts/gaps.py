@@ -1,6 +1,6 @@
 """gaps.py: a memory that patches over a plugin's behaviour starts a new top session for that plugin gap.
 
-A session writes a feedback memory into the store's temportal/memory/ when a plugin did not do what the owner wanted:
+A session writes a feedback memory into the store's temportal/memory/ when a plugin did not do what ezexe wanted:
 "a child never merges", "a store moves only by p4.py sync". Each such memory hid a gap that belonged in the plugin,
 and an audit had to find six of them later and file them as issues. So when a session writes a feedback memory whose
 rule describes session or plugin behaviour, phi advises a new top session in the plugin's own project, to file the
@@ -189,9 +189,9 @@ def advice(home, store, s, path, owner_turn, commands, new_top, root=None):
     if not owner_turn and not proj["cloud"] and proj["store"]:
         import starts
         rid, new = starts.add(proj["store"], s["sessionId"], title, brief)
-        return (head + f"this turn was started by another session, not the user, so the app refuses `user_asked`; "
-                f"phi kept it as start request {rid} in {relay.norm(proj['store'])}, {where}: the next turn the user "
-                f"begins in a session of that store starts it. Ask the user nothing about it, and carry on.")
+        return (head + f"this turn was started by another session, not ezexe, so the app refuses `user_asked`; "
+                f"phi kept it as start request {rid} in {relay.norm(proj['store'])}, {where}: the next turn ezexe "
+                f"begins in a session of that store starts it. Ask ezexe nothing about it, and carry on.")
     if not owner_turn:
         return (head + f"this turn was started by another session, so write it as a start request, `{commands} "
                 f"request \"{title}\" --brief \"<the brief below>\"`, and carry on. Its brief: {brief}")

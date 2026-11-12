@@ -273,7 +273,7 @@ def tmp_cases():
         put(harness, "after2.md", "again\n")
         assert os.path.isfile(os.path.join(target, "after2.md")), "the sweep did not link the scratchpad again"
 
-        # a link elsewhere is the owner's: left as it is
+        # a link elsewhere is ezexe's: left as it is
         other = tempfile.mkdtemp(prefix="p4-scratchpad-other-")
         try:
             os.rmdir(harness) if os.name == "nt" else os.unlink(harness)
@@ -456,7 +456,7 @@ def sweep_cases():
         put(new["e"], "new.md", "new\n")
         os.makedirs(old["e"]); link(pad["e"], old["e"]); links.append(pad["e"])
         shutil.rmtree(os.path.join(p4, "tmp"))
-        # f: a link elsewhere, the owner's
+        # f: a link elsewhere, ezexe's
         link(pad["f"], other); links.append(pad["f"])
         # g: an empty real scratchpad quiet two hours whose transcript was written now
         os.makedirs(pad["g"]); age(pad["g"], os.path.dirname(pad["g"]))

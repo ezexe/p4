@@ -3,18 +3,18 @@
 8.5). Read-only over Claude Code's `~/.claude/projects/<slug>/<session>.jsonl` files.
 
 A transcript is JSON lines. The ones read here:
-  {"type": "user", "message": {"content": "<the owner's prompt>"}, "timestamp", "cwd", "origin": {"kind": "human"}}
+  {"type": "user", "message": {"content": "<ezexe's prompt>"}, "timestamp", "cwd", "origin": {"kind": "human"}}
   {"type": "assistant", "message": {"id", "content": [{"type": "text"|"tool_use", ...}], "usage": {...}}}
   {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id", "content"}]}}
 An assistant message is written one line per content block under the same message id; its usage is counted once.
 
-A turn runs from one owner prompt to the next; an owner's /<name> command line (the harness's tags, so not a
+A turn runs from one ezexe prompt to the next; ezexe's /<name> command line (the harness's tags, so not a
 prompt) opens a turn too, `/name args` its prompt, and a local command (after its caveat line) does not. For each turn, per repository path (relative to the project):
   edited     an Edit, Write, MultiEdit or NotebookEdit of it, or a Bash write (a redirect into it, sed -i, tee,
              cp/mv onto it)
   read       a Read of it, or a Bash read naming it (cat, head, tail, sed -n, less, wc, grep on it)
   hit        a Grep or Glob result listing it
-  invoked    its skill run by a Skill call or the owner's /<name> command: .claude/skills/<name>/SKILL.md, or
+  invoked    its skill run by a Skill call or ezexe's /<name> command: .claude/skills/<name>/SKILL.md, or
              .claude/commands/<name>.md; `dir:name` is dir/.claude/skills/name/SKILL.md (a skill's body reaches the
              context without a Read, so it is a use like a cite)
   cited      after it was read, its path, its distinctive file name or one of its symbols appears in the turn's reply
@@ -57,7 +57,7 @@ def read_lines(path):
 
 
 def prompt_text(d):
-    """The owner's prompt on a transcript line, or None: a user line that is not a tool result, not a sidechain,
+    """ezexe's prompt on a transcript line, or None: a user line that is not a tool result, not a sidechain,
     from a human (where the transcript says), and not a harness injection (`<...>` first)."""
     if d.get("type") != "user" or d.get("isSidechain") or d.get("isMeta"):
         return None
@@ -77,7 +77,7 @@ def prompt_text(d):
 
 
 def command_text(d):
-    """The text of an owner's slash-command line, or '': a user line, not a sidechain or meta, from a human (where
+    """The text of ezexe's slash-command line, or '': a user line, not a sidechain or meta, from a human (where
     the transcript says), whose text starts with the command tags (so prompt_text skips it as the harness's)."""
     if d.get("type") != "user" or d.get("isSidechain") or d.get("isMeta"):
         return ""
@@ -119,7 +119,7 @@ def turns(path_or_lines):
         cmd = "" if p is not None or caveat else command_text(d)
         if d.get("type") == "user":
             caveat = bool(d.get("isMeta")) and "<local-command-caveat>" in json.dumps(d.get("message") or {})
-        if cmd:                    # an owner's /<name> command is a turn of its own: `/name args` its prompt
+        if cmd:                    # ezexe's /<name> command is a turn of its own: `/name args` its prompt
             args = " ".join(a.strip() for a in ARGS_RE.findall(cmd) if a.strip())
             p = " ".join(["/" + n for n in COMMAND_RE.findall(cmd)[:1]] + ([args] if args else []))
         if p is not None or cmd:

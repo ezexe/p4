@@ -319,7 +319,7 @@ class Dictionary(Base):
         self.vocab([
             st.vocab_entry_pairs("gizmo", "(pending)", '2026-10-01 — you wrote "fix the gizmo board" and it was read '
                                  'as the gauge; you then wrote "no the gizmo board"', "correction", [], "2026-11-01"),
-            st.vocab_entry_pairs("widget", "the owner's own meaning", '2026-10-02 — you wrote "the widget"',
+            st.vocab_entry_pairs("widget", "ezexe's own meaning", '2026-10-02 — you wrote "the widget"',
                                  "correction", [], "2026-11-02"),
             st.vocab_entry_pairs("doohickey", "(pending)", '2026-10-03 — you wrote "the doohickey"',
                                  "owner", [], "2026-11-03"),
@@ -330,13 +330,13 @@ class Dictionary(Base):
         g = self.block("gizmo")
         self.assertIn("  means: (fake) gizmo as in: fix the gizmo board", g)
         self.assertRegex(g, r"  means-by: claude-fable-5-1 2026-11-01 18:00 [0-9a-f]{8}")
-        self.assertEqual(self.block("widget"), widget, "a meaning the owner wrote is untouched")
-        self.assertEqual(self.block("doohickey"), owner, "an owner's entry is untouched")
+        self.assertEqual(self.block("widget"), widget, "a meaning ezexe wrote is untouched")
+        self.assertEqual(self.block("doohickey"), owner, "ezexe's entry is untouched")
         v = {x["term"]: x for x in st.read_vocabulary(self.p4)}
         self.assertFalse(v["gizmo"]["pending"])
         # a second run has nothing pending
         self.assertEqual(te.dictionary(self.p4, dargs(), client=te.FakeClient(), out=quiet)["entries"], 0)
-        # the owner edits the teacher's meaning: a re-edit by another teacher leaves it alone
+        # ezexe edits the teacher's meaning: a re-edit by another teacher leaves it alone
         t = self.text().replace("  means: (fake) gizmo as in: fix the gizmo board", "  means: the gizmo board, mine")
         write(p4conf.sub(self.p4, "store", st.VOCABULARY), t)
         s = te.dictionary(self.p4, dargs("--re-edit", "--teacher", "claude-opus-5-5"), client=te.FakeClient(),
@@ -360,7 +360,7 @@ class Dictionary(Base):
         self.vocab([st.vocab_entry_pairs("gizmo", "(pending)", '2026-10-01 — you wrote "fix the gizmo board"',
                                          "correction", [], "2026-11-01")])
         e = next(x for x in st.load_file(self.p4, st.VOCABULARY) if x.value == "gizmo")
-        t = self.text().replace("  means: (pending)", "  means: what the owner typed meanwhile")
+        t = self.text().replace("  means: (pending)", "  means: what ezexe typed meanwhile")
         write(p4conf.sub(self.p4, "store", st.VOCABULARY), t)
         n = te.write_meanings(self.p4, {(e.line, "gizmo", "(pending)"): "the teacher's"}, "claude-fable-5-1", NOW)
         self.assertEqual(n, 0)
@@ -454,7 +454,7 @@ class Facts(Base):
         self.assertTrue(cmake.value.startswith("use the"), cmake.value)
         self.assertTrue(cmake.fields["source"].startswith("https://docs.example.org/"), cmake.fields)
         self.assertEqual(cmake.fields["verified"], NOW)
-        self.assertEqual(cmake.fields["time"], "2026-10-29 11:00", "the fact is timed by the owner's question")
+        self.assertEqual(cmake.fields["time"], "2026-10-29 11:00", "the fact is timed by ezexe's question")
         self.assertEqual(cmake.fields["by"], "claude-fable-5-1")
         self.assertEqual(st.feature_kind("facts.md", cmake), "fact sourced")
         with open(lb.mpath(self.p4, te.SPEND), encoding="utf-8") as f:

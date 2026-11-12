@@ -19,8 +19,8 @@ import p4conf  # noqa: E402
 import said  # noqa: E402
 import store as st  # noqa: E402
 
-RULES = """The owner's rulings: what holds past the turn, in the owner's own words.
-Written when the owner rules.
+RULES = """ezexe's rulings: what holds past the turn, in ezexe's own words.
+Written when ezexe rules.
 Fields: ruling, owner-words, scope, form, status, time, pinned, plain; from (migrated entries).
 
 - ruling: the narwhal port stays open across zebrafish plots and closes only at exit

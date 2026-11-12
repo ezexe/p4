@@ -3,12 +3,12 @@
 
 Nothing in a store says which rule a session acted on. Measured on one store (2026-11-10): the words of a turn
 against a rule's rare words "label" every rule on hundreds of turns, no later message is like the message a rule
-was made on, and the owner never had to repeat one. The only party that knows is the session, at the moment it
+was made on, and ezexe never had to repeat one. The only party that knows is the session, at the moment it
 acts, so it is asked to say so in three fixed statements, out of the reply:
 
     applied r1               a line shown this turn changed what it did
     set-aside r1 --why ...   it saw the line and decided against it
-    lacked --why ...         the owner corrected it and no line covered it
+    lacked --why ...         ezexe corrected it and no line covered it
 
 `recall.said.mode` of p4.json:
     off      (the default) nothing is asked and recall's lines are as they were
@@ -82,7 +82,7 @@ def instruction(handles, session, p4):
             "one command before you finish (a note for the store, not part of your reply):\n"
             f"  SAID applied {first}\n"
             f"  SAID set-aside {first} --why \"a few words\"\n"
-            "  SAID lacked --why \"what was missing\"   (the owner corrected you and no line covered it)\n"
+            "  SAID lacked --why \"what was missing\"   (ezexe corrected you and no line covered it)\n"
             f"where SAID is: {cmd}")
 
 

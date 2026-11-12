@@ -45,23 +45,23 @@ BARRIER_JACCARD = 0.5
 BARRIER_MIN_TOKENS = 3
 
 HEADERS = {
-    "rules.md": ("The owner's rulings: what holds past the turn, in the owner's own words.",
-                 "Written when the owner rules something; a later retraction frees a ruling, never an edit here.",
+    "rules.md": ("ezexe's rulings: what holds past the turn, in ezexe's own words.",
+                 "Written when ezexe rules something; a later retraction frees a ruling, never an edit here.",
                  "Fields: ruling, owner-words, scope, form, status, time, pinned, plain; from (migrated entries)."),
-    "corrections.md": ("Readings that steered work and were wrong, and details the owner had to ask for.",
-                       "Written when the owner corrects a reading (match, meant) or asks for what was left out "
+    "corrections.md": ("Readings that steered work and were wrong, and details ezexe had to ask for.",
+                       "Written when ezexe corrects a reading (match, meant) or asks for what was left out "
                        "(asked, omitted).",
                        "Fields: key, time, match, meant, delta; asked, time, omitted; correction, from (migrated entries)."),
-    "retractions.md": ("What the owner freed: a rule or reading no longer in force, and the lesson kept from it.",
-                       "Written when the owner takes something back; recall shows these in place of what they freed.",
+    "retractions.md": ("What ezexe freed: a rule or reading no longer in force, and the lesson kept from it.",
+                       "Written when ezexe takes something back; recall shows these in place of what they freed.",
                        "Fields: freed, time, cause, owner-words, swept, lesson; from (migrated entries)."),
     "facts.md": ("Claims checked against a source, with where and when they were checked.",
                  "Written when a claim is verified; a claim without a source stays out.",
                  "Fields: claim, source, verified, time."),
-    VOCABULARY: ("The owner's words that were once misread, what they mean, and the exchange that proves it.",
-                 "Grown from corrections, retractions, missed details and repeats; the owner edits it freely.",
+    VOCABULARY: ("ezexe's words that were once misread, what they mean, and the exchange that proves it.",
+                 "Grown from corrections, retractions, missed details and repeats; ezexe edits it freely.",
                  "Fields: term, means, because, source, points-at, added, status (on or off)."),
-    MESSAGES: ("Every owner message of one session: when it came, how it arrived, and what was done about it.",
+    MESSAGES: ("Every ezexe message of one session: when it came, how it arrived, and what was done about it.",
                "Opened by the prompt hook and completed by the close hook from the reply.",
                "Fields: fingerprint, time, arrival, state, addressed, recommended, match, freed-by, resembles; from (migrated rows)."),
 }
@@ -74,7 +74,7 @@ KIND_NAMES = {"rules.md": "rule", "corrections.md": "correction", "retractions.m
 JARGON = re.compile(r"(?i)\b(frags?|rulings?|pour(ed|s)?|tombstones?|derivations?|the operator|register entry|"
                     r"read barrier|write barrier|dispatch row|hot tier|cold tier|pre-finalizers?|vlds|phi-index)\b(?!-)")
 
-# words too ordinary to be a term of the owner's own: never a dictionary term, never a rare term that makes a line
+# words too ordinary to be a term of ezexe's own: never a dictionary term, never a rare term that makes a line
 COMMON = frozenset("""able about above actually add added again ago agree ahead also always another answer anything
 anyway around asked back because before being better big bit both build built call came case change changed check
 clean code come coming correct could current day did different does doing done down each else end enough even
@@ -348,7 +348,7 @@ NOT_OWNER_ARRIVAL = re.compile(r"(?i)\s*(task notification|notification|agent me
 
 
 def owner_message(e, fp=None):
-    """A row of the owner's own words: not a notification, an agent's message or a harness injection (`<...>`)."""
+    """A row of ezexe's own words: not a notification, an agent's message or a harness injection (`<...>`)."""
     fp = unquote(e.fields.get("fingerprint", e.value)) if fp is None else fp
     return not NOT_OWNER_ARRIVAL.match(e.fields.get("arrival", "")) and not fp.lstrip().startswith("<")
 
@@ -602,9 +602,9 @@ def build_index(p4, write=True):
         for e in files[rel]:
             fp = unquote(e.fields.get("fingerprint", e.value))
             if not owner_message(e, fp):
-                # a notification, an agent's message or a harness injection is not the owner speaking: never a line,
+                # a notification, an agent's message or a harness injection is not ezexe speaking: never a line,
                 # never a short turn or a repeat
-                excluded["not the owner's"] = excluded.get("not the owner's", 0) + 1
+                excluded["not ezexe's"] = excluded.get("not ezexe's", 0) + 1
                 continue
             tok = norm_token(fp)
             done = completed(e)

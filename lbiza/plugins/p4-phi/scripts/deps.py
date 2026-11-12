@@ -142,7 +142,7 @@ def auto_roots(project):
 
 def roots(project):
     """[(absolute root, the prefix its entries' paths carry, split)], the configured ones first. A found root inside
-    another is dropped; a configured one inside another is kept, the owner's word that the part matters: it carries
+    another is dropped; a configured one inside another is kept, ezexe's word that the part matters: it carries
     the outer root's prefix and its path below it, and is split (each of its directories a package of its own)."""
     found = []
     for r in ROOTS:
@@ -481,7 +481,7 @@ def package_entries(pkg, version, desc, light=False, opened=()):
         read += 1
         for e in repo.file_entries(f"{p}/{rel}", text)[:PER_FILE if asked else max(1, min(PER_FILE, max_entries - len(out)))]:
             out.append({"id": e["id"], "path": f"{p}/{rel}", "line": e["line"], "sym": e["sym"], "text": e["text"]})
-    if pkg.get("flat"):                                  # the folder the owner named: every file of its own, by name
+    if pkg.get("flat"):                                  # the folder ezexe named: every file of its own, by name
         have = {e["path"] for e in out}
         for rel in files:
             if len(out) >= LISTED:

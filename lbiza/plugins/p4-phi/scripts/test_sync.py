@@ -16,7 +16,7 @@ sys.path.insert(0, HERE)
 import p4conf  # noqa: E402
 import sync  # noqa: E402
 
-RULES = "The owner's rulings.\nWritten when the owner rules.\nFields: ruling, time.\n\n- ruling: the base rule\n  time: 2026-11-01 10:00\n"
+RULES = "ezexe's rulings.\nWritten when ezexe rules.\nFields: ruling, time.\n\n- ruling: the base rule\n  time: 2026-11-01 10:00\n"
 LABELS = "task\tentry\tlabel\n"
 EVAL = "round\ttime\tlabels\n0\t2026-11-01 10:00\t1\n"
 ENV = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.org", "GIT_COMMITTER_NAME": "t",
@@ -231,7 +231,7 @@ class Sync(unittest.TestCase):
         self.assertEqual(sh(self.win, "git", "status", "--porcelain").strip(), "")
 
     def test_entries_merge_field_by_field_and_a_freeing_stays(self):
-        head = "The owner's rulings.\nWritten when the owner rules.\nFields: ruling, status, time.\n"
+        head = "ezexe's rulings.\nWritten when ezexe rules.\nFields: ruling, status, time.\n"
         ent = lambda name, status, extra="": f"\n- ruling: the {name} rule\n  scope: everywhere\n  status: {status}\n  time: 2026-11-02 10:00\n{extra}"
         base = (head + ent("au", "LIVE") + ent("old", "LIVE")).encode()
         ours = (head + ent("au", "LIVE") + ent("old", "LIVE") + ent("mac", "LIVE")).encode()
@@ -343,7 +343,7 @@ class Sync(unittest.TestCase):
         mine = "name: mine\n"
         write(p4, ".github/workflows/p4-sync.yml", mine)
         self.assertEqual(sync.seed(p4, "trunk"), [])
-        self.assertEqual(read(p4, ".github/workflows/p4-sync.yml"), mine, "without the seed line it is the owner's")
+        self.assertEqual(read(p4, ".github/workflows/p4-sync.yml"), mine, "without the seed line it is ezexe's")
         r = subprocess.run([sys.executable, "-I", os.path.join(p4, ".github", "p4_sync.py"), "--help"], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
 

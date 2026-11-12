@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """hook.py <name>: p4-phi's recall hooks, once the p4-recall plugin (fresh-marketplace.md 3.3), run by hooks/recall-hook.sh with the harness's JSON
 payload on stdin. Every hook resolves `.claude/p4/` from CLAUDE_PROJECT_DIR or the payload's `cwd`, prints only what
-its row of 3.3 allows, and on any failure exits 0 with one notice for the user (`systemMessage`), never for the model.
+its row of 3.3 allows, and on any failure exits 0 with one notice for ezexe (`systemMessage`), never for the model.
 
   layout         SessionStart startup|resume|clear|compact  silent; .claude/p4/ and its git repository once, the
-                 `.git/info/exclude` line, the index when owed; only when the owner pinned rules, the block
-                 `Standing rules from the owner:` (<= 1,500 characters). The store's .gitignore is seeded whole
+                 `.git/info/exclude` line, the index when owed; only when ezexe pinned rules, the block
+                 `Standing rules from ezexe:` (<= 1,500 characters). The store's .gitignore is seeded whole
                  when there is none; later, any seeded line the file lacks is appended under its own marker line
-                 (`# seeded by p4-recall <date>`), nothing else touched or reordered. A line the owner deleted on
+                 (`# seeded by p4-recall <date>`), nothing else touched or reordered. A line ezexe deleted on
                  purpose is indistinguishable from one a newer plugin added, so the marker decides: with no seed
-                 marker in the file (the owner deleted the marker block) and some seeded line present, nothing is
-                 added; with no marker and no seeded line (the owner's own file), the whole block is appended.
+                 marker in the file (ezexe deleted the marker block) and some seeded line present, nothing is
+                 added; with no marker and no seeded line (ezexe's own file), the whole block is appended.
   recall         UserPromptSubmit   additionalContext: 0-5 lines; opens the message row; logs what it served
   agent          PreToolUse Agent   updatedInput: the Agent call's input as received, its `prompt` with the lines
                  appended under "Notes from this repo's memory:"; nothing when no line clears the threshold
@@ -42,7 +42,7 @@ The output shapes, from https://code.claude.com/docs/en/hooks (read 2026-11-01):
 - SubagentStop: input `agent_id`, `agent_type`, `agent_transcript_path`, `last_assistant_message`.
 - async: "Async hooks can't block or control Claude's behavior" and their output "is delivered on the next
   conversation turn", so the train hook prints nothing; with `-p` an async hook still running at teardown is killed.
-- `systemMessage` (a common JSON field) is shown to the user; the 10,000-character cap applies per string.
+- `systemMessage` (a common JSON field) is shown to ezexe; the 10,000-character cap applies per string.
 """
 
 import json
@@ -220,7 +220,7 @@ def seed_gitignore(gi, today=None):
         return []
     marked = any(SEED_MARKER_RE.match(l.strip()) for l in text.splitlines())
     if not marked and len(missing) < len(seeded_lines()):
-        return []                          # the owner removed the marker block: their edits win
+        return []                          # ezexe removed the marker block: their edits win
     today = today or time.strftime("%Y-%m-%d")
     with open(gi, "a", encoding="utf-8", newline="\n") as f:
         f.write(("" if not text or text.endswith("\n") else "\n") + f"{SEED_MARKER} {today}\n"
@@ -284,7 +284,7 @@ def pinned_block(p4):
     if not rules:
         return ""
     rules.sort(key=lambda e: e.time, reverse=True)
-    out = "Standing rules from the owner:"
+    out = "Standing rules from ezexe:"
     for e in rules:
         line = "\n- " + st.collapse(e.fields.get("plain") or e.value)
         if len(out) + len(line) > PINNED_CHARS:
@@ -500,9 +500,9 @@ def h_close(payload):
             os.remove(lb.served_path(p4, f"turn-{session}"))
         except OSError:
             pass
-    # The term dictionary is no longer grown (0.8.0): the owner ruled it the wrong conception on 2026-11-10. A message
+    # The term dictionary is no longer grown (0.8.0): ezexe ruled it the wrong conception on 2026-11-10. A message
     # is understood whole, with what was in view when it came (view.py), not word by word: a judge could show a
-    # meaning for 1 of 18 pending terms, and most were how the owner writes, not terms at all. labels.signals and
+    # meaning for 1 of 18 pending terms, and most were how ezexe writes, not terms at all. labels.signals and
     # the reading side stay for stores that still hold a vocabulary.md; nothing calls them here.
     try:                        # view.py: what this session has in view, brought up to date with its transcript
         import view

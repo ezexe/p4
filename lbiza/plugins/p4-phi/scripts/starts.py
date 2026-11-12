@@ -1,9 +1,9 @@
 """starts.py: start requests, the children a session wants but cannot start, carried by the store.
 
-The app refuses `mcp__ccd_session__start_session` with `initiation` `user_asked` in a turn the user did not begin:
+The app refuses `mcp__ccd_session__start_session` with `initiation` `user_asked` in a turn ezexe did not begin:
 a child's turn that another session's message started, or an app event. Such a session used to fall back to a card
-or ask the user to type "go". Instead it writes each child it wants as a start request into the store,
-`phi.py request "<title>" --brief "<brief>"`, and carries on. At the next turn the user's own words begin, in any
+or ask ezexe to type "go". Instead it writes each child it wants as a start request into the store,
+`phi.py request "<title>" --brief "<brief>"`, and carries on. At the next turn ezexe's own words begin, in any
 session of the same store, that session is handed every pending request, one line each with the exact call. When
 the start happens, the brief's marker line tells phi, at the child's first message, whose child it is: phi records
 the requester as its parent, so the child's spawnedFrom, its relays and its archive line go there. The app keeps
@@ -21,7 +21,7 @@ import time
 
 import relay
 
-EXPIRE_S = 24 * 3600            # a request no user's turn has started by then is dropped
+EXPIRE_S = 24 * 3600            # a request no turn of ezexe's has started by then is dropped
 CLAIM_S = 15 * 60               # a claimed request whose child never arrived is handed again after this
 MARK_RE = re.compile(r"phi start request (req-[0-9a-f]{10}) for (\S+?)\.?(?:\s|$)")
 ISSUE = "claude-code#109282"
@@ -99,15 +99,15 @@ def call_of(r):
 
 
 def hand_text(home, sid, at=None):
-    """The lines a session is handed at a turn the user began: each pending request with its exact call. ''
+    """The lines a session is handed at a turn ezexe began: each pending request with its exact call. ''
     when none is pending."""
     rows = pending(home, at)
     if not rows:
         return ""
     lines = [f"- \"{r['title']}\" for \"{r.get('requesterTitle') or r['requester']}\" ({r['requester']}): "
              f"`mcp__ccd_session__start_session` with {json.dumps(call_of(r), ensure_ascii=False)}" for r in rows]
-    return ("phi (p4-phi): start requests from sessions whose turns the user did not begin, so the app refused "
-            "them `user_asked`. This turn the user began, so start each now, with exactly the call given, before "
+    return ("phi (p4-phi): start requests from sessions whose turns ezexe did not begin, so the app refused "
+            "them `user_asked`. This turn ezexe began, so start each now, with exactly the call given, before "
             "the rest of this turn's work:\n" + "\n".join(lines) + "\n"
             f"The app keeps this session as each child's parent in its own nesting, {ISSUE}; phi records the "
             f"requester as the parent, so the child's spawnedFrom, its relays and its archive line go to the "
@@ -116,9 +116,9 @@ def hand_text(home, sid, at=None):
 
 def requested_text(rid, new):
     return ((f"kept as start request {rid}" if new else f"start request {rid} was already kept") +
-            ": the next turn the user begins, in any session of this store, starts it with `user_asked`, and phi "
-            "makes it this session's child, its spawnedFrom, relays and archive line coming here. Do not ask the "
-            "user to type anything or click a card; carry on with the rest of the task.")
+            ": the next turn ezexe begins, in any session of this store, starts it with `user_asked`, and phi "
+            "makes it this session's child, its spawnedFrom, relays and archive line coming here. Do not ask "
+            "ezexe to type anything or click a card; carry on with the rest of the task.")
 
 
 def claim(home, prompt, by, at=None):

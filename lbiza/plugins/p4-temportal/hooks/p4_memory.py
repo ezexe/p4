@@ -206,7 +206,7 @@ def migrate(app, p4, stamp):
     lines = []
     os.makedirs(p4, exist_ok=True)
     if is_link(app):
-        if not same_dir(app, p4):                       # a link somewhere else: the owner's arrangement
+        if not same_dir(app, p4):                       # a link somewhere else: ezexe's arrangement
             return [f"{app} is a link that does not reach .claude/p4/temportal/memory/; left as it is, nothing moved"], False
         if not retry(remove_link, app):
             return [f"{app} is a link to .claude/p4/temportal/memory/ and is busy, retried at the turn's close"], False

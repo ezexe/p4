@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """scratchpad.py — the p4-temportal plugin's scratchpad part: the notebook lives in `<project>/.claude/p4/temportal/scratchpad/`, tracked by
 the p4 repo, and its logs, build results and binaries live in its `.out/`, which ignores itself. A storage move:
-nothing here tells the model how to behave unless the owner turns the two asks on.
+nothing here tells the model how to behave unless ezexe turns the two asks on.
 
   notebook-out (SessionStart)  seeds `.claude/p4/temportal/scratchpad/.out/.gitignore` (`*`), re-seeds it when missing or
                                changed, and moves every ignorable found elsewhere in the notebook into `.out/` at the

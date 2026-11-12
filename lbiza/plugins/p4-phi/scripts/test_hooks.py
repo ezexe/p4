@@ -198,7 +198,7 @@ class Layout(Base):
 
     def test_gitignore_vlds_header_counts_as_a_marker(self):
         got = self.gitignore("# Seeded by the vlds plugin (hooks/p4-layout.sh) when the repository has no .gitignore; "
-                             "the owner's edits win.\n*.wav\nphi/models/index.json\nphi/models/repo.json\n")
+                             "ezexe's edits win.\n*.wav\nphi/models/index.json\nphi/models/repo.json\n")
         self.assertIn("\n# seeded by p4-recall ", got)
         self.assertTrue(got.endswith("phi/models/ranker.pt\n"))
         self.assertIn("temportal/scratchpad/.out/\n", got)
@@ -208,12 +208,12 @@ class Layout(Base):
 
     def test_gitignore_without_marker_is_the_owners(self):
         theirs = "*.wav\nphi/models/index.json\nbuild/\n"
-        self.assertEqual(self.gitignore(theirs), theirs, "a seeded line present and no marker: the owner's edits win")
+        self.assertEqual(self.gitignore(theirs), theirs, "a seeded line present and no marker: ezexe's edits win")
         own = "# my rules\nbuild/\n*.log\n"
         got = self.gitignore(own)
         self.assertTrue(got.startswith(own) and "# seeded by p4-recall " in got and got.endswith("phi/models/ranker.pt\n"),
                         "no seeded line at all: the whole block, under the marker")
-        # the owner deletes the marker block: nothing comes back
+        # ezexe deletes the marker block: nothing comes back
         cut = got[:got.index("# seeded by p4-recall")] + "phi/models/ranker.pt\n"
         self.assertEqual(self.gitignore(cut), cut)
 
@@ -224,7 +224,7 @@ class Layout(Base):
         o = self.out(run_hook("layout", {"source": "startup", "cwd": self.proj}, self.proj))
         ctx = o["hookSpecificOutput"]["additionalContext"]
         self.assertEqual(o["hookSpecificOutput"]["hookEventName"], "SessionStart")
-        self.assertTrue(ctx.startswith("Standing rules from the owner:"))
+        self.assertTrue(ctx.startswith("Standing rules from ezexe:"))
         self.assertLessEqual(len(ctx), 1500)
         self.assertIn("pinned rule number 19", ctx.split("\n")[1], "newest first")
 
@@ -304,7 +304,7 @@ class Recall(Base):
                                 "cwd": self.proj}, self.proj)
         self.assertEqual(r.returncode, 0)
         o = json.loads(r.stdout)
-        self.assertEqual(list(o), ["systemMessage"], "a notice for the user, nothing for the model")
+        self.assertEqual(list(o), ["systemMessage"], "a notice for ezexe, nothing for the model")
         self.assertEqual(o["systemMessage"].count("\n"), 0)
 
 

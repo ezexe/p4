@@ -591,8 +591,8 @@ def _short(s, n):
 
 def names_nothing(p, home, base=""):
     """True when a path names no one shard or scope: the project's root, the store, a folder above either, or a
-    drive's root. A brief that names the project names everything in it, so it is no route and no fork's share (the
-    owner's acceptance check of 2026-11-12: the project root routed a brief falsely and advised fork six times)."""
+    drive's root. A brief that names the project names everything in it, so it is no route and no fork's share (
+    ezexe's acceptance check of 2026-11-12: the project root routed a brief falsely and advised fork six times)."""
     p = norm(p)
     if not p or p == "/" or re.fullmatch(r"[a-z]:/?", p, re.I):
         return True
@@ -653,7 +653,7 @@ def shards_line(home, sid):
 #
 # Measured 2026-11-12 on this machine's app records, 84 children with a parent transcript on disk: the parent's
 # transcript held a median 2.9 MB when a fork started (quartiles 1.9 and 4.4 MB) and 2.1 MB when a fresh session
-# did. Above 1 MB a parent had a median of 2 to 27 of the owner's turns behind it, and already held 0.76 to 0.86 of
+# did. Above 1 MB a parent had a median of 2 to 27 of ezexe's turns behind it, and already held 0.76 to 0.86 of
 # the brief's words: a fork there carries the rest of the parent's work into the child, while a brief carries most
 # of what the child needs. Under 1 MB, 17 of 22 children were fresh and the parent held little. So a fork is advised
 # only from a parent whose transcript is at most FORK_MAX_BYTES, for a child whose paths cover at least
@@ -946,7 +946,7 @@ def tree_home(store):
 # --- stale nodes ---------------------------------------------------------------------------------------------------------
 #
 # A finished child whose work a newer note supersedes holds a picture of the tree that is no longer true. Relayed to, or
-# relayed from, it can only push the others back to that picture: the user's "uncertainty loop", met when a migration
+# relayed from, it can only push the others back to that picture: ezexe's "uncertainty loop", met when a migration
 # session's recall/ plus temportal/ store was superseded by the fold into phi/. So it is fenced off at once: its
 # still-true outcome kept as one note on its parent, it left out of the anchor, the slices and the relay, and the parent
 # told to archive it. A stale child that is messaged again is handed what superseded it, and is un-staled only when its
@@ -1150,9 +1150,9 @@ def closing_commits(home, sid, s):
 def push_text(child_title, child, commits):
     """The top session's line: push and sync a finished child's issue-closing commits now, not ask."""
     named = "; ".join(f"{sha} \"{_short(subj, 80)}\" closes {', '.join(n)} in {repo}" for repo, sha, subj, n in commits)
-    return (f"phi (p4-phi): \"{child_title}\" ({child}) finished with commits that close issues: {named}. The "
-            f"owner's rule is that green work closing an issue is pushed at once: once its suites pass, push that "
-            f"repository's main and sync each p4 store it touches with `p4.py sync --push`, without asking the user, "
+    return (f"phi (p4-phi): \"{child_title}\" ({child}) finished with commits that close issues: {named}. "
+            f"ezexe's rule is that green work closing an issue is pushed at once: once its suites pass, push that "
+            f"repository's main and sync each p4 store it touches with `p4.py sync --push`, without asking ezexe, "
             f"and say in one line what was pushed. Asking stays for force-pushes, history rewrites and deletions.")
 
 

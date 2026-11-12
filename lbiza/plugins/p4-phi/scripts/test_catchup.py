@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""catchup.py: what fell behind at a session's start, closed where it may be and named where only the owner may.
+"""catchup.py: what fell behind at a session's start, closed where it may be and named where only ezexe may.
 
     python3 -I lbiza/plugins/p4-phi/scripts/test_catchup.py
 """
@@ -87,12 +87,12 @@ class Plugins(Base):
             f"claude plugin uninstall p4-phi@{M} --scope local",
             f"claude plugin uninstall p4-phi@{M} --scope local (in {other})",
             f"claude plugin install p4-phi@{M} --scope user"],
-            "p4-recall was on for the whole user: p4-phi moves to the user, each project's own install removed "
+            "p4-recall was on for the whole user: p4-phi moves to ezexe, each project's own install removed "
             "first in its project, so it is never installed twice (C1), and nothing is updated that is removed")
 
     def test_the_owners_config_retires_disabled_plugins_too(self):
-        """The tester's isolated copy of the owner's config (C1, C2): p4-memory and p4-scratchpad installed and
-        disabled, p4-recall and p4-temportal for the user, p4-phi in two projects."""
+        """The tester's isolated copy of ezexe's config (C1, C2): p4-memory and p4-scratchpad installed and
+        disabled, p4-recall and p4-temportal for ezexe, p4-phi in two projects."""
         ap = os.path.join(self.tmp, "AudioPlugin")
         self.install([("p4-memory", "user", "0.1.10", None), ("p4-scratchpad", "user", "0.1.12", None),
                       ("p4-recall", "user", "0.9.0", None), ("p4-temportal", "user", "0.2.0", None),

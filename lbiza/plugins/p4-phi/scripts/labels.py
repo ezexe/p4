@@ -16,7 +16,7 @@ edited; then the recency rule (1a, 5.2) drops a label resting on a fact a newer 
 one in its place.
 
 tasks.tsv holds the tasks: id, session, time, text, kind (first | new | short | agent: the close hook writes
-`first` for a session's first owner message, `short` for one of at most SHORT_WORDS words, `new` otherwise;
+`first` for a session's first ezexe message, `short` for one of at most SHORT_WORDS words, `new` otherwise;
 `agent` is a subagent's task).
 """
 
@@ -144,7 +144,7 @@ def read_batches(p4):
 
 
 def held_batches(p4):
-    """The teacher batches held for the owner (5.6: a second opinion below 0.65, or edited below raw): their rows
+    """The teacher batches held for ezexe (5.6: a second opinion below 0.65, or edited below raw): their rows
     are not trained on, and the raw labels of their tasks stand in."""
     return {k for k, v in read_batches(p4).items() if isinstance(v, dict) and v.get("status") == "held"}
 
@@ -295,7 +295,7 @@ def used(doc, rare_doc, hay_toks, hay_text, prompt_text, prompt_toks):
 # --- the history labels: tasks without a pool (5.2 step 1) -----------------------------------------------
 
 def message_rows(files):
-    """[(s8, rows)] in session order; rows the owner's own (notifications and harness injections out)."""
+    """[(s8, rows)] in session order; rows ezexe's own (notifications and harness injections out)."""
     import migrate
     out = []
     for rel in sorted(k for k in files if k.startswith(st.MESSAGES + "/")):

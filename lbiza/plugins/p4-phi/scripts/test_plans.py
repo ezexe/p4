@@ -285,9 +285,9 @@ class TreeOfPlans(unittest.TestCase):
         self.assertNotIn("own_initiative", ctx)
 
     def test_a_child_waiting_on_a_question_the_chain_can_settle_is_flagged_up(self):
-        """Act-don't-wait: the parent hears of a child's open question that is not the user's to answer."""
+        """Act-don't-wait: the parent hears of a child's open question that is not ezexe's to answer."""
         self.assertIn("python3", plans.waiting_on("Done. Should the runner use the py launcher or python3?"))
-        self.assertEqual(plans.waiting_on("Done. Shall I push it to origin?"), "", "authority: the user's")
+        self.assertEqual(plans.waiting_on("Done. Shall I push it to origin?"), "", "authority: ezexe's")
         self.assertEqual(plans.waiting_on("Done, nothing open."), "")
         s = relay._session(self.t.p4, A)
         plans.turn_relay(self.t.p4, s, {"id": "r1", "report": "Moved it. Should phi/ keep the old folder name?"}, [])
@@ -675,11 +675,11 @@ class TopOrchestrates(unittest.TestCase):
         self.assertNotIn("finished, started to be archived", context(t.say(TOP, "and then")), "said once")
 
     def test_a_numbered_check_is_work_and_starting_a_check_is_orchestration(self):
-        """Check 6: "Check 1: nothing hidden in AppData" was kept on the top as landing work, and "Start the
-        owner's-eye acceptance check" was advised as work."""
+        """Check 6: "Check 1: nothing hidden in AppData" was kept on the top as landing work, and "Start
+        ezexe's-eye acceptance check" was advised as work."""
         groups, kept = plans.top_groups({"steps": [
             {"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate((
-                "Check 1: nothing hidden in AppData", "Start the owner's-eye acceptance check",
+                "Check 1: nothing hidden in AppData", "Start ezexe's-eye acceptance check",
                 "Check the session's own landed work", "Kick off the review session",
                 "Run the docs check", "Start the dev server and port the CLI in src/cli.py"))]}, "")
         self.assertEqual([[st["addr"] for st in g] for g in groups], [["1"], ["6"]])
@@ -894,7 +894,7 @@ class KeepGoing(unittest.TestCase):
         self.assertEqual(self.stop("New turn.", uuid="u2").get("decision"), "block", "a new turn counts afresh")
 
     def test_authority_a_wrap_up_or_a_background_task_lets_the_turn_end(self):
-        self.assertEqual(self.stop("Shall I push main to origin now?"), {}, "a push asked of the user")
+        self.assertEqual(self.stop("Shall I push main to origin now?"), {}, "a push asked of ezexe")
         self.assertEqual(self.stop("Done for now.", [("mcp__ccd_turn__wrap_up", {"recap": "x"}, "ok")], uuid="u3"), {})
         plans.register(self.t.p4, relay._session(self.t.p4, TOP), "Bash",
                        {"command": "sh run.sh", "run_in_background": True},

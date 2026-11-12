@@ -12,8 +12,8 @@ session that started it and given to that session in full at its next message, o
 tasks and notes of the sessions above it and the last turn of the other sessions started beside it; a top session
 given the last turns of the top sessions before it, with no likeness of words involved; a note refused without a
 source; a session detached, and reparented; a session's own turns after a compaction; silence where there is
-nothing to say; the user's standing instruction for a message about something else, once in full and then in a
-line beside each of the user's messages, never beside the harness's; the task changed by its command; the hook
+nothing to say; ezexe's standing instruction for a message about something else, once in full and then in a
+line beside each of ezexe's messages, never beside the harness's; the task changed by its command; the hook
 names of earlier versions still answered; a hook never failing a call; hooks.json's shape.
 """
 
@@ -437,14 +437,14 @@ class Background(unittest.TestCase):
     def test_a_session_is_given_the_last_turn_of_the_others_started_beside_it(self):
         self.t.stop(KID, HANDED, [("Edit", {"file_path": "src/export/flush.py"}, "ok"),
                                   ("Bash", {"command": "python -c \"x\""}, "No module named 'numpy'", 1)],
-                    "Stopped: the fix needs the owner's word on the format.")
+                    "Stopped: the fix needs ezexe's word on the format.")
         self.start(KID2)
         text = context(self.t.say(KID2, "Check the ports table"))          # no path named: the whole background
         self.assertIn("the other sessions \"Narwhal exporter\" started", text)
         self.assertIn("Fix the dropped row", text)
         self.assertIn("not shown done", text)
         self.assertIn("edited export/flush.py", text)
-        self.assertIn("the owner's word on the format", text)
+        self.assertIn("ezexe's word on the format", text)
         self.assertIn("numpy", text)
         self.assertNotIn("- \"Check the ports table\" (", text)     # not its own turns: it has none
 
@@ -542,7 +542,7 @@ class NewTask(unittest.TestCase):
         self.assertIn("new top session", first)
         self.assertIn("`context` `fresh`", first)
         self.assertIn("stay with the task", first)
-        self.assertIn("the user", first)
+        self.assertIn("ezexe", first)
         second = self.say(TOP, "also, what colour should the fence be?")
         self.assertIn(TASK, second)
         self.assertLess(len(second), 400)
@@ -561,7 +561,7 @@ class NewTask(unittest.TestCase):
         self.assertIn("call `mcp__ccd_session_mgmt__detach_session` with its id yourself", first,
                       "the starter's line names the app's move")
         self.assertIn("start a new top session", self.say(TOP, "also, the fence colour?"))
-        told = self.say(KID, "Task:\nPick the fence colour. The user's words: \"the fence colour?\" "
+        told = self.say(KID, "Task:\nPick the fence colour. ezexe's words: \"the fence colour?\" "
                         + phi.NEW_TOP_BRIEF + " " + phi.new_top_first_act())
         self.assertIn("phi detached it into the root at this first message", told)
         self.assertIn("call `mcp__ccd_session_mgmt__detach_session` with `\"self\"`", told)
@@ -616,7 +616,7 @@ class NewTask(unittest.TestCase):
         self.assertEqual(self.say(TOP, "<task-notification>done</task-notification>"), "")
 
     def test_a_turn_another_session_started_is_told_to_split_by_a_start_request(self):
-        """The app refuses user_asked in a turn the user's words did not start: a split is a start request in the store."""
+        """The app refuses user_asked in a turn ezexe's words did not start: a split is a start request in the store."""
         self.say(TOP, TASK)
         text = self.say(TOP, '<cross-session-message from="local_x">please also look at Y</cross-session-message>')
         self.assertIn(" request \"<title>\" --brief", text, "a start request, not a card")
@@ -626,7 +626,7 @@ class NewTask(unittest.TestCase):
         self.say(KID, HANDED)
         kid = self.say(KID, '<cross-session-message from="local_x">please also look at Y</cross-session-message>')
         self.assertIn(" request \"<title>\" --brief", kid, "a child's split is a start request too")
-        self.assertIn("Do not ask the user to type anything", kid)
+        self.assertIn("Do not ask ezexe to type anything", kid)
 
     def test_a_deep_or_full_session_starts_no_session(self):
         """The caps: three deep in the tree, or eight live children."""
@@ -777,8 +777,8 @@ class Rules(unittest.TestCase):
         self.assertGreater(len(phi.rules_text(self.t.p4, 9000)), len(phi.builtin_text()))
 
     def test_act_dont_wait_yields_to_a_projects_go_ahead(self):
-        """#23: a project rule that waits for the user's go makes that go the user's; p4.json can turn it off."""
-        self.assertIn("that go is the user's to give", phi.BUILT_IN)
+        """#23: a project rule that waits for ezexe's go makes that go ezexe's; p4.json can turn it off."""
+        self.assertIn("that go is ezexe's to give", phi.BUILT_IN)
         self.assertIn("act-don't-wait", self.start(TOP))
         write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"act_dont_wait": False}}))
         got = self.start(TOP)

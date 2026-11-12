@@ -14,8 +14,8 @@ close  the close hook completes the session's last open row from the reply: `sta
        row by its time and says which of the two it was, in plain words.
 Rows are appended or extended in place: no other line of the file is rewritten.
 
-Why `recommended:`: 300 characters of the first paragraph rarely hold the recommendation the session handed the
-owner (served_back on ap-p4 found it in later paragraphs), and that sentence is what a later check against the
+Why `recommended:`: 300 characters of the first paragraph rarely hold the recommendation the session handed
+ezexe (served_back on ap-p4 found it in later paragraphs), and that sentence is what a later check against the
 documentation (`p4.py teacher facts`) and the recency rule need to see.
 """
 
@@ -36,7 +36,7 @@ RECOMMENDED_CHARS = 300
 HARNESS_RE = re.compile(r"^\s*<(task-notification|system-reminder|local-command|command-name|command-message|"
                         r"bash-input|bash-stdout|user-prompt-submit-hook)", re.I)
 PEER_RE = re.compile(r"^\s*(Another Claude session sent a message:\s*)?<cross-session-message\b", re.I)
-# a sentence that hands the owner a recommendation (served_back.RECOMMEND_RE): recommendation phrasing only, not
+# a sentence that hands ezexe a recommendation (served_back.RECOMMEND_RE): recommendation phrasing only, not
 # every `should`
 RECOMMEND_RE = re.compile(r"(?i)\b(recommend|suggest|better to|prefer(red|able)?|the right way|instead of|rather than|"
                           r"go with|best (way|option|practice)|i'?d (use|go|pick|keep|pin|set)|the fix is|"
@@ -82,7 +82,7 @@ def row_open(p4, session, prompt, now=None, arrival=None):
     path = session_file(p4, session)
     rel = f"{st.MESSAGES}/{os.path.basename(path)}"
     is_harness = bool(HARNESS_RE.match(prompt or ""))
-    # another session's message arrives as a turn and is answered like one, but its words are not the owner's
+    # another session's message arrives as a turn and is answered like one, but its words are not ezexe's
     is_peer = bool(PEER_RE.match(prompt or ""))
     arrival = arrival or ("notification" if is_harness else "agent message" if is_peer else "turn")
     pairs = [("fingerprint", quote(prompt, FP_CHARS)), ("time", now), ("arrival", arrival)]
@@ -138,7 +138,7 @@ def row_close(p4, session, reply, now=None):
 
 def task_kind(p4, session, row, prompt):
     """The task kind of a closed turn, as labels.task_of_row names it: `short` (at most SHORT_WORDS words),
-    `first` (the session's first owner row: none of the owner's before it in the session's file), else `new`."""
+    `first` (the session's first ezexe row: none of ezexe's before it in the session's file), else `new`."""
     if len(st.norm_token(prompt).split()) <= st.SHORT_WORDS:
         return "short"
     if row is not None:

@@ -17,12 +17,12 @@ merged (the workflow and a machine can run at once), it fetches and merges once 
 private three-branch store: the first push of a branch carrying the seeded workflow ran it, and its own token's
 push of main, with the workflow file in it, went through. GitHub documents that a workflow's token cannot change
 files under .github/workflows; should a repository refuse that push, the error says so and `p4.py sync --all
---push` on a machine does the same merge with the owner's credentials.
+--push` on a machine does the same merge with ezexe's credentials.
 
 Two machines write the same files, so a plain merge conflicts. Each conflicted file is settled by its kind:
   the store's entries (store/**/*.md)   entry by entry, field by field, against the common ancestor: an entry only
                     one machine has is kept, a field only one machine changed takes its value, and when both changed
-                    a `status:` the one that is no longer LIVE wins, so a merge never brings back what the owner
+                    a `status:` the one that is no longer LIVE wins, so a merge never brings back what ezexe
                     freed (measured: a union of lines kept both status lines and the rule read LIVE again)
   other text (*.md), tables (*.tsv, *.jsonl), .gitignore   both sides' lines (git merge-file --union); a
                     table's repeated rows and an index's repeated link lines (memory/MEMORY.md) are dropped
@@ -514,7 +514,7 @@ def snapshot(branch):
 def entry_changes(old, new):
     """Every store entry whose fields a move from `old` to `new` changed, a line each, its `status:` first: a clean
     merge is no proof that an entry still reads as it should (#21: a line-union kept both `status:` lines of a rule
-    and it read LIVE again after the owner had freed it)."""
+    and it read LIVE again after ezexe had freed it)."""
     if not old or not new or old == new:
         return []
     out = []
@@ -616,7 +616,7 @@ jobs:
 
 def seed(p4, main="main"):
     """Write the workflow and this script into the store's .github/ when they are absent, or carry the seed line and
-    differ from the plugin's (an owner who removed the line keeps theirs). A copy seeded by a newer plugin (a higher
+    differ from the plugin's (ezexe, having removed the line, keeps that copy). A copy seeded by a newer plugin (a higher
     SEED, which another machine's sync brought in) is left alone. Returns the paths written."""
     here = os.path.abspath(__file__)
     with open(here, encoding="utf-8") as f:

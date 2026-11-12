@@ -61,7 +61,7 @@ class Notices(unittest.TestCase):
 
     def test_an_unreadable_ranker_file_leaves_a_notice_and_the_query_falls_back(self):
         with open(p4conf.sub(self.p4, "store", "rules.md"), "w", encoding="utf-8") as f:
-            f.write("The owner's rulings.\nWritten when the owner rules.\nFields: ruling, status, time.\n\n"
+            f.write("ezexe's rulings.\nWritten when ezexe rules.\nFields: ruling, status, time.\n\n"
                     "- ruling: the ring buffer drains on the audio thread\n  status: LIVE\n  time: 2026-11-01 10:00\n")
         with open(p4conf.sub(self.p4, "models", "ranker.json"), "w", encoding="utf-8") as f:
             f.write("<<<<<<< HEAD\n{")

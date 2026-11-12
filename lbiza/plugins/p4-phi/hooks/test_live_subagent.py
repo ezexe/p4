@@ -4,7 +4,7 @@
 Opt-in: P4_LIVE=1 python3 hooks/test_live_subagent.py   (it spends the signed-in account's subscription: one or two
 `claude -p` runs on haiku). P4_CLAUDE names the CLI (default: the desktop app's bundled one); ANTHROPIC_API_KEY is
 removed from its environment, since the CLI is signed in to a claude.ai account and a key in the environment breaks
-that. `--setting-sources project,local` keeps the user's own settings (their hooks and installed plugins) out, so
+that. `--setting-sources project,local` keeps ezexe's own settings (their hooks and installed plugins) out, so
 only this plugin (`--plugin-dir`) runs, on a fixture git project in a temp directory.
 
 The run: a prompt that makes the main agent launch exactly one subagent on a task the fixture store has lines for.

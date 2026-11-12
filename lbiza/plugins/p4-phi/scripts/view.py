@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """view.py: what a session has in view, kept up to date as its context changes.
 
-Recall and its ranker were built around the owner's messages: they wake on a prompt and at a turn's end and know
+Recall and its ranker were built around ezexe's messages: they wake on a prompt and at a turn's end and know
 nothing of what the session already holds. Measured on one store (2026-11-10), 73% of the files a task was
 labelled with were ones its session had already opened: recalling them scores well and tells the session nothing,
 so near.py had to leave a whole session's own history out by rule.
@@ -91,14 +91,14 @@ def refresh(p4, project, session, transcript_path, served_now=None):
     except (OSError, ValueError):
         turns = []
     if not turns and transcript_path:
-        # a session another session started has no message from the owner, and it has a context all the same: its
+        # a session another session started has no message from ezexe, and it has a context all the same: its
         # calls are read as one turn (measured: 7 of one machine's 79 transcripts, each with 50 to 70 API calls)
         try:
             lines = tr.read_lines(transcript_path)
         except (OSError, ValueError):
             lines = []
         if any(d.get("type") == "assistant" for d in lines):
-            turns = tr.turns([{"type": "user", "message": {"role": "user", "content": "(not started by the owner)"}}] + lines)
+            turns = tr.turns([{"type": "user", "message": {"role": "user", "content": "(not started by ezexe)"}}] + lines)
     if not turns:
         return old
     v = build(turns, project)

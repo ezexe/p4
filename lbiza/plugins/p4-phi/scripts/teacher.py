@@ -16,18 +16,18 @@
       below 0.65 the batch is held (models/teacher-batches.json), and held rows are not trained on.
   p4.py teacher dictionary [--re-edit] [--max-usd X] [--estimate] [--fake]
       Writes `means:` for the pending entries of store/vocabulary.md, 20 per call, from their `because:` quotes
-      alone. Only an entry still pending when its batch is written is filled; an entry the owner wrote or edited is
-      never overwritten (`means-by:` records the model, the date and a hash of the meaning it wrote, so an owner's
+      alone. Only an entry still pending when its batch is written is filled; an entry ezexe wrote or edited is
+      never overwritten (`means-by:` records the model, the date and a hash of the meaning it wrote, so ezexe's
       later edit is seen; --re-edit redoes only meanings another teacher wrote that nobody has edited since).
   p4.py teacher facts [--limit N] [--max-usd X] [--estimate] [--fake]
       Writes store/facts.md, the file recall serves under `inject: rules-facts` and the one every branch of ap-p4
-      left empty because nothing wrote it. For each owner message that asked for a recommendation (a question with
+      left empty because nothing wrote it. For each ezexe message that asked for a recommendation (a question with
       should / best / which way / recommend, ASK_RE; newest first; one not yet answered, by its `from:`) the model
       is sent the message with the `web_search_20260209` tool and told to find the current official documentation
       and recommend what it says; a second, structured call turns that answer into a claim and a source. The
       source URL is one the search results returned (never one the model only named): an answer that cites none,
       or says the documentation does not settle it, writes nothing (a claim without a source stays out). Written:
-      one entry of claim, source, verified (now), by (the model that answered), time (the owner's message), from
+      one entry of claim, source, verified (now), by (the model that answered), time (ezexe's message), from
       (the message row's id), appended to store/facts.md. A search costs SEARCH_USD on top of the tokens and the
       estimate assumes every allowed search is run.
 
@@ -83,7 +83,7 @@ OUT_EST = {"edit-labels": 3000, "dictionary": 4000, "facts": 4000, "facts-extrac
                                                                                             # thinking included (assumed)
 SEARCH_MAX_USES = 5           # web searches a facts call may run
 SEARCH_USD = 0.01             # per search, on top of the tokens ($10 per 1,000 searches)
-# an owner message asking for a recommendation (served_back.ASK_RE), with a question mark
+# an ezexe message asking for a recommendation (served_back.ASK_RE), with a question mark
 ASK_RE = re.compile(r"(?i)\b(should|better|best|recommend|suggest|which (one|way|approach|option)|what (do|would) you "
                     r"(think|suggest|recommend|do)|or (should|just)|is it (worth|better|ok|fine|right)|do (i|we) need|"
                     r"proper|optimal|correct way)\b")
@@ -363,7 +363,7 @@ EDIT_SCHEMA = {
 def edit_system(cutoff):
     return (
         "You review the training labels of a recall model that is trained on one software repository and its "
-        "owner's history. A task is a message the owner sent on a given date. The stored picks are the entries a "
+        "ezexe's history. A task is a message ezexe sent on a given date. The stored picks are the entries a "
         "mechanical labeler marked as bearing on it; the candidates are other entries a search found. An entry "
         "bears on the task when an assistant answering that message on that date is better off for having it in "
         "front of it: a ruling, correction, fact, earlier message or file the answer depends on or must respect. "
@@ -771,7 +771,7 @@ def edit_labels(p4, args, client=None, out=print):
             save_batch(p4, target, rec)
             with open(lb.mpath(p4, EDITS_MD), "a", encoding="utf-8", newline="\n") as f:
                 f.write(f"\nbatch {target}: second opinion from {SECOND_OPINION} on {len(theirs)} tasks, agreement F1 "
-                        f"{f1:.3f}" + (f" (below {AGREE_MIN}: the batch is held for the owner)\n" if held else "\n"))
+                        f"{f1:.3f}" + (f" (below {AGREE_MIN}: the batch is held for ezexe)\n" if held else "\n"))
             summary["f1"], summary["held"] = f1, held
             out(f"teacher: second opinion F1 {f1:.3f} over {len(theirs)} tasks"
                 + (f": below {AGREE_MIN}, batch {target} held" if held else f" (at or above {AGREE_MIN})"))
@@ -793,10 +793,10 @@ DICT_SCHEMA = {
 }
 
 DICT_SYSTEM = (
-    "You write the meanings in a repository owner's vocabulary dictionary. Each term below once caused a "
-    "misreading the owner had to correct; its because: lines quote the exchange that proves it: what the owner "
-    "wrote, how it was read, and what the owner wrote next. From those quotes alone, write what the term meant to "
-    "the owner, as one clause, in the owner's own words where the follow-up supplies them. Do not guess beyond the "
+    "You write the meanings in ezexe's vocabulary dictionary. Each term below once caused a "
+    "misreading ezexe had to correct; its because: lines quote the exchange that proves it: what ezexe "
+    "wrote, how it was read, and what ezexe wrote next. From those quotes alone, write what the term meant to "
+    "ezexe, as one clause, in ezexe's own words where the follow-up supplies them. Do not guess beyond the "
     "quotes: when they do not show what the term meant, return an empty string for it. Use the ids in brackets "
     "exactly as given.")
 
@@ -816,7 +816,7 @@ def owner_entry(e):
 
 
 def dict_targets(p4, teacher, re_edit):
-    """The vocabulary entries to write: pending ones (never an owner's); with --re-edit also meanings another
+    """The vocabulary entries to write: pending ones (never ezexe's); with --re-edit also meanings another
     teacher wrote that are unchanged since (their hash still matches)."""
     out = []
     for e in st.load_file(p4, st.VOCABULARY):
@@ -846,7 +846,7 @@ def dict_user(batch):
 def write_meanings(p4, answers, teacher, when, re_edit=False):
     """Fill `means:` for {(line, term, old means): new means}, re-reading vocabulary.md first: an entry is written
     only when it still stands at that line with that term and the meaning it had when the batch was built (so an
-    owner's edit made meanwhile wins), and never when its source is the owner's. Only the entry's `means:` and
+    ezexe's edit made meanwhile wins), and never when its source is ezexe's. Only the entry's `means:` and
     `means-by:` lines change. Returns the count written."""
     path = os.path.join(st.store_dir(p4), st.VOCABULARY)
     text = st.read_text(path)
@@ -957,7 +957,7 @@ def dictionary(p4, args, client=None, out=print):
 # --- facts (the file recall serves under inject: rules-facts; nothing else writes it) -------------------------
 
 FACTS_SYSTEM = (
-    "You are answering a software project's owner, and you must not answer from memory. Search for the current "
+    "You are answering ezexe, who maintains a software project, and you must not answer from memory. Search for the current "
     "official documentation or primary source for what the message asks about (the project's own docs, the "
     "vendor's reference, the standard, the release notes), read it, and recommend what it says, in two or three "
     "sentences. Quote the documented approach's date or version. Cite every source you used by URL. When the "
@@ -983,7 +983,7 @@ def asks_recommendation(text):
 
 
 def fact_targets(p4, limit=None, files=None):
-    """The owner message rows that asked for a recommendation and have no facts.md entry pointing at them
+    """ezexe message rows that asked for a recommendation and have no facts.md entry pointing at them
     (`from:`), newest first; `limit` keeps the newest N."""
     files = files if files is not None else st.load_store(p4)
     done = {e.fields.get("from", "").strip() for e in files.get("facts.md", [])}
@@ -1062,7 +1062,7 @@ def facts(p4, args, client=None, out=print):
     for e in rows:
         fp = st.unquote(e.fields.get("fingerprint", e.value))
         when_asked = e.time
-        user = f"The owner's message ({when_asked}):\n\n{fp}"
+        user = f"ezexe's message ({when_asked}):\n\n{fp}"
         kw = search_request(teacher, user)
         c = count(client, kw)
         n_in += c

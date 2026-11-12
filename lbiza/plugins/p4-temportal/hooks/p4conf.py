@@ -122,7 +122,7 @@ DEFAULTS = {
     },
 }
 
-# Sections whose keys are the owner's to choose: merged over the defaults, never called unknown.
+# Sections whose keys are ezexe's to choose: merged over the defaults, never called unknown.
 OPEN = ("temportal.cache",)
 
 # Sections no plugin reads any more: dropped from a p4.json that still holds one. `plans` was the p4-plans
@@ -522,7 +522,7 @@ def _merge(base, over, unknown, prefix=""):
             unknown.append(prefix + k)
             out[k] = v                   # kept, so a newer plugin's key survives an older one's rewrite
         elif prefix + k in OPEN and isinstance(base[k], dict) and isinstance(v, dict):
-            out[k] = {**base[k], **v}    # keys of the owner's choosing, such as a cache rule per directory
+            out[k] = {**base[k], **v}    # keys of ezexe's choosing, such as a cache rule per directory
         elif isinstance(base[k], dict) and isinstance(v, dict):
             out[k] = _merge(base[k], v, unknown, f"{prefix}{k}.")
         else:

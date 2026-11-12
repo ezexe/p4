@@ -216,8 +216,8 @@ class DictionaryCheck(unittest.TestCase):
         self.assertEqual(vocab["wombat"]["status"], "off")
         self.assertEqual(vocab["narwhal"]["status"], "off")
         self.assertEqual(vocab["the mac branch thing"]["status"], "on")
-        self.assertEqual(vocab["capybara"]["status"], "on", "an owner's entry is listed, never turned off")
-        self.assertEqual(self.owner_block(), owner_before, "the owner's entry is byte-identical after a round")
+        self.assertEqual(vocab["capybara"]["status"], "on", "ezexe's entry is listed, never turned off")
+        self.assertEqual(self.owner_block(), owner_before, "ezexe's entry is byte-identical after a round")
         self.assertEqual(res["counts"]["off"], 2)
 
     def owner_block(self):

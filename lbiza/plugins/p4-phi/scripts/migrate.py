@@ -756,13 +756,13 @@ def session_rows(files):
 
 
 def turn_rows(rows):
-    """The owner's own messages: notifications, agent messages and hook injections out."""
+    """ezexe's own messages: notifications, agent messages and hook injections out."""
     return [r for r in rows if not re.match(r"(?i)\s*(task notification|agent message|hook injection)",
                                             r.fields.get("arrival", "")) and not fp(r).lstrip().startswith("<")]
 
 
 def misread_before(rows, i, df, n, exclude=()):
-    """(row, terms) for the owner's message a signal at row i answers: the nearest of the three before it that is not
+    """(row, terms) for ezexe's message a signal at row i answers: the nearest of the three before it that is not
     a shell command (`! ...`) and yields a rare term, or (None, [])."""
     for j in range(i - 1, max(-1, i - 4), -1):
         text = fp(rows[j])
@@ -872,7 +872,7 @@ def seed_dictionary(files, df, n, now):
         rows, i = locate(rows_by, timeline, session_for(e), e.time, words)
         where = e.fields.get("from", e.id)
         if i is None or i == 0:
-            stats["no_term"].append(f"{kind} {where}: no earlier owner message in its session's rows")
+            stats["no_term"].append(f"{kind} {where}: no earlier ezexe message in its session's rows")
             continue
         after = rows[i]
         match = st.collapse(e.fields.get("match", ""))
@@ -898,7 +898,7 @@ def seed_dictionary(files, df, n, now):
         rows, i = locate(rows_by, timeline, session_for(e), e.time, words)
         where = e.fields.get("from", e.id)
         if i is None or i == 0:
-            stats["no_term"].append(f"retraction {where}: no earlier owner message in its session's rows")
+            stats["no_term"].append(f"retraction {where}: no earlier ezexe message in its session's rows")
             continue
         before, ts = misread_before(rows, i, df, n, exclude=ranker.tokens(e.fields.get("freed", "")))
         if not ts:
@@ -1295,7 +1295,7 @@ def render_report(r):
         L.append("No project repository given (or none found), so no frag was checked against the project's "
                  "tracked files; `--project <dir>` lists the frags the repo uses.")
     elif users:
-        L += ["Frags the project repo names (listed for the owner, not moved):", ""]
+        L += ["Frags the project repo names (listed for ezexe, not moved):", ""]
         L += [f"- `{nm}`: used by {', '.join(u)}" for nm, u in sorted(users.items())]
     else:
         L.append("No frag is named by the project's tracked files.")

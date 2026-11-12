@@ -186,7 +186,7 @@ class StatusRule(unittest.TestCase):
 class Vocabulary(unittest.TestCase):
     def test_design_example_parses(self):
         with tempfile.TemporaryDirectory() as d:
-            text = """The owner's words.
+            text = """ezexe's words.
 Grown from corrections.
 Fields: term.
 

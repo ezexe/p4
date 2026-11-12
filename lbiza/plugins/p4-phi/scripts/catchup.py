@@ -1,7 +1,7 @@
-"""catchup.py: at a session's start, close what fell behind on this machine, and say what only the owner can close.
+"""catchup.py: at a session's start, close what fell behind on this machine, and say what only ezexe can close.
 
 Run by hooks/recall-hook.sh as `catch-up` on SessionStart startup, a command of its own with its own timeout. It
-prints nothing when nothing is behind. Otherwise one `systemMessage` for the owner, never context for the model:
+prints nothing when nothing is behind. Otherwise one `systemMessage` for ezexe, never context for the model:
 
   layout    p4conf.migrate_layout moves a store an older plugin wrote into each plugin's directory.
   branch    when the store's git repository has an origin and this machine's branch is behind `<main>` there, the
@@ -11,7 +11,7 @@ prints nothing when nothing is behind. Otherwise one `systemMessage` for the own
   plugins   a retired plugin still enabled (p4-memory, p4-scratchpad, p4-recall) that the marketplace no longer
             offers, or an installed p4-phi or
             p4-temportal older than the marketplace's, gets the exact `claude plugin` commands that close it. They
-            are printed, never run: plugin settings are the owner's.
+            are printed, never run: plugin settings are ezexe's.
   cache     the version folders under <config>/plugins/cache/p4-marketplace/ that no install uses: how many, and
             their size, in the same line. Nothing is deleted; the CLI never removes them either.
 
@@ -275,7 +275,7 @@ def start_sync(p4):
 # --- the hook ------------------------------------------------------------------------------------------------
 
 def run(project, p4, sync=True):
-    """The line for the owner, '' when nothing is behind."""
+    """The line for ezexe, '' when nothing is behind."""
     parts = []
     if os.path.isdir(p4):
         moved = p4conf.migrate_layout(p4)
@@ -315,7 +315,7 @@ def run(project, p4, sync=True):
 
 
 def prune_cache():
-    """Delete the version folders under cache/p4-marketplace that no install uses; the owner runs this."""
+    """Delete the version folders under cache/p4-marketplace that no install uses; ezexe runs this."""
     import shutil
     base = os.path.join(config_dir(), "plugins", "cache", MARKET)
     used = all_install_paths()
