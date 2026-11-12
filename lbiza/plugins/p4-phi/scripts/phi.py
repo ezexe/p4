@@ -1554,6 +1554,17 @@ def h_stop(payload):
                                                                               for x in steps))):
         if relay.retire_done(me.home, above, s["sessionId"], s, row["time"]):
             RAN["retired"] = "done"
+    if above and (row.get("done") or (steps and all(x.get("status") == "completed" for x in steps))):
+        cur = load_session(me.home, s["sessionId"]) or s
+        told = list(cur.get("closesTold") or [])
+        new = [c for c in relay.closing_commits(me.home, s["sessionId"], cur) if c[1] not in told]
+        if new:                                    # #27: the top session pushes issue-closing work at once
+            top = (chain_of(me.home, s["sessionId"]) or [above])[-1]
+            relay.warn(me.home, top, "push:" + s["sessionId"] + ":" + ",".join(c[1] for c in new),
+                       relay.push_text(title_of(cur), s["sessionId"], new))
+            cur["closesTold"] = (told + [c[1] for c in new])[-100:]
+            save_session(me.home, cur)
+            RAN["push_told"] = len(new)
     for node in (above, s["sessionId"]):           # the anchor of the node above, and this node's own for its children
         a = relay.make_anchor(me.home, node, row["time"])
         if a and node == above:

@@ -1113,6 +1113,49 @@ def outcome(home, sid, s):
     return files, heads_, commits, still
 
 
+CLOSES = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+((?:[\w.-]+/[\w.-]+)?#\d+)", re.I)
+
+
+def closing_commits(home, sid, s):
+    """[(repo, short sha, subject, [issues])] of the commits a session made since its first turn whose messages
+    close an issue (`Closes #N`), oldest first."""
+    turns = _rows(os.path.join(_dir(home, sid), "turns.jsonl"))
+    first, last = {}, {}
+    for r in turns:
+        for h in (r.get("delta") or {}).get("heads") or []:
+            repo, _, sha = str(h).rpartition(" ")
+            first.setdefault(repo, sha)
+            last[repo] = sha
+    out = []
+    for repo, sha in last.items():
+        path = repo.rsplit("@", 1)[0]
+        old = first.get(repo)
+        made = str(s.get("createdAt") or "")
+        # the first head is read at the first turn's end, so that turn's own commits are found by time
+        early = _git(path, "log", "--reverse", f"--since={made}", "--format=%h%x1f%s%x1f%B%x1e", old) if made and old \
+            else None
+        late = _git(path, "log", "--reverse", "--format=%h%x1f%s%x1f%B%x1e", f"{old}..{sha}") if old and old != sha \
+            else None
+        text = "".join(r.stdout for r in (early, late) if r and r.returncode == 0)
+        for rec in text.split("\x1e"):
+            parts = rec.strip().split("\x1f")
+            if len(parts) < 3:
+                continue
+            issues = list(dict.fromkeys(CLOSES.findall(parts[2])))
+            if issues:
+                out.append((path, parts[0], parts[1], issues))
+    return out
+
+
+def push_text(child_title, child, commits):
+    """The top session's line: push and sync a finished child's issue-closing commits now, not ask."""
+    named = "; ".join(f"{sha} \"{_short(subj, 80)}\" closes {', '.join(n)} in {repo}" for repo, sha, subj, n in commits)
+    return (f"phi (p4-phi): \"{child_title}\" ({child}) finished with commits that close issues: {named}. The "
+            f"owner's rule is that green work closing an issue is pushed at once: once its suites pass, push that "
+            f"repository's main and sync each p4 store it touches with `p4.py sync --push`, without asking the user, "
+            f"and say in one line what was pushed. Asking stays for force-pushes, history rewrites and deletions.")
+
+
 FINDINGS_CHARS = 3000          # of a retired child's final report, kept in its replaces: note
 BARE = re.compile(r"^\W*(?:\w+\s+){0,4}(?:is\s+)?(?:done|finished|complete[d]?)(?:\s+and\s+reported)?\W*$", re.I)
 

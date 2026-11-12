@@ -167,6 +167,24 @@ class ThreeSessions(unittest.TestCase):
         self.assertEqual(self.t.stop(host, "edit it", [("Edit", {"file_path": path}, "ok")], uuid=uuid).returncode, 0)
         return path
 
+    def test_a_childs_issue_closing_commits_tell_the_top_to_push_at_once(self):
+        """#27: green work that closes an issue is pushed and synced at once, not asked."""
+        t = self.t
+        self.edit_uncommitted(A, ("lib", "x.py"), "c1")
+        g = ["git", "-C", self.work, "-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run(g + ["commit", "-qam", "lib: fix x\n\nCloses #5"], check=True, capture_output=True)
+        self.edit_uncommitted(A, ("lib", "y.py"), "c2")
+        subprocess.run(g + ["commit", "-qam", "lib: tidy y"], check=True, capture_output=True)
+        self.assertEqual(t.cli(A, "done", "test_x.py: 3 tests OK").returncode, 0)
+        self.assertEqual(t.stop(A, "finish", report="Fixed x; suites green.", uuid="c3").returncode, 0)
+        ctx = context(t.say(TOP, "what next?"))
+        self.assertIn("finished with commits that close issues", ctx)
+        self.assertIn("closes #5", ctx)
+        self.assertNotIn("tidy y", ctx, "a commit closing nothing is not named")
+        self.assertIn("without asking the user", ctx)
+        t.stop(A, "again", report="Nothing more.", uuid="c4")
+        self.assertNotIn("close issues", context(t.say(TOP, "and now?")), "told once per commit")
+
     def test_a_deprecation_warns_the_sibling_with_uncommitted_edits_before_any_tool(self):
         t = self.t
         mine = self.edit_uncommitted(B, ("lib", "x.py"), "b1")
