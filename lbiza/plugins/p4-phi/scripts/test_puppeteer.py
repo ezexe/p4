@@ -126,6 +126,9 @@ class Linear(Base):
             time.sleep(0.2)
         self.assertGreater(jload(self.path(TOP, "watcher.json"))["pid"], 0, "the watcher runs")
         self.assertIn(f"({TOP})", read(self.path(TOP, "ledger.md")))
+        beat = jload(self.path(TOP, "watcher.json"))
+        self.assertLess(time.time() - beat["beat"], 20, "it says it is alive at every look, before the look")
+        self.assertIn("slowestTickMs", beat)
         t.say(TOP, ASK, P4_PHI_WATCH="1", P4_PHI_WATCH_S="0.3", P4_PHI_WATCH_NET="0")
         self.assertEqual(len([x for x in t.log(TOP) if x.get("watcher")]), 1, "one watcher, not one a message")
         t.say(KID, handed("Port the flush to the new writer."))       # the watcher writes it in, no command run
@@ -140,6 +143,25 @@ class Linear(Base):
         while time.time() < end and os.path.exists(self.path(TOP, "watcher.json")):
             time.sleep(0.2)
         self.assertFalse(os.path.exists(self.path(TOP, "watcher.json")), "it ends when its orchestrator is archived")
+
+    def test_a_ledger_is_built_without_git(self):
+        # hook-started watchers on the real store spent their looks in git, one call a session a look, stopped
+        # saying they were alive and were started again beside themselves: seven processes for four orchestrators
+        t = self.t
+        t.say(TOP, TASK)
+        t.say(KID, handed("Fix `src/export/flush.py` for ezexe/demo#7 and commit it."))
+        ran = []
+        real = puppeteer.relay._git
+        puppeteer.relay._git = lambda *a: ran.append(a) or None
+        os.environ["P4_PHI_APP_SESSIONS"] = os.path.join(t.tmp, "app")
+        try:
+            m = puppeteer.build(t.p4, TOP)
+            puppeteer.signature(t.p4, TOP, puppeteer.app_roots(t.p4, TOP))
+        finally:
+            puppeteer.relay._git = real
+            os.environ.pop("P4_PHI_APP_SESSIONS", None)
+        self.assertEqual(ran, [])
+        self.assertEqual(m["rows"][1]["issue"], "ezexe/demo#7", "the issue is read from the task's own words")
 
     def test_work_is_drafted_from_ezexes_words_and_started_and_a_question_is_left_alone(self):
         t = self.t

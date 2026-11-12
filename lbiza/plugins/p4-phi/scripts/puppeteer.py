@@ -56,7 +56,7 @@ WATCH_SLOW_S = 30.0              # its tick once nothing changed for WATCH_CALM_
 WATCH_CALM_S = 600.0
 WATCH_QUIT_S = 24 * 3600.0       # a watcher whose sources stood still this long ends; the next hook starts another
 BEAT_S = 30.0                    # how often a watcher says it is alive
-BEAT_DEAD_S = 100.0              # a watcher silent this long is taken as gone
+BEAT_DEAD_S = 300.0              # a watcher silent this long is taken as gone: far past its slowest look
 ISSUE_TTL_S = 120.0              # how long an issue's state read from GitHub is believed
 GH_S = 6                         # one gh call of the puppeteer's, which a prompt hook may be waiting on
 ROUTE_CHECK_S = 600.0            # how often registered routes are checked for a reopen or a revert
@@ -232,22 +232,15 @@ def app_index(roots):
 # --- issues -----------------------------------------------------------------------------------------------------------
 
 def topic_issue(s, base=""):
-    """(slug, number, repo path) of the issue a session's work closes: the one phi took for it, else the first its
-    task names; ('', 0, '') for none."""
+    """(slug, number, repo path) of the issue a session's work closes: the one phi took for it, else the first
+    `owner/name#N` its task names; ('', 0, '') for none. No git runs here: a ledger is built from this for every
+    session of a subtree on every change, and the repository is looked for only once a route's other records back
+    it (closing_pushed)."""
     iss = s.get("issue") if isinstance(s.get("issue"), dict) else None
     if iss and iss.get("repo") and iss.get("number"):
         return str(iss["repo"]), int(iss["number"]), str(iss.get("path") or "")
-    task = str(s.get("task") or "")
-    m = re.search(r"\b([\w.-]+/[\w.-]+)#(\d+)\b", task)
-    if m:
-        repo = next((r for r, slug in issues.repos_named(task, base or s.get("cwd") or "")
-                     if slug.lower() == m.group(1).lower()), "")
-        return m.group(1), int(m.group(2)), repo
-    for repo, slug in issues.repos_named(task, base or s.get("cwd") or "")[:1]:
-        n = issues.named_issue(task, slug)
-        if n:
-            return slug, n, repo
-    return "", 0, ""
+    m = re.search(r"\b([\w.-]+/[\w.-]+)#(\d+)\b", str(s.get("task") or ""))
+    return (m.group(1), int(m.group(2)), "") if m else ("", 0, "")
 
 
 def states_path(home):
@@ -560,20 +553,33 @@ def tick(home, top, net=True):
 def watch(home, top, once=False, max_s=None, interval=None):
     """The puppeteer's watch over one orchestrator's subtree, until the orchestrator is closed, another watcher
     took over, nothing changed for a day, or the plugin's own scripts changed under it: the marketplace runs from
-    its checkout, so a watcher on yesterday's code ends and the next hook starts one on today's."""
+    its checkout, so a watcher on yesterday's code ends and the next hook starts one on today's. It says it is
+    alive before each look, never after, so a slow look is not taken for a dead watcher and a second one started;
+    and it yields to a newer watcher before it looks, not after."""
     me = os.getpid()
     code = code_stamp()
-    started = last_beat = time.time()
-    last_change, last_sig = started, ""
-    relay._write_json(watcher_path(home, top), {"pid": me, "beat": started, "started": now()})
+    started = time.time()
+    last_change, last_sig, ticks, slowest, last_ms = started, "", 0, 0, 0
+    os.environ.setdefault("GIT_TERMINAL_PROMPT", "0")      # no git or gh call of a watcher ever waits on a person
+    os.environ.setdefault("GH_PROMPT_DISABLED", "1")
+    began = now()
     while True:
         if not os.path.isdir(relay._dir(home, top)):
             return 0
+        w = relay._read_json(watcher_path(home, top))
+        if ticks and w.get("pid") not in (me, -1):
+            return 0                                # another watcher took this orchestrator
+        at = time.time()
+        relay._write_json(watcher_path(home, top), {"pid": me, "beat": at, "started": began, "ticks": ticks,
+                                                    "lastTickMs": last_ms, "slowestTickMs": slowest})
         s = relay._session(home, top)
         try:
             tick(home, top, net=os.environ.get("P4_PHI_WATCH_NET") != "0")
         except Exception:  # noqa: BLE001
             pass
+        ticks += 1
+        last_ms = round((time.time() - at) * 1000)
+        slowest = max(slowest, last_ms)
         if once or closed(s) or relay.gone(home, s):
             break
         at = time.time()
@@ -582,12 +588,6 @@ def watch(home, top, once=False, max_s=None, interval=None):
             last_sig, last_change = sig, at
         if at - last_change > WATCH_QUIT_S or (max_s and at - started > max_s) or code_stamp() != code:
             break
-        w = relay._read_json(watcher_path(home, top))
-        if w.get("pid") not in (me, -1):
-            return 0                                # another watcher took this orchestrator
-        if at - last_beat >= BEAT_S or w.get("pid") == -1:
-            relay._write_json(watcher_path(home, top), {"pid": me, "beat": at, "started": w.get("started") or now()})
-            last_beat = at
         try:
             quick = float(os.environ.get("P4_PHI_WATCH_S") or 0)
         except ValueError:
