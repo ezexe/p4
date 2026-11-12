@@ -247,6 +247,13 @@ class ThreeSessions(unittest.TestCase):
                                        "-m", "store")):
             subprocess.run(["git", "-C", t.p4, *args], check=True, capture_output=True)
         self.assertFalse(relay.track(t.p4, first_only=True), "off until p4.json sets phi.track")
+        status = subprocess.run(["git", "-C", t.p4, "status", "--porcelain", "-uall"], capture_output=True,
+                                text=True).stdout                  # #35: with tracking off, no tree file shows
+        self.assertEqual(t.stop(TOP, "plan it", report="Planned.", uuid="tr1").returncode, 0)
+        self.assertEqual(t.stop(A, "move it", report="Moved.", uuid="tr2").returncode, 0)
+        self.assertTrue(os.path.exists(os.path.join(t.p4, "phi", "reports.jsonl")))
+        self.assertFalse([x for x in status.splitlines() if "phi/sessions/" in x or x.endswith(
+            ("phi/anchor.json", "phi/reports.jsonl", "phi/start-requests.jsonl"))], status)
         write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"track": True}}))
         self.assertTrue(relay.track(t.p4, first_only=True))
         shown = subprocess.run(["git", "-C", t.p4, "show", "--name-only", "--format=%s", "HEAD"],
@@ -255,6 +262,8 @@ class ThreeSessions(unittest.TestCase):
         files = [x for x in shown if x.startswith("phi/")]
         self.assertTrue(any(x.endswith("/session.json") for x in files))
         self.assertFalse(any(x.endswith(("log.jsonl", "session.md")) for x in files), "per machine or made again")
+        self.assertNotIn(relay.UNTRACKED_MARK, open(os.path.join(t.p4, ".gitignore"), encoding="utf-8").read(),
+                         "#35: tracking on takes the untracked tree's block out")
         self.assertFalse(relay.track(t.p4, first_only=True), "committed once")
         t.cli(B, "note", "the session tree is tracked in the store now", "--source", "test")
         relay.track(t.p4)

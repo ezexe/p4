@@ -839,15 +839,56 @@ def _ignore_lines(home):
     return bool(missing)
 
 
+# #35: while phi.track is off nothing of the session tree is ever committed, so all of it is ignored, under its own
+# marker line; when tracking is turned on the block comes out again, and the per-machine lines of IGNORED stay.
+UNTRACKED_MARK = "# the session tree, while phi.track is off (p4-phi)"
+UNTRACKED = ("phi/sessions/", "phi/anchor.json", "phi/reports.jsonl", "phi/start-requests.jsonl")
+
+
+def tree_ignore(home, tracked):
+    """The store's .gitignore with the untracked tree's block present (tracking off) or taken out (on). True when
+    the file changed."""
+    gi = os.path.join(home, ".gitignore")
+    try:
+        with open(gi, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        text = ""
+    lines = text.splitlines()
+    if UNTRACKED_MARK in lines:
+        k = lines.index(UNTRACKED_MARK)
+        end = k + 1
+        while end < len(lines) and lines[end].strip() in UNTRACKED:
+            end += 1
+        if not tracked and set(lines[k + 1:end]) >= set(UNTRACKED):
+            return False
+        lines = lines[:k] + lines[end:]
+    elif tracked:
+        return False
+    if not tracked:
+        lines += [UNTRACKED_MARK, *UNTRACKED]
+    if not os.path.isdir(home):
+        return False
+    with open(gi, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + ("\n" if lines else ""))
+    return True
+
+
 def track(home, first_only=False):
     """Stage phi/ in the store's git; the first time, commit it on its own. Returns True when it committed. Only
-    when the store's p4.json sets phi.track. The project's root goes into git as {project} through the store's
-    path filter (PL1), so another machine's checkout names its own files."""
+    when the store's p4.json sets phi.track; otherwise the session tree is kept ignored (#35). The project's root
+    goes into git as {project} through the store's path filter (PL1), so another machine's checkout names its own
+    files."""
     try:
         import p4conf
-        if not (p4conf.section(home, "phi", write=False) or {}).get("track"):
-            return False
+        on = bool((p4conf.section(home, "phi", write=False) or {}).get("track"))
     except Exception:  # noqa: BLE001
+        return False
+    try:
+        dropped = tree_ignore(home, on)
+    except OSError:
+        dropped = False
+    if not on:
         return False
     top = _git(home, "rev-parse", "--show-toplevel")
     if not top or top.returncode != 0 or norm(top.stdout.strip()) != norm(home):
@@ -857,7 +898,7 @@ def track(home, first_only=False):
     first = bool(mark) and not os.path.exists(mark)
     if first_only and not first:
         return False
-    changed = _ignore_lines(home)
+    changed = _ignore_lines(home) or dropped
     attrs = _path_filter(home)
     _git(home, "add", "-A", "--", "phi", *([".gitignore"] if changed else []), *([".gitattributes"] if attrs else []))
     if not first:
