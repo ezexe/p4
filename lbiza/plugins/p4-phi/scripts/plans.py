@@ -371,6 +371,8 @@ def judge(plan, cwd):
             kept.append((a, f"shares {relay.show(shared[0][1], cwd)} with step {shared[0][0]}"))
         elif len(words(text)) < QUICK_WORDS:
             kept.append((a, "a quick thing"))
+        elif not paths[a]:
+            kept.append((a, "names no file, so it cannot be judged apart from the others"))
         else:
             free.append(st)
     waits = sum(1 for _, why in kept if why.startswith("waits on"))
@@ -395,8 +397,9 @@ def split_advice(home, s, plan, owner_turn, cap):
     relay._write_json(path, disk)
     free = new
     named = "; ".join(f"{st['addr']} \"{relay._short(st.get('content'), 90)}\"" for st in free)
-    judged = ("Judged by the paths each step names, wording that leans on another step (after, then, once, using, "
-              "the result of, step N), and size: fewer than four content words is a quick thing.")
+    judged = ("Judged by the paths each step names, and a step naming none stays; wording that leans on another "
+              "step (after, then, once, using, the result of, step N) or waits on or relays work; and size: fewer "
+              "than four content words is a quick thing.")
     if cap:
         return (f"phi (p4-phi): steps {named} could each run on their own, but {cap[0].lower() + cap[1:]} "
                 f"Every step stays here as a sub-step. {judged}")
@@ -596,9 +599,20 @@ def open_steps(home, sid):
     return [x for x in p.get("steps") or [] if x.get("status") != "completed"]
 
 
+FENCE = re.compile(r"```.*?(?:```|$)", re.S)
+DRAWN = re.compile(r"[\u2500-\u257f]")             # box-drawing characters: a tree or table drawn in a report
+
+
+def prose(text):
+    """`text` without fenced code blocks and drawn lines, whose addresses and words are no claim about a step."""
+    text = FENCE.sub("\n", str(text or ""))
+    return "\n".join(ln for ln in text.splitlines() if not DRAWN.search(ln))
+
+
 def matches(text, steps, shard, base):
     """[(step, the sentences of `text` that bear on it)]: a step is matched by its address, by a path in the
-    session's shard, or by sharing SHARE content words with a sentence."""
+    session's shard, or by sharing SHARE content words with a sentence. Code blocks and drawn trees are left out."""
+    text = prose(text)
     sents = [x.strip() for x in SENTENCE.split(str(text or "")) if x.strip()]
     named = set(ADDR_RE.findall(str(text or "")))
     out = []

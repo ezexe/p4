@@ -220,6 +220,19 @@ class TreeOfPlans(unittest.TestCase):
         self.assertIn("2.4", again.split("can each run")[0], "a new free step is named")
         self.assertNotIn("2.2 \"", again.split("can each run")[0])
 
+    def test_steps_naming_no_file_stay_and_drawn_trees_match_nothing(self):
+        """The gap: SA1 and SA2 named no file and both edited plans.py. The noise: a drawn tree's addresses."""
+        plan = {"steps": [{"addr": "1", "content": "SA1 keep tasks of a reworded step", "status": "in_progress"},
+                          {"addr": "2", "content": "SA2 anchor and down-line for sub-agents", "status": "pending"}]}
+        free, kept = plans.judge(plan, "")
+        self.assertEqual(free, [])
+        self.assertIn("names no file", kept[0][1])
+        steps = [{"addr": "1", "content": "Waits and relays stay in place"},
+                 {"addr": "2", "content": "Run every suite, commit, fast-forward"}]
+        report = ("Here is the tree:\n\u251c\u2500\u2500 x/ \u251c\u2500\u2500 child for step 1 plan: 1.1, 1.2\n"
+                  "```\nstep 2 plan: 2.1 run every suite\n```\nNothing else.")
+        self.assertEqual(plans.matches(report, steps, [], ""), [])
+
     def test_a_plan_of_waits_and_relays_is_serial(self):
         """SP2, live: four serial steps were advised to split."""
         plan = {"steps": [{"addr": "1", "content": "Wait for SA1 and SA2 on main", "status": "in_progress"},
