@@ -32,6 +32,25 @@ class Paths(unittest.TestCase):
         self.assertFalse(relay.overlap("e:/w/lib", "e:/w/docs"))
         self.assertEqual(relay.norm("/e/projects/x/", ""), relay.norm("E:/projects/x", ""))
 
+    def test_a_child_is_told_its_scratch_folder_and_paths_relative(self):
+        """P9 and the slice header: the child's own scratch folder, and paths as the project names them."""
+        line = relay.scratch_line("E:/proj/.claude/p4", "abc-1", "E:/proj")
+        self.assertIn("scratch folder is .claude/p4/temportal/tmp/abc-1/", line)
+        self.assertEqual(relay.scratch_line("E:/proj/.claude/p4", "", "E:/proj"), "")
+        tmp = tempfile.mkdtemp()
+        try:
+            home = os.path.join(tmp, ".claude", "p4")
+            write(os.path.join(home, "phi", "sessions", "top", "session.json"),
+                  json.dumps({"sessionId": "top", "cwd": tmp, "task": "t"}))
+            kid = {"sessionId": "kid", "spawnedFrom": {"sessionId": "top"}, "cwd": tmp,
+                   "task": f"fix {tmp}/src/a.py"}
+            text = relay.slice_text(home, kid)
+            self.assertIn("(src/a.py)", text)
+            self.assertNotIn(relay.norm(tmp), text.split("Its task")[0])
+            self.assertEqual(relay.slice_text(home, dict(kid, task="no path here")), "", "P2: no empty paths line")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_a_first_look_relays_no_backlog_and_revisions_collapse(self):
         """RF1: a first look once replayed a day of revisions, 40 lines and 11.4 KB."""
         tmp = tempfile.mkdtemp()

@@ -903,6 +903,8 @@ def given(s, me, home, own=False):
         step = plans.slice_for(home, s)
         piece = relay.slice_text(home, s) if cut_to else ""
         text = "\n\n".join(p for p in (text, step, piece) if p)
+    if above:
+        text = "\n\n".join(p for p in (text, relay.scratch_line(home, me.cli, s.get("cwd") or "")) if p)
     if above and "anchorSeen" not in s:
         # the start is the child's base: a fresh child's slice or a fork's inherited conversation already holds the
         # anchor as it is now, so the rebase check hands over only what changes after it

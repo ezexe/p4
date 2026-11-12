@@ -666,11 +666,11 @@ def slice_text(home, s):
     base = s.get("cwd") or ps.get("cwd") or ""
     mine = shard_of(s) or paths_in(s.get("task") or "", base)
     ver = int(anchor.get("version") or 0)
-    head = (f"phi (p4-phi): what the parent, \"{_title(ps)}\", has for this session's paths "
-            f"({', '.join(mine[:5]) or 'none named'}), from its anchor v{ver}. Its task: \""
-            f"{_short(ps.get('task') or '', 300)}\".")
     if not mine:
-        return head + " The task names no path, so nothing of the anchor is given; `phi.py shard <paths>` names them."
+        return ""                                 # nothing to cut the anchor by: the background says the rest (P2)
+    head = (f"phi (p4-phi): what the parent, \"{_title(ps)}\", has for this session's paths "
+            f"({', '.join(show(p, base) for p in mine[:5])}), from its anchor v{ver}. Its task: \""
+            f"{_short(ps.get('task') or '', 300)}\".")
     marks, heads, files = [], set(), []
     every = list((anchor.get("nodes") or {}).items()) + [(parent, anchor.get("parent") or {})]
     for nid, n in every:
@@ -697,6 +697,14 @@ def slice_text(home, s):
     if files:
         out += ["Changed there:"] + files + (["Heads to build on: " + ", ".join(sorted(heads))] if heads else [])
     return "\n".join(out)
+
+
+def scratch_line(home, cli, base):
+    """P9: the folder a started session keeps its temporary files in, named at its start so it never asks or guesses."""
+    if not cli:
+        return ""
+    return (f"phi (p4-phi): this session's scratch folder is {show(norm(os.path.join(home, 'temportal', 'tmp', cli)), base)}/"
+            f": temporary files go there, and are named by that path.")
 
 
 def anchor_version(home, parent):
