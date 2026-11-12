@@ -57,8 +57,9 @@ def addr(root, i):
 
 
 def root_of(home, s):
-    """A session's root step: the address its brief names, else its parent's step in progress now; '' for a top
-    session or a parent with no plan."""
+    """A session's root step: the address its brief names, else the parent's open step its brief's words match
+    best, else the parent's step in progress now; '' for a top session or a parent with no plan. Siblings started
+    in one step for different steps of the plan each get their own root."""
     if s.get("rootStep") is not None:
         return str(s.get("rootStep") or "")
     parent = relay._parent(s)
@@ -67,7 +68,22 @@ def root_of(home, s):
     m = STEP_RE.search(str(s.get("task") or ""))
     if m:
         return m.group(1)
-    return str(load(home, parent).get("current") or "")
+    pp = load(home, parent)
+    current = str(pp.get("current") or "")
+    mine = words(s.get("task"))
+
+    def fit(st):                                       # shared words, then the share of the step's own words
+        theirs = words((st or {}).get("content"))
+        n = len(mine & theirs)
+        return (n, n / len(theirs)) if theirs and n >= (min(SHARE, len(theirs)) or SHARE) else (0, 0.0)
+
+    best, score = current, fit(step_of(pp, current))
+    for st in pp.get("steps") or []:
+        if st.get("status") == "completed":
+            continue
+        if fit(st) > score:                            # the step in progress wins a tie
+            best, score = str(st.get("addr") or ""), fit(st)
+    return best
 
 
 def step_of(plan, a):

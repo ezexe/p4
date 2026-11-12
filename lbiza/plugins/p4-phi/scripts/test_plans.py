@@ -114,6 +114,16 @@ class TreeOfPlans(unittest.TestCase):
         self.assertEqual(anchor["nodes"][A]["plan"]["current"], "2.1", "the parent's anchor is the plan tree")
         self.assertEqual(anchor["parent"]["plan"]["current"], "2")
 
+    def test_siblings_started_in_one_step_get_the_steps_their_briefs_name(self):
+        """Two children started while the parent is on step 2, one for its docs step: each its own root."""
+        home = self.t.p4
+        s = {"sessionId": "x", "spawnedFrom": {"sessionId": TOP}, "task": "Write the layout docs for the store"}
+        self.assertEqual(plans.root_of(home, s), "3")
+        s["task"] = "Move the store layout into phi, the code part"
+        self.assertEqual(plans.root_of(home, s), "2")
+        s["task"] = "something else entirely"
+        self.assertEqual(plans.root_of(home, s), "2", "no match: the step in progress")
+
     def test_an_up_line_is_said_once(self):
         """P1: "the parent has moved past your root step" came at every boundary after."""
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move", "Tell docs"))
