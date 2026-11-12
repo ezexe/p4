@@ -21,20 +21,29 @@ esac
 known="${CLAUDE_PLUGIN_ROOT}/.python"   # the interpreter proven once: in the plugin's own install, never %TEMP%
 if [ "$probe" = 1 ] && [ -r "$known" ]; then
   read -r c < "$known" || c=""
+  case "$c" in */*) ;; *) c="" ;; esac       # a bare name cached before T2 may be the alias: probe again
   if [ -n "$c" ] && command -v "$c" >/dev/null 2>&1; then
     run "$c" "$@"
     exit 0
   fi
 fi
 
-for c in python3 python py; do
+order="python3 python py"
+[ "$probe" = 1 ] && order="py python python3"   # Windows: the launcher first, the WindowsApps alias last (T2)
+for c in $order; do
   p=$(command -v "$c" 2>/dev/null) || continue
   case "$p" in *WindowsApps*) probe=1 ;; esac
-  if [ "$probe" = 0 ] || "$c" -I -c "import sys" >/dev/null 2>&1; then
-    [ "$probe" = 1 ] && printf '%s\n' "$c" > "$known" 2>/dev/null
+  if [ "$probe" = 0 ]; then
     run "$c" "$@"
     exit 0
   fi
+  v=""; [ "$c" = py ] && v="-3"
+  exe=$("$c" $v -I -c "import sys; print(sys.executable.replace(chr(92), '/'))" 2>/dev/null) || continue
+  [ -n "$exe" ] && command -v "$exe" >/dev/null 2>&1 || continue
+  printf '%s\n' "$exe" > "$known" 2>/dev/null
+  c="$exe"
+  run "$c" "$@"
+  exit 0
 done
 
 exit 0
