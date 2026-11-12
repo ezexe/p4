@@ -117,3 +117,16 @@ The live node reads phi's session files and recall's tasks and labels: 3 ms on p
 `recall.node.on` ships off.
 The node is a small, real gain for the trained ranker and none for the road the stores run today, and the lines it adds there cost more precision than they buy.
 It earns being turned on when a round with it passes the promotion floor, which the labels behind it do not support yet: the repo-file and commit labels that dominate both stores are not what `rules-facts` serves.
+
+## The relay
+
+Linked sessions are kept in step while they work, the way `phi/phi_rank/tree.py` keeps its node tree: each node owns a shard, a parent is formed from its children, and changes travel as deltas on a shared anchor.
+The code is `lbiza/plugins/p4-phi/scripts/relay.py`, called from phi's hooks.
+
+- **Shard:** `phi.py shard <paths or globs>` keeps what a session alone may change in its `session.json`. A parent's shard covers its children's. When two sessions under the same parent declare overlapping shards, the one declaring is told in the command's output and the other at its next message.
+- **Delta:** each turn's row in `turns.jsonl` carries its delta at Stop: the branch heads of the repositories it edited in, the files it changed, and the `deprecates:` and `replaces:` notes written since the turn before, with the paths they name.
+- **Anchor:** the parent's folder keeps `anchor.json`, the latest delta of each child and the parent's own marked notes, under a version that goes up only when that content changes. It is made again at the Stop of the parent or of any child, and when a child declares a shard.
+- **Rebase check:** every message a session gets, side-session events included, compares the parent's anchor with the version the session last saw. A newer anchor hands over the other nodes' deprecations and replacements first and in full, then their other deltas cut evenly to the room the hook has left. Before that comes a warning to stop and message the owner for each uncommitted file or shard path of the session that a deprecation names, and for each uncommitted file inside another node's shard. A warning is given once, and nothing is said when nothing changed.
+- **Routing:** a message that names a path inside another node's shard is that node's, and the session is told to send it there by SendMessage. Only a message no shard covers gets a new forked session. A parent is never routed down to its own children.
+
+`test_relay.py` runs it through phi's hooks on a three-session tree: one child deprecates a path its sibling holds uncommitted edits in, and the sibling's next message starts with the warning.

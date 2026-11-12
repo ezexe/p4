@@ -41,8 +41,14 @@ given; notes. Nothing is renamed.
            reports of the session that started this one.
 
 Commands for a session: `note "<claim>" --source "<where checked>"`, `done "<what was run and what it showed>"`,
-`task "<the new task>"`, `show [sessionId]`, `tree`, `background`, `detach <sessionId>`,
+`task "<the new task>"`, `shard <paths or globs>`, `show [sessionId]`, `tree`, `background`, `detach <sessionId>`,
 `reparent <sessionId> <under sessionId>`.
+
+The relay (relay.py), modelled on phi_rank/tree.py's node tree: a session's shard is what it alone may change; each
+turn keeps its delta, the heads, files and `deprecates:`/`replaces:` notes; a parent's anchor.json merges its
+children's latest deltas under a version; every message a session gets, side-session events too, carries what a
+newer anchor changed, deprecations first and in full, and a warning before any tool runs when its uncommitted files
+or shard meet a deprecated path or another node's shard; a message about another node's shard is routed there.
 
 Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `new_task` (false: off),
 `rules`, `background_chars`, `reports_chars`, `wait_s`. P4_PHI=0 turns the plugin off, P4_PHI_NEW_TASK=0 the
@@ -65,6 +71,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import node as nd  # noqa: E402  (a session's place in the tree, which recall reads too)
 import p4conf  # noqa: E402  (the store's layout: each plugin's files in .claude/p4/<plugin>/)
+import relay  # noqa: E402  (shards, deltas, anchors: linked sessions kept in step while they work)
 
 BACKGROUND = True
 REPORTS = True
@@ -691,12 +698,16 @@ def new_task_text(home, s, me, user=True, again=False):
         told = s["newTaskToldAt"] = {}
     if again or not told.get(me.cli):
         told[me.cli] = now()
+        listed = relay.shards_line(home, s["sessionId"])
+        shards = f" (shards now: {listed})" if listed else ""
         RAN["new_task"] = "instruction"
         return (f"phi (p4-phi): this session's task: \"{cut(task, RULE_TASK)}\" When a message from the user is "
                 f"about something else, do not turn this session to it. Start a session for it with "
                 f"`mcp__ccd_session__start_session` (initiation `user_asked`, context `fork`, so it has this whole "
                 f"conversation and shares this checkout), tell the user in one line which session has it, and "
-                f"stay with the task. This is the user's standing instruction for this project, so the session "
+                f"stay with the task. A message about a path inside another session's shard is that session's: "
+                f"send it there with SendMessage instead, and start a new session only for what no shard covers"
+                f"{shards}. This is the user's standing instruction for this project, so the session "
                 f"is started, not offered as a card. Its report comes back here in full. A quick thing (a "
                 f"question, a few tool calls) stays here. When the user says the task itself has changed: "
                 f"`{commands()} task \"<the new task>\"`. This session's page: {page_path(home, s['sessionId'])}.")
@@ -924,9 +935,14 @@ def h_user_prompt_submit(payload):
         text, seen = reports_text(me.home, s)
         s["reportsSeen"] = seen
         parts.append(text)
-    parts.append(new_task_text(me.home, s, me, user=bool(req)))
+    route = relay.route_text(me.home, s["sessionId"], req, s.get("cwd") or "") if req else ""
+    parts.append(route or new_task_text(me.home, s, me, user=bool(req)))
     save_session(me.home, s)
-    return "\n\n".join(p for p in parts if p)
+    # the rebase check, on every message: what the nodes beside this one changed, and the warnings, first
+    used = sum(len(p) for p in parts if p)
+    text, _ = relay.rebase(me.home, s["sessionId"], HOOK_CHARS - used, fair_cut)
+    RAN["relay"] = len(text)
+    return "\n\n".join(p for p in [text] + parts if p)
 
 
 def h_stop(payload):
@@ -949,6 +965,12 @@ def h_stop(payload):
     done = s.get("done") if isinstance(s.get("done"), dict) else None
     if done and clean(done.get("text")):
         row["done"] = clean(done["text"])[:400]
+    files = [c["input"].get("file_path") or c["input"].get("notebook_path") for c in turn.get("calls") or []
+             if c.get("name") in EDIT_TOOLS and isinstance(c.get("input"), dict)]
+    earlier = load_turns(me.home, s["sessionId"])
+    row["delta"] = relay.delta(me.home, s, [f for f in files if f],
+                               s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd(),
+                               since=str(earlier[-1].get("time") or "") if earlier else "")
     row["sessions"] = [f"\"{r.get('title') or r['sessionId'][:14]}\": "
                        f"{'done' if r['turn'].get('done') else 'not shown done'}"
                        for r in latest_reports(load_reports(me.home, s["sessionId"]))][:TURN_STEPS]
@@ -960,6 +982,10 @@ def h_stop(payload):
     if not s.get("task"):
         s["task"], s["taskAt"] = row["prompt"], row["time"]
     save_session(me.home, s)
+    for node in (above, s["sessionId"]):           # the anchor of the node above, and this node's own for its children
+        a = relay.make_anchor(me.home, node, row["time"])
+        if a and node == above:
+            RAN["anchor"] = a.get("version")
     render_page(me.home, s["sessionId"])
     render_page(me.home, above)
     RAN.update(turn=row["id"], done=bool(row["done"]))
@@ -1084,7 +1110,7 @@ def main(argv=None):
     import argparse
     ap = argparse.ArgumentParser(description="phi: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent"):
+    for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in (default: this session's)")
         p.add_argument("--session", default="", help="the sessionId (default: this session's)")
@@ -1098,6 +1124,8 @@ def main(argv=None):
             p.add_argument("which", nargs="?", default="")
         if name in ("detach", "reparent"):
             p.add_argument("moved")
+        if name == "shard":
+            p.add_argument("paths", nargs="*", help="paths or globs this session alone may change; none shows it")
         if name == "reparent":
             p.add_argument("under")
     a = ap.parse_args(argv)
@@ -1130,6 +1158,16 @@ def main(argv=None):
             print("phi: this is not a session (no session id in the environment); pass --session", file=sys.stderr)
             return 2
         s = ensure_session(me.home, me.id, me.rec, me.cli)
+        if a.cmd == "shard":
+            save_session(me.home, s)
+            if not a.paths:
+                print("\n".join(relay.shard_of(s)) or "this session declared no shard")
+                return 0
+            lines = relay.set_shard(me.home, s["sessionId"], a.paths, os.getcwd())
+            print("kept as this session's shard: " + ", ".join(relay.shard_of(load_session(me.home, s["sessionId"]))))
+            for line in lines:
+                print("phi: " + line)
+            return 0
         if a.cmd == "note":
             print("kept" if note_add(me.home, s["sessionId"], a.claim, a.source, a.kind, me.cli) else "already kept")
         elif a.cmd == "done":
