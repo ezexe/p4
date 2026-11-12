@@ -52,6 +52,15 @@ def bears(a, b):
     return len(words(a) & words(b)) >= SHARE
 
 
+SIBLING_STOP = frozenset("phi session sessions check checks step steps p4 plugin plugins".split())
+
+
+def bears_sibling(a, b):
+    """A sibling's words bear on a step only past the shared vocabulary of the tree: more than two content words
+    outside SIBLING_STOP, so {phi, session} alone never relays a sibling's report."""
+    return len((words(a) & words(b)) - SIBLING_STOP) > 2
+
+
 def addr(root, i):
     return f"{root}.{i}" if root else str(i)
 
@@ -347,22 +356,27 @@ WAITS = re.compile(r"\b(wait(?:s|ing)?|until|confirm\w*|verif\w*|can go|when\b[^
                    r"send|ask|hand (?:off|over)|report back)\b", re.I)   # SP2: a step that waits on or relays work
 QUICK_WORDS = 4               # a step of fewer content words is a quick thing, done here
 LANDS = re.compile(r"^\W*(?:run\b[^,.;]*\b(?:tests?|suites?|checks?)|report|wrap)\b"
-                   r"|^\W*(?:tests?|verify|check|review)\b(?!\s*#?\d)(?=[^.;:]*\b(?:own|landed|merged|committed|"
+                   r"|^\W*(?:tests?|verify|check|review)\b(?!\s*#?\d)(?=[^.;:]*\b(?:own (?:work|changes?|commits?|diff|steps?)|landed|merged|committed|"
                    r"pushed|work|changes?|diff|results?|commits?|suites?|tests?|build|outcome|fix(?:es)?|it|them)\b)"
                    r"|\b(?:commit|merge|push|ship|release|land|fast-forward)\b", re.I)
 # checks or lands the session's own work. A check of anything else is work: "Check 1: nothing hidden in AppData" was
 # kept on a top session as landing work, though it was one of the checks its children were for
-ORCHESTRATES = re.compile(r"^\W*(?:start|run|kick\s*off|launch)\s+(?!writing|adding|implementing|making)"
+ORCHESTRATES = re.compile(r"^\W*(?:start|run|re-?run|kick\s*off|launch)\s+(?!writing|adding|implementing|making)"
                           r"(?:[\w'’-]+\s+){0,5}?(?:checks?|tests?|sessions?)\b", re.I)
 # starts a check, test or session, which is orchestration: "Start ezexe's-eye acceptance check" was advised as work
 MANAGES = re.compile(r"\b(?:un)?(?:archiv|relay|messag|start|stop|review|check|brief|spawn|ask|tell|nudg|queu|send|"
                      r"sent|pass|hand|forward)\w*\b"
-                     r"[^.;]*?\b(?:child(?:ren)?|(?:sub-?)?sessions?)\b"   # manages a child session: orchestration
+                     r"[^.;]*?\b(?:child(?:ren)?|(?:sub-?)?sessions?)\b(?!\s+(?:tree|page|record|files?|json|logs?|"
+                     r"state|ids?|store))"   # manages a child session: orchestration, not "check phi session tree"
                      # queues, sends, passes, hands or forwards something to a session named by its id, its quoted
                      # title or its role: "Queue issues #19-#24 to p4-phi fixer" was advised as work
                      r"|\b(?:queu|send|sent|pass|hand|forward)\w*\b[^.;]*?\b(?:to|for)\s+(?:the\s+)?"
                      r"(?:local_[\w-]+|[\"“'][^\"”']+[\"”']|(?:[\w-]+\s+){0,3}?(?:top|parent|orchestrator|fixer|"
                      r"tester|starter|owner of)\b)", re.I)
+# compiles, reports or tabulates the other steps' results: "Final six-row pass/fail table" was handed to a child
+TABULATES = re.compile(r"^\W*(?:final\s+)?(?:[\w/-]+\s+){0,3}?(?:pass/fail\s+)?(?:table|tally|summary|scorecard)\b"
+                       r"|\b(?:compil|tabulat|collat|summari[sz]|tall(?:y|ies))\w*\b[^.;]*\b(?:results?|outcomes?|"
+                       r"findings|steps?|checks?)\b", re.I)
 
 
 def judge(plan, cwd):
@@ -386,6 +400,8 @@ def judge(plan, cwd):
             kept.append((a, "starts a check, test or session, which is orchestration"))
         elif MANAGES.search(text):
             kept.append((a, "manages a child session"))
+        elif TABULATES.search(text):
+            kept.append((a, "compiles or reports the other steps' results"))
         elif shared:
             kept.append((a, f"shares {relay.show(shared[0][1], cwd)} with step {shared[0][0]}"))
         elif len(words(text)) < QUICK_WORDS:
@@ -454,6 +470,8 @@ def top_groups(plan, cwd):
             kept.append((st["addr"], "starts a check, test or session, which is orchestration"))
         elif MANAGES.search(text):
             kept.append((st["addr"], "manages a child session, which is orchestration"))
+        elif TABULATES.search(text):
+            kept.append((st["addr"], "compiles or reports the other steps' results"))
         elif wait:
             kept.append((st["addr"], f"waits on or relays work (\"{wait.group(0)}\")"))
         else:
@@ -706,21 +724,22 @@ def prose(text):
     return "\n".join(ln for ln in text.splitlines() if not DRAWN.search(ln))
 
 
-def matches(text, steps, shard, base, loose=True):
+def matches(text, steps, shard, base, loose=True, bear=None):
     """[(step, the sentences of `text` that bear on it)]: a step is matched by its address, by a path in the
     session's shard, or by sharing SHARE content words with a sentence. Code blocks and drawn trees are left out."""
     text = prose(text)
+    bear = bear or bears
     sents = [x.strip() for x in SENTENCE.split(str(text or "")) if x.strip()]
     named = set(ADDR_RE.findall(str(text or "")))
     out = []
     for st in steps:
         hit = []
         for x in sents:
-            if st["addr"] in set(ADDR_RE.findall(x)) or (loose and bears(x, st.get("content"))) or any(
+            if st["addr"] in set(ADDR_RE.findall(x)) or (loose and bear(x, st.get("content"))) or any(
                     relay.overlap(p, sh) for p in relay.paths_in(x, base) for sh in shard):
                 hit.append(x)
             for t in st.get("tasks") or []:
-                if loose and t.get("status") == "open" and bears(x, t.get("what")) and x not in hit:
+                if loose and t.get("status") == "open" and bear(x, t.get("what")) and x not in hit:
                     hit.append(x)
         if st["addr"] in named and not hit:
             hit = [x for x in sents if st["addr"] in x][:2]
@@ -770,7 +789,8 @@ def turn_relay(home, s, row, calls):
         os_ = relay._session(home, oid)
         if os_.get("stale"):
             continue
-        got = matches(text, open_steps(home, oid), relay.shard_of(os_), os_.get("cwd") or s.get("cwd") or "")
+        got = matches(text, open_steps(home, oid), relay.shard_of(os_), os_.get("cwd") or s.get("cwd") or "",
+                      bear=bears if way == "down" else bears_sibling)
         if not got:
             continue
         lines = [f"{st['addr']} \"{relay._short(st.get('content'), 100)}\": " +

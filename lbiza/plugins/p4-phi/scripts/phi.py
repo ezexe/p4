@@ -725,7 +725,8 @@ def background_text(home, s, own=False, slim=False):
     for n in chain:
         for r in load_notes(home, n["sessionId"]):
             kind = f"{r['kind']}; " if r.get("kind") else ""
-            notes.append(f"- {cut(clean(r.get('claim')), 300)} ({kind}source: {cut(clean(r.get('source')), 120)})")
+            room = relay.FINDINGS_CHARS + 2000 if clean(r.get("claim")).startswith("replaces:") else 300
+            notes.append(f"- {cut(clean(r.get('claim')), room)} ({kind}source: {cut(clean(r.get('source')), 120)})")
     notes = [] if slim else nd.by_overlap(notes, own_task)   # nearest the task first; a fresh child gets its slice
     if notes:
         body += ["Notes of the sessions above (already checked; do not work these out again):"] + notes[:12]
@@ -1183,7 +1184,7 @@ def nudge_step(home, s):
     st = plans.step_of(plan, plan.get("current") or "") if plan.get("steps") else None
     text = str((st or {}).get("content") or "")
     if (not st or st.get("status") == "completed" or plans.LANDS.search(text) or plans.ORCHESTRATES.search(text) or plans.WAITS.search(text)
-            or plans.MANAGES.search(text)):
+            or plans.MANAGES.search(text) or plans.TABULATES.search(text)):
         return None
     return None if nudge_key(st) in (s.get("nudged") or []) else st
 
@@ -1323,6 +1324,28 @@ def h_memory_gap(payload):
                        NEW_TOP_BRIEF + " " + new_top_first_act())
     RAN["memory_gap"] = bool(text)
     return text or None
+
+
+def h_self_archive(payload):
+    """PreToolUse on mcp__ccd_session_mgmt__archive_session: a child archiving itself may never reach its Stop
+    hook, so its turn and its last report are kept now, read from the transcript, and it is retired onto its parent
+    as at Stop (#30: such a child's report was lost)."""
+    me = Me(payload)
+    if not me.home or not me.id:
+        return None
+    s = load_session(me.home, me.id)
+    if not spawned_from(s):
+        return None
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    target = str(inp.get("session_id") or inp.get("sessionId") or inp.get("id") or "self")
+    if target not in ("self", me.id, me.cli, me.id.removeprefix("local_")):
+        return None
+    turn = last_turn(payload.get("transcript_path") or "")
+    texts = [t for t in (turn or {}).get("texts") or [] if isinstance(t, str) and t.strip()]
+    h_stop({**payload, "hook_event_name": "Stop", "last_assistant_message": texts[-1] if texts else "",
+            "_atArchive": True})
+    RAN["self_archive"] = True
+    return None
 
 
 def h_task(payload):
@@ -1486,7 +1509,7 @@ def h_user_prompt_submit(payload):
     s = load_session(me.home, s["sessionId"]) or s
     if step:
         parts.append(step)
-    pend = s.pop("staleChildren", None) or []
+    pend = (s.pop("staleChildren", None) or []) + relay.drain_archive(me.home, s["sessionId"])
     pend = [x for x in pend if isinstance(x, dict) and not archived_already(me.home, x.get("id"))]
     stale = relay.stale_text(pend)                # children to archive, said once; one archived by hand is not named
     s["staleTold"] = (list(s.get("staleTold") or []) + [x.get("id") for x in pend if isinstance(x, dict)])[-50:]
@@ -1538,6 +1561,11 @@ def h_stop(payload):
         return None
     row = turn_of(turn, report if isinstance(report, str) else "")
     row.update({"time": now(), "sessionId": s["sessionId"], "cliSessionId": me.cli})
+    earlier_ = load_turns(me.home, s["sessionId"])
+    if earlier_ and earlier_[-1].get("atArchive") and earlier_[-1].get("id") == row["id"]:
+        return None                                # #30: kept already when this session archived itself
+    if payload.get("_atArchive"):
+        row["atArchive"] = True
     said = said_of(turn, row["report"])
     if said:
         row["said"] = said
@@ -1946,8 +1974,10 @@ HOOKS = {"session-start": ("SessionStart", h_session_start),
          "store-guard": ("PreToolUse", h_store_guard),
          "plan": ("PostToolUse", h_plan),
          "memory-gap": ("PostToolUse", h_memory_gap),
+         "self-archive": ("PreToolUse", h_self_archive),
          "task": ("PostToolUse", h_task)}
-ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "store-guard", "plan", "task", "memory-gap")})
+ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "store-guard", "plan", "task", "memory-gap",
+                                                     "self-archive")})
 ROUTED["nudge"] = ("PreToolUse", h_nudge)
 ROUTED.update({"agent-launch": ("PreToolUse", h_agent_launch), "agent-pre": ("PreToolUse", h_agent_call),
                "agent-post": ("PostToolUse", h_agent_call), "agent-stop": ("SubagentStop", h_agent_stop)})
@@ -2048,6 +2078,9 @@ def tree_text(home):
     def walk(above, depth):
         for s in started.get(above, []):
             turns = load_turns(home, s["sessionId"])
+            if not turns and not clean(s.get("title")) and not clean(s.get("task")):
+                walk(s["sessionId"], depth)          # no record and no turns: an empty node, its children kept
+                continue
             state = ("done" if turns[-1].get("done") else "not shown done") if turns else "no turn yet"
             out.append(f"{'  ' * depth}- {title_of(s)} ({s['sessionId']}): {state}, "
                        f"{len(turns)} turn{'s' * (len(turns) != 1)}")

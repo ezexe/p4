@@ -556,6 +556,7 @@ def h_subagent_stop(payload):
 # --- lookups (PreToolUse and PostToolUse on every tool) --------------------------------------------------
 
 PHI_CHECK = {"mcp__ccd_session__start_session": "start-advice", "EnterWorktree": "branch-guard",
+             "mcp__ccd_session_mgmt__archive_session": "self-archive",
              "Bash": ("branch-guard", "store-guard", "nudge"),
              "PowerShell": ("branch-guard", "store-guard", "nudge"), "Edit": "nudge",
              "Write": "nudge", "MultiEdit": "nudge", "NotebookEdit": "nudge"}

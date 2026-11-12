@@ -26,6 +26,7 @@ tree is kept the same way (.docs/p4/recall-node.md, "The relay"):
 Every function takes the store's home and session ids as phi.py has them; phi.py calls them from its hooks.
 """
 
+import glob
 import fnmatch
 import hashlib
 import json
@@ -1063,7 +1064,11 @@ def _pend_archive(home, parent, sid, s, kind):
     the same minute each read-modify-wrote the parent's session.json, and the later write lost the earlier child,
     so the parent was never told to archive it (check 6, 2026-11-12)."""
     ppath = os.path.join(_dir(home, parent), "session.json")
-    with locked(ppath):
+    with locked(ppath) as lk:
+        if not lk.held:                           # never written unlocked: kept on a file of its own, read later
+            _write_json(os.path.join(_dir(home, parent), f"archive-pending-{_safe(sid)}.json"),
+                        {"id": sid, "title": _title(s), "kind": kind})
+            return
         pd = _read_json(ppath)
         if pd:
             pend = pd.setdefault("staleChildren", [])
@@ -1071,6 +1076,24 @@ def _pend_archive(home, parent, sid, s, kind):
             pend.append({"id": sid, "title": _title(s), "kind": kind})
             pd["staleTold"] = [x for x in pd.get("staleTold") or [] if x != sid]
             _write_json(ppath, pd)
+
+
+def _safe(sid):
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", str(sid or ""))[:80]
+
+
+def drain_archive(home, parent):
+    """The children a locked write could not name on the parent, from their own files; the files are removed."""
+    out = []
+    for p in glob.glob(os.path.join(_dir(home, parent), "archive-pending-*.json")):
+        d = _read_json(p)
+        if isinstance(d, dict) and d.get("id"):
+            out.append({"id": d["id"], "title": d.get("title") or d["id"], "kind": d.get("kind") or "done"})
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    return out
 
 
 DISPOSABLE = re.compile(r"\barchive(?:d)?\s+(?:it\s+|this session\s+)?when\s+(?:it(?:'s| is)\s+|you(?:'re| are)\s+)?"

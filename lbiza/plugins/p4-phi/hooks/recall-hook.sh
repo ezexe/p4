@@ -37,6 +37,7 @@ if [ "$name" = lookup-check ]; then
       [ "$nudge" = 1 ] || exit 0 ;;
     *'"tool_name":"WebFetch"'*|*'"tool_name": "WebFetch"'*|*'"tool_name":"WebSearch"'*|*'"tool_name": "WebSearch"'*) ;;
     *'"tool_name":"Bash"'*|*'"tool_name": "Bash"'*|*'"tool_name":"PowerShell"'*|*'"tool_name": "PowerShell"'*) ;;
+    *mcp__ccd_session_mgmt__archive_session*) ;;  # a child archiving itself: phi keeps its report first
     *mcp__ccd_session__start_session*|*'"tool_name":"EnterWorktree"'*|*'"tool_name": "EnterWorktree"'*) ;;
     *) exit 0 ;;
   esac
