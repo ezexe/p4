@@ -80,12 +80,37 @@ class Plugins(Base):
                       ("p4-phi", "local", "0.4.0", os.path.join(self.tmp, "other")),
                       ("p4-temportal", "user", "0.2.0", None)],
                      {"p4-recall": True, "p4-temportal": True, "p4-memory": False}, {"p4-phi": True})
+        other = os.path.join(self.tmp, "other")
         self.assertEqual(catchup.plugin_commands(self.project), [
             f"claude plugin marketplace update {M}",
             f"claude plugin uninstall p4-recall@{M} --scope user",
-            f"claude plugin update p4-phi@{M} --scope local",
+            f"claude plugin uninstall p4-phi@{M} --scope local",
+            f"claude plugin uninstall p4-phi@{M} --scope local (in {other})",
             f"claude plugin install p4-phi@{M} --scope user"],
-            "p4-recall was on for the whole user: p4-phi in this project alone would leave the others without recall")
+            "p4-recall was on for the whole user: p4-phi moves to the user, each project's own install removed "
+            "first in its project, so it is never installed twice (C1), and nothing is updated that is removed")
+
+    def test_the_owners_config_retires_disabled_plugins_too(self):
+        """The tester's isolated copy of the owner's config (C1, C2): p4-memory and p4-scratchpad installed and
+        disabled, p4-recall and p4-temportal for the user, p4-phi in two projects."""
+        ap = os.path.join(self.tmp, "AudioPlugin")
+        self.install([("p4-memory", "user", "0.1.10", None), ("p4-scratchpad", "user", "0.1.12", None),
+                      ("p4-recall", "user", "0.9.0", None), ("p4-temportal", "user", "0.2.0", None),
+                      ("p4-phi", "local", "0.5.0", self.project), ("p4-phi", "local", "0.5.0", ap)],
+                     {"p4-memory": False, "p4-scratchpad": False, "p4-recall": True, "p4-temportal": True},
+                     {"p4-phi": True})
+        cmds = catchup.plugin_commands(self.project)
+        self.assertEqual(cmds, [
+            f"claude plugin marketplace update {M}",
+            f"claude plugin uninstall p4-recall@{M} --scope user",
+            f"claude plugin uninstall p4-memory@{M} --scope user",
+            f"claude plugin uninstall p4-scratchpad@{M} --scope user",
+            f"claude plugin uninstall p4-phi@{M} --scope local",
+            f"claude plugin uninstall p4-phi@{M} --scope local (in {ap})",
+            f"claude plugin install p4-phi@{M} --scope user"])
+        self.assertEqual(sum(c.startswith(f"claude plugin install p4-phi@{M}") for c in cmds), 1)
+        line = catchup.run(self.project, os.path.join(self.project, ".claude", "p4"), sync=False)
+        self.assertIn(f"`claude plugin uninstall p4-phi@{M} --scope local` in {ap}", line)
 
     def test_a_retired_plugin_whose_successor_is_missing_gets_an_install(self):
         self.install([("p4-memory", "user", "0.1.10", None), ("p4-scratchpad", "user", "0.1.12", None)],

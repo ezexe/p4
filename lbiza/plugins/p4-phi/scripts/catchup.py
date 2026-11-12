@@ -117,30 +117,69 @@ def market_versions():
     return out
 
 
+def every_install():
+    """[(name, scope, version, projectPath)] of every p4 install on this machine, any project."""
+    data = read_json(os.path.join(config_dir(), "plugins", "installed_plugins.json")).get("plugins") or {}
+    out = []
+    for key, rows in data.items():
+        name, _, market = str(key).partition("@")
+        if market != MARKET:
+            continue
+        for r in rows if isinstance(rows, list) else [rows]:
+            if isinstance(r, dict):
+                out.append((name, r.get("scope") or "user", r.get("version") or "", r.get("projectPath") or ""))
+    return out
+
+
 def plugin_commands(project):
-    """The `claude plugin` commands that bring this project's p4 plugins up to date, in order; [] when none."""
+    """The `claude plugin` commands that bring the p4 plugins up to date, in order; [] when none. A command that
+    has to run inside another project, to remove an install scoped to it, ends with `(in <project>)`."""
     on = enabled(project)
     have = installs(project)
     offer = market_versions()
-    out, need = [], {}
+    every = every_install()
+    out, need, seen = [], {}, set()
+
+    def retire(name, scope, where=""):
+        key = (name, scope, os.path.normcase(where))
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(f"claude plugin uninstall {name}@{MARKET} --scope {scope}" + (f" (in {where})" if where else ""))
+        if scope == "user" or need.get(RETIRED[name]) != "user":
+            need[RETIRED[name]] = scope
+    # retired only once the marketplace stops offering it: a machine whose marketplace still lists p4-recall has no
+    # p4-phi that carries recall yet, and uninstalling it there would leave no recall at all. A retired plugin
+    # installed but disabled is listed too: its install record and cache folders stay until it is uninstalled.
     for (name, scope), state in sorted(on.items()):
-        # retired only once the marketplace stops offering it: a machine whose marketplace still lists p4-recall
-        # has no p4-phi that carries recall yet, and uninstalling it there would leave no recall at all
         if state and name in RETIRED and name not in offer:
-            out.append(f"claude plugin uninstall {name}@{MARKET} --scope {scope}")
-            need.setdefault(RETIRED[name], scope)
-    updates = []
+            retire(name, scope)
+    for name, scope, _, where in sorted(every):
+        if name in RETIRED and name not in offer:
+            retire(name, scope, "" if scope == "user" or same_path(where, project) else where)
+    moves, updates = [], []
     for name in CURRENT:
         rows = have.get(name, [])
+        # the successor goes where the retired plugin was: p4-recall for the whole user and p4-phi in two projects
+        # would leave every other project without recall. Each project's own install is removed first, in that
+        # project, so the plugin is never installed twice where both scopes reach (the tester's C1).
+        to_user = need.get(name) == "user" and name in offer and "user" not in {sc for sc, _, _ in rows}
+        if to_user:
+            for n, scope, _, where in sorted(every, key=lambda r: (not same_path(r[3], project), r[3], r[1])):
+                if n == name and scope in ("local", "project"):
+                    here = same_path(where, project)
+                    moves.append(f"claude plugin uninstall {name}@{MARKET} --scope {scope}"
+                                 + ("" if here else f" (in {where})"))
+            moves.append(f"claude plugin install {name}@{MARKET} --scope user")
+        elif name in need and name in offer and need[name] not in {sc for sc, _, _ in rows}:
+            moves.append(f"claude plugin install {name}@{MARKET} --scope {need[name]}")
         for scope, v, _ in rows:
+            if to_user and scope in ("local", "project"):
+                continue                            # removed above: no update for it
             if offer.get(name) and version(v) < version(offer[name]):
                 updates.append(f"claude plugin update {name}@{MARKET} --scope {scope}")
-        # the successor goes where the retired plugin was: p4-recall enabled for the whole user and p4-phi installed
-        # in two projects leaves every other project without recall unless p4-phi is installed for the user too
-        if name in need and name in offer and need[name] not in {sc for sc, _, _ in rows}:
-            updates.append(f"claude plugin install {name}@{MARKET} --scope {need[name]}")
-    if updates:
-        out = [f"claude plugin marketplace update {MARKET}"] + out + updates
+    if moves or updates:
+        out = [f"claude plugin marketplace update {MARKET}"] + out + moves + updates
     return out
 
 
@@ -253,7 +292,11 @@ def run(project, p4, sync=True):
     cmds = plugin_commands(project)
     n, size = old_cache()
     if cmds:
-        parts.append("plugins behind; run: " + " ; ".join(f"`{c}`" for c in cmds))
+        shown = []
+        for c in cmds:
+            cmd, _, where = c.partition(" (in ")
+            shown.append(f"`{cmd}`" + (f" in {where.rstrip(')')}" if where else ""))
+        parts.append("plugins behind; run, in this order: " + " ; ".join(shown))
     if n:
         parts.append(f"{n} old version folder(s) under {os.path.join(config_dir(), 'plugins', 'cache', MARKET)} "
                      f"hold {size_text(size)}, used by no install; nothing was deleted")
