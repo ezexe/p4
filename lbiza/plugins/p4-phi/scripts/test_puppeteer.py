@@ -33,7 +33,7 @@ sys.path.insert(0, HERE)
 import phi  # noqa: E402
 import puppeteer  # noqa: E402
 import starts  # noqa: E402
-from test_phi import CLI, KID, KID2, GRAND, TASK, TOP, Tree, context, jload, read, write  # noqa: E402
+from test_phi import CLI, KID, KID2, GRAND, TASK, TOP, Tree, context, jload, read, transcript, write  # noqa: E402
 from test_issues import FAKE_GH, GhTree  # noqa: E402
 
 TOP2 = "local_top00002"
@@ -351,6 +351,113 @@ class Parallel(Base):
         self.assertEqual(ctx.count("Which reading of"), 1, "one question")
         r = t.cli(TOP, "merge", gid, "--result", "straight writes: losing a row is not acceptable")
         self.assertIn("converged on \"straight writes", r.stdout)
+
+    def group(self, gid):
+        return jload(os.path.join(self.t.dir(TOP), "readings", gid + ".json"))
+
+    def archived_stop(self, kid):
+        """A reading that archives itself with an empty report: its turn is kept as it goes."""
+        path = transcript(os.path.join(self.t.tmp, kid + "arch.jsonl"), "reading", (), "", "arch")
+        r = self.t.hook("stop", kid, {"hook_event_name": "Stop", "transcript_path": path,
+                                      "last_assistant_message": "", "_atArchive": True})
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_a_result_given_through_done_is_read(self):
+        """#44: both readings of the live proof answered with `phi.py done` and an empty report."""
+        t, gid = self.t, self.start()
+        self.assertEqual(t.cli(KID, "done", "buffering was tried and it loses rows on a crash").returncode, 0)
+        t.stop(KID, "reading 1", report="")
+        self.assertEqual(self.group(gid)["state"], "open")
+        self.assertEqual(t.cli(KID2, "done", "straight writes were tried and never lose a row").returncode, 0)
+        t.stop(KID2, "reading 2", report="")
+        g = self.group(gid)
+        self.assertEqual(g["state"], "forked", "the merge took each reading's done text")
+        self.assertEqual(g["readings"][0]["result"], "buffering was tried and it loses rows on a crash")
+        self.assertIn("put one question to ezexe", context(t.say(TOP, "And?")))
+
+    def test_a_result_line_wins_over_the_done_text(self):
+        t, gid = self.t, self.start()
+        t.cli(KID, "done", "ran the buffer test and it passed")
+        t.stop(KID, "reading 1", report="Result: write each row straight to the store, a crash loses none")
+        t.stop(KID2, "reading 2", report="Result: write each row straight to the store, a crash loses none")
+        g = self.group(gid)
+        self.assertEqual(g["state"], "collapsed")
+        self.assertIn("straight to the store", g["result"])
+
+    def test_a_reading_archived_with_no_result_is_lost_and_the_group_closes(self):
+        """#44: an archived reading with no result left its group open for ever."""
+        t, gid = self.t, self.start()
+        self.archived_stop(KID)
+        self.assertEqual(self.group(gid)["state"], "open", "the other reading is still awaited")
+        t.stop(KID2, "reading 2", report="Result: straight writes never lose a row")
+        g = self.group(gid)
+        self.assertEqual(g["state"], "collapsed", "it closes on what the other gave")
+        self.assertEqual(g["lost"], [1])
+        self.assertIn("reading 1 was archived with no result and is lost", self.ledger()[0])
+        ctx = context(t.say(TOP, "And?"))
+        self.assertIn("reading 1 was archived with no result and is lost", ctx)
+        self.assertIn("straight writes never lose a row", ctx)
+
+    def test_every_reading_lost_closes_the_group_and_says_so(self):
+        t, gid = self.t, self.start()
+        for kid in (KID, KID2):
+            s = t.session(kid)
+            s["archived"] = "2026-11-13 00:02"
+            write(os.path.join(t.dir(kid), "session.json"), json.dumps(s))
+        self.assertEqual(t.cli(TOP, "merge", gid).returncode, 0)
+        g = self.group(gid)
+        self.assertEqual(g["state"], "lost")
+        self.assertIn("closed with no result: readings 1, 2 were archived with no result and are lost", self.ledger()[0])
+
+    def test_a_rerun_session_replaces_the_earlier_child(self):
+        """#44: the second pair of sessions carried the same reading line and the group still named the first."""
+        t, gid = self.t, self.start()
+        self.archived_stop(KID)
+        self.archived_stop(KID2)
+        self.assertEqual(self.group(gid)["state"], "lost")
+        for kid in ("local_kid00003", "local_kid00004"):
+            CLI.setdefault(kid, kid.replace("local_kid", "ffff") + "-0000-4000-8000-000000000000")
+            t.record(kid, TOP, title="a rerun")
+        for kid, old in zip(("local_kid00003", "local_kid00004"), (KID, KID2)):
+            brief = jload(os.path.join(t.dir(TOP), "drafts", t.session(old)["draft"] + ".json"))["brief"]
+            t.say(kid, handed(brief))
+        g = self.group(gid)
+        self.assertEqual([r["child"] for r in g["readings"]], ["local_kid00003", "local_kid00004"])
+        self.assertEqual([r["earlier"] for r in g["readings"]], [[KID], [KID2]])
+        self.assertEqual(g["state"], "open", "open again for the rerun")
+        t.stop("local_kid00003", "reading 1", report="Result: straight writes never lose a row")
+        t.stop("local_kid00004", "reading 2", report="Result: straight writes never lose a row.")
+        self.assertEqual(self.group(gid)["state"], "collapsed")
+
+    def test_a_rerun_the_group_never_heard_of_is_found_at_the_merge(self):
+        """#44: grp-2e785dbf03 as it stands: the group names the first pair, the results are on the second."""
+        t, gid = self.t, self.start()
+        self.archived_stop(KID)
+        g = self.group(gid)
+        for k, kid in enumerate(("local_kid00003", "local_kid00004"), 1):
+            write(os.path.join(t.dir(kid), "session.json"), json.dumps({
+                "sessionId": kid, "createdAt": "2026-11-13 00:0%d" % (5 + k), "spawnedFrom": {"sessionId": TOP},
+                "archived": "2026-11-13 00:07", "reading": {"group": gid, "k": k, "n": 2, "parent": TOP}}))
+            write(os.path.join(t.dir(kid), "turns.jsonl"), json.dumps({
+                "id": "t1", "report": "", "atArchive": True,
+                "done": "listed the folder: 61 sessions" if k == 1 else "phi.py tree printed 10 sessions"}) + "\n")
+        self.assertEqual(t.cli(TOP, "merge", gid).returncode, 0)
+        g = self.group(gid)
+        self.assertEqual(g["state"], "forked")
+        self.assertEqual([r["child"] for r in g["readings"]], ["local_kid00003", "local_kid00004"])
+        self.assertEqual(g["readings"][0]["result"], "listed the folder: 61 sessions")
+
+    def test_a_readings_title_ends_at_a_clause(self):
+        """#44: "Reading 2: count only the sessions that the command" was cut at a word count."""
+        t = self.t
+        t.say(TOP, TASK)
+        r = t.cli(TOP, "readings",
+                  "count only the sessions that the command python -I phi.py tree prints, which leaves archived out",
+                  "count every session folder under E:/projects/p4-phi/.claude/p4/phi/sessions, archived ones included",
+                  "--words", "How many sessions does the store hold right now?")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('"title": "Reading 1: count only the sessions"', r.stdout)
+        self.assertIn('"title": "Reading 2: count every session folder"', r.stdout)
 
     def test_the_session_can_name_the_readings_itself_and_the_caps_still_hold(self):
         t = self.t

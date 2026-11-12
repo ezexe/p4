@@ -144,6 +144,32 @@ class Loop(unittest.TestCase):
         self.assertNotIn("issue", self.t.session(GRAND), "a repo with no GitHub remote gets none")
         self.assertEqual(len([c for c in self.calls() if c[:2] == ["issue", "create"]]), 1)
 
+    def test_a_reading_gets_no_issue_record(self):
+        """#44: reading 2 of the live proof got ezexe/p4#40 and #42; a reading explores and commits nothing."""
+        brief = (f"# Reading 2: count the rows\n\nThis session takes one reading of those words, reading 2 of 2: fix "
+                 f"the count in {self.work}/lib/x.py\nA reading explores: change no tracked file and commit nothing, "
+                 f"since the readings beside this one share the checkout.\nArchive when done.\n\n"
+                 f"phi draft drf-0123456789 for {TOP}.\nphi reading grp-0123456789 2 of 2 for {TOP}.")
+        ctx = context(self.t.say(A, brief))
+        self.assertNotIn("#7", ctx)
+        self.assertNotIn("issue", self.t.session(A))
+        self.plan(A, items("Fix the count in lib/x.py", "Report the result"))
+        self.assertNotIn("issue", self.t.session(A), "nor at its plan")
+        self.assertFalse([c for c in self.calls() if c[:2] == ["issue", "create"]])
+        self.assertFalse(issues.writing("Fix x.py. A reading explores: change no tracked file and commit nothing."))
+
+    def test_an_issue_title_ends_at_a_clause_or_is_the_briefs_title_line(self):
+        """#44, #45: titles were cut with dots in the middle of a sentence."""
+        self.t.record(A, TOP, title="Fix the off-by-one in the exporter that drops the last row of the ports table when the ...")
+        context(self.t.say(A, f"Fix the off-by-one in the exporter that drops the last row of the ports table when the "
+                              f"table closes early, in {self.work}/lib/x.py, and commit it. Archive when done."))
+        made = [c for c in self.calls() if c[:2] == ["issue", "create"]]
+        title = made[0][made[0].index("--title") + 1]
+        self.assertEqual(title, "Fix the off-by-one in the exporter that drops the last row of the ports table")
+        self.assertEqual(issues.issue_title("a cut session title ...", "# The x fix, whole\n\nFix lib/x.py."),
+                         "The x fix, whole", "the brief's title line")
+        self.assertNotIn("...", issues.issue_title("", "Fix " + "the very long thing " * 12))
+
     def test_an_issue_the_brief_names_is_taken_not_filed_again(self):
         ctx = context(self.t.say(A, f"Build ezexe/demo issue #3: fix {self.work}/lib/x.py. Archive when done."))
         self.assertIn("ezexe/demo#3", ctx)

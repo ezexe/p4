@@ -685,6 +685,42 @@ def _short(s, n):
     return s if len(s) <= n else s[:n - 4] + " ..."
 
 
+DANGLING = frozenset("""a an the that which who whose of to for in on at by with from under over into onto and or but as
+than its their this these those is are was were be when where while if so not no only every each because since unless
+until then""".split())
+SUBORDINATE = frozenset("that which who whose when where while because since if unless until so".split())
+SENTENCE_END = re.compile(r"[.!?](?=\s)")
+CLAUSE_END = re.compile(r"[,;:](?=\s)|\s[-–—]\s")
+
+
+def clause_cut(text, n):
+    """A title's worth of `text` in at most `n` characters, ended at a sentence or a clause and never mid-phrase
+    (#44, #45): whole when it fits; else up to the last sentence end in the room, else the last clause mark, else
+    the words before the last subordinate clause that the room cuts through, with no dangling word left at the
+    end. Nothing marks that it was cut: what is left reads as a title."""
+    s = " ".join(str(text or "").split())
+    if len(s) <= n:
+        return s
+    head = s[:n + 1]
+    for marks in (SENTENCE_END, CLAUSE_END):
+        ends = [m.start() for m in marks.finditer(head) if m.start() >= n // 3]
+        if ends:
+            return head[:ends[-1]].rstrip(" ,;:.-–—")
+    return whole_phrase(head[:n].rsplit(" ", 1)[0] if " " in head[:n] else head[:n])
+
+
+def whole_phrase(cut):
+    """Words that were cut off mid-sentence, ended where a phrase ends: a subordinate clause the cut ran through is
+    dropped only when it is left with no more than its opening words, and no dangling word stays at the end."""
+    kept = " ".join(str(cut or "").split()).split(" ")
+    subs = [k for k, w in enumerate(kept) if w.lower().strip(",;:.") in SUBORDINATE and k >= 2]
+    if subs and len(kept) - subs[-1] <= 3:
+        kept = kept[:subs[-1]]
+    while len(kept) > 1 and kept[-1].lower().strip(",;:.") in DANGLING:
+        kept.pop()
+    return " ".join(kept).rstrip(" ,;:.-–—")
+
+
 # --- routing ---------------------------------------------------------------------------------------------------------
 
 def names_nothing(p, home, base=""):

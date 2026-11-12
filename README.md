@@ -43,6 +43,7 @@ prompty → prompter ─┼─ pioneer_b ─┼─ puppeteer
 In p4-phi's session tree this is an under-determined message, where one draft would have to guess past a real ambiguity.
 Prompter drafts each distinct reading, and a pioneer starts each as a sibling child of the orchestrator.
 Each child ends its report with a `Result:` line, and the puppeteer merges them in the ledger.
+A reading that shows its result with `phi.py done` is merged from that text, and one archived with no result is marked lost so its group still closes.
 Readings that converge collapse to one result, and only a fork that survives the merge reaches ezexe, as one question with options and a default.
 
 ## Meta-Prompting

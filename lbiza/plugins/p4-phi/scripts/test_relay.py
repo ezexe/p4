@@ -95,6 +95,18 @@ class Paths(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_a_title_is_cut_at_a_clause_never_mid_phrase(self):
+        """#44: "count only the sessions that the command" and "count every session folder under"."""
+        self.assertEqual(relay.clause_cut("count only the sessions that the command python -I phi.py tree prints", 46),
+                         "count only the sessions")
+        self.assertEqual(relay.clause_cut("count every session folder under E:/projects/p4-phi/.claude/p4/phi", 46),
+                         "count every session folder")
+        self.assertEqual(relay.clause_cut("Cap the hook text. Then hand each note to a session only once, by page", 40),
+                         "Cap the hook text")
+        self.assertEqual(relay.clause_cut("the issue loop files on the plugin repo, keeps whole titles, and more", 60),
+                         "the issue loop files on the plugin repo, keeps whole titles")
+        self.assertEqual(relay.clause_cut("a short title", 46), "a short title")
+
     def test_git_bash_and_wsl_paths_are_absolute(self):
         """P5: /e/x as Git Bash writes it is E:/x, not a path under the base."""
         self.assertEqual(relay.paths_in("cat /e/projects/p4-phi/x/a1.txt", "E:/projects/p4-phi"),

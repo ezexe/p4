@@ -41,7 +41,8 @@ WRITES = re.compile(r"\b(?:build|fix|add|implement|chang|edit|writ|refactor|rena
                     r"migrat|commit|patch|rewrit|wire|seed|ship|land)\w*\b", re.I)
 READS = re.compile(r"^\W*(?:check|audit|verify|review|question|relay|ask|answer|report|investigate|look|read|find|"
                    r"explain|measure|compare|list|show|summari[sz]e|confirm|survey)\b", re.I)
-READ_ONLY = re.compile(r"\bread[- ]only\b|\b(?:do not|don't|never|no)\s+(?:edit|chang|commit|writ)\w*", re.I)
+READ_ONLY = re.compile(r"\bread[- ]only\b|\b(?:do not|don't|never|no)\s+(?:edit|chang|commit|writ)\w*|"
+                       r"\b(?:chang|edit|commit|writ)\w*\s+(?:nothing|no\s+(?:tracked\s+)?files?)\b", re.I)
 FILE_RE = re.compile(r"(?<![\w/\\.-])[\w-]+\.(?:py|js|ts|tsx|jsx|mjs|cjs|json|md|sh|ps1|toml|ya?ml|go|rs|c|h|cpp|"
                      r"hpp|cs|java|kt|rb|php|swift|sql|html|css|txt|cfg|ini)\b")
 GITHUB = re.compile(r"github\.com[:/]+([\w.-]+)/([\w.-]+?)(?:\.git)?/*$", re.I)
@@ -162,6 +163,18 @@ def link_of(rec):
     return ""
 
 
+def issue_title(title, brief):
+    """An issue's title: the brief's own title line when it has one, else the session's title, else the brief's
+    first sentence; cut at a clause or a sentence end, never mid-phrase and never with dots (#44, #45)."""
+    first = str(brief or "").strip().split("\n", 1)[0]
+    head = re.sub(r"^[\s#*>]+", "", first) if re.match(r"\s*#+\s", first) else ""
+    line = head or re.sub(r"^[\s#*>]+", "", str(title or "").strip().split("\n", 1)[0]) or re.sub(r"^[\s#*>]+", "", first)
+    whole = re.sub(r"\s*(?:\.\.\.|\u2026)\s*$", "", line)
+    if whole != line:
+        whole = relay.whole_phrase(whole)          # a title the app cut already: its dangling end goes too
+    return relay.clause_cut(whole, 100)
+
+
 def ensure(home, s, text, base, where, rec=None):
     """At a child's first message (`where` "brief") or its first plan ("plan"): its issue, filed or taken from its
     brief, kept in s["issue"] (s is changed, the caller saves it). Returns the line for the child, '' for none."""
@@ -170,6 +183,8 @@ def ensure(home, s, text, base, where, rec=None):
         return ""
     if s.get("issue"):
         return ""
+    if isinstance(s.get("reading"), dict):
+        return ""                                  # #44: a reading explores and commits nothing: no issue record
     looked = list(s.get("issueLooked") or [])
     if where in looked:
         return ""
@@ -189,7 +204,7 @@ def ensure(home, s, text, base, where, rec=None):
         return ""                                  # its purpose is filed already, in issues now closed: none again
     if not n:
         plan = plan_lines(home, s["sessionId"])
-        title = relay._short(re.sub(r"^[\s#*>]+", "", (s.get("title") or whole).strip().split("\n", 1)[0]), 100)
+        title = issue_title(s.get("title"), whole)
         link = link_of(rec)
         body = (f"Filed by p4-phi for the child session `{s['sessionId']}`, started by `{parent}`."
                 + (f" Session: {link}" if link else "") + "\n\n### Brief\n\n" + whole[:BODY_CHARS]

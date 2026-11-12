@@ -830,9 +830,7 @@ def load_draft(home, sid, did):
 def topic_of(req):
     first = re.split(r"(?<=[.!?])\s+|\n+", " ".join(str(req).split()), maxsplit=1)[0]
     first = re.sub(r"^\W*(?:(?:please|now that|now|also|and|so|ok|okay|can you|could you)\s+)+", "", first, flags=re.I)
-    if len(first) > 58:
-        first = first[:58].rsplit(" ", 1)[0]
-    return first.strip(" .,;:")
+    return relay.clause_cut(first, 58).strip(" .,;:")
 
 
 def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
@@ -844,7 +842,7 @@ def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
     route = read["routes"][0] if read["routes"] else None
     title = topic_of(reading["title"] if reading else req)
     if reading:
-        title = f"Reading {reading['k']}: " + (title if len(title) <= 46 else title[:46].rsplit(" ", 1)[0])
+        title = f"Reading {reading['k']}: " + relay.clause_cut(reading["title"], 46).strip(" .,;:")
     repo = next(iter(issues.repos_named(req, base)), ("", ""))
     here = relay.repo_of(base) if base else ""
     slug = repo[1] or (issues.github_of(here) if here else "")
@@ -1046,19 +1044,59 @@ def arrived(home, s, prompt):
         s["reading"] = {"group": m.group(1), "k": int(m.group(2)), "n": int(m.group(3)), "parent": m.group(4)}
         g = relay._read_json(os.path.join(groups_dir(home, m.group(4)), f"{m.group(1)}.json"))
         for r in g.get("readings") or []:
-            if r.get("k") == int(m.group(2)) and not r.get("child"):
-                r["child"] = s["sessionId"]
+            if r.get("k") == int(m.group(2)) and r.get("child") != s["sessionId"]:
+                rebind(g, r, s["sessionId"])       # #44: a rerun's session replaces the earlier child
                 save_group(home, g)
     return bool(s.get("draft") or s.get("reading"))
 
 
+def rebind(g, r, sid):
+    """A reading given to the session that carries its line now; the child before it is kept as `earlier`. A group
+    that closed with this reading lost is open again."""
+    if r.get("child"):
+        r["earlier"] = (list(r.get("earlier") or []) + [r["child"]])[-8:]
+    r["child"] = sid
+    was_lost = bool(r.pop("lost", None))
+    r.pop("result", None)
+    if g.get("state") == "lost" or (was_lost and g.get("state") != "open"):
+        for k in ("result", "default", "question", "mergedAt", "lost"):
+            g.pop(k, None)
+        g["state"] = "open"
+
+
+def carriers(home, g, r):
+    """The sessions that carry a reading's line, newest last: a rerun started before #44 never reached its group
+    file, so the sessions' own `reading` is read as well as the group's child."""
+    out = []
+    for sid, s in relay._sessions(home).items():
+        rd = s.get("reading") if isinstance(s.get("reading"), dict) else {}
+        if rd.get("group") == g["id"] and rd.get("k") == r.get("k") and relay._parent(s) == g.get("parent"):
+            out.append((str(s.get("createdAt") or ""), sid))
+    return [sid for _, sid in sorted(out)]
+
+
 def result_of(home, sid):
-    """The `Result:` line of a reading's last finished turn, '' while it has none."""
-    for t in reversed(_phi().load_turns(home, sid)):
+    """A reading's result: the `Result:` line of its last finished turn that has one, or failing that what it showed
+    with `phi.py done` (#44: readings that answered through `done` never closed their group). '' while it has
+    neither."""
+    turns = _phi().load_turns(home, sid)
+    for t in reversed(turns):
         got = RESULT_RE.findall(f"{t.get('said') or ''}\n{t.get('report') or ''}")
         if got:
             return " ".join(got[-1].split())
+    for t in reversed(turns):
+        if str(t.get("done") or "").strip():
+            return " ".join(str(t["done"]).split())
     return ""
+
+
+def lost(home, sid):
+    """True when a reading's session is archived, or kept its last turn as it archived itself, with no result."""
+    if not sid or result_of(home, sid):
+        return False
+    s = relay._session(home, sid)
+    turns = _phi().load_turns(home, sid)
+    return bool(relay.gone(home, s) or (turns and turns[-1].get("atArchive")))
 
 
 def same_result(a, b):
@@ -1073,41 +1111,79 @@ def merge(home, g):
     result; a fork becomes one question with options and a default -> True when its state changed."""
     if g.get("state") != "open":
         return False
-    got = []
+    got, gone, changed = [], [], False
     for r in g["readings"]:
+        held = [x for x in carriers(home, g, r) if x != r.get("child")]
         res = result_of(home, r["child"]) if r.get("child") else ""
-        if not res:
+        if not res and held:                        # a rerun the group file never heard of: the newest with a result
+            pick = next((x for x in reversed(held) if result_of(home, x)), "")
+            if pick or (r.get("child") and lost(home, r["child"]) and not lost(home, held[-1])):
+                rebind(g, r, pick or held[-1])
+                changed = True
+                res = result_of(home, r["child"])
+        if res:
+            r["result"] = res
+            r.pop("lost", None)
+            got.append((r, res))
+        elif r.get("child") and lost(home, r["child"]):
+            r["lost"] = True                        # archived with no result: the group closes without it
+            gone.append(r)
+        else:
+            if changed:
+                save_group(home, g)
             return False
-        r["result"] = res
-        got.append(res)
-    if all(same_result(got[0], x) for x in got[1:]):
-        g.update(state="collapsed", result=got[0], mergedAt=now())
+    if gone:
+        g["lost"] = [r["k"] for r in gone]
+    if not got:
+        g.update(state="lost", mergedAt=now())
+    elif all(same_result(got[0][1], x) for _, x in got[1:]):
+        g.update(state="collapsed", result=got[0][1], mergedAt=now())
     else:
-        shown = [k for k, r in enumerate(g["readings"]) if (_phi().load_turns(home, r["child"]) or [{}])[-1].get("done")]
-        g.update(state="forked", default=g["readings"][shown[0] if shown else 0]["k"], mergedAt=now(),
+        shown = [r["k"] for r, _ in got if (_phi().load_turns(home, r["child"]) or [{}])[-1].get("done")]
+        g.update(state="forked", default=shown[0] if shown else got[0][0]["k"], mergedAt=now(),
                  question=f"Which reading of \"{_short(g['words'], 160)}\" is meant?")
     save_group(home, g)
     return True
 
 
+def lost_words(g):
+    ks = [str(k) for k in g.get("lost") or []]
+    if not ks:
+        return ""
+    return (f"reading {ks[0]} was" if len(ks) == 1 else f"readings {', '.join(ks)} were") + \
+        " archived with no result and " + ("is" if len(ks) == 1 else "are") + " lost"
+
+
 def group_line(g):
+    gone = f"; {lost_words(g)}" if g.get("lost") else ""
+    have = [r for r in g["readings"] if not r.get("lost")]
+    if g.get("state") == "lost":
+        return f"closed with no result: {lost_words(g)}"
     if g.get("state") == "collapsed":
-        return f"{len(g['readings'])} readings converged on \"{_short(g.get('result'), 160)}\"; their rows are closed"
+        return (f"{len(have)} reading{'s' if len(have) != 1 else ''} converged on "
+                f"\"{_short(g.get('result'), 160)}\"; their rows are closed{gone}")
     if g.get("state") == "forked":
         return (f"the readings fork, so one question goes to ezexe, default reading {g.get('default')}: "
                 + "; ".join(f"reading {r['k']} \"{_short(r['text'], 60)}\" came to \"{_short(r.get('result'), 80)}\""
-                            for r in g["readings"]))
+                            for r in have) + gone)
     started = sum(1 for r in g["readings"] if r.get("child"))
     return f"open, {started} of {len(g['readings'])} readings started, results awaited"
 
 
 def merge_text(g):
+    gone = f" Of its {len(g['readings'])} readings, {lost_words(g)}." if g.get("lost") else ""
+    have = [r for r in g["readings"] if not r.get("lost")]
+    if g.get("state") == "lost":
+        return (f"phi (p4-phi) puppeteer: the readings of \"{_short(g['words'], 120)}\" gave no result:{gone} The "
+                f"group {g['id']} is closed. Start the readings again if the answer is still wanted; a new session "
+                f"carrying a reading's line takes that reading and opens the group again.")
     if g.get("state") == "collapsed":
-        return (f"phi (p4-phi) puppeteer: the {len(g['readings'])} readings of \"{_short(g['words'], 120)}\" "
-                f"converged on one result: \"{_short(g.get('result'), 300)}\". They collapse to it: carry it on as "
-                f"the answer, put no question to ezexe, and archive the reading sessions.")
+        return (f"phi (p4-phi) puppeteer: the {len(have)} reading{'s' if len(have) != 1 else ''} of "
+                f"\"{_short(g['words'], 120)}\" that gave a result "
+                f"converged on one result: \"{_short(g.get('result'), 300)}\".{gone} They collapse to it: carry it on "
+                f"as the answer, put no question to ezexe, and archive the reading sessions.")
     opts = "; ".join(f"reading {r['k']} \"{_short(r['text'], 80)}\", which came to \"{_short(r.get('result'), 140)}\""
-                     for r in g["readings"])
+                     for r in have) + ("." + gone if gone else "")
     return (f"phi (p4-phi) puppeteer: the readings of \"{_short(g['words'], 120)}\" fork after the merge. If the "
             f"chain can settle it, settle it and say why in one line, then `{_phi().commands()} merge {g['id']} "
             f"--result \"<the result>\"`. Otherwise put one question to ezexe, \"{g.get('question')}\", with these "
