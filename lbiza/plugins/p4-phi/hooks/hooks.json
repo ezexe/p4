@@ -131,6 +131,16 @@
         ]
       },
       {
+        "matcher": "Bash|Monitor|Agent|Workflow",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" task",
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "matcher": ".*",
         "hooks": [
           {

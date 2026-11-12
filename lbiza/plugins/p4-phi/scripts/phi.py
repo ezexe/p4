@@ -898,9 +898,25 @@ def h_plan(payload):
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     s = ensure_session(me.home, me.id, me.rec, me.cli)
     save_session(me.home, s)
-    text = plans.record(me.home, s, inp)
+    text = plans.record(me.home, s, inp, payload.get("transcript_path") or "")
     RAN["plan"] = len(text)
     return text or None
+
+
+def h_task(payload):
+    """PostToolUse on Bash, Monitor, Agent and Workflow: a background task recorded under the step in progress,
+    with the heads, paths and words it runs against (plans.register). Prints nothing."""
+    me = Me(payload)
+    if not me.home or not me.id:
+        return None
+    s = load_session(me.home, me.id)
+    if not s:
+        return None
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    t = plans.register(me.home, s, str(payload.get("tool_name") or ""), inp, payload.get("tool_response") or "",
+                       s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or "")
+    RAN["task"] = (t or {}).get("id", "")
+    return None
 
 
 def mark_fork(s, me, payload):
@@ -980,6 +996,7 @@ def h_user_prompt_submit(payload):
     s = ensure_session(me.home, me.id, me.rec, me.cli, hint=me.hint)
     ran_for(s, me)
     req = request_of(payload.get("prompt"))
+    plans.pickup(me.home, s["sessionId"], payload.get("prompt") or "")
     mark_fork(s, me, payload)
     if req and not s.get("task"):
         s["task"] = cut(req, TASK_CHARS)
@@ -989,6 +1006,11 @@ def h_user_prompt_submit(payload):
         text, seen = reports_text(me.home, s)
         s["reportsSeen"] = seen
         parts.append(text)
+    unsent = [u for u in s.pop("unsentRelay", None) or [] if isinstance(u, dict)]
+    if unsent:
+        parts.insert(0, "phi (p4-phi): " + " ".join(
+            f"your last turn changed step(s) {', '.join(u.get('steps') or [])} of \"{relay._title(load_session(me.home, u['child']))}\" "
+            f"and sent it nothing; relay it with SendMessage (`to`: {u['child']})." for u in unsent))
     route = relay.route_text(me.home, s["sessionId"], req, s.get("cwd") or "") if req else ""
     parts.append(route or new_task_text(me.home, s, me, user=bool(req)))
     save_session(me.home, s)
@@ -1035,6 +1057,10 @@ def h_stop(payload):
     s.pop("done", None)
     if not s.get("task"):
         s["task"], s["taskAt"] = row["prompt"], row["time"]
+    plans.pickup(me.home, s["sessionId"], plans.transcript_tail(payload.get("transcript_path") or ""))
+    unsent = plans.turn_relay(me.home, s, row, turn.get("calls") or [])
+    if unsent:                                     # what this turn changed for a child and did not tell it
+        s["unsentRelay"] = [{"child": c, "steps": a, "time": row["time"]} for c, a in unsent]
     save_session(me.home, s)
     for node in (above, s["sessionId"]):           # the anchor of the node above, and this node's own for its children
         a = relay.make_anchor(me.home, node, row["time"])
@@ -1134,7 +1160,8 @@ HOOKS = {"session-start": ("SessionStart", h_session_start),
          "stop": ("Stop", h_stop),
          "start-advice": ("PreToolUse", h_start_advice),
          "branch-guard": ("PreToolUse", h_branch_guard),
-         "plan": ("PostToolUse", h_plan)}
+         "plan": ("PostToolUse", h_plan),
+         "task": ("PostToolUse", h_task)}
 OLD_NAMES = {"arrive": "session-start", "prompt": "user-prompt-submit", "exit": "stop"}   # hooks.json of 0.1 and 0.2,
 #                                                                         still loaded in sessions that began then
 

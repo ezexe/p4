@@ -138,11 +138,14 @@ def summary(home, sid):
     if not p.get("steps"):
         return {}
     return {"root": p.get("root", ""), "current": p.get("current", ""), "version": p.get("version", 0),
-            "steps": [{"addr": x["addr"], "content": x.get("content", "")[:200], "status": x.get("status", "")}
+            "steps": [{"addr": x["addr"], "content": x.get("content", "")[:200], "status": x.get("status", ""),
+                       "tasks": [{"id": t.get("id"), "what": t.get("what", "")[:120], "status": t.get("status"),
+                                  "heads": t.get("heads") or []} for t in x.get("tasks") or []
+                                 if t.get("status") == "open"]}
                       for x in p["steps"]]}
 
 
-def record(home, s, inp):
+def record(home, s, inp, transcript=""):
     """The PostToolUse hook's work for one update_plan call -> the additionalContext text, '' for none."""
     sid = s["sessionId"]
     old = load(home, sid)
@@ -151,7 +154,13 @@ def record(home, s, inp):
     if not old.get("steps") and parent and root:
         ps = step_of(load(home, parent), root)
         old["rootText"] = (ps or {}).get("content", "")
+    keep = {st["addr"]: st.get("tasks") for st in old.get("steps") or [] if st.get("tasks")}
     plan, started, revision = apply(old, inp, root or "")
+    for st in plan.get("steps") or []:            # a step's background tasks stay with it across a call
+        if st["addr"] in keep:
+            st["tasks"] = keep[st["addr"]]
+    if old.get("loose"):
+        plan["loose"] = old["loose"]
     relay._write_json(_path(home, sid), plan)
     s["rootStep"] = root or ""
     spath = os.path.join(relay._dir(home, sid), "session.json")
@@ -164,7 +173,7 @@ def record(home, s, inp):
             relay.make_anchor(home, node, _now())
     if revision:
         relay_revision(home, s, plan, revision)
-    return boundary(home, s, plan, started) if started else ""
+    return boundary(home, s, plan, started, transcript) if started else ""
 
 
 def _now():
@@ -220,12 +229,26 @@ def relay_revision(home, s, plan, rev):
                    + ", ".join(f"{a} {'removed' if a in rev['removed'] else 'changed'}" for a in touched) + ".")
 
 
-def boundary(home, s, plan, started):
-    """What bears on the step that starts now: up, across, down, and the warnings kept for this session."""
+def boundary(home, s, plan, started, transcript=""):
+    """What bears on the step that starts now: up, across, down, the background tasks something moved under, and
+    the warnings kept for this session."""
     sid = s["sessionId"]
+    if transcript:
+        pickup(home, sid, transcript_tail(transcript))
+        plan = load(home, sid) or plan
     step = step_of(plan, started) or {}
     text = step.get("content", "")
-    lines = []
+    task_lines, moved = check_tasks(home, s, plan)     # flagged first, so a step just closed over one is caught
+    lines = [f"task: {x}" for x in task_lines]
+    for st in plan.get("steps") or []:
+        if st.get("status") == "completed" and st["addr"] != started:
+            for t in flagged_open(plan, st["addr"]):
+                if not t.get("doneSaid"):
+                    t["doneSaid"] = True
+                    lines.append(f"step {st['addr']} was marked done while task {t['id']} under it is flagged and "
+                                 f"still open; say so in that step's report, or stop the task.")
+    if moved or any(t.get("doneSaid") for _, t in _tasks(plan)):
+        relay._write_json(_path(home, sid), plan)
     path = os.path.join(relay._dir(home, sid), "session.json")
     disk = relay._read_json(path)
     for w in disk.get("relayPending") or []:
@@ -306,3 +329,200 @@ def slice_for(home, s):
     if near:
         out += ["Sibling steps in progress that share its words:"] + near
     return "\n".join(out)
+
+
+# --- a turn is a delta too ---------------------------------------------------------------------------------------------
+#
+# The miss of 2026-11-12 that this closes: a parent told the user which of a child's checks its new design would void,
+# in a plain turn report, and never told the child. Notes and plan changes were relayed; the report was not.
+
+SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
+ADDR_RE = re.compile(r"\b(?:step\s+)?(\d+(?:\.\d+)+|(?<=step )\d+)\b", re.I)
+
+
+def open_steps(home, sid):
+    """The steps of a session's plan not yet completed, with the background checks still open under them."""
+    p = load(home, sid)
+    return [x for x in p.get("steps") or [] if x.get("status") != "completed"]
+
+
+def matches(text, steps, shard, base):
+    """[(step, the sentences of `text` that bear on it)]: a step is matched by its address, by a path in the
+    session's shard, or by sharing SHARE content words with a sentence."""
+    sents = [x.strip() for x in SENTENCE.split(str(text or "")) if x.strip()]
+    named = set(ADDR_RE.findall(str(text or "")))
+    out = []
+    for st in steps:
+        hit = []
+        for x in sents:
+            if st["addr"] in set(ADDR_RE.findall(x)) or bears(x, st.get("content")) or any(
+                    relay.overlap(p, sh) for p in relay.paths_in(x, base) for sh in shard):
+                hit.append(x)
+            for t in st.get("tasks") or []:
+                if t.get("status") == "open" and bears(x, t.get("what")) and x not in hit:
+                    hit.append(x)
+        if st["addr"] in named and not hit:
+            hit = [x for x in sents if st["addr"] in x][:2]
+        if hit:
+            out.append((st, hit[:3]))
+    return out
+
+
+def turn_relay(home, s, row, calls):
+    """At Stop: the turn's report and plan, matched against the open steps of this session's children (down) and of
+    its siblings (across). Each match is relayed with the turn's own words quoted. Returns the children a match
+    reached that the turn sent no SendMessage to, as [(child id, addresses)], for the parent's next message."""
+    sid, title = s["sessionId"], relay._title(s)
+    report = str(row.get("report") or "")
+    mine = load(home, sid)
+    text = report + "\n" + "\n".join(f"{x['addr']} {x.get('content', '')}" for x in mine.get("steps") or []
+                                      if x.get("status") == "in_progress")
+    if not report.strip():
+        return []
+    sent = set()
+    for c in calls or []:
+        inp = c.get("input") if isinstance(c.get("input"), dict) else {}
+        if str(c.get("name") or "").endswith("SendMessage") and inp.get("to"):
+            sent.add(str(inp["to"]))
+    stamp = hashlib.sha1((sid + str(row.get("id") or "") + report[:200]).encode()).hexdigest()[:10]
+    unsent = []
+    targets = [(k, "down") for k in _children(home, sid)] + [(k, "across") for k in _siblings(home, s)]
+    for oid, way in targets:
+        os_ = relay._session(home, oid)
+        if os_.get("stale"):
+            continue
+        got = matches(text, open_steps(home, oid), relay.shard_of(os_), os_.get("cwd") or s.get("cwd") or "")
+        if not got:
+            continue
+        lines = [f"{st['addr']} \"{relay._short(st.get('content'), 100)}\": " +
+                 " ".join(f"\"{relay._short(q, 220)}\"" for q in quotes) for st, quotes in got]
+        who = "the session that started you" if way == "down" else "a session beside you"
+        relay.warn(home, oid, f"turn:{sid}:{stamp}",
+                   f"\"{title}\", {who}, ended a turn whose words bear on your open step(s): " + "; ".join(lines)
+                   + ". Check whether those steps still hold.")
+        if way == "down" and oid not in sent and ("local_" + oid.removeprefix("local_")) not in sent:
+            unsent.append((oid, [st["addr"] for st, _ in got]))
+    return unsent
+
+
+# --- background tasks under a step -------------------------------------------------------------------------------------
+#
+# A step's background work, a Bash run in the background, a Monitor, an Agent or a Workflow, is recorded under the step
+# in progress with what it ran against: the heads of the repositories its command names, its paths and its words. At
+# each step boundary an open task is checked against what moved since it started. Found 2026-11-12 in this session's
+# own transcript and phi's log: a completion notice that arrives while the session is idle starts a turn, and
+# UserPromptSubmit fires with the notice as its message; one that arrives during a turn is queued as an attachment and
+# no hook fires. So completions are read from the message at UserPromptSubmit, and from the transcript's tail at Stop
+# and at each step boundary.
+
+TASK_ID = re.compile(r"(?:background with ID|task[_ -]?id|agentId|ID)[\"':\s=]+([A-Za-z0-9_-]{6,})", re.I)
+NOTICE = re.compile(r"<task-id>\s*([^<\s]+)\s*</task-id>.*?<status>\s*([^<\s]+)\s*</status>"
+                    r"(?:.*?<summary>(.*?)</summary>)?", re.S)
+NEAR_DONE_S = 600             # a task older than this may be near done: finish and record rather than stop
+
+
+def register(home, s, tool, inp, response, cwd):
+    """Record a background task under the step in progress -> the task, or None when the call ran in the
+    foreground or names no task id."""
+    if tool == "Bash" and not inp.get("run_in_background"):
+        return None
+    if tool == "Agent" and not inp.get("run_in_background") and "background" not in str(response).lower():
+        return None
+    text = response if isinstance(response, str) else json.dumps(response, default=str)
+    m = TASK_ID.search(text)
+    if not m:
+        return None
+    what = str(inp.get("command") or inp.get("prompt") or inp.get("description") or inp.get("name") or tool)
+    paths = relay.paths_in(what, cwd)
+    repos = {relay.repo_of(p) for p in paths} | ({relay.repo_of(cwd)} if cwd else set())
+    task = {"id": m.group(1), "tool": tool, "what": relay._short(what, 200), "heads": relay.heads(repos),
+            "paths": paths, "at": _now(), "epoch": int(__import__("time").time()), "status": "open"}
+    sid = s["sessionId"]
+    p = load(home, sid)
+    st = step_of(p, p.get("current") or "") if p.get("steps") else None
+    if st is None:
+        p.setdefault("loose", []).append(task)
+    else:
+        st.setdefault("tasks", []).append(task)
+    relay._write_json(_path(home, sid), p)
+    return task
+
+
+def _tasks(p):
+    for st in p.get("steps") or []:
+        for t in st.get("tasks") or []:
+            yield st, t
+    for t in p.get("loose") or []:
+        yield None, t
+
+
+def pickup(home, sid, text):
+    """Completion notices in `text`, a message or a transcript's tail, closed on their tasks -> the ids closed."""
+    p = load(home, sid)
+    closed = []
+    found = {m.group(1): (m.group(2).lower(), (m.group(3) or "").strip()) for m in NOTICE.finditer(str(text or ""))}
+    if not found:
+        return closed
+    for st, t in _tasks(p):
+        if t.get("id") in found and t.get("status") == "open":
+            t["status"], t["result"] = found[t["id"]][0], relay._short(found[t["id"]][1], 300)
+            closed.append(t["id"])
+    if closed:
+        relay._write_json(_path(home, sid), p)
+    return closed
+
+
+def transcript_tail(path, size=200000):
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            n = f.tell()
+            f.seek(max(0, n - size))
+            return f.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+
+
+def check_tasks(home, s, plan):
+    """The open tasks something moved under since they started -> lines with the id and what to do."""
+    import time as _t
+    lines, changed = [], False
+    parent = relay._parent(s)
+    anchor = relay._read_json(relay.anchor_path(home, parent)) if parent else {}
+    marks = [(nid, n.get("title") or nid, m) for nid, n in (anchor.get("nodes") or {}).items()
+             if nid != s["sessionId"] for m in n.get("marks") or []]
+    for st, t in _tasks(plan):
+        if t.get("status") != "open":
+            continue
+        why = []
+        for h in t.get("heads") or []:
+            repo, _, rest = h.partition("@")
+            now_h = next(iter(relay.heads({repo})), "")
+            if now_h and now_h != h:
+                why.append(f"the head it ran against moved: {relay.show_head(h, s.get('cwd') or '')} is now "
+                           f"{relay.show_head(now_h, s.get('cwd') or '')}")
+        for nid, title, m in marks:
+            if str(m.get("time") or "") < str(t.get("at") or ""):
+                continue
+            if any(relay.overlap(a, b) for a in m.get("paths") or [] for b in t.get("paths") or []) or \
+                    bears(m.get("claim"), t.get("what")):
+                why.append(f"\"{title}\" wrote \"{relay._short(m.get('claim'), 200)}\"")
+        if not why:
+            continue
+        key = hashlib.sha1("|".join(why).encode()).hexdigest()[:10]
+        if key in (t.get("flags") or []):
+            continue
+        t.setdefault("flags", []).append(key)
+        changed = True
+        age = _t.time() - int(t.get("epoch") or 0)
+        advice = (f"it has run {int(age // 60)} min and may be near done: let it finish and record its result as "
+                  f"against the old head" if age > NEAR_DONE_S else
+                  f"`TaskStop {t['id']}`, then re-run it against the new head if it is still wanted")
+        lines.append(f"task {t['id']} ({t.get('tool')}: {relay._short(t.get('what'), 80)}): " + "; ".join(why)
+                     + f". {advice}.")
+    return lines, changed
+
+
+def flagged_open(plan, addr):
+    st = step_of(plan, addr) or {}
+    return [t for t in st.get("tasks") or [] if t.get("status") == "open" and t.get("flags")]

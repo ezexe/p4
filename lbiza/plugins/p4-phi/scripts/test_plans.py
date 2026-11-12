@@ -7,6 +7,8 @@ tree run through phi's own hooks.
 
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -116,6 +118,70 @@ class TreeOfPlans(unittest.TestCase):
         ctx = self.plan(TOP, {"advance": True})
         self.assertIn("down: \"the layout child\" has 1 of 2 steps done, now on 2.2", ctx)
         self.assertNotIn("down:", self.plan(TOP, {"advance": True}), "told again only when it moved")
+
+    def test_the_parents_report_reaches_the_child_whose_check_it_voids(self):
+        """The miss this closes: a parent's turn report voided a child's checks and the child was never told."""
+        t = self.t
+        self.plan(A, items("Run the relay suite against the notes relay", "Check the fresh slice sizes"))
+        report = "The plan-step relay replaces the notes relay, so the relay suite checks are void."
+        t.stop(TOP, "decide the relay", report=report, uuid="p1")
+        ctx = self.plan(A, {"advance": True})
+        self.assertIn("ended a turn whose words bear on your open step(s): 2.1", ctx)
+        self.assertIn(report, ctx, "the parent's own words, quoted")
+        nag = context(t.say(TOP, "next"))
+        self.assertIn(f"your last turn changed step(s) 2.1", nag)
+        self.assertIn(f"relay it with SendMessage (`to`: {A})", nag)
+        self.assertNotIn("relay it", context(t.say(TOP, "and next")), "said once")
+
+    def test_a_report_the_turn_already_sent_is_not_nagged(self):
+        t = self.t
+        self.plan(A, items("Run the relay suite against the notes relay", "Check the fresh slice sizes"))
+        t.stop(TOP, "decide the relay", [("SendMessage", {"to": A, "message": "the relay suite is void"}, "sent")],
+               report="The notes relay is replaced, so the relay suite checks are void.", uuid="p2")
+        self.assertNotIn("relay it", context(t.say(TOP, "next")))
+
+    def task(self, host, command, task_id):
+        r = self.t.hook("task", host, {"hook_event_name": "PostToolUse", "tool_name": "Bash",
+                                       "tool_input": {"command": command, "run_in_background": True},
+                                       "tool_response": f"Command running in background with ID: {task_id}. Output"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "", "registering prints nothing")
+
+    def test_a_background_task_whose_feature_a_sibling_replaces_is_told_to_stop(self):
+        t = self.t
+        if not shutil.which("git"):
+            self.skipTest("no git")
+        work = os.path.join(t.proj, "work")
+        os.makedirs(os.path.join(work, "lib"))
+        with open(os.path.join(work, "lib", "x.py"), "w", encoding="utf-8") as f:
+            f.write("x = 1\n")
+        for args in (("init", "-q"), ("add", "-A"), ("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "A")):
+            subprocess.run(["git", "-C", work, *args], check=True, capture_output=True)
+        t.say(B, "Write the docs, step 3 of the parent's plan")
+        self.plan(B, items("Check the notes relay against lib", "Write the docs"))
+        x = os.path.join(work, "lib", "x.py").replace("\\", "/")
+        self.task(B, f"python -I check_relay.py {x}", "bgcheck01")
+        p = plans.load(t.p4, B)
+        self.assertEqual(p["steps"][0]["tasks"][0]["id"], "bgcheck01")
+        self.assertTrue(p["steps"][0]["tasks"][0]["heads"], "the head it runs against is kept")
+        self.plan(A, items("Replace the notes relay", "Commit it"))
+        t.cli(A, "note", f"replaces: the notes relay in `{x}` with plan steps", "--source", "commit hhh888")
+        t.stop(A, "replace it", uuid="a1")
+        ctx = self.plan(B, {"advance": True})
+        self.assertIn("task bgcheck01", ctx)
+        self.assertIn("`TaskStop bgcheck01`", ctx)
+        self.assertIn("step 3.1 was marked done while task bgcheck01 under it is flagged and still open", ctx)
+        notice = ("<task-notification>\n<task-id>bgcheck01</task-id>\n<status>completed</status>\n"
+                  "<summary>Background command finished</summary>\n</task-notification>")
+        t.say(B, notice)
+        self.assertEqual(plans.load(t.p4, B)["steps"][0]["tasks"][0]["status"], "completed",
+                         "a completion read from the message closes the task")
+
+    def test_a_foreground_command_is_no_task(self):
+        r = self.t.hook("task", B, {"tool_name": "Bash", "tool_input": {"command": "git status"},
+                                    "tool_response": "On branch main"})
+        self.assertEqual(r.stdout.strip(), "")
+        self.assertFalse(any(st.get("tasks") for st in plans.load(self.t.p4, B).get("steps") or []))
 
     def test_a_fresh_child_starts_with_its_root_step_and_a_fork_has_it_pinned(self):
         t = self.t
