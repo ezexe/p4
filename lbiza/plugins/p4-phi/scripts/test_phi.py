@@ -556,8 +556,16 @@ class NewTask(unittest.TestCase):
         self.assertIn("`initiation` `user_asked`", first)
         self.assertIn("`use_worktree: false`", first)
         self.assertIn(phi.NEW_TOP_BRIEF, first)
+        self.assertIn("Its first act: `mcp__ccd_session_mgmt__detach_session` with `\"self\"`", first)
+        self.assertIn("phi.py\" detach`", first, "the brief names phi's detach too")
+        self.assertIn("call `mcp__ccd_session_mgmt__detach_session` with its id yourself", first,
+                      "the starter's line names the app's move")
         self.assertIn("start a new top session", self.say(TOP, "also, the fence colour?"))
-        self.say(KID, "Task:\nPick the fence colour. The user's words: \"the fence colour?\" " + phi.NEW_TOP_BRIEF)
+        told = self.say(KID, "Task:\nPick the fence colour. The user's words: \"the fence colour?\" "
+                        + phi.NEW_TOP_BRIEF + " " + phi.new_top_first_act())
+        self.assertIn("phi detached it into the root at this first message", told)
+        self.assertIn("call `mcp__ccd_session_mgmt__detach_session` with `\"self\"`", told)
+        self.assertNotIn("detached it into the root", self.say(KID, "and again"), "said at the first message only")
         s = phi.load_session(self.t.p4, KID)
         self.assertEqual(phi.spawned_from(s), "", "detached at its first hook")
         self.assertEqual(s["spawnedFrom"]["source"], "detached")
@@ -568,6 +576,9 @@ class NewTask(unittest.TestCase):
         self.t.record(KID2, TOP, "a plain child")
         self.say(KID2, "Task:\nWrite the docs; this is not a new top")
         self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID2)), TOP, "an unmarked brief stays a child")
+        r = self.t.cli(KID2, "detach")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID2)), "", "phi.py detach with no id: itself")
 
     def test_a_childs_new_topic_is_handed_up(self):
         self.say(TOP, TASK)

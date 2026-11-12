@@ -687,7 +687,7 @@ def prose(text):
     return "\n".join(ln for ln in text.splitlines() if not DRAWN.search(ln))
 
 
-def matches(text, steps, shard, base):
+def matches(text, steps, shard, base, loose=True):
     """[(step, the sentences of `text` that bear on it)]: a step is matched by its address, by a path in the
     session's shard, or by sharing SHARE content words with a sentence. Code blocks and drawn trees are left out."""
     text = prose(text)
@@ -697,17 +697,24 @@ def matches(text, steps, shard, base):
     for st in steps:
         hit = []
         for x in sents:
-            if st["addr"] in set(ADDR_RE.findall(x)) or bears(x, st.get("content")) or any(
+            if st["addr"] in set(ADDR_RE.findall(x)) or (loose and bears(x, st.get("content"))) or any(
                     relay.overlap(p, sh) for p in relay.paths_in(x, base) for sh in shard):
                 hit.append(x)
             for t in st.get("tasks") or []:
-                if t.get("status") == "open" and bears(x, t.get("what")) and x not in hit:
+                if loose and t.get("status") == "open" and bears(x, t.get("what")) and x not in hit:
                     hit.append(x)
         if st["addr"] in named and not hit:
             hit = [x for x in sents if st["addr"] in x][:2]
         if hit:
             out.append((st, hit[:3]))
     return out
+
+
+# A parent's report that shares words with a child's step is relayed to the child, but the parent is nagged that it
+# sent nothing only when the sentence changes the step: a progress report that names the child's work is no change.
+CHANGES = re.compile(r"\b(?:void\w*|replac\w*|deprecat\w*|supersed\w*|no longer|instead|drop(?:s|ped)?|"
+                     r"remov\w*|cancel\w*|revis\w*|renam\w*|obsolete|wrong|broke\w*|stop(?:s|ped)?|undo\w*|"
+                     r"revert\w*|redo|rework\w*)\b", re.I)
 
 
 def turn_relay(home, s, row, calls):
@@ -732,8 +739,11 @@ def turn_relay(home, s, row, calls):
     sent = set()
     for c in calls or []:
         inp = c.get("input") if isinstance(c.get("input"), dict) else {}
-        if str(c.get("name") or "").endswith("SendMessage") and inp.get("to"):
+        name = str(c.get("name") or "")
+        if name.endswith("SendMessage") and inp.get("to"):
             sent.add(str(inp["to"]))
+        elif name.endswith("send_message") and (inp.get("session_id") or inp.get("to")):
+            sent.add(str(inp.get("session_id") or inp.get("to")))
     stamp = hashlib.sha1((sid + str(row.get("id") or "") + report[:200]).encode()).hexdigest()[:10]
     unsent = []
     targets = [(k, "down") for k in _children(home, sid)] + [(k, "across") for k in _siblings(home, s)]
@@ -750,8 +760,12 @@ def turn_relay(home, s, row, calls):
         relay.warn(home, oid, f"turn:{sid}:{stamp}",
                    f"\"{title}\", {who}, ended a turn whose words bear on your open step(s): " + "; ".join(lines)
                    + ". Check whether those steps still hold.")
-        if way == "down" and oid not in sent and ("local_" + oid.removeprefix("local_")) not in sent:
-            unsent.append((oid, [st["addr"] for st, _ in got]))
+        strict = {st["addr"] for st, _ in matches(text, open_steps(home, oid), relay.shard_of(os_),
+                                                  os_.get("cwd") or s.get("cwd") or "", loose=False)}
+        named = [st["addr"] for st, quotes in got
+                 if st["addr"] in strict or any(CHANGES.search(q) for q in quotes)]
+        if way == "down" and named and oid not in sent and ("local_" + oid.removeprefix("local_")) not in sent:
+            unsent.append((oid, named))   # a step named by address or path, or words that change it, not progress
     parent = relay._parent(s)
     ask = waiting_on(report)
     if parent and ask:

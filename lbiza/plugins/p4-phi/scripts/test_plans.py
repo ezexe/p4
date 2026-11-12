@@ -361,6 +361,20 @@ class TreeOfPlans(unittest.TestCase):
         self.assertIn(f"relay it with SendMessage (`to`: {A})", nag)
         self.assertNotIn("relay it", context(t.say(TOP, "and next")), "said once")
 
+    def test_a_progress_report_naming_a_childs_work_is_not_nagged(self):
+        """The miss this closes: a parent's progress report shared words with a child's steps and was nagged as a
+        change it never sent."""
+        t = self.t
+        self.plan(A, items("Run the relay suite against the notes relay", "Check the fresh slice sizes"))
+        report = ("The layout child is running the relay suite against the notes relay now; the fresh slice sizes "
+                  "are next.")
+        t.stop(TOP, "progress", report=report, uuid="p3")
+        self.assertIn("bear on your open step(s): 2.1", self.plan(A, {"advance": True}), "still relayed down")
+        self.assertNotIn("relay it", context(t.say(TOP, "next")), "progress is no change")
+        t.stop(TOP, "decide", [("mcp__ccd_session_mgmt__send_message", {"session_id": A, "message": "void"}, "sent")],
+               report="The relay suite checks are void; the notes relay is replaced.", uuid="p4")
+        self.assertNotIn("relay it", context(t.say(TOP, "and next")), "the app's send_message counts as sent")
+
     def test_a_report_the_turn_already_sent_is_not_nagged(self):
         t = self.t
         self.plan(A, items("Run the relay suite against the notes relay", "Check the fresh slice sizes"))
@@ -730,6 +744,9 @@ class TopOrchestrates(unittest.TestCase):
         t.stop(TOP, "a turn", uuid="t1a")
         anchor = json.load(open(relay.anchor_path(t.p4, ""), encoding="utf-8"))
         self.assertNotIn(T2, anchor["nodes"], "and leaves the root anchor")
+        tree = t.cli(TOP, "tree").stdout
+        self.assertIn(TOP, tree)
+        self.assertNotIn(T2, tree, "an archived top is not printed")
 
     def test_a_child_archived_by_hand_is_not_named_for_archiving(self):
         t, C = self.t, self.C

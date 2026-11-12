@@ -778,14 +778,23 @@ NEW_TOP = re.compile(r"\b(?:this|it) (?:session )?is a new top session\b", re.I)
 NEW_TOP_BRIEF = "This session is a new top session, orchestrating its own topic."
 
 
+def new_top_first_act():
+    """What a new top session does first: leave the starter in the app, then in phi."""
+    return (f"Its first act: `mcp__ccd_session_mgmt__detach_session` with `\"self\"`, so the app stops nesting it and "
+            f"its reports stop going to the starter, then `{commands()} detach`.")
+
+
 def new_top_route(owner_turn=True):
     """How a top session starts a new top session for a topic outside its task."""
     how = ("Start it with `mcp__ccd_session__start_session`, `initiation` `user_asked`" if owner_turn else
            "This turn was started by another session, so propose it as a card: `mcp__ccd_session__start_session`, "
            "`initiation` `own_initiative`, which the user starts with a click")
     return (f"{how}, `context` `fresh`, `use_worktree: false`; its brief: the topic, the user's words quoted, and "
-            f"the line \"{NEW_TOP_BRIEF}\" phi detaches it into the root at its first hook, where every top session "
-            f"relays to the others as siblings.")
+            f"the lines \"{NEW_TOP_BRIEF} {new_top_first_act()}\" Both moves are needed: the app's detach, else it "
+            f"stays nested under this session and reports here, and phi's, which phi also makes at its first hook "
+            f"on that line. If it has not left this session's family by its first report, call "
+            f"`mcp__ccd_session_mgmt__detach_session` with its id yourself. In the root every top session relays to "
+            f"the others as siblings.")
 
 
 def depth_of(home, s):
@@ -1359,10 +1368,12 @@ def h_user_prompt_submit(payload):
     configure(me.home)
     s = ensure_session(me.home, me.id, me.rec, me.cli, hint=me.hint)
     ran_for(s, me)
+    detached_now = False
     if spawned_from(s) and NEW_TOP.search(str(payload.get("prompt") or "")) and not load_turns(me.home, s["sessionId"]):
         reparent(me.home, s["sessionId"], "", "detached")     # its brief marks it a new top: into the root
         s = load_session(me.home, s["sessionId"])
         RAN["new_top"] = True
+        detached_now = True
     req = request_of(payload.get("prompt"))
     s["turnBy"] = "user" if req else (
         "session" if re.search(r"<cross-session-message\b", str(payload.get("prompt") or "")) else "event")
@@ -1393,6 +1404,12 @@ def h_user_prompt_submit(payload):
     s["staleTold"] = (list(s.get("staleTold") or []) + [x.get("id") for x in pend if isinstance(x, dict)])[-50:]
     if stale:
         parts.insert(0, stale)
+    if detached_now:
+        parts.insert(0, "phi (p4-phi): this session's brief marks it a new top session, so phi detached it into the "
+                        "root at this first message. Now call `mcp__ccd_session_mgmt__detach_session` with `\"self\"` "
+                        "before anything else, so the app stops nesting it under its starter and its reports stop "
+                        "going there; it orchestrates its own topic, and the other top sessions relay to it as "
+                        "siblings.")
     unsent = [u for u in s.pop("unsentRelay", None) or [] if isinstance(u, dict)]
     if unsent:
         parts.insert(0, "phi (p4-phi): " + " ".join(
@@ -1819,9 +1836,12 @@ def tree_text(home):
         d = read_json(p)
         if d.get("sessionId"):
             sessions[d["sessionId"]] = d
+    gone_ = {k for k, d in sessions.items() if d.get("archived") or relay.archived_in_app(d)}
     started = {}
     for s in sorted(sessions.values(), key=lambda s: s.get("createdAt", "")):
         above = spawned_from(s)
+        if s["sessionId"] in gone_ or above in gone_:
+            continue                                 # an archived session, and what hangs under it, is not printed
         started.setdefault(above if above in sessions else "", []).append(s)
     out = []
 
@@ -1856,7 +1876,9 @@ def main(argv=None):
             p.add_argument("text")
         if name == "show":
             p.add_argument("which", nargs="?", default="")
-        if name in ("detach", "reparent"):
+        if name == "detach":
+            p.add_argument("moved", nargs="?", default="", help="the session to detach (default: this one)")
+        if name == "reparent":
             p.add_argument("moved")
         if name == "shard":
             p.add_argument("paths", nargs="*", help="paths or globs this session alone may change; none shows it")
@@ -1873,6 +1895,10 @@ def main(argv=None):
             print(tree_text(me.home) or "no sessions yet")
             return 0
         if a.cmd == "detach":
+            if not a.moved and not me.id:
+                print("phi: name the session to detach, or run this from inside it", file=sys.stderr)
+                return 2
+            a.moved = a.moved or me.id
             print("detached: it is a top session now" if reparent(me.home, a.moved, "", "detached")
                   else "already a top session")
             return 0
