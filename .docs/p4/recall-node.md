@@ -187,3 +187,11 @@ The code is `lbiza/plugins/p4-phi/scripts/plans.py`, run by a PostToolUse hook o
 - **Fenced off:** marked `stale` in its `session.json` with the anchor version and the note, it is left out of the anchor, of every fresh child's slice and of the relay up, across and down.
 - **Handed to the parent:** the parent's next message names the stale children with their ids, once, and says to archive them with `mcp__ccd_session_mgmt__archive_session`; a hook cannot archive a session itself.
 - **Reactivated:** a stale session messaged again is handed what superseded it, once, and is un-staled when its next turn ends having seen that anchor.
+
+## Routing through the hooks every session already has
+
+- **What was found,** by the marketplace test session: Claude Code reads a session's `hooks.json` once, at its start, while the scripts its entries call are read from the plugin folder at every call. So the `start-advice`, `branch-guard`, `plan` and `task` entries added after 13:30 never ran in any session open before them; neither a marketplace update nor disabling and enabling the plugin reloaded them.
+- **The rule from here:** `hooks.json` stays at the entries every open session holds, the list of 13:30. A new check runs inside an entry that already fires: recall's `lookup-check`, PreToolUse on every tool, hands `start_session` to start-advice and `EnterWorktree`, Bash and PowerShell to branch-guard; recall's `lookup-record`, PostToolUse on every tool, hands `update_plan` to the plan check and background Bash, Monitor, Agent and Workflow to task registration.
+- **The shell fast paths:** `recall-hook.sh` lets `start_session`, `EnterWorktree` and any command naming git reach Python, and never runs an `update_plan` record detached, since its answer goes beside the result.
+- **Once per call:** a session started while the dedicated entries were in `hooks.json` holds both; each check marks the call's `tool_use_id` in its session folder's `.calls/`, which is never tracked, so it runs once whichever entry reaches it first.
+- **Seen:** each routed check writes its line in the session's `log.jsonl`.

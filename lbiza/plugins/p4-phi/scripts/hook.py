@@ -83,6 +83,7 @@ phi/sessions.md
 phi/rules.md
 phi/catchup.json
 phi/**/*.tmp
+phi/sessions/*/.calls/
 __pycache__/
 *.pyc
 *.png
@@ -529,8 +530,32 @@ def h_subagent_stop(payload):
 
 # --- lookups (PreToolUse and PostToolUse on every tool) --------------------------------------------------
 
+PHI_CHECK = {"mcp__ccd_session__start_session": "start-advice", "EnterWorktree": "branch-guard",
+             "Bash": "branch-guard", "PowerShell": "branch-guard"}
+PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "Bash": "task", "Monitor": "task", "Agent": "task",
+              "Workflow": "task"}
+
+
+def phi_route(payload, table):
+    """phi's handler for this tool, run in this process: the hooks.json entries every open session froze at its
+    start are recall's, so new phi checks ride on them and hooks.json never needs a new entry (L3 of the
+    marketplace test session). None when phi has nothing to say; a failure in phi never touches recall."""
+    name = table.get(str(payload.get("tool_name") or ""))
+    if not name:
+        return None
+    try:
+        import phi
+        return phi.routed(name, payload)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def h_lookup_check(payload):
-    """lookups.py: an earlier finding in place of a web call, an earlier failure before a command expected to fail."""
+    """lookups.py: an earlier finding in place of a web call, an earlier failure before a command expected to fail.
+    First phi's checks before a tool runs: start-advice, branch-guard."""
+    out = phi_route(payload, PHI_CHECK)
+    if out:
+        return out
     import lookups
     p4 = ready(payload)
     if not p4:
@@ -539,7 +564,11 @@ def h_lookup_check(payload):
 
 
 def h_lookup_record(payload):
-    """lookups.py: the call's row; a failure other sessions already met is told what they did about it."""
+    """lookups.py: the call's row; a failure other sessions already met is told what they did about it. First phi's
+    records after a tool ran: the plan and its step boundary, a background task under its step."""
+    out = phi_route(payload, PHI_RECORD)
+    if out and str(payload.get("tool_name") or "") == "mcp__ccd_turn__update_plan":
+        return out
     import lookups
     p4 = ready(payload)
     if not p4:

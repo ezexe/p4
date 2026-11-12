@@ -79,26 +79,6 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "mcp__ccd_session__start_session",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" start-advice",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "EnterWorktree|Bash|PowerShell",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" branch-guard",
-            "timeout": 10
-          }
-        ]
-      },
-      {
         "matcher": "Agent",
         "hooks": [
           {
@@ -120,26 +100,6 @@
       }
     ],
     "PostToolUse": [
-      {
-        "matcher": "mcp__ccd_turn__update_plan",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" plan",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "Bash|Monitor|Agent|Workflow",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" task",
-            "timeout": 10
-          }
-        ]
-      },
       {
         "matcher": ".*",
         "hooks": [

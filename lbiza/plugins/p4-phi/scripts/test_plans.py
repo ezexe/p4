@@ -140,6 +140,39 @@ class TreeOfPlans(unittest.TestCase):
                report="The notes relay is replaced, so the relay suite checks are void.", uuid="p2")
         self.assertNotIn("relay it", context(t.say(TOP, "next")))
 
+    def lookup(self, host, name, payload, wait=False):
+        """A tool call through recall's lookup entry, as every session's frozen hook list runs it."""
+        t = self.t
+        root = os.path.dirname(HERE)
+        body = {"session_id": host, "cwd": t.proj, "hook_event_name": "PostToolUse", **payload}
+        r = subprocess.run(["sh", os.path.join(root, "hooks", "recall-hook.sh"), name], input=json.dumps(body),
+                           capture_output=True, text=True, timeout=60,
+                           env={**t.env(host), **({"P4_RECALL_SYNC": "1"} if wait else {})})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
+
+    def test_the_plan_check_runs_through_recalls_lookup_entry_once(self):
+        """L3: a session's hook list is read once at its start, so the plan check rides on lookup-record, which every
+        open session has; a session that also has the dedicated entry runs it once."""
+        t = self.t
+        self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
+        call = {"tool_name": "mcp__ccd_turn__update_plan", "tool_input": {"advance": True},
+                "tool_response": "Plan updated.", "tool_use_id": "toolu_route01"}
+        self.plan(TOP, items("Port the hooks", "Move the store layout into temportal instead", "Write the docs", at=1))
+        ctx = self.lookup(A, "lookup-record", call)
+        self.assertIn("step 2.2 starts now", ctx)
+        self.assertEqual(plans.load(t.p4, A)["current"], "2.2")
+        r = t.hook("plan", A, call)
+        self.assertEqual(r.stdout.strip(), "", "the same call through the dedicated entry is not run again")
+        self.assertEqual(plans.load(t.p4, A)["current"], "2.2", "advanced once")
+        logged = [x.get("hook") for x in t.log(A)]
+        self.assertIn("plan", logged, "the routed check writes its log line (P7)")
+        self.lookup(A, "lookup-record", {"tool_name": "Monitor", "tool_input": {"command": "tail -f x.log"},
+                                         "tool_response": "Monitor started (task bz4dv0pvj, expires in 30m)",
+                                         "tool_use_id": "toolu_route02"}, wait=True)   # a clean call runs detached
+        self.assertEqual(plans.load(t.p4, A)["steps"][1]["tasks"][0]["id"], "bz4dv0pvj",
+                         "a Monitor is recorded by the id its result gives (M1)")
+
     def task(self, host, command, task_id):
         r = self.t.hook("task", host, {"hook_event_name": "PostToolUse", "tool_name": "Bash",
                                        "tool_input": {"command": command, "run_in_background": True},

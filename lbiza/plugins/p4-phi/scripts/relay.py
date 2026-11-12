@@ -710,7 +710,7 @@ def child_paths(home, s):
 # rest of .gitignore runs beside this one at a start.
 
 IGNORED = ("phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/sessions.md", "phi/rules.md",
-           "phi/catchup.json", "phi/**/*.tmp")
+           "phi/catchup.json", "phi/**/*.tmp", "phi/sessions/*/.calls/")
 TRACKED_MARK = "p4-phi-tracked"
 
 

@@ -24,9 +24,11 @@ if [ "$name" = lookup-check ]; then
   case "$payload" in
     *'"tool_name":"WebFetch"'*|*'"tool_name": "WebFetch"'*|*'"tool_name":"WebSearch"'*|*'"tool_name": "WebSearch"'*) ;;
     *'"tool_name":"Bash"'*|*'"tool_name": "Bash"'*|*'"tool_name":"PowerShell"'*|*'"tool_name": "PowerShell"'*) ;;
+    *mcp__ccd_session__start_session*|*'"tool_name":"EnterWorktree"'*|*'"tool_name": "EnterWorktree"'*) ;;
     *) exit 0 ;;
   esac
   case "$payload" in
+    *git*) ;;                                     # a git command: phi's branch guard reads it (hook.py routes)
     *'"tool_name":"Bash"'*|*'"tool_name": "Bash"'*|*'"tool_name":"PowerShell"'*|*'"tool_name": "PowerShell"'*)
       # a command is checked only by the failure model, which a store has only once a training round passed one
       m="${CLAUDE_PROJECT_DIR:-.}/.claude/p4/phi/models/lookups-model.json"
@@ -45,6 +47,7 @@ if [ "$name" = lookup-record ]; then
   piped=1
   if [ "${P4_RECALL_SYNC:-0}" != 1 ]; then
     case "$payload" in
+      *mcp__ccd_turn__update_plan*) ;;            # phi's plan check answers beside the result: never detached
       *PostToolUseFailure*|*Traceback*|*Error*|*Exception*|*"not found"*|*"not recognized"*|*"No such file"*) ;;
       *fatal:*|*denied*|*ENAMETOOLONG*|*"unexpected EOF"*|*"cannot access"*|*unterminated*) ;;
       *) detach=1 ;;

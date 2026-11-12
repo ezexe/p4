@@ -426,7 +426,8 @@ def turn_relay(home, s, row, calls):
 # no hook fires. So completions are read from the message at UserPromptSubmit, and from the transcript's tail at Stop
 # and at each step boundary.
 
-TASK_ID = re.compile(r"(?:background with ID|task[_ -]?id|agentId|ID)[\"':\s=]+([A-Za-z0-9_-]{6,})", re.I)
+TASK_ID = re.compile(r"(?:background with ID|task[_ -]?id|agentId|ID)[\"':\s=]+([A-Za-z0-9_-]{6,})"
+                     r"|\(task\s+([A-Za-z0-9_-]{6,})", re.I)      # M1: "Monitor started (task bz4dv0pvj, ..."
 NOTICE = re.compile(r"<task-id>\s*([^<\s]+)\s*</task-id>.*?<status>\s*([^<\s]+)\s*</status>"
                     r"(?:.*?<summary>(.*?)</summary>)?", re.S)
 NEAR_DONE_S = 600             # a task older than this may be near done: finish and record rather than stop
@@ -446,7 +447,7 @@ def register(home, s, tool, inp, response, cwd):
     what = str(inp.get("command") or inp.get("prompt") or inp.get("description") or inp.get("name") or tool)
     paths = relay.paths_in(what, cwd)
     repos = {relay.repo_of(p) for p in paths} | ({relay.repo_of(cwd)} if cwd else set())
-    task = {"id": m.group(1), "tool": tool, "what": relay._short(what, 200), "heads": relay.heads(repos),
+    task = {"id": m.group(1) or m.group(2), "tool": tool, "what": relay._short(what, 200), "heads": relay.heads(repos),
             "paths": paths, "at": _now(), "epoch": int(__import__("time").time()), "status": "open"}
     sid = s["sessionId"]
     p = load(home, sid)

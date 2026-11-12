@@ -1172,6 +1172,52 @@ def h_branch_guard(payload):
                                                                f"needs no merge."}}
 
 
+def once(home, sid, kind, payload):
+    """True the first time this tool call reaches this handler: a session whose hook list holds both the routed
+    entry and the dedicated one runs each check once. An atomic file per call; True when the call names no id."""
+    tid = SAFE.sub("_", str(payload.get("tool_use_id") or ""))[:80]
+    if not tid or not home or not sid:
+        return True
+    d = os.path.join(session_dir(home, sid), ".calls")
+    try:
+        os.makedirs(d, exist_ok=True)
+        fd = os.open(os.path.join(d, f"{kind}-{tid}"), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+    except FileExistsError:
+        return False
+    except OSError:
+        return True
+    try:
+        old = time.time() - 86400
+        for n in os.listdir(d)[:500]:
+            p = os.path.join(d, n)
+            if os.path.getmtime(p) < old:
+                os.remove(p)
+    except OSError:
+        pass
+    return True
+
+
+ROUTED = {}
+
+
+def routed(name, payload):
+    """A phi handler run from another hook's entry (recall's lookup hooks), with the hook output phi would give and
+    its log line."""
+    event, fn = ROUTED[name]
+    started = time.time()
+    RAN.clear()
+    me = Me(payload)
+    if not me.home or not me.id or not once(me.home, me.id, name, payload):
+        return None
+    RAN.update(home=me.home, session=me.id, routed=True)
+    out = fn(payload)
+    log_run(name, json.dumps(out) if isinstance(out, dict) else out, started)
+    if isinstance(out, dict) or not out:
+        return out or None
+    return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": out}}
+
+
 HOOKS = {"session-start": ("SessionStart", h_session_start),
          "user-prompt-submit": ("UserPromptSubmit", h_user_prompt_submit),
          "stop": ("Stop", h_stop),
@@ -1179,6 +1225,7 @@ HOOKS = {"session-start": ("SessionStart", h_session_start),
          "branch-guard": ("PreToolUse", h_branch_guard),
          "plan": ("PostToolUse", h_plan),
          "task": ("PostToolUse", h_task)}
+ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "plan", "task")})
 OLD_NAMES = {"arrive": "session-start", "prompt": "user-prompt-submit", "exit": "stop"}   # hooks.json of 0.1 and 0.2,
 #                                                                         still loaded in sessions that began then
 
@@ -1195,6 +1242,11 @@ def hook_main(name):
             return 0
         event, fn = HOOKS[name]
         started = time.time()
+        if name in ROUTED:                          # a dedicated entry a newer hook list holds: once, as routed
+            me = Me(payload)
+            if me.home and me.id and not once(me.home, me.id, name, payload):
+                return 0
+            RAN.update(home=me.home, session=me.id)
         text = fn(payload)
         if isinstance(text, dict):                  # a hook that answers with its own JSON (start-advice)
             log_run(name, json.dumps(text), started)
