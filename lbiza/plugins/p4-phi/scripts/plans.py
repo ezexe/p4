@@ -710,9 +710,18 @@ OWN_WORDS = ("phi (p4-phi)", "words bear on your open step", "check whether thos
              "stop before any tool runs")
 
 
+# #33: a session link names a session, not a step: the link and its label are never matched against step words
+SESSION_LINK = re.compile(r"\[[^\]\n]*\]\(\s*claude://[^)\s]*\s*\)|<?claude://[^\s)>]+>?", re.I)
+
+
+def links_removed(text):
+    """`text` without claude:// session links, a markdown link's label with it."""
+    return SESSION_LINK.sub(" ", str(text or ""))
+
+
 def own_removed(text):
-    """`text` without phi's own relay lines and the sentences that quote them."""
-    keep = [ln for ln in str(text or "").splitlines() if not OWN_LINE.match(ln)]
+    """`text` without phi's own relay lines, the sentences that quote them, and session links with their labels."""
+    keep = [ln for ln in links_removed(text).splitlines() if not OWN_LINE.match(ln)]
     sents = [x for x in SENTENCE.split("\n".join(keep)) if x.strip()]
     return "\n".join(x for x in sents if not any(w in x.lower() for w in OWN_WORDS))
 ADDR_RE = re.compile(r"\b(?:step\s+)?(\d+(?:\.\d+)+|(?<=step )\d+)\b", re.I)
@@ -729,8 +738,9 @@ DRAWN = re.compile(r"[\u2500-\u257f]")             # box-drawing characters: a t
 
 
 def prose(text):
-    """`text` without fenced code blocks and drawn lines, whose addresses and words are no claim about a step."""
-    text = FENCE.sub("\n", str(text or ""))
+    """`text` without fenced code blocks, drawn lines and session links, whose addresses and words are no claim
+    about a step."""
+    text = links_removed(FENCE.sub("\n", str(text or "")))
     return "\n".join(ln for ln in text.splitlines() if not DRAWN.search(ln))
 
 

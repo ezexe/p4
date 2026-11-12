@@ -229,6 +229,12 @@ class TreeOfPlans(unittest.TestCase):
         self.assertIn("names no file", kept[0][1])
         steps = [{"addr": "1", "content": "Waits and relays stay in place"},
                  {"addr": "2", "content": "Run every suite, commit, fast-forward"}]
+        linked = ("Started:\n- [Record and check phi's own lines\u2026](claude://claude.ai/epitaxy/local_ab12)\n"
+                  "- claude://claude.ai/epitaxy/local_cd34")             # #33: a session link names no step
+        own = [{"addr": "3", "content": "Record and check phi's own lines"}]
+        self.assertEqual(plans.matches(linked, own, [], ""), [])
+        self.assertNotIn("Record", plans.own_removed(linked))
+        self.assertEqual(len(plans.matches("I will record and check phi's own lines now.", own, [], "")), 1)
         report = ("Here is the tree:\n\u251c\u2500\u2500 x/ \u251c\u2500\u2500 child for step 1 plan: 1.1, 1.2\n"
                   "```\nstep 2 plan: 2.1 run every suite\n```\nNothing else.")
         self.assertEqual(plans.matches(report, steps, [], ""), [])
