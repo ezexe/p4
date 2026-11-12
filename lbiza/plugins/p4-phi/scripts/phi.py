@@ -788,16 +788,18 @@ BUILT_IN = ("built-in, act-don't-wait: a next step the chain can settle (the tas
             "rules ask for the user's go before a kind of step, such as a plan's edits, that go is the user's to give: "
             "wait for it on those steps, and act on the rest.")
 ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves the built-in rule out in a project (#23)
+TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps a top session's work in it (#24)
 
 
 def project_conf(store):
     """The project's own phi keys in p4.json, read where the session runs, not from a shared home store."""
-    global ACT_DONT_WAIT
+    global ACT_DONT_WAIT, TOP_ORCHESTRATES
     try:
         d = p4conf.section(store, "phi", write=False) if store else {}
     except Exception:  # noqa: BLE001
         d = {}
     ACT_DONT_WAIT = d.get("act_dont_wait") is not False
+    TOP_ORCHESTRATES = d.get("top_orchestrates") is not False
 
 
 TOP_RULE = ("This is the top session of its tree, so it keeps itself free for orchestration: planning, relaying "
@@ -914,7 +916,7 @@ def new_task_text(home, s, me, user=True, again=False):
                 f"about something else, " + elsewhere +
                 f"question, a few tool calls) stays here. When the user says the task itself has changed: "
                 f"`{commands()} task \"<the new task>\"`. This session's page: {page_path(home, s['sessionId'])}."
-                + (" " + TOP_RULE if not spawned_from(s) else "")
+                + (" " + TOP_RULE if not spawned_from(s) and TOP_ORCHESTRATES else "")
                 + (" " + caps_text(home, s) if caps_text(home, s) else ""))
     if not user:
         return ""
@@ -1128,8 +1130,8 @@ def h_plan(payload):
     if isinstance(inp.get("items"), list):        # a plan's first whole list, or a revision of it
         s = load_session(me.home, me.id) or s
         cap = caps_text(me.home, s)
-        advise = plans.split_advice if spawned_from(s) else plans.top_advice
-        advice = advise(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user", cap)
+        advise = plans.split_advice if spawned_from(s) else plans.top_advice if TOP_ORCHESTRATES else None
+        advice = advise(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user", cap)             if advise else ""                      # #24: a project whose top session lands its plan itself
         RAN["split"] = "advised" if advice else ""
         text = "\n\n".join(p for p in (advice, text) if p)
     if not spawned_from(s) and any(k in inp for k in ("advance", "start", "done", "items")):
@@ -1170,7 +1172,7 @@ def nudge_key(step):
 
 def nudge_step(home, s):
     """The top session's step in progress when it is a work step not nudged on yet, else None."""
-    if not s or spawned_from(s):
+    if not s or spawned_from(s) or not TOP_ORCHESTRATES:
         return None
     plan = plans.load(home, s["sessionId"])
     st = plans.step_of(plan, plan.get("current") or "") if plan.get("steps") else None

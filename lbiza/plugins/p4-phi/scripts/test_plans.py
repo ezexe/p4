@@ -592,6 +592,19 @@ class TopOrchestrates(unittest.TestCase):
         groups, kept = plans.top_groups(landing, "")
         self.assertEqual((groups, [a for a, _ in kept]), ([], ["1", "2", "3"]))
 
+    def test_a_project_can_keep_its_work_in_the_top_session(self):
+        """#24: p4.json phi.top_orchestrates false leaves out the top rule, its split advice and its nudge."""
+        with open(os.path.join(self.t.p4, "p4.json"), "w", encoding="utf-8") as f:
+            json.dump({"phi": {"top_orchestrates": False}}, f)
+        p = self.t.proj
+        ctx = self.plan(TOP, items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
+                                   "Run the suites, commit and push the exporter"))
+        self.assertNotIn("top session of its tree", ctx or "")
+        self.assertEqual(self.check(TOP, "Edit", {"file_path": f"{p}/src/export/flush.py"}, "tk1"), "",
+                         "no nudge to hand the step to a child")
+        self.assertNotIn("keeps itself free for orchestration",
+                         context(self.t.say(TOP, "carry on", P4_PHI_NEW_TASK="1")))
+
     def test_a_serial_pair_of_work_steps_becomes_one_child(self):
         p = self.t.proj
         ctx = self.plan(TOP, items(f"Write the parser in {p}/src/parse.py",
