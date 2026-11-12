@@ -25,6 +25,7 @@ EXPIRE_S = 24 * 3600            # a request no turn of ezexe's has started by th
 CLAIM_S = 15 * 60               # a claimed request whose child never arrived is handed again after this
 MARK_RE = re.compile(r"phi start request (req-[0-9a-f]{10}) for (\S+?)\.?(?:\s|$)")
 ISSUE = "claude-code#109282"
+BACKGROUND_MIN = 80             # #37: the app refuses a fresh start whose background is shorter
 
 
 def path_of(home):
@@ -73,9 +74,25 @@ def pending(home, at=None):
     return sorted(out, key=lambda r: float(r.get("at") or 0))
 
 
-def add(home, requester, title, brief, context="fresh", at=None):
+def background_of(home, requester, given=""):
+    """A request's background: the one given, else one built from the requester's task and the store's project,
+    never shorter than BACKGROUND_MIN characters."""
+    text = " ".join(str(given or "").split())
+    if not text:
+        s = relay._session(home, requester)
+        task = relay._short(" ".join(str(s.get("task") or "").split()), 600)
+        project = relay.norm(os.path.dirname(os.path.dirname(os.path.abspath(home))))
+        text = (f"Requested by the session \"{relay._title(s)}\" ({requester}) in the project {project}"
+                + (f", whose task is: {task}" if task else "") + ".")
+    if len(text) < BACKGROUND_MIN:
+        text += (" phi (p4-phi) carried this start request through the store; the brief says what the child must "
+                 "do and leave done.")
+    return text
+
+
+def add(home, requester, title, brief, context="fresh", at=None, background=""):
     """Keep a start request -> (its id, True when new). The same brief from the same session, still pending, is
-    kept once."""
+    kept once. Its background is the one given or one built from the requester (#37)."""
     title, brief = " ".join(str(title or "").split()), str(brief or "").strip()
     if len(title) < 3:
         raise ValueError("a start request needs the child's title")
@@ -87,15 +104,21 @@ def add(home, requester, title, brief, context="fresh", at=None):
     at = time.time() if at is None else at
     _append(home, {"kind": "request", "id": rid, "at": at, "time": time.strftime("%Y-%m-%d %H:%M"),
                    "requester": requester, "requesterTitle": relay._title(relay._session(home, requester)),
-                   "title": title, "brief": brief, "context": "fork" if context == "fork" else "fresh"})
+                   "title": title, "brief": brief, "context": "fork" if context == "fork" else "fresh",
+                   "background": background_of(home, requester, background)})
     return rid, True
 
 
-def call_of(r):
+def call_of(r, home=""):
     """The exact start_session input that starts a request. Always fresh: a fork would carry the starter's
-    conversation, not the requester's."""
+    conversation, not the requester's. It carries the request's background, which the app requires (#37); a request
+    kept before backgrounds were is given one built now."""
+    bg = str(r.get("background") or "")
+    if len(bg) < BACKGROUND_MIN:
+        bg = background_of(home, r["requester"], bg) if home else (
+            bg + " " + background_of("", r["requester"], "")).strip()
     return {"initiation": "user_asked", "title": r["title"], "context": "fresh", "use_worktree": False,
-            "prompt": r["brief"] + "\n\n" + marker(r["id"], r["requester"])}
+            "background": bg, "prompt": r["brief"] + "\n\n" + marker(r["id"], r["requester"])}
 
 
 def hand_text(home, sid, at=None):
@@ -105,7 +128,7 @@ def hand_text(home, sid, at=None):
     if not rows:
         return ""
     lines = [f"- \"{r['title']}\" for \"{r.get('requesterTitle') or r['requester']}\" ({r['requester']}): "
-             f"`mcp__ccd_session__start_session` with {json.dumps(call_of(r), ensure_ascii=False)}" for r in rows]
+             f"`mcp__ccd_session__start_session` with {json.dumps(call_of(r, home), ensure_ascii=False)}" for r in rows]
     return ("phi (p4-phi): start requests from sessions whose turns ezexe did not begin, so the app refused "
             "them `user_asked`. This turn ezexe began, so start each now, with exactly the call given, before "
             "the rest of this turn's work:\n" + "\n".join(lines) + "\n"

@@ -68,6 +68,8 @@ class StartRequests(unittest.TestCase):
         call = json.loads(line.split("`mcp__ccd_session__start_session` with ", 1)[1].split("\n", 1)[0])
         self.assertEqual((call["initiation"], call["context"], call["use_worktree"]), ("user_asked", "fresh", False))
         self.assertIn(BRIEF, call["prompt"])
+        self.assertGreaterEqual(len(call["background"]), 80, "#37: the app refuses a shorter background")
+        self.assertIn(KID, call["background"], "built from the requester")
         self.assertIn(f"for {KID}.", call["prompt"])
         adv = t.hook("start-advice", TOP2, {"hook_event_name": "PreToolUse",
                                             "tool_name": "mcp__ccd_session__start_session", "tool_input": call})
@@ -91,6 +93,20 @@ class StartRequests(unittest.TestCase):
         self.assertIn("Archive them now", archive)
         self.assertIn(NEW, archive.split("started to be archived when done")[1], "the archive line goes to the requester")
         self.assertNotIn("Archive them now", context(t.say(TOP2, "and now?")), "not to the starter")
+
+    def test_a_given_background_is_carried_and_a_short_one_made_long_enough(self):
+        """#37: the handed-out call carries a background of at least 80 characters, given or not."""
+        t = self.t
+        given = "The exporter's flush moved to the new writer in src/flush.py; the docs follow the same layout."
+        self.assertEqual(t.cli(KID, "request", "the docs port", "--brief", BRIEF, "--background", given).returncode, 0)
+        self.assertEqual(t.cli(KID, "request", "the short one", "--brief", BRIEF + " Short.", "--background",
+                               "Short.").returncode, 0)
+        calls = {r["title"]: starts.call_of(r, t.p4) for r in starts.pending(t.p4)}
+        self.assertEqual(calls["the docs port"]["background"], given)
+        self.assertTrue(calls["the short one"]["background"].startswith("Short."))
+        self.assertGreaterEqual(len(calls["the short one"]["background"]), 80)
+        old = {"id": "req-0000000000", "requester": KID, "title": "an old row", "brief": BRIEF}
+        self.assertGreaterEqual(len(starts.call_of(old, t.p4)["background"]), 80, "a row kept before #37")
 
     def test_a_request_expires_after_a_day(self):
         home = self.t.p4

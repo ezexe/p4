@@ -2270,6 +2270,8 @@ def main(argv=None):
             p.add_argument("--brief", default="", help="the child's whole brief")
             p.add_argument("--brief-file", default="", help="a file holding the brief")
             p.add_argument("--context", default="fresh", choices=("fresh", "fork"))
+            p.add_argument("--background", default="", help="the child's background (default: one built from this "
+                                                              "session's task and the project)")
     a = ap.parse_args(argv)
     me = Me(session=a.session, p4=a.p4)
     if not me.home or not os.path.isdir(me.home):
@@ -2320,7 +2322,7 @@ def main(argv=None):
                 with open(a.brief_file, encoding="utf-8") as f:
                     brief = f.read()
             save_session(me.home, s)
-            rid, new = starts.add(me.home, s["sessionId"], a.title, brief, a.context)
+            rid, new = starts.add(me.home, s["sessionId"], a.title, brief, a.context, background=a.background)
             print(starts.requested_text(rid, new))
             if a.context == "fork":
                 print("phi: a start request is always fresh: a fork would carry the starter's conversation, not "
