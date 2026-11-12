@@ -378,7 +378,7 @@ def save_session(home, s):
         s["stale"] = st                           # marked stale by a sibling's Stop while this hook ran
     elif isinstance(st, dict) and isinstance(s.get("stale"), dict) and st.get("told"):
         s["stale"]["told"] = True
-    for k in ("relayWarned", "marksGiven"):
+    for k in ("relayWarned", "marksGiven", "upTold"):
         if isinstance(disk.get(k), list):
             s[k] = list(s.get(k) or []) + [x for x in disk[k] if x not in (s.get(k) or [])]
     for k in ("othersGiven", "plansSeen"):

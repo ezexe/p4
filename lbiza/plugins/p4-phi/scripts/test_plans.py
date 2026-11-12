@@ -114,6 +114,15 @@ class TreeOfPlans(unittest.TestCase):
         self.assertEqual(anchor["nodes"][A]["plan"]["current"], "2.1", "the parent's anchor is the plan tree")
         self.assertEqual(anchor["parent"]["plan"]["current"], "2")
 
+    def test_an_up_line_is_said_once(self):
+        """P1: "the parent has moved past your root step" came at every boundary after."""
+        self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move", "Tell docs"))
+        self.plan(TOP, items("Port the hooks", "Move the store layout into phi", "Write the layout docs", at=2))
+        first = self.plan(A, {"advance": True})
+        self.assertIn("up: the parent has moved past your root step 2", first)
+        again = self.plan(A, {"advance": True})
+        self.assertNotIn("moved past", again)
+
     def test_the_parent_revising_the_childs_root_reaches_it_at_its_next_advance(self):
         t = self.t
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
@@ -123,7 +132,8 @@ class TreeOfPlans(unittest.TestCase):
         ctx = self.plan(A, {"advance": True})
         self.assertIn("step 2.3 starts now", ctx)
         self.assertIn("your root step 2 in the plan of \"top\" was revised", ctx)
-        self.assertIn("up: the parent revised your root step 2", ctx)
+        self.assertNotIn("up: the parent revised your root step 2", ctx, "P1: the relayed revision says it once")
+        self.assertEqual(ctx.count("root step 2"), 1)
         self.assertEqual(self.plan(A, {"items": [{"content": "Rewrite p4conf.LAYOUT", "status": "completed"},
                                                  {"content": "Move recall/ into phi/", "status": "completed"},
                                                  {"content": "Commit the move", "status": "completed"},

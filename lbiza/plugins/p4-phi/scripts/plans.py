@@ -267,7 +267,8 @@ def boundary(home, s, plan, started, transcript=""):
         if ps is None and pp.get("steps"):
             lines.append(f"up: your root step {root} is no longer in the parent's plan.")
         elif ps is not None:
-            if plan.get("rootText") and ps.get("content") != plan.get("rootText"):
+            relayed = any(f"your root step {root} " in x for x in lines)   # P1: the relayed revision said it
+            if plan.get("rootText") and ps.get("content") != plan.get("rootText") and not relayed:
                 lines.append(f"up: the parent revised your root step {root} to \"{relay._short(ps.get('content'), 160)}\" "
                              f"since you started on it.")
             if ps.get("status") == "completed" or (pp.get("current") and pp.get("current") != root
@@ -292,6 +293,17 @@ def boundary(home, s, plan, started, transcript=""):
         done = sum(1 for x in kp["steps"] if x.get("status") == "completed")
         lines.append(f"down: \"{relay._title(ks)}\" has {done} of {len(kp['steps'])} steps done"
                      + (f", now on {kp['current']}" if kp.get("current") else "") + ".")
+    told = disk.setdefault("upTold", [])         # P1: an up line is said once, not at every boundary after
+    kept = []
+    for x in lines:
+        if x in kept:
+            continue
+        if x.startswith("up: "):
+            if x in told:
+                continue
+            told.append(x)
+        kept.append(x)
+    lines = kept
     relay._write_json(path, disk)
     if not lines:
         return ""
