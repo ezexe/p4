@@ -52,6 +52,23 @@ class Paths(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_the_same_words_are_queued_once_and_no_cli_id_gets_no_background(self):
+        """R7: one quote relayed twice under two stamps. R8: a call with no session id given the background again."""
+        tmp = tempfile.mkdtemp()
+        try:
+            home = os.path.join(tmp, "p4")
+            write(os.path.join(home, "phi", "sessions", "kid", "session.json"), json.dumps({"sessionId": "kid"}))
+            self.assertTrue(relay.warn(home, "kid", "turn:top:aaa", "the same quote"))
+            self.assertFalse(relay.warn(home, "kid", "turn:top:bbb", "the same quote"))
+            self.assertEqual(len(relay._session(home, "kid")["relayPending"]), 1)
+            import phi
+            s = {"sessionId": "kid", "spawnedFrom": {"sessionId": "top"}, "forked": True,
+                 "backgroundGivenFor": {"": "top"}}
+            me = type("Me", (), {"cli": ""})()
+            self.assertEqual(phi.given(s, me, home), "")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_a_first_look_relays_no_backlog_and_revisions_collapse(self):
         """RF1: a first look once replayed a day of revisions, 40 lines and 11.4 KB."""
         tmp = tempfile.mkdtemp()

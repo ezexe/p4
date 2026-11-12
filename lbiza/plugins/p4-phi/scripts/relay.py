@@ -211,6 +211,8 @@ def warn(home, sid, key, text):
     if key in told:
         return False
     pend = s.setdefault("relayPending", [])
+    if any(isinstance(w, dict) and w.get("text") == text for w in pend):
+        return False                              # R7: the same words already wait for this session
     up = re.match(r"^plan:([^:]+):[^:]+:up$", key)
     same = [w for w in pend if isinstance(w, dict) and up and re.match(rf"^plan:{re.escape(up.group(1))}:[^:]+:up$",
                                                                       str(w.get("key") or ""))]

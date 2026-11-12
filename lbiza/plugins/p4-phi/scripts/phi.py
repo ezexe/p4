@@ -883,11 +883,12 @@ def rules_text(home, room):
 def given(s, me, home, own=False):
     """The background, when this CLI session has not been given it under the session that started it; marks it
     given."""
-    if not BACKGROUND:
-        return ""
+    if not BACKGROUND or not me.cli:
+        return ""                                  # R8: a call with no session id is no new CLI session
     told = s.setdefault("backgroundGivenFor", {})
     if not isinstance(told, dict):
         told = s["backgroundGivenFor"] = {}
+    told.pop("", None)                             # an empty key stored before R8
     above = spawned_from(s)
     if not own and told.get(me.cli) == above:
         return ""

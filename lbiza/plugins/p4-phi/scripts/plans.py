@@ -418,10 +418,18 @@ def turn_relay(home, s, row, calls):
     sid, title = s["sessionId"], relay._title(s)
     report = own_removed(row.get("report"))
     mine = load(home, sid)
-    text = report + "\n" + "\n".join(f"{x['addr']} {x.get('content', '')}" for x in mine.get("steps") or []
-                                      if x.get("status") == "in_progress")
+    step = "\n".join(f"{x['addr']} {x.get('content', '')}" for x in mine.get("steps") or []
+                     if x.get("status") == "in_progress")
     if not report.strip():
         return []
+    path = os.path.join(relay._dir(home, sid), "session.json")
+    disk = relay._read_json(path)
+    if step and step == disk.get("stepRelayed"):
+        step = ""                                 # R7: an unchanged step was matched and relayed again every turn
+    elif step:
+        disk["stepRelayed"] = s["stepRelayed"] = step
+        relay._write_json(path, disk)
+    text = report + ("\n" + step if step else "")
     sent = set()
     for c in calls or []:
         inp = c.get("input") if isinstance(c.get("input"), dict) else {}
