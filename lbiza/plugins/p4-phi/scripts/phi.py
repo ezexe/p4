@@ -1252,7 +1252,7 @@ def h_plan(payload):
         s = load_session(me.home, me.id) or s      # #28: the issue at the first plan, then the commits' check
         cwd = payload.get("cwd") or s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or ""
         line = issues.ensure(me.home, s, issues.plan_lines(me.home, me.id), cwd, "plan", me.rec) \
-            if isinstance(inp.get("items"), list) else ""
+            if isinstance(inp.get("items"), list) and not load_turns(me.home, me.id) else ""
         if not line and isinstance(inp.get("items"), list):
             issues.post_plan(me.home, s)
         flag = issues.unclosed_text(me.home, s, cwd)

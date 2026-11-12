@@ -150,6 +150,23 @@ class Loop(unittest.TestCase):
         self.assertIn("named in its brief", ctx)
         self.assertFalse([c for c in self.calls() if c[:2] == ["issue", "create"]])
 
+    def test_a_brief_naming_only_closed_issues_files_none(self):
+        """#39: a queue's brief named #28, closed by then, and its plan filed a new issue for work already filed."""
+        write(os.path.join(self.ghdir, "state.json"), json.dumps({"3": "CLOSED", "4": "CLOSED"}))
+        ctx = context(self.t.say(A, f"Fix ezexe/demo issue #3, then #4 in {self.work}/lib/x.py. Archive when done."))
+        self.plan(A, items("Fix x", "Fix y"))
+        self.assertNotIn("issue", self.t.session(A))
+        self.assertNotIn("filed now", ctx)
+        self.assertFalse([c for c in self.calls() if c[:2] == ["issue", "create"]])
+
+    def test_a_session_with_turns_already_files_none_at_its_plan(self):
+        """#39: a session already at work when the loop went live filed an issue at its next plan."""
+        self.t.say(B, "Look around")
+        self.assertEqual(self.t.stop(B, "Look around", report="Looked.", uuid="b1").returncode, 0)
+        self.t.cli(B, "task", f"Fix the off-by-one in {self.work}/lib/x.py and commit it")
+        self.assertNotIn("#7", self.plan(B, items(f"Fix {self.work}/lib/x.py", "Commit it")))
+        self.assertNotIn("issue", self.t.session(B))
+
     def test_a_commit_missing_closes_is_flagged_once(self):
         self.start_writer()
         self.plan(A, items("Fix x", "Run the tests"))

@@ -119,14 +119,21 @@ def repos_named(text, base):
     return out
 
 
-def named_issue(text, slug):
-    """The number of an issue on `slug` the text already names, 0 for none."""
+def named_issues(text, slug):
+    """The numbers of the issues on `slug` the text already names, in order."""
+    out = []
     for m in NAMED.finditer(str(text or "")):
         other = m.group(1) or m.group(2)
         if other and other.lower() != slug.lower():
             continue
-        return int(m.group(3))
-    return 0
+        if int(m.group(3)) not in out:
+            out.append(int(m.group(3)))
+    return out
+
+
+def named_issue(text, slug):
+    """The number of the first issue on `slug` the text already names, 0 for none."""
+    return (named_issues(text, slug) or [0])[0]
 
 
 def issue_state(slug, n):
@@ -175,11 +182,12 @@ def ensure(home, s, text, base, where, rec=None):
     if not repos:
         return ""
     repo, slug = repos[0]
-    n, url, adopted = named_issue(whole, slug), "", False
-    if n and issue_state(slug, n) == "OPEN":
-        url, adopted = f"https://github.com/{slug}/issues/{n}", True
-    else:
-        n = 0
+    named = named_issues(whole, slug)
+    n = next((k for k in named if issue_state(slug, k) == "OPEN"), 0)
+    url, adopted = (f"https://github.com/{slug}/issues/{n}", True) if n else ("", False)
+    if named and not n:
+        return ""                                  # its purpose is filed already, in issues now closed: none again
+    if not n:
         plan = plan_lines(home, s["sessionId"])
         title = relay._short(re.sub(r"^[\s#*>]+", "", (s.get("title") or whole).strip().split("\n", 1)[0]), 100)
         link = link_of(rec)
