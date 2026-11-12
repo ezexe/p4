@@ -580,6 +580,26 @@ class NewTask(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID2)), "", "phi.py detach with no id: itself")
 
+    def test_a_detached_top_is_never_retired_onto_its_former_starter(self):
+        """Retirement, archive lines and step roots read spawnedFrom.sessionId, never its `from`."""
+        import plans
+        self.say(TOP, TASK)
+        stale = phi.load_session(self.t.p4, KID) or phi.ensure_session(self.t.p4, KID)
+        self.say(KID, "Task:\nPick the fence colour, archive when done. " + phi.NEW_TOP_BRIEF)
+        self.assertEqual(phi.load_session(self.t.p4, KID)["spawnedFrom"]["from"], TOP)
+        phi.save_session(self.t.p4, dict(stale, spawnedFrom={"sessionId": TOP, "source": "record"}))
+        self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID)), "", "an older copy never undoes a detach")
+        self.t.hook("plan", KID, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                                  "tool_input": {"items": [{"content": "Pick it", "status": "completed"}]},
+                                  "tool_response": "Plan updated."})
+        self.t.stop(KID, "Pick the fence colour", report="Picked green; done.")
+        s = phi.load_session(self.t.p4, KID)
+        self.assertFalse(s.get("doneRetired"), "a top session is retired onto nobody")
+        self.assertEqual(plans.root_of(self.t.p4, s), "")
+        self.assertFalse(phi.load_notes(self.t.p4, TOP), "no replaces: note on the former starter")
+        self.assertNotIn(KID, json.dumps(phi.load_session(self.t.p4, TOP).get("staleChildren") or []))
+        self.assertNotIn("Archive them now", self.say(TOP, "carry on"))
+
     def test_a_childs_new_topic_is_handed_up(self):
         self.say(TOP, TASK)
         first = self.say(KID, HANDED)

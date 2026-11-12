@@ -426,6 +426,11 @@ def save_session(home, s):
             s[k] = disk[k]
     if int(disk.get("anchorSeen") or 0) > int(s.get("anchorSeen") or 0):
         s["anchorSeen"] = disk["anchorSeen"]
+    moved = disk.get("spawnedFrom") if isinstance(disk.get("spawnedFrom"), dict) else {}
+    mine = s.get("spawnedFrom") if isinstance(s.get("spawnedFrom"), dict) else {}
+    if moved.get("source") in ("detached", "reparented", "requested") \
+            and str(moved.get("time") or "") > str(mine.get("time") or ""):
+        s["spawnedFrom"] = moved                  # a detach or reparent made while this hook held an older copy
     write_atomic(os.path.join(session_dir(home, s["sessionId"]), "session.json"),
                  json.dumps(s, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
 
