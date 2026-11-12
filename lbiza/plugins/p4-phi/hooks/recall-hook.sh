@@ -9,7 +9,7 @@
 # The lookup hooks run before and after every tool call (0.8.9), so every process this script starts is paid twice a
 # call. Measured on Windows, 2026-11-11 (median of 7): 415 to 490 ms a call before, of which 144 ms was hook.py.
 # Since then: the platform is read from the environment (no `uname`), the interpreter proven once is remembered in
-# a file beside the temp directory (no second interpreter start), and a call lookups.py has nothing to check
+# the plugin's own install, ${CLAUDE_PLUGIN_ROOT}/.python (no second interpreter start), and a call lookups.py has nothing to check
 # (lookup-check on a tool that is neither a web call nor a shell command, or on a command while the store has no
 # failure model) ends here, with no python at all. After: 49 ms for such a check, about 250 ms for a record that
 # has to answer, and a clean call's record costs the call only this script (the python runs on behind it).
@@ -69,7 +69,7 @@ case "${OS:-}${OSTYPE:-}" in
   *) probe=0 ;;
 esac
 
-known="${TMPDIR:-${TEMP:-/tmp}}/p4-recall-python"
+known="${CLAUDE_PLUGIN_ROOT}/.python"   # the interpreter proven once: in the plugin's own install, never %TEMP%
 if [ "$probe" = 1 ] && [ -r "$known" ]; then
   read -r c < "$known" || c=""
   if [ -n "$c" ] && command -v "$c" >/dev/null 2>&1; then

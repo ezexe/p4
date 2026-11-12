@@ -152,3 +152,6 @@ experiment/__pycache__
 # Python
 __pycache__/
 *.py[cod]
+
+# the interpreter a hook runner proved once (hooks/run-hook.sh, hooks/recall-hook.sh)
+lbiza/plugins/*/.python

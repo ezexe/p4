@@ -193,6 +193,27 @@ class Layout(unittest.TestCase):
             self.assertEqual(self.g("status", "--porcelain").strip(), "", "the move is committed whole")
         self.assertEqual(p4conf.migrate_layout(self.p4), [])
 
+    def test_the_layout_commit_holds_the_move_and_nothing_else(self):
+        """B2 and B3 of the marketplace test session: a pending hook edit stays pending, and a seed line an older
+        plugin appends again in the flat form is not left twice."""
+        if not self.git:
+            self.skipTest("no git")
+        put(os.path.join(self.p4, "phi", "store", "facts.md"), "a fact\n")
+        put(os.path.join(self.p4, ".gitignore"), "phi/models/index.json\n")
+        self.g("init", "-q")
+        self.g("add", "-A")
+        self.g("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "new layout")
+        put(os.path.join(self.p4, "phi", "store", "facts.md"), "a fact\na second fact, not yet committed\n")
+        put(os.path.join(self.p4, "store", "messages", "old.md"), "an old plugin's row\n")
+        put(os.path.join(self.p4, "models", "tasks.tsv"), "id\ttext\n")
+        with open(os.path.join(self.p4, ".gitignore"), "a", encoding="utf-8") as f:
+            f.write("# seeded by p4-recall\nmodels/index.json\n")
+        p4conf.migrate_layout(self.p4)
+        committed = self.g("show", "--name-only", "--format=", "HEAD").split()
+        self.assertEqual(sorted(committed), [".gitignore", "phi/models/tasks.tsv", "phi/store/messages/old.md"])
+        self.assertEqual(self.g("status", "--porcelain").strip(), "M phi/store/facts.md")
+        self.assertEqual(read(os.path.join(self.p4, ".gitignore")).splitlines().count("phi/models/index.json"), 1)
+
     def test_an_old_plugin_writing_after_the_move_is_merged(self):
         put(os.path.join(self.p4, "temportal", "memory", "a.md"), "new\n")
         put(os.path.join(self.p4, "temportal", "memory", "same.md"), "s\n")

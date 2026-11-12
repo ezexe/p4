@@ -210,6 +210,10 @@ def _harness_links(sid):
     return out
 
 
+# The files a move put in a new place in this process, so the layout commit holds those and nothing else.
+_LANDED = []
+
+
 def _merge_tree(src, dst, aside):
     """Move every file of `src` into `dst`. A file `dst` lacks is moved in and an identical one dropped. Of two that
     differ the newer is kept in `dst` and the older goes to `aside` under the same relative path. Returns the count
@@ -224,6 +228,7 @@ def _merge_tree(src, dst, aside):
                 if not os.path.lexists(t):
                     os.makedirs(os.path.dirname(t), exist_ok=True)
                     os.replace(s, t)
+                    _LANDED.append(t)
                 elif os.path.isfile(t) and filecmp.cmp(s, t, shallow=False):
                     os.remove(s)
                 else:
@@ -233,8 +238,10 @@ def _merge_tree(src, dst, aside):
                     if os.path.lexists(a):
                         a += time.strftime(".%Y%m%d-%H%M%S")
                     os.replace(old, a)
+                    _LANDED.append(a)
                     if old is t:
                         os.replace(s, t)
+                        _LANDED.append(t)
                     aside_n += 1
             except OSError:
                 continue
@@ -258,9 +265,14 @@ def _move(src, dst, aside):
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         try:
             os.rename(src, dst)
-            return 0
         except OSError:
             pass
+        else:
+            if os.path.isdir(dst):
+                _LANDED.extend(os.path.join(d, n) for d, _, names in os.walk(dst) for n in names)
+            else:
+                _LANDED.append(dst)
+            return 0
     return _merge_tree(src, dst, aside)
 
 
@@ -295,15 +307,18 @@ def _move_tmp(old, new, aside):
 
 
 def _rewrite_paths(p, moved):
-    """Lines of .gitignore or .gitattributes that name a moved directory are made to name its new place. True when
-    the file changed."""
+    """Lines of .gitignore or .gitattributes that name an older place are made to name its new one: `moved` maps each
+    old path to its new one. A rewritten line the file already holds is dropped, so an older plugin's seed block
+    appended again leaves no line twice. True when the file changed."""
     try:
         with open(p, encoding="utf-8", newline="") as f:
             text = f.read()
     except OSError:
         return False
+    lines = text.splitlines(keepends=True)
+    have = {l.strip() for l in lines}
     out = []
-    for line in text.splitlines(keepends=True):
+    for line in lines:
         s = line.lstrip()
         lead = line[:len(line) - len(s)]
         neg = "!" if s.startswith("!") else ""
@@ -313,8 +328,16 @@ def _rewrite_paths(p, moved):
         for old in sorted(moved, key=len, reverse=True):         # recall/models before models
             if body.startswith(old + "/") or body.rstrip("\r\n") == old:
                 body = moved[old] + body[len(old):]
+                new = lead + neg + slash + body
+                if new.strip() in have:
+                    new = None                                   # already there: the old form goes
+                else:
+                    have.add(new.strip())
                 break
-        out.append(lead + neg + slash + body)
+        else:
+            new = line
+        if new is not None:
+            out.append(new)
     new = "".join(out)
     if new == text:
         return False
@@ -390,8 +413,44 @@ def _olds(p4):
     return out
 
 
+def _tracked(p4, rel):
+    """The files git tracks under `rel`, as git names them."""
+    r = _git(p4, "ls-files", "-z", "--", rel)
+    return [x for x in r.stdout.decode("utf-8", "surrogateescape").split("\0") if x] if r and r.returncode == 0 else []
+
+
+def _commit_moves(p4, gone, landed, extra):
+    """Commit the move and nothing else: the removal of `gone` (tracked files of the older places), the files that
+    `landed` in a new place, and `extra` (.gitignore, .gitattributes). What else the hooks left pending stays
+    pending. A landed file the store ignores is left out, as git would."""
+    rel = lambda p: os.path.relpath(p, p4).replace("\\", "/")
+    new = sorted({rel(p) for p in landed if os.path.isfile(p)})
+    if new:
+        r = _git_in(p4, ["check-ignore", "-z", "--stdin"], new)
+        skip = set(r.stdout.decode("utf-8", "surrogateescape").split("\0")) if r else set()
+        new = [p for p in new if p not in skip]
+    paths = sorted(set(gone) | set(new) | set(extra))
+    if not paths:
+        return
+    _git_in(p4, ["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"], paths)
+    _git_in(p4, ["-c", "user.name=p4", "-c", "user.email=p4@localhost", "commit", "-q", "--no-verify", "--only",
+                 "-m", "layout: each plugin's files in .claude/p4/<plugin>/",
+                 "--pathspec-from-file=-", "--pathspec-file-nul"], paths)
+
+
+def _git_in(p4, args, paths):
+    try:
+        return subprocess.run(["git", "-C", p4, *args], input="\0".join(paths).encode("utf-8", "surrogateescape"),
+                              capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def _migrate(p4, commit):
     lines, done = [], {}
+    del _LANDED[:]
+    own = commit and _own_repo(p4)
+    gone = [f for _, rel in _olds(p4) for f in _tracked(p4, rel)] if own else []
     for k, rel in _olds(p4):
         src, dst = os.path.join(p4, *rel.split("/")), sub(p4, k)
         plugin = LAYOUT[k].split("/")[0]
@@ -418,18 +477,11 @@ def _migrate(p4, commit):
             os.rmdir(g)
         except OSError:
             pass
-    changed = [f for f in (".gitignore", ".gitattributes") if _rewrite_paths(os.path.join(p4, f), done)]
-    if commit and done and _own_repo(p4):
-        known = []
-        for p in sorted({*done, *done.values(), *changed, *({r.split("/")[0] for r in done if "/" in r})}):
-            _git(p4, "add", "-A", "--", p)              # one at a time: a path git never saw fails a whole add
-            r = _git(p4, "ls-files", "--", p)
-            h = _git(p4, "ls-tree", "--name-only", "HEAD", "--", p)
-            if (r and r.stdout.strip()) or (h and h.stdout.strip()):
-                known.append(p)
-        if known:
-            _git(p4, "-c", "user.name=p4", "-c", "user.email=p4@localhost", "commit", "-q", "--no-verify", "-m",
-                 "layout: each plugin's files in .claude/p4/<plugin>/", "--", *known)
+    # every older place whose new one exists, moved now or before: a line an older plugin appended again goes too
+    places = {old: LAYOUT[k] for k, olds in OLDER.items() for old in olds if os.path.isdir(sub(p4, k))}
+    changed = [f for f in (".gitignore", ".gitattributes") if _rewrite_paths(os.path.join(p4, f), places)]
+    if own and done:
+        _commit_moves(p4, gone, _LANDED, changed)
     return lines
 
 

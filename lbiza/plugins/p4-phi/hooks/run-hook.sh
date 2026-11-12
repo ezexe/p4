@@ -1,8 +1,8 @@
 #!/bin/sh
 # p4-phi hook runner: find a working python, run scripts/phi.py hook <name> isolated (-I) with the harness's stdin
 # passed through, and exit 0 whatever happens, so a broken hook never blocks a call. On Windows a `python3` on PATH
-# can be the Store stub, so there a candidate is proven with a trivial run once and remembered in a file beside the
-# temp directory. -X utf8 runs the hook in UTF-8 mode, not the Windows code page.
+# can be the Store stub, so there a candidate is proven with a trivial run once and remembered in the plugin's
+# own install, ${CLAUDE_PLUGIN_ROOT}/.python, which recall-hook.sh shares. -X utf8 runs the hook in UTF-8 mode, not the Windows code page.
 set -u
 
 [ "${P4_PHI:-1}" = 0 ] && exit 0
@@ -18,7 +18,7 @@ case "${OS:-}${OSTYPE:-}" in
   *) probe=0 ;;
 esac
 
-known="${TMPDIR:-${TEMP:-/tmp}}/p4-phi-python"
+known="${CLAUDE_PLUGIN_ROOT}/.python"   # the interpreter proven once: in the plugin's own install, never %TEMP%
 if [ "$probe" = 1 ] && [ -r "$known" ]; then
   read -r c < "$known" || c=""
   if [ -n "$c" ] && command -v "$c" >/dev/null 2>&1; then

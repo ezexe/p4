@@ -667,6 +667,15 @@ class Wiring(unittest.TestCase):
             self.assertIn("run-hook.sh", cmd)
             self.assertTrue(cmd.endswith(" " + name), cmd)
 
+    def test_runners_write_nothing_to_temp(self):
+        """B1 of the marketplace test session: the proven interpreter is kept in the plugin's install, not %TEMP%."""
+        for name in ("run-hook.sh", "recall-hook.sh"):
+            with open(os.path.join(ROOT, "hooks", name), encoding="utf-8") as f:
+                text = f.read()
+            self.assertIn('known="${CLAUDE_PLUGIN_ROOT}/.python"', text, name)
+            for word in ("TMPDIR", "TEMP", "/tmp"):
+                self.assertNotIn(word, text.replace("%TEMP%", ""), f"{name} names {word}")
+
     def test_manifests(self):
         p = jload(os.path.join(ROOT, ".claude-plugin", "plugin.json"))
         self.assertEqual(p["name"], "p4-phi")
