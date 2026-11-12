@@ -1115,6 +1115,12 @@ def h_plan(payload):
         advice = advise(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user", cap)
         RAN["split"] = "advised" if advice else ""
         text = "\n\n".join(p for p in (advice, text) if p)
+    if not spawned_from(s) and any(k in inp for k in ("advance", "start", "done", "items")):
+        wt = relay.worktrees_text(me.home, me.id, relay.repo_of(s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR")
+                                                                or ""))
+        if wt:                                     # #22: at the top's step boundary, merged worktrees to remove
+            RAN["worktrees"] = wt.count("git worktree remove")
+            text = "\n\n".join(p for p in (text, wt) if p)
     nudge_arm(me, load_session(me.home, me.id) or s)
     RAN["plan"] = len(text)
     return text or None
@@ -1440,6 +1446,10 @@ def h_user_prompt_submit(payload):
     s["staleTold"] = (list(s.get("staleTold") or []) + [x.get("id") for x in pend if isinstance(x, dict)])[-50:]
     if stale:
         parts.insert(0, stale)
+        if not spawned_from(s):                    # #22: a child retired or archived: merged worktrees to remove
+            wt = relay.worktrees_text(me.home, s["sessionId"], relay.repo_of(s.get("cwd") or ""))
+            if wt:
+                parts.insert(1, wt)
     asked = starts.hand_text(me.home, s["sessionId"]) if req and not handed_over(payload.get("prompt")) else ""
     if asked:                                      # the owner began this turn: it carries the sessions' start requests
         parts.insert(0, asked)

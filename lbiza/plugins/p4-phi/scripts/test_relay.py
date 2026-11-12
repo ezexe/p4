@@ -478,6 +478,41 @@ class ForkOrFresh(ThreeSessions):
 
 
 
+class MergedWorktrees(unittest.TestCase):
+    """#22: merged worktrees and their branches are named for removal; the others are kept with why."""
+
+    def test_merged_clean_worktrees_are_named_and_the_rest_kept(self):
+        if not shutil.which("git"):
+            self.skipTest("no git")
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = os.path.join(tmp, "repo")
+            g = lambda cwd, *a: subprocess.run(["git", "-C", cwd, "-c", "user.name=t", "-c", "user.email=t@t", *a],
+                                               check=True, capture_output=True, text=True)
+            write(os.path.join(repo, "a.txt"), "a\n")
+            subprocess.run(["git", "init", "-q", "-b", "main", repo], check=True, capture_output=True)
+            g(repo, "add", "-A")
+            g(repo, "commit", "-qm", "one")
+            wts = {n: os.path.join(tmp, ".claude", "worktrees", n) for n in ("done", "dirty", "open")}
+            for n, p in wts.items():
+                g(repo, "worktree", "add", "-q", "-b", n, p)
+                write(os.path.join(p, n + ".txt"), n + "\n")
+                g(p, "add", "-A")
+                g(p, "commit", "-qm", n)
+            g(repo, "merge", "-q", "--no-edit", "done", "dirty")
+            write(os.path.join(wts["dirty"], "left.txt"), "left\n")
+            gone, kept = relay.merged_worktrees(relay.repo_of(repo))
+            self.assertEqual([(b, base) for _, b, base in gone], [("done", "main")])
+            why = {os.path.basename(p.rstrip("/\\")): w for p, w in kept}
+            self.assertEqual(why, {"dirty": "uncommitted or untracked files", "open": "open is not merged"})
+            home = os.path.join(tmp, "home")
+            os.makedirs(relay._dir(home, "local_top"))
+            relay._write_json(os.path.join(relay._dir(home, "local_top"), "session.json"), {"sessionId": "local_top"})
+            text = relay.worktrees_text(home, "local_top", relay.repo_of(repo))
+            self.assertIn("git branch -d done", text)
+            self.assertIn("Kept:", text)
+            self.assertEqual(relay.worktrees_text(home, "local_top", relay.repo_of(repo)), "", "said once per set")
+
+
 class SharedHome(unittest.TestCase):
     """Two projects naming one home store: a session in one hears a session in the other."""
 
