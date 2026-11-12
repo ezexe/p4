@@ -387,7 +387,7 @@ def save_session(home, s):
     for k in ("othersGiven", "plansSeen"):
         if isinstance(disk.get(k), dict):
             s[k] = {**disk[k], **(s.get(k) or {})}
-    for k in ("rootStep", "shard"):
+    for k in ("rootStep", "shard", "splitAdvised"):
         if k in disk and k not in s:
             s[k] = disk[k]
     if int(disk.get("anchorSeen") or 0) > int(s.get("anchorSeen") or 0):
@@ -996,6 +996,13 @@ def h_plan(payload):
     s = ensure_session(me.home, me.id, me.rec, me.cli)
     save_session(me.home, s)
     text = plans.record(me.home, s, inp, payload.get("transcript_path") or "")
+    if isinstance(inp.get("items"), list):        # a plan's first whole list, or a revision of it
+        s = load_session(me.home, me.id) or s
+        cap = caps_text(me.home, s)
+        advice = plans.split_advice(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user",
+                                    cap)
+        RAN["split"] = "advised" if advice else ""
+        text = "\n\n".join(p for p in (advice, text) if p)
     RAN["plan"] = len(text)
     return text or None
 
@@ -1114,6 +1121,8 @@ def h_user_prompt_submit(payload):
     s = ensure_session(me.home, me.id, me.rec, me.cli, hint=me.hint)
     ran_for(s, me)
     req = request_of(payload.get("prompt"))
+    s["turnBy"] = "user" if req else (
+        "session" if re.search(r"<cross-session-message\b", str(payload.get("prompt") or "")) else "event")
     plans.pickup(me.home, s["sessionId"], payload.get("prompt") or "")
     mark_fork(s, me, payload)
     if req and not s.get("task"):

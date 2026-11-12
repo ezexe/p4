@@ -327,6 +327,66 @@ def boundary(home, s, plan, started, transcript=""):
             f"may need revising before it runs:\n" + "\n".join(f"- {x}" for x in lines))
 
 
+# --- the split advice ----------------------------------------------------------------------------------------------
+#
+# At a plan's first whole list and at each revision, the open steps are judged: a step that names no path another
+# step names, has no wording that leans on another step and is more than a quick thing can run as its own child
+# session. Two or more such steps are named in one line; the rest stay here as sub-steps.
+
+DEPENDS = re.compile(r"\b(after|then|once|using|uses|based on|depends? on|following|built on|with the results?|"
+                     r"results? of|output of|from (?:the )?(?:step|previous|last)|step \d+)\b", re.I)
+QUICK_WORDS = 4               # a step of fewer content words is a quick thing, done here
+
+
+def judge(plan, cwd):
+    """The open steps -> (those that can each run on their own, [(address, why it stays)])."""
+    steps = [st for st in plan.get("steps") or [] if st.get("status") != "completed"]
+    paths = {st["addr"]: relay.paths_in(st.get("content"), cwd) for st in steps}
+    free, kept = [], []
+    for st in steps:
+        a, text = st["addr"], st.get("content", "")
+        dep = DEPENDS.search(text)
+        shared = [(o["addr"], p) for o in steps if o["addr"] != a for p in paths[a]
+                  if any(relay.overlap(p, q) for q in paths[o["addr"]])]
+        if dep:
+            kept.append((a, f"leans on another step (\"{dep.group(0)}\")"))
+        elif shared:
+            kept.append((a, f"shares {relay.show(shared[0][1], cwd)} with step {shared[0][0]}"))
+        elif len(words(text)) < QUICK_WORDS:
+            kept.append((a, "a quick thing"))
+        else:
+            free.append(st)
+    return free, kept
+
+
+def split_advice(home, s, plan, owner_turn, cap):
+    """One line naming the steps that can each run as a child session, said once per set; '' when fewer than two."""
+    free, kept = judge(plan, s.get("cwd") or "")
+    if len(free) < 2:
+        return ""
+    key = sorted(st.get("content", "") for st in free)
+    path = os.path.join(relay._dir(home, s["sessionId"]), "session.json")
+    disk = relay._read_json(path)
+    if disk.get("splitAdvised") == key:
+        return ""
+    disk["splitAdvised"] = s["splitAdvised"] = key
+    relay._write_json(path, disk)
+    named = "; ".join(f"{st['addr']} \"{relay._short(st.get('content'), 90)}\"" for st in free)
+    judged = ("Judged by the paths each step names, wording that leans on another step (after, then, once, using, "
+              "the result of, step N), and size: fewer than four content words is a quick thing.")
+    if cap:
+        return (f"phi (p4-phi): steps {named} could each run on their own, but {cap[0].lower() + cap[1:]} "
+                f"Every step stays here as a sub-step. {judged}")
+    route = ("Start each now with `mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, "
+             "`use_worktree: false`, on this session's branch" if owner_turn else
+             "This turn was started by another session, so propose each as a card: `initiation` `own_initiative`, "
+             "`context` `fork`, `use_worktree: false`, which the user starts with a click")
+    stay = ("; ".join(f"{a} ({why})" for a, why in kept)) or "none"
+    return (f"phi (p4-phi): steps {named} can each run on their own: no path another step names, nothing leaning "
+            f"on another step, more than a quick thing. {route}; one child per step, its brief that step's slice: "
+            f"the step's words, its paths and what it must leave done. Staying here as sub-steps: {stay}. {judged}")
+
+
 def _after(a, b):
     """True when address a comes after address b in the parent's plan."""
     def key(x):

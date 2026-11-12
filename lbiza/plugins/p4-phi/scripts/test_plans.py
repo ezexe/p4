@@ -152,6 +152,53 @@ class TreeOfPlans(unittest.TestCase):
         s["task"] = "something else entirely"
         self.assertEqual(plans.root_of(home, s), "2", "no match: the step in progress")
 
+    def three(self, *extra):
+        p = self.t.proj
+        return items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
+                     f"Rewrite the parser tables in {p}/src/parse/tables.py for speed",
+                     f"Document the store layout in {p}/docs/layout.md with examples", *extra)
+
+    def test_three_disjoint_steps_are_advised_to_split(self):
+        self.t.say(B, "Do the three parts")
+        ctx = self.plan(B, self.three())
+        self.assertIn("can each run on their own", ctx)
+        for a in ("2.1", "2.2", "2.3"):
+            self.assertIn(a, ctx.split("can each run")[0])
+        self.assertIn("`initiation` `user_asked`", ctx)
+        self.assertIn("use_worktree: false", ctx)
+        self.assertIn("Judged by", ctx)
+        self.assertNotIn("can each run", self.plan(B, {"advance": True}) or "", "said once per set")
+
+    def test_a_step_using_anothers_results_stays_in_place(self):
+        self.t.say(B, "Do the parts")
+        ctx = self.plan(B, self.three("Write the summary report using the exporter's results for the release"))
+        self.assertIn("2.4 (leans on another step (\"using\"))", ctx)
+        self.assertNotIn("2.4 \"", ctx.split("can each run")[0])
+
+    def test_two_steps_on_one_file_stay_in_place(self):
+        p = self.t.proj
+        self.t.say(B, "Do the parts")
+        ctx = self.plan(B, items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
+                                 f"Speed up the buffered flush path in {p}/src/export/flush.py for large rows",
+                                 f"Document the store layout in {p}/docs/layout.md with examples"))
+        self.assertNotIn("can each run", ctx or "", "one free step is no split")
+
+    def test_past_the_cap_everything_stays_in_place(self):
+        self.t.say(B, "Do the three parts")
+        for k in range(8):
+            self.t.record(f"local_cap{k:05d}", B, title=f"cap {k}")
+            self.t.say(f"local_cap{k:05d}", "work")
+        ctx = self.plan(B, self.three())
+        self.assertIn("Every step stays here as a sub-step", ctx)
+        self.assertNotIn("user_asked", ctx)
+
+    def test_in_a_turn_another_session_began_the_advice_is_cards(self):
+        self.t.say(B, "Do the three parts")
+        self.t.say(B, '<cross-session-message from="local_x">go on</cross-session-message>')
+        ctx = self.plan(B, self.three())
+        self.assertIn("`initiation` `own_initiative`", ctx)
+        self.assertNotIn("user_asked", ctx)
+
     def test_a_child_waiting_on_a_question_the_chain_can_settle_is_flagged_up(self):
         """Act-don't-wait: the parent hears of a child's open question that is not the user's to answer."""
         self.assertIn("python3", plans.waiting_on("Done. Should the runner use the py launcher or python3?"))
