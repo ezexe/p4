@@ -363,10 +363,11 @@ LANDS = re.compile(r"^\W*(?:run\b[^,.;]*\b(?:tests?|suites?|checks?)|report|wrap
 # kept on a top session as landing work, though it was one of the checks its children were for
 ORCHESTRATES = re.compile(r"^\W*(?:start|kick\s*off|launch)\s+(?!writing|adding|implementing|making)"
                           r"(?:[\w'’-]+\s+){0,5}?(?:checks?|tests?|sessions?)\b"
-                          r"|^\W*(?:run|re-?run)\s+(?:[\w'’-]+\s+){0,5}?sessions?\b", re.I)
+                          r"|^\W*(?:run|re-?run)\s+(?:[\w'’-]+\s+){0,5}?(?:sessions?|acceptance\s+(?:checks?|tests?|runs?))\b", re.I)
 # starts a check, test or session, which is orchestration: "Start ezexe's-eye acceptance check" was advised as work.
 # #32: the doer and the object decide. Running or re-running checks or tests oneself is work for a child: "Re-run
-# failed checks 1, 2, 6" stayed at the top; only starting them in a session, or running sessions, is orchestration.
+# failed checks 1, 2, 6" stayed at the top. Starting a check, test or session, and running a session or the
+# acceptance check, which an acceptance session does, stay orchestration.
 MANAGES = re.compile(r"\b(?:un)?(?:archiv|relay|messag|start|stop|review|check|brief|spawn|ask|tell|nudg|queu|send|"
                      r"sent|pass|hand|forward)\w*\b"
                      r"[^.;]*?\b(?:child(?:ren)?|(?:sub-?)?sessions?)\b(?!\s+(?:tree|page|record|files?|json|logs?|"
