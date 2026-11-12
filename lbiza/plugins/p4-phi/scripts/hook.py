@@ -84,6 +84,7 @@ phi/rules.md
 phi/catchup.json
 phi/**/*.tmp
 phi/sessions/*/.calls/
+phi/.agents/
 __pycache__/
 *.pyc
 *.png
@@ -347,27 +348,49 @@ def agent_lines(p4, prompt, model_id=""):
     return r
 
 
+def agent_input(inp):
+    out = {"hookEventName": "PreToolUse", "updatedInput": inp}
+    if os.environ.get("P4_AGENT_ALLOW") == "1":
+        out["permissionDecision"] = "allow"
+    return {"hookSpecificOutput": out}
+
+
+def phi_text(name, payload):
+    """phi's routed handler's text, '' when it has none or fails."""
+    try:
+        import phi
+        out = phi.routed(name, payload)
+    except Exception:  # noqa: BLE001
+        return ""
+    return str(((out or {}).get("hookSpecificOutput") or {}).get("additionalContext") or "")
+
+
 def h_agent(payload):
     import labels as lb
-    p4 = ready(payload)
-    if not p4:
-        return None
     inp = payload.get("tool_input")
     if not isinstance(inp, dict) or not isinstance(inp.get("prompt"), str):
         return None
+    node = phi_text("agent-launch", payload)    # phi: the sub-agent's node under the step, and that step's slice
+    if node and node not in inp["prompt"]:
+        inp = dict(inp, prompt=inp["prompt"].rstrip() + "\n\n" + node)
+    else:
+        node = ""
+    p4 = ready(payload)
+    if not p4:
+        return agent_input(inp) if node else None
     prompt = inp["prompt"]
     if NOTES_HEAD in prompt:
-        return None                       # already carries notes (a retried call)
+        return agent_input(inp) if node else None   # already carries notes (a retried call)
     r = agent_lines(p4, prompt)
     if not r["lines"]:
-        return None
+        return agent_input(inp) if node else None
     shown = injected(p4, r["lines"])
     shadow = not shown
     lb.write_served(p4, f"agent-{sha8(prompt)}", {"ids": [i for i in r["ids"] if ":" in i], "text": prompt[:2000],
                                                   "task": f"agent:{sha8(prompt)}", "time": now(),
                                                   "tool_use_id": payload.get("tool_use_id", ""), "shadow": shadow})
     if shadow:
-        return None
+        return agent_input(inp) if node else None
     updated = dict(inp)                   # every original field, unchanged, as updatedInput requires
     updated["prompt"] = prompt.rstrip() + "\n\n" + NOTES_HEAD + "\n" + "\n".join(shown)
     out = {"hookEventName": "PreToolUse", "updatedInput": updated}
@@ -491,6 +514,7 @@ def h_close(payload):
 
 
 def h_subagent_stop(payload):
+    phi_text("agent-stop", payload)               # phi: the sub-agent's node closed with its result
     import labels as lb
     import store as st
     import transcript as tr
@@ -553,6 +577,10 @@ def phi_route(payload, table):
 def h_lookup_check(payload):
     """lookups.py: an earlier finding in place of a web call, an earlier failure before a command expected to fail.
     First phi's checks before a tool runs: start-advice, branch-guard."""
+    if payload.get("agent_id"):                   # a sub-agent's call: phi warns it of what changed since its launch
+        text = phi_text("agent-pre", payload)
+        if text:
+            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": text}}
     out = phi_route(payload, PHI_CHECK)
     if out:
         return out
@@ -566,6 +594,8 @@ def h_lookup_check(payload):
 def h_lookup_record(payload):
     """lookups.py: the call's row; a failure other sessions already met is told what they did about it. First phi's
     records after a tool ran: the plan and its step boundary, a background task under its step."""
+    if payload.get("agent_id"):
+        phi_text("agent-post", payload)            # phi: the sub-agent's id bound to its node
     out = phi_route(payload, PHI_RECORD)
     if out and str(payload.get("tool_name") or "") == "mcp__ccd_turn__update_plan":
         return out

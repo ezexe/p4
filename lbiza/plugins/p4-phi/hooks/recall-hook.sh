@@ -21,13 +21,19 @@ piped=0
 if [ "$name" = lookup-check ]; then
   payload=$(cat)
   piped=1
+  sub=0
   case "$payload" in
+    *'"agent_id"'*)                               # a sub-agent's call: phi warns it while an open one is recorded
+      a="${CLAUDE_PROJECT_DIR:-.}/.claude/p4/phi/.agents"
+      [ -d "$a" ] && [ -n "$(ls -A "$a" 2>/dev/null)" ] && sub=1 ;;
+  esac
+  [ "$sub" = 1 ] || case "$payload" in
     *'"tool_name":"WebFetch"'*|*'"tool_name": "WebFetch"'*|*'"tool_name":"WebSearch"'*|*'"tool_name": "WebSearch"'*) ;;
     *'"tool_name":"Bash"'*|*'"tool_name": "Bash"'*|*'"tool_name":"PowerShell"'*|*'"tool_name": "PowerShell"'*) ;;
     *mcp__ccd_session__start_session*|*'"tool_name":"EnterWorktree"'*|*'"tool_name": "EnterWorktree"'*) ;;
     *) exit 0 ;;
   esac
-  case "$payload" in
+  [ "$sub" = 1 ] || case "$payload" in
     *git*) ;;                                     # a git command: phi's branch guard reads it (hook.py routes)
     *'"tool_name":"Bash"'*|*'"tool_name": "Bash"'*|*'"tool_name":"PowerShell"'*|*'"tool_name": "PowerShell"'*)
       # a command is checked only by the failure model, which a store has only once a training round passed one

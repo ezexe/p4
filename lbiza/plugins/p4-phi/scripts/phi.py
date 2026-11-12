@@ -1409,6 +1409,65 @@ def routed(name, payload):
     return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": out}}
 
 
+def agent_marker(me, agent_id):
+    return os.path.join(me.store or me.home, "phi", ".agents", SAFE.sub("_", str(agent_id))[:80])
+
+
+def h_agent_launch(payload):
+    """PreToolUse on Agent (recall's entry): a pending entry under the step in progress -> its slice, for its prompt."""
+    me = Me(payload)
+    if not me.home or not me.id:
+        return ""
+    s = load_session(me.home, me.id)
+    if not s:
+        return ""
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    text = plans.agent_launch(me.home, s, payload.get("tool_use_id"), inp)
+    RAN["agent"] = "launch"
+    return text
+
+
+def h_agent_call(payload):
+    """A sub-agent's tool call, routed from recall's lookup hooks: bound to its entry after the call, warned before
+    it. The shell lets a sub-agent's check through only while phi/.agents/ names an open sub-agent."""
+    agent_id = str(payload.get("agent_id") or "")
+    me = Me(payload)
+    if not agent_id or not me.home or not me.id:
+        return None
+    s = load_session(me.home, me.id)
+    if not s:
+        return None
+    if payload.get("hook_event_name") == "PreToolUse":
+        text = plans.agent_warn(me.home, s, agent_id)
+        RAN["agent"] = "warned" if text else "checked"
+        return text or None
+    if plans.agent_bind(me.home, s, agent_id):
+        try:
+            os.makedirs(os.path.dirname(agent_marker(me, agent_id)), exist_ok=True)
+            with open(agent_marker(me, agent_id), "w", encoding="utf-8") as f:
+                f.write(me.id + "\n")
+        except OSError:
+            pass
+        RAN["agent"] = "bound"
+    return None
+
+
+def h_agent_stop(payload):
+    """SubagentStop (recall's entry): the sub-agent's entry closed with its last message."""
+    agent_id = str(payload.get("agent_id") or "")
+    me = Me(payload)
+    if not agent_id or not me.home or not me.id:
+        return None
+    s = load_session(me.home, me.id)
+    if s and plans.agent_stop(me.home, s, agent_id, payload.get("last_assistant_message") or ""):
+        RAN["agent"] = "stopped"
+    try:
+        os.remove(agent_marker(me, agent_id))
+    except OSError:
+        pass
+    return None
+
+
 HOOKS = {"session-start": ("SessionStart", h_session_start),
          "user-prompt-submit": ("UserPromptSubmit", h_user_prompt_submit),
          "stop": ("Stop", h_stop),
@@ -1417,6 +1476,8 @@ HOOKS = {"session-start": ("SessionStart", h_session_start),
          "plan": ("PostToolUse", h_plan),
          "task": ("PostToolUse", h_task)}
 ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "plan", "task")})
+ROUTED.update({"agent-launch": ("PreToolUse", h_agent_launch), "agent-pre": ("PreToolUse", h_agent_call),
+               "agent-post": ("PostToolUse", h_agent_call), "agent-stop": ("SubagentStop", h_agent_stop)})
 OLD_NAMES = {"arrive": "session-start", "prompt": "user-prompt-submit", "exit": "stop"}   # hooks.json of 0.1 and 0.2,
 #                                                                         still loaded in sessions that began then
 

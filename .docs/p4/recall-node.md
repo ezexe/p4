@@ -206,3 +206,15 @@ The code is `lbiza/plugins/p4-phi/scripts/plans.py`, run by a PostToolUse hook o
 - **Act-don't-wait, built in:** the rules block every session receives leads with one built-in rule. A next step the chain can settle is decided and done; only the user's authority goes to the user: permissions, credentials, spending, and actions that cannot be undone or publish outward.
 - **The relay flag:** at Stop, a started session whose report ends on a question that names no such matter is flagged to its parent at the parent's next message, with the session id to answer it by SendMessage.
 - **The job-gap budget:** an open background task more than an hour past its own timeout, with no notice read, is taken as unknown and never flagged. A TaskStop call closes its task, and a loose task is never checked against a step.
+
+## The split advice at plan time
+
+- **Judged:** at a plan's first whole list and at each revision, the open steps. A step can run as its own child when it names no path another step names, has no wording that leans on another step, such as after, then, once, using, the result of or step N, and has four or more content words.
+- **Said:** two or more such steps get one line naming them, said once per set, with each staying step and its reason, and what the judgment looked at. In a turn the user began, the start is `user_asked`, `fresh`, `use_worktree: false`; in a turn another session began, an `own_initiative` fork card. Past the caps, every step stays.
+
+## Sub-agents as child nodes
+
+- **Launch:** recall's PreToolUse entry on Agent records a pending entry under the step in progress, with the anchor version, and adds that step's line and slice to the sub-agent's prompt.
+- **Bind:** a sub-agent's hook payloads carry the launching session's id and its own `agent_id`. Its first PostToolUse binds the id to the oldest pending launch as a task of the step, and writes `phi/.agents/<id>`.
+- **Warned:** while `phi/.agents/` names an open sub-agent, the shell lets a sub-agent's PreToolUse reach Python, and it is told what changed beside the launching session since its launch, or that its step was revised or removed.
+- **Stop:** recall's SubagentStop entry closes the task with the sub-agent's last message and removes its marker. The task travels in the anchor like any background task, so the parent sees it in the delta.

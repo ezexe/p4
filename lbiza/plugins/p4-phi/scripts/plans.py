@@ -155,8 +155,8 @@ def summary(home, sid):
         return {}
     return {"root": p.get("root", ""), "current": p.get("current", ""), "version": p.get("version", 0),
             "steps": [{"addr": x["addr"], "content": x.get("content", "")[:200], "status": x.get("status", ""),
-                       "tasks": [{"id": t.get("id"), "what": t.get("what", "")[:120], "status": t.get("status"),
-                                  "heads": t.get("heads") or []} for t in x.get("tasks") or []
+                       "tasks": [{"id": t.get("id"), "tool": t.get("tool", ""), "what": t.get("what", "")[:120],
+                                  "status": t.get("status"), "heads": t.get("heads") or []} for t in x.get("tasks") or []
                                  if t.get("status") == "open"]}
                       for x in p["steps"]]}
 
@@ -385,6 +385,122 @@ def split_advice(home, s, plan, owner_turn, cap):
     return (f"phi (p4-phi): steps {named} can each run on their own: no path another step names, nothing leaning "
             f"on another step, more than a quick thing. {route}; one child per step, its brief that step's slice: "
             f"the step's words, its paths and what it must leave done. Staying here as sub-steps: {stay}. {judged}")
+
+
+# --- sub-agents as child nodes of the step that launched them ------------------------------------------------------
+#
+# A sub-agent's hook payloads carry the launching session's session_id and the sub-agent's own agent_id (measured
+# by the marketplace test session, 2026-11-12). At the Agent call it is a pending node under the step in progress,
+# given that step's slice in its prompt; its first tool call binds its id to the node; each later call is warned of
+# what changed beside the launching session since; its stop attaches its result. The node is a task of the step, so
+# the anchor carries it to the parent like any background task.
+
+PENDING_S = 3600              # a launch no tool call bound within this long is dropped
+
+
+def _agent(p, agent_id):
+    return next((t for _, t in _tasks(p) if t.get("id") == agent_id), None)
+
+
+def agent_launch(home, s, tool_use_id, inp):
+    """The Agent call, before it runs: a pending node under the step in progress -> the text for its prompt."""
+    import time as _t
+    sid = s["sessionId"]
+    p = load(home, sid)
+    st = step_of(p, p.get("current") or "") if p.get("steps") else None
+    parent = relay._parent(s)
+    seen = int(relay._read_json(relay.anchor_path(home, parent)).get("version") or 0)
+    prompt = str(inp.get("prompt") or "")
+    pend = {k: v for k, v in (p.get("agentsPending") or {}).items()
+            if _t.time() - int(v.get("epoch") or 0) < PENDING_S}
+    pend[str(tool_use_id or len(pend))] = {"step": (st or {}).get("addr", ""), "stepText": (st or {}).get("content", ""),
+                                           "anchorSeen": seen, "epoch": int(_t.time()),
+                                           "what": relay._short(inp.get("description") or prompt, 200)}
+    p["agentsPending"] = pend
+    relay._write_json(_path(home, sid), p)
+    if not st:
+        return ""
+    head = (f"phi (p4-phi): you are a sub-agent of \"{relay._title(s)}\", launched for its step {st['addr']}, "
+            f"\"{relay._short(st.get('content'), 200)}\". Keep to that step; what you find goes back in your result.")
+    piece = relay.slice_text(home, {"sessionId": "agent", "spawnedFrom": {"sessionId": parent}, "task": prompt,
+                                    "cwd": s.get("cwd") or ""}) if parent else ""
+    return "\n".join(x for x in (head, piece) if x)
+
+
+def agent_bind(home, s, agent_id):
+    """A sub-agent's tool call: its id bound to the oldest pending launch -> True when newly bound."""
+    import time as _t
+    sid = s["sessionId"]
+    p = load(home, sid)
+    if not agent_id or _agent(p, agent_id):
+        return False
+    pend = p.get("agentsPending") or {}
+    key = min(pend, key=lambda k: int(pend[k].get("epoch") or 0)) if pend else None
+    got = pend.pop(key) if key else {"step": p.get("current") or "", "anchorSeen": 0, "what": "a sub-agent"}
+    if not pend:
+        p.pop("agentsPending", None)
+    epoch = int(got.get("epoch") or _t.time())
+    task = {"id": agent_id, "tool": "Agent", "agent": True, "what": got.get("what", ""), "status": "open",
+            "anchorSeen": int(got.get("anchorSeen") or 0), "stepText": got.get("stepText", ""), "heads": [],
+            "paths": [], "epoch": epoch, "at": _t.strftime("%Y-%m-%d %H:%M", _t.localtime(epoch))}
+    st = step_of(p, got.get("step") or "")
+    if st is None:
+        p.setdefault("loose", []).append(task)
+    else:
+        st.setdefault("tasks", []).append(task)
+    relay._write_json(_path(home, sid), p)
+    return True
+
+
+def agent_warn(home, s, agent_id):
+    """A sub-agent's next tool call: what changed beside the launching session since it was launched or last told,
+    and its step revised or gone; '' when nothing did."""
+    sid = s["sessionId"]
+    p = load(home, sid)
+    t = _agent(p, agent_id)
+    if not t or t.get("status") != "open":
+        return ""
+    anchor = relay._read_json(relay.anchor_path(home, relay._parent(s)))
+    v = int(anchor.get("version") or 0)
+    lines = []
+    seen = int(t.get("anchorSeen") or 0)
+    if v > seen:
+        for nid, at in sorted((anchor.get("changedAt") or {}).items()):
+            if nid == sid or int(at or 0) <= seen:
+                continue
+            n = (anchor.get("nodes") or {}).get(nid) or {}
+            marks = [m.get("claim") for m in n.get("marks") or []][-2:]
+            files = (n.get("files") or [])[:4]
+            said = "; ".join(relay._short(x, 200) for x in marks) or (
+                "changed " + ", ".join(relay.show(f, s.get("cwd") or "") for f in files) if files else "")
+            if said:
+                lines.append(f"\"{n.get('title') or nid}\": {said}")
+    step = next((st for st in p.get("steps") or [] for x in st.get("tasks") or [] if x is t), None)
+    if t.get("stepText") and step is None:
+        lines.append("the step you were launched for is no longer in the launching session's plan")
+    elif step is not None and t.get("stepText") and step.get("content") != t["stepText"]:
+        lines.append(f"the step you were launched for now reads \"{relay._short(step.get('content'), 160)}\"")
+        t["stepText"] = step.get("content")
+    if v > seen or lines:
+        t["anchorSeen"] = v
+        relay._write_json(_path(home, sid), p)
+    if not lines:
+        return ""
+    return ("phi (p4-phi): since you were launched, beside the session that launched you:\n"
+            + "\n".join(f"- {x}" for x in lines[:6]) + "\nCheck that your work still holds before going on.")
+
+
+def agent_stop(home, s, agent_id, result):
+    """The sub-agent stopped: its node closed with its result -> True when a node was closed."""
+    sid = s["sessionId"]
+    agent_bind(home, s, agent_id)                 # one that made no tool call is bound now
+    p = load(home, sid)
+    t = _agent(p, agent_id)
+    if not t or t.get("status") != "open":
+        return False
+    t["status"], t["result"] = "completed", relay._short(str(result or ""), 300)
+    relay._write_json(_path(home, sid), p)
+    return True
 
 
 def _after(a, b):

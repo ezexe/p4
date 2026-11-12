@@ -152,6 +152,47 @@ class TreeOfPlans(unittest.TestCase):
         s["task"] = "something else entirely"
         self.assertEqual(plans.root_of(home, s), "2", "no match: the step in progress")
 
+    def test_a_sub_agent_is_a_child_node_of_the_step_that_launched_it(self):
+        t, home = self.t, self.t.p4
+        self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
+        sa = relay._session(home, A)
+        text = plans.agent_launch(home, sa, "toolu_a1", {"prompt": "read the layout code", "description": "probe"})
+        self.assertIn("sub-agent of", text)
+        self.assertIn("step 2.1", text)
+        self.assertTrue(plans.agent_bind(home, sa, "agentx001"), "its first tool call binds its id")
+        self.assertFalse(plans.agent_bind(home, sa, "agentx001"))
+        step = plans.load(home, A)["steps"][0]
+        self.assertEqual([(x["id"], x["tool"]) for x in step["tasks"]], [("agentx001", "Agent")])
+        self.assertNotIn("agentsPending", plans.load(home, A))
+        relay.make_anchor(home, TOP, "2026-11-12 18:00")
+        node = json.load(open(relay.anchor_path(home, TOP), encoding="utf-8"))["nodes"][A]
+        self.assertEqual(node["plan"]["steps"][0]["tasks"][0]["id"], "agentx001", "the delta carries it")
+        self.assertEqual(plans.agent_warn(home, sa, "agentx001"), "", "nothing changed since its launch")
+        t.cli(B, "note", "replaces: the old docs layout in docs/layout.md", "--source", "test")
+        relay.make_anchor(home, TOP, "2026-11-12 18:01")
+        warned = plans.agent_warn(home, sa, "agentx001")
+        self.assertIn("the old docs layout", warned)
+        self.assertEqual(plans.agent_warn(home, sa, "agentx001"), "", "told once")
+        self.plan(A, items("Rewrite p4conf.LAYOUT and OLDER", "Move recall/ into phi/", "Commit the move"))
+        self.assertEqual([x["id"] for x in plans.load(home, A)["loose"]], ["agentx001"], "P6: with its step's words")
+        self.assertIn("no longer in the launching session's plan", plans.agent_warn(home, sa, "agentx001"))
+
+    def test_a_sub_agents_step_revised_and_its_stop(self):
+        home = self.t.p4
+        self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
+        sa = relay._session(home, A)
+        plans.agent_launch(home, sa, "toolu_a2", {"prompt": "move it"})
+        plans.agent_bind(home, sa, "agenty002")
+        p = plans.load(home, A)
+        p["steps"][0]["content"] = "Rewrite p4conf.LAYOUT for the temportal folder"
+        relay._write_json(plans._path(home, A), p)
+        self.assertIn("now reads \"Rewrite p4conf.LAYOUT for the temportal folder\"", plans.agent_warn(home, sa, "agenty002"))
+        self.assertTrue(plans.agent_stop(home, sa, "agenty002", "Moved; tests green."))
+        task = plans.load(home, A)["steps"][0]["tasks"][0]
+        self.assertEqual((task["status"], task["result"]), ("completed", "Moved; tests green."))
+        self.assertEqual(plans.agent_warn(home, sa, "agenty002"), "", "a stopped sub-agent is told nothing")
+        self.assertTrue(plans.agent_stop(home, sa, "agentz003", "no tools used"), "one that made no call is bound at stop")
+
     def three(self, *extra):
         p = self.t.proj
         return items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
