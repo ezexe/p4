@@ -20,6 +20,16 @@
             "timeout": 15
           }
         ]
+      },
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/recall-hook.sh\" catch-up",
+            "timeout": 20
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [

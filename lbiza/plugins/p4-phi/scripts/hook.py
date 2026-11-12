@@ -19,6 +19,8 @@ its row of 3.3 allows, and on any failure exits 0 with one notice for the user (
                  dictionary's signals, rebuilds the index when owed
   subagent-stop  SubagentStop       nothing; usage and repo labels for what was served to that subagent
   train          Stop, async        nothing; `train --if-owed`, never a paid step
+  catch-up       SessionStart startup  one systemMessage when the store, its branch or the p4 plugins fell behind
+                 (catchup.py), nothing otherwise
 
 The output shapes, from https://code.claude.com/docs/en/hooks (read 2026-11-01):
 - UserPromptSubmit: `{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "..."}}`,
@@ -562,7 +564,12 @@ def h_train(payload):
     return None
 
 
-HANDLERS = {"layout": h_layout, "recall": h_recall, "agent": h_agent, "subagent-start": h_subagent_start,
+def h_catch_up(payload):
+    import catchup
+    return catchup.hook(payload)
+
+
+HANDLERS = {"catch-up": h_catch_up, "layout": h_layout, "recall": h_recall, "agent": h_agent, "subagent-start": h_subagent_start,
             "close": h_close, "subagent-stop": h_subagent_stop, "train": h_train,
             "lookup-check": h_lookup_check, "lookup-record": h_lookup_record}
 
