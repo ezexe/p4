@@ -297,10 +297,37 @@ def run(project, p4, sync=True):
             cmd, _, where = c.partition(" (in ")
             shown.append(f"`{cmd}`" + (f" in {where.rstrip(')')}" if where else ""))
         parts.append("plugins behind; run, in this order: " + " ; ".join(shown))
-    if n:
+    # the cache line once per new count (C3): nothing removes those folders by itself, so it would print forever
+    mark = os.path.join(p4, "phi", "catchup.json")
+    told = read_json(mark).get("cacheFolders")
+    if n and n != told:
         parts.append(f"{n} old version folder(s) under {os.path.join(config_dir(), 'plugins', 'cache', MARKET)} "
-                     f"hold {size_text(size)}, used by no install; nothing was deleted")
+                     f"hold {size_text(size)}, used by no install; nothing was deleted. To delete them: "
+                     f"`python -I -X utf8 \"{os.path.join(HERE, 'catchup.py')}\" prune-cache`")
+    if n != told and os.path.isdir(p4):
+        try:
+            os.makedirs(os.path.dirname(mark), exist_ok=True)
+            with open(mark, "w", encoding="utf-8", newline="\n") as f:
+                f.write(json.dumps({"cacheFolders": n}) + "\n")
+        except OSError:
+            pass
     return ("p4-phi catch-up: " + ". ".join(parts) + ".") if parts else ""
+
+
+def prune_cache():
+    """Delete the version folders under cache/p4-marketplace that no install uses; the owner runs this."""
+    import shutil
+    base = os.path.join(config_dir(), "plugins", "cache", MARKET)
+    used = all_install_paths()
+    gone = []
+    for name in sorted(os.listdir(base)) if os.path.isdir(base) else []:
+        for v in sorted(os.listdir(os.path.join(base, name))):
+            p = os.path.join(base, name, v)
+            if os.path.isdir(p) and not any(same_path(p, u) for u in used):
+                shutil.rmtree(p, ignore_errors=True)
+                if not os.path.exists(p):
+                    gone.append(p)
+    return gone
 
 
 def hook(payload):
@@ -309,3 +336,12 @@ def hook(payload):
     project = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
     line = run(project, os.path.join(project, ".claude", "p4"))
     return {"systemMessage": line} if line else None
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["prune-cache"]:
+        removed = prune_cache()
+        print("\n".join(f"deleted {p}" for p in removed) or "no unused version folder")
+        sys.exit(0)
+    print("usage: catchup.py prune-cache   (delete the plugin cache's version folders no install uses)", file=sys.stderr)
+    sys.exit(2)

@@ -340,12 +340,41 @@ def edited_files(home, sid):
     return sorted(out)
 
 
+def mark_key(nid, m):
+    return f"{nid}:{m.get('time')}:" + hashlib.sha1(str(m.get('claim') or '').encode('utf-8')).hexdigest()[:10]
+
+
+def show(p, base):
+    """A path as a message shows it: relative to the session's project when it lies there (R2)."""
+    b = norm(base) if base else ""
+    if b and (p == b or p.startswith(b + "/")):
+        return p[len(b) + 1:] or "."
+    return p
+
+
+def too_broad(p, home):
+    """A path no warning is raised for: the store itself or a folder above it, a repository's top folder, or a
+    drive. A note that names one of those names everything in it, which is no conflict with any one file."""
+    h = norm(home)
+    if covers(p, h) or re.fullmatch(r"[a-z]:", p or "", re.I):
+        return True
+    return bool(repo_of(p) == p and os.path.isdir(p))
+
+
+def scratch(home, sid, f):
+    """A file in the session's own scratch folder, temportal/tmp/<session>: never a conflict (the false positive
+    of 2026-11-12, a note naming the store warned of a session's own scratch files)."""
+    t = norm(os.path.join(home, "temportal", "tmp"))
+    return covers(t, f)
+
+
 def rebase(home, sid, room, fair_cut):
     """(the text a session is given at this message, its session.json changed). '' when nothing changed."""
     path = os.path.join(_dir(home, sid), "session.json")
     s = _read_json(path)
     if not s:
         return "", False
+    base = s.get("cwd") or ""
     warnings = [w["text"] for w in s.get("relayPending") or [] if isinstance(w, dict)]
     told = s.setdefault("relayWarned", [])
     told.extend(w["key"] for w in s.get("relayPending") or [] if isinstance(w, dict) and w.get("key") not in told)
@@ -353,35 +382,40 @@ def rebase(home, sid, room, fair_cut):
     parent = _parent(s)
     anchor = _read_json(anchor_path(home, parent)) if parent else {}
     seen = int(s.get("anchorSeen") or 0)
+    given = s.setdefault("marksGiven", [])
     version = int(anchor.get("version") or 0)
     fresh = version > seen
     marks, others = [], []
     if fresh:
         changed = anchor.get("changedAt") or {}
-        for nid, n in sorted((anchor.get("nodes") or {}).items()):
+        nodes = sorted((anchor.get("nodes") or {}).items())
+        par = anchor.get("parent") or {}
+        for nid, n in nodes + [(parent, par)]:
             if nid == sid or int(changed.get(nid) or 0) <= seen:
                 continue
             for m in n.get("marks") or []:
-                marks.append((nid, n.get("title") or nid, m))
+                key = mark_key(nid, m)                 # each mark relayed once, however often its node changes (R4)
+                if key not in given:
+                    given.append(key)
+                    marks.append((nid, n.get("title") or nid, m))
+            if nid == parent:
+                continue
             bits = []
             if n.get("heads"):
-                bits.append("heads " + ", ".join(n["heads"]))
+                bits.append("heads " + ", ".join(show(h, base) for h in n["heads"]))
             if n.get("files"):
-                bits.append(f"{len(n['files'])} file(s) changed: " + ", ".join(n["files"][:12])
+                bits.append(f"{len(n['files'])} file(s) changed: " + ", ".join(show(f, base) for f in n["files"][:12])
                             + (" ..." if len(n["files"]) > 12 else ""))
             if bits:
                 others.append(f"- \"{n.get('title') or nid}\" ({nid}): " + "; ".join(bits))
-        par = anchor.get("parent") or {}
-        if int(changed.get(parent) or 0) > seen:
-            for m in par.get("marks") or []:
-                marks.append((parent, par.get("title") or parent, m))
         s["anchorSeen"] = version
+        del given[:-400]                               # the newest keys are enough to tell a mark already given
         if s.get("forked") and shard_of(s):          # a fork keeps its own agenda: only what touches its shard
             own = shard_of(s)
             marks = [x for x in marks if any(overlap(p, o) for p in x[2].get("paths") or [] for o in own)]
-            others = [line for line in others if any(o in line for o in own)]
+            others = [line for line in others if any(show(o, base) in line for o in own)]
     # the direct warnings: uncommitted files and shard paths against what is deprecated, and against other shards
-    mine = uncommitted(edited_files(home, sid))
+    mine = [f for f in uncommitted(edited_files(home, sid)) if not scratch(home, sid, f)]
     shard = shard_of(s)
     every_mark = [(nid, n.get("title") or nid, m) for nid, n in (anchor.get("nodes") or {}).items() if nid != sid
                   for m in n.get("marks") or []]
@@ -389,24 +423,26 @@ def rebase(home, sid, room, fair_cut):
                    for m in (anchor.get("parent") or {}).get("marks") or []]
     for nid, title, m in every_mark:
         for p in m.get("paths") or []:
-            hit = [f for f in mine if covers(p, f) or covers(f, p)] + [x for x in shard if overlap(x, p)]
+            if too_broad(p, home):
+                continue
+            hit = sorted({f for f in mine if covers(p, f) or covers(f, p)} | {x for x in shard if overlap(x, p)})
             key = f"mark:{nid}:{m.get('time')}:{p}"
             if hit and key not in told:
                 told.append(key)
-                warnings.append(f"\"{title}\" ({nid}) wrote \"{_short(m.get('claim'), 300)}\", which names {p}; this "
-                                f"session has {', '.join(hit[:5])} there. Stop that work and message {nid} by "
-                                f"SendMessage before going on.")
+                warnings.append(f"\"{title}\" wrote \"{_short(m.get('claim'), 300)}\", which names {show(p, base)}; "
+                                f"this session has {', '.join(show(h, base) for h in hit[:5])} there. Stop that work "
+                                f"and message {nid} by SendMessage before going on.")
     for nid, n in (anchor.get("nodes") or {}).items():
         if nid == sid:
             continue
         for pat in n.get("shard") or []:
-            hit = [f for f in mine if covers(pat, f)]
+            hit = sorted({f for f in mine if covers(pat, f)})
             key = f"shard-edit:{nid}:{pat}:{','.join(hit)}"
             if hit and key not in told:
                 told.append(key)
-                warnings.append(f"this session has uncommitted changes to {', '.join(hit[:5])}, inside the shard of "
-                                f"\"{n.get('title') or nid}\" ({nid}), {pat}. Stop that work and message {nid} by "
-                                f"SendMessage; that session alone changes it.")
+                warnings.append(f"this session has uncommitted changes to {', '.join(show(h, base) for h in hit[:5])}, "
+                                f"inside the shard of \"{n.get('title') or nid}\", {show(pat, base)}. Stop that work "
+                                f"and message {nid} by SendMessage; that session alone changes it.")
     if not (warnings or marks or others):
         _write_json(path, s)
         return "", fresh
@@ -590,3 +626,10 @@ def slice_text(home, s):
 
 def anchor_version(home, parent):
     return int(_read_json(anchor_path(home, parent)).get("version") or 0) if parent else 0
+
+
+def mark_keys(home, parent):
+    """The keys of every mark the parent's anchor holds: what a child's start already carries."""
+    a = _read_json(anchor_path(home, parent)) if parent else {}
+    nodes = list((a.get("nodes") or {}).items()) + [(parent, a.get("parent") or {})]
+    return [mark_key(nid, m) for nid, n in nodes for m in n.get("marks") or []]

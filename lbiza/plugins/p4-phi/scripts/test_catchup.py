@@ -142,6 +142,15 @@ class Plugins(Base):
         self.assertIn("2 old version folder(s)", line)
         self.assertIn("3.0 KB", line)
         self.assertTrue(os.path.isdir(os.path.join(cache, "p4-recall", "0.8.21")), "nothing is deleted")
+        p4 = os.path.join(self.project, ".claude", "p4")
+        os.makedirs(p4, exist_ok=True)
+        self.assertIn("prune-cache", catchup.run(self.project, p4, sync=False))
+        self.assertEqual(catchup.run(self.project, p4, sync=False), "", "told once per count (C3)")
+        write(os.path.join(cache, "p4-phi", "0.5.0", "b.txt"), "z")
+        self.assertIn("3 old version folder(s)", catchup.run(self.project, p4, sync=False))
+        removed = catchup.prune_cache()
+        self.assertEqual(len(removed), 3)
+        self.assertTrue(os.path.isdir(os.path.join(cache, "p4-phi", "0.7.0")), "the folder an install uses stays")
 
     def test_versions_compare_as_numbers(self):
         self.assertLess(catchup.version("0.9.0"), catchup.version("0.10.0"))

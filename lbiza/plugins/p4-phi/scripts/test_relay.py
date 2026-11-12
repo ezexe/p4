@@ -85,7 +85,8 @@ class ThreeSessions(unittest.TestCase):
         ctx = context(r)
         first = ctx.split("\n\n")[0]
         self.assertTrue(first.startswith("phi (p4-phi): stop before any tool runs."), ctx[:300])
-        self.assertIn(relay.norm(mine), first)
+        self.assertIn("this session has work/lib/x.py there", first, "paths relative to the project, once (R1, R2)")
+        self.assertEqual(first.count(A), 1, "a node's id once (R3)")
         self.assertIn("message " + A, first)
         self.assertIn("deprecates: `", ctx)
         self.assertIn("(source: commit abc123)", ctx, "a deprecation is given in full, with its source")
@@ -101,6 +102,29 @@ class ThreeSessions(unittest.TestCase):
         ctx = context(t.say(B, "next"))
         self.assertNotIn("stop before any tool runs", ctx)
         self.assertIn("replaces: `", ctx)
+
+    def test_a_note_naming_the_store_or_a_repository_top_warns_nobody(self):
+        """The false positive of 2026-11-12: a note naming the whole store warned of a session's scratch files."""
+        t = self.t
+        self.edit_uncommitted(B, ("lib", "x.py"), "b1")
+        t.cli(A, "note", f"deprecates: any reading of `{t.p4}` as flat, and of `{self.work}` as one plugin",
+              "--source", "commit ccc333")
+        t.stop(A, "broad note", uuid="a1")
+        ctx = context(t.say(B, "next"))
+        self.assertNotIn("stop before any tool runs", ctx)
+        self.assertIn("(source: commit ccc333)", ctx, "the note is still relayed, in full")
+
+    def test_a_mark_is_relayed_once(self):
+        """R4: a node that changes again does not send its older marks again."""
+        t = self.t
+        t.cli(A, "note", f"replaces: `{self.x('docs', 'd.md')}` with the README", "--source", "commit ddd444")
+        t.stop(A, "one", uuid="a1")
+        self.assertIn("ddd444", context(t.say(B, "first")))
+        t.cli(A, "note", f"replaces: `{self.x('docs', 'e.md')}` with the wiki", "--source", "commit eee555")
+        t.stop(A, "two", uuid="a2")
+        ctx = context(t.say(B, "second"))
+        self.assertIn("eee555", ctx)
+        self.assertNotIn("ddd444", ctx)
 
     def test_overlapping_shards_are_told_on_both_sides(self):
         t = self.t
@@ -176,6 +200,27 @@ class ForkOrFresh(ThreeSessions):
         self.t.cli(TOP, "shard", self.x("lib"))
         out = self.advise(TOP, "fresh", f"Rework `{self.x('lib')}`", 10 * 1024)
         self.assertIn('advises context "fork"', out["permissionDecisionReason"])
+
+    def test_a_start_with_its_own_worktree_or_branch_is_asked(self):
+        self.t.cli(TOP, "shard", self.x("lib"))
+        path = os.path.join(self._tmp.name, "short.jsonl")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("x")
+        for extra in ({"use_worktree": True}, {"branch_name": "my-branch"}):
+            r = self.t.hook("start-advice", TOP, {"tool_name": "mcp__ccd_session__start_session", "transcript_path": path,
+                                                  "tool_input": {"context": "fresh", "prompt": "write docs", **extra}})
+            out = json.loads(r.stdout)["hookSpecificOutput"]
+            self.assertEqual(out["permissionDecision"], "ask")
+            self.assertIn("use_worktree: false", out["permissionDecisionReason"])
+
+    def test_a_child_making_its_own_branch_is_asked_and_the_top_is_not(self):
+        def guard(host, cmd, tool="Bash"):
+            r = self.t.hook("branch-guard", host, {"tool_name": tool, "tool_input": {"command": cmd}})
+            return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
+        self.assertEqual(guard(B, "git switch -c mine")["permissionDecision"], "ask")
+        self.assertIsNotNone(guard(B, "", tool="EnterWorktree"))
+        self.assertIsNone(guard(B, "git status && git commit -qm x"), "ordinary git is never asked")
+        self.assertIsNone(guard(TOP, "git switch -c mine"), "a top session decides its own branches")
 
     def test_a_fresh_child_starts_with_only_its_shards_slice(self):
         t = self.t

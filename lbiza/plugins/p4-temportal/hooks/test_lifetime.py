@@ -214,6 +214,14 @@ class Layout(unittest.TestCase):
         self.assertEqual(self.g("status", "--porcelain").strip(), "M phi/store/facts.md")
         self.assertEqual(read(os.path.join(self.p4, ".gitignore")).splitlines().count("phi/models/index.json"), 1)
 
+    def test_a_flat_line_for_a_folder_that_never_existed_is_rewritten_too(self):
+        """B3b of the marketplace test session: a flat store without scratchpad/ kept `scratchpad/.out/`."""
+        put(os.path.join(self.p4, "store", "facts.md"), "f\n")
+        put(os.path.join(self.p4, ".gitignore"), "scratchpad/.out/\nmodels/served/\ntemportal/scratchpad/.out/\n")
+        p4conf.migrate_layout(self.p4, commit=False)
+        self.assertEqual(read(os.path.join(self.p4, ".gitignore")),
+                         "phi/models/served/\ntemportal/scratchpad/.out/\n", "rewritten, and not left twice")
+
     def test_an_old_plugin_writing_after_the_move_is_merged(self):
         put(os.path.join(self.p4, "temportal", "memory", "a.md"), "new\n")
         put(os.path.join(self.p4, "temportal", "memory", "same.md"), "s\n")

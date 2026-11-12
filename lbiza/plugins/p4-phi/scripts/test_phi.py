@@ -662,8 +662,9 @@ class Wiring(unittest.TestCase):
              for ev, gs in jload(HOOKS_JSON)["hooks"].items()}
         d = {ev: gs for ev, gs in d.items() if gs}                  # phi's own; recall's run recall-hook.sh
         self.assertEqual(sorted(d), ["PreToolUse", "SessionStart", "Stop", "UserPromptSubmit"])
-        self.assertEqual([g["matcher"] for g in d["PreToolUse"]], ["mcp__ccd_session__start_session"],
-                         "around a tool call only to advise fork or fresh on a session's start")
+        self.assertEqual([g["matcher"] for g in d["PreToolUse"]],
+                         ["mcp__ccd_session__start_session", "EnterWorktree|Bash|PowerShell"],
+                         "around a tool call only to advise a session's start and to guard a child's branches")
         for event, name in (("SessionStart", START), ("UserPromptSubmit", PROMPT), ("Stop", STOP)):
             cmd = d[event][0]["hooks"][0]["command"]
             self.assertIn("run-hook.sh", cmd)

@@ -477,8 +477,9 @@ def _migrate(p4, commit):
             os.rmdir(g)
         except OSError:
             pass
-    # every older place whose new one exists, moved now or before: a line an older plugin appended again goes too
-    places = {old: LAYOUT[k] for k, olds in OLDER.items() for old in olds if os.path.isdir(sub(p4, k))}
+    # every older place, moved now, before, or never there: a flat line names a place that no longer exists either
+    # way, and an older plugin may append it again (B3b: a flat store with no scratchpad/ kept `scratchpad/.out/`)
+    places = {old: LAYOUT[k] for k, olds in OLDER.items() for old in olds}
     changed = [f for f in (".gitignore", ".gitattributes") if _rewrite_paths(os.path.join(p4, f), places)]
     if own and done:
         _commit_moves(p4, gone, _LANDED, changed)

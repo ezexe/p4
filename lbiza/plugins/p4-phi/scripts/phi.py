@@ -866,6 +866,7 @@ def given(s, me, home, own=False):
         # the start is the child's base: a fresh child's slice or a fork's inherited conversation already holds the
         # anchor as it is now, so the rebase check hands over only what changes after it
         s["anchorSeen"] = relay.anchor_version(home, above)
+        s["marksGiven"] = relay.mark_keys(home, above)
     return text
 
 
@@ -1047,17 +1048,54 @@ def h_start_advice(payload):
         size = 0
     advised, why = relay.advise_start(me.home, me.id, inp, size)
     RAN.update(advice=advised, wanted=wanted, transcript=size)
-    if advised == wanted:
+    reasons = []
+    if advised != wanted:
+        reasons.append(f"p4-phi advises context \"{advised}\" here, not \"{wanted}\": {why}.")
+    if inp.get("use_worktree") is True or inp.get("branch_name") or inp.get("source_branch"):
+        # the user's rule: a child works on the parent's branch in the parent's checkout
+        reasons.append("p4-phi: the user's rule is no worktrees and no branches of a child's own; pass "
+                       "`use_worktree: false`, leave out branch_name and source_branch, and let the child work on "
+                       "this session's branch in this checkout.")
+    if not reasons:
         return None
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
-                                   "permissionDecisionReason": f"p4-phi advises context \"{advised}\" here, not "
-                                                               f"\"{wanted}\": {why}."}}
+                                   "permissionDecisionReason": " ".join(reasons)}}
+
+
+BRANCHING = re.compile(r"\bgit\b[^\n|;&]*?\b(worktree\s+add|switch\s+(-c|--create|-C)|checkout\s+(-b|-B)|"
+                       r"branch\s+(?!-)[\w./-]+\s*$|branch\s+(?!-)[\w./-]+\s+[\w./-]+)")
+
+
+def h_branch_guard(payload):
+    """PreToolUse on EnterWorktree and Bash in a session another one started: making a worktree or a branch of its
+    own is asked first, the user's rule being that a child works on its parent's branch. Silent otherwise."""
+    me = Me(payload)
+    if not me.home or not me.id:
+        return None
+    s = load_session(me.home, me.id)
+    if not spawned_from(s):
+        return None
+    name = str(payload.get("tool_name") or "")
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    if name == "EnterWorktree":
+        what = "entering a worktree of its own"
+    elif name in SHELL_TOOLS and BRANCHING.search(str(inp.get("command") or "")):
+        what = "making a worktree or branch of its own"
+    else:
+        return None
+    RAN["branch_guard"] = what
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
+                                   "permissionDecisionReason": f"p4-phi: this session is a child, and {what} goes "
+                                                               f"against the user's rule: a child works on its "
+                                                               f"parent's branch in the parent's checkout, so its work "
+                                                               f"needs no merge."}}
 
 
 HOOKS = {"session-start": ("SessionStart", h_session_start),
          "user-prompt-submit": ("UserPromptSubmit", h_user_prompt_submit),
          "stop": ("Stop", h_stop),
-         "start-advice": ("PreToolUse", h_start_advice)}
+         "start-advice": ("PreToolUse", h_start_advice),
+         "branch-guard": ("PreToolUse", h_branch_guard)}
 OLD_NAMES = {"arrive": "session-start", "prompt": "user-prompt-submit", "exit": "stop"}   # hooks.json of 0.1 and 0.2,
 #                                                                         still loaded in sessions that began then
 
