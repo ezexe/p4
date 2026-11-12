@@ -580,6 +580,25 @@ class NewTask(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID2)), "", "phi.py detach with no id: itself")
 
+    def test_a_feature_request_in_a_broadly_tasked_top_is_a_new_topic(self):
+        """#29: a broad task does not swallow every feature."""
+        self.say(TOP, "Sort out the claude dev desktop app files in appdata or temp, and the plugins around them")
+        got = self.say(TOP, "build the issue loop")
+        self.assertIn("asks for something new that is not in this session's plan", got)
+        self.assertIn(phi.NEW_TOP_BRIEF, got)
+        for plain in ("fix this typo", "check that the scratchpad link works"):
+            self.assertNotIn("something new", self.say(TOP, plain), plain)
+        r = self.t.hook("plan", TOP, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                                      "tool_input": {"items": [{"content": "Build the child-session issue loop feature",
+                                                                "status": "pending"},
+                                                               {"content": "Move the tmp folders", "status": "pending"}]},
+                                      "tool_response": "Plan updated."}, P4_PHI_NEW_TASK="1")
+        ctx = context(r)
+        self.assertIn("step 1 \"Build the child-session issue loop feature\" is a new feature", ctx)
+        self.assertNotIn("step 2 \"Move", ctx.split("is a new feature")[0])
+        self.assertNotIn("something new", self.say(TOP, "add the issue loop's tests"),
+                         "a message on an open step of the plan is that step's")
+
     def test_a_detached_top_is_never_retired_onto_its_former_starter(self):
         """Retirement, archive lines and step roots read spawnedFrom.sessionId, never its `from`."""
         import plans

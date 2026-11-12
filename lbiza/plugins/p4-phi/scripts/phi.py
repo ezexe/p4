@@ -887,7 +887,42 @@ def split_text(home, s, prompt):
             "or click a card. Do the rest here; a question the chain can settle is answered, not waited on.")
 
 
-def new_task_text(home, s, me, user=True, again=False):
+FEATURE = re.compile(r"^\W*(?:please\s+|now\s+|also\s+|and\s+|can you\s+|could you\s+)*(?:build|add|make|implement|"
+                     r"create|design|introduce)\b|\bnew feature\b|\bfeature request\b|\bit should\b", re.I)
+FEATURE_STEP = re.compile(r"\bnew feature\b|^\W*(?:build|implement|design|introduce)\b[^.;]*\b(?:feature|loop|"
+                          r"lifecycle|mode|command|system|plugin|workflow)\b", re.I)
+
+
+def feature_request(home, s, req):
+    """True when a message asks for something new that is not yet in the session's plan: a feature is a new topic
+    even within a broad task (#29). A message that bears on an open step of the plan is that step's."""
+    text = clean(req)
+    if not text or not FEATURE.search(text):
+        return False
+    steps = plans.open_steps(home, s["sessionId"])
+    return not any(plans.bears(text, st.get("content")) for st in steps)
+
+
+def feature_steps_text(home, s, plan, owner_turn):
+    """A top session's own plan steps that are new features: each gets a new top session, once per step."""
+    if spawned_from(s):
+        return ""
+    path = os.path.join(session_dir(home, s["sessionId"]), "session.json")
+    disk = read_json(path)
+    told = [x for x in disk.get("featureAdvised") or [] if isinstance(x, str)]
+    new = [st for st in plan.get("steps") or [] if st.get("status") != "completed"
+           and FEATURE_STEP.search(str(st.get("content") or "")) and st.get("content") not in told]
+    if not new:
+        return ""
+    if disk:
+        disk["featureAdvised"] = (told + [st.get("content") for st in new])[-50:]
+        write_atomic(path, json.dumps(disk, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
+    named = "; ".join(f"step {st.get('addr')} \"{cut(clean(st.get('content')), 90)}\"" for st in new)
+    return (f"phi (p4-phi): {named} is a new feature, and a feature is a new topic even within this task: it gets a "
+            f"new top session of its own, not a child or a step here. {new_top_route(owner_turn)}")
+
+
+def new_task_text(home, s, me, user=True, again=False, req=""):
     """ezexe's standing instruction for a message about something else: once in full for a CLI session that
     has a task (and again after a compaction), then a line with the task beside each of ezexe's messages.
     '' with no task, and beside the harness's messages."""
@@ -928,6 +963,16 @@ def new_task_text(home, s, me, user=True, again=False):
         return ""
     RAN["new_task"] = "line"
     parent = spawned_from(s)
+    if req and feature_request(home, s, req):
+        RAN["new_task"] = "feature"
+        if parent:
+            return (f"phi (p4-phi): this message asks for something new that is not in this session's plan, and a "
+                    f"feature is a new topic even within a broad task: hand it up to {parent} with SendMessage, "
+                    f"ezexe's words quoted, as a new topic for a new top session, and stay with the task.")
+        return (f"phi (p4-phi): this message asks for something new that is not in this session's plan. A feature is "
+                f"a new topic even within a broad task like \"{cut(task, LINE_TASK)}\", so it gets a new top session "
+                f"of its own, a sibling of this one. {new_top_route(s.get('turnBy', 'user') == 'user')} Tell ezexe in "
+                f"one line which session has it, and stay with the task.")
     if parent:
         return (f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" If this message is about something "
                 f"else, hand it up to {parent} with SendMessage, ezexe's words quoted, and stay with the task; "
@@ -1195,7 +1240,8 @@ def h_plan(payload):
         advise = plans.split_advice if spawned_from(s) else plans.top_advice if TOP_ORCHESTRATES else None
         advice = advise(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user", cap)             if advise else ""                      # #24: a project whose top session lands its plan itself
         RAN["split"] = "advised" if advice else ""
-        text = "\n\n".join(p for p in (advice, text) if p)
+        feat = feature_steps_text(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user")
+        text = "\n\n".join(p for p in (feat, advice, text) if p)
     if not spawned_from(s) and any(k in inp for k in ("advance", "start", "done", "items")):
         wt = relay.worktrees_text(me.home, me.id, relay.repo_of(s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR")
                                                                 or ""))
@@ -1593,7 +1639,7 @@ def h_user_prompt_submit(payload):
             f"your last turn changed step(s) {', '.join(u.get('steps') or [])} of \"{relay._title(load_session(me.home, u['child']))}\" "
             f"and sent it nothing; relay it with SendMessage (`to`: {u['child']})." for u in unsent))
     route = relay.route_text(me.home, s["sessionId"], req, s.get("cwd") or "") if req else ""
-    parts.append(route or new_task_text(me.home, s, me, user=bool(req)) or split_text(me.home, s, payload.get("prompt")))
+    parts.append(route or new_task_text(me.home, s, me, user=bool(req), req=req) or split_text(me.home, s, payload.get("prompt")))
     save_session(me.home, s)
     # the rebase check, on every message: what the nodes beside this one changed, and the warnings, first
     used = sum(len(p) for p in parts if p)
