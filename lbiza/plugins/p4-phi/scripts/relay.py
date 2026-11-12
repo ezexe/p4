@@ -34,6 +34,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 MARKS = ("deprecates:", "replaces:")
 PATH_RE = re.compile(r"`([^`\s]+)`|((?:[A-Za-z]:)?[\w.~-]*[\\/][\w.\\/*~-]+)")
@@ -473,8 +474,57 @@ def scratch(home, sid, f):
     return covers(t, f)
 
 
-def rebase(home, sid, room, fair_cut):
-    """(the text a session is given at this message, its session.json changed). '' when nothing changed."""
+FAR_WHOLE = 400                  # notes that do not touch a session are still shown when all of them are this short
+HELD_BYTES = 256 * 1024          # of a session's held.md, the newest kept
+HELD_HEAD = "# Held for this session\n\nWhat p4-phi had for this session beyond the room beside one prompt, newest last.\n"
+
+
+def held_path(home, sid):
+    return os.path.join(_dir(home, sid), "held.md").replace("\\", "/")
+
+
+def hold(home, sid, pieces, now=""):
+    """What did not fit beside a prompt, kept whole on the session's held.md (#43); the page's path."""
+    path = held_path(home, sid)
+    pieces = [str(p) for p in pieces if p]
+    if not pieces:
+        return path
+    try:
+        with open(path, encoding="utf-8") as f:
+            old = f.read()
+    except (OSError, UnicodeDecodeError):
+        old = ""
+    body = (old[len(HELD_HEAD):] if old.startswith(HELD_HEAD) else old) + "".join(
+        f"\n## {now or time.strftime('%Y-%m-%d %H:%M')}\n\n{p}\n" for p in pieces)
+    if len(body.encode("utf-8", "replace")) > HELD_BYTES:
+        body = body[-HELD_BYTES // 2:]
+        body = body[body.find("\n## "):] if "\n## " in body else body
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(HELD_HEAD + body)
+    os.replace(tmp, path)
+    return path
+
+
+def page_of(home, nid):
+    return os.path.join(_dir(home, nid), "session.md").replace("\\", "/")
+
+
+def touching(s, m, touches, edited=()):
+    """True when a sibling's mark bears on this session: a path it names lies in the session's shard or among the
+    files it changed, or `touches` finds its words in the session's task or open steps (#43)."""
+    own = list(shard_of(s)) + list(edited)
+    if any(overlap(p, o) for p in m.get("paths") or [] for o in own):
+        return True
+    return bool(touches and touches(str(m.get("claim") or "")))
+
+
+def rebase(home, sid, room, fair_cut, touches=None):
+    """(the text a session is given at this message, its session.json changed). '' when nothing changed. With
+    `touches`, a sibling's deprecation or replacement is given in full only when it touches this session's task,
+    shard or open steps; the rest is a count and the pages that hold them. Whatever passes `room` is named by count
+    and kept on a page, and none of it comes again (#43)."""
     path = os.path.join(_dir(home, sid), "session.json")
     s = _read_json(path)
     if not s:
@@ -566,19 +616,66 @@ def rebase(home, sid, room, fair_cut):
     if not (warnings or marks or others):
         _write_json(path, s)
         return "", fresh
-    parts = []
+    parts, used = [], 0
     if warnings:
-        parts.append("phi (p4-phi): stop before any tool runs. " + " ".join(f"({k + 1}) {w}" for k, w in
-                                                                          enumerate(warnings)))
+        head = "phi (p4-phi): stop before any tool runs. "
+        shown, over = [], []
+        for w in warnings:
+            (shown if not over and len(head) + sum(len(x) + 5 for x in shown) + len(w) + 5 <= max(600, room - 260)
+             else over).append(w)
+        held = list(over)
+        if not shown:
+            shown, over = [_short(over[0], max(300, room - 400))], over[1:]
+        line = head + " ".join(f"({k + 1}) {w}" for k, w in enumerate(shown))
+        if held:
+            page = hold(home, sid, ["Warnings that did not fit beside one prompt:\n" + "\n".join(f"- {w}" for w in held)])
+            line += (f" {len(over)} more warning(s) did not fit here and are whole on {page}: read them before "
+                     f"going on." if over else f" It is whole on {page}.")
+        parts.append(line)
+        used += len(line) + 2
     if marks:
-        parts.append(f"phi (p4-phi): what the sessions beside this one deprecated or replaced since it last looked "
-                     f"(anchor v{version}), in full:\n" + "\n".join(
-                         f"- \"{t}\" ({nid}): {m.get('claim')} (source: {m.get('source')})" for nid, t, m in marks))
+        edited = edited_files(home, sid) if touches is not None else []
+        near = [x for x in marks if touches is None or touching(s, x[2], touches, edited)]
+        far = [x for x in marks if x not in near]
+        if far and sum(len(str(m.get("claim"))) + len(str(m.get("source"))) + len(str(tt)) + 60
+                       for _, tt, m in far) <= FAR_WHOLE:
+            near, far = marks, []                      # shorter in full than the line that would name their pages
+        bits = []
+        if near:
+            lines = [f"- \"{t}\" ({nid}): {m.get('claim')} (source: {m.get('source')})" for nid, t, m in near]
+            left = max(400, room - used - 420 - (330 if far else 0))
+            whole = sum(len(x) + 1 for x in lines) <= left
+            if not whole:
+                keep = max(1, min(len(lines), left // 400))     # as many as get a readable share, the newest
+                far = near[:len(near) - keep] + far
+                near = near[len(near) - keep:]
+                lines = fair_cut(lines[-keep:], left - keep)
+            pages = sorted({page_of(home, nid) for nid, _, _ in near})
+            bits.append(f"phi (p4-phi): what the sessions beside this one deprecated or replaced since it last "
+                        f"looked (anchor v{version}), "
+                        + ("in full" if whole else f"cut to the room beside one prompt and whole on "
+                                                   f"{', '.join(pages[:3])}") + ":\n" + "\n".join(lines))
+        if far:
+            by = {}
+            for nid, _, _ in far:
+                by[nid] = by.get(nid, 0) + 1
+            named = ", ".join(f"{n} on {page_of(home, nid)}" for nid, n in sorted(by.items())[:3])
+            more = f", and {len(by) - 3} more page(s) under {os.path.dirname(_dir(home, sid)).replace(chr(92), '/')}" \
+                if len(by) > 3 else ""
+            bits.append(f"phi (p4-phi): {len(far)} more deprecation or replacement note(s) from the sessions beside "
+                        f"this one (anchor v{version}) are not shown: they do not touch this session's task, shard or "
+                        f"open steps, or did not fit. They are whole on their sessions' pages: {named}{more}.")
+        parts += bits
+        used += sum(len(x) + 2 for x in bits)
     if others:
-        left = max(0, room - sum(len(p) for p in parts) - 200)
-        cut = fair_cut(others, left) if left else []
+        left = max(0, room - used - 200)
+        keep = others[:max(0, left // 160)]
+        cut = fair_cut(keep, left) if left and keep else []
         if cut:
-            parts.append("phi (p4-phi): what else changed beside this session since it last looked:\n" + "\n".join(cut))
+            more = f"\n- and {len(others) - len(cut)} more session(s) changed; `phi.py tree` lists them." \
+                if len(others) > len(cut) else ""
+            parts.append("phi (p4-phi): what else changed beside this session since it last looked:\n"
+                         + "\n".join(cut) + more)
     _write_json(path, s)
     return "\n\n".join(parts), True
 
@@ -795,7 +892,9 @@ IGNORED = ("phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/session
            "phi/catchup.json", "phi/**/*.tmp", "phi/sessions/*/.calls/", "phi/.agents/", "phi/.nudge/",
            # #38: the puppeteer's pages are made again from the records; routes.jsonl is kept
            "phi/sessions/*/ledger.md", "phi/sessions/*/ledger.json", "phi/sessions/*/ledger.sig",
-           "phi/sessions/*/watcher.json", "phi/meta-ledger.md", "phi/.issue-states.json", "phi/.routes-checked")
+           "phi/sessions/*/watcher.json", "phi/meta-ledger.md", "phi/.issue-states.json", "phi/.routes-checked",
+           # #43: what did not fit beside a prompt, and the standing instructions in full: pages of this machine
+           "phi/sessions/*/held.md", "phi/sessions/*/standing.md")
 TRACKED_MARK = "p4-phi-tracked"
 
 

@@ -79,7 +79,8 @@ From 0.3 the plugin's files, fields, commands and every line it gives a session 
 - The commands are `note`, `done`, `task`, `show`, `tree`, `background`, `detach` and `reparent`.
 - The hooks are named for their events: `session-start`, `user-prompt-submit` and `stop`.
 - The names `arrive`, `prompt` and `exit` still run, because sessions that began under 0.1 or 0.2 keep calling them.
-- The settings are `background`, `reports`, `turns`, `new_task`, `background_chars`, `reports_chars` and `wait_s`.
+- The settings are `background`, `reports`, `turns`, `new_task`, `background_chars`, `reports_chars`, `prompt_chars` and `wait_s`.
+- `prompt_chars` is the ceiling on what phi adds beside one prompt, 4,000 by default; what does not fit is kept on the session's `held.md` and named by count, as `.docs/p4/phi-prompt-cap.md` measures.
 
 ### What was done with the tree of 0.1 and 0.2
 

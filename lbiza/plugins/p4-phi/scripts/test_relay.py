@@ -229,6 +229,48 @@ class ThreeSessions(unittest.TestCase):
         self.assertNotIn("stop before any tool runs", ctx)
         self.assertIn("(source: commit ccc333)", ctx, "the note is still relayed, in full")
 
+    def test_thirty_sibling_notes_stay_under_the_cap_and_come_once(self):
+        """#43: a session with 30 sibling notes pending gets hook text under the cap, the remainder named by count
+        and page, and none of the same notes on the prompt after."""
+        import phi
+        t = self.t
+        filler = "The exporter's ports table moved to the store and the old flush path is gone. " * 12
+        for k in range(27):
+            self.assertEqual(t.cli(A, "note", f"replaces: narwhal exporter build {k:02d}. {filler}",
+                                   "--source", f"commit far{k:02d}").returncode, 0)
+        for k in range(3):
+            self.assertEqual(t.cli(A, "note", f"replaces: the recall fold plan {k}: fold recall into phi as hook {k}",
+                                   "--source", f"commit near{k}").returncode, 0)
+        t.stop(A, "thirty notes", uuid="a30")
+        ctx = context(t.say(B, "next"))
+        self.assertLessEqual(len(ctx), phi.PROMPT_CHARS, "under the cap")
+        for k in range(3):
+            self.assertIn(f"(source: commit near{k})", ctx, "what touches its task is given in full")
+        self.assertNotIn("commit far", ctx, "what does not is not shown")
+        self.assertIn("27 more deprecation or replacement note(s)", ctx, "the remainder by count")
+        page = os.path.join(t.p4, "phi", "sessions", A, "session.md").replace("\\", "/")
+        self.assertIn(f"27 on {page}", ctx, "and by the page that holds it")
+        self.assertIn("narwhal exporter build 26", open(page, encoding="utf-8").read(), "the page holds them whole")
+        again = context(t.say(B, "and after"))
+        self.assertNotIn("deprecat", again, "none of the same notes on the prompt after")
+        self.assertNotIn("commit near", again)
+        t.stop(A, "one more turn", [("Edit", {"file_path": self.x("docs", "d.md")}, "ok")], uuid="a31")
+        self.assertNotIn("replaces:", context(t.say(B, "third")), "nor when the sibling changes again")
+
+    def test_thirty_warnings_stay_under_the_cap_and_the_rest_is_held(self):
+        """#43: the hub is no exception: what does not fit is named by count and kept on held.md, once."""
+        import phi
+        t = self.t
+        for k in range(30):
+            relay.warn(t.p4, TOP, f"note:{k}", f"warning {k:02d} of thirty: " + "a sibling changed the layout. " * 10)
+        ctx = context(t.say(TOP, "what now?"))
+        self.assertLessEqual(len(ctx), phi.PROMPT_CHARS)
+        self.assertIn("warning 00 of thirty", ctx)
+        self.assertRegex(ctx, r"\d+ more warning\(s\) did not fit here and are whole on ")
+        held = open(os.path.join(t.p4, "phi", "sessions", TOP, "held.md"), encoding="utf-8").read()
+        self.assertIn("warning 29 of thirty", held)
+        self.assertNotIn("of thirty", context(t.say(TOP, "and now?")), "none of them again")
+
     def test_a_mark_is_relayed_once(self):
         """R4: a node that changes again does not send its older marks again."""
         t = self.t

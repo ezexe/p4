@@ -97,6 +97,7 @@ TURNS = True
 NEW_TASK = True
 RULES = True
 HOOK_CHARS = 9500                # Claude Code keeps 10,000 characters of a hook's context and files the rest away
+PROMPT_CHARS = 4000              # #43: the ceiling on what phi adds beside one prompt; the rest is held on a page
 BACKGROUND_CHARS = 3000
 REPORTS_CHARS = 6000
 REPORT_CHARS = 4000              # of one report, kept
@@ -112,7 +113,8 @@ TRANSCRIPT_BYTES = 8 * 1024 * 1024
 WAIT_S = 2.0                     # how long a handed-over first message waits for the app's record
 SCAN_RECORDS = 60                # the newest records searched for a CLI session id, when the host id is missing
 SETTINGS = {"background": "BACKGROUND", "reports": "REPORTS", "turns": "TURNS", "new_task": "NEW_TASK",
-            "rules": "RULES", "background_chars": "BACKGROUND_CHARS", "reports_chars": "REPORTS_CHARS", "wait_s": "WAIT_S"}
+            "rules": "RULES", "background_chars": "BACKGROUND_CHARS", "reports_chars": "REPORTS_CHARS", "wait_s": "WAIT_S",
+            "prompt_chars": "PROMPT_CHARS"}
 SHELL_TOOLS = ("Bash", "PowerShell")
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 LOOKING = frozenset("""cat head tail sed grep rg ls find wc awk echo cd for printf date sleep tr file which where test
@@ -784,20 +786,30 @@ def background_text(home, s, own=False, slim=False):
     return "\n".join((head, text, tail))[:BACKGROUND_CHARS]
 
 
-def reports_text(home, s):
-    """The reports of the sessions this session started that finished a turn since it last looked, in full, and
-    how many rows that covers."""
+def reports_text(home, s, room=None):
+    """The reports of the sessions this session started that finished a turn since it last looked, and how many
+    rows that covers. In full where they fit in `room`; a report past it is cut and whole on its page, and the
+    ones there is no room for at all are named by count with their pages (#43)."""
     rows = load_reports(home, s["sessionId"])
     seen = s.get("reportsSeen") if isinstance(s.get("reportsSeen"), int) else 0
     new = latest_reports(rows[seen:])
     if not new:
         return "", len(rows)
+    room = REPORTS_CHARS if room is None else min(REPORTS_CHARS, room)
     out = ["phi (p4-phi): reports of the sessions this session started that finished a turn since it last looked. "
-           "The app relays the first 400 characters of a report; these are in full."]
-    each = max(600, (REPORTS_CHARS - len(out[0])) // len(new))
-    for r in reversed(new):
+           "The app relays the first 400 characters of a report; these are in full, or cut with ... and whole on "
+           "the page named under each."]
+    shown = list(reversed(new))[:max(1, (room - len(out[0])) // 700)]
+    rest = [r for r in reversed(new) if r not in shown]
+    each = max(500, (room - len(out[0]) - 110 * len(rest)) // len(shown) - 140)
+    for r in shown:
         lines = turn_lines(r.get("title") or r["sessionId"][:14], r["turn"], report=REPORT_CHARS, prompt=300)
         out += [cut("\n".join(lines), each), f"  its page: {page_path(home, r['sessionId'])}"]
+    if rest:
+        out.append(f"{len(rest)} more report(s) are not shown here and are on their pages: " + ", ".join(
+            f"\"{cut(r.get('title') or r['sessionId'][:14], 40)}\" {page_path(home, r['sessionId'])}"
+            for r in rest[:6]) + (f", and {len(rest) - 6} more on {page_path(home, s['sessionId'])}"
+                                  if len(rest) > 6 else "") + ".")
     return "\n".join(out), len(rows)
 
 
@@ -883,7 +895,7 @@ def caps_text(home, s):
     return ""
 
 
-def split_text(home, s, prompt):
+def split_text(home, s, prompt, cli=""):
     """A turn another session's message started: the app refuses `user_asked` there, so a split is a card ezexe
     starts. '' for ezexe's own turns, the app's events and a session with no task."""
     if not clean(s.get("task")) or not re.search(r"<cross-session-message\b", str(prompt or "")):
@@ -892,6 +904,42 @@ def split_text(home, s, prompt):
     RAN["split"] = "cap" if cap else "card"
     if cap:
         return "phi (p4-phi): this turn was started by another session, not ezexe. " + cap
+    told = s.setdefault("splitTold", {})
+    if not isinstance(told, dict):
+        told = s["splitTold"] = {}
+    if cli and told.get(cli):                      # #43: said once in full, then a line
+        RAN["split"] = "line"
+        return ("phi (p4-phi): another session started this turn, so a task of its own in it is written as a start "
+                f"request with `phi.py request`, as said before and kept on {standing_path(home, s['sessionId'])}; "
+                "do the rest here.")
+    if cli:
+        told[cli] = now()
+    text = _split_full(home, s)
+    keep_standing(home, s["sessionId"], "A turn another session started", text)
+    return text
+
+
+def standing_path(home, sid):
+    return os.path.join(session_dir(home, sid), "standing.md").replace("\\", "/")
+
+
+def keep_standing(home, sid, name, text):
+    """A standing instruction kept whole on the session's standing.md, so a later prompt or a compaction names the
+    page and does not say it again (#43)."""
+    path = standing_path(home, sid)
+    try:
+        with open(path, encoding="utf-8") as f:
+            old = f.read()
+    except (OSError, UnicodeDecodeError):
+        old = ""
+    parts = dict(re.findall(r"(?ms)^## (.+?)\n\n(.*?)(?=^## |\Z)", old))
+    parts[name] = text.strip()
+    write_atomic(path, "# What p4-phi has told this session to do, in full\n\n" + "".join(
+        f"## {k}\n\n{v.strip()}\n\n" for k, v in parts.items()))
+    return path
+
+
+def _split_full(home, s):
     if not spawned_from(s):
         return ("phi (p4-phi): this turn was started by another session, not ezexe, so the app refuses "
                 "`mcp__ccd_session__start_session` with `user_asked`. A topic in it outside this top session's task "
@@ -939,7 +987,7 @@ def feature_steps_text(home, s, plan, owner_turn):
             f"new top session of its own, not a child or a step here. {new_top_route(owner_turn)}")
 
 
-def new_task_text(home, s, me, user=True, again=False, req=""):
+def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
     """ezexe's standing instruction for a message about something else: once in full for a CLI session that
     has a task (and again after a compaction), then a line with the task beside each of ezexe's messages.
     '' with no task, and beside the harness's messages."""
@@ -949,6 +997,14 @@ def new_task_text(home, s, me, user=True, again=False, req=""):
     told = s.setdefault("newTaskToldAt", {})
     if not isinstance(told, dict):
         told = s["newTaskToldAt"] = {}
+    if brief and told.get(me.cli) and os.path.isfile(standing_path(home, s["sessionId"])):
+        RAN["new_task"] = "page"                   # #43: after a compaction, a line with its page, not in full
+        up = spawned_from(s)
+        where = (f"hand it up to {up} with SendMessage, ezexe's words quoted" if up else
+                 f"start a new top session for it (`context` `fresh`, its brief ending \"{NEW_TOP_BRIEF}\")")
+        return (f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" When a message from ezexe is about "
+                f"something else, {where}, and stay with the task. ezexe's standing instruction, handed in full "
+                f"before the compaction, is whole on {standing_path(home, s['sessionId'])}.")
     if again or not told.get(me.cli):
         told[me.cli] = now()
         listed = relay.shards_line(home, s["sessionId"])
@@ -973,12 +1029,14 @@ def new_task_text(home, s, me, user=True, again=False, req=""):
                          + (f"This session's ledger is written for it by phi's watcher, "
                             f"{puppeteer.ledger_path(home, s['sessionId'])}: read that, and keep none by hand. "
                             if puppeteer.on(home) else "") + "A quick thing (a ")
-        return (f"phi (p4-phi): this session's task: \"{cut(task, RULE_TASK)}\" When a message from ezexe is "
+        full = (f"phi (p4-phi): this session's task: \"{cut(task, RULE_TASK)}\" When a message from ezexe is "
                 f"about something else, " + elsewhere +
                 f"question, a few tool calls) stays here. When ezexe says the task itself has changed: "
                 f"`{commands()} task \"<the new task>\"`. This session's page: {page_path(home, s['sessionId'])}."
                 + (" " + TOP_RULE if not spawned_from(s) and TOP_ORCHESTRATES else "")
                 + (" " + caps_text(home, s) if caps_text(home, s) else ""))
+        keep_standing(home, s["sessionId"], "A message about something else", full)
+        return full
     if not user:
         return ""
     RAN["new_task"] = "line"
@@ -1115,7 +1173,7 @@ def builtin_text():
     return "phi (p4-phi): a rule built into p4-phi, for every session:\n- " + BUILT_IN
 
 
-def rules_text(home, room, fork=False):
+def rules_text(home, room, fork=False, brief=False):
     """The store's rules for a session's start, a line each, in at most `room` characters, led by the built-in
     rule. The built-in rule alone in a project with no rules, and for a fork, whose inherited conversation already
     holds the store's rules."""
@@ -1127,6 +1185,12 @@ def rules_text(home, room, fork=False):
         return builtin_text() if room >= len(builtin_text()) else ""     # '' when the project turned it off
     page = rules_page(home, rules)
     mem = p4conf.sub(home, "memory").replace("\\", "/")
+    if brief:                                      # #43: handed in full at the start; after a compaction, its page
+        RAN["rules"] = "page"
+        return (f"phi (p4-phi): this project's standing rules were handed to this session in full at its start and "
+                f"still hold: " + ", ".join((["act-don't-wait"] if ACT_DONT_WAIT else []) + [n for n, _ in rules])
+                + f". Each is whole, with its Why, on one page: {page}. Read that page when one of them bears on "
+                  f"the next step.")
     head = (f"phi (p4-phi): this project's standing rules, from the feedback and user memories in {mem}. They are "
             f"in your context now, as are CLAUDE.md and the memory index, so do not open the memory files or "
             f"CLAUDE.md to learn the rules before the work. A rule cut short with ... is whole, with its Why, on "
@@ -1200,7 +1264,7 @@ def live_rules(s, store, project):
 
 # --- the hooks -------------------------------------------------------------------------------------------------------
 
-def given(s, me, home, own=False):
+def given(s, me, home, own=False, brief=False):
     """The background, when this CLI session has not been given it under the session that started it; marks it
     given."""
     if not BACKGROUND or not me.cli:
@@ -1219,7 +1283,7 @@ def given(s, me, home, own=False):
     # a fresh child starts with exactly what the parent has for it (F2): the tasks above it, its root step and the
     # parent's plan around it, and the parent's anchor cut to its paths, never the parent's whole background
     cut_to = relay.child_paths(home, s) if fresh else []
-    text = background_text(home, s, own=own, slim=bool(cut_to))   # nothing to cut by: the parent's whole background
+    text = background_text(home, s, own=own, slim=bool(cut_to) or brief)   # brief: after a compaction (#43)
     if fresh:
         step = plans.slice_for(home, s)
         piece = relay.slice_text(home, s) if cut_to else ""
@@ -1542,13 +1606,13 @@ def h_session_start(payload):
             and os.environ.get("CLAUDE_CODE_HOST_SESSION_ID")):
         # with a host id and nothing recorded, the app has not yet written which session started this one, and
         # the first message tells
-        text = given(s, me, me.home, own=lost or len(s.get("cliSessionIds") or []) > 1)
-        rule = new_task_text(me.home, s, me, user=False, again=lost) if lost else ""
+        text = given(s, me, me.home, own=lost or len(s.get("cliSessionIds") or []) > 1, brief=source == "compact")
+        rule = new_task_text(me.home, s, me, user=False, again=lost, brief=source == "compact") if lost else ""
     pin = pin_of(me.home, s)
     text = "\n\n".join(p for p in (pin, text) if p)
     live_rules(s, me.store, os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or "")   # #26: the baseline
     rules = rules_text(me.store, HOOK_CHARS - len(text) - len(rule) - 4,
-                       fork=bool(s.get("forked"))) if source != "resume" else ""
+                       fork=bool(s.get("forked")), brief=source == "compact") if source != "resume" else ""
     relay.remember_store(me.store)
     if me.home_missing:
         rule = "\n\n".join(p for p in (rule, f"phi (p4-phi): this project's p4.json names the home store "
@@ -1606,6 +1670,43 @@ def within(parts, room=None):
     return "\n\n".join(fair_cut(parts, room - 2 * len(parts)))
 
 
+def fit(parts, room, home, sid):
+    """The parts that fit in `room`, in their order, each whole; what does not fit is kept whole on the session's
+    held.md and named by count and that page, and the first of them is shown cut where room is left (#43)."""
+    parts = [p for p in parts if p]
+    if sum(len(p) + 2 for p in parts) - 2 <= room:
+        return "\n\n".join(parts)
+    tail = 200 + len(relay.held_path(home, sid))   # the line that names the count and the page
+    out, over, used = [], [], 0
+    for p in parts:
+        if used + len(p) + 2 <= room - tail:
+            out.append(p)
+            used += len(p) + 2
+        else:
+            over.append(p)
+    page = relay.hold(home, sid, over, now())
+    left = room - tail - used - 2
+    cut_one = left >= 500
+    if cut_one:
+        out.append(cut(over[0], left))
+    RAN["held"] = len(over)
+    out.append(f"phi (p4-phi): {len(over)} piece(s) of what phi had for this prompt, {sum(len(p) for p in over)} "
+               f"characters, did not fit in its {room} beside one prompt"
+               + (", the one above cut with ..." if cut_one else "") + f". They are whole on {page}.")
+    return "\n\n".join(out)
+
+
+def touches_of(home, s):
+    """What tells whether a sibling's note bears on this session: its words against the task and the open steps."""
+    own = [clean(s.get("task"))] + [str(st.get("content") or "") for st in plans.open_steps(home, s["sessionId"])]
+    own = [plans.words(o) - plans.SIBLING_STOP for o in own if o]
+
+    def touches(text):
+        got = plans.words(text)                    # three shared content words, or all of a two-word task
+        return any(len(o) >= 2 and len(o & got) >= min(3, len(o)) for o in own)
+    return touches
+
+
 def h_user_prompt_submit(payload):
     me = started_by(Me(payload), payload)
     if not me.home or not me.id:
@@ -1655,10 +1756,12 @@ def h_user_prompt_submit(payload):
         issue_line = issues.ensure(me.home, s, req or str(payload.get("prompt") or ""),
                                    s.get("cwd") or payload.get("cwd") or "", "brief", me.rec)   # #28
         RAN["issue"] = (s.get("issue") or {}).get("number", "")
+    handed = given(s, me, me.home)
+    room = HOOK_CHARS if handed else min(PROMPT_CHARS, HOOK_CHARS)   # the background comes once, with its first message
     parts = [live_rules(s, me.store, os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or ""),
-             pin_of(me.home, s), given(s, me, me.home)]
+             pin_of(me.home, s), handed]
     if REPORTS:
-        text, seen = reports_text(me.home, s)
+        text, seen = reports_text(me.home, s, room * 3 // 5)
         s["reportsSeen"] = seen
         parts.append(text)
     save_session(me.home, s)
@@ -1710,13 +1813,13 @@ def h_user_prompt_submit(payload):
     if verdict and RAN.get("new_task") in ("line", "feature"):
         rule = ""                                  # pioneer's verdict says where the message goes
     parts.append(pup)
-    parts.append(route or rule or split_text(me.home, s, payload.get("prompt")))
+    last = route or rule or split_text(me.home, s, payload.get("prompt"), me.cli)
     save_session(me.home, s)
     # the rebase check, on every message: what the nodes beside this one changed, and the warnings, first
-    used = sum(len(p) for p in parts if p)
-    text, _ = relay.rebase(me.home, s["sessionId"], HOOK_CHARS - used, fair_cut)
+    used = sum(len(p) + 2 for p in parts + [last] if p)
+    text, _ = relay.rebase(me.home, s["sessionId"], max(room // 3, room - used), fair_cut, touches_of(me.home, s))
     RAN["relay"] = len(text)
-    return within([text] + parts)
+    return fit([text, last] + parts, room, me.home, s["sessionId"])
 
 
 def h_stop(payload):

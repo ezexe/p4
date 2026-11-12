@@ -641,6 +641,11 @@ class NewTask(unittest.TestCase):
         self.assertIn(" request \"<title>\" --brief", text, "a start request, not a card")
         self.assertNotIn("own_initiative", text)
         self.assertIn(phi.NEW_TOP_BRIEF, text)
+        again = self.say(TOP, '<cross-session-message from="local_x">and Z as well</cross-session-message>')
+        self.assertNotIn(phi.NEW_TOP_BRIEF, again, "#43: said once in full, then a line with its page")
+        self.assertIn("standing.md", again)
+        self.assertLess(len(again), 400)
+        self.assertIn(phi.NEW_TOP_BRIEF, read(os.path.join(self.t.dir(TOP), "standing.md")))
         self.assertEqual(self.say(TOP, "<side-sessions-event>a session finished</side-sessions-event>"), "")
         self.say(KID, HANDED)
         kid = self.say(KID, '<cross-session-message from="local_x">please also look at Y</cross-session-message>')
@@ -680,7 +685,11 @@ class NewTask(unittest.TestCase):
         r = self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "compact"}, P4_PHI_NEW_TASK="1")
         text = context(r)
         self.assertIn(TASK, text)
-        self.assertIn("start_session", text)
+        self.assertIn("start a new top session", text)
+        page = os.path.join(self.t.dir(TOP), "standing.md").replace("\\", "/")
+        self.assertIn(page, text, "#43: after a compaction, a line with its page, not the instruction in full")
+        self.assertNotIn("start_session", text)
+        self.assertIn("start_session", read(page), "the page holds it whole")
 
     def test_the_task_is_changed_by_its_command(self):
         self.say(TOP, TASK)
@@ -799,6 +808,30 @@ class Rules(unittest.TestCase):
         self.start(TOP)
         self.assertNotIn("standing rules", self.start(TOP, "resume"))
         self.assertIn("standing rules", self.start(TOP, "compact"))
+
+    def test_after_a_compaction_the_rules_are_a_line_with_their_page(self):
+        """#43: a rule a session has been handed comes back after a compaction as one line with its page."""
+        full = self.start(TOP)
+        text = self.start(TOP, "compact")
+        self.assertIn("tabs-not-spaces", text)
+        self.assertIn("phi/rules.md", text)
+        self.assertNotIn("Indent with tabs", text, "not in full")
+        self.assertLess(len(text), len(full) // 2)
+
+    def test_pieces_past_the_cap_are_held_on_a_page_and_named_by_count(self):
+        """#43: the text beside one prompt has a hard ceiling; what does not fit is named by count and page."""
+        home = self.t.p4
+        self.t.say(TOP, TASK)
+        parts = ["first piece " + "a" * 1500, "second piece " + "b" * 3000, "third piece " + "c" * 2500, "last line"]
+        text = phi.fit(parts, phi.PROMPT_CHARS, home, TOP)
+        self.assertLessEqual(len(text), phi.PROMPT_CHARS)
+        self.assertIn("first piece", text)
+        self.assertIn("last line", text, "a short piece after a long one still fits")
+        self.assertIn("2 piece(s) of what phi had for this prompt", text)
+        held = read(os.path.join(self.t.dir(TOP), "held.md"))
+        self.assertIn("b" * 3000, held)
+        self.assertIn("c" * 2500, held)
+        self.assertEqual(phi.fit(["x", "y"], 100, home, TOP), "x\n\ny", "what fits is untouched")
 
     def test_rules_and_background_share_the_hooks_room(self):
         self.t.say(TOP, TASK)
