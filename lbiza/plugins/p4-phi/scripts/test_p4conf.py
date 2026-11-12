@@ -32,6 +32,19 @@ class P4Conf(unittest.TestCase):
         for c in COPIES:
             self.assertEqual(c.read_bytes(), src, c)
 
+    def test_every_setting_scratchpad_reads_has_its_default(self):
+        """Each key temportal's scratchpad.py maps to a constant is in DEFAULTS, at the constant's own value, so a
+        store's p4.json is never told it holds an unknown key."""
+        import ast
+        import re
+        text = (PLUGINS / "p4-temportal" / "hooks" / "scratchpad.py").read_text(encoding="utf-8")
+        tree = ast.parse(text)
+        consts = {t.id: n.value for n in tree.body if isinstance(n, ast.Assign) for t in n.targets
+                  if isinstance(t, ast.Name)}
+        for key in ("scratch_sweep_minutes", "tmp_empty_idle_hours", "tmp_skip_dirs"):
+            const = re.search(rf'"{key}": "(\w+)"', text).group(1)
+            self.assertEqual(p4conf.DEFAULTS["scratchpad"][key], ast.literal_eval(consts[const]), key)
+
     def test_a_missing_file_is_written_with_every_default(self):
         s = p4conf.load(self.p4)
         self.assertEqual(s, p4conf.DEFAULTS)

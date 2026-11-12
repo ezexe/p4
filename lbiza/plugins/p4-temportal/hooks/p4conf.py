@@ -38,6 +38,9 @@ DEFAULTS = {
         "tmp_idle_days": 7,              # another session's tmp untouched this long is committed, then deleted
         "tmp_max_file_mb": 20,           # a larger tmp file is never staged, so never deleted
         "tmp_max_files": 5000,           # a tmp with more files is left alone
+        "tmp_empty_idle_hours": 1,       # another session's empty tmp quiet this long is removed at a start
+        "scratch_sweep_minutes": 60,     # another session's scratchpad quiet this long is linked, repaired or removed
+        "tmp_skip_dirs": [".pytest_cache", "node_modules", ".venv", "venv", ".tox", ".mypy_cache", "pytest-of-*"],
         "ignorable_ext": ["log", "out", "tmp", "dump", "pid", "o", "obj", "pdb", "ilk", "exe", "dll", "lib", "so",
                           "dylib", "a", "class", "pyc", "pyo", "tlog", "binlog", "etl", "trace", "lastbuildstate"],
         "ignorable_dirs": ["bin", "build", "obj", "logs", "out", "dist", "target", "node_modules", "__pycache__",
