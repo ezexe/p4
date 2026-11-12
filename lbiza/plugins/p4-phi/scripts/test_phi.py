@@ -286,7 +286,7 @@ class Sessions(unittest.TestCase):
 
     def test_the_first_session_of_a_store_hears_nothing(self):
         r = self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"})
-        self.assertEqual((r.returncode, r.stdout.strip()), (0, ""))
+        self.assertEqual((r.returncode, context(r)), (0, phi.builtin_text()), "no store rules: the built-in one")
         self.assertEqual(self.t.say(TOP, TASK).stdout.strip(), "")
         self.assertEqual(self.t.session(TOP)["task"], TASK)
 
@@ -449,7 +449,8 @@ class Background(unittest.TestCase):
         self.t.stop(TOP, TASK, [("Edit", {"file_path": "src/export/flush.py"}, "ok")], "Half done.")
         other = "local_top00002"
         self.t.record(other, title="Something else entirely")
-        self.assertEqual(self.start(other), "")     # in the app a start is given nothing: who started it is unknown
+        self.assertEqual(self.start(other), phi.builtin_text())   # in the app a start is given no background:
+        # who started it is unknown; it has the built-in rule, the store having none here
         text = context(self.t.say(other, "paint the fence green"))
         self.assertIn("the top sessions in this project before this one", text)
         self.assertIn(TASK, text)
@@ -692,13 +693,19 @@ class Rules(unittest.TestCase):
         self.assertIn("background for this session", first)
         self.assertLessEqual(len(first), phi.HOOK_CHARS)
 
-    def test_no_memories_and_off_are_silence(self):
+    def test_off_is_silence_and_no_memories_is_the_built_in_rule_alone(self):
         write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"rules": False}))
         self.assertEqual(self.start(TOP), "")
         os.remove(os.path.join(self.t.p4, "phi", "phi.json"))
         for f in os.listdir(os.path.join(self.t.p4, "temportal", "memory")):
             os.remove(os.path.join(self.t.p4, "temportal", "memory", f))
-        self.assertEqual(self.start(TOP), "")
+        self.assertEqual(self.start(TOP), phi.builtin_text(), "act-don't-wait holds in a project with no memories")
+
+    def test_a_fork_gets_the_built_in_rule_alone(self):
+        """A fork's inherited conversation already holds the store's rules."""
+        self.assertEqual(phi.rules_text(self.t.p4, 9000, fork=True), phi.builtin_text())
+        self.assertIn("act-don't-wait", phi.rules_text(self.t.p4, 9000))
+        self.assertGreater(len(phi.rules_text(self.t.p4, 9000)), len(phi.builtin_text()))
 
 
 class Ids(unittest.TestCase):

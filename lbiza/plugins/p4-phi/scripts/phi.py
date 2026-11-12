@@ -908,11 +908,21 @@ def rules_page(home, rules):
     return path.replace("\\", "/")
 
 
-def rules_text(home, room):
-    """The store's rules for a session's start, a line each, in at most `room` characters. '' with none."""
-    rules = memory_rules(home) if RULES and home else []
-    if not rules or room < 600:
+def builtin_text():
+    """The rule p4-phi carries itself, so it holds in every project, with memories or none."""
+    return "phi (p4-phi): a rule built into p4-phi, for every session:\n- " + BUILT_IN
+
+
+def rules_text(home, room, fork=False):
+    """The store's rules for a session's start, a line each, in at most `room` characters, led by the built-in
+    rule. The built-in rule alone in a project with no rules, and for a fork, whose inherited conversation already
+    holds the store's rules."""
+    if not RULES:
         return ""
+    rules = memory_rules(home) if home and not fork else []
+    if not rules or room < 600:
+        RAN["rules"] = 0
+        return builtin_text() if room >= len(builtin_text()) else ""
     page = rules_page(home, rules)
     mem = p4conf.sub(home, "memory").replace("\\", "/")
     head = (f"phi (p4-phi): this project's standing rules, from the feedback and user memories in {mem}. They are "
@@ -923,7 +933,7 @@ def rules_text(home, room):
             f"its start, and your task and notes beside its first message, so its brief does not tell it to read "
             f"CLAUDE.md, MEMORY.md or any memory file: the brief names only what this task needs, such as a skill, "
             f"a plan or source files.")
-    rules = [("built-in", BUILT_IN.split(": ", 1)[1])] + list(rules)
+    rules = [tuple(BUILT_IN.split(": ", 1))] + list(rules)
     names = [f"- {name}: " for name, _ in rules]
     room -= len(head) + sum(len(x) + 1 for x in names) + 2
     RAN["rules"] = len(rules)
@@ -1046,7 +1056,8 @@ def h_session_start(payload):
         rule = new_task_text(me.home, s, me, user=False, again=lost) if lost else ""
     pin = pin_of(me.home, s)
     text = "\n\n".join(p for p in (pin, text) if p)
-    rules = rules_text(me.store, HOOK_CHARS - len(text) - len(rule) - 4) if source != "resume" else ""
+    rules = rules_text(me.store, HOOK_CHARS - len(text) - len(rule) - 4,
+                       fork=bool(s.get("forked"))) if source != "resume" else ""
     relay.remember_store(me.store)
     if me.home_missing:
         rule = "\n\n".join(p for p in (rule, f"phi (p4-phi): this project's p4.json names the home store "
