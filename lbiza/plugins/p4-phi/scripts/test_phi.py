@@ -593,7 +593,7 @@ class NeverFails(unittest.TestCase):
 
 
 def memory(p4, name, kind, body):
-    write(os.path.join(p4, "memory", name + ".md"),
+    write(os.path.join(p4, "temportal", "memory", name + ".md"),
           f"---\nname: {name}\ndescription: about {name}\nmetadata:\n  type: {kind}\n---\n\n{body}\n")
 
 
@@ -608,7 +608,7 @@ class Rules(unittest.TestCase):
                "Indent with tabs in the exporter.\n\n**Why:** the boss's editor.\n\n**How to apply:** every file.")
         memory(p4, "long-rule", "feedback", "Run the ports check before a commit. " * 200)
         memory(p4, "where-the-build-is", "project", "The build lives in out/Narwhal.")
-        write(os.path.join(p4, "memory", "MEMORY.md"), "# Memory index\n\n- [Long](long-rule.md) — x\n"
+        write(os.path.join(p4, "temportal", "memory", "MEMORY.md"), "# Memory index\n\n- [Long](long-rule.md) — x\n"
               "- [Tabs](tabs-not-spaces.md) — y\n")
 
     def tearDown(self):
@@ -651,8 +651,8 @@ class Rules(unittest.TestCase):
         write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"rules": False}))
         self.assertEqual(self.start(TOP), "")
         os.remove(os.path.join(self.t.p4, "phi", "phi.json"))
-        for f in os.listdir(os.path.join(self.t.p4, "memory")):
-            os.remove(os.path.join(self.t.p4, "memory", f))
+        for f in os.listdir(os.path.join(self.t.p4, "temportal", "memory")):
+            os.remove(os.path.join(self.t.p4, "temportal", "memory", f))
         self.assertEqual(self.start(TOP), "")
 
 

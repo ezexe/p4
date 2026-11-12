@@ -50,9 +50,9 @@ class Said(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.proj = os.path.join(os.path.realpath(self.tmp.name), "proj")
         self.p4 = os.path.join(self.proj, ".claude", "p4")
-        os.makedirs(os.path.join(self.p4, "models"))
-        write(os.path.join(self.p4, "store", "rules.md"), RULES)
-        os.makedirs(os.path.join(self.p4, "store", "messages"))
+        os.makedirs(p4conf.sub(self.p4, "models"))
+        write(p4conf.sub(self.p4, "store", "rules.md"), RULES)
+        os.makedirs(p4conf.sub(self.p4, "store", "messages"))
         self.env = dict(os.environ)
         os.environ["CLAUDE_PROJECT_DIR"] = self.proj
         os.environ.pop("P4_RECALL_INJECT", None)

@@ -29,6 +29,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 import ranker  # noqa: E402
 import store as st  # noqa: E402
 
@@ -49,7 +50,7 @@ NOTIFY_RE = re.compile(r"^\s*<(task-notification|system-reminder|local-command|c
 # --- files -----------------------------------------------------------------------------------------------
 
 def mpath(p4, name):
-    return os.path.join(p4, "models", name)
+    return p4conf.sub(p4, "models", name)
 
 
 def read_tsv(path):
@@ -388,7 +389,7 @@ def from_history(p4, idx=None, files=None):
 # --- usage labels (5.1), the close hooks -----------------------------------------------------------------
 
 def served_path(p4, key):
-    return os.path.join(p4, "models", "served", re.sub(r"[^\w.-]", "_", key) + ".json")
+    return p4conf.sub(p4, "models", "served", re.sub(r"[^\w.-]", "_", key) + ".json")
 
 
 def write_served(p4, key, record):

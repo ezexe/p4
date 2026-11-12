@@ -42,6 +42,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import labels as lb  # noqa: E402
+import p4conf  # noqa: E402
 import ranker  # noqa: E402
 import store as st  # noqa: E402
 
@@ -127,7 +128,7 @@ def task_examples(idx, task, positives, limit=None, files=None, docs_by=None):
 
 def silent_prompts(p4):
     """The ordinary messages a round trains silence on: models/silent.jsonl, else the plugin's default list."""
-    path = os.path.join(p4, "models", SILENT)
+    path = p4conf.sub(p4, "models", SILENT)
     if not os.path.exists(path):
         path = SILENT_DEFAULT
     out = []
@@ -452,7 +453,7 @@ def short_subset(p4, idx=None, held_sessions=3):
 # --- the round -------------------------------------------------------------------------------------------
 
 def eval_rows(p4):
-    path = os.path.join(p4, "models", "eval.tsv")
+    path = p4conf.sub(p4, "models", "eval.tsv")
     if not os.path.exists(path):
         return []
     with open(path, encoding="utf-8") as f:
@@ -483,7 +484,7 @@ def owed(p4, now_s=None):
         before = int(last.get("labels", "0"))
     except ValueError:
         before = 0
-    path = os.path.join(p4, "models", "eval.tsv")
+    path = p4conf.sub(p4, "models", "eval.tsv")
     age = now_s - os.path.getmtime(path)
     try:                                   # deps.py: a package installed or updated after the last round
         import deps
@@ -594,14 +595,14 @@ def run_round(p4, write=True, now=None, idx=None, sources=None, quiet=False, dic
             loud = sum(1 for s in silent if ranker.select(s["files"], scored(w, s), t, 2, limit=1))
             ev["silent"] = {"n": len(silent), "loud": loud / len(silent)}
         if write and promote:
-            ranker.save(os.path.join(p4, "models", "ranker.json"), w, t, round_=int(row["round"]), trained=now,
+            ranker.save(p4conf.sub(p4, "models", "ranker.json"), w, t, round_=int(row["round"]), trained=now,
                         per_file=2, floor={"r-precision": round(ev["r-precision"], 4),
                                            "precision": round(ev["precision"], 4),
                                            "short": round(short["rate"], 4)},
                         features=["base"] + (["near"] if __import__("near").ON else []), tasks=len(live))
     row["seconds"] = f"{time.time() - t0:.1f}"
     if write:
-        path = os.path.join(p4, "models", "eval.tsv")
+        path = p4conf.sub(p4, "models", "eval.tsv")
         head = EVAL_HEAD if not os.path.exists(path) else ""
         cols = EVAL_HEAD.rstrip("\n").split("\t")
         os.makedirs(os.path.dirname(path), exist_ok=True)

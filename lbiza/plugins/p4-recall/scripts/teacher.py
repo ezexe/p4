@@ -58,6 +58,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import labels as lb  # noqa: E402
+import p4conf  # noqa: E402
 import ranker  # noqa: E402
 import store as st  # noqa: E402
 

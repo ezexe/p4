@@ -1,0 +1,11 @@
+{
+  "name": "p4-temportal",
+  "version": "0.2.0",
+  "description": "Keeps every file Claude Code would otherwise write under AppData or the system temp directory in <project>/.claude/p4/temportal/: the per-project memory in memory/ (AppData keeps a pointer MEMORY.md, and the session start prints the index the built-in would), the notebook in scratchpad/ with logs, build results and binaries swept into its ignored .out/, and each session's scratchpad as a link to tmp/<session>/, tracked by the p4 repo. Replaces p4-memory and p4-scratchpad, and moves a store they wrote flat in .claude/p4/ into each plugin's own directory.",
+  "author": {
+    "name": "ezexe"
+  },
+  "homepage": "https://github.com/ezexe/p4/tree/main/lbiza/plugins/p4-temportal",
+  "repository": "https://github.com/ezexe/p4",
+  "license": "MIT"
+}

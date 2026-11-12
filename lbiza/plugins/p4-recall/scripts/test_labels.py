@@ -19,6 +19,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 import labels as lb  # noqa: E402
 import p4 as cli  # noqa: E402
 import repo  # noqa: E402
@@ -83,7 +84,7 @@ class Recency(Base):
                ("source", "live measurement 2026-11-01"), ("verified", "2026-11-01"), ("checked", "2026-11-01"),
                ("prior", "limit"), ("supersedes", self.old_id), ("time", "2026-11-01 12:00")]
         self.new_id = f"facts.md:2026-11-01 12:00:{st.sha8(new[0][1])}"
-        write(os.path.join(self.p4, "store", "facts.md"), st.render("facts.md", [old, new]))
+        write(p4conf.sub(self.p4, "store", "facts.md"), st.render("facts.md", [old, new]))
 
     def test_label_moves_to_the_newer_fact(self):
         lb.add_tasks(self.p4, [{"id": "late", "session": "s", "time": "2026-11-01 15:00", "text": "memory size",
@@ -115,7 +116,7 @@ class History(Base):
                  ("addressed", "the quokka harness checks the zebrafish plotter golden images")],
                 [("fingerprint", '"hi"'), ("time", "2026-10-25 10:05"), ("arrival", "turn"), ("state", "FRESH"),
                  ("addressed", "hello")]]
-        write(os.path.join(self.p4, "store", "messages", "dddd4444.md"), st.render("messages/dddd4444.md", rows))
+        write(p4conf.sub(self.p4, "store", "messages", "dddd4444.md"), st.render("messages/dddd4444.md", rows))
         s = lb.from_history(self.p4)
         self.assertGreaterEqual(s["history_tasks"], 1)
         got = [r for r in lb.read_tsv(lb.mpath(self.p4, lb.RAW)) if r["source"] == "store"]
@@ -292,12 +293,12 @@ class Signals(Base):
                  ("state", "FRESH"), ("addressed", "renamed it to walrus-1")],
                 [("fingerprint", '"no, the walrus branch is walrus-mac"'), ("time", "2026-10-30 10:03"),
                  ("arrival", "turn"), ("state", "FRESH"), ("addressed", "renamed it to walrus-mac")]]
-        write(os.path.join(self.p4, "store", "messages", "eeee5555.md"), st.render("messages/eeee5555.md", rows))
-        text = st.read_text(os.path.join(self.p4, "store", "corrections.md")).rstrip("\n")
+        write(p4conf.sub(self.p4, "store", "messages", "eeee5555.md"), st.render("messages/eeee5555.md", rows))
+        text = st.read_text(p4conf.sub(self.p4, "store", "corrections.md")).rstrip("\n")
         text += "\n\n" + st.format_entry([("key", "walrus-branch"), ("time", "2026-10-30 10:03"),
                                           ("match", "walrus-1"), ("meant", "walrus-mac"),
                                           ("from", "sessions/eeee5555/vlds/ledger.md:1")]) + "\n"
-        write(os.path.join(self.p4, "store", "corrections.md"), text)
+        write(p4conf.sub(self.p4, "store", "corrections.md"), text)
 
     def test_correction_yields_pending_entry_quoting_before_and_after(self):
         self.correction()
@@ -312,7 +313,7 @@ class Signals(Base):
         self.assertEqual(lb.signals(self.p4, session="eeee5555", now=NOW)["new_terms"], 0, "never a second entry")
 
     def test_owner_edit_untouched(self):
-        path = os.path.join(self.p4, "store", "vocabulary.md")
+        path = p4conf.sub(self.p4, "store", "vocabulary.md")
         before = st.read_text(path)
         self.correction()
         lb.signals(self.p4, session="eeee5555", now=NOW)
@@ -341,7 +342,8 @@ class RealStores(unittest.TestCase):
         with tempfile.TemporaryDirectory() as t:
             out = os.path.join(t, "p4")
             migrate.run(src, out=out, apply=True, now=NOW)
-            os.remove(os.path.join(out, "store", "vocabulary.md"))
+            p4conf.migrate_layout(out, commit=False)          # what the next hook does to a flat store
+            os.remove(p4conf.sub(out, "store", "vocabulary.md"))
             r = lb.signals(out, now=NOW)
             self.assertEqual(r["signals"]["correction"], expect)
             vocab = st.read_vocabulary(out)

@@ -14,6 +14,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 import deps  # noqa: E402
 import labels as lb  # noqa: E402
 import store as st  # noqa: E402
@@ -33,8 +34,8 @@ class Deps(unittest.TestCase):
         t = os.path.realpath(self.tmp.name)
         self.proj, self.ext = os.path.join(t, "proj"), os.path.join(t, "elsewhere", "framework")
         self.p4 = os.path.join(self.proj, ".claude", "p4")
-        os.makedirs(os.path.join(self.p4, "models"))
-        os.makedirs(os.path.join(self.p4, "store"))
+        os.makedirs(p4conf.sub(self.p4, "models"))
+        os.makedirs(p4conf.sub(self.p4, "store"))
         nm = os.path.join(self.proj, "node_modules")
         write(os.path.join(self.proj, "package.json"),
               json.dumps({"dependencies": {"left-pad": "^1.0.0", "@scope/tool": "2.0.0"}}))
@@ -272,7 +273,7 @@ class Deps(unittest.TestCase):
         self.assertEqual(got.get("repo:node_modules/left-pad/lib/pad.js"), "dropped")
         self.assertEqual(tr.rel(os.path.join(self.ext, "..", "other.h"), self.proj), "", "outside every root: no path")
         # the retrain: a round older than the change is owed again, a round after it is not
-        ev = os.path.join(self.p4, "models", "eval.tsv")
+        ev = p4conf.sub(self.p4, "models", "eval.tsv")
         write(ev, "round\ttime\tlabels\tpromoted\twhy\n0\t2026-11-01 00:00\t0\tkept old\tx\n")
         os.utime(ev, (time.time() - 100, time.time() - 100))
         ok, why = train.owed(self.p4)

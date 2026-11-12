@@ -65,25 +65,26 @@ SEED_MARKER = "# seeded by p4-recall"
 # a seed marker of this plugin (either header) or of the vlds plugin's layout hook, whose stores this one inherits
 SEED_MARKER_RE = re.compile(r"(?i)^#\s*seeded (once )?by (p4-recall|the vlds plugin)\b")
 GITIGNORE = """# seeded once by p4-recall; your edits win
-scratchpad/.out/
-models/served/
-models/index.json
-models/repo.json
-models/deps.json
-models/near.json
-models/lookups.db*
-models/view/
-models/*.tmp
+temportal/scratchpad/.out/
+recall/models/served/
+recall/models/index.json
+recall/models/repo.json
+recall/models/deps.json
+recall/models/near.json
+recall/models/lookups.db*
+recall/models/view/
+recall/models/*.tmp
+.layout.lock
 __pycache__/
 *.pyc
 *.png
 *.jpg
 *.zip
 *.gz
-models/ranker.pt
+recall/models/ranker.pt
 """
-# models/ranker.pt is each machine's own build of the .pt ranker's chain (phi_rank): never tracked. The chain itself,
-# models/ranker-anchor.pt and models/ranker.rNNN.phid, and the pretrained base are tracked, in git LFS (the store's
+# recall/models/ranker.pt is each machine's own build of the .pt ranker's chain (phi_rank): never tracked. The chain itself,
+# recall/models/ranker-anchor.pt and recall/models/ranker.rNNN.phid, and the pretrained base are tracked, in git LFS (the store's
 # .gitattributes), so a blanket *.pt or *.phid here would hide the very files the other machines pull.
 # inject: "rules-facts" is the measured default. The paid validation of 2026-11-01 (Opus 5.5, two seeds, Haiku judge):
 # - every line (inject: true): never better than the built-in on the general tasks, the same lesson task worse on
@@ -135,7 +136,8 @@ def p4_of(payload):
 def ready(payload):
     """The .claude/p4 directory when it holds a store (the layout hook made it); None otherwise."""
     p4 = p4_of(payload)
-    if not (os.path.isdir(os.path.join(p4, "store")) or os.path.isdir(os.path.join(p4, "models"))):
+    p4conf.migrate_layout(p4)             # a store written flat by an older plugin: six lstat calls when there is none
+    if not (os.path.isdir(p4conf.sub(p4, "store")) or os.path.isdir(p4conf.sub(p4, "models"))):
         return None
     p4conf.configure(globals(), p4, "recall", {"pinned_chars": "PINNED_CHARS",
                                                           "repo_deadline_s": "REPO_DEADLINE_S"})
@@ -163,8 +165,10 @@ def init_layout(project):
     project's .git/info/exclude. Returns the p4 path."""
     import subprocess
     p4 = os.path.join(project, ".claude", "p4")
-    for sub in ("store", "store/messages", "memory", "scratchpad", "models"):
-        os.makedirs(os.path.join(p4, sub), exist_ok=True)
+    os.makedirs(p4, exist_ok=True)
+    p4conf.migrate_layout(p4)             # a store an older plugin wrote flat in .claude/p4 moves into recall/ first
+    for sub in (p4conf.sub(p4, "store"), p4conf.sub(p4, "store", "messages"), p4conf.sub(p4, "models")):
+        os.makedirs(sub, exist_ok=True)
     seed_gitignore(os.path.join(p4, ".gitignore"))
     p4conf.load(p4)                       # p4.json: every plugin's settings, written when missing
     if not os.path.exists(os.path.join(p4, ".git")):
@@ -590,7 +594,7 @@ def main(argv=None):
         try:                # one retrain notice for the p4-model skill (notices.py), never a second failure here
             import notices
             p4 = p4_of(payload if isinstance(payload, dict) else {})
-            if os.path.isdir(os.path.join(p4, "store")) or os.path.isdir(os.path.join(p4, "models")):
+            if os.path.isdir(p4conf.sub(p4, "store")) or os.path.isdir(p4conf.sub(p4, "models")):
                 notices.notify(p4, f"hook {name or '?'}", e, (payload.get("session_id") or "") if isinstance(payload, dict) else "")
         except Exception:  # noqa: BLE001
             pass

@@ -22,6 +22,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 import labels as lb  # noqa: E402
 import store as st  # noqa: E402
 from test_store import make_store, write  # noqa: E402
@@ -148,11 +149,11 @@ class Layout(Base):
         r = run_hook("layout", {"hook_event_name": "SessionStart", "source": "startup", "cwd": self.proj}, self.proj)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout, "", "SessionStart prints nothing when no rule is pinned")
-        for sub in ("store", "memory", "scratchpad", "models", ".git"):
-            self.assertTrue(os.path.exists(os.path.join(self.p4, sub)), sub)
+        for sub in ("store", "models", ".git"):
+            self.assertTrue(os.path.exists(p4conf.sub(self.p4, sub)), sub)
         self.assertTrue(os.path.exists(os.path.join(self.p4, ".gitignore")))
-        self.assertTrue(os.path.exists(os.path.join(self.p4, "models", "index.json")))
-        self.assertTrue(os.path.exists(os.path.join(self.p4, "models", "repo.json")), "the repo indexed")
+        self.assertTrue(os.path.exists(p4conf.sub(self.p4, "models", "index.json")))
+        self.assertTrue(os.path.exists(p4conf.sub(self.p4, "models", "repo.json")), "the repo indexed")
         run_hook("layout", {"source": "resume", "cwd": self.proj}, self.proj)
         with open(os.path.join(self.proj, ".git", "info", "exclude"), encoding="utf-8") as f:
             self.assertEqual(f.read().count(".claude/p4/"), 1, "the exclude line added once")
@@ -169,42 +170,42 @@ class Layout(Base):
 
     def test_gitignore_missing_seeded_lines_are_appended_under_a_marker(self):
         import hook
-        old = "# seeded once by p4-recall; your edits win\nscratchpad/.out/\nmodels/served/\nmodels/index.json\n" \
-              "models/repo.json\nmodels/*.tmp\n__pycache__/\n*.png\n*.jpg\n*.zip\n*.gz\n# mine\nbuild/\n"
+        old = "# seeded once by p4-recall; your edits win\ntemportal/scratchpad/.out/\nrecall/models/served/\nrecall/models/index.json\n" \
+              "recall/models/repo.json\nrecall/models/*.tmp\n__pycache__/\n*.png\n*.jpg\n*.zip\n*.gz\n# mine\nbuild/\n"
         got = self.gitignore(old)
         self.assertTrue(got.startswith(old), "what was there is untouched and in its order")
         tail = got[len(old):].splitlines()
         self.assertRegex(tail[0], r"^# seeded by p4-recall \d{4}-\d{2}-\d{2}$")
-        self.assertEqual(tail[1:], ["models/deps.json", "models/near.json", "models/lookups.db*", "models/view/", "*.pyc",
-                                    "models/ranker.pt"])
+        self.assertEqual(tail[1:], ["recall/models/deps.json", "recall/models/near.json", "recall/models/lookups.db*", "recall/models/view/", ".layout.lock", "*.pyc",
+                                    "recall/models/ranker.pt"])
         self.assertEqual(self.gitignore(), got, "a second run adds nothing")
         self.assertEqual(hook.seed_gitignore(os.path.join(self.p4, ".gitignore")), [])
 
     def test_gitignore_vlds_header_counts_as_a_marker(self):
         got = self.gitignore("# Seeded by the vlds plugin (hooks/p4-layout.sh) when the repository has no .gitignore; "
-                             "the owner's edits win.\n*.wav\nmodels/index.json\nmodels/repo.json\n")
+                             "the owner's edits win.\n*.wav\nrecall/models/index.json\nrecall/models/repo.json\n")
         self.assertIn("\n# seeded by p4-recall ", got)
-        self.assertTrue(got.endswith("models/ranker.pt\n"))
-        self.assertIn("scratchpad/.out/\n", got)
+        self.assertTrue(got.endswith("recall/models/ranker.pt\n"))
+        self.assertIn("temportal/scratchpad/.out/\n", got)
         self.assertNotIn("*.pt\n", got, "the anchor and the chain are tracked in LFS: no blanket *.pt")
-        for line in ("models/index.json", "models/repo.json"):
+        for line in ("recall/models/index.json", "recall/models/repo.json"):
             self.assertEqual(got.count(line + "\n"), 1, f"{line}: a line the file already holds is never appended again")
 
     def test_gitignore_without_marker_is_the_owners(self):
-        theirs = "*.wav\nmodels/index.json\nbuild/\n"
+        theirs = "*.wav\nrecall/models/index.json\nbuild/\n"
         self.assertEqual(self.gitignore(theirs), theirs, "a seeded line present and no marker: the owner's edits win")
         own = "# my rules\nbuild/\n*.log\n"
         got = self.gitignore(own)
-        self.assertTrue(got.startswith(own) and "# seeded by p4-recall " in got and got.endswith("models/ranker.pt\n"),
+        self.assertTrue(got.startswith(own) and "# seeded by p4-recall " in got and got.endswith("recall/models/ranker.pt\n"),
                         "no seeded line at all: the whole block, under the marker")
         # the owner deletes the marker block: nothing comes back
-        cut = got[:got.index("# seeded by p4-recall")] + "models/ranker.pt\n"
+        cut = got[:got.index("# seeded by p4-recall")] + "recall/models/ranker.pt\n"
         self.assertEqual(self.gitignore(cut), cut)
 
     def test_pinned_block_cut_at_1500(self):
         rules = [[("ruling", f"pinned rule number {k} " + "x" * 120), ("status", "LIVE"), ("pinned", "yes"),
                   ("time", f"2026-10-{10 + k:02d} 10:00")] for k in range(20)]
-        write(os.path.join(self.p4, "store", "rules.md"), st.render("rules.md", rules))
+        write(p4conf.sub(self.p4, "store", "rules.md"), st.render("rules.md", rules))
         o = self.out(run_hook("layout", {"source": "startup", "cwd": self.proj}, self.proj))
         ctx = o["hookSpecificOutput"]["additionalContext"]
         self.assertEqual(o["hookSpecificOutput"]["hookEventName"], "SessionStart")
@@ -279,11 +280,11 @@ class Recall(Base):
         self.assertTrue(st.completed(rows[0]))
 
     def test_corrupt_store_exit_0_one_notice(self):
-        os.makedirs(os.path.join(self.p4, "models"), exist_ok=True)
-        with open(os.path.join(self.p4, "models", "index.json"), "w") as f:
+        os.makedirs(p4conf.sub(self.p4, "models"), exist_ok=True)
+        with open(p4conf.sub(self.p4, "models", "index.json"), "w") as f:
             f.write('{"version": 5, "sources": [0, 0], "docs": [[')
-        shutil.rmtree(os.path.join(self.p4, "store", "messages"))
-        write(os.path.join(self.p4, "store", "messages"), "not a directory")   # the row cannot be written
+        shutil.rmtree(p4conf.sub(self.p4, "store", "messages"))
+        write(p4conf.sub(self.p4, "store", "messages"), "not a directory")   # the row cannot be written
         r = run_hook("recall", {"session_id": SESSION, "prompt": "the quokka harness zebrafish plotter",
                                 "cwd": self.proj}, self.proj)
         self.assertEqual(r.returncode, 0)
@@ -507,7 +508,7 @@ class Judged(Base):
         fresh = self.close("measure the axolotl latency on the second rig", "Measured: 3 ms.", "2026-11-01 10:20")
         self.assertEqual(fresh.fields["state"], "FRESH")
         self.assertNotIn("match", fresh.fields)
-        text = st.read_text(os.path.join(self.p4, "store", "messages", f"{SESSION[:8]}.md"))
+        text = st.read_text(p4conf.sub(self.p4, "store", "messages", f"{SESSION[:8]}.md"))
         self.assertEqual(text.count("- fingerprint:"), 4, "rows are extended in place, never rewritten")
 
     def test_identical_short_answer_is_an_echo(self):

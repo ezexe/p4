@@ -12,6 +12,7 @@ from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 import hook  # noqa: E402
 import notices  # noqa: E402
 import p4 as cli  # noqa: E402
@@ -22,8 +23,8 @@ class Notices(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp()
         self.p4 = os.path.join(self.root, ".claude", "p4")
-        os.makedirs(os.path.join(self.p4, "store"))
-        os.makedirs(os.path.join(self.p4, "models"))
+        os.makedirs(p4conf.sub(self.p4, "store"))
+        os.makedirs(p4conf.sub(self.p4, "models"))
 
     def test_notify_once_a_day_per_component_and_kind(self):
         self.assertTrue(notices.notify(self.p4, "json ranker", ValueError("bad file"), "abcd1234efgh", now="2026-11-09 10:00"))
@@ -59,10 +60,10 @@ class Notices(unittest.TestCase):
         self.assertEqual([(r["component"], r["kind"], r["session"]) for r in rows], [("hook recall", "RuntimeError", "deadbeef")])
 
     def test_an_unreadable_ranker_file_leaves_a_notice_and_the_query_falls_back(self):
-        with open(os.path.join(self.p4, "store", "rules.md"), "w", encoding="utf-8") as f:
+        with open(p4conf.sub(self.p4, "store", "rules.md"), "w", encoding="utf-8") as f:
             f.write("The owner's rulings.\nWritten when the owner rules.\nFields: ruling, status, time.\n\n"
                     "- ruling: the ring buffer drains on the audio thread\n  status: LIVE\n  time: 2026-11-01 10:00\n")
-        with open(os.path.join(self.p4, "models", "ranker.json"), "w", encoding="utf-8") as f:
+        with open(p4conf.sub(self.p4, "models", "ranker.json"), "w", encoding="utf-8") as f:
             f.write("<<<<<<< HEAD\n{")
         idx = st.build_index(self.p4)
         r = cli.query(self.p4, "where does the ring buffer drain?", "deadbeef", idx=idx)

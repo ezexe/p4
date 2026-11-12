@@ -16,7 +16,7 @@ sys.path.insert(0, str(HERE))
 import p4conf  # noqa: E402
 
 PLUGINS = HERE.parents[1]
-COPIES = [PLUGINS / "p4-memory" / "hooks" / "p4conf.py", PLUGINS / "p4-scratchpad" / "hooks" / "p4conf.py"]
+COPIES = [PLUGINS / "p4-temportal" / "hooks" / "p4conf.py", PLUGINS / "p4-phi" / "scripts" / "p4conf.py"]
 
 
 class P4Conf(unittest.TestCase):
@@ -36,11 +36,11 @@ class P4Conf(unittest.TestCase):
         s = p4conf.load(self.p4)
         self.assertEqual(s, p4conf.DEFAULTS)
         self.assertEqual(self.read(), p4conf.DEFAULTS)
-        self.assertEqual(set(s), {"version", "memory", "scratchpad", "recall"})
+        self.assertEqual(set(s), {"version", "memory", "scratchpad", "temportal", "recall"})
 
     def test_the_retired_config_json_seeds_it(self):
-        os.makedirs(os.path.join(self.p4, "models"))
-        with open(os.path.join(self.p4, "models", "config.json"), "w", encoding="utf-8") as f:
+        os.makedirs(p4conf.sub(self.p4, "models"))
+        with open(p4conf.sub(self.p4, "models", "config.json"), "w", encoding="utf-8") as f:
             json.dump({"teacher-model": "claude-opus-5-5", "inject": False, "teacher-cutoff": "2026-06"}, f)
         t = p4conf.load(self.p4)["recall"]
         self.assertEqual((t["teacher"]["model"], t["teacher"]["cutoff"], t["inject"]), ("claude-opus-5-5", "2026-06", False))

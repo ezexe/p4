@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""scratchpad.py — the p4-scratchpad plugin: the notebook lives in `<project>/.claude/p4/scratchpad/`, tracked by
+"""scratchpad.py — the p4-temportal plugin's scratchpad part: the notebook lives in `<project>/.claude/p4/temportal/scratchpad/`, tracked by
 the p4 repo, and its logs, build results and binaries live in its `.out/`, which ignores itself. A storage move:
 nothing here tells the model how to behave unless the owner turns the two asks on.
 
-  notebook-out (SessionStart)  seeds `.claude/p4/scratchpad/.out/.gitignore` (`*`), re-seeds it when missing or
+  notebook-out (SessionStart)  seeds `.claude/p4/temportal/scratchpad/.out/.gitignore` (`*`), re-seeds it when missing or
                                changed, and moves every ignorable found elsewhere in the notebook into `.out/` at the
                                same relative path (a taken name gets the time as a suffix; nothing overwritten or
                                removed). Silent unless it re-seeded or moved something, then one line. The first seed
@@ -13,7 +13,7 @@ The session's temp directory, ON unless p4.json's scratchpad.tmp is false or P4_
 
   tmp-link (SessionStart)      the harness's per-session scratchpad (`%TEMP%/claude/<project>/<session>/scratchpad` on
                                Windows, `/private/tmp/claude-<uid>/<project>/<session>/scratchpad` on macOS) becomes a
-                               link (a junction on Windows) to `.claude/p4/tmp/<session>/`, tracked by the p4 repo, so
+                               link (a junction on Windows) to `.claude/p4/temportal/tmp/<session>/`, tracked by the p4 repo, so
                                what the session writes there is kept; what it already held is moved in first (a taken
                                name gets the time as a suffix). One line names the link when it is made.
   tmp-sweep (Stop)             the same, silent: a scratchpad the start could not link, or that appeared after it, is
@@ -31,14 +31,14 @@ The session's temp directory, ON unless p4.json's scratchpad.tmp is false or P4_
 
 Two asks, OFF unless the environment sets P4_SCRATCHPAD_ASKS=1 (design section 3.2, untested until measured):
 
-  repo-uses (SessionStart)     one line per file under `.claude/p4/src/` that the project repo's tracked code, build,
+  repo-uses (SessionStart)     one line per file under `.claude/p4/temportal/src/` that the project repo's tracked code, build,
                                docs or CI names: that file is code the repo uses, so it belongs in the repo. Read-only,
                                one `git grep`; silent outside a git repo or without git.
   ask (PreToolUse)             for a Write or Edit, the file_path; for a Bash command, every write-position path
                                (redirects, tee, python's open() in a write mode, cp / mv destinations). A CODE file
                                (by extension or by name) headed for a temp location, the harness's per-session
-                               scratchpad, or `.claude/p4/scratchpad/` gets an ask (never a deny) naming where it
-                               belongs: the repo if the repo will use it, else `.claude/p4/src/`. Silent inside a
+                               scratchpad, or `.claude/p4/temportal/scratchpad/` gets an ask (never a deny) naming where it
+                               belongs: the repo if the repo will use it, else `.claude/p4/temportal/src/`. Silent inside a
                                subagent, whose writer the human answering the prompt cannot redirect.
 
 Every failure prints a one-line notice and exits 0.
@@ -62,7 +62,6 @@ import p4conf  # noqa: E402  (the settings file, .claude/p4/p4.json)
 ASKS_ENV = "P4_SCRATCHPAD_ASKS"
 TMP_ENV = "P4_SCRATCHPAD_TMP"
 HARNESS_ENV = "P4_SCRATCHPAD_HARNESS"   # tests and odd installs name the harness's scratchpad themselves
-TMP_DIR = "tmp"
 TEMP_ROOTS = ("/tmp", "/private/tmp")   # beside tempfile.gettempdir(): where the harness puts its claude*
 
 CODE_EXT = {"py", "pyw", "sh", "bash", "zsh", "ps1", "psm1", "bat", "cmd", "js", "mjs", "cjs", "ts", "rb", "pl",
@@ -123,6 +122,13 @@ def configure(payload):
         "repo_uses_lines": "REPO_USES_LINES"})
 
 
+def layout(payload):
+    """A store an older plugin wrote flat in .claude/p4 is moved into each plugin's directory first."""
+    lines = p4conf.migrate_layout(os.path.join(project_root(payload), ".claude", "p4"))
+    if lines:
+        print("p4-temportal: " + "; ".join(lines) + ".")
+
+
 def asks_on():
     env = os.environ.get(ASKS_ENV, "").strip()
     return env == "1" if env in ("0", "1") else bool(ASKS)
@@ -150,10 +156,12 @@ def tracked_in_p4(p4, rels):
     if not rels or not os.path.isdir(os.path.join(p4, ".git")):
         return set()
     try:
-        r = subprocess.run(["git", "-C", p4, "ls-files", "-z", "--", "scratchpad"], capture_output=True, timeout=15)
+        r = subprocess.run(["git", "-C", p4, "ls-files", "-z", "--", p4conf.rel("scratchpad")], capture_output=True,
+                           timeout=15)
     except Exception:
         return set()
-    listed = {s.decode("utf-8", "replace")[len("scratchpad/"):] for s in r.stdout.split(b"\0") if s}
+    cut = len(p4conf.rel("scratchpad")) + 1
+    listed = {s.decode("utf-8", "replace")[cut:] for s in r.stdout.split(b"\0") if s}
     return {rel for rel in rels if rel in listed}
 
 
@@ -161,7 +169,7 @@ def sweep_notebook(root, now_tag):
     """Seed `.out/` and move the notebook's ignorables into it -> (reseeded, [moved rel paths], [tracked rels]).
     `reseeded` is False for the first seed of a new `.out/`, which is silent."""
     p4 = os.path.join(root, ".claude", "p4")
-    pad = os.path.join(p4, "scratchpad")
+    pad = p4conf.sub(p4, "scratchpad")
     out = os.path.join(pad, OUT_NAME)
     first = not os.path.isdir(out)
     os.makedirs(out, exist_ok=True)
@@ -218,14 +226,14 @@ def cmd_notebook_out(payload):
     reseeded, moved, tracked = sweep_notebook(root, time.strftime("%Y%m%d-%H%M%S"))
     parts = []
     if reseeded:
-        parts.append("re-seeded .claude/p4/scratchpad/.out/.gitignore (`*`)")
+        parts.append("re-seeded .claude/p4/temportal/scratchpad/.out/.gitignore (`*`)")
     if moved:
-        parts.append(f"moved {len(moved)} log/build/binary file(s) into .claude/p4/scratchpad/.out/ ("
+        parts.append(f"moved {len(moved)} log/build/binary file(s) into .claude/p4/temportal/scratchpad/.out/ ("
                      + ", ".join(moved[:6]) + (", …" if len(moved) > 6 else "") + ")")
     if tracked:
         parts.append(f"{len(tracked)} of them were tracked by the p4 repo and now show as deleted there")
     if parts:
-        print("p4-scratchpad: " + "; ".join(parts) + ".")
+        print("p4-temportal: " + "; ".join(parts) + ".")
     return 0
 
 
@@ -262,7 +270,7 @@ def harness_scratchpad(payload):
 
 
 def p4_tmp(root, payload):
-    return os.path.join(root, ".claude", "p4", TMP_DIR, session_id(payload) or "session")
+    return p4conf.sub(os.path.join(root, ".claude", "p4"), "tmp", session_id(payload) or "session")
 
 
 def is_link(path):
@@ -350,7 +358,7 @@ def p4_repo(root):
 
 
 def tmp_rel(sid):
-    return f"{TMP_DIR}/{sid}"
+    return p4conf.rel("tmp", sid)
 
 
 def tmp_files(target):
@@ -381,7 +389,7 @@ def nul(paths):
 def stage_tmp(p4, sid):
     """`git add` the session's tmp: every file tmp_files allows that the repo does not ignore, and the removal of a
     tracked file that is gone. False when the tmp is too large to stage."""
-    target = os.path.join(p4, TMP_DIR, sid)
+    target = p4conf.sub(p4, "tmp", sid)
     files = tmp_files(target) if os.path.isdir(target) else []
     if files is None:
         return False
@@ -406,7 +414,7 @@ def close_tmp(p4, sid):
     """A tmp that is done: staged, committed alone (what else is staged stays staged), and only then deleted, the
     removal committed too. A file no commit holds (ignored, over the cap, changed since) stays on disk. Returns the
     commit that holds the files, or '' when nothing was removed."""
-    rel, target = tmp_rel(sid), os.path.join(p4, TMP_DIR, sid)
+    rel, target = tmp_rel(sid), p4conf.sub(p4, "tmp", sid)
     if not os.path.isdir(target) or stage_tmp(p4, sid) is False:
         return ""
     r = git_p4(p4, "diff", "--cached", "--quiet", "--", rel)
@@ -501,7 +509,7 @@ def newest(path):
 def close_idle(p4, own):
     """Other sessions' tmps nothing has written to for TMP_IDLE_DAYS: sessions that ended without a SessionEnd.
     At most TMP_IDLE_CLOSES a start."""
-    base = os.path.join(p4, TMP_DIR)
+    base = p4conf.sub(p4, "tmp")
     if TMP_IDLE_DAYS is None or TMP_IDLE_DAYS < 0 or not os.path.isdir(base):
         return 0
     limit, done = time.time() - TMP_IDLE_DAYS * 86400, 0
@@ -542,7 +550,7 @@ def cmd_tmp_link(payload):
             line += ("; " if line else "") + f"this session's tmp files were restored from commit {back[:8]} into {there}"
         close_idle(p4, sid)
     if line:
-        print("p4-scratchpad: " + line + ".")
+        print("p4-temportal: " + line + ".")
     return 0
 
 
@@ -575,9 +583,9 @@ def cmd_tmp_close(payload):
 # ---- repo-uses (opt-in) ---------------------------------------------------------------------------------------
 
 def repo_use_candidates(root):
-    """{basename: [project-relative paths]} — every code file under `.claude/p4/src/` (dot-directories skipped)
+    """{basename: [project-relative paths]} — every code file under `.claude/p4/temportal/src/` (dot-directories skipped)
     whose name is distinctive enough to look for."""
-    src = os.path.join(root, ".claude", "p4", "src")
+    src = p4conf.sub(os.path.join(root, ".claude", "p4"), "src")
     found = {}
     for d, dirs, files in os.walk(src):
         dirs[:] = sorted(x for x in dirs if not x.startswith("."))
@@ -631,7 +639,7 @@ def cmd_repo_uses(payload):
         named = ", ".join(f"`{u}`" for u in users[:2]) + (" …" if len(users) > 2 else "")
         lines.append(f"`{path}` is used by {named}; it belongs in the repo.")
     if len(used) > REPO_USES_LINES:
-        lines.append(f"(+{len(used) - REPO_USES_LINES} more files under .claude/p4/src/ the repo names)")
+        lines.append(f"(+{len(used) - REPO_USES_LINES} more files under .claude/p4/temportal/src/ the repo names)")
     if lines:
         print("\n".join(lines))
     return 0
@@ -655,7 +663,7 @@ def in_temp(path):
 
 def in_notebook(path):
     p = _norm(path)
-    return "/.claude/p4/scratchpad/" in p or p.startswith(".claude/p4/scratchpad/")
+    return "/.claude/p4/temportal/scratchpad/" in p or p.startswith(".claude/p4/temportal/scratchpad/")
 
 
 def _first(m):
@@ -687,17 +695,17 @@ def cmd_ask(payload):
     if not asks_on() or payload.get("agent_id"):
         return 0
     root = project_root(payload)
-    src = os.path.join(root, ".claude", "p4", "src")
+    src = p4conf.sub(os.path.join(root, ".claude", "p4"), "src")
     reasons, seen = [], set()
     for p in written_paths(payload):
         if p in seen or not is_code(p):
             continue
         seen.add(p)
         if in_harness_scratchpad(p):
-            where = ("the harness's per-session scratchpad, kept in .claude/p4/tmp/ for notes and output"
+            where = ("the harness's per-session scratchpad, kept in .claude/p4/temportal/tmp/ for notes and output"
                      if tmp_on() else "the harness's per-session scratchpad, which is gone with the session")
         elif in_notebook(p):
-            where = "the notebook .claude/p4/scratchpad/, which is for notes, logs and output"
+            where = "the notebook .claude/p4/temportal/scratchpad/, which is for notes, logs and output"
         elif in_temp(p):
             where = "a temp location"
         else:
@@ -708,7 +716,7 @@ def cmd_ask(payload):
     if not reasons:
         return 0
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
-                                             "permissionDecisionReason": "p4-scratchpad: " + "; ".join(reasons[:3])
+                                             "permissionDecisionReason": "p4-temportal: " + "; ".join(reasons[:3])
                                              + "."}}))
     return 0
 
@@ -721,6 +729,8 @@ def main():
     payload = payload_from_stdin()
     try:
         configure(payload)
+        if sub in ("notebook-out", "repo-uses", "tmp-link"):
+            layout(payload)
         if sub == "notebook-out":
             return cmd_notebook_out(payload)
         if sub == "repo-uses":
@@ -736,7 +746,7 @@ def main():
         print(f"scratchpad.py: unknown subcommand {sub!r}")
         return 0
     except Exception as e:  # noqa: BLE001 — a hook degrades, never raises
-        print(f"p4-scratchpad ({sub}) degraded: {type(e).__name__}: {e}")
+        print(f"p4-temportal scratchpad ({sub}) degraded: {type(e).__name__}: {e}")
         return 0
 
 

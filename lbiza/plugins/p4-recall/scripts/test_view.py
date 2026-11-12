@@ -11,6 +11,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 import view  # noqa: E402
 
 
@@ -24,7 +25,7 @@ class View(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.proj = os.path.join(os.path.realpath(self.tmp.name), "proj")
         self.p4 = os.path.join(self.proj, ".claude", "p4")
-        os.makedirs(os.path.join(self.p4, "models"))
+        os.makedirs(p4conf.sub(self.p4, "models"))
         j = lambda *a: os.path.join(self.proj, *a)
         self.turns = [
             turn("look at the port", [("Read", {"file_path": j("src", "port.py")}, "def open()"),

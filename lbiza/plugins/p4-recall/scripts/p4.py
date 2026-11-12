@@ -35,6 +35,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 import ranker  # noqa: E402
 import store as st  # noqa: E402
 
@@ -206,7 +207,7 @@ def rank(p4, text, idx=None, model=None, k=5, now=None):
     if idx is None:
         idx, _ = st.ensure_index(p4)
     if model is None:
-        model = ranker.load(os.path.join(p4, "models", "ranker.json")) or {}
+        model = ranker.load(p4conf.sub(p4, "models", "ranker.json")) or {}
     now = now or time.strftime("%Y-%m-%d %H:%M")
     tok = st.norm_token(text)
     terms = list(dict.fromkeys(ranker.tokens(text)))
@@ -340,7 +341,7 @@ def query(p4, text, session=None, now=None, idx=None, model=None):
     if idx is None:
         idx, _ = st.ensure_index(p4)
     if model is None:
-        rpath = os.path.join(p4, "models", "ranker.json")
+        rpath = p4conf.sub(p4, "models", "ranker.json")
         model = ranker.load(rpath)
         if model is None and os.path.exists(rpath):
             # a file that is there and not a readable ranker of this kind: the no-ranker road, and one notice a day
@@ -510,7 +511,7 @@ def cmd_query(args):
     p4 = p4_dir(args)
     r = query(p4, args.text, args.session, args.now or None)
     if args.served_id and r["ids"]:
-        path = os.path.join(p4, "models", "served", re.sub(r"[^\w.-]", "_", args.served_id) + ".json")
+        path = p4conf.sub(p4, "models", "served", re.sub(r"[^\w.-]", "_", args.served_id) + ".json")
         ranker.write_atomic(path, json.dumps({"ids": r["ids"], "text": args.text[:500], "session": args.session or ""}))
     if args.json:
         print(json.dumps(r, ensure_ascii=False))
@@ -541,7 +542,7 @@ def cmd_check(args):
     print(f"  vocabulary: {len(vocab)} entries, {sum(1 for v in vocab if v['status'] == 'on' and not v['pending'])} "
           f"on, {sum(1 for v in vocab if v['pending'])} pending, {sum(1 for v in vocab if v['status'] == 'off')} off")
     ids = {d["id"] for d in idx["docs"]}
-    lab = os.path.join(p4, "models", "labels-raw.tsv")
+    lab = p4conf.sub(p4, "models", "labels-raw.tsv")
     if os.path.exists(lab):
         per, orphan = {}, 0
         with open(lab, encoding="utf-8") as f:

@@ -33,6 +33,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 
 FILE = "said.tsv"
 HEAD = ["time", "session", "task", "act", "entry", "note"]
@@ -47,7 +48,7 @@ def mode(p4):
 
 
 def path(p4):
-    return os.path.join(p4, "models", FILE)
+    return p4conf.sub(p4, "models", FILE)
 
 
 def tag(pairs):

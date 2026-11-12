@@ -14,6 +14,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 import labels as lb  # noqa: E402
 import store as st  # noqa: E402
 import teacher as te  # noqa: E402
@@ -41,7 +42,7 @@ def quiet(*_a, **_k):
 
 
 def facts(p4, entries):
-    write(os.path.join(p4, "store", "facts.md"), st.render("facts.md", entries))
+    write(p4conf.sub(p4, "store", "facts.md"), st.render("facts.md", entries))
     st.build_index(p4)
 
 
@@ -196,7 +197,7 @@ class Cost(Base):
         s = te.edit_labels(self.p4, args("--limit", "5", "--estimate"), client=client, out=quiet)
         self.assertEqual((s["status"], client.created), ("estimate", []))
         # the dictionary batch refuses the same way
-        write(os.path.join(self.p4, "store", st.VOCABULARY), st.render(st.VOCABULARY, [
+        write(p4conf.sub(self.p4, "store", st.VOCABULARY), st.render(st.VOCABULARY, [
             st.vocab_entry_pairs("gizmo", "(pending)", '2026-10-01 — you wrote "fix the gizmo"', "correction", [],
                                  "2026-11-01 10:00")]))
         d = dargs()
@@ -302,10 +303,10 @@ class SecondOpinion(Base):
 
 class Dictionary(Base):
     def vocab(self, entries):
-        write(os.path.join(self.p4, "store", st.VOCABULARY), st.render(st.VOCABULARY, entries))
+        write(p4conf.sub(self.p4, "store", st.VOCABULARY), st.render(st.VOCABULARY, entries))
 
     def text(self):
-        with open(os.path.join(self.p4, "store", st.VOCABULARY), encoding="utf-8") as f:
+        with open(p4conf.sub(self.p4, "store", st.VOCABULARY), encoding="utf-8") as f:
             return f.read()
 
     def block(self, term):
@@ -337,7 +338,7 @@ class Dictionary(Base):
         self.assertEqual(te.dictionary(self.p4, dargs(), client=te.FakeClient(), out=quiet)["entries"], 0)
         # the owner edits the teacher's meaning: a re-edit by another teacher leaves it alone
         t = self.text().replace("  means: (fake) gizmo as in: fix the gizmo board", "  means: the gizmo board, mine")
-        write(os.path.join(self.p4, "store", st.VOCABULARY), t)
+        write(p4conf.sub(self.p4, "store", st.VOCABULARY), t)
         s = te.dictionary(self.p4, dargs("--re-edit", "--teacher", "claude-opus-5-5"), client=te.FakeClient(),
                           out=quiet)
         self.assertEqual(s["entries"], 0)
@@ -360,7 +361,7 @@ class Dictionary(Base):
                                          "correction", [], "2026-11-01")])
         e = next(x for x in st.load_file(self.p4, st.VOCABULARY) if x.value == "gizmo")
         t = self.text().replace("  means: (pending)", "  means: what the owner typed meanwhile")
-        write(os.path.join(self.p4, "store", st.VOCABULARY), t)
+        write(p4conf.sub(self.p4, "store", st.VOCABULARY), t)
         n = te.write_meanings(self.p4, {(e.line, "gizmo", "(pending)"): "the teacher's"}, "claude-fable-5-1", NOW)
         self.assertEqual(n, 0)
         self.assertEqual(self.text(), t)
@@ -425,7 +426,7 @@ class Facts(Base):
         self.messages(self.ROWS)
 
     def messages(self, rows, s8="eeee5555"):
-        write(os.path.join(self.p4, "store", "messages", f"{s8}.md"), st.render(f"messages/{s8}.md", rows))
+        write(p4conf.sub(self.p4, "store", "messages", f"{s8}.md"), st.render(f"messages/{s8}.md", rows))
 
     def facts_entries(self):
         return st.load_file(self.p4, "facts.md")
@@ -474,7 +475,7 @@ class Facts(Base):
         s = te.facts(self.p4, fargs(), client=te.FakeClient(), out=quiet)
         self.assertEqual((s["tasks"], s["written"], s["unsettled"]), (2, 1, 1), s)
         self.assertEqual(len(self.facts_entries()), 1)
-        self.assertNotIn("linker", open(os.path.join(self.p4, "store", "facts.md"), encoding="utf-8").read())
+        self.assertNotIn("linker", open(p4conf.sub(self.p4, "store", "facts.md"), encoding="utf-8").read())
 
     def test_estimate_and_budget(self):
         s = te.facts(self.p4, fargs("--estimate"), client=te.FakeClient(), out=quiet)

@@ -16,6 +16,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 import store as st  # noqa: E402
 
 FIXTURES = os.environ.get("P4_FIXTURES", "/Users/ez/gritz/p4/.claude/p4/scratchpad/.out/p4-colab/overrides-1-work/stores")
@@ -75,10 +76,10 @@ def make_store(root):
     ]
     facts = [[("claim", "CEF's C API wraps every refcounted object with a heap allocation on each side"),
               ("time", "2026-10-12 18:14"), ("source", "cpptoc_ref_counted.h:31"), ("verified", "2026-10-12 18:14")]]
-    write(os.path.join(p4, "store", "rules.md"), entry_file("rules.md", rules))
-    write(os.path.join(p4, "store", "corrections.md"), entry_file("corrections.md", corrections))
-    write(os.path.join(p4, "store", "retractions.md"), entry_file("retractions.md", retractions))
-    write(os.path.join(p4, "store", "facts.md"), entry_file("facts.md", facts))
+    write(p4conf.sub(p4, "store", "rules.md"), entry_file("rules.md", rules))
+    write(p4conf.sub(p4, "store", "corrections.md"), entry_file("corrections.md", corrections))
+    write(p4conf.sub(p4, "store", "retractions.md"), entry_file("retractions.md", retractions))
+    write(p4conf.sub(p4, "store", "facts.md"), entry_file("facts.md", facts))
     rows_a = [
         [("fingerprint", '"Keep going"'), ("time", "2026-10-01 10:00"), ("arrival", "turn"), ("state", "FRESH"),
          ("addressed", "continued the running CEF build as configured, nothing to change")],
@@ -93,19 +94,19 @@ def make_store(root):
         [("fingerprint", '"Keep going"'), ("time", "2026-10-02 09:00"), ("arrival", "turn"), ("state", "FRESH"),
          ("addressed", "continued the running CEF build as configured, nothing to change")],
     ]
-    write(os.path.join(p4, "store", "messages", "aaaa1111.md"), entry_file("messages/aaaa1111.md", rows_a))
-    write(os.path.join(p4, "store", "messages", "bbbb2222.md"), entry_file("messages/bbbb2222.md", rows_b))
+    write(p4conf.sub(p4, "store", "messages", "aaaa1111.md"), entry_file("messages/aaaa1111.md", rows_a))
+    write(p4conf.sub(p4, "store", "messages", "bbbb2222.md"), entry_file("messages/bbbb2222.md", rows_b))
     vocab = [st.vocab_entry_pairs("the mac branch thing",
                                   "the branch 0.0.1-apple&win&mac_mac, cut under 0.0.1-apple&win&mac",
                                   '2026-11-01 11:18 — you wrote "rename it to the mac branch thing"', "correction",
                                   ["rules.md:2026-11-01 11:18:" + st.sha8(rules[1][0][1])], "2026-11-01 13:30"),
              st.vocab_entry_pairs("frobnicate", "(pending)", "2026-10-01 — you wrote \"frobnicate it\"",
                                   "follow-up", [], "2026-11-01 13:30")]
-    write(os.path.join(p4, "store", "vocabulary.md"), entry_file(st.VOCABULARY, vocab))
-    write(os.path.join(p4, "memory", "MEMORY.md"), "- [cef](cef.md)\n")
-    write(os.path.join(p4, "memory", "cef.md"), "---\nname: cef\ndescription: how the capybara build is watched\n"
+    write(p4conf.sub(p4, "store", "vocabulary.md"), entry_file(st.VOCABULARY, vocab))
+    write(p4conf.sub(p4, "memory", "MEMORY.md"), "- [cef](cef.md)\n")
+    write(p4conf.sub(p4, "memory", "cef.md"), "---\nname: cef\ndescription: how the capybara build is watched\n"
           "---\n\n# Watching a capybara build\n\nThe ninja log names objects by directory.\n")
-    write(os.path.join(p4, "src", "tool", "probe.py"), "#!/usr/bin/env python3\n# probe the narwhal port\nprint(1)\n")
+    write(p4conf.sub(p4, "src", "tool", "probe.py"), "#!/usr/bin/env python3\n# probe the narwhal port\nprint(1)\n")
     return p4
 
 
@@ -202,7 +203,7 @@ Fields: term.
   means: (pending)
   status: off
 """
-            write(os.path.join(d, "store", "vocabulary.md"), text)
+            write(p4conf.sub(d, "store", "vocabulary.md"), text)
             v = st.read_vocabulary(d)
             self.assertEqual(len(v), 2)
             self.assertEqual(v[0]["term"], "the mac branch thing")
@@ -226,14 +227,14 @@ class IndexStaleness(unittest.TestCase):
             self.assertEqual([d_["id"] for d_ in idx["docs"]], [d_["id"] for d_ in idx2["docs"]])
             # a store file newer than the index
             future = time.time() + 5
-            path = os.path.join(p4, "store", "facts.md")
+            path = p4conf.sub(p4, "store", "facts.md")
             os.utime(path, (future, future))
             self.assertTrue(st.index_stale(p4))
             st.build_index(p4)
             os.utime(st.index_path(p4), (future + 1, future + 1))
             self.assertFalse(st.index_stale(p4))
             # a memory file removed
-            os.remove(os.path.join(p4, "memory", "cef.md"))
+            os.remove(p4conf.sub(p4, "memory", "cef.md"))
             self.assertTrue(st.index_stale(p4))
 
     def test_index_excludes_freed_spent_and_open(self):
@@ -252,7 +253,7 @@ class IndexStaleness(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p4 = make_store(d)
             before = {x["id"] for x in st.build_index(p4)["docs"]}
-            path = os.path.join(p4, "store", "rules.md")
+            path = p4conf.sub(p4, "store", "rules.md")
             ents = [e.pairs for e in st.load_file(p4, "rules.md")]
             write(path, st.render("rules.md", [[("ruling", "an inserted ruling"), ("time", "2026-12-01 00:00")]] + ents))
             after = {x["id"] for x in st.build_index(p4)["docs"]}

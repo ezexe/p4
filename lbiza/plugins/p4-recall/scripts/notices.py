@@ -18,7 +18,13 @@ noted once a day: a store whose model is broken for a week has seven rows, not o
 """
 
 import os
+import sys
 import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 
 NOTICES = "retrain-needed.tsv"
 RESOLVED = "retrain-resolved.tsv"
@@ -28,7 +34,7 @@ FAMILIES = (("json ranker", "json"), ("pt ranker", "ranker"), ("ranker server", 
 
 
 def path(p4, name=NOTICES):
-    return os.path.join(p4, "models", name)
+    return p4conf.sub(p4, "models", name)
 
 
 def _rows(p):

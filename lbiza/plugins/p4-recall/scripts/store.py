@@ -31,6 +31,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 import ranker  # noqa: E402
 
 STORE_FILES = ("rules.md", "corrections.md", "retractions.md", "facts.md")
@@ -216,7 +217,7 @@ def read_text(path):
 
 
 def store_dir(p4):
-    return os.path.join(p4, "store")
+    return p4conf.sub(p4, "store")
 
 
 def load_file(p4, rel):
@@ -417,7 +418,7 @@ def stamp_of(path):
 def memory_entries(p4):
     """One entry per heading of every memory/*.md (MEMORY.md, the index of links, aside); a file without headings
     is one entry headed by its frontmatter description or first line."""
-    d = os.path.join(p4, "memory")
+    d = p4conf.sub(p4, "memory")
     out = []
     if not os.path.isdir(d):
         return out
@@ -459,7 +460,7 @@ def memory_entries(p4):
 
 def src_entries(p4):
     """The one-line head of each file under src/ (its first non-empty line, comment marks off)."""
-    d = os.path.join(p4, "src")
+    d = p4conf.sub(p4, "src")
     out = []
     if not os.path.isdir(d):
         return out
@@ -491,7 +492,7 @@ def src_entries(p4):
 # --- the index -------------------------------------------------------------------------------------------
 
 def index_path(p4):
-    return os.path.join(p4, "models", "index.json")
+    return p4conf.sub(p4, "models", "index.json")
 
 
 def sources_signature(p4):
@@ -500,11 +501,11 @@ def sources_signature(p4):
     count, newest = 0, 0
     for name in ("repo.json", "deps.json"):                        # the repository's entries (repo.py), the dependencies' (deps.py)
         try:
-            st_ = os.stat(os.path.join(p4, "models", name))
+            st_ = os.stat(p4conf.sub(p4, "models", name))
             count, newest = count + 1, max(newest, st_.st_mtime_ns)
         except OSError:
             pass
-    stack = [os.path.join(p4, sub) for sub in ("store", "memory", "src")]
+    stack = [p4conf.sub(p4, sub) for sub in ("store", "memory", "src")]
     while stack:
         top = stack.pop()
         try:
@@ -544,7 +545,12 @@ def index_stale(p4):
 
 
 def display_path(e):
-    return (f"store/{e.file}" if not e.file.startswith(("memory/", "src/")) else e.file)
+    """Where an entry's file is, relative to the store: an entry's own `file` keeps the old names (memory/x.md,
+    src/x.py, rules.md), so ids and labels survive the layout move."""
+    top, _, rest = e.file.partition("/")
+    if top in ("memory", "src") and rest:
+        return p4conf.rel(top, rest)
+    return p4conf.rel("store", e.file)
 
 
 def make_doc(e, fname, kind):
@@ -605,7 +611,7 @@ def build_index(p4, write=True):
             addressed = collapse(e.fields.get("addressed", ""))
             rows.append([e.time, tok[:300], 1 if done else 0, addressed[:160]])
             if tok and len(tok.split()) <= SHORT_WORDS:
-                short.setdefault(tok, []).append([e.time, s8, 1 if done else 0, addressed[:300], "store/" + rel,
+                short.setdefault(tok, []).append([e.time, s8, 1 if done else 0, addressed[:300], p4conf.rel("store", rel),
                                                   e.line])
             if done:
                 add(e, "messages", KIND_NAMES["messages"])
@@ -681,7 +687,7 @@ def repo_docs(p4):
 
 def cache_path(p4):
     # named under the seeded .gitignore's `models/*.tmp`, so a store seeded before the cache existed ignores it too
-    return os.path.join(p4, "models", "index-cache.tmp")
+    return p4conf.sub(p4, "models", "index-cache.tmp")
 
 
 def load_index(p4):
@@ -783,10 +789,12 @@ def find_p4(given=None, cwd=None):
         if not base:
             continue
         base = os.path.abspath(base)
-        if os.path.isdir(os.path.join(base, "store")) or os.path.basename(base) == "p4" and given:
+        if os.path.isdir(os.path.join(base, "store")) or os.path.isdir(p4conf.sub(base, "store"))                 or os.path.basename(base) == "p4" and given:
+            p4conf.migrate_layout(base)
             return base
         cand = os.path.join(base, ".claude", "p4")
         if os.path.isdir(cand):
+            p4conf.migrate_layout(cand)
             return cand
         if given:
             return base

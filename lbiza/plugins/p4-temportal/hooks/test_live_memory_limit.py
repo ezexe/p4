@@ -8,7 +8,7 @@ whose MEMORY.md has 200 numbered lines of 150 bytes each. A 25,000-byte cut ends
 after line 170, and no byte cut at all after line 200. The session is asked for the highest line number it can see.
 
 Live and opt-in: it runs a real session on the account this machine is signed in with (Haiku, one short answer).
-  P4_LIVE=1 python3 lbiza/plugins/p4-memory/hooks/test_live_memory_limit.py
+  P4_LIVE=1 python3 lbiza/plugins/p4-temportal/hooks/test_live_memory_limit.py
 Without P4_LIVE=1, or without a claude binary, it skips and says so.
 """
 

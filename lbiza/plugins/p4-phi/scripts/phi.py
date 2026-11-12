@@ -60,6 +60,11 @@ import re
 import sys
 import time
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+import p4conf  # noqa: E402  (the store's layout: each plugin's files in .claude/p4/<plugin>/)
+
 BACKGROUND = True
 REPORTS = True
 TURNS = True
@@ -743,9 +748,9 @@ WHY = re.compile(r"\A\s*\*\*Why")
 
 
 def memory_rules(home):
-    """The store's rules: (name, body) for each memory of type feedback or user in <home>/memory, in the order
+    """The store's rules: (name, body) for each memory of type feedback or user in <home>/temportal/memory, in the order
     MEMORY.md lists them, then the ones it does not list."""
-    mem = os.path.join(home, "memory")
+    mem = p4conf.sub(home, "memory")
     try:
         files = sorted(f for f in os.listdir(mem) if f.endswith(".md") and f != "MEMORY.md")
     except OSError:
@@ -789,7 +794,7 @@ def fair_cut(texts, room):
 def rules_page(home, rules):
     """<home>/phi/rules.md: every rule in full on one page, written only when a memory changed."""
     path = os.path.join(home, "phi", "rules.md")
-    mem = os.path.join(home, "memory").replace("\\", "/")
+    mem = p4conf.sub(home, "memory").replace("\\", "/")
     text = "\n".join([f"# The store's rules, in full", "",
                       f"Written by p4-phi from the feedback and user memories in {mem}. Edit those files, not this "
                       f"page.", ""] + [f"## {name}\n\n{body}\n" for name, body in rules])
@@ -809,7 +814,7 @@ def rules_text(home, room):
     if not rules or room < 600:
         return ""
     page = rules_page(home, rules)
-    mem = os.path.join(home, "memory").replace("\\", "/")
+    mem = p4conf.sub(home, "memory").replace("\\", "/")
     head = (f"phi (p4-phi): this project's standing rules, from the feedback and user memories in {mem}. They are "
             f"in your context now, as are CLAUDE.md and the memory index, so do not open the memory files or "
             f"CLAUDE.md to learn the rules before the work. A rule cut short with ... is whole, with its Why, on "
@@ -851,6 +856,7 @@ def h_session_start(payload):
     me = Me(payload)
     if not me.home or not me.id:
         return None
+    p4conf.migrate_layout(me.home)        # the memory read below is where the other plugins will have moved it
     configure(me.home)
     s = ensure_session(me.home, me.id, me.rec, me.cli)
     ran_for(s, me)

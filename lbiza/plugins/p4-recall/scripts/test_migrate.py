@@ -20,6 +20,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import migrate  # noqa: E402
+import p4conf  # noqa: E402
 import store as st  # noqa: E402
 from test_store import NOW, REPOS, fixture, write  # noqa: E402
 
@@ -312,6 +313,7 @@ class Synthetic(unittest.TestCase):
         with open(os.path.join(self.out, "archive", "migration-2026-11-01.md"), encoding="utf-8") as f:
             report = f.read()
         self.assertIn("pool-road: model", report, "the old ## recall section is copied into the report")
+        p4conf.migrate_layout(self.out, commit=False)       # what the next hook does to the flat tree it wrote
         rules = st.load_file(self.out, "rules.md")
         self.assertTrue(any(e.fields.get("source") == "index" for e in rules), "owner-rooted index rule")
         idx = st.build_index(self.out)

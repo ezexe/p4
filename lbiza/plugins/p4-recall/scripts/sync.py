@@ -56,7 +56,7 @@ MODEL_PREFIX = ("models/ranker",)
 MODEL_EXT = (".pt", ".phid")
 INDEX_LINE = re.compile(rb"^- \[[^\]]+\]\([^)]+\)")        # `- [Title](file.md) ...`, as memory/MEMORY.md lists
 NAME, EMAIL = "p4-sync", "p4-sync@users.noreply.github.com"
-SEED = 9      # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
+SEED = 10     # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
 
 
 def git(*args, check=True, cwd=None):
@@ -72,8 +72,29 @@ def show(spec):
     return r.stdout if r.returncode == 0 else None
 
 
+# A store moved into each plugin's own directory (p4conf.LAYOUT): recall's files are under recall/, the memory under
+# temportal/. A branch from a machine not yet updated still has them at the top, so every rule here reads a path by
+# its name inside the plugin's directory, and both layouts merge alike.
+PLUGIN_DIRS = ("recall/", "temportal/")
+
+
+def logical(path):
+    """`recall/store/rules.md` -> `store/rules.md`, `temportal/memory/MEMORY.md` -> `memory/MEMORY.md`."""
+    for d in PLUGIN_DIRS:
+        if path.lower().startswith(d):
+            return path[len(d):]
+    return path
+
+
 def is_model(path):
+    path = logical(path)
     return path in MODEL_UNIT or path.startswith(MODEL_PREFIX) or path.endswith(MODEL_EXT)
+
+
+def eval_log(spec_prefix):
+    """The training log at a commit, in either layout."""
+    got = show(f"{spec_prefix}:recall/{LOG}")
+    return got if got is not None else show(f"{spec_prefix}:{LOG}")
 
 
 def last_round(data):
@@ -230,7 +251,7 @@ def seeded_defaults():
 def structured(path):
     """A file whose lines git must never merge by itself: settings (a clean textual merge of two machines' p4.json
     left `recall` holding its keys twice, measured 2026-11-10) and the store's entries."""
-    low = path.lower()
+    low = logical(path).lower()
     return low.endswith(".json") or (low.startswith("store/") and low.endswith(".md"))
 
 
@@ -240,11 +261,11 @@ def settle(path, ref, model_side, sides=None):
     base, ours, theirs = sides or (show(f":1:{path}"), show(f":2:{path}"), show(f":3:{path}"))
     if ours is None or theirs is None:
         return (ours if ours is not None else theirs), "kept (the other side deleted it)"
-    if path == LOG:
+    if logical(path) == LOG:
         return merge_log(base, ours, theirs), "training log: both sides' rounds, by time"
     if is_model(path):
         return (theirs if model_side == "theirs" else ours), f"model: the {'incoming' if model_side == 'theirs' else 'current'} side, whole"
-    low = path.lower()
+    low = logical(path).lower()
     if low.startswith("store/") and low.endswith(".md"):
         got = merge_entries(base, ours, theirs)
         if got is not None:
@@ -279,7 +300,7 @@ def merge(ref, into):
     paths = [p for p in git("diff", "--name-only", "--diff-filter=U", "-z").stdout.split("\0") if p]
     if r.returncode != 0 and not paths:
         raise RuntimeError(f"merge of {ref}: {(r.stderr or r.stdout).strip()[:300]}")
-    model_side = "theirs" if last_round(show(f"{ref}:models/eval.tsv")) > last_round(show("HEAD:models/eval.tsv")) else "ours"
+    model_side = "theirs" if last_round(eval_log(ref)) > last_round(eval_log("HEAD")) else "ours"
     log = []
     for p in paths:
         data, rule = settle(p, ref, model_side)
@@ -318,13 +339,15 @@ def merge(ref, into):
 
 
 def store_branches(main):
-    """The remote's branches that hold a store (a store/ directory), the main one left out."""
+    """The remote's branches that hold a store (a recall/ directory, or store/ in the flat layout), the main one left
+    out."""
     out = []
     for b in git("for-each-ref", "--format=%(refname:short)", "refs/remotes/origin").stdout.split():
         name = b.removeprefix("origin/")
         if name in ("HEAD", main, "origin") or not b.startswith("origin/"):
             continue
-        if "store" in git("ls-tree", "--name-only", b, check=False).stdout.split():
+        top = git("ls-tree", "--name-only", b, check=False).stdout.split()
+        if "recall" in top or "store" in top:
             out.append(name)
     return sorted(out)
 

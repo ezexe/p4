@@ -4,40 +4,47 @@
     "name": "ezexe"
   },
   "metadata": {
-    "description": "P4: three plugins that keep Claude Code's memory and notebook in the repo and recall the repo's own history next to each message; the design is .docs/p4/fresh-marketplace.md."
+    "description": "P4: plugins that keep Claude Code's memory, notebook and temp files in the repo, each in its own directory under .claude/p4/, and recall the repo's own history next to each message; the design is .docs/p4/fresh-marketplace.md."
   },
   "plugins": [
     {
-      "name": "p4-memory",
-      "source": "./plugins/p4-memory",
-      "description": "Stores Claude Code's built-in per-project memory in <project>/.claude/p4/memory/ instead of AppData, leaving a pointer MEMORY.md in AppData. The start prints the same index the built-in would.",
-      "version": "0.1.0",
+      "name": "p4-temportal",
+      "source": "./plugins/p4-temportal",
+      "description": "Keeps every file Claude Code would otherwise write under AppData or the system temp directory in <project>/.claude/p4/temportal/: the memory, the notebook, each session's scratchpad and saved code. Files get lifetimes like a browser's cache and cookies, and what has expired is cleared. Replaces p4-memory and p4-scratchpad.",
+      "version": "0.2.0",
       "category": "productivity",
-      "keywords": ["memory", "p4"]
-    },
-    {
-      "name": "p4-scratchpad",
-      "source": "./plugins/p4-scratchpad",
-      "description": "Keeps the notebook in <project>/.claude/p4/scratchpad/ with logs, build results and binaries swept into its ignored .out/. Two asks about where code belongs, off unless P4_SCRATCHPAD_ASKS=1.",
-      "version": "0.1.0",
-      "category": "productivity",
-      "keywords": ["scratchpad", "notebook", "p4"]
+      "keywords": [
+        "memory",
+        "scratchpad",
+        "temp",
+        "lifetime",
+        "p4"
+      ]
     },
     {
       "name": "p4-recall",
       "source": "./plugins/p4-recall",
-      "description": "A small ranker trained on the repo's own store: adds a few lines from the owner's history next to a message when it is confident, and nothing otherwise.",
-      "version": "0.1.0",
+      "description": "A small ranker trained on the repo's own store, kept in <project>/.claude/p4/recall/: adds a few lines from the owner's history next to a message when it is confident, and nothing otherwise.",
+      "version": "0.9.0",
       "category": "productivity",
-      "keywords": ["recall", "memory", "p4"]
+      "keywords": [
+        "recall",
+        "memory",
+        "p4"
+      ]
     },
     {
       "name": "p4-phi",
       "source": "./plugins/p4-phi",
       "description": "What linked sessions hand each other, in the app's own words: every session starts with the store's rules, a started session is given the tasks and notes of the sessions above it, every finished turn's report reaches the session that started it in full, and a message about something else gets a forked session while this one stays with its task.",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "category": "productivity",
-      "keywords": ["phi", "sessions", "memo", "p4"]
+      "keywords": [
+        "phi",
+        "sessions",
+        "memo",
+        "p4"
+      ]
     }
   ]
 }

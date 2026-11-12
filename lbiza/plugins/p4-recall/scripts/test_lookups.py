@@ -139,7 +139,7 @@ class Record(Base):
         self.assertEqual([r["ok"] for r in got], [1, 1, 1])
         self.assertIn("30 seconds", got[0]["finding"])
         self.assertEqual(got[1]["finding"], "")              # a passing command's output is not kept
-        with open(os.path.join(self.p4, "store", "lookups.jsonl"), encoding="utf-8") as f:
+        with open(p4conf.sub(self.p4, "store", "lookups.jsonl"), encoding="utf-8") as f:
             kept = [json.loads(l) for l in f]
         self.assertEqual([k["tool"] for k in kept], ["WebFetch"])     # the tracked file: findings, not every call
 

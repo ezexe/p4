@@ -17,6 +17,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 import labels as lb  # noqa: E402
 import ranker  # noqa: E402
 import store as st  # noqa: E402
@@ -38,9 +39,9 @@ def synthetic(root, n_tasks=12, noisy=False):
                               ("time", f"2026-10-{1 + (i + j) % 20:02d} 09:00")])
                 rules.append([("ruling", f"the {a} board alone runs at night"), ("status", "LIVE"),
                               ("time", f"2026-10-{1 + (i + j) % 20:02d} 10:00")]) if j == i + 1 else None
-    write(os.path.join(p4, "store", "rules.md"), st.render("rules.md", rules))
+    write(p4conf.sub(p4, "store", "rules.md"), st.render("rules.md", rules))
     for f in ("corrections.md", "retractions.md", "facts.md"):
-        write(os.path.join(p4, "store", f), st.render(f, []))
+        write(p4conf.sub(p4, "store", f), st.render(f, []))
     idx = st.build_index(p4)
     tasks, labs = [], []
     k = 0
@@ -77,7 +78,7 @@ class Rounds(unittest.TestCase):
         row = train.run_round(self.p4, now=NOW)
         self.assertEqual(row["promoted"], "promoted", row["why"])
         self.assertGreaterEqual(float(row["r_precision"]), 0.9)
-        m = ranker.load(os.path.join(self.p4, "models", "ranker.json"))
+        m = ranker.load(p4conf.sub(self.p4, "models", "ranker.json"))
         self.assertIsNotNone(m)
         self.assertGreaterEqual(m["floor"]["precision"], 0.6)
         rows = train.eval_rows(self.p4)
@@ -87,11 +88,11 @@ class Rounds(unittest.TestCase):
 
     def test_round_below_the_floor_is_not_promoted(self):
         train.run_round(self.p4, now=NOW)
-        path = os.path.join(self.p4, "models", "ranker.json")
+        path = p4conf.sub(self.p4, "models", "ranker.json")
         before = open(path, encoding="utf-8").read()
         noisy = synthetic(os.path.join(self.tmp.name, "n"), noisy=True)
-        shutil.copyfile(os.path.join(noisy, "models", "labels-raw.tsv"),
-                        os.path.join(self.p4, "models", "labels-raw.tsv"))
+        shutil.copyfile(p4conf.sub(noisy, "models", "labels-raw.tsv"),
+                        p4conf.sub(self.p4, "models", "labels-raw.tsv"))
         row = train.run_round(self.p4, now=NOW)
         self.assertEqual(row["promoted"], "kept old")
         self.assertIn("below the floor", row["why"])
@@ -103,13 +104,13 @@ class Rounds(unittest.TestCase):
         row = train.run_round(self.p4, now=NOW)
         self.assertEqual(row["promoted"], "kept old")
         self.assertIn("first round: pool labels alone", row["why"])
-        self.assertFalse(os.path.exists(os.path.join(self.p4, "models", "ranker.json")))
+        self.assertFalse(os.path.exists(p4conf.sub(self.p4, "models", "ranker.json")))
 
     def test_eval_writes_nothing(self):
-        before = sorted(os.listdir(os.path.join(self.p4, "models")))
+        before = sorted(os.listdir(p4conf.sub(self.p4, "models")))
         row = train.run_round(self.p4, write=False, now=NOW)
         self.assertTrue(row["eval"])
-        self.assertEqual(sorted(os.listdir(os.path.join(self.p4, "models"))), before)
+        self.assertEqual(sorted(os.listdir(p4conf.sub(self.p4, "models"))), before)
 
     def test_if_owed(self):
         ok, why = train.owed(self.p4)
@@ -125,13 +126,13 @@ class Rounds(unittest.TestCase):
         self.assertFalse(ok, "ten labels, but the last round is under an hour old")
         self.assertIn("s old", why)
         old = time.time() - 7200
-        os.utime(os.path.join(self.p4, "models", "eval.tsv"), (old, old))
+        os.utime(p4conf.sub(self.p4, "models", "eval.tsv"), (old, old))
         self.assertTrue(train.owed(self.p4)[0])
 
     def test_pool_candidates_keep_held_entries(self):
         """A pool's reader saw freed and spent entries on the old barrier and could pick one; the label stays on it
         (migrate.import_pools) and the entry is among the pool task's candidates, though the index never holds it."""
-        path = os.path.join(self.p4, "store", "rules.md")
+        path = p4conf.sub(self.p4, "store", "rules.md")
         rules = [list(e.pairs) for e in st.load_file(self.p4, "rules.md")]
         rules.append([("ruling", "the axolotl relay once kept the bandicoot gauge by hand"), ("status", "FREED"),
                       ("time", "2026-10-02 09:00")])
@@ -174,7 +175,7 @@ class DictionaryCheck(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.p4 = make_store(self.tmp.name)
-        self.path = os.path.join(self.p4, "store", "vocabulary.md")
+        self.path = p4conf.sub(self.p4, "store", "vocabulary.md")
         rules = st.load_file(self.p4, "rules.md")
         zebra = next(e for e in rules if e.value.startswith("the zebrafish plotter uses"))
         mac = next(e for e in rules if e.value.startswith("the Mac's branch"))

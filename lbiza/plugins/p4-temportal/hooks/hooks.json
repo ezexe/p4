@@ -1,0 +1,47 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" memory migrate", "timeout": 30},
+          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad notebook-out", "timeout": 20},
+          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad repo-uses", "timeout": 20},
+          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad tmp-link", "timeout": 30},
+          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" lifetime sweep", "timeout": 30}
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|Bash",
+        "hooks": [
+          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad ask", "timeout": 20}
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" memory mirror", "timeout": 20}
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" memory sweep", "timeout": 30},
+          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad tmp-sweep", "timeout": 30}
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad tmp-close", "timeout": 30},
+          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" lifetime session-end", "timeout": 30}
+        ]
+      }
+    ]
+  }
+}

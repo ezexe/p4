@@ -13,6 +13,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 import sync  # noqa: E402
 
 RULES = "The owner's rulings.\nWritten when the owner rules.\nFields: ruling, time.\n\n- ruling: the base rule\n  time: 2026-11-01 10:00\n"

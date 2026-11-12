@@ -56,6 +56,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 import ranker  # noqa: E402
 import repo  # noqa: E402
 
@@ -596,7 +597,7 @@ def used_in(pkg, includes, others=()):
 # --- the incremental build -------------------------------------------------------------------------------
 
 def state_path(p4):
-    return os.path.join(p4, "models", STATE)
+    return p4conf.sub(p4, "models", STATE)
 
 
 def load_state(p4):

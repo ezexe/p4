@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""test_p4_memory.py — acceptance tests for p4-memory: every AppData memory source (the memory/ directory, a link
-an earlier version left, a memory.pre-p4-* directory) is merged into .claude/p4/memory/ and deleted, a differing
+"""test_p4_memory.py — acceptance tests for p4-temportal's memory part: every AppData memory source (the memory/ directory, a link
+an earlier version left, a memory.pre-p4-* directory) is merged into .claude/p4/temportal/memory/ and deleted, a differing
 file kept in .conflicts/ and never overwriting p4; AppData keeps only the pointer MEMORY.md; a write into AppData
 is moved into p4; a busy directory is left to the turn's close; .claude/p4/ is created when absent (not as a git
 repository). Then the gate-2 checks of the design (.docs/p4/fresh-marketplace.md 8.1): (a) the SessionStart output
@@ -82,7 +82,7 @@ def behavior():
     base = tempfile.mkdtemp(prefix="p4-memory-")
     root = os.path.join(base, "proj")
     app = os.path.join(base, "appdata", "projects", "slug", "memory")
-    p4mem = os.path.join(root, ".claude", "p4", "memory")
+    p4mem = os.path.join(root, ".claude", "p4", "temportal", "memory")
     transcript = os.path.join(os.path.dirname(app), "session.jsonl")
     put(transcript, "{}\n")
     # no .claude/p4 yet: the hook creates the directory (not a git repository) and moves the memory in
@@ -91,7 +91,7 @@ def behavior():
     os.makedirs(root0)
     put(os.path.join(app0, "MEMORY.md"), "- [a](a.md) — a\n")
     out = run("migrate", root0, app0, {})
-    p4mem0 = os.path.join(root0, ".claude", "p4", "memory")
+    p4mem0 = os.path.join(root0, ".claude", "p4", "temportal", "memory")
     assert read(os.path.join(p4mem0, "MEMORY.md")) == "- [a](a.md) — a\n", "the memory was not moved without .claude/p4"
     assert not os.path.exists(os.path.join(root0, ".claude", "p4", ".git")), "p4-memory initialized a git repository"
     assert only_pointer(app0) and "moved 1" in out, out
@@ -117,7 +117,7 @@ def behavior():
     assert os.path.normpath(p4mem) in read(os.path.join(app, "MEMORY.md")), "the pointer does not name p4"
     assert os.path.isfile(transcript), "the harness's own files were touched"
     lines = out.splitlines()
-    assert lines[0].startswith("p4-memory: ") and "moved 1" in lines[0] and ".conflicts/" in lines[0], out
+    assert lines[0].startswith("p4-temportal: ") and "moved 1" in lines[0] and ".conflicts/" in lines[0], out
     assert lines[1:] == ["- [a](a.md) — a"], out
     # a second start moves nothing and prints the index alone
     assert run("migrate", root, app, {}) == "- [a](a.md) — a", "an idle start printed more than the index"
@@ -174,16 +174,16 @@ def behavior():
     app3 = os.path.join(base, "appdata3", "projects", "slug", "memory")
     put(os.path.join(app3, "MEMORY.md"), "- [a](a.md) — a\n")
     run("migrate", root3.replace("\\", "/"), app3.replace("\\", "/"), {})
-    assert read(os.path.join(root3, ".claude", "p4", "memory", "MEMORY.md")) == "- [a](a.md) — a\n"
+    assert read(os.path.join(root3, ".claude", "p4", "temportal", "memory", "MEMORY.md")) == "- [a](a.md) — a\n"
     assert only_pointer(app3)
     # the runner exits 0 on an unknown subcommand and on a missing script
     sh = shutil.which("sh")
     if sh:
         env = dict(os.environ, CLAUDE_PLUGIN_ROOT=os.path.dirname(HERE), CLAUDE_PROJECT_DIR=root3,
                    P4_MEMORY_APPDATA=app3)
-        assert subprocess.run([sh, RUNNER, "nope"], input=b"{}", env=env, capture_output=True).returncode == 0
+        assert subprocess.run([sh, RUNNER, "memory", "nope"], input=b"{}", env=env, capture_output=True).returncode == 0
         env["CLAUDE_PLUGIN_ROOT"] = base
-        assert subprocess.run([sh, RUNNER, "migrate"], input=b"{}", env=env, capture_output=True).returncode == 0
+        assert subprocess.run([sh, RUNNER, "memory", "migrate"], input=b"{}", env=env, capture_output=True).returncode == 0
     shutil.rmtree(base, ignore_errors=True)
     print("test_p4_memory.py: behavior green")
 
@@ -211,17 +211,17 @@ def gate2_a():
             for rel, text in in_app.items():
                 put(os.path.join(app, rel), text)
             for rel, text in in_p4.items():
-                put(os.path.join(root, ".claude", "p4", "memory", rel), text)
+                put(os.path.join(root, ".claude", "p4", "temportal", "memory", rel), text)
             out = run_raw("migrate", root, app).splitlines()
             # the same files in a plain memory directory, as the built-in would see them after the move
             ref_dir = os.path.join(base, name, "builtin")
-            shutil.copytree(os.path.join(root, ".claude", "p4", "memory"), ref_dir,
+            shutil.copytree(os.path.join(root, ".claude", "p4", "temportal", "memory"), ref_dir,
                             ignore=shutil.ignore_patterns(".conflicts"))
             ref = builtin_print(ref_dir)
             extra = len(out) - len(ref)
             assert extra in (0, 1), f"{name}: {extra} extra lines\n" + "\n".join(out[:5])
             if extra:
-                assert out[0].startswith("p4-memory: ") and out[1:] == ref, f"{name}: the notice is not one line\n{out[:3]}"
+                assert out[0].startswith("p4-temportal: ") and out[1:] == ref, f"{name}: the notice is not one line\n{out[:3]}"
             else:
                 assert out == ref, f"{name}: output differs from the built-in\n{out[:3]}"
             if name == "quiet":
@@ -251,7 +251,7 @@ def gate2_b():
         root, app = os.path.join(base, "proj"), os.path.join(base, "appdata", "memory")
         os.makedirs(root)
         run("migrate", root, app, {})
-        p4 = os.path.normpath(os.path.join(root, ".claude", "p4", "memory"))
+        p4 = os.path.normpath(os.path.join(root, ".claude", "p4", "temportal", "memory"))
         text = read(os.path.join(app, "MEMORY.md"))
         body = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("<!--") and not ln.startswith("#")]
         sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", " ".join(body)) if s.strip()]

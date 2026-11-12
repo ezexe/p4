@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""p4_memory.py — the p4-memory plugin: Claude Code's built-in per-project memory is stored in the p4 repo,
-`<project>/.claude/p4/memory/`, and nowhere else. A storage move only: nothing here tells the model how to behave.
+"""p4_memory.py — the p4-temportal plugin's memory part: Claude Code's built-in per-project memory is stored in the p4 repo,
+`<project>/.claude/p4/temportal/memory/`, and nowhere else. A storage move only: nothing here tells the model how to behave.
 
 The harness loads and names memories at `~/.claude/projects/<project-slug>/memory/` (AppData). This plugin empties
 that directory into p4 and leaves one file there, a pointer `MEMORY.md` that says where the memory is and to write
@@ -8,7 +8,7 @@ there. The rest of `~/.claude/projects/<project-slug>/` (transcripts, per-sessio
 `.claude/p4/` is created when absent (a plain directory; p4-recall's layout hook makes it a git repository).
 
   migrate (SessionStart)  every AppData memory source (the `memory/` directory, a junction or symlink an earlier
-                          version left, every `memory.pre-p4-<time>` directory) is merged into `.claude/p4/memory/`
+                          version left, every `memory.pre-p4-<time>` directory) is merged into `.claude/p4/temportal/memory/`
                           and deleted: identical in p4 -> dropped; a live file absent in p4 -> moved in; any other ->
                           kept at `.conflicts/<source>/<path>`, never overwriting the p4 file. A link to p4 is removed
                           as a link. Then the pointer is written and the p4 `MEMORY.md` is printed as the built-in
@@ -60,6 +60,13 @@ def configure(payload):
     p4conf.configure(globals(), p4, "memory", {"retries": "RETRIES", "retry_wait_s": "RETRY_WAIT_S"})
 
 
+def layout(payload):
+    """A store an older plugin wrote flat in .claude/p4 is moved into each plugin's directory first."""
+    lines = p4conf.migrate_layout(os.path.join(project_root(payload), ".claude", "p4"))
+    if lines:
+        print("p4-temportal: " + "; ".join(lines) + ".")
+
+
 def project_root(payload):
     return os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
 
@@ -81,7 +88,7 @@ def appdata_memory(payload, root):
 
 
 def p4_memory(root):
-    return os.path.join(root, ".claude", "p4", MEMORY)
+    return p4conf.sub(os.path.join(root, ".claude", "p4"), "memory")
 
 
 def same_dir(a, b):
@@ -200,10 +207,10 @@ def migrate(app, p4, stamp):
     os.makedirs(p4, exist_ok=True)
     if is_link(app):
         if not same_dir(app, p4):                       # a link somewhere else: the owner's arrangement
-            return [f"{app} is a link that does not reach .claude/p4/memory/; left as it is, nothing moved"], False
+            return [f"{app} is a link that does not reach .claude/p4/temportal/memory/; left as it is, nothing moved"], False
         if not retry(remove_link, app):
-            return [f"{app} is a link to .claude/p4/memory/ and is busy, retried at the turn's close"], False
-        lines.append(f"removed the link {app} -> .claude/p4/memory/ (its target untouched)")
+            return [f"{app} is a link to .claude/p4/temportal/memory/ and is busy, retried at the turn's close"], False
+        lines.append(f"removed the link {app} -> .claude/p4/temportal/memory/ (its target untouched)")
     sources = [app] if os.path.isdir(app) else []
     sources += sorted(d for d in glob.glob(glob.escape(app) + ".pre-p4-*") if os.path.isdir(d) and not is_link(d))
     moved, aside, left = [], [], []
@@ -233,9 +240,9 @@ def migrate(app, p4, stamp):
     except OSError as e:
         lines.append(f"could not write the pointer MEMORY.md in {app} ({e})")
     if moved:
-        lines.append(f"moved {len(moved)} memory file(s) from AppData into .claude/p4/memory/")
+        lines.append(f"moved {len(moved)} memory file(s) from AppData into .claude/p4/temportal/memory/")
     if aside:
-        lines.append(f"kept {len(aside)} differing file(s) in .claude/p4/memory/.conflicts/ ("
+        lines.append(f"kept {len(aside)} differing file(s) in .claude/p4/temportal/memory/.conflicts/ ("
                      + ", ".join(aside[:5]) + (", …" if len(aside) > 5 else "") + ")")
     if left:
         lines.append(f"{', '.join(map(os.path.basename, left))} busy, retried at the turn's close")
@@ -262,7 +269,7 @@ def builtin_index(memdir):
 
 
 def notice(parts):
-    return ("p4-memory: " + "; ".join(parts) + ".") if parts else ""
+    return ("p4-temportal: " + "; ".join(parts) + ".") if parts else ""
 
 
 def cmd_migrate(payload):
@@ -319,7 +326,7 @@ def cmd_mirror(payload):
             with open(dst, "a", encoding="utf-8", newline="\n") as f:
                 f.write(("\n" if old and not old.endswith("\n") else "") + "\n".join(add) + "\n")
         write_pointer(app, p4)
-        note = (f"p4-memory: {len(add)} index line(s) written to the AppData MEMORY.md were appended to "
+        note = (f"p4-temportal: {len(add)} index line(s) written to the AppData MEMORY.md were appended to "
                 f"{os.path.normpath(dst)}; the AppData file is the pointer again.")
     else:
         if os.path.isfile(dst) and not filecmp.cmp(fp, dst, shallow=False):
@@ -327,7 +334,7 @@ def cmd_mirror(payload):
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(fp, dst)
         retry(os.remove, fp)
-        note = f"p4-memory: {fp} was moved to {os.path.normpath(dst)}."
+        note = f"p4-temportal: {fp} was moved to {os.path.normpath(dst)}."
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": note}}))
     return 0
 
@@ -352,6 +359,7 @@ def main():
     try:
         configure(payload)
         if sub == "migrate":
+            layout(payload)
             return cmd_migrate(payload)
         if sub == "mirror":
             return cmd_mirror(payload)
@@ -360,7 +368,7 @@ def main():
         print(f"p4_memory.py: unknown subcommand {sub!r}")
         return 0
     except Exception as e:  # noqa: BLE001 — a hook degrades, never raises
-        print(f"p4-memory ({sub}) degraded: {type(e).__name__}: {e}")
+        print(f"p4-temportal memory ({sub}) degraded: {type(e).__name__}: {e}")
         return 0
 
 

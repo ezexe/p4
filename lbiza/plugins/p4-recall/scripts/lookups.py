@@ -57,6 +57,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 import ranker  # noqa: E402
 
 DB = "lookups.db"
@@ -238,15 +239,15 @@ def signature(text, failed):
 # --- the database -------------------------------------------------------------------------------------------
 
 def db_path(p4):
-    return os.path.join(p4, "models", DB)
+    return p4conf.sub(p4, "models", DB)
 
 
 def kept_path(p4):
-    return os.path.join(p4, "store", KEPT)
+    return p4conf.sub(p4, "store", KEPT)
 
 
 def model_path(p4):
-    return os.path.join(p4, "models", MODEL)
+    return p4conf.sub(p4, "models", MODEL)
 
 
 def connect(p4):
@@ -794,7 +795,7 @@ def train(p4, folds=5, now=None):
            "shell": {k: v for k, v in shell.items() if k != "w"}, "time": when}
     import labels as lb
     head = ["time", "web_calls", "savable", "matcher", "model", "promoted", "shell_tested", "shell_failed", "shell"]
-    lb.append_tsv(os.path.join(p4, "models", EVAL), head, [{
+    lb.append_tsv(p4conf.sub(p4, "models", EVAL), head, [{
         "time": when, "web_calls": web["calls"], "savable": web["savable"],
         "matcher": json.dumps(web["matcher"], separators=(",", ":")), "model": json.dumps(web["model"], separators=(",", ":")),
         "promoted": "model" if web["promoted"] else "matcher", "shell_tested": shell.get("tested", 0),

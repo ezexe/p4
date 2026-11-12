@@ -1,6 +1,6 @@
 {
   "name": "p4-phi",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "What linked sessions hand each other, in the app's own words. Every session starts with the store's rules, a line each; a started session is given the tasks and notes of the sessions above it and the last turn of the sessions beside it; every finished turn is kept, done or not, and its report reaches the session that started it in full; a message about something else gets a forked session while this one stays with its task. Kept in <project>/.claude/p4/phi/. Nothing is matched by its words.",
   "author": {
     "name": "ezexe"

@@ -12,6 +12,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 import labels as lb  # noqa: E402
 import repo  # noqa: E402
 import store as st  # noqa: E402
@@ -39,8 +40,8 @@ class Renames(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.proj = os.path.join(os.path.realpath(self.tmp.name), "proj")
         self.p4 = os.path.join(self.proj, ".claude", "p4")
-        os.makedirs(os.path.join(self.p4, "models"))
-        os.makedirs(os.path.join(self.p4, "store"))
+        os.makedirs(p4conf.sub(self.p4, "models"))
+        os.makedirs(p4conf.sub(self.p4, "store"))
         write(os.path.join(self.proj, ".gitignore"), ".claude/\n")
         write(os.path.join(self.proj, "src", "port.py"), BODY)
         write(os.path.join(self.proj, "src", "gone.py"), "def vanish():\n    return 2\n")

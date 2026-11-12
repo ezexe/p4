@@ -20,13 +20,14 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 import p4 as cli  # noqa: E402
 import ranker  # noqa: E402
 import store as st  # noqa: E402
 from test_store import NOW, fixture, make_store, write  # noqa: E402
 
 LINE_RE = re.compile(r"^- (\d{4}-\d\d-\d\d|undated) (rule|correction|missed detail|retracted|fact|memory|"
-                     r"earlier message|your word|saved code): (.+) \(((?:store|memory|src)/[^:]+):(\d+)\)$")
+                     r"earlier message|your word|saved code): (.+) \(((?:recall/store|temportal/memory|temportal/src)/[^:]+):(\d+)\)$")
 SCRIPT = os.path.join(HERE, "p4.py")
 
 
@@ -89,7 +90,7 @@ class Shape(Fixture):
 
     def test_line_text_cut_at_160(self):
         long_rule = [("ruling", "the pangolin relay " + "keeps every lane open " * 20), ("time", "2026-10-01 00:00")]
-        path = os.path.join(self.p4, "store", "rules.md")
+        path = p4conf.sub(self.p4, "store", "rules.md")
         ents = [e.pairs for e in st.load_file(self.p4, "rules.md")]
         write(path, st.render("rules.md", ents + [long_rule]))
         a = q(self.p4, "pangolin relay lane")
@@ -112,7 +113,7 @@ class ShortTurns(Fixture):
     def test_readings_that_differ(self):
         rows = [[("fingerprint", '"go"'), ("time", f"2026-10-0{k} 10:00"), ("state", "FRESH"),
                  ("addressed", "built it" if k != 3 else "pushed it")] for k in range(1, 5)]
-        write(os.path.join(self.p4, "store", "messages", "cccc3333.md"), st.render("messages/cccc3333.md", rows))
+        write(p4conf.sub(self.p4, "store", "messages", "cccc3333.md"), st.render("messages/cccc3333.md", rows))
         line = q(self.p4, "go")["lines"][0]
         self.assertIn("built it (×3), pushed it (×1)", line)
 
@@ -151,14 +152,14 @@ class RankerRoad(Fixture):
         xs, _s, _t = ranker.candidate_features(terms, cands, idf, idx["avgdl"], NOW)
         ys = [1 if "quokka" in d["toks"] else 0 for d in idx["docs"]]
         w = ranker.fit(list(zip(xs, ys)))
-        ranker.save(os.path.join(self.p4, "models", "ranker.json"), w, 0.5, trained=NOW)
+        ranker.save(p4conf.sub(self.p4, "models", "ranker.json"), w, 0.5, trained=NOW)
         a = q(self.p4, "does the quokka harness run the zebrafish plotter")
         self.assertIn("ranker", a["road"])
         self.assertTrue(a["lines"])
         self.assertLessEqual(len(a["lines"]), 5)
 
     def test_old_ranker_json_is_ignored(self):
-        write(os.path.join(self.p4, "models", "ranker.json"), json.dumps({"kind": "phi_serve", "port": 1}))
+        write(p4conf.sub(self.p4, "models", "ranker.json"), json.dumps({"kind": "phi_serve", "port": 1}))
         self.assertNotIn("ranker", q(self.p4, "does the quokka harness run the zebrafish plotter")["road"])
 
 
@@ -268,7 +269,7 @@ class RepoIndex(unittest.TestCase):
         git(self.proj, "add", "-A")
         git(self.proj, "commit", "-q", "-m", "first: the axolotl gain and the dugong probe")
         self.p4 = os.path.join(self.proj, ".claude", "p4")
-        os.makedirs(os.path.join(self.p4, "store"))
+        os.makedirs(p4conf.sub(self.p4, "store"))
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -335,7 +336,7 @@ class RepoIndex(unittest.TestCase):
         if not self.repo.is_repo(here):
             self.skipTest("not in a git checkout")
         p4 = os.path.join(self.tmp.name, "self", ".claude", "p4")
-        os.makedirs(os.path.join(p4, "store"))
+        os.makedirs(p4conf.sub(p4, "store"))
         s = self.repo.build(p4, here)
         self.assertGreater(s["files"], 10)
         self.assertIn("lbiza/plugins/p4-recall/scripts/store.py — build_index", "\n".join(d["show"] for d in
@@ -414,7 +415,7 @@ class OrdinarySilentOnFixture(Fixture):
     def test_hi_and_keep_going_without_history(self):
         p4 = make_store(tempfile.mkdtemp(dir=self.tmp.name))
         for rel in ("aaaa1111.md", "bbbb2222.md"):
-            os.remove(os.path.join(p4, "store", "messages", rel))
+            os.remove(p4conf.sub(p4, "store", "messages", rel))
         for text in ("hi", "keep going"):
             self.assertEqual(cli.query(p4, text, None, NOW)["lines"], [], text)
 

@@ -29,6 +29,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 import ranker  # noqa: E402
 
 VERSION = 1
@@ -39,7 +40,7 @@ MAX_FILES = 2000
 
 
 def path(p4, session):
-    return os.path.join(p4, "models", "view", re.sub(r"[^\w.-]", "_", (session or "")[:8]) + ".json")
+    return p4conf.sub(p4, "models", "view", re.sub(r"[^\w.-]", "_", (session or "")[:8]) + ".json")
 
 
 def empty():
@@ -145,7 +146,7 @@ def dropped(v):
 def describe(p4, session="", limit=12):
     """Lines saying what a session has in view, for another session to read: its newest files (edited ones
     marked), its commits and its compactions. With no session, one line for each session the store has a record of."""
-    d = os.path.join(p4, "models", "view")
+    d = p4conf.sub(p4, "models", "view")
     try:
         names = sorted(n[:-5] for n in os.listdir(d) if n.endswith(".json"))
     except OSError:
@@ -174,7 +175,7 @@ def describe(p4, session="", limit=12):
 
 
 def stats_line(p4):
-    d = os.path.join(p4, "models", "view")
+    d = p4conf.sub(p4, "models", "view")
     try:
         names = [n for n in os.listdir(d) if n.endswith(".json")]
     except OSError:

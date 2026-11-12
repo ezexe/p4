@@ -29,7 +29,8 @@ if [ "$name" = lookup-check ]; then
   case "$payload" in
     *'"tool_name":"Bash"'*|*'"tool_name": "Bash"'*|*'"tool_name":"PowerShell"'*|*'"tool_name": "PowerShell"'*)
       # a command is checked only by the failure model, which a store has only once a training round passed one
-      m="${CLAUDE_PROJECT_DIR:-.}/.claude/p4/models/lookups-model.json"
+      m="${CLAUDE_PROJECT_DIR:-.}/.claude/p4/recall/models/lookups-model.json"
+      [ -r "$m" ] || m="${CLAUDE_PROJECT_DIR:-.}/.claude/p4/models/lookups-model.json"   # a store not moved yet
       [ -r "$m" ] || exit 0
       read -r line < "$m" || true
       case "$line" in *'"shell":{"w":{}'*) exit 0 ;; esac ;;
