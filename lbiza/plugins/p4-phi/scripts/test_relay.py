@@ -36,6 +36,11 @@ class Paths(unittest.TestCase):
         got = relay.paths_in("deprecates: `lib/x.py` and docs/old.md, see https://example.com/a", "E:/w")
         self.assertEqual(got, [relay.norm("E:/w/lib/x.py"), relay.norm("E:/w/docs/old.md")])
 
+    def test_a_path_on_a_missing_drive_has_no_repository(self):
+        # H1: dirname("s:/") is "s:/", and the walk up once never ended, hanging every prompt hook
+        for p in ("s:/replaces", "q:/no/such/dir/file.txt", "/no/such/place"):
+            self.assertEqual(relay.repo_of(p), "", p)
+
 
 class ThreeSessions(unittest.TestCase):
     def setUp(self):

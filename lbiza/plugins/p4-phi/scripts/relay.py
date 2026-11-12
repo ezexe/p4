@@ -224,7 +224,10 @@ def _git(cwd, *args):
 def repo_of(path):
     d = path if os.path.isdir(path) else os.path.dirname(path)
     while d and not os.path.isdir(d):
-        d = os.path.dirname(d)
+        up = os.path.dirname(d)
+        if up == d:                                     # a drive or root that does not exist: no repository
+            return ""
+        d = up
     r = _git(d, "rev-parse", "--show-toplevel") if d else None
     return norm(r.stdout.strip()) if r and r.returncode == 0 and r.stdout.strip() else ""
 
