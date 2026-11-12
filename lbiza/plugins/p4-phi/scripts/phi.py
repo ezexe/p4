@@ -44,6 +44,10 @@ Commands for a session: `note "<claim>" --source "<where checked>"`, `done "<wha
 `task "<the new task>"`, `shard <paths or globs>`, `show [sessionId]`, `tree`, `background`, `detach <sessionId>`,
 `reparent <sessionId> <under sessionId>`.
 
+The issue loop (issues.py, #28): a child whose brief or plan names files in a GitHub repository gets an issue for its
+purpose; its commits say `Closes #N`; the test a plan step names, or `proof "<command>"`, is re-run at Stop and its
+result commented on the issue; it is pushed when green and archived only once the issue is closed.
+
 The relay (relay.py), modelled on phi_rank/tree.py's node tree: a session's shard is what it alone may change; each
 turn keeps its delta, the heads, files and `deprecates:`/`replaces:` notes; a parent's anchor.json merges its
 children's latest deltas under a version; every message a session gets, side-session events too, carries what a
@@ -74,6 +78,7 @@ import p4conf  # noqa: E402  (the store's layout: each plugin's files in .claude
 import plans  # noqa: E402  (each session's plan with step addresses; the parent's anchor is the plan tree)
 import relay  # noqa: E402  (shards, deltas, anchors: linked sessions kept in step while they work)
 import starts  # noqa: E402  (start requests: children a session wants but cannot start, carried by the store)
+import issues  # noqa: E402  (#28: a writing child's loop of issue, Closes #N, proving test, push, archive)
 
 BACKGROUND = True
 REPORTS = True
@@ -421,7 +426,8 @@ def save_session(home, s):
     for k in ("othersGiven", "plansSeen"):
         if isinstance(disk.get(k), dict):
             s[k] = {**disk[k], **(s.get(k) or {})}
-    for k in ("rootStep", "shard", "disposable", "doneRetired", "archived", "appRoot", "nudged", "landingGiven"):
+    for k in ("rootStep", "shard", "disposable", "doneRetired", "archived", "appRoot", "nudged", "landingGiven",
+              "issue", "issueLooked"):
         if k in disk and k not in s:
             s[k] = disk[k]
     if int(disk.get("anchorSeen") or 0) > int(s.get("anchorSeen") or 0):
@@ -1242,6 +1248,17 @@ def h_plan(payload):
         RAN["split"] = "advised" if advice else ""
         feat = feature_steps_text(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user")
         text = "\n\n".join(p for p in (feat, advice, text) if p)
+    if spawned_from(s) and any(k in inp for k in ("advance", "start", "done", "items")):
+        s = load_session(me.home, me.id) or s      # #28: the issue at the first plan, then the commits' check
+        cwd = payload.get("cwd") or s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or ""
+        line = issues.ensure(me.home, s, issues.plan_lines(me.home, me.id), cwd, "plan", me.rec) \
+            if isinstance(inp.get("items"), list) else ""
+        if not line and isinstance(inp.get("items"), list):
+            issues.post_plan(me.home, s)
+        flag = issues.unclosed_text(me.home, s, cwd)
+        save_session(me.home, s)
+        RAN["issue"] = (s.get("issue") or {}).get("number", "")
+        text = "\n\n".join(p for p in (line, flag, text) if p)
     if not spawned_from(s) and any(k in inp for k in ("advance", "start", "done", "items")):
         wt = relay.worktrees_text(me.home, me.id, relay.repo_of(s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR")
                                                                 or ""))
@@ -1448,6 +1465,10 @@ def h_self_archive(payload):
     h_stop({**payload, "hook_event_name": "Stop", "last_assistant_message": texts[-1] if texts else "",
             "_atArchive": True})
     RAN["self_archive"] = True
+    held = RAN.get("issue_open")
+    if held:                                       # #28: an unproven or open issue keeps the child from archiving
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                       "permissionDecisionReason": held}}
     return None
 
 
@@ -1603,6 +1624,11 @@ def h_user_prompt_submit(payload):
     if req and not s.get("task"):
         s["task"] = cut(req, TASK_CHARS)
         s["taskAt"] = now()
+    issue_line = ""
+    if spawned_from(s) and not load_turns(me.home, s["sessionId"]) and not s.get("issue"):
+        issue_line = issues.ensure(me.home, s, req or str(payload.get("prompt") or ""),
+                                   s.get("cwd") or payload.get("cwd") or "", "brief", me.rec)   # #28
+        RAN["issue"] = (s.get("issue") or {}).get("number", "")
     parts = [live_rules(s, me.store, os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or ""),
              pin_of(me.home, s), given(s, me, me.home)]
     if REPORTS:
@@ -1628,6 +1654,8 @@ def h_user_prompt_submit(payload):
     if asked:                                      # ezexe began this turn: it carries the sessions' start requests
         parts.insert(0, asked)
         RAN["start_requests"] = asked.count("\n- ")
+    if issue_line:
+        parts.insert(0, issue_line)
     if detached_now:
         parts.insert(0, "phi (p4-phi): this session's brief marks it a new top session, so phi detached it into the "
                         "root at this first message. Now call `mcp__ccd_session_mgmt__detach_session` with `\"self\"` "
@@ -1705,11 +1733,21 @@ def h_stop(payload):
         s["unsentRelay"] = [{"child": c, "steps": a, "time": row["time"]} for c, a in unsent]
     save_session(me.home, s)
     steps = plans.load(me.home, s["sessionId"]).get("steps") or []
-    if s.get("disposable") and above and (row.get("done") or (steps and all(x.get("status") == "completed"
-                                                                              for x in steps))):
-        if relay.retire_done(me.home, above, s["sessionId"], s, row["time"]):
+    finished = bool(row.get("done") or (steps and all(x.get("status") == "completed" for x in steps)))
+    proved, held, note = True, "", ""
+    if above and finished and isinstance(s.get("issue"), dict):
+        cur = load_session(me.home, s["sessionId"]) or s     # #28: the test re-run on the final head, the issue closed
+        proved, held, note = issues.gate(me.home, cur, payload.get("cwd") or cur.get("cwd") or "")
+        save_session(me.home, cur)
+        s = cur
+        RAN["issue_gate"] = "ok" if proved else (held[:60] or "held")
+        if not proved:
+            RAN["issue_open"] = held or (f"phi (p4-phi): {cur['issue']['repo']}#{cur['issue']['number']} is not "
+                                         f"yet proven and closed, so this session is not archived.")
+    if s.get("disposable") and above and finished and proved:
+        if relay.retire_done(me.home, above, s["sessionId"], s, row["time"], extra=note):
             RAN["retired"] = "done"
-    if above and (row.get("done") or (steps and all(x.get("status") == "completed" for x in steps))):
+    if above and finished and not isinstance(s.get("issue"), dict):
         cur = load_session(me.home, s["sessionId"]) or s
         told = list(cur.get("closesTold") or [])
         new = [c for c in relay.closing_commits(me.home, s["sessionId"], cur) if c[1] not in told]
@@ -1733,6 +1771,7 @@ def h_stop(payload):
         return None
     why = plans.keep_going(me.home, now_s, row["report"], turn.get("calls") or [], row["id"],
                            bool(payload.get("stop_hook_active")))
+    why = "\n\n".join(p for p in (held, why) if p)   # #28: the proving test's verdict, then the open steps
     if why:                                        # #20: open steps the chain can settle send the turn back
         RAN["kept_going"] = True
         return {"decision": "block", "reason": why}
@@ -1824,7 +1863,8 @@ def h_branch_guard(payload):
     elif name in SHELL_TOOLS and BRANCH_MOVE.search(QUOTED.sub("''", str(inp.get("command") or ""))):
         what = "moving the checkout to another branch, which in a shared checkout moves the parent's too"
     elif name in SHELL_TOOLS and LANDING.search(QUOTED.sub("''", str(inp.get("command") or ""))) \
-            and not LANDING_GIVEN.search(str(s.get("task") or "")) and not s.get("landingGiven"):
+            and not LANDING_GIVEN.search(str(s.get("task") or "")) and not s.get("landingGiven") \
+            and not isinstance(s.get("issue"), dict):
         verb = LANDING.search(QUOTED.sub("''", str(inp.get("command") or ""))).group(1)
         RAN["branch_guard"] = f"git {verb}"
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
@@ -2203,7 +2243,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="phi: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
-                 "request"):
+                 "request", "proof"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in (default: this session's)")
         p.add_argument("--session", default="", help="the sessionId (default: this session's)")
@@ -2213,6 +2253,8 @@ def main(argv=None):
             p.add_argument("--kind", default="", help="ruled-out, decision, machine, code")
         if name in ("done", "task"):
             p.add_argument("text")
+        if name == "proof":
+            p.add_argument("command", help="the test that proves this session's issue fixed, run from here")
         if name == "show":
             p.add_argument("which", nargs="?", default="")
         if name == "detach":
@@ -2283,6 +2325,15 @@ def main(argv=None):
             if a.context == "fork":
                 print("phi: a start request is always fresh: a fork would carry the starter's conversation, not "
                       "this session's, so the brief must say all the child needs.")
+            return 0
+        if a.cmd == "proof":
+            if not isinstance(s.get("issue"), dict):
+                raise ValueError("this session has no issue to prove (#28: a writing child's issue is taken at its "
+                                 "first message or plan)")
+            s["issue"]["test"] = {"cmd": a.command.strip(), "cwd": os.getcwd(), "step": "phi.py proof"}
+            save_session(me.home, s)
+            print(f"kept: phi re-runs `{a.command.strip()}` here at Stop on the final head, before "
+                  f"{s['issue']['repo']}#{s['issue']['number']} lets this session be archived")
             return 0
         if a.cmd == "disposable":
             s["disposable"] = True

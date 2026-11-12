@@ -1201,7 +1201,7 @@ def findings_of(last):
     return out + "Its final turn left no report text with findings: read its transcript before relying on it."
 
 
-def retire_done(home, parent, sid, s, now):
+def retire_done(home, parent, sid, s, now, extra=""):
     """A disposable child whose work is over: its outcome kept as one replaces: note on its parent, it left out of
     the relay, the anchors and the down-lines, and the parent told at its next message to archive it. Returns True
     when it was retired now."""
@@ -1214,7 +1214,7 @@ def retire_done(home, parent, sid, s, now):
     turns = _rows(os.path.join(_dir(home, sid), "turns.jsonl"))
     last = turns[-1] if turns else {}
     claim = (f"replaces: \"{_title(disk)}\" ({sid}) as a live node: it finished and was started to be archived "
-             f"when done. Changed: " + (", ".join(show(f, base) for f in files[:10]) or "no files")
+             f"when done. " + (extra.strip() + " " if extra else "") + "Changed: " + (", ".join(show(f, base) for f in files[:10]) or "no files")
              + (" ..." if len(files) > 10 else "") + ". Heads: " + (", ".join(heads_) or "none") + ". Commits: "
              + ("; ".join(commits) or "none") + ". Still open: " + ("; ".join(still) or "nothing") + ". "
              + findings_of(last))
