@@ -63,6 +63,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+import node as nd  # noqa: E402  (a session's place in the tree, shared with p4-recall)
 import p4conf  # noqa: E402  (the store's layout: each plugin's files in .claude/p4/<plugin>/)
 
 BACKGROUND = True
@@ -617,15 +618,18 @@ def background_text(home, s, own=False):
     if tasks:
         body += ["Tasks of the sessions above this one, nearest first (this session's task is part of the first):"]
         body += tasks
+    own_task = clean(s.get("task"))
     notes = []
     for n in chain:
         for r in load_notes(home, n["sessionId"]):
             kind = f"{r['kind']}; " if r.get("kind") else ""
             notes.append(f"- {cut(clean(r.get('claim')), 300)} ({kind}source: {cut(clean(r.get('source')), 120)})")
+    notes = nd.by_overlap(notes, own_task)      # with this session's task known, the notes nearest it come first
     if notes:
         body += ["Notes of the sessions above (already checked; do not work these out again):"] + notes[:12]
     others = [r for r in latest_reports(load_reports(home, above, TAIL_BYTES), skip=sid)[:OTHERS * 3]
               if spawned_from(load_session(home, r["sessionId"])) == above][:OTHERS]
+    others = nd.by_overlap(others, own_task, key=lambda r: f"{r.get('title', '')} {r.get('turn', {}).get('prompt', '')}")
     if others:
         who = f"the other sessions \"{title_of(chain[0])}\" started" if chain else \
             "the top sessions in this project before this one"

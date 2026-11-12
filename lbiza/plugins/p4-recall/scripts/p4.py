@@ -68,6 +68,8 @@ FILE_DENSE = 0.75             # ...and making up most of the entry
 # for its correction or retraction (standing_first).
 VARIANT_WEIGHT = 0.5          # another form of a message's word (commits / committed / commit) counts half
 EXPAND_WEIGHT = 0.5
+NODE_WEIGHT = 0.3            # a word of the session's own task or of a task above it in the session tree (node.py)
+NODE_TERMS = 12              # the rarest of those words that join the query; a long brief must not drown the message
 STUBS = ()
 
 QUERY_SETTINGS = {"max_lines": "MAX_LINES", "per_file": "PER_FILE", "text_chars": "TEXT_CHARS",
@@ -256,13 +258,29 @@ def near_candidates(p4, model, docs, cand, text, session, gone):
     return near.extend(docs, near.id_index(docs), cand, got, lambda i: docs[i]["id"] not in gone)
 
 
+def node_weights(idx, node, terms, weight=None, top=None):
+    """{word: weight} for the node's words (.docs/p4/recall-node.md): the content words of the session's own task and
+    of the tasks above it that the message lacks, the `top` rarest by idf, each at `weight`. The gates that keep
+    recall silent never read these: a node only reorders and widens what the message's own words let through."""
+    if not node:
+        return {}
+    weight = NODE_WEIGHT if weight is None else weight
+    top = NODE_TERMS if top is None else top
+    have = set(terms)
+    words = [t for t in dict.fromkeys(ranker.tokens(node.text())) if t not in have]
+    words = [t for t in content_terms(idx, words) if t in idx["post"]]
+    n = idx["n"]
+    words.sort(key=lambda t: (-ranker.idf_of(len(st.postings(idx, t)) // 2, n), t))
+    return {t: weight for t in words[:top]}
+
+
 def message_words(terms):
     """The message's words a line must account for: not common, not bare numbers, whether or not the store has them."""
     return [t for t in terms if t not in st.COMMON and not t.isdigit()]
 
 
 def fallback_order(idx, terms, weights, points, gone, min_shared=None, cover=None, icover=None, dense=None,
-                   with_stats=False):
+                   with_stats=False, node_ids=None):
     """The no-ranker road (4.5: a fresh repo): BM25 over the message's words, their other forms at half weight and
     the dictionary's expansions; a line prints when it shares at least `min_shared` of the message's words (a word
     or another form of it), and those cover `cover` of the message's words and `icover` of their idf, densely
@@ -284,6 +302,12 @@ def fallback_order(idx, terms, weights, points, gone, min_shared=None, cover=Non
     qterms = list(dict.fromkeys(list(terms) + list(w)))
     scores = bm25_scores(idx, qterms, w)
     cand = [i for i in sorted(scores, key=lambda i: (-scores[i], i)) if docs[i]["id"] not in gone][:CANDIDATES]
+    if node_ids:
+        at = idx.get("_at") or {}
+        if not at:
+            at = idx["_at"] = {d["id"]: i for i, d in enumerate(docs)}
+        have = set(cand)
+        cand += [at[e] for e in sorted(node_ids) if e in at and at[e] not in have and e not in gone]
     idf = {v: ranker.idf_of(len(st.postings(idx, v) or []) // 2, n) for t in q for v in forms[t]
            if st.postings(idx, v)}
     unseen = ranker.idf_of(0, n)
@@ -302,6 +326,9 @@ def fallback_order(idx, terms, weights, points, gone, min_shared=None, cover=Non
             continue
         if d["id"] in points:
             out.append((i, len(q) + 1))          # an entry the dictionary points at needs no more
+            continue
+        if node_ids and d["id"] in node_ids and got:
+            out.append((i, len(got)))            # an entry the node's tasks used: one of the message's words is enough
             continue
         if len(got) < min_shared or c < cover or ic < icover or dn < dense:
             if not (d["kind"] == "file" and len(got) >= FILE_SHARED and c >= FILE_COVER and dn >= FILE_DENSE):
@@ -335,8 +362,28 @@ def standing_first(idx, order):
     return out
 
 
-def query(p4, text, session=None, now=None, idx=None, model=None):
-    """{"lines": [...], "ids": [...], "jargon_dropped": n, "road": "..."}: the recall for one message."""
+def live_node(p4, session):
+    """(node, entries) for the running session when recall.node.on: its place in phi's session tree and the
+    entries labelled positive for the tasks of the sessions above it. (None, set()) when off or unknown."""
+    import p4conf
+    if not p4conf.section(p4, "recall", write=False).get("node", {}).get("on"):
+        return None, set()
+    import node as nd
+    n = nd.live(p4, session or "")
+    if not n or not n.up:
+        return n, set()
+    tree = nd.phi_tree(p4)
+    clis = {c[:8] for sid, _ in n.up for c in tree.sessions.get(sid, {}).get("cli", [])}
+    import labels as lb
+    tasks = {t["id"] for t in lb.read_tsv(lb.mpath(p4, lb.TASKS)) if (t.get("session") or "")[:8] in clis}
+    return n, {r["entry"] for r in lb.read_tsv(lb.mpath(p4, lb.TRAIN)) if r.get("label") == "1" and r["task"] in tasks}
+
+
+def query(p4, text, session=None, now=None, idx=None, model=None, node=None, node_ids=None, hide=None):
+    """{"lines": [...], "ids": [...], "jargon_dropped": n, "road": "..."}: the recall for one message. `node` is the
+    session's place in the session tree (node.py): its tasks' words join the query at NODE_WEIGHT. `node_ids` are
+    entries the tasks above it were labelled with: candidates, and through the gates on one shared word. `hide` are
+    entries never printed: a replay of an older message hides what was written after it."""
     configure(p4)
     if idx is None:
         idx, _ = st.ensure_index(p4)
@@ -390,6 +437,11 @@ def query(p4, text, session=None, now=None, idx=None, model=None):
         for t in v.get("means_toks", []):
             if t not in weights and t not in terms:
                 weights[t] = EXPAND_WEIGHT
+    nw = node_weights(idx, node, terms) if node else {}
+    for t, w_ in nw.items():
+        weights.setdefault(t, w_)
+    if nw:
+        road.append("node")
     qterms = terms + [t for t in weights if t not in terms]
     if not qterms:
         return {"lines": out, "ids": ids, "jargon_dropped": dropped, "road": "+".join(road) or "no terms"}
@@ -397,7 +449,7 @@ def query(p4, text, session=None, now=None, idx=None, model=None):
     if not scores:
         return {"lines": out, "ids": ids, "jargon_dropped": dropped, "road": "+".join(road) or "no match"}
     docs = idx["docs"]
-    gone = superseded_ids(idx, now)
+    gone = superseded_ids(idx, now) | set(hide or ())
     cand = [i for i in sorted(scores, key=lambda i: (-scores[i], i)) if docs[i]["id"] not in gone][:CANDIDATES]
     idf = idf_map(idx, qterms)
     room = MAX_LINES - len(out)
@@ -415,6 +467,15 @@ def query(p4, text, session=None, now=None, idx=None, model=None):
             if "dict-hit" in model.get("features", []) else None
         if near_feats is not None:
             extra = {**(extra or {}), "near": near_feats}
+        if node_ids and "node" in model.get("features", []):
+            at = {docs[i]["id"]: k for k, i in enumerate(cand)}
+            more = [i for i, d in enumerate(docs) if d["id"] in node_ids and d["id"] not in at and d["id"] not in gone]
+            for i in more:
+                cand.append(i)
+                cds.append({"file": docs[i]["file"], "kind": docs[i]["kind"], "state": docs[i]["state"],
+                            "time": docs[i]["time"], "toks": docs[i]["toks"].split(), "head": docs[i]["head"].split(),
+                            "dl": docs[i]["dl"], "fkind": docs[i].get("fkind")})
+            extra = {**(extra or {}), "node": {k for k, i in enumerate(cand) if docs[i]["id"] in node_ids}}
         xs, _bm, _sh = ranker.candidate_features(qterms, cds, idf, idx["avgdl"], now,
                                                  scores=[scores.get(i, 0.0) for i in cand], weights=weights, extra=extra)
         sc = [ranker.score(model["w"], x) for x in xs]
@@ -423,7 +484,7 @@ def query(p4, text, session=None, now=None, idx=None, model=None):
         order = [cand[k] for k in picked]
     else:
         road.append("bm25")
-        order = fallback_order(idx, terms, weights, points, gone)
+        order = fallback_order(idx, terms, weights, points, gone, node_ids=node_ids)
     per = {}
     for i in order:
         if room <= 0:

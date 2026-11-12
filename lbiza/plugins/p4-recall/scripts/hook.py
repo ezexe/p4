@@ -306,7 +306,8 @@ def h_recall(payload):
     if rows.HARNESS_RE.match(prompt):
         rows.row_open(p4, session, prompt, now())     # a notification: its row, complete on arrival, and no recall
         return None
-    r = cli.query(p4, prompt, session[:8] if session else None, now())
+    node, node_ids = cli.live_node(p4, session)
+    r = cli.query(p4, prompt, session[:8] if session else None, now(), node=node, node_ids=node_ids)
     rid = rows.row_open(p4, session, prompt, now())
     ids = [i for i in r["ids"] if not i.startswith(("history:", "repeat"))]
     shown = injected(p4, r["lines"])

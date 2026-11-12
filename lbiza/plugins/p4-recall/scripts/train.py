@@ -113,6 +113,15 @@ def task_examples(idx, task, positives, limit=None, files=None, docs_by=None):
         import near
         got = near.entries(mem, task["text"], task.get("time") or "", task.get("session") or "")
         cand, feats = near.extend(docs, docs_by["id_at"], cand, got, lambda i: eligible(docs[i], task))
+    node_hit = None
+    node_of = (docs_by or {}).get("node") if files is None else None
+    if node_of:
+        # node.py: the entries the tasks above this task's session used join the candidates, with a feature saying so
+        got = node_of(task)
+        if got:
+            at, have = docs_by["id_at"], set(cand)
+            cand = cand + [at[e] for e in sorted(got) if e in at and at[e] not in have and eligible(docs[at[e]], task)]
+            node_hit = {k for k, i in enumerate(cand) if docs[i]["id"] in got}
     if not cand:
         return [], [], [], []
     heads = (docs_by or {}).get("head140", {})
@@ -120,8 +129,10 @@ def task_examples(idx, task, positives, limit=None, files=None, docs_by=None):
             "toks": docs[i]["toks"].split(), "head": heads.get(docs[i]["id"]) or docs[i]["head"].split(),
             "dl": docs[i]["dl"], "fkind": docs[i].get("fkind")} for i in cand]
     sc = [scores.get(i, 0.0) for i in cand]
-    xs, _, _ = ranker.candidate_features(terms, cds, idf, avgdl, task["time"] or "", scores=sc,
-                                         extra={"near": feats} if feats is not None else None)
+    ext = {"near": feats} if feats is not None else {}
+    if node_hit is not None:
+        ext["node"] = node_hit
+    xs, _, _ = ranker.candidate_features(terms, cds, idf, avgdl, task["time"] or "", scores=sc, extra=ext or None)
     ys = [1 if docs[i]["id"] in positives else 0 for i in cand]
     return xs, ys, cand, sc
 
@@ -246,7 +257,7 @@ def pool_like(r):
     return r["source"] == "pool" or (r["source"] == "store+edited" and "from:pool" in (r.get("note") or ""))
 
 
-def build_sets(p4, idx=None, sources=None, max_tasks=None, rows=None, now=None, keep_near=False):
+def build_sets(p4, idx=None, sources=None, max_tasks=None, rows=None, now=None, keep_near=False, node=False):
     """[{task, xs, ys, w, files, bm25, n_pos, source}] for every task with at least one positive that is indexed,
     then the silence tasks (source `silent`, no positive) unless `sources` leaves them out.
 
@@ -275,6 +286,9 @@ def build_sets(p4, idx=None, sources=None, max_tasks=None, rows=None, now=None, 
         # when a writing round built it from the store's whole training set (not an eval, one source, or stand-ins)
         extra["near"] = near.build(p4, idx, labels=rows, write=keep_near and given is None and not sources)
         extra["id_at"] = near.id_index(idx["docs"])
+    if node:
+        extra["node"] = node_lookup(p4, tasks, rows)
+        extra.setdefault("id_at", {d["id"]: i for i, d in enumerate(idx["docs"])})
     out = []
     order = sorted(by_task, key=lambda t: (tasks.get(t, {}).get("time", ""), t), reverse=True)
     keep_all = {t for t in order if any(r["source"] in ("pool", "store+edited") for r in by_task[t])}
@@ -319,6 +333,36 @@ def build_sets(p4, idx=None, sources=None, max_tasks=None, rows=None, now=None, 
         out.extend(silent_sets(idx, silent_prompts(p4), now or datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
                                mem=extra.get("near"), id_at=extra.get("id_at")))
     return out
+
+
+def node_lookup(p4, tasks, rows):
+    """task -> the entries labelled positive for the tasks of the sessions above its session, dated no later than
+    it (node.py: the app's records and phi's files make the tree; tasks.tsv names each task's session)."""
+    import node as nd
+    tree = nd.record_tree(None)
+    for sid, s_ in nd.phi_tree(p4).sessions.items():
+        tree.add(sid, s_["parent"], s_["cli"], s_["created"], s_["tasks"], s_["notes"])
+    tree.finish()
+    by_session = {}
+    for r in rows:
+        if r.get("label"):
+            t = tasks.get(r["task"]) or {}
+            sid = tree.session_of(t.get("session") or "")
+            if sid:
+                by_session.setdefault(sid, []).append(((t.get("time") or "")[:16], r["entry"]))
+
+    def lookup(task):
+        when = (task.get("time") or "")[:16]
+        sid = tree.session_of(task.get("session") or "")
+        if not sid:
+            return set()
+        out, seen, p = set(), {sid}, tree.sessions[sid]["parent"]
+        while p and p not in seen and len(seen) <= nd.CHAIN_MAX:
+            seen.add(p)
+            out.update(e for w, e in by_session.get(p, []) if not w or not when or w <= when)
+            p = tree.sessions.get(p, {}).get("parent", "")
+        return out
+    return lookup
 
 
 def fit_sets(sets, seed=0):
@@ -499,6 +543,12 @@ def owed(p4, now_s=None):
     return True, f"{n - before} new labels, last round {int(age)} s old"
 
 
+def node_on(p4):
+    """recall.node.on of p4.json: the session tree's entries in training (off until measured above today)."""
+    import p4conf
+    return bool(p4conf.section(p4, "recall", write=False).get("node", {}).get("on"))
+
+
 def configure(p4):
     """recall.train of the store's p4.json over the training constants (read, never written, here)."""
     import p4conf
@@ -522,7 +572,7 @@ def run_round(p4, write=True, now=None, idx=None, sources=None, quiet=False, dic
     if cmp and cmp.get("ok") is False and write:
         hold_batches(p4, cmp["batches"], f"edited {cmp['edited']:.3f} below raw {cmp['raw']:.3f} on held-out raw "
                                          f"labels ({now})")
-    sets = build_sets(p4, idx, sources, now=now, keep_near=write)
+    sets = build_sets(p4, idx, sources, now=now, keep_near=write, node=node_on(p4))
     ev = evaluate(sets)
     per_source = {}
     for r in lb.training_labels(p4, idx):
@@ -599,7 +649,8 @@ def run_round(p4, write=True, now=None, idx=None, sources=None, quiet=False, dic
                         per_file=2, floor={"r-precision": round(ev["r-precision"], 4),
                                            "precision": round(ev["precision"], 4),
                                            "short": round(short["rate"], 4)},
-                        features=["base"] + (["near"] if __import__("near").ON else []), tasks=len(live))
+                        features=["base"] + (["near"] if __import__("near").ON else []) + (["node"] if node_on(p4) else []),
+                        tasks=len(live))
     row["seconds"] = f"{time.time() - t0:.1f}"
     if write:
         path = p4conf.sub(p4, "models", "eval.tsv")
