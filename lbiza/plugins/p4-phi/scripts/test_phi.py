@@ -79,6 +79,7 @@ class Tree:
         env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE_", "P4_PHI"))}
         env.update({"CLAUDE_PLUGIN_ROOT": ROOT, "CLAUDE_PROJECT_DIR": proj or self.proj,
                     "P4_PHI_APP_SESSIONS": os.path.join(self.tmp, "app"), "P4_PHI_WAIT": "0",
+                    "P4_PHI_STORES": os.path.join(self.tmp, "p4-stores.json"),
                     "P4_PHI_NEW_TASK": "0", **more})
         if host:
             env["CLAUDE_CODE_HOST_SESSION_ID"] = host

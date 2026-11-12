@@ -174,9 +174,8 @@ def set_shard(home, sid, paths, base):
         raise ValueError("name the paths or globs this session alone may change")
     s["shard"] = shard
     _write_json(path, s)
-    if _parent(s):                                # the siblings see the new shard at their next message
-        import time
-        make_anchor(home, _parent(s), time.strftime("%Y-%m-%d %H:%M"))
+    import time                                   # the siblings see the new shard at their next message
+    make_anchor(home, _parent(s), time.strftime("%Y-%m-%d %H:%M"))
     lines = []
     for o, os_ in _siblings(home, s).items():
         hits = sorted({f"{a} and {b}" for a in shard for b in shard_of(os_) if overlap(a, b)})
@@ -257,15 +256,18 @@ def delta(home, s, files, cwd, since=""):
 # --- anchors ---------------------------------------------------------------------------------------------------------
 
 def anchor_path(home, parent):
+    """<parent>/anchor.json; for the top sessions, which nobody started, phi/anchor.json: the root of the tree."""
+    if not parent:
+        return os.path.join(home, "phi", "anchor.json")
     return os.path.join(_dir(home, parent), "anchor.json")
 
 
 def make_anchor(home, parent, now):
+    """Make <parent>/anchor.json again from the latest delta of each child and the parent's own marked notes, or
+    with no parent the root's from the top sessions' marks and plans; its version goes up only when that content
+    changed. Returns the anchor."""
     import plans                                  # the plan tree: each node's steps, statuses and current step
-    """Make <parent>/anchor.json again from the latest delta of each child and the parent's own marked notes; its
-    version goes up only when that content changed. Returns the anchor."""
-    if not parent:
-        return {}
+    root = not parent                             # the top sessions: only their marks and plans, never heads or files
     every = _sessions(home)
     nodes = {}
     for sid, s in every.items():
@@ -281,10 +283,11 @@ def make_anchor(home, parent, now):
         if last or marks or shard_of(s) or plan:
             d = (last or {}).get("delta") or {}
             nodes[sid] = {"title": _title(s), "time": str((last or {}).get("time") or ""),
-                          "heads": d.get("heads") or [], "files": d.get("files") or [], "marks": marks,
+                          "heads": [] if root else d.get("heads") or [], "files": [] if root else d.get("files") or [],
+                          "marks": marks,
                           "shard": shard_of(s), "plan": plan, "root": str(s.get("rootStep") or "")}
-    own = {"title": _title(every.get(parent, {})), "marks": _all_marks(home, parent),
-           "shard": shard_of(every.get(parent, {})), "plan": plans.summary(home, parent)}
+    own = {} if root else {"title": _title(every.get(parent, {})), "marks": _all_marks(home, parent),
+                           "shard": shard_of(every.get(parent, {})), "plan": plans.summary(home, parent)}
     body = {"nodes": nodes, "parent": own}
     digest = hashlib.sha1(json.dumps(body, sort_keys=True).encode("utf-8")).hexdigest()
     path = anchor_path(home, parent)
@@ -389,7 +392,7 @@ def rebase(home, sid, room, fair_cut):
     told.extend(w["key"] for w in s.get("relayPending") or [] if isinstance(w, dict) and w.get("key") not in told)
     s["relayPending"] = []
     parent = _parent(s)
-    anchor = _read_json(anchor_path(home, parent)) if parent else {}
+    anchor = _read_json(anchor_path(home, parent))
     seen = int(s.get("anchorSeen") or 0)
     given = s.setdefault("marksGiven", [])
     version = int(anchor.get("version") or 0)
@@ -705,3 +708,65 @@ def track(home, first_only=False):
     except OSError:
         pass
     return True
+
+
+# --- a shared home store -----------------------------------------------------------------------------------------------
+#
+# Related repositories can share one session tree: a project's p4.json names `phi.home`, the home store's git remote
+# (not a path, so it holds on every machine). Each machine resolves remotes to its own store folders through a map kept
+# per user, beside Claude Code's settings and in no repository: p4-stores.json, written at every start for the store
+# that started. The project's session tree goes to the home's phi/; its memory, rules and recall data stay its own.
+
+def stores_map_path():
+    return os.environ.get("P4_PHI_STORES") or os.path.join(
+        os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude"), "p4-stores.json")
+
+
+def remote_key(url):
+    """A git remote in one form: host/owner/name, whatever the scheme, user or .git suffix."""
+    u = str(url or "").strip().lower()
+    u = re.sub(r"^[a-z+]+://", "", u)
+    u = re.sub(r"^[^@/]+@", "", u)
+    u = u.replace(":", "/", 1) if re.match(r"^[^/]+:[^/]", u) else u
+    return re.sub(r"\.git$", "", u.rstrip("/"))
+
+
+def remote_of(store):
+    r = _git(store, "remote", "get-url", "origin")
+    return remote_key(r.stdout.strip()) if r and r.returncode == 0 and r.stdout.strip() else ""
+
+
+def remember_store(store):
+    """Keep this machine's folder for the store's remote in the per-user map; quiet on any failure."""
+    key = remote_of(store) if store and os.path.isdir(store) else ""
+    if not key:
+        return
+    path = stores_map_path()
+    m = _read_json(path)
+    if m.get(key) == store:
+        return
+    m[key] = store
+    try:
+        _write_json(path, m)
+    except OSError:
+        pass
+
+
+def tree_home(store):
+    """(where the session tree of `store`'s project lives, the remote named but not found here or '')."""
+    if not store:
+        return store, ""
+    try:
+        import p4conf
+        named = (p4conf.section(store, "phi", write=False) or {}).get("home")
+    except Exception:  # noqa: BLE001
+        named = None
+    if not named:
+        return store, ""
+    key = remote_key(named)
+    if key == remote_of(store):
+        return store, ""
+    found = _read_json(stores_map_path()).get(key) or ""
+    if found and os.path.isdir(found):
+        return found, ""
+    return store, str(named)

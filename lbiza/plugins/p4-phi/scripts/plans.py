@@ -168,9 +168,8 @@ def record(home, s, inp, transcript=""):
     if disk and disk.get("rootStep") != s["rootStep"]:
         disk["rootStep"] = s["rootStep"]
         relay._write_json(spath, disk)
-    for node in (parent, sid):
-        if node:
-            relay.make_anchor(home, node, _now())
+    relay.make_anchor(home, parent, _now())       # the parent's anchor, or the root's for a top session
+    relay.make_anchor(home, sid, _now())
     if revision:
         relay_revision(home, s, plan, revision)
     return boundary(home, s, plan, started, transcript) if started else ""

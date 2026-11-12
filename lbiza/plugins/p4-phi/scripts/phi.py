@@ -343,12 +343,16 @@ class Me:
         self.id = session or host or str(self.rec.get("sessionId") or "") or self.cli
         project = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
         self.home = p4 or ""
+        self.store = store_at(project) or p4 or ""     # this project's own store: its memory, rules and recall
+        self.home_missing = ""
         if not self.home:
             above = spawned_from(self.rec)
             if not above and hint and hint != self.id:
                 above = self.hint = hint
             self.home = (home_of_record(app_record(above)) if above else "") or store_at(project) \
                 or home_of_record(self.rec)
+            self.home, self.home_missing = relay.tree_home(self.home)   # a shared home store, when one is named
+        self.store = self.store or self.home
 
 
 # --- sessions --------------------------------------------------------------------------------------------------------
@@ -937,7 +941,7 @@ def h_session_start(payload):
     me = Me(payload)
     if not me.home or not me.id:
         return None
-    p4conf.migrate_layout(me.home)        # the memory read below is where the other plugins will have moved it
+    p4conf.migrate_layout(me.store)       # the memory read below is where the other plugins will have moved it
     relay.track(me.home, first_only=True)  # the session tree, committed on its own the first time
     configure(me.home)
     s = ensure_session(me.home, me.id, me.rec, me.cli)
@@ -955,7 +959,12 @@ def h_session_start(payload):
         rule = new_task_text(me.home, s, me, user=False, again=lost) if lost else ""
     pin = pin_of(me.home, s)
     text = "\n\n".join(p for p in (pin, text) if p)
-    rules = rules_text(me.home, HOOK_CHARS - len(text) - len(rule) - 4) if source != "resume" else ""
+    rules = rules_text(me.store, HOOK_CHARS - len(text) - len(rule) - 4) if source != "resume" else ""
+    relay.remember_store(me.store)
+    if me.home_missing:
+        rule = "\n\n".join(p for p in (rule, f"phi (p4-phi): this project's p4.json names the home store "
+                                               f"{me.home_missing}, which this machine has not seen; the session "
+                                               f"tree stays in this project's store.") if p)
     save_session(me.home, s)
     return "\n\n".join(p for p in (rules, text, rule) if p) or None
 

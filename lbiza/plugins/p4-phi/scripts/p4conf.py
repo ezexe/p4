@@ -46,6 +46,9 @@ DEFAULTS = {
         "repo_uses_max": 200,            # candidate names one git grep carries
         "repo_uses_lines": 10,           # lines printed at most; the rest counted on one more
     },
+    "phi": {                             # the session tree (p4-phi)
+        "home": None,                    # a home store's git remote: related repositories share one session tree
+    },
     "temportal": {                       # lifetimes under .claude/p4/temportal/ (p4-temportal lifetime.py)
         "cache": {                       # a rule per directory, relative to temportal/; memory/ is never cleared
             "scratchpad/.out": {"max_age_days": 14, "max_mb": 500},   # swept logs, build output, binaries

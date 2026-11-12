@@ -36,7 +36,7 @@ class P4Conf(unittest.TestCase):
         s = p4conf.load(self.p4)
         self.assertEqual(s, p4conf.DEFAULTS)
         self.assertEqual(self.read(), p4conf.DEFAULTS)
-        self.assertEqual(set(s), {"version", "memory", "scratchpad", "temportal", "recall"})
+        self.assertEqual(set(s), {"version", "memory", "scratchpad", "phi", "temportal", "recall"})
 
     def test_the_retired_config_json_seeds_it(self):
         os.makedirs(p4conf.sub(self.p4, "models"))

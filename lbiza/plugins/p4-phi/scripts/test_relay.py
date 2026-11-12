@@ -293,5 +293,61 @@ class ForkOrFresh(ThreeSessions):
         self.assertNotIn("what the parent", later, "a fork is not given the fresh child's slice")
 
 
+
+class SharedHome(unittest.TestCase):
+    """Two projects naming one home store: a session in one hears a session in the other."""
+
+    def setUp(self):
+        if not shutil.which("git"):
+            self.skipTest("no git")
+        self._tmp = tempfile.TemporaryDirectory()
+        base = self._tmp.name
+        self.home = Tree(os.path.join(base, "home"))
+        self.a = Tree(os.path.join(base, "a"))
+        self.b = Tree(os.path.join(base, "b"))
+        for t in (self.home, self.a, self.b):
+            subprocess.run(["git", "-C", t.p4, "init", "-q"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", self.home.p4, "remote", "add", "origin", "https://example.com/team/home.git"],
+                       check=True, capture_output=True)
+        self.stores = os.path.join(base, "p4-stores.json")
+        for t in (self.home, self.a, self.b):
+            t.stores = self.stores
+        self.home.record(TOP, title="the home")
+        self.assertEqual(self.home.hook("session-start", TOP, {"source": "startup"},
+                                        P4_PHI_STORES=self.stores).returncode, 0)
+        self.assertEqual(json.load(open(self.stores, encoding="utf-8")),
+                         {"example.com/team/home": self.home.p4}, "the start keeps this machine's folder for the remote")
+        for t in (self.a, self.b):
+            write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"home": "git@example.com:team/home.git"}}))
+        self.a.record(A, title="the tree in repo a")
+        self.b.record(B, title="the tree in repo b")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_a_deprecation_in_one_repo_reaches_a_session_in_the_other(self):
+        a, b = self.a, self.b
+        a.say(A, "Rework the exporter", P4_PHI_STORES=self.stores)
+        b.say(B, "Port the exporter docs", P4_PHI_STORES=self.stores)
+        self.assertTrue(os.path.isdir(os.path.join(self.home.p4, "phi", "sessions", A)), "a's tree is in the home")
+        self.assertFalse(os.path.isdir(os.path.join(a.p4, "phi", "sessions", A)))
+        r = subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(HERE, "phi.py"), "note",
+                            "deprecates: the exporter's v1 table, for both repositories", "--source", "commit iii999"],
+                           capture_output=True, text=True, env={**a.env(A), "P4_PHI_STORES": self.stores}, cwd=a.proj)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        a.stop(A, "deprecate v1", uuid="a1", P4_PHI_STORES=self.stores)
+        ctx = context(b.say(B, "next", P4_PHI_STORES=self.stores))
+        self.assertIn("deprecates: the exporter's v1 table", ctx)
+        self.assertIn("(source: commit iii999)", ctx)
+
+    def test_a_home_this_machine_has_not_seen_is_said_once_and_the_tree_stays_home(self):
+        a = self.a
+        write(os.path.join(a.p4, "p4.json"), json.dumps({"phi": {"home": "git@example.com:team/elsewhere.git"}}))
+        ctx = context(a.hook("session-start", A, {"source": "startup"}, P4_PHI_STORES=self.stores))
+        self.assertIn("names the home store git@example.com:team/elsewhere.git, which this machine has not seen", ctx)
+        a.say(A, "Rework the exporter", P4_PHI_STORES=self.stores)
+        self.assertTrue(os.path.isdir(os.path.join(a.p4, "phi", "sessions", A)), "the tree stays in its own store")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
