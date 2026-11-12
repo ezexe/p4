@@ -171,12 +171,20 @@ def record(home, s, inp, transcript=""):
         ps = step_of(load(home, parent), root)
         old["rootText"] = (ps or {}).get("content", "")
     keep = {st.get("content", ""): st.get("tasks") for st in old.get("steps") or [] if st.get("tasks")}
+    at = {st.get("addr"): st.get("content", "") for st in old.get("steps") or [] if st.get("tasks")}
+    olds = {st.get("content", "") for st in old.get("steps") or []}
     plan, started, revision = apply(old, inp, root or "")
     placed = set()
+    news = {st.get("content", "") for st in plan.get("steps") or []}
     for st in plan.get("steps") or []:            # a task stays with its step's words, not its number (P6)
         if st.get("content", "") in keep:
             st["tasks"] = keep[st["content"]]
             placed.add(st["content"])
+    for st in plan.get("steps") or []:            # SA1: a step reworded in place keeps its tasks by address
+        was = at.get(st.get("addr"))
+        if was and was not in placed and was not in news and st.get("content", "") not in olds:
+            st["tasks"] = list(st.get("tasks") or []) + keep[was]
+            placed.add(was)
     plan["loose"] = list(old.get("loose") or []) + [t for c, ts in keep.items() if c not in placed for t in ts]
     if not plan["loose"]:
         plan.pop("loose")
@@ -455,6 +463,14 @@ def agent_bind(home, s, agent_id):
     else:
         st.setdefault("tasks", []).append(task)
     relay._write_json(_path(home, sid), p)
+    parent = relay._parent(s)                     # SA2: the anchors carry it now, and the parent is told its id
+    relay.make_anchor(home, parent, _now())
+    relay.make_anchor(home, sid, _now())
+    if parent:
+        where = f"its step {st['addr']}" if st else "no step of its plan"
+        relay.warn(home, parent, f"agent:{sid}:{agent_id}",
+                   f"down: \"{relay._title(s)}\" launched sub-agent {agent_id} for {where}"
+                   + (f", \"{relay._short(task['what'], 120)}\"" if task.get("what") else "") + ".")
     return True
 
 

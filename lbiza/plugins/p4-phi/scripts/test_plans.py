@@ -174,8 +174,10 @@ class TreeOfPlans(unittest.TestCase):
         self.assertIn("the old docs layout", warned)
         self.assertEqual(plans.agent_warn(home, sa, "agentx001"), "", "told once")
         self.plan(A, items("Rewrite p4conf.LAYOUT and OLDER", "Move recall/ into phi/", "Commit the move"))
-        self.assertEqual([x["id"] for x in plans.load(home, A)["loose"]], ["agentx001"], "P6: with its step's words")
-        self.assertIn("no longer in the launching session's plan", plans.agent_warn(home, sa, "agentx001"))
+        self.assertEqual(plans.load(home, A)["steps"][0]["tasks"][0]["id"], "agentx001", "SA1: reworded in place")
+        self.assertIn("now reads \"Rewrite p4conf.LAYOUT and OLDER\"", plans.agent_warn(home, sa, "agentx001"))
+        self.assertIn(f"down: \"the layout child\" launched sub-agent agentx001 for its step 2.1",
+                      " ".join(w["text"] for w in relay._session(home, TOP).get("relayPending") or []), "SA2")
 
     def test_a_sub_agents_step_revised_and_its_stop(self):
         home = self.t.p4
