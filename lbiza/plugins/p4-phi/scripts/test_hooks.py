@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+os.environ["P4_PHI"] = "0"          # phi's routed checks stay out of these tests: they touch no live store
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)

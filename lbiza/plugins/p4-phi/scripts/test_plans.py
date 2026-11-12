@@ -173,6 +173,37 @@ class TreeOfPlans(unittest.TestCase):
         self.assertEqual(plans.load(t.p4, A)["steps"][1]["tasks"][0]["id"], "bz4dv0pvj",
                          "a Monitor is recorded by the id its result gives (M1)")
 
+    def test_a_session_whose_hook_list_lacks_the_route_gets_its_plan_from_its_transcript(self):
+        """Sessions started before the lookup entries reached them hold only phi's own entries: their update_plan
+        calls are read back from the transcript at the next message, each once."""
+        t = self.t
+        path = os.path.join(self._tmp.name, "a-transcript.jsonl")
+        rows = [{"type": "user", "message": {"role": "user", "content": "Move the store layout into phi, in steps"}}]
+
+        def add(k, inp):
+            rows.append({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": f"toolu_rp{k}", "name": "mcp__ccd_turn__update_plan", "input": inp}]}})
+            rows.append({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": f"toolu_rp{k}", "content": "Plan updated."}]}})
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("".join(json.dumps(r) + chr(10) for r in rows))
+
+        def message(text):
+            return context(t.hook("user-prompt-submit", A, {"hook_event_name": "UserPromptSubmit", "prompt": text,
+                                                           "transcript_path": path}))
+        add(0, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/"))
+        message("go on")
+        self.assertEqual([x["addr"] for x in plans.load(t.p4, A)["steps"]], ["2.1", "2.2"], "read back")
+        self.plan(TOP, items("Port the hooks", "Move the store layout into temportal instead", "Write the docs", at=1))
+        add(1, {"advance": True})
+        ctx = message("next")
+        self.assertEqual(plans.load(t.p4, A)["current"], "2.2")
+        self.assertIn("step 2.2 starts now", ctx, "the step boundary is answered at the message")
+        self.assertIn("your root step 2", ctx)
+        self.lookup(A, "lookup-record", {"tool_name": "mcp__ccd_turn__update_plan", "tool_input": {"advance": True},
+                                         "tool_response": "Plan updated.", "tool_use_id": "toolu_rp1"})
+        self.assertEqual(plans.load(t.p4, A)["current"], "2.2", "a replayed call is not applied again by a hook")
+
     def task(self, host, command, task_id):
         r = self.t.hook("task", host, {"hook_event_name": "PostToolUse", "tool_name": "Bash",
                                        "tool_input": {"command": command, "run_in_background": True},

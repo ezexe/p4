@@ -1016,6 +1016,11 @@ def h_user_prompt_submit(payload):
         text, seen = reports_text(me.home, s)
         s["reportsSeen"] = seen
         parts.append(text)
+    save_session(me.home, s)
+    step = replay(me, s, payload.get("transcript_path") or "")
+    s = load_session(me.home, s["sessionId"]) or s
+    if step:
+        parts.append(step)
     stale = relay.stale_text(s.pop("staleChildren", None))   # children to archive, said once
     if stale:
         parts.insert(0, stale)
@@ -1070,6 +1075,9 @@ def h_stop(payload):
     s.pop("done", None)
     if not s.get("task"):
         s["task"], s["taskAt"] = row["prompt"], row["time"]
+    save_session(me.home, s)
+    replay(me, s, payload.get("transcript_path") or "")
+    s = load_session(me.home, s["sessionId"]) or s
     plans.pickup(me.home, s["sessionId"], plans.transcript_tail(payload.get("transcript_path") or ""))
     if isinstance(s.get("stale"), dict) and s["stale"].get("told") and \
             int(s.get("anchorSeen") or 0) >= int(s["stale"].get("anchorVersion") or 0):
@@ -1201,9 +1209,50 @@ def once(home, sid, kind, payload):
 ROUTED = {}
 
 
+def replay(me, s, transcript):
+    """The plan calls and background launches of the transcript that no hook handled, applied in order -> the step
+    boundary text of the last one, '' for none. A session whose hook list was frozen before recall's lookup entries
+    reached it (one started before 13:30 on 2026-11-12 holds a p4-recall entry whose folder is gone) has only phi's
+    own entries, so its calls are read back here, at each message and each Stop, each once by its tool_use_id."""
+    if not transcript or not os.path.exists(transcript):
+        return ""
+    calls, results = [], {}
+    for d in read_transcript(transcript):
+        c = (d.get("message") or {}).get("content")
+        for b in c if isinstance(c, list) else []:
+            if not isinstance(b, dict):
+                continue
+            if d.get("type") == "assistant" and b.get("type") == "tool_use" and b.get("name") in (
+                    "mcp__ccd_turn__update_plan", "Bash", "PowerShell", "Monitor", "Agent", "Workflow"):
+                calls.append(b)
+            elif d.get("type") == "user" and b.get("type") == "tool_result":
+                results[b.get("tool_use_id")] = result_text(b)
+    text = ""
+    for b in calls[-200:]:
+        tid = b.get("id")
+        if tid not in results:
+            continue                                # still running, or its result not written yet
+        name = "plan" if b["name"] == "mcp__ccd_turn__update_plan" else "task"
+        payload = {"tool_name": b["name"], "tool_input": b.get("input") or {}, "tool_response": results[tid],
+                   "tool_use_id": tid, "transcript_path": transcript}
+        if name == "task" and not (b["name"] != "Bash" or (b.get("input") or {}).get("run_in_background")):
+            continue
+        if not once(me.home, me.id, name, payload):
+            continue
+        if name == "plan":
+            text = plans.record(me.home, load_session(me.home, me.id) or s, payload["tool_input"], transcript) or text
+        else:
+            plans.register(me.home, load_session(me.home, me.id) or s, b["name"], payload["tool_input"],
+                           payload["tool_response"], s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or "")
+    RAN["replayed"] = len(calls)
+    return text
+
+
 def routed(name, payload):
     """A phi handler run from another hook's entry (recall's lookup hooks), with the hook output phi would give and
     its log line."""
+    if os.environ.get("P4_PHI") == "0":
+        return None
     event, fn = ROUTED[name]
     started = time.time()
     RAN.clear()
