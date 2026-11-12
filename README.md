@@ -12,6 +12,12 @@ _prompts that build prompts to prompter prompts into pioneer prompts that puppet
 prompty → prompter → pioneer → puppeteer
 ```
 
+In p4-phi's session tree this is one message of ezexe's reaching an orchestrator, a top session or any session that started sessions.
+Prompty takes ezexe's message and reads it against the orchestrator's ledger: the area it names, the live session that owns that area, and the running writer that holds its files.
+Prompter drafts the exact next session: its topic, a brief built from ezexe's words, its parent, fork or fresh, and the issue it closes.
+Pioneer gate-checks the draft, then starts it, routes it to the area's owner with SendMessage, or queues it as a start request behind a busy writer.
+Puppeteer watches and reconciles: one background watcher an orchestrator writes `ledger.md` in its phi session folder from phi's files and the app's session records, only when one of them changes, with a reconcile line at the top for each divergence between the two.
+
 ## Recursive Refinement
 
 ```
@@ -19,6 +25,12 @@ puppeteer → prompty → prompter → pioneer → puppeteer
     ↑                                          │
     └──────────────────────────────────────────┘
 ```
+
+In p4-phi's session tree the puppeteer feeds prompty again through registered routes.
+When a topic's work lands, the puppeteer writes its route to `routes.jsonl` beside the ledger: the request's words, the topic, the session shape that worked, the brief's slice, fork or fresh, and the issue.
+A route is registered only when the records back what the reports claimed: the issue is closed, a commit that closes it is pushed, and the sessions are archived with their outcome kept.
+Prompty scores the next message against the registered routes before prompter drafts anything new, and a close match becomes the starting draft, so the tree learns its routes.
+A route whose issue was reopened or whose commit was reverted is withdrawn.
 
 ## Parallel Exploration
 
@@ -28,6 +40,11 @@ prompty → prompter ─┼─ pioneer_b ─┼─ puppeteer
                     └─ pioneer_c ─┘
 ```
 
+In p4-phi's session tree this is an under-determined message, where one draft would have to guess past a real ambiguity.
+Prompter drafts each distinct reading, and a pioneer starts each as a sibling child of the orchestrator.
+Each child ends its report with a `Result:` line, and the puppeteer merges them in the ledger.
+Readings that converge collapse to one result, and only a fork that survives the merge reaches ezexe, as one question with options and a default.
+
 ## Meta-Prompting
 
 ```
@@ -35,6 +52,12 @@ puppeteer_a ──┐
 puppeteer_b ──┼── meta_puppeteer ── prompty (new generation)
 puppeteer_c ──┘
 ```
+
+In p4-phi's session tree the top sessions are sibling puppeteers, and the meta-puppeteer is a role any of them takes.
+Whichever top session receives ezexe's message runs the meta pass over every top session's ledger before its own prompty step, and writes `meta-ledger.md` at the phi root.
+The pass finds duplicate topics, top sessions in conflict over the same files or issue, and stale topics, and it seeds the next generation of topics from what is left open.
+
+The two plugins that carry all of this, p4-phi and p4-temportal, are described in [`lbiza/README.md`](lbiza/README.md).
 
 <div align="center">
 
