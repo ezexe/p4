@@ -343,9 +343,11 @@ def boundary(home, s, plan, started, transcript=""):
 
 DEPENDS = re.compile(r"\b(after|then|once|using|uses|based on|depends? on|following|built on|with the results?|"
                      r"results? of|output of|from (?:the )?(?:step|previous|last)|step \d+)\b", re.I)
+WAITS = re.compile(r"\b(wait(?:s|ing)?|until|confirm\w*|verif\w*|can go|when\b[^.]*\blands?|tell|notify|relay\w*|"
+                   r"send|ask|hand (?:off|over)|report back)\b", re.I)   # SP2: a step that waits on or relays work
 QUICK_WORDS = 4               # a step of fewer content words is a quick thing, done here
-LANDS = re.compile(r"^\W*(?:run (?:the |all )?tests?|tests?|verify|check|commit|merge|push|ship|release|land|"
-                   r"fast-forward|report|review|wrap)\b", re.I)   # a step that checks or lands the others' work
+LANDS = re.compile(r"^\W*(?:run\b[^,.;]*\b(?:tests?|suites?|checks?)|tests?|verify|check|report|review|wrap)\b"
+                   r"|\b(?:commit|merge|push|ship|release|land|fast-forward)\b", re.I)   # checks or lands others' work
 
 
 def judge(plan, cwd):
@@ -358,8 +360,11 @@ def judge(plan, cwd):
         dep = DEPENDS.search(text)
         shared = [(o["addr"], p) for o in steps if o["addr"] != a for p in paths[a]
                   if any(relay.overlap(p, q) for q in paths[o["addr"]])]
+        wait = WAITS.search(text)
         if dep:
             kept.append((a, f"leans on another step (\"{dep.group(0)}\")"))
+        elif wait:
+            kept.append((a, f"waits on or relays other work (\"{wait.group(0)}\")"))
         elif LANDS.search(text):
             kept.append((a, "checks or lands the other steps' work"))
         elif shared:
@@ -368,6 +373,10 @@ def judge(plan, cwd):
             kept.append((a, "a quick thing"))
         else:
             free.append(st)
+    waits = sum(1 for _, why in kept if why.startswith("waits on"))
+    if steps and waits * 2 >= len(steps):          # SP2: a plan of waits and relays is serial as a whole
+        kept += [(st["addr"], "the plan is mostly waits and relays, so serial") for st in free]
+        free = []
     return free, kept
 
 

@@ -220,6 +220,20 @@ class TreeOfPlans(unittest.TestCase):
         self.assertIn("2.4", again.split("can each run")[0], "a new free step is named")
         self.assertNotIn("2.2 \"", again.split("can each run")[0])
 
+    def test_a_plan_of_waits_and_relays_is_serial(self):
+        """SP2, live: four serial steps were advised to split."""
+        plan = {"steps": [{"addr": "1", "content": "Wait for SA1 and SA2 on main", "status": "in_progress"},
+                          {"addr": "2", "content": "Tester confirms nodes_test 14/14 on both lists", "status": "pending"},
+                          {"addr": "3", "content": "Push p4 and phi main", "status": "pending"},
+                          {"addr": "4", "content": "Tell the side chat the reply can go", "status": "pending"}]}
+        free, kept = plans.judge(plan, "")
+        self.assertEqual(free, [])
+        self.assertEqual([a for a, _ in kept], ["1", "2", "3", "4"])
+        self.assertEqual(plans.split_advice(self.t.p4, relay._session(self.t.p4, B), plan, True, ""), "")
+        mine = {"steps": [{"addr": "1", "content": "Waits and relays stay in place", "status": "in_progress"},
+                          {"addr": "2", "content": "Run every suite, commit, fast-forward", "status": "pending"}]}
+        self.assertEqual(plans.judge(mine, "")[0], [], "a landing step anywhere in its words, live")
+
     def test_a_step_that_checks_or_lands_the_others_stays(self):
         self.t.say(B, "Do the parts")
         ctx = self.plan(B, self.three("Test, commit and fast-forward main after review"))
