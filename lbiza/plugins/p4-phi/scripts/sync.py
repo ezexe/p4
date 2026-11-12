@@ -56,7 +56,7 @@ MODEL_PREFIX = ("models/ranker",)
 MODEL_EXT = (".pt", ".phid")
 INDEX_LINE = re.compile(rb"^- \[[^\]]+\]\([^)]+\)")        # `- [Title](file.md) ...`, as memory/MEMORY.md lists
 NAME, EMAIL = "p4-sync", "p4-sync@users.noreply.github.com"
-SEED = 12     # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
+SEED = 13    # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
 
 
 def git(*args, check=True, cwd=None):
@@ -511,11 +511,59 @@ def snapshot(branch):
     return True
 
 
+def entry_changes(old, new):
+    """Every store entry whose fields a move from `old` to `new` changed, a line each, its `status:` first: a clean
+    merge is no proof that an entry still reads as it should (#21: a line-union kept both `status:` lines of a rule
+    and it read LIVE again after the owner had freed it)."""
+    if not old or not new or old == new:
+        return []
+    out = []
+
+    def val(v):
+        return " ".join(" ".join(v).split(":", 1)[1:]).strip()[:60] if v else "(none)"
+
+    for path in git("diff", "--name-only", "-z", old, new, check=False).stdout.split("\0"):
+        low = logical(path).lower()
+        if not (low.startswith("store/") and low.endswith(".md")):
+            continue
+        before, after = ({k: (h, f) for k, h, f in
+                          parse_entries((show(f"{c}:{path}") or b"").decode("utf-8", "replace"))[1]} for c in (old, new))
+        for k, (head, fields) in after.items():
+            if k not in before:
+                out.append(f"  {path}: new entry {head[:80]}")
+                continue
+            a, b = {}, {}
+            for d, fs in ((a, before[k][1]), (b, fields)):
+                for n, v in fs:
+                    d.setdefault(n, []).append(v)
+            changed = sorted((n for n in set(a) | set(b) if a.get(n) != b.get(n)), key=lambda n: (n != "status", n))
+            for n in changed:
+                va = [val(v) for v in a.get(n) or [None]]
+                vb = [val(v) for v in b.get(n) or [None]]
+                out.append(f"  {path}: {head[:60]}: {n or 'text'}: {' | '.join(va)} -> {' | '.join(vb)}")
+        for k, (head, _f) in before.items():
+            if k not in after:
+                out.append(f"  {path}: entry gone: {head[:80]}")
+    return out
+
+
+def report_changes(old):
+    """Print the entries the move from `old` to HEAD changed, so the session checks them instead of trusting a
+    clean merge."""
+    lines = entry_changes(old, git("rev-parse", "HEAD", check=False).stdout.strip())
+    if lines:
+        print(f"p4 sync: {len(lines)} store entr{'y' if len(lines) == 1 else 'ies'} changed in this sync; check that "
+              f"each reads as it should:\n" + "\n".join(lines[:200]))
+
+
 def cmd_catch_up():
     """Move the current branch up to origin's, when origin's is ahead and nothing here is in its way."""
     branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
     git("fetch", "-q", "origin")
+    before = git("rev-parse", "HEAD", check=False).stdout.strip()
     r = git("merge", "-q", "--ff-only", f"origin/{branch}", check=False)
+    if r.returncode == 0:
+        report_changes(before)
     print(f"p4 sync: {branch} is at origin/{branch}" if r.returncode == 0 else
           f"p4 sync: {branch} could not move up to origin/{branch} ({(r.stderr or r.stdout).strip()[:160]}); run `p4.py sync`")
     return 0 if r.returncode == 0 else 1
@@ -529,9 +577,11 @@ def cmd_pull(main, push, snap=False):
         print("p4 sync: this checkout has uncommitted changes to tracked files; commit them first", file=sys.stderr)
         return 1
     git("fetch", "-q", "origin")
+    before = git("rev-parse", "HEAD", check=False).stdout.strip()
     for ref in (f"origin/{branch}", f"origin/{main}"):
         if git("rev-parse", "-q", "--verify", ref, check=False).returncode == 0:
             print("\n".join(merge(ref, branch)))
+    report_changes(before)
     if push:
         git("push", "-q", "origin", f"HEAD:refs/heads/{branch}")
         print(f"p4 sync: pushed {branch}")

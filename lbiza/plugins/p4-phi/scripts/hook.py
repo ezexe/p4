@@ -556,7 +556,8 @@ def h_subagent_stop(payload):
 # --- lookups (PreToolUse and PostToolUse on every tool) --------------------------------------------------
 
 PHI_CHECK = {"mcp__ccd_session__start_session": "start-advice", "EnterWorktree": "branch-guard",
-             "Bash": ("branch-guard", "nudge"), "PowerShell": ("branch-guard", "nudge"), "Edit": "nudge",
+             "Bash": ("branch-guard", "store-guard", "nudge"),
+             "PowerShell": ("branch-guard", "store-guard", "nudge"), "Edit": "nudge",
              "Write": "nudge", "MultiEdit": "nudge", "NotebookEdit": "nudge"}
 PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "Bash": "task", "Monitor": "task", "Agent": "task",
               "Workflow": "task", "TaskStop": "task", "KillShell": "task"}
@@ -580,7 +581,7 @@ def phi_route(payload, table):
 
 def h_lookup_check(payload):
     """lookups.py: an earlier finding in place of a web call, an earlier failure before a command expected to fail.
-    First phi's checks before a tool runs: start-advice, branch-guard, and the nudge of a top session doing a work step itself."""
+    First phi's checks before a tool runs: start-advice, branch-guard, store-guard, and the nudge of a top session doing a work step itself."""
     if payload.get("agent_id"):                   # a sub-agent's call: phi warns it of what changed since its launch
         text = phi_text("agent-pre", payload)
         if text:

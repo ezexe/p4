@@ -253,6 +253,24 @@ class Sync(unittest.TestCase):
         twice = (head + "\n- key: cmake\n  time: 2026-11-01 10:00\n  meant: a\n\n- key: cmake\n  time: 2026-11-05 10:00\n  meant: b\n").encode()
         self.assertEqual(sync.merge_entries(twice, twice, twice).decode().count("- key: cmake"), 2, "a repeated key is two entries")
 
+    def test_a_sync_names_every_entry_whose_state_changed(self):
+        """#21: the session checks what changed instead of trusting a clean merge."""
+        ent = lambda name, status: f"\n- ruling: the {name} rule\n  status: {status}\n  time: 2026-11-02 10:00\n"
+        write(self.win, "store/rules.md", "Rulings.\n" + ent("au", "LIVE") + ent("old", "LIVE"))
+        sh(self.win, "git", "add", "-A")
+        sh(self.win, "git", "commit", "-q", "-m", "one")
+        old = sh(self.win, "git", "rev-parse", "HEAD").strip()
+        write(self.win, "store/rules.md", "Rulings.\n" + ent("au", "FREED (2026-11-09)") + ent("new", "LIVE"))
+        sh(self.win, "git", "commit", "-q", "-am", "two")
+        os.chdir(self.win)
+        try:
+            got = "\n".join(sync.entry_changes(old, sh(self.win, "git", "rev-parse", "HEAD").strip()))
+        finally:
+            os.chdir(self.home)
+        self.assertIn("the au rule: status: LIVE -> FREED (2026-11-09)", got)
+        self.assertIn("new entry - ruling: the new rule", got)
+        self.assertIn("entry gone: - ruling: the old rule", got)
+
     def test_settings_git_merged_cleanly_are_still_merged_by_key(self):
         """Two machines each add a `deps` block to p4.json, far enough apart that git merges the lines without a
         conflict and the file holds the key twice; and both change the same line of a script, which is then one side whole, never both sides' lines."""

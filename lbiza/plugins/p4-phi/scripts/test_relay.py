@@ -390,6 +390,28 @@ class ForkOrFresh(ThreeSessions):
         self.assertIn("moves the parent's too", guard(B, "git checkout feature/x")["permissionDecisionReason"])
         self.assertIsNone(guard(TOP, "git switch -c mine"), "a top session decides its own branches")
 
+    def test_a_hand_pull_or_push_in_a_store_is_asked_and_names_p4_sync(self):
+        """#21: a store moves only by p4.py sync."""
+        p4 = self.t.p4
+        subprocess.run(["git", "init", "-q", p4], check=True, capture_output=True)
+        clone = os.path.join(p4, "temportal", "tmp", "s1", "p4")
+        os.makedirs(clone)
+        subprocess.run(["git", "init", "-q", clone], check=True, capture_output=True)
+
+        def guard(host, cmd, cwd=None):
+            r = self.t.hook("store-guard", host, {"tool_name": "Bash", "tool_input": {"command": cmd},
+                                                  "cwd": cwd or self.t.proj})
+            return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
+        for host in (TOP, B):
+            out = guard(host, f"cd {p4} && git pull origin main")
+            self.assertEqual(out["permissionDecision"], "ask")
+            self.assertIn("sync --push --p4", out["permissionDecisionReason"])
+        self.assertIn("force-push", guard(TOP, f'git -C "{p4}" push --force origin win')["permissionDecisionReason"])
+        self.assertIsNotNone(guard(TOP, "git push", cwd=p4), "the call's own folder")
+        self.assertIsNone(guard(TOP, f"git -C {self.work} push"), "a project checkout is not a store")
+        self.assertIsNone(guard(TOP, f"cd {clone} && git push origin main"), "a clone kept in the store's tmp")
+        self.assertIsNone(guard(TOP, f"git -C {p4} status"), "reading a store is never asked")
+
     def test_a_child_landing_work_is_asked_unless_its_brief_gave_it_the_landing(self):
         """#19: only the parent merges and pushes."""
         def guard(host, cmd):

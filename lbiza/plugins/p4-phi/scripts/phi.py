@@ -1643,6 +1643,63 @@ def h_branch_guard(payload):
                                                                f"needs no merge."}}
 
 
+STORE_MOVE = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b([^\n|;&]*?)\b(push|pull)(?![\w-])([^\n|;&]*)")
+DASH_C = re.compile(r"(?:^|\s)-C\s+(\S+)")
+CD = re.compile(r"(?:^|&&|;|\n)\s*(?:cd|pushd|Set-Location)\s+(\S+)\s*(?=&&|;|\n|$)")
+
+
+def store_root(path):
+    """The p4 store a folder is in: its `.claude/p4`, when the folder's git checkout is the store itself; '' for
+    any other folder, a clone kept under the store's temportal/tmp among them."""
+    p = relay.norm(path)
+    m = re.search(r"^(.*?/\.claude/p4)(?=/|$)", p, re.I)
+    if not m:
+        return ""
+    root = m.group(1)
+    rest = p[len(root):].lstrip("/")
+    if os.path.isdir(p):
+        r = relay._git(p, "rev-parse", "--show-toplevel")
+        top = relay.norm(r.stdout.strip()) if r is not None and r.returncode == 0 else ""
+        return root if top == root else ""
+    return "" if rest.lower().startswith(("temportal/tmp", "phi/sessions")) else root
+
+
+def h_store_guard(payload):
+    """PreToolUse on a shell call (#21): a hand `git pull`, `git push` or force-push in a p4 store is asked first, and
+    `p4.py sync --push --p4 <store>` named as the way, since two machines write the same files and a plain merge or
+    a line-union damages them."""
+    if str(payload.get("tool_name") or "") not in SHELL_TOOLS:
+        return None
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    cmd = QUOTED.sub(lambda m: m.group(0) if re.match(r"^['\"][^'\"\s]*['\"]$", m.group(0)) else "''",
+                     str(inp.get("command") or ""))
+    m = STORE_MOVE.search(cmd)
+    if not m:
+        return None
+    base = str(payload.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or "")
+    places = [x.group(1) for x in CD.finditer(cmd[:m.start()])][-1:] or [base]
+    dash = DASH_C.search(m.group(1))
+    if dash:
+        places = [relay.norm(dash.group(1), relay.norm(places[0]))]
+    store = ""
+    for p in places:
+        store = store_root(relay.norm(p, relay.norm(base)) if p else "")
+        if store:
+            break
+    if not store:
+        return None
+    force = bool(re.search(r"(?:^|\s)(?:-f|--force(?:-with-lease)?)\b|\s\+\S", m.group(3) + m.group(1)))
+    what = "a force-push" if force and m.group(2) == "push" else f"a hand `git {m.group(2)}`"
+    RAN["store_guard"] = what
+    sync = f"python -I -X utf8 \"{os.path.join(HERE, 'p4.py')}\" sync --push --p4 \"{store}\"".replace("\\", "/")
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
+                                   "permissionDecisionReason": f"p4-phi: this is {what} in the p4 store {store}. A "
+                                                               f"store moves only by `{sync}`: two machines write the "
+                                                               f"same files, and a plain merge or a line-union damages "
+                                                               f"them. Then check each entry the sync names as "
+                                                               f"changed."}}
+
+
 def once(home, sid, kind, payload):
     """True the first time this tool call reaches this handler: a session whose hook list holds both the routed
     entry and the dedicated one runs each check once. An atomic file per call; True when the call names no id."""
@@ -1817,9 +1874,10 @@ HOOKS = {"session-start": ("SessionStart", h_session_start),
          "stop": ("Stop", h_stop),
          "start-advice": ("PreToolUse", h_start_advice),
          "branch-guard": ("PreToolUse", h_branch_guard),
+         "store-guard": ("PreToolUse", h_store_guard),
          "plan": ("PostToolUse", h_plan),
          "task": ("PostToolUse", h_task)}
-ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "plan", "task")})
+ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "store-guard", "plan", "task")})
 ROUTED["nudge"] = ("PreToolUse", h_nudge)
 ROUTED.update({"agent-launch": ("PreToolUse", h_agent_launch), "agent-pre": ("PreToolUse", h_agent_call),
                "agent-post": ("PostToolUse", h_agent_call), "agent-stop": ("SubagentStop", h_agent_stop)})
