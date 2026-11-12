@@ -210,7 +210,18 @@ def warn(home, sid, key, text):
     if key in told:
         return False
     pend = s.setdefault("relayPending", [])
-    pend.append({"key": key, "text": text})
+    up = re.match(r"^plan:([^:]+):[^:]+:up$", key)
+    same = [w for w in pend if isinstance(w, dict) and up and re.match(rf"^plan:{re.escape(up.group(1))}:[^:]+:up$",
+                                                                      str(w.get("key") or ""))]
+    if same:                                      # RF1: one line for a child's revisions since the last look
+        n = sum(int(w.get("count") or 1) for w in same) + 1
+        for w in same:
+            pend.remove(w)
+            told.append(w.get("key"))
+        text = re.sub(r"revised its plan:", f"revised its plan {n} times since you last looked; now:", text, count=1)
+        pend.append({"key": key, "text": text, "count": n})
+    else:
+        pend.append({"key": key, "text": text})
     turns = [w for w in pend if isinstance(w, dict) and str(w.get("key", "")).startswith("turn:")]
     for old in turns[:-TURN_WARNINGS]:                  # R6: the newest relayed turn reports only
         pend.remove(old)
@@ -440,6 +451,9 @@ def rebase(home, sid, room, fair_cut):
     s["relayPending"] = []
     parent = _parent(s)
     anchor = _read_json(anchor_path(home, parent))
+    if "anchorSeen" not in s:                     # RF1: the first look takes what is there as seen, relays none of it
+        s["anchorSeen"] = int(anchor.get("version") or 0)
+        s["marksGiven"] = mark_keys(home, parent)
     seen = int(s.get("anchorSeen") or 0)
     given = s.setdefault("marksGiven", [])
     version = int(anchor.get("version") or 0)

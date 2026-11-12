@@ -1026,6 +1026,16 @@ def started_by(me, payload):
     return me
 
 
+def within(parts, room=None):
+    """The parts joined, cut evenly to the hook's room: Claude Code files away a hook's text past 10,000 characters
+    (RF1: a first look once gave 11.4 KB)."""
+    room = HOOK_CHARS if room is None else room
+    parts = [p for p in parts if p]
+    if sum(len(p) + 2 for p in parts) <= room:
+        return "\n\n".join(parts)
+    return "\n\n".join(fair_cut(parts, room - 2 * len(parts)))
+
+
 def h_user_prompt_submit(payload):
     me = started_by(Me(payload), payload)
     if not me.home or not me.id:
@@ -1066,7 +1076,7 @@ def h_user_prompt_submit(payload):
     used = sum(len(p) for p in parts if p)
     text, _ = relay.rebase(me.home, s["sessionId"], HOOK_CHARS - used, fair_cut)
     RAN["relay"] = len(text)
-    return "\n\n".join(p for p in [text] + parts if p)
+    return within([text] + parts)
 
 
 def h_stop(payload):
@@ -1272,7 +1282,9 @@ def replay(me, s, transcript):
             elif d.get("type") == "user" and b.get("type") == "tool_result":
                 results[b.get("tool_use_id")] = result_text(b)
     text = ""
-    for b in calls[-200:]:
+    last_list = max((k for k, b in enumerate(calls) if b["name"] == "mcp__ccd_turn__update_plan"
+                     and isinstance((b.get("input") or {}).get("items"), list)), default=0)
+    for b in calls[last_list:][-200:]:            # an earlier plan is replaced whole by the latest list (RB1)
         tid = b.get("id")
         if tid not in results:
             continue                                # still running, or its result not written yet

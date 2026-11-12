@@ -32,6 +32,29 @@ class Paths(unittest.TestCase):
         self.assertFalse(relay.overlap("e:/w/lib", "e:/w/docs"))
         self.assertEqual(relay.norm("/e/projects/x/", ""), relay.norm("E:/projects/x", ""))
 
+    def test_a_first_look_relays_no_backlog_and_revisions_collapse(self):
+        """RF1: a first look once replayed a day of revisions, 40 lines and 11.4 KB."""
+        tmp = tempfile.mkdtemp()
+        try:
+            home = os.path.join(tmp, "p4")
+            write(os.path.join(home, "phi", "sessions", "kid", "session.json"),
+                  json.dumps({"sessionId": "kid", "spawnedFrom": {"sessionId": "top"}}))
+            write(os.path.join(home, "phi", "sessions", "top", "anchor.json"), json.dumps({
+                "version": 9, "changedAt": {"sib": 9}, "parent": {},
+                "nodes": {"sib": {"title": "sib", "marks": [{"claim": "replaces: old news", "time": "2026-11-12 09:00",
+                                                             "paths": []}]}}}))
+            text, _ = relay.rebase(home, "kid", 9000, lambda xs, n: xs)
+            self.assertNotIn("old news", text, "what was there at the first look is taken as seen")
+            write(os.path.join(home, "phi", "sessions", "top", "session.json"), json.dumps({"sessionId": "top"}))
+            for k in range(5):
+                relay.warn(home, "top", f"plan:kid:{k:04d}:up", f"\"kid\", started for a step you have no plan for, "
+                                                                 f"revised its plan: {k}.1 changed.")
+            pend = relay._session(home, "top")["relayPending"]
+            self.assertEqual(len(pend), 1)
+            self.assertIn("revised its plan 5 times since you last looked; now: 4.1 changed.", pend[0]["text"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_git_bash_and_wsl_paths_are_absolute(self):
         """P5: /e/x as Git Bash writes it is E:/x, not a path under the base."""
         self.assertEqual(relay.paths_in("cat /e/projects/p4-phi/x/a1.txt", "E:/projects/p4-phi"),
@@ -49,7 +72,7 @@ class Paths(unittest.TestCase):
         try:
             home = os.path.join(tmp, "p4")
             write(os.path.join(home, "phi", "sessions", "kid", "session.json"),
-                  json.dumps({"sessionId": "kid", "spawnedFrom": {"sessionId": "top"}}))
+                  json.dumps({"sessionId": "kid", "spawnedFrom": {"sessionId": "top"}, "anchorSeen": 0}))
             write(os.path.join(home, "phi", "sessions", "top", "anchor.json"), json.dumps({
                 "version": 3, "changedAt": {"sib": 3}, "parent": {},
                 "nodes": {"sib": {"title": "sib", "marks": [{"claim": "replaces: x", "time": "2026-11-12 14:00",

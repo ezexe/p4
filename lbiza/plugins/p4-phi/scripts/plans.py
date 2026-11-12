@@ -227,7 +227,8 @@ def relay_revision(home, s, plan, rev):
     parent = relay._parent(s)
     if parent and touched:
         relay.warn(home, parent, f"plan:{sid}:{stamp}:up",
-                   f"\"{title}\", started for your step {plan.get('root') or '?'}, revised its plan: "
+                   f"\"{title}\", started for " + (f"your step {plan['root']}" if plan.get("root") else
+                                                     "a step you have no plan for") + ", revised its plan: "
                    + ", ".join(f"{a} {'removed' if a in rev['removed'] else 'changed'}" for a in touched) + ".")
 
 
