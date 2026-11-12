@@ -1077,6 +1077,62 @@ def rules_text(home, room, fork=False):
     return "\n".join([head] + [a + b for a, b in zip(names, fair_cut([rule_of(b) for _, b in rules], room))])
 
 
+# --- rules that change mid-session (#26) ----------------------------------------------------------------------------
+#
+# The store's rules reach a session at its start, and the global and project CLAUDE.md through the harness at its
+# start too. A rule ezexe changes during the day must reach the sessions already working, or they keep writing the
+# old wording into notes, issues and code. So each message compares what the session last saw with what is on disk
+# now, and gives the changed or added lines once and the removed ones as a list.
+
+LIVE_RULES_CHARS = 3000          # of the changes given at one message
+LIVE_RULES_LINES = 400           # kept of what a session last saw
+
+
+def rule_sources(store, project):
+    """[(source, line)] of the store's rules, a line each, the global CLAUDE.md and the project's CLAUDE.md."""
+    out = [(f"memory {name}", f"{name}: {rule_of(body)}") for name, body in (memory_rules(store) if store else [])]
+    conf = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    for label, path in (("global CLAUDE.md", os.path.join(conf, "CLAUDE.md")),
+                        ("project CLAUDE.md", os.path.join(project, "CLAUDE.md") if project else ""),
+                        ("project CLAUDE.md", os.path.join(project, ".claude", "CLAUDE.md") if project else "")):
+        try:
+            with open(path, encoding="utf-8") as f:
+                out += [(label, ln.strip()) for ln in f.read().splitlines() if ln.strip()]
+        except (OSError, UnicodeDecodeError):
+            continue
+    return out[:LIVE_RULES_LINES]
+
+
+def live_rules(s, store, project):
+    """The lines that changed since this session last looked, once; '' when nothing changed or nothing was seen
+    before. Records what is on disk now in `s`."""
+    if not RULES:
+        return ""
+    new = [f"{a}\t{b}" for a, b in rule_sources(store, project)]
+    key = hashlib.sha1("\n".join(new).encode("utf-8", "replace")).hexdigest()[:16]
+    seen = s.get("rulesSeen") if isinstance(s.get("rulesSeen"), dict) else {}
+    s["rulesSeen"] = {"hash": key, "lines": new}
+    if not seen or seen.get("hash") == key:
+        return ""
+    old = list(seen.get("lines") or [])
+    added = [x for x in new if x not in set(old)]
+    gone = [x for x in old if x not in set(new)]
+    if not added and not gone:
+        return ""
+    RAN["rules_changed"] = len(added) + len(gone)
+
+    def shown(x):
+        src, _, line = x.partition("\t")
+        return f"- {src}: {line}"
+
+    parts = ["phi (p4-phi): the rules changed since this session last looked; these hold from now on."]
+    if added:
+        parts.append("Changed or added:\n" + "\n".join(shown(x) for x in added))
+    if gone:
+        parts.append("Removed, no longer rules:\n" + "\n".join(shown(x) for x in gone))
+    return cut("\n".join(parts), LIVE_RULES_CHARS)
+
+
 # --- the hooks -------------------------------------------------------------------------------------------------------
 
 def given(s, me, home, own=False):
@@ -1407,6 +1463,7 @@ def h_session_start(payload):
         rule = new_task_text(me.home, s, me, user=False, again=lost) if lost else ""
     pin = pin_of(me.home, s)
     text = "\n\n".join(p for p in (pin, text) if p)
+    live_rules(s, me.store, os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or "")   # #26: the baseline
     rules = rules_text(me.store, HOOK_CHARS - len(text) - len(rule) - 4,
                        fork=bool(s.get("forked"))) if source != "resume" else ""
     relay.remember_store(me.store)
@@ -1499,7 +1556,8 @@ def h_user_prompt_submit(payload):
     if req and not s.get("task"):
         s["task"] = cut(req, TASK_CHARS)
         s["taskAt"] = now()
-    parts = [pin_of(me.home, s), given(s, me, me.home)]
+    parts = [live_rules(s, me.store, os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or ""),
+             pin_of(me.home, s), given(s, me, me.home)]
     if REPORTS:
         text, seen = reports_text(me.home, s)
         s["reportsSeen"] = seen

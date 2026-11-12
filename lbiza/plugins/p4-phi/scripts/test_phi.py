@@ -730,6 +730,34 @@ class Rules(unittest.TestCase):
     def start(self, host, source="startup"):
         return context(self.t.hook(START, host, {"hook_event_name": "SessionStart", "source": source}))
 
+    def live(self, prompt, conf):
+        return context(self.t.say(TOP, prompt, CLAUDE_CONFIG_DIR=conf))
+
+    def test_a_reworded_memory_reaches_an_open_session_once(self):
+        """#26: rules that change mid-session reach sessions already open."""
+        conf = os.path.join(self._tmp.name, "conf")
+        os.makedirs(conf)
+        self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"}, CLAUDE_CONFIG_DIR=conf)
+        self.assertNotIn("rules changed", self.live("Build the exporter", conf))
+        memory(self.t.p4, "tabs-not-spaces", "feedback", "Indent with four spaces in the exporter, never tabs.")
+        got = self.live("carry on", conf)
+        self.assertIn("the rules changed since this session last looked", got)
+        self.assertIn("four spaces in the exporter", got)
+        self.assertIn("Removed, no longer rules", got)
+        self.assertIn("Indent with tabs in the exporter", got)
+        self.assertNotIn("rules changed", self.live("and now", conf), "nothing repeats")
+
+    def test_a_line_added_to_the_global_claude_md_reaches_an_open_session(self):
+        conf = os.path.join(self._tmp.name, "conf")
+        write(os.path.join(conf, "CLAUDE.md"), "# Global\n\n- Call the user ezexe.\n")
+        self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"}, CLAUDE_CONFIG_DIR=conf)
+        self.assertNotIn("rules changed", self.live("Build the exporter", conf))
+        write(os.path.join(conf, "CLAUDE.md"), "# Global\n\n- Call the user ezexe.\n- Never write parentheticals.\n")
+        got = self.live("carry on", conf)
+        self.assertIn("global CLAUDE.md: - Never write parentheticals.", got)
+        self.assertNotIn("Call the user ezexe", got, "only what changed")
+        self.assertNotIn("rules changed", self.live("and now", conf), "nothing repeats")
+
     def test_every_session_starts_with_the_rules_and_not_the_projects_facts(self):
         for host in (TOP, KID):
             text = self.start(host)
