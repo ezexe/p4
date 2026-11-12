@@ -723,6 +723,53 @@ def reports_text(home, s):
     return "\n".join(out), len(rows)
 
 
+MAX_DEPTH = 3                 # a session this deep in the tree starts no session of its own
+MAX_CHILDREN = 8              # nor one that has this many live children already
+BUILT_IN = ("built-in, act-don't-wait: a next step the chain can settle (the task, the parent's plan and notes, "
+            "siblings' work, the project's rules) is decided and done, with one line saying what was chosen and why. "
+            "Only a matter of the user's authority goes to the user: permissions or security settings, credentials, "
+            "spending, and actions that cannot be undone or publish outward. A child asks the session that started it "
+            "with SendMessage, and never ends its turn waiting on a question the chain can settle.")
+
+
+def depth_of(home, s):
+    """How many sessions lie above this one: 0 for a top session."""
+    n, seen, cur = 0, set(), s
+    while spawned_from(cur) and spawned_from(cur) not in seen and n < 20:
+        seen.add(spawned_from(cur))
+        cur = load_session(home, spawned_from(cur)) or {}
+        n += 1
+    return n
+
+
+def caps_text(home, s):
+    """'' while this session may start sessions; else the one line saying where the work goes instead."""
+    depth = depth_of(home, s)
+    if depth >= MAX_DEPTH:
+        return (f"This session is {depth} deep in the session tree, the most phi allows: start no session; do the "
+                f"work here, or send it to the session that started you with SendMessage.")
+    kids = len(plans._children(home, s["sessionId"]))
+    if kids >= MAX_CHILDREN:
+        return (f"This session has {kids} live sessions of its own, the most phi allows: send the work to the one "
+                f"whose task it fits with SendMessage, or archive a finished one first.")
+    return ""
+
+
+def split_text(home, s, prompt):
+    """A turn another session's message started: the app refuses `user_asked` there, so a split is a card the user
+    starts. '' for the user's own turns, the app's events and a session with no task."""
+    if not clean(s.get("task")) or not re.search(r"<cross-session-message\b", str(prompt or "")):
+        return ""
+    cap = caps_text(home, s)
+    RAN["split"] = "cap" if cap else "card"
+    if cap:
+        return "phi (p4-phi): this turn was started by another session, not the user. " + cap
+    return ("phi (p4-phi): this turn was started by another session, not the user, so the app refuses "
+            "`mcp__ccd_session__start_session` with `user_asked`. Work in it that is a task of its own, outside "
+            "this session's task, goes on a card: `initiation` `own_initiative`, `context` `fork`, which the user "
+            "starts with a click. Do the rest here; a question the chain can settle is answered, not waited on.")
+
+
 def new_task_text(home, s, me, user=True, again=False):
     """The user's standing instruction for a message about something else: once in full for a CLI session that
     has a task (and again after a compaction), then a line with the task beside each of the user's messages.
@@ -747,7 +794,8 @@ def new_task_text(home, s, me, user=True, again=False):
                 f"{shards}. This is the user's standing instruction for this project, so the session "
                 f"is started, not offered as a card. Its report comes back here in full. A quick thing (a "
                 f"question, a few tool calls) stays here. When the user says the task itself has changed: "
-                f"`{commands()} task \"<the new task>\"`. This session's page: {page_path(home, s['sessionId'])}.")
+                f"`{commands()} task \"<the new task>\"`. This session's page: {page_path(home, s['sessionId'])}."
+                + (" " + caps_text(home, s) if caps_text(home, s) else ""))
     if not user:
         return ""
     RAN["new_task"] = "line"
@@ -875,6 +923,7 @@ def rules_text(home, room):
             f"its start, and your task and notes beside its first message, so its brief does not tell it to read "
             f"CLAUDE.md, MEMORY.md or any memory file: the brief names only what this task needs, such as a skill, "
             f"a plan or source files.")
+    rules = [("built-in", BUILT_IN.split(": ", 1)[1])] + list(rules)
     names = [f"- {name}: " for name, _ in rules]
     room -= len(head) + sum(len(x) + 1 for x in names) + 2
     RAN["rules"] = len(rules)
@@ -1080,7 +1129,7 @@ def h_user_prompt_submit(payload):
             f"your last turn changed step(s) {', '.join(u.get('steps') or [])} of \"{relay._title(load_session(me.home, u['child']))}\" "
             f"and sent it nothing; relay it with SendMessage (`to`: {u['child']})." for u in unsent))
     route = relay.route_text(me.home, s["sessionId"], req, s.get("cwd") or "") if req else ""
-    parts.append(route or new_task_text(me.home, s, me, user=bool(req)))
+    parts.append(route or new_task_text(me.home, s, me, user=bool(req)) or split_text(me.home, s, payload.get("prompt")))
     save_session(me.home, s)
     # the rebase check, on every message: what the nodes beside this one changed, and the warnings, first
     used = sum(len(p) for p in parts if p)

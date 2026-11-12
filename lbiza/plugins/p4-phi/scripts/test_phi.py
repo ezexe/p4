@@ -550,6 +550,36 @@ class NewTask(unittest.TestCase):
         self.assertEqual(self.say(TOP, "<side-sessions-event>a session finished a turn</side-sessions-event>"), "")
         self.assertEqual(self.say(TOP, "<task-notification>done</task-notification>"), "")
 
+    def test_a_turn_another_session_started_is_told_to_split_by_a_card(self):
+        """The app refuses user_asked in a turn the user's words did not start: a split goes on an own_initiative card."""
+        self.say(TOP, TASK)
+        text = self.say(TOP, '<cross-session-message from="local_x">please also look at Y</cross-session-message>')
+        self.assertIn("own_initiative", text)
+        self.assertIn("`context` `fork`", text)
+        self.assertEqual(self.say(TOP, "<side-sessions-event>a session finished</side-sessions-event>"), "")
+
+    def test_a_deep_or_full_session_starts_no_session(self):
+        """The caps: three deep in the tree, or eight live children."""
+        home = self.t.p4
+        self.say(TOP, TASK)
+        chain = ["local_d1", "local_d2", "local_d3"]
+        above = TOP
+        for sid in chain:
+            write(os.path.join(home, "phi", "sessions", sid, "session.json"),
+                  json.dumps({"sessionId": sid, "spawnedFrom": {"sessionId": above}, "task": "t"}))
+            above = sid
+        self.assertEqual(phi.depth_of(home, phi.load_session(home, "local_d3")), 3)
+        self.assertIn("start no session", phi.caps_text(home, phi.load_session(home, "local_d3")))
+        self.assertEqual(phi.caps_text(home, phi.load_session(home, "local_d1")), "")
+        for k in range(8):
+            write(os.path.join(home, "phi", "sessions", f"local_k{k}", "session.json"),
+                  json.dumps({"sessionId": f"local_k{k}", "spawnedFrom": {"sessionId": TOP}}))
+        self.assertIn("live sessions of its own", phi.caps_text(home, phi.load_session(home, TOP)))
+
+    def test_act_dont_wait_rides_with_the_rules(self):
+        self.assertIn("act-don't-wait", phi.BUILT_IN)
+        self.assertIn("authority", phi.BUILT_IN)
+
     def test_a_started_sessions_task_is_its_brief(self):
         self.say(TOP, TASK)
         text = self.say(KID, HANDED)

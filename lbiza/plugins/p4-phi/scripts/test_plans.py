@@ -152,6 +152,16 @@ class TreeOfPlans(unittest.TestCase):
         s["task"] = "something else entirely"
         self.assertEqual(plans.root_of(home, s), "2", "no match: the step in progress")
 
+    def test_a_child_waiting_on_a_question_the_chain_can_settle_is_flagged_up(self):
+        """Act-don't-wait: the parent hears of a child's open question that is not the user's to answer."""
+        self.assertIn("python3", plans.waiting_on("Done. Should the runner use the py launcher or python3?"))
+        self.assertEqual(plans.waiting_on("Done. Shall I push it to origin?"), "", "authority: the user's")
+        self.assertEqual(plans.waiting_on("Done, nothing open."), "")
+        s = relay._session(self.t.p4, A)
+        plans.turn_relay(self.t.p4, s, {"id": "r1", "report": "Moved it. Should phi/ keep the old folder name?"}, [])
+        pend = relay._session(self.t.p4, TOP).get("relayPending") or []
+        self.assertTrue(any("ended its turn on a question" in w["text"] and A in w["text"] for w in pend))
+
     def test_an_up_line_is_said_once(self):
         """P1: "the parent has moved past your root step" came at every boundary after."""
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move", "Tell docs"))

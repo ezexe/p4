@@ -453,7 +453,29 @@ def turn_relay(home, s, row, calls):
                    + ". Check whether those steps still hold.")
         if way == "down" and oid not in sent and ("local_" + oid.removeprefix("local_")) not in sent:
             unsent.append((oid, [st["addr"] for st, _ in got]))
+    parent = relay._parent(s)
+    ask = waiting_on(report)
+    if parent and ask:
+        relay.warn(home, parent, f"wait:{sid}:{stamp}",
+                   f"\"{title}\", a session you started, ended its turn on a question: \"{relay._short(ask, 240)}\". "
+                   f"It names no matter of the user's authority, so answer it with SendMessage (`to`: {sid}) "
+                   f"from what the chain knows, rather than leaving it waiting.")
     return unsent
+
+
+AUTHORITY = re.compile(r"\b(push|force|merge|publish|post|deploy|release|credential|password|token|secret|api key|"
+                       r"permission|sign[ -]?in|log[ -]?in|spend|pay|purchase|billing|delete|destroy|drop|"
+                       r"irreversible|cannot be undone|restart|install)\w*", re.I)
+
+
+def waiting_on(report):
+    """The question a turn's report ends on, when it is not a matter of the user's authority; '' otherwise."""
+    tail = str(report or "").strip()[-600:]
+    qs = [q.strip() for q in re.findall(r"[^.!?\n]*\?", tail) if len(q.strip()) > 8]
+    if not qs or not tail.rstrip().endswith("?") and tail.rfind("?") < len(tail) - 200:
+        return ""
+    q = qs[-1]
+    return "" if AUTHORITY.search(q) else q
 
 
 # --- background tasks under a step -------------------------------------------------------------------------------------

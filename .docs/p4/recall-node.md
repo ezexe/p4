@@ -198,3 +198,11 @@ The code is `lbiza/plugins/p4-phi/scripts/plans.py`, run by a PostToolUse hook o
 - **Seen:** each routed check writes its line in the session's `log.jsonl`.
 - **Sessions older than the lookup entries,** found live 2026-11-12: a session started before 13:30 that day holds a hook list naming p4-recall's folder, which the fold into p4-phi removed, so recall's lookup hooks never run in it and nothing routed reaches it. phi's own three entries still run there, so at each message and each Stop phi reads the transcript's `update_plan` calls and background launches that no hook handled, in order, each once by its `tool_use_id`: the plan is kept and a step boundary is answered at the next message instead of beside the call.
 - **Tests stay out of live stores:** recall's hook tests run with `P4_PHI=0`, since they inherit the real session's host id, and a routed phi check had written their calls into a live session's folder.
+
+## Splitting work, and not waiting
+
+- **A turn another session started:** the app refuses `start_session` with `user_asked` in a turn the user's words did not start. Beside a cross-session message, phi says that work of its own goes on an `own_initiative` card with `context` `fork`, which the user starts with a click. The app's own events get no such line, since a turn right after the user's may still start a session.
+- **Caps:** a session 3 deep in the tree, or one with 8 live children, starts no session. Both the standing instruction and the card line say where the work goes instead.
+- **Act-don't-wait, built in:** the rules block every session receives leads with one built-in rule. A next step the chain can settle is decided and done; only the user's authority goes to the user: permissions, credentials, spending, and actions that cannot be undone or publish outward.
+- **The relay flag:** at Stop, a started session whose report ends on a question that names no such matter is flagged to its parent at the parent's next message, with the session id to answer it by SendMessage.
+- **The job-gap budget:** an open background task more than an hour past its own timeout, with no notice read, is taken as unknown and never flagged. A TaskStop call closes its task, and a loose task is never checked against a step.
