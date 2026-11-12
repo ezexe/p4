@@ -446,6 +446,17 @@ class ForkOrFresh(ThreeSessions):
         s["task"] = "Fix it, run the suites, then push main yourself."
         relay._write_json(os.path.join(relay._dir(self.t.p4, B), "session.json"), s)
         self.assertIsNone(guard(B, "git push origin main"), "a brief that hands over the landing")
+        s["task"] = "Fix the exporter."
+        relay._write_json(os.path.join(relay._dir(self.t.p4, B), "session.json"), s)
+        self.assertIsNotNone(guard(B, "git push origin main"))
+        s["task"] = "Build the queue: issues #19 to #24 on ezexe/p4, the fix for each in its body."
+        relay._write_json(os.path.join(relay._dir(self.t.p4, B), "session.json"), s)
+        self.assertIsNone(guard(B, "git push origin main"), "a fixer closing issues lands its own commits")
+        s["task"] = "Fix the exporter."
+        relay._write_json(os.path.join(relay._dir(self.t.p4, B), "session.json"), s)
+        self.t.say(B, f'<cross-session-message from="{TOP}" from-name="top">Push each green commit as it closes '
+                      f'its issue.</cross-session-message>')
+        self.assertIsNone(guard(B, "git push origin main"), "the parent let it land its own work")
 
     def test_a_fresh_child_starts_with_only_its_shards_slice(self):
         t = self.t

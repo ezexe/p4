@@ -421,7 +421,7 @@ def save_session(home, s):
     for k in ("othersGiven", "plansSeen"):
         if isinstance(disk.get(k), dict):
             s[k] = {**disk[k], **(s.get(k) or {})}
-    for k in ("rootStep", "shard", "disposable", "doneRetired", "archived", "appRoot", "nudged"):
+    for k in ("rootStep", "shard", "disposable", "doneRetired", "archived", "appRoot", "nudged", "landingGiven"):
         if k in disk and k not in s:
             s[k] = disk[k]
     if int(disk.get("anchorSeen") or 0) > int(s.get("anchorSeen") or 0):
@@ -1459,7 +1459,11 @@ def h_user_prompt_submit(payload):
             s = load_session(me.home, s["sessionId"])
         starts.started(me.home, rid, s["sessionId"])
     req = request_of(payload.get("prompt"))
-    s["turnBy"] = "user" if req else (
+    said = str(payload.get("prompt") or "")
+    if spawned_from(s) and not s.get("landingGiven") and LANDING_GIVEN.search(said) \
+            and f'<cross-session-message from="{spawned_from(s)}"' in said:
+        s["landingGiven"] = True                   # #19: the parent let this child land its own work
+    s["turnBy"] ="user" if req else (
         "session" if re.search(r"<cross-session-message\b", str(payload.get("prompt") or "")) else "event")
     plans.pickup(me.home, s["sessionId"], payload.get("prompt") or "")
     mark_fork(s, me, payload)
@@ -1661,7 +1665,9 @@ BRANCHING = re.compile(r"\bgit\b[^\n|;&]*?\b(worktree\s+add|switch\s+(-c|--creat
 LANDING = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b[^\n|;&]*?\b(push|merge|rebase|pull)(?![\w-])")
 # a brief that hands the child the landing itself: "then push main yourself", "you merge and push"
 LANDING_GIVEN = re.compile(r"\b(?:push|merg|land)\w*\b[^.\n]{0,60}\byourself\b|\byou (?:may |can |then )?"
-                           r"(?:merge|push|land)\b", re.I)
+                           r"(?:merge|push|land)\b"
+                           # a fixer closing issues lands its own green issue commits, by ezexe's push-at-once rule
+                           r"|\b(?:clos|fix|resolv)\w*\b[^.\n]{0,40}\bissues?\b|\bCloses #\d+|\bissues? #\d+", re.I)
 
 
 def h_branch_guard(payload):
@@ -1685,7 +1691,7 @@ def h_branch_guard(payload):
     elif name in SHELL_TOOLS and BRANCH_MOVE.search(QUOTED.sub("''", str(inp.get("command") or ""))):
         what = "moving the checkout to another branch, which in a shared checkout moves the parent's too"
     elif name in SHELL_TOOLS and LANDING.search(QUOTED.sub("''", str(inp.get("command") or ""))) \
-            and not LANDING_GIVEN.search(str(s.get("task") or "")):
+            and not LANDING_GIVEN.search(str(s.get("task") or "")) and not s.get("landingGiven"):
         verb = LANDING.search(QUOTED.sub("''", str(inp.get("command") or ""))).group(1)
         RAN["branch_guard"] = f"git {verb}"
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
