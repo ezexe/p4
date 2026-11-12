@@ -275,16 +275,59 @@ def merge_jsonl(base, ours, theirs):
     return "".join(l + "\n" for _, _, l in sorted(rows)).encode("utf-8")
 
 
-def merge_plan(ours, theirs):
-    """A session's plan from two machines: step by step by address, the later status winning; the side of the
-    higher version gives the rest."""
+def _union_tasks(into, extra):
+    """Tasks of both sides by id, the later status winning."""
+    have = {t.get("id"): t for t in into if t.get("id")}
+    for t in extra or []:
+        mine = have.get(t.get("id"))
+        if mine is None:
+            into.append(dict(t))
+            have[t.get("id")] = into[-1]
+        elif t.get("status") not in (None, "open") and mine.get("status") in (None, "open"):
+            mine["status"] = t["status"]
+    return into
+
+
+def merge_plan(ours, theirs, base=None):
+    """A session's plan from two machines. The side of the higher version gives the order and the rest. A step is
+    matched by its words, else by its address while the other side left that step's words as the base had them;
+    the later status wins and both sides' tasks are kept by id. A step only the lower side added since the base is
+    kept after the others, never lost (MP1)."""
     a, b = json.loads(ours), json.loads(theirs)
     hi, lo = (a, b) if int(a.get("version") or 0) >= int(b.get("version") or 0) else (b, a)
-    other = {x.get("addr"): x for x in lo.get("steps") or []}
-    for st in hi.get("steps") or []:
-        o = other.get(st.get("addr"))
-        if o and STATUS_ORDER.get(o.get("status"), 0) > STATUS_ORDER.get(st.get("status"), 0):
+    try:
+        was = json.loads(base) if base else {}
+    except ValueError:
+        was = {}
+    base_text = {x.get("addr"): x.get("content", "") for x in was.get("steps") or []}
+    base_words = set(base_text.values())
+    steps = hi.setdefault("steps", [])
+    by_words = {x.get("content", ""): x for x in steps}
+    by_addr = {x.get("addr"): x for x in steps}
+    for o in lo.get("steps") or []:
+        words = o.get("content", "")
+        st = by_words.get(words)
+        if st is None and base_text.get(o.get("addr")) == words:
+            st = by_addr.get(o.get("addr"))     # the higher side reworded this step; the lower left it as it was
+        if st is None:
+            if words in base_words or not words:
+                continue                          # the higher side removed it
+            st = dict(o)
+            if st.get("addr") in by_addr:         # its address is taken: the next free one under the same root
+                root = st["addr"].rsplit(".", 1)[0] if "." in str(st["addr"]) else ""
+                n = len(steps) + 1
+                while (f"{root}.{n}" if root else str(n)) in by_addr:
+                    n += 1
+                st["addr"] = f"{root}.{n}" if root else str(n)
+            st.pop("tasks", None)
+            steps.append(st)
+            by_words[words], by_addr[st["addr"]] = st, st
+        if STATUS_ORDER.get(o.get("status"), 0) > STATUS_ORDER.get(st.get("status"), 0):
             st["status"] = o["status"]
+        if o.get("tasks"):
+            st["tasks"] = _union_tasks(st.setdefault("tasks", []), o["tasks"])
+    if lo.get("loose"):
+        hi["loose"] = _union_tasks(hi.setdefault("loose", []), lo["loose"])
     return (json.dumps(hi, ensure_ascii=False, indent=1, sort_keys=True) + "\n").encode("utf-8")
 
 
@@ -311,7 +354,7 @@ def settle(path, ref, model_side, sides=None):
         return merge_jsonl(base, ours, theirs), "session tree: both sides' rows, by time"
     try:
         if PHI_PLAN.match(path):
-            return merge_plan(ours, theirs), "plan: step by step, the later status"
+            return merge_plan(ours, theirs, base), "plan: step by step, the later status, both sides' steps"
         if PHI_ANCHOR.match(path):
             return merge_anchor(ours, theirs), "anchor: the higher version, whole"
     except ValueError:

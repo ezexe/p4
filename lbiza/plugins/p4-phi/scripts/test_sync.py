@@ -164,6 +164,28 @@ class Sync(unittest.TestCase):
         self.assertEqual(plan["steps"][1]["content"], "b, revised")
         self.assertEqual(plan["steps"][0]["status"], "completed", "the later status wins, from either side")
 
+    def test_merge_plan_keeps_the_lower_sides_new_steps_and_tasks(self):
+        """MP1: the lower version's added step and its tasks were lost."""
+        base = {"version": 1, "steps": [{"addr": "1", "content": "a", "status": "pending"},
+                                        {"addr": "2", "content": "b", "status": "pending"}]}
+        lo = {"version": 2, "steps": [{"addr": "1", "content": "a", "status": "in_progress",
+                                       "tasks": [{"id": "t1", "status": "open"}]},
+                                      {"addr": "2", "content": "b", "status": "pending"},
+                                      {"addr": "3", "content": "c, added here", "status": "pending"}]}
+        hi = {"version": 3, "steps": [{"addr": "1", "content": "a", "status": "pending",
+                                       "tasks": [{"id": "t2", "status": "open"}]},
+                                      {"addr": "2", "content": "b, reworded", "status": "pending"},
+                                      {"addr": "3", "content": "d, added there", "status": "pending"}]}
+        out = json.loads(sync.merge_plan(json.dumps(lo), json.dumps(hi), json.dumps(base)))
+        words = [x["content"] for x in out["steps"]]
+        self.assertEqual(words, ["a", "b, reworded", "d, added there", "c, added here"])
+        self.assertEqual(out["steps"][3]["addr"], "4", "a taken address moves to the next free one")
+        self.assertEqual(out["steps"][0]["status"], "in_progress")
+        self.assertEqual(sorted(t["id"] for t in out["steps"][0]["tasks"]), ["t1", "t2"])
+        removed = dict(hi, steps=hi["steps"][:2])
+        out = json.loads(sync.merge_plan(json.dumps(lo), json.dumps(removed), json.dumps(base)))
+        self.assertNotIn("b", [x["content"] for x in out["steps"]], "a base step the higher side reworded stays gone")
+
     def test_without_push_nothing_leaves(self):
         self.machine(self.win, "win", "2026-11-05 10:00", "Z:/c", [2, 2])
         main = self.tip("main")
