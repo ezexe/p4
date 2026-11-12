@@ -339,8 +339,8 @@ class Me:
         self.hint = ""
         self.cli = str(payload.get("session_id") or os.environ.get("CLAUDE_CODE_SESSION_ID") or "")
         host = os.environ.get("CLAUDE_CODE_HOST_SESSION_ID") or ""
-        if self.cli and host and host == "local_" + self.cli:
-            self.cli = ""                              # the host's own id, its prefix dropped: not a CLI session
+        # FB1: a CLI id equal to the host id without "local_" is normal: the app gives many started sessions that pair
+        # (58 of 396 records, the newest children among them). Treating it as a stray id took their background away.
         self.rec = app_record(session or host) if (session or host) else record_of_cli(self.cli)
         self.id = session or host or str(self.rec.get("sessionId") or "") or self.cli
         project = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()

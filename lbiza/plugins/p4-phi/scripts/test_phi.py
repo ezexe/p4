@@ -417,6 +417,17 @@ class Background(unittest.TestCase):
         self.assertEqual([(r["hook"], r["spawnedFrom"]) for r in self.t.log(KID)],
                          [(START, TOP), (PROMPT, TOP), (PROMPT, TOP)])
 
+    def test_a_child_whose_cli_id_is_its_host_id_unprefixed_still_gets_its_background(self):
+        # FB1: the app gives many started sessions a CLI id equal to the host id without "local_"
+        same = KID2.removeprefix("local_")
+        self.t.cli(TOP, "note", "The ports table is written by flush_rows in export/flush.py", "--source", "x")
+        context(self.t.hook(START, KID2, {"hook_event_name": "SessionStart", "source": "startup"}, cli=same,
+                            CLAUDE_CODE_SESSION_ID=same))
+        text = context(self.t.hook(PROMPT, KID2, {"hook_event_name": "UserPromptSubmit", "prompt": HANDED},
+                                   cli=same, CLAUDE_CODE_SESSION_ID=same))
+        self.assertIn("background for this session", text)
+        self.assertIn(TASK, text)
+
     def test_background_missed_at_the_start_comes_with_the_first_message(self):
         self.assertIn(TASK, context(self.t.say(KID, HANDED)))
 
@@ -661,12 +672,13 @@ class Rules(unittest.TestCase):
 
 
 class Ids(unittest.TestCase):
-    def test_the_hosts_id_without_its_prefix_is_no_cli_session(self):
+    def test_the_hosts_id_without_its_prefix_is_a_real_cli_session(self):
+        # FB1: 58 of the app's 396 records pair the two ids this way; it is no stray id
         old = {k: os.environ.get(k) for k in ("CLAUDE_CODE_HOST_SESSION_ID", "CLAUDE_CODE_SESSION_ID")}
         os.environ["CLAUDE_CODE_HOST_SESSION_ID"] = "local_26c9fe71-aaaa"
         try:
             me = phi.Me({"session_id": "26c9fe71-aaaa"}, p4=tempfile.mkdtemp())
-            self.assertEqual(me.cli, "")
+            self.assertEqual(me.cli, "26c9fe71-aaaa")
             self.assertEqual(me.id, "local_26c9fe71-aaaa")
         finally:
             for k, v in old.items():
