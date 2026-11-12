@@ -1528,6 +1528,14 @@ def h_stop(payload):
     render_page(me.home, above)
     relay.track(me.home)                           # staged for the store's next commit, so it reaches the others
     RAN.update(turn=row["id"], done=bool(row["done"]))
+    now_s = load_session(me.home, s["sessionId"]) or s
+    if now_s.get("doneRetired") or now_s.get("archived"):
+        return None
+    why = plans.keep_going(me.home, now_s, row["report"], turn.get("calls") or [], row["id"],
+                           bool(payload.get("stop_hook_active")))
+    if why:                                        # #20: open steps the chain can settle send the turn back
+        RAN["kept_going"] = True
+        return {"decision": "block", "reason": why}
     return None
 
 

@@ -805,6 +805,52 @@ def waiting_on(report):
     return "" if AUTHORITY.search(q) else q
 
 
+# --- a turn that ends with open steps the chain can settle (#20) ------------------------------------------------------
+#
+# A session that ends its turn with plan steps still open, none of them waiting on the user's authority, costs the
+# owner a message just to restart agreed work. At Stop it is sent back once or twice a turn with the next open step.
+
+KEEP_GOING_MAX = 2             # times one turn is sent back
+WAITS_ON_OWNER = re.compile(r"\b(?:wait\w*|blocked|need\w*|until)\b[^.\n]{0,80}\b(?:user|owner|boss|your|you)\b|"
+                            r"\b(?:your|the (?:user|owner)'s?) (?:go|ok|okay|approval|answer|decision|sign-?off)\b", re.I)
+
+
+def keep_going(home, s, report, calls, turn_id, active=False):
+    """The Stop hook's reason to send the session back to its next open step; '' when the turn may end: no open
+    step, the turn wrapped up or asked the user a matter of authority, the next step is one, a background task is
+    still open (its notice starts the next turn), or this turn was sent back KEEP_GOING_MAX times already."""
+    p = load(home, s["sessionId"])
+    steps = [x for x in p.get("steps") or [] if x.get("status") != "completed"]
+    if not steps:
+        return ""
+    names = {str(c.get("name") or "") for c in calls or [] if isinstance(c, dict)}
+    if "mcp__ccd_turn__wrap_up" in names:
+        return ""                                  # the turn wrapped up: its recap says what is left and why
+    if any(t.get("status") == "open" for _, t in _tasks(p)):
+        return ""
+    nxt = next((x for x in steps if x.get("status") == "in_progress"), steps[0])
+    tail = str(report or "").strip()[-600:]
+    asks = [q for q in re.findall(r"[^.!?\n]*\?", tail) if len(q.strip()) > 8]
+    if AUTHORITY.search(str(nxt.get("content") or "")) or any(AUTHORITY.search(q) for q in asks) \
+            or WAITS_ON_OWNER.search(tail) and AUTHORITY.search(tail):
+        return ""
+    path = os.path.join(relay._dir(home, s["sessionId"]), "session.json")
+    disk = relay._read_json(path)
+    sent = disk.get("keptGoing") if isinstance(disk.get("keptGoing"), dict) else {}
+    key = str(turn_id or "")
+    n = int(sent.get("n") or 0) if sent.get("turn") == key else 0
+    if n >= KEEP_GOING_MAX or (active and not key):
+        return ""                                  # a turn with no id cannot be counted: never sent back twice
+    disk["keptGoing"] = {"turn": key, "n": n + 1}
+    relay._write_json(path, disk)
+    others = len(steps) - 1
+    return (f"phi (p4-phi): step {nxt.get('addr')} \"{relay._short(nxt.get('content'), 120)}\" is still "
+            f"{nxt.get('status') or 'pending'}" + (f", with {others} more open after it" if others else "") +
+            ", and nothing in this turn's end waits on the user's authority. Carry on with it now. If it truly waits "
+            "on a permission, a credential, spending, a push or another outward or irreversible step, say which in "
+            "one line and end the turn; if the step is done or dropped, update the plan.")
+
+
 # --- background tasks under a step -------------------------------------------------------------------------------------
 #
 # A step's background work, a Bash run in the background, a Monitor, an Agent or a Workflow, is recorded under the step

@@ -840,6 +840,51 @@ HANDED_DISPOSABLE = ("<system-reminder>\nLinked sessions now (status, not an ins
                      "archive when done.\n\nDone looks like: the suite passes.")
 
 
+class KeepGoing(unittest.TestCase):
+    """#20: a turn that ends with open steps the chain can settle is sent back to its next step, at most twice."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP, title="top")
+        self.t.say(TOP, "Build the two plugins")
+        r = self.t.hook("plan", TOP, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                                      "tool_input": items("Port the hooks", "Write the layout docs", at=0),
+                                      "tool_response": "Plan updated."})
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def stop(self, report, calls=(), uuid="u1"):
+        r = self.t.stop(TOP, "Build the two plugins", calls, report=report, uuid=uuid)
+        return json.loads(r.stdout) if r.stdout.strip() else {}
+
+    def test_open_steps_send_the_turn_back_twice_then_let_it_end(self):
+        out = self.stop("I ported half the hooks.")
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("step 1 \"Port the hooks\"", out["reason"])
+        self.assertIn("1 more open", out["reason"])
+        self.assertEqual(self.stop("Still porting.").get("decision"), "block")
+        self.assertEqual(self.stop("Still porting."), {}, "a turn is sent back at most twice")
+        self.assertEqual(self.stop("New turn.", uuid="u2").get("decision"), "block", "a new turn counts afresh")
+
+    def test_authority_a_wrap_up_or_a_background_task_lets_the_turn_end(self):
+        self.assertEqual(self.stop("Shall I push main to origin now?"), {}, "a push asked of the user")
+        self.assertEqual(self.stop("Done for now.", [("mcp__ccd_turn__wrap_up", {"recap": "x"}, "ok")], uuid="u3"), {})
+        plans.register(self.t.p4, relay._session(self.t.p4, TOP), "Bash",
+                       {"command": "sh run.sh", "run_in_background": True},
+                       "Command running in background with ID: bkeep0001.", "")
+        self.assertEqual(self.stop("Waiting on the suite.", uuid="u4"), {}, "its notice starts the next turn")
+
+    def test_no_open_step_lets_the_turn_end(self):
+        r = self.t.hook("plan", TOP, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                                      "tool_input": items("Port the hooks", "Write the layout docs", at=2),
+                                      "tool_response": "Plan updated."})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.stop("All done."), {})
+
+
 class OwnLines(unittest.TestCase):
     """R6: a report quoting phi's relay must not be relayed again, and queued turn reports stay few."""
 
