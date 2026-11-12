@@ -77,6 +77,12 @@ phi/models/lookups.db*
 phi/models/view/
 phi/models/*.tmp
 .layout.lock
+phi/sessions/*/log.jsonl
+phi/sessions/*/session.md
+phi/sessions.md
+phi/rules.md
+phi/catchup.json
+phi/**/*.tmp
 __pycache__/
 *.pyc
 *.png

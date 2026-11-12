@@ -56,7 +56,7 @@ MODEL_PREFIX = ("models/ranker",)
 MODEL_EXT = (".pt", ".phid")
 INDEX_LINE = re.compile(rb"^- \[[^\]]+\]\([^)]+\)")        # `- [Title](file.md) ...`, as memory/MEMORY.md lists
 NAME, EMAIL = "p4-sync", "p4-sync@users.noreply.github.com"
-SEED = 11     # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
+SEED = 12     # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
 
 
 def git(*args, check=True, cwd=None):
@@ -253,11 +253,52 @@ def seeded_defaults():
         return None
 
 
+PHI_JSONL = re.compile(r"^phi/(?:sessions/[^/]+/(?:turns|notes|reports)|reports)\.jsonl$")
+PHI_PLAN = re.compile(r"^phi/sessions/[^/]+/plan\.json$")
+PHI_ANCHOR = re.compile(r"^phi/sessions/[^/]+/anchor\.json$")
+STATUS_ORDER = {"pending": 0, "in_progress": 1, "completed": 2}
+
+
+def merge_jsonl(base, ours, theirs):
+    """Both sides' rows of a session-tree log, each once, in time order."""
+    rows, seen = [], set()
+    for data in (base, ours, theirs):
+        for line in (data or b"").decode("utf-8", "replace").splitlines():
+            if not line.strip() or line in seen:
+                continue
+            seen.add(line)
+            try:
+                when = str(json.loads(line).get("time") or "")
+            except (ValueError, AttributeError):
+                when = ""
+            rows.append((when, len(rows), line))
+    return "".join(l + "\n" for _, _, l in sorted(rows)).encode("utf-8")
+
+
+def merge_plan(ours, theirs):
+    """A session's plan from two machines: step by step by address, the later status winning; the side of the
+    higher version gives the rest."""
+    a, b = json.loads(ours), json.loads(theirs)
+    hi, lo = (a, b) if int(a.get("version") or 0) >= int(b.get("version") or 0) else (b, a)
+    other = {x.get("addr"): x for x in lo.get("steps") or []}
+    for st in hi.get("steps") or []:
+        o = other.get(st.get("addr"))
+        if o and STATUS_ORDER.get(o.get("status"), 0) > STATUS_ORDER.get(st.get("status"), 0):
+            st["status"] = o["status"]
+    return (json.dumps(hi, ensure_ascii=False, indent=1, sort_keys=True) + "\n").encode("utf-8")
+
+
+def merge_anchor(ours, theirs):
+    """An anchor is made again at the next Stop: the side of the higher version, whole."""
+    a, b = json.loads(ours), json.loads(theirs)
+    return ours if int(a.get("version") or 0) >= int(b.get("version") or 0) else theirs
+
+
 def structured(path):
     """A file whose lines git must never merge by itself: settings (a clean textual merge of two machines' p4.json
     left `recall` holding its keys twice, measured 2026-11-10) and the store's entries."""
     low = logical(path).lower()
-    return low.endswith(".json") or (low.startswith("store/") and low.endswith(".md"))
+    return low.endswith(".json") or (low.startswith("store/") and low.endswith(".md")) or bool(PHI_JSONL.match(path))
 
 
 def settle(path, ref, model_side, sides=None):
@@ -266,6 +307,15 @@ def settle(path, ref, model_side, sides=None):
     base, ours, theirs = sides or (show(f":1:{path}"), show(f":2:{path}"), show(f":3:{path}"))
     if ours is None or theirs is None:
         return (ours if ours is not None else theirs), "kept (the other side deleted it)"
+    if PHI_JSONL.match(path):
+        return merge_jsonl(base, ours, theirs), "session tree: both sides' rows, by time"
+    try:
+        if PHI_PLAN.match(path):
+            return merge_plan(ours, theirs), "plan: step by step, the later status"
+        if PHI_ANCHOR.match(path):
+            return merge_anchor(ours, theirs), "anchor: the higher version, whole"
+    except ValueError:
+        pass
     if logical(path) == LOG:
         return merge_log(base, ours, theirs), "training log: both sides' rounds, by time"
     if is_model(path):

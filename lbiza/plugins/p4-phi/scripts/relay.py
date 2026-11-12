@@ -650,3 +650,58 @@ def child_paths(home, s):
     """The paths a child's start is cut to: its shard, else those its task names; [] when neither names any."""
     base = s.get("cwd") or _session(home, _parent(s)).get("cwd") or ""
     return shard_of(s) or paths_in(s.get("task") or "", base)
+
+
+# --- phi/ tracked in the store -------------------------------------------------------------------------------------------
+#
+# The session tree reaches the other machines through the store's git, like the rest of it: session.json, turns.jsonl,
+# notes.jsonl, reports.jsonl, plan.json and anchor.json are tracked; what is per machine or made again from them is
+# ignored. The ignore lines are made sure of here, before anything is added, since the recall hook that seeds the
+# rest of .gitignore runs beside this one at a start.
+
+IGNORED = ("phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/sessions.md", "phi/rules.md",
+           "phi/catchup.json", "phi/**/*.tmp")
+TRACKED_MARK = "p4-phi-tracked"
+
+
+def _ignore_lines(home):
+    gi = os.path.join(home, ".gitignore")
+    try:
+        with open(gi, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        text = ""
+    have = {x.strip() for x in text.splitlines()}
+    missing = [x for x in IGNORED if x not in have]
+    if missing:
+        with open(gi, "a", encoding="utf-8", newline="\n") as f:
+            f.write(("" if not text or text.endswith("\n") else "\n") + "# the session tree's per-machine and made-again "
+                    "files (p4-phi)\n" + "".join(x + "\n" for x in missing))
+    return bool(missing)
+
+
+def track(home, first_only=False):
+    """Stage phi/ in the store's git; the first time, commit it on its own. Returns True when it committed."""
+    top = _git(home, "rev-parse", "--show-toplevel")
+    if not top or top.returncode != 0 or norm(top.stdout.strip()) != norm(home):
+        return False
+    gd = _git(home, "rev-parse", "--absolute-git-dir")
+    mark = os.path.join(gd.stdout.strip(), TRACKED_MARK) if gd and gd.returncode == 0 else ""
+    first = bool(mark) and not os.path.exists(mark)
+    if first_only and not first:
+        return False
+    changed = _ignore_lines(home)
+    _git(home, "add", "-A", "--", "phi", ".gitignore" if changed else "phi")
+    if not first:
+        return False
+    paths = ["phi"] + ([".gitignore"] if changed else [])
+    staged = _git(home, "diff", "--cached", "--name-only", "--", *paths)
+    if staged and staged.stdout.strip():
+        _git(home, "-c", "user.name=p4", "-c", "user.email=p4@localhost", "commit", "-q", "--no-verify", "-m",
+             "phi: the session tree, tracked", "--", *paths)
+    try:
+        with open(mark, "w", encoding="utf-8") as f:
+            f.write("tracked\n")
+    except OSError:
+        pass
+    return True

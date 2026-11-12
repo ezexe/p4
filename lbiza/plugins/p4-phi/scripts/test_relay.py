@@ -126,6 +126,25 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn("eee555", ctx)
         self.assertNotIn("ddd444", ctx)
 
+    def test_phi_is_committed_once_without_logs_and_staged_after(self):
+        t = self.t
+        for args in (("init", "-q"), ("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty",
+                                       "-m", "store")):
+            subprocess.run(["git", "-C", t.p4, *args], check=True, capture_output=True)
+        self.assertTrue(relay.track(t.p4, first_only=True))
+        shown = subprocess.run(["git", "-C", t.p4, "show", "--name-only", "--format=%s", "HEAD"],
+                               capture_output=True, text=True).stdout.split()
+        self.assertEqual(shown[:4], ["phi:", "the", "session", "tree,"])
+        files = [x for x in shown if x.startswith("phi/")]
+        self.assertTrue(any(x.endswith("/session.json") for x in files))
+        self.assertFalse(any(x.endswith(("log.jsonl", "session.md")) for x in files), "per machine or made again")
+        self.assertFalse(relay.track(t.p4, first_only=True), "committed once")
+        t.cli(B, "note", "the session tree is tracked in the store now", "--source", "test")
+        relay.track(t.p4)
+        staged = subprocess.run(["git", "-C", t.p4, "diff", "--cached", "--name-only"], capture_output=True,
+                                text=True).stdout
+        self.assertIn(f"phi/sessions/{B}/notes.jsonl", staged, "after the first time, staged for the next commit")
+
     def test_overlapping_shards_are_told_on_both_sides(self):
         t = self.t
         r = t.cli(A, "shard", self.x("lib"))

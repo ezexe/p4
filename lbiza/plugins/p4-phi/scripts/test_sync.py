@@ -129,6 +129,41 @@ class Sync(unittest.TestCase):
         self.assertEqual(self.run_all("--push"), 0)
         self.assertEqual(self.tip("main"), tips, "a second run changes nothing")
 
+    def test_the_session_tree_merges_across_machines(self):
+        """phi/ tracked: a session's rows from both machines in time order, its plan step by step."""
+        sid = "local_s1"
+        base = {"steps": [{"addr": "1", "content": "a", "status": "in_progress"},
+                          {"addr": "2", "content": "b", "status": "pending"}], "current": "1", "version": 1}
+        for d in (self.win, self.mac):
+            sh(d, "git", "pull", "-q", "origin", "main")
+        write(self.win, f"phi/sessions/{sid}/plan.json", json.dumps(base, indent=1))
+        write(self.win, f"phi/sessions/{sid}/turns.jsonl", json.dumps({"time": "2026-11-12 10:00", "id": "t0"}) + "\n")
+        sh(self.win, "git", "add", "-A")
+        sh(self.win, "git", "commit", "-q", "-m", "tree")
+        sh(self.win, "git", "push", "-q", "origin", "HEAD:main", "HEAD:win", "HEAD:mac", "-f")
+        sh(self.mac, "git", "fetch", "-q", "origin")
+        sh(self.mac, "git", "reset", "-q", "--hard", "origin/mac")
+        win_plan = dict(base, version=2, current="2", steps=[dict(base["steps"][0], status="completed"),
+                                                             dict(base["steps"][1], status="in_progress")])
+        write(self.win, f"phi/sessions/{sid}/plan.json", json.dumps(win_plan, indent=1))
+        write(self.win, f"phi/sessions/{sid}/turns.jsonl", json.dumps({"time": "2026-11-12 11:00", "id": "win"}) + "\n", "a")
+        mac_plan = dict(base, version=3, steps=[base["steps"][0], dict(base["steps"][1], content="b, revised")])
+        write(self.mac, f"phi/sessions/{sid}/plan.json", json.dumps(mac_plan, indent=1))
+        write(self.mac, f"phi/sessions/{sid}/turns.jsonl", json.dumps({"time": "2026-11-12 10:30", "id": "mac"}) + "\n", "a")
+        for d, n in ((self.win, "win"), (self.mac, "mac")):
+            sh(d, "git", "add", "-A")
+            sh(d, "git", "commit", "-q", "-m", f"{n} tree")
+            sh(d, "git", "push", "-q", "origin", "HEAD")
+        self.assertEqual(self.run_all("--push"), 0)
+        out = os.path.join(os.path.dirname(self.origin), "out-tree")
+        sh(os.path.dirname(self.origin), "git", "clone", "-q", self.origin, out)
+        ids = [json.loads(l)["id"] for l in read(out, f"phi/sessions/{sid}/turns.jsonl").splitlines()]
+        self.assertEqual(ids, ["t0", "mac", "win"], "both machines' rows, each once, by time")
+        plan = json.loads(read(out, f"phi/sessions/{sid}/plan.json"))
+        self.assertEqual(plan["version"], 3, "the higher version gives the rest")
+        self.assertEqual(plan["steps"][1]["content"], "b, revised")
+        self.assertEqual(plan["steps"][0]["status"], "completed", "the later status wins, from either side")
+
     def test_without_push_nothing_leaves(self):
         self.machine(self.win, "win", "2026-11-05 10:00", "Z:/c", [2, 2])
         main = self.tip("main")
@@ -167,8 +202,9 @@ class Sync(unittest.TestCase):
         head = sh(self.win, "git", "rev-parse", "HEAD").strip()
         self.assertEqual((self.tip("main"), self.tip("win"), self.tip("mac")), (head, head, head))
         self.assertEqual(sh(self.win, "git", "rev-parse", "--abbrev-ref", "HEAD").strip(), "win")
-        self.assertIn("t-live", read(self.win, "models/labels.tsv"))
-        self.assertIn("the mac rule", read(self.win, "store/rules.md"))
+        # p4.py sync moves a flat store into the plugins' layout first (p4conf.migrate_layout)
+        self.assertIn("t-live", read(self.win, p4conf.rel("models", "labels.tsv")))
+        self.assertIn("the mac rule", read(self.win, p4conf.rel("store", "rules.md")))
         self.assertTrue(os.path.exists(os.path.join(self.win, ".github", "workflows", "p4-sync.yml")))
         self.assertEqual(sh(self.win, "git", "status", "--porcelain").strip(), "")
 

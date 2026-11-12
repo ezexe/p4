@@ -938,6 +938,7 @@ def h_session_start(payload):
     if not me.home or not me.id:
         return None
     p4conf.migrate_layout(me.home)        # the memory read below is where the other plugins will have moved it
+    relay.track(me.home, first_only=True)  # the session tree, committed on its own the first time
     configure(me.home)
     s = ensure_session(me.home, me.id, me.rec, me.cli)
     ran_for(s, me)
@@ -1068,6 +1069,7 @@ def h_stop(payload):
             RAN["anchor"] = a.get("version")
     render_page(me.home, s["sessionId"])
     render_page(me.home, above)
+    relay.track(me.home)                           # staged for the store's next commit, so it reaches the others
     RAN.update(turn=row["id"], done=bool(row["done"]))
     return None
 
