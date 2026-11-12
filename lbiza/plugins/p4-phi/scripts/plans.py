@@ -154,13 +154,16 @@ def record(home, s, inp, transcript=""):
     if not old.get("steps") and parent and root:
         ps = step_of(load(home, parent), root)
         old["rootText"] = (ps or {}).get("content", "")
-    keep = {st["addr"]: st.get("tasks") for st in old.get("steps") or [] if st.get("tasks")}
+    keep = {st.get("content", ""): st.get("tasks") for st in old.get("steps") or [] if st.get("tasks")}
     plan, started, revision = apply(old, inp, root or "")
-    for st in plan.get("steps") or []:            # a step's background tasks stay with it across a call
-        if st["addr"] in keep:
-            st["tasks"] = keep[st["addr"]]
-    if old.get("loose"):
-        plan["loose"] = old["loose"]
+    placed = set()
+    for st in plan.get("steps") or []:            # a task stays with its step's words, not its number (P6)
+        if st.get("content", "") in keep:
+            st["tasks"] = keep[st["content"]]
+            placed.add(st["content"])
+    plan["loose"] = list(old.get("loose") or []) + [t for c, ts in keep.items() if c not in placed for t in ts]
+    if not plan["loose"]:
+        plan.pop("loose")
     relay._write_json(_path(home, sid), plan)
     s["rootStep"] = root or ""
     spath = os.path.join(relay._dir(home, sid), "session.json")
@@ -431,9 +434,10 @@ TASK_ID = re.compile(r"(?:background with ID|task[_ -]?id|agentId|ID)[\"':\s=]+(
 NOTICE = re.compile(r"<task-id>\s*([^<\s]+)\s*</task-id>.*?<status>\s*([^<\s]+)\s*</status>"
                     r"(?:.*?<summary>(.*?)</summary>)?", re.S)
 NEAR_DONE_S = 600             # a task older than this may be near done: finish and record rather than stop
+STALE_TASK_S = 6 * 3600       # an open task older than this with no completion notice read is taken as unknown
 
 
-def register(home, s, tool, inp, response, cwd):
+def register(home, s, tool, inp, response, cwd, at_epoch=None):
     """Record a background task under the step in progress -> the task, or None when the call ran in the
     foreground or names no task id."""
     if tool == "Bash" and not inp.get("run_in_background"):
@@ -448,7 +452,12 @@ def register(home, s, tool, inp, response, cwd):
     paths = relay.paths_in(what, cwd)
     repos = {relay.repo_of(p) for p in paths} | ({relay.repo_of(cwd)} if cwd else set())
     task = {"id": m.group(1) or m.group(2), "tool": tool, "what": relay._short(what, 200), "heads": relay.heads(repos),
-            "paths": paths, "at": _now(), "epoch": int(__import__("time").time()), "status": "open"}
+            "paths": paths, "status": "open"}
+    import time as _t
+    epoch = int(at_epoch or _t.time())
+    task["epoch"], task["at"] = epoch, _t.strftime("%Y-%m-%d %H:%M", _t.localtime(epoch))
+    if any(t.get("id") == task["id"] for _, t in _tasks(load(home, s["sessionId"]))):
+        return None                               # the same launch read twice
     sid = s["sessionId"]
     p = load(home, sid)
     st = step_of(p, p.get("current") or "") if p.get("steps") else None
@@ -505,6 +514,10 @@ def check_tasks(home, s, plan):
              if nid != s["sessionId"] for m in n.get("marks") or []]
     for st, t in _tasks(plan):
         if t.get("status") != "open":
+            continue
+        if _t.time() - int(t.get("epoch") or 0) > STALE_TASK_S:
+            t["status"] = "unknown"               # long past with no notice read: finished, stopped or expired
+            changed = True
             continue
         why = []
         for h in t.get("heads") or []:

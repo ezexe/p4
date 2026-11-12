@@ -18,6 +18,7 @@ sys.path.insert(0, HERE)
 import plans  # noqa: E402
 import relay  # noqa: E402
 from test_phi import GRAND, KID, KID2, TOP, Tree, context  # noqa: E402
+import relay as _relay  # noqa: E402,F401
 
 A, B = KID, KID2
 
@@ -41,6 +42,44 @@ class Apply(unittest.TestCase):
         self.assertEqual(rev["removed"], ["2.3"])
         top, _, _ = plans.apply({}, items("a", "b"), "")
         self.assertEqual([x["addr"] for x in top["steps"]], ["1", "2"])
+
+
+class Tasks(unittest.TestCase):
+    """RB1 and P6 of the marketplace test session: tasks stay with their step's words, and an old task is unknown."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP, title="top")
+        self.t.say(TOP, "Build it")
+        self.s = relay._session(self.t.p4, TOP)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_a_task_follows_its_steps_words_across_a_rewrite(self):
+        home = self.t.p4
+        plans.record(home, self.s, items("Run the smoke check", "Write the report"))
+        plans.register(home, self.s, "Bash", {"command": "sh smoke.sh", "run_in_background": True},
+                       "Command running in background with ID: bsmoke001.", "")
+        plans.record(home, self.s, items("Plan the layout", "Run the smoke check", "Write the report"))
+        p = plans.load(home, TOP)
+        self.assertEqual([st["addr"] for st in p["steps"] if st.get("tasks")], ["2"], "with its words, now step 2")
+        plans.record(home, self.s, items("Plan the layout", "Write the report"))
+        p = plans.load(home, TOP)
+        self.assertFalse(any(st.get("tasks") for st in p["steps"]))
+        self.assertEqual([t["id"] for t in p["loose"]], ["bsmoke001"], "its step is gone: loose, not on another step")
+
+    def test_a_task_long_past_with_no_notice_is_unknown_and_never_flagged(self):
+        import time as _t
+        home = self.t.p4
+        plans.record(home, self.s, items("Run the smoke check", "Write the report"))
+        plans.register(home, self.s, "Bash", {"command": "sh smoke.sh", "run_in_background": True},
+                       "Command running in background with ID: bold00001.", "", at_epoch=int(_t.time()) - 86400)
+        lines, _ = plans.check_tasks(home, self.s, plans.load(home, TOP))
+        self.assertEqual(lines, [])
+        p = plans.load(home, TOP)
+        self.assertEqual(p["steps"][0]["tasks"][0]["status"], "open", "check_tasks reads; the boundary writes")
 
 
 class TreeOfPlans(unittest.TestCase):

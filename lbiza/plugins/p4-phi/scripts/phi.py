@@ -1239,6 +1239,17 @@ def once(home, sid, kind, payload):
 ROUTED = {}
 
 
+def epoch_of(stamp):
+    """Epoch seconds of a transcript timestamp, None when there is none."""
+    if not stamp:
+        return None
+    try:
+        from datetime import datetime
+        return int(datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).timestamp())
+    except ValueError:
+        return None
+
+
 def replay(me, s, transcript):
     """The plan calls and background launches of the transcript that no hook handled, applied in order -> the step
     boundary text of the last one, '' for none. A session whose hook list was frozen before recall's lookup entries
@@ -1246,15 +1257,18 @@ def replay(me, s, transcript):
     own entries, so its calls are read back here, at each message and each Stop, each once by its tool_use_id."""
     if not transcript or not os.path.exists(transcript):
         return ""
-    calls, results = [], {}
+    calls, results, notices, when = [], {}, [], {}
     for d in read_transcript(transcript):
         c = (d.get("message") or {}).get("content")
+        if d.get("type") == "user" and "<task-notification>" in json.dumps(c, default=str):
+            notices.append(json.dumps(c, default=str))
         for b in c if isinstance(c, list) else []:
             if not isinstance(b, dict):
                 continue
             if d.get("type") == "assistant" and b.get("type") == "tool_use" and b.get("name") in (
                     "mcp__ccd_turn__update_plan", "Bash", "PowerShell", "Monitor", "Agent", "Workflow"):
                 calls.append(b)
+                when[b.get("id")] = str(d.get("timestamp") or "")
             elif d.get("type") == "user" and b.get("type") == "tool_result":
                 results[b.get("tool_use_id")] = result_text(b)
     text = ""
@@ -1273,7 +1287,10 @@ def replay(me, s, transcript):
             text = plans.record(me.home, load_session(me.home, me.id) or s, payload["tool_input"], transcript) or text
         else:
             plans.register(me.home, load_session(me.home, me.id) or s, b["name"], payload["tool_input"],
-                           payload["tool_response"], s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or "")
+                           payload["tool_response"], s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or "",
+                           at_epoch=epoch_of(when.get(tid)))
+    if notices:                                    # every completion notice of the transcript, not only its tail
+        plans.pickup(me.home, me.id, "\n".join(notices))
     RAN["replayed"] = len(calls)
     return text
 
