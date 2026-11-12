@@ -736,6 +736,11 @@ class TopOrchestrates(unittest.TestCase):
         self.assertEqual(len(notes), 1, notes)
         self.assertIn(findings, notes[0])
         self.assertIn("Its findings, from its final report", notes[0])
+        head = "Check 2 result: both stores FAIL"
+        long = relay.findings_of({"report": head + "\n" + "detail line. " * 400})      # #34: 5,000+ characters
+        self.assertIn(head, long, "the head of a long report is kept")
+        self.assertTrue(long.endswith('...".'), "its tail is cut and marked")
+        self.assertLess(len(long), relay.FINDINGS_CHARS + 100)
         bare = relay.findings_of({"done": "done", "report": "Done."})
         self.assertIn("left no report text", bare)
         self.assertNotIn('"Done."', bare)

@@ -1196,7 +1196,8 @@ def findings_of(last):
         report = ""
     out = f"Shown done: \"{_short(done, 400)}\". " if done and not BARE.match(done) else ""
     if report:
-        cut = report if len(report) <= FINDINGS_CHARS else "... " + report[-(FINDINGS_CHARS - 4):]
+        # #34: a report leads with its result, so the head is kept and the tail cut
+        cut = report if len(report) <= FINDINGS_CHARS else report[:FINDINGS_CHARS - 3].rstrip() + "..."
         return out + f"Its findings, from its final report: \"{cut}\"."
     return out + "Its final turn left no report text with findings: read its transcript before relying on it."
 
