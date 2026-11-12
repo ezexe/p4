@@ -235,9 +235,9 @@ def set_shard(home, sid, paths, base):
 
 
 def _siblings(home, s):
+    """The live sessions beside this one: the same parent's, or for a top session every other top session in the
+    store's root, detached ones included, so tops relay to each other as siblings. An archived one is gone."""
     p = _parent(s)
-    if not p:
-        return {}
     return {k: v for k, v in _sessions(home).items() if k != s.get("sessionId") and _parent(v) == p
             and not gone(home, v)}
 

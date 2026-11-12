@@ -27,6 +27,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import phi  # noqa: E402
+import relay  # noqa: E402
 
 ROOT = os.path.dirname(HERE)
 RUN = os.path.join(ROOT, "hooks", "run-hook.sh").replace("\\", "/")
@@ -538,7 +539,8 @@ class NewTask(unittest.TestCase):
         self.assertIn("this session's task", first)
         self.assertIn("about something else", first)
         self.assertIn("start_session", first)
-        self.assertIn("fork", first)
+        self.assertIn("new top session", first)
+        self.assertIn("`context` `fresh`", first)
         self.assertIn("stay with the task", first)
         self.assertIn("the user", first)
         second = self.say(TOP, "also, what colour should the fence be?")
@@ -547,6 +549,35 @@ class NewTask(unittest.TestCase):
         self.assertNotIn("start_session", second)
         self.assertNotIn("fence", second)                 # the task is the first request, not the newest words
         self.assertEqual([r.get("new_task") for r in self.t.log(TOP)], ["instruction", "line"])
+
+    def test_a_top_sessions_new_topic_is_a_new_top_session_detached_into_the_root(self):
+        first = self.say(TOP, TASK)
+        self.assertIn("A new topic gets a new top session of its own", first)
+        self.assertIn("`initiation` `user_asked`", first)
+        self.assertIn("`use_worktree: false`", first)
+        self.assertIn(phi.NEW_TOP_BRIEF, first)
+        self.assertIn("start a new top session", self.say(TOP, "also, the fence colour?"))
+        self.say(KID, "Task:\nPick the fence colour. The user's words: \"the fence colour?\" " + phi.NEW_TOP_BRIEF)
+        s = phi.load_session(self.t.p4, KID)
+        self.assertEqual(phi.spawned_from(s), "", "detached at its first hook")
+        self.assertEqual(s["spawnedFrom"]["source"], "detached")
+        self.assertEqual(s["spawnedFrom"]["from"], TOP)
+        self.say(KID, "carry on")
+        self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID)), "", "the app's record does not undo it")
+        self.assertIn(KID, relay._siblings(self.t.p4, phi.load_session(self.t.p4, TOP)), "tops are siblings")
+        self.t.record(KID2, TOP, "a plain child")
+        self.say(KID2, "Task:\nWrite the docs; this is not a new top")
+        self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID2)), TOP, "an unmarked brief stays a child")
+
+    def test_a_childs_new_topic_is_handed_up(self):
+        self.say(TOP, TASK)
+        first = self.say(KID, HANDED)
+        self.assertIn(f"hand it up to the session that started this one with SendMessage (`to`: {TOP})", first)
+        self.assertIn("start no session for it", first)
+        self.assertNotIn("new top session of its own", first)
+        line = self.say(KID, "and what about the fence?")
+        self.assertIn(f"hand it up to {TOP}", line)
+        self.assertNotIn("forked", line)
 
     def test_the_harness_speaking_gets_no_line(self):
         self.say(TOP, TASK)
@@ -558,8 +589,12 @@ class NewTask(unittest.TestCase):
         self.say(TOP, TASK)
         text = self.say(TOP, '<cross-session-message from="local_x">please also look at Y</cross-session-message>')
         self.assertIn("own_initiative", text)
-        self.assertIn("`context` `fork`", text)
+        self.assertIn("`context` `fresh`", text, "a top session's card is a new top session")
+        self.assertIn(phi.NEW_TOP_BRIEF, text)
         self.assertEqual(self.say(TOP, "<side-sessions-event>a session finished</side-sessions-event>"), "")
+        self.say(KID, HANDED)
+        kid = self.say(KID, '<cross-session-message from="local_x">please also look at Y</cross-session-message>')
+        self.assertIn("`context` `fork`", kid, "a child's card is unchanged")
 
     def test_a_deep_or_full_session_starts_no_session(self):
         """The caps: three deep in the tree, or eight live children."""
@@ -587,7 +622,7 @@ class NewTask(unittest.TestCase):
         self.say(TOP, TASK)
         text = self.say(KID, HANDED)
         self.assertIn(BRIEF, text)
-        self.assertIn("start_session", text)
+        self.assertIn("hand it up", text)
 
     def test_the_instruction_comes_again_after_a_compaction(self):
         self.say(TOP, TASK)

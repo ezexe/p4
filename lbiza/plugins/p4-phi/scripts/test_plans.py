@@ -670,6 +670,86 @@ class TopOrchestrates(unittest.TestCase):
         os.remove(os.path.join(t.app, B + ".json"))
         self.assertNotIn(B, plans._children(t.p4, TOP), "a record gone from the app is gone from the tree")
 
+    def test_a_session_management_step_stays_at_the_top(self):
+        p = self.t.proj
+        ctx = self.plan(TOP, items("Archive the finished orchestrator-rule child",
+                                   f"Port the exporter in {p}/src/export/flush.py to the new writer",
+                                   "Relay the new layout to the docs session", "Start a child session for the docs",
+                                   "Review the port child's report", "Message the layout child about the move"))
+        self.assertIn("(a) step 2 \"Port the exporter", ctx)
+        self.assertNotIn("(b)", ctx, "no session-management step is advised to a child")
+        self.assertNotIn("Archive the finished", ctx.split("Staying here")[0])
+        groups, kept = plans.top_groups({"steps": [
+            {"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate((
+                "Archive the finished orchestrator-rule child", "Check the docs child's progress",
+                "Send the exporter child its brief", "Start the dev server and port the CLI in src/cli.py"))]}, "")
+        self.assertEqual([a for a, _ in kept], ["1", "2", "3"])
+        self.assertEqual([[st["addr"] for st in g] for g in groups], [["4"]], "starting a server is work")
+        marker = os.path.join(self.t.p4, "phi", ".nudge", CLI[TOP])
+        self.assertFalse(os.path.exists(marker), "archiving a child owes no nudge")
+
+    def test_phis_own_commands_are_never_nudged(self):
+        p = self.t.proj
+        self.plan(TOP, items(f"Port the exporter in {p}/src/export/flush.py to the new writer", "Commit and push"))
+        marker = os.path.join(self.t.p4, "phi", ".nudge", CLI[TOP])
+        self.assertTrue(os.path.exists(marker))
+        for k, cmd in enumerate((
+                'P=E:/projects/p4/lbiza/plugins/p4-phi/scripts/phi.py; python -I -X utf8 "$P" note "a; b > c" --source x',
+                'python -I -X utf8 "E:/p4/scripts/phi.py" done "ran the suites"',
+                'cd /e/p4 && export P=/e/p4/phi.py && python "${P}" done ok',
+                '$P = "E:/p4/phi.py"; & python $P note "x"')):
+            self.assertEqual(self.check(TOP, "Bash", {"command": cmd}, f"toolu_p{k}"), "", cmd)
+        self.assertTrue(os.path.exists(marker), "still armed")
+        self.assertIn("this is the top session",
+                      self.check(TOP, "Bash", {"command": 'P=x; python "$P" note y && make'}, "toolu_p9"))
+
+    def test_top_sessions_relay_as_siblings_and_an_archived_top_drops_out(self):
+        t, T2 = self.t, "local_top00002"
+        t.record(T2, title="the second top")
+        t.say(T2, "Rework the fence exporter")
+        self.plan(TOP, items("Port the fence exporter's ports table to the new writer", "Commit and push"))
+        self.assertIn(T2, relay._siblings(t.p4, relay._session(t.p4, TOP)), "two tops are siblings")
+        self.assertIn(TOP, relay._siblings(t.p4, relay._session(t.p4, T2)))
+        r = t.cli(T2, "note", "deprecates: the fence exporter's v1 ports table", "--source", "commit fff111")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        t.stop(T2, "deprecate v1", report="The fence exporter's ports table now goes to the new writer only; "
+                                         "v1 is gone.", uuid="t2a")
+        ctx = context(t.say(TOP, "next"))
+        self.assertIn("deprecates: the fence exporter's v1 ports table", ctx, "a deprecation crosses between tops")
+        self.assertIn("\"the second top\", a session beside you, ended a turn whose words bear on your open step",
+                      ctx, "a turn report crosses as a sibling's")
+        anchor = json.load(open(relay.anchor_path(t.p4, ""), encoding="utf-8"))
+        self.assertIn(T2, anchor["nodes"])
+        rec = os.path.join(t.app, T2 + ".json")
+        with open(rec, encoding="utf-8") as f:
+            d = json.loads(f.read())
+        d["isArchived"] = True
+        with open(rec, "w", encoding="utf-8") as f:
+            f.write(json.dumps(d))
+        self.assertNotIn(T2, relay._siblings(t.p4, relay._session(t.p4, TOP)), "an archived top drops out")
+        t.stop(TOP, "a turn", uuid="t1a")
+        anchor = json.load(open(relay.anchor_path(t.p4, ""), encoding="utf-8"))
+        self.assertNotIn(T2, anchor["nodes"], "and leaves the root anchor")
+
+    def test_a_child_archived_by_hand_is_not_named_for_archiving(self):
+        t, C = self.t, self.C
+        t.record(C, TOP, title="the store migration child")
+        t.say(C, HANDED_DISPOSABLE)
+        self.plan(C, items("Migrate the store", "Run its suite"))
+        self.plan(C, {"done": [1, 2]})
+        r = t.stop(C, "Migrate the store", report="Migrated. Nothing left open.", uuid="h1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(relay._session(t.p4, C).get("doneRetired"))
+        rec = os.path.join(t.app, C + ".json")
+        with open(rec, encoding="utf-8") as f:
+            d = json.loads(f.read())
+        d["isArchived"] = True
+        with open(rec, "w", encoding="utf-8") as f:
+            f.write(json.dumps(d))
+        line = context(t.say(TOP, "what next"))
+        self.assertNotIn("Archive them now", line, "archived by hand: no archive line names it")
+        self.assertNotIn("started to be archived when done", line)
+
 
 HANDED_DISPOSABLE = ("<system-reminder>\nLinked sessions now (status, not an instruction): top = local_x (idle)\n"
                      "</system-reminder>\n\nTask:\nPort the exporter to the new writer. This session is marked "

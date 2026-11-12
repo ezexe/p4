@@ -348,6 +348,8 @@ WAITS = re.compile(r"\b(wait(?:s|ing)?|until|confirm\w*|verif\w*|can go|when\b[^
 QUICK_WORDS = 4               # a step of fewer content words is a quick thing, done here
 LANDS = re.compile(r"^\W*(?:run\b[^,.;]*\b(?:tests?|suites?|checks?)|tests?|verify|check|report|review|wrap)\b"
                    r"|\b(?:commit|merge|push|ship|release|land|fast-forward)\b", re.I)   # checks or lands others' work
+MANAGES = re.compile(r"\b(?:un)?(?:archiv|relay|messag|start|stop|review|check|brief|spawn|ask|tell|nudg)\w*\b"
+                     r"[^.;]*?\b(?:child(?:ren)?|(?:sub-?)?sessions?)\b", re.I)   # manages a child session: orchestration
 
 
 def judge(plan, cwd):
@@ -367,6 +369,8 @@ def judge(plan, cwd):
             kept.append((a, f"waits on or relays other work (\"{wait.group(0)}\")"))
         elif LANDS.search(text):
             kept.append((a, "checks or lands the other steps' work"))
+        elif MANAGES.search(text):
+            kept.append((a, "manages a child session"))
         elif shared:
             kept.append((a, f"shares {relay.show(shared[0][1], cwd)} with step {shared[0][0]}"))
         elif len(words(text)) < QUICK_WORDS:
@@ -418,7 +422,8 @@ def split_advice(home, s, plan, owner_turn, cap):
 # A session with no parent keeps itself free for orchestration: planning, relaying between sessions, decisions with
 # the user, and landing work. Every work step of its plan goes to a fresh child, not only the independent ones; a run
 # of serial work steps (one leaning on the step before it, or sharing a path with it) is one child that does them in
-# order. A step that checks or lands work (test-and-commit, merge, push, release) or waits on and relays work stays.
+# order. A step that checks or lands work (test-and-commit, merge, push, release), waits on and relays work, or
+# manages a child session (archives, relays to, messages, starts, reviews or checks one) stays.
 
 def top_groups(plan, cwd):
     """The open steps of a top session's plan -> ([[work steps one child does in order]], [(address, why it stays)])."""
@@ -429,6 +434,8 @@ def top_groups(plan, cwd):
         wait = WAITS.search(text)
         if LANDS.search(text):
             kept.append((st["addr"], "checks or lands the work"))
+        elif MANAGES.search(text):
+            kept.append((st["addr"], "manages a child session, which is orchestration"))
         elif wait:
             kept.append((st["addr"], f"waits on or relays work (\"{wait.group(0)}\")"))
         else:

@@ -382,6 +382,15 @@ class Me:
 
 # --- sessions --------------------------------------------------------------------------------------------------------
 
+def archived_already(home, sid):
+    """True when a child named for archiving is archived already: by hand in the app (`isArchived` in its record,
+    or its record gone), or marked so in its session.json."""
+    c = load_session(home, sid) if sid else {}
+    if not c:
+        return False
+    return bool(c.get("archived")) or relay.archived_in_app(c)
+
+
 def load_session(home, sid):
     s = read_json(os.path.join(session_dir(home, sid), "session.json")) if sid else {}
     if isinstance(s.get("backgroundGivenFor"), dict):
@@ -765,6 +774,20 @@ TOP_RULE = ("This is the top session of its tree, so it keeps itself free for or
             "done\"; the steps that test-and-commit, merge, push or release stay here.")
 
 
+NEW_TOP = re.compile(r"\b(?:this|it) (?:session )?is a new top session\b", re.I)
+NEW_TOP_BRIEF = "This session is a new top session, orchestrating its own topic."
+
+
+def new_top_route(owner_turn=True):
+    """How a top session starts a new top session for a topic outside its task."""
+    how = ("Start it with `mcp__ccd_session__start_session`, `initiation` `user_asked`" if owner_turn else
+           "This turn was started by another session, so propose it as a card: `mcp__ccd_session__start_session`, "
+           "`initiation` `own_initiative`, which the user starts with a click")
+    return (f"{how}, `context` `fresh`, `use_worktree: false`; its brief: the topic, the user's words quoted, and "
+            f"the line \"{NEW_TOP_BRIEF}\" phi detaches it into the root at its first hook, where every top session "
+            f"relays to the others as siblings.")
+
+
 def depth_of(home, s):
     """How many sessions lie above this one: 0 for a top session."""
     n, seen, cur = 0, set(), s
@@ -797,6 +820,11 @@ def split_text(home, s, prompt):
     RAN["split"] = "cap" if cap else "card"
     if cap:
         return "phi (p4-phi): this turn was started by another session, not the user. " + cap
+    if not spawned_from(s):
+        return ("phi (p4-phi): this turn was started by another session, not the user, so the app refuses "
+                "`mcp__ccd_session__start_session` with `user_asked`. A topic in it outside this top session's task "
+                "gets a new top session of its own. " + new_top_route(False) + " Do the rest here; a question the "
+                "chain can settle is answered, not waited on.")
     return ("phi (p4-phi): this turn was started by another session, not the user, so the app refuses "
             "`mcp__ccd_session__start_session` with `user_asked`. Work in it that is a task of its own, outside "
             "this session's task, goes on a card: `initiation` `own_initiative`, `context` `fork`, which the user "
@@ -818,14 +846,24 @@ def new_task_text(home, s, me, user=True, again=False):
         listed = relay.shards_line(home, s["sessionId"])
         shards = f" (shards now: {listed})" if listed else ""
         RAN["new_task"] = "instruction"
+        parent = spawned_from(s)
+        if parent:
+            elsewhere = (f"do not turn this session to it, and start no session for it: hand it up to the session "
+                         f"that started this one with SendMessage (`to`: {parent}), the user's words quoted, tell "
+                         f"the user in one line that it went up, and stay with the task. Only a top session starts "
+                         f"a session for a new topic. A message about a path inside another session's shard is that "
+                         f"session's: send it there with SendMessage instead{shards}. This is the user's standing "
+                         f"instruction for this project. A quick thing (a ")
+        else:
+            elsewhere = (f"do not turn this session to it. A new topic gets a new top session of its own, a sibling "
+                         f"of this one, so this session stays orchestrating its topic. {new_top_route(True)} Tell the "
+                         f"user in one line which session has it, and stay with the task. A message about a path "
+                         f"inside another session's shard is that session's: send it there with SendMessage instead, "
+                         f"and start a new session only for what no shard covers{shards}. This is the user's standing "
+                         f"instruction for this project, so the session is started, not offered as a card. Its "
+                         f"report comes back here in full. A quick thing (a ")
         return (f"phi (p4-phi): this session's task: \"{cut(task, RULE_TASK)}\" When a message from the user is "
-                f"about something else, do not turn this session to it. Start a session for it with "
-                f"`mcp__ccd_session__start_session` (initiation `user_asked`, context `fork`, so it has this whole "
-                f"conversation and shares this checkout), tell the user in one line which session has it, and "
-                f"stay with the task. A message about a path inside another session's shard is that session's: "
-                f"send it there with SendMessage instead, and start a new session only for what no shard covers"
-                f"{shards}. This is the user's standing instruction for this project, so the session "
-                f"is started, not offered as a card. Its report comes back here in full. A quick thing (a "
+                f"about something else, " + elsewhere +
                 f"question, a few tool calls) stays here. When the user says the task itself has changed: "
                 f"`{commands()} task \"<the new task>\"`. This session's page: {page_path(home, s['sessionId'])}."
                 + (" " + TOP_RULE if not spawned_from(s) else "")
@@ -833,8 +871,14 @@ def new_task_text(home, s, me, user=True, again=False):
     if not user:
         return ""
     RAN["new_task"] = "line"
+    parent = spawned_from(s)
+    if parent:
+        return (f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" If this message is about something "
+                f"else, hand it up to {parent} with SendMessage, the user's words quoted, and stay with the task; "
+                f"otherwise carry on.")
     return (f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" If this message is about something "
-            f"else, start a forked session for it and stay with the task; otherwise carry on.")
+            f"else, start a new top session for it (`context` `fresh`, its brief ending \"{NEW_TOP_BRIEF}\") and stay "
+            f"with the task; otherwise carry on.")
 
 
 def render_page(home, sid):
@@ -1074,7 +1118,8 @@ def nudge_step(home, s):
     plan = plans.load(home, s["sessionId"])
     st = plans.step_of(plan, plan.get("current") or "") if plan.get("steps") else None
     text = str((st or {}).get("content") or "")
-    if not st or st.get("status") == "completed" or plans.LANDS.search(text) or plans.WAITS.search(text):
+    if (not st or st.get("status") == "completed" or plans.LANDS.search(text) or plans.WAITS.search(text)
+            or plans.MANAGES.search(text)):
         return None
     return None if nudge_key(st) in (s.get("nudged") or []) else st
 
@@ -1095,14 +1140,51 @@ def nudge_arm(me, s):
         pass
 
 
+ASSIGN = re.compile(r"^(?:export\s+|set\s+)?\$?([A-Za-z_]\w*)\s*=\s*('[^']*'|\"[^\"]*\"|\S*)\s*(.*)$", re.S)
+PHI_PY = re.compile(r"(?:^|[\/'\"\s])phi\.py\b")
+PYTHONS = ("python", "python3", "py", "uv", "pythonw")
+
+
+def runs_phi(part, phi_vars):
+    """True when one shell command runs phi.py: python with phi.py, or a variable bound to it, among its words, or
+    phi.py itself, or that variable, as the program."""
+    p = re.sub(r"^&\s*", "", clean(part))
+    first = p.split(" ", 1)[0].strip("'\"") if p else ""
+    refs = [rf"\$\{{?(?:env:)?{re.escape(v)}\b" for v in phi_vars]
+    def names_phi(x):
+        return bool(PHI_PY.search(" " + x) or any(re.search(r, x, re.I) for r in refs))
+    if names_phi(first):
+        return True
+    return program(p) in PYTHONS and names_phi(p)
+
+
 def work_command(cmd):
     """True when a shell command builds, tests or changes files: anything past reading, git's reading and landing
-    commands, and phi's own commands."""
-    c = QUOTED.sub("''", str(cmd or ""))
-    if REDIRECT.search(c):
+    commands, and phi's own commands: any that runs phi.py, directly or through a variable bound to it."""
+    raw = str(cmd or "")
+    quoted = []
+
+    def hold(m):
+        quoted.append(m.group(0))
+        return f"'\x00{len(quoted) - 1}\x00'"
+    c = QUOTED.sub(hold, raw)
+    if REDIRECT.search(QUOTED.sub("''", raw)):
         return True
+    phi_vars = set()
     for part in re.split(r"&&|\|\||;|\n|\|", c):
         part = part.strip()
+        whole = re.sub(r"'\x00(\d+)\x00'", lambda m: quoted[int(m.group(1))], part)
+        bind = ASSIGN.match(whole)
+        if bind:                                   # VAR=value, or export / set / $VAR = value: no effect of its own
+            if PHI_PY.search(bind.group(2)):
+                phi_vars.add(bind.group(1))
+            if not bind.group(3).strip():
+                continue
+            whole = bind.group(3).strip()
+            part = whole
+        if runs_phi(whole, phi_vars):
+            continue
+        part = re.sub(r"'\x00\d+\x00'", "''", part)
         prog = program(part)
         if prog in NUDGE_LOOKING:
             if prog == "sed" and re.search(r"\s-i", part):
@@ -1114,7 +1196,7 @@ def work_command(cmd):
             if not sub or sub in GIT_READ or sub in GIT_LANDS:
                 continue
             return True
-        if prog == "gh" or (prog in ("python", "python3", "py") and "phi.py" in str(cmd)):
+        if prog == "gh":
             continue
         return True
     return False
@@ -1277,6 +1359,10 @@ def h_user_prompt_submit(payload):
     configure(me.home)
     s = ensure_session(me.home, me.id, me.rec, me.cli, hint=me.hint)
     ran_for(s, me)
+    if spawned_from(s) and NEW_TOP.search(str(payload.get("prompt") or "")) and not load_turns(me.home, s["sessionId"]):
+        reparent(me.home, s["sessionId"], "", "detached")     # its brief marks it a new top: into the root
+        s = load_session(me.home, s["sessionId"])
+        RAN["new_top"] = True
     req = request_of(payload.get("prompt"))
     s["turnBy"] = "user" if req else (
         "session" if re.search(r"<cross-session-message\b", str(payload.get("prompt") or "")) else "event")
@@ -1302,7 +1388,8 @@ def h_user_prompt_submit(payload):
     if step:
         parts.append(step)
     pend = s.pop("staleChildren", None) or []
-    stale = relay.stale_text(pend)                # children to archive, said once
+    pend = [x for x in pend if isinstance(x, dict) and not archived_already(me.home, x.get("id"))]
+    stale = relay.stale_text(pend)                # children to archive, said once; one archived by hand is not named
     s["staleTold"] = (list(s.get("staleTold") or []) + [x.get("id") for x in pend if isinstance(x, dict)])[-50:]
     if stale:
         parts.insert(0, stale)
