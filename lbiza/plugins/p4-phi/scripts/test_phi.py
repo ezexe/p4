@@ -756,6 +756,20 @@ class Rules(unittest.TestCase):
         self.assertIn("act-don't-wait", phi.rules_text(self.t.p4, 9000))
         self.assertGreater(len(phi.rules_text(self.t.p4, 9000)), len(phi.builtin_text()))
 
+    def test_act_dont_wait_yields_to_a_projects_go_ahead(self):
+        """#23: a project rule that waits for the user's go makes that go the user's; p4.json can turn it off."""
+        self.assertIn("that go is the user's to give", phi.BUILT_IN)
+        self.assertIn("act-don't-wait", self.start(TOP))
+        write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"act_dont_wait": False}}))
+        got = self.start(TOP)
+        self.assertNotIn("act-don't-wait", got)
+        self.assertIn("tabs-not-spaces", got, "the project's own rules still come")
+        try:
+            phi.project_conf(self.t.p4)
+            self.assertEqual(phi.builtin_text(), "")
+        finally:
+            phi.project_conf("")
+
 
 class Ids(unittest.TestCase):
     def test_the_hosts_id_without_its_prefix_is_a_real_cli_session(self):

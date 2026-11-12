@@ -379,6 +379,7 @@ class Me:
                 or home_of_record(self.rec)
             self.home, self.home_missing = relay.tree_home(self.home)   # a shared home store, when one is named
         self.store = self.store or self.home
+        project_conf(self.store)
 
 
 # --- sessions --------------------------------------------------------------------------------------------------------
@@ -783,7 +784,20 @@ BUILT_IN = ("built-in, act-don't-wait: a next step the chain can settle (the tas
             "siblings' work, the project's rules) is decided and done, with one line saying what was chosen and why. "
             "Only a matter of the user's authority goes to the user: permissions or security settings, credentials, "
             "spending, and actions that cannot be undone or publish outward. A child asks the session that started it "
-            "with SendMessage, and never ends its turn waiting on a question the chain can settle.")
+            "with SendMessage, and never ends its turn waiting on a question the chain can settle. Where the project's "
+            "rules ask for the user's go before a kind of step, such as a plan's edits, that go is the user's to give: "
+            "wait for it on those steps, and act on the rest.")
+ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves the built-in rule out in a project (#23)
+
+
+def project_conf(store):
+    """The project's own phi keys in p4.json, read where the session runs, not from a shared home store."""
+    global ACT_DONT_WAIT
+    try:
+        d = p4conf.section(store, "phi", write=False) if store else {}
+    except Exception:  # noqa: BLE001
+        d = {}
+    ACT_DONT_WAIT = d.get("act_dont_wait") is not False
 
 
 TOP_RULE = ("This is the top session of its tree, so it keeps itself free for orchestration: planning, relaying "
@@ -1021,7 +1035,10 @@ def rules_page(home, rules):
 
 
 def builtin_text():
-    """The rule p4-phi carries itself, so it holds in every project, with memories or none."""
+    """The rule p4-phi carries itself, so it holds in every project, with memories or none; '' where the project's
+    p4.json turns it off."""
+    if not ACT_DONT_WAIT:
+        return ""
     return "phi (p4-phi): a rule built into p4-phi, for every session:\n- " + BUILT_IN
 
 
@@ -1034,7 +1051,7 @@ def rules_text(home, room, fork=False):
     rules = memory_rules(home) if home and not fork else []
     if not rules or room < 600:
         RAN["rules"] = 0
-        return builtin_text() if room >= len(builtin_text()) else ""
+        return builtin_text() if room >= len(builtin_text()) else ""     # '' when the project turned it off
     page = rules_page(home, rules)
     mem = p4conf.sub(home, "memory").replace("\\", "/")
     head = (f"phi (p4-phi): this project's standing rules, from the feedback and user memories in {mem}. They are "
@@ -1045,7 +1062,7 @@ def rules_text(home, room, fork=False):
             f"its start, and your task and notes beside its first message, so its brief does not tell it to read "
             f"CLAUDE.md, MEMORY.md or any memory file: the brief names only what this task needs, such as a skill, "
             f"a plan or source files.")
-    rules = [tuple(BUILT_IN.split(": ", 1))] + list(rules)
+    rules = ([tuple(BUILT_IN.split(": ", 1))] if ACT_DONT_WAIT else []) + list(rules)
     names = [f"- {name}: " for name, _ in rules]
     room -= len(head) + sum(len(x) + 1 for x in names) + 2
     RAN["rules"] = len(rules)
@@ -1323,7 +1340,7 @@ def h_session_start(payload):
         # AW1: a project with no .claude/p4 yet still gets the rule phi carries itself; the SessionStart hooks run
         # side by side, so p4-temportal making the folder first is not to be counted on
         RAN["start"] = "no store"
-        return builtin_text() if RULES and payload.get("source") != "resume" else None
+        return (builtin_text() or None) if RULES and payload.get("source") != "resume" else None
     p4conf.migrate_layout(me.store)       # the memory read below is where the other plugins will have moved it
     relay.track(me.home, first_only=True)  # the session tree, committed on its own the first time
     configure(me.home)

@@ -49,6 +49,7 @@ DEFAULTS = {
     "phi": {                             # the session tree (p4-phi)
         "home": None,                    # a home store's git remote: related repositories share one session tree
         "track": False,                  # phi/ committed in the store; off until no tracked file holds a local path
+        "act_dont_wait": True,           # false: the built-in act-don't-wait rule is left out in this project
     },
     "temportal": {                       # lifetimes under .claude/p4/temportal/ (p4-temportal lifetime.py)
         "cache": {                       # a rule per directory, relative to temportal/; memory/ is never cleared
