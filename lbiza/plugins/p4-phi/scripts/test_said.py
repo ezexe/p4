@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """said.py: a session states what it did with the store's lines it was shown.
 
-    python3 -I lbiza/plugins/p4-recall/scripts/test_said.py
+    python3 -I lbiza/plugins/p4-phi/scripts/test_said.py
 """
 
 import json

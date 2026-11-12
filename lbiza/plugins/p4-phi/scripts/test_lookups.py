@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """lookups.py: every tool call is recorded, and a call is checked against what earlier calls found before it runs.
 
-    python3 -I lbiza/plugins/p4-recall/scripts/test_lookups.py
+    python3 -I lbiza/plugins/p4-phi/scripts/test_lookups.py
 
 Checked: a call's key, kind and error signature; one row per tool_use id; a web finding handed back in place of the
 same question (PreToolUse deny, once: the same call again runs); a different question about the same page left
@@ -327,8 +327,8 @@ class Peer(Base):
 
 class HooksJson(unittest.TestCase):
     def test_matchers(self):
-        with open(HOOKS_JSON, encoding="utf-8") as f:
-            h = json.load(f)["hooks"]
+        import test_hooks
+        h = test_hooks.own_hooks(HOOKS_JSON, "/hooks/recall-hook.sh")
         self.assertEqual([m["matcher"] for m in h["PreToolUse"]], ["Agent", ".*"])
         self.assertEqual(h["PreToolUse"][1]["hooks"][0]["command"].split()[-1], "lookup-check")
         for ev in ("PostToolUse", "PostToolUseFailure"):

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """node.py: a session's place in the session tree, from phi's files and from the app's records.
 
-    python3 -I lbiza/plugins/p4-recall/scripts/test_node.py
+    python3 -I lbiza/plugins/p4-phi/scripts/test_node.py
 """
 
 import json
@@ -16,9 +16,10 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import node  # noqa: E402
 import p4 as cli  # noqa: E402
+import p4conf  # noqa: E402
 import store as st  # noqa: E402
 
-COPIES = [HERE.parents[1] / "p4-phi" / "scripts" / "node.py"]
+COPIES = []                  # one plugin carries node.py since p4-phi 0.7.0
 
 
 def write(path, text):
@@ -133,7 +134,7 @@ class Query(unittest.TestCase):
                   ("time", "2026-10-02 10:00")],
                  [("ruling", "golden images of the narwhal plotter live in tests/golden"), ("status", "LIVE"),
                   ("time", "2026-10-03 10:00")]]
-        write(os.path.join(self.p4, "recall", "store", "rules.md"), st.render("rules.md", rules))
+        write(p4conf.sub(self.p4, "store", "rules.md"), st.render("rules.md", rules))
         self.idx, _ = st.ensure_index(self.p4)
 
     def tearDown(self):

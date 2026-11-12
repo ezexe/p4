@@ -63,7 +63,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
-import node as nd  # noqa: E402  (a session's place in the tree, shared with p4-recall)
+import node as nd  # noqa: E402  (a session's place in the tree, which recall reads too)
 import p4conf  # noqa: E402  (the store's layout: each plugin's files in .claude/p4/<plugin>/)
 
 BACKGROUND = True

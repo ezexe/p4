@@ -5,7 +5,7 @@
 The harness loads and names memories at `~/.claude/projects/<project-slug>/memory/` (AppData). This plugin empties
 that directory into p4 and leaves one file there, a pointer `MEMORY.md` that says where the memory is and to write
 there. The rest of `~/.claude/projects/<project-slug>/` (transcripts, per-session directories) is never touched.
-`.claude/p4/` is created when absent (a plain directory; p4-recall's layout hook makes it a git repository).
+`.claude/p4/` is created when absent (a plain directory; p4-phi's recall layout hook makes it a git repository).
 
   migrate (SessionStart)  every AppData memory source (the `memory/` directory, a junction or symlink an earlier
                           version left, every `memory.pre-p4-<time>` directory) is merged into `.claude/p4/temportal/memory/`

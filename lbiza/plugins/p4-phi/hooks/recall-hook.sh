@@ -1,5 +1,5 @@
 #!/bin/sh
-# p4-recall hook runner: find a working python, run scripts/hook.py <name> isolated (-I) with the harness's stdin
+# p4-phi's recall hook runner (recall was the p4-recall plugin until p4-phi 0.7.0): find a working python, run scripts/hook.py <name> isolated (-I) with the harness's stdin
 # passed through, and exit 0 whatever happens, so a broken hook never blocks a call. On Windows a `python3` on PATH
 # can be the Store stub, so there a candidate is proven with a trivial run first; elsewhere that second interpreter
 # start (about 70 ms) is skipped, since the recall hook has a 300 ms budget (fresh-marketplace.md 4.5).
@@ -29,8 +29,9 @@ if [ "$name" = lookup-check ]; then
   case "$payload" in
     *'"tool_name":"Bash"'*|*'"tool_name": "Bash"'*|*'"tool_name":"PowerShell"'*|*'"tool_name": "PowerShell"'*)
       # a command is checked only by the failure model, which a store has only once a training round passed one
-      m="${CLAUDE_PROJECT_DIR:-.}/.claude/p4/recall/models/lookups-model.json"
-      [ -r "$m" ] || m="${CLAUDE_PROJECT_DIR:-.}/.claude/p4/models/lookups-model.json"   # a store not moved yet
+      m="${CLAUDE_PROJECT_DIR:-.}/.claude/p4/phi/models/lookups-model.json"
+      [ -r "$m" ] || m="${CLAUDE_PROJECT_DIR:-.}/.claude/p4/recall/models/lookups-model.json"   # a store not moved yet
+      [ -r "$m" ] || m="${CLAUDE_PROJECT_DIR:-.}/.claude/p4/models/lookups-model.json"
       [ -r "$m" ] || exit 0
       read -r line < "$m" || true
       case "$line" in *'"shell":{"w":{}'*) exit 0 ;; esac ;;

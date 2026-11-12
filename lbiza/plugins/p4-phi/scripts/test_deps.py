@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """deps.py: dependency roots as recall entries, read again when a package is installed or updated.
 
-    python3 -I lbiza/plugins/p4-recall/scripts/test_deps.py
+    python3 -I lbiza/plugins/p4-phi/scripts/test_deps.py
 """
 
 import json

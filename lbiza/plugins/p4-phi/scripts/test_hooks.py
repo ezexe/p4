@@ -3,7 +3,7 @@
 
 Run: python3 test_hooks.py   (stdlib unittest, offline, a few seconds)
 
-Each hook runs as the harness runs it: `sh hooks/run-hook.sh <name>` with the JSON payload on stdin,
+Each hook runs as the harness runs it: `sh hooks/recall-hook.sh <name>` with the JSON payload on stdin,
 CLAUDE_PLUGIN_ROOT and CLAUDE_PROJECT_DIR set, on a small git project holding the fixture store. Checked: the
 hooks.json events, matchers, timeouts and async flag; each output's JSON shape against the docs; silence where 3.3
 says nothing; `updatedInput` carrying every original Agent field; the row opened and completed from
@@ -28,8 +28,21 @@ import store as st  # noqa: E402
 from test_store import make_store, write  # noqa: E402
 
 ROOT = os.path.dirname(HERE)
-RUN = os.path.join(ROOT, "hooks", "run-hook.sh")
+RUN = os.path.join(ROOT, "hooks", "recall-hook.sh")
 HOOKS_JSON = os.path.join(ROOT, "hooks", "hooks.json")
+
+
+def own_hooks(path, runner):
+    """The plugin's hooks.json events and groups whose commands run `runner`: p4-phi carries phi's hooks
+    (run-hook.sh) and recall's (recall-hook.sh) side by side."""
+    with open(path, encoding="utf-8") as f:
+        h = json.load(f)["hooks"]
+    out = {}
+    for ev, groups in h.items():
+        mine = [g for g in groups if all(runner in x["command"] for x in g["hooks"])]
+        if mine:
+            out[ev] = mine
+    return out
 SESSION = "cccc3333-0000-4000-8000-000000000000"
 
 
@@ -98,8 +111,7 @@ class Base(unittest.TestCase):
 
 class HooksJson(unittest.TestCase):
     def test_events_matchers_timeouts(self):
-        with open(HOOKS_JSON, encoding="utf-8") as f:
-            h = json.load(f)["hooks"]
+        h = own_hooks(HOOKS_JSON, "/hooks/recall-hook.sh")
         self.assertEqual(set(h), {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop",
                                   "SubagentStop"})
         self.assertEqual(h["SessionStart"][0]["matcher"], "startup|resume|clear|compact")
@@ -116,7 +128,7 @@ class HooksJson(unittest.TestCase):
             for m in ev:
                 for x in m["hooks"]:
                     self.assertEqual(x["type"], "command")
-                    self.assertIn("${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh", x["command"])
+                    self.assertIn("${CLAUDE_PLUGIN_ROOT}/hooks/recall-hook.sh", x["command"])
 
     def test_runner_runs_isolated_and_never_fails(self):
         with open(RUN, encoding="utf-8") as f:
@@ -170,36 +182,36 @@ class Layout(Base):
 
     def test_gitignore_missing_seeded_lines_are_appended_under_a_marker(self):
         import hook
-        old = "# seeded once by p4-recall; your edits win\ntemportal/scratchpad/.out/\nrecall/models/served/\nrecall/models/index.json\n" \
-              "recall/models/repo.json\nrecall/models/*.tmp\n__pycache__/\n*.png\n*.jpg\n*.zip\n*.gz\n# mine\nbuild/\n"
+        old = "# seeded once by p4-recall; your edits win\ntemportal/scratchpad/.out/\nphi/models/served/\nphi/models/index.json\n" \
+              "phi/models/repo.json\nphi/models/*.tmp\n__pycache__/\n*.png\n*.jpg\n*.zip\n*.gz\n# mine\nbuild/\n"
         got = self.gitignore(old)
         self.assertTrue(got.startswith(old), "what was there is untouched and in its order")
         tail = got[len(old):].splitlines()
         self.assertRegex(tail[0], r"^# seeded by p4-recall \d{4}-\d{2}-\d{2}$")
-        self.assertEqual(tail[1:], ["recall/models/deps.json", "recall/models/near.json", "recall/models/lookups.db*", "recall/models/view/", ".layout.lock", "*.pyc",
-                                    "recall/models/ranker.pt"])
+        self.assertEqual(tail[1:], ["phi/models/deps.json", "phi/models/near.json", "phi/models/lookups.db*", "phi/models/view/", ".layout.lock", "*.pyc",
+                                    "phi/models/ranker.pt"])
         self.assertEqual(self.gitignore(), got, "a second run adds nothing")
         self.assertEqual(hook.seed_gitignore(os.path.join(self.p4, ".gitignore")), [])
 
     def test_gitignore_vlds_header_counts_as_a_marker(self):
         got = self.gitignore("# Seeded by the vlds plugin (hooks/p4-layout.sh) when the repository has no .gitignore; "
-                             "the owner's edits win.\n*.wav\nrecall/models/index.json\nrecall/models/repo.json\n")
+                             "the owner's edits win.\n*.wav\nphi/models/index.json\nphi/models/repo.json\n")
         self.assertIn("\n# seeded by p4-recall ", got)
-        self.assertTrue(got.endswith("recall/models/ranker.pt\n"))
+        self.assertTrue(got.endswith("phi/models/ranker.pt\n"))
         self.assertIn("temportal/scratchpad/.out/\n", got)
         self.assertNotIn("*.pt\n", got, "the anchor and the chain are tracked in LFS: no blanket *.pt")
-        for line in ("recall/models/index.json", "recall/models/repo.json"):
+        for line in ("phi/models/index.json", "phi/models/repo.json"):
             self.assertEqual(got.count(line + "\n"), 1, f"{line}: a line the file already holds is never appended again")
 
     def test_gitignore_without_marker_is_the_owners(self):
-        theirs = "*.wav\nrecall/models/index.json\nbuild/\n"
+        theirs = "*.wav\nphi/models/index.json\nbuild/\n"
         self.assertEqual(self.gitignore(theirs), theirs, "a seeded line present and no marker: the owner's edits win")
         own = "# my rules\nbuild/\n*.log\n"
         got = self.gitignore(own)
-        self.assertTrue(got.startswith(own) and "# seeded by p4-recall " in got and got.endswith("recall/models/ranker.pt\n"),
+        self.assertTrue(got.startswith(own) and "# seeded by p4-recall " in got and got.endswith("phi/models/ranker.pt\n"),
                         "no seeded line at all: the whole block, under the marker")
         # the owner deletes the marker block: nothing comes back
-        cut = got[:got.index("# seeded by p4-recall")] + "recall/models/ranker.pt\n"
+        cut = got[:got.index("# seeded by p4-recall")] + "phi/models/ranker.pt\n"
         self.assertEqual(self.gitignore(cut), cut)
 
     def test_pinned_block_cut_at_1500(self):

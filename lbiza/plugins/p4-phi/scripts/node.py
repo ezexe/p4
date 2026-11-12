@@ -1,8 +1,6 @@
-"""node.py: a session's place in the app's session tree, as p4-recall and p4-phi both read it.
+"""node.py: a session's place in the app's session tree, as p4-phi's background and its recall both read it.
 
-The same file is copied into p4-recall/scripts and p4-phi/scripts (an installed plugin cannot import another's
-code); test_node.py holds the copies byte-identical. Standard library only, and cheap: the recall hook runs it on
-every message.
+Standard library only, and cheap: the recall hook runs it on every message.
 
 A node is one session read at the time of one message (.docs/p4/recall-node.md):
 

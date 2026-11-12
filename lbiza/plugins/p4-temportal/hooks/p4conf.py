@@ -3,7 +3,7 @@ p4conf.py: every p4 plugin's settings in one file, `<project>/.claude/p4/p4.json
 
 The same file is copied into each plugin (an installed plugin cannot import another's code); test_p4conf.py holds
 the copies byte-identical. `load(p4)` returns DEFAULTS with the file merged over them, and writes the file when it is
-missing (seeded from the retired recall/models/config.json, if any) or lacks a key a newer version added, keeping every
+missing (seeded from the retired models/config.json, if any) or lacks a key a newer version added, keeping every
 value already there. A file that is not valid JSON is never overwritten: the defaults are used and a line goes to
 stderr. Environment variables a plugin documents (P4_RECALL_INJECT, P4_SCRATCHPAD_ASKS) still win, for one run.
 
@@ -126,17 +126,22 @@ LEGACY = {"teacher-model": ("recall", "teacher", "model"), "teacher-cutoff": ("r
 
 
 # Where each kind of file lives under .claude/p4, by plugin. p4-temportal keeps what Claude Code would otherwise write
-# under AppData or the system temp directory: memory, the notebook, the session scratchpads and saved code. p4-recall
-# keeps its store and its models, and p4-phi keeps phi/. p4.json and the store repository's own files stay at the top:
-# .git, .github, .gitignore and .gitattributes.
+# under AppData or the system temp directory: memory, the notebook, the session scratchpads and saved code. p4-phi
+# keeps phi/: its session tree, and recall's store and models, since recall is part of it. p4.json and the store
+# repository's own files stay at the top: .git, .github, .gitignore and .gitattributes.
 LAYOUT = {
     "memory": "temportal/memory",
     "scratchpad": "temportal/scratchpad",
     "tmp": "temportal/tmp",
     "src": "temportal/src",
-    "store": "recall/store",
-    "models": "recall/models",
+    "store": "phi/store",
+    "models": "phi/models",
 }
+# Where an older plugin kept each of them, oldest first: flat at the top before p4-temportal 0.2.0, and under recall/
+# while p4-recall was a plugin of its own, 0.9.0 to 0.10.0. migrate_layout moves either.
+OLDER = {k: [k] for k in LAYOUT}
+OLDER["store"].append("recall/store")
+OLDER["models"].append("recall/models")
 LAYOUT_LOCK = ".layout.lock"              # held while one hook moves the store; the others wait for it
 LAYOUT_CONFLICTS = ".layout-conflicts"    # inside the plugin's directory: the older of two differing copies
 TEMP_ROOTS = ("/tmp", "/private/tmp")     # beside tempfile.gettempdir(): where the harness puts its claude*
@@ -305,9 +310,9 @@ def _rewrite_paths(p, moved):
         s = s[len(neg):]
         slash = "/" if s.startswith("/") else ""
         body = s[len(slash):]
-        for old in moved:
+        for old in sorted(moved, key=len, reverse=True):         # recall/models before models
             if body.startswith(old + "/") or body.rstrip("\r\n") == old:
-                body = LAYOUT[old] + body[len(old):]
+                body = moved[old] + body[len(old):]
                 break
         out.append(lead + neg + slash + body)
     new = "".join(out)
@@ -331,12 +336,11 @@ def _own_repo(p4):
 
 
 def migrate_layout(p4, commit=True):
-    """Move what an older plugin wrote flat in `p4` into its plugin's directory: memory/, scratchpad/, tmp/ and src/
-    into temportal/, store/ and models/ into recall/. .gitignore and .gitattributes are rewritten to match, and when
-    `p4` is a git repository of its own the move is committed alone. Returns the lines to print, none when there was
-    nothing to move. Cheap when there is nothing: six lstat calls."""
-    olds = [k for k in LAYOUT if os.path.lexists(os.path.join(p4, k)) and not is_link(os.path.join(p4, k))]
-    if not olds:
+    """Move what an older plugin wrote in an older place into its plugin's directory: memory/, scratchpad/, tmp/ and
+    src/ into temportal/, and store/ and models/, flat or under recall/, into phi/. .gitignore and .gitattributes are
+    rewritten to match, and when `p4` is a git repository of its own the move is committed alone. Returns the lines
+    to print, none when there was nothing to move. Cheap when there is nothing: eight lstat calls."""
+    if not _olds(p4):
         return []
     lock = os.path.join(p4, LAYOUT_LOCK)
     if not _take(lock):
@@ -356,7 +360,7 @@ def _take(lock, wait_s=15.0, stale_s=120.0):
     while True:
         try:
             os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
-            if not waited or any(os.path.lexists(os.path.join(os.path.dirname(lock), k)) for k in LAYOUT):
+            if not waited or _olds(os.path.dirname(lock)):
                 return True
             os.remove(lock)                             # the hook that held it moved everything
             return False
@@ -375,29 +379,49 @@ def _take(lock, wait_s=15.0, stale_s=120.0):
         time.sleep(0.1)
 
 
+def _olds(p4):
+    """[(kind, older path)] of every older place that still holds something, oldest first."""
+    out = []
+    for k, places in OLDER.items():
+        for rel in places:
+            p = os.path.join(p4, *rel.split("/"))
+            if os.path.lexists(p) and not is_link(p):
+                out.append((k, rel))
+    return out
+
+
 def _migrate(p4, commit):
-    olds = [k for k in LAYOUT if os.path.lexists(os.path.join(p4, k)) and not is_link(os.path.join(p4, k))]
-    lines, done = [], []
-    for k in olds:
-        src, dst = os.path.join(p4, k), sub(p4, k)
+    lines, done = [], {}
+    for k, rel in _olds(p4):
+        src, dst = os.path.join(p4, *rel.split("/")), sub(p4, k)
         plugin = LAYOUT[k].split("/")[0]
         aside = os.path.join(p4, plugin, LAYOUT_CONFLICTS, k)
         try:
             a = _move_tmp(src, dst, aside) if k == "tmp" and os.path.isdir(src) else _move(src, dst, aside)
         except OSError as e:
-            lines.append(f"could not move {k}/ to {LAYOUT[k]}/ ({e}); tried again at the next start")
+            lines.append(f"could not move {rel}/ to {LAYOUT[k]}/ ({e}); tried again at the next start")
             continue
-        done.append(k)
-        line = f"moved {k}/ to {LAYOUT[k]}/"
+        done[rel] = LAYOUT[k]
+        line = f"moved {rel}/ to {LAYOUT[k]}/"
         if a:
             line += f", {a} differing file(s) kept in {plugin}/{LAYOUT_CONFLICTS}/"
         if os.path.lexists(src):
             line += ", some files left for the next start"
         lines.append(line)
+    for top in sorted({r.split("/")[0] for r in done if "/" in r}):    # recall/, once store/ and models/ left it
+        g = os.path.join(p4, top)
+        kept = os.path.join(g, LAYOUT_CONFLICTS)
+        if os.path.isdir(kept):
+            there = os.path.join(p4, "phi", LAYOUT_CONFLICTS, top)
+            _move(kept, there, there)
+        try:
+            os.rmdir(g)
+        except OSError:
+            pass
     changed = [f for f in (".gitignore", ".gitattributes") if _rewrite_paths(os.path.join(p4, f), done)]
     if commit and done and _own_repo(p4):
         known = []
-        for p in sorted({*done, *(LAYOUT[k] for k in done), *changed}):
+        for p in sorted({*done, *done.values(), *changed, *({r.split("/")[0] for r in done if "/" in r})}):
             _git(p4, "add", "-A", "--", p)              # one at a time: a path git never saw fails a whole add
             r = _git(p4, "ls-files", "--", p)
             h = _git(p4, "ls-tree", "--name-only", "HEAD", "--", p)
@@ -425,7 +449,7 @@ def _merge(base, over, unknown, prefix=""):
 
 
 def _legacy(p4):
-    """The values of the retired recall/models/config.json, placed where p4.json keeps them."""
+    """The values of the retired models/config.json, placed where p4.json keeps them."""
     try:
         with open(sub(p4, "models", "config.json"), encoding="utf-8") as f:
             old = json.load(f)

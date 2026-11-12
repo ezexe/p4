@@ -4,7 +4,7 @@
     "name": "ezexe"
   },
   "metadata": {
-    "description": "P4: plugins that keep Claude Code's memory, notebook and temp files in the repo, each in its own directory under .claude/p4/, and recall the repo's own history next to each message; the design is .docs/p4/fresh-marketplace.md."
+    "description": "P4: two plugins. p4-temportal keeps Claude Code's memory, notebook and temp files in the repo with lifetimes; p4-phi hands linked sessions their context and recalls the repo's own history next to each message. Each keeps its files in its own directory under .claude/p4/; the design is .docs/p4/fresh-marketplace.md and .docs/p4/recall-node.md."
   },
   "plugins": [
     {
@@ -22,26 +22,15 @@
       ]
     },
     {
-      "name": "p4-recall",
-      "source": "./plugins/p4-recall",
-      "description": "A small ranker trained on the repo's own store, kept in <project>/.claude/p4/recall/: adds a few lines from the owner's history next to a message when it is confident, and nothing otherwise.",
-      "version": "0.10.0",
-      "category": "productivity",
-      "keywords": [
-        "recall",
-        "memory",
-        "p4"
-      ]
-    },
-    {
       "name": "p4-phi",
       "source": "./plugins/p4-phi",
-      "description": "What linked sessions hand each other, in the app's own words: every session starts with the store's rules, a started session is given the tasks and notes of the sessions above it, every finished turn's report reaches the session that started it in full, and a message about something else gets a forked session while this one stays with its task.",
-      "version": "0.6.0",
+      "description": "What linked sessions hand each other, and recall from the repo's own history, in one plugin. Every session starts with the store's rules; a started session is given the tasks and notes of the sessions above it, ordered by its own task, and the last turn of the sessions beside it; every finished turn's report reaches the session that started it in full; a message about something else gets a forked session. Recall, the p4-recall plugin until 0.7.0, adds a few lines from the store beside a message or a subagent's task when its ranker is confident, and nothing otherwise. Kept in <project>/.claude/p4/phi/.",
+      "version": "0.7.0",
       "category": "productivity",
       "keywords": [
         "phi",
         "sessions",
+        "recall",
         "memo",
         "p4"
       ]

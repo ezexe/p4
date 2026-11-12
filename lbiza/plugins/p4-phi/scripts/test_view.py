@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """view.py: what a session has in view, rebuilt from its transcript.
 
-    python3 -I lbiza/plugins/p4-recall/scripts/test_view.py
+    python3 -I lbiza/plugins/p4-phi/scripts/test_view.py
 """
 
 import os

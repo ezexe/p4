@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""hook.py <name>: the p4-recall hooks (fresh-marketplace.md 3.3), run by hooks/run-hook.sh with the harness's JSON
+"""hook.py <name>: p4-phi's recall hooks, once the p4-recall plugin (fresh-marketplace.md 3.3), run by hooks/recall-hook.sh with the harness's JSON
 payload on stdin. Every hook resolves `.claude/p4/` from CLAUDE_PROJECT_DIR or the payload's `cwd`, prints only what
 its row of 3.3 allows, and on any failure exits 0 with one notice for the user (`systemMessage`), never for the model.
 
@@ -66,14 +66,14 @@ SEED_MARKER = "# seeded by p4-recall"
 SEED_MARKER_RE = re.compile(r"(?i)^#\s*seeded (once )?by (p4-recall|the vlds plugin)\b")
 GITIGNORE = """# seeded once by p4-recall; your edits win
 temportal/scratchpad/.out/
-recall/models/served/
-recall/models/index.json
-recall/models/repo.json
-recall/models/deps.json
-recall/models/near.json
-recall/models/lookups.db*
-recall/models/view/
-recall/models/*.tmp
+phi/models/served/
+phi/models/index.json
+phi/models/repo.json
+phi/models/deps.json
+phi/models/near.json
+phi/models/lookups.db*
+phi/models/view/
+phi/models/*.tmp
 .layout.lock
 __pycache__/
 *.pyc
@@ -81,10 +81,10 @@ __pycache__/
 *.jpg
 *.zip
 *.gz
-recall/models/ranker.pt
+phi/models/ranker.pt
 """
-# recall/models/ranker.pt is each machine's own build of the .pt ranker's chain (phi_rank): never tracked. The chain itself,
-# recall/models/ranker-anchor.pt and recall/models/ranker.rNNN.phid, and the pretrained base are tracked, in git LFS (the store's
+# phi/models/ranker.pt is each machine's own build of the .pt ranker's chain (phi_rank): never tracked. The chain itself,
+# phi/models/ranker-anchor.pt and phi/models/ranker.rNNN.phid, and the pretrained base are tracked, in git LFS (the store's
 # .gitattributes), so a blanket *.pt or *.phid here would hide the very files the other machines pull.
 # inject: "rules-facts" is the measured default. The paid validation of 2026-11-01 (Opus 5.5, two seeds, Haiku judge):
 # - every line (inject: true): never better than the built-in on the general tasks, the same lesson task worse on

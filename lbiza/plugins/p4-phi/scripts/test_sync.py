@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """sync.py: two machines' branches of a store merged into main and moved up to it, each kind of file by its rule.
 
-    python3 -I lbiza/plugins/p4-recall/scripts/test_sync.py
+    python3 -I lbiza/plugins/p4-phi/scripts/test_sync.py
 """
 
 import json

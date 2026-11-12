@@ -56,7 +56,7 @@ MODEL_PREFIX = ("models/ranker",)
 MODEL_EXT = (".pt", ".phid")
 INDEX_LINE = re.compile(rb"^- \[[^\]]+\]\([^)]+\)")        # `- [Title](file.md) ...`, as memory/MEMORY.md lists
 NAME, EMAIL = "p4-sync", "p4-sync@users.noreply.github.com"
-SEED = 10     # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
+SEED = 11     # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
 
 
 def git(*args, check=True, cwd=None):
@@ -72,14 +72,16 @@ def show(spec):
     return r.stdout if r.returncode == 0 else None
 
 
-# A store moved into each plugin's own directory (p4conf.LAYOUT): recall's files are under recall/, the memory under
-# temportal/. A branch from a machine not yet updated still has them at the top, so every rule here reads a path by
-# its name inside the plugin's directory, and both layouts merge alike.
-PLUGIN_DIRS = ("recall/", "temportal/")
+# A store moved into each plugin's own directory (p4conf.LAYOUT): recall's files are under phi/, where p4-phi keeps
+# them since recall is part of it, and were under recall/ before; the memory is under temportal/. A branch from a
+# machine not yet updated may still have them under recall/ or at the top, so every rule here reads a path by its
+# name inside the plugin's directory, and all three layouts merge alike.
+PLUGIN_DIRS = ("phi/", "recall/", "temportal/")
 
 
 def logical(path):
-    """`recall/store/rules.md` -> `store/rules.md`, `temportal/memory/MEMORY.md` -> `memory/MEMORY.md`."""
+    """`phi/store/rules.md` or `recall/store/rules.md` -> `store/rules.md`, `temportal/memory/MEMORY.md` ->
+    `memory/MEMORY.md`."""
     for d in PLUGIN_DIRS:
         if path.lower().startswith(d):
             return path[len(d):]
@@ -93,8 +95,11 @@ def is_model(path):
 
 def eval_log(spec_prefix):
     """The training log at a commit, in either layout."""
-    got = show(f"{spec_prefix}:recall/{LOG}")
-    return got if got is not None else show(f"{spec_prefix}:{LOG}")
+    for d in ("phi/", "recall/", ""):
+        got = show(f"{spec_prefix}:{d}{LOG}")
+        if got is not None:
+            return got
+    return None
 
 
 def last_round(data):
@@ -347,7 +352,7 @@ def store_branches(main):
         if name in ("HEAD", main, "origin") or not b.startswith("origin/"):
             continue
         top = git("ls-tree", "--name-only", b, check=False).stdout.split()
-        if "recall" in top or "store" in top:
+        if "phi" in top or "recall" in top or "store" in top:
             out.append(name)
     return sorted(out)
 

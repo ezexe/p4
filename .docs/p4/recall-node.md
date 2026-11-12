@@ -29,14 +29,15 @@ Node-aware recall adds three things, each measured on its own.
 The gates that keep recall silent stay on the message's own words.
 A node never makes a line print that the message itself gives no reason for.
 
-## One plugin or two
+## One plugin
 
-The two plugins stay separate and share one node model: `node.py`, carried byte-identical in both, as `p4conf.py` already is.
+Recall is part of p4-phi since p4-phi 0.7.0, and the p4-recall plugin is gone.
 
-- An installed plugin cannot import another plugin's code, so whichever plugin needs the tree has to carry the code that reads it.
-- p4-recall runs on every message and every tool call with a budget of about 300 ms, while p4-phi's hooks may wait two seconds for the app's record. Putting both in one process would put phi's waits in recall's budget.
-- A store can run either plugin alone, and AudioPlugin did until 2026-11-11.
-- Merging is a packaging step that can follow once the node model has earned its place. The measurements below decide that, not the packaging.
+- Recall serves lines beside a message or a subagent's task, which is the moment phi hands a session its context, so the two belong in one plugin. p4-temportal stays about files and their lifetimes.
+- Each hook stays its own command with its own timeout: phi's `run-hook.sh` runs `scripts/phi.py`, recall's `recall-hook.sh` runs `scripts/hook.py`. Recall's budget of about 300 ms is untouched by phi's waits for the app's record, which was the one reason to keep them apart.
+- `node.py` and `p4conf.py` now exist once in the plugin. p4-temportal still carries its own copy of `p4conf.py`, and `test_p4conf.py` holds the two byte-identical.
+- One plugin is one directory: recall's store and models are `phi/store/` and `phi/models/`. `p4conf.migrate_layout` moves either older layout there at the next session start: flat `store/` and `models/`, or `recall/store/` and `recall/models/`. The store's sync script merges all three, at seed 11.
+- `phi_model` finds the plugin by its scripts, `scripts/p4.py` and `scripts/train.py`, and looks for a plugin named p4-phi before p4-recall.
 
 ## What phi hands over
 
@@ -51,7 +52,7 @@ With a node, the background is ranked against the session's own task instead of 
 
 Claude Code keeps 10,000 characters of each hook's added context and files the rest away.
 phi's hooks keep to 9,500.
-Recall adds at most five lines of about 160 characters each, in its own hook, so it never shares phi's budget.
+Recall adds at most five lines of about 160 characters each, in its own hook command, so it never shares the budget of phi's hook.
 The node is never printed: it only chooses lines.
 
 ## Measurement

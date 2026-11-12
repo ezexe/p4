@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A label follows its file through a rename, and falls back to the file when only its symbol is gone.
 
-    python3 -I lbiza/plugins/p4-recall/scripts/test_renames.py
+    python3 -I lbiza/plugins/p4-phi/scripts/test_renames.py
 """
 
 import os

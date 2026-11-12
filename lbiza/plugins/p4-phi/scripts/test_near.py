@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """near.py: a task's candidates include what earlier, similar tasks of other sessions used.
 
-    python3 -I lbiza/plugins/p4-recall/scripts/test_near.py
+    python3 -I lbiza/plugins/p4-phi/scripts/test_near.py
 """
 
 import json

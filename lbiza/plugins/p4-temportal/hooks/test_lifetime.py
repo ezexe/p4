@@ -157,18 +157,41 @@ class Layout(unittest.TestCase):
             if k != "src":
                 self.assertFalse(os.path.exists(os.path.join(self.p4, k)), k)
         self.assertTrue(os.path.isfile(os.path.join(self.p4, "temportal", "memory", "MEMORY.md")))
-        self.assertTrue(os.path.isfile(os.path.join(self.p4, "recall", "store", "facts.md")))
+        self.assertTrue(os.path.isfile(os.path.join(self.p4, "phi", "store", "facts.md")))
         self.assertTrue(os.path.isfile(os.path.join(self.p4, "temportal", "tmp", "sid1", "a.md")))
         with open(os.path.join(self.p4, ".gitignore"), encoding="utf-8") as f:
-            self.assertEqual(f.read(), "temportal/scratchpad/.out/\nrecall/models/served/\n/recall/models/*.tmp\n"
+            self.assertEqual(f.read(), "temportal/scratchpad/.out/\nphi/models/served/\n/phi/models/*.tmp\n"
                                        "__pycache__/\n")
         with open(os.path.join(self.p4, ".gitattributes"), encoding="utf-8") as f:
-            self.assertEqual(f.read(), "recall/models/*.pt filter=lfs\n")
+            self.assertEqual(f.read(), "phi/models/*.pt filter=lfs\n")
         if self.git:
             self.assertEqual(self.g("status", "--porcelain").strip(), "", "the move is committed whole")
-            self.assertIn("R100\tstore/facts.md\trecall/store/facts.md",
+            self.assertIn("R100\tstore/facts.md\tphi/store/facts.md",
                           self.g("show", "-M", "--name-status", "--format=", "HEAD"))
         self.assertEqual(p4conf.migrate_layout(self.p4), [], "a second start has nothing to move")
+
+    def test_a_store_of_the_recall_plugin_moves_into_phi(self):
+        put(os.path.join(self.p4, "recall", "store", "rules.md"), "r\n")
+        put(os.path.join(self.p4, "recall", "models", "eval.tsv"), "round\n")
+        put(os.path.join(self.p4, "phi", "sessions", "s", "session.json"), "{}")
+        put(os.path.join(self.p4, "models", "late.json"), "{}")         # a flat write from a machine not updated yet
+        put(os.path.join(self.p4, ".gitignore"), "recall/models/served/\nmodels/view/\n")
+        if self.git:
+            self.g("init", "-q")
+            self.g("add", "-A")
+            self.g("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "recall layout")
+        lines = p4conf.migrate_layout(self.p4)
+        self.assertIn("moved recall/store/ to phi/store/", lines)
+        self.assertIn("moved recall/models/ to phi/models/", lines)
+        self.assertIn("moved models/ to phi/models/", lines)
+        self.assertFalse(os.path.exists(os.path.join(self.p4, "recall")), "recall/ is gone once emptied")
+        for rel in (("phi", "store", "rules.md"), ("phi", "models", "eval.tsv"), ("phi", "models", "late.json"),
+                    ("phi", "sessions", "s", "session.json")):
+            self.assertTrue(os.path.isfile(os.path.join(self.p4, *rel)), rel)
+        self.assertEqual(read(os.path.join(self.p4, ".gitignore")), "phi/models/served/\nphi/models/view/\n")
+        if self.git:
+            self.assertEqual(self.g("status", "--porcelain").strip(), "", "the move is committed whole")
+        self.assertEqual(p4conf.migrate_layout(self.p4), [])
 
     def test_an_old_plugin_writing_after_the_move_is_merged(self):
         put(os.path.join(self.p4, "temportal", "memory", "a.md"), "new\n")
@@ -179,10 +202,10 @@ class Layout(unittest.TestCase):
         lines = p4conf.migrate_layout(self.p4, commit=False)
         self.assertIn("1 differing file(s) kept in temportal/.layout-conflicts/", lines[0])
         mem = os.path.join(self.p4, "temportal", "memory")
-        self.assertEqual(open(os.path.join(mem, "a.md"), encoding="utf-8").read(), "new\n", "the newer copy stays")
+        self.assertEqual(read(os.path.join(mem, "a.md")), "new\n", "the newer copy stays")
         self.assertTrue(os.path.isfile(os.path.join(mem, "b.md")))
         aside = os.path.join(self.p4, "temportal", ".layout-conflicts", "memory", "a.md")
-        self.assertEqual(open(aside, encoding="utf-8").read(), "old\n")
+        self.assertEqual(read(aside), "old\n")
         self.assertFalse(os.path.exists(os.path.join(self.p4, "memory")))
 
     def test_a_live_session_scratchpad_follows_its_tmp(self):

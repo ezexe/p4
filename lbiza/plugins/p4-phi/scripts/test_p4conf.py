@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """p4conf.py: one settings file for every p4 plugin, written when missing, merged over the defaults.
 
-    python3 -I lbiza/plugins/p4-recall/scripts/test_p4conf.py
+    python3 -I lbiza/plugins/p4-phi/scripts/test_p4conf.py
 """
 
 import json
