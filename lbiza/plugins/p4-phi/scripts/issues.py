@@ -6,7 +6,7 @@
            names, open on that repository, is taken as its own instead of filing a second. The number is kept in
            session.json as `issue`, and a line tells the child. A read-only child (a check, an audit, a question, a
            relay) gets none, and neither does a repository with no GitHub remote.
-  commits  at each step boundary, a commit made since the issue was taken that does not say `Closes #N` gets one line.
+  commits  at each step boundary, a commit made since the issue was taken that closes no issue gets one line.
   proof    before the child counts as finished, its plan names the test that proves the issue fixed: a backticked
            command or a test file in a step that speaks of a test, or `phi.py proof "<command>"`. phi runs it again at
            Stop on the final head and comments the result on the issue; a failing test keeps the child open.
@@ -257,7 +257,7 @@ def own_commits(s, cwd=""):
         rng = f"{base}..HEAD" if base else ""
         rows = _commits(repo, rng) if base else []
         if not base:
-            made = str(s.get("createdAt") or "")
+            made = str(iss.get("time") or s.get("createdAt") or "")      # since the issue was taken
             out_ = git(repo, "log", "-40", "--reverse", f"--since={made}", "--format=%h%x1f%s%x1f%B%x1e") if made else ""
             rows = [tuple(r.strip().split("\x1f")[:3]) for r in out_.split("\x1e") if r.strip().count("\x1f") >= 2]
         for sha, subj, body in rows:
@@ -273,8 +273,9 @@ def unclosed_text(home, s, cwd=""):
     if not iss or not on(home):
         return ""
     told = list(iss.get("flagged") or [])
+    # a commit that closes another issue is that issue's work, done on purpose: only one closing none is named
     new = [(sha, subj) for _, sha, subj, body in own_commits(s, cwd)
-           if not closes(body, iss["repo"], iss["number"]) and sha not in told]
+           if not relay.CLOSES.search(body or "") and sha not in told]
     if not new:
         return ""
     iss["flagged"] = (told + [sha for sha, _ in new])[-100:]

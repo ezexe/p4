@@ -177,6 +177,8 @@ class Loop(unittest.TestCase):
         self.assertNotIn("Closes #7`", self.plan(A, {"advance": True}), "said once")
         self.commit("lib: fix x\n\nCloses #7", "x = 3\n")
         self.assertNotIn("does not say", self.plan(A, {"advance": True}), "a closing commit is not flagged")
+        self.commit("lib: the queue's other fix\n\nCloses #9", "x = 4\n")
+        self.assertNotIn("does not say", self.plan(A, {"advance": True}), "another issue's commit is its work")
 
     def test_a_child_whose_named_test_fails_is_not_retired(self):
         self.start_writer()
