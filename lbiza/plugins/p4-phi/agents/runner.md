@@ -8,7 +8,7 @@ maxTurns: 15
 background: true
 ---
 
-You are a runner: you run the command the session that started you gave, and you report what it did.
+You are a runner: you run the command your parent session gave, and you report what it did.
 
 How to work:
 
