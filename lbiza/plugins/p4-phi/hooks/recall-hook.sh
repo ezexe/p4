@@ -43,6 +43,9 @@ if [ "$name" = lookup-check ]; then
   esac
   [ "$sub" = 1 ] || [ "$nudge" = 1 ] || case "$payload" in
     *git*) ;;                                     # a git command: phi's branch guard reads it (hook.py routes)
+    # a command that may run long: phi's levels check reads it (#57). Every other shell call still ends here.
+    *test_*.py*|*pytest*|*unittest*|*"npm test"*|*"npm run "*|*"pnpm "*|*"cargo test"*|*"cargo build"*) ;;
+    *"go test"*|*"go build"*|*"make "*) ;;
     *'"tool_name":"Bash"'*|*'"tool_name": "Bash"'*|*'"tool_name":"PowerShell"'*|*'"tool_name": "PowerShell"'*)
       # a command is checked only by the failure model, which a store has only once a training round passed one
       m="${CLAUDE_PROJECT_DIR:-.}/.claude/p4/phi/models/lookups-model.json"

@@ -607,6 +607,124 @@ class TreeOfPlans(unittest.TestCase):
         self.assertIn("It is for step 2 of its parent's plan; its own steps are 2.1, 2.2", later)
 
 
+class Levels(unittest.TestCase):
+    """#57: work runs at the level Claude Code gives it. A top session's long foreground command is started in the
+    background by the hook; a child is told once per step; a step is named for the subagent that does it."""
+
+    LONG = {"command": "cd scripts && python -I -X utf8 test_flush.py 2>&1 | tail -3", "description": "Run the tests",
+            "timeout": 300000}
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP, title="top")
+        self.t.record(A, TOP, title="the layout child")
+        self.t.say(TOP, "Build the exporter")
+        self.t.say(A, "Move the store layout into phi, in steps")
+        self.n = 0
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    plan = TreeOfPlans.plan
+
+    def pre(self, host, inp, tool="Bash", tree=None, **more):
+        """A shell call's PreToolUse through recall's lookup-check entry -> the hook's own output, {} for none."""
+        t = tree or self.t
+        self.n += 1
+        body = {"session_id": CLI[host], "cwd": t.proj, "hook_event_name": "PreToolUse", "tool_name": tool,
+                "tool_input": inp, "tool_use_id": f"toolu_lv{self.n}", **more}
+        r = subprocess.run(["sh", os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh"), "lookup-check"],
+                           input=json.dumps(body), capture_output=True, text=True, timeout=60,
+                           env=t.env(host, CLAUDE_PLUGIN_DATA=os.path.join(self._tmp.name, "data")))
+        self.assertEqual((r.returncode, r.stderr.strip()), (0, ""))
+        return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else {}
+
+    def test_a_top_sessions_long_foreground_command_is_started_in_the_background(self):
+        out = self.pre(TOP, dict(self.LONG))
+        self.assertEqual(out["hookEventName"], "PreToolUse")
+        self.assertEqual(out["updatedInput"], {**self.LONG, "run_in_background": True},
+                         "every field as sent, plus the one added")
+        self.assertIn("started it in the background", out["additionalContext"])
+        self.assertNotIn("permissionDecision", out)
+        self.assertEqual(self.pre(TOP, dict(self.LONG), tool="PowerShell")["updatedInput"]["run_in_background"], True)
+        for quiet in ({"command": "ls -la"}, {"command": "grep -n pytest notes.md"},
+                      {**self.LONG, "run_in_background": True}):
+            self.assertEqual(self.pre(TOP, quiet), {}, quiet)
+        self.assertEqual(self.pre(TOP, dict(self.LONG), agent_id="agent_runner1"), {},
+                         "a sub-agent's call is left alone: a runner waits on its command")
+
+    def test_a_child_is_told_once_per_step_and_its_call_runs_as_sent(self):
+        self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/"))
+        out = self.pre(A, dict(self.LONG))
+        self.assertNotIn("updatedInput", out)
+        self.assertIn("`run_in_background: true`", out["additionalContext"])
+        self.assertIn("`p4-phi:runner`", out["additionalContext"])
+        self.assertEqual(self.pre(A, {"command": "pytest -q"}), {}, "once for this step")
+        self.plan(A, {"advance": True})
+        self.assertIn("Said once for this step", self.pre(A, {"command": "pytest -q"})["additionalContext"])
+
+    def test_p4_json_turns_the_levels_off_and_nothing_turns_them_on(self):
+        self.assertTrue(self.pre(TOP, dict(self.LONG)), "on with no p4.json key")
+        with open(os.path.join(self.t.p4, "p4.json"), "w", encoding="utf-8") as f:
+            json.dump({"phi": {"levels": False}}, f)
+        self.assertEqual(self.pre(TOP, dict(self.LONG)), {})
+        self.assertEqual(self.pre(A, dict(self.LONG)), {})
+
+    def test_the_rewrite_and_the_line_need_no_store(self):
+        t2 = Tree(os.path.join(self._tmp.name, "bare"), store=False)
+        t2.record(TOP, title="top")
+        t2.record(A, TOP, title="a child")
+        out = self.pre(TOP, dict(self.LONG), tree=t2)
+        self.assertEqual(out["updatedInput"], {**self.LONG, "run_in_background": True})
+        told = self.pre(A, dict(self.LONG), tree=t2)
+        self.assertNotIn("updatedInput", told)
+        self.assertIn("Said once", told["additionalContext"])
+        self.assertEqual(self.pre(A, dict(self.LONG), tree=t2), {}, "remembered without a store")
+        self.assertTrue(os.listdir(os.path.join(self._tmp.name, "data", "levels")), "in the plugin's data folder")
+        self.assertFalse(os.path.exists(os.path.join(t2.proj, ".claude")), "nothing written into the project")
+
+    def test_a_command_already_running_is_not_started_again_by_the_rewrite(self):
+        """#47: restart-check reads `run_in_background`, which the rewritten call gains only after the hooks."""
+        r = self.t.hook("task", TOP, {"hook_event_name": "PostToolUse", "tool_name": "Bash",
+                                      "tool_input": {**self.LONG, "run_in_background": True},
+                                      "tool_response": {"stdout": "", "backgroundTaskId": "bg7level01"}})
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, ""))
+        out = self.pre(TOP, dict(self.LONG))
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertIn("bg7level01", out["permissionDecisionReason"])
+
+    def test_a_launch_the_transcript_shows_without_the_field_is_still_recorded(self):
+        """The transcript keeps a call's input as it was sent, so a command the hook moved back is known by its
+        result (measured 2026-11-16, CLI 2.1.322)."""
+        s = relay._session(self.t.p4, TOP)
+        got = plans.register(self.t.p4, s, "Bash", dict(self.LONG),
+                             "Command running in background with ID: bg7level02. Output is being written to: x", "")
+        self.assertEqual(got["id"], "bg7level02")
+        self.assertIsNone(plans.register(self.t.p4, s, "PowerShell", {"command": "Get-Item x"}, "ID: notatask1", ""))
+
+    def test_each_step_is_named_for_the_level_it_runs_at(self):
+        for text, level in (("Find where the exporter is configured across src/", "sweep"),
+                            ("Read the hooks docs and list what PreToolUse may return", "sweep"),
+                            ("Run test_flush.py", "runner"), ("Re-run the build", "runner"),
+                            ("Run the tests and fix what fails", "session"),
+                            ("Port the exporter to the new writer", "session"),
+                            ("Find and remove the dead flags", "session")):
+            self.assertEqual(plans.level_of(text), level, text)
+        p = self.t.proj
+        ctx = self.plan(TOP, items("Find where the exporter is configured across src/", "Run test_flush.py",
+                                   f"Port the exporter in {p}/src/export/flush.py to the new writer"))
+        self.assertIn("which only reads or searches: a background subagent, `p4-phi:sweep`, not a session", ctx)
+        self.assertIn("which only runs a command: a background subagent, `p4-phi:runner`, not a session", ctx)
+        self.assertIn("mcp__ccd_session__start_session", ctx, "the step that writes still goes to a child session")
+        self.assertIn("completion notification", ctx)
+        s = relay._session(self.t.p4, TOP)
+        plain = plans.top_advice(self.t.p4, {**s, "splitAdvised": []}, {"steps": [
+            {"addr": "9", "content": "Find where the ports table is read across lib/", "status": "pending"}]},
+            True, "", levels=False)
+        self.assertNotIn("p4-phi:sweep", plain, "with the levels off every work step is a child's, as before")
+
+
 class TopOrchestrates(unittest.TestCase):
     """Rule 1: the top session keeps itself free for orchestration. Rule 2: a child started to be archived when
     done leaves its outcome on the parent and is named for archiving. And an archived child leaves the relay."""

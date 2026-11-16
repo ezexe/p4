@@ -54,6 +54,9 @@ DEFAULTS = {
         "track": False,                  # phi/ committed in the store; off until no tracked file holds a local path
         "act_dont_wait": True,           # false: the built-in act-don't-wait rule is left out in this project
         "top_orchestrates": True,        # false: the top session lands its plan itself, no child unless asked
+        "levels": True,                  # false: no levels rule, no long command moved to the background (#57)
+        "file_sets": True,               # false: a session may be started by a brief that declares no file set (#48)
+        "session_archives": False,       # true: sessions may archive sessions, as before #49
     },
     "temportal": {                       # lifetimes under .claude/p4/temportal/ (p4-temportal lifetime.py)
         "cache": {                       # a rule per directory, relative to temportal/; memory/ is never cleared

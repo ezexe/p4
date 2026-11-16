@@ -875,13 +875,35 @@ BUILT_IN = ("built-in, act-don't-wait: a next step the chain can settle (the tas
             "rules ask for ezexe's go before a kind of step, such as a plan's edits, that go is ezexe's to give: "
             "wait for it on those steps, and act on the rest.")
 ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves the built-in rule out in a project (#23)
+# The levels rule (#57). Each mechanism it names is Claude Code's own, read from the docs on 2026-11-16:
+# - sub-agents.md, "Run subagents in foreground or background": "Foreground subagents block the main conversation
+#   until complete." and "Background subagents run concurrently while you continue working."; in its frontmatter
+#   table, `background`: "Set to `true` to keep this subagent in the background even when Claude asks to wait for it."
+# - sub-agents.md: "A background subagent's report arrives inside a completion notification, which is marked as an
+#   automated event rather than a message from you."
+# - plugins/components.md, "Agents": "The name form is `<plugin>:<name>`", so agents/sweep.md is `p4-phi:sweep`.
+# - tools-reference.md, "Background commands": "Claude can set `run_in_background: true` to start the command as a
+#   background task and continue working while it runs."
+# - tools-reference.md, "Foreground commands that move to the background": "When a foreground command reaches its
+#   timeout without finishing, Claude Code moves it to the background instead of stopping it, unless the command
+#   starts with `sleep`." The default is `BASH_DEFAULT_TIMEOUT_MS`, "two minutes out of the box".
+# That a top session keeps to orchestration is phi's own TOP_RULE (#24), which the docs neither give nor deny.
+LEVELS = ("built-in, levels: work runs at the level Claude Code gives it, so this session's own turn is never held "
+          "by it. A search or a read across more than a couple of files goes to a background subagent: the Agent "
+          "tool with `subagent_type` `p4-phi:sweep`. A command expected to run long, such as a test file, a test "
+          "suite or a build, is started with `run_in_background: true` on its Bash or PowerShell call, or handed to "
+          "`p4-phi:runner`, which reports pass or fail with the failing output. A read of a diff or a result that "
+          "should not lean on this session's own view goes to `p4-phi:check`. Once one is started, go on with "
+          "other work or end the turn: its completion notification brings the result in a later turn, so never "
+          "wait for it in the foreground, sleep or poll. A top session keeps to orchestration.")
+LEVELS_ON = True              # p4.json phi.levels: false leaves the levels rule and its checks out; nothing turns it on
 TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps a top session's work in it (#24)
 FILE_SETS = True              # p4.json phi.file_sets: false starts sessions whose briefs declare no file set (#48)
 
 
 def project_conf(store):
     """The project's own phi keys in p4.json, read where the session runs, not from a shared home store."""
-    global ACT_DONT_WAIT, TOP_ORCHESTRATES, FILE_SETS
+    global ACT_DONT_WAIT, TOP_ORCHESTRATES, FILE_SETS, LEVELS_ON
     try:
         d = p4conf.section(store, "phi", write=False) if store else {}
     except Exception:  # noqa: BLE001
@@ -889,6 +911,8 @@ def project_conf(store):
     ACT_DONT_WAIT = d.get("act_dont_wait") is not False
     TOP_ORCHESTRATES = d.get("top_orchestrates") is not False
     FILE_SETS = d.get("file_sets") is not False
+    LEVELS_ON = d.get("levels") is not False
+    plans.LEVELS = LEVELS_ON
 
 
 TOP_RULE = ("This is the top session of its tree, so it keeps itself free for orchestration: planning, relaying "
@@ -1224,11 +1248,18 @@ def rules_page(home, rules):
 
 
 def builtin_text():
-    """The rule p4-phi carries itself, so it holds in every project, with memories or none; '' where the project's
-    p4.json turns it off."""
-    if not ACT_DONT_WAIT:
+    """The rules p4-phi carries itself, so they hold in every project, with memories or none, a store or none; ''
+    where the project's p4.json turns both off."""
+    own = built_in()
+    if not own:
         return ""
-    return "phi (p4-phi): a rule built into p4-phi, for every session:\n- " + BUILT_IN
+    head = "a rule built into p4-phi" if len(own) == 1 else "the rules built into p4-phi"
+    return f"phi (p4-phi): {head}, for every session:\n" + "\n".join("- " + x for x in own)
+
+
+def built_in():
+    """The built-in rules that are on, each as its line."""
+    return ([BUILT_IN] if ACT_DONT_WAIT else []) + ([LEVELS] if LEVELS_ON else [])
 
 
 def rules_text(home, room, fork=False, brief=False):
@@ -1246,7 +1277,8 @@ def rules_text(home, room, fork=False, brief=False):
     if brief:                                      # #43: handed in full at the start; after a compaction, its page
         RAN["rules"] = "page"
         return (f"phi (p4-phi): this project's standing rules were handed to this session in full at its start and "
-                f"still hold: " + ", ".join((["act-don't-wait"] if ACT_DONT_WAIT else []) + [n for n, _ in rules])
+                f"still hold: " + ", ".join([x.split(": ", 1)[0].replace("built-in, ", "") for x in built_in()]
+                                            + [n for n, _ in rules])
                 + f". Each is whole, with its Why, on one page: {page}. Read that page when one of them bears on "
                   f"the next step.")
     head = (f"phi (p4-phi): this project's standing rules, from the feedback and user memories in {mem}. They are "
@@ -1257,7 +1289,7 @@ def rules_text(home, room, fork=False, brief=False):
             f"its start, and your task and notes beside its first message, so its brief does not tell it to read "
             f"CLAUDE.md, MEMORY.md or any memory file: the brief names only what this task needs, such as a skill, "
             f"a plan or source files.")
-    rules = ([tuple(BUILT_IN.split(": ", 1))] if ACT_DONT_WAIT else []) + list(rules)
+    rules = [tuple(x.split(": ", 1)) for x in built_in()] + list(rules)
     names = [f"- {name}: " for name, _ in rules]
     room -= len(head) + sum(len(x) + 1 for x in names) + 2
     RAN["rules"] = len(rules)
@@ -1557,6 +1589,12 @@ def h_nudge(payload):
     save_session(me.home, s)
     nudge_arm(me, s)
     RAN["nudge"] = st.get("addr")
+    level = plans.level_of(st.get("content")) if LEVELS_ON else "session"
+    if level != "session":                         # #57: a step a subagent does needs no session
+        return (f"phi (p4-phi): this is the top session, kept free for orchestration, and step {st.get('addr')}, "
+                f"\"{cut(clean(st.get('content')), 120)}\", {plans.LEVEL_WHAT[level]}: hand it to a background "
+                f"subagent, the Agent tool with `subagent_type` `p4-phi:{level}`, and go on or end the turn until its "
+                f"completion notification. Said once for this step.")
     return (f"phi (p4-phi): this is the top session, kept free for orchestration, and step {st.get('addr')}, "
             f"\"{cut(clean(st.get('content')), 120)}\", is work: hand it to a child session with "
             f"`mcp__ccd_session__start_session`, `context` `fresh`, `use_worktree: false`, its brief that step, a "
@@ -1652,6 +1690,135 @@ def h_restart_check(payload):
     RAN["restart"] = "held"
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                    "permissionDecisionReason": why}}
+
+
+# --- levels: a long command never holds a top session's turn (#57) -------------------------------------------------
+#
+# hooks.md, "PreToolUse decision control": `updatedInput` "Modifies the tool's input parameters before execution.
+# Replaces the entire input object, so include unchanged fields alongside modified ones. Claude Code evaluates
+# permission rules and a Bash command's auto-background eligibility against the input your hook returns, not the input
+# Claude sent." and `additionalContext` is a "String added to Claude's context alongside the tool result." The Bash
+# input's `run_in_background` is a "boolean ... Whether to run the command in background" (hooks.md, "PreToolUse
+# input"). The page does not say in words that a hook may add that field, so it was measured on 2026-11-16 (CLI
+# 2.1.322, `claude -p` on haiku, a plugin's command hook, no `permissionDecision`): the call's PostToolUse carried
+# `"run_in_background": true` and a `backgroundTaskId`, and its result read "Command running in background with
+# ID". The transcript keeps the input as it was sent, without the field, so a launch is also known by that result.
+# With no `permissionDecision`, "auto mode can deny the changed call", but "a `command` hook in settings or a plugin's
+# hooks file can change Bash, PowerShell, Monitor, Edit, Write, and NotebookEdit calls without this denial."
+
+LONG_PY = re.compile(r"(?:^|[\s\\/'\"])test_\w+\.py\b|\s-m\s+(?:pytest|unittest)\b", re.I)
+LONG_RUN = re.compile(r"^(?:(?:npm|pnpm)\s+(?:run\s+)?(?:test|build)\b|(?:cargo|go)\s+(?:test|build)\b|"
+                      r"make\s+(?:-\S+\s+)*(?:test|build)\b)", re.I)
+LEVEL_STORELESS = ("level",)     # the routed checks that run in a project with no .claude/p4 store
+
+
+def long_command(cmd):
+    """The kind of long command a shell call runs in its foreground, '' for none: a `test_*.py` run, pytest,
+    unittest, or an npm, pnpm, cargo, go or make `test` or `build`. Read where a program stands, never inside a
+    quoted string, so `grep pytest notes.md` is none."""
+    raw = str(cmd or "")
+    quoted = []
+
+    def hold(m):
+        quoted.append(m.group(0))
+        return f"'\x00{len(quoted) - 1}\x00'"
+    for part in re.split(r"&&|\|\||;|\n|\|", QUOTED.sub(hold, raw)):
+        part = re.sub(r"^&\s*", "", part.strip())
+        while True:                                # VAR=value before the program
+            bind = ASSIGN.match(part)
+            if not bind or not bind.group(3).strip() or part.startswith(("export ", "set ")):
+                break
+            part = bind.group(3).strip()
+        whole = re.sub(r"'\x00(\d+)\x00'", lambda m: quoted[int(m.group(1))], part)
+        bare = re.sub(r"'\x00(\d+)\x00'", lambda m: quoted[int(m.group(1))].strip("'\""), part)
+        prog = program(bare)
+        if prog in ("pytest", "py.test"):
+            return "pytest"
+        if prog in PYTHONS and LONG_PY.search(" " + bare):
+            m = LONG_PY.search(" " + bare).group(0)
+            return "pytest" if "pytest" in m else "unittest" if "unittest" in m else "a test file"
+        m = LONG_RUN.match(clean(bare))
+        if m:
+            return " ".join(m.group(0).split())
+        del whole
+    return ""
+
+
+def level_data():
+    """Where the once-per-step memory is kept in a project with no store: the plugin's own data folder.
+    plugins-reference.md, "Environment variables": `${CLAUDE_PLUGIN_DATA}` is "`~/.claude/plugins/data/<id>/`,
+    created on first reference and kept across plugin updates", and it is exported to hook commands."""
+    base = os.environ.get("CLAUDE_PLUGIN_DATA") or os.path.join(
+        os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude"),
+        "plugins", "data", "p4-phi")
+    return os.path.join(base, "levels")
+
+
+def level_told(me, s, key):
+    """True when this session was told of `key` before; records it otherwise. In its session.json where there is a
+    store, else in a file of its own under the plugin's data folder."""
+    if me.home and s:
+        told = [x for x in s.get("leveled") or [] if isinstance(x, str)]
+        if key in told:
+            return True
+        disk = load_session(me.home, me.id)
+        if disk:
+            disk["leveled"] = ([x for x in disk.get("leveled") or [] if isinstance(x, str) and x != key] + [key])[-50:]
+            write_atomic(os.path.join(session_dir(me.home, me.id), "session.json"),
+                         json.dumps(disk, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
+        return False
+    path = os.path.join(level_data(), safe_id(me.id or me.cli) + ".json")
+    told = [x for x in read_json(path).get("told") or [] if isinstance(x, str)]
+    if key in told:
+        return True
+    try:
+        write_atomic(path, json.dumps({"told": (told + [key])[-50:]}) + "\n")
+    except OSError:
+        pass
+    return False
+
+
+def h_level(payload):
+    """PreToolUse on a shell call that runs a known long command in the foreground (#57). In a top session the call
+    is returned with `updatedInput`: the same input plus `run_in_background: true`, and one line saying so. In a
+    session another one started the call runs as sent and the line is given once per step. A sub-agent's call is
+    left alone: a runner's whole work is to wait on its command. Works with no store: top or child is read from the
+    session's own file where there is one, else from the app's record."""
+    if not LEVELS_ON or payload.get("agent_id") or str(payload.get("tool_name") or "") not in SHELL_TOOLS:
+        return None
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    if inp.get("run_in_background") or not inp.get("command"):
+        return None
+    kind = long_command(inp.get("command"))
+    if not kind:
+        return None
+    me = Me(payload)
+    s = load_session(me.home, me.id) if me.home and me.id else {}
+    child = bool(spawned_from(s) if s else spawned_from(me.rec))
+    if child:
+        plan = plans.load(me.home, me.id) if me.home else {}
+        st = plans.step_of(plan, plan.get("current") or "") if plan.get("steps") else None
+        key = nudge_key(st) if st else "kind:" + kind
+        if level_told(me, s, key):
+            return None
+        RAN["level"] = "told"
+        return (f"phi (p4-phi): this call runs {kind} in this session's foreground, and a command like it runs long. "
+                f"Start such a command with `run_in_background: true`, or hand it to the `p4-phi:runner` subagent, "
+                f"and go on with other work or end the turn until its completion notification; do not wait, sleep or "
+                f"poll for it. Said once for this step.")
+    if me.home and me.id:                          # #47: the copy this session already runs is not started again
+        why = puppeteer.restart_text(me.home, me.id, str(inp.get("command")))
+        if why:
+            RAN["restart"] = "held"
+            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                           "permissionDecisionReason": why}}
+    RAN["level"] = "background"
+    return {"hookSpecificOutput": {
+        "hookEventName": "PreToolUse", "updatedInput": {**inp, "run_in_background": True},
+        "additionalContext": (f"phi (p4-phi): this call runs {kind}, which runs long, and this is the top session, so "
+                              f"p4-phi started it in the background by adding `run_in_background: true`. Go on with "
+                              f"other work or end the turn, and read its result when its completion notification "
+                              f"comes; do not wait, sleep or poll for it.")}}
 
 
 def session_archives(store):
@@ -2341,8 +2508,9 @@ def replay(me, s, transcript):
         name = "plan" if b["name"] == "mcp__ccd_turn__update_plan" else "task"
         payload = {"tool_name": b["name"], "tool_input": b.get("input") or {}, "tool_response": results[tid],
                    "tool_use_id": tid, "transcript_path": transcript}
-        if name == "task" and not (b["name"] != "Bash" or (b.get("input") or {}).get("run_in_background")):
-            continue
+        if name == "task" and b["name"] in SHELL_TOOLS and not (b.get("input") or {}).get("run_in_background") \
+                and not plans.LAUNCHED.match(str(results[tid])):
+            continue                                # a foreground command; one a hook moved back is known by its result
         if not once(me.home, me.id, name, payload):
             continue
         if name == "plan":
@@ -2367,6 +2535,11 @@ def routed(name, payload):
     started = time.time()
     RAN.clear()
     me = Me(payload)
+    if not me.home and name in LEVEL_STORELESS:   # #57: the levels check needs no store
+        out = fn(payload)
+        if isinstance(out, dict) or not out:
+            return out or None
+        return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": out}}
     if not me.home or not me.id or not once(me.home, me.id, name, payload):
         return None
     RAN.update(home=me.home, session=me.id, routed=True)
@@ -2449,6 +2622,7 @@ HOOKS = {"session-start": ("SessionStart", h_session_start),
 ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "store-guard", "plan", "task", "memory-gap",
                                                      "self-archive")})
 ROUTED["nudge"] = ("PreToolUse", h_nudge)
+HOOKS["level"] = ROUTED["level"] = ("PreToolUse", h_level)
 HOOKS["restart-check"] = ROUTED["restart-check"] = ("PreToolUse", h_restart_check)
 ROUTED.update({"agent-launch": ("PreToolUse", h_agent_launch), "agent-pre": ("PreToolUse", h_agent_call),
                "agent-post": ("PostToolUse", h_agent_call), "agent-stop": ("SubagentStop", h_agent_stop)})

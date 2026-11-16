@@ -920,9 +920,31 @@ class Rules(unittest.TestCase):
         self.assertIn("tabs-not-spaces", got, "the project's own rules still come")
         try:
             phi.project_conf(self.t.p4)
+            self.assertNotIn("act-don't-wait", phi.builtin_text())
+            self.assertIn("built-in, levels", phi.builtin_text(), "the other built-in rule stands on its own")
+            write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"act_dont_wait": False, "levels": False}}))
+            phi.project_conf(self.t.p4)
             self.assertEqual(phi.builtin_text(), "")
         finally:
             phi.project_conf("")
+
+    def test_the_levels_rule_is_given_with_no_configuration_and_p4_json_turns_it_off(self):
+        """#57: on in every project, a store or none; only p4.json's phi.levels: false leaves it out."""
+        got = self.start(TOP)
+        for word in ("built-in, levels", "`p4-phi:sweep`", "`p4-phi:runner`", "`p4-phi:check`",
+                     "`run_in_background: true`", "completion notification"):
+            self.assertIn(word, got)
+        self.assertNotIn("ezexe", phi.LEVELS, "it addresses the session and names no person")
+        self.assertIn("built-in, levels", phi.builtin_text())
+        with tempfile.TemporaryDirectory() as tmp:
+            bare = Tree(tmp, store=False)
+            bare.record(TOP)
+            r = bare.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"})
+            self.assertIn("built-in, levels", context(r), "a project with no store")
+        write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"levels": False}}))
+        off = self.start(KID)
+        self.assertNotIn("built-in, levels", off)
+        self.assertIn("act-don't-wait", off)
 
 
 class Ids(unittest.TestCase):

@@ -506,7 +506,36 @@ def top_groups(plan, cwd):
     return groups, kept
 
 
-def top_advice(home, s, plan, owner_turn, cap):
+# --- the level a step runs at (#57) ---------------------------------------------------------------------------------
+#
+# A step that only reads or searches is a background subagent's, `p4-phi:sweep`; one that only runs a command is
+# `p4-phi:runner`'s; the rest is a child session's. sub-agents.md: "Background subagents run concurrently while you
+# continue working", and a plugin's agent is named `<plugin>:<name>` (plugins/components.md, "Agents").
+
+READS = re.compile(r"^\W*(?:find|search|look\s+(?:for|up|at|into|through)|read|grep|list|locate|survey|scan|map|"
+                   r"inventory|explore|trace|identify|count|collect|gather|sweep)\b", re.I)
+RUNS = re.compile(r"^\W*(?:run|re-?run|execute)\b", re.I)
+WRITES = re.compile(r"\b(?:fix\w*|writ\w*|add\w*|chang\w*|edit\w*|implement\w*|updat\w*|remov\w*|renam\w*|creat\w*|"
+                    r"mak\w+|mov\w+|commit\w*|refactor\w*|port\w*|delet\w*|migrat\w*|rewrit\w*|replac\w*|patch\w*|"
+                    r"push\w*|merg\w*|land\w*|releas\w*|ship\w*|install\w*)\b", re.I)
+LEVELS = True                 # phi.project_conf sets it from p4.json phi.levels
+LEVEL_WHAT = {"sweep": "only reads or searches", "runner": "only runs a command"}
+LAUNCHED = re.compile(r"\s*Command running in background with ID", re.I)   # a shell call's result when it was moved back
+
+
+def level_of(text):
+    """'sweep' for a step that only reads or searches, 'runner' for one that only runs a command, else 'session'."""
+    text = str(text or "")
+    if WRITES.search(text):
+        return "session"
+    if READS.search(text):
+        return "sweep"
+    if RUNS.search(text):
+        return "runner"
+    return "session"
+
+
+def top_advice(home, s, plan, owner_turn, cap, levels=None):
     """The top session's line: each work step, or run of serial ones, to one fresh child; said once per set. ''
     when no work step is new."""
     groups, kept = top_groups(plan, s.get("cwd") or "")
@@ -520,7 +549,15 @@ def top_advice(home, s, plan, owner_turn, cap):
                                                         if st.get("content", "") not in told]
     relay._write_json(path, disk)
 
+    levels = LEVELS if levels is None else levels
+
+    def level(g):
+        return level_of(g[0].get("content")) if levels and len(g) == 1 else "session"
+
     def child(g):
+        if level(g) != "session":
+            return (f"step {g[0]['addr']} \"{relay._short(g[0].get('content'), 90)}\", which {LEVEL_WHAT[level(g)]}: "
+                    f"a background subagent, `p4-phi:{level(g)}`, not a session")
         if len(g) == 1:
             return f"step {g[0]['addr']} \"{relay._short(g[0].get('content'), 90)}\""
         return (f"steps {', '.join(st['addr'] for st in g)} in order, as one child: "
@@ -529,9 +566,15 @@ def top_advice(home, s, plan, owner_turn, cap):
     head = ("phi (p4-phi): this is the top session of its tree, so it keeps itself free for orchestration: "
             "planning, relaying between sessions, decisions with ezexe, and landing the work, meaning merge and push.")
     stay = ("; ".join(f"{a} ({why})" for a, why in kept)) or "none"
+    subs = [g for g in new[:26] if level(g) != "session"]
+    agents = (" A step named for a subagent starts with the Agent tool, `subagent_type` as named, and comes back as a "
+              "completion notification in a later turn: go on or end the turn, and do not wait, sleep or poll for "
+              "it.") if subs else ""
     if cap:
         return (f"{head} Its work steps would each go to a child: {named}. But {cap[0].lower() + cap[1:]} "
-                f"Staying here meanwhile: every step.")
+                f"Staying here meanwhile: every step.{agents}")
+    if subs and len(subs) == len(new[:26]):
+        return f"{head} Its work steps need no session: {named}.{agents} Staying here: {stay}."
     route = ("Start each now with `mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, "
              "`use_worktree: false`, on this session's branch" if owner_turn else
              "This turn was started by another session, so the app refuses `user_asked`: write each as a start "
@@ -541,7 +584,7 @@ def top_advice(home, s, plan, owner_turn, cap):
             f"child as a serial run, and steps with disjoint files each get a child: {named}. {route}. Each brief is its "
             f"steps' words, a line `Files: <the paths it may write>`, what they must leave done, and says "
             f"\"report when done\", so the child "
-            f"leaves its outcome here as a replaces: note and is treated as archived when it finishes. Staying "
+            f"leaves its outcome here as a replaces: note and is treated as archived when it finishes.{agents} Staying "
             f"here: {stay}.")
 
 
@@ -928,8 +971,9 @@ BACKGROUND_AGENT = re.compile(r"(?:launched|running|runs) in the background|asyn
 def register(home, s, tool, inp, response, cwd, at_epoch=None):
     """Record a background task under the step in progress -> the task, or None when the call ran in the
     foreground or names no task id."""
-    if tool == "Bash" and not inp.get("run_in_background"):
-        return None
+    if tool in ("Bash", "PowerShell") and not inp.get("run_in_background") and not LAUNCHED.match(
+            response if isinstance(response, str) else ""):
+        return None                               # a foreground command; one a hook moved back is known by its result
     if tool == "Agent" and not inp.get("run_in_background") and not BACKGROUND_AGENT.search(str(response)):
         return None                               # a foreground agent has finished by its result
     text = response if isinstance(response, str) else json.dumps(response, default=str)
