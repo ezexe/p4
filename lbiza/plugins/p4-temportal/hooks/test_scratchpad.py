@@ -1422,10 +1422,16 @@ class AskPaths(unittest.TestCase):
             self.assertFalse([p for p in listed if p.endswith(".ipynb")], listed)
 
     def test_a_powershell_write_by_a_positional_path_is_asked_about(self):
-        for cmd in ("Set-Content $env:TEMP\\x.py 'print(1)'", "'print(1)' | Out-File $env:TEMP\\x.py"):
+        for cmd in ("Set-Content $env:TEMP\\x.py 'print(1)'", "'print(1)' | Out-File $env:TEMP\\x.py",
+                    "'x' | Out-File -Encoding utf8 $env:TEMP\\x.py", "Set-Content -Value x $env:TEMP\\x.py",
+                    "New-Item -ItemType File $env:TEMP\\x.py", "Add-Content -Value x $env:TMP\\x.py",
+                    "Set-Content -Value x C:\\Users\\u\\AppData\\Local\\Temp\\x.py"):
             d = ask({"tool_name": "PowerShell", "cwd": "E:/projects/x", "tool_input": {"command": cmd}})
             self.assertIsNotNone(d, cmd)
             self.assertIn("x.py", d["permissionDecisionReason"], cmd)
+        for cmd in ("Get-Content $env:TEMP\\x.py", "Get-Content $env:TEMP\\x.py | Select-String print"):
+            self.assertIsNone(ask({"tool_name": "PowerShell", "cwd": "E:/projects/x", "tool_input": {"command": cmd}}),
+                              cmd)
 
     def test_powershell_and_notebookedit_writes_are_read(self):
         import scratchpad as sp

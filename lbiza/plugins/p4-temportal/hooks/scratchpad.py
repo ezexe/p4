@@ -110,10 +110,12 @@ WRITE_RES = [
     # PowerShell's writers, by their path parameter
     re.compile(r"(?i)\b(?:Set-Content|Add-Content|Out-File|New-Item)\b[^\n|;]*?-(?:Path|FilePath|LiteralPath)[ \t]+"
                + _PATH),
-    # and by a positional path, the first argument when it is no parameter, as in `... | Out-File $env:TEMP\x.py`
-    re.compile(r"(?i)\b(?:Set-Content|Add-Content|Out-File|New-Item)[ \t]+(?!-)" + _PATH),
 ]
 ARGS_RES = [re.compile(r"\b(?:cp|mv)\b([^\n|;&]*)")]
+# PowerShell's writers by a positional path, wherever it stands among the parameters, as in
+# `'x' | Out-File -Encoding utf8 $env:TEMP\x.py`: every argument that is no parameter is read as a path, and one that
+# names no code file in a temp place is passed over by the ask. A reader such as Get-Content is never matched.
+PS_WRITER_ARGS = re.compile(r"(?i)\b(?:Set-Content|Add-Content|Out-File|New-Item)\b([^\n|;]*)")
 TOKEN_RE = re.compile(r"\"[^\"\n]*\"|'[^'\n]*'|\S+")
 
 OUT_NAME = ".out"
@@ -1218,6 +1220,8 @@ def written_paths(payload):
         for m in rx.finditer(cmd):
             toks = [t.strip("\"'") for t in TOKEN_RE.findall(m.group(1)) if not t.startswith("-")]
             out += toks[-1:]                            # the destination: cp / mv write only their last argument
+    for m in PS_WRITER_ARGS.finditer(cmd):
+        out += [t.strip("\"'") for t in TOKEN_RE.findall(m.group(1)) if not t.startswith("-")]
     return [p for p in out if p]
 
 
