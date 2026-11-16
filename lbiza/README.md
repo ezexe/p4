@@ -2,8 +2,8 @@
 
 The marketplace `p4-marketplace` holds two Claude Code plugins, each with hooks, scripts and a skill.
 
-- **p4-temportal** keeps in a project's store what Claude Code would keep in its own folders: the auto memory directory, each session scratchpad directory and other temp files, with lifetimes. Its skill, `plugins/p4-temportal/skills/temportal/SKILL.md`, says what each folder holds and how lifetimes clear it.
-- **p4-phi** carries what linked sessions hand each other, and retrieval from the project's own history. Its README, `plugins/p4-phi/README.md`, says what it does and how it is set.
+- **p4-temportal**, whose skill `plugins/p4-temportal/skills/temportal/SKILL.md` says what it does.
+- **p4-phi**, whose README `plugins/p4-phi/README.md` says what it does and how it is set.
 
 ## Where each plugin keeps its files
 
@@ -25,4 +25,3 @@ The copies of `p4conf.py` in the two plugins are identical.
 ## Tests
 
 Each test file runs on its own from its folder with `python3 <file>`: p4-temportal's in `plugins/p4-temportal/hooks/` and p4-phi's in `plugins/p4-phi/scripts/`.
-`test_live_memory_limit.py` runs a real Claude Code session, so it runs only with `P4_LIVE=1`.

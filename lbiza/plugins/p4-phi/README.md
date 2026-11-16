@@ -72,7 +72,7 @@ Every key is optional.
 | `file_sets` | `true` | `false`: a session may be started by a brief that declares no write set |
 | `issues` | `true` | `false`: no GitHub issue is filed for a writing child's purpose |
 | `session_archives` | `false` | `true`: sessions may archive sessions |
-| `puppeteer_section` | `puppeteers` | another name for the sidebar section; an empty string turns the supervisor session off |
+| `puppeteer_section` | `puppeteers` | another name for the sidebar section; an empty string makes no session a supervisor session |
 | `puppeteer_chars` | 200000 | the characters p4-phi may hand a supervisor session between compactions before its boundary notice says so |
 | `track` | `false` | `true`: the session tree is committed to the store |
 | `home` | none | a git remote: related repositories share one session tree |
