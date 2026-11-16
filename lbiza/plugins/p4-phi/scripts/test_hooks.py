@@ -8,7 +8,7 @@ It needs only the standard library's unittest and no network. Each hook runs as 
 a small git project holding the fixture store. Checked: the hooks.json events, matchers, timeouts and async flag;
 each output's JSON shape against the hooks reference; silence where a hook has nothing to add; `updatedInput`
 carrying every original Agent field; the row opened and completed from `last_assistant_message`; a notification
-complete on arrival; usage labels, used when the served entry's path appears in an Edit input and unused otherwise;
+complete on arrival; usage labels, used when the served document's path appears in an Edit input and unused otherwise;
 the repo labels of a turn; exit 0 and one notice on a corrupt store; the pinned block cut at 1,500 characters; the
 `.git/info/exclude` line never added twice; the store's .gitignore seeded under its marker; every handler in a
 project with no store.
@@ -173,7 +173,8 @@ class Layout(Base):
         with open(os.path.join(self.proj, ".git", "info", "exclude"), encoding="utf-8") as f:
             self.assertEqual(f.read().count(".claude/p4/"), 1, "the exclude line added once")
         status = subprocess.run(["git", "-C", self.proj, "status", "--porcelain"], capture_output=True, text=True)
-        self.assertNotIn(".claude", status.stdout, "the nested p4 repo stays out of the project's index")
+        self.assertNotIn(".claude", status.stdout,
+                         "the store, a git repository of its own, stays out of the project's git status")
 
     def gitignore(self, text=None):
         gi = os.path.join(self.p4, ".gitignore")
@@ -349,7 +350,7 @@ class RecallLatency(unittest.TestCase):
         self.assertLess(min(times), 0.300, f"recall hook took {[round(x, 3) for x in times]} s")
 
     def test_cache_follows_the_index(self):
-        """The cache is keyed on index.json: an index rebuilt with other entries is never read from a stale cache."""
+        """The cache is keyed on index.json: an index rebuilt with other documents is never read from a stale cache."""
         idx = st.build_index(self.p4)
         n = idx["n"]
         got = st.load_index(self.p4)
@@ -568,14 +569,15 @@ class SubagentStop(Base):
         self.assertTrue(usage)
         self.assertTrue(usage[0]["task"].startswith("agent:"))
         self.assertTrue(any(x["label"] == "1" for x in usage),
-                        "the reply carries two of a served entry's rare terms the task did not")
+                        "the reply carries two of a served document's rare terms the task did not")
         self.assertTrue(any(t["kind"] == "agent" for t in lb.read_tasks(self.p4).values()))
 
 
 class ZeroConfiguration(unittest.TestCase):
     """The plugin works in a project nobody set up. An empty folder with no `.claude`, no P4_* variable and no
-    settings file: every handler runs clean, the delegation rule is given, a top session's long command is moved to a
-    background task, and the store is made by the plugin's own SessionStart hook, with no step from ezexe."""
+    settings file: every handler runs clean, the delegation rule is given, a top-level session's long command is
+    moved to a background task, and the store is made by the plugin's own SessionStart hook, with no step from
+    ezexe."""
 
     LONG = {"command": "python -m pytest -q", "description": "Run the tests"}
 

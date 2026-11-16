@@ -10,7 +10,7 @@ event and matcher hooks/hooks.json runs it on, and what it does.
   layout         SessionStart, matcher `startup|resume|clear|compact`. Moves a store of an older layout through
                  p4conf.migrate_layout; makes `.claude/p4/` with its folders, its .gitignore, p4.json and its git
                  repository where they are missing; adds the `.git/info/exclude` line; seeds the store's sync
-                 workflow; and brings the repository's entries, the dependencies' entries and the index up to date.
+                 workflow; and brings the repository's and the dependencies' documents and the index up to date.
                  It prints nothing unless ezexe pinned rules, and then the block `Standing rules from ezexe:` of
                  at most PINNED_CHARS characters as `additionalContext`.
   recall         UserPromptSubmit. The retrieval lines that `injected` lets through as `additionalContext`, with
@@ -24,13 +24,13 @@ event and matcher hooks/hooks.json runs it on, and what it does.
                  or else lookups.py's check: an earlier finding in place of a web call, an earlier failure before a
                  command expected to fail.
   lookup-record  PostToolUse and PostToolUseFailure, matcher `.*`. For a subagent's call, its id bound to phi.py's
-                 entry of it. Then phi.py's records that PHI_RECORD names for the tool, whose answer is returned for
-                 the plan tool, Write and Edit; otherwise lookups.py writes the call's row and tells a failure what
-                 other sessions did about it.
+                 record of the subagent. Then phi.py's records that PHI_RECORD names for the tool, whose answer is
+                 returned for `update_plan`, Write and Edit; otherwise lookups.py writes the call's row and tells a
+                 failure what other sessions did about it.
   close          Stop. Nothing printed. It completes the message's row from the reply, writes the turn's usage and
                  repo labels and its task, notes the dependency files the turn opened, brings view.py's record of
-                 the session up to date, and then the repository's entries, the dependencies' and the index.
-  subagent-stop  SubagentStop, matcher `.*`. Nothing printed. It closes phi.py's entry of the subagent, then writes
+                 the session up to date, and then the repository's and the dependencies' documents and the index.
+  subagent-stop  SubagentStop, matcher `.*`. Nothing printed. It closes phi.py's record of the subagent, then writes
                  the usage and repo labels of what the agent hook served it, and its task.
   train          Stop, async. Nothing printed. `train --if-owed`, a round of the ranker when train.py's `owed` says
                  one is due, which calls no paid model; nothing when p4.json's `recall.learn` is false.
@@ -264,8 +264,8 @@ def exclude_line(project):
 
 
 def refresh_index(p4, project, deadline_s=None):
-    """Bring the repository's entries, then the dependencies', up to date incrementally within their deadlines, and
-    then rebuild the index when a source is newer than it."""
+    """Bring the repository's documents, then the dependencies', up to date incrementally within their deadlines,
+    and then rebuild the index when a source is newer than it."""
     deadline_s = REPO_DEADLINE_S if deadline_s is None else deadline_s
     import subprocess
     import deps
@@ -341,7 +341,8 @@ def h_recall(payload):
     if shown:
         import said
         if said.mode(p4) != "off":
-            # said.py: the corpus's lines get handles, and the session is asked to state what it did with them
+            # said.py: the rule, correction, retraction and fact lines get handles, and the session is asked to
+            # state what it did with them
             keep = set(shown)
             shown, handles = said.tag([(l, i) for l, i in zip(r["lines"], r["ids"]) if l in keep])
             if handles:
@@ -494,7 +495,7 @@ def h_close(payload):
 
 
 def h_subagent_stop(payload):
-    phi_text("agent-stop", payload)               # phi.py: the subagent's entry closed with its last message
+    phi_text("agent-stop", payload)               # phi.py: the subagent's record closed with its last message
     import labels as lb
     import store as st
     import transcript as tr
@@ -550,7 +551,7 @@ def phi_route(payload, table):
     """phi.py's handlers that `table` names for this tool, run in this process in their order until one answers:
     that answer, or None. A failure in phi.py is swallowed and never touches the lookup hooks. A session registers a
     plugin's hooks when it loads the plugin, at its start or at `/reload-plugins`, and the lookup hooks already run
-    on every tool, so a check added to phi.py needs no entry of its own in hooks.json."""
+    on every tool, so a check added to phi.py needs no hook of its own in hooks.json."""
     names = table.get(str(payload.get("tool_name") or ""))
     for name in (names,) if isinstance(names, str) else names or ():
         try:
@@ -582,12 +583,12 @@ def h_lookup_check(payload):
 
 
 def h_lookup_record(payload):
-    """After a tool ran or failed. A subagent's call binds its id to phi.py's entry of it. Then phi.py's records
-    that PHI_RECORD names for the tool run, such as the plan with its step boundary and a background task under its
-    step; their answer is returned for the plan tool, Write and Edit. Otherwise lookups.py writes the call's row,
-    and a failure other sessions already met is told what they did about it."""
+    """After a tool ran or failed. A subagent's call binds its id to phi.py's record of the subagent. Then phi.py's
+    records that PHI_RECORD names for the tool run, such as the task list with its step boundary and a background
+    task under its step; their answer is returned for `update_plan`, Write and Edit. Otherwise lookups.py writes the
+    call's row, and a failure other sessions already met is told what they did about it."""
     if payload.get("agent_id"):
-        phi_text("agent-post", payload)            # phi.py: the subagent's id bound to its entry
+        phi_text("agent-post", payload)            # phi.py: the subagent's id bound to its record
     out = phi_route(payload, PHI_RECORD)
     if out and str(payload.get("tool_name") or "") in ("mcp__ccd_turn__update_plan", "Write", "Edit", "MultiEdit"):
         return out
