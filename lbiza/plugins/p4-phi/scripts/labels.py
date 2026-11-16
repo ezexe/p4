@@ -262,7 +262,7 @@ def paths_named(text):
     return set(PATH_RE.findall(text or ""))
 
 
-def used(doc, rare_doc, hay_toks, hay_text, prompt_text, prompt_toks):
+def used(doc, rare_doc, hay_toks, hay_text, prompt_text):
     """5.1's usage rule: the reply or the turn's Edit/Write/Bash inputs contain two of the entry's rare terms, or a
     path it names that the prompt did not."""
     if len(rare_doc & hay_toks) >= 2:
@@ -346,8 +346,8 @@ def from_history(p4, idx=None, files=None):
                     continue
                 rd = rare_of(idx, d["toks"].split())
                 shared = rd & hay_toks
-                if len(shared) >= 2 and len(shared - prompt_toks) >= 1 or used(d, set(), set(), hay, t["text"],
-                                                                                 prompt_toks) and d["file"] == "repo":
+                if len(shared) >= 2 and len(shared - prompt_toks) >= 1 or used(d, set(), set(), hay, t["text"]) \
+                        and d["file"] == "repo":
                     got.append((len(shared), -i, d["id"]))
                 if len(got) >= HISTORY_POOL:
                     break
@@ -423,7 +423,7 @@ def usage_labels(p4, idx, served, reply, turn=None, task_id="", now=""):
         if not d:
             continue
         rd = rare_of(idx, d["toks"].split()) - prompt_toks
-        u = used(d, rd, hay_toks, hay, prompt, prompt_toks)
+        u = used(d, rd, hay_toks, hay, prompt)
         out.append({"task": task_id or served.get("task", ""), "entry": eid, "label": "1" if u else "0",
                     "source": "usage", "weight": str(USAGE_WEIGHT), "time": now, "teacher": "", "edited": "",
                     "note": ("used" if u else "unused") + (f"; {mode}" if mode else "")})
