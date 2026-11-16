@@ -421,8 +421,7 @@ def newer_than(d, cutoff, facts):
 
 class Context:
     """What every task of a batch shares: the index; the index with the documents of the held entries beside it,
-    which a pool task may have picked; the ranker; the facts' fields by id; the head tokens train.head_tokens gives
-    the `head-bm25` feature; the tasks; and the raw labels by task."""
+    which a pool task may have picked; the ranker; the facts' fields by id; the tasks; and the raw labels by task."""
 
     def __init__(self, p4):
         import train
@@ -433,7 +432,6 @@ class Context:
         self.by_id = {d["id"]: d for d in self.hidx["docs"]}
         self.model = ranker.load(lb.mpath(p4, "ranker.json")) or {}
         self.facts = {e.id: e.fields for e in st.load_file(p4, "facts.md")}
-        self.extra = {"head140": train.head_tokens(p4)}
         self.tasks = lb.read_tasks(p4)
         self.raw = {}
         for r in lb.read_tsv(lb.mpath(p4, lb.RAW)):
@@ -447,7 +445,7 @@ def candidates(ctx, task, pool):
     files = set(st.STORE_FILES) if pool else None
     idx = ctx.hidx if pool else ctx.idx
     xs, _, cand, sc = ctx.train.task_examples(idx, task, set(), limit=0 if pool else ctx.train.CANDIDATES,
-                                              files=files, docs_by=ctx.extra)
+                                              files=files)
     if not cand:
         return []
     bm = cand[:CAND_K]

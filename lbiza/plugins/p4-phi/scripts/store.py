@@ -39,7 +39,8 @@ import ranker  # noqa: E402
 STORE_FILES = ("rules.md", "corrections.md", "retractions.md", "facts.md")
 VOCABULARY = "vocabulary.md"
 MESSAGES = "messages"
-INDEX_VERSION = 6
+INDEX_VERSION = 7
+HEAD_CHARS = 140              # a corpus entry's head: the characters of its value the head-bm25 feature reads
 MASK_MIN = 24
 SHORT_WORDS = 5
 KNOWN_SHORT_MIN = 2
@@ -574,16 +575,21 @@ def display_path(e):
 
 def make_doc(e, fname, kind):
     """The index's document for an Entry of the corpus, memory or saved code, with its term frequencies under `_tf`,
-    which build_index turns into postings."""
+    which build_index turns into postings. Its `head`, the text the ranker's `head-bm25` feature reads in training
+    and in the query alike, is for an entry of STORE_FILES its value collapsed and cut at HEAD_CHARS characters,
+    each word with its repeats, and for any other entry the distinct words of its value's first 400 characters."""
     toks = ranker.tokens(entry_text(e))
-    head = ranker.tokens(e.value[:400])
+    if fname in STORE_FILES:
+        head = " ".join(ranker.tokens(collapse(e.value)[:HEAD_CHARS]))
+    else:
+        head = " ".join(dict.fromkeys(ranker.tokens(e.value[:400])))
     tf = {}
     for t in toks:
         tf[t] = tf.get(t, 0) + 1
     return {"id": e.id, "path": display_path(e), "line": e.line, "file": fname, "kind": kind,
             "time": e.time, "state": e.state, "show": show_text(fname, e)[:240],
             "plain": bool(e.fields.get("plain", "").strip()), "dl": len(toks), "_tf": tf,
-            "toks": " ".join(tf), "head": " ".join(dict.fromkeys(head)),
+            "toks": " ".join(tf), "head": head,
             **({"match": collapse(e.fields.get("match", ""))[:300]} if fname == "corrections.md" else {}),
             **({"supersedes": e.fields["supersedes"].strip()} if e.fields.get("supersedes", "").strip()
                else {}),

@@ -231,6 +231,52 @@ class PerFile(unittest.TestCase):
         self.assertIn("below 0.9", row["why"])
 
 
+class HeadFeature(unittest.TestCase):
+    def test_training_and_the_query_read_one_head(self):
+        """A corpus entry's `head-bm25` in a training set is the one the query hands the ranker for the same text,
+        here for an entry whose words come after its first 140 characters."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        p4 = os.path.join(tmp.name, ".claude", "p4")
+        filler = "the bench clock and the board counters are kept in step by one scheduler thread, "
+        rules = [[("ruling", filler * 2 + "and the axolotl relay wakes the bandicoot gauge"), ("status", "LIVE"),
+                  ("time", "2026-10-01 09:00")],
+                 [("ruling", "the axolotl relay wakes at dawn"), ("status", "LIVE"), ("time", "2026-10-02 09:00")],
+                 [("ruling", "the bandicoot gauge reads low after a restart"), ("status", "LIVE"),
+                  ("time", "2026-10-03 09:00")]]
+        write(p4conf.sub(p4, "store", "rules.md"), st.render("rules.md", rules))
+        for f in ("corrections.md", "retractions.md", "facts.md"):
+            write(p4conf.sub(p4, "store", f), st.render(f, []))
+        idx = st.build_index(p4)
+        far = next(d for d in idx["docs"] if "scheduler" in d["show"])
+        text = "why the axolotl relay wakes the bandicoot gauge so early"
+        lb.add_tasks(p4, [{"id": "u0", "session": "s0000000", "time": "2026-10-30 12:00", "text": text,
+                           "kind": "first"}])
+        lb.write_tsv(lb.mpath(p4, lb.TRAIN), lb.TRAIN_HEAD, [
+            {"task": "u0", "entry": far["id"], "label": "1", "source": "usage", "weight": "1.0",
+             "time": "2026-10-30 12:00", "teacher": "", "edited": "", "note": ""}])
+        s = next(s for s in train.build_sets(p4, idx, sources={"usage"}) if s["task"] == "u0")
+        trained = {i: x[ranker.h("head-bm25")] for i, x in zip(s["cand_ids"], s["xs"])}
+        import p4 as cli
+        seen = []
+        real = ranker.candidate_features
+
+        def spy(terms, cds, *a, **kw):
+            out = real(terms, cds, *a, **kw)
+            seen.append((cds, out[0]))
+            return out
+        ranker.candidate_features = spy
+        self.addCleanup(setattr, ranker, "candidate_features", real)
+        cli.query(p4, text, idx=idx, now="2026-10-30 12:00",
+                  model={"w": {ranker.h("bias"): 1.0}, "threshold": 0.99, "features": ["base"], "per_file": 2})
+        cds, xs = seen[-1]
+        id_of = {d["toks"]: d["id"] for d in idx["docs"]}
+        served = {id_of[" ".join(c["toks"])]: x[ranker.h("head-bm25")] for c, x in zip(cds, xs)}
+        self.assertEqual(set(served), set(trained), "the same three candidates")
+        for i in served:
+            self.assertAlmostEqual(served[i], trained[i], msg=i)
+
+
 class DictionaryCheck(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

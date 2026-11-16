@@ -131,9 +131,8 @@ def task_examples(idx, task, positives, limit=None, files=None, docs_by=None):
             node_hit = {k for k, i in enumerate(cand) if docs[i]["id"] in got}
     if not cand:
         return [], [], [], []
-    heads = (docs_by or {}).get("head140", {})
     cds = [{"file": docs[i]["file"], "kind": docs[i]["kind"], "state": docs[i]["state"], "time": docs[i]["time"],
-            "toks": docs[i]["toks"].split(), "head": heads.get(docs[i]["id"]) or docs[i]["head"].split(),
+            "toks": docs[i]["toks"].split(), "head": docs[i]["head"].split(),
             "dl": docs[i]["dl"], "fkind": docs[i].get("fkind")} for i in cand]
     sc = [scores.get(i, 0.0) for i in cand]
     ext = {"near": feats} if feats is not None else {}
@@ -202,18 +201,6 @@ def silent_sets(idx, prompts, now, mem=None, id_at=None):
                     "files": [docs[i]["path"] for i in cand], "bm25": sc, "n_pos": 0, "source": "silent",
                     "missed": False, "kind": "silent", "time": now, "sources": ["silent"],
                     "cand_ids": [docs[i]["id"] for i in cand]})
-    return out
-
-
-def head_tokens(p4):
-    """`{entry id: tokens}` for every entry outside the message files: its value collapsed, cut at 140 characters
-    and tokenized with repeats, the text task_examples gives the `head-bm25` feature in place of the index's head."""
-    out = {}
-    for f, ents in st.load_store(p4).items():
-        if f.startswith(st.MESSAGES + "/"):
-            continue
-        for e in ents:
-            out[e.id] = ranker.tokens(st.collapse(e.value)[:140])
     return out
 
 
@@ -291,7 +278,7 @@ def build_sets(p4, idx=None, sources=None, max_tasks=None, rows=None, now=None, 
         by_task.setdefault(r["task"], []).append(r)
     ids = {d["id"]: i for i, d in enumerate(idx["docs"])}
     store_files = set(st.STORE_FILES)
-    extra = {"head140": head_tokens(p4)}
+    extra = {}
     import near
     near.configure(p4)
     if near.ON:
