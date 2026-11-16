@@ -19,9 +19,6 @@ import p4 as cli  # noqa: E402
 import p4conf  # noqa: E402
 import store as st  # noqa: E402
 
-COPIES = []                  # one plugin carries node.py since p4-phi 0.7.0
-
-
 def write(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -44,11 +41,6 @@ class Tree(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.p4, ignore_errors=True)
-
-    def test_every_plugin_carries_the_same_copy(self):
-        src = (HERE / "node.py").read_bytes()
-        for c in COPIES:
-            self.assertEqual(c.read_bytes(), src, c)
 
     def test_a_child_reads_its_task_the_tasks_above_and_its_siblings(self):
         session(self.p4, "top", task="port the narwhal plotter to macos",
