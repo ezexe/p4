@@ -1538,11 +1538,18 @@ def h_self_archive(payload):
     refuse = None
     if not session_archives(me.store):             # #49: the archive is ezexe's own action in the app
         RAN["archive_refused"] = "self" if own else target[:40]
+        if not own and not spawned_from(s):       # a top session archiving what ezexe picked in its quick select
+            turn = last_turn(payload.get("transcript_path") or "")
+            if target in relay.picked(me.home, me.id, (turn or {}).get("calls")):
+                RAN["archive_refused"] = ""
+                RAN["archive_picked"] = target[:40]
+                return None
         why = relay.NO_ARCHIVE + (
-            " This session's turn is kept and it is retired to the session that started it. " + relay.BUTTON
-            if own and spawned_from(s) else " " + relay.BUTTON if own else
-            f" phi already treats a finished or superseded session as archived. Tell ezexe in one line that {target} "
-            f"is ready to archive.")
+            " This session's turn is kept. " + relay.CHILD_DONE if own and spawned_from(s) else
+            " " + relay.BUTTON if own else
+            f" phi already treats a finished or superseded session as archived. A top session that is done offers "
+            f"its tree's finished sessions to ezexe as one quick select, an `AskUserQuestion` with `multiSelect`, "
+            f"and archives only the ones ezexe picked there: {target} was not picked in this turn.")
         refuse = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                          "permissionDecisionReason": why}}
     if not spawned_from(s) or not own:
@@ -2534,8 +2541,13 @@ def main(argv=None):
             s["done"] = {"text": clean(a.text)[:400], "time": now()}
             save_session(me.home, s)
             print("this turn will be kept as done")
-            if spawned_from(s) and s.get("disposable"):
-                print(relay.BUTTON)                # #49: a finished session asks with a button, not prose
+            if spawned_from(s):                    # #49: the button is for a topmost session only
+                print(relay.CHILD_DONE)
+            else:
+                print(relay.BUTTON)
+                listed = relay.offer_text(me.home, s["sessionId"])
+                if listed:
+                    print(listed)
             try:                                   # #45: the issue it closes, and what that still owes
                 line = issues.done_text(me.home, s, os.getcwd()) if spawned_from(s) else ""
             except Exception:  # noqa: BLE001

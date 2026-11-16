@@ -676,7 +676,7 @@ class TopOrchestrates(unittest.TestCase):
         self.assertNotIn(C, plans._children(t.p4, TOP), "out of the down-lines")
         self.assertNotIn(C, (relay._read_json(relay.anchor_path(t.p4, TOP)).get("nodes") or {}))
         line = context(t.say(TOP, "what next"))
-        self.assertIn("list each to ezexe as its link", line)
+        self.assertIn("offers the finished sessions to ezexe as one quick select", line)
         self.assertNotIn("archive_session", line, "#49: no archive call is handed out")
         self.assertIn(C, line.split("finished and retired")[1])
         self.assertNotIn("finished and retired", context(t.say(TOP, "and then")), "said once")

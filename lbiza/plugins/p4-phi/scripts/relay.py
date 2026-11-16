@@ -1550,16 +1550,102 @@ def stale_text(pend):
 # archive itself is ezexe's own action in the app. ezexe is told once, by the parent's one line, and the sessions
 # still waiting for that action are listed on <home>/phi/ready-to-archive.md.
 
-READY = ("The chain treats them as archived from now. No session archives a session: call no archive tool. Each "
-         "is ready to archive, so list each to ezexe as its link, exactly as given here, and ezexe opens it and "
-         "presses the archive button in its next-step box.")
+READY = ("The chain treats them as archived from now. They are ready to archive, but call no archive tool for them "
+         "now: when the top session of this tree is done, it offers the finished sessions to ezexe as one quick "
+         "select and archives exactly the ones ezexe picks.")
 NO_ARCHIVE = ("phi (p4-phi): no session archives a session, itself included (ezexe/p4#49). The archive is ezexe's "
               "own action in the app.")
 # ezexe: "the self archival request should be simplified to a button the user can press"
-BUTTON = ("End this turn with `mcp__ccd_turn__wrap_up` whose first action is the app's `archive`, and a recap of one "
-          "sentence naming what was done: that puts the button in this session's next-step box, and ezexe archives "
-          "it with one press. Write no paragraph asking for it, and call no archive tool. The chain has been told "
-          "already and treats this session as archived.")
+# and: "its meant for topmost level sessions but when there done(ready to get archioved) if they have still
+# sessions that are ready to be archive on quick select for user"
+BUTTON = ("This is the top session of its tree and it is done, so end this turn with `mcp__ccd_turn__wrap_up` whose "
+          "first action is the app's `archive`, and a recap of one sentence naming what was done: that puts the "
+          "button in this session's next-step box, and ezexe archives it with one press. Write no paragraph asking "
+          "for it, and call no archive tool for this session.")
+CHILD_DONE = ("This session was started by another, so it shows no archive button and asks for nothing: report what "
+              "was done and end the turn. It retires to the session that started it, and the chain treats it as "
+              "archived. Call no archive tool.")
+OFFER_MAX = 4                    # options one AskUserQuestion holds
+
+
+def ready_in_tree(home, top):
+    """The sessions under `top` that phi holds as finished and the app has not archived, oldest first:
+    [(sessionId, title, parent)]."""
+    every = _sessions(home)
+    out = []
+    for sid, s in sorted(every.items(), key=lambda kv: str(kv[1].get("createdAt") or "")):
+        if not s.get("doneRetired") or s.get("archived") or archived_in_app(s):
+            continue
+        cur, seen = _parent(s), set()
+        while cur and cur != top and cur not in seen:
+            seen.add(cur)
+            cur = _parent(every.get(cur) or {})
+        if cur == top:
+            out.append((sid, _title(s), _parent(s)))
+    return out
+
+
+def offer(home, top):
+    """The quick select a done top session puts to ezexe -> [{"label", "description", "ids"}]: one option a
+    finished session while they fit one question, else one option a parent with its children named, and one for
+    all of them. The labels are what the archive hook reads ezexe's picks by, so they are kept on the top session."""
+    ready = ready_in_tree(home, top)
+    if not ready:
+        return []
+    every = _sessions(home)
+    if len(ready) <= OFFER_MAX:
+        opts = [{"label": _short(t, 44), "description": f"Archive {sid}.", "ids": [sid]} for sid, t, _ in ready]
+    else:
+        groups = {}
+        for sid, t, parent in ready:
+            groups.setdefault(parent, []).append((sid, t))
+        opts = [{"label": f"All {len(ready)} finished sessions", "description": "Archive every one of them.",
+                 "ids": [sid for sid, _, _ in ready]}]
+        for parent, kids in list(groups.items())[:OFFER_MAX - 1]:
+            opts.append({"label": _short(f"Under {_title(every.get(parent) or {'sessionId': parent})}", 44),
+                         "description": "Archive " + "; ".join(f"\"{_short(t, 40)}\"" for _, t in kids[:8]) + ".",
+                         "ids": [sid for sid, _ in kids]})
+    seen = {}
+    for o in opts:                                 # a label is the key a pick is read by: each one once
+        seen[o["label"]] = seen.get(o["label"], 0) + 1
+        if seen[o["label"]] > 1:
+            o["label"] = _short(o["label"], 40) + f" ({seen[o['label']]})"
+    path = os.path.join(_dir(home, top), "session.json")
+    d = _read_json(path)
+    if d:
+        d["archiveOffer"] = [{"label": o["label"], "ids": o["ids"]} for o in opts]
+        _write_json(path, d)
+    return opts
+
+
+def offer_text(home, top):
+    """The line a done top session is handed about the finished sessions of its tree, '' when there are none."""
+    opts = offer(home, top)
+    if not opts:
+        return ""
+    n = len({i for o in opts for i in o["ids"]})
+    lines = "\n".join(f"- label \"{o['label']}\", description \"{o['description']}\"" for o in opts)
+    return (f"phi (p4-phi): {n} session{'s' if n != 1 else ''} of this tree {'are' if n != 1 else 'is'} finished and "
+            f"not yet archived. In this closing turn, before `mcp__ccd_turn__wrap_up`, put them to ezexe as one "
+            f"quick select: one `AskUserQuestion` with `multiSelect` true, the question saying that archiving all of "
+            f"them is the recommended choice, and exactly these options"
+            + (", with a last option \"None of them\"" if len(opts) == 1 else "") + f":\n{lines}\n"
+            f"Archive none of them before ezexe has answered. Then call `mcp__ccd_session_mgmt__archive_session` for "
+            f"exactly the sessions under the options ezexe picked, and for no other: ezexe's selection is the user "
+            f"action, and phi lets those calls through.")
+
+
+def picked(home, top, calls):
+    """The session ids ezexe picked in this turn's quick select: the ids under each offered option whose label an
+    answered AskUserQuestion of the turn carries."""
+    offer_ = [o for o in _session(home, top).get("archiveOffer") or [] if isinstance(o, dict)]
+    said = " \n ".join(str(c.get("result") or "") for c in calls or []
+                       if c.get("name") == "AskUserQuestion" and not c.get("failed"))
+    out = []
+    for o in offer_:
+        if o.get("label") and str(o["label"]) in said:
+            out += [i for i in o.get("ids") or [] if i not in out]
+    return out
 
 
 def link_of(x):
