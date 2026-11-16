@@ -62,15 +62,36 @@ FILES_WANTED = ("a brief declares its file set (ezexe/p4#48): add a line `Files:
                 "that share a file go to one child as a serial run, and tasks with disjoint files each get a child.")
 
 
+LIST_END = re.compile(r"(?<=[\w`/\\)*\"'])[.:]\s+(?=[A-Z`\"'(])")   # where the list ends and a sentence begins
+
+
+def _is_root(entry, base):
+    """True for the repository's root or the session's own folder: named on a `Files:` line, it is context."""
+    return "/" in entry and (entry == relay.norm(base or "") or os.path.exists(os.path.join(entry, ".git")))
+
+
 def files_of(brief, base=""):
     """The file set a brief declares: [] for `Files: none`, None when it has no such line. A path with a folder is
-    normalized under `base`; a bare file name is kept as its lower-case name."""
+    normalized under `base`; a bare file name is kept as its lower-case name. Only the paths listed after `Files:`
+    up to the end of that line are read, and only up to where the list ends and a sentence begins. A path that is
+    an ancestor of another listed path, or a repository's root, is context and is not held, unless it is the only
+    path on the line (#62: a checkout's path named beside `dox/` made a child hold the whole repository)."""
     m = FILES_LINE.search(str(brief or ""))
     if not m:
         return None
-    value = m.group(1).strip().rstrip(".")
+    value = LIST_END.split(m.group(1).strip(), 1)[0].strip().rstrip(".")
     if NO_FILES.match(value):
         return []
+    out = _listed(value, base)
+    if len(out) > 1:
+        whole = {e: e if "/" in e else relay.norm(e, base) for e in out}    # a bare name may be a folder here
+        context = [e for e in out if _is_root(whole[e], base) or any(
+            o != e and "/" in o and relay.covers(whole[e], o) for o in out)]
+        out = [e for e in out if e not in context] or out[:1]
+    return out
+
+
+def _listed(value, base):
     out = []
     for tok in re.split(r"\s*(?:,|;|\band\b)\s*", value):
         ticked = re.findall(r"`([^`\s]+)`", tok)

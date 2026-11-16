@@ -206,6 +206,78 @@ class StartRequests(unittest.TestCase):
             json.dump({**row, "isArchived": True}, f)
         self.assertNotIn("this start is held", t.hook("start-advice", TOP, call).stdout, "archived: free as well")
 
+    def test_a_set_narrowed_with_phi_files_no_longer_blocks_a_start_on_the_released_paths(self):
+        """#62: a session that landed its work on some files held them until `phi.py done`."""
+        t = self.t
+        w = "local_wrt00002"
+        CLI.setdefault(w, "abab0002-0000-4000-8000-000000000000")
+        t.record(w, TOP, title="the flush and docs writer")
+        t.say(w, "Task:\nPort the flush and write its page. Report when done.\nFiles: src/flush.py, docs/flush.md")
+        call = {"hook_event_name": "PreToolUse", "tool_name": "mcp__ccd_session__start_session",
+                "tool_input": {"initiation": "user_asked", "title": "the flush again", "context": "fresh",
+                               "use_worktree": False, "prompt": BRIEF}}
+        self.assertIn("this start is held", t.hook("start-advice", TOP, call).stdout)
+        r = t.cli(w, "files", "docs/flush.md")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("docs/flush.md", r.stdout)
+        self.assertIn("released: ", r.stdout)
+        self.assertIn("src/flush.py", r.stdout.split("released: ", 1)[1])
+        self.assertNotIn("this start is held", t.hook("start-advice", TOP, call).stdout,
+                         "the guard reads the narrowed set at once")
+        s = t.session(w)
+        self.assertEqual([f.rsplit("/", 1)[-1] for f in s["fileSet"]], ["flush.md"])
+        self.assertEqual(len(s["fileSets"]), 1, "the set before it is recorded")
+        self.assertEqual(len(s["fileSets"][0]["files"]), 2)
+        docs = {**call, "tool_input": {**call["tool_input"], "prompt": BRIEF.replace("src/flush.py", "docs/flush.md")}}
+        self.assertIn("this start is held", t.hook("start-advice", TOP, docs).stdout, "what it kept is still held")
+        t.say(w, "carry on")                       # a hook that read the record before the command keeps the new set
+        self.assertEqual(len(t.session(w)["fileSet"]), 1)
+        r = t.cli(w, "files", "--release")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(t.session(w)["fileSet"], [])
+        self.assertNotIn("this start is held", t.hook("start-advice", TOP, docs).stdout)
+        self.assertIn("holds no file", t.cli(w, "files").stdout)
+        self.assertEqual(t.cli(w, "files", "a.py", "--release").returncode, 2, "one or the other")
+
+    def test_a_files_line_holds_only_the_paths_it_lists_to_write(self):
+        """#62: a checkout's path named for context on the line was read as held, so a child held the repository."""
+        base = self.t.proj
+        os.makedirs(os.path.join(base, "p4", ".git"))
+        root = relay.norm(os.path.join(base, "p4"))
+        a = relay.norm("dox/a.html", base)
+        got = starts.files_of("Write the page.\nFiles: `dox/a.html`. The live checkout is `" + root + "`, never "
+                              "edit it.\nReport when done.", base)
+        self.assertEqual(got, [a], "a sentence after the list names no file to write")
+        got = starts.files_of("Files: dox/a.html, in the checkout `" + root + "`", base)
+        self.assertEqual(got, [a], "a repository root beside another path is context")
+        got = starts.files_of("Files: `p4/dox/a.html`, `p4/dox`, `p4`", base)
+        self.assertEqual(got, [relay.norm("p4/dox/a.html", base)], "an ancestor of a listed path is not held")
+        self.assertEqual(starts.files_of("Files: `" + root + "`", base), [root], "the only path on the line is held")
+        self.assertEqual(starts.files_of("Files: src/a.py, src/b.py and README.md.", base),
+                         [relay.norm("src/a.py", base), relay.norm("src/b.py", base), "readme.md"])
+        self.assertEqual(starts.files_of("Files: none. The checkout is `" + root + "`.", base), [])
+        self.assertIsNone(starts.files_of("The checkout is `" + root + "`.", base))
+
+    def test_a_session_whose_closing_commit_is_pushed_is_told_what_it_still_holds(self):
+        """#62: named with the command that releases them, once."""
+        t = self.t
+        w = "local_wrt00003"
+        CLI.setdefault(w, "abab0003-0000-4000-8000-000000000000")
+        t.record(w, TOP, title="the flush writer")
+        t.say(w, "Task:\nPort the flush. Report when done.\nFiles: src/flush.py")
+        s = t.session(w)
+        closing = [(t.proj, "abc1234", "port the flush", ["7"])]
+        self.assertEqual(phi.files_held_text(t.p4, s, closing, pushed=lambda repo, sha: False), "", "not pushed yet")
+        line = phi.files_held_text(t.p4, s, closing, pushed=lambda repo, sha: True)
+        self.assertIn("commit abc1234, which closes #7, is on a remote branch", line)
+        self.assertIn("src/flush.py", line)
+        self.assertIn(" files --release`", line)
+        self.assertIn(" files <path> ...`", line)
+        self.assertEqual(phi.files_held_text(t.p4, s, closing, pushed=lambda repo, sha: True), "", "said once")
+        s["fileSet"] = []
+        s.pop("filesHeldTold")
+        self.assertEqual(phi.files_held_text(t.p4, s, closing, pushed=lambda repo, sha: True), "", "holds nothing")
+
     def test_a_request_expires_after_a_day(self):
         home = self.t.p4
         rid, new = starts.add(home, KID, "an old child", BRIEF, at=time.time() - 25 * 3600)

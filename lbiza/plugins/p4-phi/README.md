@@ -55,6 +55,12 @@ The sessions it controls stay tops of their own trees, in their own sections.
 | Names a boundary once | The notice tells it to end the turn with one question and the buttons "Compact now" and "Later". |
 | Routes a new top session through it | `phi.py request ... --to-puppeteer` in a controlled session, read by the puppeteer's hooks from the requester's own store. |
 | Hands a start request only to the session that filed it | At the next turn ezexe begins in that session, so the app nests the child where phi does. A session whose turn another session began shows a proposal card first. |
+| Warns of an early go | A puppeteer's message to a session it controls gets one line while another controlled session, or one in its tree, still holds a file in that session's set. The line names the holder by its full title and the command that frees the files. |
+
+A session narrows its declared file set with `phi.py files <path> ...` and empties it with `phi.py files --release`.
+The start guard reads the new set at once, so a start on the released paths is no longer held.
+A `Files:` line holds only the paths it lists to write: a repository's root, or an ancestor of another listed path, is context unless it is the only path on the line.
+`scripts/test_starts.py` proves both.
 
 What phi does not do here.
 It does not stop a session from filing itself in the section, since the app asks nobody: the rule rests on ezexe's filing, and phi says once, in the session and on its record, that it saw the session there, and tells every session it lists who claims it.

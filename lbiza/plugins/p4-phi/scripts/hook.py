@@ -558,6 +558,7 @@ def h_subagent_stop(payload):
 
 PHI_CHECK = {"mcp__ccd_session__start_session": "start-advice", "EnterWorktree": "branch-guard",
              "mcp__ccd_session_mgmt__archive_session": "self-archive",
+             "SendMessage": "go-guard", "mcp__ccd_session_mgmt__send_message": "go-guard",
              "Bash": ("branch-guard", "store-guard", "restart-check", "level", "nudge"),
              "PowerShell": ("branch-guard", "store-guard", "restart-check", "level", "nudge"), "Edit": "nudge",
              "Write": "nudge", "MultiEdit": "nudge", "NotebookEdit": "nudge"}

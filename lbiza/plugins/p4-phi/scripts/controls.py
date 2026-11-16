@@ -862,6 +862,49 @@ def answers_text(home, s):
     return ("phi (p4-phi): " + "; ".join(lines) + ". Start no session for it.") if lines else ""
 
 
+# --- a go to a waiting writer (#62) --------------------------------------------------------------------------------------
+
+def go_text(home, s, target, message=""):
+    """A puppeteer's message to a session it controls -> one line when another controlled session, or a session in
+    its tree, still holds a file in that writer's set: the holder by full title, and what frees the files. ''
+    when nothing is held or the pair was warned of already. The set is the one the message declares on a
+    `Files:` line, else the one the target declared."""
+    target = PHI.safe_id(target) if target else ""
+    rows = controlled(s)
+    mine = next((e for e in rows if e["sessionId"] == target), None)
+    if not mine:
+        return ""
+    store = mine.get("store") or ""
+    t = PHI.load_session(store, target) if store else {}
+    files = starts.files_of(message, t.get("cwd") or "") or [x for x in t.get("fileSet") or [] if isinstance(x, str)]
+    if not files:
+        return ""
+    held = []
+    for e in rows:
+        st = e.get("store") or ""
+        if e["sessionId"] == target or not st:
+            continue
+        for sid, _, theirs in starts.writers(st):
+            above = PHI.chain_of(st, sid)
+            if sid == target or target in above or (sid != e["sessionId"] and e["sessionId"] not in above):
+                continue
+            hit = starts.files_overlap(files, theirs)
+            if hit:
+                held.append((sid, full_title(sid), hit))
+    if not held:
+        return ""
+    key = hashlib.sha1(json.dumps([target, sorted((sid, hit) for sid, _, hit in held)]).encode("utf-8")).hexdigest()[:12]
+    told = [k for k in s.get("goWarned") or [] if isinstance(k, str)]
+    if key in told:
+        return ""
+    s["goWarned"] = (told + [key])[-40:]
+    names = "; ".join(f"\"{title}\" ({sid}) holds {', '.join(hit[:4])}" for sid, title, hit in held[:4])
+    return (f"phi (p4-phi): this go to \"{full_title(target)}\" is early: {names}, and no two sessions write the "
+            f"same file at once (ezexe/p4#48). Hold the go until that session reports done, or have it release what "
+            f"it has landed with `{PHI.commands()} files --release` or `{PHI.commands()} files <the paths it still "
+            f"writes>` first. Said once for this pair.")
+
+
 # --- routing down ----------------------------------------------------------------------------------------------------------
 
 def route_down(s, words_):

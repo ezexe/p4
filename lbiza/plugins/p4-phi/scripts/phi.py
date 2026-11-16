@@ -476,6 +476,10 @@ def save_session(home, s):
         s["controls"] = disk["controls"]          # #58: only the controls command and a puppeteer's own start change it
     if int(disk.get("anchorSeen") or 0) > int(s.get("anchorSeen") or 0):
         s["anchorSeen"] = disk["anchorSeen"]
+    if str(disk.get("fileSetAt") or "") > str(s.get("fileSetAt") or ""):
+        for k in ("fileSet", "fileSetAt", "fileSets"):    # #62: `phi.py files` ran while this hook held an older copy
+            if k in disk:
+                s[k] = disk[k]
     moved = disk.get("spawnedFrom") if isinstance(disk.get("spawnedFrom"), dict) else {}
     mine = s.get("spawnedFrom") if isinstance(s.get("spawnedFrom"), dict) else {}
     if moved.get("source") in ("detached", "reparented", "requested") \
@@ -891,6 +895,60 @@ def reports_text(home, s, room=None):
             for r in rest[:6]) + (f", and {len(rest) - 6} more on {page_path(home, s['sessionId'])}"
                                   if len(rest) > 6 else "") + ".")
     return "\n".join(out), len(rows)
+
+
+# --- a session's file set, narrowed or released (#62) ----------------------------------------------------------------
+
+def set_files(home, s, paths, base):
+    """Replace a session's declared file set -> (the new set, what it released). The set before it is kept on the
+    record, and the start guard reads the new one at once, since it reads each record as it runs."""
+    new = []
+    for p in paths:
+        name = str(p or "").strip().strip("`'\"").rstrip(".")
+        if not name:
+            continue
+        entry = relay.norm(name, base) if re.search(r"[\\/]", name) else name.lower()
+        if entry not in new:
+            new.append(entry)
+    old = [x for x in s.get("fileSet") or [] if isinstance(x, str)] if isinstance(s.get("fileSet"), list) else []
+    if isinstance(s.get("fileSet"), list):
+        kept = [x for x in s.get("fileSets") or [] if isinstance(x, dict)]
+        s["fileSets"] = (kept + [{"files": old, "until": now()}])[-20:]
+    s["fileSet"], s["fileSetAt"] = new, now_exact()
+    s.pop("filesHeldTold", None)
+    save_session(home, s)
+    return new, [x for x in old if x not in new]
+
+
+def now_exact():
+    """A time that orders two writes of one minute."""
+    return time.strftime("%Y-%m-%d %H:%M:%S") + f".{int(time.time() * 1000) % 1000:03d}"
+
+
+def files_held_text(home, s, closing=None, pushed=None):
+    """The line a session is given once when its issue-closing commit is on a remote branch and it still holds
+    files: the files, and the command that releases them. '' otherwise. The caller saves the record."""
+    files = [x for x in s.get("fileSet") or [] if isinstance(x, str)] if isinstance(s.get("fileSet"), list) else []
+    if not files:
+        return ""
+    try:
+        closing = relay.closing_commits(home, s["sessionId"], s) if closing is None else closing
+        pushed = pushed or issues._pushed
+        done = [(sha, closes) for path, sha, _, closes in closing if pushed(path, sha)]
+    except Exception:  # noqa: BLE001
+        return ""
+    key = ",".join(sha for sha, _ in done)
+    if not done or s.get("filesHeldTold") == key:
+        return ""
+    s["filesHeldTold"] = key
+    sha, closes = done[-1]
+    base = s.get("cwd") or ""
+    shown = ", ".join(f"`{relay.show(f, base) if '/' in f else f}`" for f in files[:8]) + (
+        f" and {len(files) - 8} more" if len(files) > 8 else "")
+    return (f"phi (p4-phi): this session's commit {sha}, which closes #{', #'.join(closes)}, is on a remote branch, "
+            f"and it still holds {len(files)} file{'s' if len(files) != 1 else ''}: {shown}. No other session can "
+            f"be started on them until this one reports done. If its work on them is landed, release them with "
+            f"`{commands()} files --release`, or keep only what it still writes with `{commands()} files <path> ...`.")
 
 
 MAX_DEPTH = 3                 # a session this deep in the tree starts no session of its own
@@ -2229,6 +2287,12 @@ def h_user_prompt_submit(payload):
         RAN["start_requests"] = asked.count("\n- ")
     if issue_line:
         parts.insert(0, issue_line)
+    if FILE_SETS and s.get("fileSet") and load_turns(me.home, s["sessionId"]):
+        held_line = files_held_text(me.home, s)    # #62: its closing commit is pushed and it still holds files
+        if held_line:
+            parts.insert(0, held_line)
+            RAN["files_held"] = len(s["fileSet"])
+            save_session(me.home, s)
     if detached_now:
         parts.insert(0, "phi (p4-phi): this session's brief marks it a new top session, so phi detached it into the "
                         "root at this first message. Now call `mcp__ccd_session_mgmt__detach_session` with `\"self\"` "
@@ -2437,6 +2501,24 @@ def log_run(name, text, started):
            "host_in_env": bool(os.environ.get("CLAUDE_CODE_HOST_SESSION_ID"))}
     row.update({k: v for k, v in RAN.items() if k not in ("home", "session")})
     append_line(os.path.join(session_dir(RAN["home"], RAN["session"]), "log.jsonl"), row)
+
+
+def h_go_guard(payload):
+    """PreToolUse on a message one session sends another: a puppeteer's go to a waiting writer is warned about
+    while another session it controls still holds a file in that writer's set (#62). Never a block."""
+    me = Me(payload)
+    if not me.home or not me.id:
+        return None
+    s = load_session(me.home, me.id)
+    if spawned_from(s) or not controls.is_puppeteer(s, me.store):
+        return None
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    target = str(inp.get("to") or inp.get("session_id") or inp.get("sessionId") or "")
+    text = controls.go_text(me.home, s, target, str(inp.get("message") or inp.get("content") or inp.get("text") or ""))
+    if text:
+        RAN["go_held"] = target[:40]
+        save_session(me.home, s)
+    return text or None
 
 
 def h_start_advice(payload):
@@ -2835,6 +2917,7 @@ HOOKS = {"session-start": ("SessionStart", h_session_start),
 ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "store-guard", "plan", "task", "memory-gap",
                                                      "self-archive")})
 ROUTED["nudge"] = ("PreToolUse", h_nudge)
+HOOKS["go-guard"] = ROUTED["go-guard"] = ("PreToolUse", h_go_guard)
 HOOKS["level"] = ROUTED["level"] = ("PreToolUse", h_level)
 HOOKS["restart-check"] = ROUTED["restart-check"] = ("PreToolUse", h_restart_check)
 ROUTED.update({"agent-launch": ("PreToolUse", h_agent_launch), "agent-pre": ("PreToolUse", h_agent_call),
@@ -2956,7 +3039,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="phi: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
-                 "request", "proof", "controls"):
+                 "request", "proof", "controls", "files"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in (default: this session's)")
         p.add_argument("--session", default="", help="the sessionId (default: this session's)")
@@ -2978,6 +3061,10 @@ def main(argv=None):
             p.add_argument("paths", nargs="*", help="paths or globs this session alone may change; none shows it")
         if name == "reparent":
             p.add_argument("under")
+        if name == "files":
+            p.add_argument("paths", nargs="*", help="the paths this session still writes, replacing its declared "
+                                                    "file set; none shows it")
+            p.add_argument("--release", action="store_true", help="hold no file any more")
         if name == "request":
             p.add_argument("title", help="the child's title")
             p.add_argument("--brief", default="", help="the child's whole brief")
@@ -3043,6 +3130,20 @@ def main(argv=None):
             print("kept as this session's shard: " + ", ".join(relay.shard_of(load_session(me.home, s["sessionId"]))))
             for line in lines:
                 print("phi: " + line)
+            return 0
+        if a.cmd == "files":
+            if a.release and a.paths:
+                raise ValueError("pass the paths this session still writes, or --release for none, not both")
+            if not a.paths and not a.release:
+                held = s.get("fileSet") if isinstance(s.get("fileSet"), list) else None
+                print("this session declared no file set" if held is None else
+                      "this session holds no file" if not held else "\n".join(held))
+                return 0
+            new, freed = set_files(me.home, s, a.paths, os.getcwd())
+            render_page(me.home, s["sessionId"])
+            print("this session holds no file now" if not new else "kept as this session's file set: " + ", ".join(new))
+            if freed:
+                print("released: " + ", ".join(freed) + ". A start on them is no longer held by this session.")
             return 0
         if a.cmd == "controls":
             if not controls.is_puppeteer(s, me.store):

@@ -529,6 +529,32 @@ class Pair(unittest.TestCase):
         self.assertIn(f"controls {TOP3}` takes it under control", ctx)
         self.assertNotIn("does not control", context(t.say(PUP, "and now?")), "named once")
 
+    def test_a_go_to_a_waiting_writer_is_warned_about_while_another_controlled_session_holds_its_files(self):
+        """#62: the next writer's child was refused, because the session before it still held the files."""
+        t = self.t
+        t.say(TOP, "Task:\nBuild the exporter's flush.\nFiles: src/flush.py, src/writer.py")
+        t.say(TOP3, "Task:\nBuild the retry on the same writer.\nFiles: src/writer.py")
+        t.say(PUP, "Control the trees")
+        t.cli(PUP, "controls", TOP, TOP3)
+
+        def go(to, message="Go: your files are free now."):
+            r = t.hook("go-guard", PUP, {"hook_event_name": "PreToolUse", "tool_name": "SendMessage",
+                                         "tool_input": {"to": to, "message": message}})
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return context(r)
+        said = go(TOP3)
+        self.assertIn("this go to \"A top session nobody put under the puppeteer\" is early", said)
+        self.assertIn(f"\"Build the narwhal exporter\" ({TOP}) holds ", said, "the holder by its full title")
+        self.assertIn("writer.py", said)
+        self.assertIn(" files --release`", said)
+        self.assertEqual(go(TOP3), "", "said once for the pair")
+        self.assertEqual(go(KID), "", "a session it does not control is not its go")
+        self.assertEqual(t.cli(TOP, "files", "src/flush.py").returncode, 0)
+        s = t.session(PUP)
+        relay._write_json(os.path.join(t.dir(PUP), "session.json"), {**s, "goWarned": []})
+        self.assertEqual(go(TOP3), "", "released: the go is free")
+        self.assertIn("flush.py", go(TOP3, "Go.\nFiles: src/flush.py"), "the set the message declares is read")
+
     def test_work_on_a_controlled_sessions_topic_is_sent_down_and_not_done_by_the_puppeteer(self):
         t = self.t
         t.say(PUP, "Control the trees")
