@@ -20,7 +20,6 @@ import phi  # noqa: E402
 import plans  # noqa: E402
 import relay  # noqa: E402
 from test_phi import CLI, GRAND, KID, KID2, TOP, Tree, context  # noqa: E402
-import relay as _relay  # noqa: E402,F401
 
 A, B = KID, KID2
 
