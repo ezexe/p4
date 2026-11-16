@@ -97,6 +97,8 @@ TURNS = True
 NEW_TASK = True
 RULES = True
 HOOK_CHARS = 9500                # Claude Code keeps 10,000 characters of a hook's context and files the rest away
+HELD_HEAD = 90                   # of a piece that did not fit, shown beside the prompt so it is known for what it is
+PHI_LEAD = re.compile(r"^phi \(p4-phi\)[^:]*:\s*")
 PROMPT_CHARS = 4000              # #43: the ceiling on what phi adds beside one prompt; the rest is held on a page
 BACKGROUND_CHARS = 3000
 REPORTS_CHARS = 6000
@@ -1733,11 +1735,12 @@ def within(parts, room=None):
 
 def fit(parts, room, home, sid):
     """The parts that fit in `room`, in their order, each whole; what does not fit is kept whole on the session's
-    held.md and named by count and that page, and the first of them is shown cut where room is left (#43)."""
+    held.md and named by count, by that page and by how each begins (#43). No piece is shown cut: on the first
+    live prompts a cut piece was a list of start requests, whose calls are of no use in part."""
     parts = [p for p in parts if p]
     if sum(len(p) + 2 for p in parts) - 2 <= room:
         return "\n\n".join(parts)
-    tail = 200 + len(relay.held_path(home, sid))   # the line that names the count and the page
+    tail = 260 + len(relay.held_path(home, sid)) + 3 * (HELD_HEAD + 8)    # the lines that name what is held
     out, over, used = [], [], 0
     for p in parts:
         if used + len(p) + 2 <= room - tail:
@@ -1746,14 +1749,13 @@ def fit(parts, room, home, sid):
         else:
             over.append(p)
     page = relay.hold(home, sid, over, now())
-    left = room - tail - used - 2
-    cut_one = left >= 500
-    if cut_one:
-        out.append(cut(over[0], left))
     RAN["held"] = len(over)
-    out.append(f"phi (p4-phi): {len(over)} piece(s) of what phi had for this prompt, {sum(len(p) for p in over)} "
-               f"characters, did not fit in its {room} beside one prompt"
-               + (", the one above cut with ..." if cut_one else "") + f". They are whole on {page}.")
+    heads = ['"' + cut(clean(PHI_LEAD.sub("", p)), HELD_HEAD) + '"' for p in over[:3]]
+    line = (f"phi (p4-phi): {len(over)} piece(s) of what phi had for this prompt, {sum(len(p) for p in over)} "
+            f"characters, did not fit in its {room} beside one prompt and are whole on {page}. Read that page "
+            f"before going on when one of them asks something of this session. They begin: " + "; ".join(heads)
+            + (f"; and {len(over) - 3} more" if len(over) > 3 else "") + ".")
+    out.append(line)
     return "\n\n".join(out)
 
 

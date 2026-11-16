@@ -25,4 +25,25 @@ The numbers are sums of the `said` field of each session's `log.jsonl` in the st
 
 ## After the cap
 
-The rows below are filled from the same logs once the change has run on live prompts.
+The cap went live in the checkout at 07:32 on 2026-11-16, and these sums are of the `user-prompt-submit` rows logged from then until 08:49 the same day.
+
+| | Before, 510 prompts | After, 79 prompts |
+| --- | --- | --- |
+| Characters in all | 1,000,543 | 128,715 |
+| Mean a prompt | 1,962 | 1,629 |
+| Median prompt | 1,118 | 368 |
+| Largest prompt | 11,654 | 9,466 |
+| Prompts over 4,000 | 92 | 5 |
+
+- The 5 prompts over 4,000 are each the first message of a started session, which carries its background once and keeps the 9,500 ceiling; they sum to 46,912 characters.
+- The other 74 prompts sum to 81,803 characters, a mean of 1,105 and a median of 348, and none is over 3,965.
+- 6 of those 74 reached the ceiling, and each named what it held back by count and page.
+- A turn another session started carried the routing advice in full before: 106 such prompts with a mean of 2,596 and a median of 1,397.
+- The same kind of turn now carries one line: 37 prompts with a mean of 1,009 and a median of 272.
+- The two orchestrating sessions that were prompted in this window, the hub and the puppeteer's top, got 24 prompts with a mean of 991 and a median of 272.
+- The hub itself, `local_a2a263da`, was prompted too few times in this window to stand alone, so its 321,382 characters have no like-for-like row yet.
+
+## What the first live prompts showed
+
+- A list of four start requests met the ceiling and was shown cut in the middle of a call.
+- A held piece is no longer shown cut: it is named beside the prompt by how it begins, with its count and its page, and the session is told to read the page when a piece asks something of it.
