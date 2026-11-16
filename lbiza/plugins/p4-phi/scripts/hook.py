@@ -106,7 +106,7 @@ phi/models/ranker.pt
 #   newer-than-the-model tasks 0.667 against 0.50 on both seeds with nothing lost
 # With the other lines held back, the query still runs and what it would have shown is logged, so usage labels keep
 # teaching the model. inject: false turns it off entirely.
-CONFIG = {"teacher-model": "claude-fable-5-1", "inject": "rules-facts"}
+CONFIG = {"inject": "rules-facts"}
 
 
 RULES_FACTS = re.compile(r"^- \S+ (rule|fact): ")
