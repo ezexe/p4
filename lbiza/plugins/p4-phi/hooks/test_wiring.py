@@ -7,7 +7,7 @@ Every entry runs twice, in a project with no store and in a project whose store 
 Each run must exit 0, write nothing on stderr, and print nothing or one JSON object whose `hookSpecificOutput` names
 the entry's own event.
 The gate of recall-hook.sh runs against a stand-in python that only says it ran, and each runner runs with no python
-on PATH at all.
+on PATH at all, and the marketplace's catalog is held to each plugin's own plugin.json.
 
 Run: python3 test_wiring.py
 """
@@ -183,6 +183,22 @@ class Wiring(unittest.TestCase):
                 shutil.copytree(seed, proj)
                 return proj
             self.run_all("a new store", make)
+
+
+class Manifests(unittest.TestCase):
+    """The marketplace's catalog against each plugin's own plugin.json: Claude Code warns when an entry's version and
+    its plugin.json's differ, platform row P16."""
+
+    def test_each_marketplace_entry_has_its_plugins_name_and_version(self):
+        lbiza = os.path.dirname(os.path.dirname(ROOT))
+        with open(os.path.join(lbiza, ".claude-plugin", "marketplace.json"), encoding="utf-8") as f:
+            market = json.load(f)
+        self.assertTrue(market["plugins"])
+        for entry in market["plugins"]:
+            with open(os.path.join(lbiza, entry["source"], ".claude-plugin", "plugin.json"), encoding="utf-8") as f:
+                plugin = json.load(f)
+            self.assertEqual(plugin["name"], entry["name"], entry["source"])
+            self.assertEqual(plugin.get("version"), entry.get("version"), entry["name"])
 
 
 class Gate(unittest.TestCase):
