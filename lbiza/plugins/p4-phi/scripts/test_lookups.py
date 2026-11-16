@@ -10,8 +10,9 @@ the same question about another part of the page or a search of other domains or
 left alone; a failed command's signature recognised when it fails again in another session, with the
 command that worked after it; the modes "answer", "note" and "shadow", and `on` false, which logs nothing; a corrupt
 database never failing a call; the backfill from transcripts taking each tool_use id once; a training round
-promoting the fitted model when it answers more held-out calls than the matcher; another session's message kept as
-a row that is not ezexe's; hooks.json's matchers.
+promoting the fitted model when it answers more held-out calls than the matcher, and keeping the matcher when it does
+not, each as a check then reads it; another session's message kept as a row that is not ezexe's; hooks.json's
+matchers.
 """
 
 import json
@@ -327,6 +328,15 @@ class Backfill(Base):
 
 
 class Train(Base):
+    def threshold_used(self, prompt, page):
+        """The threshold a check of a fetch of page `page` scores at, as web_match reads the model file."""
+        con = lk.connect(self.p4)
+        try:
+            return lk.web_match(con, self.p4, "WebFetch", {"url": f"{URL}/{page}", "prompt": prompt},
+                                "2026-11-14 10:00")[2]
+        finally:
+            con.close()
+
     def test_a_round_reports_both_roads_and_keeps_the_matcher_unless_beaten(self):
         con = lk.connect(self.p4)
         n = 0
@@ -352,7 +362,30 @@ class Train(Base):
         self.assertGreaterEqual(r["model"]["precision"], 0.9)
         self.assertGreater(r["model"]["answered"], r["matcher"]["answered"])
         self.assertTrue(r["promoted"])
-        self.assertEqual(os.path.exists(lk.model_path(self.p4)), r["written"])
+        web = lk.load_model(self.p4)["web"]
+        self.assertTrue(web["promoted"] and web["w"], "a check scores with the fitted weights")
+        self.assertEqual(self.threshold_used("Quote the default timeout of the narwhal port 0", 0), web["threshold"],
+                         "at the model's own threshold")
+
+    def test_a_round_the_matcher_wins_keeps_the_matcher(self):
+        con = lk.connect(self.p4)
+        n = 0
+        for s in range(12):                                   # every page asked one question, found one answer
+            for page in range(4):
+                n += 1
+                lk.insert(con, {"id": f"t{n}", "time": f"2026-11-{1 + s:02d} 10:{page:02d}", "session": f"s{s}",
+                                "agent": "", "tool": "WebFetch",
+                                "inp": {"url": f"{URL}/{page}", "prompt": f"Quote the default timeout of port {page}"},
+                                "ok": True, "text": f"Port {page} times out after {30 + page} seconds by default."})
+        con.commit()
+        con.close()
+        r = lk.train(self.p4, folds=3)
+        self.assertEqual(r["model"]["answered"], r["matcher"]["answered"], "the questions alone tell every time")
+        self.assertFalse(r["promoted"])
+        web = lk.load_model(self.p4)["web"]
+        self.assertFalse(web["promoted"], "the file keeps the weights, unpromoted")
+        self.assertEqual(self.threshold_used("Quote the default timeout of port 0", 0), web["matcher_threshold"],
+                         "a check uses the matcher at its trained threshold")
 
 
 class Peer(Base):
