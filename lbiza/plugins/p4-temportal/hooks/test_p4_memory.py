@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""test_p4_memory.py — acceptance tests for p4-temportal's memory part: the AppData memory/ directory, or a link an
-earlier version left in its place, is merged into .claude/p4/temportal/memory/ and deleted, a differing
-file kept in .conflicts/ and never overwriting p4; AppData keeps only the pointer MEMORY.md; a write into AppData
-is moved into p4; a busy directory is left to the turn's close; .claude/p4/ is created when absent (not as a git
-repository). Then the gate-2 checks of the design (.docs/p4/fresh-marketplace.md 8.1): (a) the SessionStart output
-equals what the built-in prints from a memory directory holding the same files, plus at most one notice line;
-(b) the pointer has no imperative sentence except where to write. Run from anywhere:
-python3 hooks/test_p4_memory.py — exit 0 = green."""
+"""test_p4_memory.py: acceptance tests for p4-temportal's memory part. The auto memory directory, or a link left in
+its place, is merged into .claude/p4/temportal/memory/ and deleted, a differing file is kept in .conflicts/ and never
+overwrites the store's, the auto memory directory keeps only the pointer MEMORY.md, a write into it is moved into the
+store, a busy folder is left to turn end, and .claude/p4/ is made as a plain folder when absent. Then what a session
+is given: the SessionStart output equals what Claude Code loads from a memory folder holding the same files, after at
+most one notice line, and the pointer has no imperative sentence but the one that says where to write. Run from
+anywhere: python3 hooks/test_p4_memory.py, and exit 0 is green."""
 
 import json
 import os
@@ -20,9 +19,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, "p4_memory.py")
 RUNNER = os.path.join(HERE, "run-hook.sh")
 MARK = "<!-- p4-memory: pointer"
-BUILTIN_LINES = 200     # the built-in loads the first 200 lines of MEMORY.md or the first 25KB, whichever comes
-BUILTIN_BYTES = 25_000      # first, cut at whole lines (docs: memory; measured by test_live_memory_limit.py);
-                            # kept here independently of the hook
+BUILTIN_LINES = 200         # the reference of what Claude Code loads, kept apart from p4_memory.py's constants so
+BUILTIN_BYTES = 25_000      # that a change there fails here
 
 
 def run(sub, root, app, payload):
@@ -34,7 +32,7 @@ def run(sub, root, app, payload):
 
 
 def run_raw(sub, root, app):
-    """The SessionStart output unstripped, as the harness receives it."""
+    """The SessionStart output unstripped, as Claude Code receives it."""
     env = dict(os.environ, CLAUDE_PROJECT_DIR=root, P4_MEMORY_APPDATA=app)
     r = subprocess.run([sys.executable, "-I", HOOK, sub], input=b"{}", env=env, capture_output=True, timeout=90)
     return r.stdout.decode("utf-8", "replace")
@@ -64,8 +62,8 @@ def link(app, target):
 
 
 def builtin_print(memdir):
-    """The reference: what the built-in prints from a memory directory — the first 200 lines of its MEMORY.md, or
-    the first 25KB, whichever comes first."""
+    """The reference: what Claude Code loads from a memory folder, cut at BUILTIN_LINES lines or BUILTIN_BYTES
+    bytes, whichever comes first."""
     path = os.path.join(memdir, "MEMORY.md")
     if not os.path.isfile(path):
         return []
@@ -79,13 +77,13 @@ def builtin_print(memdir):
 
 
 def behavior():
-    base = tempfile.mkdtemp(prefix="p4-memory-")
+    base = tempfile.mkdtemp(prefix="p4-temportal-memory-")
     root = os.path.join(base, "proj")
     app = os.path.join(base, "appdata", "projects", "slug", "memory")
     p4mem = os.path.join(root, ".claude", "p4", "temportal", "memory")
     transcript = os.path.join(os.path.dirname(app), "session.jsonl")
     put(transcript, "{}\n")
-    # no .claude/p4 yet: the hook creates the directory (not a git repository) and moves the memory in
+    # no .claude/p4 yet: the hook makes it as a plain folder, not a git repository, and moves the memory in
     root0 = os.path.join(base, "proj0")
     app0 = os.path.join(base, "appdata0", "projects", "slug", "memory")
     os.makedirs(root0)
@@ -93,7 +91,7 @@ def behavior():
     out = run("migrate", root0, app0, {})
     p4mem0 = os.path.join(root0, ".claude", "p4", "temportal", "memory")
     assert read(os.path.join(p4mem0, "MEMORY.md")) == "- [a](a.md) — a\n", "the memory was not moved without .claude/p4"
-    assert not os.path.exists(os.path.join(root0, ".claude", "p4", ".git")), "p4-memory initialized a git repository"
+    assert not os.path.exists(os.path.join(root0, ".claude", "p4", ".git")), "p4-temportal initialized a git repository"
     assert only_pointer(app0) and "moved 1" in out, out
     # the main fixture
     os.makedirs(os.path.join(root, ".claude", "p4"))
@@ -105,31 +103,31 @@ def behavior():
     out = run("migrate", root, app, {})
     # moved, kept aside, dropped, deleted
     assert read(os.path.join(p4mem, "MEMORY.md")) == "- [a](a.md) — a\n", "an absent file was not moved in"
-    assert read(os.path.join(p4mem, "a.md")) == "fact a, edited elsewhere\n", "the p4 file was overwritten"
+    assert read(os.path.join(p4mem, "a.md")) == "fact a, edited elsewhere\n", "the store file was overwritten"
     assert read(os.path.join(p4mem, ".conflicts", "memory", "a.md")) == "fact a\n", "differing copy not kept"
     assert only_pointer(app), os.listdir(app)
-    assert os.path.normpath(p4mem) in read(os.path.join(app, "MEMORY.md")), "the pointer does not name p4"
-    assert os.path.isfile(transcript), "the harness's own files were touched"
+    assert os.path.normpath(p4mem) in read(os.path.join(app, "MEMORY.md")), "the pointer names no memory folder"
+    assert os.path.isfile(transcript), "Claude Code's own files were touched"
     lines = out.splitlines()
     assert lines[0].startswith("p4-temportal: ") and "moved 1" in lines[0] and ".conflicts/" in lines[0], out
     assert lines[1:] == ["- [a](a.md) — a"], out
     # a second start moves nothing and prints the index alone
     assert run("migrate", root, app, {}) == "- [a](a.md) — a", "an idle start printed more than the index"
-    # the turn's close has nothing to do: silent
-    assert run("sweep", root, app, {}) == "", "an idle close spoke"
-    # a write into AppData is moved into p4, and the session is told in one line
+    # turn end has nothing to do: silent
+    assert run("sweep", root, app, {}) == "", "an idle turn end spoke"
+    # a write into the auto memory directory is moved into the store, and the session is told in one line
     put(os.path.join(app, "c.md"), "fact c\n")
     w = {"tool_name": "Write", "tool_input": {"file_path": os.path.join(app, "c.md"), "content": "fact c\n"}}
     note = json.loads(run("mirror", root, app, w))["hookSpecificOutput"]["additionalContext"]
     assert "moved to" in note and "\n" not in note and read(os.path.join(p4mem, "c.md")) == "fact c\n", note
-    assert only_pointer(app), "the written file stayed in AppData"
-    # a write that replaces a different p4 file: the write wins, the p4 file it replaced is kept aside
+    assert only_pointer(app), "the written file stayed in the auto memory directory"
+    # a write that replaces a different store file: the write wins, and the file it replaced is kept aside
     put(os.path.join(app, "b.md"), "fact b, rewritten\n")
     w2 = {"tool_name": "Write", "tool_input": {"file_path": os.path.join(app, "b.md"), "content": ""}}
     run("mirror", root, app, w2)
     assert read(os.path.join(p4mem, "b.md")) == "fact b, rewritten\n"
     assert read(os.path.join(p4mem, ".conflicts", "replaced", "b.md")) == "fact b\n", "the replaced file was lost"
-    # an index line written into the pointer goes to the p4 MEMORY.md, and the pointer is restored
+    # an index line written into the pointer goes to the store's MEMORY.md, and the pointer is restored
     ptr = os.path.join(app, "MEMORY.md")
     put(ptr, read(ptr) + "- [c](c.md) — c\n")
     e = {"tool_name": "Edit", "tool_input": {"file_path": ptr}}
@@ -147,7 +145,7 @@ def behavior():
     out = run("migrate", root, app2, {})
     assert "removed the link" in out and sorted(os.listdir(p4mem)) == before, out
     assert only_pointer(app2) and not os.path.samefile(app2, p4mem), "the link was not replaced by the pointer"
-    # a busy folder in AppData: its content reaches p4, the deletion waits for the close
+    # a busy folder in the auto memory directory: its content reaches the store, its deletion waits for turn end
     held = os.path.join(app, "held")
     put(os.path.join(held, "y.md"), "fact y\n")
     if os.name == "nt":
@@ -158,11 +156,11 @@ def behavior():
         finally:
             busy.kill()
             busy.wait()
-    assert run("sweep", root, app, {}) == "", "the close printed"
-    assert not os.path.exists(held), "the close did not delete the busy folder"
+    assert run("sweep", root, app, {}) == "", "turn end printed"
+    assert not os.path.exists(held), "turn end did not delete the busy folder"
     assert read(os.path.join(p4mem, "held", "y.md")) == "fact y\n"
     assert only_pointer(app), os.listdir(app)
-    assert run("sweep", root, app, {}) == "", "a clean close spoke"
+    assert run("sweep", root, app, {}) == "", "a clean turn end spoke"
     # a project dir with forward slashes, as a hook payload's cwd carries it
     root3 = os.path.join(base, "proj3")
     os.makedirs(os.path.join(root3, ".claude", "p4"))
@@ -184,9 +182,9 @@ def behavior():
 
 
 def gate2_a():
-    """(a) SessionStart output == the built-in's print from a memory directory holding the same files, plus at most
-    one notice line — with nothing to move, with a move and a conflict, and with an index past the built-in's cut."""
-    base = tempfile.mkdtemp(prefix="p4-memory-gate-a-")
+    """The SessionStart output equals what Claude Code loads from a memory folder holding the same files, after at
+    most one notice line: with nothing to move, with a move and a conflict, and with an index past the cut."""
+    base = tempfile.mkdtemp(prefix="p4-temportal-memory-start-")
     try:
         index = "".join(f"- [t{i}](t{i}.md) — topic {i}\n" for i in range(250))
         cases = {
@@ -208,7 +206,7 @@ def gate2_a():
             for rel, text in in_p4.items():
                 put(os.path.join(root, ".claude", "p4", "temportal", "memory", rel), text)
             out = run_raw("migrate", root, app).splitlines()
-            # the same files in a plain memory directory, as the built-in would see them after the move
+            # the same files in a plain memory folder, as Claude Code would load them after the move
             ref_dir = os.path.join(base, name, "builtin")
             shutil.copytree(os.path.join(root, ".claude", "p4", "temportal", "memory"), ref_dir,
                             ignore=shutil.ignore_patterns(".conflicts"))
@@ -216,9 +214,10 @@ def gate2_a():
             extra = len(out) - len(ref)
             assert extra in (0, 1), f"{name}: {extra} extra lines\n" + "\n".join(out[:5])
             if extra:
-                assert out[0].startswith("p4-temportal: ") and out[1:] == ref, f"{name}: the notice is not one line\n{out[:3]}"
+                assert out[0].startswith("p4-temportal: ") and out[1:] == ref, \
+                    f"{name}: the notice is not one line\n{out[:3]}"
             else:
-                assert out == ref, f"{name}: output differs from the built-in\n{out[:3]}"
+                assert out == ref, f"{name}: output differs from what Claude Code loads\n{out[:3]}"
             if name == "quiet":
                 assert extra == 0, "a start with nothing to move printed a notice"
             if name == "moved":
@@ -231,7 +230,7 @@ def gate2_a():
                 assert out == [], out
     finally:
         shutil.rmtree(base, ignore_errors=True)
-    print("test_p4_memory.py: gate 2 (a) green")
+    print("test_p4_memory.py: start output green")
 
 
 IMPERATIVE = re.compile(r"^(?:please\s+)?(?:do|don't|never|always|read|write|use|save|remember|keep|check|edit|"
@@ -240,8 +239,8 @@ MODAL = re.compile(r"\b(?:must|should|shall|have to|need to|never|always|do not|
 
 
 def gate2_b():
-    """(b) The pointer says where the memory is and to write there; it has no other imperative sentence."""
-    base = tempfile.mkdtemp(prefix="p4-memory-gate-b-")
+    """The pointer says where the memory is and to write there, and has no other imperative sentence."""
+    base = tempfile.mkdtemp(prefix="p4-temportal-memory-pointer-")
     try:
         root, app = os.path.join(base, "proj"), os.path.join(base, "appdata", "memory")
         os.makedirs(root)
@@ -258,7 +257,7 @@ def gate2_b():
         assert len(sentences) == 2, f"the pointer says more than where and to write there: {sentences}"
     finally:
         shutil.rmtree(base, ignore_errors=True)
-    print("test_p4_memory.py: gate 2 (b) green")
+    print("test_p4_memory.py: pointer words green")
 
 
 def main():

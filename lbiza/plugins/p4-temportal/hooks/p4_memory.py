@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
-"""p4_memory.py — the p4-temportal plugin's memory part: Claude Code's built-in per-project memory is stored in the p4 repo,
-`<project>/.claude/p4/temportal/memory/`, and nowhere else. A storage move only: nothing here tells the model how to behave.
+"""p4_memory.py: p4-temportal's memory part, which keeps the project's auto memory in the store's
+`<project>/.claude/p4/temportal/memory/` and nowhere else. It moves files, and it tells the model only where to write.
 
-The harness loads and names memories at `~/.claude/projects/<project-slug>/memory/` (AppData). This plugin empties
-that directory into p4 and leaves one file there, a pointer `MEMORY.md` that says where the memory is and to write
-there. The rest of `~/.claude/projects/<project-slug>/` (transcripts, per-session directories) is never touched.
-`.claude/p4/` is created when absent (a plain directory; p4-phi's recall layout hook makes it a git repository).
+Claude Code loads auto memory from the auto memory directory, `~/.claude/projects/<project>/memory/` under the
+configuration directory. This part moves every file of that directory into the store's memory folder and leaves one
+file there, a pointer `MEMORY.md` that says where the memory is and to write there. The rest of
+`~/.claude/projects/<project>/`, transcripts and per-session folders, is never touched. `.claude/p4/` is made as a
+plain folder when absent, and p4-phi makes it a git repository.
 
-  migrate (SessionStart)  the AppData `memory/` directory, or a junction or symlink an earlier version left in its
-                          place, is merged into `.claude/p4/temportal/memory/`
-                          and deleted: identical in p4 -> dropped; a live file absent in p4 -> moved in; any other ->
-                          kept at `.conflicts/<source>/<path>`, never overwriting the p4 file. A link to p4 is removed
-                          as a link. Then the pointer is written and the p4 `MEMORY.md` is printed as the built-in
-                          prints its own (the first BUILTIN_LINES lines), plus at most one notice line when a file
-                          was moved or a conflict kept.
-  mirror (PostToolUse)    a Write or Edit into the AppData memory directory is moved into p4 at once (a p4 file it
-                          replaces kept in `.conflicts/replaced/`; index lines added to the pointer appended to the
-                          p4 `MEMORY.md`, the pointer restored); one line says where it went.
-  sweep (Stop)            whatever the start could not delete is tried again; prints nothing.
+  migrate    at SessionStart, merges the auto memory directory into `.claude/p4/temportal/memory/` and deletes what
+             it merged: a file identical in the store is dropped, a file the store lacks is moved in, and any other is
+             kept at `.conflicts/memory/<path>` without overwriting the store's file. A link left in place of the
+             directory is removed as a link when it reaches the store's memory folder, never followed, and left as it
+             is when it points elsewhere. Then it writes the pointer and prints the store's `MEMORY.md` as Claude Code
+             would load it, after one notice line when a file was moved or kept aside. When the store's layout moved
+             at this start, that line comes first.
+  mirror     at PostToolUse, moves a Write or Edit into the auto memory directory into the store at once: a store
+             file it replaces is kept in `.conflicts/replaced/`, index lines added to the pointer are appended to the
+             store's `MEMORY.md` and the pointer is restored, and one line says where the file went.
+  sweep      at Stop, tries again to delete what the start could not, and prints nothing.
 
 Every failure prints a one-line notice and exits 0.
 """
@@ -33,14 +34,14 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
-import p4conf  # noqa: E402  (the settings file, .claude/p4/p4.json)
+import p4conf  # noqa: E402 - the settings file, .claude/p4/p4.json
 
 MEMORY = "memory"
 CONFLICTS = ".conflicts"
-POINTER_MARK = "<!-- p4-memory: pointer"
-BUILTIN_LINES = 200          # the built-in loads the first 200 lines of MEMORY.md, or the first 25KB, whichever
-BUILTIN_BYTES = 25_000       # comes first (docs: memory); "25KB" is 25,000 bytes cut at whole lines, as measured
-                             # twice on Claude Code 2.1.309 by test_live_memory_limit.py (2026-11-01: M166 both runs)
+POINTER_MARK = "<!-- p4-memory: pointer"    # a format the pointer files on disk carry, kept as it is
+BUILTIN_LINES = 200          # Claude Code loads the first 200 lines of MEMORY.md or its first 25KB, whichever comes
+BUILTIN_BYTES = 25_000       # first, by https://code.claude.com/docs/en/memory, and test_live_memory_limit.py
+                             # measures 25KB as 25,000 bytes cut at a whole line
 RETRIES = 5
 RETRY_WAIT_S = 1.0
 
@@ -53,13 +54,13 @@ def payload_from_stdin():
 
 
 def configure(payload):
-    """The memory section of <project>/.claude/p4/p4.json over the constants (the file written when missing)."""
+    """The memory section of <project>/.claude/p4/p4.json over the constants, writing the file when it is missing."""
     p4 = os.path.join(project_root(payload), ".claude", "p4")
     p4conf.configure(globals(), p4, "memory", {"retries": "RETRIES", "retry_wait_s": "RETRY_WAIT_S"})
 
 
 def layout(payload):
-    """A store an older plugin wrote flat in .claude/p4 is moved into each plugin's directory first."""
+    """Files in an earlier place of the store's layout are moved into each plugin's folder first."""
     lines = p4conf.migrate_layout(os.path.join(project_root(payload), ".claude", "p4"))
     if lines:
         print("p4-temportal: " + "; ".join(lines) + ".")
@@ -70,13 +71,13 @@ def project_root(payload):
 
 
 def project_slug(root):
-    """The harness's directory name for a project: every character outside [A-Za-z0-9] becomes a dash."""
+    """Claude Code's folder name for a project under `projects/`: every character outside [A-Za-z0-9] is a dash."""
     return re.sub(r"[^A-Za-z0-9]", "-", os.path.normpath(root))
 
 
 def appdata_memory(payload, root):
-    """`~/.claude/projects/<slug>/memory` — read from the transcript's own directory when the payload names it."""
-    if os.environ.get("P4_MEMORY_APPDATA"):          # tests and odd installs point it elsewhere
+    """The auto memory directory, `~/.claude/projects/<slug>/memory`, beside the transcript the payload names."""
+    if os.environ.get("P4_MEMORY_APPDATA"):          # tests point it at a fixture
         return os.environ["P4_MEMORY_APPDATA"]
     tp = str(payload.get("transcript_path") or "")
     if tp:
@@ -110,7 +111,7 @@ def is_link(path):
 
 
 def remove_link(path):
-    """Remove a symlink or junction itself — never what it points at (rmtree would follow a junction)."""
+    """Remove a symlink or junction itself, never what it points at, since rmtree would follow a junction."""
     if os.path.islink(path):
         os.unlink(path)
     else:
@@ -158,8 +159,8 @@ def files_in(base, skip_conflicts):
 
 
 def keep_aside(mem, source, rel, src, stamp):
-    """Copy src into p4's .conflicts/<source>/<rel>; an identical copy already there is enough, a different one
-    gets the stamp appended so nothing kept earlier is overwritten."""
+    """Copy src into the memory folder's .conflicts/<source>/<rel>; an identical copy already there is enough, and
+    a different one gets the stamp appended so nothing kept earlier is overwritten."""
     side = os.path.join(mem, CONFLICTS, source, rel)
     if os.path.isfile(side):
         if filecmp.cmp(src, side, shallow=False):
@@ -183,8 +184,8 @@ def retry(fn, *args):
 
 
 def empty_live_dir(app):
-    """Delete everything in the live AppData memory directory but the pointer — the directory itself stays, since
-    the harness may hold it open and loads MEMORY.md from it."""
+    """Delete everything in the auto memory directory but the pointer. The directory itself stays, since Claude Code
+    may hold it open and loads MEMORY.md from it."""
     ok = True
     for name in os.listdir(app):
         path = os.path.join(app, name)
@@ -200,15 +201,16 @@ def empty_live_dir(app):
 
 
 def migrate(app, mem, stamp):
-    """-> (lines to print, done?) — done when no AppData memory source is left but the pointer."""
+    """-> (lines to print, done), done when nothing but the pointer is left in the auto memory directory."""
     lines = []
     os.makedirs(mem, exist_ok=True)
     if is_link(app):
         if not same_dir(app, mem):                       # a link somewhere else: ezexe's arrangement
-            return [f"{app} is a link that does not reach .claude/p4/temportal/memory/; left as it is, nothing moved"], False
+            return [f"{app} is a link that does not reach .claude/p4/temportal/memory/; "
+                    "left as it is, nothing moved"], False
         if not retry(remove_link, app):
-            return [f"{app} is a link to .claude/p4/temportal/memory/ and is busy, retried at the turn's close"], False
-        lines.append(f"removed the link {app} -> .claude/p4/temportal/memory/ (its target untouched)")
+            return [f"{app} is a link to .claude/p4/temportal/memory/ and is busy, retried at turn end"], False
+        lines.append(f"removed the link {app} -> .claude/p4/temportal/memory/ and left its target untouched")
     moved, aside, left = [], [], []
     name = os.path.basename(app)
     if os.path.isdir(app) and not all(n == "MEMORY.md" and is_pointer(os.path.join(app, n)) for n in os.listdir(app)):
@@ -217,7 +219,7 @@ def migrate(app, mem, stamp):
             if rel == "MEMORY.md" and is_pointer(src):
                 continue
             if os.path.isfile(dst) and filecmp.cmp(src, dst, shallow=False):
-                pass                                    # identical in p4: dropped
+                pass                                    # identical in the store: dropped
             elif not os.path.exists(dst) and rel.split(os.sep)[0] != CONFLICTS:
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copy2(src, dst)
@@ -230,22 +232,22 @@ def migrate(app, mem, stamp):
     try:
         write_pointer(app, mem)
     except OSError as e:
-        lines.append(f"could not write the pointer MEMORY.md in {app} ({e})")
+        lines.append(f"could not write the pointer MEMORY.md in {app}: {e}")
     if moved:
-        lines.append(f"moved {len(moved)} memory file(s) from AppData into .claude/p4/temportal/memory/")
+        lines.append(f"moved {len(moved)} memory file(s) from the auto memory directory into "
+                     ".claude/p4/temportal/memory/")
     if aside:
-        lines.append(f"kept {len(aside)} differing file(s) in .claude/p4/temportal/memory/.conflicts/ ("
-                     + ", ".join(aside[:5]) + (", …" if len(aside) > 5 else "") + ")")
+        lines.append(f"kept {len(aside)} differing file(s): "
+                     + ", ".join(aside[:5]) + (", …" if len(aside) > 5 else "")
+                     + ", in .claude/p4/temportal/memory/.conflicts/")
     if left:
-        lines.append(f"{', '.join(map(os.path.basename, left))} busy, retried at the turn's close")
+        lines.append(f"{', '.join(map(os.path.basename, left))} busy, retried at turn end")
     return lines, not left
 
 
 def builtin_index(memdir):
-    """What the built-in prints from a memory directory: the first BUILTIN_LINES lines of its MEMORY.md, or the first
-    BUILTIN_BYTES cut at a whole line, whichever comes first (https://code.claude.com/docs/en/memory: "The first 200
-    lines of `MEMORY.md`, or the first 25KB, whichever comes first"; the byte value and the whole-line cut are measured
-    by test_live_memory_limit.py)."""
+    """What Claude Code loads from a memory folder: the first BUILTIN_LINES lines of its MEMORY.md, or its first
+    BUILTIN_BYTES bytes cut at a whole line, whichever comes first."""
     index = os.path.join(memdir, "MEMORY.md")
     if not os.path.isfile(index):
         return ""
@@ -271,7 +273,7 @@ def cmd_migrate(payload):
     out = notice(parts)
     if out:
         print(out)
-    index = builtin_index(mem)          # the harness loaded only the pointer: print what it would have printed
+    index = builtin_index(mem)          # Claude Code loaded only the pointer: print what it would have loaded
     if index:
         sys.stdout.write(index if index.endswith("\n") else index + "\n")
     return 0
@@ -288,8 +290,8 @@ def added_index_lines(text, mem):
 
 
 def cmd_mirror(payload):
-    """PostToolUse: a memory written into the AppData directory is moved into p4 at once — the harness's own write
-    is never refused, and nothing it writes stays there."""
+    """PostToolUse: a memory written into the auto memory directory is moved into the store at once. The write
+    itself is never refused, and nothing written there stays."""
     inp = payload.get("tool_input") or {}
     fp = str(inp.get("file_path") or "") if isinstance(inp, dict) else ""
     if not fp:
@@ -318,8 +320,8 @@ def cmd_mirror(payload):
             with open(dst, "a", encoding="utf-8", newline="\n") as f:
                 f.write(("\n" if old and not old.endswith("\n") else "") + "\n".join(add) + "\n")
         write_pointer(app, mem)
-        note = (f"p4-temportal: {len(add)} index line(s) written to the AppData MEMORY.md were appended to "
-                f"{os.path.normpath(dst)}; the AppData file is the pointer again.")
+        note = (f"p4-temportal: {len(add)} index line(s) written to the pointer MEMORY.md were appended to "
+                f"{os.path.normpath(dst)}; the pointer is restored.")
     else:
         if os.path.isfile(dst) and not filecmp.cmp(fp, dst, shallow=False):
             keep_aside(mem, "replaced", rel, dst, stamp)
@@ -332,7 +334,7 @@ def cmd_mirror(payload):
 
 
 def cmd_sweep(payload):
-    """Stop: whatever the start could not move or delete is tried again at the turn's close. Prints nothing."""
+    """Stop: what the start could not move or delete is tried again at turn end. Prints nothing."""
     root = project_root(payload)
     app, mem = appdata_memory(payload, root), p4_memory(root)
     pending = is_link(app) or (
@@ -360,7 +362,7 @@ def main():
         print(f"p4_memory.py: unknown subcommand {sub!r}")
         return 0
     except Exception as e:  # noqa: BLE001 — a hook degrades, never raises
-        print(f"p4-temportal memory ({sub}) degraded: {type(e).__name__}: {e}")
+        print(f"p4-temportal memory {sub} degraded: {type(e).__name__}: {e}")
         return 0
 
 
