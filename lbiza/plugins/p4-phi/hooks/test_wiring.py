@@ -201,6 +201,11 @@ class Manifests(unittest.TestCase):
             self.assertEqual(plugin.get("version"), entry.get("version"), entry["name"])
 
 
+def marker_name(agent_id):
+    """The name phi.py gives an open subagent's marker, `agent_marker` in phi.py."""
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", str(agent_id))[:80]
+
+
 class Gate(unittest.TestCase):
     """recall-hook.sh's lookup-check gate, against a stand-in python that only says it ran and with what."""
 
@@ -225,12 +230,12 @@ class Gate(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def check(self, tool, tool_input):
+    def check(self, tool, tool_input, **more):
         env = {k: v for k, v in os.environ.items() if not k.upper().startswith(("CLAUDE", "P4_"))}
         env.update(CLAUDE_PLUGIN_ROOT=SLASHED, CLAUDE_PROJECT_DIR=self.proj, CLAUDE_PLUGIN_DATA=self.data,
                    PATH=self.bin + os.pathsep + env.get("PATH", ""))
         payload = json.dumps({"session_id": SESSION, "hook_event_name": "PreToolUse", "tool_name": tool,
-                              "tool_input": tool_input, "cwd": self.proj})
+                              "tool_input": tool_input, "cwd": self.proj, **more})
         r = subprocess.run([SH, RECALL, "lookup-check"], input=payload, capture_output=True, text=True, env=env,
                            cwd=self.proj, timeout=60)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -241,6 +246,17 @@ class Gate(unittest.TestCase):
         for tool in ("SendMessage", "mcp__ccd_session_mgmt__send_message"):
             out = self.check(tool, {"to": "local_x", "message": "go ahead"})
             self.assertTrue(out.startswith("RAN ") and out.endswith("scripts/hook.py lookup-check"), (tool, out))
+
+    def test_only_a_subagents_own_marker_opens_the_gate_for_it(self):
+        """phi.py marks an open subagent with a file named after its id; a marker another subagent left behind, when
+        no SubagentStop removed it, opens the gate for no other subagent."""
+        agents = os.path.join(self.proj, ".claude", "p4", "phi", ".agents")
+        os.makedirs(agents)
+        old, new = "a5f0c2d9e8b7a6f41", "a389c1db97089b3bf"           # ids as the Agent tool gives them
+        open(os.path.join(agents, marker_name(old)), "w").close()
+        self.assertEqual(self.check("Read", {"file_path": "a.py"}, agent_id=new), "")
+        open(os.path.join(agents, marker_name(new)), "w").close()
+        self.assertTrue(self.check("Read", {"file_path": "a.py"}, agent_id=new).startswith("RAN "))
 
     def test_a_read_ends_in_the_gate_and_a_web_call_reaches_hook_py(self):
         self.assertEqual(self.check("Read", {"file_path": "a.py"}), "")

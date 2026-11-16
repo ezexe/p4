@@ -22,9 +22,11 @@ if [ "$name" = lookup-check ]; then
   piped=1
   sub=0
   case "$payload" in
-    *'"agent_id"'*)                               # a subagent's call: phi.py warns it while one is open
-      a="${CLAUDE_PROJECT_DIR:-.}/.claude/p4/phi/.agents"
-      [ -d "$a" ] && [ -n "$(ls -A "$a" 2>/dev/null)" ] && sub=1 ;;
+    *'"agent_id"'*)                               # a subagent's call: phi.py warns it while its marker is open
+      for f in "${CLAUDE_PROJECT_DIR:-.}/.claude/p4/phi/.agents"/*; do
+        [ -e "$f" ] || break
+        case "$payload" in *'"agent_id":"'"${f##*/}"'"'*|*'"agent_id": "'"${f##*/}"'"'*) sub=1; break ;; esac
+      done ;;
   esac
   nudge=0                                         # a top-level session owes a nudge: its CLI id names a marker
   for f in "${CLAUDE_PROJECT_DIR:-.}/.claude/p4/phi/.nudge"/*; do
