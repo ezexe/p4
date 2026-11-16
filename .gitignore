@@ -1,11 +1,12 @@
-# the local Python environment the notebook's kernel runs in
+# the virtual environment scripts/make_venv.py builds
 .venv/
 
+# what Claude Code and the plugins write for a session started in this checkout: its settings and its store
 .claude/
 
-# Python
+# compiled Python files
 __pycache__/
 *.py[cod]
 
-# the interpreter a hook runner proved once (hooks/run-hook.sh, hooks/recall-hook.sh)
+# the interpreter each plugin's hook runner proved once, written by hooks/run-hook.sh and hooks/recall-hook.sh
 lbiza/plugins/*/.python
