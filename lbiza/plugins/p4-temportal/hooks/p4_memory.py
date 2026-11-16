@@ -17,8 +17,7 @@ there. The rest of `~/.claude/projects/<project-slug>/` (transcripts, per-sessio
   mirror (PostToolUse)    a Write or Edit into the AppData memory directory is moved into p4 at once (a p4 file it
                           replaces kept in `.conflicts/replaced/`; index lines added to the pointer appended to the
                           p4 `MEMORY.md`, the pointer restored); one line says where it went.
-  sweep (Stop)            whatever the start could not delete is tried again; prints nothing. `relink` is accepted
-                          as its old name.
+  sweep (Stop)            whatever the start could not delete is tried again; prints nothing.
 
 Every failure prints a one-line notice and exits 0.
 """
@@ -363,7 +362,7 @@ def main():
             return cmd_migrate(payload)
         if sub == "mirror":
             return cmd_mirror(payload)
-        if sub in ("sweep", "relink"):
+        if sub == "sweep":
             return cmd_sweep(payload)
         print(f"p4_memory.py: unknown subcommand {sub!r}")
         return 0
