@@ -86,4 +86,4 @@ python3 scripts/make_venv.py --check    # what .venv can and cannot import
 ```
 
 phi installs editable from a [phi](https://github.com/ezexe/phi) checkout beside this one (`../phi`) when there is one, else from GitHub; `--phi <path>` names another.
-Where PyTorch publishes no build for the machine (an Intel Mac on Python 3.13 or later), `.venv` is finished without torch: recall and `phi_model check` run, and the `.pt` ranker and node tree are off; build `.venv` from a Python 3.12 to have them there.
+Where PyTorch publishes no build for the machine, `.venv` is finished without torch: recall and `phi_model check` run, and the `.pt` ranker and node tree are off. An Intel Mac always takes that route, since ezexe/phi needs torch 2.4.1 or newer and PyPI's last torch for macOS on x86_64 is 2.2.2.
