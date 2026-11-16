@@ -560,6 +560,14 @@ def stage_tmp(p4, sid):
     return True
 
 
+def commit_flags(p4):
+    """`git commit` as close_tmp runs it: literal pathspecs, past a failing pre-commit hook, and under the identity
+    p4conf's own commits use when the store has none, so a close never fails on either."""
+    known = all((git_out(p4, "config", key) or "").strip() for key in ("user.name", "user.email"))
+    ident = [] if known else ["-c", "user.name=p4", "-c", "user.email=p4@localhost"]
+    return ["--literal-pathspecs", *ident, "commit", "--no-verify"]
+
+
 def closed_mark(p4, sid):
     """Where the commit of a removed scratchpad directory is noted: inside the store's git directory, out of the
     working tree."""
@@ -580,7 +588,7 @@ def close_tmp(p4, sid):
     if r.returncode == 1:
         # the staged paths alone: a pathspec commit takes every tracked path's working copy, a copy's edit included
         staged = [n for n in (git_out(p4, "diff", "--cached", "--name-only", "-z", "--", rel) or "").split("\0") if n]
-        c = git_p4(p4, "--literal-pathspecs", "commit", "-q", "-m", f"tmp: session {sid[:8]}, kept before its removal",
+        c = git_p4(p4, *commit_flags(p4), "-q", "-m", f"tmp: session {sid[:8]}, kept before its removal",
                    "--pathspec-from-file=-", "--pathspec-file-nul", stdin=nul(staged)) if staged else None
         if c is None or c.returncode != 0:
             return ""                                  # not committed: nothing is deleted
@@ -608,7 +616,7 @@ def close_tmp(p4, sid):
                 os.rmdir(d)                            # only when emptied
             except OSError:
                 pass
-    git_p4(p4, "--literal-pathspecs", "commit", "-q", "-m", f"tmp: session {sid[:8]} removed; its files are in "
+    git_p4(p4, *commit_flags(p4), "-q", "-m", f"tmp: session {sid[:8]} removed; its files are in "
            f"{head[:8]}", "--pathspec-from-file=-", "--pathspec-file-nul", stdin=nul(removed))   # the removals alone
     mark = closed_mark(p4, sid)
     if mark:

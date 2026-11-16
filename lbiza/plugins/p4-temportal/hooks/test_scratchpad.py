@@ -804,6 +804,41 @@ def tmp_staged_copy_cases():
     print("test_scratchpad.py: tmp staged copy cases green")
 
 
+def tmp_close_bare_store_cases():
+    """tmp-close commits and removes a session's files in a store with no git identity and a pre-commit hook that
+    exits 1."""
+    if not shutil.which("git"):
+        print("test_scratchpad.py: bare store cases skipped, no git on PATH")
+        return
+    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-bare-")
+    temp = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-temp-")
+    sid = "7777aaaa-0000-4000-8000-000000000007"
+    empty = os.path.join(temp, "empty.gitconfig")
+    put(temp, "empty.gitconfig", "")
+    tmp_env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp, "CLAUDE_CONFIG_DIR": temp, "GIT_CONFIG_GLOBAL": empty,
+               "GIT_CONFIG_NOSYSTEM": "1"}
+    p4 = os.path.join(root, ".claude", "p4")
+    mine = os.path.join(p4, "temportal", "tmp", sid)
+    try:
+        os.makedirs(p4)
+        subprocess.run(["git", "-C", p4, "init", "-q"], check=True, capture_output=True)
+        put(p4, "first.md", "first\n")
+        subprocess.run(["git", "-C", p4, "add", "first.md"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", p4, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "first"],
+                       check=True, capture_output=True)
+        put(os.path.join(p4, ".git", "hooks"), "pre-commit", "#!/bin/sh\nexit 1\n")
+        os.chmod(os.path.join(p4, ".git", "hooks", "pre-commit"), 0o755)
+        put(mine, "plan.md", "- a plan\n")
+        assert run_sub("tmp-close", {"cwd": root, "session_id": sid}, tmp_env, CLAUDE_PROJECT_DIR=root) == ""
+        log = subprocess.run(["git", "-C", p4, "log", "--format=%s"], capture_output=True, text=True).stdout
+        assert not os.path.exists(os.path.join(mine, "plan.md")), f"the note was not closed\n{log}"
+        assert "kept before its removal" in log, log
+    finally:
+        for d in (root, temp):
+            shutil.rmtree(d, ignore_errors=True)
+    print("test_scratchpad.py: bare store cases green")
+
+
 def snapshot(root):
     """Every file under a folder with its size, time and bytes, the git index and refs included."""
     out = {}
@@ -1027,6 +1062,7 @@ def main():
     tmp_empty_and_cap_cases()
     tmp_export_cases()
     tmp_staged_copy_cases()
+    tmp_close_bare_store_cases()
     ended_cases()
     gate2_d()
     print("test_scratchpad.py: all green")
