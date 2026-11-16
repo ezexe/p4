@@ -37,6 +37,8 @@ if [ "$name" = lookup-check ]; then
     *'"tool_name":"WebFetch"'*|*'"tool_name": "WebFetch"'*|*'"tool_name":"WebSearch"'*|*'"tool_name": "WebSearch"'*) ;;
     *'"tool_name":"Bash"'*|*'"tool_name": "Bash"'*|*'"tool_name":"PowerShell"'*|*'"tool_name": "PowerShell"'*) ;;
     *mcp__ccd_session_mgmt__archive_session*) ;;  # a child archiving itself: phi.py keeps its report first
+    # a message to another session: phi.py's go-guard reads it
+    *'"tool_name":"SendMessage"'*|*'"tool_name": "SendMessage"'*|*mcp__ccd_session_mgmt__send_message*) ;;
     *mcp__ccd_session__start_session*|*'"tool_name":"EnterWorktree"'*|*'"tool_name": "EnterWorktree"'*) ;;
     *) exit 0 ;;
   esac
