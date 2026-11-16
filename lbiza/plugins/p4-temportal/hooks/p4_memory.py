@@ -251,14 +251,14 @@ def builtin_index(memdir):
     index = os.path.join(memdir, "MEMORY.md")
     if not os.path.isfile(index):
         return ""
-    with open(index, encoding="utf-8", errors="replace") as f:
-        lines = f.readlines()[:BUILTIN_LINES]
+    with open(index, "rb") as f:
+        lines = f.read().splitlines(keepends=True)[:BUILTIN_LINES]
     kept, size = [], 0
     for line in lines:
-        size += len(line.encode("utf-8"))
+        size += len(line)                               # bytes on disk, a CRLF line counted with its CR
         if size > BUILTIN_BYTES:
             break
-        kept.append(line)
+        kept.append(line.decode("utf-8", errors="replace").replace("\r\n", "\n"))
     return "".join(kept)
 
 

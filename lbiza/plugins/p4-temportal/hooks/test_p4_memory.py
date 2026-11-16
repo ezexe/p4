@@ -260,7 +260,27 @@ def gate2_b():
     print("test_p4_memory.py: pointer words green")
 
 
+def crlf_cut():
+    """An index saved with CRLF lines is cut where its bytes on disk pass BUILTIN_BYTES: 151-byte lines keep 165."""
+    base = tempfile.mkdtemp(prefix="p4-temportal-memory-crlf-")
+    try:
+        root, app = os.path.join(base, "proj"), os.path.join(base, "appdata", "memory")
+        os.makedirs(app)
+        line = "- [c](c.md) " + "x" * (149 - 12) + "\r\n"
+        assert len(line.encode("utf-8")) == 151
+        path = os.path.join(root, ".claude", "p4", "temportal", "memory", "MEMORY.md")
+        os.makedirs(os.path.dirname(path))
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(line * 190)
+        out = [ln for ln in run_raw("migrate", root, app).splitlines() if ln.startswith("- [c]")]
+        assert len(out) == BUILTIN_BYTES // 151, f"{len(out)} CRLF lines kept, {len(out) * 151} bytes on disk"
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+    print("test_p4_memory.py: CRLF cut green")
+
+
 def main():
+    crlf_cut()
     behavior()
     gate2_a()
     gate2_b()
