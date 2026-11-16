@@ -175,7 +175,7 @@ class Linear(Base):
         call = call_in(ctx)
         self.assertEqual((call["initiation"], call["context"], call["use_worktree"]), ("user_asked", "fresh", False))
         self.assertIn("> " + RETRY, call["prompt"], "the brief is built from ezexe's words")
-        self.assertIn("Archive when done.", call["prompt"])
+        self.assertIn("Report when done.", call["prompt"])
         self.assertGreaterEqual(len(call["background"]), 80)
         did = puppeteer.DRAFT_RE.search(call["prompt"]).group(1)
         self.assertIn(f"phi draft {did} for {TOP}.", call["prompt"])

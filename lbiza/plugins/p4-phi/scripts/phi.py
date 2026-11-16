@@ -839,7 +839,7 @@ def project_conf(store):
 
 TOP_RULE = ("This is the top session of its tree, so it keeps itself free for orchestration: planning, relaying "
             "between sessions, decisions with ezexe, and landing the work, meaning merge and push. Its work "
-            "steps go to fresh child sessions, a run of serial ones to one child, each brief saying \"archive when "
+            "steps go to fresh child sessions, a run of serial ones to one child, each brief saying \"report when "
             "done\"; the steps that test-and-commit, merge, push or release stay here.")
 
 
@@ -891,7 +891,7 @@ def caps_text(home, s):
     kids = len(plans._children(home, s["sessionId"]))
     if kids >= MAX_CHILDREN:
         return (f"This session has {kids} live sessions of its own, the most phi allows: start no session; send the "
-                f"work to the one whose task it fits with SendMessage, or archive a finished one first.")
+                f"work to the one whose task it fits with SendMessage, or ask ezexe to archive a finished one first.")
     return ""
 
 
@@ -1502,7 +1502,7 @@ def h_nudge(payload):
     return (f"phi (p4-phi): this is the top session, kept free for orchestration, and step {st.get('addr')}, "
             f"\"{cut(clean(st.get('content')), 120)}\", is work: hand it to a child session with "
             f"`mcp__ccd_session__start_session`, `context` `fresh`, `use_worktree: false`, its brief that step and "
-            f"\"archive when done\", and keep this session for planning, relaying and landing. Said once for this "
+            f"\"report when done\", and keep this session for planning, relaying and landing. Said once for this "
             f"step.")
 
 
@@ -1532,12 +1532,22 @@ def h_self_archive(payload):
     if not me.home or not me.id:
         return None
     s = load_session(me.home, me.id)
-    if not spawned_from(s):
-        return None
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     target = str(inp.get("session_id") or inp.get("sessionId") or inp.get("id") or "self")
-    if target not in ("self", me.id, me.cli, me.id.removeprefix("local_")):
-        return None
+    own = target in ("self", me.id, me.cli, me.id.removeprefix("local_"))
+    refuse = None
+    if not session_archives(me.store):             # #49: the archive is ezexe's own action in the app
+        RAN["archive_refused"] = "self" if own else target[:40]
+        why = relay.NO_ARCHIVE + (
+            " This session's turn is kept and it is retired to the session that started it, which treats it as "
+            "archived from now: end the turn with your report." if own and spawned_from(s) else
+            " End the turn with your report; ezexe archives this session." if own else
+            f" phi already treats a finished or superseded session as archived. Tell ezexe in one line that {target} "
+            f"is ready to archive.")
+        refuse = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                         "permissionDecisionReason": why}}
+    if not spawned_from(s) or not own:
+        return refuse
     turn = last_turn(payload.get("transcript_path") or "")
     texts = [t for t in (turn or {}).get("texts") or [] if isinstance(t, str) and t.strip()]
     h_stop({**payload, "hook_event_name": "Stop", "last_assistant_message": texts[-1] if texts else "",
@@ -1547,7 +1557,16 @@ def h_self_archive(payload):
     if held:                                       # #28: an unproven or open issue keeps the child from archiving
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                        "permissionDecisionReason": held}}
-    return None
+    return refuse
+
+
+def session_archives(store):
+    """True only where the project's p4.json sets phi.session_archives: sessions may then archive sessions as they
+    did before #49."""
+    try:
+        return p4conf.section(store, "phi", write=False).get("session_archives") is True if store else False
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def h_task(payload):
@@ -1744,10 +1763,14 @@ def h_user_prompt_submit(payload):
     mark_fork(s, me, payload)
     if not s.get("disposable") and relay.DISPOSABLE.search(str(payload.get("prompt") or "")) \
             and not load_turns(me.home, s["sessionId"]):
-        s["disposable"] = True                     # its brief or its first message: archive when done
+        s["disposable"] = True                     # its brief or its first message: report when done
         RAN["disposable"] = True
     if s.get("doneRetired") or s.get("archived"):
         s["doneRetired"] = s["archived"] = False   # messaged again: a live node once more
+        s["reopened"] = now()
+        RAN["reopened"] = True
+        save_session(me.home, s)
+        relay.reopened(me.home, s, s["reopened"])   # #49: named as reopened, so the mark hides no live work
     if req and not s.get("task"):
         s["task"] = cut(req, TASK_CHARS)
         s["taskAt"] = now()
@@ -1894,7 +1917,7 @@ def h_stop(payload):
         RAN["issue_gate"] = "ok" if proved else (held[:60] or "held")
         if not proved:
             RAN["issue_open"] = held or (f"phi (p4-phi): {cur['issue']['repo']}#{cur['issue']['number']} is not "
-                                         f"yet proven and closed, so this session is not archived.")
+                                         f"yet proven and closed, so this session is not retired.")
     # #46: a child that archives itself is over whether or not its turn was shown done or its plan completed, so
     # it retires to its parent as it goes, its open steps named; one held by an unproven issue is not archiving
     left = bool(payload.get("_atArchive")) and not finished
@@ -2496,13 +2519,13 @@ def main(argv=None):
             s["issue"]["test"] = {"cmd": a.command.strip(), "cwd": os.getcwd(), "step": "phi.py proof"}
             save_session(me.home, s)
             print(f"kept: phi re-runs `{a.command.strip()}` here at Stop on the final head, before "
-                  f"{s['issue']['repo']}#{s['issue']['number']} lets this session be archived")
+                  f"{s['issue']['repo']}#{s['issue']['number']} lets this session be retired")
             return 0
         if a.cmd == "disposable":
             s["disposable"] = True
             save_session(me.home, s)
             print("this session is retired when its work is done: its outcome kept as a replaces: note on the "
-                  "session that started it, which is told to archive it")
+                  "session that started it, which treats it as archived and tells ezexe it is ready to archive")
             return 0
         if a.cmd == "note":
             print("kept" if note_add(me.home, s["sessionId"], a.claim, a.source, a.kind, me.cli) else "already kept")

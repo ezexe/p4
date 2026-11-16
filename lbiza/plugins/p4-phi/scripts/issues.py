@@ -265,7 +265,7 @@ def ensure(home, s, text, base, where, rec=None):
                 + (f" Session: {link}" if link else "") + "\n\n### Brief\n\n" + whole[:BODY_CHARS]
                 + "\n\n### Plan\n\n" + (plan or "(none yet)")
                 + "\n\nThe child's commits say `Closes #N`; phi re-runs the test that proves it at Stop, comments the "
-                  "result here, and archives the child once this closes.")
+                  "result here, and retires the child once this closes.")
         r = gh(["issue", "create", "-R", slug, "--title", title, "--body", body])
         m = URL_NUM.search((r.stdout or "") if r is not None and r.returncode == 0 else "")
         if not m:
@@ -278,7 +278,7 @@ def ensure(home, s, text, base, where, rec=None):
             + "`; a plan step names the test that proves it fixed (a backticked command or a test file, or "
               "`phi.py proof \"<command>\"`); phi re-runs that test at Stop on the final head and comments the "
               "result on the issue; green work is pushed at once, without asking, and each p4 store it touched synced "
-              "with `p4.py sync --push`; then, with the issue closed, this session is archived.")
+              "with `p4.py sync --push`; then, with the issue closed, this session is retired to its parent.")
 
 
 def done_text(home, s, cwd=""):
@@ -521,7 +521,7 @@ def gate(home, s, cwd=""):
         return False, ("" if _told(iss, "no-test") else
                        f"phi (p4-phi): this session's work looks finished, but its plan names no test that proves "
                        f"{ref} fixed. Add a plan step naming it, a backticked command or a test file, or run "
-                       f"`phi.py proof \"<command>\"`; phi re-runs it at Stop before this session is archived."), ""
+                       f"`phi.py proof \"<command>\"`; phi re-runs it at Stop before this session is retired."), ""
     d = proven(home, s, proof)
     head, state = d.get("head") or "?", d.get("state") or "running"
     if state in ("passed", "failed") and d.get("commented") != f"{head}:{state}":
@@ -539,7 +539,7 @@ def gate(home, s, cwd=""):
         tail = relay._short(" ".join(str(d.get("tail") or "").split()[-80:]), 600)
         return False, ("" if _told(iss, f"failed:{head}") else
                        f"phi (p4-phi): phi re-ran the proving test `{proof['cmd']}` on {head} and it failed (exit "
-                       f"{d.get('code')}), so this session stays open and is not archived until it passes. Its last "
+                       f"{d.get('code')}), so this session stays open and is not retired until it passes. Its last "
                        f"lines: {tail}"), ""
     mine = own_commits(s, cwd)
     closing = [(repo, sha, subj) for repo, sha, subj, body in mine if closes(body, slug, n)]

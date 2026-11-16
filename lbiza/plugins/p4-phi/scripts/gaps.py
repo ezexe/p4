@@ -151,7 +151,7 @@ def brief_of(name, path, rule, repo, new_top):
     return (f"A session wrote a feedback memory that patches over plugin behaviour, so the gap belongs in the plugin. "
             f"The memory, `{name}` at {relay.norm(path)}, says: \"{rule}\" Check whether the plugin does this "
             f"already; if not, file the issue with `gh issue create -R {repo}`, quoting the rule and saying what the "
-            f"plugin does now and what it should do, then have a child fix it, archive when done. {new_top}")
+            f"plugin does now and what it should do, then have a child fix it, report when done. {new_top}")
 
 
 def advice(home, store, s, path, owner_turn, commands, new_top, root=None):

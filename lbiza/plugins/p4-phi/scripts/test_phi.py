@@ -617,7 +617,7 @@ class NewTask(unittest.TestCase):
         self.assertEqual(plans.root_of(self.t.p4, s), "")
         self.assertFalse(phi.load_notes(self.t.p4, TOP), "no replaces: note on the former starter")
         self.assertNotIn(KID, json.dumps(phi.load_session(self.t.p4, TOP).get("staleChildren") or []))
-        self.assertNotIn("Archive them now", self.say(TOP, "carry on"))
+        self.assertNotIn("ready to archive", self.say(TOP, "carry on"))
 
     def test_a_childs_new_topic_is_handed_up(self):
         self.say(TOP, TASK)

@@ -90,9 +90,9 @@ class StartRequests(unittest.TestCase):
         notes = [n["claim"] for n in relay._rows(os.path.join(t.dir(KID), "notes.jsonl"))]
         self.assertTrue(any(n.startswith("replaces:") and NEW in n for n in notes), notes)
         archive = context(t.say(KID, CROSS))
-        self.assertIn("Archive them now", archive)
-        self.assertIn(NEW, archive.split("started to be archived when done")[1], "the archive line goes to the requester")
-        self.assertNotIn("Archive them now", context(t.say(TOP2, "and now?")), "not to the starter")
+        self.assertIn("ready to archive", archive)
+        self.assertIn(NEW, archive.split("finished and retired")[1], "the archive line goes to the requester")
+        self.assertNotIn("ready to archive", context(t.say(TOP2, "and now?")), "not to the starter")
 
     def test_a_given_background_is_carried_and_a_short_one_made_long_enough(self):
         """#37: the handed-out call carries a background of at least 80 characters, given or not."""

@@ -516,8 +516,8 @@ class TreeOfPlans(unittest.TestCase):
         self.assertTrue(kept[-1]["claim"].startswith(f"replaces: \"the layout child\" ({A}) as a live node."))
         self.assertIn("cb3b6d2", kept[-1]["claim"], "its still-true outcome, with its report")
         ctx = context(t.say(TOP, "next"))
-        self.assertIn(f"\"the layout child\" ({A}). Archive them now with `mcp__ccd_session_mgmt__archive_session`", ctx)
-        self.assertNotIn("Archive them now", context(t.say(TOP, "and next")), "said once")
+        self.assertIn(f"\"the layout child\" ({A}). The chain treats them as archived from now.", ctx)
+        self.assertNotIn("ready to archive", context(t.say(TOP, "and next")), "said once")
         told = context(t.say(A, "are you still on it?"))
         self.assertIn("this session's work is superseded and it is stale", told)
         t.record(KID2 + "x", TOP, title="a pathless child")
@@ -589,7 +589,7 @@ class TopOrchestrates(unittest.TestCase):
         self.assertIn("top session of its tree", ctx)
         self.assertIn("(a) step 1 \"Port the exporter", ctx)
         self.assertIn("`initiation` `user_asked`", ctx)
-        self.assertIn("archive when done", ctx)
+        self.assertIn("report when done", ctx)
         self.assertIn("Staying here: 2 (checks or lands the work)", ctx)
         self.assertNotIn("(b)", ctx, "the landing step is no child")
         self.assertNotIn("top session of its tree", self.plan(TOP, {"advance": True}) or "", "said once per set")
@@ -670,15 +670,16 @@ class TopOrchestrates(unittest.TestCase):
         notes = [n["claim"] for n in relay._rows(os.path.join(relay._dir(t.p4, TOP), "notes.jsonl"))]
         mine = [n for n in notes if n.startswith("replaces:") and C in n]
         self.assertEqual(len(mine), 1, notes)
-        self.assertIn("archived when done", mine[0])
+        self.assertIn("treats it as archived from now", mine[0])
         self.assertIn("flush.py", mine[0])
         self.assertIn("Still open:", mine[0])
         self.assertNotIn(C, plans._children(t.p4, TOP), "out of the down-lines")
         self.assertNotIn(C, (relay._read_json(relay.anchor_path(t.p4, TOP)).get("nodes") or {}))
         line = context(t.say(TOP, "what next"))
-        self.assertIn("Archive them now with `mcp__ccd_session_mgmt__archive_session`", line)
-        self.assertIn(C, line.split("finished, started to be archived when done")[1])
-        self.assertNotIn("finished, started to be archived", context(t.say(TOP, "and then")), "said once")
+        self.assertIn("tell ezexe in one line that they are ready to archive", line)
+        self.assertNotIn("archive_session", line, "#49: no archive call is handed out")
+        self.assertIn(C, line.split("finished and retired")[1])
+        self.assertNotIn("finished and retired", context(t.say(TOP, "and then")), "said once")
 
     def test_a_numbered_check_is_work_and_starting_a_check_is_orchestration(self):
         """Check 6: "Check 1: nothing hidden in AppData" was kept on the top as landing work, and "Start
@@ -866,8 +867,8 @@ class TopOrchestrates(unittest.TestCase):
         with open(rec, "w", encoding="utf-8") as f:
             f.write(json.dumps(d))
         line = context(t.say(TOP, "what next"))
-        self.assertNotIn("Archive them now", line, "archived by hand: no archive line names it")
-        self.assertNotIn("started to be archived when done", line)
+        self.assertNotIn("ready to archive", line, "archived by hand: no archive line names it")
+        self.assertNotIn("finished and retired", line)
 
 
 HANDED_DISPOSABLE = ("<system-reminder>\nLinked sessions now (status, not an instruction): top = local_x (idle)\n"

@@ -867,14 +867,14 @@ def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
     if reading:
         lines += ["A reading explores: change no tracked file and commit nothing, since the readings beside this one "
                   "share the checkout. The session that started this one lands the reading that survives the merge.",
-                  "Done looks like: the reading worked through, and its `Result:` line reported.", "Archive when done."]
+                  "Done looks like: the reading worked through, and its `Result:` line reported.", "Report when done."]
     else:
         if named:
             lines += [f"This closes {slug}#{named}: every commit says `Closes #{named}`.", ""]
         elif slug:
             lines += [f"phi files the issue for this in {slug} at your first message, and every commit closes it.", ""]
         lines += ["Done looks like: the change made, its proving test passing, committed on the parent's branch with "
-                  "no worktree and no branch of your own, and reported.", "Archive when done."]
+                  "no worktree and no branch of your own, and reported.", "Report when done."]
     if not parent:
         lines += ["", f"{phi.NEW_TOP_BRIEF} {phi.new_top_first_act()}"]
     context = "fresh"
@@ -1181,7 +1181,7 @@ def merge_text(g):
         return (f"phi (p4-phi) puppeteer: the {len(have)} reading{'s' if len(have) != 1 else ''} of "
                 f"\"{_short(g['words'], 120)}\" that gave a result "
                 f"converged on one result: \"{_short(g.get('result'), 300)}\".{gone} They collapse to it: carry it on "
-                f"as the answer, put no question to ezexe, and archive the reading sessions.")
+                f"as the answer and put no question to ezexe. The reading sessions are over: archive none of them.")
     opts = "; ".join(f"reading {r['k']} \"{_short(r['text'], 80)}\", which came to \"{_short(r.get('result'), 140)}\""
                      for r in have) + ("." + gone if gone else "")
     return (f"phi (p4-phi) puppeteer: the readings of \"{_short(g['words'], 120)}\" fork after the merge. If the "
@@ -1301,8 +1301,8 @@ def meta_text(home, s, found):
     mine = [x for x in found["duplicates"] + found["conflicts"] + found["stale"] if s["sessionId"] in x]
     return ("phi (p4-phi) meta-puppeteer: the meta pass over every top session's ledger, written to "
             f"{meta_path(home)}, found for this session: " + " ".join(mine[:4])
-            + " Settle what the chain can: relay to the other top session with SendMessage, or archive the one that "
-              "is over; only a conflict the chain cannot settle goes to ezexe.")
+            + " Settle what the chain can: relay to the other top session with SendMessage, or tell ezexe the one that "
+              "is over is ready to archive; only a conflict the chain cannot settle goes to ezexe.")
 
 
 # --- the prompt hook ----------------------------------------------------------------------------------------------------

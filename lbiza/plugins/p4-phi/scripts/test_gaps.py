@@ -111,7 +111,7 @@ class Hook(unittest.TestCase):
         got = self.wrote(memory(self.t.p4, "children-on-parent-branch", CHILD_RULE))
         self.assertIn("patches over a gap in the plugin (team/plug)", got)
         self.assertIn("gh issue create -R team/plug", got)
-        self.assertIn("have a child fix it, archive when done", got)
+        self.assertIn("have a child fix it, report when done", got)
         self.assertIn("only the parent merges and pushes", got, "the rule quoted")
         self.assertIn("children-on-parent-branch.md", got, "the memory's path")
         self.assertIn("This session is a new top session", got)

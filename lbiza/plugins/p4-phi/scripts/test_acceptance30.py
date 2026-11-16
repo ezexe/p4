@@ -97,7 +97,7 @@ class Tree_(unittest.TestCase):
         self.t.stop(KID, "Fix the row, archive when done", report=long)
         self.assertEqual(len(phi.load_turns(self.t.p4, KID)), 1, "a Stop after it keeps no second copy")
         ctx = context(self.t.say(TOP, "what next?"))
-        self.assertIn("Archive them now", ctx)
+        self.assertIn("ready to archive", ctx)
         self.assertGreater(ctx.count("dropped by flush_rows"), 5, "the note shown whole, not cut at 300")
 
 
@@ -127,6 +127,64 @@ class Tree_(unittest.TestCase):
         self.assertIn("dropped by an off-by-one", claim, "its last report is kept")
         self.assertEqual(notes[-1]["source"], "phi self-archive retirement")
         self.assertEqual(self.t.log(KID)[-1].get("retired"), "archived")
+
+
+    def archive_call(self, host, target):
+        r = self.t.hook("self-archive", host, {"hook_event_name": "PreToolUse",
+                                               "tool_name": "mcp__ccd_session_mgmt__archive_session",
+                                               "tool_input": {"session_id": target}})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else {}
+
+    def test_a_finished_child_is_archived_by_no_session_and_ezexe_is_told_once(self):
+        """#49: no session archives a session; the chain treats a finished one as archived at once."""
+        self.t.say(KID, "Fix the row in the exporter, report when done")
+        self.assertTrue(relay._session(self.t.p4, KID).get("disposable"), "report when done marks it")
+        self.t.cli(KID, "done", "test_flush.py: 3 tests OK")
+        self.t.stop(KID, "Fix the row in the exporter, report when done", report="Fixed flush_rows; 3 tests pass.")
+        kid = relay._session(self.t.p4, KID)
+        self.assertTrue(kid.get("doneRetired"))
+        self.assertTrue(relay.gone(self.t.p4, kid), "the chain treats it as archived from that moment")
+        notes = phi.load_notes(self.t.p4, TOP)
+        self.assertTrue(notes and notes[-1]["claim"].startswith("replaces:") and KID in notes[-1]["claim"])
+        self.assertIn("ezexe archives it in the app", notes[-1]["claim"])
+        page = open(relay.ready_path(self.t.p4), encoding="utf-8").read()
+        self.assertIn(KID, page, "listed as ready to archive")
+        ctx = context(self.t.say(TOP, "what next?"))
+        self.assertNotIn("archive_session", ctx, "no archive call is handed out to any session")
+        self.assertIn("tell ezexe in one line that they are ready to archive", ctx)
+        self.assertEqual(ctx.count(f"({KID})"), 1, "the notice names it once")
+        again = context(self.t.say(TOP, "and then?"))
+        self.assertNotIn("ready to archive", again, "and only once")
+        self.assertNotIn("archive_session", again)
+        # a session that calls the archive tool is refused, for itself and for another
+        mine = self.archive_call(KID, "self")
+        self.assertEqual(mine.get("permissionDecision"), "deny")
+        self.assertIn("no session archives a session", mine.get("permissionDecisionReason", ""))
+        other = self.archive_call(TOP, KID)
+        self.assertEqual(other.get("permissionDecision"), "deny")
+        self.assertIn(f"{KID} is ready to archive", other.get("permissionDecisionReason", ""))
+
+    def test_a_retired_session_messaged_again_is_named_as_reopened(self):
+        """#49: the mark does not hide live work."""
+        self.t.say(KID, "Fix the row in the exporter, report when done")
+        self.t.cli(KID, "done", "test_flush.py: 3 tests OK")
+        self.t.stop(KID, "Fix the row in the exporter, report when done", report="Fixed flush_rows.")
+        context(self.t.say(TOP, "what next?"))
+        self.t.say(KID, "One more thing: the header row too")
+        kid = relay._session(self.t.p4, KID)
+        self.assertFalse(kid.get("doneRetired"))
+        self.assertFalse(relay.gone(self.t.p4, kid), "live again")
+        ctx = context(self.t.say(TOP, "and now?"))
+        self.assertIn("was messaged again and is reopened", ctx)
+        self.assertIn(KID, ctx)
+        self.assertNotIn(KID, open(relay.ready_path(self.t.p4), encoding="utf-8").read())
+        self.assertNotIn("is reopened", context(self.t.say(TOP, "and after?")), "said once")
+
+    def test_a_project_can_let_sessions_archive_again(self):
+        relay._write_json(os.path.join(self.t.p4, "p4.json"), {"phi": {"session_archives": True}})
+        self.t.say(KID, "Fix the row")
+        self.assertEqual(self.archive_call(TOP, KID), {})
 
 
 class ArchiveLock(unittest.TestCase):

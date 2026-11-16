@@ -538,8 +538,8 @@ def rebase(home, sid, room, fair_cut, touches=None):
         s["anchorSeen"] = max(int(s.get("anchorSeen") or 0), int(st.get("anchorVersion") or 0))
         _write_json(path, s)
         return (f"phi (p4-phi): this session's work is superseded and it is stale in the session tree: "
-                f"\"{st.get('note')}\". Re-base onto that before going on; the session that started it was told "
-                f"to archive it, and its outcome is kept there."), True
+                f"\"{st.get('note')}\". Re-base onto that before going on; the session that started it treats "
+                f"it as archived, its outcome is kept there, and ezexe was told it is ready to archive."), True
     warnings = [w["text"] for w in s.get("relayPending") or [] if isinstance(w, dict)]
     told = s.setdefault("relayWarned", [])
     told.extend(w["key"] for w in s.get("relayPending") or [] if isinstance(w, dict) and w.get("key") not in told)
@@ -930,7 +930,9 @@ IGNORED = ("phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/session
            "phi/sessions/*/ledger.md", "phi/sessions/*/ledger.json", "phi/sessions/*/ledger.sig",
            "phi/sessions/*/watcher.json", "phi/meta-ledger.md", "phi/.issue-states.json", "phi/.routes-checked",
            # #43: what did not fit beside a prompt, and the standing instructions in full: pages of this machine
-           "phi/sessions/*/held.md", "phi/sessions/*/standing.md")
+           "phi/sessions/*/held.md", "phi/sessions/*/standing.md",
+           # #49: the sessions waiting for ezexe's archive, made again from the records
+           "phi/ready-to-archive.md")
 TRACKED_MARK = "p4-phi-tracked"
 
 
@@ -1255,6 +1257,7 @@ def _pend_archive(home, parent, sid, s, kind):
             pend.append({"id": sid, "title": _title(s), "kind": kind})
             pd["staleTold"] = [x for x in pd.get("staleTold") or [] if x != sid]
             _write_json(ppath, pd)
+    ready_page(home)
 
 
 def _safe(sid):
@@ -1275,8 +1278,9 @@ def drain_archive(home, parent):
     return out
 
 
-DISPOSABLE = re.compile(r"\barchive(?:d)?\s+(?:it\s+|this session\s+)?when\s+(?:it(?:'s| is)\s+|you(?:'re| are)\s+)?"
-                        r"(?:done|finished)\b", re.I)
+# #49: briefs say "report when done"; "archive when done" in an older brief still marks the session the same way
+DISPOSABLE = re.compile(r"\b(?:archive(?:d)?|report)\s+(?:it\s+|this session\s+)?when\s+(?:it(?:'s| is)\s+|"
+                        r"you(?:'re| are)\s+)?(?:done|finished)\b", re.I)
 
 
 def commits_between(repo, old, new):
@@ -1395,7 +1399,7 @@ def retire_done(home, parent, sid, s, now, extra="", archived=False):
     turns = _rows(os.path.join(_dir(home, sid), "turns.jsonl"))
     last = turns[-1] if turns else {}
     steps = [x for x in still if x.startswith("step ")]
-    how = "it finished and was started to be archived when done."
+    how = "it finished, and the chain treats it as archived from now; ezexe archives it in the app."
     if archived:
         how = ("it archived itself before its work was shown done, with "
                + (f"{len(steps)} plan step{'s' if len(steps) != 1 else ''} still open: " + "; ".join(steps) + "."
@@ -1406,7 +1410,7 @@ def retire_done(home, parent, sid, s, now, extra="", archived=False):
              + ("; ".join(commits) or "none") + ". Still open: " + ("; ".join(still) or "nothing") + ". "
              + findings_of(last))
     row = {"time": now, "claim": claim[:FINDINGS_CHARS + 2000],
-           "source": "phi self-archive retirement" if archived else "phi archive-when-done retirement",
+           "source": "phi self-archive retirement" if archived else "phi report-when-done retirement",
            "kind": "decision", "cliSessionId": ""}
     npath = os.path.join(_dir(home, parent), "notes.jsonl")
     os.makedirs(os.path.dirname(npath), exist_ok=True)
@@ -1531,9 +1535,62 @@ def stale_text(pend):
     if stale:
         names = ", ".join(f"\"{x.get('title')}\" ({x.get('id')})" for x in stale)
         out.append(f"phi (p4-phi): stale, their work superseded by a newer note, their outcome kept as a replaces: "
-                   f"note on this session: {names}. Archive them now with `mcp__ccd_session_mgmt__archive_session`.")
+                   f"note on this session: {names}. {READY}")
     if done:
         names = ", ".join(f"\"{x.get('title')}\" ({x.get('id')})" for x in done)
-        out.append(f"phi (p4-phi): finished, started to be archived when done, their outcome kept as a replaces: "
-                   f"note on this session: {names}. Archive them now with `mcp__ccd_session_mgmt__archive_session`.")
+        out.append(f"phi (p4-phi): finished and retired, their outcome kept as a replaces: "
+                   f"note on this session: {names}. {READY}")
     return "\n".join(out)
+
+
+# --- no session archives a session (#49) ------------------------------------------------------------------------------
+#
+# A finished or superseded session is retired in phi at once: the replaces: note on its parent, `doneRetired` or
+# `stale` in its session.json, and `gone` true for owners, shards, the tree and the relay from that moment. The
+# archive itself is ezexe's own action in the app. ezexe is told once, by the parent's one line, and the sessions
+# still waiting for that action are listed on <home>/phi/ready-to-archive.md.
+
+READY = ("The chain treats them as archived from now. No session archives a session: call no archive tool, and tell "
+         "ezexe in one line that they are ready to archive, which ezexe does in the app.")
+NO_ARCHIVE = ("phi (p4-phi): no session archives a session, itself included (ezexe/p4#49). The archive is ezexe's "
+              "own action in the app.")
+
+
+def ready_path(home):
+    return os.path.join(home, "phi", "ready-to-archive.md").replace("\\", "/")
+
+
+def ready_page(home):
+    """<home>/phi/ready-to-archive.md: the sessions phi holds as finished or superseded that the app has not
+    archived yet, each with what it was and when. Rewritten whenever one is retired or reopened."""
+    rows = []
+    for sid, s in sorted(_sessions(home).items()):
+        mark = s.get("doneRetired") or s.get("stale")
+        if not mark or s.get("archived") or archived_in_app(s):
+            continue
+        when = mark.get("time", "") if isinstance(mark, dict) else ""
+        rows.append(f"- \"{_title(s)}\" `{sid}`: {'superseded' if s.get('stale') else 'finished'} {when}".rstrip())
+    text = "\n".join(["# Ready to archive", "",
+                      "Sessions p4-phi holds as finished or superseded and treats as archived.",
+                      "Only ezexe archives a session, in the app.", ""] + (rows or ["None."])) + "\n"
+    path = ready_path(home)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+    return path
+
+
+def reopened(home, s, now):
+    """A session marked finished or archived that is messaged again: its parent is told once that it is live, so
+    the mark does not hide live work, and it leaves the ready-to-archive page."""
+    sid, parent = s.get("sessionId"), _parent(s)
+    if parent:
+        warn(home, parent, f"reopened:{sid}:{now}",
+             f"\"{_title(s)}\" ({sid}), which phi held as finished and treated as archived, was messaged again and "
+             f"is reopened: it is a live node once more, so do not count its work as over.")
+    ready_page(home)
