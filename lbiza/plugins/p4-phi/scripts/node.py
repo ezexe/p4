@@ -1,17 +1,28 @@
-"""node.py: a session's place in the app's session tree, as p4-phi's background and its recall both read it.
+"""node.py: a session's place in the session tree, and the content words two texts share.
 
-Standard library only, and cheap: the recall hook runs it on every message.
+phi.py imports it whenever it runs. The start background phi.py builds lists the notes of the sessions above and
+the last turns of the siblings in the order `by_overlap` gives: the most content words shared with the session's
+task first. node.py uses the standard library only.
 
-A node is one session read at the time of one message (.docs/p4/recall-node.md):
+Retrieval reads the session tree only while p4.json `recall.node.on` is true, and it is false by default. Then
+`h_recall` in hook.py reads the running session's place with `live` on every message, and a training round finds
+the sessions above each task with `phi_tree` and `record_tree`.
 
-  own   the session's own task: its first request
-  up    the tasks of the sessions above it, nearest first, and their notes
-  side  the tasks of the other sessions started by the same session
+`Tree.at` reads one session at the time of one message into a `Node`:
 
-The tree has two sources. `PhiTree` reads phi's files, `phi/sessions/<sessionId>/session.json` and `notes.jsonl`,
-which phi keeps for every session it runs in: the live road. `RecordTree` reads the app's session records,
-`claude-code-sessions/**/<sessionId>.json`, which name each session's CLI id and the session that started it, and
-takes the tasks' words from recall's `tasks.tsv`: the road for messages older than phi.
+  own    the session's own task: its first request
+  up     the tasks of the sessions above it, nearest first
+  notes  the notes of those sessions, then its own
+  side   the tasks of the other sessions started by the same session
+
+`phi_tree` reads the files phi.py keeps for every session p4-phi runs in: `phi/sessions/<sessionId>/session.json`
+and `notes.jsonl`. `live` finds the running session there by the environment variable
+`CLAUDE_CODE_HOST_SESSION_ID`, else by the CLI session id it is given. The desktop app sets that variable to its
+own id for the session. `record_tree` reads the session records the desktop app keeps as
+`claude-code-sessions/**/<sessionId>.json` in the folders `records_dirs` finds. Each names a session's CLI ids, when
+it was made and the session that started or forked it. Claude Code's documentation names neither that variable nor
+these records. A training round joins the two trees, so a task of a session phi.py kept no files for still finds
+the sessions above it.
 
 Only what existed before the message counts: `at(..., when)` drops a task, a note or a session dated after it.
 """
@@ -63,7 +74,8 @@ class Node:
         return bool(self.own or self.up or self.notes or self.side)
 
     def text(self, side=False):
-        """The node's words as one text: the own task, the tasks above, the notes, and the siblings' if asked."""
+        """The words of this `Node` as one text: its own task, the tasks above it, the notes, and the siblings'
+        tasks when `side` is true."""
         parts = [self.own] + [t for _, t in self.up] + self.notes + ([t for _, t in self.side] if side else [])
         return "\n".join(p for p in parts if p)
 
@@ -93,7 +105,8 @@ def _parent(rec):
 
 
 def _stamp(v):
-    """'YYYY-MM-DD HH:MM' from a phi time string or an app epoch in milliseconds; '' when unknown."""
+    """'YYYY-MM-DD HH:MM' from a time string of phi.py's files, or from an epoch in milliseconds as the app's
+    records hold it or in seconds; '' when unknown."""
     if isinstance(v, (int, float)) and v > 0:
         import time
         return time.strftime("%Y-%m-%d %H:%M", time.localtime(v / 1000 if v > 1e11 else v))
@@ -144,7 +157,8 @@ class Tree:
         return ""
 
     def at(self, cli_or_sid, when=""):
-        """The node of a session at `when` ('YYYY-MM-DD HH:MM'; '' for now), or None when the session is unknown."""
+        """The `Node` of a session at `when`, or None when the session is unknown. `when` is 'YYYY-MM-DD HH:MM',
+        and '' means now. The session is named by its id, a CLI id or the first 8 characters of one."""
         sid = self.session_of(cli_or_sid)
         if not sid:
             return None
@@ -177,7 +191,7 @@ class Tree:
 
 
 def phi_tree(p4):
-    """The tree from phi's files under <p4>/phi/sessions."""
+    """The tree from the files phi.py keeps under <p4>/phi/sessions."""
     tree = Tree()
     for path in glob.glob(os.path.join(p4, "phi", "sessions", "*", "session.json")):
         d = _read_json(path)
@@ -199,7 +213,9 @@ def phi_tree(p4):
 
 
 def records_dirs():
-    """The folders that may hold the app's session records, likeliest first."""
+    """The folders that may hold the desktop app's session records, in this order: each `claude-code-sessions`
+    folder one level below or directly in a `Claude*` folder of `LOCALAPPDATA`, of `APPDATA` and of
+    ~/Library/Application Support."""
     home = os.path.expanduser("~")
     out = []
     for base in (os.environ.get("LOCALAPPDATA") or os.path.join(home, "AppData", "Local"),
@@ -213,8 +229,9 @@ def records_dirs():
 
 
 def record_tree(tasks_tsv=None, dirs=None, tree=None):
-    """The tree from the app's session records, the tasks' words from recall's tasks.tsv (rows whose `session`
-    names a CLI id or its first 8 characters). Added to `tree` when one is given."""
+    """The tree from the desktop app's session records in `dirs`, by default the folders records_dirs() finds. The
+    records are added to `tree` when one is given. When `tasks_tsv` names a tasks.tsv, each of its rows is a task
+    of the session that has the row's `session` among its CLI ids or their first 8 characters."""
     tree = tree or Tree()
     for d in dirs if dirs is not None else records_dirs():
         for path in glob.glob(os.path.join(d, "**", "*.json"), recursive=True):
@@ -237,8 +254,8 @@ def record_tree(tasks_tsv=None, dirs=None, tree=None):
 
 
 def live(p4, cli_session=""):
-    """The node of the running session, from phi's files: the session named by CLAUDE_CODE_HOST_SESSION_ID, else
-    the one whose CLI ids hold `cli_session`. None when phi keeps no record of it."""
+    """The `Node` of the running session from the files phi.py keeps: the session that CLAUDE_CODE_HOST_SESSION_ID
+    names, else the one whose CLI ids hold `cli_session`. None when phi.py keeps no files for it."""
     if not os.path.isdir(os.path.join(p4, "phi", "sessions")):
         return None
     tree = phi_tree(p4)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""node.py: a session's place in the session tree, from phi's files and from the app's records.
+"""node.py: a session's place in the session tree, from phi.py's files and from the desktop app's records.
 
     python3 -I lbiza/plugins/p4-phi/scripts/test_node.py
 """
@@ -116,7 +116,7 @@ class Overlap(unittest.TestCase):
 
 
 class Query(unittest.TestCase):
-    """The node changes what recall prints only through the message's own words."""
+    """The session tree changes what retrieval prints only where the message's own words give a reason."""
 
     def setUp(self):
         self.p4 = tempfile.mkdtemp(prefix="p4-node-q-")
@@ -143,7 +143,7 @@ class Query(unittest.TestCase):
     def test_no_line_prints_that_the_message_gives_no_reason_for(self):
         n = node.Node("kid", own="narwhal plotter cmake presets")
         r = cli.query(self.p4, "what time is it", None, "2026-11-01 10:00", idx=self.idx, model={}, node=n)
-        self.assertEqual(r["lines"], [], "a node never makes an ordinary message print")
+        self.assertEqual(r["lines"], [], "the session tree never makes an ordinary message print")
 
     def test_an_entry_used_above_passes_on_one_shared_word(self):
         target = [d["id"] for d in self.idx["docs"] if "tests/golden" in d["show"]][0]
