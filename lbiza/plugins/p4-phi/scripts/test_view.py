@@ -119,7 +119,7 @@ class View(unittest.TestCase):
         self.assertEqual(view.describe(self.p4)[0], "aaaaaaaa: 1 turns, 1 files in view, 0 commits, 0 compactions")
         self.assertEqual(view.load(self.p4, "bbbbbbbb")["size"]["baseline"], 50000)
 
-    def test_refresh_writes_and_reads_back(self):
+    def test_refresh_without_a_transcript_writes_nothing(self):
         self.assertIsNone(view.load(self.p4, "abcdef12"))
         self.assertEqual(view.refresh(self.p4, self.proj, "abcdef12-rest", "", None), view.empty(), "no transcript: nothing")
         self.assertEqual(view.stats_line(self.p4), "")
