@@ -289,6 +289,49 @@ class ThreeSessions(unittest.TestCase):
         t.stop(A, "again", report="Nothing more.", uuid="c4")
         self.assertNotIn("close issues", context(t.say(TOP, "and now?")), "told once per commit")
 
+    def test_a_child_closing_an_issue_in_a_store_with_an_open_retrain_notice_gets_it_named_in_the_push_line(self):
+        """#51: p4-recall 0.3.0 was pushed while its retrain had not run and the other machine was behind."""
+        import notices
+        t = self.t
+        self.assertEqual(relay.stores_of(self.work), [relay.norm(t.p4)], "the store of the project it sits in")
+        self.assertEqual(relay.owed([self.work]), [], "nothing open: nothing owed")
+        notices.notify(t.p4, "json ranker", "the pool went stale", session=A)
+        self.edit_uncommitted(A, ("lib", "x.py"), "c1")
+        g = ["git", "-C", self.work, "-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run(g + ["commit", "-qam", "lib: fix x\n\nCloses #5"], check=True, capture_output=True)
+        self.edit_uncommitted(A, ("lib", "y.py"), "c2")
+        subprocess.run(g + ["commit", "-qam", "lib: tidy y"], check=True, capture_output=True)
+        self.assertEqual(t.cli(A, "done", "test_x.py: 3 tests OK").returncode, 0)
+        self.assertEqual(t.stop(A, "finish", report="Fixed x; suites green.", uuid="c3").returncode, 0)
+        ctx = context(t.say(TOP, "what next?"))
+        self.assertIn("finished with commits that close issues", ctx)
+        self.assertIn("Before that push, this change owes: 1 open retrain notice in ", ctx)
+        self.assertIn("retrain-needed.tsv (json ranker)", ctx)
+        self.assertIn("Finish each first. Where one cannot be finished from here, name it in the report before "
+                      "pushing, not after.", ctx)
+        plain = relay.push_text("the child", A, [(self.work, "abc1234", "lib: fix x", ["#5"])])
+        self.assertNotIn("owes", plain, "with nothing owed the line is as it was")
+        self.assertIn("without asking ezexe", plain)
+
+    def test_a_machine_branch_of_the_store_behind_main_is_owed(self):
+        """#51: the other machine's pull is owed when its branch of the store is behind main."""
+        store = os.path.join(self.t.tmp, "solo", ".claude", "p4")
+        bare = os.path.join(self.t.tmp, "store.git")
+        os.makedirs(store)
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", bare], check=True, capture_output=True)
+        g = ["git", "-C", store, "-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run(["git", "init", "-q", "-b", "main", store], check=True, capture_output=True)
+        subprocess.run(g + ["remote", "add", "origin", bare], check=True, capture_output=True)
+        subprocess.run(g + ["commit", "-q", "--allow-empty", "-m", "one"], check=True, capture_output=True)
+        subprocess.run(g + ["push", "-q", "origin", "main", "main:mac"], check=True, capture_output=True)
+        self.assertEqual(relay.owed([os.path.dirname(os.path.dirname(store))]), [], "every branch is at main")
+        subprocess.run(g + ["commit", "-q", "--allow-empty", "-m", "two"], check=True, capture_output=True)
+        subprocess.run(g + ["push", "-q", "origin", "main"], check=True, capture_output=True)
+        got = relay.owed([os.path.dirname(os.path.dirname(store))])
+        self.assertEqual(len(got), 1)
+        self.assertIn("the machine branch `mac` of the store ", got[0])
+        self.assertIn("is 1 commit behind main", got[0])
+
     def test_a_deprecation_warns_the_sibling_with_uncommitted_edits_before_any_tool(self):
         t = self.t
         mine = self.edit_uncommitted(B, ("lib", "x.py"), "b1")

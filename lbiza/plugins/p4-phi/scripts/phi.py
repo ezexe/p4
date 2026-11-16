@@ -2497,7 +2497,9 @@ def h_stop(payload):
         if new:                                    # #27: the top session pushes issue-closing work at once
             top = (chain_of(me.home, s["sessionId"]) or [above])[-1]
             relay.warn(me.home, top, "push:" + s["sessionId"] + ":" + ",".join(c[1] for c in new),
-                       relay.push_text(title_of(cur), s["sessionId"], new))
+                       relay.push_text(title_of(cur), s["sessionId"], new,
+                                       relay.owed(list(dict.fromkeys(c[0] for c in new)))))   # #51
+            RAN["push_owes"] = True
             cur["closesTold"] = (told + [c[1] for c in new])[-100:]
             save_session(me.home, cur)
             RAN["push_told"] = len(new)

@@ -1505,13 +1505,72 @@ def closing_commits(home, sid, s):
     return out
 
 
-def push_text(child_title, child, commits):
-    """The top session's line: push and sync a finished child's issue-closing commits now, not ask."""
+def stores_of(repo):
+    """The p4 stores a change in `repo` touches, as far as phi can see: the store of the repository itself, and of
+    the nearest folder above it that holds one, as a marketplace checkout sits inside its project."""
+    out, d = [], str(repo or "")
+    for _ in range(4):
+        store = os.path.join(d, ".claude", "p4")
+        if d and os.path.isdir(store) and norm(store) not in out:
+            out.append(norm(store))
+        up = os.path.dirname(d.rstrip("/\\"))
+        if not up or up == d:
+            break
+        d = up
+    return out
+
+
+OWED_MAX = 6                   # owed items named in one push line
+
+
+def owed(repos, main="main"):
+    """What a change in `repos` still owes before it is pushed, from what phi can see (#51): the open retrain
+    notices in `models/retrain-needed.tsv` of a store it touches, and the machine branches of that store that are
+    behind main, read from the refs already fetched. Nothing is fetched and nothing is run."""
+    out = []
+    for store in dict.fromkeys(s for r in repos for s in stores_of(r)):
+        try:
+            import notices
+            rows = notices.open_notices(store)
+            where = norm(notices.path(store))
+        except Exception:  # noqa: BLE001
+            rows, where = [], ""
+        if rows:
+            parts = ", ".join(dict.fromkeys(str(r.get("component") or "a model") for r in rows))
+            out.append(f"{len(rows)} open retrain notice{'s' if len(rows) != 1 else ''} in {where} ({_short(parts, 120)}): "
+                       f"run the retrain they ask for")
+        top = _git(store, "rev-parse", "--show-toplevel")
+        if not top or top.returncode != 0 or norm(top.stdout.strip()) != norm(store):
+            continue                               # the store is not a repository of its own: no machine branches
+        refs = _git(store, "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin")
+        for ref in (refs.stdout.split() if refs and refs.returncode == 0 else []):
+            name = ref.removeprefix("origin/")
+            if name in ("HEAD", main, "origin") or not ref.startswith("origin/"):
+                continue
+            n = _git(store, "rev-list", "--count", f"{ref}..origin/{main}")
+            behind = int(n.stdout.strip() or 0) if n and n.returncode == 0 and n.stdout.strip().isdigit() else 0
+            if behind:
+                out.append(f"the machine branch `{name}` of the store {store} is {behind} commit"
+                           f"{'s' if behind != 1 else ''} behind {main}: that machine's pull and settings")
+    return out
+
+
+def push_text(child_title, child, commits, owes=()):
+    """The top session's line: push and sync a finished child's issue-closing commits now, not ask. With `owes`,
+    what the change still owes comes first: finished before the push, or named in the report before it (#51)."""
     named = "; ".join(f"{sha} \"{_short(subj, 80)}\" closes {', '.join(n)} in {repo}" for repo, sha, subj, n in commits)
+    owes = [x for x in owes if x]
+    first = ""
+    if owes:
+        first = (" Before that push, this change owes: " + "; ".join(owes[:OWED_MAX])
+                 + (f"; and {len(owes) - OWED_MAX} more" if len(owes) > OWED_MAX else "")
+                 + ". Finish each first. Where one cannot be finished from here, name it in the report before "
+                   "pushing, not after.")
     return (f"phi (p4-phi): \"{child_title}\" ({child}) finished with commits that close issues: {named}. "
             f"ezexe's rule is that green work closing an issue is pushed at once: once its suites pass, push that "
             f"repository's main and sync each p4 store it touches with `p4.py sync --push`, without asking ezexe, "
-            f"and say in one line what was pushed. Asking stays for force-pushes, history rewrites and deletions.")
+            f"and say in one line what was pushed.{first} Asking stays for force-pushes, history rewrites and "
+            f"deletions.")
 
 
 FINDINGS_CHARS = 3000          # of a retired child's final report, kept in its replaces: note
