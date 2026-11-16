@@ -28,9 +28,10 @@ The scratchpad directory is on unless p4.json's scratchpad.tmp is false or P4_SC
                  this session's or another's. Then it stages the session's scratchpad directory in the store with
                  `git add`, at every turn end: never a file git ignores, one over scratchpad.tmp_max_file_mb, the
                  contents of a clone, a work tree, a bare repository, a folder holding .claude/p4 or a store with
-                 p4.json beside phi/, or a folder named in scratchpad.tmp_skip_dirs. A scratchpad directory over
-                 scratchpad.tmp_max_files has only its tracked files' changes staged, so no file added earlier stays
-                 staged after it is gone.
+                 p4.json beside phi/, a copy or export of a repository, which is a folder below the directory's top
+                 holding .gitignore, .gitattributes or .claude-plugin/, or a folder named in scratchpad.tmp_skip_dirs.
+                 A scratchpad directory over scratchpad.tmp_max_files has only its tracked files' changes staged, so
+                 no file added earlier stays staged after it is gone.
   tmp-close      at SessionEnd, commits the session's scratchpad directory and only then removes its files: its
                  staged files are committed alone, leaving whatever else is staged, the files that commit holds are
                  deleted with the folders they leave empty, and the removal is committed too. A file no commit holds
@@ -481,7 +482,7 @@ def tmp_files(target):
     stage_tmp then stages only the tracked files' changes."""
     out, cap = [], TMP_MAX_FILE_MB * 1024 * 1024
     for d, dirs, names in os.walk(target):
-        if nested_repo(d, dirs, names):
+        if nested_repo(d, dirs, names, top=d == target):
             dirs[:] = []
             continue
         dirs[:] = [x for x in dirs if not skipped_dir(x)]
@@ -498,14 +499,19 @@ def tmp_files(target):
     return out
 
 
-def nested_repo(d, dirs, names):
+def nested_repo(d, dirs, names, top=False):
     """A folder holding a repository or a store, which a scratchpad directory never stages: a clone or work tree with
     a .git folder or file, a bare repository, a project or copy holding .claude/p4, or a store itself, with p4.json
-    beside phi/. Such a copy duplicates thousands of files into the store's history, and it is the working copy of the
-    session that made it."""
+    beside phi/. Below the scratchpad directory's top, a copy or export of a repository without its .git too: a folder
+    whose top holds .gitignore or .gitattributes, files a repository keeps, or .claude-plugin/, the folder of a
+    plugin's or a marketplace's manifest. Such a copy duplicates thousands of files into the store's history, and it is
+    the working copy of the session that made it. A .gitignore a session writes in a folder of its own leaves that
+    folder on disk and out of every commit too, while one at the scratchpad directory's top keeps out only what it
+    names."""
     return (".git" in dirs or ".git" in names or is_bare_repo(d)
             or os.path.isdir(os.path.join(d, ".claude", "p4"))
-            or ("p4.json" in names and "phi" in dirs))
+            or ("p4.json" in names and "phi" in dirs)
+            or not top and (".gitignore" in names or ".gitattributes" in names or ".claude-plugin" in dirs))
 
 
 def is_bare_repo(d):

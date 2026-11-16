@@ -627,6 +627,84 @@ def tmp_empty_and_cap_cases():
     print("test_scratchpad.py: tmp empty and cap cases green")
 
 
+def tmp_export_cases():
+    """A copy or export of a repository below the top of a scratchpad directory is never staged, so tmp-close never
+    commits or removes it: an export made by `git archive`, whose top holds the repository's .gitignore, a copy whose
+    top holds .gitattributes, and a copied plugin whose top holds .claude-plugin/. An ordinary folder of notes beside
+    each is staged, and so is a .gitignore at the scratchpad directory's own top, which keeps out only what it names."""
+    if not shutil.which("git"):
+        print("test_scratchpad.py: tmp export cases skipped, no git on PATH")
+        return
+    import zipfile
+    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-export-")
+    temp = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-temp-")
+    sid = "4444dddd-0000-4000-8000-000000000004"
+    tmp_env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp}
+    p4, repo = os.path.join(root, ".claude", "p4"), os.path.join(root, "repo")
+    mine, rel = os.path.join(p4, "temportal", "tmp", sid), f"temportal/tmp/{sid}"
+
+    def git(where, *args):
+        r = subprocess.run(["git", "-C", where, "-c", "user.name=t", "-c", "user.email=t@t"] + list(args),
+                           capture_output=True, text=True)
+        assert r.returncode == 0, (args, r.stderr)
+        return r.stdout
+
+    def run(sub):
+        return run_sub(sub, {"cwd": root, "session_id": sid}, tmp_env, CLAUDE_PROJECT_DIR=root)
+
+    try:
+        for d in (p4, repo):
+            os.makedirs(d)
+            git(d, "init", "-q")
+        put(p4, "first.md", "first\n")
+        git(p4, "add", "first.md")
+        git(p4, "commit", "-q", "-m", "first")
+        put(repo, ".gitignore", "__pycache__/\n*.pyc\n")
+        put(repo, "README.md", "a repository\n")
+        put(repo, "pkg/mod.py", "x = 1\n")
+        put(repo, "pkg/data.json", "{}\n")
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", "repo")
+        rev = git(repo, "rev-parse", "--short", "HEAD").strip()
+        git(repo, "archive", "--format=zip", "-o", os.path.join(root, "repo.zip"), "HEAD")
+        with zipfile.ZipFile(os.path.join(root, "repo.zip")) as z:
+            z.extractall(os.path.join(mine, "work", f"at-{rev}"))
+        put(mine, ".gitignore", "*.log\n")
+        put(mine, "plan.md", "- a plan\n")
+        put(mine, "run.log", "a log\n")
+        put(mine, "notes/findings.md", "- a finding\n")
+        put(mine, "notes/runs/r1.tsv", "a\t1\n")
+        put(mine, "work/summary.md", "what the export showed\n")
+        put(mine, "lfs/.gitattributes", "*.pt filter=lfs diff=lfs merge=lfs -text\n")
+        put(mine, "lfs/model.md", "a model card\n")
+        put(mine, "models/plugin/p4-x/.claude-plugin/plugin.json", json.dumps({"name": "p4-x"}))
+        put(mine, "models/plugin/p4-x/hooks/hooks.json", "{}\n")
+        put(mine, "models/plugin/p4-x/README.md", "a plugin\n")
+        put(mine, "models/notes.md", "- which model\n")
+        notes = [f"{rel}/{n}" for n in (".gitignore", "models/notes.md", "notes/findings.md", "notes/runs/r1.tsv",
+                                        "plan.md", "work/summary.md")]
+        copies = sorted(f"{rel}/{n}" for n in ("lfs/.gitattributes", "lfs/model.md", f"work/at-{rev}/.gitignore",
+                                              f"work/at-{rev}/README.md", f"work/at-{rev}/pkg/mod.py",
+                                              f"work/at-{rev}/pkg/data.json", "models/plugin/p4-x/README.md",
+                                              "models/plugin/p4-x/.claude-plugin/plugin.json",
+                                              "models/plugin/p4-x/hooks/hooks.json"))
+
+        assert run("tmp-sweep") == "", "tmp-sweep spoke"
+        staged = git(p4, "diff", "--cached", "--name-only").split()
+        print(f"test_scratchpad.py: staged after tmp-sweep: {len(staged)} paths, "
+              f"{len(set(staged) & set(copies))} of them files of a copy or export of a repository")
+        assert staged == notes, staged
+        # tmp-close commits the notes alone and removes them; the copies stay on disk, in no commit
+        assert run("tmp-close") == "", "tmp-close spoke"
+        assert sorted(git(p4, "show", "--name-only", "--format=", "HEAD~1").split()) == notes, "the kept commit"
+        assert all(os.path.isfile(os.path.join(p4, *c.split("/"))) for c in copies), "a copy was removed"
+        assert not os.path.exists(os.path.join(mine, "plan.md")), "a committed note is still on disk"
+    finally:
+        for d in (root, temp):
+            shutil.rmtree(d, ignore_errors=True)
+    print("test_scratchpad.py: tmp export cases green")
+
+
 def snapshot(root):
     """Every file under a folder with its size, time and bytes, the git index and refs included."""
     out = {}
@@ -848,6 +926,7 @@ def main():
     sweep_cases()
     move_cases()
     tmp_empty_and_cap_cases()
+    tmp_export_cases()
     ended_cases()
     gate2_d()
     print("test_scratchpad.py: all green")
