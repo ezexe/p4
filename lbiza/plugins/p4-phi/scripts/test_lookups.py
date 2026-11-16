@@ -315,6 +315,27 @@ class Check(Base):
         self.assertEqual(r.returncode, 0)
 
 
+class Lines(Base):
+    def test_every_lookup_line_is_the_plugins_own(self):
+        """A line lookups.py hands a session opens as p4-phi's lines do, so a report that quotes one has it taken out
+        by plans.own_removed, as any line of the plugin's."""
+        import plans
+        self.record_fetch()
+        web = self.out(run_hook("lookup-check", pre("WebFetch", {"url": URL, "prompt": ASK}, proj=self.proj),
+                                self.proj))["hookSpecificOutput"]["permissionDecisionReason"]
+        err = "Exit code 1\nModuleNotFoundError: No module named 'numpy'"
+        self.out(run_hook("lookup-record", post("Bash", {"command": "python tools/probe.py"}, err, S1, self.proj, "t2",
+                                                "PostToolUseFailure"), self.proj))
+        after = self.out(run_hook("lookup-record", post("Bash", {"command": "python other/thing.py"}, err, S2,
+                                                        self.proj, "t3", "PostToolUseFailure"), self.proj))
+        shell = lk.shell_text({"time": "2026-11-01 10:00", "sig": "ModuleNotFoundError: No module named 'numpy'",
+                               "ask": "python tools/probe.py", "fix": ""})
+        for text in (web, after["hookSpecificOutput"]["additionalContext"], shell):
+            first = text.splitlines()[0]
+            self.assertTrue(plans.OWN_LINE.match(first), first)
+            self.assertNotIn(first[-40:], plans.own_removed(f"Fixed the port.\n> {first}\nThe tests pass."))
+
+
 class Backfill(Base):
     def test_each_tool_use_id_is_taken_once(self):
         d = os.path.join(self.tmp.name, "tr")

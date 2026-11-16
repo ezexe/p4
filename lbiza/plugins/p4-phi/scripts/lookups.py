@@ -420,8 +420,8 @@ def after_text(con, row):
     if not seen:
         return ""
     sessions = len({r["session"] for r in seen})
-    out = (f"p4-recall: this error was met before, in {sessions} earlier session{'s' if sessions != 1 else ''} "
-           f"(tool results, last {seen[0]['time']}): {row['sig']}")
+    out = (f"phi (p4-phi): this error was met before, in {sessions} earlier session{'s' if sessions != 1 else ''}, "
+           f"last at {seen[0]['time']}: {row['sig']}")
     fixed = [r for r in seen if r["fix"]]
     if fixed:
         out += f"\nThere the failed command was: {fixed[0]['ask'][:300]}\nand what ran next and worked: {fixed[0]['fix'][:400]}"
@@ -557,14 +557,17 @@ def shell_match(con, p4, tool, inp):
 
 
 def web_text(row):
-    what = f"a page lookup, WebFetch {row['target']}" if row["tool"] == "WebFetch" else "a web search"
-    return (f"p4-recall: this was looked up before ({what}, {row['time']}; a small model wrote the answer from the "
-            f"page, so it is a reading of it, not the page).\n"
+    if row["tool"] == "WebFetch":
+        what = (f"a page lookup, WebFetch {row['target']}, at {row['time']}. A small model wrote the answer from the "
+                f"page, so it is a reading of the page and not the page itself.")
+    else:
+        what = f"a web search, at {row['time']}. What it found is what the search returned then."
+    return (f"phi (p4-phi): this was looked up before, {what}\n"
             f"Asked then: {row['ask'][:300]}\nFound then: {row['finding'][:SHOWN_CHARS]}")
 
 
 def shell_text(row):
-    out = (f"p4-recall: a command like this failed before (a tool result, {row['time']}): {row['sig']}\n"
+    out = (f"phi (p4-phi): a command like this failed before, at {row['time']}: {row['sig']}\n"
            f"It was: {row['ask'][:300]}")
     if row["fix"]:
         out += f"\nWhat ran next and worked: {row['fix'][:400]}"
