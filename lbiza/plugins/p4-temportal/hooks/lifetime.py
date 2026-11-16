@@ -4,12 +4,14 @@
 Two kinds of lifetime clear files, as a browser clears its cache and its cookies. A cache rule per folder, in the
 p4.json section `temportal.cache` with paths relative to temportal/, clears the files older than `max_age_days`, and
 then the oldest files while the folder holds more than `max_mb`. The rule of `.layout-conflicts` clears the store's
-phi/.layout-conflicts/ too, where a layout move sets aside the older copies of phi's files. A cookie is one file or
-folder with its own expiry, set by `lifetime.py set <path> <lifetime>` and kept in temportal/expires.json, and the
-lifetime `session` clears it when the session that set it ends. A cache rule whose path resolves to memory/, in any
-letter case, or to a folder outside temportal/ clears nothing. A cookie is refused inside memory/, on tmp/ or anything
-in it, and on scratchpad/, src/ or expires.json themselves: a session scratchpad directory in tmp/ is committed before
-it is removed, and the others are never cleared whole.
+phi/.layout-conflicts/ too, where a layout move sets aside the older copies of phi's files. In both folders a copy's
+age starts at the later of its own time and its folder's, since a move keeps the time of the copy it sets aside and
+gives the folder it lands in a new one, and neither folder is cleared when it or phi/ is a link or resolves to any
+other place. A cookie is one file or folder with its own expiry, set by `lifetime.py set <path> <lifetime>` and kept
+in temportal/expires.json, and the lifetime `session` clears it when the session that set it ends. A cache rule whose
+path resolves to memory/, in any letter case, or to a folder outside temportal/ clears nothing. A cookie is refused
+inside memory/, on tmp/ or anything in it, and on scratchpad/, src/ or expires.json themselves: a session scratchpad
+directory in tmp/ is committed before it is removed, and the others are never cleared whole.
 
 A file the store's git tracks is removed with its removal staged, so its last version stays in the history, and an
 ignored or untracked file is deleted. The retention sweep stages those removals and no other change, so an edit
@@ -212,18 +214,23 @@ def remove(path):
         return 0
 
 
-def _files(d):
-    """[(mtime, size, path)] of every file under `d`, links not followed."""
+def _files(d, by_folder=False):
+    """[(time, size, path)] of every file under `d`, links not followed. The time is the file's modification time, or
+    with `by_folder` the later of it and the time of the folder holding the file."""
     out = []
     for base, dirs, names in os.walk(d):
         dirs[:] = [x for x in dirs if not p4conf.is_link(os.path.join(base, x))]
+        try:
+            since = os.lstat(base).st_mtime if by_folder else float("-inf")
+        except OSError:
+            continue
         for n in names:
             p = os.path.join(base, n)
             try:
                 st = os.lstat(p)
             except OSError:
                 continue
-            out.append((st.st_mtime, st.st_size, p))
+            out.append((max(st.st_mtime, since), st.st_size, p))
     return out
 
 
@@ -240,17 +247,26 @@ def _prune_empty(d, keep):
 
 def sweep_cache(p4, now=None, removed=None):
     """Clear by each cache rule in the folder its key resolves to under temportal/, and by the rule of
-    .layout-conflicts in each other plugin's folder of that name too -> [(folder from temportal/, files cleared)].
-    Each file removed is added to `removed` when it is a list."""
+    .layout-conflicts in the folder of that name that _conflicts_dir finds for temportal/ and for each other plugin,
+    where _files reads a copy's age from its folder too -> [(folder from temportal/, files cleared)]. Each file
+    removed is added to `removed` when it is a list."""
     now = time.time() if now is None else now
     out = []
+    lc = p4conf.LAYOUT_CONFLICTS
     for key, rule in sorted(rules(p4).items()):
-        rel = rel_in(p4, key.strip("/"))
-        if not rel or never(rel) or not isinstance(rule, dict):
+        if not isinstance(rule, dict):
             continue
-        names = [rel] + ([f"../{plugin}/{rel}" for plugin in ASIDE] if rel == p4conf.LAYOUT_CONFLICTS else [])
-        for name in names:
-            gone = _clear(os.path.normpath(os.path.join(home(p4), *name.split("/"))), rule, now)
+        rel = rel_in(p4, key.strip("/"))
+        named = os.path.normpath(key.strip("/")).replace("\\", "/")      # the key as written, no link followed
+        if lc in (rel, named):
+            places = [(lc, _conflicts_dir(p4, "temportal"), True)]
+            places += [(f"../{plugin}/{lc}", _conflicts_dir(p4, plugin), True) for plugin in ASIDE]
+        elif rel and not never(rel):
+            places = [(rel, os.path.join(home(p4), *rel.split("/")), False)]
+        else:
+            continue
+        for name, d, by_folder in places:
+            gone = _clear(d, rule, now, by_folder) if d else []
             if removed is not None:
                 removed.extend(gone)
             if gone:
@@ -258,11 +274,26 @@ def sweep_cache(p4, now=None, removed=None):
     return out
 
 
-def _clear(d, rule, now):
-    """Clear the folder `d` by one cache rule -> the paths of the files it removed."""
+def _conflicts_dir(p4, plugin):
+    """The .layout-conflicts/ of `plugin` in the store, or None when that folder is a link, when the folder of a plugin
+    other than temportal is one, or when it resolves to any other place, so the rule of .layout-conflicts never clears
+    through a link. A temportal/ that is a link is followed, as rel_in follows it for every cache rule."""
+    top = os.path.join(p4, plugin)
+    d = os.path.join(top, p4conf.LAYOUT_CONFLICTS)
+    if p4conf.is_link(d) or plugin != "temportal" and p4conf.is_link(top):
+        return None
+    real = os.path.realpath(top) if plugin == "temportal" else os.path.join(os.path.realpath(p4), plugin)
+    same = os.path.normcase(os.path.realpath(d)) == os.path.normcase(os.path.join(real, p4conf.LAYOUT_CONFLICTS))
+    return d if same else None
+
+
+def _clear(d, rule, now, by_folder=False):
+    """Clear the folder `d` by one cache rule -> the paths of the files it removed. With `by_folder` a file's age
+    starts at the later of its own time and its folder's, since a layout move keeps the time of the copy it sets
+    aside and gives the folder it lands in a new one."""
     if not os.path.isdir(d):
         return []
-    files = sorted(_files(d))                           # oldest first
+    files = sorted(_files(d, by_folder))                # oldest first
     gone = []
     age = rule.get("max_age_days")
     if age is not None:

@@ -36,6 +36,14 @@ def put(path, text="x", age_days=0):
     return path
 
 
+def set_aside(path, age_days, text="x"):
+    """A copy as a layout move left it `age_days` ago: the file and the folder holding it both last changed then."""
+    put(path, text, age_days)
+    t = time.time() - age_days * DAY
+    os.utime(os.path.dirname(path), (t, t))
+    return path
+
+
 def run(*args, stdin="", cwd=None, **env):
     """lifetime.py as a process, with every CLAUDE* name of this environment removed and the names given set."""
     e = {k: v for k, v in os.environ.items() if not k.upper().startswith("CLAUDE")}
@@ -109,9 +117,9 @@ class Lifetime(unittest.TestCase):
     def test_older_copies_a_layout_move_set_aside_in_phi_are_cleared_too(self):
         """The rule of .layout-conflicts clears phi/.layout-conflicts/ as it clears temportal/.layout-conflicts/, and
         the removal of a copy the store's git tracks is staged."""
-        old_t = put(os.path.join(self.t, ".layout-conflicts", "memory", "a.md"), age_days=31)
-        old_phi = put(os.path.join(self.p4, "phi", ".layout-conflicts", "store", "facts.md"), age_days=31)
+        old_t = set_aside(os.path.join(self.t, ".layout-conflicts", "memory", "a.md"), 31)
         new_phi = put(os.path.join(self.p4, "phi", ".layout-conflicts", "store", "rules.md"), age_days=1)
+        old_phi = set_aside(os.path.join(self.p4, "phi", ".layout-conflicts", "store", "facts.md"), 31)
         git = shutil.which("git")
         if git:
             g = lambda *a: subprocess.run([git, "-C", self.p4, *a], capture_output=True, text=True, check=True).stdout
@@ -122,6 +130,54 @@ class Lifetime(unittest.TestCase):
         self.assertEqual([os.path.exists(p) for p in (old_t, old_phi, new_phi)], [False, False, True], line)
         if git:
             self.assertIn("D\tphi/.layout-conflicts/store/facts.md", g("diff", "--cached", "--name-status"))
+
+    def test_a_copy_set_aside_at_a_start_survives_the_sweep_of_that_start(self):
+        """A copy last changed 40 days ago that the layout move of a start sets aside in temportal/.layout-conflicts/
+        and in phi/.layout-conflicts/ is still there after the retention sweep the same hook runs next. The line of the
+        move that says it was kept is all the hook prints."""
+        put(os.path.join(self.t, "memory", "a.md"), "new\n")
+        put(os.path.join(self.p4, "memory", "a.md"), "old\n", age_days=40)
+        put(os.path.join(self.p4, "phi", "store", "facts.md"), "new\n")
+        put(os.path.join(self.p4, "store", "facts.md"), "old\n", age_days=40)
+        r = run("sweep", stdin="{}", CLAUDE_PROJECT_DIR=self.root)
+        kept = [os.path.join(self.t, ".layout-conflicts", "memory", "a.md"),
+                os.path.join(self.p4, "phi", ".layout-conflicts", "store", "facts.md")]
+        self.assertEqual((r.stdout, [read(p) if os.path.exists(p) else "gone" for p in kept]),
+                         ("p4-temportal: moved memory/ to temportal/memory/, differing files: 1, kept in "
+                          "temportal/.layout-conflicts/; moved store/ to phi/store/, differing files: 1, kept in "
+                          "phi/.layout-conflicts/.\n", ["old\n", "old\n"]))
+
+    def test_a_copy_whose_file_and_folder_are_past_the_rule_is_cleared(self):
+        """A copy in temportal/.layout-conflicts/ or phi/.layout-conflicts/ whose file and folder both last changed
+        40 days ago is past the rule of 30 days, and the retention sweep clears it."""
+        copies = [set_aside(os.path.join(self.t, ".layout-conflicts", "memory", "a.md"), 40),
+                  set_aside(os.path.join(self.p4, "phi", ".layout-conflicts", "store", "facts.md"), 40)]
+        r = run("--p4", self.p4, "now")
+        self.assertEqual((r.stdout, [os.path.exists(p) for p in copies]),
+                         ("p4-temportal: cleared files past the cache rule: 1, in .layout-conflicts/; files past the "
+                          "cache rule: 1, in ../phi/.layout-conflicts/.\n", [False, False]))
+
+    def test_no_layout_conflicts_folder_is_cleared_through_a_link(self):
+        """A phi/ or a .layout-conflicts/ that is a link clears nothing in the folder it reaches, where a file past the
+        rule of 30 days stays. The links of phi/ and phi/.layout-conflicts/ reach folders outside the store, and the
+        link of temportal/.layout-conflicts/ reaches the notebook."""
+        outside = os.path.join(self.root, "outside")
+        cases = [("phi", os.path.join(outside, "phi"), (".layout-conflicts", "store", "facts.md")),
+                 ("phi/.layout-conflicts", os.path.join(outside, "conflicts"), ("store", "facts.md")),
+                 ("temportal/.layout-conflicts", os.path.join(self.t, "scratchpad"), ("plan.md",))]
+        cleared = {}
+        for place, target, inside in cases:
+            reached = set_aside(os.path.join(target, *inside), 40)
+            link = os.path.join(self.p4, *place.split("/"))
+            os.makedirs(os.path.dirname(link), exist_ok=True)
+            p4conf._make_link(link, target)
+            try:
+                r = run("--p4", self.p4, "now")
+            finally:
+                p4conf._unlink(link)
+            if not os.path.exists(reached) or r.stdout != "nothing has expired\n":
+                cleared[place] = r.stdout.strip()
+        self.assertEqual(cleared, {}, "the rule of .layout-conflicts cleared a folder through a link")
 
     def test_the_sweep_stages_only_the_removals_it_made(self):
         """After a retention sweep in a store that is its own git repository, the deletion of each file it cleared is
@@ -134,7 +190,7 @@ class Lifetime(unittest.TestCase):
         pad = put(os.path.join(self.t, "tmp", "s1", "n.md"), "n\n")
         page = put(os.path.join(self.t, "scratchpad", "page.html"))
         probe = put(os.path.join(self.t, "scratchpad", "probe", "out.txt"))
-        put(os.path.join(self.p4, "phi", ".layout-conflicts", "store", "facts.md"), age_days=31)
+        set_aside(os.path.join(self.p4, "phi", ".layout-conflicts", "store", "facts.md"), 31)
         g("init", "-q")
         g("add", "-A")
         g("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "store")
