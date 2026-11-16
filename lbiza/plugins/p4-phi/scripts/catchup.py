@@ -5,7 +5,7 @@ prints nothing when nothing is behind. Otherwise one `systemMessage` for ezexe, 
 
   layout    the lines of p4conf.migrate_layout, when it moved the store.
   branch    when the store is a git repository of its own with an origin, and this machine's branch is behind
-            origin's `<main>`, which p4.json's `recall.sync.main` names, `p4.py sync` runs detached, so the start
+            origin's `<main>`, which p4.json's `recall.sync.main` names, `p4.py sync` runs behind it, so the start
             never waits on a merge, and its output goes to `<git dir>/p4-sync.log`; when it cannot start, the line
             says to run `p4.py sync`. The fetch that finds out is given FETCH_S seconds. Nothing is
             forced, and nothing is pulled outside `p4.py sync`.
@@ -259,12 +259,14 @@ def behind(p4, main="main"):
 
 
 def start_sync(p4):
-    """Start `p4.py sync --p4 <p4>` detached, its output appended to <git dir>/p4-sync.log; True when it started."""
+    """Start `p4.py sync --p4 <p4>` in a process of its own with a console that has no window, its output appended
+    to <git dir>/p4-sync.log; True when it started."""
     gd = git(p4, "rev-parse", "--absolute-git-dir")
     log = os.path.join(gd.stdout.strip(), "p4-sync.log") if gd and gd.returncode == 0 else os.devnull
     flags = 0
-    if os.name == "nt":
-        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    if os.name == "nt":                 # a console of its own with no window, which git and the rest it starts share;
+        flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0)       # DETACHED_PROCESS would give each its own window
+                 | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
     try:
         with open(log, "a", encoding="utf-8") as out:
             out.write(f"--- {time.strftime('%Y-%m-%d %H:%M:%S')} catch-up\n")

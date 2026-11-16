@@ -460,8 +460,9 @@ def run_background(home, sid, cmd, cwd, head):
     path = proof_path(home, sid)
     relay._write_json(path, {"cmd": cmd, "cwd": cwd, "head": head, "state": "running", "time": now()})
     flags = 0
-    if os.name == "nt":
-        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    if os.name == "nt":                 # a console of its own with no window, which sh, git and the test share;
+        flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0)       # DETACHED_PROCESS would give each its own window
+                 | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
     try:
         subprocess.Popen([sys.executable, "-I", "-X", "utf8", os.path.abspath(__file__), "proof-run", path],
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

@@ -593,9 +593,9 @@ def ensure_watcher(home, s):
         return False
     relay._write_json(watcher_path(home, top), {"pid": -1, "beat": time.time(), "started": now()})   # the claim
     flags = 0
-    if os.name == "nt":
-        flags = (getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-                 | getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    if os.name == "nt":                 # a console of its own with no window, which git and the rest it starts share;
+        flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0)       # DETACHED_PROCESS would give each its own window
+                 | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
     try:
         subprocess.Popen([sys.executable, "-I", "-X", "utf8", os.path.join(HERE, "phi.py"), "watch", "--p4", home,
                           "--session", top], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,

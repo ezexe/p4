@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -293,6 +294,86 @@ class Loop(unittest.TestCase):
         self.assertIn("lib: fix x", notes)
         self.assertIn("test_x.py", notes)
         self.assertIn(A, context(self.t.say(TOP, "what next?")), "the parent gets its archive line")
+
+
+CONSOLE = """import ctypes, json, os, subprocess, sys
+REPORT = ("import ctypes, json, sys; json.dump({'window': ctypes.windll.kernel32.GetConsoleWindow() or 0}, "
+          "open(sys.argv[1], 'w'))")
+out = sys.argv[sys.argv.index("--p4") + 1] if "--p4" in sys.argv else sys.argv[1]
+subprocess.run(["git", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+subprocess.run([sys.executable, "-I", "-c", REPORT, os.path.join(out, "grandchild.json")])
+json.dump({"window": ctypes.windll.kernel32.GetConsoleWindow() or 0}, open(os.path.join(out, "child.json"), "w"))
+"""
+
+
+@unittest.skipUnless(os.name == "nt", "a console window is a Windows matter")
+class NoConsoleWindow(unittest.TestCase):
+    """Every process p4-phi leaves running behind a hook, and every console program it starts, such as git, sh or
+    python, shares one console that has no window. A process started with DETACHED_PROCESS has no console, so each
+    console program it starts gets a console of its own, which opens a window, or a Windows Terminal tab through
+    OpenConsole.exe; CREATE_NO_WINDOW is ignored beside DETACHED_PROCESS. The stand-in each start runs reports its
+    own console's window and that of a python it starts, after starting git."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.tmp = os.path.realpath(self._tmp.name)
+        self.fake = os.path.join(self.tmp, "scripts")
+        os.makedirs(self.fake)
+        for name in ("p4.py", "phi.py", "console.py"):
+            write(os.path.join(self.fake, name), CONSOLE)
+        self.addCleanup(self._tmp.cleanup)
+
+    def windows(self, out):
+        """Each reporter's console window, once both have written."""
+        files = [os.path.join(out, f) for f in ("child.json", "grandchild.json")]
+        end = time.time() + 60
+        while time.time() < end and not all(os.path.exists(f) and os.path.getsize(f) for f in files):
+            time.sleep(0.1)
+        time.sleep(0.2)
+        return {os.path.basename(f)[:-5]: json.load(open(f)).get("window") for f in files if os.path.exists(f)}
+
+    def assertNoWindow(self, out, what):
+        self.assertEqual(self.windows(out), {"child": 0, "grandchild": 0},
+                         f"{what}: a process it leaves behind, and what that process starts, have no console window")
+
+    def test_the_issue_loops_background_proof_opens_no_console_window(self):
+        out = os.path.join(self.tmp, "proof")
+        os.makedirs(out)
+        cmd = f'"{sys.executable}" -I "{os.path.join(self.fake, "console.py")}" "{out}"'.replace("\\", "/")
+        issues.run_background(self.tmp, "local_proof0001", cmd, out, "abc1234")
+        self.assertNoWindow(out, "issues.run_background")
+
+    def test_catchups_background_sync_opens_no_console_window(self):
+        import catchup
+        out = os.path.join(self.tmp, "store")
+        os.makedirs(out)
+        saved = catchup.HERE
+        catchup.HERE = self.fake
+        try:
+            self.assertTrue(catchup.start_sync(out))
+        finally:
+            catchup.HERE = saved
+        self.assertNoWindow(out, "catchup.start_sync")
+
+    def test_the_orchestrators_watcher_opens_no_console_window(self):
+        import puppeteer
+        out = os.path.join(self.tmp, "home")
+        os.makedirs(out)
+        saved = {k: getattr(puppeteer, k) for k in ("HERE", "on", "orchestrator", "closed", "watcher_alive",
+                                                     "watcher_path")}
+        puppeteer.HERE = self.fake
+        puppeteer.on = puppeteer.orchestrator = lambda *a: True
+        puppeteer.closed = puppeteer.watcher_alive = lambda *a: False
+        puppeteer.watcher_path = lambda home, top: os.path.join(self.tmp, "watcher.json")
+        env = os.environ.pop("P4_PHI_WATCH", None)
+        try:
+            self.assertTrue(puppeteer.ensure_watcher(out, {"sessionId": "local_watch0001"}))
+        finally:
+            for k, v in saved.items():
+                setattr(puppeteer, k, v)
+            if env is not None:
+                os.environ["P4_PHI_WATCH"] = env
+        self.assertNoWindow(out, "puppeteer.ensure_watcher")
 
 
 class Words(unittest.TestCase):
