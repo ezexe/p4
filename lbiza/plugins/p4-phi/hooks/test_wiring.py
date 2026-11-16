@@ -268,7 +268,8 @@ class Gate(unittest.TestCase):
         for cmd in ("ls", "ls github", "cat .gitignore", "ls ~/git/x", "digit"):
             self.assertEqual(self.check("Bash", {"command": cmd, "description": "list github"}, **where), "", cmd)
         for cmd in ("git status", "cd a && git log", "ls; git diff", "cd repo\ngit push", "cd repo\tgit push",
-                    "cd repo\r\ngit push", "git\npush", "git.exe push", "cd a && C:/Git/bin/git.exe push"):
+                    "cd repo\r\ngit push", "git\npush", "git.exe push", "cd a && C:/Git/bin/git.exe push",
+                    "git-lfs push", "git.cmd push", "cd a && git-lfs push", "cd repo\ngit.cmd push"):
             self.assertTrue(self.check("Bash", {"command": cmd}, **where).startswith("RAN "), cmd)
 
 

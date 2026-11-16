@@ -45,10 +45,11 @@ if [ "$name" = lookup-check ]; then
   [ "$sub" = 1 ] || [ "$nudge" = 1 ] || case "$payload" in
     # a git command: phi.py's branch guard reads it. `git` counts only as a word of the payload, so a path holding
     # github does not start a python on every shell call. The payload is raw JSON, so a newline, tab or return
-    # beside the word is the escape \n, \t or \r, which counts as a boundary too, and git.exe counts as git.
-    *[!A-Za-z0-9_./\\-]git[!A-Za-z0-9_./\\-]*|*[\\][ntr]git[!A-Za-z0-9_./\\-]*) ;;
+    # beside the word is the escape \n, \t or \r, which counts as a boundary too. A - or . after it
+    # counts as phi.py's git\b does, so git-lfs, git.cmd and git.exe count as git, from any folder.
+    *[!A-Za-z0-9_./\\-]git[!A-Za-z0-9_/\\]*|*[\\][ntr]git[!A-Za-z0-9_/\\]*) ;;
     *[!A-Za-z0-9_./\\-]git[\\][ntr]*|*[\\][ntr]git[\\][ntr]*) ;;
-    *[!A-Za-z0-9_.-]git.exe[!A-Za-z0-9_.-]*|*[\\][ntr]git.exe[!A-Za-z0-9_.-]*) ;;   # also C:/Git/bin/git.exe
+    *[!A-Za-z0-9_.-]git[.-]*) ;;                  # C:/Git/bin/git.exe
     # a command that may run long: phi.py's check that a long command runs in the background reads it. Every other
     # shell call ends here.
     # At least as wide as phi.long_kind, which reads words whatever the space between them: a call the gate
