@@ -527,6 +527,14 @@ def _migrate(p4, commit):
             os.rmdir(g)
         except OSError:
             pass
+    # a move keeps each file's own time, so a set-aside copy older than its cache rule would be cleared by the sweep
+    # of the same start, unreported: every file landed in a set-aside folder takes the move's time
+    for p in _LANDED:
+        if LAYOUT_CONFLICTS in p.replace("\\", "/").split("/"):
+            try:
+                os.utime(p)
+            except OSError:
+                pass
     if own and done:
         _commit_moves(p4, gone, _LANDED, changed)
     return lines

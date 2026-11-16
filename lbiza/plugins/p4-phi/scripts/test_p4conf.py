@@ -161,6 +161,24 @@ class P4Conf(unittest.TestCase):
         self.assertFalse(p4conf._take(lock))
         self.assertLess(time.monotonic() - t, 10, "recall gives up the lock within its own 10-second hook timeout")
 
+    def test_set_aside_copies_moved_at_a_start_outlive_that_starts_sweep(self):
+        """An old recall/.layout-conflicts/ moved whole to phi/.layout-conflicts/recall keeps its files' old times
+        through the rename, so a 30-day sweep run by the same start would clear them unreported. Every file a move
+        lands in a set-aside folder takes the move's time."""
+        import time
+        old = time.time() - 60 * 86400
+        for rel in (("recall", "store", "a.txt"), ("recall", ".layout-conflicts", "store", "kept.txt")):
+            f = os.path.join(self.p4, *rel)
+            os.makedirs(os.path.dirname(f), exist_ok=True)
+            with open(f, "w", encoding="utf-8") as h:
+                h.write("x")
+            os.utime(f, (old, old))
+        p4conf.migrate_layout(self.p4, commit=False)
+        kept = os.path.join(self.p4, "phi", p4conf.LAYOUT_CONFLICTS, "recall", "store", "kept.txt")
+        self.assertTrue(os.path.isfile(kept))
+        cutoff = time.time() - 30 * 86400                # the sweep's rule for .layout-conflicts, faked
+        self.assertGreater(os.path.getmtime(kept), cutoff, "the start that moved it would clear it")
+
     def test_configure_sets_only_values_that_differ_from_the_default(self):
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
             json.dump({"recall": {"query": {"max_lines": 9}}, "scratchpad": {"ignorable_ext": ["log"]}}, f)
