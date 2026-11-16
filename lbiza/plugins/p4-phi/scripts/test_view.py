@@ -137,6 +137,24 @@ class View(unittest.TestCase):
         self.assertEqual(v["entries"], {"rules.md:a": 0, "facts.md:b": 1})
         self.assertEqual(view.in_view(v), ({"src/port.py", "docs/notes.md"}, {"rules.md:a", "facts.md:b"}))
 
+    def test_a_compact_start_marks_the_compaction(self):
+        """ezexe/p4#186: SessionStart with source `compact` marks the session's record at its next turn, with no
+        summary text in the transcript to guess from, and the mark stays through the Stop hook's next refresh."""
+        from test_hooks import make_project, run_hook, transcript
+        proj = make_project(os.path.join(self.tmp.name, "hp"))
+        p4 = os.path.join(proj, ".claude", "p4")
+        tp = transcript(os.path.join(self.tmp.name, "c.jsonl"), "look at the port",
+                        [("Read", {"file_path": os.path.join(proj, "README.md")}, "x")], "seen", proj)
+        session = "abcdef12-0000-4000-8000-000000000000"
+        r = run_hook("layout", {"hook_event_name": "SessionStart", "source": "compact", "session_id": session,
+                                "transcript_path": tp, "cwd": proj}, proj)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        v = view.load(p4, session)
+        self.assertEqual([m["turn"] for m in v["marks"]], [1], "marked after the one turn")
+        self.assertEqual(view.in_view(v), (set(), set()), "what came before is out of view")
+        v = view.refresh(p4, proj, session, tp, ["rules.md:a"])
+        self.assertEqual([m["turn"] for m in v["marks"]], [1], "kept by the next refresh")
+
     def test_refresh_without_a_transcript_writes_nothing(self):
         self.assertIsNone(view.load(self.p4, "abcdef12"))
         self.assertEqual(view.refresh(self.p4, self.proj, "abcdef12-rest", "", None), view.empty(), "no transcript: nothing")

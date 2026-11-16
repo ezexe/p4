@@ -5,7 +5,8 @@ A session's record holds names and sizes, never content:
     files     each file a tool call read or edited: the turn it was last touched in, how often, whether edited
     entries   each document a retrieval line showed the session with a handle, and the turn it was shown in
     commits   each `git commit` a command made: the repository's folder name and the subject git printed
-    marks     where the context was compacted: the turn, and how many files were in view before it
+    marks     where the context was compacted: the turn, and how many files were in view before it, set by
+              SessionStart's `compact` source through compacted, or read from a transcript's summary text
     size      how big the context was at every step, what it began at and what filled it, as sizes() counts it
 
 The Stop hook `close` calls refresh at every turn end, which rebuilds the record from the session's transcript;
@@ -110,8 +111,25 @@ def refresh(p4, project, session, transcript_path, served_now=None):
     v["entries"] = dict(old.get("entries", {}))
     for e in served_now or []:
         v["entries"][e] = len(turns) - 1
+    # a mark SessionStart's `compact` source set is carried on, beside those read from the transcript
+    have = {m["turn"] for m in v["marks"]}
+    v["marks"] = sorted(v["marks"] + [m for m in old.get("marks", []) if m.get("signal") and m["turn"] not in have],
+                        key=lambda m: m["turn"])
     os.makedirs(os.path.dirname(path(p4, session)), exist_ok=True)
     ranker.write_atomic(path(p4, session), json.dumps(v, separators=(",", ":"), ensure_ascii=False))
+    return v
+
+
+def compacted(p4, project, session, transcript_path):
+    """SessionStart's `compact` source: the context was compacted after the session's last turn. The record is
+    brought up to date with the transcript and marked at its next turn, a mark every later refresh keeps; returns the
+    record."""
+    v = refresh(p4, project, session, transcript_path) or empty()
+    turn = v.get("turns", 0)
+    if turn not in {m["turn"] for m in v["marks"]}:
+        v["marks"].append({"turn": turn, "files": len(v["files"]), "signal": True})
+        os.makedirs(os.path.dirname(path(p4, session)), exist_ok=True)
+        ranker.write_atomic(path(p4, session), json.dumps(v, separators=(",", ":"), ensure_ascii=False))
     return v
 
 

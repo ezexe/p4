@@ -10,8 +10,9 @@ event and matcher hooks/hooks.json runs it on, and what it does.
   layout         SessionStart, matcher `startup|resume|clear|compact`. Moves a store of an older layout through
                  p4conf.migrate_layout; makes `.claude/p4/` with its folders, its .gitignore, p4.json and its git
                  repository where they are missing; adds the `.git/info/exclude` line; seeds the store's sync
-                 workflow once the store has an origin; and brings the repository's and the dependencies'
-                 documents and the index up to date.
+                 workflow once the store has an origin; on the `compact` source, marks the compaction in the
+                 session's view record; and brings the repository's and the dependencies' documents and the
+                 index up to date.
                  It prints nothing unless ezexe pinned rules, and then the block `Standing rules from ezexe:` of
                  at most PINNED_CHARS characters as `additionalContext`.
   recall         UserPromptSubmit. The retrieval lines that `injected` lets through as `additionalContext`, with
@@ -310,6 +311,12 @@ def pinned_block(p4):
 def h_layout(payload):
     project = project_of(payload)
     p4 = init_layout(project)
+    if payload.get("source") == "compact" and payload.get("session_id"):
+        try:                    # view.py: the compaction marked where it happened, not guessed from the transcript
+            import view
+            view.compacted(p4, project, payload["session_id"], payload.get("transcript_path") or "")
+        except (OSError, ValueError, KeyError, ImportError):
+            pass
     refresh_index(p4, project)
     block = pinned_block(p4)
     if block:
