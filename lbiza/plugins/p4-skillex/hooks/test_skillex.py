@@ -465,6 +465,53 @@ class Loading(Store):
         skillex.cmd_start(self.p4, {})
         self.assertFalse(os.path.exists(copy))
 
+    def test_a_staging_folder_another_session_is_filling_is_left_alone(self):
+        staging = os.path.join(self.p4, "skillex", ".state", "staging")
+        busy = put(os.path.join(staging, "other.4242.1", "SKILL.md"), "half\n")
+        left = put(os.path.join(staging, "other.4243.1", "SKILL.md"), "left\n")
+        old = time.time() - 2 * skillex.STAGING_STALE_S
+        os.utime(os.path.dirname(left), (old, old))
+        self.store_skill("demo-brew")
+        skillex.cmd_start(self.p4, {})
+        self.assertTrue(os.path.isfile(busy), "a session still copying keeps its staging folder")
+        self.assertFalse(os.path.exists(os.path.dirname(left)), "one a run left long ago is cleared")
+
+    def test_a_failed_swap_puts_the_old_copy_back(self):
+        self.store_skill("demo-brew")
+        skillex.cmd_start(self.p4, {})
+        copy = os.path.join(self.root, ".claude", "skills", "demo-brew")
+        self.store_skill("demo-brew", "Say it differently.\n")
+        real_replace = skillex.os.replace
+
+        def refuses_staging(a, b):
+            if os.sep + "staging" + os.sep in str(a):
+                raise PermissionError("a scanner holds the folder")
+            return real_replace(a, b)
+
+        skillex.os.replace = refuses_staging
+        try:
+            skillex.cmd_start(self.p4, {})
+        finally:
+            skillex.os.replace = real_replace
+        self.assertTrue(os.path.isfile(os.path.join(copy, skillex.MARKER)), "the old copy is back, marker and all")
+        self.assertIn("Say what the skill does.", read(os.path.join(copy, "SKILL.md")))
+        self.assertIn("Say it differently.", read(os.path.join(skillex.cmd_start(self.p4, {}) and copy, "SKILL.md")))
+
+    def test_a_start_records_its_session_before_it_copies(self):
+        self.store_skill("demo-brew")
+        real_mirror = skillex.mirror
+
+        def fails(*a, **k):
+            raise OSError("disk full")
+
+        skillex.mirror = fails
+        try:
+            with self.assertRaises(OSError):
+                skillex.cmd_start(self.p4, {"session_id": "s9"})
+        finally:
+            skillex.mirror = real_mirror
+        self.assertIsNotNone(skillex.read_session(self.p4, "s9"))
+
     def test_a_project_without_the_store_skills_folder_keeps_its_copies(self):
         copy = os.path.join(self.root, ".claude", "skills", "demo-brew")
         put(os.path.join(copy, "SKILL.md"), "---\nname: demo-brew\ndescription: a copy from another clone.\n---\n")

@@ -661,22 +661,26 @@ def mirror(p4, names=None, remove=False):
             _same_bytes(p, os.path.join(target, rel)) for rel, p in files.items())
         if same:
             continue
-        staging = os.path.join(state_dir(p4), "staging", f"{n}.{os.getpid()}")
-        if os.path.isdir(staging):
-            shutil.rmtree(staging)
-        for rel, p in files.items():
-            os.makedirs(os.path.dirname(os.path.join(staging, rel)), exist_ok=True)
-            shutil.copyfile(p, os.path.join(staging, rel))
-        with open(os.path.join(staging, MARKER), "w", encoding="utf-8", newline="\n") as f:
-            f.write(f".claude/p4/skillex/{n}\n")
-        with open(os.path.join(staging, COPY_IGNORE), "w", encoding="utf-8", newline="\n") as f:
-            f.write("*\n")
-        if os.path.isdir(target):
-            set_aside(p4, target)
+        staging = os.path.join(state_dir(p4), "staging", f"{n}.{os.getpid()}.{time.time_ns()}")
+        try:
+            for rel, p in files.items():
+                os.makedirs(os.path.dirname(os.path.join(staging, rel)), exist_ok=True)
+                shutil.copyfile(p, os.path.join(staging, rel))
+            with open(os.path.join(staging, MARKER), "w", encoding="utf-8", newline="\n") as f:
+                f.write(f".claude/p4/skillex/{n}\n")
+            with open(os.path.join(staging, COPY_IGNORE), "w", encoding="utf-8", newline="\n") as f:
+                f.write("*\n")
+        except OSError:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+        old = set_aside(p4, target) if os.path.isdir(target) else None
         try:
             os.replace(staging, target)
-        except OSError:                                  # another session placed its copy first
+        except OSError:
             shutil.rmtree(staging, ignore_errors=True)
+            if old and not os.path.exists(target):       # not another session's copy: the old one goes back
+                os.replace(old, target)
+            continue
         changed.append(n)
     if remove and names is None and os.path.isdir(dst):
         for n in sorted(os.listdir(dst)):
@@ -688,19 +692,33 @@ def mirror(p4, names=None, remove=False):
 
 
 def set_aside(p4, target):
-    """Move a copy out of `.claude/skills/` whole, marker and all, into `.state/aside/`; clear_aside deletes it."""
+    """Move a copy out of `.claude/skills/` whole, marker and all, into `.state/aside/`, where clear_aside deletes
+    it. Returns where it went, or None when another session moved it first."""
     aside = os.path.join(state_dir(p4), "aside")
     os.makedirs(aside, exist_ok=True)
-    os.replace(target, os.path.join(aside, f"{os.path.basename(target)}.{os.getpid()}.{time.time_ns()}"))
+    where = os.path.join(aside, f"{os.path.basename(target)}.{os.getpid()}.{time.time_ns()}")
+    try:
+        os.replace(target, where)
+    except FileNotFoundError:
+        return None
+    return where
 
 
 def clear_aside(p4):
-    """Delete what set_aside moved, and a staging folder an ended run left; a failure only waits for the next run."""
+    """Delete what set_aside moved, which is whole and nobody's, and a staging folder quiet for STAGING_STALE_S,
+    which a run that ended midway left; a staging folder still being filled belongs to a running session. A failure
+    only waits for the next run."""
+    now = time.time()
     for sub in ("aside", "staging"):
         d = os.path.join(skillex_dir(p4), STATE, sub)
         for n in os.listdir(d) if os.path.isdir(d) else []:
-            if sub == "aside" or not n.endswith(f".{os.getpid()}"):
-                shutil.rmtree(os.path.join(d, n), ignore_errors=True)
+            p = os.path.join(d, n)
+            try:
+                stale = sub == "aside" or now - os.path.getmtime(p) > STAGING_STALE_S
+            except OSError:
+                continue
+            if stale:
+                shutil.rmtree(p, ignore_errors=True)
 
 
 def _same_bytes(a, b):
@@ -752,6 +770,7 @@ def notice(results):
     return "\n".join(out)
 
 
+STAGING_STALE_S = 600                 # a staging folder quiet this long was left by a run that ended midway
 STATE_QUIET_S = 3600                  # a session's state whose tmp folder is gone is deleted once this quiet
 
 
@@ -810,11 +829,11 @@ def cmd_start(p4, payload):
     prune_sessions(p4)
     had_store = os.path.isdir(skillex_dir(p4))         # a missing store says nothing about which skills are gone
     os.makedirs(skillex_dir(p4), exist_ok=True)
+    sid = payload.get("session_id")
+    if sid and read_session(p4, sid) is None:          # first, so a failed copy never costs the session its looks
+        write_session(p4, sid, {"since": time.time(), "looked": {}})
     made = not os.path.isdir(project_skills(p4))
     changed = mirror(p4, remove=had_store)
-    sid = payload.get("session_id")
-    if sid and read_session(p4, sid) is None:
-        write_session(p4, sid, {"since": time.time(), "looked": {}})
     if changed or made:
         return {"hookSpecificOutput": {"hookEventName": "SessionStart", "reloadSkills": True}}
     return None
