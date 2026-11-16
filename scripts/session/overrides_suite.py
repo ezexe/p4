@@ -1,7 +1,7 @@
 """
 The p4 overrides as pathways, tested against their controls through the Claude API: does each always-on contract the
 marketplace's plugins inject at SessionStart make Claude better than Anthropic's built-in behavior, or only longer?
-For .docs/p4/overrides.md; the Colab notebook is .docs/p4/overrides_colab.ipynb (scripts/session/make_colab_notebook.py).
+For .docs/p4/overrides.md, whose Colab notebook is .docs/p4/overrides_colab.ipynb.
 
 Units: every contract a plugin's SessionStart hook prints whole, found from the plugins' own hooks.json — a command
 that cats a hooks/*.md, or a hooks/*.sh that names one (seed files, *-seed.md, are not contracts). Today that is

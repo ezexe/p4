@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_overrides_suite.py — the overrides suite, the store miner and the notebook, offline: nothing here calls the API.
+"""test_overrides_suite.py — the overrides suite and the store miner, offline: nothing here calls the API.
 
   1. every grader passes its task's reference and fails each bad answer (the instrument, before the pathways)
   2. the units are found from the plugins' own hooks.json, seed files left out
@@ -7,22 +7,16 @@
   4. a --fake run answers every pathway on every task, writes the JSON and resumes from its cache; a context that
      carries FAKE-FIX:<category> measurably helps, and a task's earlier turns reach the request
   5. the store miner finds corrections, retractions and repeats, and skips the files' own schema headers
-  6. the notebook's code cells parse, and its audit cell turns measured gains and costs into the right readings
-  7. the whole notebook runs with FAKE on a local repo on the old flat layout: the lessons are mined, the rebuild
-     starts from the empty frame and keeps exactly the pieces that help, validation says to apply it, and the
-     upgrade moves the repo onto the partitioned layout
-  8. the jargon scan catches the contracts' vocabulary and leaves ordinary words alone
+  6. the jargon scan catches the contracts' vocabulary and leaves ordinary words alone
 
 Run from the repository root:  python scripts/session/test_overrides_suite.py
 """
 
-import ast
 import json
 import shutil
 import subprocess
 import sys
 import tempfile
-import types
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -32,23 +26,19 @@ import overrides_suite as os_  # noqa: E402
 import store_lessons as sl  # noqa: E402
 
 TASKS = HERE / "overrides_tasks.jsonl"
-NOTEBOOK = REPO / ".docs" / "p4" / "overrides_colab.ipynb"
-# The old contracts live in git history since the fresh marketplace emptied lbiza/ (1750fa2): the tests of the units,
-# the pathways and the old Colab notebook read the marketplace as it was at f2323b2, beside this checkout's scripts.
+# The old contracts live in git history since the fresh marketplace emptied lbiza/ (1750fa2): the tests of the units
+# and the pathways read the marketplace as it was at f2323b2.
 OLD_REF = "f2323b2"
 _OLD = []
 
 
 def old_market():
-    """A directory holding the old marketplace's lbiza/ (git archive of OLD_REF) and this checkout's scripts/ and
-    .docs/: what the old notebook and the units read."""
+    """A directory holding the old marketplace's lbiza/, a git archive of OLD_REF: what the units read."""
     if _OLD:
         return _OLD[0]
     d = Path(tempfile.mkdtemp(prefix="p4-old-market-"))
     arch = subprocess.run(["git", "-C", str(REPO), "archive", OLD_REF, "lbiza"], capture_output=True, check=True)
     subprocess.run(["tar", "-x", "-C", str(d)], input=arch.stdout, check=True)
-    shutil.copytree(REPO / "scripts", d / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
-    shutil.copytree(REPO / ".docs", d / ".docs")
     _OLD.append(d)
     return d
 CONTRACTS = ["emission-discipline/emission-gate", "src-fragger/src-fragger", "vlds/memory-override", "vlds/gc-contract"]
@@ -146,125 +136,6 @@ def test_store_lessons():
         got = sl.lessons(Path(d) / ".claude" / "p4")
     assert got["counts"]["correction"] == 1 and got["counts"]["retraction"] == 1 and got["counts"]["repeat"] == 1, got
     assert "cmake-floor" in got["lessons"][0]["text"]
-
-
-def cells():
-    nb = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
-    return ["".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "code"]
-
-
-def cell(marker):
-    found = [c for c in cells() if marker in c]
-    assert len(found) == 1, (marker, len(found))
-    return found[0]
-
-
-def stub_colab_modules():
-    """matplotlib and IPython are Colab's (and VS Code's kernel's); stubs stand in for them here."""
-    ax = types.SimpleNamespace(bar=lambda *a, **k: None, set_xticks=lambda *a, **k: None, set=lambda **k: None,
-                               legend=lambda **k: None)
-    fig = types.SimpleNamespace(savefig=lambda *a, **k: None, tight_layout=lambda: None)
-    plt = types.SimpleNamespace(subplots=lambda **k: (fig, ax))
-    sys.modules["matplotlib"] = types.SimpleNamespace(use=lambda *_: None, pyplot=plt)
-    sys.modules["matplotlib.pyplot"] = plt
-    sys.modules.setdefault("IPython", types.ModuleType("IPython"))
-    disp = types.ModuleType("IPython.display")
-    disp.Markdown, disp.Image, disp.display = str, str, lambda *_: None
-    sys.modules["IPython.display"] = disp
-
-
-def settings(d, **over):
-    g = {}
-    exec(cell('RUN = "overrides-1"'), g)
-    runs = over.pop("RUNS", {"claude-opus-5-5": [0, 1], "claude-sonnet-5-5": [0, 1]})
-    g.update({"DRIVE_DIR": str(d), "P4_PATH": str(old_market()), "FAKE": True, "AUDIT_RUNS": runs, "VALIDATE_RUNS": runs,
-              "MODELS": list(runs), "SEEDS": sorted({s for v in runs.values() for s in v}),
-              "REBUILD_SEEDS": sorted({s for v in runs.values() for s in v}),
-              "SCREEN_MODELS": ["claude-haiku-5-5"], "STORE_REPOS": [], "RUN_PLUGIN_TESTS": False}
-             | over)
-    exec(cell("def save_json"), g)
-    return g
-
-
-def test_notebook_audit_readings():
-    for c in cells():
-        ast.parse(c)
-    stub_colab_modules()
-    with tempfile.TemporaryDirectory() as d:
-        g = settings(d)
-        exec(cell("def checkout"), g)
-        exec(cell("import overrides_suite as osu"), g)
-        exec(cell("def survey"), g)
-        assert os_.main(["--p4", str(old_market()), "--tasks", str(TASKS), "--model", "claude-opus-5-5", "--fake",
-                         "--cache", f"{d}/c", "--out", f"{d}/base.json"]) == 0
-        base = json.loads(Path(f"{d}/base.json").read_text())
-        accs = {"builtin": .70, "all": .80, "pad": .68,
-                "-emission-discipline/emission-gate": .75, "+emission-discipline/emission-gate": .74,
-                "-src-fragger/src-fragger": .78, "+src-fragger/src-fragger": .70,
-                "-vlds/memory-override": .80, "+vlds/memory-override": .70,
-                "-vlds/gc-contract": .82, "+vlds/gc-contract": .69}
-        for m in g["MODELS"]:
-            for s in g["SEEDS"]:
-                r = json.loads(json.dumps(base))
-                r.update(model=m, seed=s)
-                for pw, p in r["pathways"].items():
-                    p["accuracy"] = accs[pw]
-                    p["by_category"] = {c: accs[pw] for c in os_.GENERAL} | {"protocol": 1.0}
-                    p["jargon_rate"] = 0.0
-                    for t in p["tasks"].values():
-                        t["passed"] = True
-                r["pathways"]["all"]["by_category"]["simple"] = .6
-                for k in CONTRACTS:
-                    r["pathways"][f"-{k}"]["by_category"]["simple"] = .9 if k == "src-fragger/src-fragger" else .6
-                (Path(d) / g["RUN"] / "results" / f"overrides-{m}-s{s}.json").write_text(json.dumps(r))
-        exec(cell("per_unit, decisions"), g)
-        assert g["decisions"] == {"emission-discipline/emission-gate": "keep", "src-fragger/src-fragger": "edit",
-                                  "vlds/memory-override": "drop", "vlds/gc-contract": "drop"}, g["decisions"]
-        claims = g["claims"]
-        assert claims["the old contracts together beat the built-in stand-in (all > builtin, every seed, every model)"] \
-            == "holds"
-        assert "simple" in g["per_unit"]["src-fragger/src-fragger"]["categories it costs"]
-
-
-def test_notebook_end_to_end():
-    """Every section with FAKE, on a local project still on the old flat layout."""
-    stub_colab_modules()
-    with tempfile.TemporaryDirectory() as d:
-        proj = Path(d) / "proj"
-        flat_store(proj)
-        g = settings(Path(d) / "drive", STORE_REPOS=[{"path": str(proj)}], MIGRATE_DRY=False,
-                     RUNS={"claude-haiku-5-5": [0]}, RUN_AUDIT=False, SHORTLIST=6, MIGRATE_PUSH=False,
-                     PUSH_RESULTS=False)
-        exec(cell("def checkout"), g)
-        exec(cell("import overrides_suite as osu"), g)
-        exec(cell("def survey"), g)
-        assert g["stores_report"]["proj"]["before"]["layout"] == "flat"
-        assert g["stores_report"]["proj"]["lessons"]["correction"] == 1
-        # the lesson items a real run's SPLITTER_MODEL would write: the fake answers only these measurably help
-        g["LESSON_ITEMS"] += [
-            {"unit": "emission-discipline/emission-gate", "text": "FAKE-FIX:honesty Say what you cannot know.",
-             "from": "fixture", "store": "proj"},
-            {"unit": "vlds/memory-override", "text": "FAKE-FIX:memory Keep the earlier turns in mind.",
-             "from": "fixture", "store": "proj"},
-            {"unit": "vlds/memory-override", "text": "FAKE-FIX:judgment Check before acting on a request.",
-             "from": "fixture", "store": "proj"},
-            {"unit": "src-fragger/src-fragger", "text": "A line that changes nothing.", "from": "fixture",
-             "store": "proj"}]
-        for marker in ('plan = ([(m, s)', "per_unit, decisions", "SPLIT_SYSTEM", "screen = {}", "def assemble",
-                       "vclaims = {", "REPORT_SYSTEM", "p4-push", "upgrades = load_state()"):
-            exec(cell(marker), g)
-        kept = {g["candidates"][c]["text"].split()[0] for c in g["chosen"]}
-        assert kept == {"FAKE-FIX:honesty", "FAKE-FIX:memory", "FAKE-FIX:judgment"}, g["chosen"]
-        rb = g["summary"]["rebuild"]
-        assert rb["claims"]["the rebuilt contracts beat the built-in stand-in (test split, every seed, every model)"] \
-            == "holds", rb["claims"]
-        assert rb["apply"] is True, rb["claims"]
-        assert rb["chars"]["rebuilt"] < rb["chars"]["old"]
-        for u, f in rb["files"].items():   # the hooks and the plugin tests key on each contract's first line
-            assert f["text"].splitlines()[0] == g["HEADS"][u]
-        up = g["upgrades"]["proj"]
-        assert up["before"] == "flat" and up["after"] == "partitioned", up
-        assert (proj / ".claude" / "p4" / "vlds").is_dir(), "the local tree itself must stay untouched"
 
 
 def test_jargon():

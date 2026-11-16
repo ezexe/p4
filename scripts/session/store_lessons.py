@@ -1,6 +1,6 @@
 """
 What an existing p4 store says could have gone better: the lessons its sessions recorded while the old contracts ran.
-For the Colab notebook's section 4 (.docs/p4/overrides_colab.ipynb), and runnable on any p4 tree by hand.
+test_migrate.py checks migrate.py's counts of an old tree against these, and it runs on any p4 tree by hand.
 
 A lesson is an entry the store wrote because something went wrong or had to be undone:
   correction   ledger.md        a reading that steered work and was wrong (`match:` against `meant:`)
@@ -118,11 +118,6 @@ def labels(p4):
         out[name.split(".")[0]] = {k: (len(d[k]) if isinstance(d.get(k), (list, dict)) and k != "heldout" else d.get(k))
                                    for k in keys}
     return out
-
-
-def live_rules_text(p4):
-    rs = live_rules(p4)
-    return "" if not rs else "The owner's live rules:\n" + "\n".join(f"- {r['ruling']}" for r in rs)
 
 
 def main(argv=None):
