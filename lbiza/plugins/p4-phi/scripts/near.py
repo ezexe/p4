@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """near.py: candidates from what earlier, similar tasks used.
 
-A task's labelled entries are the files a turn opened, cited or edited. They rarely share words with its prompt, so
-BM25 over the prompt draws few of them, while prompts are more like each other than like file paths. near.py adds
-to a task's candidates the entries that the NEIGHBOURS earlier tasks most like its prompt used, at most MAX of them.
-Three features tell the ranker that an entry came this way: `near`, `near-rank` and `near-hit`. Without them the
-added candidates do harm. Two more say how like the prompt the task that used an entry was: `near-like` and
-`near-strong`.
+A task's repo labels are on the files a turn opened, cited or edited. They rarely share words with its prompt, so
+BM25 over the prompt draws few of them, while prompts are more like each other than like file paths. near.py
+adds to a task's candidates the documents that the NEIGHBOURS earlier tasks most like its prompt used, at most MAX
+of them. Three features tell the ranker that a document came this way: `near`, `near-rank` and `near-hit`. Without
+them the added candidates do harm. Two more say how like the prompt the task that used a document was: `near-like`
+and `near-strong`.
 
-It is on while p4.json `recall.near.on` is true, as it is by default. A training round then adds these entries to
+It is on while p4.json `recall.near.on` is true, as it is by default. A training round then adds these documents to
 the candidates of each task whose candidates BM25 draws from the whole index and of each silence task, and the
 model it writes lists `near` among its features. A query adds them only for a served model that lists `near`, and
 only after a round has written the memory. Only other sessions' tasks count unless `recall.near.same_session` is
@@ -16,7 +16,7 @@ true: what a session opened a turn ago is already in its context, so retrieving 
 session nothing.
 
 The memory is `phi/models/near.json`, a cache git ignores. It holds every labelled task's time, session, prompt
-words and positive entries. A training round writes it, and a query only reads it: building it would not fit the
+words and positive documents. A training round writes it, and a query only reads it: building it would not fit the
 time budget stated at `h_recall` in hook.py. A task only ever sees tasks dated before it.
 """
 
@@ -34,8 +34,8 @@ import ranker  # noqa: E402
 FILE = "near.json"
 VERSION = 1
 ON = True
-NEIGHBOURS = 20               # earlier tasks whose entries are taken
-MAX = 100                     # entries added to a task's candidates, the highest scored first
+NEIGHBOURS = 20               # earlier tasks whose documents are taken
+MAX = 100                     # documents added to a task's candidates, the highest scored first
 SAME_SESSION = False          # the session's own earlier tasks too; the module docstring says why not
 
 
@@ -51,8 +51,9 @@ def path(p4):
 
 def build(p4, idx, labels=None, write=True):
     """The memory from the store's tasks and its training labels, or from `labels` in their place:
-    {"version": VERSION, "tasks": [[time, session, tokens, [entry ids]]]}, oldest first, each task with its positives
-    that the index holds. Written to phi/models/near.json when `write`, and returned as prepare() leaves it."""
+    {"version": VERSION, "tasks": [[time, session, tokens, [document ids]]]}, oldest first, each task with its
+    positives that the index holds. Written to phi/models/near.json when `write`, and returned as prepare() leaves
+    it."""
     import labels as lb
     ids = {d["id"] for d in idx["docs"]}
     tasks = lb.read_tasks(p4)
@@ -94,8 +95,8 @@ def load(p4):
 
 
 def entries(mem, text, when="", session="", same_session=None):
-    """{entry id: score} from the NEIGHBOURS tasks dated before `when` whose prompts are most like `text`: a task's
-    likeness is the idf of the words it shares with the prompt over the root of its own length, and an entry's
+    """{document id: score} from the NEIGHBOURS tasks dated before `when` whose prompts are most like `text`: a task's
+    likeness is the idf of the words it shares with the prompt over the root of its own length, and a document's
     score the sum over the tasks that used it. An empty `when` means now, when every task counts. The session's own
     tasks are left out unless `same_session`, which defaults to SAME_SESSION. The result is a `Scores`."""
     if not mem or not mem["rows"]:
@@ -128,7 +129,8 @@ def entries(mem, text, when="", session="", same_session=None):
 
 
 class Scores(dict):
-    """{entry id: score}, with `like`: {entry id: how like the prompt the most similar task that used it was, 0..1}."""
+    """{document id: score}, with `like`: {document id: x}, where x, from 0 to 1, is how like the prompt the most
+    similar task that used that document was."""
 
     def __init__(self, *a, **k):
         super().__init__(*a, **k)
@@ -136,7 +138,8 @@ class Scores(dict):
 
 
 def id_index(docs):
-    """{entry id: doc index}, read off the index's rows where it has them, so a query decodes no doc for it."""
+    """{document id: position in docs}, read off the index's rows where it has them, so a query decodes no document
+    for it."""
     rows, fields = getattr(docs, "rows", None), getattr(docs, "fields", None)
     if rows is not None and fields:
         k = fields.index("id")
@@ -145,12 +148,12 @@ def id_index(docs):
 
 
 def extend(docs, id_at, cand, got, allowed):
-    """The candidates with at most MAX near entries that BM25 did not draw appended, and {candidate position:
-    features} for every candidate that is a near entry. A near entry's features are its score over the best and
-    `1 / (1 + rank)`, then its likeness when `got` is a `Scores`. `got` is entries()'s result and `id_at` is
-    {entry id: doc index}.
-    `allowed(doc index)` says whether an entry may be a candidate at all: a query refuses a superseded one, and
-    training one the task could not have been shown."""
+    """The candidates with at most MAX near documents that BM25 did not draw appended, and {candidate position:
+    features} for every candidate that is a near document. A near document's features are its score over the best
+    and `1 / (1 + rank)`, then its likeness when `got` is a `Scores`. `got` is entries()'s result and `id_at` is
+    {document id: position in docs}.
+    `allowed(position in docs)` says whether a document may be a candidate at all: a query refuses a superseded one,
+    and training one the task could not have been shown."""
     if not got:
         return list(cand), {}
     have = set(cand)

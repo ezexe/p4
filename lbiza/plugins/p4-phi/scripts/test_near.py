@@ -24,7 +24,7 @@ import train  # noqa: E402
 
 ENV = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.org", "GIT_COMMITTER_NAME": "t",
        "GIT_COMMITTER_EMAIL": "t@example.org", "GIT_COMMITTER_DATE": "2026-10-30T10:00:00"}   # before every task:
-# an entry dated after a task could not have been shown to it
+# a document dated after a task could not have been shown to it
 # files whose names and symbols share no word with the prompts that use them
 FILES = {"src/kelp/anchor.py": "def moor_line():\n    return 1\n", "src/kelp/buoy.py": "def float_marker():\n    return 2\n",
          "src/reef/polyp.py": "def bud_colony():\n    return 3\n", "docs/tide.md": "# Tide tables\n\nWhen the water turns.\n"}
@@ -124,7 +124,8 @@ class Near(unittest.TestCase):
         self.assertEqual(set(feats), {0, 1})
         gone = {"repo:src/kelp/anchor.py"}
         cand, _ = cli.near_candidates(self.p4, {"features": ["near"]}, docs, [], TASKS[3][3], "dddddddd", gone)
-        self.assertEqual({docs[i]["id"] for i in cand}, {"repo:src/kelp/buoy.py"}, "a superseded entry is never brought back")
+        self.assertEqual({docs[i]["id"] for i in cand}, {"repo:src/kelp/buoy.py"},
+                         "a superseded document is never brought back")
         w = {str(ranker.h("near-hit")): 9.0, str(ranker.h("bias")): -4.0}
         model = {"w": {int(k): v for k, v in w.items()}, "threshold": 0.5, "features": ["base", "near"], "per_file": 2}
         ids = cli.rank(self.p4, TASKS[3][3], idx=self.idx, model=model, k=2)
