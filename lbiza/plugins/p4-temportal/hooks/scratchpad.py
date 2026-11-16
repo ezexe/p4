@@ -657,25 +657,6 @@ def restore_tmp(p4, sid):
     return head if missing else ""
 
 
-def newest(path):
-    """The latest modification time under a directory (its own when it holds nothing)."""
-    try:
-        t = os.path.getmtime(path)
-    except OSError:
-        return time.time()
-    seen = 0
-    for d, _, names in os.walk(path):
-        for n in names:
-            try:
-                t = max(t, os.path.getmtime(os.path.join(d, n)))
-            except OSError:
-                pass
-            seen += 1
-            if seen > TMP_MAX_FILES:
-                return time.time()                     # too large to judge: not idle
-    return t
-
-
 def transcript_time(sid):
     """The last write to the session's transcript, `<config>/projects/*/<session>.jsonl`, or 0 when none is found."""
     cfg = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
