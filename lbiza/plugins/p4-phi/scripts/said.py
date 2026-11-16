@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
-"""said.py: what a session states about the store's lines it was shown, `p4.py said`.
+"""said.py: what a session states about the retrieval lines it was shown, `p4.py said`.
 
-Nothing in a store says which rule a session acted on. Measured on one store (2026-11-10): the words of a turn
-against a rule's rare words "label" every rule on hundreds of turns, no later message is like the message a rule
-was made on, and ezexe never had to repeat one. The only party that knows is the session, at the moment it
-acts, so it is asked to say so in three fixed statements, out of the reply:
+Nothing in a store says which rule a session acted on. Matching the words of a turn against a rule's rare words
+labels every rule on hundreds of turns, no later message is like the message a rule was made on, and ezexe does not
+have to repeat a rule. Only the session knows it when it acts, so it is asked to say so with one of three fixed
+statements, run as a command and not written in its reply:
 
     applied r1               a line shown this turn changed what it did
     set-aside r1 --why ...   it saw the line and decided against it
     lacked --why ...         ezexe corrected it and no line covered it
 
 `recall.said.mode` of p4.json:
-    off      (the default) nothing is asked and recall's lines are as they were
-    shadow   each rule, correction, retraction and fact line shown gets a handle (`[r1]`), one instruction follows
-             the lines, and what the session states is written down; nothing trains on it
-    on       the same, and training reads the statements as labels (source `said`: applied 1, set-aside 0)
+    off      the default: nothing is asked, and the retrieval lines carry no handles
+    shadow   each rule, correction, retraction and fact line shown gets a handle such as `[r1]`, one instruction
+             follows the lines, and what the session states is written down; nothing trains on it
+    on       the same, and training reads the statements as labels of source `said`: 1 for applied, 0 for set-aside
 
-A statement is a claim, not a fact, and the instruction is one more thing a session is told: how often sessions
-state anything (asked against stated, `p4.py check`) and how often a statement is true (a judged sample) are to be
-measured in shadow before `on`.
+A statement is a claim, not a fact, and the instruction is one more thing a session is told. So `shadow` comes
+before `on`, to measure two things: `p4.py check` prints how many asked turns stated anything, and how often a
+statement is true takes a judged sample.
 
-Every statement, and every turn that was asked, is a row of models/said.tsv (time, session, task, act, entry,
-note), a table the store tracks and its sync merges. An applied or set-aside statement is also a row of
-labels.tsv, which training skips unless the mode is on.
+Every statement is a row of phi/models/said.tsv, and so is every turn that was asked. Its columns are time, session,
+task, act, entry and note. The store tracks the table, and its sync merges every machine's rows into it. An applied
+or set-aside statement is also a row of phi/models/labels.tsv, which training skips unless the mode is on.
 """
 
 import os
@@ -50,8 +50,9 @@ def path(p4):
 
 
 def tag(pairs):
-    """([lines, a store entry's with its handle first], {handle: entry id}) for (line, entry id) pairs: a rule,
-    correction, retraction or fact gets `[r1]`, `[r2]`, ...; any other line is left as it is."""
+    """The lines and {handle: entry id} for a list of pairs of a line and its entry id. The line of a rule,
+    correction, retraction or fact gets the next handle of `[r1]`, `[r2]` and so on, after its leading `- ` or
+    first when it has none; any other line is left as it is."""
     import store as st
     lines, handles = [], {}
     for line, eid in pairs:
@@ -64,8 +65,9 @@ def tag(pairs):
 
 
 def command():
-    """The command a session runs, in a form both Bash and PowerShell take: this interpreter and this plugin's p4.py,
-    with forward slashes and no quotes; `python` when the interpreter's path holds a space."""
+    """The command a session runs, in a form both Bash and PowerShell take: this interpreter and this plugin's p4.py
+    with forward slashes. The script's path is in double quotes only when it holds a space, and `python` stands in
+    for an interpreter whose path holds one."""
     exe = sys.executable.replace("\\", "/")
     script = os.path.join(HERE, "p4.py").replace("\\", "/")
     return f"{exe if ' ' not in exe else 'python'} -I {script if ' ' not in script else chr(34) + script + chr(34)} said"
@@ -75,12 +77,13 @@ def instruction(handles, session, p4):
     where = p4.replace(chr(92), "/")
     cmd = f"{command()} --session {session} --p4 {where if ' ' not in where else chr(34) + where + chr(34)}"
     first = next(iter(handles))
-    # the command is written once: three full copies of it made the instruction a thousand characters
-    return ("If a line above with a handle changes what you do this turn, or you decide against one, record it with "
-            "one command before you finish (a note for the store, not part of your reply):\n"
+    # the command is spelled out one time, as SAID: it holds long paths, and a copy on each line would triple them
+    return ("If a line above with a handle changes what you do this turn or you decide against one, record it for the "
+            "store with one command outside your reply before you finish. Use the third if ezexe corrected you and no "
+            "line covered it:\n"
             f"  SAID applied {first}\n"
             f"  SAID set-aside {first} --why \"a few words\"\n"
-            "  SAID lacked --why \"what was missing\"   (ezexe corrected you and no line covered it)\n"
+            "  SAID lacked --why \"what was missing\"\n"
             f"where SAID is: {cmd}")
 
 
@@ -96,8 +99,9 @@ def asked(p4, session, task, handles, now):
 
 
 def state(p4, session, act, names, why="", now=None):
-    """Record one statement of the turn in flight: (lines to print, exit code). The handles are those of the lines
-    the recall hook showed this session's current turn (models/served/turn-<session>.json)."""
+    """Record one statement of the turn in flight, and return the lines to print and the exit code. The handles are
+    those of the lines `h_recall` in hook.py showed this session's current turn, which it keeps in
+    phi/models/served/turn-<session>.json."""
     import labels as lb
     now = now or time.strftime("%Y-%m-%d %H:%M")
     if act not in ACTS:
@@ -115,7 +119,7 @@ def state(p4, session, act, names, why="", now=None):
     bad = [n for n in names if n not in handles]
     if bad:
         return [f"said: no line with the handle {', '.join(bad)} was shown this turn"
-                + (f" (shown: {' '.join(sorted(handles))})" if handles else "")], 2
+                + (f"; the handles shown were {' '.join(sorted(handles))}" if handles else "")], 2
     rows, labels = [], []
     for n in dict.fromkeys(names):
         note = act + (f": {why}" if why else "")

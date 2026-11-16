@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""said.py: a session states what it did with the store's lines it was shown.
+"""said.py: a session states what it did with the retrieval lines it was shown.
 
     python3 -I lbiza/plugins/p4-phi/scripts/test_said.py
 """
@@ -90,7 +90,8 @@ class Said(unittest.TestCase):
         self.assertIn("where SAID is: ", text)
         self.assertIn("said --session " + SESSION, text)
         words = text.split("If a line above")[1]
-        for p in (self.p4.replace("\\", "/"), HERE.replace("\\", "/")):     # the paths are as long as the install's (T1)
+        # the two paths are as long as the install's, so they are left out of the count
+        for p in (self.p4.replace("\\", "/"), HERE.replace("\\", "/")):
             words = words.replace(p, "")
         self.assertLess(len(words), 500, "the instruction stays short: the command once")
         self.assertIn("SAID applied r1", text)
@@ -104,7 +105,7 @@ class Said(unittest.TestCase):
         self.assertEqual((r.returncode, r.stdout.strip()), (0, "said: noted"), r.stderr)
         r = subprocess.run(cmd + ["set-aside", "r9", "--why", "not this turn"], capture_output=True, text=True)
         self.assertEqual(r.returncode, 2)
-        self.assertIn("no line with the handle r9 was shown this turn (shown: r1", r.stdout)
+        self.assertIn("no line with the handle r9 was shown this turn; the handles shown were r1", r.stdout)
         r = subprocess.run(cmd + ["lacked", "--why", "which   plotter the port serves"], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         rows = lb.read_tsv(said.path(self.p4))
