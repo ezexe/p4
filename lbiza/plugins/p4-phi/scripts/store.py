@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """store.py: the corpus and its index. The corpus is the entry files under `phi/store/` of the store `.claude/p4`;
 this module reads their entries and ids, applies the status rule and reads the vocabulary dictionary. The index
-`phi/models/index.json` is what retrieval reads, built from the corpus, the memory files, the saved code and the
-entries of the repository and its dependencies.
+`phi/models/index.json` is what retrieval reads: the documents the ranker scores, built from the corpus, the memory
+files, the saved code, the repository and its dependencies.
 
 The corpus is Markdown files of dash-led entries, one field per line and a blank line between entries. Each file
 starts with three header lines in ordinary words, which parse skips. A value that spans lines continues on lines
@@ -70,12 +70,14 @@ HEADERS = {
                "migrated row adds from."),
 }
 
-# the word a retrieval line prints for each file's entries: plain words, never the file's name
+# the word a retrieval line prints for a document, by the file or folder it comes from: plain words, never the
+# file's name
 KIND_NAMES = {"rules.md": "rule", "corrections.md": "correction", "retractions.md": "retracted", "facts.md": "fact",
               "memory": "memory", "messages": "earlier message", "src": "saved code"}
 
 # words of the store's own design, which read as riddles to a session: p4.py's query drops a retrieval line that
-# holds one, unless the line's doc is plain. An entry with a `plain:` field and every repository entry are plain.
+# holds one, unless the line's document is plain. A document is plain when its entry has a `plain:` field, and every
+# document of the repository and its dependencies is plain.
 JARGON = re.compile(r"(?i)\b(frags?|rulings?|pour(ed|s)?|tombstones?|derivations?|the operator|register entry|"
                     r"read barrier|write barrier|dispatch row|hot tier|cold tier|pre-finalizers?|vlds|phi-index)\b(?!-)")
 
@@ -367,7 +369,7 @@ def completed(e):
     return bool(e.fields.get("addressed", "").strip())
 
 
-# --- what an entry prints as -----------------------------------------------------------------------------
+# --- what a document shows -------------------------------------------------------------------------------
 
 def collapse(s):
     return re.sub(r"\s+", " ", unquote(s or "")).strip()
@@ -382,7 +384,8 @@ def kind_of(fname, e=None):
 
 
 def show_text(fname, e):
-    """The entry in ordinary words, before the index and the retrieval line cut it: its `plain:` when it has one."""
+    """What a document shows in ordinary words, before the index and the retrieval line cut it: the `plain:` of the
+    entry it comes from when that has one."""
     f = e.fields
     if f.get("plain", "").strip():
         return collapse(f["plain"])
@@ -411,11 +414,11 @@ def feature_kind(fname, e):
 
 
 def entry_text(e):
-    """The words an entry is indexed by: its head and every field but the bookkeeping ones."""
+    """The words a document is indexed by: its head and every field but the bookkeeping ones."""
     return " ".join([e.value] + [v for k, v in e.pairs[1:] if k not in NOT_TEXT])
 
 
-# --- memory and src entries ------------------------------------------------------------------------------
+# --- memory and saved code, as documents -----------------------------------------------------------------
 
 def stamp_of(path):
     import time as _t
@@ -426,9 +429,10 @@ def stamp_of(path):
 
 
 def memory_entries(p4):
-    """One entry per heading of every Markdown file of the auto memory directory `temportal/memory/` but MEMORY.md,
-    the index of links. The text before a file's first heading is one more entry when it holds any, and a file
-    without headings is that one entry, headed by the frontmatter's description, else its name, else the file's."""
+    """The documents of the auto memory directory `temportal/memory/`, each an Entry: one per heading of every
+    Markdown file but MEMORY.md, the index of links. The text before a file's first heading is one more document
+    when it holds any, and a file without headings is that one document, headed by the frontmatter's description,
+    else its name, else the file's."""
     d = p4conf.sub(p4, "memory")
     out = []
     if not os.path.isdir(d):
@@ -470,8 +474,9 @@ def memory_entries(p4):
 
 
 def src_entries(p4):
-    """One entry for each file of saved code under `temportal/src/`, holding its path and its first non-empty line
-    that is no `#!` line, comment marks off. A file over 1 MiB, or one that does not read as UTF-8, is skipped."""
+    """One document for each file of saved code under `temportal/src/`, an Entry holding its path and its first
+    non-empty line that is no `#!` line, comment marks off. A file over 1 MiB, or one that does not read as UTF-8,
+    is skipped."""
     d = p4conf.sub(p4, "src")
     out = []
     if not os.path.isdir(d):
@@ -510,9 +515,9 @@ def index_path(p4):
 def sources_signature(p4):
     """(count, newest mtime_ns): the number of files under the corpus, `temportal/memory/` and `temportal/src/` plus
     repo.json and deps.json of `phi/models/`, and the newest mtime among those files and folders. It walks with
-    os.scandir, one stat for each entry and no path joins, since every message's staleness check runs it."""
+    os.scandir, one stat for each file or folder and no path joins, since every message's staleness check runs it."""
     count, newest = 0, 0
-    for name in ("repo.json", "deps.json"):                        # the repository's and its dependencies' entries
+    for name in ("repo.json", "deps.json"):                        # the repository's and its dependencies' documents
         try:
             st_ = os.stat(p4conf.sub(p4, "models", name))
             count, newest = count + 1, max(newest, st_.st_mtime_ns)
@@ -558,9 +563,9 @@ def index_stale(p4):
 
 
 def display_path(e):
-    """Where an entry's file is, relative to the store `.claude/p4`, by LAYOUT. An entry's own `file` does not
-    depend on LAYOUT: it is `memory/x.md`, `src/x.py` or a corpus file such as `rules.md`, so ids and labels stay
-    the same wherever LAYOUT puts the folders."""
+    """Where the file a document comes from is, relative to the store `.claude/p4`, by LAYOUT. The Entry's own `file`
+    does not depend on LAYOUT: it is `memory/x.md`, `src/x.py` or a corpus file such as `rules.md`, so ids and labels
+    stay the same wherever LAYOUT puts the folders."""
     top, _, rest = e.file.partition("/")
     if top in ("memory", "src") and rest:
         return p4conf.rel(top, rest)
@@ -568,7 +573,8 @@ def display_path(e):
 
 
 def make_doc(e, fname, kind):
-    """One index doc for an entry, its term frequencies under `_tf`, which build_index turns into postings."""
+    """The index's document for an Entry of the corpus, memory or saved code, with its term frequencies under `_tf`,
+    which build_index turns into postings."""
     toks = ranker.tokens(entry_text(e))
     head = ranker.tokens(e.value[:400])
     tf = {}
@@ -585,19 +591,19 @@ def make_doc(e, fname, kind):
 
 
 def held_docs(p4, files=None):
-    """The corpus entries the index leaves out because they are FREED, SPENT or EXPIRED, as docs with their `_tf`.
-    Retrieval never shows them, but train.with_held adds them to a pool task's candidates, since a pool label can
-    name a held entry, which the pool's reader saw with its state."""
+    """The corpus entries the index leaves out because they are FREED, SPENT or EXPIRED, as documents with their
+    `_tf`. Retrieval never shows them, but train.with_held adds them to a pool task's candidates, since a pool label
+    can name one of them, which the pool's reader saw with its state."""
     files = files if files is not None else load_store(p4)
     return [make_doc(e, fname, kind_of(fname, e)) for fname in STORE_FILES for e in files.get(fname, [])
             if e.state != "LIVE"]
 
 
 def build_index(p4, write=True):
-    """The index retrieval reads: every LIVE entry of the four files of STORE_FILES, every completed row of ezexe's
-    messages, every memory section, every head of saved code and every entry of the repository and its
-    dependencies, tokenized, with BM25's postings; plus the short-turn table, each session's rows for the repeat
-    line, and the vocabulary for expansion."""
+    """The index retrieval reads: one document for every LIVE entry of the four files of STORE_FILES, every completed
+    row of ezexe's messages, every memory section and every head of saved code, and the documents of the repository
+    and its dependencies, all tokenized, with BM25's postings; plus the short-turn table, each session's rows for the
+    repeat line, and the vocabulary for expansion."""
     files = load_store(p4)
     docs, excluded = [], {}
     session_rows, short = {}, {}
@@ -661,13 +667,13 @@ def build_index(p4, write=True):
     out = {"version": INDEX_VERSION, "sources": list(sig), "n": len(docs),
            "avgdl": (total / len(docs)) if docs else 1.0, "excluded": excluded, "docs": docs, "post": post,
            "short": short, "sessions": session_rows, "vocab": vocab, "stems": ranker.stem_table(post),
-           # what a query reads of every doc, kept apart so a query never decodes every row of load_index's Docs
+           # what a query reads of every document, kept apart so a query never decodes every row of load_index's Docs
            "dl": [d["dl"] for d in docs],
            "sup": [[d.get("time") or "", d["supersedes"]] for d in docs if d.get("supersedes")],
            "rule_at": rule_minutes(docs)}
     if write:
-        # on disk the docs are rows and each term's postings a string, decoded only for a query's terms, which
-        # halves the load time
+        # on disk the documents are rows and each term's postings a string, decoded only for a query's terms,
+        # which halves the load time
         disk = dict(out)
         disk["doc_fields"] = list(DOC_FIELDS)
         disk["docs"] = [[d.get(k) for k in DOC_FIELDS] for d in docs]
@@ -683,7 +689,7 @@ DOC_FIELDS = ("id", "path", "line", "file", "kind", "time", "state", "show", "pl
 
 
 def repo_docs(p4):
-    """The entries of the repository from `phi/models/repo.json` and of its dependencies from deps.json beside it,
+    """The documents of the repository from `phi/models/repo.json` and of its dependencies from deps.json beside it,
     which refresh_index in hook.py brings up to date at session start and at every turn end, as `p4.py index --repo`
     and `--deps` do by hand."""
     try:
@@ -694,7 +700,7 @@ def repo_docs(p4):
         out = repo.entries(p4)
     except (OSError, ValueError, KeyError):
         out = []
-    try:                               # the dependencies' entries, less any id the repository's entries hold
+    try:                               # the dependencies' documents, less any id the repository's documents hold
         import deps
         have = {d["id"] for d in out}
         out += [d for d in deps.entries(p4) if d["id"] not in have]
@@ -709,10 +715,10 @@ def cache_path(p4):
 
 
 def load_index(p4):
-    """The index as build_index wrote it, its docs decoded into dicts as they are read. A hook is a new process for
-    every message, so the decoded index is kept beside the JSON in `phi/models/index-cache.tmp`, in marshal, which
-    loads in about a third of json.load's time. The cache is keyed on the JSON's mtime and size and INDEX_VERSION;
-    one that does not match, or does not read, is rebuilt from the JSON and written again."""
+    """The index as build_index wrote it, its documents decoded into dicts as they are read. A hook is a new process
+    for every message, so the decoded index is kept beside the JSON in `phi/models/index-cache.tmp`, in marshal,
+    which loads in about a third of json.load's time. The cache is keyed on the JSON's mtime and size and
+    INDEX_VERSION; one that does not match, or does not read, is rebuilt from the JSON and written again."""
     import marshal
     path = index_path(p4)
     s = os.stat(path)
@@ -738,7 +744,7 @@ def load_index(p4):
 
 def write_cache(p4, disk):
     """Write `phi/models/index-cache.tmp`, the on-disk index in marshal, keyed on index.json's mtime and size and
-    INDEX_VERSION. Its docs stay rows and its postings strings. Best effort."""
+    INDEX_VERSION. Its documents stay rows and its postings strings. Best effort."""
     import marshal
     try:
         s = os.stat(index_path(p4))
@@ -751,8 +757,8 @@ def write_cache(p4, disk):
 
 
 class Docs:
-    """The index's docs, each decoded from its on-disk row into a dict the first time it is read: a query reads a
-    few hundred of a corpus's thousands, so the rest are never built."""
+    """The index's documents, each decoded from its on-disk row into a dict the first time it is read: a query reads
+    a few hundred of the index's thousands, so the rest are never built."""
     __slots__ = ("rows", "fields", "got")
 
     def __init__(self, rows, fields):
@@ -775,7 +781,7 @@ class Docs:
 
 
 def rule_minutes(docs):
-    """{minute: [doc index]} of the rulings, by the minute they were written, for p4.standing_first."""
+    """{minute: [position in docs]} of the rulings, by the minute they were written, for p4.standing_first."""
     out = {}
     for i, d in enumerate(docs):
         if d["file"] == "rules.md" and d.get("time"):
@@ -784,7 +790,8 @@ def rule_minutes(docs):
 
 
 def postings(idx, term):
-    """[doc, tf, doc, tf, ...] for one term, or None; an on-disk string is decoded on first use."""
+    """[document, tf, document, tf, ...] for one term, each document by its position in the index's documents, or
+    None; an on-disk string is decoded on first use."""
     p = idx["post"].get(term)
     if isinstance(p, str):
         p = idx["post"][term] = [int(x) for x in p.split()]
