@@ -3023,14 +3023,11 @@ HOOKS["level"] = ROUTED["level"] = ("PreToolUse", h_level)
 HOOKS["restart-check"] = ROUTED["restart-check"] = ("PreToolUse", h_restart_check)
 ROUTED.update({"agent-launch": ("PreToolUse", h_agent_launch), "agent-pre": ("PreToolUse", h_agent_call),
                "agent-post": ("PostToolUse", h_agent_call), "agent-stop": ("SubagentStop", h_agent_stop)})
-OLD_NAMES = {"arrive": "session-start", "prompt": "user-prompt-submit", "exit": "stop"}   # hooks.json of 0.1 and 0.2,
-#                                                                         still loaded in sessions that began then
 
 
 def hook_main(name):
     """A hook never fails a call and says nothing without something to say."""
     try:
-        name = OLD_NAMES.get(name, name)
         if os.environ.get("P4_PHI") == "0" or name not in HOOKS:
             return 0
         raw = sys.stdin.read()

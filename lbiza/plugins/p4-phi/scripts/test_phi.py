@@ -351,11 +351,6 @@ class Sessions(unittest.TestCase):
         self.assertEqual(self.t.say(TOP, TASK).stdout.strip(), "")
         self.assertEqual(self.t.session(TOP)["task"], TASK)
 
-    def test_the_hook_names_of_earlier_versions_still_run(self):
-        self.t.hook("prompt", TOP, {"hook_event_name": "UserPromptSubmit", "prompt": TASK})
-        self.assertEqual(self.t.session(TOP)["task"], TASK)
-        self.assertEqual(self.t.log(TOP)[-1]["hook"], PROMPT)
-
 
 class Turns(unittest.TestCase):
     def setUp(self):
