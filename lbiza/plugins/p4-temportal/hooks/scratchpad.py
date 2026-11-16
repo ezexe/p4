@@ -63,7 +63,8 @@ The two asks are off unless p4.json's scratchpad.asks is true or P4_SCRATCHPAD_A
                  every path in a write position, a redirect, tee, python's open() in a write mode, or the destination
                  of cp or mv. A code file, by extension or by name, headed for a temp location, the session's
                  scratchpad path or the notebook gets an ask naming where it belongs: the repository if it will use
-                 the file, else `.claude/p4/temportal/src/`. It never denies, and it is silent inside a subagent,
+                 the file, else `.claude/p4/temportal/src/`. A `.ipynb` headed for the notebook gets none, since the
+                 notebook is where p4-temportal keeps notebooks. It never denies, and it is silent inside a subagent,
                  whose writer ezexe cannot redirect from the prompt.
 
 Every failure prints a one-line notice and exits 0."""
