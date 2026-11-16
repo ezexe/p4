@@ -1348,7 +1348,9 @@ class WaitsOnReports(unittest.TestCase):
         for stays in self.STEPS + ("Collect the children's reports", "Wait until every tree reports",
                                    "Check the acceptance session's results", "Read the reports from the fixers"):
             self.assertEqual(plans.top_stays(stays), plans.AWAITS_WHY, stays)
-        for work in ("Collect the timings of the build in out/t.csv", "Verify phi's session tree matches the app",
+        for work in ("Fix session report truncation", "Write the children's reports page in dox/reports.html",
+                     "Add the trees' results to the board in controls.py",
+                     "Collect the timings of the build in out/t.csv", "Verify phi's session tree matches the app",
                      "Check 1: nothing hidden in AppData", "Write the report of the run in docs/run.md"):
             self.assertEqual(plans.top_stays(work), "", work)
 

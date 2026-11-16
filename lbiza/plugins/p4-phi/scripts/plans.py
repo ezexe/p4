@@ -501,12 +501,16 @@ OTHERS = re.compile(r"\b(?:reports?|answers?|repl(?:y|ies)|word)\s+from\b"
                     r"|\b(?:sessions?|trees?|child(?:ren)?|tops?|siblings?|puppeteers?|orchestrators?)"
                     r"(?:'s|s'|’s|s’|')?\s+(?:own\s+|last\s+|final\s+)?(?:reports?|results?|answers?|repl(?:y|ies)|"
                     r"outcomes?|findings)\b", re.I)
+BUILDS = re.compile(r"^\W*(?:fix|writ|add|chang|edit|implement|updat|remov|renam|creat|mak|refactor|port|rewrit|"
+                    r"replac|patch|build|migrat|delet)\w*\b", re.I)
 AWAITS_WHY = "waits on or checks other sessions' reports, which only this session receives"
 
 
 def awaits_sessions(text):
     """True for a step that waits on, awaits, collects or checks other sessions' or trees' reports or results."""
     text = str(text or "")
+    if BUILDS.match(text):                         # "Fix session report truncation" builds something: work
+        return False
     return bool(AWAITS_TOP.search(text) or OTHERS.search(text))
 
 
