@@ -72,9 +72,9 @@ SECRETS = [re.compile(p) for p in (
     r"(?:[Aa]uthorization:\s*|[\"'])(?:Bearer|Basic)\s+(?![{$%<])[A-Za-z0-9._~+/=-]{16,}|\bBearer\s+(?![{$%<])[A-Za-z0-9._~+/=-]{20,}",
     r"://[^/\s:@'\"{}$%<]+:(?![{$%<])[^/\s@'\"{}]{3,}@",
     r"\bcurl\b[^\n]*\s(?:-u\s*|--user[ =])['\"]?[^\s:'\"$%-][^\s:'\"$%]*:(?![$%{])[^\s'\"]{3,}",
-    r"\b(?:mysql|mysqldump)\b[^\n;&|]*\s-p(?![$%{'\"\s])[^\s'\"]{4,}",
-    r"\b(?:docker\s+login|sshpass)\b[^\n;&|]*?\s-p\s+['\"]?(?![$%{-]|\d+(?::\d+)?\b)[^\s'\"]{4,}",
-    r"[Aa]uthorization[\"']?\s*[:=]\s*[\"']?(?:[A-Za-z]+\s+)?(?![{$%<])[A-Za-z0-9._~+/=-]{16,}",
+    r"\b(?:mysql|mysqldump)\b[^\n;&|]*\s-p(?:['\"](?![$%{]))?(?![$%{'\"\s])[^\s'\"]{4,}",
+    r"\b(?:docker\s+login|sshpass)\b[^\n;&|]*?\s-p\s*['\"]?(?![$%{-]|\d+(?::\d+)?\b)[^\s'\"]{4,}",
+    r"[Aa]uthorization[\"']?\]?\s*[:=]\s*(?:[\"'](?:[A-Za-z]+\s+)?|[A-Za-z]+\s+)(?![{$%<])[A-Za-z0-9._~+/=-]{16,}",
     r"ConvertTo-SecureString\s+[\"'][^\"'$]{6,}[\"']\s+-AsPlainText",
     r"(?:\bauth\s*=\s*\(|HTTPBasicAuth\(|HTTPDigestAuth\()\s*['\"][^'\"\n]+['\"]\s*,\s*['\"](?![$%{])[^'\"\n]{6,}['\"]",
 )]

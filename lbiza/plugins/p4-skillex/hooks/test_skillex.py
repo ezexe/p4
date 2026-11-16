@@ -243,7 +243,10 @@ class Watcher(Store):
                    ('const apiKey: string = "a8f3k29dk3l0s9d2";', ".ts"),
                    ('h = {"Authorization": "Token a8f3k29dk3l0s9d2abcd"}', ".py"),
                    ('curl -H "Authorization: Token a8f3k29dk3l0s9d2abcd" x', ".sh"),
-                   ('$pw = ConvertTo-SecureString "P@ssw0rd123" -AsPlainText -Force', ".ps1")]
+                   ('$pw = ConvertTo-SecureString "P@ssw0rd123" -AsPlainText -Force', ".ps1"),
+                   ("mysqldump -u root -p'Str0ng!Pass1' db > out.sql", ".sh"), ('mysql -uroot -p"S3cretPass" db', ".sh"),
+                   ("sshpass -pS3cretPw ssh host", ".sh"),
+                   ('headers["Authorization"] = "Token 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b"', ".py")]
         spared = [('token_url = "https://x/oauth/token"', ".py"), ('password_field = "password"', ".py"),
                   ('SECRET_NAME = "prod-db-creds"', ".py"), ("token = parts[0]", ".py"),
                   ("tokens = list(tokenize.generate_tokens(io.StringIO(src).readline))", ".py"),
@@ -284,7 +287,11 @@ class Watcher(Store):
                   ("mysqldump -u root -p mydb > out.sql", ".sh"),
                   ("docker run --name mysql -p 3306:3306 -e X=1 mysql:8", ".sh"),
                   ('sshpass -p "$PW" ssh -p 2222 host', ".sh"), ('api_key = "xxxxxxxxxxxxxxxxxxxx"', ".py"),
-                  ('h = {"Authorization": f"Bearer {token}"}', ".py"), ('h = {"Authorization": "Token " + token}', ".py")]
+                  ('h = {"Authorization": f"Bearer {token}"}', ".py"), ('h = {"Authorization": "Token " + token}', ".py"),
+                  ('authorization = request.headers.get("Authorization")', ".py"),
+                  ("const authorization = req.headers.authorization;", ".js"),
+                  ('h = {"Authorization": config.authorization}', ".py"),
+                  ("authorization = base64.b64encode(raw).decode()", ".py"), ("sshpass -p \"$PW\" ssh -p2222 host", ".sh")]
         for i, (line, ext) in enumerate(flagged + spared):
             p = put(os.path.join(self.root, f"probe{i}{ext}"), line + "\n")
             self.assertEqual(skillex.holds_secret(p), (line, ext) in flagged, line)
