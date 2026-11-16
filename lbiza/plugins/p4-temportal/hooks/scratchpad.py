@@ -566,7 +566,7 @@ def close_tmp(p4, sid):
         return ""
     if r.returncode == 1:
         # the staged paths alone: a pathspec commit takes every tracked path's working copy, a copy's edit included
-        staged = [n for n in (git_out(p4, "diff", "--cached", "--name-only", "-z", "--", rel) or "").split("\0") if n]
+        staged = [n for n in (git_out(p4, "diff", "--cached", "--no-renames", "--name-only", "-z", "--", rel) or "").split("\0") if n]
         c = git_p4(p4, *commit_flags(p4), "-q", "-m", f"tmp: session {sid[:8]}, kept before its removal",
                    "--pathspec-from-file=-", "--pathspec-file-nul", stdin=nul(staged)) if staged else None
         if c is None or c.returncode != 0:

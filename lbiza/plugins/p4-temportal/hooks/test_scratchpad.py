@@ -747,6 +747,37 @@ def tmp_close_bare_store_cases():
     print("test_scratchpad.py: bare store cases green")
 
 
+def tmp_close_rename_cases():
+    """A committed file renamed inside the session folder is closed whole: no staged deletion of its old path is
+    left in the index for a later commit."""
+    if not shutil.which("git"):
+        print("test_scratchpad.py: rename close cases skipped, no git on PATH")
+        return
+    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-rename-")
+    sid = "eeee5555-0000-4000-8000-00000000000e"
+    p4 = os.path.join(root, ".claude", "p4")
+    mine, rel = os.path.join(p4, "temportal", "tmp", sid), f"temportal/tmp/{sid}"
+
+    def git(*args):
+        return subprocess.run(["git", "-C", p4] + list(args), check=True, capture_output=True, text=True).stdout
+
+    try:
+        os.makedirs(p4)
+        for args in (["init", "-q"], ["config", "user.name", "t"], ["config", "user.email", "t@t"]):
+            git(*args)
+        put(mine, "old.md", "a note long enough to be seen as the same file after its rename\n")
+        git("add", "-A")
+        git("commit", "-q", "-m", "an earlier turn end")
+        os.rename(os.path.join(mine, "old.md"), os.path.join(mine, "new.md"))
+        assert run_sub("tmp-close", {"cwd": root, "session_id": sid}, None, CLAUDE_PROJECT_DIR=root) == ""
+        left = git("diff", "--cached", "--name-status", "--no-renames")
+        assert left == "", f"the close left staged changes for a later commit:\n{left}"
+        assert git("ls-files", "--", rel) == "", "a path of the closed folder is still tracked"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("test_scratchpad.py: rename close cases green")
+
+
 def tmp_close_cut_cases():
     """A close stopped between its commits, here in the middle of its deletions, leaves the next start of that
     session every file the first commit holds."""
@@ -1186,6 +1217,7 @@ def main():
     tmp_staged_copy_cases()
     tmp_close_bare_store_cases()
     tmp_close_cut_cases()
+    tmp_close_rename_cases()
     archived_by_phi_cases()
     scratchpad_dir_cases()
     parallel_hooks_cases()
