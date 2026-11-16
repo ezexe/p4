@@ -344,7 +344,7 @@ class Regressions(unittest.TestCase):
     """The no-ranker road on a fresh store (the coordinator's defect, 2026-11-01): on ap-p4_mac (two pool labels, no
     ranker) "which branch do mac commits go on" and "where does the p4 repo live" printed nothing. They must recall
     the matching ruling in the top 5; ordinary messages must stay at 0 lines. The gate was chosen on a held-out
-    split by tune_fallback.py, with these cases as a constraint."""
+    split, with these cases as a constraint."""
 
     @classmethod
     def setUpClass(cls):

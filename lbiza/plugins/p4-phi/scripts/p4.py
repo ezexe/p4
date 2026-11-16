@@ -42,12 +42,12 @@ CANDIDATES = 200
 MIN_RARE = 2                  # without a trained ranker a line must share this many of the message's words...
 # ...cover this share of the message's words (every word not common and not a number, counted even when the store
 # has never seen it, so a message about something else covers little), cover this share of their idf (a word the
-# store lacks weighs the most a word can), and be dense enough in the entry. Chosen 2026-11-01 by tune_fallback.py
+# store lacks weighs the most a word can), and be dense enough in the entry. Chosen 2026-11-01
 # on a held-out split (the pools and history labels of AudioPlugin-p4 and ap-p4_mac should print; the suite's
 # general prompts must stay silent), with the regression cases of test_query.Regressions as a constraint. Before
 # (half the store-known words or six of them): suite prompts silent 84% on ap-p4_mac and 89% on AudioPlugin-p4,
 # held-out F1 0.065, a right line for 23% of held-out tasks. After: silent 100% on both, held-out F1 0.079, a right
-# line for 20% (tune_fallback.py prints the numbers).
+# line for 20%.
 FALLBACK_COVER = 0.75         # shared words over the message's words
 FALLBACK_ICOVER = 0.65        # their idf over the message's idf
 FALLBACK_DENSE = 0.35         # shared words per square root of the entry's length: a long entry needs more of them
@@ -274,12 +274,11 @@ def message_words(terms):
 
 
 def fallback_order(idx, terms, weights, points, gone, min_shared=None, cover=None, icover=None, dense=None,
-                   with_stats=False, node_ids=None):
+                   node_ids=None):
     """The no-ranker road (4.5: a fresh repo): BM25 over the message's words, their other forms at half weight and
     the dictionary's expansions; a line prints when it shares at least `min_shared` of the message's words (a word
     or another form of it), and those cover `cover` of the message's words and `icover` of their idf, densely
-    enough in the entry (`dense`). An entry a dictionary hit points at needs no more. `with_stats` returns
-    [(doc, shared, cover, icover, density)] for every candidate, ungated (tune_fallback.py)."""
+    enough in the entry (`dense`). An entry a dictionary hit points at needs no more."""
     min_shared = MIN_RARE if min_shared is None else min_shared
     cover = FALLBACK_COVER if cover is None else cover
     icover = FALLBACK_ICOVER if icover is None else icover
@@ -307,7 +306,7 @@ def fallback_order(idx, terms, weights, points, gone, min_shared=None, cover=Non
     unseen = ranker.idf_of(0, n)
     widf = {t: max(idf.get(v, 0.0) for v in forms[t]) if t in forms else unseen for t in words}
     total = sum(widf.values()) or 1.0
-    out, stats = [], []
+    out = []
     for i in cand:
         d = docs[i]
         toks = set(d["toks"].split())
@@ -315,9 +314,6 @@ def fallback_order(idx, terms, weights, points, gone, min_shared=None, cover=Non
         c = len(got) / max(1, len(words))
         ic = sum(widf.get(t, 0.0) for t in got) / total
         dn = len(got) / max(1.0, d["dl"]) ** 0.5
-        if with_stats:
-            stats.append((i, len(got), c, ic, dn))
-            continue
         if d["id"] in points:
             out.append((i, len(q) + 1))          # an entry the dictionary points at needs no more
             continue
@@ -328,8 +324,6 @@ def fallback_order(idx, terms, weights, points, gone, min_shared=None, cover=Non
             if not (d["kind"] == "file" and len(got) >= FILE_SHARED and c >= FILE_COVER and dn >= FILE_DENSE):
                 continue
         out.append((i, len(got)))
-    if with_stats:
-        return stats
     out.sort(key=lambda x: -x[1])          # stable: BM25's order within a tie
     return standing_first(idx, [i for i, _ in out])
 
