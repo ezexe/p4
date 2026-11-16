@@ -31,6 +31,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+import p4conf  # noqa: E402
 import ranker  # noqa: E402
 import store as st  # noqa: E402
 
@@ -1134,8 +1135,10 @@ def run(p4, out=None, apply=False, now=None, project=None, report_path=None):
               "label_rows": labels, "pools": pstats, "vocab": vstats, "checks": checks, "out": out}
 
     if apply:
-        if os.path.isdir(os.path.join(out, "store")):
-            raise SystemExit(f"migrate: {out}/store exists; already migrated")
+        # a store of the flat layout or of the current one, under phi/, is a migrated store: nothing to migrate
+        for done in (os.path.join(out, "store"), p4conf.sub(out, "store")):
+            if os.path.isdir(done):
+                raise SystemExit(f"migrate: {done} exists; already migrated")
         write_new(plan, texts, tasks, labels, out, in_place)
         for o, nrel in plan.archive:
             a, b = os.path.join(p4, o), os.path.join(out, nrel)

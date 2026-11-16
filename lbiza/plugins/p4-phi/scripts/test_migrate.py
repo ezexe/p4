@@ -343,6 +343,26 @@ class Synthetic(unittest.TestCase):
         self.assertIn("unplaced 0", r.stdout)
 
 
+class CurrentLayout(unittest.TestCase):
+    def test_apply_refuses_a_store_in_the_current_layout(self):
+        """A store already in the current layout, under phi/ and temportal/, has nothing to migrate: --apply refuses
+        it as already migrated and leaves every file as it was."""
+        with tempfile.TemporaryDirectory() as t:
+            p4 = os.path.join(t, "proj", ".claude", "p4")
+            write(p4conf.sub(p4, "store", "rules.md"), st.render("rules.md", [
+                [("ruling", "the narwhal port stays open"), ("status", "LIVE"), ("time", "2026-10-01 09:00")]]))
+            write(p4conf.sub(p4, "memory", "MEMORY.md"), "# Memory\n")
+
+            def tree():
+                return {os.path.relpath(os.path.join(d, f), p4): open(os.path.join(d, f), "rb").read()
+                        for d, _, fs in os.walk(p4) for f in fs}
+            before = tree()
+            with self.assertRaises(SystemExit) as cm:
+                migrate.run(p4, None, apply=True, now=NOW)
+            self.assertIn("already migrated", str(cm.exception))
+            self.assertEqual(tree(), before)
+
+
 class RealRepos(unittest.TestCase):
     """The four clones, migrated dry into a temp dir; read only."""
 
