@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""notices.py: a failing hook or an unreadable ranker leaves one retrain notice a day per component, and an
-answered notice is no longer open."""
+"""notices.py: a failing hook or an unreadable ranker file leaves one retrain notice a day per component and kind,
+and a row of retrain-resolved.tsv closes the notice it answers."""
 
 import io
 import json
@@ -37,7 +37,7 @@ class Notices(unittest.TestCase):
                           ("2026-11-10 09:00", "ValueError", "abcd1234")])
         self.assertEqual(rows[0]["error"], "bad file")
         text = open(notices.path(self.p4), encoding="utf-8").read()
-        self.assertTrue(text.startswith("# p4-recall retrain notices"))
+        self.assertTrue(text.startswith("# p4-phi retrain notices"))
         self.assertEqual(text.count("\n"), 4)
 
     def test_resolved_rows_close_notices_without_rewriting_them(self):

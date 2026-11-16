@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""notices.py: the retrain notices a session leaves when a model fails it, `models/retrain-needed.tsv`.
+"""notices.py: the retrain notices a session leaves when a model fails it, `phi/models/retrain-needed.tsv`.
 
-A hook that meets an unexpected model failure falls back (the no-ranker road, the children, the operator) and
-appends one row here: nothing more, never a retry in the hook's own 300 ms. The p4-model skill (ezexe/phi,
-`python -m phi_model check|update`) reads the rows, retrains the model each one names, and answers them by
-appending to `models/retrain-resolved.tsv`; this file is never rewritten, so a notice appended while a training
-runs is never lost.
+Two places append a row, and each goes on: p4.py's `query` when `phi/models/ranker.json` is there and is not a
+readable ranker of its kind, falling back to BM25, and hook.py's `main` when a hook raises, exiting 0 all the same.
+Neither retries or retrains. The p4-model skill of ezexe/phi, `python -m phi_model check|update`, reads the rows,
+retrains, and answers the notices of each model it rebuilt by appending to `phi/models/retrain-resolved.tsv`. This
+file is never rewritten, so a notice appended while a training runs is never lost.
 
-Rows: time, epoch, session, component, kind, error (tab-separated; a `#` line is the header). A component is
-`json ranker` (models/ranker.json: unreadable, not this kind, or scoring raised), `pt ranker` (the .pt chain or
-its server), `hook <name>` (a hook that raised), `train` (a round that raised). The same component and kind is
-noted once a day: a store whose model is broken for a week has seven rows, not one per message.
+Rows are tab-separated: time, epoch, session, component, kind, error. A line that begins with `#` is the header,
+and no reader parses it. A component is `json ranker`, for a ranker file that is unreadable or not of its kind, or
+`hook <name>`, for a hook that raised, the two the plugin writes; notice_family also files `pt ranker` and
+`ranker server` under the .pt ranker that ezexe/phi's p4-model trains, and `train` under a training round. The same
+component and kind is noted once a day: a store whose model is broken for a week has seven rows, not one per
+message.
 
     notify(p4, "json ranker", ValueError("unreadable"), session)   -> True when a row was appended
     open_notices(p4)                                                -> the rows not yet answered
@@ -28,7 +30,7 @@ import p4conf  # noqa: E402
 
 NOTICES = "retrain-needed.tsv"
 RESOLVED = "retrain-resolved.tsv"
-HEAD = "# p4-recall retrain notices — time\tepoch\tsession\tcomponent\tkind\terror\n"
+HEAD = "# p4-phi retrain notices — time\tepoch\tsession\tcomponent\tkind\terror\n"
 FAMILIES = (("json ranker", "json"), ("pt ranker", "ranker"), ("ranker server", "ranker"), ("hook", "hook"),
             ("train", "train"))
 
@@ -75,7 +77,8 @@ def notify(p4, component, error, session="", now=None):
 
 
 def open_notices(p4):
-    """The notices no row of retrain-resolved.tsv answers (matched on time, component and error)."""
+    """The notices no row of retrain-resolved.tsv answers: a row answers the notice of its time, component and
+    error."""
     done = {(r["time"], r["component"], r["error"]) for r in _rows(path(p4, RESOLVED))}
     return [r for r in _rows(path(p4)) if (r["time"], r["component"], r["error"]) not in done]
 
