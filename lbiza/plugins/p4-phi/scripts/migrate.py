@@ -12,8 +12,6 @@ drop with its reason; an entry or file that fits none is listed as unplaced, by 
 
 import argparse
 import datetime
-import hashlib
-import json
 import os
 import re
 import shutil
