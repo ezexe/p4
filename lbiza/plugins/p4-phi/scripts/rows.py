@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
-"""rows.py: the message rows of `store/messages/<s8>.md` (fresh-marketplace.md 3.5, 5.1).
+"""rows.py: the message rows of `phi/store/messages/<s8>.md`, one row for each message a session is sent.
 
-open   the prompt hook stamps a row: `fingerprint:` (the message, quoted, at most 300 characters), `time:`,
-       `arrival:` (turn, or notification for a harness message), and `resembles:` when an earlier completed row of
-       the session resembles it (the old barrier's rule). A notification or agent message is complete on arrival:
-       `state: FRESH` and an `addressed:` saying so.
-close  the close hook completes the session's last open row from the reply: `state:`, `addressed:` (the reply's
-       first paragraph, at most 300 characters), `recommended:` (the reply's first sentence that recommends
-       something, at most 300 characters; empty when none) and, when the row resembles an earlier one, `match:`.
-       The state is judged here, from the row's `resembles:` and the earlier row's `addressed:`: ECHO when the
-       same answer came again (the two paragraphs' tokens at Jaccard >= 0.5, the barrier's rule), SUPERSEDED when
-       the earlier row was answered anew, FRESH when no completed row resembles it. `match:` names the earlier
-       row by its time and says which of the two it was, in plain words.
-Rows are appended or extended in place: no other line of the file is rewritten.
+open   the UserPromptSubmit hook `recall` stamps a row: `fingerprint:`, the message quoted and cut to 300
+       characters, `time:` and `arrival:`. `arrival:` is `turn` for ezexe's message, `notification` for one that
+       Claude Code wrote, whose text opens with a tag HARNESS_RE matches, and `agent message` for another
+       session's. A row of ezexe's also gets `resembles:`, naming the newest completed row of ezexe's in the
+       session that resembles it by store.resembles. A notification is complete on arrival: `state: FRESH` and an
+       `addressed:` saying so. Another session's message is answered like a turn: its row stays open to the turn end.
+close  at the turn end, the Stop hook `close` completes the session's last open row from the reply: `state:`,
+       `addressed:`, the reply's first paragraph cut to 300 characters, `recommended:`, the reply's first sentence
+       that recommends something, cut to 300 characters and empty when none, and `match:` when the row's
+       `resembles:` names a completed row. judge_state gives the state and `match:`.
+Rows are appended or extended in place: no other line of the file changes.
 
-Why `recommended:`: 300 characters of the first paragraph rarely hold the recommendation the session handed
-ezexe (served_back on ap-p4 found it in later paragraphs), and that sentence is what a later check against the
-documentation (`p4.py teacher facts`) and the recency rule need to see.
+`recommended:` takes its sentence from any paragraph, since a reply often states its recommendation after the
+first. store.entry_text indexes it with the row's other text, so its words reach retrieval.
 """
 
 import datetime
@@ -36,8 +34,7 @@ RECOMMENDED_CHARS = 300
 HARNESS_RE = re.compile(r"^\s*<(task-notification|system-reminder|local-command|command-name|command-message|"
                         r"bash-input|bash-stdout|user-prompt-submit-hook)", re.I)
 PEER_RE = re.compile(r"^\s*(Another Claude session sent a message:\s*)?<cross-session-message\b", re.I)
-# a sentence that hands ezexe a recommendation (served_back.RECOMMEND_RE): recommendation phrasing only, not
-# every `should`
+# a sentence that hands ezexe a recommendation: recommendation phrasing only, not every `should`
 RECOMMEND_RE = re.compile(r"(?i)\b(recommend|suggest|better to|prefer(red|able)?|the right way|instead of|rather than|"
                           r"go with|best (way|option|practice)|i'?d (use|go|pick|keep|pin|set)|the fix is|"
                           r"(you|we) should|should (use|pin|keep|move|set|run|switch|avoid|not|stay|be))\b")
@@ -66,8 +63,8 @@ def first_paragraph(reply):
 
 
 def recommended_sentence(reply):
-    """The reply's first sentence that recommends (RECOMMEND_RE), from any paragraph, fenced code left out; a
-    question is not one. '' when none."""
+    """The reply's first sentence that RECOMMEND_RE finds, from any paragraph, fenced code left out and a question
+    skipped, cut to RECOMMENDED_CHARS; '' when none."""
     text = FENCE_RE.sub(" ", reply or "")
     for s in SENTENCE_END_RE.split(text):
         s = re.sub(r"\s+", " ", s or "").strip()
@@ -104,7 +101,8 @@ def row_open(p4, session, prompt, now=None, arrival=None):
 
 
 def row_close(p4, session, reply, now=None):
-    """Complete the session's last open row from the reply; returns (row Entry before completion, completed?)."""
+    """Complete the session's last open row from the reply. Returns `(row, done)`: the row's Entry as it was before,
+    None when the session has no open row, and whether the row was completed, which a reply with no text is not."""
     path = session_file(p4, session)
     if not os.path.exists(path):
         return None, False
@@ -119,7 +117,7 @@ def row_close(p4, session, reply, now=None):
     if not addressed:
         return e, False
     lines = text.split("\n")
-    j = e.line                          # the line after the head (0-based index e.line)
+    j = e.line                          # the line after the head: e.line counts the head's line from 1
     while j < len(lines) and lines[j].startswith("  "):
         j += 1
     add = []
@@ -137,8 +135,9 @@ def row_close(p4, session, reply, now=None):
 
 
 def task_kind(p4, session, row, prompt):
-    """The task kind of a closed turn, as labels.task_of_row names it: `short` (at most SHORT_WORDS words),
-    `first` (the session's first ezexe row: none of ezexe's before it in the session's file), else `new`."""
+    """The task kind of a closed turn, as labels.task_of_row names it: `short` for a message of at most
+    store.SHORT_WORDS words, `first` for the session's first row of ezexe's, with none of ezexe's before it in the
+    session's file, else `new`."""
     if len(st.norm_token(prompt).split()) <= st.SHORT_WORDS:
         return "short"
     if row is not None:
@@ -151,10 +150,10 @@ def task_kind(p4, session, row, prompt):
 
 
 def judge_state(e, ents, addressed):
-    """(state, match) for a row being completed: ECHO when the earlier row its `resembles:` names got the same
-    answer again (the two `addressed:` paragraphs share tokens at Jaccard >= 0.5, st.resembles), SUPERSEDED when
-    that earlier row was answered anew, FRESH when it resembles no completed row. `match` names the earlier row
-    and why, in plain words; '' for FRESH."""
+    """`(state, match)` for a row being completed: ECHO when the earlier row its `resembles:` names got the same
+    answer again, the two `addressed:` paragraphs alike by st.resembles; SUPERSEDED when that earlier row was
+    answered anew; FRESH when its `resembles:` names no completed row. `match` names the earlier row by its time
+    and says which of the two it was, in plain words; '' for FRESH."""
     rid = e.fields.get("resembles", "").strip()
     prior = next((x for x in ents if rid and x.id == rid and st.completed(x)), None)
     if prior is None:
