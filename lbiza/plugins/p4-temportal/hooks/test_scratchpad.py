@@ -938,11 +938,21 @@ def parallel_hooks_cases():
         assert not os.path.exists(os.path.join(p4, ".layout.lock")), "the layout lock was left"
         with open(os.path.join(p4, "p4.json"), encoding="utf-8") as f:
             json.load(f)
+        # the same runner started twice at once with a part that does nothing: what this machine's load costs a hook
+        idle = [c.rsplit(" ", 1)[0] + " nothing-here" for c in event_hooks("SessionEnd")]
+        start = time.monotonic()
+        procs = [subprocess.Popen([sh, "-c", c], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, env=env) for c in idle]
+        for p in procs:
+            p.communicate(stdin, timeout=120)
+        floor = time.monotonic() - start
         start = time.monotonic()
         at_once("SessionEnd")
         took = time.monotonic() - start
-        print(f"test_scratchpad.py: the two SessionEnd hooks at once took {took * 1000:.0f} ms")
-        assert took <= 1.5, f"the SessionEnd hooks took {took:.2f} s, over the 1.5 s budget"
+        limit = max(1.5, 3 * floor)       # the 1.5 s budget, widened only when even an idle start is slow here
+        print(f"test_scratchpad.py: the two SessionEnd hooks at once took {took * 1000:.0f} ms, two idle starts "
+              f"{floor * 1000:.0f} ms, limit {limit * 1000:.0f} ms")
+        assert took <= limit, f"the SessionEnd hooks took {took:.2f} s, over {limit:.2f} s"
     finally:
         shutil.rmtree(root, ignore_errors=True)
     print("test_scratchpad.py: parallel hooks cases green")
