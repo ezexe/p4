@@ -1,25 +1,34 @@
 #!/usr/bin/env python3
-"""repo.py: the repository itself as recall entries (fresh-marketplace.md 4.1a), `p4.py index --repo`.
+"""repo.py: the repository itself as retrieval entries.
 
-Indexed mechanically from `git ls-files -s` and `git log`, incrementally: a file is re-read only when its blob sha
-changed since the last run, and the history reads only `git log <last indexed commit>..HEAD`, so a rebuild after
-one commit touches that commit's files alone. The state lives in `models/repo.json` (a cache, ignored by git); the
-entries join `models/index.json` at the next index build.
+`p4.py index --repo` builds them, and so do the layout and close hooks, within hook.py's REPO_DEADLINE_S; `build`
+stops at its deadline and goes on from there at the next run. The entries are read mechanically from
+`git ls-files -s` and `git log`, incrementally: a file is read again only when its blob sha changed since the last
+run, and the history reads only `git log <last indexed commit>..HEAD`, so a rebuild after one commit reads that
+commit's files alone. The state lives in `phi/models/repo.json`, a cache that hook.py's GITIGNORE keeps
+untracked, and the entries join `phi/models/index.json` at the next index build. repo.json also keeps the renames
+git detects, so labels.follow takes a label on a file's old path to its new one.
 
-Entries:
-  path      every tracked file's path                                  id repo:<path>
-  heading   each Markdown heading: path, heading, the first line under it   id repo:<path>#<sha8 heading>
-  symbol    top-level definitions and classes by a cheap regex per language, as `path:line symbol`
-  target    build targets and scripts (CMakeLists.txt, *.cmake, Makefile, package.json scripts, pyproject.toml)
-  commit    `<date> <sha8> <subject>; touched: <paths>`, newest first, the last MAX_COMMITS   id commit:<sha8>
-Conventions (CLAUDE.md, CLAUDE.local.md, AGENTS.md, README*, CONTRIBUTING*, .github/*.md) are Markdown and indexed
-by section like any other.
+Entries, by id, and the line that shows each:
+  file      repo:<path>                  every tracked file that is not excluded: its path
+  heading   repo:<path>#<sha8 heading>   each Markdown heading outside a code fence: `<path> — <heading>`, its
+                                         text adding the first line under it
+  symbol    repo:<path>#<sha8 symbol>    each top-level definition and class, by a cheap regex per language:
+                                         `<path> — <symbol>` at its line
+  target    repo:<path>#<sha8 target>    each target of CMakeLists.txt, *.cmake, a Makefile or *.mk, and each
+                                         script of package.json or pyproject.toml as `script <name>`:
+                                         `<path> — <target>`
+  commit    commit:<sha8>                each commit but merges, newest first, the last MAX_COMMITS:
+                                         `<subject> (<paths>)`, dated the day it was committed, with MAX_TOUCHED
+                                         paths shown and every one in its text
+Convention files such as CLAUDE.md, AGENTS.md and README.md are Markdown, indexed by heading like any other.
 
-Excluded: anything ignored (ls-files lists tracked files only; a tracked file the ignore rules match is dropped too),
-LFS pointers, binaries (BINARY_EXT and a NUL in the first 8 KB), vendored and generated code (node_modules/,
-third_party/, vendor/, *.min.*, *.generated.*, a first line that says `generated`, any directory a `.p4ignore`
-names), and files over 512 KB. File entries stop at MAX_FILE_ENTRIES (50,000), newest-touched files first; `check`
-reports the cut.
+Excluded: anything ignored, since ls-files lists tracked files only and a tracked file the ignore rules match is
+dropped too; submodules; LFS pointers; binaries, by BINARY_EXT or a NUL in the first 8 KB; vendored and generated
+code, which is node_modules/, third_party/ and vendor/, *.min.* and *.generated.*, a first line that says
+`generated` or an `@generated` in the first 400 characters, and any directory a `.p4ignore` names; and files over
+512 KB. File entries stop at MAX_FILE_ENTRIES, the most recently touched files first, and a file whose entries
+would pass the cap is left out whole; `p4.py check` reports the cut.
 """
 
 import json
@@ -40,7 +49,7 @@ VERSION = 1
 MAX_BYTES = 512 * 1024
 MAX_FILE_ENTRIES = 50000
 MAX_COMMITS = 2000
-MAX_TOUCHED = 12               # paths listed on one commit entry
+MAX_TOUCHED = 12               # paths a commit entry shows; its text holds them all
 VENDORED_DIRS = ("node_modules", "third_party", "vendor")
 BINARY_EXT = frozenset("""png jpg jpeg gif bmp ico icns webp tif tiff psd svgz pdf zip gz tgz bz2 xz 7z rar tar jar war
 dmg iso exe dll so dylib a lib o obj class pyc pyo whl egg wasm bin dat db sqlite sqlite3 mp3 mp4 m4a wav flac ogg
@@ -124,7 +133,7 @@ def head(project):
 
 
 def commits(project, since="", limit=MAX_COMMITS):
-    """[(sha, date, subject, [paths])], newest first: `git log <since>..HEAD`, or the last `limit` commits."""
+    """`[(sha, date, subject, [paths])]`, newest first: `git log <since>..HEAD`, or the last `limit` commits."""
     rng = [f"{since}..HEAD"] if since else ["HEAD"]
     try:
         text = git(project, "log", *rng, f"-n{limit}", "--no-merges", "--name-only", "--format=\x1e%H\x1f%cs\x1f%s",
@@ -144,8 +153,8 @@ def commits(project, since="", limit=MAX_COMMITS):
 
 
 def renames(project, since=""):
-    """{old path: the path it has now} for every rename git detects in `since..HEAD` (the whole history when
-    `since` is empty). A file renamed twice maps straight to its last name."""
+    """{old path: the path it has now} for every rename git detects in `since..HEAD`, or in the whole history when
+    `since` is empty. A file renamed twice maps straight to its last name."""
     rng = [f"{since}..HEAD"] if since else ["HEAD"]
     text = git(project, "log", *rng, "-M", "--diff-filter=R", "--name-status", "--format=", "-z", timeout=120)
     toks = [t.strip(chr(10)) for t in text.split(chr(0))]
@@ -171,7 +180,7 @@ def merge_renames(known, newer):
 # --- exclusions ------------------------------------------------------------------------------------------
 
 def p4ignore(project):
-    """Directories a `.p4ignore` at the project root names, one per line (# comments)."""
+    """Directories a `.p4ignore` at the project root names, one per line; a `#` starts a comment."""
     path = os.path.join(project, ".p4ignore")
     out = []
     try:
@@ -203,7 +212,7 @@ def excluded_by_path(path, ignored_dirs=()):
 
 
 def read_file(project, path):
-    """(text, reason): the file's text, or '' and why it is out."""
+    """`(text, reason)`: the file's text, or '' and why it is out."""
     full = os.path.join(project, path)
     try:
         size = os.path.getsize(full)
@@ -350,7 +359,7 @@ def project_of(p4):
 
 
 def build(p4, project=None, deadline_s=None, now=None):
-    """Bring models/repo.json up to date with the project's git tree. Returns stats:
+    """Bring phi/models/repo.json up to date with the project's git tree. Returns stats:
     {changed, removed, reread, files, entries, commits, new_commits, excluded{reason: n}, cut, complete}."""
     project = os.path.abspath(project or project_of(p4) or "")
     if not project or not is_repo(project):
@@ -368,8 +377,8 @@ def build(p4, project=None, deadline_s=None, now=None):
     known = {c[0] for c in s["commits"]}
     fresh = [c for c in new if c[0] not in known]
     s["commits"] = (fresh + s["commits"])[:MAX_COMMITS]
-    # the renames, so a label on a file's old path still reaches it (labels.follow): the history once, then only
-    # what is new since the head they were read at
+    # the renames, so labels.follow takes a label on a file's old path to its new one: the whole history once,
+    # then only what is new since the head they were read at
     if s.get("renames_head") != hd:
         try:
             try:
@@ -435,8 +444,9 @@ def build(p4, project=None, deadline_s=None, now=None):
 
 
 def entries(p4):
-    """The docs the index adds for the repository: (file entries, commit entries) as dicts with id, path, line,
-    kind, time, show and the text to tokenize. [] when no repo.json exists."""
+    """The docs the index adds for the repository, its file entries and then its commits, as dicts with id, path,
+    line, kind, time, show, head and the text to tokenize, a commit's with its paths too. [] when repo.json holds
+    no files."""
     s = load_state(p4)
     if not s.get("files"):
         return []
@@ -472,5 +482,5 @@ def stats_line(p4):
     kept = sum(1 for r in s["files"].values() if not r.get("out") and not r.get("cut"))
     return (f"repo: {kept} files, {s.get('entries', 0)} file entries, {len(s.get('commits', []))} commits; excluded "
             + ", ".join(f"{k} {v}" for k, v in sorted(s.get("excluded", {}).items()))
-            + (f"; cut at {MAX_FILE_ENTRIES} file entries: {s['cut']} files left out (oldest-touched)"
+            + (f"; cut at {MAX_FILE_ENTRIES} file entries: {s['cut']} files left out, the least recently touched"
                if s.get("cut") else "") + f"; {len(s.get('renames', {}))} renamed paths followed")
