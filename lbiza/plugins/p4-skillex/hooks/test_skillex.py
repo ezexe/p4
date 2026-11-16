@@ -434,6 +434,15 @@ class Loading(Store):
         skillex.cmd_start(self.p4, {})
         self.assertFalse(os.path.exists(copy))
 
+    def test_a_project_without_the_store_skills_folder_keeps_its_copies(self):
+        copy = os.path.join(self.root, ".claude", "skills", "demo-brew")
+        put(os.path.join(copy, "SKILL.md"), "---\nname: demo-brew\ndescription: a copy from another clone.\n---\n")
+        put(os.path.join(copy, skillex.MARKER), ".claude/p4/skillex/demo-brew\n")
+        skillex.cmd_start(self.p4, {})
+        self.assertTrue(os.path.isfile(os.path.join(copy, "SKILL.md")), "no store yet, so no skill is known gone")
+        skillex.cmd_start(self.p4, {})
+        self.assertFalse(os.path.exists(copy), "once the store's folder exists, a copy it lacks leaves")
+
     def test_a_copy_cut_short_keeps_its_marker(self):
         self.store_skill("demo-brew")
         put(os.path.join(self.p4, "skillex", "demo-brew", "scripts", "demo.py"), "print('demo')\n")

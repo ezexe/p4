@@ -624,8 +624,9 @@ def link_similar(skill_dir, similar):
 
 # --------------------------------------------------------------------------------------------------------- copying
 
-def mirror(p4, names=None):
-    """Copy store skills into the project's `.claude/skills/`. Returns the names copied or removed."""
+def mirror(p4, names=None, remove=False):
+    """Copy store skills into the project's `.claude/skills/`, and with `remove` set aside each copy whose store skill
+    is gone. Returns the names copied or removed."""
     src = skillex_dir(p4)
     dst = project_skills(p4)
     os.makedirs(dst, exist_ok=True)
@@ -666,7 +667,7 @@ def mirror(p4, names=None):
         except OSError:                                  # another session placed its copy first
             shutil.rmtree(staging, ignore_errors=True)
         changed.append(n)
-    if names is None and os.path.isdir(dst):
+    if remove and names is None and os.path.isdir(dst):
         for n in sorted(os.listdir(dst)):
             if n not in store and os.path.isfile(os.path.join(dst, n, MARKER)):
                 set_aside(p4, os.path.join(dst, n))    # its store skill is gone
@@ -761,9 +762,10 @@ def write_session(p4, sid, st):
 
 
 def cmd_start(p4, payload):
+    had_store = os.path.isdir(skillex_dir(p4))         # a missing store says nothing about which skills are gone
     os.makedirs(skillex_dir(p4), exist_ok=True)
     made = not os.path.isdir(project_skills(p4))
-    changed = mirror(p4)
+    changed = mirror(p4, remove=had_store)
     sid = payload.get("session_id")
     if sid and read_session(p4, sid) is None:
         write_session(p4, sid, {"since": time.time(), "looked": {}})
