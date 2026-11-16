@@ -15,7 +15,8 @@ The session's temp directory, ON unless p4.json's scratchpad.tmp is false or P4_
                                Windows, `/private/tmp/claude-<uid>/<project>/<session>/scratchpad` on macOS) becomes a
                                link (a junction on Windows) to `.claude/p4/temportal/tmp/<session>/`, tracked by the p4 repo, so
                                what the session writes there is kept; what it already held is moved in first (a taken
-                               name gets the time as a suffix). One line names the link when it is made. A link
+                               name gets the time as a suffix; a clone's read-only git objects move too, across
+                               drives). One line names the link when it is made. A link
                                left by an older layout or location, one whose target is gone or is
                                `.claude/p4/tmp/<session>`, is repaired: what the old target holds moves in first.
   scratch-sweep (SessionStart) the project's other scratchpads, in the same temp folder and in the folder an older
@@ -65,6 +66,7 @@ import os
 import glob
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -361,11 +363,55 @@ def move_into(src, target, stamp):
             stem, ext = os.path.splitext(dest)
             dest = f"{stem}.{stamp}{ext}"
         try:
-            shutil.move(os.path.join(src, name), dest)
+            move_entry(os.path.join(src, name), dest)
             moved.append(name)
         except OSError:
             continue
     return moved
+
+
+def move_entry(src, dest):
+    """Move one file or folder. A folder that cannot be renamed, as from the temp drive to the project's, is copied
+    and then removed with its read-only files, such as a clone's git objects: shutil.move stops at the first of
+    those, after the copy, and leaves the folder in both places. A copy that fails is taken back."""
+    try:
+        os.rename(src, dest)
+        return
+    except OSError:
+        pass
+    if is_link(src) or not os.path.isdir(src):
+        shutil.move(src, dest)
+        return
+    try:
+        shutil.copytree(src, dest, symlinks=True)
+    except OSError:
+        try:
+            remove_tree(dest)
+        except OSError:
+            pass
+        raise
+    remove_tree(src)
+
+
+def remove_tree(path):
+    """Remove a folder with all it holds, read-only files too; a link inside is removed, never followed."""
+    with os.scandir(path) as entries:
+        found = list(entries)
+    for e in found:
+        if is_link(e.path):
+            if os.name == "nt" and os.path.isdir(e.path):
+                os.rmdir(e.path)
+            else:
+                os.unlink(e.path)
+        elif e.is_dir(follow_symlinks=False):
+            remove_tree(e.path)
+        else:
+            try:
+                os.unlink(e.path)
+            except PermissionError:
+                os.chmod(e.path, stat.S_IWRITE)
+                os.unlink(e.path)
+    os.rmdir(path)
 
 
 def link_tmp(harness, target, stamp):

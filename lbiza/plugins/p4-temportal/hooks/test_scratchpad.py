@@ -620,6 +620,55 @@ def tmp_empty_and_cap_cases():
     print("test_scratchpad.py: tmp empty and cap cases green")
 
 
+def move_cases():
+    """A folder that cannot be renamed into the tmp, as from the temp drive to the project's, is copied and removed
+    with its read-only files, so a scratchpad holding a clone still ends as the link; a copy that fails is taken
+    back and the folder stays where it was."""
+    import stat
+    sys.path.insert(0, HERE)
+    import scratchpad as sp
+    base = tempfile.mkdtemp(prefix="p4-scratchpad-move-")
+    rename, copytree = os.rename, shutil.copytree
+
+    def no_rename(*_a, **_k):
+        raise OSError("another drive")
+
+    def half_copy(src, dest, **_k):
+        os.makedirs(dest)
+        raise shutil.Error("the copy stopped")
+
+    try:
+        harness, target = os.path.join(base, "temp", "sid", "scratchpad"), os.path.join(base, "p4", "tmp", "sid")
+        obj = os.path.join(harness, "clone", ".git", "objects", "08")
+        put(obj, "609f44", "object\n")
+        os.chmod(os.path.join(obj, "609f44"), stat.S_IREAD)
+        put(harness, "note.md", "a note\n")
+        os.makedirs(target)
+        os.rename = no_rename
+        try:
+            shutil.copytree = half_copy
+            assert sp.move_into(harness, target, "t") == ["note.md"], "a folder whose copy failed counted as moved"
+            assert os.path.isfile(os.path.join(obj, "609f44")), "a folder whose copy failed did not stay"
+            assert not os.path.exists(os.path.join(target, "clone")), "a failed copy was left in the tmp"
+            shutil.copytree = copytree
+            state, moved = sp.link_tmp(harness, target, "t")
+        finally:
+            os.rename, shutil.copytree = rename, copytree
+        assert (state, moved) == ("linked", ["clone"]), (state, moved)
+        with open(os.path.join(target, "clone", ".git", "objects", "08", "609f44"), encoding="utf-8") as f:
+            assert f.read() == "object\n", "a read-only file did not move"
+        assert is_link(harness) and os.path.samefile(harness, target), "a scratchpad holding a clone was not linked"
+        assert sorted(os.listdir(target)) == ["clone", "note.md"], os.listdir(target)
+    finally:
+        if os.path.lexists(harness) and is_link(harness):
+            unlink(harness)
+        for d, _dirs, names in os.walk(base):
+            for n in names:
+                os.chmod(os.path.join(d, n), stat.S_IWRITE)
+        shutil.rmtree(base, ignore_errors=True)
+    print("test_scratchpad.py: move cases green")
+
+
 def main():
     asks()
     notebook_out()
@@ -627,6 +676,7 @@ def main():
     tmp_cases()
     tmp_keep_cases()
     sweep_cases()
+    move_cases()
     tmp_empty_and_cap_cases()
     gate2_d()
     print("test_scratchpad.py: all green")
