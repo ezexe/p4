@@ -407,12 +407,22 @@ def read_sources(p4, name):
         return []
 
 
-def owner_skill(p4, rels):
-    """The store skill whose recorded sources share a script with `rels`, if any."""
+def owner_skill(p4, rels, paths=()):
+    """The store skill this work belongs to, if any: one whose recorded sources share a script with `rels`, or one
+    whose kept script in `scripts/` links to a script of `paths` as two sessions' scripts link. The second finds the
+    skill again after temportal has cleared every source's tmp folder."""
     want = set(rels)
-    for n in store_skills(p4):
+    names = store_skills(p4)
+    for n in names:
         if want & set(read_sources(p4, n)):
             return n
+    mine = [ids for ids in (identifiers(p) for p in paths) if ids]
+    for n in names:
+        scripts = os.path.join(skillex_dir(p4), n, "scripts")
+        for f in sorted(os.listdir(scripts)) if os.path.isdir(scripts) else []:
+            kept = identifiers(os.path.join(scripts, f))
+            if kept and any(jaccard(kept, ids) >= SIMILAR for ids in mine):
+                return n
     return None
 
 
@@ -717,7 +727,7 @@ def brew(p4, path):
     t = real(os.path.join(p4, "temportal"))
     sources = [(session, path)] + found
     rels = [os.path.relpath(real(p), t).replace(os.sep, "/") for _, p in sources]
-    name = owner_skill(p4, rels)
+    name = owner_skill(p4, rels, [p for _, p in sources])
     created = name is None
     if created:
         name = free_name(p4, pick_name([p for _, p in sources], path))

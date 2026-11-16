@@ -275,6 +275,19 @@ class Watcher(Store):
         st["since"] -= 60
         skillex.write_session(self.p4, sid, st)
 
+    def test_the_same_work_after_its_sources_were_cleared_refreshes_its_skill(self):
+        self.script("s1", "astcheck.py", "astcheck", "a=1")
+        self.script("s2", "astcheck.py", "astcheck", "b=2")
+        self.write(self.script("s3", "astcheck.py", "astcheck", "c=3"))
+        for s in ("s1", "s2", "s3"):                         # temportal commits and clears idle tmp folders
+            shutil.rmtree(os.path.join(self.tmp, s))
+        self.script("s4", "check.py", "check", "d=4")
+        self.script("s5", "check.py", "check", "e=5")
+        out = self.write(self.script("s6", "check.py", "check", "f=6"))
+        self.assertEqual(self.skills(), ["astcheck"], "no second skill for the same work")
+        self.assertIn("refreshed the skill `astcheck`", out["hookSpecificOutput"]["additionalContext"])
+        self.assertIn("tmp/s6/check.py", read(os.path.join(self.p4, "skillex", "astcheck", "sources.txt")))
+
     def test_a_script_written_by_a_shell_command_is_seen_at_stop(self):
         self.started_a_minute_ago("s3")
         self.script("s1", "astcheck.py", "astcheck", "a=1")
