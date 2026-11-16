@@ -182,11 +182,12 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
   <nav class="tabs" aria-label="Pages about sessions">
     <a href="session-levels.html" aria-current="page">Session levels</a>
     <a href="session-tree.html">The session tree</a>
+    <a href="puppeteer.html">The puppeteer</a>
   </nav>
   <h1>Session levels</h1>
   <p class="lede">Since version 0.9.0, p4-phi runs each piece of work at the level Claude Code gives it, so a session's own turn is never held by it. Choose a kind of task below, see the level it goes to, and step through the path its result takes back.</p>
   <ul class="facts">
-    <li class="f-phi"><b>Sessions do the writing.</b>A top session orchestrates and lands. Each work step of its plan goes to a child session, which the <a href="session-tree.html">session tree</a> page shows.</li>
+    <li class="f-phi"><b>Sessions do the writing.</b>A top session orchestrates and lands. Each work step of its plan goes to a child session, which the <a href="session-tree.html">session tree</a> page shows. A <a href="puppeteer.html">puppeteer</a> is the exception: its steps stay with it.</li>
     <li class="f-you"><b>Subagents run in the background.</b>The plugin ships three: <code>p4-phi:sweep</code>, <code>p4-phi:runner</code> and <code>p4-phi:check</code>. Any session can start one.</li>
     <li class="f-app"><b>Nobody waits in the foreground.</b>The session that asked goes on or ends its turn. A completion notification brings the result in a later turn.</li>
   </ul>
@@ -363,9 +364,10 @@ function steps(kind,ask){
        html:"The brief is the step's words, a line <code>Files:</code> with the paths the child may write, what it must leave done, and “report when done”. Steps that share a file go to one child as a serial run. Steps with disjoint files each get a child.",
        code:call("mcp__ccd_session__start_session",{initiation:"user_asked",context:"fresh",use_worktree:false,title:"Fix the review findings in relay.py",
          prompt:"Fix the ten review findings in relay.py.\nFiles: lbiza/plugins/p4-phi/scripts/relay.py\nDone means: test_relay.py passes and one commit is on main.\nReport when done."})},
-      {dir:"down",legs:["tc"],by:"Or it writes a start request",say:"A start request carries the same brief down.",
-       html:"On a turn that another session began, the app refuses <code>user_asked</code>. The top session writes the brief as a start request instead. The next turn ezexe begins, in any session of the store, starts it as this session's child.",
-       code:"phi.py request \"Fix the review findings in relay.py\" --brief \"<the whole brief, with its Files: line>\""},
+      {dir:"down",legs:["tc"],by:"Or it shows a proposal card",say:"A card, or a start request, carries the same brief down.",
+       html:"On a turn that another session began, the app refuses <code>user_asked</code>. The top session shows the child as a proposal card, the same call with <code>initiation</code> <code>own_initiative</code>, which ezexe presses in this session. Only where the card is refused too does it write the brief as a start request. The next turn ezexe begins in this session starts it, and no other session is handed it.",
+       code:call("mcp__ccd_session__start_session",{initiation:"own_initiative",context:"fresh",use_worktree:false,title:"Fix the review findings in relay.py",
+         prompt:"<the whole brief, with its Files: line>"})},
       {dir:"hold",legs:["tc"],by:"The top session ends its turn",say:"The child works. The top session is free.",
        html:"The top session keeps itself free for planning, relaying between sessions, decisions with ezexe, and landing. It does not do the step itself and it does not wait on the child."},
       {dir:"up",legs:["tc"],by:"The child reports",say:"The report comes back up.",

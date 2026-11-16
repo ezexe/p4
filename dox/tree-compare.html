@@ -185,7 +185,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
     </div>
     <div class="row">
       <h3>How a node is created</h3>
-      <div class="cs"><b>Session tree</b>A session calls <code>mcp__ccd_session__start_session</code>, or keeps a start request with <code>phi.py request</code> that ezexe's next turn starts.</div>
+      <div class="cs"><b>Session tree</b>A session calls <code>mcp__ccd_session__start_session</code>. When the app refuses the call it shows a proposal card for ezexe to press, or keeps a start request with <code>phi.py request</code> that ezexe's next turn in that same session starts.</div>
       <div class="cp"><b>Call tree, drawn</b>You move the slider. <code>buildTree(n)</code> makes every node of the tree at once, by recursion.</div>
       <div class="cp"><b>Node tree, built</b>You run <code>python -m phi_rank.tree train</code> with <code>--k</code>. It trains the first K addresses, the deepest first, each on one shard of the store's tracked text.</div>
     </div>
@@ -197,7 +197,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
     </div>
     <div class="row">
       <h3>How a node is retired</h3>
-      <div class="cs"><b>Session tree</b>One at a time. A done child leaves its outcome on its parent as a <code>replaces:</code> note, and ezexe archives it. A message brings it back.</div>
+      <div class="cs"><b>Session tree</b>One at a time. A done child leaves its outcome on its parent as a <code>replaces:</code> note, and ezexe archives it. A <a href="puppeteer.html">puppeteer</a> may archive a complete session it controls. A message brings it back.</div>
       <div class="cp"><b>Call tree, drawn</b>All at once. A new <code>n</code> replaces the whole tree with a new one.</div>
       <div class="cp"><b>Node tree, built</b>All at once. A new training run writes <code>tree.json</code> again, and the tree is loaded from the addresses that file lists.</div>
     </div>
