@@ -268,12 +268,15 @@ def rank(p4, text, idx=None, model=None, k=5, now=None):
 
 def near_candidates(p4, model, docs, cand, text, session, gone):
     """The candidates with near.py's documents that BM25 did not draw appended, and the `near` feature of every
-    candidate among near.py's documents, when the loaded ranker was trained with that feature. The candidates as
+    candidate among near.py's documents, when the loaded ranker was trained with that feature and p4.json's
+    recall.near.on is true. The candidates as
     they are and None otherwise, or when no training round has left near.py a memory it can read."""
     if "near" not in (model or {}).get("features", []):
         return cand, None
     import near
     near.configure(p4)
+    if not near.ON:                       # p4.json's recall.near.on, read by training and by the query alike
+        return cand, None
     mem = near.load(p4)
     if not mem:
         return cand, None

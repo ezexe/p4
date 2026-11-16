@@ -131,6 +131,20 @@ class Near(unittest.TestCase):
         ids = cli.rank(self.p4, TASKS[3][3], idx=self.idx, model=model, k=2)
         self.assertEqual(set(ids), {"repo:src/kelp/anchor.py", "repo:src/kelp/buoy.py"}, "ranked from the near candidates")
 
+    def test_off_adds_no_near_candidate(self):
+        """With p4.json's `recall.near.on` false, a query adds no near candidate, even under a model trained with it."""
+        path = os.path.join(self.p4, "p4.json")
+        conf = {}
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                conf = json.load(f)
+        conf.setdefault("recall", {}).setdefault("near", {})["on"] = False
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(conf, f)
+        got = cli.near_candidates(self.p4, {"features": ["base", "near"]}, self.idx["docs"], [], TASKS[3][3],
+                                  "dddddddd", set())
+        self.assertEqual(got, ([], None))
+
     def test_extend_caps_and_ranks(self):
         docs = self.idx["docs"]
         id_at = near.id_index(docs)
