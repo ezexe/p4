@@ -931,6 +931,42 @@ class Rules(unittest.TestCase):
         self.assertIn("background for this session", first)
         self.assertLessEqual(len(first), phi.HOOK_CHARS)
 
+    def test_the_start_text_keeps_to_the_hooks_room_with_every_line_it_carries(self):
+        """A supervisor session whose p4.json names a shared store this machine has not seen, started again after a
+        clear and after a compaction, with the default start background and with one set longer than the hook's room:
+        each start text is at most HOOK_CHARS and still carries the standing instruction and the missing-home line,
+        and after a compaction the line that names its board comes first."""
+        t = self.t
+        write(os.path.join(t.tmp, "claude_desktop_config.json"), json.dumps({"preferences": {"epitaxyPrefs": {
+            "dframe-group-scopes": {"acct/org": {"groups": [{"id": "cg-1", "name": "puppeteers"}],
+                                                 "assignments": {"code:" + TOP: "cg-1"}}}}}}))
+        write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"home": "git@example.com:team/elsewhere.git"}}))
+        t.say(TOP, TASK, P4_PHI_NEW_TASK="1")
+        calls = ([("Edit", {"file_path": f"src/export/flush_part_{k}.py"}, "ok") for k in range(14)]
+                 + [("Bash", {"command": f"python -I tests/test_part_{k}.py"}, f"No module named 'part{k}'", 1)
+                    for k in range(4)])
+        for n, host in enumerate([f"local_top0000{k}" for k in range(2, 6)] + [TOP] * 3):
+            if host != TOP:
+                t.record(host, title=f"Narwhal importer, part {n}")
+            t.stop(host, "Build the next part of the narwhal tools and check it. " * 5, calls,
+                   "Built and checked: " + "the part reads the ports table back and its check passes. " * 8,
+                   uuid=f"u{n}")
+        sizes = {}
+        for chars in (phi.BACKGROUND_CHARS, 2 * phi.HOOK_CHARS):
+            write(os.path.join(t.p4, "phi", "phi.json"), json.dumps({"background_chars": chars}))
+            for source in ("clear", "compact"):
+                text = context(t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": source},
+                                      P4_PHI_NEW_TASK="1"))
+                sizes[f"{source}, background_chars {chars}"] = len(text)
+                self.assertIn("When a message from ezexe is about something else", text, source)
+                self.assertIn("names the shared store git@example.com:team/elsewhere.git", text, source)
+                if chars == phi.BACKGROUND_CHARS:
+                    self.assertIn("feedback and user memories", text, "the rules keep the room the others leave")
+                if source == "compact":
+                    self.assertTrue(text.startswith("phi (p4-phi): this session is a supervisor session and its "
+                                                    "context was compacted"), text[:200])
+        self.assertLessEqual(max(sizes.values()), phi.HOOK_CHARS, sizes)
+
     def test_off_is_silence_and_no_memories_is_the_built_in_rules_alone(self):
         write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"rules": False}))
         self.assertEqual(self.start(TOP), "")

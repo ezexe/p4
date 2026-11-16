@@ -2104,8 +2104,6 @@ def h_session_start(payload):
     pin = pin_of(me.home, s)
     text = "\n\n".join(p for p in (pin, text) if p)
     live_rules(s, me.store, os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or "")   # what it starts with
-    rules = rules_text(me.store, HOOK_CHARS - len(text) - len(rule) - 4,
-                       fork=bool(s.get("forked")), brief=source == "compact") if source != "resume" else ""
     relay.remember_store(me.store)
     if me.home_missing:
         rule = "\n\n".join(p for p in (rule, f"phi (p4-phi): this project's p4.json names the shared store "
@@ -2115,6 +2113,9 @@ def h_session_start(payload):
     if source == "compact" and controls.is_puppeteer(s, me.store):
         first = controls.compacted(me.home, s)     # a supervisor session's board path before anything else
         RAN["pair"] = "compacted"
+    text = cut(text, HOOK_CHARS - len(first) - len(rule) - 6)    # the room the lines around it leave
+    rules = rules_text(me.store, HOOK_CHARS - len(first) - len(text) - len(rule) - 6,
+                       fork=bool(s.get("forked")), brief=source == "compact") if source != "resume" else ""
     save_session(me.home, s)
     return "\n\n".join(p for p in (first, rules, text, rule) if p) or None
 
