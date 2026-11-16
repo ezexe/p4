@@ -7,13 +7,20 @@
 # prompt's UTF-8 punctuation never decodes into lone surrogates that a later UTF-8 write refuses.
 set -u
 
+# A failure is printed as a systemMessage, which Claude Code shows ezexe on every event, where plain stdout reaches
+# nobody on Stop, SessionEnd, PreToolUse or PostToolUse. A quote or backslash in the words is dropped to keep it JSON.
+notice() {
+  m=$(printf '%s' "$1" | tr -d '"\\')
+  printf '{"systemMessage": "%s"}\n' "$m"
+}
+
 part="${1:-}"
 shift || true
 case "$part" in
   memory) script=p4_memory.py ;;
   scratchpad) script=scratchpad.py ;;
   lifetime) script=lifetime.py ;;
-  *) echo "p4-temportal: unknown part '$part'; nothing was done"; exit 0 ;;
+  *) notice "p4-temportal: unknown part '$part'; nothing was done"; exit 0 ;;
 esac
 
 # The ask runs before every Write, Edit, NotebookEdit, Bash and PowerShell call and is off unless P4_SCRATCHPAD_ASKS=1
@@ -42,5 +49,5 @@ if [ -r "$f" ]; then
   fi
 fi
 
-echo "p4-temportal $part ${1:-?}: no working python found; nothing was done"
+notice "p4-temportal $part ${1:-?}: no working python found; nothing was done"
 exit 0

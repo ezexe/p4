@@ -1,4 +1,5 @@
 """Deciding tests for run-hook.sh: run it with sh against a stub plugin root."""
+import json
 import os
 import shutil
 import subprocess
@@ -36,7 +37,12 @@ class RunHookTest(unittest.TestCase):
         (self.root / "hooks" / "find-python.sh").unlink()
         out = self.run_hook("lifetime", "sweep")
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertIn("no working python found", out.stdout)
+        self.assertIn("no working python found", json.loads(out.stdout)["systemMessage"])
+
+    def test_an_unknown_part_prints_a_system_message(self):
+        out = self.run_hook("nosuch", "sweep")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("unknown part 'nosuch'", json.loads(out.stdout)["systemMessage"])
 
     def test_find_python_equals_p4_phis(self):
         phi = HERE.parent.parent / "p4-phi" / "hooks" / "find-python.sh"

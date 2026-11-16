@@ -66,6 +66,33 @@ def run(*args, stdin="", cwd=None, **env):
                           capture_output=True, text=True, encoding="utf-8", cwd=cwd, env=e)
 
 
+class FailureNotice(unittest.TestCase):
+    """A failure on SessionEnd, where plain stdout reaches nobody, is printed as a systemMessage that ezexe sees."""
+
+    def test_a_degraded_sweep_prints_a_system_message(self):
+        import contextlib
+        import io
+        import lifetime
+        root = tempfile.mkdtemp(prefix="p4-temportal-fail-")
+        old = (lifetime.sweep, sys.argv, sys.stdin)
+        def broken(*a, **k):
+            raise OSError("disk gone")
+        try:
+            lifetime.sweep = broken
+            for sub, event in (("session-end", "SessionEnd"), ("sweep", "SessionStart")):
+                sys.argv = ["lifetime.py", sub]
+                sys.stdin = io.TextIOWrapper(io.BytesIO(json.dumps({"cwd": root, "hook_event_name": event}).encode()))
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    lifetime.main()
+                msg = json.loads(out.getvalue())["systemMessage"]
+                self.assertIn(f"lifetime {sub} degraded", msg)
+                self.assertIn("disk gone", msg)
+        finally:
+            lifetime.sweep, sys.argv, sys.stdin = old
+            wipe(root)
+
+
 class Lifetime(unittest.TestCase):
     maxDiff = None
 

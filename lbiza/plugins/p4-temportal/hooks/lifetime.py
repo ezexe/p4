@@ -444,7 +444,8 @@ def main():
                 if line:
                     print(line)
         except Exception as e:  # noqa: BLE001 — a hook degrades, never raises
-            print(f"p4-temportal lifetime {sub} degraded: {type(e).__name__}: {e}")
+            # a systemMessage reaches ezexe on SessionEnd too, where plain stdout reaches nobody
+            print(json.dumps({"systemMessage": f"p4-temportal lifetime {sub} degraded: {type(e).__name__}: {e}"}))
         return 0
     import argparse
     ap = argparse.ArgumentParser(prog="lifetime.py", description="p4-temportal: cookie and cache lifetimes")
