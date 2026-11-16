@@ -20,7 +20,11 @@ case "${OS:-}${OSTYPE:-}" in
   *Windows*|*msys*|*cygwin*|*win32*) probe=1 ;;
   *) probe=0 ;;
 esac
-known="${CLAUDE_PLUGIN_ROOT}/.python"   # the interpreter proven once, by its absolute path, in the plugin's folder
+known="${CLAUDE_PLUGIN_ROOT}/.python"   # the interpreter proven once, by its absolute path
+if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then   # the data folder is kept across updates and sits outside the checkout
+  [ -d "$CLAUDE_PLUGIN_DATA" ] || mkdir -p "$CLAUDE_PLUGIN_DATA" 2>/dev/null
+  [ -d "$CLAUDE_PLUGIN_DATA" ] && known="${CLAUDE_PLUGIN_DATA}/.python"
+fi
 if [ "$probe" = 1 ] && [ -r "$known" ]; then
   read -r c < "$known" || c=""
   case "$c" in */*) ;; *) c="" ;; esac       # a bare name may be the WindowsApps alias: probe again
