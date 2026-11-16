@@ -858,6 +858,60 @@ class WarnTogether(unittest.TestCase):
         finally:
             shutil.rmtree(home, ignore_errors=True)
 
+    def test_a_record_that_reads_empty_keeps_the_warning_for_later(self):
+        """#53, from the read of its commit: session.json reads empty while another writer's os.replace is under
+        way on Windows, and the warning was dropped."""
+        home = tempfile.mkdtemp(prefix="p4-phi-warn-")
+        read = relay._read_json
+        try:
+            top = "local_topwarn"
+            path = os.path.join(relay._dir(home, top), "session.json")
+            relay._write_json(path, {"sessionId": top})
+            relay._read_json = lambda p: {} if p == path else read(p)
+            self.assertTrue(relay.warn(home, top, "key1", "met an empty read"), "kept, not dropped")
+            relay._read_json = read
+            self.assertEqual(len(glob.glob(os.path.join(relay._dir(home, top), "warn-pending-*.json"))), 1)
+            relay.warn(home, top, "key2", "written under the lock")
+            pend = relay._read_json(path).get("relayPending")
+            self.assertEqual(sorted(w["text"] for w in pend), ["met an empty read", "written under the lock"])
+        finally:
+            relay._read_json = read
+            shutil.rmtree(home, ignore_errors=True)
+
+    def test_another_write_of_the_record_never_drops_a_waiting_warning(self):
+        """#53: phi.save_session and the other read-modify-writes of session.json held a copy read earlier."""
+        import threading
+        import phi
+        home = tempfile.mkdtemp(prefix="p4-phi-warn-")
+        try:
+            top = "local_topwarn"
+            path = os.path.join(relay._dir(home, top), "session.json")
+            relay._write_json(path, {"sessionId": top})
+            stale = relay._read_json(path)                 # a copy a hook read before the warning came
+            relay.warn(home, top, "key0", "came while a hook held an older copy")
+            relay._write_json(path, {**stale, "stepRelayed": "1 x"})
+            self.assertEqual(len(relay._read_json(path)["relayPending"]), 1, "a plain write keeps it")
+            gate = threading.Barrier(16)
+
+            def warns(k):
+                gate.wait()
+                relay.warn(home, top, f"key{k}", f"warning number {k}")
+
+            def saves(k):
+                gate.wait()
+                phi.save_session(home, {**stale, "nudged": [str(k)]})
+                relay._write_json(path, {**stale, "keptGoing": {"turn": str(k), "n": 1}})
+            runs = [threading.Thread(target=warns if k % 2 else saves, args=(k,)) for k in range(1, 17)]
+            for r in runs:
+                r.start()
+            for r in runs:
+                r.join()
+            pend = relay._read_json(path).get("relayPending")
+            self.assertEqual(len(pend), 9, "the eight warnings and the first, through eight saves and eight writes")
+            self.assertFalse(os.path.exists(path + ".lock"))
+        finally:
+            shutil.rmtree(home, ignore_errors=True)
+
     def test_a_warning_that_cannot_get_the_lock_is_kept_and_drained(self):
         home = tempfile.mkdtemp(prefix="p4-phi-warn-")
         wait = relay.LOCK_WAIT_S

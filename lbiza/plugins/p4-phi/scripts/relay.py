@@ -34,6 +34,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 
 MARKS = ("deprecates:", "replaces:")
@@ -52,9 +53,42 @@ def _read_json(path):
         return {}
 
 
+_HOLDS = threading.local()     # the paths whose lock this thread holds
+_GAVE_UP = {}                  # a lock file -> when this process stopped waiting for it
+
+
+def _held(path):
+    """True while this thread holds `path`'s lock (relay.locked)."""
+    return path in getattr(_HOLDS, "paths", ())
+
+
 def _write_json(path, d):
+    """`d` written to `path`. A session's record is written under its lock, and with the warnings that wait on
+    disk, not the copy the caller read earlier: only relay.warn and relay.take_warnings change `relayPending`,
+    under the lock, so no other read-modify-write of the record can drop a warning written meanwhile (#53)."""
+    if os.path.basename(path) == "session.json" and not _held(path):
+        with locked(path):                        # not got: the entries are read again right before the write
+            keep_pending(path, d)
+            _write_raw(path, d)
+        return
+    _write_raw(path, d)
+
+
+def keep_pending(path, d):
+    """`d` given the warnings and the told keys the record on disk holds now. For a writer that did not take them
+    under the lock."""
+    fresh = _read_json(path)
+    if "relayPending" in fresh:
+        d["relayPending"] = fresh["relayPending"]
+    if isinstance(fresh.get("relayWarned"), list):
+        mine = d.get("relayWarned") if isinstance(d.get("relayWarned"), list) else []
+        d["relayWarned"] = mine + [k for k in fresh["relayWarned"] if k not in mine]
+    return d
+
+
+def _write_raw(path, d):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = f"{path}.{os.getpid()}.tmp"            # one writer's temp file never another's
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"     # one writer's temp file never another's
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(d, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
     os.replace(tmp, path)
@@ -268,18 +302,23 @@ def warn(home, sid, key, text):
         return False
     with locked(path) as lk:
         if not lk.held:
-            name = hashlib.sha1(f"{key} {text}".encode("utf-8", "replace")).hexdigest()[:16]
-            _write_json(os.path.join(_dir(home, sid), f"warn-pending-{name}.json"),
-                        {"key": key, "text": text, "time": time.time()})
-            return True
+            return _warn_later(home, sid, key, text)
         s = _read_json(path)
-        if not s:
-            return False
+        if not s:                                 # the record is there but reads empty, as while another writer's
+            return _warn_later(home, sid, key, text)   # os.replace is under way on Windows: kept, never dropped
         took = drain_warnings(home, sid, s)
         added = _warn(s, key, text)
         if took or added:
             _write_json(path, s)
         return added
+
+
+def _warn_later(home, sid, key, text):
+    """A warning that cannot be put on the record now, kept on a file of its own for drain_warnings."""
+    name = hashlib.sha1(f"{key} {text}".encode("utf-8", "replace")).hexdigest()[:16]
+    _write_json(os.path.join(_dir(home, sid), f"warn-pending-{name}.json"),
+                {"key": key, "text": text, "time": time.time()})
+    return True
 
 
 def drain_warnings(home, sid, s):
@@ -1354,17 +1393,21 @@ class locked:
     a lock older than LOCK_STALE_S, so a crashed hook never blocks the next one."""
 
     def __init__(self, path):
+        self.path = path
         self.lock = path + ".lock"
         self.held = False
 
     def __enter__(self):
         import time
         os.makedirs(os.path.dirname(self.lock), exist_ok=True)
+        if time.time() - _GAVE_UP.get(self.lock, 0) < LOCK_STALE_S and os.path.exists(self.lock):
+            return self                           # a lock this process already waited out, still there: not again
         end = time.time() + LOCK_WAIT_S
         while True:
             try:
                 os.close(os.open(self.lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
                 self.held = True
+                _HOLDS.paths = getattr(_HOLDS, "paths", frozenset()) | {self.path}
                 return self
             except FileExistsError:
                 try:
@@ -1374,6 +1417,7 @@ class locked:
                 except OSError:
                     continue
                 if time.time() > end:
+                    _GAVE_UP[self.lock] = time.time()
                     return self                   # never block a hook for good: go on unlocked
                 time.sleep(0.02)
             except OSError:
@@ -1381,6 +1425,7 @@ class locked:
 
     def __exit__(self, *exc):
         if self.held:
+            _HOLDS.paths = getattr(_HOLDS, "paths", frozenset()) - {self.path}
             try:
                 os.remove(self.lock)
             except OSError:

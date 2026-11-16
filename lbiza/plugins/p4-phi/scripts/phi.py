@@ -450,7 +450,17 @@ def load_session(home, sid):
 
 def save_session(home, s):
     """session.json written from `s`, keeping what another hook wrote into it meanwhile: a sibling's Stop marks a
-    session stale or queues a warning while this hook holds the copy it read at its start (ST1, ST2)."""
+    session stale or queues a warning while this hook holds the copy it read at its start (ST1, ST2). The read
+    and the write run under the session's lock, the one relay.warn holds, so a warning written between them is
+    never dropped (#53)."""
+    path = os.path.join(session_dir(home, s.get("sessionId")), "session.json")
+    if relay._held(path):
+        return _save_session(home, s)
+    with relay.locked(path):
+        return _save_session(home, s)
+
+
+def _save_session(home, s):
     disk = load_session(home, s.get("sessionId"))
     if "relayPending" in disk:                    # queued and consumed on disk only, by relay.warn and the checks
         s["relayPending"] = disk["relayPending"]
