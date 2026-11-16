@@ -7,7 +7,6 @@
                                        external modules; a package installed or updated is read again)
   query --text T [--session S]         the recall lines for one message: 0 lines for an ordinary message,
                                        otherwise at most 5, each `- <date> <kind>: <text> (<file>:<line>)`
-  row open|close --session S ...       stamp a message row; complete it from the reply (rows.py)
   serve-log --key K --ids ...          record what was served to a turn or a subagent (models/served/)
   usage --key K --reply-file F         the served lines' usage labels, from the reply (and --transcript)
   signals [--session S]                the dictionary's signals into vocabulary.md (pending entries)
@@ -636,18 +635,6 @@ def cmd_check(args):
     return 0
 
 
-def cmd_row(args):
-    import rows
-    p4 = p4_dir(args)
-    if args.action == "open":
-        print(rows.row_open(p4, args.session, args.text, args.now or None))
-    else:
-        reply = open(args.reply_file, encoding="utf-8").read() if args.reply_file else args.text
-        e, done = rows.row_close(p4, args.session, reply, args.now or None)
-        print(f"row close: {e.id if e else 'no open row'}{'' if done else ' (not completed)'}")
-    return 0
-
-
 def cmd_serve_log(args):
     import labels as lb
     p4 = p4_dir(args)
@@ -785,13 +772,6 @@ def main(argv=None):
     p.add_argument("--all", action="store_true", help="merge every machine's branch into main and move them up to it")
     p.add_argument("--push", action="store_true")
     p.add_argument("--main", default="")
-    p = sub.add_parser("row")
-    p.add_argument("action", choices=("open", "close"))
-    p.add_argument("--p4")
-    p.add_argument("--session", required=True)
-    p.add_argument("--text", default="")
-    p.add_argument("--reply-file", default="")
-    p.add_argument("--now", default="")
     p = sub.add_parser("serve-log")
     p.add_argument("--p4")
     p.add_argument("--key", required=True)
@@ -866,8 +846,6 @@ def main(argv=None):
         return cmd_query(args)
     if args.cmd == "check":
         return cmd_check(args)
-    if args.cmd == "row":
-        return cmd_row(args)
     if args.cmd == "serve-log":
         return cmd_serve_log(args)
     if args.cmd == "usage":

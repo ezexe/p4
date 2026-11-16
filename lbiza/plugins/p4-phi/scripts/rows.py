@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""rows.py: the message rows of `store/messages/<s8>.md` (fresh-marketplace.md 3.5, 5.1), `p4.py row open|close`.
+"""rows.py: the message rows of `store/messages/<s8>.md` (fresh-marketplace.md 3.5, 5.1).
 
 open   the prompt hook stamps a row: `fingerprint:` (the message, quoted, at most 300 characters), `time:`,
        `arrival:` (turn, or notification for a harness message), and `resembles:` when an earlier completed row of
