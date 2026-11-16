@@ -7,7 +7,6 @@
                                        external modules; a package installed or updated is read again)
   query --text T [--session S]         the recall lines for one message: 0 lines for an ordinary message,
                                        otherwise at most 5, each `- <date> <kind>: <text> (<file>:<line>)`
-  usage --key K --reply-file F         the served lines' usage labels, from the reply (and --transcript)
   signals [--session S]                the dictionary's signals into vocabulary.md (pending entries)
   labels [--from-pools OLD] [--from-history] [--from-transcripts --project D --slug DIR ...] [--reexploration]
                                        list the label set with counts per source; import or derive labels
@@ -634,28 +633,6 @@ def cmd_check(args):
     return 0
 
 
-def cmd_usage(args):
-    import labels as lb
-    import transcript as tr
-    p4 = p4_dir(args)
-    served = lb.read_served(p4, args.key)
-    if not served:
-        print("usage: nothing was served under that key")
-        return 0
-    reply = open(args.reply_file, encoding="utf-8").read() if args.reply_file else ""
-    turn = None
-    if args.transcript:
-        ts = tr.turns(args.transcript)
-        turn = ts[-1] if ts else None
-    idx, _ = st.ensure_index(p4)
-    rows_ = lb.usage_labels(p4, idx, served, reply, turn, served.get("task", ""), time.strftime("%Y-%m-%d %H:%M"))
-    if not args.dry:
-        lb.append_tsv(lb.mpath(p4, lb.TRAIN), lb.TRAIN_HEAD, rows_)
-    print(f"usage: {sum(1 for r in rows_ if r['label'] == '1')} used, {sum(1 for r in rows_ if r['label'] == '0')} "
-          f"unused")
-    return 0
-
-
 def cmd_signals(args):
     import labels as lb
     p4 = p4_dir(args)
@@ -763,12 +740,6 @@ def main(argv=None):
     p.add_argument("--all", action="store_true", help="merge every machine's branch into main and move them up to it")
     p.add_argument("--push", action="store_true")
     p.add_argument("--main", default="")
-    p = sub.add_parser("usage")
-    p.add_argument("--p4")
-    p.add_argument("--key", required=True)
-    p.add_argument("--reply-file", default="")
-    p.add_argument("--transcript", default="")
-    p.add_argument("--dry", action="store_true")
     p = sub.add_parser("signals")
     p.add_argument("--p4")
     p.add_argument("--session", default="")
@@ -831,8 +802,6 @@ def main(argv=None):
         return cmd_query(args)
     if args.cmd == "check":
         return cmd_check(args)
-    if args.cmd == "usage":
-        return cmd_usage(args)
     if args.cmd == "signals":
         return cmd_signals(args)
     if args.cmd == "labels":
