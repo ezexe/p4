@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
-"""migrate.py: the old p4 layout (sessions/*/vlds/*.md, models/, vindex/ ...) into the new one (store/, models/,
-archive/, src/), fresh-marketplace.md section 6. Dry by default: it reads the old tree, builds the new layout in
-memory, runs every check of the migration table and writes the report `archive/migration-<date>.md`. `--apply`
-also writes the new layout, into `--out` (default: in place, the old paths removed only when nothing is unplaced).
+"""migrate.py: a store in the vlds layout into the flat layout, every file placed and the result checked.
 
-Every file of the old tree is placed: converted entry by entry, archived verbatim, or dropped as derived, each
-drop with its reason; an entry or file that fits none is listed as unplaced, by old path and line.
+The vlds layout keeps each session's entries in `sessions/<session>/vlds/*.md`, beside `vindex/`, `sindex/`,
+`mrindex/` and a flat `models/`. The flat layout keeps the corpus in `store/`, the training files in `models/`,
+saved code in `src/` and what is kept verbatim in `archive/`, all at the top of `.claude/p4`. The plugins write
+neither: p4conf.migrate_layout, which the next hook runs, moves the flat layout into the plugins' directories, all
+but `archive/`, which stays at the top.
 
-    python3 migrate.py --p4 <old .claude/p4 tree> [--out <dir>] [--apply] [--now "YYYY-MM-DD HH:MM"]
+A run is dry by default: it reads the vlds tree, builds the flat layout in memory, runs its checks and writes the
+report `archive/migration-<date>.md`. `--apply` also writes the flat layout into `--out`, or in place when there is
+no `--out`, where the vlds paths are removed only when nothing is unplaced. Every file of the vlds tree is placed:
+converted entry by entry, archived verbatim, copied into `src/`, left where it is, or dropped with its reason. An
+entry or file that fits none is listed as unplaced, by its path and line in the vlds tree.
+
+The module is also a library: labels.py imports `turn_rows`, `fp`, `MARKERS` and `minutes` for its history labels
+and its follow-up check. `seed_dictionary` and `df_table` serve the migration alone, to seed its dictionary.
+
+    python3 migrate.py --p4 <a .claude/p4 in the vlds layout> [--out <dir>] [--apply] [--now "YYYY-MM-DD HH:MM"]
+                       [--project <repo>] [--report <path>]
 """
 
 import argparse
@@ -24,7 +34,7 @@ if HERE not in sys.path:
 import ranker  # noqa: E402
 import store as st  # noqa: E402
 
-# --- the old store's counting, as scripts/session/store_lessons.py does it (ported, read-only) ------------
+# --- the vlds tree's counts, made as scripts/session/store_lessons.py makes them, for the checks ---------
 
 OLD_KINDS = {"correction": ("ledger.md", re.compile(r"(?m)^\s*-?\s*meant:")),
              "retraction": ("tombstones.md", re.compile(r"(?m)^\s*-?\s*freed:")),
@@ -38,7 +48,7 @@ S8_RE = re.compile(r"--([0-9a-f]{8})$")
 
 
 def old_blocks_text(text):
-    """store_lessons.entries: blocks cut at blank lines and code fences."""
+    """The blocks of `text`, cut at blank lines and code fences, the fence lines dropped."""
     text = re.sub(r"(?m)^```[a-z]*\s*$", "\n", text)
     return [b.strip() for b in re.split(r"\n\s*\n", text) if b.strip()]
 
@@ -59,7 +69,8 @@ def glob(p4, pattern):
 
 
 def old_counts(p4):
-    """store_lessons' numbers on the old tree: lesson counts, live rules, label health."""
+    """{counts, live_rules, labels} of the vlds tree: the entries of each kind and the LIVE rulings, each text once,
+    over every vlds folder old_stores finds, and the counts of the dispatch rows under sessions/*/vlds/."""
     counts = {k: 0 for k in OLD_KINDS}
     for s in old_stores(p4):
         for kind, (fname, sel) in OLD_KINDS.items():
@@ -104,10 +115,10 @@ def row_counts(lab, e):
     lab["judged"] += bool(state and state.group(1) != "FRESH") or bool(re.search(r"(?m)^\s*match:\s*\S", e))
 
 
-# --- reading old files into entries ---------------------------------------------------------------------
+# --- reading the vlds files into entries -----------------------------------------------------------------
 
 def old_blocks(text):
-    """[(first line 1-based, [lines])] cut at blank lines and fence lines, with line numbers."""
+    """[(first line, [lines])] of `text`, cut at blank lines and fence lines, the first line counted from 1."""
     out, cur = [], None
     for n, l in enumerate(text.split("\n"), 1):
         if not l.strip() or FENCE_RE.match(l):
@@ -122,9 +133,10 @@ def old_blocks(text):
 
 def old_entries(text):
     """[{line, pairs, block, template, text}] for every block that carries a field, split at its column-0
-    `- key:` lines; header prose (no field) and schema templates are returned marked so the caller can count them.
-    A block that opens on an indented field with no dash continues the entry before it: the old hooks wrote a row's
-    first fields, and the model appended `state:` and `addressed:` after a blank line (`joined` records where)."""
+    `- key:` lines. A block with no field, such as header prose, comes back marked `prose`, and a schema template
+    marked `template`, so the caller can count them. A block that opens on an indented field with no dash continues
+    the entry before it, since a dispatch row of the vlds layout can carry its `state:` and `addressed:` after a
+    blank line; that entry's `joined` lists the first line of each such block."""
     out, last = [], None
     for start, lines in old_blocks(text):
         btext = "\n".join(lines)
@@ -185,20 +197,21 @@ def session_of(dirname):
     return dirname
 
 
-# --- the plan: every old file placed ---------------------------------------------------------------------
+# --- the plan: every file of the vlds tree placed --------------------------------------------------------
 
 CONVERT = {"local-storage.md", "ledger.md", "tombstones.md", "briefs.md", "data-store.md", "dispatch.md", "index.md",
            "recall-pool.md"}
 ARCHIVE_SESSION_FILES = {"session-storage.md", "virtual.md", "logger.md", "mind-reader.md"}
 DROP_SESSION_FILES = {"phi-index.md": "the per-session φ register; derived", ".sessions": "derived session list",
-                      ".gc-heads": "the retired gc's heads; derived", ".turn-close": "a turn-close stamp; derived",
-                      ".check-last": "a check stamp; derived", ".pre-ask": "the retired pre-ask gate's state",
-                      ".pool-owed": "the retired pool's flag"}
-DROP_TOP = {"vindex": "the cumulative vlds index; derived (its ## recall section is copied below)",
+                      ".gc-heads": "the vlds layout's gc heads; derived", ".turn-close": "a turn-end stamp; derived",
+                      ".check-last": "a check stamp; derived",
+                      ".pre-ask": "the vlds layout's pre-ask gate state, which no plugin reads",
+                      ".pool-owed": "the vlds layout's pool flag, which no plugin reads"}
+DROP_TOP = {"vindex": "the cumulative vlds index; derived, any ## recall section of it copied below",
             "sindex": "the cumulative frags index; derived, rebuilt from src/"}
 ARCHIVE_TOP = ("mrindex",)
-# flights/ is kept where the old store has it: where planned work lives is the repository's own plan-planner skill's to say,
-# and training reads a folder of planned work by the files it holds, wherever it is kept (phi_store.work_folders).
+# flights/ stays where the vlds tree keeps it: where planned work lives is the repository's own plan-planner skill's
+# to say, and ezexe/phi's phi_store.work_folders finds a folder of planned work by the files it holds, wherever it is.
 KEEP_TOP = ("flights",)
 COMMENT = {".py": "#", ".sh": "#", ".ps1": "#", ".cmake": "#", ".rb": "#", ".pl": "#", ".r": "#", ".yml": "#",
            ".yaml": "#", ".toml": "#", ".js": "//", ".ts": "//", ".mjs": "//", ".cjs": "//", ".c": "//", ".cc": "//",
@@ -213,22 +226,22 @@ class Plan:
         self.messages = {}                                   # s8 -> [pairs]
         self.index_rules = []                                # archive/index-rules.md
         self.unsorted = {}                                   # archive/unsorted/<name> -> [pairs]
-        self.archive = []                                    # (old rel, new rel) verbatim
-        self.dropped = []                                    # (old rel, reason)
-        self.src = []                                        # (old rel, new rel, head comment or "")
-        self.unplaced = []                                   # (old rel:line, reason)
-        self.reasons = []                                    # (old rel:line, where, reason) placed with a reason
-        self.kept = []                                       # untouched paths (memory/, scratchpad/, .git ...)
+        self.archive = []                                    # (vlds rel, archive rel), copied verbatim
+        self.dropped = []                                    # (vlds rel, reason)
+        self.src = []                                        # (vlds rel, src rel) of each file of a session's src/
+        self.unplaced = []                                   # (vlds rel:line, reason)
+        self.reasons = []                                    # (vlds rel or rel:line, where, reason)
+        self.kept = []                                       # paths left as they are, such as memory/ and .gitignore
         self.pools, self.audits = [], []
-        self.multi = []                                      # (old rel:line, n, kind)
+        self.multi = []                                      # (vlds rel:line, n, kind) of a block of n entries
         self.prose = 0
         self.templates = 0
         self.found = {}                                      # kind -> count found
         self.recall_section = ""
         self.notes = []
-        self.frag_heads = {}                                 # old src rel -> task text
-        self.joined = []                                     # old rel:line of a row's fields joined across a blank
-        self.completions = []                                # (old rel:line, row) a text-keyed completion joined
+        self.frag_heads = {}                                 # vlds rel of a src/ file -> its task in frags.md
+        self.joined = []                                     # vlds rel:line of a row's fields joined across a blank
+        self.completions = []                                # vlds rel:line of a `- <message>` completion joined
 
     def put(self, fname, pairs, rel, line):
         pairs = list(pairs) + [("from", f"{rel}:{line}")]
@@ -292,7 +305,7 @@ def place_file(plan, rel, parts, name):
             plan.audits.append(rel)
             plan.archive.append((rel, f"archive/{rel}"))
         elif name.endswith(".pt"):
-            plan.dropped.append((rel, "the retired .pt ranker (Colab: no .pt raised the JSON ranker)"))
+            plan.dropped.append((rel, "a .pt ranker of the vlds layout, which no plugin loads"))
         elif name.endswith(".tmp"):
             plan.dropped.append((rel, "a temp file"))
         else:
@@ -321,10 +334,10 @@ def place_file(plan, rel, parts, name):
         if sub[0] == "vlds" and sub[1:2] == ["idb"]:
             if len(sub) >= 3 and sub[2] in ("runs", "blobs"):
                 plan.archive.append((rel, f"archive/{rel}"))
-                plan.reasons.append((rel, f"archive/{rel}", "the keyspace's cold tier (entries poured out of the "
-                                                            "hot files), kept verbatim, not indexed"))
+                plan.reasons.append((rel, f"archive/{rel}", "the keyspace's cold tier, entries moved out of the "
+                                                            "hot files, kept verbatim and not indexed"))
             else:
-                plan.dropped.append((rel, "the keyspace's index (idb/); derived"))
+                plan.dropped.append((rel, "the keyspace's index under idb/; derived"))
             return
         if sub[0] == "vlds":
             plan.archive.append((rel, f"archive/{rel}"))
@@ -420,7 +433,8 @@ def convert_file(plan, rel, name, s8, path):
 
 
 def route(name, e):
-    """(new file, kind) for one old entry, or (archive file, reason), or (None, why unplaced)."""
+    """For one entry of a vlds file: (corpus file, kind) to convert it, (archive file, reason) to archive it, or
+    (None, why) when it is unplaced."""
     if name == "local-storage.md":
         if has(e, "ruling", "rule", "owner-words", "words"):
             return "rules.md", "ruling"
@@ -428,7 +442,7 @@ def route(name, e):
     if name == "ledger.md":
         if has(e, "meant"):
             return "corrections.md", "correction"
-        return "archive/ledger-events.md", "a ledger event (surfaced or reused), not a correction"
+        return "archive/ledger-events.md", "a ledger event, such as an entry surfaced or reused, not a correction"
     if name == "tombstones.md":
         if has(e, "freed"):
             return "retractions.md", "retraction"
@@ -447,15 +461,16 @@ def route(name, e):
         return "archive/unsorted/dispatch.md", "a dispatch entry with no fingerprint:"
     if name == "index.md":
         if has(e, "key"):
-            return "archive/index-rules.md", "an index.md guide-loop rule: archived, not indexed (open question 3)"
+            return "archive/index-rules.md", "an index.md guide-loop rule, archived and not indexed"
         return "archive/unsorted/index.md", "an index.md entry with no key:"
     return None, "no route"
 
 
-# --- the new store in memory -----------------------------------------------------------------------------
+# --- the flat layout's corpus in memory ------------------------------------------------------------------
 
 def new_files(plan):
-    """{store rel: [Entry]} as parse() would read the files the plan writes, statuses applied."""
+    """(texts, files): {corpus rel: text} of each file the plan writes, and {corpus rel: [Entry]} as st.parse
+    reads those texts, statuses applied."""
     texts = {f: st.render(f, plan.new[f]) for f in st.STORE_FILES}
     for s8, rows in sorted(plan.messages.items()):
         texts[f"messages/{s8}.md"] = st.render(f"messages/{s8}.md", rows)
@@ -515,8 +530,9 @@ def new_counts(files):
 
 
 def new_live_rules(files):
-    """The LIVE rulings by the new status rule, each text once, as store_lessons.live_rules reads them: entries
-    whose own status is LIVE (store_lessons counts no other), now also unmasked by any retraction."""
+    """(live, lost) over the rulings of rules.md whose own status is LIVE, each text once, read as old_counts reads
+    the vlds tree's: `live` holds the text of each that the status rule keeps LIVE, `lost` a (text, id, reason) for
+    each that a retraction frees."""
     seen, out, lost = set(), [], []
     for e in files.get("rules.md", []):
         if e.fields.get("source", "") == "index":
@@ -535,7 +551,8 @@ def new_live_rules(files):
 
 
 def finding17(files):
-    """The rulings the old mask freed on shared owner-words that the new rule keeps LIVE: [(id, text, new state)]."""
+    """[(id, text, state)] of each ruling that st.status_of frees with `rule="old"` but not with its default rule:
+    one that shares owner-words with a retraction dated no later than the ruling."""
     ms = st.masks(files.get("retractions.md", []))
     got = []
     for e in files.get("rules.md", []):
@@ -553,7 +570,9 @@ STAMP_RE = re.compile(r"\b(20\d\d-\d\d-\d\d(?: \d\d:\d\d)?)\b")
 
 
 def parse_pool(path):
-    """pick_model.parse_pool, ported."""
+    """A recall-pool.md of the vlds layout as {path, task, pooled, session, id, picks, by_model, reader}: `picks`
+    holds a (file, time, head) for each pick line of its steering section, and `by_model` is true when its `read:`
+    line credits a model with the picks."""
     text = st.read_text(path)
     task = re.search(r"^task:\s*(.*)$", text, re.M)
     pooled = re.search(r"^pooled:\s*(\d{4}-\d\d-\d\d \d\d:\d\d)", text, re.M)
@@ -600,7 +619,9 @@ def labelled_pool(p):
 
 
 def distilled(old_file, field, value, fields, width=400):
-    """phi.distilled's text of an old entry, which a pool's pick head is a prefix of."""
+    """The text a pool shows for an entry of a vlds file, of which a pick's head is a prefix: the value unquoted
+    with its whitespace collapsed, a log line's bold part alone, an index rule with its directive, a data-store
+    claim tagged sourced or unsourced, cut to `width`."""
     v = value
     if field == "log":
         m = re.search(r"\*\*(.+?)\*\*", v)
@@ -617,8 +638,8 @@ def distilled(old_file, field, value, fields, width=400):
 
 
 def pick_lookup(plan, files):
-    """{(old file, time): [(distilled head, id, entry or None)]} over every placed entry and every archived file
-    of entries a pool could have picked from."""
+    """{(vlds file name, time): [(distilled head, id, entry or None)]} over every placed entry and every archived
+    file of entries a pool could have picked from."""
     look = {}
     for f, ents in files.items():
         if f.startswith("messages/"):
@@ -653,8 +674,8 @@ def pick_lookup(plan, files):
 
 
 def archived_entries(path, new_rel):
-    """phi.hot_entries over an archived file: the column-0 `- ` heads after the `---` line (a bullet with no field is
-    a log line), with ids under the archive."""
+    """The entries of an archived vlds file as a pool lists them: each column-0 `- ` head after the `---` line, a
+    bullet with no field read as a log line, with ids under the archive."""
     lines = st.read_text(path).split("\n")
     try:
         start = lines.index("---") + 1
@@ -685,7 +706,8 @@ def archived_entries(path, new_rel):
 
 
 def import_pools(plan, files):
-    """(tasks rows, label rows, stats) for every labelled pool and audit, each pick resolved to an entry id."""
+    """(tasks rows, label rows, stats) for every labelled pool and audit, each pick resolved to an entry id or
+    listed as unresolved."""
     look = pick_lookup(plan, files)
     tasks, labels = [], []
     stats = {"pools": 0, "labelled": 0, "audits": 0, "picks": 0, "resolved": 0, "to_archive": 0, "to_freed": 0,
@@ -694,8 +716,8 @@ def import_pools(plan, files):
     stats["pools"] = len(sources)
     for r in plan.pools:
         if r.count("/") != 3:
-            plan.reasons.append((r, f"archive/{r}", "a recall pool nested below a session's vlds/; the old ranker "
-                                                    "never read it, so no labels are imported from it"))
+            plan.reasons.append((r, f"archive/{r}", "a recall-pool.md nested below a session's vlds/, from which "
+                                                    "no labels are imported"))
     audits = [parse_label_file(os.path.join(plan.p4, r)) for r in plan.audits]
     taught = {p["session"][:8] for p in audits if labelled_pool(p) and p.get("reader", "children") != "children"}
     chosen = [p for p in sources if labelled_pool(p) and (p.get("session") or "")[:8] not in taught]
@@ -715,9 +737,8 @@ def import_pools(plan, files):
                 if dist.startswith(head[:40]):
                     got = (eid, e)
                     break
-            # pick_model.build_pairs matched a pick by file, time and head prefix alone: a pick whose head the reader
-            # wrote in its own words was never a label, so it is listed, not resolved by its time (a guess that gave
-            # pool a3ac5de6 three labels the old ranker never had)
+            # a pick resolves by its file, its time and the first 40 characters of its head alone: a pick whose head
+            # is the reader's own words is listed as unresolved, never taken for an entry that shares its file and time
             if not got:
                 stats["unresolved"].append(f"{os.path.relpath(p['path'], plan.p4)}: [{f} {tm}] {head[:80]}")
                 continue
@@ -727,9 +748,8 @@ def import_pools(plan, files):
                 stats["to_archive"] += 1
                 note = (note + " " if note else "") + "archived (not indexed)"
             elif e.state != "LIVE":
-                # the old barrier listed a freed or spent entry with its state, and the pool's reader picked it: the
-                # label stays on that entry (train.py keeps such entries among a pool's candidates), never moved to
-                # the retraction, which is dated after the pool and so could never be drawn for it
+                # the reader picked an entry that reads freed, spent or expired: the label stays on that entry, which
+                # train.with_held keeps among a pool task's candidates, and never moves to a retraction
                 stats["to_freed"] += 1
                 note = (note + " " if note else "") + f"picked while {e.state}"
             stats["resolved"] += 1
@@ -740,7 +760,7 @@ def import_pools(plan, files):
     return tasks, labels, stats
 
 
-# --- dictionary seeds (5.3) ------------------------------------------------------------------------------
+# --- dictionary seeds ------------------------------------------------------------------------------------
 
 COMMON = st.COMMON
 MARKERS = ("no", "not", "i meant", "i mean", "should have", "incorrect", "wrong", "again")
@@ -759,7 +779,7 @@ def turn_rows(rows):
 
 def misread_before(rows, i, df, n, exclude=()):
     """(row, terms) for ezexe's message a signal at row i answers: the nearest of the three before it that is not
-    a shell command (`! ...`) and yields a rare term, or (None, [])."""
+    a shell command, which starts with `!`, and yields a rare term, or (None, [])."""
     for j in range(i - 1, max(-1, i - 4), -1):
         text = fp(rows[j])
         if text.lstrip().startswith("!"):
@@ -775,8 +795,8 @@ def fp(e):
 
 
 def rare_terms(text, df, n, exclude=(), limit=1):
-    """The words of `text` rare in the index (idf > 3) or unseen, outside `exclude` and the common vocabulary,
-    rarest first."""
+    """The `limit` rarest words of `text` that ranker.is_rare calls rare by `df` over `n` docs, words the docs never
+    hold first, leaving out `exclude`, the common vocabulary, numbers and words under three letters."""
     ex = set(exclude)
     got = []
     for t in dict.fromkeys(ranker.tokens(text)):
@@ -805,8 +825,9 @@ def row_at(rows, when, words=""):
 
 
 def locate(rows_by, timeline, s8, when, words):
-    """(rows, i): the signal's answering row in its own session's rows; failing that (a legacy store, a session with
-    no rows), in every session's rows laid on one timeline, within an hour before the signal."""
+    """(rows, i): the signal's answering row in its own session's rows. Failing that, as for a signal of a session
+    with no rows, every session's rows laid on one timeline give the last row within the hour before the signal, or
+    the nearest of the four before it that resembles `words` when that last row does not."""
     rows = turn_rows(rows_by.get(s8, []))
     i = row_at(rows, when, words)
     if i:
@@ -828,8 +849,9 @@ def clip(s, n):
 
 
 def seed_dictionary(files, df, n, now):
-    """(vocabulary pairs, stats): one pending entry per term from the 221 signals' kinds (correction, retraction,
-    missed detail, repeat) and the follow-up detector, `because:` filled, `means: (pending)`."""
+    """(vocabulary pairs, stats): one pending entry per rare term a signal yields, with `because:` filled and
+    `means: (pending)`. The signals are the corpus's corrections, retractions, missed details and repeats, and the
+    pairs of messages the follow-up detector flags."""
     rows_by = session_rows(files)
     terms, order = {}, []
     stats = {"signals": {"correction": 0, "retraction": 0, "missed": 0, "repeat": 0, "follow-up": 0},
@@ -955,7 +977,7 @@ def seed_dictionary(files, df, n, now):
                        f"({cur.time})")
             add("follow-up", ts, because, f"follow-up ({cur.id})", [prev.id])
 
-    # the follow-up detector is untested (8.1 judges its precision by hand): its terms are kept, status off
+    # no test measures the follow-up detector's precision, so a term it alone yields is kept with status off
     pairs = [st.vocab_entry_pairs(t, "(pending)", terms[t]["because"], terms[t]["source"], terms[t]["points"], now,
                                   "off" if terms[t]["source"].startswith("follow-up") else "on")
              for t in order]
@@ -1026,11 +1048,13 @@ def run(p4, out=None, apply=False, now=None, project=None, report_path=None):
     def check(name, ok, detail):
         checks.append((name, bool(ok), detail))
 
+    # a check given True passes whatever the data and only reports its detail, as does "pools: labelled pools
+    # imported", which import_pools makes true; the summary's `checks N/N pass` counts them with the rest
     oc, ol = old["counts"], old["labels"]
     multi_rows = sum(k - 1 for _, k, kind in plan.multi if kind == "row")
     check("rulings: live rules", len(old["live_rules"]) == len(live_new) + len(live_lost),
-          f"store_lessons.live_rules {len(old['live_rules'])}; new LIVE {len(live_new)}"
-          + (f", freed by a dated retraction {len(live_lost)} (listed)" if live_lost else ""))
+          f"{len(old['live_rules'])} LIVE by their own status; {len(live_new)} LIVE by the status rule"
+          + (f", {len(live_lost)} freed by a retraction and listed" if live_lost else ""))
     words_old = []
     for s in old_stores(p4):
         f = os.path.join(s, "local-storage.md")
@@ -1045,61 +1069,63 @@ def run(p4, out=None, apply=False, now=None, project=None, report_path=None):
     check("rulings: every owner-words verbatim", not missing_words,
           f"{len(words_old)} owner-words strings, {len(missing_words)} missing")
     check("corrections: count of meant:", oc["correction"] == counts["correction"],
-          f"old {oc['correction']}, new {counts['correction']}")
+          f"found {oc['correction']}, written {counts['correction']}")
     check("corrections: each key: once", not dup_keys,
           "no key twice" if not dup_keys else "twice or more: " + ", ".join(f"{k} ×{v}" for k, v in dup_keys.items()))
     check("retractions: count of freed:", oc["retraction"] == counts["retraction"],
-          f"old {oc['retraction']}, new {counts['retraction']}")
+          f"found {oc['retraction']}, written {counts['retraction']}")
     ow_missing = []
     for e in files["retractions.md"]:
         if not e.fields.get("owner-words", "").strip():
             ow_missing.append(e.fields.get("from", e.id))
-    check("retractions: each owner-words present", True,
+    check("retractions: owner-words present or listed", True,
           f"{counts['retraction'] - len(ow_missing)} with owner-words"
-          + (f"; {len(ow_missing)} had none in the old store either: " + ", ".join(ow_missing) if ow_missing else ""))
+          + (f"; {len(ow_missing)} had none in the vlds tree either: " + ", ".join(ow_missing) if ow_missing else ""))
     check("missed details: count of omitted:", oc["missed"] == counts["missed"],
-          f"old {oc['missed']}, new {counts['missed']}")
+          f"found {oc['missed']}, written {counts['missed']}")
     claims_old = 0
     for s in old_stores(p4):
         f = os.path.join(s, "data-store.md")
         if os.path.exists(f):
             claims_old += sum(1 for b in old_blocks_text(st.read_text(f))
                               if re.search(r"(?m)^\s*-?\s*claim:", b) and not TEMPLATE.search(b))
-    check("facts: count of claim:", claims_old == counts["claim"], f"old {claims_old}, new {counts['claim']}")
+    check("facts: count of claim:", claims_old == counts["claim"], f"found {claims_old}, written {counts['claim']}")
     check("index rules: archived", True, f"{len(plan.index_rules)} archived; "
           f"{sum(1 for p in plan.index_rules if any(k == 'owner-words' for k, _ in p))} owner-rooted also in rules.md")
     check("dispatch: rows", ol["rows"] + multi_rows == lab["rows"],
-          f"old {ol['rows']}, new {lab['rows']}" + (f" (+{multi_rows}: an old block held two rows with no blank line "
-                                                    f"between; store_lessons counted it once)" if multi_rows else ""))
+          f"found {ol['rows']}, written {lab['rows']}"
+          + (f", {multi_rows} more where a vlds block held rows with no blank line between, which the vlds count "
+             f"takes as one" if multi_rows else ""))
     joined = len(plan.joined) + len(plan.completions)
-    why = (f"; {len(plan.joined)} rows had their state:/addressed: written after a blank line, which store_lessons "
+    why = (f"; {len(plan.joined)} rows had their state:/addressed: written after a blank line, which the vlds count "
            f"credits to the next row's block, and {len(plan.completions)} completions were written as a separate "
            f"`- <message>` entry; both are joined to their own row here") if joined else ""
-    check("dispatch: completed (none lost)", lab["completed"] >= ol["completed"] and
-          lab["completed"] - ol["completed"] <= joined + multi_rows, f"old {ol['completed']}, new {lab['completed']}" + why)
-    check("dispatch: open", lab["open"] <= ol["open"] + multi_rows, f"old {ol['open']}, new {lab['open']}")
-    check("dispatch: judged (none lost)", lab["judged"] >= ol["judged"] and
-          lab["judged"] - ol["judged"] <= joined + multi_rows, f"old {ol['judged']}, new {lab['judged']}")
+    check("dispatch: completed, none lost", lab["completed"] >= ol["completed"] and
+          lab["completed"] - ol["completed"] <= joined + multi_rows,
+          f"found {ol['completed']}, written {lab['completed']}" + why)
+    check("dispatch: open", lab["open"] <= ol["open"] + multi_rows, f"found {ol['open']}, written {lab['open']}")
+    check("dispatch: judged, none lost", lab["judged"] >= ol["judged"] and
+          lab["judged"] - ol["judged"] <= joined + multi_rows, f"found {ol['judged']}, written {lab['judged']}")
     check("dispatch: ECHO/SUPERSEDED rows still so", oc["repeat"] == counts["repeat"],
-          f"old {oc['repeat']}, new {counts['repeat']}")
+          f"found {oc['repeat']}, written {counts['repeat']}")
     check("pools: labelled pools imported", pstats["labelled"] == len([t for t in tasks if t[0].startswith("pool:")]),
-          f"{pstats['pools']} pools, {pstats['labelled']} labelled (pick_model.labelled_pool), "
+          f"{pstats['pools']} pools, {pstats['labelled']} labelled, "
           f"{pstats['taught_out']} left out for a teacher's audit; {pstats['audits']} audits")
-    check("pools: picks resolved", True,
-          f"{pstats['resolved']} of {pstats['picks']} picks resolved ({pstats['to_archive']} to archived entries, "
-          f"{pstats['to_freed']} picked while freed or spent, kept on that entry; matched by file, time and head as "
-          f"pick_model.build_pairs did); {len(pstats['unresolved'])} unresolved, listed")
+    check("pools: picks resolved or listed", True,
+          f"{pstats['resolved']} of {pstats['picks']} picks resolved by file, time and head: {pstats['to_archive']} "
+          f"to archived entries, {pstats['to_freed']} picked while freed or spent and kept on that entry; "
+          f"{len(pstats['unresolved'])} unresolved, listed")
     sig_total = sum(vstats["signals"][k] for k in ("correction", "retraction", "missed", "repeat"))
     old_sig = oc["correction"] + oc["retraction"] + oc["missed"] + oc["repeat"]
     check("dictionary: every signal an entry or listed", sig_total == old_sig,
           f"{old_sig} signals; {sum(vstats['yielded'][k] for k in ('correction', 'retraction', 'missed', 'repeat'))} "
-          f"yielded terms, the rest listed; {vstats['terms']} pending entries "
-          f"(follow-up detector: {vstats['signals']['follow-up']} flagged, {vstats['yielded']['follow-up']} with terms)")
+          f"yielded terms, the rest listed; {vstats['terms']} pending entries; the follow-up detector flagged "
+          f"{vstats['signals']['follow-up']}, {vstats['yielded']['follow-up']} of them with terms")
     n_src = len(plan.src)
     check("src: file count", True, f"{n_src} files into src/<s8>-<task>/; "
           f"{sum(1 for o, _ in plan.src if src_head(plan, o))} get a head comment from the register")
-    check("finding 17: masked rulings read LIVE", all(s == "LIVE" for _, _, s in f17),
-          f"{len(f17)} rulings the old mask freed on shared owner-words; "
+    check("rulings: LIVE after a retraction with the same owner-words", all(s == "LIVE" for _, _, s in f17),
+          f"{len(f17)} rulings dated at or after a retraction with the same owner-words; "
           f"{sum(1 for _, _, s in f17 if s == 'LIVE')} read LIVE")
 
     archived_ok = []
@@ -1120,15 +1146,15 @@ def run(p4, out=None, apply=False, now=None, project=None, report_path=None):
                 if k.rstrip("/") in ("memory", "scratchpad", *KEEP_TOP):
                     check(f"{k} tree identical", same_tree(os.path.join(p4, k), os.path.join(out, k)), "copied as is")
     else:
-        check("archives byte-identical", True, f"{len(plan.archive)} files to copy verbatim (checked on --apply)")
+        check("archives byte-identical", True, f"{len(plan.archive)} files to copy verbatim, compared only on --apply")
 
     users = repo_users(project, [os.path.basename(o) for o, _ in plan.src])
     report["repo_users"] = users
     if project is None and os.path.basename(os.path.dirname(p4)) == ".claude":
         proj = os.path.dirname(os.path.dirname(p4))
         if os.path.isfile(os.path.join(proj, ".git")):
-            plan.notes.append("the project dir is a git worktree: a worktree hook outside p4 may block writes under "
-                              ".claude/p4/** (finding 7); that is not p4's")
+            plan.notes.append("the project dir is a git worktree: a worktree hook outside the p4 plugins may block "
+                              "writes under .claude/p4/**; such a block comes from that hook, not from the plugins")
     text = render_report(report)
     rp = report_path or os.path.join(out, "archive", f"migration-{date}.md")
     os.makedirs(os.path.dirname(rp), exist_ok=True)
@@ -1208,7 +1234,8 @@ def write_new(plan, texts, tasks, labels, out, in_place):
 
 
 def remove_old(plan, p4):
-    """In place, once nothing is unplaced: the old paths go (git history and archive/ keep them)."""
+    """In place, when nothing is unplaced: remove sessions/, vindex/, sindex/ and mrindex/, the files of models/
+    that the plan archived or dropped, and the folders under models/ left empty."""
     for top in ("sessions", "vindex", "sindex", "mrindex"):
         path = os.path.join(p4, top)
         if os.path.isdir(path):
@@ -1229,31 +1256,34 @@ def remove_old(plan, p4):
 def render_report(r):
     plan, old = r["plan"], r["old"]
     L = [f"# Migration report, {r['now']}", "",
-         f"Old tree: `{r['p4']}`. New layout: `{r['out']}`. Written by `p4.py migrate` "
-         f"({'applied' if r['apply'] else 'dry run'}).", "",
+         f"The vlds tree: `{r['p4']}`. The flat layout: `{r['out']}`. Written by "
+         f"{'an applied' if r['apply'] else 'a dry'} run of `p4.py migrate`.", "",
          "## Checks", "", "| check | result | detail |", "|---|---|---|"]
     for name, ok, detail in r["checks"]:
         L.append(f"| {name} | {'pass' if ok else 'FAIL'} | {detail.replace('|', '/')} |")
     L += ["", "## Per kind", "", "| kind | found | written |", "|---|---|---|"]
     c, lab = r["counts"], r["labels"]
     oc, ol = old["counts"], old["labels"]
-    for k, o, n_ in (("rulings (store_lessons)", oc["ruling"], c["ruling"]), ("corrections", oc["correction"],
+    for k, o, n_ in (("rulings", oc["ruling"], c["ruling"]), ("corrections", oc["correction"],
                      c["correction"]), ("retractions", oc["retraction"], c["retraction"]),
                      ("missed details", oc["missed"], c["missed"]), ("repeats", oc["repeat"], c["repeat"]),
                      ("dispatch rows", ol["rows"], lab["rows"]), ("rows completed", ol["completed"], lab["completed"]),
                      ("rows open", ol["open"], lab["open"]), ("rows judged", ol["judged"], lab["judged"]),
-                     ("facts", "", c["claim"]), ("index rules (archive)", "", len(plan.index_rules)),
+                     ("facts", "", c["claim"]), ("index rules, archived", "", len(plan.index_rules)),
                      ("pool label rows", "", len(r["label_rows"])), ("tasks", "", len(r["tasks"])),
-                     ("vocabulary entries (pending)", "", r["vocab"]["terms"]), ("src files", "", len(plan.src)),
+                     ("pending vocabulary entries", "", r["vocab"]["terms"]), ("src files", "", len(plan.src)),
                      ("archived verbatim", "", len(plan.archive)), ("dropped", "", len(plan.dropped))):
         L.append(f"| {k} | {o} | {n_} |")
-    L += ["", f"Live rules: store_lessons {len(old['live_rules'])}, new LIVE {len(r['live_new'])}.", ""]
+    L += ["", f"Live rules: {len(old['live_rules'])} LIVE by their own status, {len(r['live_new'])} LIVE by the "
+          f"status rule.", ""]
     if r["live_lost"]:
-        L += ["Rulings whose own status is LIVE that the new rule reads as FREED (a retraction names them):", ""]
+        L += ["Rulings whose own status is LIVE that the status rule reads as FREED, since a retraction names "
+              "them:", ""]
         L += [f"- `{i}` {clip(t, 120)}: {why}" for t, i, why in r["live_lost"]]
         L.append("")
-    L += ["## Finding 17", "", "Rulings the old mask freed on shared owner-words, by the new rule:", ""]
-    L += [f"- {s}: {t} (`{i}`)" for i, t, s in r["finding17"]] or ["- none"]
+    L += ["## Rulings after a retraction with the same owner-words", "",
+          "Each ruling dated at or after a retraction with the same owner-words, by its state:", ""]
+    L += [f"- {s}: {t}, `{i}`" for i, t, s in r["finding17"]] or ["- none"]
     L += ["", "## Unplaced", ""]
     L += [f"- {w}: {why}" for w, why in plan.unplaced] or ["- none"]
     L += ["", "## Placed with a reason", ""]
@@ -1261,18 +1291,18 @@ def render_report(r):
     for w, where, why in plan.reasons:
         groups.setdefault((where if not where.startswith("archive/sessions") else "archive/<same path>", why), []).append(w)
     for (where, why), ws in sorted(groups.items()):
-        L.append(f"- {len(ws)} → `{where}`: {why}" + (f" ({', '.join(ws[:3])}{', …' if len(ws) > 3 else ''})"))
+        L.append(f"- {len(ws)} → `{where}`: {why}" + (f" — {', '.join(ws[:3])}{', …' if len(ws) > 3 else ''}"))
     if plan.multi:
-        L += ["", "Old blocks that held more than one entry (split here):", ""]
+        L += ["", "Blocks of the vlds tree that held more than one entry, split here:", ""]
         L += [f"- {w}: {k} {kind} entries" for w, k, kind in plan.multi]
-    L += ["", "## Dropped (derived or retired)", ""]
+    L += ["", "## Dropped", ""]
     dg = {}
     for d, why in plan.dropped:
         dg.setdefault(why, []).append(d)
-    L += [f"- {len(ds)} × {why} ({', '.join(ds[:2])}{', …' if len(ds) > 2 else ''})" for why, ds in sorted(dg.items())]
+    L += [f"- {len(ds)} × {why} — {', '.join(ds[:2])}{', …' if len(ds) > 2 else ''}" for why, ds in sorted(dg.items())]
     L += ["", "Kept untouched: " + (", ".join(f"`{k}`" for k in plan.kept) or "nothing"), ""]
     if plan.recall_section:
-        L += ["## The old `## recall` section (vindex/phi-index.md), so no setting vanishes silently", "", "```",
+        L += ["## The `## recall` section of vindex/phi-index.md, so no setting vanishes silently", "", "```",
               plan.recall_section, "```", ""]
     p = r["pools"]
     L += ["## Pools", "", f"{p['pools']} pools, {p['labelled']} labelled, {p['audits']} audits; {p['resolved']} of "
@@ -1288,10 +1318,10 @@ def render_report(r):
     L += ["## src", ""]
     users = r.get("repo_users")
     if users is None:
-        L.append("No project repository given (or none found), so no frag was checked against the project's "
-                 "tracked files; `--project <dir>` lists the frags the repo uses.")
+        L.append("No project repository was given, or it is not a git repository, so no frag was checked against the "
+                 "project's tracked files; `--project <dir>` lists the frags the repo uses.")
     elif users:
-        L += ["Frags the project repo names (listed for ezexe, not moved):", ""]
+        L += ["Frags the project repo names, listed for ezexe and not moved:", ""]
         L += [f"- `{nm}`: used by {', '.join(u)}" for nm, u in sorted(users.items())]
     else:
         L.append("No frag is named by the project's tracked files.")
@@ -1304,24 +1334,25 @@ def summary(r):
     plan = r["plan"]
     fails = [c for c in r["checks"] if not c[1]]
     lab = r["labels"]
-    return (f"migrate{'' if r['apply'] else ' (dry)'}: rulings {r['counts']['ruling']} "
-            f"(live {len(r['live_new'])}), corrections {r['counts']['correction']}, retractions "
+    return (f"migrate{'' if r['apply'] else ', dry run'}: rulings {r['counts']['ruling']}, "
+            f"live {len(r['live_new'])}, corrections {r['counts']['correction']}, retractions "
             f"{r['counts']['retraction']}, missed {r['counts']['missed']}, repeats {r['counts']['repeat']}, rows "
-            f"{lab['rows']} ({lab['completed']} completed, {lab['open']} open, {lab['judged']} judged), facts "
+            f"{lab['rows']}: {lab['completed']} completed, {lab['open']} open, {lab['judged']} judged; facts "
             f"{r['counts']['claim']}, pool labels {len(r['label_rows'])}, vocabulary {r['vocab']['terms']}, "
-            f"finding 17 {sum(1 for x in r['finding17'] if x[2] == 'LIVE')}/{len(r['finding17'])} LIVE; unplaced "
+            f"rulings after a retraction with the same owner-words "
+            f"{sum(1 for x in r['finding17'] if x[2] == 'LIVE')}/{len(r['finding17'])} LIVE; unplaced "
             f"{len(plan.unplaced)}; checks {len(r['checks']) - len(fails)}/{len(r['checks'])} pass"
             + ("".join(f"\n  FAIL {n}: {d}" for n, _, d in fails)) + f"\n  report: {r['report_path']}")
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--p4", required=True, help="the old .claude/p4 tree")
-    ap.add_argument("--out", default="", help="where the new layout goes (default: in place)")
+    ap.add_argument("--p4", required=True, help="the .claude/p4 tree in the vlds layout")
+    ap.add_argument("--out", default="", help="where the flat layout goes; the --p4 tree itself when not given")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--now", default="")
     ap.add_argument("--project", default=None, help="the project repo, to list the frags it uses")
-    ap.add_argument("--report", default="", help="the report's path (default <out>/archive/migration-<date>.md)")
+    ap.add_argument("--report", default="", help="the report's path; <out>/archive/migration-<date>.md when not given")
     args = ap.parse_args(argv)
     r = run(args.p4, args.out or None, args.apply, args.now or None, args.project, args.report or None)
     print(summary(r))

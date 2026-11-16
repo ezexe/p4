@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Tests for migrate.py (fresh-marketplace.md section 6, 8.1's migrate bullet).
+"""Tests for migrate.py.
 
 Run: python3 test_migrate.py
 
-A synthetic old tree, built here, covers every row of the migration table; the four cloned repos, when present,
-are migrated dry into a temp directory (and ap-p4_mac also applied): every check passes, zero unplaced entries,
-counts equal to `scripts/session/store_lessons.py`, the six finding-17 rulings LIVE, archives byte-identical.
-The clones are read only; nothing is written into them.
+A synthetic tree in the vlds layout, built here, holds every kind of file the migration places. The four cloned
+stores, when test_store.FIXTURES holds them, are migrated dry into a temp directory, and ap-p4_mac is also applied:
+every check passes, no entry is unplaced, the counts equal those of `scripts/session/store_lessons.py`, the rulings
+dated at or after a retraction with the same owner-words read LIVE, and the archives are byte-identical. The clones
+are only read; nothing is written into them.
 """
 
 import importlib.util
@@ -39,7 +40,7 @@ HEADER = "# VLDS Partition\n\nWhat it holds.\n\n```yaml\n- ruling: [the ruling]\
 
 
 def old_tree(root):
-    """An old p4 tree: two sessions, every file kind of the migration table."""
+    """A tree in the vlds layout at `root`/old: two sessions and every kind of file the migration places."""
     p4 = os.path.join(root, "old")
     s1 = os.path.join(p4, "sessions", "mac-setup--150e7eb7", "vlds")
     s2 = os.path.join(p4, "sessions", "a3ac5de6", "vlds")
@@ -233,7 +234,8 @@ class Synthetic(unittest.TestCase):
         self.assertEqual(by_fp["why that one?"].fields.get("addressed"), "explained the branch choice",
                          "a `- <message>` completion joins its row")
         self.assertEqual(r["labels"]["rows"], 6)
-        self.assertEqual(r["labels"]["completed"], 5, "a row with addressed: and no state: stays open, as before")
+        self.assertEqual(r["labels"]["completed"], 5, "a row with addressed: and no state: stays open, as the vlds "
+                                                      "count has it")
 
     def test_store_lessons_agrees(self):
         sl = store_lessons()
@@ -277,9 +279,9 @@ class Synthetic(unittest.TestCase):
             self.assertRegex(e.fields["because"], r'you wrote ".+"')
 
     def test_pool_picks_resolve_as_pick_model_did(self):
-        """The imported labels are the old ranker's labels: a pick of a freed ruling stays on that ruling (the old
-        barrier listed it with its state), and a pick whose head is the reader's own words is unresolved, never
-        guessed from its file and time (pick_model.build_pairs matched file, time and head prefix alone)."""
+        """A pick of a freed ruling, which the pool listed with its state, stays on that ruling, and a pick whose
+        head is the reader's own words is unresolved, never guessed from its file and time: a pick resolves by its
+        file, its time and its head's prefix alone."""
         os.remove(os.path.join(self.old, "models", "labels", "a3ac5de6.tsv"))
         pool = os.path.join(self.old, "sessions", "a3ac5de6", "vlds", "recall-pool.md")
         with open(pool, "a", encoding="utf-8") as f:
@@ -311,7 +313,8 @@ class Synthetic(unittest.TestCase):
             self.assertEqual(f.read().split("\n")[:2], ["#!/usr/bin/env python3", "# probe the narwhal port"])
         with open(os.path.join(self.out, "archive", "migration-2026-11-01.md"), encoding="utf-8") as f:
             report = f.read()
-        self.assertIn("pool-road: model", report, "the old ## recall section is copied into the report")
+        self.assertIn("pool-road: model", report, "the ## recall section of vindex/phi-index.md is copied into the "
+                                                  "report")
         p4conf.migrate_layout(self.out, commit=False)       # what the next hook does to the flat tree it wrote
         rules = st.load_file(self.out, "rules.md")
         self.assertTrue(any(e.fields.get("source") == "index" for e in rules), "owner-rooted index rule")
@@ -336,7 +339,7 @@ class Synthetic(unittest.TestCase):
         r = subprocess.run([sys.executable, os.path.join(HERE, "p4.py"), "migrate", "--p4", self.old, "--out",
                             self.out, "--now", NOW], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("migrate (dry)", r.stdout)
+        self.assertIn("migrate, dry run:", r.stdout)
         self.assertIn("unplaced 0", r.stdout)
 
 
