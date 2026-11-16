@@ -119,6 +119,24 @@ class View(unittest.TestCase):
         self.assertEqual(view.describe(self.p4)[0], "aaaaaaaa: 1 turns, 1 files in view, 0 commits, 0 compactions")
         self.assertEqual(view.load(self.p4, "bbbbbbbb")["size"]["baseline"], 50000)
 
+    def test_refresh_carries_what_earlier_turns_were_shown(self):
+        """The Stop hook's call: refresh with the transcript and the turn's served documents writes the record, and
+        the next turn's refresh keeps what the earlier turn was shown, by that turn, beside its own."""
+        from test_hooks import transcript
+        first = transcript(os.path.join(self.tmp.name, "s.jsonl"), "look at the port",
+                           [("Read", {"file_path": os.path.join(self.proj, "src", "port.py")}, "x")], "seen", self.proj)
+        v = view.refresh(self.p4, self.proj, "abcdef12-rest", first, ["rules.md:a"])
+        self.assertEqual(v["entries"], {"rules.md:a": 0})
+        self.assertEqual(view.load(self.p4, "abcdef12")["entries"], {"rules.md:a": 0}, "written where load reads")
+        notes = os.path.join(self.proj, "docs", "notes.md")
+        more = transcript(os.path.join(self.tmp.name, "more.jsonl"), "now the notes",
+                          [("Read", {"file_path": notes}, "y")], "read", self.proj)
+        with open(first, "a", encoding="utf-8") as f, open(more, encoding="utf-8") as g:
+            f.write(g.read())
+        v = view.refresh(self.p4, self.proj, "abcdef12-rest", first, ["facts.md:b"])
+        self.assertEqual(v["entries"], {"rules.md:a": 0, "facts.md:b": 1})
+        self.assertEqual(view.in_view(v), ({"src/port.py", "docs/notes.md"}, {"rules.md:a", "facts.md:b"}))
+
     def test_refresh_without_a_transcript_writes_nothing(self):
         self.assertIsNone(view.load(self.p4, "abcdef12"))
         self.assertEqual(view.refresh(self.p4, self.proj, "abcdef12-rest", "", None), view.empty(), "no transcript: nothing")
