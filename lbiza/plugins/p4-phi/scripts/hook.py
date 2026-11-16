@@ -340,7 +340,7 @@ def h_recall(payload):
 
 # --- subagent recall (PreToolUse Agent; SubagentStart fallback) ------------------------------------------
 
-def agent_lines(p4, prompt, model_id=""):
+def agent_lines(p4, prompt):
     import p4 as cli
     r = cli.query(p4, prompt, None, now())
     return r
