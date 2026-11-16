@@ -172,6 +172,17 @@ class Venv(unittest.TestCase):
             (self.tmp / "phi").rmdir()
         self.assertEqual(v.python_floor(v.PHI_GIT, False), v.PHI_PYTHON)
 
+    def test_a_named_path_that_is_not_phi_stops_with_a_checkout_beside(self):
+        """--phi names the checkout to install, so a named folder that is no ezexe/phi checkout stops before anything
+        runs, even with an ezexe/phi checkout at ../phi."""
+        self.phi(self.tmp / "phi")
+        (self.tmp / "notphi").mkdir()
+        calls = self.faked((3, 12, 4))
+        with self.assertRaises(SystemExit) as stop:
+            v.main(["--phi", str(self.tmp / "notphi")])
+        self.assertIn("is not an ezexe/phi checkout", str(stop.exception))
+        self.assertEqual(calls, [], "nothing ran, so no .venv was made")
+
     def test_the_known_floor_is_that_of_the_ezexe_phi_beside_this_checkout(self):
         phi = self._root.parent / "phi"
         if not (phi / "pyproject.toml").is_file():

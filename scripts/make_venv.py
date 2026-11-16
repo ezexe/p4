@@ -64,8 +64,9 @@ def missing(py: Path):
 
 
 def phi_source(given):
-    """An editable ezexe/phi checkout, the given one or else ../phi beside this checkout, or the GitHub URL."""
-    for cand in ([Path(given)] if given else []) + [ROOT.parent / "phi"]:
+    """An editable ezexe/phi checkout, the given one alone when one is given, else ../phi beside this checkout, or else
+    the GitHub URL."""
+    for cand in [Path(given)] if given else [ROOT.parent / "phi"]:
         if (cand / "pyproject.toml").is_file() and 'name = "phi-prune"' in (cand / "pyproject.toml").read_text(encoding="utf-8"):
             return cand.resolve(), True
     if given:
