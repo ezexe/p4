@@ -26,7 +26,6 @@ labels.tsv, which training skips unless the mode is on.
 """
 
 import os
-import re
 import sys
 import time
 
@@ -38,7 +37,6 @@ import p4conf  # noqa: E402
 FILE = "said.tsv"
 HEAD = ["time", "session", "task", "act", "entry", "note"]
 ACTS = ("applied", "set-aside", "lacked")
-HANDLE_RE = re.compile(r"^r[1-9]\d?$")
 
 
 def mode(p4):
