@@ -780,6 +780,13 @@ def tmp_staged_copy_cases():
         assert git("diff", "--cached", "--name-status", "--", orel).splitlines() == [f"A\t{orel}/note.md"], \
             git("diff", "--cached", "--name-status", "--", orel)
         assert git("ls-files", "--", f"{orel}/export").split() == [f"{orel}/export/held.md"], "held.md left the index"
+        # that held file edited on disk: tmp-close removes the note and commits no change to the file of the copy
+        put(theirs, "export/held.md", "edited on disk\n")
+        assert run("tmp-close", other) == "", "tmp-close spoke"
+        changes = git("log", "--format=%s", "--", f"{orel}/export/held.md").splitlines()
+        assert changes == ["held"], f"tmp-close changed the copy's file in history: {changes}"
+        assert git("show", f"HEAD:{orel}/export/held.md") == "held by a commit\n", "tmp-close committed the edit"
+        assert not os.path.exists(os.path.join(theirs, "note.md")), "the note was not removed"
     finally:
         for d in (root, temp):
             shutil.rmtree(d, ignore_errors=True)

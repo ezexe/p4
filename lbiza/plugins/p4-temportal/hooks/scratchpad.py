@@ -578,7 +578,10 @@ def close_tmp(p4, sid):
     if r is None:
         return ""
     if r.returncode == 1:
-        c = git_p4(p4, "commit", "-q", "-m", f"tmp: session {sid[:8]}, kept before its removal", "--", rel)
+        # the staged paths alone: a pathspec commit takes every tracked path's working copy, a copy's edit included
+        staged = [n for n in (git_out(p4, "diff", "--cached", "--name-only", "-z", "--", rel) or "").split("\0") if n]
+        c = git_p4(p4, "--literal-pathspecs", "commit", "-q", "-m", f"tmp: session {sid[:8]}, kept before its removal",
+                   "--pathspec-from-file=-", "--pathspec-file-nul", stdin=nul(staged)) if staged else None
         if c is None or c.returncode != 0:
             return ""                                  # not committed: nothing is deleted
     tracked = git_out(p4, "ls-files", "-z", "--", rel)
@@ -588,13 +591,13 @@ def close_tmp(p4, sid):
         return ""
     head = head.strip()
     changed = set(changed.split("\0"))
-    removed = 0
+    removed = []
     for name in tracked.split("\0"):
         if not name or name in changed:
             continue
         try:
             os.remove(os.path.join(p4, *name.split("/")))
-            removed += 1
+            removed.append(name)
         except OSError:
             continue
     if not removed:
@@ -605,8 +608,8 @@ def close_tmp(p4, sid):
                 os.rmdir(d)                            # only when emptied
             except OSError:
                 pass
-    git_p4(p4, "add", "-u", "--", rel)
-    git_p4(p4, "commit", "-q", "-m", f"tmp: session {sid[:8]} removed; its files are in {head[:8]}", "--", rel)
+    git_p4(p4, "--literal-pathspecs", "commit", "-q", "-m", f"tmp: session {sid[:8]} removed; its files are in "
+           f"{head[:8]}", "--pathspec-from-file=-", "--pathspec-file-nul", stdin=nul(removed))   # the removals alone
     mark = closed_mark(p4, sid)
     if mark:
         try:
