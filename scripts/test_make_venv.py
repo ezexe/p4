@@ -1,4 +1,5 @@
-"""Offline tests for make_venv.py: where it looks for phi, which interpreter it names, --check without a .venv.
+"""Offline tests for make_venv.py: where it looks for phi, which interpreter it names, --check without a .venv, and a
+build on a machine with no torch.
 
     python3 scripts/test_make_venv.py
 """
@@ -51,7 +52,7 @@ class Venv(unittest.TestCase):
         self.assertFalse(v.VENV.exists(), "--check never creates .venv")
 
     def test_no_torch_build_finishes_the_venv_without_it(self):
-        """Every torch install fails (an Intel Mac on Python 3.14): phi goes in with --no-deps beside numpy, the
+        """Every torch install fails, as on an Intel Mac on Python 3.14: phi goes in with --no-deps beside numpy, the
         requirements still install, and the run ends ready rather than failing."""
         v.python_of(v.VENV).parent.mkdir(parents=True)
         v.python_of(v.VENV).write_text("")
