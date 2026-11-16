@@ -56,7 +56,7 @@ NAMED = re.compile(r"(?:github\.com/([\w.-]+/[\w.-]+)/issues/|\b([\w.-]+/[\w.-]+
 TEST_WORD = re.compile(r"\btest|\bsuite|\bpytest\b|\bunittest\b", re.I)
 TEST_CMD = re.compile(r"`([^`\n]{3,})`")
 TEST_FILE = re.compile(r"((?:[A-Za-z]:)?[\w./\\-]*?\btest_[\w-]+\.py|[\w./\\-]*?[\w-]+_test\.py)\b")
-FINDING_FORM = ("Finding: <the claim>; source: <where it was checked>; test: <the deciding test>; files: <the paths a "
+FINDING_FORM = ("Finding: <the claim>; source: <the file and line it was read at>; test: <the deciding test>; files: <the paths a "
                 "fix changes>")
 FINDING = re.compile(r"(?m)^(?:[ \t>*+-]|\d+[.)])*(Finding:[ \t]*\S[^\n]*)$")
 FINDINGS_LINE = (

@@ -829,7 +829,7 @@ def background_text(home, s, own=False, slim=False):
         head = ("phi (p4-phi): background for this session from the sessions in this project before it. Use what "
                 "is here where it fits; do not work it out again.")
     tail = (f"The page this comes from: {page_path(home, above)}. Keep a finding the next session would have to "
-            f"work out again: `{commands()} note \"<claim>\" --source \"<where it was checked>\"`. When something "
+            f"work out again: `{commands()} note \"<claim>\" --source \"<the file and line it was checked at>\"`. When something "
             f"shows the task done: `{commands()} done \"<what was run and what it showed>\"`. Each turn's report "
             f"is kept either way" + (" and reaches the parent session beside its next message." if chain else "."))
     room = BACKGROUND_CHARS - len(head) - len(tail) - 2
@@ -1020,6 +1020,9 @@ TOP_RULE = ("This is the orchestrator of its tree, so it keeps itself free for o
 
 NEW_TOP = re.compile(r"\b(?:this|it) (?:session )?is a new top session\b", re.I)
 NEW_TOP_BRIEF = "This session is a new top session, orchestrating its own topic."
+RESTATE = ("the task restated as your own instruction to the session that receives it: what it is to do and why, "
+           "from its side, a line `Files: <paths>` and what done looks like, with no message quoted and nothing "
+           "of who asked or how the request travelled")
 
 
 def new_top_first_act():
@@ -1048,7 +1051,7 @@ def new_top_route(owner_turn=True):
            f"this session; only where the card is refused too, write it as a start request, {request_cmd()}, "
            f"which the next turn ezexe begins in this session starts")
     return (f"{how}, `context` `fresh`, `use_worktree: false`, with the `model` and `effort` its kind of work gets, "
-            f"said in one line of the brief; its brief: the topic, ezexe's words quoted, and "
+            f"said in one line of the brief; its brief: {RESTATE}, and "
             f"the lines \"{NEW_TOP_BRIEF} {new_top_first_act()}\" Both moves are needed: the app's detach to top "
             f"level, else it stays nested under this session and reports here, and p4-phi's, which p4-phi also makes "
             f"at the new session's first hook on that line. If it is still nested under this session at its first "
@@ -1192,7 +1195,7 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
     if brief and told.get(me.cli) and os.path.isfile(standing_path(home, s["sessionId"])):
         RAN["new_task"] = "page"                   # after a compaction, a line with its page, not in full
         up = spawned_from(s)
-        where = (f"hand it up to {up} with SendMessage, ezexe's words quoted" if up else
+        where = (f"hand it up to {up} with SendMessage, holding {RESTATE}" if up else
                  f"start a new orchestrator for it, its brief ending \"{NEW_TOP_BRIEF}\"")
         return (f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" When a message from ezexe is about "
                 f"something else, {where}, and stay with the task. The standing instruction, handed in full "
@@ -1205,7 +1208,7 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
         parent = spawned_from(s)
         if parent:
             elsewhere = (f"do not turn this session to it, and start no session for it: hand it up to your parent "
-                         f"session, {parent}, with SendMessage, ezexe's words quoted, tell "
+                         f"session, {parent}, with SendMessage, holding {RESTATE}; tell "
                          f"ezexe in one line that it went up, and stay with the task. Only an orchestrator starts "
                          f"a session for a new topic. A message about a path among another session's owned paths is "
                          f"that session's: send it there with SendMessage instead{shards}. "
@@ -1239,7 +1242,7 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
         if parent:
             return (f"phi (p4-phi): this message asks for something new that is not in this session's task list, and "
                     f"a feature is a new topic even within a broad task: hand it up to {parent} with SendMessage, "
-                    f"ezexe's words quoted, as a new topic for a new orchestrator, and stay with the task.")
+                    f"holding {RESTATE}, as a new topic for a new orchestrator, and stay with the task.")
         return (f"phi (p4-phi): this message asks for something new that is not in this session's task list. A "
                 f"feature is a new topic even within a broad task like \"{cut(task, LINE_TASK)}\", so it gets a new "
                 f"orchestrator of its own, a sibling of this one. "
@@ -1247,7 +1250,7 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
                 f"stay with the task.")
     if parent:
         return (f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" If this message is about something "
-                f"else, hand it up to {parent} with SendMessage, ezexe's words quoted, and stay with the task; "
+                f"else, hand it up to {parent} with SendMessage, holding {RESTATE}, and stay with the task; "
                 f"otherwise carry on.")
     return (f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" If this message is about something "
             f"else, start a new orchestrator for it as the standing instruction says, its brief ending "

@@ -11,10 +11,13 @@ The labelled set. Each kept turn of a session whose prompt is ezexe's own messag
 is one example: the message, its time, and the session that received it. Its owner label is the session that ended
 up doing its work:
 
-  relayed   another session that was live at that time and whose later turn quotes the message, 60 characters of
-            it or more, as a message passing ezexe's words on does: that session is the right owner.
-  new       a session started after the message whose brief quotes it: the work went to a new session, so no live
-            session owned it and the right pick is none.
+  relayed   another session that was live at that time and whose later turn holds 60 characters or more of the
+            message: that session is the right owner. p4-phi asks a session that passes work on to restate the
+            task as its own instruction and quote no message, so a relay written that way is not found here.
+  new       a session started after the message whose brief holds 60 characters or more of it: the work went to a
+            new session, so no live session owned it and the right pick is none. A start draft's brief quotes no
+            sentence of the message, so a session started from one is found only when its brief restates it
+            closely.
   here      neither: the receiving session did the work itself, so again no other live session owned it.
 
 A scorer is given the message and the tasks of the other sessions that existed then, as the routing step is, and

@@ -527,6 +527,7 @@ class Supervisor(unittest.TestCase):
                             P4_PHI_NEW_TASK="1"))
         self.assertIn("This session is controlled by a puppeteer", ctx)
         self.assertIn("--to-puppeteer", ctx)
+        self.assertIn(phi.RESTATE, ctx, "the request's brief restates the task")
         self.assertNotIn("start_session", ctx, "handed a new-topic line, it is given no start call")
         new_top = BRIEF + "\n" + phi.NEW_TOP_BRIEF
         r = t.hook("start-advice", TOP2, {"hook_event_name": "PreToolUse", "tool_name": START,
@@ -662,6 +663,7 @@ class Supervisor(unittest.TestCase):
         self.assertIn(f"work on the topic \"Build the narwhal exporter\" `{TOP}` orchestrates", ctx)
         self.assertIn("do not do it here and start no child for it", ctx)
         self.assertIn("send that session one message with SendMessage", ctx)
+        self.assertIn("holding " + phi.RESTATE, ctx, "the task restated, never ezexe's words quoted")
         self.assertNotIn("orchestrates. If so", context(t.say(PUP, "How is the weather on the moon today?")))
 
 

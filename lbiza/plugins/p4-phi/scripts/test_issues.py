@@ -440,7 +440,7 @@ class FindingsGoUp(unittest.TestCase):
     to write each finding into its report as one `Finding:` line; the findings of a controlled tree's reports are on
     its puppeteer's board; and the plugin-gap line names that puppeteer, not `gh issue create`."""
 
-    FORM = ("`Finding: <the claim>; source: <where it was checked>; test: <the deciding test>; files: <the paths a "
+    FORM = ("`Finding: <the claim>; source: <the file and line it was read at>; test: <the deciding test>; files: <the paths a "
             "fix changes>`")
 
     def setUp(self):

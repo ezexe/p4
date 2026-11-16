@@ -236,8 +236,8 @@ RULE = (
     "prints where each stands, to tell ezexe in one place, each by its full title. Its board is {board}, and what "
     "p4-phi cannot see goes on it through `{cmd} note`. It sends the feedback and user memories ezexe changes to all "
     "of them with SendMessage. It writes no plugin or project files. Work ezexe gives it on a topic a controlled "
-    "session orchestrates goes to that session in one SendMessage holding ezexe's words, a line `Files: <paths>` "
-    "and what done looks like, and that session briefs and starts a worker of its own for it; this session "
+    "session orchestrates goes to that session in one SendMessage holding {restate}, and that session briefs and "
+    "starts a worker of its own for it; this session "
     "neither does that work nor starts a child for it. A topic none covers gets a new orchestrator that this "
     "puppeteer starts and then files in its environment's section with `mcp__ccd_sidebar__move_sessions`, "
     "never in \"{section}\". It starts only new orchestrators: the app nests a session under the session that "
@@ -266,7 +266,8 @@ def board_path(home, sid):
 
 
 def rule_text(home, s):
-    return RULE.format(section=section_of(s["sessionId"]), cmd=PHI.commands(), board=board_path(home, s["sessionId"]))
+    return RULE.format(section=section_of(s["sessionId"]), cmd=PHI.commands(), board=board_path(home, s["sessionId"]),
+                       restate=PHI.RESTATE)
 
 
 def control(home, s, add=(), drop=()):
@@ -336,7 +337,7 @@ def ask_route(s):
         return ""
     return (f"This session is controlled by a puppeteer, so it starts no new orchestrator itself: write "
             f"`{PHI.commands()} request \"<title>\" --brief \"<the whole brief>\" --to-puppeteer`, the brief holding "
-            f"the topic, ezexe's words quoted and a line `Files: <paths>`. Its puppeteer "
+            f"{PHI.RESTATE}. Its puppeteer "
             f"\"{full_title(held['sessionId'])}\" starts it as an orchestrator of this environment, files it in "
             f"this environment's section and takes it under control, or declines it with one line to ezexe.")
 
@@ -1111,6 +1112,5 @@ def route_down(s, words_):
     sid = best["sessionId"]
     return (f"phi (p4-phi): this message reads as work on the topic \"{full_title(sid)}\" `{sid}` orchestrates. If so, "
             f"do not do it here and start no child for it: send that session one message with SendMessage, holding "
-            f"ezexe's words, a line `Files: <paths>` and what done looks like, and telling it to brief and start a "
-            f"worker of its own for it. Keep it on the board with `{PHI.commands()} note \"<what was sent "
+            f"{PHI.RESTATE}, and telling it to brief and start a worker of its own for it. Keep it on the board with `{PHI.commands()} note \"<what was sent "
             f"and to whom>\" --source \"<the message>\" --kind waiting` until its report comes.")

@@ -6,7 +6,7 @@ start draft, the gate and the watcher, which the functions `prompty`, `prompter`
 
   linear     Routing reads ezexe's message against the records the ledger is built from: the area it names, the
              live session that is that area's code owner, the running writer that holds its files. The start draft
-             is the exact next session: its topic, a brief built from ezexe's words, its parent session, fork or
+             is the exact next session: its topic, a brief written as its own instruction, its parent session, fork or
              fresh, the issue it closes. The gate checks the draft: the issue it names is open, or it names none,
              p4-phi files none and the child's findings go up in its report; no running writer holds the same files;
              the parent session is the right orchestrator. A clean draft is handed as
@@ -75,7 +75,7 @@ MODEL_FILE = "prompty.json"      # <store>/phi/models/prompty.json: the trained 
 TOPIC_WORDS = 3                  # content words a message shares with this session's task to be part of its topic
 QUICK_WORDS = 6                  # a message of fewer content words is a quick thing, never drafted
 STALE_S = 24 * 3600.0            # an orchestrator with open work and no turn this long is stale
-WORDS_CHARS = 1500               # of ezexe's words, quoted in a brief
+WORDS_CHARS = 1500               # of a message and of a task, kept on a registered route for scoring
 STOP = frozenset("""phi session sessions p4 plugin plugins please make sure also just now then when with that this
 there their them they have has should would could will want need like into from about your you our out get got use
 using one two all any each every not and for the are was were been being its it's can may must more most some such
@@ -1007,9 +1007,11 @@ def topic_of(req):
 
 
 def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
-    """The start draft for a message, the exact next session: its topic, a brief built from ezexe's words, its parent
-    session, fork or fresh, and the issue it closes when the words name one. A close registered route gives the
-    starting shape."""
+    """The start draft for a message, the exact next session: its topic, a brief written as an instruction to that
+    session, its parent session, fork or fresh, and the issue it closes when the message names one. The brief states
+    the task by its title, its files, what done looks like, and the model and effort the call adds; it quotes no
+    sentence of the message and says nothing of who asked or how the request travelled. A close registered route
+    gives the starting shape."""
     phi = _phi()
     sid = s["sessionId"]
     parent = sid if read["within"] or relay._parent(s) else ""
@@ -1024,17 +1026,16 @@ def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
     full = re.search(r"\b([\w.-]+/[\w.-]+)#(\d+)\b", req)
     if full and not named:                          # the words name the issue whole, in whichever repository
         slug, named = full.group(1), int(full.group(2))
-    lines = [f"# {title}", "", "ezexe's words:", "", "> " + _short(req, WORDS_CHARS).replace("\n", "\n> "), ""]
+    lines = [f"# {title}", "", f"Task: {title}.", ""]
     if reading:
-        lines += [f"This session takes one reading of those words, reading {reading['k']} of {reading['n']}: "
+        lines += [f"This session takes one reading of the task, reading {reading['k']} of {reading['n']}: "
                   f"{reading['text']}",
                   "Work only that reading, and end your report with one line `Result: <what this reading comes to>`, "
                   "which its parent session merges with the other readings.", ""]
     if route:
-        lines += [f"A route that landed before fits these words: \"{route['topic']}\", {route['issue']}, a "
+        lines += [f"A route that landed before fits this task: \"{route['topic']}\", {route['issue']}, a "
                   f"{route['context']} session, {(route.get('shape') or {}).get('parent', 'a child')}.",
-                  "Its steps were: " + "; ".join((route.get("shape") or {}).get("steps") or ["none kept"]) + ".",
-                  "Its brief began: " + _short((route.get("slice") or {}).get("brief"), 500), ""]
+                  "Its steps were: " + "; ".join((route.get("shape") or {}).get("steps") or ["none kept"]) + ".", ""]
     paths = read["paths"] or ((route or {}).get("slice") or {}).get("paths") or []
     if paths:
         lines += ["Area: " + ", ".join(f"`{p}`" for p in paths[:8]) + ".", ""]
@@ -1062,10 +1063,8 @@ def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
     lines += ["", f"phi draft {did} for {parent or 'root'}."]
     if reading:
         lines += [f"phi reading {reading['group']} {reading['k']} of {reading['n']} for {sid}."]
-    task = _short(" ".join(str(s.get("task") or "").split()), 500)
-    background = (f"A start draft p4-phi made in the session \"{phi.title_of(s)}\" `{sid}` from ezexe's message; "
-                  f"that session's ledger is {ledger_path(home, sid)}."
-                  + (f" That session's task: {task}" if task else ""))
+    background = (f"The session \"{phi.title_of(s)}\" `{sid}` drafted this start; its ledger is "
+                  f"{ledger_path(home, sid)}.")
     return {"id": did, "time": now(), "words": req, "title": title, "brief": "\n".join(lines), "parent": parent,
             "context": context, "issue": f"{slug}#{named}" if named else "", "repo": slug, "paths": paths,
             "route": (route or {}).get("id", ""), "background": starts.background_of(home, sid, background),
@@ -1077,7 +1076,8 @@ def call_of(d):
     call = {"initiation": "user_asked", "title": d["title"], "context": d["context"], "prompt": d["brief"]}
     if d["context"] == "fresh":
         call.update(use_worktree=False, background=d["background"])
-    return plans.with_level(call, d["title"] + "\n" + d["brief"])    # a fresh draft names its model and effort
+    # a fresh draft names its model and effort, judged by the message it came from as well as its brief
+    return plans.with_level(call, d["title"] + "\n" + str(d.get("words") or "") + "\n" + d["brief"])
 
 
 # --- the gate, then the dispatch --------------------------------------------------------------------------------------
@@ -1143,7 +1143,7 @@ def verdict_text(home, s, d):
             "to another session, leave the draft and answer it here.")
     if d["verdict"] == "route":
         o = d["owner"]
-        return (head + f"Route it: SendMessage with `to` {o['sessionId']} and ezexe's words quoted, then tell ezexe in "
+        return (head + f"Route it: SendMessage with `to` {o['sessionId']}, holding {phi.RESTATE}, then tell ezexe in "
                 f"one line that \"{o['title']}\" has it. Start no session for it." + tail)
     if d["verdict"] == "queue":
         return (head + f"Queue it behind that writer: `{phi.commands()} pioneer {d['id']}` keeps it as a start request "
@@ -1152,7 +1152,10 @@ def verdict_text(home, s, d):
     if d["verdict"] == "here":
         return head + "No session is started for it." + tail
     return (head + "Start it now: `mcp__ccd_session__start_session` with "
-            + json.dumps(call_of(d), ensure_ascii=False) + tail)
+            + json.dumps(call_of(d), ensure_ascii=False) + ". Its brief states the task by its title: before the "
+            "call, restate the rest of the task under that line as your own instruction to the new session, what it "
+            "is to do and why, from its side, quoting no message and saying nothing of who asked or how the request "
+            "travelled." + tail)
 
 
 # --- parallel: one child for each reading, merged ---------------------------------------------------------------------

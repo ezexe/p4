@@ -21,6 +21,7 @@ meta-ledger.md, with the duplicate topic, the conflict over one file and the sta
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -174,7 +175,7 @@ class Linear(Base):
         self.assertIn("its parent is this session", ctx)
         call = call_in(ctx)
         self.assertEqual((call["initiation"], call["context"], call["use_worktree"]), ("user_asked", "fresh", False))
-        self.assertIn("> " + RETRY, call["prompt"], "the brief is built from ezexe's words")
+        self.assertNotIn(RETRY, call["prompt"], "the brief quotes no sentence of the message")
         self.assertIn("Report when done.", call["prompt"])
         self.assertGreaterEqual(len(call["background"]), 80)
         did = puppeteer.DRAFT_RE.search(call["prompt"]).group(1)
@@ -195,7 +196,57 @@ class Linear(Base):
         ctx = context(t.say(TOP, "Fix the off-by-one in `src/export/flush.py` that drops the last row"))
         self.assertIn(f"its area has a live code owner, \"the flush port\" `{KID}`", ctx)
         self.assertIn(f"Route it: SendMessage with `to` {KID}", ctx)
+        self.assertIn(phi.RESTATE, ctx, "the route asks for the task restated, never the message quoted")
         self.assertNotIn("`mcp__ccd_session__start_session` with {", ctx, "no session is started for it")
+
+    def test_a_start_draft_is_an_instruction_that_quotes_no_sentence_of_the_message(self):
+        """The draft's brief states the task, its files, what done looks like and the model and effort as an
+        instruction to the session it starts: no sentence of the message beyond the title, and no line on who asked
+        or how the request travelled."""
+        t = self.t
+        t.say(TOP, TASK)
+        t.stop(TOP, TASK, report="planned")
+        rest = ["It drops the last row whenever the ports table is locked by the nightly vacuum",
+                "Keep the thirty second timeout exactly as it is today"]
+        ctx = context(t.say(TOP, RETRY + ". " + ". ".join(rest) + "."))
+        call = call_in(ctx)
+        brief = call["prompt"]
+        for sentence in [RETRY] + rest:
+            if sentence not in call["title"]:
+                self.assertNotIn(sentence, brief, "no sentence of the message beyond the title")
+        self.assertFalse([x for x in brief.splitlines() if x.startswith(">")], "no quoted block")
+        for line in ("Files: ", "Done looks like: ", "Model and effort: "):
+            self.assertIn(line, brief)
+        self.assertIn(call["title"], brief, "the task, stated by its title")
+        travelled = re.compile(r"ezexe asked|ezexe's (?:words|message)|routed from|relayed by|from ezexe|"
+                               r"words quoted", re.I)
+        self.assertIsNone(travelled.search(brief), brief)
+        self.assertIsNone(travelled.search(call["background"]), call["background"])
+        self.assertIn("restate", ctx, "the session that makes the call is told to state the task in its own words")
+
+    def test_no_line_handed_to_a_session_tells_it_to_quote_a_prompt(self):
+        """Every road that tells a session to pass work on asks for the task restated as its own instruction."""
+        t = self.t
+        said = [context(t.say(host, words, P4_PHI_NEW_TASK="1")) for host, words in (
+            (TOP, TASK), (TOP, "also, what colour should the fence be?"),
+            (KID, handed("Port the flush to the new writer. Archive when done.")), (KID, "and what about the fence?"),
+            (KID, "Add a dark mode toggle to the billing dashboard's settings page"))]
+        asks = re.compile(r"words,? quoted|quoted words|holding ezexe's words|built from ezexe's words|"
+                          r"ezexe's words:", re.I)
+        for text in said:
+            self.assertIsNone(asks.search(text), text)
+        self.assertIn(phi.RESTATE, said[0], "an orchestrator's new topic")
+        self.assertIn(phi.RESTATE, said[2], "a worker's new topic, handed up")
+        self.assertIn(phi.RESTATE, said[3])
+        import ast
+        for name in ("phi.py", "controls.py", "puppeteer.py", "issues.py"):
+            tree = ast.parse(read(os.path.join(HERE, name)))
+            docs = {id(n.body[0].value) for n in ast.walk(tree)
+                    if isinstance(n, (ast.Module, ast.FunctionDef, ast.ClassDef)) and n.body
+                    and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant)}
+            for n in ast.walk(tree):
+                if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs:
+                    self.assertIsNone(asks.search(n.value), f"{name}:{n.lineno} {n.value[:120]}")
 
     def test_a_draft_whose_writer_is_busy_is_queued_behind_it(self):
         t = self.t
@@ -299,8 +350,8 @@ class Recursive(unittest.TestCase):
         ctx = context(t.say(TOP2, "Fix the narwhal exporter flush again: it drops the last row of the ports table"))
         self.assertIn(f"closely matches the registered route \"{row['id']}\"", ctx)
         brief = call_in(ctx)["prompt"]
-        self.assertIn("A route that landed before fits these words: \"the x fix\", ezexe/demo#7, a fresh session", brief)
-        self.assertIn("Its brief began: Fix the off-by-one", brief)
+        self.assertIn("A route that landed before fits this task: \"the x fix\", ezexe/demo#7, a fresh session", brief)
+        self.assertNotIn("Fix the off-by-one", brief, "no earlier brief is quoted")
         self.assertNotIn("route that landed", context(t.say(TOP2, "Add a dark theme to the billing dashboard's "
                                                                   "settings page")), "no match: a fresh draft")
         self.state(**{"7": "OPEN"})

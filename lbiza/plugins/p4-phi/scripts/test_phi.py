@@ -682,7 +682,7 @@ class NewTask(unittest.TestCase):
     def test_a_childs_new_topic_is_handed_up(self):
         self.say(TOP, TASK)
         first = self.say(KID, HANDED)
-        self.assertIn(f"hand it up to your parent session, {TOP}, with SendMessage", first)
+        self.assertIn(f"hand it up to your parent session, {TOP}, with SendMessage, holding {phi.RESTATE}", first)
         self.assertIn("start no session for it", first)
         self.assertNotIn("new orchestrator of its own", first)
         line = self.say(KID, "and what about the fence?")
