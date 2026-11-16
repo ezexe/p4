@@ -51,7 +51,8 @@ SCRIPT_EXT = (".py", ".sh", ".ps1", ".js", ".mjs", ".cjs", ".ts", ".bat", ".cmd"
 SNAPSHOT_MARKS = (".git", "README.md", "LICENSE", "pyproject.toml", "setup.py", "package.json", ".claude-plugin")
 SKIP_DIRS = {"node_modules", "__pycache__", ".pytest_cache", "venv", ".venv", ".out"}
 SEARCH_DEADLINE_S = 3.0
-SEARCH_MAX_FILES = 5000
+SEARCH_MAX_FILES = 5000               # skills read at most
+SEARCH_MAX_DIRS = 50000               # folders walked at most, whatever the clock says
 SEARCH_KEEP = 3
 SEARCH_MIN_SCORE = 0.18                # measured: the true matches scored 0.195 to 0.198, the best false one 0.143
 MARKER = ".skillex"                   # in a copy under .claude/skills/: the store folder it was copied from
@@ -556,9 +557,9 @@ def search_similar(p4, skill_dir):
     own = key(skill_dir)
     seen, candidates = set(), []
     walks = (os.walk(root) for root in search_roots(p4) if os.path.isdir(root))
-    for r, ds, fs in (step for walk in walks for step in walk):
-        if time.monotonic() > deadline or len(candidates) >= SEARCH_MAX_FILES:
-            break                                        # every root is left once the time is up
+    for walked, (r, ds, fs) in enumerate(step for walk in walks for step in walk):
+        if time.monotonic() > deadline or walked >= SEARCH_MAX_DIRS or len(candidates) >= SEARCH_MAX_FILES:
+            break                                        # every root is left once a cap is reached
         ds[:] = [d for d in ds if d not in SKIP_DIRS and d != ".git" and d != STATE]
         if "SKILL.md" not in fs:
             continue

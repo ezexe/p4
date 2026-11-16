@@ -373,18 +373,24 @@ class Watcher(Store):
         put(os.path.join(self.p4, "skillex", "x" * 64, "SKILL.md"), "---\nname: long\n---\n")
         self.assertEqual(len(skillex.free_name(self.p4, "x" * 64)), 64)
 
-    def test_the_search_stops_at_its_deadline(self):
-        old = skillex.SEARCH_DEADLINE_S
-        skillex.SEARCH_DEADLINE_S = 0.0
+    def capped(self, name, value):
+        old = getattr(skillex, name, None)
+        setattr(skillex, name, value)
         try:
             self.script("s1", "astcheck.py", "astcheck", "a=1")
             self.script("s2", "astcheck.py", "astcheck", "b=2")
             self.write(self.script("s3", "astcheck.py", "astcheck", "c=3"))
         finally:
-            skillex.SEARCH_DEADLINE_S = old
+            setattr(skillex, name, old)
         d = os.path.join(self.p4, "skillex", "astcheck")
         self.assertEqual(json.loads(read(os.path.join(d, "similar.json"))), [])
         self.assertTrue(os.path.isfile(os.path.join(self.root, ".claude", "skills", "astcheck", "SKILL.md")))
+
+    def test_the_search_stops_at_its_deadline(self):
+        self.capped("SEARCH_DEADLINE_S", -1.0)             # already past, on a clock of any resolution
+
+    def test_the_search_stops_at_its_folder_cap(self):
+        self.capped("SEARCH_MAX_DIRS", 0)
 
     def test_a_write_through_the_scratchpad_link_counts_as_its_session(self):
         self.script("s1", "astcheck.py", "astcheck", "a=1")
