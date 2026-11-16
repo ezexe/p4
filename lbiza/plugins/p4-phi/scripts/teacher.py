@@ -1149,7 +1149,7 @@ def facts(p4, args, client=None, out=print):
 
 def parser():
     ap = argparse.ArgumentParser(prog="p4.py teacher", description="the paid batches (build step 9)")
-    ap.add_argument("action", choices=("edit-labels", "dictionary", "facts", "extract"))
+    ap.add_argument("action", choices=("edit-labels", "dictionary", "facts"))
     ap.add_argument("--p4")
     ap.add_argument("--limit", type=int, default=None,
                     help="edit-labels: the newest N tasks; dictionary: the first N batches of 20; facts: the newest "
@@ -1173,9 +1173,6 @@ def main(argv=None, p4=None):
         print("p4: no .claude/p4 directory found", file=sys.stderr)
         return 1
     read_config(p4)
-    if args.action == "extract":
-        print("p4.py teacher extract: not built yet (build step 10)", file=sys.stderr)
-        return 2
     if not args.fake and not args.estimate and not (os.environ.get("ANTHROPIC_API_KEY")
                                                     or os.environ.get("ANTHROPIC_AUTH_TOKEN")
                                                     or os.environ.get("ANTHROPIC_PROFILE")):

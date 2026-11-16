@@ -168,12 +168,6 @@ class Cli(Fixture):
         self.assertIn("rebuilt", run_cli("index", "--p4", self.p4).stdout)
         self.assertIn("fresh", run_cli("index", "--p4", self.p4).stdout)
 
-    def test_stubs(self):
-        # step 9's teacher is built (test_teacher.py); its extraction batch (step 10) is the one stub left
-        r = run_cli("teacher", "extract", "--p4", self.p4)
-        self.assertEqual(r.returncode, 2)
-        self.assertIn("not built yet", r.stderr)
-
     def test_check(self):
         r = run_cli("check", "--p4", self.p4)
         self.assertEqual(r.returncode, 0, r.stderr)
