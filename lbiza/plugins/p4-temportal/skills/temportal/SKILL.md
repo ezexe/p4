@@ -15,7 +15,7 @@ Until `.claude/p4` is a git repository of its own, which p4-phi makes it, no scr
 - `temportal/scratchpad/` is the notebook, kept across sessions, and logs, build output and binaries in it are moved into `scratchpad/.out/`, which git ignores.
 - `temportal/src/` holds code kept for reuse that the project's repository does not use.
 - At a start and at each turn end another session's scratchpad folder under the temp directory is linked to its scratchpad directory, or removed when it is empty and quiet, and at a start the scratchpad directory of an ended session is committed and removed.
-- `python3 -I "${CLAUDE_PLUGIN_ROOT}/hooks/scratchpad.py" ended-sweep --dry-run` lists every ended session's scratchpad directory with what it would commit and remove, and the same command without `--dry-run` commits and removes them.
+- `CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}" sh "${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh" scratchpad ended-sweep --dry-run` lists every ended session's scratchpad directory with what it would commit and remove, and the same command without `--dry-run` commits and removes them.
 
 ## Lifetimes
 
@@ -29,7 +29,7 @@ The retention sweep clears what is past its lifetime at each session start and s
 Set a cookie:
 
 ```bash
-python3 -I "${CLAUDE_PLUGIN_ROOT}/hooks/lifetime.py" --p4 "<project>/.claude/p4" set "<path under temportal/>" 7d
+CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}" sh "${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh" lifetime --p4 "<project>/.claude/p4" set "<path under temportal/>" 7d
 ```
 
 The lifetime is `30m`, `12h`, `7d`, `2w`, an ISO date, or `session` with `--session <session id>` to clear it when this session ends.
