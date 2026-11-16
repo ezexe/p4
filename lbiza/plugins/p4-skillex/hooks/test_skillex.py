@@ -650,6 +650,79 @@ class Loading(Store):
             skillex.os.replace = real_replace
         self.assertIn("Say it differently.", read(os.path.join(copy, "SKILL.md")))
 
+    def test_a_copy_set_aside_long_after_it_was_made_waits_for_its_session(self):
+        self.store_skill("demo-brew")
+        skillex.cmd_start(self.p4, {})
+        copy = os.path.join(self.root, ".claude", "skills", "demo-brew")
+        old = time.time() - 2 * skillex.STAGING_STALE_S
+        os.utime(copy, (old, old))                       # a copy made hours ago
+        where = skillex.set_aside(self.p4, copy)
+        skillex.clear_aside(self.p4)
+        self.assertTrue(os.path.isfile(os.path.join(where, skillex.MARKER)), "another session's clear waits")
+
+    def test_a_held_copy_of_a_removed_skill_stays_without_breaking_the_start(self):
+        self.store_skill("a-gone")
+        skillex.cmd_start(self.p4, {})
+        held = os.path.join(self.root, ".claude", "skills", "a-gone")
+        shutil.rmtree(os.path.join(self.p4, "skillex", "a-gone"))
+        self.store_skill("b-new")
+        real_replace = skillex.os.replace
+
+        def holds(a, b):
+            if os.path.normcase(str(a)) == os.path.normcase(held):
+                raise PermissionError("a scanner holds a file inside")
+            return real_replace(a, b)
+
+        skillex.os.replace = holds
+        try:
+            out = skillex.cmd_start(self.p4, {})
+        finally:
+            skillex.os.replace = real_replace
+        self.assertTrue(out["hookSpecificOutput"]["reloadSkills"])
+        self.assertTrue(os.path.isfile(os.path.join(self.root, ".claude", "skills", "b-new", skillex.MARKER)))
+        self.assertIn("a-gone", skillex.copied(self.p4), "still recorded, so a later start removes it")
+        skillex.cmd_start(self.p4, {})
+        self.assertFalse(os.path.exists(held))
+
+    def test_a_copy_across_volumes_is_copied(self):
+        self.store_skill("demo-brew")
+        real_replace = skillex.os.replace
+
+        def across(a, b):
+            if os.sep + "staging" + os.sep in str(a):
+                e = OSError(18, "Invalid cross-device link")
+                raise e
+            return real_replace(a, b)
+
+        skillex.os.replace = across
+        try:
+            skillex.cmd_start(self.p4, {})
+        finally:
+            skillex.os.replace = real_replace
+        copy = os.path.join(self.root, ".claude", "skills", "demo-brew")
+        self.assertTrue(os.path.isfile(os.path.join(copy, skillex.MARKER)))
+        self.assertTrue(os.path.isfile(os.path.join(copy, "SKILL.md")))
+
+    def test_a_brew_whose_copy_is_held_says_so(self):
+        skillex.cmd_start(self.p4, {})
+        self.script("s1", "astcheck.py", "astcheck", "a=1")
+        self.script("s2", "astcheck.py", "astcheck", "b=2")
+        real_replace = skillex.os.replace
+
+        def refuses(a, b):
+            if os.sep + "staging" + os.sep in str(a):
+                raise PermissionError("held")
+            return real_replace(a, b)
+
+        skillex.os.replace = refuses
+        try:
+            out = self.write(self.script("s3", "astcheck.py", "astcheck", "c=3"))
+        finally:
+            skillex.os.replace = real_replace
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("is made at a later session start", ctx)
+        self.assertNotIn("it is copied to", ctx)
+
     def test_a_fresh_set_aside_copy_waits_for_its_session(self):
         aside = os.path.join(self.root, ".claude", ".skillex-swap", "aside")
         fresh = put(os.path.join(aside, "x.4242.1", skillex.MARKER), "m\n")

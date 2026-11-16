@@ -690,8 +690,9 @@ def copied(p4):
 
 
 def record_copies(p4, added=(), removed=()):
-    """Add to and take from `copied.json` at once, over a fresh read, so neither a failure later in the same run nor
-    another session writing it meanwhile loses a record."""
+    """Add to and take from `copied.json` at once, over a fresh read, so a failure later in the same run loses no
+    record. Two sessions writing it in the same instant can still drop a name, which the next start records again
+    from the marked copy."""
     now = copied(p4)
     new = (now | set(added)) - set(removed)
     if new != now:
@@ -746,7 +747,17 @@ def mirror(p4, names=None, remove=False):
             continue
         try:
             os.replace(staging, target)
-        except OSError:
+        except OSError as e:
+            if not os.path.exists(target) and cross_volume(e):
+                try:                                     # .claude/skills links to another drive: copy across
+                    shutil.copytree(staging, target)
+                except OSError:
+                    shutil.rmtree(target, ignore_errors=True)
+                else:
+                    shutil.rmtree(staging, ignore_errors=True)
+                    record_copies(p4, added={n})
+                    changed.append(n)
+                    continue
             shutil.rmtree(staging, ignore_errors=True)
             if old and not os.path.exists(target) and os.path.isfile(os.path.join(old, MARKER)):
                 try:                                     # not another session's copy: the old one goes back
@@ -759,7 +770,10 @@ def mirror(p4, names=None, remove=False):
     if remove and names is None and os.path.isdir(dst):
         for n in sorted(os.listdir(dst)):
             if n not in store and n in copied(p4) and os.path.isfile(os.path.join(dst, n, MARKER)):
-                set_aside(p4, os.path.join(dst, n))    # its store skill is gone
+                try:
+                    set_aside(p4, os.path.join(dst, n))  # its store skill is gone
+                except OSError:                          # a held folder: removed at a later start
+                    continue
                 record_copies(p4, removed={n})
                 changed.append(n)
     clear_aside(p4)
@@ -778,6 +792,11 @@ def swap_dir(p4, sub):
     return os.path.join(base, sub)
 
 
+def cross_volume(e):
+    """True for the error a rename gives across drives or file systems."""
+    return getattr(e, "errno", None) == 18 or getattr(e, "winerror", None) == 17
+
+
 def set_aside(p4, target):
     """Move a copy out of `.claude/skills/` whole, marker and all, into the swap folder's `aside/`, where clear_aside
     deletes it. Returns where it went, or None when another session moved it first."""
@@ -786,6 +805,10 @@ def set_aside(p4, target):
         os.replace(target, where)
     except FileNotFoundError:
         return None
+    try:
+        os.utime(where)                                  # a rename keeps the copy's age; clear_aside reads this one
+    except OSError:
+        pass
     return where
 
 
@@ -839,15 +862,17 @@ def brew(p4, path):
     if created:
         similar = search_similar(p4, d)
         link_similar(d, similar)
-    mirror(p4, [name])
-    return name, created, similar
+    copied_now = name in mirror(p4, [name])
+    return name, created, similar, copied_now
 
 
 def notice(results):
     out = []
-    for name, created, similar in results:
+    for name, created, similar, copied_now in results:
         verb = "wrote" if created else "refreshed"
-        line = f"p4-skillex: {verb} the skill `{name}` at .claude/p4/skillex/{name}/SKILL.md from scripts this project's sessions keep writing; it is copied to .claude/skills/{name}/."
+        where = (f"it is copied to .claude/skills/{name}/" if copied_now
+                 else f"its copy in .claude/skills/{name}/ is made at a later session start")
+        line = f"p4-skillex: {verb} the skill `{name}` at .claude/p4/skillex/{name}/SKILL.md from scripts this project's sessions keep writing; {where}."
         if similar:
             line += " Similar existing skills: " + ", ".join(f"`{m['name']}`" for m in similar) + "."
         out.append(line)
