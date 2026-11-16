@@ -91,6 +91,19 @@ class Lifetime(unittest.TestCase):
         self.assertFalse(os.path.exists(big2))
         self.assertEqual(lifetime.sweep(self.p4), "", "a second sweep has nothing to clear")
 
+    def test_a_size_cap_keeps_a_copy_the_same_start_set_aside(self):
+        """A hand-set max_mb on the .layout-conflicts rule clears oldest first whatever the age, so a copy a layout
+        move set aside in the same start must not be the one it clears."""
+        put(os.path.join(self.p4, "recall", "store", "a.txt"), "a")
+        kept = put(os.path.join(self.p4, "recall", ".layout-conflicts", "store", "kept.txt"), "k" * 100, age_days=60)
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump({"temportal": {"cache": {".layout-conflicts": {"max_mb": 0.00001}}}}, f)
+        p4conf.migrate_layout(self.p4, commit=False)
+        lifetime.sweep(self.p4)
+        moved = os.path.join(self.p4, "phi", p4conf.LAYOUT_CONFLICTS, "recall", "store", "kept.txt")
+        self.assertFalse(os.path.exists(kept))
+        self.assertTrue(os.path.isfile(moved), "the copy set aside in this start is kept")
+
     def test_memory_is_never_cleared(self):
         mem = put(os.path.join(self.t, "memory", "a.md"), age_days=400)
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:

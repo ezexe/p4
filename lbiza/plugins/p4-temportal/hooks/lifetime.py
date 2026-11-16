@@ -55,6 +55,7 @@ WHOLE = ("scratchpad", "src", EXPIRES)  # the notebook, the saved code and the c
 ASIDE = sorted({place.split("/")[0] for place in p4conf.LAYOUT.values()} - {"temportal"})
 UNITS = {"m": 60, "h": 3600, "d": 86400, "w": 7 * 86400}
 SESSION = "session"
+FRESH_S = 3600                          # a set-aside copy this young came with this start's move: no size cap clears it
 
 
 def payload_from_stdin():
@@ -290,7 +291,8 @@ def _conflicts_dir(p4, plugin):
 def _clear(d, rule, now, by_folder=False):
     """Clear the folder `d` by one cache rule -> the paths of the files it removed. With `by_folder` a file's age
     starts at the later of its own time and its folder's, since a layout move keeps the time of the copy it sets
-    aside and gives the folder it lands in a new one."""
+    aside and gives the folder it lands in a new one, and `max_mb` never clears a copy younger than FRESH_S, which
+    the same start's move set aside."""
     if not os.path.isdir(d):
         return []
     files = sorted(_files(d, by_folder))                # oldest first
@@ -311,6 +313,8 @@ def _clear(d, rule, now, by_folder=False):
         for mt, size, p in files:
             if total <= limit:
                 break
+            if by_folder and mt > now - FRESH_S:
+                continue                                # set aside by this start's layout move
             if os.path.basename(p) != ".gitignore" and remove(p):
                 total -= size
                 gone.append(p)
