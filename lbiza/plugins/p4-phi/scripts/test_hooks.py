@@ -176,6 +176,19 @@ class Layout(Base):
         self.assertNotIn(".claude", status.stdout,
                          "the store, a git repository of its own, stays out of the project's git status")
 
+    def test_the_sync_files_are_seeded_once_the_store_has_an_origin(self):
+        """A store with no origin never syncs, so the layout hook seeds no sync workflow, script or defaults into it;
+        once it has an origin, the next layout hook seeds them."""
+        shutil.rmtree(self.p4)
+        run_hook("layout", {"source": "startup", "cwd": self.proj}, self.proj)
+        self.assertFalse(os.path.exists(os.path.join(self.p4, ".github")), "no origin: nothing seeded")
+        bare = os.path.join(self.tmp.name, "origin.git")
+        subprocess.run(["git", "init", "-q", "--bare", bare], check=True, capture_output=True)
+        subprocess.run(["git", "-C", self.p4, "remote", "add", "origin", bare], check=True, capture_output=True)
+        run_hook("layout", {"source": "startup", "cwd": self.proj}, self.proj)
+        for f in ("p4_sync.py", "p4_defaults.json", os.path.join("workflows", "p4-sync.yml")):
+            self.assertTrue(os.path.exists(os.path.join(self.p4, ".github", f)), f)
+
     def gitignore(self, text=None):
         gi = os.path.join(self.p4, ".gitignore")
         if text is not None:

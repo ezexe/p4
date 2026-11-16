@@ -10,7 +10,8 @@ event and matcher hooks/hooks.json runs it on, and what it does.
   layout         SessionStart, matcher `startup|resume|clear|compact`. Moves a store of an older layout through
                  p4conf.migrate_layout; makes `.claude/p4/` with its folders, its .gitignore, p4.json and its git
                  repository where they are missing; adds the `.git/info/exclude` line; seeds the store's sync
-                 workflow; and brings the repository's and the dependencies' documents and the index up to date.
+                 workflow once the store has an origin; and brings the repository's and the dependencies'
+                 documents and the index up to date.
                  It prints nothing unless ezexe pinned rules, and then the block `Standing rules from ezexe:` of
                  at most PINNED_CHARS characters as `additionalContext`.
   recall         UserPromptSubmit. The retrieval lines that `injected` lets through as `additionalContext`, with
@@ -182,7 +183,8 @@ def git(*args, cwd, timeout=10):
 
 def init_layout(project):
     """Make .claude/p4/ with its folders, its .gitignore, p4.json and its git repository where they are missing, add
-    its line to the project's .git/info/exclude, and seed the store's sync workflow. Returns the p4 path."""
+    its line to the project's .git/info/exclude, and seed the store's sync workflow once it has an origin.
+    Returns the p4 path."""
     import subprocess
     p4 = os.path.join(project, ".claude", "p4")
     os.makedirs(p4, exist_ok=True)
@@ -197,12 +199,12 @@ def init_layout(project):
         except (OSError, subprocess.SubprocessError):
             pass
     exclude_line(project)
-    try:                                  # the store's sync workflow and its script, unless recall.sync.seed is false
+    try:                       # the store's sync workflow and script, once it has an origin, unless recall.sync.seed is false
         conf = p4conf.section(p4, "recall", write=False).get("sync", {})
-        if conf.get("seed", True):
+        if conf.get("seed", True) and git("remote", "get-url", "origin", cwd=p4).returncode == 0:
             import sync
             sync.seed(p4, conf.get("main", "main"))
-    except (OSError, ImportError):
+    except (OSError, ImportError, subprocess.SubprocessError):
         pass
     return p4
 
