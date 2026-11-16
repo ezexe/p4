@@ -1099,6 +1099,53 @@ FIRST_SPLIT = ("phi (p4-phi): this is this session's first message: the app lets
                "files stays here whole.")
 
 
+RESEARCH = ("Before it creates anything new, such as a module, a page, a format or a kind of test, this session finds "
+            "the documented terms for what it creates, from Anthropic's docs, the platform's docs or the field's "
+            "published sources, and a published implementation guide for that kind of work. It logs both, each with "
+            "its source, in its decisions file, the one its brief names or decisions.md in its scratchpad directory, "
+            "and builds by them. A name only this project uses stays only where no published source names the thing, "
+            "and the decisions file says where it looked.")
+RESEARCH_STEP_HEAD = ("phi (p4-phi): this task list creates something new with no step before it that finds the "
+                      "documented terms and an implementation guide:")
+CREATES = re.compile(r"^\W*(?:create|add|build|write|make|scaffold|introduce|design)\b[^.;]*?\b(?:modules?|plugins?|"
+                     r"skills?|pages?|formats?|hooks?|commands?|subcommands?|class(?:es)?|scripts?|schemas?|agents?)\b",
+                     re.I)
+RESEARCHES = re.compile(r"\b(?:find|research|look\s+up|read|survey)\b[^.;]*\b(?:terms?|names?|guides?|docs|"
+                        r"documentation)\b", re.I)
+
+
+def research_text(home, s):
+    """A writing worker's or soldier's first message: the line to find the documented terms and an implementation
+    guide before it creates anything. '' for an orchestrator, a later message, and a session that writes nothing."""
+    if not spawned_from(s) or not clean(s.get("task")) or load_turns(home, s["sessionId"]):
+        return ""
+    files = s.get("fileSet")
+    if not (files if isinstance(files, list) else issues.writing(s.get("task"))):
+        return ""
+    RAN["research"] = True
+    return "phi (p4-phi): " + RESEARCH
+
+
+def research_step_text(home, s, plan):
+    """The line for a task list whose first step that creates something has no research step before it, said once
+    for that step; '' otherwise."""
+    steps = [st for st in plan.get("steps") or [] if st.get("status") != "completed"]
+    at = next((k for k, st in enumerate(steps) if CREATES.search(str(st.get("content") or ""))), None)
+    if at is None or any(RESEARCHES.search(str(st.get("content") or "")) for st in steps[:at]):
+        return ""
+    st = steps[at]
+    path = os.path.join(session_dir(home, s["sessionId"]), "session.json")
+    disk = read_json(path)
+    told = [x for x in disk.get("researchAdvised") or [] if isinstance(x, str)]
+    if st.get("content") in told:
+        return ""
+    disk["researchAdvised"] = s["researchAdvised"] = told + [st.get("content", "")]
+    write_atomic(path, json.dumps(disk, indent=1, ensure_ascii=False))
+    RAN["research_step"] = st.get("addr")
+    return (f"{RESEARCH_STEP_HEAD} step {st.get('addr')} \"{cut(clean(st.get('content')), 120)}\". Put a step before "
+            f"it that does so. {RESEARCH}")
+
+
 def first_split_text(home, s):
     """A worker's or a soldier's first message: the line to plan its split while the app still lets it start
     sessions. '' for an orchestrator, a later message, a session with no task, and one a cap holds."""
@@ -1563,7 +1610,8 @@ def h_plan(payload):
         advice = advise(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user", cap)             if advise else ""                      # none where the orchestrator does its own steps
         RAN["split"] = "advised" if advice else ""
         feat = feature_steps_text(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user")
-        text = "\n\n".join(p for p in (feat, advice, text) if p)
+        research = research_step_text(me.home, s, plans.load(me.home, me.id))
+        text = "\n\n".join(p for p in (feat, research, advice, text) if p)
     if spawned_from(s) and any(k in inp for k in ("advance", "start", "done", "items")):
         s = load_session(me.home, me.id) or s      # the issue or the findings line, then the commits' check
         cwd = payload.get("cwd") or s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or ""
@@ -2354,6 +2402,9 @@ def h_user_prompt_submit(payload):
     first_split = first_split_text(me.home, s)
     if first_split:
         parts.insert(0, first_split)
+    research = research_text(me.home, s)
+    if research:
+        parts.insert(0, research)
     if FILE_SETS and s.get("fileSet") and load_turns(me.home, s["sessionId"]):
         held_line = files_held_text(me.home, s)    # its closing commit is pushed and it still holds files
         if held_line:

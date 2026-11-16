@@ -49,6 +49,8 @@ A worker splits at its first message: the app lets a session start sessions only
 Subagents keep reads, searches, single command runs and independent checks.
 A writing part that comes up later is kept as a start request, which ezexe starts by a click.
 A subagent that wrote files is listed on the ledger under Level misses.
+Before a session creates anything new, such as a module, a page, a format or a kind of test, it finds the documented terms for it and a published implementation guide for that kind of work, logs both with their sources in its decisions file, and builds by them: a writing worker's first message and every start draft carry that line.
+A task list whose first creating step has no such research step before it is advised one, once.
 
 ## What a `Files:` line holds
 

@@ -1058,7 +1058,8 @@ def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
         elif slug:
             lines += [f"It names no issue in {slug}, and p4-phi files none: each finding goes into the report as one "
                       f"`Finding:` line, which the parent session passes up unchanged.", ""]
-        lines += ["Done looks like: the change made, its regression test passing, committed and reported.",
+        lines += [phi.RESEARCH, "",
+                  "Done looks like: the change made, its regression test passing, committed and reported.",
                   "Report when done."]
     if not parent:
         lines += ["", f"{phi.NEW_TOP_BRIEF} {phi.new_top_first_act()}"]

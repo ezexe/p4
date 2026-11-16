@@ -343,6 +343,52 @@ class WorkerSplit(Base):
         self.assertIn("the flush port", miss)
 
 
+class TermsAndGuides(Base):
+    """A session about to create something finds its documented terms and an implementation guide first, logs both
+    with their sources in its decisions file, and builds by them."""
+
+    plan = WorkerSplit.plan
+
+    def test_a_writing_workers_first_message_carries_the_research_line(self):
+        t = self.t
+        t.say(TOP, TASK)
+        first = context(t.say(KID, handed("Add a retry module for the flush writer.\nFiles: src/export/retry.py\n"
+                                           "Report when done.")))
+        self.assertIn("documented terms", first)
+        self.assertIn(phi.RESEARCH, first)
+        t.stop(KID, "Add a retry module", report="half way")
+        self.assertNotIn(phi.RESEARCH, context(t.say(KID, "carry on")), "said at the first message only")
+        t.record(KID2, TOP, title="the exporter check")
+        checker = context(t.say(KID2, handed("Check that the exporter's tests pass and report.\nFiles: none")))
+        self.assertNotIn(phi.RESEARCH, checker, "a read-only worker creates nothing")
+
+    def test_a_start_draft_carries_the_research_step(self):
+        t = self.t
+        t.say(TOP, TASK)
+        t.stop(TOP, TASK, report="planned")
+        brief = call_in(context(t.say(TOP, RETRY)))["prompt"]
+        self.assertIn("documented terms", brief)
+        self.assertIn(phi.RESEARCH, brief)
+
+    def test_a_plan_with_no_research_step_before_its_first_creating_step_is_advised_one(self):
+        t = self.t
+        t.say(TOP, TASK)
+        t.say(KID, handed("Add a retry module for the flush writer. Report when done."))
+        ctx = self.plan(KID, {"items": [
+            {"content": "Create the retry module src/export/retry.py", "status": "in_progress"},
+            {"content": "Wire the retry into the flush writer", "status": "pending"}], "scope": "first_task"})
+        self.assertIn("documented terms", ctx)
+        self.assertIn(phi.RESEARCH_STEP_HEAD, ctx)
+        self.assertIn("\"Create the retry module", ctx.split(phi.RESEARCH_STEP_HEAD)[1])
+        t.record(KID2, TOP, title="the retry module")
+        t.say(KID2, handed("Add a retry module for the flush writer. Report when done."))
+        ok = self.plan(KID2, {"items": [
+            {"content": "Find the documented terms and an implementation guide for a retry module",
+             "status": "in_progress"},
+            {"content": "Create the retry module src/export/retry.py", "status": "pending"}], "scope": "first_task"})
+        self.assertNotIn(phi.RESEARCH_STEP_HEAD, ok, "a plan that researches first is advised nothing")
+
+
 class Recursive(unittest.TestCase):
     def setUp(self):
         if not shutil.which("git") or not shutil.which("sh"):
