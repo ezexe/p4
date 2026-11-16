@@ -110,6 +110,8 @@ WRITE_RES = [
     # PowerShell's writers, by their path parameter
     re.compile(r"(?i)\b(?:Set-Content|Add-Content|Out-File|New-Item)\b[^\n|;]*?-(?:Path|FilePath|LiteralPath)[ \t]+"
                + _PATH),
+    # and by a positional path, the first argument when it is no parameter, as in `... | Out-File $env:TEMP\x.py`
+    re.compile(r"(?i)\b(?:Set-Content|Add-Content|Out-File|New-Item)[ \t]+(?!-)" + _PATH),
 ]
 ARGS_RES = [re.compile(r"\b(?:cp|mv)\b([^\n|;&]*)")]
 TOKEN_RE = re.compile(r"\"[^\"\n]*\"|'[^'\n]*'|\S+")

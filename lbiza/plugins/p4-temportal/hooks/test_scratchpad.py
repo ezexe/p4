@@ -1410,6 +1410,12 @@ class AskPaths(unittest.TestCase):
                   "$env:TEMP/x.py", "%TEMP%/x.py", "$TMPDIR/x.py"):
             self.assertTrue(sp.in_temp(p), p)
 
+    def test_a_powershell_write_by_a_positional_path_is_asked_about(self):
+        for cmd in ("Set-Content $env:TEMP\\x.py 'print(1)'", "'print(1)' | Out-File $env:TEMP\\x.py"):
+            d = ask({"tool_name": "PowerShell", "cwd": "E:/projects/x", "tool_input": {"command": cmd}})
+            self.assertIsNotNone(d, cmd)
+            self.assertIn("x.py", d["permissionDecisionReason"], cmd)
+
     def test_powershell_and_notebookedit_writes_are_read(self):
         import scratchpad as sp
         for cmd in ('"print(1)" > $env:TEMP/x.py', 'Set-Content -Path $env:TEMP/x.py -Value "print(1)"',
