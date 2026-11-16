@@ -117,8 +117,8 @@ def remove_link(path):
         os.rmdir(path)                                  # a junction: RemoveDirectory drops the reparse point only
 
 
-def pointer_text(p4):
-    p = os.path.normpath(p4)
+def pointer_text(mem):
+    p = os.path.normpath(mem)
     return (f"{POINTER_MARK} -->\n"
             f"# Memory location\n\n"
             f"This project's memory is stored in `{p}`.\n"
@@ -133,10 +133,10 @@ def is_pointer(path):
         return False
 
 
-def write_pointer(app, p4):
+def write_pointer(app, mem):
     os.makedirs(app, exist_ok=True)
     path = os.path.join(app, "MEMORY.md")
-    text = pointer_text(p4)
+    text = pointer_text(mem)
     try:
         with open(path, encoding="utf-8") as f:
             if f.read() == text:
@@ -157,10 +157,10 @@ def files_in(base, skip_conflicts):
     return sorted(out)
 
 
-def keep_aside(p4, source, rel, src, stamp):
+def keep_aside(mem, source, rel, src, stamp):
     """Copy src into p4's .conflicts/<source>/<rel>; an identical copy already there is enough, a different one
     gets the stamp appended so nothing kept earlier is overwritten."""
-    side = os.path.join(p4, CONFLICTS, source, rel)
+    side = os.path.join(mem, CONFLICTS, source, rel)
     if os.path.isfile(side):
         if filecmp.cmp(src, side, shallow=False):
             return side
@@ -199,12 +199,12 @@ def empty_live_dir(app):
     return ok
 
 
-def migrate(app, p4, stamp):
+def migrate(app, mem, stamp):
     """-> (lines to print, done?) — done when no AppData memory source is left but the pointer."""
     lines = []
-    os.makedirs(p4, exist_ok=True)
+    os.makedirs(mem, exist_ok=True)
     if is_link(app):
-        if not same_dir(app, p4):                       # a link somewhere else: ezexe's arrangement
+        if not same_dir(app, mem):                       # a link somewhere else: ezexe's arrangement
             return [f"{app} is a link that does not reach .claude/p4/temportal/memory/; left as it is, nothing moved"], False
         if not retry(remove_link, app):
             return [f"{app} is a link to .claude/p4/temportal/memory/ and is busy, retried at the turn's close"], False
@@ -213,7 +213,7 @@ def migrate(app, p4, stamp):
     name = os.path.basename(app)
     if os.path.isdir(app) and not all(n == "MEMORY.md" and is_pointer(os.path.join(app, n)) for n in os.listdir(app)):
         for rel in files_in(app, skip_conflicts=False):
-            src, dst = os.path.join(app, rel), os.path.join(p4, rel)
+            src, dst = os.path.join(app, rel), os.path.join(mem, rel)
             if rel == "MEMORY.md" and is_pointer(src):
                 continue
             if os.path.isfile(dst) and filecmp.cmp(src, dst, shallow=False):
@@ -223,12 +223,12 @@ def migrate(app, p4, stamp):
                 shutil.copy2(src, dst)
                 moved.append(rel)
             else:
-                keep_aside(p4, name, rel, src, stamp)
+                keep_aside(mem, name, rel, src, stamp)
                 aside.append(f"{name}/{rel}")
         if not empty_live_dir(app):
             left.append(app)
     try:
-        write_pointer(app, p4)
+        write_pointer(app, mem)
     except OSError as e:
         lines.append(f"could not write the pointer MEMORY.md in {app} ({e})")
     if moved:
@@ -266,12 +266,12 @@ def notice(parts):
 
 def cmd_migrate(payload):
     root = project_root(payload)
-    app, p4 = appdata_memory(payload, root), p4_memory(root)
-    parts, _ = migrate(app, p4, time.strftime("%Y%m%d-%H%M%S"))
+    app, mem = appdata_memory(payload, root), p4_memory(root)
+    parts, _ = migrate(app, mem, time.strftime("%Y%m%d-%H%M%S"))
     out = notice(parts)
     if out:
         print(out)
-    index = builtin_index(p4)          # the harness loaded only the pointer: print what it would have printed
+    index = builtin_index(mem)          # the harness loaded only the pointer: print what it would have printed
     if index:
         sys.stdout.write(index if index.endswith("\n") else index + "\n")
     return 0
@@ -281,9 +281,9 @@ def norm(path):
     return os.path.normcase(os.path.normpath(path.replace("/", os.sep)))
 
 
-def added_index_lines(text, p4):
+def added_index_lines(text, mem):
     """Lines a write put into the pointer that the pointer itself does not carry."""
-    stock = set(pointer_text(p4).splitlines())
+    stock = set(pointer_text(mem).splitlines())
     return [ln for ln in text.splitlines() if ln.strip() and ln not in stock and not ln.startswith(POINTER_MARK)]
 
 
@@ -295,18 +295,18 @@ def cmd_mirror(payload):
     if not fp:
         return 0
     root = project_root(payload)
-    app, p4 = appdata_memory(payload, root), p4_memory(root)
+    app, mem = appdata_memory(payload, root), p4_memory(root)
     if is_link(app):
         return 0
     n_app, n_fp = norm(app), norm(fp)
     if not n_fp.startswith(n_app + os.sep) or not os.path.isfile(fp):
         return 0
     rel = os.path.relpath(n_fp, n_app)
-    dst = os.path.join(p4, rel)
+    dst = os.path.join(mem, rel)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     if rel.lower() == "memory.md":
         with open(fp, encoding="utf-8", errors="replace") as f:
-            new = added_index_lines(f.read(), p4)
+            new = added_index_lines(f.read(), mem)
         old = ""
         if os.path.isfile(dst):
             with open(dst, encoding="utf-8", errors="replace") as f:
@@ -314,15 +314,15 @@ def cmd_mirror(payload):
         have = set(old.splitlines())
         add = [ln for ln in new if ln not in have]
         if add:
-            os.makedirs(p4, exist_ok=True)
+            os.makedirs(mem, exist_ok=True)
             with open(dst, "a", encoding="utf-8", newline="\n") as f:
                 f.write(("\n" if old and not old.endswith("\n") else "") + "\n".join(add) + "\n")
-        write_pointer(app, p4)
+        write_pointer(app, mem)
         note = (f"p4-temportal: {len(add)} index line(s) written to the AppData MEMORY.md were appended to "
                 f"{os.path.normpath(dst)}; the AppData file is the pointer again.")
     else:
         if os.path.isfile(dst) and not filecmp.cmp(fp, dst, shallow=False):
-            keep_aside(p4, "replaced", rel, dst, stamp)
+            keep_aside(mem, "replaced", rel, dst, stamp)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(fp, dst)
         retry(os.remove, fp)
@@ -334,11 +334,11 @@ def cmd_mirror(payload):
 def cmd_sweep(payload):
     """Stop: whatever the start could not move or delete is tried again at the turn's close. Prints nothing."""
     root = project_root(payload)
-    app, p4 = appdata_memory(payload, root), p4_memory(root)
+    app, mem = appdata_memory(payload, root), p4_memory(root)
     pending = is_link(app) or (
         os.path.isdir(app) and any(n != "MEMORY.md" or not is_pointer(os.path.join(app, n)) for n in os.listdir(app)))
     if pending or not os.path.isdir(app):
-        migrate(app, p4, time.strftime("%Y%m%d-%H%M%S"))
+        migrate(app, mem, time.strftime("%Y%m%d-%H%M%S"))
     return 0
 
 
