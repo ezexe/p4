@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Tests for store.py: the entry format, ids, the status rule (finding 17), the vocabulary, the index's staleness.
+"""Tests for store.py: the entry format, ids, the status rule, the vocabulary and the index's staleness.
 
-Run: python3 test_store.py   (stdlib unittest; pytest collects it too)
+Run: python3 test_store.py
 
-The real-store checks run only when the four cloned p4 repos exist (P4_FIXTURES, default the colab clone path);
-everything else builds its own small fixture in a temp directory.
+It is a stdlib unittest file, and pytest collects it too.
+
+FIXTURES is the folder P4_FIXTURES names, or a default path without it. The real-store test runs only when FIXTURES
+holds a clone of the store ap-p4_mac with its `sessions` folder, and is skipped wherever that clone is missing.
+Every other test builds its own small store in a temp directory. fixture, make_store and write serve the tests of
+test_query.py, test_labels.py, test_train.py, test_hooks.py, test_migrate.py and test_teacher.py too.
 """
 
 import os
@@ -27,7 +31,7 @@ def fixture(name):
     return path if os.path.isdir(os.path.join(path, "sessions")) else None
 
 
-# --- a small new-format store, shared by the query tests ------------------------------------------------
+# --- a small store, shared with the tests of retrieval, labels, training and hooks ----------------------
 
 def write(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -40,7 +44,7 @@ def entry_file(fname, entries):
 
 
 def make_store(root):
-    """A .claude/p4 tree in the new layout, small enough to read by eye."""
+    """A store `.claude/p4` under `root`, its files in LAYOUT's places and its corpus small enough to read by eye."""
     p4 = os.path.join(root, ".claude", "p4")
     rules = [
         [("ruling", "the macOS deployment target is 13.3"), ("owner-words", '"Raise to 13.3"'),
@@ -155,11 +159,12 @@ class StatusRule(unittest.TestCase):
         return files
 
     def test_ruling_made_by_the_retraction_stays_live(self):
-        """Finding 17: shared owner-words, the ruling at the retraction's time (it is what the correction wrote)."""
+        """A ruling with a retraction's owner-words and its time stays LIVE, since the correction that wrote the
+        retraction wrote the ruling too; the rule "old" frees it."""
         f = self.files("2026-11-01 11:18")
         self.assertEqual(f["rules.md"][0].state, "LIVE")
         st.apply_status(f, rule="old")
-        self.assertEqual(f["rules.md"][0].state, "FREED", "the old mask freed it")
+        self.assertEqual(f["rules.md"][0].state, "FREED", "the rule \"old\" frees it")
 
     def test_earlier_entry_with_shared_words_is_freed(self):
         self.assertEqual(self.files("2026-11-01 09:00")["rules.md"][0].state, "FREED")
@@ -223,7 +228,7 @@ class IndexStaleness(unittest.TestCase):
             idx2, rebuilt2 = st.ensure_index(p4)
             self.assertFalse(rebuilt2)
             self.assertEqual([d_["id"] for d_ in idx["docs"]], [d_["id"] for d_ in idx2["docs"]])
-            # a store file newer than the index
+            # a corpus file newer than the index
             future = time.time() + 5
             path = p4conf.sub(p4, "store", "facts.md")
             os.utime(path, (future, future))

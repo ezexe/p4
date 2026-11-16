@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""store.py: the files under `.claude/p4/store/`, their entries and ids, the status rule, the vocabulary
-dictionary, and the derived `models/index.json` that recall reads.
+"""store.py: the corpus and its index. The corpus is the entry files under `phi/store/` of the store `.claude/p4`;
+this module reads their entries and ids, applies the status rule and reads the vocabulary dictionary. The index
+`phi/models/index.json` is what retrieval reads, built from the corpus, the memory files, the saved code and the
+entries of the repository and its dependencies.
 
-The store format (fresh-marketplace.md 3.5, 4.2): Markdown files of dash-led entries, one field per line, a blank
-line between entries; each file starts with three lines in ordinary words. Field names are the old store's
-(`ruling:`, `match:`, `meant:`, `freed:`, `state:`, `addressed:`). A value that spans lines continues on lines
+The corpus is Markdown files of dash-led entries, one field per line and a blank line between entries. Each file
+starts with three header lines in ordinary words, which parse skips. A value that spans lines continues on lines
 indented four spaces.
 
     - ruling: the macOS deployment target is 13.3
@@ -12,14 +13,15 @@ indented four spaces.
       status: LIVE
       time: 2026-11-01 10:50
 
-An entry's id is `<file>:<time>:<sha8 of its first field's text>` (file relative to store/, e.g. `rules.md` or
-`messages/150e7eb7.md`), so it stays the same when lines move; a second entry with the same id in one file gets
-`~2`, and so on.
+An entry's id is `<file>:<time>:<sha8 of its first field's text>`, with the file relative to `phi/store/` as in
+`rules.md` or `messages/150e7eb7.md`. The id holds no line number, so it stays the same when lines move; a second
+entry with the same id in one file gets `~2`, and so on.
 
-The status rule (finding 17, the held branch's fix): an entry is FREED only by a retraction whose `freed:` head
-matches it (one contained in the other, the shorter side at least 24 characters), or by owner-words shared with a
-retraction dated after the entry; `SPENT` (and an explicit `FREED` or `EXPIRED`) is the entry's own field, never
-inferred. Retractions themselves are never freed.
+The status rule: an entry's own `status:` of SPENT, FREED or EXPIRED stands, and SPENT is never inferred. Otherwise
+a retraction frees the entry in two ways. Its `freed:` text frees the entry when one of that text and the entry's
+head contains the other and the shorter is at least MASK_MIN characters long. Its owner-words free the entry when
+they equal the entry's, unless both are dated and the entry is no older than the retraction. No retraction frees a
+retraction or a message row.
 """
 
 import hashlib
@@ -47,30 +49,33 @@ BARRIER_MIN_TOKENS = 3
 HEADERS = {
     "rules.md": ("ezexe's rulings: what holds past the turn, in ezexe's own words.",
                  "Written when ezexe rules something; a later retraction frees a ruling, never an edit here.",
-                 "Fields: ruling, owner-words, scope, form, status, time, pinned, plain; from (migrated entries)."),
+                 "Fields: ruling, owner-words, scope, form, status, time, pinned, plain; a migrated entry adds from."),
     "corrections.md": ("Readings that steered work and were wrong, and details ezexe had to ask for.",
-                       "Written when ezexe corrects a reading (match, meant) or asks for what was left out "
-                       "(asked, omitted).",
-                       "Fields: key, time, match, meant, delta; asked, time, omitted; correction, from (migrated entries)."),
-    "retractions.md": ("What ezexe freed: a rule or reading no longer in force, and the lesson kept from it.",
-                       "Written when ezexe takes something back; recall shows these in place of what they freed.",
-                       "Fields: freed, time, cause, owner-words, swept, lesson; from (migrated entries)."),
+                       "Written when ezexe corrects a reading or asks for what was left out.",
+                       "Fields: key, time, match, meant, delta for a corrected reading; asked, time, omitted for a "
+                       "missed detail; a migrated entry may also hold correction and from."),
+    "retractions.md": ("What ezexe freed: a rule or reading out of force, and the lesson kept from it.",
+                       "Written when ezexe takes something back; retrieval shows these in place of what they freed.",
+                       "Fields: freed, time, cause, owner-words, swept, lesson; a migrated entry adds from."),
     "facts.md": ("Claims checked against a source, with where and when they were checked.",
                  "Written when a claim is verified; a claim without a source stays out.",
-                 "Fields: claim, source, verified, time."),
-    VOCABULARY: ("ezexe's words that were once misread, what they mean, and the exchange that proves it.",
-                 "Grown from corrections, retractions, missed details and repeats; ezexe edits it freely.",
-                 "Fields: term, means, because, source, points-at, added, status (on or off)."),
-    MESSAGES: ("Every ezexe message of one session: when it came, how it arrived, and what was done about it.",
+                 "Fields: claim, source, verified, by, time, from, supersedes."),
+    VOCABULARY: ("ezexe's words a session misread, what they mean, and the exchange that proves it.",
+                 "Written by migrate.py from corrections, retractions, missed details, repeats and follow-ups; the "
+                 "teacher model fills in meanings, and ezexe edits it freely.",
+                 "Fields: term, means, means-by, because, source, points-at, added, status; status is on or off."),
+    MESSAGES: ("Every message one session received: when it came, how it arrived, and what was done about it.",
                "Opened by the prompt hook and completed by the close hook from the reply.",
-               "Fields: fingerprint, time, arrival, state, addressed, recommended, match, freed-by, resembles; from (migrated rows)."),
+               "Fields: fingerprint, time, arrival, state, addressed, recommended, match, freed-by, resembles; a "
+               "migrated row adds from."),
 }
 
-# what each file prints as at the boundary (3.5): plain words, never the file's name
+# the word a retrieval line prints for each file's entries: plain words, never the file's name
 KIND_NAMES = {"rules.md": "rule", "corrections.md": "correction", "retractions.md": "retracted", "facts.md": "fact",
               "memory": "memory", "messages": "earlier message", "src": "saved code"}
 
-# the suite's jargon list (scripts/session/overrides_suite.py JARGON): a printed line must hold none of these
+# words of the store's own design, which read as riddles to a session: p4.py's query drops a retrieval line that
+# holds one, unless the line's doc is plain. An entry with a `plain:` field and every repository entry are plain.
 JARGON = re.compile(r"(?i)\b(frags?|rulings?|pour(ed|s)?|tombstones?|derivations?|the operator|register entry|"
                     r"read barrier|write barrier|dispatch row|hot tier|cold tier|pre-finalizers?|vlds|phi-index)\b(?!-)")
 
@@ -154,8 +159,9 @@ def sha8(text):
 
 
 def parse(text, file=""):
-    """[Entry] from a store file's text: every column-0 `- key: value` line opens an entry, its two-space field
-    lines follow, a four-space line continues the field before it. Anything else (the header prose) is skipped."""
+    """[Entry] from a corpus file's text: every column-0 `- key: value` line opens an entry, its two-space field
+    lines follow, and a four-space line continues the field before it. A blank line is skipped. Any other line is
+    skipped and ends the entry before it; the header's prose is such a line."""
     out, cur = [], None
     for n, l in enumerate(text.split("\n"), 1):
         m = HEAD_RE.match(l)
@@ -204,7 +210,8 @@ def format_entry(pairs):
 
 
 def render(fname, entries_pairs):
-    """A whole store file: its three header lines, a blank line, then the entries a blank line apart."""
+    """A whole corpus file: its three header lines from HEADERS, then a blank line and the entries a blank line
+    apart. A file HEADERS lacks gets three empty header lines."""
     key = MESSAGES if fname.startswith(MESSAGES + "/") else fname
     head = "\n".join(HEADERS.get(key, ("", "", "")))
     body = "\n\n".join(format_entry(p) for p in entries_pairs)
@@ -235,7 +242,7 @@ def message_files(p4):
 
 
 def load_store(p4):
-    """{file: [Entry]} for the four store files and every messages file, statuses applied."""
+    """{file: [Entry]} for the four files of STORE_FILES and every session's file of messages, statuses applied."""
     got = {f: load_file(p4, f) for f in STORE_FILES}
     for rel in message_files(p4):
         got[rel] = load_file(p4, rel)
@@ -260,9 +267,10 @@ def masks(retractions):
 def mask_hit(value, fields, ms, rule="new"):
     """(retraction id, time, why) for the first retraction that frees an entry, or None.
 
-    rule "new" (3.5): shared owner-words free only an entry dated before the retraction; rule "old" (the masking
-    before finding 17's fix) frees on shared owner-words whatever the dates. A head contained in a `freed:` (or the
-    reverse), the shorter side at least MASK_MIN characters, frees under both."""
+    Under the rule "new", equal owner-words free an entry unless both are dated and the entry is no older than the
+    retraction; under "old" they free it whatever the dates, and migrate.finding17 lists the rulings the two rules
+    part on. Under both, an entry's head and a retraction's `freed:` text free it when one contains the other and
+    the shorter is at least MASK_MIN characters long."""
     head, own = norm_text(value), norm_text(fields.get("owner-words", ""))
     stamp = str(fields.get("time", "")).strip()
     for ref, freed, words, when in ms:
@@ -294,7 +302,7 @@ def apply_status(files, rule="new"):
             e.state, e.reason = status_of(fname, e.value, e.fields, ms, rule)
 
 
-# --- the vocabulary dictionary (5.3) ---------------------------------------------------------------------
+# --- the vocabulary dictionary ---------------------------------------------------------------------------
 
 def read_vocabulary(p4):
     """[{term, means, because: [..], source, points-at: [ids], added, status, line, pending}] from vocabulary.md."""
@@ -318,10 +326,11 @@ def vocab_entry_pairs(term, means, because, source, points_at, added, status="on
     return pairs
 
 
-# --- short turns and resemblance (the old prompt hook's rules) --------------------------------------------
+# --- short turns and resemblance -------------------------------------------------------------------------
 
 def norm_token(text):
-    """The old `_token`: lower-cased, punctuation out, whitespace collapsed."""
+    """A text as the tokens messages are matched on: lower-cased, every punctuation mark but the apostrophe, the
+    slash and the hyphen out, whitespace collapsed."""
     t = (text or "").lower().replace("…", " ").replace("’", "'")
     t = re.sub(r"[^\w\s'/-]", " ", t)
     return " ".join(t.split())
@@ -335,8 +344,8 @@ def unquote(v):
 
 
 def resembles(new, old):
-    """The old barrier's rule over fingerprint token sets: identical, or Jaccard >= 0.5 when the new one has at
-    least three tokens."""
+    """True when a message's token set `new` resembles an earlier message's set `old`: the two are identical, or
+    `new` has at least BARRIER_MIN_TOKENS tokens and their Jaccard similarity is at least BARRIER_JACCARD."""
     if not new or not old:
         return False
     if new == old:
@@ -348,7 +357,8 @@ NOT_OWNER_ARRIVAL = re.compile(r"(?i)\s*(task notification|notification|agent me
 
 
 def owner_message(e, fp=None):
-    """A row of ezexe's own words: not a notification, an agent's message or a harness injection (`<...>`)."""
+    """True for a row of ezexe's own words: its arrival is no notification, agent message or hook injection, and its
+    fingerprint does not open with `<`, as a text Claude Code wraps in a tag does."""
     fp = unquote(e.fields.get("fingerprint", e.value)) if fp is None else fp
     return not NOT_OWNER_ARRIVAL.match(e.fields.get("arrival", "")) and not fp.lstrip().startswith("<")
 
@@ -372,7 +382,7 @@ def kind_of(fname, e=None):
 
 
 def show_text(fname, e):
-    """The entry in ordinary words, before the 160-character cut: its `plain:` when it has one."""
+    """The entry in ordinary words, before the index and the retrieval line cut it: its `plain:` when it has one."""
     f = e.fields
     if f.get("plain", "").strip():
         return collapse(f["plain"])
@@ -390,8 +400,8 @@ def show_text(fname, e):
 
 
 def feature_kind(fname, e):
-    """The kind the ranker's `kind=` feature sees, finer than the printed one where the old barrier was: a ruling
-    with a `form:` is a form; a fact is sourced or unsourced."""
+    """The kind the ranker's `kind=` feature sees, finer than the printed kind for rulings and facts: a ruling with a
+    `form:` is a form, and a fact is sourced or unsourced."""
     if fname == "rules.md":
         return "form" if e.fields.get("form", "").strip() else "rule"
     if fname == "facts.md":
@@ -416,8 +426,9 @@ def stamp_of(path):
 
 
 def memory_entries(p4):
-    """One entry per heading of every memory/*.md (MEMORY.md, the index of links, aside); a file without headings
-    is one entry headed by its frontmatter description or first line."""
+    """One entry per heading of every Markdown file of the auto memory directory `temportal/memory/` but MEMORY.md,
+    the index of links. The text before a file's first heading is one more entry when it holds any, and a file
+    without headings is that one entry, headed by the frontmatter's description, else its name, else the file's."""
     d = p4conf.sub(p4, "memory")
     out = []
     if not os.path.isdir(d):
@@ -459,7 +470,8 @@ def memory_entries(p4):
 
 
 def src_entries(p4):
-    """The one-line head of each file under src/ (its first non-empty line, comment marks off)."""
+    """One entry for each file of saved code under `temportal/src/`, holding its path and its first non-empty line
+    that is no `#!` line, comment marks off. A file over 1 MiB, or one that does not read as UTF-8, is skipped."""
     d = p4conf.sub(p4, "src")
     out = []
     if not os.path.isdir(d):
@@ -496,10 +508,11 @@ def index_path(p4):
 
 
 def sources_signature(p4):
-    """(count, newest mtime_ns) over every file and directory under store/, memory/ and src/ (os.scandir: one stat
-    per entry, no path joins, the hot path of every message's staleness check)."""
+    """(count, newest mtime_ns): the number of files under the corpus, `temportal/memory/` and `temportal/src/` plus
+    repo.json and deps.json of `phi/models/`, and the newest mtime among those files and folders. It walks with
+    os.scandir, one stat for each entry and no path joins, since every message's staleness check runs it."""
     count, newest = 0, 0
-    for name in ("repo.json", "deps.json"):                        # the repository's entries (repo.py), the dependencies' (deps.py)
+    for name in ("repo.json", "deps.json"):                        # the repository's and its dependencies' entries
         try:
             st_ = os.stat(p4conf.sub(p4, "models", name))
             count, newest = count + 1, max(newest, st_.st_mtime_ns)
@@ -528,8 +541,8 @@ def sources_signature(p4):
 
 
 def index_stale(p4):
-    """True when models/index.json is missing, of another version, or older than a store, memory or src file (or
-    the file count moved: a deletion)."""
+    """True when `phi/models/index.json` is missing or of another version, when a source is newer than it, or when
+    the sources' count or newest mtime differs from what it was built on, as a deletion makes it differ."""
     path = index_path(p4)
     try:
         st = os.stat(path)
@@ -545,8 +558,9 @@ def index_stale(p4):
 
 
 def display_path(e):
-    """Where an entry's file is, relative to the store: an entry's own `file` keeps the old names (memory/x.md,
-    src/x.py, rules.md), so ids and labels survive the layout move."""
+    """Where an entry's file is, relative to the store `.claude/p4`, by LAYOUT. An entry's own `file` does not
+    depend on LAYOUT: it is `memory/x.md`, `src/x.py` or a corpus file such as `rules.md`, so ids and labels stay
+    the same wherever LAYOUT puts the folders."""
     top, _, rest = e.file.partition("/")
     if top in ("memory", "src") and rest:
         return p4conf.rel(top, rest)
@@ -554,7 +568,7 @@ def display_path(e):
 
 
 def make_doc(e, fname, kind):
-    """One index doc for an entry, its term frequencies under `_tf` (turned into postings by build_index)."""
+    """One index doc for an entry, its term frequencies under `_tf`, which build_index turns into postings."""
     toks = ranker.tokens(entry_text(e))
     head = ranker.tokens(e.value[:400])
     tf = {}
@@ -571,18 +585,19 @@ def make_doc(e, fname, kind):
 
 
 def held_docs(p4, files=None):
-    """The store entries the index leaves out (FREED, SPENT, EXPIRED) as docs with their `_tf`: never recalled, but
-    an old pool's reader saw them on the barrier with their state and could pick one, so train.py keeps them among
-    a pool task's candidates, as pick_model.py's barrier rows did."""
+    """The corpus entries the index leaves out because they are FREED, SPENT or EXPIRED, as docs with their `_tf`.
+    Retrieval never shows them, but train.with_held adds them to a pool task's candidates, since a pool label can
+    name a held entry, which the pool's reader saw with its state."""
     files = files if files is not None else load_store(p4)
     return [make_doc(e, fname, kind_of(fname, e)) for fname in STORE_FILES for e in files.get(fname, [])
             if e.state != "LIVE"]
 
 
 def build_index(p4, write=True):
-    """The index recall reads: every LIVE entry of the store files, every completed message row, every memory
-    section and every src head, tokenized, with BM25's postings; plus the short-turn table, each session's rows
-    for the repeat line, and the vocabulary for expansion."""
+    """The index retrieval reads: every LIVE entry of the four files of STORE_FILES, every completed row of ezexe's
+    messages, every memory section, every head of saved code and every entry of the repository and its
+    dependencies, tokenized, with BM25's postings; plus the short-turn table, each session's rows for the repeat
+    line, and the vocabulary for expansion."""
     files = load_store(p4)
     docs, excluded = [], {}
     session_rows, short = {}, {}
@@ -602,8 +617,8 @@ def build_index(p4, write=True):
         for e in files[rel]:
             fp = unquote(e.fields.get("fingerprint", e.value))
             if not owner_message(e, fp):
-                # a notification, an agent's message or a harness injection is not ezexe speaking: never a line,
-                # never a short turn or a repeat
+                # a notification, an agent's message or a text Claude Code injects is not ezexe speaking: never a
+                # line, never a short turn or a repeat
                 excluded["not ezexe's"] = excluded.get("not ezexe's", 0) + 1
                 continue
             tok = norm_token(fp)
@@ -646,19 +661,20 @@ def build_index(p4, write=True):
     out = {"version": INDEX_VERSION, "sources": list(sig), "n": len(docs),
            "avgdl": (total / len(docs)) if docs else 1.0, "excluded": excluded, "docs": docs, "post": post,
            "short": short, "sessions": session_rows, "vocab": vocab, "stems": ranker.stem_table(post),
-           # what a query reads of every doc, kept apart so a query never decodes all of them (load_index's Docs)
+           # what a query reads of every doc, kept apart so a query never decodes every row of load_index's Docs
            "dl": [d["dl"] for d in docs],
            "sup": [[d.get("time") or "", d["supersedes"]] for d in docs if d.get("supersedes")],
            "rule_at": rule_minutes(docs)}
     if write:
-        # on disk the docs are rows and the postings strings, decoded only for a query's terms: half the load time
+        # on disk the docs are rows and each term's postings a string, decoded only for a query's terms, which
+        # halves the load time
         disk = dict(out)
         disk["doc_fields"] = list(DOC_FIELDS)
         disk["docs"] = [[d.get(k) for k in DOC_FIELDS] for d in docs]
         disk["post"] = {t: " ".join(map(str, v)) for t, v in post.items()}
         text = json.dumps(disk, separators=(",", ":"), ensure_ascii=False)
         ranker.write_atomic(index_path(p4), text)
-        write_cache(p4, disk)          # the next message's load is warm (load_index)
+        write_cache(p4, disk)          # so the next message's load_index finds a warm cache
     return out
 
 
@@ -667,7 +683,9 @@ DOC_FIELDS = ("id", "path", "line", "file", "kind", "time", "state", "show", "pl
 
 
 def repo_docs(p4):
-    """The repository's entries (4.1a) from models/repo.json, when `p4.py index --repo` has run."""
+    """The entries of the repository from `phi/models/repo.json` and of its dependencies from deps.json beside it,
+    which refresh_index in hook.py brings up to date at session start and at every turn end, as `p4.py index --repo`
+    and `--deps` do by hand."""
     try:
         import repo
     except ImportError:
@@ -676,7 +694,7 @@ def repo_docs(p4):
         out = repo.entries(p4)
     except (OSError, ValueError, KeyError):
         out = []
-    try:                               # the dependencies (deps.py); a path the repository tracks keeps its own entry
+    try:                               # the dependencies' entries, less any id the repository's entries hold
         import deps
         have = {d["id"] for d in out}
         out += [d for d in deps.entries(p4) if d["id"] not in have]
@@ -686,15 +704,15 @@ def repo_docs(p4):
 
 
 def cache_path(p4):
-    # named under the seeded .gitignore's `models/*.tmp`, so a store seeded before the cache existed ignores it too
+    # a name the seeded .gitignore's `phi/models/*.tmp` covers, so git ignores the cache in every seeded store
     return p4conf.sub(p4, "models", "index-cache.tmp")
 
 
 def load_index(p4):
-    """The index as build_index wrote it, its docs as dicts. A hook is a new process every message, so the decoded
-    index is kept beside the JSON in models/index-cache.tmp (marshal: about a third of json.load's time on
-    AudioPlugin-p4), keyed on the JSON's mtime and size; a cache that does not match, or does not read, is rebuilt
-    from the JSON and written again."""
+    """The index as build_index wrote it, its docs decoded into dicts as they are read. A hook is a new process for
+    every message, so the decoded index is kept beside the JSON in `phi/models/index-cache.tmp`, in marshal, which
+    loads in about a third of json.load's time. The cache is keyed on the JSON's mtime and size and INDEX_VERSION;
+    one that does not match, or does not read, is rebuilt from the JSON and written again."""
     import marshal
     path = index_path(p4)
     s = os.stat(path)
@@ -719,8 +737,8 @@ def load_index(p4):
 
 
 def write_cache(p4, disk):
-    """models/index-cache.tmp: the on-disk index (rows, posting strings) in marshal, keyed on index.json's mtime
-    and size; best effort."""
+    """Write `phi/models/index-cache.tmp`, the on-disk index in marshal, keyed on index.json's mtime and size and
+    INDEX_VERSION. Its docs stay rows and its postings strings. Best effort."""
     import marshal
     try:
         s = os.stat(index_path(p4))
@@ -734,7 +752,7 @@ def write_cache(p4, disk):
 
 class Docs:
     """The index's docs, each decoded from its on-disk row into a dict the first time it is read: a query reads a
-    few hundred of AudioPlugin-p4's 5,000, so the rest are never built."""
+    few hundred of a corpus's thousands, so the rest are never built."""
     __slots__ = ("rows", "fields", "got")
 
     def __init__(self, rows, fields):
@@ -757,7 +775,7 @@ class Docs:
 
 
 def rule_minutes(docs):
-    """{minute: [doc index]} of the rulings, by the minute they were written (p4.standing_first)."""
+    """{minute: [doc index]} of the rulings, by the minute they were written, for p4.standing_first."""
     out = {}
     for i, d in enumerate(docs):
         if d["file"] == "rules.md" and d.get("time"):
@@ -766,7 +784,7 @@ def rule_minutes(docs):
 
 
 def postings(idx, term):
-    """[doc, tf, doc, tf, ...] for one term (decoded from the on-disk string on first use), or None."""
+    """[doc, tf, doc, tf, ...] for one term, or None; an on-disk string is decoded on first use."""
     p = idx["post"].get(term)
     if isinstance(p, str):
         p = idx["post"][term] = [int(x) for x in p.split()]
@@ -774,7 +792,7 @@ def postings(idx, term):
 
 
 def ensure_index(p4):
-    """(index, rebuilt?): the index, rebuilt first when a source is newer."""
+    """(index, rebuilt?): the index, rebuilt first when it is stale or does not load."""
     if index_stale(p4):
         return build_index(p4), True
     try:
@@ -784,7 +802,11 @@ def ensure_index(p4):
 
 
 def find_p4(given=None, cwd=None):
-    """The .claude/p4 directory: the one given (or its .claude/p4), else CLAUDE_PROJECT_DIR's, else cwd's."""
+    """The store `.claude/p4` of the directory given, else of CLAUDE_PROJECT_DIR, else of the working directory.
+    Each is the store itself when it holds a `store` or `phi/store` folder, or when it is named p4 and a directory
+    was given; otherwise its `.claude/p4` is the store when that folder exists. A directory given is returned as it
+    is when neither holds, and None comes back when no store is found and none was given. A store found is put in
+    LAYOUT's places by p4conf.migrate_layout first."""
     for base in (given, os.environ.get("CLAUDE_PROJECT_DIR"), cwd or os.getcwd()):
         if not base:
             continue
