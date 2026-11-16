@@ -4,7 +4,7 @@
 Run: python3 test_query.py
 
 On a small fixture store: the same lines for the same message; no line for "hi", for an ordinary message or for one
-that shares a single word with the entries; at most MAX_LINES lines, PER_FILE of them from one file, each with at
+that shares a single word with the documents; at most MAX_LINES lines, PER_FILE of them from one file, each with at
 most TEXT_CHARS characters of text; the line's shape; no jargon-list word printed; the history line for a short
 message sent twice before and none for one sent once; the repeat line for a resembling completed row and none for an
 open row or another session's; dictionary expansion; the trained ranker's road. repo.build, which
@@ -303,8 +303,8 @@ class RepoIndex(unittest.TestCase):
         self.assertIn("src/axolotl.py", commit["show"])
         # into the index and out of a query as a file line, never a file's contents
         st.build_index(self.p4)
-        # The no-ranker road wants most of a message's words in one entry, so the message names the symbol alone:
-        # with "mixer" or "defined" beside it, no one entry would hold enough of them.
+        # The no-ranker road wants most of a message's words in one document, so the message names the symbol alone:
+        # with "mixer" or "defined" beside it, no one document would hold enough of them.
         r = cli.query(self.p4, "where is the axolotl gain", None, NOW, model={})
         self.assertTrue(any(l.startswith("- file: src/axolotl.py") for l in r["lines"]), r)
         self.assertFalse(any("return x" in l for l in r["lines"]))

@@ -3,9 +3,9 @@
 
   index [--force] [--repo] [--deps] [--project D]
       Rebuild the index, phi/models/index.json, when it is missing, of another version or out of date with the
-      files it reads, or always with --force. --repo first brings the repository's entries up to date through
-      repo.py, and --deps the entries of the project's frameworks, library packages and external modules through
-      deps.py, which reads a package again when it was installed or updated.
+      files it reads, or always with --force. --repo first brings the repository's documents up to date through
+      repo.py, and --deps the documents of the project's frameworks, library packages and external modules
+      through deps.py, which reads a package again when it was installed or updated.
   view [SESSION] [--backfill] [--project D] [--slug DIR ...]
       Print what a session has in view, for another session to read, or one line for each session with a record
       when none is named. --backfill builds the record of every session whose transcript is on this machine.
@@ -29,11 +29,11 @@
   eval [--json] [--no-dictionary] [--sources S] [--now T]
       Print the numbers of the same round, writing nothing.
   query --text T [--session S] [--now T] [--json]
-      Print the retrieval lines for one message: none for an ordinary message, otherwise at most MAX_LINES, a
-      corpus entry's line shaped `- <date> <kind>: <text> (<path>:<line>)`.
+      Print the retrieval lines for one message: none for an ordinary message, otherwise at most MAX_LINES, the
+      line of a document of the corpus, memory or saved code shaped `- <date> <kind>: <text> (<path>:<line>)`.
   check
       Print the store's health: the corpus files' entries by state, the message rows, the vocabulary, the labels
-      that name no indexed entry, the counts of repo.py, deps.py, view.py and said.py, and the jargon rate of
+      that name no indexed document, the counts of repo.py, deps.py, view.py and said.py, and the jargon rate of
       what retrieval would print.
   migrate --p4 TREE [--out DIR] [--apply] [--now T] [--project D] [--report F]
       Convert a store in the vlds plugin's layout into the store's files through migrate.py; without --apply it
@@ -68,21 +68,22 @@ PER_FILE = 2
 TEXT_CHARS = 160
 HISTORY_CHARS = 120
 CANDIDATES = 200
-# Without a trained ranker, fallback_order prints an entry that passes the four gates below, or a file entry that
-# passes the three after them. The gates count the message's words: each word that is neither common nor a number,
-# even one the index lacks, so a message about something else covers little of itself with any entry. Looser values
-# let the general prompts of scripts/session/overrides_tasks.jsonl print, and tighter ones drop the entries that
-# labelled tasks are about; test_query.Regressions holds questions that must print and messages that must not.
-MIN_RARE = 2                  # the entry holds at least this many of the message's words...
+# Without a trained ranker, fallback_order prints a document that passes the four gates below, or a file document
+# that passes the three after them. The gates count the message's words: each word that is neither common nor a
+# number, even one the index lacks, so a message about something else covers little of itself with any document.
+# Looser values let the general prompts of scripts/session/overrides_tasks.jsonl print, and tighter ones drop the
+# documents that labelled tasks are about; test_query.Regressions holds questions that must print and messages that
+# must not.
+MIN_RARE = 2                  # the document holds at least this many of the message's words...
 FALLBACK_COVER = 0.75         # ...they are this share of the message's words...
 FALLBACK_ICOVER = 0.65        # ...their idf is this share of the message's, a word the index lacks weighing most...
-FALLBACK_DENSE = 0.35         # ...and this many per square root of the entry's length: a long entry needs more
-# A file entry is a path and a symbol's name, so a question about it seldom covers FALLBACK_COVER of its own words
-# with one: a file entry that fails the gates above prints when it passes these three instead. A lower FILE_SHARED
-# or FILE_COVER lets a general prompt print or costs precision.
-FILE_SHARED = 4               # a file entry: this many of the message's words...
+FALLBACK_DENSE = 0.35         # ...and this many per square root of the document's length: a long document needs more
+# A file document is a path and a symbol's name, so a question about it seldom covers FALLBACK_COVER of its own
+# words with one: a file document that fails the gates above prints when it passes these three instead. A lower
+# FILE_SHARED or FILE_COVER lets a general prompt print or costs precision.
+FILE_SHARED = 4               # a file document: this many of the message's words...
 FILE_COVER = 0.55             # ...covering this share of them...
-FILE_DENSE = 0.75             # ...and making up most of the entry
+FILE_DENSE = 0.75             # ...and making up most of the document
 VARIANT_WEIGHT = 0.5          # the BM25 weight of another form of a message's word, such as committed for commits
 EXPAND_WEIGHT = 0.5           # the query weight of a word that a dictionary entry's meaning adds
 NODE_WEIGHT = 0.3            # the query weight of a word of the session's task, the tasks above it or their notes
@@ -266,9 +267,9 @@ def rank(p4, text, idx=None, model=None, k=5, now=None):
 
 
 def near_candidates(p4, model, docs, cand, text, session, gone):
-    """The candidates with near.py's entries that BM25 did not draw appended, and the `near` feature of every
-    candidate among near.py's entries, when the loaded ranker was trained with that feature. The candidates as they
-    are and None otherwise, or when no training round has left near.py a memory it can read."""
+    """The candidates with near.py's documents that BM25 did not draw appended, and the `near` feature of every
+    candidate among near.py's documents, when the loaded ranker was trained with that feature. The candidates as
+    they are and None otherwise, or when no training round has left near.py a memory it can read."""
     if "near" not in (model or {}).get("features", []):
         return cand, None
     import near
@@ -305,13 +306,13 @@ def message_words(terms):
 def fallback_order(idx, terms, weights, points, gone, min_shared=None, cover=None, icover=None, dense=None,
                    node_ids=None):
     """The no-ranker road, taken while the store has no ranker it can read: BM25 over the message's words, their
-    other forms at VARIANT_WEIGHT and the words in `weights`. An entry prints when it holds at least `min_shared` of
-    the message's words, each as it is or in another form, and those make up at least `cover` of the message's words
-    and `icover` of their idf, with at least `dense` of them per square root of the entry's length; a file entry
-    that misses these gates may pass on FILE_SHARED, FILE_COVER and FILE_DENSE instead. An entry a dictionary hit
-    points at needs no more, and one of `node_ids` needs one of the message's words. The entries come in the order
-    of how many of the message's words they hold, BM25's within a tie, and standing_first puts a ruling in place of
-    its same-minute correction or retraction."""
+    other forms at VARIANT_WEIGHT and the words in `weights`. A document prints when it holds at least `min_shared`
+    of the message's words, each as it is or in another form, and those make up at least `cover` of the message's
+    words and `icover` of their idf, with at least `dense` of them per square root of the document's length; a file
+    document that misses these gates may pass on FILE_SHARED, FILE_COVER and FILE_DENSE instead. A document a
+    dictionary hit points at needs no more, and one of `node_ids` needs one of the message's words. The documents
+    come in the order of how many of the message's words they hold, BM25's within a tie, and standing_first puts a
+    ruling in place of its same-minute correction or retraction."""
     min_shared = MIN_RARE if min_shared is None else min_shared
     cover = FALLBACK_COVER if cover is None else cover
     icover = FALLBACK_ICOVER if icover is None else icover
@@ -348,7 +349,7 @@ def fallback_order(idx, terms, weights, points, gone, min_shared=None, cover=Non
         ic = sum(widf.get(t, 0.0) for t in got) / total
         dn = len(got) / max(1.0, d["dl"]) ** 0.5
         if d["id"] in points:
-            out.append((i, len(q) + 1))          # an entry the dictionary points at needs no more
+            out.append((i, len(q) + 1))          # a document the dictionary points at needs no more
             continue
         if node_ids and d["id"] in node_ids and got:
             out.append((i, len(got)))            # labelled for a task above the session: one shared word is enough
@@ -384,7 +385,7 @@ def standing_first(idx, order):
 
 
 def live_node(p4, session):
-    """The running session's place in the session tree and the entries labelled positive for the tasks of the
+    """The running session's place in the session tree and the documents labelled positive for the tasks of the
     sessions above it, when `recall.node.on` is set. None and an empty set when it is off or the session is unknown;
     the place and an empty set when no session is above it."""
     import p4conf
@@ -404,9 +405,9 @@ def live_node(p4, session):
 def query(p4, text, session=None, now=None, idx=None, model=None, node=None, node_ids=None, hide=None):
     """The retrieval lines for one message, as `{"lines": [...], "ids": [...], "jargon_dropped": n, "road": "..."}`,
     where `road` names the ways the lines came. `node` is the session's place in the session tree: the words of its
-    tasks join the query at NODE_WEIGHT. `node_ids` are the entries the tasks above it were labelled with: the
+    tasks join the query at NODE_WEIGHT. `node_ids` are the documents the tasks above it were labelled with: the
     no-ranker road takes them as candidates that pass on one shared word, and a ranker trained with the `node`
-    feature takes them as candidates that feature marks. `hide` names entries never printed, such as those written
+    feature takes them as candidates that feature marks. `hide` names documents never printed, such as those dated
     after the message a replay asks about."""
     configure(p4)
     if idx is None:
@@ -539,20 +540,20 @@ def cmd_index(args):
         project = args.project or repo.project_of(p4)
         s = repo.build(p4, project)
         print(f"index --repo: {s['changed']} files read again, {s['reread']} kept and {s['removed']} removed; "
-              f"{s['new_commits']} new commits; {s['files']} files, {s['entries']} file entries, {s['commits']} "
+              f"{s['new_commits']} new commits; {s['files']} files, {s['entries']} file documents, {s['commits']} "
               f"commits; excluded " + ", ".join(f"{k} {v}" for k, v in sorted(s["excluded"].items()))
-              + (f"; {s['cut']} files past the {repo.MAX_FILE_ENTRIES:,}-entry cap" if s["cut"] else ""))
+              + (f"; {s['cut']} files past the {repo.MAX_FILE_ENTRIES:,}-document cap" if s["cut"] else ""))
     if args.deps:
         import deps
         import repo
         deps.configure(p4)
         s = deps.build(p4, args.project or repo.project_of(p4))
         print(f"index --deps: {s['packages']} packages in {s['roots']} roots, {s['read']} read again, "
-              f"{s['installed']} installed, {s['updated']} updated, {s['removed']} removed; {s['entries']} entries"
-              + (f"; {s['cut']} packages past the {deps.MAX_ENTRIES:,}-entry cap" if s["cut"] else ""))
+              f"{s['installed']} installed, {s['updated']} updated, {s['removed']} removed; {s['entries']} documents"
+              + (f"; {s['cut']} packages past the {deps.MAX_ENTRIES:,}-document cap" if s["cut"] else ""))
     if args.force or st.index_stale(p4):
         idx = st.build_index(p4)
-        print(f"index: rebuilt, {idx['n']} entries -> {st.index_path(p4)}")
+        print(f"index: rebuilt, {idx['n']} documents -> {st.index_path(p4)}")
     else:
         print("index: fresh")
     return 0
@@ -639,7 +640,7 @@ def cmd_check(args):
                 per[c[3]] = per.get(c[3], 0) + 1
                 orphan += c[1] not in ids and not c[1].startswith("archive/")
         print(f"  labels-raw.tsv: " + ", ".join(f"{k} {v}" for k, v in sorted(per.items()))
-              + f"; {orphan} labels name no indexed entry")
+              + f"; {orphan} labels name no indexed document")
     import repo
     rl = repo.stats_line(p4)
     if rl:
@@ -658,9 +659,9 @@ def cmd_check(args):
         print("  " + sl)
     jar = sum(1 for d in idx["docs"] if not d.get("plain") and st.JARGON.search(entry_line(d)))
     rate = jar / len(idx["docs"]) if idx["docs"] else 0.0
-    print(f"  index: {idx['n']} entries, {'rebuilt' if rebuilt else 'fresh'}; excluded "
+    print(f"  index: {idx['n']} documents, {'rebuilt' if rebuilt else 'fresh'}; excluded "
           + ", ".join(f"{k} {v}" for k, v in sorted(idx.get("excluded", {}).items()))
-          + f"; jargon rate of what retrieval would print {rate:.1%}, {jar} entries with jargon and no plain:; "
+          + f"; jargon rate of what retrieval would print {rate:.1%}, {jar} documents with jargon and no plain:; "
             f"target under 10%")
     return 0
 
@@ -684,7 +685,7 @@ def cmd_labels(args):
             print(f"labels --from-transcripts: {r['dep_opened']} dependency files the turns opened were not indexed; "
                   f"{d['read']} packages read again, the turns labelled a second time")
             r = lb.from_transcripts(p4, project, args.slug, idx=idx, all_sessions=args.all_sessions)
-        print(f"labels --from-transcripts: {r['dep_rows']} of the {r['rows']} repo labels are on dependency entries")
+        print(f"labels --from-transcripts: {r['dep_rows']} of the {r['rows']} repo labels are on dependency documents")
         print(f"labels --from-transcripts: {r['transcripts']} transcripts, {r['turns']} turns, {r['matched_rows']} "
               f"of them matched to rows, {r['tasks']} tasks, {r['rows']} repo labels: "
               + ", ".join(f"{k} {v}" for k, v in sorted(r["labels"].items())))
