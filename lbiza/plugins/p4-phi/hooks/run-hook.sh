@@ -56,4 +56,5 @@ for c in $order; do
   exit 0
 done
 
+echo "{\"systemMessage\": \"phi (p4-phi) ${1:-?} hook: no working python found; nothing was done\"}"
 exit 0

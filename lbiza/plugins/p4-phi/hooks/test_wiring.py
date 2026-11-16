@@ -6,7 +6,8 @@ with forward slashes, the event's input as one JSON object on stdin, and the plu
 Every entry runs twice, in a project with no store and in a project whose store the layout entry has just made.
 Each run must exit 0, write nothing on stderr, and print nothing or one JSON object whose `hookSpecificOutput` names
 the entry's own event.
-The gate of recall-hook.sh runs against a stand-in python that only says it ran.
+The gate of recall-hook.sh runs against a stand-in python that only says it ran, and each runner runs with no python
+on PATH at all.
 
 Run: python3 test_wiring.py
 """
@@ -228,6 +229,36 @@ class Gate(unittest.TestCase):
     def test_a_read_ends_in_the_gate_and_a_web_call_reaches_hook_py(self):
         self.assertEqual(self.check("Read", {"file_path": "a.py"}), "")
         self.assertTrue(self.check("WebFetch", {"url": "https://example.com"}).startswith("RAN "))
+
+
+def no_python_path(tmp):
+    """A PATH that finds `sh` and `mkdir` and no python: the shell's own folder where it holds none, as Git's does
+    on Windows, else a folder of links to the two."""
+    folder = os.path.dirname(SH)
+    if not any(shutil.which(n, path=folder) for n in ("python3", "python", "py")):
+        return folder
+    links = os.path.join(tmp, "shbin")
+    os.makedirs(links)
+    for tool in ("sh", "mkdir"):
+        os.symlink(shutil.which(tool), os.path.join(links, tool))
+    return links
+
+
+class NoPython(unittest.TestCase):
+    """Each runner with no python on PATH and none remembered: it ends with exit 0 and says so to ezexe."""
+
+    def test_each_runner_says_so_when_it_finds_no_python(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            env = {k: v for k, v in os.environ.items() if not k.upper().startswith(("CLAUDE", "P4_"))}
+            env.update(PATH=no_python_path(tmp), CLAUDE_PLUGIN_ROOT=SLASHED, CLAUDE_PROJECT_DIR=tmp,
+                       CLAUDE_PLUGIN_DATA=os.path.join(tmp, "data"), HOME=tmp, USERPROFILE=tmp)
+            for runner, name in ((PHI_RUN, "session-start"), (RECALL, "layout")):
+                r = subprocess.run([SH, runner, name], input="{}", capture_output=True, text=True, env=env, cwd=tmp,
+                                   timeout=60)
+                self.assertEqual(r.returncode, 0, (name, r.stderr))
+                out = json.loads(r.stdout) if r.stdout.strip() else {}
+                self.assertIn("no working python found", out.get("systemMessage", ""),
+                              (os.path.basename(runner), r.stdout))
 
 
 if __name__ == "__main__":
