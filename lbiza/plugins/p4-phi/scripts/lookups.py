@@ -92,7 +92,6 @@ EPOCHS_SHELL = 6                 # the failure model's passes. 6, 20, 60 passes:
 #                                  top-100 precision on the later commands 0.17, 0.16, 0.14. It learns the earlier
 #                                  commands by heart and the later ones no better.
 
-WEB_TOOLS = ("WebFetch", "WebSearch")
 SHELL_TOOLS = ("Bash", "PowerShell")
 KINDS = {"WebFetch": "web", "WebSearch": "web", "Bash": "shell", "PowerShell": "shell", "Read": "read",
          "NotebookRead": "read", "Grep": "search", "Glob": "search", "Edit": "edit", "Write": "edit",
