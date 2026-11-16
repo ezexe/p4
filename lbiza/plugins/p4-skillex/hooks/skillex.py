@@ -451,13 +451,13 @@ def owner_skill(p4, rels, paths=()):
     """The store skill this work belongs to, if any: one whose recorded sources share a script with `rels`, or one
     whose kept script in `scripts/` links to a script of `paths` as two sessions' scripts link. The second finds the
     skill again after temportal has cleared every source's tmp folder: of the skills p4-skillex brewed, the one
-    whose kept script best matches the written script, `paths[0]`."""
+    whose kept script best matches a script of the cluster, `paths`."""
     want = set(rels)
     names = store_skills(p4)
     for n in names:
         if want & set(read_sources(p4, n)):
             return n
-    mine = identifiers(paths[0]) if paths else None
+    mine = [ids for ids in (identifiers(p) for p in paths) if ids]
     best, best_score = None, SIMILAR
     for n in names:
         if not read_sources(p4, n):                     # a skill written by hand: its script is never replaced
@@ -465,7 +465,7 @@ def owner_skill(p4, rels, paths=()):
         scripts = os.path.join(skillex_dir(p4), n, "scripts")
         for f in sorted(os.listdir(scripts)) if os.path.isdir(scripts) else []:
             kept = identifiers(os.path.join(scripts, f))
-            score = jaccard(kept, mine) if kept and mine else 0.0
+            score = max((jaccard(kept, ids) for ids in mine), default=0.0) if kept else 0.0
             if score >= best_score and (best is None or score > best_score):
                 best, best_score = n, score
     return best
@@ -993,9 +993,9 @@ def cmd_stop(p4, payload):
                 changed.append((m.st_mtime_ns, p))
                 if folder == notebook:
                     shared.append(p)
-    if shared:
-        mark_notebook(p4, shared)
     results = [r for r in (brew(p4, p) for _, p in sorted(changed)) if r]
+    if shared:                                           # once brewed, so a Stop cut short leaves them to the next
+        mark_notebook(p4, shared)
     if results:
         return {"systemMessage": notice(results)}
     return None

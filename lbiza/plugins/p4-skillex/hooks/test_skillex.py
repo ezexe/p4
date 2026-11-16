@@ -337,6 +337,20 @@ class Watcher(Store):
         self.assertEqual(read(os.path.join(self.p4, "skillex", "aaa-hand", "scripts", "kept.py")), ids(1, 21))
         self.assertEqual(self.skills(), ["a-lint", "aaa-hand", "astcheck"])
 
+    def test_a_cluster_refreshes_the_skill_its_other_scripts_match(self):
+        def ids(first, last):
+            return "\n".join(f"ident_{n:02d} = {n}" for n in range(first, last)) + "\n"
+
+        d = os.path.join(self.p4, "skillex", "astcheck")
+        put(os.path.join(d, "SKILL.md"), "---\nname: astcheck\ndescription: kept.\n---\n\n## Where it was written\n")
+        put(os.path.join(d, "scripts", "kept.py"), ids(1, 21))
+        put(os.path.join(d, "sources.txt"), "tmp/old/astcheck.py\n")
+        for s in ("s1", "s2"):
+            put(os.path.join(self.tmp, s, "check.py"), ids(6, 26))          # links to the kept script at 0.6
+        self.write(put(os.path.join(self.tmp, "s3", "check.py"), ids(11, 31)))   # 0.33 to it, 0.6 to s1 and s2
+        self.assertEqual(self.skills(), ["astcheck"], "the far end of the chain refreshes, no second skill")
+        self.assertIn("tmp/s3/check.py", read(os.path.join(d, "sources.txt")))
+
     def test_a_script_written_by_a_shell_command_is_seen_at_stop(self):
         self.started_a_minute_ago("s3")
         self.script("s1", "astcheck.py", "astcheck", "a=1")
@@ -371,6 +385,26 @@ class Watcher(Store):
         os.utime(os.path.join(sessions, "s5.json"), (old, old))
         skillex.cmd_start(self.p4, {})
         self.assertIn("s5.json", os.listdir(sessions), "a session two hours quiet is no ended session")
+
+    def test_a_notebook_script_a_stop_cut_short_left_is_seen_by_the_next(self):
+        self.script("s1", "astcheck.py", "astcheck", "a=1")
+        self.script("s2", "astcheck.py", "astcheck", "b=2")
+        for s in ("s3", "s4"):
+            os.makedirs(os.path.join(self.tmp, s))
+            self.started_a_minute_ago(s)
+        put(os.path.join(self.p4, "temportal", "scratchpad", "astcheck.py"), CHECK.format(name="astcheck", extra="c=3"))
+        real_brew = skillex.brew
+
+        def cut(*a):
+            raise OSError("the Stop hook timed out")
+
+        skillex.brew = cut
+        try:
+            with self.assertRaises(OSError):
+                skillex.cmd_stop(self.p4, {"session_id": "s3"})
+        finally:
+            skillex.brew = real_brew
+        self.assertIn("wrote the skill", skillex.cmd_stop(self.p4, {"session_id": "s4"})["systemMessage"])
 
     def test_a_notebook_script_is_looked_at_once(self):
         self.script("s1", "astcheck.py", "astcheck", "a=1")
