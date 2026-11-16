@@ -570,6 +570,14 @@ class Loading(Store):
             skillex.mirror = real_mirror
         self.assertIsNotNone(skillex.read_session(self.p4, "s9"))
 
+    def test_a_copy_made_before_the_ignore_file_gets_one(self):
+        self.store_skill("demo-brew")
+        skillex.cmd_start(self.p4, {})
+        ignore = os.path.join(self.root, ".claude", "skills", "demo-brew", ".gitignore")
+        os.remove(ignore)
+        self.assertTrue(skillex.cmd_start(self.p4, {})["hookSpecificOutput"]["reloadSkills"])
+        self.assertEqual(read(ignore), "*\n")
+
     def test_a_project_without_the_store_skills_folder_keeps_its_copies(self):
         copy = os.path.join(self.root, ".claude", "skills", "demo-brew")
         put(os.path.join(copy, "SKILL.md"), "---\nname: demo-brew\ndescription: a copy from another clone.\n---\n")

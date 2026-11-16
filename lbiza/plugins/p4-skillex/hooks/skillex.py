@@ -692,7 +692,7 @@ def mirror(p4, names=None, remove=False):
         there = set()
         for r, ds, fs in os.walk(target):
             there |= {os.path.relpath(os.path.join(r, f), target) for f in fs if f not in (MARKER, COPY_IGNORE)}
-        same = os.path.isdir(target) and there == set(files) and all(
+        same = os.path.isfile(os.path.join(target, COPY_IGNORE)) and there == set(files) and all(
             _same_bytes(p, os.path.join(target, rel)) for rel, p in files.items())
         if same:
             continue
