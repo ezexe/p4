@@ -6,6 +6,7 @@
 
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -22,6 +23,7 @@ COPIES = [PLUGINS / "p4-temportal" / "hooks" / "p4conf.py", PLUGINS / "p4-phi" /
 class P4Conf(unittest.TestCase):
     def setUp(self):
         self.p4 = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.p4, True)
 
     def read(self):
         with open(p4conf.path(self.p4), encoding="utf-8") as f:
@@ -95,6 +97,11 @@ class P4Conf(unittest.TestCase):
         self.assertEqual(p4conf.load(self.p4, warn=False), p4conf.DEFAULTS)
         with open(p4conf.path(self.p4), encoding="utf-8") as f:
             self.assertEqual(f.read(), "{not json")
+
+    def test_a_test_leaves_no_temp_folder(self):
+        t = P4Conf("test_no_directory_no_file")
+        t.run(unittest.TestResult())
+        self.assertFalse(os.path.exists(t.p4), "setUp's folder is removed after the test")
 
     def test_no_directory_no_file(self):
         gone = os.path.join(self.p4, "absent")
