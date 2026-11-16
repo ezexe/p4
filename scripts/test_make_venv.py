@@ -91,6 +91,29 @@ class Venv(unittest.TestCase):
         self.assertTrue(any(c[-1] == "numpy" for c in calls))
         self.assertTrue(any(str(v.REQUIREMENTS) in c for c in calls))
 
+    def test_an_intel_mac_finishes_the_venv_without_torch(self):
+        """PyPI's last torch for macOS on x86_64 is 2.2.2 and ezexe/phi needs 2.4.1 or newer, so on an Intel Mac no
+        torch is asked for, even where pip would install 2.2.2 or .venv already holds it, and ezexe/phi goes in with
+        --no-deps."""
+        v.python_of(v.VENV).parent.mkdir(parents=True)
+        v.python_of(v.VENV).write_text("")
+        self.phi(self.tmp / "phi")
+        calls = []
+        real = (v.run, v.missing, v.subprocess, v.platform)
+        v.run = lambda *cmd: calls.append([str(c) for c in cmd]) or 0
+        v.missing = lambda py: [] if any("-e" in c for c in calls) else ["phi_prune", "phi_rank"]
+        v.subprocess = types.SimpleNamespace(run=lambda *a, **k: types.SimpleNamespace(stdout="3 12 7"))
+        v.platform = types.SimpleNamespace(system=lambda: "Darwin", machine=lambda: "x86_64")
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(v.main([]), 0)
+        finally:
+            v.run, v.missing, v.subprocess, v.platform = real
+        self.assertEqual([c for c in calls if "torch" in c], [], "no torch is asked for")
+        self.assertIn("--no-deps", [c for c in calls if "-e" in c][0])
+        self.assertIn("Intel Mac", out.getvalue())
+
     def requires(self, spec):
         """An ezexe/phi checkout beside the p4 checkout whose pyproject.toml has the given requires-python line."""
         phi = self.phi(self.tmp / "phi")

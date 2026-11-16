@@ -11,11 +11,10 @@ Then use .venv/bin/python, or .venv\\Scripts\\python.exe on Windows, as in `.ven
 --project <repo>`. An existing .venv is reused and topped up, never recreated. torch comes from PyTorch's CPU wheel
 index, since the p4 models train and serve on the CPU, else from PyPI; --cuda takes PyPI's default build instead.
 
-Where no torch build exists for the machine, as on an Intel Mac, whose last PyTorch wheels are 2.2 for Python 3.12 at
-most, .venv is finished without it: ezexe/phi is installed without its torch dependency, and everything retrieval
-serves still runs, since `phi_model check` reads the JSON ranker, the labels and the notices and says the .pt ranker
-is not checked. To get torch on such a Mac, build .venv from a Python 3.12: remove .venv and run
-`python3.12 scripts/make_venv.py`.
+Where no torch build exists for the machine, .venv is finished without it: ezexe/phi is installed without its torch
+dependency, and everything retrieval serves still runs, since `phi_model check` reads the JSON ranker, the labels and
+the notices and says the .pt ranker is not checked. An Intel Mac always takes that route: ezexe/phi needs torch 2.4.1
+or newer, and PyPI's last torch for macOS on x86_64 is 2.2.2, so no torch is asked for there.
 
 It stops before it makes or tops up .venv when the Python that runs ezexe/phi there, .venv's own or else the one
 running this script, is older than the requires-python in the pyproject.toml of the ezexe/phi it installs: the
@@ -46,6 +45,11 @@ NEED_TORCH = ("torch", "phi_prune", "phi_rank")     # what cannot import on a ma
 PHI_PYPROJECT = "https://raw.githubusercontent.com/ezexe/phi/HEAD/pyproject.toml"     # of what PHI_GIT installs
 PHI_PYTHON = (3, 11, 0)     # ezexe/phi's requires-python, in its place when GitHub's file gives none
 LOWER = re.compile(r"(>=|~=|==|>)\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?")     # a version specifier that sets a lower bound
+
+
+def intel_mac():
+    """True on macOS on x86_64, where PyPI's last torch, 2.2.2, is older than the 2.4.1 ezexe/phi needs."""
+    return platform.system() == "Darwin" and platform.machine() == "x86_64"
 
 
 def python_of(venv: Path) -> Path:
@@ -155,8 +159,13 @@ def main(argv=None) -> int:
     if run(py, "-m", "pip", "install", "-q", "--upgrade", "pip"):
         print("make_venv.py: the step above failed; .venv is left as it is")
         return 1
-    torch_ok = "torch" not in missing(py)
-    if not torch_ok:
+    if intel_mac():
+        torch_ok = False
+        print("make_venv.py: an Intel Mac has no torch ezexe/phi accepts, since PyPI's last torch for it is 2.2.2 and "
+              "ezexe/phi needs 2.4.1 or newer, so .venv is finished without it")
+    else:
+        torch_ok = "torch" not in missing(py)
+    if not torch_ok and not intel_mac():
         tries = ([[]] if a.cuda else [["--index-url", TORCH_CPU], []])     # the CPU wheels, then PyPI
         torch_ok = any(run(py, "-m", "pip", "install", "-q", "torch", *t) == 0 for t in tries)
         if not torch_ok:
