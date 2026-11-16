@@ -30,9 +30,9 @@ The watcher every orchestrator has is puppeteer.py's and is another thing.
                `notify_when_idle` could tell it when a controlled session goes idle, and p4-phi uses neither.
   archiving    a supervisor session archives only what ezexe picks. A complete controlled session is offered to
                ezexe, as a button on the turn's wrap-up when it is the one complete session while another still
-               works, and otherwise as an option of one multiple-choice question by full title, or past four
-               complete sessions as one option for all of them beside the first three; the archive hook lets
-               through only what ezexe picked in that turn. The completeness checks decide what is offered.
+               works, and otherwise as an option of its own by full title, at most four options to a multiple-choice
+               question and four questions to one AskUserQuestion; the archive hook lets through only what ezexe
+               picked in that turn. The completeness checks decide what is offered.
   requests     a controlled session that would start a new top-level session writes `request ... --to-puppeteer`
                into its own store; the supervisor session's hooks read it there, and what became of it is kept on
                the supervisor session's record, where the hook of the session that filed it reads it.
@@ -554,7 +554,8 @@ NOT_PICKED = ("Not picked by ezexe in this turn: a supervisor session archives o
               "p4-phi hands it says")
 PICKED = "ezexe picked it in this turn"
 BUTTON_YES, BUTTON_NO = "Archive it", "Not now"
-OFFER_MAX = 4                    # options one AskUserQuestion holds
+OFFER_MAX = 4                    # options one question of an AskUserQuestion holds
+QUESTIONS_MAX = 4                # questions one AskUserQuestion holds
 
 
 def archive(home, s, target, reason, picked=False):
@@ -608,10 +609,10 @@ def complete(home, s):
 
 
 def offer(home, s, button=True):
-    """The multiple-choice question a supervisor session puts to ezexe: one option for each complete controlled
-    session, by its full title and with the finished sessions of its tree, each a dict of its label, description and
-    ids; past OFFER_MAX complete sessions, one option for all of them comes first and the first three follow it. The labels are what the archive hook reads ezexe's picks by, so they are kept on the supervisor session's
-    record; the caller saves it."""
+    """The options a supervisor session puts to ezexe: one for each complete controlled session, by its full title
+    and with the finished sessions of its tree, each a dict of its label, description and ids. The labels are what
+    the archive hook reads ezexe's picks by, so they are kept on the supervisor session's record; the caller saves
+    it."""
     ready, _ = complete(home, s)
     if not ready:
         s.pop("archiveOffer", None)
@@ -621,10 +622,6 @@ def offer(home, s, button=True):
         return f"Archive {sid}" + (f" and the {len(kids)} finished session{'s' if len(kids) != 1 else ''} of its "
                                    f"tree" if kids else "") + "."
     opts = [{"label": title, "description": about(sid, kids), "ids": [sid] + kids} for sid, title, kids in ready]
-    if len(opts) > OFFER_MAX:
-        opts = [{"label": f"All {len(ready)} complete sessions", "description": "Archive every one of them: "
-                 + "; ".join(f"\"{t}\"" for _, t, _ in ready) + ".",
-                 "ids": [i for o in opts for i in o["ids"]]}] + opts[:OFFER_MAX - 1]
     seen = {}
     for o in opts:                                 # a label is the key a pick is read by: each one once
         seen[o["label"]] = seen.get(o["label"], 0) + 1
@@ -639,9 +636,10 @@ def offer(home, s, button=True):
 
 def offer_text(home, s, button=True):
     """The line that puts a supervisor session's complete sessions to ezexe, and an empty string when none is
-    complete. It names the button or the multiple-choice question and never the archive call, which follows ezexe's
+    complete. It names the button or the multiple-choice questions and never the archive call, which follows ezexe's
     pick. One session is a button on the turn's wrap-up when `button`; where the wrap-up already holds a question,
-    it is a multiple-choice question of one option."""
+    it is a multiple-choice question of one option. Past OFFER_MAX sessions, the options are split as evenly as they
+    go into questions of at most OFFER_MAX options, QUESTIONS_MAX questions to one AskUserQuestion."""
     opts = offer(home, s, button)
     ready, left = complete(home, s)
     if not opts:
@@ -659,14 +657,21 @@ def offer_text(home, s, button=True):
                 f"When ezexe's next message is \"{BUTTON_YES}\", archive exactly "
                 + ("that session and those of its tree" if kids else "that session")
                 + f" in that turn, and p4-phi lets it through; on anything else leave it and say so.{out}")
-    lines = "\n".join(f"- label \"{o['label']}\", description \"{o['description']}\"" for o in opts)
+    asks = -(-len(opts) // OFFER_MAX)              # questions, each of two to OFFER_MAX options when there are several
+    lines = "\n".join((f"Question {k + 1}:\n" if asks > 1 else "") + "\n".join(
+        f"- label \"{o['label']}\", description \"{o['description']}\""
+        for o in opts[k * len(opts) // asks:(k + 1) * len(opts) // asks]) for k in range(asks))
+    into = ("one `AskUserQuestion`" if asks <= QUESTIONS_MAX else
+            f"{-(-asks // QUESTIONS_MAX)} `AskUserQuestion` calls of at most {QUESTIONS_MAX} questions")
+    how = ("one multiple-choice question: one `AskUserQuestion` with `multiSelect` true" if asks == 1 else
+           f"{asks} multiple-choice questions in {into}, each question with a text of its own and `multiSelect` true")
     n = len(ready)
     return (f"phi (p4-phi): {n} session{'s' if n != 1 else ''} this supervisor session controls "
             f"{'are' if n != 1 else 'is'} complete. Archiving {'them' if n != 1 else 'it'} is ezexe's "
             f"own pick, never this session's judgement. {lead} Then, before `mcp__ccd_turn__wrap_up`, put them to "
-            f"ezexe as one multiple-choice question: one `AskUserQuestion` with `multiSelect` true, each option a "
-            f"session by its full title, exactly these options"
-            + (", with a last option \"None of them\"" if len(opts) == 1 else "") + f":\n{lines}\n"
+            f"ezexe as {how}, each option a session by its full title, exactly these options"
+            + (", with a last option \"None of them\"" if len(opts) == 1 else "")
+            + (" under these questions" if asks > 1 else "") + f":\n{lines}\n"
             f"Archive none of them before ezexe has answered. Then archive exactly the sessions under the options "
             f"ezexe picked, and no other: p4-phi lets through only those. Name "
             f"each one archived and each one left.{out}")

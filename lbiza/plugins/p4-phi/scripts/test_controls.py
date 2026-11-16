@@ -20,11 +20,12 @@ import inproc  # noqa: E402
 import phi  # noqa: E402
 import relay  # noqa: E402
 import starts  # noqa: E402
-from test_phi import CLI, KID, TOP, Tree, context, read, transcript, write  # noqa: E402
+from test_phi import CLI, KID, TOP, Tree, context, memory, read, transcript, write  # noqa: E402
 
 PUP, PUP2, TOP2, TOP3, NEW = ("local_pup00001", "local_pup00002", "local_top00002", "local_top00003",
                               "local_new00001")
-for k, sid in enumerate((PUP, PUP2, TOP2, TOP3, NEW)):
+TOP4, TOP5 = "local_top00004", "local_top00005"
+for k, sid in enumerate((PUP, PUP2, TOP2, TOP3, NEW, TOP4, TOP5)):
     CLI.setdefault(sid, f"9999{k}000-0000-4000-8000-000000000000")
 ARCHIVE = "mcp__ccd_session_mgmt__archive_session"
 START = "mcp__ccd_session__start_session"
@@ -254,6 +255,34 @@ class Supervisor(unittest.TestCase):
         self.assertEqual(self.archive(PUP, TOP2, prompt="Archive it").get("permissionDecision"), "deny")
         self.assertNotIn("is complete", context(t.say(PUP, "and now?")), "offered once")
 
+    def test_five_complete_sessions_are_each_an_option_of_their_own_in_one_askuserquestion(self):
+        """An AskUserQuestion takes up to four questions of up to four options each, so five complete sessions are
+        two questions of one AskUserQuestion, and ezexe's pick of the fifth alone archives the fifth."""
+        t = self.t
+        t.record(TOP4, title="Build the ports table")
+        t.record(TOP5, title="Build the moon format reader")
+        five = [(TOP, self.TITLE), (TOP2, "Build the importer"), (TOP3, "A top session nobody put under the puppeteer"),
+                (TOP4, "Build the ports table"), (TOP5, "Build the moon format reader")]
+        for sid, _ in five:
+            self.finish(sid, proj=self.other if sid == TOP2 else None)
+        t.say(PUP, "Control the five trees")
+        t.cli(PUP, "controls", *[sid for sid, _ in five])
+        ctx = context(t.say(PUP, "five reports came in"))
+        self.assertEqual({o["label"]: o["ids"] for o in t.session(PUP)["archiveOffer"]},
+                         {title: [sid] for sid, title in five}, "each session under an option of its own")
+        self.assertIn("5 sessions this supervisor session controls are complete", ctx)
+        self.assertIn("put them to ezexe as 2 multiple-choice questions in one `AskUserQuestion`", ctx)
+        asked = ctx.split("under these questions:\nQuestion 1:\n", 1)[-1].split("\nArchive none of them", 1)[0]
+        asked = asked.split("\nQuestion 2:\n")
+        self.assertEqual(len(asked), 2, ctx)
+        for q in asked:
+            self.assertTrue(2 <= len(q.splitlines()) <= 4, f"a question holds two to four options:\n{q}")
+        for sid, title in five:
+            self.assertEqual(sum(f"- label \"{title}\", description \"Archive {sid}.\"" in q for q in asked), 1, title)
+        self.assertEqual(self.archive(PUP, TOP5, picks=["Build the moon format reader"]), {}, "the fifth, picked alone")
+        self.assertEqual(self.archive(PUP, TOP4, picks=["Build the moon format reader"]).get("permissionDecision"),
+                         "deny", "and no session ezexe did not pick")
+
     def test_a_supervisor_session_is_refused_what_it_does_not_control_and_what_is_not_complete(self):
         t = self.t
         self.finish(TOP3)
@@ -383,6 +412,21 @@ class Supervisor(unittest.TestCase):
         r = t.hook("session-start", TOP, {"hook_event_name": "SessionStart", "source": "compact"})
         self.assertNotIn("its board", context(r))
 
+    def test_a_memory_ezexe_changes_during_the_run_is_named_on_the_board(self):
+        t = self.t
+        conf = os.path.join(t.tmp, "conf")             # no global CLAUDE.md: the store's memories are the rules
+        os.makedirs(conf)
+        memory(t.p4, "tabs-not-spaces", "feedback", "Indent with tabs in the exporter.")
+        section = "## Feedback and user memories ezexe changed during the run\n\n"
+        board = os.path.join(t.dir(PUP), "board.md")
+        t.say(PUP, "Control the trees", CLAUDE_CONFIG_DIR=conf)
+        self.assertIn(section + "None.", read(board))
+        memory(t.p4, "tabs-not-spaces", "feedback", "Indent with four spaces in the exporter, never tabs.")
+        t.say(PUP, "carry on", CLAUDE_CONFIG_DIR=conf)
+        changed = read(board).split(section, 1)[1].split("\n## ", 1)[0]
+        self.assertRegex(changed, r"^- tabs-not-spaces, \d{4}-\d\d-\d\d \d\d:\d\d\nEach is whole on .+/phi/rules\.md\.")
+        self.assertEqual([x["name"] for x in t.session(PUP)["rulesChanged"]], ["tabs-not-spaces"])
+
     def test_a_boundary_is_named_once_as_a_question_with_two_buttons(self):
         t = self.t
         t.say(PUP, "Control the two trees")
@@ -410,6 +454,23 @@ class Supervisor(unittest.TestCase):
         ctx = context(t.say(PUP, "and now?"))
         self.assertIn("the app's `new_session` action, which starts the successor supervisor session from the board",
                       ctx)
+
+    def test_a_controlled_tree_that_closed_is_a_boundary_named_once_while_another_still_works(self):
+        t = self.t
+        t.say(PUP, "Control the two trees")
+        t.say(TOP, "Build it")                      # both mid-turn
+        t.say(TOP2, "Build it", proj=self.other)
+        t.cli(PUP, "controls", TOP, TOP2)
+        self.assertNotIn("a boundary", context(t.say(PUP, "anything?")), "both still work")
+        app = os.path.join(t.app, TOP + ".json")
+        write(app, json.dumps({**json.loads(read(app)), "isArchived": True}))      # ezexe archived it in the app
+        ctx = context(t.say(PUP, "anything now?"))
+        self.assertIn(f"a boundary: the tree of \"{self.TITLE}\" has closed.", ctx)
+        self.assertIn("\"Compact now\" and \"Later\"", ctx)
+        self.assertNotIn("is complete", ctx, "an archived session is offered to nobody")
+        board = read(os.path.join(t.dir(PUP), "board.md"))
+        self.assertRegex(board, rf"- \"{self.TITLE}\" `{TOP}`, store .+: archived\.")
+        self.assertNotIn("a boundary", context(t.say(PUP, "and now?")), "said once")
 
     def test_a_successor_takes_over_the_controlled_sessions_and_archives_the_old_supervisor_session(self):
         t = self.t
