@@ -83,6 +83,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import p4conf  # noqa: E402 - the settings file, .claude/p4/p4.json
+import hookio  # noqa: E402 - the hook input and link helpers p4-temportal's scripts share
 
 ASKS_ENV = "P4_SCRATCHPAD_ASKS"
 TMP_ENV = "P4_SCRATCHPAD_TMP"
@@ -117,15 +118,10 @@ REPO_USES_MAX = 200        # candidate names one git grep carries
 REPO_USES_LINES = 10       # lines printed at most; the rest counted on one more
 
 
-def payload_from_stdin():
-    try:
-        return json.loads(sys.stdin.buffer.read().decode("utf-8", errors="replace"))
-    except Exception:
-        return {}
+payload_from_stdin = hookio.payload_from_stdin
 
 
-def project_root(payload):
-    return os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
+project_root = hookio.project_root
 
 
 ASKS = False                # p4.json scratchpad.asks; P4_SCRATCHPAD_ASKS=1 or 0 wins for one run
@@ -312,17 +308,7 @@ def p4_tmp(root, payload):
     return p4conf.sub(os.path.join(root, ".claude", "p4"), "tmp", session_id(payload) or "session")
 
 
-def is_link(path):
-    """A symlink or a Windows junction."""
-    if os.path.islink(path):
-        return True
-    isj = getattr(os.path, "isjunction", None)        # 3.12+
-    if isj:
-        return isj(path)
-    try:
-        return bool(os.lstat(path).st_file_attributes & 0x400)   # FILE_ATTRIBUTE_REPARSE_POINT
-    except (OSError, AttributeError):
-        return False
+is_link = p4conf.is_link
 
 
 def same_dir(a, b):
@@ -350,12 +336,7 @@ def link_target(path):
     return os.path.normpath(t[4:] if t.startswith("\\\\?\\") else t)
 
 
-def remove_link(path):
-    """Remove a link, a junction or a symlink, never what it points at."""
-    if os.name == "nt":
-        os.rmdir(path)
-    else:
-        os.unlink(path)
+remove_link = hookio.remove_link
 
 
 def dangling(link, sid):

@@ -35,6 +35,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import p4conf  # noqa: E402 - the settings file, .claude/p4/p4.json
+import hookio  # noqa: E402 - the hook input and link helpers p4-temportal's scripts share
 
 MEMORY = "memory"
 CONFLICTS = ".conflicts"
@@ -49,11 +50,7 @@ RETRIES = 5
 RETRY_WAIT_S = 1.0
 
 
-def payload_from_stdin():
-    try:
-        return json.loads(sys.stdin.buffer.read().decode("utf-8", errors="replace"))
-    except Exception:
-        return {}
+payload_from_stdin = hookio.payload_from_stdin
 
 
 def configure(payload):
@@ -69,8 +66,7 @@ def layout(payload):
     return ("p4-temportal: " + "; ".join(lines) + ".\n") if lines else ""
 
 
-def project_root(payload):
-    return os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
+project_root = hookio.project_root
 
 
 def project_slug(root):
@@ -227,25 +223,10 @@ def same_dir(a, b):
         return False
 
 
-def is_link(path):
-    """A symlink or a Windows junction."""
-    if os.path.islink(path):
-        return True
-    isj = getattr(os.path, "isjunction", None)        # 3.12+
-    if isj:
-        return isj(path)
-    try:
-        return bool(os.lstat(path).st_file_attributes & 0x400)   # FILE_ATTRIBUTE_REPARSE_POINT
-    except (OSError, AttributeError):
-        return False
+is_link = p4conf.is_link
 
 
-def remove_link(path):
-    """Remove a symlink or junction itself, never what it points at, since rmtree would follow a junction."""
-    if os.path.islink(path):
-        os.unlink(path)
-    else:
-        os.rmdir(path)                                  # a junction: RemoveDirectory drops the reparse point only
+remove_link = hookio.remove_link
 
 
 def pointer_text(mem):

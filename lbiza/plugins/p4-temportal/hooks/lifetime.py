@@ -53,6 +53,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import p4conf  # noqa: E402 - the settings file, .claude/p4/p4.json
+import hookio  # noqa: E402 - the hook input and link helpers p4-temportal's scripts share
 
 EXPIRES = "expires.json"
 NEVER = ("memory",)                     # folders no lifetime ever clears
@@ -64,15 +65,10 @@ SESSION = "session"
 FRESH_S = 3600                          # a set-aside copy this young came with this start's move: no rule clears it
 
 
-def payload_from_stdin():
-    try:
-        return json.loads(sys.stdin.buffer.read().decode("utf-8", errors="replace"))
-    except Exception:
-        return {}
+payload_from_stdin = hookio.payload_from_stdin
 
 
-def project_root(payload):
-    return os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
+project_root = hookio.project_root
 
 
 def store_of(root):
@@ -209,14 +205,7 @@ def _git(p4, *args):
         return None
 
 
-def _own_repo(p4):
-    r = _git(p4, "rev-parse", "--show-toplevel")
-    if not (r and r.returncode == 0):
-        return False
-    try:
-        return os.path.samefile(r.stdout.decode("utf-8", "replace").strip(), p4)
-    except OSError:
-        return False
+_own_repo = p4conf._own_repo
 
 
 def remove(path):
