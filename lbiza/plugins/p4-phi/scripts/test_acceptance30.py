@@ -101,6 +101,34 @@ class Tree_(unittest.TestCase):
         self.assertGreater(ctx.count("dropped by flush_rows"), 5, "the note shown whole, not cut at 300")
 
 
+    def test_a_child_archiving_itself_with_open_steps_still_retires_with_them_named(self):
+        """#46: check 2's child archived itself with steps 2.2 to 2.4 open, and its parent heard nothing."""
+        self.t.say(KID, "Fix the row in the exporter")
+        r = self.t.hook("plan", KID, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                                      "tool_input": {"items": [{"content": "Read flush_rows", "status": "completed"},
+                                                               {"content": "Fix the last row", "status": "in_progress"},
+                                                               {"content": "Run the exporter suite", "status": "pending"}]},
+                                      "tool_response": "Plan updated."})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        report = "Read flush_rows: the last row is dropped by an off-by-one. Not fixed yet."
+        path = transcript(os.path.join(self._tmp.name, "kid46.jsonl"), "Fix the row in the exporter", [], report)
+        r = self.t.hook("self-archive", KID, {"hook_event_name": "PreToolUse",
+                                              "tool_name": "mcp__ccd_session_mgmt__archive_session",
+                                              "tool_input": {"session_id": "self"}, "transcript_path": path})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(relay._session(self.t.p4, KID).get("doneRetired"), "a self-archive counts as done")
+        notes = phi.load_notes(self.t.p4, TOP)
+        self.assertTrue(notes, "the parent holds its replaces: note")
+        claim = notes[-1]["claim"]
+        self.assertIn("it archived itself before its work was shown done, with 2 plan steps still open", claim)
+        self.assertIn("\"Fix the last row\" in_progress", claim)
+        self.assertIn("\"Run the exporter suite\" pending", claim)
+        self.assertNotIn("Read flush_rows\"", claim, "a completed step is not named")
+        self.assertIn("dropped by an off-by-one", claim, "its last report is kept")
+        self.assertEqual(notes[-1]["source"], "phi self-archive retirement")
+        self.assertEqual(self.t.log(KID)[-1].get("retired"), "archived")
+
+
 class ArchiveLock(unittest.TestCase):
     def test_a_held_lock_never_loses_the_child(self):
         with tempfile.TemporaryDirectory() as home:

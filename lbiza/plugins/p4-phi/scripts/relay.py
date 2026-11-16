@@ -1381,10 +1381,11 @@ def findings_of(last):
     return out + "Its final turn left no report text with findings: read its transcript before relying on it."
 
 
-def retire_done(home, parent, sid, s, now, extra=""):
+def retire_done(home, parent, sid, s, now, extra="", archived=False):
     """A disposable child whose work is over: its outcome kept as one replaces: note on its parent, it left out of
     the relay, the anchors and the down-lines, and the parent told at its next message to archive it. Returns True
-    when it was retired now."""
+    when it was retired now. With `archived`, a child that archived itself before its work was shown done (#46):
+    the note says so and names the plan steps it left open."""
     path = os.path.join(_dir(home, sid), "session.json")
     disk = _read_json(path)
     if not parent or not disk or disk.get("doneRetired"):
@@ -1393,12 +1394,19 @@ def retire_done(home, parent, sid, s, now, extra=""):
     base = disk.get("cwd") or ""
     turns = _rows(os.path.join(_dir(home, sid), "turns.jsonl"))
     last = turns[-1] if turns else {}
-    claim = (f"replaces: \"{_title(disk)}\" ({sid}) as a live node: it finished and was started to be archived "
-             f"when done. " + (extra.strip() + " " if extra else "") + "Changed: " + (", ".join(show(f, base) for f in files[:10]) or "no files")
+    steps = [x for x in still if x.startswith("step ")]
+    how = "it finished and was started to be archived when done."
+    if archived:
+        how = ("it archived itself before its work was shown done, with "
+               + (f"{len(steps)} plan step{'s' if len(steps) != 1 else ''} still open: " + "; ".join(steps) + "."
+                  if steps else "no plan step left open."))
+    claim = (f"replaces: \"{_title(disk)}\" ({sid}) as a live node: {how} "
+             + (extra.strip() + " " if extra else "") + "Changed: " + (", ".join(show(f, base) for f in files[:10]) or "no files")
              + (" ..." if len(files) > 10 else "") + ". Heads: " + (", ".join(heads_) or "none") + ". Commits: "
              + ("; ".join(commits) or "none") + ". Still open: " + ("; ".join(still) or "nothing") + ". "
              + findings_of(last))
-    row = {"time": now, "claim": claim[:FINDINGS_CHARS + 2000], "source": "phi archive-when-done retirement",
+    row = {"time": now, "claim": claim[:FINDINGS_CHARS + 2000],
+           "source": "phi self-archive retirement" if archived else "phi archive-when-done retirement",
            "kind": "decision", "cliSessionId": ""}
     npath = os.path.join(_dir(home, parent), "notes.jsonl")
     os.makedirs(os.path.dirname(npath), exist_ok=True)

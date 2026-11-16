@@ -1895,9 +1895,12 @@ def h_stop(payload):
         if not proved:
             RAN["issue_open"] = held or (f"phi (p4-phi): {cur['issue']['repo']}#{cur['issue']['number']} is not "
                                          f"yet proven and closed, so this session is not archived.")
-    if s.get("disposable") and above and finished and proved:
-        if relay.retire_done(me.home, above, s["sessionId"], s, row["time"], extra=note):
-            RAN["retired"] = "done"
+    # #46: a child that archives itself is over whether or not its turn was shown done or its plan completed, so
+    # it retires to its parent as it goes, its open steps named; one held by an unproven issue is not archiving
+    left = bool(payload.get("_atArchive")) and not finished
+    if above and proved and ((s.get("disposable") and finished) or left):
+        if relay.retire_done(me.home, above, s["sessionId"], s, row["time"], extra=note, archived=left):
+            RAN["retired"] = "archived" if left else "done"
     if above and finished and not isinstance(s.get("issue"), dict):
         cur = load_session(me.home, s["sessionId"]) or s
         told = list(cur.get("closesTold") or [])
