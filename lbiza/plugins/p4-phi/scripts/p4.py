@@ -570,9 +570,6 @@ def cmd_sync(args):
 def cmd_query(args):
     p4 = p4_dir(args)
     r = query(p4, args.text, args.session, args.now or None)
-    if args.served_id and r["ids"]:
-        path = p4conf.sub(p4, "models", "served", re.sub(r"[^\w.-]", "_", args.served_id) + ".json")
-        ranker.write_atomic(path, json.dumps({"ids": r["ids"], "text": args.text[:500], "session": args.session or ""}))
     if args.json:
         print(json.dumps(r, ensure_ascii=False))
     elif r["lines"]:
@@ -839,7 +836,6 @@ def main(argv=None):
     p.add_argument("--text", required=True)
     p.add_argument("--session", default="")
     p.add_argument("--now", default="")
-    p.add_argument("--served-id", default="")
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("check")
     p.add_argument("--p4")
