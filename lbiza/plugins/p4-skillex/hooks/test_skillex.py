@@ -814,10 +814,55 @@ class Loading(Store):
         across, real_replace = self.across_volumes()
         skillex.os.replace = across
         try:
-            self.assertIsNone(skillex.set_aside(self.p4, copy))
+            with self.assertRaises(OSError):
+                skillex.set_aside(self.p4, copy)
         finally:
             skillex.os.replace = real_replace
         self.assertTrue(os.path.isfile(os.path.join(copy, skillex.MARKER)))
+
+    def test_a_removal_another_session_is_moving_keeps_the_record(self):
+        self.store_skill("demo-brew")
+        skillex.cmd_start(self.p4, {})
+        shutil.rmtree(os.path.join(self.p4, "skillex", "demo-brew"))
+        os.makedirs(os.path.join(skillex.swap_dir(self.p4, "claims"), "demo-brew"))
+        across, real_replace = self.across_volumes()
+        skillex.os.replace = across
+        try:
+            skillex.cmd_start(self.p4, {})
+        finally:
+            skillex.os.replace = real_replace
+        self.assertIn("demo-brew", skillex.copied(self.p4), "kept for the start after the other session's")
+
+    def test_a_removal_cut_short_keeps_the_marker_and_the_ignore_file(self):
+        folder = os.path.join(self.root, "copy")
+        for f, text in ((skillex.MARKER, ".claude/p4/skillex/x\n"), (".gitignore", "*\n"), ("SKILL.md", "s\n")):
+            put(os.path.join(folder, f), text)
+        real_remove, real_rmdir = skillex.os.remove, skillex.os.rmdir
+
+        def held(path, *a, **k):
+            if str(path).endswith("SKILL.md"):
+                raise PermissionError("held")
+            return real_remove(path, *a, **k)
+
+        skillex.os.remove = held
+        try:
+            self.assertFalse(skillex.remove_marked(folder))
+        finally:
+            skillex.os.remove = real_remove
+        self.assertEqual(read(os.path.join(folder, ".gitignore")), "*\n", "a held copy stays ignored")
+        os.remove(os.path.join(folder, "SKILL.md"))
+
+        def stood_in(path, *a, **k):
+            if os.path.normcase(str(path)) == os.path.normcase(folder):
+                raise PermissionError("a shell stands in it")
+            return real_rmdir(path, *a, **k)
+
+        skillex.os.rmdir = stood_in
+        try:
+            self.assertFalse(skillex.remove_marked(folder))
+        finally:
+            skillex.os.rmdir = real_rmdir
+        self.assertEqual(read(os.path.join(folder, skillex.MARKER)), ".claude/p4/skillex/x\n", "marked again")
 
     def test_a_copy_across_volumes_cut_short_leaves_no_unmarked_folder(self):
         self.store_skill("demo-brew")

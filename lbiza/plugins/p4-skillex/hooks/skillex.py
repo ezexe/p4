@@ -856,7 +856,9 @@ def cross_volume(e):
 
 def set_aside(p4, target):
     """Move a copy out of `.claude/skills/` whole, marker and all, into the swap folder's `aside/`, where clear_aside
-    deletes it. Returns where it went, or None when another session moved it first."""
+    deletes it. Returns where it went, or None when another session moved it first. Raises OSError when the copy is
+    held, or is being moved across drives by another session, so the caller keeps it and its record for a later
+    start."""
     where = os.path.join(swap_dir(p4, "aside"), f"{os.path.basename(target)}.{os.getpid()}.{time.time_ns()}")
     try:
         os.utime(target)                                 # a rename keeps the copy's age; clear_aside reads this one
@@ -870,7 +872,7 @@ def set_aside(p4, target):
         try:
             os.mkdir(claim)                              # one session at a time moves this copy across drives
         except FileExistsError:
-            return None
+            raise OSError(f"{target} is being moved by another session")
         try:
             if not copy_marked(target, where):
                 raise
@@ -899,11 +901,13 @@ def copy_marked(src, dst):
 
 
 def remove_marked(folder):
-    """Delete a copy with its marker last, and the marker only once nothing else is left, so a removal cut short by a
-    held file leaves a marked copy, which a later start removes. Returns whether the folder is gone."""
+    """Delete a copy with its marker and its ignore file last, and those only once nothing else is left, so a removal
+    cut short by a held file leaves a marked copy that git ignores, which a later start removes. Returns whether the
+    folder is gone."""
+    keep = (MARKER, COPY_IGNORE)
     for r, ds, fs in os.walk(folder, topdown=False):
         for f in fs:
-            if not (r == folder and f == MARKER):
+            if not (r == folder and f in keep):
                 try:
                     os.remove(os.path.join(r, f))
                 except OSError:
@@ -914,13 +918,29 @@ def remove_marked(folder):
             except OSError:
                 pass
     try:
-        if set(os.listdir(folder)) - {MARKER}:
+        if set(os.listdir(folder)) - set(keep):
             return False                                 # something is held: the marker stays with it
-        os.remove(os.path.join(folder, MARKER))
+        with open(os.path.join(folder, MARKER), encoding="utf-8") as f:
+            marker = f.read()
+    except FileNotFoundError:
+        return not os.path.exists(folder)
+    except OSError:
+        return False
+    try:
+        for f in (COPY_IGNORE, MARKER):
+            if os.path.exists(os.path.join(folder, f)):
+                os.remove(os.path.join(folder, f))
         os.rmdir(folder)
     except FileNotFoundError:
         pass
     except OSError:
+        if os.path.isdir(folder):                        # the folder stays, say a shell stands in it: marked again
+            for f, text in ((MARKER, marker), (COPY_IGNORE, "*\n")):
+                try:
+                    with open(os.path.join(folder, f), "w", encoding="utf-8", newline="\n") as out:
+                        out.write(text)
+                except OSError:
+                    pass
         return False
     return not os.path.exists(folder)
 
