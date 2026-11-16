@@ -17,14 +17,18 @@ Only once a skill exists does the watcher search for something similar that alre
 machine's personal folder, of the plugins and marketplaces Claude Code keeps, of the project, and the store's other
 skills. Each match is linked from the new skill's `SKILL.md` under "Similar existing skills" and in `similar.json`.
 
+The store folder also holds `src/`, the saved code saved.py keeps, which is no skill and is never copied.
+
 A store skill reaches every session of the project through Claude Code's own project skills folder: each store skill
 is copied into `<project>/.claude/skills/<skill_name>/` with a `.skillex` file naming its source, a SessionStart hook
 that changes a copy asks Claude Code to scan the skill folders again with `reloadSkills`, and a copy written during
 a session is picked up by Claude Code's watch of that folder. The store keeps the skill; the copy is regenerated
 from it and never edited by hand. A folder in `.claude/skills/` without a `.skillex` file is never touched.
 
-  start                        SessionStart: make the store folder and `.claude/skills/`, copy every store skill
-                               there.
+  start                        SessionStart: move files from an earlier place of the store's layout, make the store
+                               folder and `.claude/skills/`, copy every store skill there.
+  repo-uses                    SessionStart: saved.py's first ask, about saved code the repository uses.
+  ask                          PreToolUse on Write, Edit and Bash: saved.py's second ask, about where code belongs.
   write                        PostToolUse on Write: look at the written file when it lies in temportal.
   stop                         Stop: look at the scripts of the session's tmp folder and of the notebook changed
                                since the last look, so a script written by a shell command is seen too.
@@ -41,6 +45,12 @@ import re
 import shutil
 import sys
 import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+import p4conf  # noqa: E402 - the settings file and the store's layout, .claude/p4/p4.json
+import saved  # noqa: E402 - the saved code in skillex/src/ and its two asks
 
 MIN_SESSIONS = 3                      # sessions whose scripts must share the work, the written one included
 SIMILAR = 0.5                         # Jaccard index of identifier sets at and above which two scripts match
@@ -520,7 +530,7 @@ def owner_skill(p4, rels, paths=()):
 def free_name(p4, name):
     """`name`, or `name-2` and onward, so it is neither a store skill nor a project's own skill in `.claude/skills/`,
     and stays within 64 characters."""
-    taken = set(store_skills(p4))
+    taken = set(store_skills(p4)) | {os.path.basename(p4conf.LAYOUT["src"])}    # saved code's folder
     own = project_skills(p4)
     if os.path.isdir(own):
         taken |= {n for n in os.listdir(own) if not os.path.isfile(os.path.join(own, n, MARKER))}
@@ -1069,6 +1079,7 @@ def write_session(p4, sid, st):
 def cmd_start(p4, payload):
     if not active(p4):
         return None
+    moved = p4conf.migrate_layout(p4)
     prune_sessions(p4)
     os.makedirs(skillex_dir(p4), exist_ok=True)
     sid = payload.get("session_id")
@@ -1076,9 +1087,12 @@ def cmd_start(p4, payload):
         write_session(p4, sid, {"since": time.time(), "looked": {}})
     made = not os.path.isdir(project_skills(p4))
     changed = mirror(p4, remove=True)
+    out = {}
     if changed or made:
-        return {"hookSpecificOutput": {"hookEventName": "SessionStart", "reloadSkills": True}}
-    return None
+        out["reloadSkills"] = True
+    if moved:
+        out["additionalContext"] = "p4-skillex: " + "; ".join(moved) + "."
+    return {"hookSpecificOutput": {"hookEventName": "SessionStart", **out}} if out else None
 
 
 def notebook_seen(p4):
@@ -1208,7 +1222,8 @@ def main():
         r = brew(p4, args[1])
         print(notice([r]) if r else "p4-skillex: nothing is brewing in that file")
         return 0
-    handlers = {"start": cmd_start, "write": cmd_write, "stop": cmd_stop}
+    handlers = {"start": cmd_start, "write": cmd_write, "stop": cmd_stop,
+                "repo-uses": saved.cmd_repo_uses, "ask": saved.cmd_ask}
     if sub not in handlers:
         print(f"p4-skillex: unknown command '{sub}'; nothing was done")
         return 0
@@ -1216,7 +1231,7 @@ def main():
         payload = payload_from_stdin()
         out = handlers[sub](p4 or store_of(project_root(payload)), payload)
         if out:
-            print(json.dumps(out))
+            print(out if isinstance(out, str) else json.dumps(out))
     except Exception as e:  # a broken hook never blocks a call
         print(f"p4-skillex {sub}: {type(e).__name__}: {e}; nothing more was done")
     return 0

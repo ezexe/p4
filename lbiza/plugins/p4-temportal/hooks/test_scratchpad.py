@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 """test_scratchpad.py: acceptance tests for p4-temportal's scratchpad part. The notebook's .out/ is seeded,
 silently the first time, and seeded again, logs, build output and binaries move into it, and a clean tree prints
-nothing at a session start. With P4_SCRATCHPAD_ASKS=1 the PreToolUse ask fires, and never denies, before a code file
-goes to a temp location, the session's scratchpad path or the notebook, and repo-uses prints one line for each file
-under .claude/p4/temportal/src/ the repository names; with the switch off both are silent. Then the session's
-scratchpad directory: linked, staged, committed and removed, and restored, and the other sessions' scratchpad folders
+nothing at a session start. Then the session's scratchpad directory: linked, staged, committed and removed, and restored, and the other sessions' scratchpad folders
 linked or removed. Run from anywhere: python3 hooks/test_scratchpad.py, and exit 0 is green; the git cases skip,
 saying so, without git on PATH."""
 
@@ -19,15 +16,10 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "scratchpad.py")
 HOOKS_JSON = os.path.join(HERE, "hooks.json")
-SCRATCH = "C:/Users/someone/AppData/Local/Temp/claude/30ad6e18862a20e8/abc123/scratchpad"
-MAC_SCRATCH = "/private/tmp/claude-501/-Users-ez-x/f27bc042/scratchpad"
-P4_SRC = "E:/projects/x/.claude/p4/temportal/src"
-PAD = "E:/projects/x/.claude/p4/temportal/scratchpad"
-ON = {"P4_SCRATCHPAD_ASKS": "1"}
 
 
 def env_with(extra=None, **kw):
-    env = {k: v for k, v in os.environ.items() if k != "P4_SCRATCHPAD_ASKS"}
+    env = dict(os.environ)
     env.update(extra or {})
     env.update(kw)
     return env
@@ -38,67 +30,6 @@ def run_sub(sub, payload, extra=None, **kw):
                        capture_output=True, timeout=60, env=env_with(extra, **kw))
     assert r.returncode == 0, r
     return r.stdout.decode("utf-8", "replace").strip()
-
-
-def ask(payload, extra=ON):
-    out = run_sub("ask", payload, extra)
-    if not out:
-        return None
-    d = json.loads(out)["hookSpecificOutput"]
-    assert d["hookEventName"] == "PreToolUse" and d["permissionDecision"] == "ask", d   # never a deny
-    return d
-
-
-def write(path):
-    return {"tool_name": "Write", "cwd": "E:/projects/x", "tool_input": {"file_path": path, "content": "x"}}
-
-
-def bash(cmd):
-    return {"tool_name": "Bash", "cwd": "E:/projects/x", "tool_input": {"command": cmd}}
-
-
-ASK_CASES = [
-    write(f"{SCRATCH}/sweep.py"), write(f"{MAC_SCRATCH}/probe.sh"),
-    write(f"{PAD}/probe.py"), write(".claude/p4/temportal/scratchpad/edit.py"),
-    bash("cat > .claude/p4/temportal/scratchpad/gen.py <<'EOF'\nprint(1)\nEOF\n"),
-    write(f"{PAD}/envtest.cmake"), write(f"{PAD}/probe/CMakeLists.txt"), write(f"{PAD}/probe/Makefile"),
-    write(f"{PAD}/harness.html"), write(f"{PAD}/.out/kept.py"),
-    bash("cat > /tmp/probe.sh <<'EOF'\necho hi\nEOF\n"),
-    bash(f'python - <<\'EOF\'\nopen("{SCRATCH}/gen.py", "w").write("x")\nEOF\n'),
-    bash(f"cp tools/x.py {SCRATCH}/x.py"), bash("echo hi | tee -a /tmp/run.sh"),
-    {"tool_name": "Edit", "cwd": "E:/projects/x",
-     "tool_input": {"file_path": f"{SCRATCH}/sweep.py", "old_string": "a", "new_string": "b"}},
-]
-PASS_CASES = [
-    write(f"{SCRATCH}/commit-msg.txt"), write(f"{SCRATCH}/notes.md"),
-    write(f"{P4_SRC}/sweep.py"), write(f"{P4_SRC}/CMakeLists.txt"), write("E:/projects/x/tools/build.py"),
-    write("E:/projects/x/CMakeLists.txt"), write("E:/projects/x/web/index.html"),
-    write(f"{PAD}/notes.md"), write(f"{PAD}/cmdlines.txt"), write(f"{PAD}/run.log"),
-    bash("cat > /tmp/out.json <<'EOF'\n{}\nEOF\n"), bash("grep -n def /tmp/probe.sh"),
-    bash("cp /tmp/probe.py tools/probe.py"),
-    {"tool_name": "Read", "tool_input": {"file_path": f"{SCRATCH}/sweep.py"}},
-]
-
-
-def asks():
-    for p in ASK_CASES:
-        d = ask(p)
-        assert d, f"did not ask: {p['tool_input']}"
-        reason = d["permissionDecisionReason"]
-        assert "belongs in the repo" in reason and ".claude/p4/temportal/src" in reason.replace("\\", "/"), reason
-    for p in PASS_CASES:
-        assert ask(p) is None, f"asked: {p['tool_input']}"
-    # the reason names the file's home under .claude/p4/temportal/src/
-    d = ask(write(f"{SCRATCH}/sweep.py"))
-    assert "E:/projects/x/.claude/p4/temportal/src/sweep.py" in d["permissionDecisionReason"].replace("\\", "/"), d
-    # a subagent is never asked: ezexe, who answers the prompt, cannot redirect a running agent
-    for p in ASK_CASES:
-        assert ask(dict(p, agent_id="agent_01ABC", agent_type="Explore")) is None, f"subagent asked: {p['tool_input']}"
-    # the switch: off by default and for any value but 1
-    for extra in ({}, {"P4_SCRATCHPAD_ASKS": "0"}, {"P4_SCRATCHPAD_ASKS": ""}, {"P4_SCRATCHPAD_ASKS": "yes"}):
-        for p in ASK_CASES:
-            assert ask(p, extra) is None, f"asked with {extra}: {p['tool_input']}"
-    print("test_scratchpad.py: ask cases green")
 
 
 def put(base, rel, text="x\n"):
@@ -160,38 +91,6 @@ def notebook_out():
     print("test_scratchpad.py: notebook-out cases green")
 
 
-def repo_uses():
-    git = shutil.which("git")
-    if not git:
-        print("test_scratchpad.py: repo-uses cases SKIPPED, no git on PATH")
-        return
-    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-uses-")
-    try:
-        put(root, ".claude/p4/temportal/src/port/compdb.py", "print(1)\n")
-        put(root, ".claude/p4/temportal/src/probe_cef.py", "print(2)\n")
-        put(root, ".claude/p4/temportal/src/deploy_mac.sh", "echo\n")
-        put(root, ".claude/p4/temportal/src/go.sh", "echo\n")
-        put(root, ".claude/p4/notes.md", "compdb.py probe_cef.py\n")      # the store's own files never count
-        put(root, ".gitignore", ".claude/p4/\n")
-        put(root, "CMakeLists.txt", "add_custom_target(compdb COMMAND python3 ${CMAKE_SOURCE_DIR}/scripts/compdb.py)\n")
-        put(root, "README.md", "Run go.sh first.\n")
-        put(root, ".github/workflows/ci.yml", "steps:\n  - run: sh deploy_mac.sh\n")
-
-        def uses(extra=ON):
-            return run_sub("repo-uses", {"cwd": root}, extra, CLAUDE_PROJECT_DIR=root)
-
-        assert uses() == "", "a project outside git spoke"
-        subprocess.run([git, "-C", root, "init", "-q"], check=True)
-        subprocess.run([git, "-C", root, "add", "-A"], check=True)
-        out = uses().splitlines()
-        assert out == ["`.claude/p4/temportal/src/deploy_mac.sh` is used by `.github/workflows/ci.yml`; it belongs in the repo.",
-                       "`.claude/p4/temportal/src/port/compdb.py` is used by `CMakeLists.txt`; it belongs in the repo."], out
-        assert uses({}) == "", "repo-uses spoke with the switch off"
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
-    print("test_scratchpad.py: repo-uses cases green")
-
-
 def session_start(root, extra):
     """Every SessionStart command of hooks.json, each run through `sh -c`, one after another; their output
     joined."""
@@ -211,7 +110,7 @@ def session_start(root, extra):
 
 def gate2_d():
     """SessionStart prints nothing on a clean tree: a fresh project, whose notebook is seeded silently, the same
-    project again, and a git project with notes in the notebook and an unused file in src/, with the asks off and on."""
+    project again, and a git project with notes in the notebook."""
     if not shutil.which("sh"):
         print("test_scratchpad.py: clean start SKIPPED, no sh on PATH")
         return
@@ -227,19 +126,16 @@ def gate2_d():
             return []
 
     try:
-        for extra in ({}, ON):
-            assert session_start(root, extra) == "", f"a fresh tree printed (asks {extra or 'off'})"
-            with open(os.path.join(root, ".claude", "p4", "temportal", "scratchpad", ".out", ".gitignore"), encoding="utf-8") as f:
-                assert f.read() == "*\n", "the first seed did not happen"
-            assert session_start(root, extra) == "", "a second start on a clean tree printed"
+        assert session_start(root, {}) == "", "a fresh tree printed"
+        with open(os.path.join(root, ".claude", "p4", "temportal", "scratchpad", ".out", ".gitignore"), encoding="utf-8") as f:
+            assert f.read() == "*\n", "the first seed did not happen"
+        assert session_start(root, {}) == "", "a second start on a clean tree printed"
         put(root, ".claude/p4/temportal/scratchpad/plan.md", "- a note\n")
-        put(root, ".claude/p4/temportal/src/oneoff_probe.py", "print(1)\n")
         put(root, "main.c", "int main(void) { return 0; }\n")
         if shutil.which("git"):
             subprocess.run(["git", "-C", root, "init", "-q"], check=True)
             subprocess.run(["git", "-C", root, "add", "main.c"], check=True)
-        for extra in ({}, ON):
-            assert session_start(root, extra) == "", f"a clean tree with notes printed (asks {extra or 'off'})"
+        assert session_start(root, {}) == "", "a clean tree with notes printed"
         # and the runner exits 0 when the script is broken or missing
         r = subprocess.run([shutil.which("sh"), os.path.join(HERE, "run-hook.sh"), "scratchpad", "notebook-out"], input=b"{}",
                            capture_output=True, env=env_with(CLAUDE_PLUGIN_ROOT=root, CLAUDE_PROJECT_DIR=root))
@@ -1000,7 +896,7 @@ def event_hooks(event):
 
 
 def parallel_hooks_cases():
-    """The five SessionStart hooks run at once, as Claude Code runs the hooks of one event, on a store with the older
+    """The four SessionStart hooks run at once, as Claude Code runs the hooks of one event, on a store with the older
     layout leave one moved layout, no layout lock and one p4.json that parses; the two SessionEnd hooks run at once
     on that small store finish within the 1.5-second budget of a SessionEnd."""
     sh = shutil.which("sh")
@@ -1035,7 +931,9 @@ def parallel_hooks_cases():
         at_once("SessionStart")
         left = [rel for rel in old if os.path.exists(os.path.join(p4, *rel.split("/")))]
         assert left == [], f"files left in the older layout: {left}"
-        moved = [rel for rel in old if not os.path.isfile(os.path.join(p4, "temportal", *rel.split("/")))]
+        home = {"src": "skillex"}                         # saved code moves to p4-skillex's folder, the rest to temportal/
+        moved = [rel for rel in old
+                 if not os.path.isfile(os.path.join(p4, home.get(rel.split("/")[0], "temportal"), *rel.split("/")))]
         assert moved == [], f"files missing from the new layout: {moved}"
         assert not os.path.exists(os.path.join(p4, ".layout.lock")), "the layout lock was left"
         with open(os.path.join(p4, "p4.json"), encoding="utf-8") as f:
@@ -1263,9 +1161,7 @@ def move_cases():
 
 
 def main():
-    asks()
     notebook_out()
-    repo_uses()
     tmp_cases()
     tmp_keep_cases()
     sweep_cases()

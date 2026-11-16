@@ -11,7 +11,7 @@ gives the folder it lands in a new one, and neither folder is cleared when it or
 other place. A cookie is one file or folder with its own expiry, set by `lifetime.py set <path> <lifetime>` and kept
 in temportal/expires.json, and the lifetime `session` clears it when the session that set it ends. A cache rule whose
 path resolves to memory/, in any letter case, or to a folder outside temportal/ clears nothing. A cookie is refused
-inside memory/, on tmp/ or anything in it, and on scratchpad/, src/ or expires.json themselves: a session scratchpad
+inside memory/, on tmp/ or anything in it, and on scratchpad/ or expires.json themselves: a session scratchpad
 directory in tmp/ is committed before it is removed, and the others are never cleared whole.
 
 A file the store's git tracks is removed with its removal staged, so its last version stays in the history, and an
@@ -51,7 +51,7 @@ import p4conf  # noqa: E402 - the settings file, .claude/p4/p4.json
 
 EXPIRES = "expires.json"
 NEVER = ("memory",)                     # folders no lifetime ever clears
-WHOLE = ("scratchpad", "src", EXPIRES)  # the notebook, the saved code and the cookies, which no cookie clears whole
+WHOLE = ("scratchpad", EXPIRES)         # the notebook and the cookies, which no cookie clears whole
 # the other plugins' folders of the layout, where a layout move sets copies aside in a .layout-conflicts/ of their own
 ASIDE = sorted({place.split("/")[0] for place in p4conf.LAYOUT.values()} - {"temportal"})
 UNITS = {"m": 60, "h": 3600, "d": 86400, "w": 7 * 86400}
@@ -161,7 +161,7 @@ def refusal(p4, path):
     if rel.split("/")[0].lower() == "tmp":
         return rel, f"{rel} takes no cookie: a session scratchpad directory is committed before it is removed"
     if rel.lower() in WHOLE:
-        return rel, f"{rel} takes no cookie: scratchpad/, src/ and {EXPIRES} are never cleared whole"
+        return rel, f"{rel} takes no cookie: scratchpad/ and {EXPIRES} are never cleared whole"
     return rel, None
 
 

@@ -219,6 +219,16 @@ class Lifetime(unittest.TestCase):
                          ("p4-temportal: cleared files past the cache rule: 1, in .layout-conflicts/; files past the "
                           "cache rule: 1, in ../phi/.layout-conflicts/.\n", [False, False]))
 
+    def test_the_layout_conflicts_rule_clears_p4_skillex_s_too(self):
+        """A layout move of saved code sets older copies aside in skillex/.layout-conflicts/, which the
+        .layout-conflicts rule clears as it clears temportal's and phi's."""
+        self.assertIn("skillex", lifetime.ASIDE)
+        fresh = put(os.path.join(self.p4, "skillex", ".layout-conflicts", "src", "kept.py"), age_days=1)
+        old = set_aside(os.path.join(self.p4, "skillex", ".layout-conflicts", "src", "probe.py"), 31)
+        lifetime.sweep(self.p4)
+        self.assertFalse(os.path.exists(old))
+        self.assertTrue(os.path.exists(fresh))
+
     def test_no_layout_conflicts_folder_is_cleared_through_a_link(self):
         """A phi/ or a .layout-conflicts/ that is a link clears nothing in the folder it reaches, where a file past the
         rule of 30 days stays. The links of phi/ and phi/.layout-conflicts/ reach folders outside the store, and the
@@ -332,14 +342,12 @@ class Lifetime(unittest.TestCase):
         self.assertIn("does not exist", missing.stderr)
 
     def test_no_cookie_on_tmp_or_on_the_folders_and_file_of_temportal_itself(self):
-        """A cookie on tmp/ or anything in it, or on scratchpad/, src/ or expires.json themselves, is refused, since
+        """A cookie on tmp/ or anything in it, or on scratchpad/ or expires.json themselves, is refused, since
         a session scratchpad directory is committed before it is removed and those are never cleared whole."""
         put(os.path.join(self.t, "tmp", "s1", "probe", "out.txt"))
-        put(os.path.join(self.t, "src", "kept.py"))
         lifetime.set_cookie(self.p4, put(os.path.join(self.t, "scratchpad", "page.html")), "1d")
         accepted = []
-        for rel in ("tmp", "tmp/s1", "tmp/s1/probe", "tmp/s1/probe/out.txt", "Tmp/s1", "scratchpad", "src",
-                    lifetime.EXPIRES):
+        for rel in ("tmp", "tmp/s1", "tmp/s1/probe", "tmp/s1/probe/out.txt", "Tmp/s1", "scratchpad", lifetime.EXPIRES):
             try:
                 lifetime.set_cookie(self.p4, os.path.join(self.t, *rel.split("/")), "1d")
                 accepted.append(rel)
@@ -400,8 +408,7 @@ class Layout(unittest.TestCase):
         lines = p4conf.migrate_layout(self.p4)
         self.assertEqual(len(lines), 5, lines)
         for k in p4conf.LAYOUT:
-            if k != "src":
-                self.assertFalse(os.path.exists(os.path.join(self.p4, k)), k)
+            self.assertFalse(os.path.exists(os.path.join(self.p4, k)), k)
         self.assertTrue(os.path.isfile(os.path.join(self.p4, "temportal", "memory", "MEMORY.md")))
         self.assertTrue(os.path.isfile(os.path.join(self.p4, "phi", "store", "facts.md")))
         self.assertTrue(os.path.isfile(os.path.join(self.p4, "temportal", "tmp", "sid1", "a.md")))

@@ -32,7 +32,6 @@ DEFAULTS = {
         "retry_wait_s": 1.0,             # seconds between those attempts
     },
     "scratchpad": {
-        "asks": False,                   # the two asks about where code belongs; P4_SCRATCHPAD_ASKS=1 or 0 wins
         "tmp": True,                     # the session scratchpad directory in temportal/tmp/<session>, linked from
                                          # the path Claude Code gives; P4_SCRATCHPAD_TMP=1 or 0 wins
         "tmp_idle_days": 7,              # another session's quiet scratchpad directory is committed and removed
@@ -49,6 +48,9 @@ DEFAULTS = {
                           "dylib", "a", "class", "pyc", "pyo", "tlog", "binlog", "etl", "trace", "lastbuildstate"],
         "ignorable_dirs": ["bin", "build", "obj", "logs", "out", "dist", "target", "node_modules", "__pycache__",
                            ".cache", "cmake-build-debug", "cmake-build-release", "x64", "debug", "release"],
+    },
+    "skillex": {                         # p4-skillex's saved code in skillex/src/ and its two asks
+        "asks": False,                   # the two asks about where code belongs; P4_SKILLEX_ASKS=1 or 0 wins
         "repo_uses_min_name": 6,         # a basename shorter than this matches too much to call it a use
         "repo_uses_max": 200,            # candidate names one git grep carries
         "repo_uses_lines": 10,           # lines printed at most; the rest counted on one more
@@ -146,24 +148,32 @@ RETIRED = ("plans", "version")
 LEGACY = {"teacher-model": ("recall", "teacher", "model"), "teacher-cutoff": ("recall", "teacher", "cutoff"),
           "inject": ("recall", "inject")}
 
+# Keys an earlier p4.json kept elsewhere, and where p4.json keeps each now: load() moves a value the file still holds
+# at its earlier place, unless the new place holds one already, and rewrites the file.
+MOVED = {("scratchpad", "asks"): ("skillex", "asks"),
+         ("scratchpad", "repo_uses_min_name"): ("skillex", "repo_uses_min_name"),
+         ("scratchpad", "repo_uses_max"): ("skillex", "repo_uses_max"),
+         ("scratchpad", "repo_uses_lines"): ("skillex", "repo_uses_lines")}
 
-# Where each kind of file lives in the store, by plugin. p4-temportal keeps the auto memory, the notebook, the
-# session scratchpad directories and saved code in temportal/, and p4-phi keeps its session tree and the retrieval
-# corpus and models in phi/. p4.json and the store's own git files stay at the top: .git, .github, .gitignore and
+
+# Where each kind of file lives in the store, by plugin. p4-temportal keeps the auto memory, the notebook and the
+# session scratchpad directories in temportal/, p4-skillex keeps saved code in skillex/, and p4-phi keeps its session
+# tree and the retrieval corpus and models in phi/. p4.json and the store's own git files stay at the top: .git, .github, .gitignore and
 # .gitattributes.
 LAYOUT = {
     "memory": "temportal/memory",
     "scratchpad": "temportal/scratchpad",
     "tmp": "temportal/tmp",
-    "src": "temportal/src",
+    "src": "skillex/src",
     "store": "phi/store",
     "models": "phi/models",
 }
-# Each kind's earlier places in a store, oldest first: at the top of the store, and under recall/ for the corpus
-# and the models. migrate_layout moves files from any of them.
+# Each kind's earlier places in a store, oldest first: at the top of the store, under recall/ for the corpus and the
+# models, and under temportal/ for saved code. migrate_layout moves files from any of them.
 OLDER = {k: [k] for k in LAYOUT}
 OLDER["store"].append("recall/store")
 OLDER["models"].append("recall/models")
+OLDER["src"].append("temportal/src")
 LAYOUT_LOCK = ".layout.lock"              # held while one hook moves the store; the others wait for it
 LAYOUT_CONFLICTS = ".layout-conflicts"    # inside the plugin's folder: the older of two differing copies
 TEMP_ROOTS = ("/tmp", "/private/tmp")     # beside tempfile.gettempdir(): where Claude Code makes its claude* folders
@@ -401,10 +411,11 @@ def _own_repo(p4):
 
 
 def migrate_layout(p4, commit=True):
-    """Move what lies in an earlier place of the layout into its plugin's folder: memory/, scratchpad/, tmp/ and src/
-    into temportal/, and store/ and models/, at the top or under recall/, into phi/. .gitignore and .gitattributes are
+    """Move what lies in an earlier place of the layout into its plugin's folder: memory/, scratchpad/ and tmp/ into
+    temportal/, src/ at the top or under temportal/ into skillex/, and store/ and models/, at the top or under
+    recall/, into phi/. .gitignore and .gitattributes are
     rewritten to match, and when `p4` is a git repository of its own the move is committed alone. Returns the lines
-    to print, none when there was nothing to move. Cheap when there is nothing: eight lstat calls."""
+    to print, none when there was nothing to move. Cheap when there is nothing: nine lstat calls."""
     if not _olds(p4):
         return []
     lock = os.path.join(p4, LAYOUT_LOCK)
@@ -517,7 +528,8 @@ def _migrate(p4, commit):
         if os.path.lexists(src):
             line += ", some files left for the next start"
         lines.append(line)
-    for top in sorted({r.split("/")[0] for r in done if "/" in r}):    # recall/, once store/ and models/ left it
+    homes = {v.split("/")[0] for v in LAYOUT.values()}
+    for top in sorted({r.split("/")[0] for r in done if "/" in r} - homes):   # recall/, once store/ and models/ left it
         g = os.path.join(p4, top)
         kept = os.path.join(g, LAYOUT_CONFLICTS)
         if os.path.isdir(kept):
@@ -573,6 +585,19 @@ def _legacy(p4):
     return over
 
 
+def _moved(over):
+    """`over` with each MOVED key taken from its earlier place to its place now."""
+    out = copy.deepcopy(over)
+    for (sec, key), (new_sec, new_key) in MOVED.items():
+        old = out.get(sec)
+        if isinstance(old, dict) and key in old:
+            value = old.pop(key)
+            dest = out.setdefault(new_sec, {})
+            if isinstance(dest, dict):
+                dest.setdefault(new_key, value)
+    return out
+
+
 def _write(p4, data):
     """Write p4.json through a temp file of this call's own, since the hooks of one event load at once."""
     fd, tmp = tempfile.mkstemp(prefix=FILE + ".", suffix=".tmp", dir=p4)
@@ -600,7 +625,9 @@ def load(p4, write=True, warn=True):
             return copy.deepcopy(DEFAULTS)
     else:
         over = _legacy(p4)
-    over = {k: v for k, v in over.items() if k not in RETIRED}
+    kept = {k: v for k, v in over.items() if k not in RETIRED}
+    over = _moved(kept)
+    moved = over != kept                                # a key at its earlier place: the file is rewritten
     unknown = []
     merged = _merge(DEFAULTS, over, unknown)
     if warn and unknown:
@@ -608,7 +635,7 @@ def load(p4, write=True, warn=True):
               file=sys.stderr)
     # a retired key alone never rewrites the file, since an older copy that still writes it would put it back at its
     # own next load: it leaves the file at the next rewrite for a missing key
-    if write and os.path.isdir(p4) and (not existed or merged != over):
+    if write and os.path.isdir(p4) and (not existed or moved or merged != over):
         try:
             _write(p4, merged)
         except OSError:

@@ -137,7 +137,7 @@ The pointer text in AppData says only where the memory is and to write there; it
 | hook | matcher | prints at most | earned by |
 |---|---|---|---|
 | SessionStart | — | nothing; one line only when `.claude/p4/scratchpad/.out/.gitignore` was re-seeded or ignorable files were moved into `.out/` | the owner's word (storage move) |
-| SessionStart, opt-in | — | one line per file under `.claude/p4/src/` that the project's tracked code, build, docs or CI names: "`x.py` is used by `CMakeLists.txt`; it belongs in the repo" (the held branch's `repo-uses`, finding 8) | **untested**; off by default, on with `P4_SCRATCHPAD_ASKS=1`; test in 8.1 |
+| SessionStart, opt-in | — | one line per file under `.claude/p4/src/` that the project's tracked code, build, docs or CI names: "`x.py` is used by `CMakeLists.txt`; it belongs in the repo" (the held branch's `repo-uses`, finding 8) | **untested**; off by default, on with `P4_SKILLEX_ASKS=1`; test in 8.1 |
 | PreToolUse, opt-in | `Write\|Edit\|Bash` | an ask (never a deny) before a code file is written to `/tmp`, the harness scratchpad or `.claude/p4/scratchpad/`, naming where it belongs: the repo if the repo will use it, else `.claude/p4/src/` | **untested**; same switch; the parser and cases from `frag_gate.py` and its test |
 
 The split by worth (15:29, finding 8): code the repo works with goes into the repo, where the repo keeps that kind of code; `.claude/p4/src/` holds only what the repo doesn't use. Dropped: the contract, the skill, the per-session `src/` trees, the register and `sindex/`.

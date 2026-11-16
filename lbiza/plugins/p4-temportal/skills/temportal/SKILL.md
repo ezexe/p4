@@ -13,7 +13,6 @@ Until `.claude/p4` is a git repository of its own, which p4-phi makes it, no scr
 - `temportal/tmp/<session>/` is this session's scratchpad directory: write temporary files by this path, and the scratchpad path Claude Code gives is a link to it.
 - A scratchpad directory is staged at each turn end, and its files are committed and removed after its session ends, so a file meant to outlast the session goes in the notebook, with a lifetime when it should not stay for good.
 - `temportal/scratchpad/` is the notebook, kept across sessions, and logs, build output and binaries in it are moved into `scratchpad/.out/`, which git ignores.
-- `temportal/src/` holds code kept for reuse that the project's repository does not use.
 - At a start and at each turn end another session's scratchpad folder under the temp directory is linked to its scratchpad directory, or removed when it is empty and quiet, and at a start the scratchpad directory of an ended session is committed and removed.
 - `CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}" sh "${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh" scratchpad ended-sweep --dry-run` lists every ended session's scratchpad directory with what it would commit and remove, and the same command without `--dry-run` commits and removes them.
 
