@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""deps.py: the project's frameworks, library packages and external modules as retrieval entries.
+"""deps.py: the project's frameworks, library packages and external modules as retrieval documents.
 
 `p4.py index --deps` builds them, and so do the layout and close hooks, within a deadline. repo.py indexes what
 the project tracks and leaves vendored trees out; this indexes what the project is built on. Each dependency root
-is read as packages, each package by its manifest, its documents and the surface a session would open, and a
-package is read again only when its signature moves. The record lives in `phi/models/deps.json`, a cache of this
-machine's paths that hook.py's GITIGNORE keeps untracked. Its entries join `phi/models/index.json` beside the
-repository's, so retrieval can serve them, the hooks label them from what a turn opened, and the ranker trains on
-them.
+is read as packages, each package by its manifest, its documentation files and the surface a session would open,
+and a package is read again only when its signature moves. The record lives in `phi/models/deps.json`, a cache of
+this machine's paths that hook.py's GITIGNORE keeps untracked. Its documents join `phi/models/index.json` beside
+the repository's, so retrieval can serve them, the hooks label them from what a turn opened, and the ranker trains
+on them.
 
 Roots, from `recall.deps` of p4.json:
   auto    true: every directory named node_modules, vendor, third_party, _deps, vcpkg_installed or site-packages
@@ -16,7 +16,7 @@ Roots, from `recall.deps` of p4.json:
   roots   more of them, each a path relative to the project or absolute, such as a framework's own checkout
           outside the project. A path inside a root named before it names the part of that root that matters: it
           is a root of its own, split whatever manifest it carries into one package for each of its directories
-          and one for its own files, which are read within the caps and the rest entered by path alone.
+          and one for its own files, which are read within the caps and the rest listed by path alone.
 
 Packages of a root, by its name:
   node_modules     each <name>/package.json and @scope/<name>/package.json
@@ -32,13 +32,13 @@ pyproject.toml, Cargo.toml or vcpkg.json, or a VERSION file. The commit its git 
 src/, is added as `@<sha12>`, and a package with neither takes `sha256:` and the first 12 characters of a
 *.sha256 file beside it or in it. Its signature is that version, the caps, the files read past the caps, and the
 names, sizes and times of its top-level files: when the signature moves, the package is read again and train.py
-owes a round. A changed version is recorded as an update entry, and so is a package that came into or left a root
-read before.
+owes a round. A changed version is recorded as an update document, and so is a package that came into or left a
+root read before.
 
-Entries of a package, with ids in the repository's form so that the hooks' repo labels land on them:
+Documents of a package, with ids in the repository's form so that the hooks' repo labels land on them:
   repo:<path>                    the package: `<path> (<name> <version>, a dependency)`, its text adding the
                                  description
-  repo:<path>/<file>[#<sha8>]    its files, as repo.file_entries makes them: documents by heading, manifests by
+  repo:<path>/<file>[#<sha8>]    its files, as repo.file_entries makes them: Markdown by heading, manifests by
                                  target, sources by top-level symbol
   dep-update:<sha8>              an update, shown as a commit dated the day the build saw it:
                                  `<name> updated <old> -> <new> (<path>)`, `<name> <version> installed (<path>)`
@@ -46,18 +46,18 @@ Entries of a package, with ids in the repository's form so that the hooks' repo 
 A path inside the project is relative to it; a root outside it is shown as `@<root's name>/...`, and
 `externals()` gives transcript.rel the map back, so a file a turn opened there is labelled too.
 
-Reading order and bounds: a package's files are read in `spread()`'s order, its top-level documents and manifests
-and the entry points its package.json names first, then one file from each directory in turn, the headers and the
-files under a public folder of PUBLIC_DIRS, such as include/, src/ or api/, ranked first; never tests, build
-output or binaries. A direct package gives FILES files and ENTRIES entries at most, PER_FILE of one file. A
-transitive package, an npm or Python package that the project's own manifests do not name, gets its package entry
-and at most LIGHT_FILES of its documents, manifests and entry points, LIGHT_ENTRIES entries in all. The files a
-session opened in a package, which the close and subagent-stop hooks and `p4.py labels --from-transcripts`
-remember through `note_opened`, and the files of it the project's own sources include are read first, past the
-caps: the entries follow what the sessions and the project use. A change of FILES, ENTRIES, DEPTH or SCAN has
-every package read again. A package's walk stops after SCAN entries or DEPTH levels; the whole stops at
-MAX_ENTRIES, the most recently read packages first and a package that would pass it left out whole; `build` stops
-at its deadline and goes on from there next time.
+Reading order and bounds: a package's files are read in `spread()`'s order, its top-level manifests and
+documentation files, such as package.json and README.md, and the entry points its package.json names first, then
+one file from each directory in turn, the headers and the files under a public folder of PUBLIC_DIRS, such as
+include/, src/ or api/, ranked first; never tests, build output or binaries. A direct package gives FILES files and
+ENTRIES documents at most, PER_FILE of one file. A transitive package, an npm or Python package that the project's
+own manifests do not name, gets its package document and at most LIGHT_FILES of its documentation files,
+manifests and entry points, LIGHT_ENTRIES documents in all. The files a session opened in a package, which the
+close and subagent-stop hooks and `p4.py labels --from-transcripts` remember through `note_opened`, and the files
+of it the project's own sources include are read first, past the caps: the documents follow what the sessions and
+the project use. A change of FILES, ENTRIES, DEPTH or SCAN has every package read again. A package's walk stops
+after SCAN files and folders or DEPTH levels; the whole stops at MAX_ENTRIES, the most recently read packages first
+and a package that would pass it left out whole; `build` stops at its deadline and goes on from there next time.
 """
 
 import hashlib
@@ -83,17 +83,17 @@ MAX_ENTRIES = 20000
 AUTO_NAMES = ("node_modules", "vendor", "third_party", "_deps", "vcpkg_installed", "site-packages")
 AUTO_DEPTH = 3
 ENTER_DOT = (".venv", "venv")
-FILES, ENTRIES = 3, 40               # of a direct package: files read, entries kept. Few, since more dependency
-                                     # entries make the ranker print for more ordinary prompts at a lower
+FILES, ENTRIES = 3, 40               # of a direct package: files read, documents kept. Few, since more dependency
+                                     # documents make the ranker print for more ordinary prompts at a lower
                                      # R-precision, while few repo labels fall on a dependency file: a package is
-                                     # its entry, its documents and what a session opened in it. A store whose
-                                     # labels gain from more raises them with recall.deps.package_files and
-                                     # recall.deps.package_entries.
-PER_FILE = 12                        # entries of one file: its path and its first symbols
-LIGHT_FILES, LIGHT_ENTRIES = 2, 30   # of a transitive package: files read, entries kept
+                                     # its own document, its documentation files and what a session opened in it.
+                                     # A store whose labels gain from more raises them with
+                                     # recall.deps.package_files and recall.deps.package_entries.
+PER_FILE = 12                        # documents of one file: its path and its first symbols
+LIGHT_FILES, LIGHT_ENTRIES = 2, 30   # of a transitive package: files read, documents kept
 SCAN, DEPTH = 20000, 6
 OPENED = 200                         # files a session opened in one package, remembered and always read
-LISTED = 600                         # entries of a named folder's own files: read within the caps, the rest by name
+LISTED = 600                         # documents of a named folder's own files: read within the caps, the rest by name
 USED = 400                           # files of one package the project's own sources include, always read
 UP = 8                               # directories above a package an include path may start from
 SOURCE_EXT = (".h", ".hh", ".hpp", ".hxx", ".inl", ".c", ".cc", ".cpp", ".cxx", ".m", ".mm", ".mojom")
@@ -155,7 +155,7 @@ def auto_roots(project):
 
 
 def roots(project):
-    """`[(root, prefix, split)]`, the configured roots first: each absolute root, the prefix its entries' paths
+    """`[(root, prefix, split)]`, the configured roots first: each absolute root, the prefix its documents' paths
     carry, and whether it is split. A found root inside another is dropped; a configured one inside a root named
     before it is kept, ezexe's word that the part matters: it carries the outer root's prefix and its path below
     it, and is split, each of its directories a package of its own."""
@@ -202,7 +202,7 @@ def kind_of(root):
 
 def packages(root, prefix, split=False):
     """[{name, dir, path, kind, meta}] of one root: `dir` is absolute, or '' when the package is only a record,
-    `path` is the one its entries show, and `meta` is a site package's dist-info. A split root is its directories,
+    `path` is the one its documents show, and `meta` is a site package's dist-info. A split root is its directories,
     each a package, and itself for the files directly in it, marked `flat`: those are read within the caps and the
     rest listed by name, whatever manifest the root has."""
     kind = kind_of(root)
@@ -392,11 +392,12 @@ def signature(pkg, version, opened=()):
     return sha8(version + "|" + "|".join(asked + sorted(rows)[:SIG_FILES]))     # asked whole: never cut by the files
 
 
-# --- entries of one package ------------------------------------------------------------------------------
+# --- documents of one package ----------------------------------------------------------------------------
 
 def rank_file(rel, entry_points):
-    """Lower is read first: the top-level documents and manifests, the entry points package.json names, a header
-    under a public folder, then any other file under one or a header elsewhere, then the rest, each by depth."""
+    """Lower is read first: the top-level documentation files and manifests, the entry points package.json names, a
+    header under a public folder, then any other file under one or a header elsewhere, then the rest, each by
+    depth."""
     parts = rel.split("/")
     base = parts[-1].lower()
     stem = base.rsplit(".", 1)[0]
@@ -410,8 +411,8 @@ def rank_file(rel, entry_points):
 
 
 def walk(d, flat=False):
-    """Relative paths of a package's readable files, breadth first, bounded by SCAN entries and DEPTH levels; `flat`
-    is its own directory only."""
+    """Relative paths of a package's readable files, breadth first, bounded by SCAN files and folders seen and DEPTH
+    levels; `flat` is its own directory only."""
     out, level, seen = [], [""], 0
     for _ in range(1 if flat else DEPTH + 1):
         nxt = []
@@ -458,10 +459,10 @@ def entry_points(d):
 
 
 def spread(files, eps):
-    """The files in reading order: documents, manifests and entry points first; then one from each directory in
-    turn, a file's directory being at most the first two folders of its path, the directories in the order of
-    their best file and each one's own files by rank, so a cap leaves out the depths of every directory and not
-    the directories late in the alphabet."""
+    """The files in reading order: documentation files, manifests and entry points first; then one from each
+    directory in turn, a file's directory being at most the first two folders of its path, the directories in the
+    order of their best file and each one's own files by rank, so a cap leaves out the depths of every directory and
+    not the directories late in the alphabet."""
     ranked = sorted(files, key=lambda r: rank_file(r, eps))
     first = [r for r in ranked if rank_file(r, eps)[0] <= 1]
     buckets = {}
@@ -477,9 +478,9 @@ def spread(files, eps):
 
 
 def package_entries(pkg, version, desc, light=False, opened=()):
-    """[{id, line, sym, text, path}] of one package: its own entry, the files of `opened` past the caps, then its
-    files in `spread()`'s order within the caps, a light package's only its documents, manifests and entry points;
-    a flat package then lists each of its own files left by path, LISTED entries in all."""
+    """[{id, line, sym, text, path}] of one package: its own document, the files of `opened` past the caps, then
+    its files in `spread()`'s order within the caps, a light package's only its documentation files, manifests and
+    entry points; a flat package then lists each of its own files left by path, LISTED documents in all."""
     p = pkg["path"]
     out = [{"id": f"repo:{p}", "path": p, "line": 1, "sym": "",
             "text": f"{p} {pkg['name']} {version} {desc} dependency package".strip()}]
@@ -514,7 +515,7 @@ def package_entries(pkg, version, desc, light=False, opened=()):
 
 
 def note_opened(p4, paths):
-    """Remember the dependency files a turn opened that the index does not hold, `paths` in the entries' form such
+    """Remember the dependency files a turn opened that the index does not hold, `paths` in the documents' form such
     as `@framework/include/api.h`: each is filed under the longest package path it sits in, and that package is
     read again at the next build with those files first. Returns how many were new."""
     s = load_state(p4)
@@ -539,7 +540,7 @@ def note_opened(p4, paths):
 
 
 def opened_in_turn(turn, project):
-    """The paths, in the entries' form, of the files a turn's calls of transcript.py's READ_TOOLS and EDIT_TOOLS
+    """The paths, in the documents' form, of the files a turn's calls of transcript.py's READ_TOOLS and EDIT_TOOLS
     name."""
     import transcript as tr
     cwd = turn.get("cwd") or project
@@ -720,8 +721,8 @@ def build(p4, project=None, deadline_s=None, now=None, now_s=None):
 
 
 def entries(p4):
-    """The docs the index adds for the dependencies, in repo.entries' form: the file entries of every package the
-    cap left in, then the updates."""
+    """The documents the index adds for the dependencies, in repo.entries' form: the file documents of every package
+    the cap left in, then the update documents."""
     s = load_state(p4)
     out, known, seen = [], set(), set()
     for r in sorted(s.get("roots", {})):
@@ -764,6 +765,6 @@ def stats_line(p4):
     n = sum(len(r["packages"]) for r in s["roots"].values())
     light = sum(1 for r in s["roots"].values() for v in r["packages"].values() if v.get("light"))
     return (f"deps: {n} packages in {len(s['roots'])} roots, {light} read lightly as transitive, "
-            f"{s.get('entries', 0)} entries, {len(s.get('updates', []))} updates recorded"
-            + (f"; cut at {MAX_ENTRIES} entries: {s['cut']} packages left out, the least recently read"
+            f"{s.get('entries', 0)} documents, {len(s.get('updates', []))} updates recorded"
+            + (f"; cut at {MAX_ENTRIES} documents: {s['cut']} packages left out, the least recently read"
                if s.get("cut") else ""))

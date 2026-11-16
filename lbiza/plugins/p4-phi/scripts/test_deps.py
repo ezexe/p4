@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""deps.py: dependency roots as retrieval entries, read again when a package is installed or updated.
+"""deps.py: dependency roots as retrieval documents, read again when a package is installed or updated.
 
     python3 -I lbiza/plugins/p4-phi/scripts/test_deps.py
 """
@@ -193,7 +193,7 @@ class Deps(unittest.TestCase):
         s = deps.build(self.p4, self.proj)
         self.assertGreater(s["cut"], 0)
         self.assertLessEqual(len([d for d in deps.entries(self.p4) if d["kind"] == "file"]), 6)
-        self.assertIn("cut at 6 entries", deps.stats_line(self.p4))
+        self.assertIn("cut at 6 documents", deps.stats_line(self.p4))
 
     def test_a_named_root_inside_another_is_read_by_its_directories(self):
         part = os.path.join(self.ext, "src", "part")
@@ -223,7 +223,8 @@ class Deps(unittest.TestCase):
         self.assertIn("repo:@framework/src/part/core/ports.h", ids)
         self.assertIn("repo:@framework/src/part/public/cpp/remote.h", ids)
         self.assertIn("repo:@framework/src/part/README.md", ids)
-        self.assertEqual(len(ids), len(deps.entries(self.p4)), "no entry twice, though the outer root holds the part too")
+        self.assertEqual(len(ids), len(deps.entries(self.p4)),
+                         "no document twice, though the outer root holds the part too")
         self.assertEqual(tr.rel(os.path.join(part, "core", "ports.h"), self.proj) or "@framework/src/part/core/ports.h",
                          "@framework/src/part/core/ports.h")
 
