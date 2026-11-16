@@ -429,16 +429,16 @@ def age(*paths, hours=2):
 def sweep_cases():
     """tmp-link sweeps the project's other scratchpads under the same temp folder: a real empty one quiet past the
     limit is removed with a session folder it leaves empty, a fresh one or one whose transcript is fresh is linked
-    though it is empty, a real one with files is linked into p4 with its files moved, a dangling link to the old
-    `.claude/p4/tmp/<session>` is re-pointed at that session's tmp, one with nothing in p4 to point at is removed, a
-    foreign link is left; this session's own stale link is repaired and named. The folder an older harness named
-    after the project's path is swept the same way. After the start no scratchpad of the project is a plain folder,
-    and one made after it, for an id that runs no hook, is linked at the turn's close, silently."""
+    though it is empty, a real one with files is linked into p4 with its files moved, a dangling link with nothing in
+    p4 to point at is removed, a foreign link is left; this session's own scratchpad is linked and named. The folder
+    an older harness named after the project's path is swept the same way. After the start no scratchpad of the
+    project is a plain folder, and one made after it, for an id that runs no hook, is linked at the turn's close,
+    silently."""
     root = tempfile.mkdtemp(prefix="p4-scratchpad-sweep-")
     temp = tempfile.mkdtemp(prefix="p4-scratchpad-temp-")
     cfg = tempfile.mkdtemp(prefix="p4-scratchpad-cfg-")
     other = tempfile.mkdtemp(prefix="p4-scratchpad-other-")
-    sids = {k: f"{k * 8}-0000-4000-8000-00000000000{i}" for i, k in enumerate("sabcdefgh")}
+    sids = {k: f"{k * 8}-0000-4000-8000-00000000000{i}" for i, k in enumerate("sabcdfgh")}
     tmp_env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp, "CLAUDE_CONFIG_DIR": cfg}
     hashdir = os.path.join(temp, "claude", "ffccc31c49e17720")
     p4 = os.path.join(root, ".claude", "p4")
@@ -450,21 +450,16 @@ def sweep_cases():
     old = {k: os.path.join(p4, "tmp", s) for k, s in sids.items()}
     links = []
     try:
-        # s: this session, its link left by the old layout, whose target is gone
-        os.makedirs(old["s"])
-        link(pad["s"], old["s"]); links.append(pad["s"])
-        os.rmdir(old["s"])
+        # s: this session, a real empty scratchpad
+        os.makedirs(pad["s"])
         # a: an app helper's real empty scratchpad, quiet two hours; its session folder holds nothing else
         os.makedirs(pad["a"]); age(pad["a"], os.path.dirname(pad["a"]))
         # b: the same, made a minute ago
         os.makedirs(pad["b"])
         # c: a real scratchpad with a note, quiet two hours
         put(pad["c"], "note.md", "kept\n"); age(os.path.join(pad["c"], "note.md"), pad["c"], os.path.dirname(pad["c"]))
-        # d: a dangling link to the old layout, nothing in p4 for it
+        # d: a dangling link into the store, nothing in p4 for it
         os.makedirs(old["d"]); link(pad["d"], old["d"]); links.append(pad["d"]); os.rmdir(old["d"])
-        # e: a dangling link to the old layout, and p4 holds that session's tmp at the new place
-        put(new["e"], "new.md", "new\n")
-        os.makedirs(old["e"]); link(pad["e"], old["e"]); links.append(pad["e"])
         shutil.rmtree(os.path.join(p4, "tmp"))
         # f: a link elsewhere, ezexe's
         link(pad["f"], other); links.append(pad["f"])
@@ -482,12 +477,12 @@ def sweep_cases():
         def real_folders():
             return sorted(k for k in sids if os.path.isdir(pad[k]) and not is_link(pad[k]))
 
-        assert real_folders() == ["a", "b", "c", "g", "h", "i", "j"], real_folders()
+        assert real_folders() == ["a", "b", "c", "g", "h", "i", "j", "s"], real_folders()
         out = run_sub("tmp-link", {"cwd": root, "session_id": sids["s"]}, tmp_env, CLAUDE_PROJECT_DIR=root)
-        assert "was a stale link and now reaches" in out, out
-        assert "other sessions' scratchpads: 4 linked, 4 removed, 1 repaired" in out, out
+        assert "this session's scratchpad" in out and "is a link to" in out, out
+        assert "other sessions' scratchpads: 4 linked, 4 removed" in out, out
         assert real_folders() == [], f"plain scratchpad folders left after a start: {real_folders()}"
-        assert points_at(pad["s"]) == os.path.normcase(new["s"]), "this session's stale link was not repaired"
+        assert points_at(pad["s"]) == os.path.normcase(new["s"]), "this session's scratchpad was not linked"
         assert not os.path.exists(os.path.dirname(pad["a"])), "a quiet empty scratchpad was not removed"
         for k in "bg":
             assert points_at(pad[k]) == os.path.normcase(new[k]), "a fresh empty scratchpad was not linked"
@@ -499,8 +494,6 @@ def sweep_cases():
             assert f.read() == "kept\n", "a quiet scratchpad's note did not move into p4"
         assert points_at(pad["c"]) == os.path.normcase(new["c"]), "a quiet scratchpad with files was not linked"
         assert not os.path.lexists(pad["d"]), "a dangling link with nothing to point at was left"
-        assert points_at(pad["e"]) == os.path.normcase(new["e"]), "a link to the old layout was not repaired"
-        assert os.path.isfile(os.path.join(pad["e"], "new.md")), "the repaired link does not reach the tmp"
         assert os.path.samefile(pad["f"], other), "a foreign link was changed"
         assert not os.path.exists(pad["h"]) and os.path.isdir(os.path.join(os.path.dirname(pad["h"]), "tasks")), \
             "the empty scratchpad beside tasks/ was not removed alone"
