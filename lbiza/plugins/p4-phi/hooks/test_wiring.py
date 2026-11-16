@@ -7,7 +7,8 @@ Every entry runs twice, in a project with no store and in a project whose store 
 Each run must exit 0, write nothing on stderr, and print nothing or one JSON object whose `hookSpecificOutput` names
 the entry's own event.
 The gate of recall-hook.sh runs against a stand-in python that only says it ran, and each runner runs with no python
-on PATH at all, and the marketplace's catalog is held to each plugin's own plugin.json.
+on PATH at all, the marketplace's catalog is held to each plugin's own plugin.json, and every plugin folder to an entry
+of that catalog.
 
 Run: python3 test_wiring.py
 """
@@ -199,6 +200,19 @@ class Manifests(unittest.TestCase):
                 plugin = json.load(f)
             self.assertEqual(plugin["name"], entry["name"], entry["source"])
             self.assertEqual(plugin.get("version"), entry.get("version"), entry["name"])
+
+    def test_every_plugin_folder_has_a_marketplace_entry(self):
+        """A plugin folder the catalog does not list cannot be installed from the marketplace, platform row P14."""
+        lbiza = os.path.dirname(os.path.dirname(ROOT))
+        with open(os.path.join(lbiza, ".claude-plugin", "marketplace.json"), encoding="utf-8") as f:
+            market = json.load(f)
+        listed = {os.path.normcase(os.path.normpath(os.path.join(lbiza, e["source"])))
+                  for e in market["plugins"] if isinstance(e.get("source"), str)}
+        plugins = os.path.join(lbiza, "plugins")
+        for name in sorted(os.listdir(plugins)):
+            folder = os.path.join(plugins, name)
+            if os.path.isfile(os.path.join(folder, ".claude-plugin", "plugin.json")):
+                self.assertIn(os.path.normcase(os.path.normpath(folder)), listed, name)
 
 
 def marker_name(agent_id):
