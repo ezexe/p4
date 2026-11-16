@@ -572,6 +572,25 @@ class SubagentStop(Base):
                         "the reply carries two of a served document's rare terms the task did not")
         self.assertTrue(any(t["kind"] == "agent" for t in lb.read_tasks(self.p4).values()))
 
+    def test_a_prompt_ending_in_a_newline_keeps_its_usage_labels(self):
+        """The subagent-stop hook finds what the agent hook served by the prompt before the notes, with its trailing
+        whitespace trimmed, so the agent hook keys it the same way."""
+        inp = dict(Agent.INPUT, prompt="look at the quokka harness\n")
+        o = self.out(run_hook("agent", {"tool_name": "Agent", "tool_input": inp, "cwd": self.proj}, self.proj))
+        prompt = o["hookSpecificOutput"]["updatedInput"]["prompt"]
+        reply = "The quokka harness checks the zebrafish plotter's golden images."
+        at = transcript(os.path.join(self.tmp.name, "agent-a2.jsonl"), prompt,
+                        [("Read", {"file_path": os.path.join(self.proj, "docs", "zebrafish.md")}, "# z")],
+                        reply, self.proj, sidechain=True)
+        run_hook("subagent-stop", {"hook_event_name": "SubagentStop", "agent_id": "a2", "agent_type": "Explore",
+                                   "agent_transcript_path": at, "session_id": SESSION,
+                                   "last_assistant_message": reply, "cwd": self.proj}, self.proj)
+        self.assertTrue([x for x in lb.read_tsv(lb.mpath(self.p4, lb.TRAIN)) if x["source"] == "usage"],
+                        "the subagent's usage labels are written")
+        served = os.path.dirname(lb.served_path(self.p4, "agent-x"))
+        left = [f for f in os.listdir(served) if f.startswith("agent-")] if os.path.isdir(served) else []
+        self.assertEqual(left, [], "the served record is consumed")
+
 
 class ZeroConfiguration(unittest.TestCase):
     """The plugin works in a project nobody set up. An empty folder with no `.claude`, no P4_* variable and no

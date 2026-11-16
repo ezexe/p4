@@ -404,9 +404,10 @@ def h_agent(payload):
         return agent_input(inp) if node else None
     shown = injected(p4, r["lines"])
     shadow = not shown
-    lb.write_served(p4, f"agent-{sha8(prompt)}", {"ids": [i for i in r["ids"] if ":" in i], "text": prompt[:2000],
-                                                  "task": f"agent:{sha8(prompt)}", "time": now(),
-                                                  "tool_use_id": payload.get("tool_use_id", ""), "shadow": shadow})
+    key = sha8(prompt.rstrip())           # the prompt before the notes, as h_subagent_stop rebuilds it
+    lb.write_served(p4, f"agent-{key}", {"ids": [i for i in r["ids"] if ":" in i], "text": prompt[:2000],
+                                         "task": f"agent:{key}", "time": now(),
+                                         "tool_use_id": payload.get("tool_use_id", ""), "shadow": shadow})
     if shadow:
         return agent_input(inp) if node else None
     updated = dict(inp)                   # every original field unchanged: updatedInput replaces the whole input
