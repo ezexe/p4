@@ -3,7 +3,8 @@
 
 Two kinds of lifetime clear files, as a browser clears its cache and its cookies. A cache rule per folder, in the
 p4.json section `temportal.cache` with paths relative to temportal/, clears the files older than `max_age_days`, and
-then the oldest files while the folder holds more than `max_mb`. The rule of `.layout-conflicts` clears the store's
+then the oldest files while the folder holds more than `max_mb`. Neither clears a set-aside copy younger than an
+hour, which the same start's layout move set aside. The rule of `.layout-conflicts` clears the store's
 phi/.layout-conflicts/ too, where a layout move sets aside the older copies of phi's files. In both folders a copy's
 age starts at the later of its own time and its folder's, since a move keeps the time of the copy it sets aside and
 gives the folder it lands in a new one, and neither folder is cleared when it or phi/ is a link or resolves to any
