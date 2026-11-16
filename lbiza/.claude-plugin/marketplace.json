@@ -4,13 +4,13 @@
     "name": "ezexe"
   },
   "metadata": {
-    "description": "Two Claude Code plugins: p4-temportal, which keeps in a project's store what Claude Code would keep in its own folders, and p4-phi, which carries what linked sessions hand each other and retrieval from the project's own history."
+    "description": "Two Claude Code plugins: p4-temportal, which stands in for three of Claude Code's own places inside the project, and p4-phi, which carries what linked sessions hand each other and retrieval from the project's own history."
   },
   "plugins": [
     {
       "name": "p4-temportal",
       "source": "./plugins/p4-temportal",
-      "description": "Keeps in a project's store what Claude Code would keep in its own folders: the auto memory directory, each session scratchpad directory and other temp files, and clears a file whose lifetime has ended.",
+      "description": "Stands in for three of Claude Code's own places inside the project: the auto memory directory, the session scratchpad directory and temporary files, with lifetimes that clear what is no longer relevant.",
       "version": "0.2.3",
       "category": "productivity",
       "keywords": [
