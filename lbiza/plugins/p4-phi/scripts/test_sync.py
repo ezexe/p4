@@ -192,11 +192,16 @@ class Sync(unittest.TestCase):
     def test_without_push_nothing_leaves(self):
         self.machine(self.win, "win", "2026-11-05 10:00", "Z:/c", [2, 2])
         main = self.tip("main")
-        self.assertEqual(self.run_all(), 0)
+        own = os.path.join(os.path.realpath(self.tmp.name), "temp")   # a temp directory of this test's own: a sync
+        os.makedirs(own)                                                # running elsewhere on the machine is not seen
+        kept, tempfile.tempdir = tempfile.tempdir, own
+        try:
+            self.assertEqual(self.run_all(), 0)
+        finally:
+            tempfile.tempdir = kept
         self.assertEqual(self.tip("main"), main)
         self.assertNotIn("p4-sync", sh(self.runner, "git", "worktree", "list"), "the worktree is gone")
-        import glob
-        self.assertEqual(glob.glob(os.path.join(tempfile.gettempdir(), "p4-sync-*")), [], "and so is its temp folder")
+        self.assertEqual(os.listdir(own), [], "and so is its temp folder")
 
     def test_pull_brings_main_into_a_machine_with_its_own_commit(self):
         self.machine(self.mac, "mac", "2026-11-07 10:00", "/Users/x/c", [3, 3])
