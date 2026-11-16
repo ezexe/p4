@@ -1,25 +1,32 @@
 #!/usr/bin/env python3
-"""transcript.py: what a session's transcript says it did with the repository's files (fresh-marketplace.md 5.1a,
-8.5). Read-only over Claude Code's `~/.claude/projects/<slug>/<session>.jsonl` files.
+"""transcript.py: what a session's transcript says it did with the repository's files. Read-only over Claude
+Code's `~/.claude/projects/<slug>/<session>.jsonl` files, whose line format Claude Code's documentation does not give.
 
 A transcript is JSON lines. The ones read here:
-  {"type": "user", "message": {"content": "<ezexe's prompt>"}, "timestamp", "cwd", "origin": {"kind": "human"}}
+  {"type": "user", "message": {"content": "<ezexe's prompt>"}, "timestamp", "cwd", "uuid", "origin": {"kind": "human"}}
   {"type": "assistant", "message": {"id", "content": [{"type": "text"|"tool_use", ...}], "usage": {...}}}
   {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id", "content"}]}}
 An assistant message is written one line per content block under the same message id; its usage is counted once.
 
-A turn runs from one ezexe prompt to the next; ezexe's /<name> command line (the harness's tags, so not a
-prompt) opens a turn too, `/name args` its prompt, and a local command (after its caveat line) does not. For each turn, per repository path (relative to the project):
-  edited     an Edit, Write, MultiEdit or NotebookEdit of it, or a Bash write (a redirect into it, sed -i, tee,
-             cp/mv onto it)
-  read       a Read of it, or a Bash read naming it (cat, head, tail, sed -n, less, wc, grep on it)
-  hit        a Grep or Glob result listing it
-  invoked    its skill run by a Skill call or ezexe's /<name> command: .claude/skills/<name>/SKILL.md, or
-             .claude/commands/<name>.md; `dir:name` is dir/.claude/skills/name/SKILL.md (a skill's body reaches the
-             context without a Read, so it is a use like a cite)
-  cited      after it was read, its path, its distinctive file name or one of its symbols appears in the turn's reply
-             text or in a later edit's input
-and the label of 5.1a's table: edited 1.0; invoked 0.7; read then cited 0.7; read and dropped -0.3; a search hit never opened -0.2.
+A turn runs from one prompt of ezexe's to the next. ezexe's /<name> command line opens a turn too, with `/name args`
+as its prompt, though prompt_text skips its text as Claude Code's tags; a local command, whose line follows a caveat
+line, does not. turns() gives each turn's prompt, time, cwd, uuid, calls, texts and tokens, and each call's name,
+input, id, result, tokens_before and text_index. file_events() gives, per repository path relative to the project:
+  edited      a call of a tool in EDIT_TOOLS on it, such as Edit, Write or NotebookEdit, or a shell command that
+              writes it: a `>` or `>>` into it, the last path of cp, mv or install, or any path of tee, git mv,
+              sed -i or perl -i
+  read        a call of a tool in READ_TOOLS on it, such as Read, or a shell command that names it as an argument of
+              a program and does not write it, whatever the program: `pytest src/a.py -q` reads src/a.py
+  hit         a Grep or Glob result listing it
+  invoked     its skill run by a Skill call or ezexe's /<name> command: .claude/skills/<name>/SKILL.md, or
+              .claude/commands/<name>.md; `dir:name` is dir/.claude/skills/name/SKILL.md. A skill's body reaches
+              the context without a Read, so it is a use like a cite
+  cited       after it was read, its path, its file name or one of its symbols, as cites() matches them, appears in
+              the turn's texts from the read on, in its reply, or in an edit's input or a shell command after the read
+  first_open  the index of the first call that edited, read or invoked it, and `read_at` that of the first that read it
+  label       edited, invoked or cited, the first that holds; else dropped for a path read, unopened for a search hit
+WEIGHTS maps each label to its training row's label and weight: 1 for edited, invoked and cited, 0 for dropped and
+unopened.
 """
 
 import json
@@ -55,8 +62,9 @@ def read_lines(path):
 
 
 def prompt_text(d):
-    """ezexe's prompt on a transcript line, or None: a user line that is not a tool result, not a sidechain,
-    from a human (where the transcript says), and not a harness injection (`<...>` first)."""
+    """ezexe's prompt on a transcript line, or None: a user line that is not a tool result, a sidechain or meta,
+    whose origin, when the line has one, is a human, and whose text does not begin with `<`, as text Claude Code
+    injects does."""
     if d.get("type") != "user" or d.get("isSidechain") or d.get("isMeta"):
         return None
     origin = d.get("origin") or {}
@@ -75,8 +83,8 @@ def prompt_text(d):
 
 
 def command_text(d):
-    """The text of ezexe's slash-command line, or '': a user line, not a sidechain or meta, from a human (where
-    the transcript says), whose text starts with the command tags (so prompt_text skips it as the harness's)."""
+    """The text of ezexe's slash-command line, or '': a user line, not a sidechain or meta, whose origin, when it
+    has one, is a human, and whose text starts with the command tags, which prompt_text skips as Claude Code's."""
     if d.get("type") != "user" or d.get("isSidechain") or d.get("isMeta"):
         return ""
     if (d.get("origin") or {}).get("kind") not in (None, "human"):
@@ -104,9 +112,11 @@ def result_text(block):
 
 
 def turns(path_or_lines):
-    """[{prompt, time, cwd, calls: [{name, input, id, result, tokens_before}], texts: [str], tokens}] in order.
-    `tokens_before` is the input tokens (fresh, cache write and cache read) of the API calls made in this turn
-    before the call was issued."""
+    """`[{prompt, time, cwd, uuid, calls: [{name, input, id, result, tokens_before, text_index}], texts: [str],
+    tokens}]` in order. `time` is the prompt line's timestamp to the second and `uuid` its id; `texts` are Claude's
+    text blocks of the turn; `tokens` is the input tokens of the turn's API calls, fresh, cache write and cache
+    read. A call's `tokens_before` is that sum up to the API call that issued it, `text_index` how many of the
+    turn's texts came before it, and `result` its tool result's text, cut to 200,000 characters."""
     lines = read_lines(path_or_lines) if isinstance(path_or_lines, str) else path_or_lines
     out, cur = [], None
     seen_msg = set()
@@ -157,7 +167,7 @@ def turns(path_or_lines):
 
 # --- paths -----------------------------------------------------------------------------------------------
 
-EXTERNAL = {}          # {dependency root outside the project: its path prefix} (deps.externals), set by the caller
+EXTERNAL = {}          # {dependency root outside the project: its path prefix}, set by the caller from deps.externals
 
 
 def rel(path, project, cwd=""):
@@ -180,7 +190,10 @@ def rel(path, project, cwd=""):
 
 
 def bash_paths(cmd, project, cwd, known):
-    """(read paths, written paths) a Bash command names among the `known` repository paths."""
+    """`(read paths, written paths)` a shell command names among the `known` repository paths, by the rules of the
+    module docstring's edited and read rows. The command is split as a POSIX shell splits it, at whitespace when its
+    quotes do not balance, or, on Windows with a backslash in it, without POSIX escapes and with matching quotes
+    dropped; its words are then cut into commands at `&&`, `||`, `;` and `|`."""
     reads, writes = set(), set()
     try:
         if os.sep == "\\" and "\\" in cmd:
@@ -253,11 +266,12 @@ def result_paths(text, project, cwd, known):
     return out
 
 
-# --- the labels of one turn (5.1a) -----------------------------------------------------------------------
+# --- the labels of one turn ------------------------------------------------------------------------------
 
 def file_events(turn, project, known, symbols=None, reply=""):
-    """{path: {"edited", "read", "hit", "cited", "first_open": call index or None, "label": edited|invoked|cited|
-    dropped|unopened}} for one turn. `known` is the set of repository paths; `symbols` {path: [symbol names]}."""
+    """`{path: {"edited", "read", "hit", "cited", "invoked", "first_open", "read_at", "label"}}` for one turn, each
+    key as the module docstring's table gives it; `first_open` and `read_at` are call indices or None. `known` is the
+    set of repository paths, `symbols` {path: [symbol names]} and `reply` the turn's reply text."""
     symbols = symbols or {}
     ev = {}
     cwd = turn.get("cwd") or project
@@ -266,7 +280,7 @@ def file_events(turn, project, known, symbols=None, reply=""):
         return ev.setdefault(p, {"edited": False, "read": False, "hit": False, "cited": False, "invoked": False,
                                  "first_open": None, "read_at": None})
 
-    later_inputs = []          # (call index, text) of every edit input and Bash command, to find cites after a read
+    later_inputs = []          # every edit input and shell command with its call index, to find cites after a read
     for k, c in enumerate(turn["calls"]):
         name, inp = c["name"], c["input"] if isinstance(c["input"], dict) else {}
         if name in EDIT_TOOLS:
@@ -327,6 +341,8 @@ def file_events(turn, project, known, symbols=None, reply=""):
 
 
 def cites(path, hay, syms):
+    """Whether `hay` names `path`: the path itself, its file name when six characters or longer, or one of `syms`
+    whose last part is five characters or longer and not all lower case."""
     if not hay:
         return False
     if path in hay:
@@ -342,14 +358,15 @@ def cites(path, hay, syms):
 
 
 def reply_of(turn):
+    """The turn's reply: its last three texts."""
     return "\n".join(turn.get("texts", [])[-3:])
 
 
-# --- the re-exploration measure (8.5, the free half) -----------------------------------------------------
+# --- what a turn spent before it opened a relevant file, which labels.reexploration totals ---------------
 
 def exploration(turn, events, relevant):
-    """(calls before the first open of a relevant file, input tokens before it, the path) or None when the turn
-    opened no relevant file."""
+    """`(k, tokens, path)` for the relevant file the turn opened first: k calls came before the one that opened it,
+    `tokens` is that call's tokens_before, and `path` the file's; None when the turn opened no relevant file."""
     best = None
     for p in relevant:
         k = events.get(p, {}).get("first_open")
