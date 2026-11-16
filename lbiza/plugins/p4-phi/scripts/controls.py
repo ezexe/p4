@@ -743,12 +743,20 @@ def offer_text(home, s, button=True):
             f"each one archived and each one left.{out}")
 
 
-def picked(home, s, turn):
+def names_of(sid):
+    """The full titles a session goes by in ezexe's answer: the app's title, and p4-phi's where it differs."""
+    store = store_of(sid)
+    k = PHI.load_session(store, sid) if store else {}
+    out = [full_title(sid, k), PHI.title_of(k) if k else ""]
+    return [x for k_, x in enumerate(out) if x and x not in out[:k_]]
+
+
+def picked(home, s, turn, named=None):
     """The session ids ezexe picked in this turn: the ids under each offered option whose label an answered
-    AskUserQuestion of the turn carries, and the ids under the offered button when the turn's own message is that
-    button's label."""
+    AskUserQuestion of the turn carries, each session of `named` an answer names by its full title or its id, and
+    the ids under the offered button when the turn's own message is that button's label."""
     turn = turn or {}
-    out = list(relay.picked(home, s["sessionId"], turn.get("calls")))
+    out = list(relay.picked(home, s["sessionId"], turn.get("calls"), named))
     said = PHI.clean(turn.get("prompt")).strip(" .!\"'").lower()
     for o in s.get("archiveOffer") or []:
         if isinstance(o, dict) and o.get("button") and said == str(o.get("label") or "").lower():

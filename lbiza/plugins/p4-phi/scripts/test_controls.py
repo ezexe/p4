@@ -73,12 +73,19 @@ class Supervisor(unittest.TestCase):
         self.t.cli(host, "done", "its suite ran green and its commit is pushed", proj=proj)
         self.t.stop(host, "Build it", report=report, proj=proj, uuid=uuid)
 
-    def archive(self, by, target, reason=WHY, picks=None, prompt="what is ready?"):
+    def archive(self, by, target, reason=WHY, picks=None, prompt="what is ready?", answers=None):
         """The archive hook for `by`'s call on `target`. With `picks`, the turn holds an answered multiple-choice
-        question carrying those labels; `prompt` is the message that began the turn."""
+        question carrying those labels; with `answers`, one whose result reads as the AskUserQuestion tool returns
+        it, each question with the labels ezexe picked, joined by commas; `prompt` is the message that began the
+        turn."""
         inp = {"session_id": target, **({"reason": reason} if reason else {})}
         calls = [] if picks is None else [("AskUserQuestion", {"questions": []},
                                            "User has answered your questions: " + ", ".join(f'"{p}"' for p in picks))]
+        if answers:
+            said = ", ".join(f'"{q}"="{", ".join(labels)}"' for q, labels in answers)
+            calls = [("AskUserQuestion", {"questions": [{"question": q, "multiSelect": True} for q, _ in answers]},
+                      f"User has answered your questions: {said}. You can now continue with the user's answers in "
+                      f"mind.")]
         self._n = getattr(self, "_n", 0) + 1
         path = transcript(os.path.join(self.t.tmp, f"{by}arch{self._n}.jsonl"), prompt, calls, "", f"arch{self._n}")
         r = self.t.hook("self-archive", by, {"hook_event_name": "PreToolUse", "tool_name": ARCHIVE,
@@ -228,6 +235,29 @@ class Supervisor(unittest.TestCase):
         self.assertEqual(self.archive(PUP, TOP, reason="", picks=[self.TITLE]), {}, "the pick needs no reason")
         self.assertEqual(self.t.session(PUP)["puppeteerArchives"][-1]["why"],
                          "ezexe picked it in this turn")
+
+    def test_a_multiselect_answer_naming_sessions_by_full_title_passes_the_gate_with_no_offer_stored(self):
+        """ezexe's picks in a multiSelect AskUserQuestion of the turn name the sessions by their full titles, and
+        no offer p4-phi stored holds those labels: each named session passes the gate, for a puppeteer and for an
+        orchestrator, and a session the answer does not name is still refused."""
+        t = self.t
+        other = "An orchestrator nobody put under the puppeteer"
+        self.finish(TOP)
+        self.finish(TOP3)
+        t.say(PUP, "Control the trees")
+        t.cli(PUP, "controls", TOP, TOP3)
+        self.assertNotIn("archiveOffer", t.session(PUP), "no offer is stored")
+        asked = [("Which finished sessions should be archived?", [self.TITLE, other])]
+        self.assertEqual(self.archive(PUP, TOP, answers=asked), {}, "picked by its full title")
+        self.assertEqual(self.archive(PUP, TOP3, answers=asked), {}, "picked by its full title")
+        none = [("Which finished sessions should be archived?", ["None of them"])]
+        self.assertEqual(self.archive(PUP, TOP, answers=none).get("permissionDecision"), "deny")
+        t.say(KID, "Task:\nBuild the flush.\nFiles: src/flush.py")
+        self.assertEqual(self.archive(TOP, KID, answers=[("Archive which?", ["the flush child"])]), {},
+                         "an orchestrator's pick by full title")
+        self.assertEqual(self.archive(TOP, KID, answers=[("Archive which?", [KID])]), {}, "or by id")
+        self.assertEqual(self.archive(TOP, KID, answers=[("Archive which?", ["the flush"])]).get(
+            "permissionDecision"), "deny", "a label that only shares words with its title is no pick")
 
     def test_a_boundary_line_for_a_complete_tree_names_the_multiple_choice_question_and_not_the_archive_call(self):
         ctx = self.complete_top()

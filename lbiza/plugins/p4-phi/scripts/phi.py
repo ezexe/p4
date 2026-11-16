@@ -1865,7 +1865,7 @@ def h_self_archive(payload):
         turn = last_turn(payload.get("transcript_path") or "") if not own and not spawned_from(s) else None
         if not own and controls.is_puppeteer(s, me.store):
             # a puppeteer archives only what ezexe picked this turn, and only a session p4-phi holds complete
-            was = target in controls.picked(me.home, s, turn)
+            was = target in controls.picked(me.home, s, turn, {target: controls.names_of(target)})
             left = controls.archive(me.home, s, target, str(inp.get("reason") or ""), picked=was)
             RAN["archive_refused"] = "" if not left else target[:40]
             RAN["puppeteer_archive"] = ("left " if left else "let ") + target[:40]
@@ -1879,7 +1879,9 @@ def h_self_archive(payload):
                                                f"phi (p4-phi): this puppeteer's archive of {target} is "
                                                f"refused: {left}. Name it to ezexe as left, with that reason.")}}
         if not own and not spawned_from(s):       # an orchestrator archiving what ezexe picked this turn
-            if target in relay.picked(me.home, me.id, (turn or {}).get("calls")):
+            mine = load_session(me.home, target)      # a session of this orchestrator's store, by its titles
+            named = {target: [controls.full_title(target, mine), title_of(mine)]} if mine else None
+            if target in relay.picked(me.home, me.id, (turn or {}).get("calls"), named):
                 RAN["archive_refused"] = ""
                 RAN["archive_picked"] = target[:40]
                 return None

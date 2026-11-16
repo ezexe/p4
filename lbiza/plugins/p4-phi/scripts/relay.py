@@ -1911,9 +1911,26 @@ def offer_text(home, top):
             f"lets those calls through.")
 
 
-def picked(home, top, calls):
+ANSWERED = re.compile(r'"((?:[^"\\]|\\.)*)"="((?:[^"\\]|\\.)*)"')
+
+
+def answers_of(said):
+    """The answers an AskUserQuestion result carries, each as the labels ezexe picked for one question, joined by
+    commas as the tool returns them; every quoted string where the result pairs no question with an answer."""
+    got = [a for _, a in ANSWERED.findall(said)]
+    return got or re.findall(r'"([^"]*)"', said)
+
+
+def names_answer(name, answer):
+    """True when `name` is one whole label of an answer: the answer itself, or one of its comma-joined labels."""
+    name = str(name or "").strip()
+    return bool(name) and bool(re.search(r"(?:^|,\s*)" + re.escape(name) + r"(?:\s*,|$)", answer.strip(), re.I))
+
+
+def picked(home, top, calls, named=None):
     """The session ids ezexe picked in this turn's multiple-choice question: the ids under each offered option whose
-    label an answered AskUserQuestion of the turn carries."""
+    label an answered AskUserQuestion of the turn carries, and each session of `named`, a map of a sessionId to the
+    full titles it goes by, that an answer names by one of those titles or by its id."""
     offer_ = [o for o in _session(home, top).get("archiveOffer") or [] if isinstance(o, dict)]
     said = " \n ".join(str(c.get("result") or "") for c in calls or []
                        if c.get("name") == "AskUserQuestion" and not c.get("failed"))
@@ -1921,6 +1938,10 @@ def picked(home, top, calls):
     for o in offer_:
         if o.get("label") and str(o["label"]) in said:
             out += [i for i in o.get("ids") or [] if i not in out]
+    answers = answers_of(said) if said else []
+    for sid, names in (named or {}).items():
+        if sid not in out and any(names_answer(n, a) for n in [sid, *names] for a in answers):
+            out.append(sid)
     return out
 
 
