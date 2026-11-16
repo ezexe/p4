@@ -33,7 +33,6 @@ import relay
 EXPIRE_S = 24 * 3600            # a request no turn of ezexe's has started by then is dropped
 CLAIM_S = 15 * 60               # a claimed request whose child never arrived is handed again after this
 MARK_RE = re.compile(r"phi start request (req-[0-9a-f]{10}) for (\S+?)\.?(?:\s|$)")
-ISSUE = "claude-code#109282"
 BACKGROUND_MIN = 80             # #37: the app refuses a fresh start whose background is shorter
 
 
