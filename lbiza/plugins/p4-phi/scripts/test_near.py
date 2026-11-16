@@ -82,7 +82,7 @@ class Near(unittest.TestCase):
         os.remove(near.path(self.p4))
         self.assertIsNone(near.load(self.p4), "no round yet: no memory, and a query builds none")
 
-    def test_entries_come_from_earlier_tasks_of_other_sessions(self):
+    def test_documents_come_from_earlier_tasks_of_other_sessions(self):
         text, when = TASKS[3][3], TASKS[3][2]
         got = near.entries(self.mem, text, when, "cccccccc")
         self.assertEqual(set(got), {"repo:src/kelp/anchor.py", "repo:src/kelp/buoy.py"}, "what the two flicker tasks used")
