@@ -2983,7 +2983,9 @@ ROUTED.update({"agent-launch": ("PreToolUse", h_agent_launch), "agent-pre": ("Pr
 
 
 def hook_main(name):
-    """A hook never fails a call and says nothing without something to say."""
+    """A hook never fails a call and says nothing without something to say; a handler that raises leaves one line
+    naming the hook and the error in its session's log.jsonl."""
+    payload = {}
     try:
         if os.environ.get("P4_PHI") == "0" or name not in HOOKS:
             return 0
@@ -3006,9 +3008,24 @@ def hook_main(name):
         log_run(name, text, started)
         if text:
             sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}))
+    except Exception as e:  # noqa: BLE001
+        log_failure(name, payload, e)
+    return 0
+
+
+def log_failure(name, payload, error):
+    """One line in the session's log.jsonl for a hook whose handler raised, so that no failure is silent; it writes
+    nothing when no session can be told from the call, and never raises itself."""
+    try:
+        home, sid = RAN.get("home"), RAN.get("session")
+        if not home or not sid:
+            me = Me(payload if isinstance(payload, dict) else {})
+            home, sid = me.home, me.id
+        if home and sid:
+            append_line(os.path.join(session_dir(home, sid), "log.jsonl"),
+                        {"time": now(), "hook": name, "error": f"{type(error).__name__}: {error}"[:300]})
     except Exception:  # noqa: BLE001
         pass
-    return 0
 
 
 # --- the commands ----------------------------------------------------------------------------------------------------

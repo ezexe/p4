@@ -794,6 +794,25 @@ class NeverFails(unittest.TestCase):
                     self.assertEqual(r.returncode, 0, (name, host, r.stderr))
                     self.assertEqual(r.stderr.strip(), "", (name, host))
 
+    def test_a_failing_hook_leaves_a_line_naming_it_and_its_error(self):
+        """A hook whose handler raises still ends quietly, and its session's log.jsonl names the hook and the error."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Tree(tmp)
+            t.record(TOP)
+            t.say(TOP, TASK)
+
+            def broken(payload):
+                raise ValueError("the handler broke")
+
+            payload = {"session_id": CLI.get(TOP, TOP), "cwd": t.proj, "hook_event_name": "Stop",
+                       "transcript_path": os.path.join(tmp, "missing.jsonl")}
+            r = inproc.run(["sh", RUN, STOP], input=json.dumps(payload), capture_output=True, text=True,
+                           env=t.env(TOP), timeout=60, stand_ins={"phi.HOOKS": {**phi.HOOKS, STOP: ("Stop", broken)}})
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, ""))
+            rows = t.log(TOP)
+            self.assertTrue(any(x.get("hook") == STOP and "ValueError: the handler broke" in str(x.get("error"))
+                                for x in rows), rows[-3:])
+
 
 def memory(p4, name, kind, body):
     write(os.path.join(p4, "temportal", "memory", name + ".md"),
