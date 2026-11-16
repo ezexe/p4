@@ -118,6 +118,7 @@ DEFAULTS = {
         "query": {
             "max_lines": 5, "per_file": 2, "text_chars": 160, "history_chars": 120, "candidates": 200,
             "min_rare": 2, "fallback_cover": 0.75, "fallback_icover": 0.65, "fallback_dense": 0.35,
+            "file_shared": 4, "file_cover": 0.55, "file_dense": 0.75,
             "variant_weight": 0.5, "expand_weight": 0.5,
         },
         "train": {

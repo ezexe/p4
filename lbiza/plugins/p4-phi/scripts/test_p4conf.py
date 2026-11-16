@@ -62,6 +62,18 @@ class P4Conf(unittest.TestCase):
         self.assertEqual(err.getvalue(), "")
         self.assertEqual(s["phi"]["puppeteer_chars"], 9)
 
+    def test_every_query_setting_p4_reads_has_its_default(self):
+        """Each key QUERY_SETTINGS in p4.py maps from recall.query is in DEFAULTS, at the constant's own value."""
+        import ast
+        tree = ast.parse((HERE / "p4.py").read_text(encoding="utf-8"))
+        consts = {t.id: n.value for n in tree.body if isinstance(n, ast.Assign) for t in n.targets
+                  if isinstance(t, ast.Name)}
+        names = ast.literal_eval(consts["QUERY_SETTINGS"])
+        query = p4conf.DEFAULTS["recall"]["query"]
+        self.assertEqual(sorted(names), sorted(query))
+        for key, const in names.items():
+            self.assertEqual(query[key], ast.literal_eval(consts[const]), key)
+
     def test_a_missing_file_is_written_with_every_default(self):
         s = p4conf.load(self.p4)
         self.assertEqual(s, p4conf.DEFAULTS)
