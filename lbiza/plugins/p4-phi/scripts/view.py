@@ -1,24 +1,23 @@
 #!/usr/bin/env python3
-"""view.py: what a session has in view, kept up to date as its context changes.
+"""view.py: what a session has in view, rebuilt from its transcript at every turn end.
 
-Recall and its ranker were built around ezexe's messages: they wake on a prompt and at a turn's end and know
-nothing of what the session already holds. Measured on one store (2026-11-10), 73% of the files a task was
-labelled with were ones its session had already opened: recalling them scores well and tells the session nothing,
-so near.py had to leave a whole session's own history out by rule.
-
-This keeps, per session, a record of what is in view: names and sizes, never content.
+A session's record holds names and sizes, never content:
     files     each file a tool call read or edited: the turn it was last touched in, how often, whether edited
-    entries   each store line recall showed it, and the turn
+    entries   each corpus entry a retrieval line showed the session with a handle, and the turn it was shown in
     commits   each `git commit` a command made: the repository's folder name and the subject git printed
     marks     where the context was compacted: the turn, and how many files were in view before it
-    size      how big the context was at every step, what it began at and what filled it (sizes, below)
+    size      how big the context was at every step, what it began at and what filled it, as sizes() counts it
 
-It is rebuilt from the session's transcript, which already records every change, at the two moments the plugin
-wakes anyway; nothing new runs on a tool call. `models/view/<session>.json` is a cache the store ignores.
+The Stop hook `close` calls refresh at every turn end, which rebuilds the record from the session's transcript;
+nothing runs on a tool call. `p4.py view --backfill` calls backfill, which refreshes the record of every
+transcript of the project on this machine. The record is `phi/models/view/<s8>.json`, named by the first eight
+characters of the session id, so two sessions whose ids share those eight characters share one record; the store's
+seeded .gitignore leaves the folder out.
 
-What it answers:
-    in_view(p4, session)        the paths and entry ids in view now (touched since the last compaction)
-    dropped(p4, session)        what was in view before the last compaction and has not been touched since
+What reads it: describe, which `p4.py view` prints for another session to read, and stats_line, which `p4.py check`
+prints. Only describe calls in_view(v) and dropped(v), which take a loaded record:
+    in_view(v)        the paths and entry ids in view now, touched or shown since the last compaction
+    dropped(v)        what was in view before the last compaction and has not been touched since
 """
 
 import json
@@ -48,8 +47,9 @@ def empty():
 
 
 def build(turns, project, served=None):
-    """The record of one session from its transcript turns (transcript.turns), oldest first. `served` is
-    {turn index: [entry ids]} for the store lines recall showed, when the caller has them."""
+    """The record of one session from its transcript turns, as transcript.turns gives them, oldest first. `served`
+    is {turn index: [entry ids]} for the corpus entries the retrieval lines showed, when the caller has them;
+    refresh passes none and carries the entries over itself."""
     import transcript as tr
     v = empty()
     for k, turn in enumerate(turns):
@@ -82,8 +82,9 @@ def build(turns, project, served=None):
 
 
 def refresh(p4, project, session, transcript_path, served_now=None):
-    """Bring a session's record up to date with its transcript and write it; returns the record. The store lines a
-    turn was shown are carried over from the record on disk, and `served_now` adds the current turn's."""
+    """Bring a session's record up to date with its transcript and write it; returns the record. The corpus entries
+    shown are carried over from the record on disk, and `served_now` adds the current turn's. A transcript with no
+    turn and no call writes nothing and returns the record on disk, or an empty one."""
     import transcript as tr
     old = load(p4, session) or empty()
     try:
@@ -91,8 +92,8 @@ def refresh(p4, project, session, transcript_path, served_now=None):
     except (OSError, ValueError):
         turns = []
     if not turns and transcript_path:
-        # a session another session started has no message from ezexe, and it has a context all the same: its
-        # calls are read as one turn (measured: 7 of one machine's 79 transcripts, each with 50 to 70 API calls)
+        # a transcript with no message from ezexe, such as that of a session another session started, has a
+        # context all the same: its calls are read as one turn
         try:
             lines = tr.read_lines(transcript_path)
         except (OSError, ValueError):
@@ -128,7 +129,7 @@ def last_mark(v):
 
 
 def in_view(v):
-    """(paths, entry ids) the session holds now: touched or shown at or after its last compaction."""
+    """`(paths, entry ids)` the session holds now: touched or shown at or after its last compaction."""
     if not v:
         return set(), set()
     cut = last_mark(v)
@@ -136,7 +137,7 @@ def in_view(v):
 
 
 def dropped(v):
-    """(paths, entry ids) that were in view before the last compaction and have not been touched or shown since."""
+    """`(paths, entry ids)` that were in view before the last compaction and have not been touched or shown since."""
     if not v or not v.get("marks"):
         return set(), set()
     cut = last_mark(v)
@@ -144,8 +145,9 @@ def dropped(v):
 
 
 def describe(p4, session="", limit=12):
-    """Lines saying what a session has in view, for another session to read: its newest files (edited ones
-    marked), its commits and its compactions. With no session, one line for each session the store has a record of."""
+    """Lines saying what a session has in view, for another session to read: its newest files in view, the edited
+    ones marked, its commits, how many of the corpus entries it was shown are in view, and the size of its context.
+    With no session, one line for each session the store has a record of."""
     d = p4conf.sub(p4, "models", "view")
     try:
         names = sorted(n[:-5] for n in os.listdir(d) if n.endswith(".json"))
@@ -160,7 +162,7 @@ def describe(p4, session="", limit=12):
         return out or ["no session has a record yet"]
     v = load(p4, session)
     if not v:
-        return [f"no record for session {session[:8]}" + (f" (records: {', '.join(names)})" if names else "")]
+        return [f"no record for session {session[:8]}" + (f"; records: {', '.join(names)}" if names else "")]
     files, entries = in_view(v)
     gone, _ = dropped(v)
     newest = sorted(files, key=lambda p: (-v["files"][p]["turn"], p))[:limit]
@@ -170,11 +172,13 @@ def describe(p4, session="", limit=12):
         out.append(f"  ... and {len(files) - limit} more")
     out += [f"  commit turn {c['turn']:3}  {c['repo']} {c['sha']}  {c['subject']}" for c in v["commits"][-limit:]]
     if entries:
-        out.append(f"  store lines shown: {len(entries)}")
+        out.append(f"  corpus entries shown: {len(entries)}")
     return out + size_lines(v.get("size"))
 
 
 def stats_line(p4):
+    """The line `p4.py check` prints: the sessions with a record and the files, commits and compactions their
+    records hold; '' when the store has no records folder."""
     d = p4conf.sub(p4, "models", "view")
     try:
         names = [n for n in os.listdir(d) if n.endswith(".json")]
@@ -194,16 +198,18 @@ TURNS_KEPT = 300
 
 
 def sizes(path_or_lines):
-    """How big a session's context was at every step, from the usage each API call reports (its input tokens:
-    fresh, cache write and cache read): numbers only.
+    """How big a session's context was at every step, from the usage each API call reports, its input tokens fresh,
+    cache write and cache read: numbers only.
         baseline     the first call's context: the system prompt, the tools, the skills and the memory files a
                      session starts with, and its first message
         last, peak   the context at the latest call, and the largest it has been
+        calls        the API calls that reported input tokens
         compactions  how often it fell to under DROP of the call before
-        by_tool      the tokens the context grew by after each tool's calls, the largest first: what filled it
+        by_tool      the tokens the context grew by after each tool's calls, the twelve largest first: what filled it
         turns        [[turn, context when the turn began, context when it ended]], the last TURNS_KEPT
-    The split the app's context panel shows inside the baseline (system tools, MCP tools, skills, memory) is the
-    app's own count and is not in a transcript; the whole baseline is."""
+    It reads the usage numbers alone, so the baseline stays whole, without the split `/context` shows inside it
+    into system tools, MCP tools, skills and memory. Claude Code's local transcripts record each API request's
+    system prompt, tools and parameters, but its documentation gives no line format for them."""
     import transcript as tr
     lines = tr.read_lines(path_or_lines) if isinstance(path_or_lines, str) else path_or_lines
     seen, series, turn = set(), [], -1
@@ -258,13 +264,14 @@ def size_lines(s):
 
 
 def compactions(v):
-    """How often a session's context was compacted: the larger of the two ways it shows (a continuation message,
-    a fall in the context's size), so every count of it agrees."""
+    """How often a session's context was compacted: the larger of the two counts, the marks build sets at a
+    continuation message and the falls in size sizes() finds, so every count of it agrees."""
     return max(len(v.get("marks") or []), (v.get("size") or {}).get("compactions", 0))
 
 
 def slug_dirs_of(project):
-    """A project's transcript folder and those of its worktrees (the same name followed by `--claude-worktrees-`)."""
+    """A project's transcript folder and those of its worktrees, whose names are its own followed by
+    `--claude-worktrees-`."""
     base = slug_dir(project)
     try:
         sibs = [os.path.join(os.path.dirname(base), n) for n in os.listdir(os.path.dirname(base))
@@ -275,13 +282,14 @@ def slug_dirs_of(project):
 
 
 def slug_dir(project):
-    """Where Claude Code keeps a project's transcripts: ~/.claude/projects/<the path, every other character a dash>."""
+    """Where Claude Code keeps a project's transcripts: `~/.claude/projects/<slug>`, the slug being the project's
+    absolute path with every character but a letter or a digit made a dash."""
     return os.path.join(os.path.expanduser("~"), ".claude", "projects", re.sub(r"[^A-Za-z0-9]", "-", os.path.abspath(project)))
 
 
 def backfill(p4, project, slug_dirs=None):
-    """The record of every session whose transcript is on this machine, built as refresh builds it: the sessions
-    that ran before the plugin kept records. Returns {sessions, files, commits, compactions}."""
+    """Refresh the record of every session whose transcript is in `slug_dirs`, by default the project's transcript
+    folders on this machine. Returns {sessions, files, commits, compactions} over the records with a turn."""
     out = {"sessions": 0, "files": 0, "commits": 0, "compactions": 0}
     for d in slug_dirs or slug_dirs_of(project):
         try:

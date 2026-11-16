@@ -79,7 +79,7 @@ class View(unittest.TestCase):
         self.assertIn("  edited turn   1  src/port.py", got)
         self.assertIn("  read   turn   0  docs/notes.md", got)
         self.assertIn("  commit turn   1  lib 1a2b3c4d  port: stay open", got)
-        self.assertEqual(view.describe(self.p4, "zzzzzzzz"), ["no record for session zzzzzzzz (records: abcdef12)"])
+        self.assertEqual(view.describe(self.p4, "zzzzzzzz"), ["no record for session zzzzzzzz; records: abcdef12"])
 
     def test_sizes_are_the_context_at_every_step(self):
         def user(text):
@@ -114,7 +114,7 @@ class View(unittest.TestCase):
             f.write(json.dumps({"type": "assistant", "message": {"id": "m9", "usage": {"input_tokens": 70000}, "content": [
                 {"type": "tool_use", "id": "t9", "name": "Read", "input": {"file_path": os.path.join(self.proj, "docs", "notes.md")}}]}}) + chr(10))
         got = view.backfill(self.p4, self.proj, [d])
-        self.assertEqual((got["sessions"], got["files"]), (3, 3), "a session with no owner message has a context too")
+        self.assertEqual((got["sessions"], got["files"]), (3, 3), "a session ezexe never wrote to has a context too")
         self.assertEqual(list(view.load(self.p4, "cccccccc")["files"]), ["docs/notes.md"])
         self.assertEqual(view.describe(self.p4)[0], "aaaaaaaa: 1 turns, 1 files in view, 0 commits, 0 compactions")
         self.assertEqual(view.load(self.p4, "bbbbbbbb")["size"]["baseline"], 50000)
