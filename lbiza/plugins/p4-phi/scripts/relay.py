@@ -1838,12 +1838,12 @@ OFFER_MAX = 4                    # options one AskUserQuestion holds
 
 
 def ready_in_tree(home, top):
-    """The sessions under `top` that p4-phi holds as finished and the app has not archived, oldest first, each as its
-    sessionId, title and parent."""
+    """The sessions under `top` that p4-phi holds as finished or superseded and the app has not archived, oldest
+    first, each as its sessionId, title and parent."""
     every = _sessions(home)
     out = []
     for sid, s in sorted(every.items(), key=lambda kv: str(kv[1].get("createdAt") or "")):
-        if not s.get("doneRetired") or s.get("archived") or archived_in_app(s):
+        if not (s.get("doneRetired") or s.get("stale")) or s.get("archived") or archived_in_app(s):
             continue
         cur, seen = _parent(s), set()
         while cur and cur != top and cur not in seen:

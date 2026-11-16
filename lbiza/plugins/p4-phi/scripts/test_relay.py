@@ -577,6 +577,22 @@ class ThreeSessions(unittest.TestCase):
         self.assertNotIn("phi (p4-phi): what", ctx)
         self.assertNotIn("stop before", ctx)
 
+    def test_a_child_a_sibling_supersedes_is_offered_to_ezexe_when_the_top_level_session_is_done(self):
+        """A finished child whose work a sibling's newer note supersedes is counted as archived and listed on
+        ready-to-archive.md, and the done top-level session puts it to ezexe as an option of its multiple-choice
+        question."""
+        t = self.t
+        t.cli(A, "shard", self.x("lib"))
+        self.assertEqual(t.cli(A, "done", "test_layout.py: 3 tests OK").returncode, 0)
+        self.assertEqual(t.stop(A, "move the layout", report="Moved the layout into lib.", uuid="a1").returncode, 0)
+        t.cli(B, "note", f"replaces: `{self.x('lib', 'x.py')}` with p4conf's layout", "--source", "commit abc123")
+        self.assertEqual(t.stop(B, "replace x", uuid="b1").returncode, 0)
+        self.assertEqual(t.session(A)["stale"]["by"], B, "superseded by the sibling's newer note")
+        self.assertIn(A, open(relay.ready_path(t.p4), encoding="utf-8").read(), "listed on ready-to-archive.md")
+        said = t.cli(TOP, "done", "both plugins built and their suites pass").stdout
+        self.assertIn(f"- label \"the layout work\", description \"Archive {A}.\"", said,
+                      "an option of the question the done top-level session puts to ezexe")
+
 
 
 class ForkOrFresh(ThreeSessions):
