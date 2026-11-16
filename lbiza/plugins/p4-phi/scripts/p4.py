@@ -10,7 +10,6 @@
   labels [--from-history] [--from-transcripts --project D --slug DIR ...] [--reexploration]
                                        list the label set with counts per source; import or derive labels
   train [--if-owed], eval              fit, evaluate held out, promote past the floor (train.py)
-  dictionary check [--dry]             every vocabulary entry's two tests; a failing entry set off
   check                                store health: counts, statuses, orphan labels, the jargon rate
   migrate [--apply] ...                the old layout into the new (scripts/migrate.py)
   teacher edit-labels|dictionary|facts [--re-edit] [--second-opinion N] [--max-usd X] [--estimate] [--fake]
@@ -677,12 +676,6 @@ def cmd_train_eval(args, which):
     return train.cmd_train(args) if which == "train" else train.cmd_eval(args)
 
 
-def cmd_dictionary(args):
-    import train
-    args.p4 = p4_dir(args)
-    return train.cmd_dictionary(args)
-
-
 def cmd_migrate(args, rest):
     import migrate
     argv = list(rest)
@@ -744,10 +737,6 @@ def main(argv=None):
         else:
             p.add_argument("--json", action="store_true")
             p.add_argument("--no-dictionary", action="store_true")
-    p = sub.add_parser("dictionary")
-    p.add_argument("action", choices=("check",))
-    p.add_argument("--p4")
-    p.add_argument("--dry", action="store_true")
     p = sub.add_parser("query")
     p.add_argument("--p4")
     p.add_argument("--text", required=True)
@@ -787,8 +776,6 @@ def main(argv=None):
         return cmd_labels(args)
     if args.cmd in ("train", "eval"):
         return cmd_train_eval(args, args.cmd)
-    if args.cmd == "dictionary":
-        return cmd_dictionary(args)
     ap.print_help()
     return 2
 

@@ -900,15 +900,3 @@ def cmd_eval(args):
             out["compare"] = row["compare"]
         print(json.dumps(out))
     return 0
-
-
-def cmd_dictionary(args):
-    res = dictionary_check(args.p4, write=not args.dry)
-    for r in res["entries"]:
-        flag = "ok" if r["fixed"] and not r["harmed"] else ("kept (ezexe's)" if r["owner"] else "set off")
-        print(f"  {r['term']}: fixes its message {'yes' if r['fixed'] else 'no'}, changes {r['changed']} of "
-              f"{r['working']} working messages -> {flag}")
-    c = res["counts"]
-    print(f"dictionary check: {c['on']} on, {c['off']} off, {c['fixed']} fixed, {c['harmed']} harmed, "
-          f"over {res['working']} working messages")
-    return 0
