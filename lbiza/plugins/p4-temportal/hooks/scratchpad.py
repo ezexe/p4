@@ -599,6 +599,14 @@ def close_tmp(p4, sid):
         return ""
     head = head.strip()
     changed = set(changed.split("\0"))
+    mark = closed_mark(p4, sid)                        # written before any deletion, so a cut close is restored
+    if mark:
+        try:
+            os.makedirs(os.path.dirname(mark), exist_ok=True)
+            with open(mark, "w", encoding="utf-8") as f:
+                f.write(head + "\n")
+        except OSError:
+            return ""                                  # no mark: nothing is deleted
     removed = []
     for name in tracked.split("\0"):
         if not name or name in changed:
@@ -618,14 +626,6 @@ def close_tmp(p4, sid):
                 pass
     git_p4(p4, *commit_flags(p4), "-q", "-m", f"tmp: session {sid[:8]} removed; its files are in "
            f"{head[:8]}", "--pathspec-from-file=-", "--pathspec-file-nul", stdin=nul(removed))   # the removals alone
-    mark = closed_mark(p4, sid)
-    if mark:
-        try:
-            os.makedirs(os.path.dirname(mark), exist_ok=True)
-            with open(mark, "w", encoding="utf-8") as f:
-                f.write(head + "\n")
-        except OSError:
-            pass
     return head
 
 

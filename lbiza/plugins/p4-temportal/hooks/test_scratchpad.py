@@ -839,6 +839,53 @@ def tmp_close_bare_store_cases():
     print("test_scratchpad.py: bare store cases green")
 
 
+def tmp_close_cut_cases():
+    """A close stopped between its commits, here in the middle of its deletions, leaves the next start of that
+    session every file the first commit holds."""
+    if not shutil.which("git"):
+        print("test_scratchpad.py: cut close cases skipped, no git on PATH")
+        return
+    sys.path.insert(0, os.path.dirname(SCRIPT))
+    import scratchpad
+    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-cut-")
+    sid = "8888bbbb-0000-4000-8000-000000000008"
+    p4 = os.path.join(root, ".claude", "p4")
+    mine = os.path.join(p4, "temportal", "tmp", sid)
+
+    class Cut(BaseException):
+        pass
+
+    real_remove, calls = os.remove, []
+
+    def cut_remove(path):
+        calls.append(path)
+        if len(calls) == 2:
+            raise Cut()
+        real_remove(path)
+
+    try:
+        os.makedirs(p4)
+        for args in (["init", "-q"], ["config", "user.name", "t"], ["config", "user.email", "t@t"]):
+            subprocess.run(["git", "-C", p4] + args, check=True, capture_output=True)
+        names = ("a.md", "b.md", "c.md")
+        for n in names:
+            put(mine, n, f"{n}\n")
+        scratchpad.os.remove = cut_remove
+        try:
+            scratchpad.close_tmp(p4, sid)
+            raise AssertionError("the close was not cut")
+        except Cut:
+            pass
+        finally:
+            scratchpad.os.remove = real_remove
+        scratchpad.restore_tmp(p4, sid)
+        back = [n for n in names if os.path.isfile(os.path.join(mine, n))]
+        assert back == list(names), f"after a cut close the next start got back {back} of {list(names)}"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("test_scratchpad.py: cut close cases green")
+
+
 def snapshot(root):
     """Every file under a folder with its size, time and bytes, the git index and refs included."""
     out = {}
@@ -1063,6 +1110,7 @@ def main():
     tmp_export_cases()
     tmp_staged_copy_cases()
     tmp_close_bare_store_cases()
+    tmp_close_cut_cases()
     ended_cases()
     gate2_d()
     print("test_scratchpad.py: all green")
