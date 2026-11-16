@@ -667,12 +667,19 @@ def copied(p4):
         return set()
 
 
+def record_copies(p4, added=(), removed=()):
+    """Add to and take from `copied.json` at once, over a fresh read, so neither a failure later in the same run nor
+    another session writing it meanwhile loses a record."""
+    now = copied(p4)
+    new = (now | set(added)) - set(removed)
+    if new != now:
+        write_json(p4, "copied.json", sorted(new))
+
+
 def mirror(p4, names=None, remove=False):
     """Copy store skills into the project's `.claude/skills/`, and with `remove` set aside each copy whose store skill
     is gone. A copy is removed only when this machine made it: an empty store folder, as in a clone whose store is
     missing, says nothing about which skills are gone. Returns the names copied or removed."""
-    made_here = copied(p4)
-    before = set(made_here)
     src = skillex_dir(p4)
     dst = project_skills(p4)
     os.makedirs(dst, exist_ok=True)
@@ -695,6 +702,8 @@ def mirror(p4, names=None, remove=False):
         same = os.path.isfile(os.path.join(target, COPY_IGNORE)) and there == set(files) and all(
             _same_bytes(p, os.path.join(target, rel)) for rel, p in files.items())
         if same:
+            if os.path.isfile(os.path.join(target, MARKER)) and n not in copied(p4):
+                record_copies(p4, added={n})             # a copy made here before copies were recorded
             continue
         staging = os.path.join(swap_dir(p4, "staging"), f"{n}.{os.getpid()}.{time.time_ns()}")
         try:
@@ -723,16 +732,14 @@ def mirror(p4, names=None, remove=False):
                 except OSError:
                     pass
             continue
-        made_here.add(n)
+        record_copies(p4, added={n})
         changed.append(n)
     if remove and names is None and os.path.isdir(dst):
         for n in sorted(os.listdir(dst)):
-            if n not in store and n in made_here and os.path.isfile(os.path.join(dst, n, MARKER)):
+            if n not in store and n in copied(p4) and os.path.isfile(os.path.join(dst, n, MARKER)):
                 set_aside(p4, os.path.join(dst, n))    # its store skill is gone
-                made_here.discard(n)
+                record_copies(p4, removed={n})
                 changed.append(n)
-    if made_here != before:
-        write_json(p4, "copied.json", sorted(made_here))
     clear_aside(p4)
     return changed
 

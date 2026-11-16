@@ -614,6 +614,33 @@ class Loading(Store):
         self.assertFalse(os.path.exists(os.path.dirname(stale)))
         self.assertEqual(read(os.path.join(self.root, ".claude", ".skillex-swap", ".gitignore")), "*\n")
 
+    def test_a_copy_made_before_the_record_is_removed_with_its_skill(self):
+        self.store_skill("demo-brew")
+        skillex.cmd_start(self.p4, {})
+        os.remove(os.path.join(self.p4, "skillex", ".state", "copied.json"))     # as before copies were recorded
+        skillex.cmd_start(self.p4, {})
+        shutil.rmtree(os.path.join(self.p4, "skillex", "demo-brew"))
+        skillex.cmd_start(self.p4, {})
+        self.assertFalse(os.path.exists(os.path.join(self.root, ".claude", "skills", "demo-brew")))
+
+    def test_a_copy_failing_midway_keeps_the_record_of_those_made(self):
+        self.store_skill("a-one")
+        self.store_skill("b-two")
+        real_copy = skillex.shutil.copyfile
+
+        def fails_b(a, b):
+            if "b-two" in str(b):
+                raise OSError("disk full")
+            return real_copy(a, b)
+
+        skillex.shutil.copyfile = fails_b
+        try:
+            with self.assertRaises(OSError):
+                skillex.cmd_start(self.p4, {})
+        finally:
+            skillex.shutil.copyfile = real_copy
+        self.assertEqual(skillex.copied(self.p4), {"a-one"})
+
     def test_a_start_records_its_session_before_it_copies(self):
         self.store_skill("demo-brew")
         real_mirror = skillex.mirror
