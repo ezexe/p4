@@ -171,19 +171,23 @@ EXTERNAL = {}          # {dependency root outside the project: its path prefix},
 
 
 def rel(path, project, cwd=""):
-    """A path relative to the project; under a dependency root outside it, `<prefix>/<path in the root>`; else ''."""
+    """A path relative to the project; under a dependency root outside it, `<prefix>/<path in the root>`; else ''.
+    On Windows, paths compare without regard to case, and Git Bash's `/e/projects/x` is `E:\\projects\\x`."""
     if not path or not isinstance(path, str):
         return ""
     p = path.strip().strip("'\"")
     if p.startswith("~"):
         p = os.path.expanduser(p)
+    if os.sep == "\\" and re.match(r"/[A-Za-z](/|$)", p):
+        p = p[1] + ":/" + p[3:]
     if not os.path.isabs(p):
         p = os.path.join(cwd or project, p)
     p = os.path.normpath(p)
     proj = os.path.normpath(project)
-    if p == proj or not p.startswith(proj + os.sep):
+    key, pkey = os.path.normcase(p), os.path.normcase(proj)
+    if key == pkey or not key.startswith(pkey + os.sep):
         for root, prefix in EXTERNAL.items():
-            if p.startswith(root + os.sep):
+            if key.startswith(os.path.normcase(root) + os.sep):
                 return prefix + "/" + p[len(root) + 1:].replace(os.sep, "/")
         return ""
     return p[len(proj) + 1:].replace(os.sep, "/")

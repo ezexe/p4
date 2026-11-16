@@ -203,6 +203,16 @@ class Transcripts(unittest.TestCase):
         self.assertEqual(ev2["README.md"]["label"], "unopened")
         self.assertEqual(tr.exploration(turn, ev, {"src/narwhal_port.py"})[:1], (2,), "two calls before")
 
+    @unittest.skipUnless(os.sep == "\\", "the spellings of one Windows path")
+    def test_a_windows_path_in_any_spelling_is_one_file(self):
+        known = lb.repo_index(self.idx)[0]
+        f = os.path.join(self.proj, "src", "narwhal_port.py")
+        drive, rest = f[0], f[2:].replace("\\", "/")
+        for spelled in (f, drive.swapcase() + f[1:], f.replace("\\", "/"), "/" + drive.lower() + rest,
+                        "/" + drive.upper() + rest):
+            self.assertEqual(tr.bash_paths(f'cat "{spelled}"', self.proj, self.proj, known),
+                             ({"src/narwhal_port.py"}, set()), spelled)
+
     def test_skill_invocations(self):
         known = {".claude/skills/narwhal-style/SKILL.md", ".claude/commands/zebra.md",
                  "tools/.claude/skills/probe/SKILL.md", "README.md"}
