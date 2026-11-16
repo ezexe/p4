@@ -45,8 +45,7 @@ import p4conf  # noqa: E402
 import ranker  # noqa: E402
 import store as st  # noqa: E402
 
-SOURCE_WEIGHT = {"said": 1.0, "store+edited": 1.0, "pool": 0.7, "short": 1.0, "usage": 0.3, "miss": 1.0, "store": 0.5,
-                 "repo": 1.0, "silent": 1.0}
+SILENT_WEIGHT = 1.0
 SILENT = "silent.jsonl"                                   # models/silent.jsonl: {"prompt": ...} per line
 SILENT_DEFAULT = os.path.join(HERE, "silent-prompts.jsonl")
 CANDIDATES = 200
@@ -186,7 +185,7 @@ def silent_sets(idx, prompts, now, mem=None, id_at=None):
         sc = [scores.get(i, 0.0) for i in cand]
         xs, _, _ = ranker.candidate_features(terms, cds, idf, idx["avgdl"], now, scores=sc,
                                              extra={"near": feats} if feats is not None else None)
-        w = SOURCE_WEIGHT["silent"]
+        w = SILENT_WEIGHT
         out.append({"task": "silent:" + st.sha8(text), "xs": xs, "ys": [0] * len(cand), "w": [w] * len(cand),
                     "files": [docs[i]["path"] for i in cand], "bm25": sc, "n_pos": 0, "source": "silent",
                     "missed": False, "kind": "silent", "time": now, "sources": ["silent"],

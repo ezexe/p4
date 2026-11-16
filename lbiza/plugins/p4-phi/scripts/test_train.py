@@ -150,13 +150,6 @@ class Rounds(unittest.TestCase):
         self.assertEqual(sum(s["ys"]), s["n_pos"], "every positive drawn")
         self.assertNotIn(held.id, {d["id"] for d in idx["docs"]}, "the caller's index is unchanged")
 
-    def test_weights_by_source(self):
-        self.assertEqual(train.SOURCE_WEIGHT["store+edited"], 1.0)
-        self.assertEqual(train.SOURCE_WEIGHT["pool"], 0.7)
-        self.assertEqual(train.SOURCE_WEIGHT["usage"], 0.3)
-        self.assertEqual(train.SOURCE_WEIGHT["short"], 1.0)
-        self.assertEqual(train.SOURCE_WEIGHT["miss"], 1.0)
-
 
 class BaselineScaling(unittest.TestCase):
     def test_baseline_counts_undrawn_positives_like_the_ranker(self):
