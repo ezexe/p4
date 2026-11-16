@@ -140,7 +140,12 @@ class Tree_(unittest.TestCase):
         """#49: no session archives a session; the chain treats a finished one as archived at once."""
         self.t.say(KID, "Fix the row in the exporter, report when done")
         self.assertTrue(relay._session(self.t.p4, KID).get("disposable"), "report when done marks it")
-        self.t.cli(KID, "done", "test_flush.py: 3 tests OK")
+        said = self.t.cli(KID, "done", "test_flush.py: 3 tests OK").stdout
+        self.assertIn("`mcp__ccd_turn__wrap_up` whose first action is the app's `archive`", said,
+                      "a finished session asks with a button, not prose")
+        self.assertIn("recap of one sentence", said)
+        self.assertNotIn("archive_session", said, "and is handed no instruction to call an archive tool")
+        self.assertIn("call no archive tool", said)
         self.t.stop(KID, "Fix the row in the exporter, report when done", report="Fixed flush_rows; 3 tests pass.")
         kid = relay._session(self.t.p4, KID)
         self.assertTrue(kid.get("doneRetired"))
@@ -152,8 +157,8 @@ class Tree_(unittest.TestCase):
         self.assertIn(KID, page, "listed as ready to archive")
         ctx = context(self.t.say(TOP, "what next?"))
         self.assertNotIn("archive_session", ctx, "no archive call is handed out to any session")
-        self.assertIn("tell ezexe in one line that they are ready to archive", ctx)
-        self.assertEqual(ctx.count(f"({KID})"), 1, "the notice names it once")
+        self.assertIn("list each to ezexe as its link", ctx)
+        self.assertEqual(ctx.count(f"](#{KID})"), 1, "the notice names it once, as a link ezexe opens")
         again = context(self.t.say(TOP, "and then?"))
         self.assertNotIn("ready to archive", again, "and only once")
         self.assertNotIn("archive_session", again)
@@ -161,6 +166,8 @@ class Tree_(unittest.TestCase):
         mine = self.archive_call(KID, "self")
         self.assertEqual(mine.get("permissionDecision"), "deny")
         self.assertIn("no session archives a session", mine.get("permissionDecisionReason", ""))
+        self.assertIn("`mcp__ccd_turn__wrap_up` whose first action is the app's `archive`",
+                      mine.get("permissionDecisionReason", ""), "refused, and told the button")
         other = self.archive_call(TOP, KID)
         self.assertEqual(other.get("permissionDecision"), "deny")
         self.assertIn(f"{KID} is ready to archive", other.get("permissionDecisionReason", ""))

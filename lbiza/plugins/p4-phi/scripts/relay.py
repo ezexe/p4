@@ -1533,11 +1533,11 @@ def stale_text(pend):
     done = [x for x in pend if x.get("kind") == "done"]
     stale = [x for x in pend if x.get("kind") != "done"]
     if stale:
-        names = ", ".join(f"\"{x.get('title')}\" ({x.get('id')})" for x in stale)
+        names = ", ".join(link_of(x) for x in stale)
         out.append(f"phi (p4-phi): stale, their work superseded by a newer note, their outcome kept as a replaces: "
                    f"note on this session: {names}. {READY}")
     if done:
-        names = ", ".join(f"\"{x.get('title')}\" ({x.get('id')})" for x in done)
+        names = ", ".join(link_of(x) for x in done)
         out.append(f"phi (p4-phi): finished and retired, their outcome kept as a replaces: "
                    f"note on this session: {names}. {READY}")
     return "\n".join(out)
@@ -1550,10 +1550,22 @@ def stale_text(pend):
 # archive itself is ezexe's own action in the app. ezexe is told once, by the parent's one line, and the sessions
 # still waiting for that action are listed on <home>/phi/ready-to-archive.md.
 
-READY = ("The chain treats them as archived from now. No session archives a session: call no archive tool, and tell "
-         "ezexe in one line that they are ready to archive, which ezexe does in the app.")
+READY = ("The chain treats them as archived from now. No session archives a session: call no archive tool. Each "
+         "is ready to archive, so list each to ezexe as its link, exactly as given here, and ezexe opens it and "
+         "presses the archive button in its next-step box.")
 NO_ARCHIVE = ("phi (p4-phi): no session archives a session, itself included (ezexe/p4#49). The archive is ezexe's "
               "own action in the app.")
+# ezexe: "the self archival request should be simplified to a button the user can press"
+BUTTON = ("End this turn with `mcp__ccd_turn__wrap_up` whose first action is the app's `archive`, and a recap of one "
+          "sentence naming what was done: that puts the button in this session's next-step box, and ezexe archives "
+          "it with one press. Write no paragraph asking for it, and call no archive tool. The chain has been told "
+          "already and treats this session as archived.")
+
+
+def link_of(x):
+    """A finished child as the link ezexe opens to press its archive button: [its title](#its id)."""
+    title = str(x.get("title") or x.get("id") or "").replace("[", "(").replace("]", ")")
+    return f"[{title}](#{x.get('id')})"
 
 
 def ready_path(home):

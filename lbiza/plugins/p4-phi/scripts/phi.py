@@ -1539,9 +1539,8 @@ def h_self_archive(payload):
     if not session_archives(me.store):             # #49: the archive is ezexe's own action in the app
         RAN["archive_refused"] = "self" if own else target[:40]
         why = relay.NO_ARCHIVE + (
-            " This session's turn is kept and it is retired to the session that started it, which treats it as "
-            "archived from now: end the turn with your report." if own and spawned_from(s) else
-            " End the turn with your report; ezexe archives this session." if own else
+            " This session's turn is kept and it is retired to the session that started it. " + relay.BUTTON
+            if own and spawned_from(s) else " " + relay.BUTTON if own else
             f" phi already treats a finished or superseded session as archived. Tell ezexe in one line that {target} "
             f"is ready to archive.")
         refuse = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
@@ -2535,6 +2534,8 @@ def main(argv=None):
             s["done"] = {"text": clean(a.text)[:400], "time": now()}
             save_session(me.home, s)
             print("this turn will be kept as done")
+            if spawned_from(s) and s.get("disposable"):
+                print(relay.BUTTON)                # #49: a finished session asks with a button, not prose
             try:                                   # #45: the issue it closes, and what that still owes
                 line = issues.done_text(me.home, s, os.getcwd()) if spawned_from(s) else ""
             except Exception:  # noqa: BLE001
