@@ -1410,6 +1410,17 @@ class AskPaths(unittest.TestCase):
                   "$env:TEMP/x.py", "%TEMP%/x.py", "$TMPDIR/x.py"):
             self.assertTrue(sp.in_temp(p), p)
 
+    def test_a_notebook_in_the_notebook_folder_is_not_asked_about_or_listed(self):
+        import scratchpad as sp
+        self.assertIsNone(ask(write("E:/projects/x/.claude/p4/temportal/scratchpad/analysis.ipynb")))
+        self.assertIsNotNone(ask(write("C:/Users/u/AppData/Local/Temp/analysis.ipynb")))
+        with tempfile.TemporaryDirectory() as root:
+            nb = os.path.join(root, ".claude", "p4", "temportal", "scratchpad")
+            os.makedirs(nb)
+            open(os.path.join(nb, "analysis.ipynb"), "w").close()
+            listed = [p for ps in sp.repo_use_candidates(root).values() for p in ps]
+            self.assertFalse([p for p in listed if p.endswith(".ipynb")], listed)
+
     def test_a_powershell_write_by_a_positional_path_is_asked_about(self):
         for cmd in ("Set-Content $env:TEMP\\x.py 'print(1)'", "'print(1)' | Out-File $env:TEMP\\x.py"):
             d = ask({"tool_name": "PowerShell", "cwd": "E:/projects/x", "tool_input": {"command": cmd}})

@@ -1235,6 +1235,8 @@ def cmd_ask(payload):
             where = ("the session's scratchpad, kept in .claude/p4/temportal/tmp/ for notes and output"
                      if tmp_on() else "the session's scratchpad, which Claude Code deletes with its transcript")
         elif in_notebook(p):
+            if p.lower().endswith(".ipynb"):            # the notebook folder is where p4-temportal keeps notebooks
+                continue
             where = "the notebook .claude/p4/temportal/scratchpad/, which is for notes, logs and output"
         elif in_temp(p):
             where = "a temp location"
