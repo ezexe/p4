@@ -265,15 +265,19 @@ def _merge_tree(src, dst, aside):
             try:
                 if not os.path.lexists(t):
                     os.makedirs(os.path.dirname(t), exist_ok=True)
+                    _note(s, t)
                     os.replace(s, t)
                     _LANDED.append(t)
                 elif os.path.isfile(t) and filecmp.cmp(s, t, shallow=False):
+                    _note(s, None)
                     os.remove(s)
                 elif _ignored(t):
                     # a cache git ignores: the newer stays, the older goes, and nothing is set aside to be committed
                     if os.path.getmtime(s) > os.path.getmtime(t):
+                        _note(s, t)
                         os.replace(s, t)
                     else:
+                        _note(s, None)
                         os.remove(s)
                 else:
                     old = t if os.path.getmtime(s) > os.path.getmtime(t) else s
@@ -281,9 +285,11 @@ def _merge_tree(src, dst, aside):
                     os.makedirs(os.path.dirname(a), exist_ok=True)
                     if os.path.lexists(a):
                         a += time.strftime(".%Y%m%d-%H%M%S")
+                    _note(old, a)
                     os.replace(old, a)
                     _LANDED.append(a)
                     if old is t:
+                        _note(s, t)
                         os.replace(s, t)
                         _LANDED.append(t)
                     aside_n += 1
@@ -307,6 +313,10 @@ def _move(src, dst, aside):
     """`src` to `dst`: one rename when `dst` is absent, else _merge_tree. Returns the count kept aside."""
     if not os.path.lexists(dst):
         os.makedirs(os.path.dirname(dst), exist_ok=True)
+        if os.path.isdir(src):
+            _note_tree(src, dst)
+        else:
+            _note(src, dst)
         try:
             os.rename(src, dst)
         except OSError:
@@ -352,13 +362,23 @@ def _move_tmp(old, new, aside):
 
 def _rewrite_paths(p, moved):
     """Lines of .gitignore or .gitattributes that name an earlier place are made to name its place in the layout:
-    `moved` maps each earlier path to its new one. A rewritten line the file already holds is dropped, so a seed block
-    appended again in the earlier form leaves no line twice. True when the file changed."""
+    `moved` maps each earlier path to its new one. True when the file changed."""
     try:
         with open(p, encoding="utf-8", newline="") as f:
             text = f.read()
     except OSError:
         return False
+    new = _rewrite_text(text, moved)
+    if new == text:
+        return False
+    with open(p, "w", encoding="utf-8", newline="") as f:
+        f.write(new)
+    return True
+
+
+def _rewrite_text(text, moved):
+    """_rewrite_paths on a file's text -> the new text. A rewritten line the text already holds is dropped, so a seed
+    block appended again in the earlier form leaves no line twice."""
     lines = text.splitlines(keepends=True)
     have = {l.strip() for l in lines}
     out = []
@@ -382,12 +402,7 @@ def _rewrite_paths(p, moved):
             new = line
         if new is not None:
             out.append(new)
-    new = "".join(out)
-    if new == text:
-        return False
-    with open(p, "w", encoding="utf-8", newline="") as f:
-        f.write(new)
-    return True
+    return "".join(out)
 
 
 def _git(p4, *args):
@@ -407,8 +422,8 @@ def migrate_layout(p4, commit=True):
     into temportal/, and store/ and models/, at the top or under recall/, and archive/ into phi/. .gitignore and
     .gitattributes are rewritten to match, and when `p4` is a git repository of its own the move is committed alone.
     Returns the lines to print, none when there was nothing to move. Cheap when there is nothing: one lstat call per
-    earlier place in OLDER."""
-    if not _olds(p4):
+    earlier place in OLDER, and one more for a move an earlier start renamed and did not commit."""
+    if not _olds(p4) and not os.path.isfile(_pending_path(p4)):
         return []
     lock = os.path.join(p4, LAYOUT_LOCK)
     if not _take(lock):
@@ -460,29 +475,183 @@ def _olds(p4):
     return out
 
 
-def _tracked(p4, rel):
-    """The files git tracks under `rel`, as git names them."""
-    r = _git(p4, "ls-files", "-z", "--", rel)
-    return [x for x in r.stdout.decode("utf-8", "surrogateescape").split("\0") if x] if r and r.returncode == 0 else []
+# A move is recorded before each rename, in the store's git directory, which no commit holds: a start killed in the
+# renames or before the commit leaves the record, and the next start finishes the move and commits it. The commit is
+# built from the record alone, each moved file taking the blob HEAD holds for it at its earlier place, in an index of
+# its own, so git's clean filter runs only on the files no commit held before, which are hashed in one call, no change
+# made to a tracked file between two starts is taken in, and the record goes only once HEAD has the commit.
+PENDING = "p4-layout-pending.jsonl"
+_JOURNAL = []                                       # the open record of the move under way, when the store is a repo
 
 
-def _commit_moves(p4, gone, landed, extra):
-    """Commit the move and nothing else: the removal of `gone`, the tracked files of the earlier places, the files
-    that `landed` in a new place, and `extra`, the rewritten .gitignore and .gitattributes. What else the hooks left
-    pending stays pending. A landed file the store ignores is left out, as git would leave it."""
-    rel = lambda p: os.path.relpath(p, p4).replace("\\", "/")
-    new = sorted({rel(p) for p in landed if os.path.isfile(p)})
-    if new:
-        r = _git_in(p4, ["check-ignore", "-z", "--stdin"], new)
-        skip = set(r.stdout.decode("utf-8", "surrogateescape").split("\0")) if r else set()
-        new = [p for p in new if p not in skip]
-    paths = sorted(set(gone) | set(new) | set(extra))
-    if not paths:
+def _git_dir(p4):
+    """The store's git directory, read from .git without running git: the folder itself, or the one a .git file
+    names, as a worktree's does. None when there is none."""
+    g = os.path.join(p4, ".git")
+    if os.path.isdir(g):
+        return g
+    try:
+        with open(g, encoding="utf-8") as f:
+            line = f.readline().strip()
+    except OSError:
+        return None
+    if not line.startswith("gitdir:"):
+        return None
+    d = line[len("gitdir:"):].strip()
+    return os.path.normpath(d if os.path.isabs(d) else os.path.join(p4, d))
+
+
+def _pending_path(p4):
+    g = _git_dir(p4)
+    return os.path.join(g, PENDING) if g else os.path.join(p4, ".git", PENDING)
+
+
+def _note(src, dst):
+    """Record that `src` moves to `dst`, or goes when `dst` is None, before it happens."""
+    if not _JOURNAL:
         return
-    _git_in(p4, ["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"], paths)
-    _git_in(p4, ["-c", "user.name=p4", "-c", "user.email=p4@localhost", "commit", "-q", "--no-verify", "--only",
-                 "-m", "layout: each plugin's files in .claude/p4/<plugin>/",
-                 "--pathspec-from-file=-", "--pathspec-file-nul"], paths)
+    p4, f = _JOURNAL[0], _JOURNAL[1]
+    rel = lambda p: os.path.relpath(p, p4).replace("\\", "/")
+    f.write(json.dumps({"m": [rel(src), rel(dst) if dst else None]}) + "\n")
+    f.flush()
+
+
+def _note_tree(src, dst):
+    """Record every file of the folder `src` as moving to the same place under `dst`."""
+    if not _JOURNAL:
+        return
+    for d, _dirs, names in os.walk(src):
+        for n in names:
+            s = os.path.join(d, n)
+            _note(s, os.path.join(dst, os.path.relpath(s, src)))
+
+
+def _note_blob(p4, name, moved):
+    """Record the blob of .gitignore or .gitattributes as HEAD holds it with only the layout's rewrite applied, so an
+    edit not yet committed stays out of the layout commit. Nothing is recorded when HEAD lacks the file or the
+    rewrite changes nothing in it."""
+    if not _JOURNAL:
+        return
+    r = _git(p4, "show", f"HEAD:{name}")
+    if not (r and r.returncode == 0):
+        return
+    text = r.stdout.decode("utf-8", "surrogateescape")
+    new = _rewrite_text(text, moved)
+    if new == text:
+        return
+    try:
+        r = subprocess.run(["git", "-C", p4, "hash-object", "-w", "--stdin"], capture_output=True, timeout=30,
+                           input=new.encode("utf-8", "surrogateescape"))
+    except (OSError, subprocess.SubprocessError):
+        return
+    sha = r.stdout.decode("ascii", "replace").strip() if r.returncode == 0 else ""
+    if sha:
+        _JOURNAL[1].write(json.dumps({"b": [name, sha]}) + "\n")
+        _JOURNAL[1].flush()
+
+
+def _commit_journal(p4):
+    """Commit what the record holds and nothing else -> True once HEAD has it, or when there is nothing to commit; the
+    record is removed then and kept otherwise."""
+    rec = _pending_path(p4)
+    try:
+        with open(rec, encoding="utf-8", errors="replace") as f:
+            lines = [l for l in f if l.strip()]
+    except OSError:
+        return False
+    rows = []
+    for l in lines:
+        try:
+            row = json.loads(l)
+        except ValueError:
+            continue                                    # a line a cut start left half written
+        if isinstance(row, dict):
+            rows.append(row)
+    head = _git(p4, "rev-parse", "-q", "--verify", "HEAD")
+    if not (head and head.returncode == 0):
+        os.remove(rec)                                  # no commit yet: nothing is tracked to move
+        return True
+    head = head.stdout.decode("ascii").strip()
+    r = _git(p4, "ls-tree", "-r", "-z", "--full-tree", "HEAD")
+    if not (r and r.returncode == 0):
+        return False
+    tree = {}
+    for item in r.stdout.decode("utf-8", "surrogateescape").split("\0"):
+        if item:
+            meta, path = item.split("\t", 1)
+            mode, _kind, sha = meta.split()
+            tree[path] = (mode, sha)
+    over, fresh = {}, []
+    look = lambda p: over[p] if p in over else tree.get(p)
+    for row in rows:
+        if "m" in row:
+            src, dst = row["m"]
+            done = os.path.lexists(os.path.join(p4, dst)) if dst else not os.path.lexists(os.path.join(p4, src))
+            if not done:
+                continue                                # noted, and the start was cut before the rename
+            e = look(src)
+            if e is None:
+                if dst:
+                    fresh.append(dst)                   # a file git did not track: committed at its new place
+                continue
+            over[src] = None
+            if dst:
+                over[dst] = e
+        elif "b" in row:
+            name, sha = row["b"]
+            over[name] = ((look(name) or ("100644", ""))[0], sha)
+    # what no commit held before, such as rows an older plugin wrote at an earlier place, is hashed as it stands, in
+    # one git call, unless the store ignores it
+    fresh = [p for p in dict.fromkeys(fresh) if p not in over and os.path.isfile(os.path.join(p4, p))]
+    if fresh:
+        r = _git_in(p4, ["check-ignore", "-z", "--stdin"], fresh)
+        if not (r and r.returncode in (0, 1)):
+            return False                                # which files are caches is not known: the record waits
+        skip = set(r.stdout.decode("utf-8", "surrogateescape").split("\0"))
+        fresh = [p for p in fresh if p not in skip]
+    if fresh:
+        try:
+            r = subprocess.run(["git", "-C", p4, "hash-object", "-w", "--stdin-paths"], capture_output=True,
+                               timeout=60, input="\n".join(fresh).encode("utf-8", "surrogateescape"))
+        except (OSError, subprocess.SubprocessError):
+            return False
+        shas = r.stdout.decode("ascii", "replace").split() if r.returncode == 0 else []
+        if len(shas) != len(fresh):
+            return False
+        over.update({p: ("100644", sha) for p, sha in zip(fresh, shas)})
+    changes = {p: e for p, e in over.items() if e != tree.get(p)}
+    if not changes:
+        os.remove(rec)
+        return True
+    index = rec + ".index"
+    env = dict(os.environ, GIT_INDEX_FILE=index, GIT_AUTHOR_NAME="p4", GIT_AUTHOR_EMAIL="p4@localhost",
+               GIT_COMMITTER_NAME="p4", GIT_COMMITTER_EMAIL="p4@localhost")
+    info = "".join(f"{e[0]} {e[1]}\t{p}\0" if e else f"0 {'0' * 40}\t{p}\0" for p, e in sorted(changes.items()))
+    run = lambda *a, inp=None: subprocess.run(["git", "-C", p4, *a], input=inp, capture_output=True, env=env,
+                                                timeout=60)
+    try:
+        steps = [run("read-tree", "HEAD"), run("update-index", "-z", "--index-info",
+                                               inp=info.encode("utf-8", "surrogateescape"))]
+        if any(s.returncode for s in steps):
+            return False
+        t = run("write-tree")
+        c = run("commit-tree", t.stdout.decode().strip(), "-p", head, "-m",
+                "layout: each plugin's files in .claude/p4/<plugin>/") if t.returncode == 0 else t
+        if c.returncode:
+            return False
+        if run("update-ref", "HEAD", c.stdout.decode().strip(), head).returncode:
+            return False
+    except (OSError, subprocess.SubprocessError):
+        return False
+    finally:
+        try:
+            os.remove(index)
+        except OSError:
+            pass
+    # the store's own index takes the new entries of the moved paths, and only them
+    _git_in(p4, ["reset", "-q", "--pathspec-from-file=-", "--pathspec-file-nul"], sorted(changes))
+    os.remove(rec)
+    return True
 
 
 def _git_in(p4, args, paths):
@@ -501,9 +670,27 @@ def _migrate(p4, commit):
     # earlier place are rewritten, whether it holds files or not, since a seed block may be appended again in the
     # earlier form
     places = {old: LAYOUT[k] for k, olds in OLDER.items() for old in olds}
-    changed = [f for f in (".gitignore", ".gitattributes") if _rewrite_paths(os.path.join(p4, f), places)]
     own = commit and _own_repo(p4)
-    gone = [f for _, rel in _olds(p4) for f in _tracked(p4, rel)] if own else []
+    if own:
+        try:
+            _JOURNAL[:] = [p4, open(_pending_path(p4), "a", encoding="utf-8")]
+        except OSError:
+            pass
+    try:
+        _moves(p4, places, lines, done)
+    finally:
+        if _JOURNAL:
+            _JOURNAL[1].close()
+            del _JOURNAL[:]
+    if own and os.path.isfile(_pending_path(p4)):
+        _commit_journal(p4)
+    return lines
+
+
+def _moves(p4, places, lines, done):
+    for f in (".gitignore", ".gitattributes"):
+        _note_blob(p4, f, places)
+        _rewrite_paths(os.path.join(p4, f), places)
     for k, rel in _olds(p4):
         src, dst = os.path.join(p4, *rel.split("/")), sub(p4, k)
         plugin = LAYOUT[k].split("/")[0]
@@ -538,9 +725,6 @@ def _migrate(p4, commit):
                 os.utime(p)
             except OSError:
                 pass
-    if own and done:
-        _commit_moves(p4, gone, _LANDED, changed)
-    return lines
 
 
 def _merge(base, over, unknown, prefix=""):

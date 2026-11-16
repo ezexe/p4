@@ -495,7 +495,8 @@ class Layout(unittest.TestCase):
         self.assertEqual(p4conf.migrate_layout(self.p4), [])
 
     def test_the_layout_commit_holds_the_move_and_nothing_else(self):
-        """A pending hook edit stays pending, and a seed line appended again in the earlier form is not left twice."""
+        """A pending hook edit stays pending, a seed block appended to .gitignore before the start stays an edit of
+        its own rather than going into the layout commit, and its line in the earlier form is not left twice."""
         if not self.git:
             self.skipTest("no git")
         put(os.path.join(self.p4, "phi", "store", "facts.md"), "a fact\n")
@@ -510,8 +511,9 @@ class Layout(unittest.TestCase):
             f.write("# seeded by p4-recall\nmodels/index.json\n")
         p4conf.migrate_layout(self.p4)
         committed = self.g("show", "--name-only", "--format=", "HEAD").split()
-        self.assertEqual(sorted(committed), [".gitignore", "phi/models/tasks.tsv", "phi/store/messages/old.md"])
-        self.assertEqual(self.g("status", "--porcelain").strip(), "M phi/store/facts.md")
+        self.assertEqual(sorted(committed), ["phi/models/tasks.tsv", "phi/store/messages/old.md"])
+        status = sorted(self.g("status", "--porcelain").split())
+        self.assertEqual(status, [".gitignore", "M", "M", "phi/store/facts.md"])
         self.assertEqual(read(os.path.join(self.p4, ".gitignore")).splitlines().count("phi/models/index.json"), 1)
 
     def test_a_flat_line_for_a_folder_that_never_existed_is_rewritten_too(self):

@@ -114,6 +114,153 @@ class P4Conf(unittest.TestCase):
         self.assertEqual(git("status", "--porcelain", "--", "archive", "phi/archive"), "")
         self.assertIn("layout", git("log", "-1", "--format=%s"))
 
+    def store(self, places=("archive",), n=20):
+        """A git store with `n` tracked files in each earlier place -> a git function on it."""
+        import subprocess
+        git = lambda *a: subprocess.run(["git", "-C", self.p4, *a], capture_output=True, text=True, check=True).stdout
+        for place in places:
+            for i in range(n):
+                f = os.path.join(self.p4, place, f"a{i}.md")
+                os.makedirs(os.path.dirname(f), exist_ok=True)
+                with open(f, "w", encoding="utf-8") as h:
+                    h.write(str(i))
+        with open(os.path.join(self.p4, ".gitignore"), "w", encoding="utf-8") as h:
+            h.write("archive/*.tmp\n")
+        git("init", "-q")
+        git("add", "-A")
+        git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "before")
+        return git
+
+    def cut(self, name, at=1):
+        """Run a start whose `name` is cut at its `at`-th call, as a hook's timeout cuts it."""
+        real, calls = getattr(p4conf, name), []
+
+        def killed(*a, **k):
+            calls.append(1)
+            if len(calls) >= at:
+                raise KeyboardInterrupt("the hook's timeout")
+            return real(*a, **k)
+        setattr(p4conf, name, killed)
+        try:
+            with self.assertRaises(KeyboardInterrupt):
+                p4conf.migrate_layout(self.p4)
+        finally:
+            setattr(p4conf, name, real)
+
+    def test_a_move_cut_before_its_commit_is_committed_at_the_next_start(self):
+        """A start hook killed after the renames and before the commit leaves the move for the next start, which finds
+        nothing left to move and still commits it."""
+        git = self.store()
+        self.cut("_commit_journal")
+        self.assertNotIn("archive", os.listdir(self.p4), "the renames were done")
+        self.assertNotEqual(git("status", "--porcelain"), "", "and not committed")
+        p4conf.migrate_layout(self.p4)
+        self.assertEqual(git("status", "--porcelain"), "")
+        self.assertIn("layout", git("log", "-1", "--format=%s"))
+        self.assertEqual(len(git("ls-files", "phi/archive").split()), 20)
+        self.assertFalse(os.path.exists(p4conf._pending_path(self.p4)))
+
+    def test_a_commit_that_returns_without_committing_keeps_the_record(self):
+        git = self.store()
+        real = p4conf.subprocess.run
+
+        def no_ref(cmd, *a, **k):
+            if "update-ref" in cmd:
+                return p4conf.subprocess.CompletedProcess(cmd, 1, b"", b"cannot lock ref")
+            return real(cmd, *a, **k)
+        p4conf.subprocess.run = no_ref
+        try:
+            p4conf.migrate_layout(self.p4)
+        finally:
+            p4conf.subprocess.run = real
+        self.assertTrue(os.path.isfile(p4conf._pending_path(self.p4)), "kept until the commit is in HEAD")
+        self.assertNotIn("layout", git("log", "-1", "--format=%s"))
+        p4conf.migrate_layout(self.p4)
+        self.assertIn("layout", git("log", "-1", "--format=%s"))
+        self.assertEqual(git("status", "--porcelain"), "")
+
+    def test_an_edit_between_two_starts_stays_out_of_the_layout_commit(self):
+        """The commit holds what the move wrote: a file edited at its new place and a .gitignore edited after the
+        rewrite, between the cut start and the next, stay uncommitted."""
+        git = self.store()
+        self.cut("_commit_journal")
+        moved = p4conf.sub(self.p4, "archive", "a3.md")
+        with open(moved, "w", encoding="utf-8") as h:
+            h.write("edited after the move")
+        with open(os.path.join(self.p4, ".gitignore"), "a", encoding="utf-8") as h:
+            h.write("edited.tmp\n")
+        p4conf.migrate_layout(self.p4)
+        self.assertIn("layout", git("log", "-1", "--format=%s"))
+        self.assertEqual(git("show", "HEAD:phi/archive/a3.md"), "3")
+        self.assertEqual(git("show", "HEAD:.gitignore"), "phi/archive/*.tmp\n")
+        self.assertEqual(sorted(git("status", "--porcelain").split()), [".gitignore", "M", "M", "phi/archive/a3.md"])
+
+    def test_a_start_cut_in_its_renames_is_finished_and_committed_at_the_next(self):
+        git = self.store(places=("archive", "store"))
+        self.cut("_move", at=2)
+        self.assertNotIn("store", os.listdir(self.p4), "the first place moved")
+        self.assertIn("archive", os.listdir(self.p4), "the second not")
+        p4conf.migrate_layout(self.p4)
+        self.assertEqual(git("status", "--porcelain"), "")
+        self.assertEqual(len(git("ls-files", "phi/archive", "phi/store").split()), 40)
+        self.assertEqual(git("ls-files", "archive", "store"), "")
+
+    def test_a_failed_ignore_check_commits_no_untracked_file_and_keeps_the_record(self):
+        git = self.store()
+        with open(os.path.join(self.p4, "archive", "cache.bin"), "w", encoding="utf-8") as h:
+            h.write("never tracked")
+        real = p4conf.subprocess.run
+
+        def broken(cmd, *a, **k):
+            if "check-ignore" in cmd:
+                return p4conf.subprocess.CompletedProcess(cmd, 128, b"", b"fatal")
+            return real(cmd, *a, **k)
+        p4conf.subprocess.run = broken
+        try:
+            p4conf.migrate_layout(self.p4)
+        finally:
+            p4conf.subprocess.run = real
+        self.assertTrue(os.path.isfile(p4conf._pending_path(self.p4)))
+        self.assertNotIn("layout", git("log", "-1", "--format=%s"))
+        p4conf.migrate_layout(self.p4)
+        self.assertIn("phi/archive/cache.bin", git("ls-files", "phi/archive").split())
+
+    def test_an_edit_to_gitignore_before_the_start_stays_out_of_the_layout_commit(self):
+        git = self.store()
+        with open(os.path.join(self.p4, ".gitignore"), "a", encoding="utf-8") as h:
+            h.write("mine.tmp" + chr(10))
+        p4conf.migrate_layout(self.p4)
+        self.assertEqual(git("show", "HEAD:.gitignore"), "phi/archive/*.tmp" + chr(10))
+        self.assertEqual(git("status", "--porcelain"), " M .gitignore" + chr(10))
+        with open(os.path.join(self.p4, ".gitignore"), encoding="utf-8") as h:
+            self.assertEqual(h.read(), "phi/archive/*.tmp" + chr(10) + "mine.tmp" + chr(10))
+
+    def test_a_record_with_a_half_written_last_line_is_still_committed(self):
+        git = self.store()
+        self.cut("_commit_journal")
+        with open(p4conf._pending_path(self.p4), "a", encoding="utf-8") as h:
+            h.write('{"m": ["archive/a1')
+        p4conf.migrate_layout(self.p4)
+        self.assertFalse(os.path.exists(p4conf._pending_path(self.p4)))
+        self.assertEqual(git("status", "--porcelain"), "")
+
+    def test_a_worktree_records_its_move_in_its_own_git_directory(self):
+        import subprocess
+        self.store()
+        wt = os.path.join(self.p4, "..", os.path.basename(self.p4) + "-wt")
+        self.addCleanup(shutil.rmtree, wt, True)
+        subprocess.run(["git", "-C", self.p4, "worktree", "add", "-q", wt], capture_output=True, check=True)
+        gd = subprocess.run(["git", "-C", wt, "rev-parse", "--absolute-git-dir"], capture_output=True, text=True,
+                            check=True).stdout.strip()
+        self.assertEqual(os.path.normcase(os.path.normpath(p4conf._pending_path(wt))),
+                         os.path.normcase(os.path.normpath(os.path.join(gd, p4conf.PENDING))))
+        self.p4 = wt
+        git = lambda *a: subprocess.run(["git", "-C", wt, *a], capture_output=True, text=True, check=True).stdout
+        self.cut("_commit_journal")
+        p4conf.migrate_layout(wt)
+        self.assertEqual(git("status", "--porcelain"), "")
+        self.assertEqual(len(git("ls-files", "phi/archive").split()), 20)
+
     def test_a_missing_file_is_written_with_every_default(self):
         s = p4conf.load(self.p4)
         self.assertEqual(s, p4conf.DEFAULTS)
