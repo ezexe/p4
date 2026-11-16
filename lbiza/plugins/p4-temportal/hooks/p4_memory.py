@@ -77,15 +77,64 @@ def project_slug(root):
     return re.sub(r"[^A-Za-z0-9]", "-", os.path.normpath(root))
 
 
+def repo_root(root):
+    """The main checkout of the git repository holding root, read from the `.git` files without running git: a
+    worktree's `.git` file names its gitdir, whose `commondir` leads to the main `.git`. Outside a repository, root."""
+    d = os.path.abspath(root)
+    while True:
+        dot = os.path.join(d, ".git")
+        if os.path.isdir(dot):
+            return d
+        if os.path.isfile(dot):
+            try:
+                with open(dot, encoding="utf-8", errors="replace") as f:
+                    gitdir = f.read().strip().split("gitdir:", 1)[1].strip()
+                gitdir = os.path.normpath(os.path.join(d, gitdir))
+                with open(os.path.join(gitdir, "commondir"), encoding="utf-8", errors="replace") as f:
+                    common = os.path.normpath(os.path.join(gitdir, f.read().strip()))
+                return os.path.dirname(common)
+            except (OSError, IndexError):
+                return d
+        up = os.path.dirname(d)
+        if up == d:
+            return os.path.abspath(root)
+        d = up
+
+
+def setting(root, name):
+    """A key of Claude Code's settings by its precedence, local over project over user, or None."""
+    home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    for path in (os.path.join(root, ".claude", "settings.local.json"), os.path.join(root, ".claude", "settings.json"),
+                 os.path.join(home, "settings.json")):
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and name in data:
+            return data[name]
+    return None
+
+
+def not_main_checkout(root, app, mem):
+    """A worktree or a subdirectory shares the main checkout's auto memory directory, whose pointer names the main
+    checkout's store, so only a session at the main checkout moves files into it or writes its pointer."""
+    return norm(repo_root(root)) != norm(root) and norm(app) != norm(mem)
+
+
 def appdata_memory(payload, root):
-    """The auto memory directory, `~/.claude/projects/<slug>/memory`, beside the transcript the payload names."""
+    """The auto memory directory as https://code.claude.com/docs/en/memory sets it: `autoMemoryDirectory` when it is
+    an absolute or `~/` path, else `<config>/projects/<project>/memory`, where <project> is
+    CLAUDE_CODE_PROJECT_DIR_NAME or the slug of the git repository's main checkout, so worktrees and subdirectories
+    share one."""
     if os.environ.get("P4_MEMORY_APPDATA"):          # tests point it at a fixture
         return os.environ["P4_MEMORY_APPDATA"]
-    tp = str(payload.get("transcript_path") or "")
-    if tp:
-        return os.path.join(os.path.dirname(tp), MEMORY)
+    moved = setting(root, "autoMemoryDirectory")
+    if isinstance(moved, str) and (moved.startswith("~/") or os.path.isabs(moved)):
+        return os.path.normpath(os.path.expanduser(moved))
     home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-    return os.path.join(home, "projects", project_slug(root), MEMORY)
+    name = os.environ.get("CLAUDE_CODE_PROJECT_DIR_NAME") or project_slug(repo_root(root))
+    return os.path.join(home, "projects", name, MEMORY)
 
 
 def p4_memory(root):
@@ -206,6 +255,8 @@ def migrate(app, mem, stamp):
     """-> (lines to print, done), done when nothing but the pointer is left in the auto memory directory."""
     lines = []
     os.makedirs(mem, exist_ok=True)
+    if norm(app) == norm(mem) or (same_dir(app, mem) and not is_link(app)):   # autoMemoryDirectory is the store
+        return lines, True
     if is_link(app):
         if not same_dir(app, mem):                       # a link somewhere else: ezexe's arrangement
             return [f"{app} is a link that does not reach .claude/p4/temportal/memory/; "
@@ -272,7 +323,7 @@ def notice(parts):
 def cmd_migrate(payload):
     root = project_root(payload)
     app, mem = appdata_memory(payload, root), p4_memory(root)
-    parts, _ = migrate(app, mem, time.strftime("%Y%m%d-%H%M%S"))
+    parts = [] if not_main_checkout(root, app, mem) else migrate(app, mem, time.strftime("%Y%m%d-%H%M%S"))[0]
     out = notice(parts)
     head = out + "\n" if out else ""
     kept, total = builtin_index(mem)    # Claude Code loaded only the pointer: print what it would have loaded
@@ -316,7 +367,7 @@ def cmd_mirror(payload):
         return 0
     root = project_root(payload)
     app, mem = appdata_memory(payload, root), p4_memory(root)
-    if is_link(app):
+    if is_link(app) or norm(app) == norm(mem) or not_main_checkout(root, app, mem):
         return 0
     n_app, n_fp = norm(app), norm(fp)
     if not n_fp.startswith(n_app + os.sep) or not os.path.isfile(fp):
@@ -355,6 +406,8 @@ def cmd_sweep(payload):
     """Stop: what the start could not move or delete is tried again at turn end. Prints nothing."""
     root = project_root(payload)
     app, mem = appdata_memory(payload, root), p4_memory(root)
+    if not_main_checkout(root, app, mem):
+        return 0
     pending = is_link(app) or (
         os.path.isdir(app) and any(n != "MEMORY.md" or not is_pointer(os.path.join(app, n)) for n in os.listdir(app)))
     if pending or not os.path.isdir(app):

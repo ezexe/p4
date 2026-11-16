@@ -295,7 +295,70 @@ def crlf_cut():
     print("test_p4_memory.py: CRLF cut green")
 
 
+def repo_key():
+    """The auto memory directory is keyed by the git repository, so a worktree and a subdirectory find the main
+    checkout's; CLAUDE_CODE_PROJECT_DIR_NAME names it instead, and autoMemoryDirectory moves it."""
+    base = tempfile.mkdtemp(prefix="p4-temportal-memory-key-")
+    keys = ("P4_MEMORY_APPDATA", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PROJECT_DIR_NAME", "CLAUDE_PROJECT_DIR")
+    saved = {k: os.environ.pop(k, None) for k in keys}
+    try:
+        sys.path.insert(0, HERE)
+        import p4_memory
+        config = os.path.join(base, "config")
+        os.environ["CLAUDE_CONFIG_DIR"] = config
+        main_ = os.path.join(base, "repo")
+        os.makedirs(os.path.join(main_, ".git", "worktrees", "wt"))
+        put(os.path.join(main_, ".git", "worktrees", "wt", "commondir"), "../..\n")
+        wt = os.path.join(base, "wt")
+        put(os.path.join(wt, ".git"), f"gitdir: {os.path.join(main_, '.git', 'worktrees', 'wt')}\n")
+        sub = os.path.join(main_, "src")
+        os.makedirs(sub)
+        want = os.path.join(config, "projects", p4_memory.project_slug(main_), "memory")
+        wt_transcript = os.path.join(config, "projects", p4_memory.project_slug(wt), "s.jsonl")
+        for where, payload in ((main_, {}), (sub, {}), (wt, {}), (wt, {"transcript_path": wt_transcript})):
+            got = p4_memory.appdata_memory(payload, where)
+            assert os.path.normpath(got) == os.path.normpath(want), f"{where} {payload}: {got}, not {want}"
+        os.environ["CLAUDE_CODE_PROJECT_DIR_NAME"] = "named"
+        got = p4_memory.appdata_memory({}, wt)
+        assert os.path.normpath(got) == os.path.join(config, "projects", "named", "memory"), got
+        del os.environ["CLAUDE_CODE_PROJECT_DIR_NAME"]
+        put(os.path.join(wt, ".claude", "settings.local.json"), json.dumps({"autoMemoryDirectory": "~/moved"}))
+        got = p4_memory.appdata_memory({}, wt)
+        assert os.path.normpath(got) == os.path.join(os.path.expanduser("~"), "moved"), got
+        # the main checkout writes the shared folder's pointer; a subdirectory and a worktree leave it and its files
+        shared = os.path.join(base, "shared", "memory")
+        put(os.path.join(main_, ".claude", "p4", "temportal", "memory", "MEMORY.md"), "- [m](m.md) — m\n")
+        run("migrate", main_, shared, {})
+        pointer = read(os.path.join(shared, "MEMORY.md"))
+        assert os.path.normpath(os.path.join(main_, ".claude", "p4", "temportal", "memory")) in pointer, pointer
+        put(os.path.join(shared, "n.md"), "fact n\n")
+        for other in (sub, wt):
+            run("migrate", other, shared, {})
+            w = {"tool_name": "Write", "tool_input": {"file_path": os.path.join(shared, "n.md")}}
+            run("mirror", other, shared, w)
+            run("sweep", other, shared, {})
+            assert read(os.path.join(shared, "MEMORY.md")) == pointer, f"{other} rewrote the main checkout's pointer"
+            assert os.path.isfile(os.path.join(shared, "n.md")), f"{other} moved a file into its own store"
+        os.remove(os.path.join(shared, "n.md"))
+        # autoMemoryDirectory set to the store itself: the index stays, no pointer is written over it
+        store = os.path.join(main_, ".claude", "p4", "temportal", "memory")
+        put(os.path.join(store, "MEMORY.md"), "- [a](a.md) — a\n")
+        assert run("migrate", main_, store, {}) == "- [a](a.md) — a" and read(os.path.join(store, "MEMORY.md")) == \
+            "- [a](a.md) — a\n", "the store's index was replaced by the pointer"
+        run("sweep", main_, store, {})
+        assert read(os.path.join(store, "MEMORY.md")) == "- [a](a.md) — a\n", "turn end wrote over the store's index"
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        shutil.rmtree(base, ignore_errors=True)
+    print("test_p4_memory.py: repository key green")
+
+
 def main():
+    repo_key()
     crlf_cut()
     behavior()
     gate2_a()
