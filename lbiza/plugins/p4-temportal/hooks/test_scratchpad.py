@@ -782,7 +782,18 @@ def tmp_staged_copy_cases():
         assert git("ls-files", "--", f"{orel}/export").split() == [f"{orel}/export/held.md"], "held.md left the index"
         # that held file edited on disk: tmp-close removes the note and commits no change to the file of the copy
         put(theirs, "export/held.md", "edited on disk\n")
+        # the dry run of ended-sweep names the same removals the real close makes: the note alone
+        put(os.path.join(p4, "phi", "sessions", "local_6"), "session.json",
+            json.dumps({"sessionId": "local_6", "cliSessionIds": [other], "archived": "2026-11-16 20:00"}))
+        for d, _dirs, names in os.walk(theirs):
+            age(d, *[os.path.join(d, n) for n in names])
+        dry = subprocess.run([sys.executable, "-I", SCRIPT, "ended-sweep", "--dry-run", "--root", root],
+                             capture_output=True, stdin=subprocess.DEVNULL, timeout=120, env=env_with(tmp_env))
+        row = "".join(x for x in dry.stdout.decode("utf-8", "replace").splitlines() if x.startswith(f"- {orel}/ "))
+        on_disk = {n for n in os.listdir(theirs)} | {"export/" + n for n in os.listdir(os.path.join(theirs, "export"))}
         assert run("tmp-close", other) == "", "tmp-close spoke"
+        gone = sorted(n for n in on_disk if not os.path.exists(os.path.join(theirs, *n.split("/"))))
+        assert f"would remove {len(gone)}" in row, f"the dry run planned {row!r}, the close removed {gone}"
         changes = git("log", "--format=%s", "--", f"{orel}/export/held.md").splitlines()
         assert changes == ["held"], f"tmp-close changed the copy's file in history: {changes}"
         assert git("show", f"HEAD:{orel}/export/held.md") == "held by a commit\n", "tmp-close committed the edit"

@@ -868,8 +868,11 @@ def plan_tmp(p4, sid):
         got = r.stdout.decode("ascii", "replace").split() if r and r.returncode == 0 else []
         if len(got) == len(remove):
             now_is = dict(zip(remove, got))
+    # a committed file of a copy is never staged, so close_tmp removes it only while it is as committed
+    copied = [r for r in remove if r in held and left_out and r.startswith(left_out)]
+    remove = [r for r in remove if r not in copied or now_is.get(r, held[r]) == held[r]]
     out["remove"] = remove
-    out["commit"] = [r for r in remove if r not in held or now_is.get(r) != held[r]]
+    out["commit"] = [r for r in remove if r not in copied and (r not in held or now_is.get(r) != held[r])]
     out["left"] = max(0, files - len(remove))
     return out
 
