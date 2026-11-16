@@ -23,6 +23,16 @@ class SkillCommands(unittest.TestCase):
             self.assertNotRegex(c, r"\bpython3?\b|\bpy\b", c)
             self.assertTrue(c.strip().startswith(RUN), c)
 
+    def test_project_and_session_are_not_left_to_fill(self):
+        # ezexe/p4#113: lifetime.py finds the store from CLAUDE_PROJECT_DIR or the working directory without --p4,
+        # and Claude Code substitutes ${CLAUDE_SESSION_ID} in a skill body.
+        text = SKILL.read_text(encoding="utf-8")
+        self.assertNotIn("<project>", text)
+        self.assertNotIn("<session id>", text)
+        self.assertNotIn("--p4", text)
+        self.assertNotIn("CLAUDE_PROJECT_DIR", text)
+        self.assertIn("--session ${CLAUDE_SESSION_ID}", text)
+
 
 if __name__ == "__main__":
     unittest.main()

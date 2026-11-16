@@ -5,7 +5,7 @@ description: Where this project keeps its auto memory, each session's scratchpad
 
 # temportal
 
-p4-temportal keeps in `<project>/.claude/p4/temportal/` the files Claude Code would write to the auto memory directory under `~/.claude/projects/` and to a session's scratchpad directory under the system temp directory.
+p4-temportal keeps in the project's `.claude/p4/temportal/` the files Claude Code would write to the auto memory directory under `~/.claude/projects/` and to a session's scratchpad directory under the system temp directory.
 Transcripts, plans, file history and subagent memory stay where Claude Code puts them.
 Until `.claude/p4` is a git repository of its own, which p4-phi makes it, no scratchpad directory is committed or removed.
 
@@ -29,10 +29,10 @@ The retention sweep clears what is past its lifetime at each session start and s
 Set a cookie:
 
 ```bash
-CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}" sh "${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh" lifetime --p4 "<project>/.claude/p4" set "<path under temportal/>" 7d
+CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}" sh "${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh" lifetime set "<path under temportal/>" 7d
 ```
 
-The lifetime is `30m`, `12h`, `7d`, `2w`, an ISO date, or `session` with `--session <session id>` to clear it when this session ends.
+The lifetime is `30m`, `12h`, `7d`, `2w`, an ISO date, or `session` with `--session ${CLAUDE_SESSION_ID}` to clear it when this session ends.
 `list` shows every cookie and cache rule, `clear <path>` removes an expiry and keeps the file, and `now` runs the retention sweep at once.
 A path under `memory/` is refused.
 A tracked file that is cleared keeps its last version in the store's git history.
