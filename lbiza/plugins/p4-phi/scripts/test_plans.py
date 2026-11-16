@@ -1007,6 +1007,32 @@ class TopOrchestrates(unittest.TestCase):
         self.assertIn("4", why)
         self.assertIn("5", why)
 
+    def test_a_top_sessions_check_steps_go_to_children(self):
+        plan = {"steps": [{"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate((
+            "Check 1: nothing hidden in AppData or %TEMP%", "Verify phi's session tree matches the app",
+            "Check the docs child's progress", "Commit locally", "Sync the store"))]}
+        groups, kept = plans.top_groups(plan, "")
+        # the issue wrote [["1", "2"]] against 280a473; since #48 two steps that share no file each get a child
+        self.assertEqual([[st["addr"] for st in g] for g in groups], [["1"], ["2"]])
+        self.assertEqual([a for a, _ in kept], ["3", "4", "5"], "only landing and managing a child stay on the top")
+
+    def test_one_function_answers_for_the_advice_and_the_nudge(self):
+        """#52: top_groups and nudge_step read the same patterns in two places, and could disagree."""
+        for work in ("Verify the tree", "Confirm the store holds no stray file", "Validate the manifest in src/m.json",
+                     "Check 3: confirm the docs match the code", "Audit the hooks for a missing matcher",
+                     "Inspect the anchor for stale nodes", "Write the sync script in src/sync.py"):
+            self.assertEqual(plans.top_stays(work), "", work)
+        for stays in ("Sync the store", "Sync each store with p4.py sync --push", "Check the docs child's progress",
+                      "Verify the sub-session's report", "Check the session's own landed work", "Merge and push main",
+                      "Confirm the fix, then commit", "Wait until the port lands", "Tell the docs session to go"):
+            self.assertTrue(plans.top_stays(stays), stays)
+        self.plan(TOP, items("Verify phi's session tree matches the app", "Sync the store"))
+        s = relay._session(self.t.p4, TOP)
+        self.assertEqual((phi.nudge_step(self.t.p4, s) or {}).get("content"),
+                         "Verify phi's session tree matches the app", "the top is nudged to hand it off")
+        self.plan(TOP, {"advance": True})
+        self.assertIsNone(phi.nudge_step(self.t.p4, relay._session(self.t.p4, TOP)), "syncing a store is its own")
+
     def test_queueing_sending_passing_or_handing_to_a_session_is_orchestration(self):
         groups, kept = plans.top_groups({"steps": [
             {"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate((

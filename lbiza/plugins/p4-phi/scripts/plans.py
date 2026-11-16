@@ -482,25 +482,46 @@ def split_advice(home, s, plan, owner_turn, cap):
 # order. A step that checks or lands work (test-and-commit, merge, push, release), waits on and relays work, or
 # manages a child session (archives, relays to, messages, starts, reviews or checks one) stays.
 
+# #52: a step that begins with one of these is read-only work of its own, a child's: "Verify phi's session tree
+# matches the app" stayed at the top on WAITS, which matches `verif` and `confirm` anywhere and was tried before the
+# step was read as work. It stays only when it names a child or a sub-session, or checks or lands the work.
+CHECK_WORK = re.compile(r"^\W*(?:re-?)?(?:check|verify|validate|audit|inspect|confirm)\w*\b", re.I)
+CHILD_WORD = re.compile(r"\b(?:child(?:ren)?(?:'s|’s)?|sub-?sessions?)\b", re.I)
+# syncing a store is landing work: the top session is the one that pushes and syncs each store
+SYNCS = re.compile(r"^\W*(?:re-?)?sync(?:s|ed|ing|hronis\w+|hroniz\w+)?\b"
+                   r"|\bsync(?:s|ed|ing)?\s+(?:[\w'’-]+\s+){0,3}?stores?\b|\bp4\.py\s+sync\b", re.I)
+
+
+def top_stays(text):
+    """Why a top session keeps a step itself, or '' for a work step that goes to a child. The one answer for
+    top_groups and for phi.nudge_step, so the advice and the nudge never disagree."""
+    text = str(text or "")
+    if LANDS.search(text) or SYNCS.search(text):
+        return "checks or lands the work"
+    if ORCHESTRATES.search(text):
+        return "starts a check, test or session, which is orchestration"
+    checks = CHECK_WORK.match(text)
+    if CHILD_WORD.search(text) if checks else MANAGES.search(text):
+        return "manages a child session, which is orchestration"
+    if TABULATES.search(text):
+        return "compiles or reports the other steps' results"
+    if TRACKS.search(text):
+        return "tracks what another session or ezexe does or decides"
+    wait = WAITS.search(text)
+    if wait and not checks:
+        return f"waits on or relays work (\"{wait.group(0)}\")"
+    return ""
+
+
 def top_groups(plan, cwd):
     """The open steps of a top session's plan -> ([[work steps one child does in order]], [(address, why it stays)])."""
     steps = [st for st in plan.get("steps") or [] if st.get("status") != "completed"]
     groups, kept, run = [], [], []
     for st in steps:
         text = st.get("content", "")
-        wait = WAITS.search(text)
-        if LANDS.search(text):
-            kept.append((st["addr"], "checks or lands the work"))
-        elif ORCHESTRATES.search(text):
-            kept.append((st["addr"], "starts a check, test or session, which is orchestration"))
-        elif MANAGES.search(text):
-            kept.append((st["addr"], "manages a child session, which is orchestration"))
-        elif TABULATES.search(text):
-            kept.append((st["addr"], "compiles or reports the other steps' results"))
-        elif TRACKS.search(text):
-            kept.append((st["addr"], "tracks what another session or ezexe does or decides"))
-        elif wait:
-            kept.append((st["addr"], f"waits on or relays work (\"{wait.group(0)}\")"))
+        why = top_stays(text)
+        if why:
+            kept.append((st["addr"], why))
         else:
             mine = relay.paths_in(text, cwd)
             serial = run and (DEPENDS.search(text) or any(relay.overlap(p, q) for p in mine for o in run
