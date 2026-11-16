@@ -106,6 +106,23 @@ class Lifetime(unittest.TestCase):
                 cleared[key] = gone + [line]
         self.assertEqual(cleared, {}, "a cache rule cleared files outside its own folder under temportal/")
 
+    def test_older_copies_a_layout_move_set_aside_in_phi_are_cleared_too(self):
+        """The rule of .layout-conflicts clears phi/.layout-conflicts/ as it clears temportal/.layout-conflicts/, and
+        the removal of a copy the store's git tracks is staged."""
+        old_t = put(os.path.join(self.t, ".layout-conflicts", "memory", "a.md"), age_days=31)
+        old_phi = put(os.path.join(self.p4, "phi", ".layout-conflicts", "store", "facts.md"), age_days=31)
+        new_phi = put(os.path.join(self.p4, "phi", ".layout-conflicts", "store", "rules.md"), age_days=1)
+        git = shutil.which("git")
+        if git:
+            g = lambda *a: subprocess.run([git, "-C", self.p4, *a], capture_output=True, text=True, check=True).stdout
+            g("init", "-q")
+            g("add", "-A")
+            g("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "store")
+        line = lifetime.sweep(self.p4)
+        self.assertEqual([os.path.exists(p) for p in (old_t, old_phi, new_phi)], [False, False, True], line)
+        if git:
+            self.assertIn("D\tphi/.layout-conflicts/store/facts.md", g("diff", "--cached", "--name-status"))
+
     def test_a_cookie_expires(self):
         page = put(os.path.join(self.t, "scratchpad", "page.html"))
         keep = put(os.path.join(self.t, "scratchpad", "keep.md"))

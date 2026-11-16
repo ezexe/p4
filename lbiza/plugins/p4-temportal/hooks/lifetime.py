@@ -3,12 +3,13 @@
 
 Two kinds of lifetime clear files, as a browser clears its cache and its cookies. A cache rule per folder, in the
 p4.json section `temportal.cache` with paths relative to temportal/, clears the files older than `max_age_days`, and
-then the oldest files while the folder holds more than `max_mb`. A cookie is one file or folder with its own expiry,
-set by `lifetime.py set <path> <lifetime>` and kept in temportal/expires.json, and the lifetime `session` clears it
-when the session that set it ends. A cache rule whose path resolves to memory/, in any letter case, or to a folder
-outside temportal/ clears nothing. A cookie is refused inside memory/, on tmp/ or anything in it, and on scratchpad/,
-src/ or expires.json themselves: a session scratchpad directory in tmp/ is committed before it is removed, and the
-others are never cleared whole.
+then the oldest files while the folder holds more than `max_mb`. The rule of `.layout-conflicts` clears the store's
+phi/.layout-conflicts/ too, where a layout move sets aside the older copies of phi's files. A cookie is one file or
+folder with its own expiry, set by `lifetime.py set <path> <lifetime>` and kept in temportal/expires.json, and the
+lifetime `session` clears it when the session that set it ends. A cache rule whose path resolves to memory/, in any
+letter case, or to a folder outside temportal/ clears nothing. A cookie is refused inside memory/, on tmp/ or anything
+in it, and on scratchpad/, src/ or expires.json themselves: a session scratchpad directory in tmp/ is committed before
+it is removed, and the others are never cleared whole.
 
 A file the store's git tracks is removed with its removal staged, so its last version stays in the history, and an
 ignored or untracked file is deleted.
@@ -45,6 +46,8 @@ import p4conf  # noqa: E402 - the settings file, .claude/p4/p4.json
 EXPIRES = "expires.json"
 NEVER = ("memory",)                     # folders no lifetime ever clears
 WHOLE = ("scratchpad", "src", EXPIRES)  # the notebook, the saved code and the cookies, which no cookie clears whole
+# the other plugins' folders of the layout, where a layout move sets copies aside in a .layout-conflicts/ of their own
+ASIDE = sorted({place.split("/")[0] for place in p4conf.LAYOUT.values()} - {"temportal"})
 UNITS = {"m": 60, "h": 3600, "d": 86400, "w": 7 * 86400}
 SESSION = "session"
 
@@ -233,41 +236,49 @@ def _prune_empty(d, keep):
 
 
 def sweep_cache(p4, now=None):
-    """Clear by each cache rule in the folder its key resolves to under temportal/ -> [(folder, files cleared)]."""
+    """Clear by each cache rule in the folder its key resolves to under temportal/, and by the rule of
+    .layout-conflicts in each other plugin's folder of that name too -> [(folder from temportal/, files cleared)]."""
     now = time.time() if now is None else now
     out = []
     for key, rule in sorted(rules(p4).items()):
         rel = rel_in(p4, key.strip("/"))
         if not rel or never(rel) or not isinstance(rule, dict):
             continue
-        d = os.path.join(home(p4), *rel.split("/"))
-        if not os.path.isdir(d):
-            continue
-        files = sorted(_files(d))                       # oldest first
-        gone = 0
-        age = rule.get("max_age_days")
-        if age is not None:
-            cutoff = now - float(age) * 86400
-            keep = []
-            for mt, size, p in files:
-                if mt < cutoff and not os.path.basename(p) == ".gitignore" and remove(p):
-                    gone += 1
-                else:
-                    keep.append((mt, size, p))
-            files = keep
-        cap = rule.get("max_mb")
-        if cap is not None:
-            total, limit = sum(s for _, s, _ in files), float(cap) * 1024 * 1024
-            for mt, size, p in files:
-                if total <= limit:
-                    break
-                if os.path.basename(p) != ".gitignore" and remove(p):
-                    total -= size
-                    gone += 1
-        _prune_empty(d, d)
-        if gone:
-            out.append((rel, gone))
+        names = [rel] + ([f"../{plugin}/{rel}" for plugin in ASIDE] if rel == p4conf.LAYOUT_CONFLICTS else [])
+        for name in names:
+            gone = _clear(os.path.normpath(os.path.join(home(p4), *name.split("/"))), rule, now)
+            if gone:
+                out.append((name, gone))
     return out
+
+
+def _clear(d, rule, now):
+    """Clear the folder `d` by one cache rule -> the count of files cleared."""
+    if not os.path.isdir(d):
+        return 0
+    files = sorted(_files(d))                           # oldest first
+    gone = 0
+    age = rule.get("max_age_days")
+    if age is not None:
+        cutoff = now - float(age) * 86400
+        keep = []
+        for mt, size, p in files:
+            if mt < cutoff and not os.path.basename(p) == ".gitignore" and remove(p):
+                gone += 1
+            else:
+                keep.append((mt, size, p))
+        files = keep
+    cap = rule.get("max_mb")
+    if cap is not None:
+        total, limit = sum(s for _, s, _ in files), float(cap) * 1024 * 1024
+        for mt, size, p in files:
+            if total <= limit:
+                break
+            if os.path.basename(p) != ".gitignore" and remove(p):
+                total -= size
+                gone += 1
+    _prune_empty(d, d)
+    return gone
 
 
 def sweep_cookies(p4, now=None, ended_session=""):
@@ -307,6 +318,9 @@ def sweep(p4, now=None, ended_session=""):
         return ""
     if _own_repo(p4):
         _git(p4, "add", "-u", "--", "temportal")
+        for rel, _ in cache:
+            if rel.startswith("../"):                   # a command of its own: git refuses a path it never tracked
+                _git(p4, "add", "-u", "--", rel[3:])
     parts = [f"files past the cache rule: {n}, in {rel}/" for rel, n in cache]
     if cookies:
         shown = ", ".join(cookies[:5]) + (f" and {len(cookies) - 5} more" if len(cookies) > 5 else "")
