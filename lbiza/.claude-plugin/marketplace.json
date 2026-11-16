@@ -4,13 +4,13 @@
     "name": "ezexe"
   },
   "metadata": {
-    "description": "P4: two plugins. p4-temportal keeps Claude Code's memory, notebook and temp files in the repo with lifetimes; p4-phi hands linked sessions their context and recalls the repo's own history next to each message. Each keeps its files in its own directory under .claude/p4/; the design is .docs/p4/fresh-marketplace.md and .docs/p4/recall-node.md."
+    "description": "Two Claude Code plugins: p4-temportal, which keeps in a project's store what Claude Code would keep in its own folders, and p4-phi, which carries what linked sessions hand each other and retrieval from the project's own history."
   },
   "plugins": [
     {
       "name": "p4-temportal",
       "source": "./plugins/p4-temportal",
-      "description": "Keeps every file Claude Code would otherwise write under AppData or the system temp directory in <project>/.claude/p4/temportal/: the memory, the notebook, each session's scratchpad and saved code. Files get lifetimes like a browser's cache and cookies, and what has expired is cleared. Replaces p4-memory and p4-scratchpad.",
+      "description": "Keeps in a project's store what Claude Code would keep in its own folders: the auto memory directory, each session scratchpad directory and other temp files, and clears a file whose lifetime has ended.",
       "version": "0.2.3",
       "category": "productivity",
       "keywords": [
@@ -24,7 +24,7 @@
     {
       "name": "p4-phi",
       "source": "./plugins/p4-phi",
-      "description": "What linked sessions hand each other, and recall from the repo's own history, in one plugin. Every session starts with the store's rules; a started session is given the tasks and notes of the sessions above it, ordered by its own task, and the last turn of the sessions beside it; every finished turn's report reaches the session that started it in full; a message about something else gets a forked session. Recall, the p4-recall plugin until 0.7.0, adds a few lines from the store beside a message or a subagent's task when its ranker is confident, and nothing otherwise. Kept in <project>/.claude/p4/phi/.",
+      "description": "What linked Claude Code sessions hand each other, and retrieval from the project's own history: rule and fact lines beside a message or a subagent's task when the ranker is confident, an earlier answer in place of a repeated web lookup, and what worked after a failure an earlier session met.",
       "version": "0.10.1",
       "category": "productivity",
       "keywords": [
