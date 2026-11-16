@@ -1,5 +1,5 @@
 {
-  "description": "p4-phi: what linked sessions hand each other (run-hook.sh, scripts/phi.py), and recall lines from this repo's own history beside a message or a subagent's task (recall-hook.sh, scripts/hook.py). Each is its own command with its own timeout.",
+  "description": "p4-phi's hooks. run-hook.sh runs scripts/phi.py at SessionStart, UserPromptSubmit and Stop. recall-hook.sh runs scripts/hook.py at every event here, and hook.py hands phi.py its checks around a tool call and at a subagent's stop.",
   "hooks": {
     "SessionStart": [
       {
