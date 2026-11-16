@@ -30,7 +30,9 @@ The scratchpad directory is on unless p4.json's scratchpad.tmp is false or P4_SC
                  contents of a clone, a work tree, a bare repository, a folder holding .claude/p4 or a store with
                  p4.json beside phi/, a copy or export of a repository, which is a folder below the directory's top
                  holding .gitignore, .gitattributes or .claude-plugin/, or a folder named in scratchpad.tmp_skip_dirs.
-                 A scratchpad directory over scratchpad.tmp_max_files has only its tracked files' changes staged, so
+                 A file that an earlier turn end staged in such a repository, store or copy leaves the index again,
+                 while one a commit holds keeps that commit's version there, so no deletion of it is staged. A
+                 scratchpad directory over scratchpad.tmp_max_files has only its tracked files' changes staged, so
                  no file added earlier stays staged after it is gone.
   tmp-close      at SessionEnd, commits the session's scratchpad directory and only then removes its files: its
                  staged files are committed alone, leaving whatever else is staged, the files that commit holds are
@@ -476,13 +478,16 @@ def tmp_rel(sid):
     return p4conf.rel("tmp", sid)
 
 
-def tmp_files(target):
+def tmp_files(target, copies=None):
     """The files of a scratchpad directory that may be staged, as absolute paths: not a link, not over the size cap,
-    and not inside a copy of a repository or a store, by nested_repo. None when there are more than TMP_MAX_FILES, and
-    stage_tmp then stages only the tracked files' changes."""
+    and not inside a copy of a repository or a store, by nested_repo. Each folder below the top that nested_repo leaves
+    out is added to `copies` when it is a list. None when there are more than TMP_MAX_FILES, and stage_tmp then stages
+    only the tracked files' changes."""
     out, cap = [], TMP_MAX_FILE_MB * 1024 * 1024
     for d, dirs, names in os.walk(target):
         if nested_repo(d, dirs, names, top=d == target):
+            if copies is not None and d != target:
+                copies.append(d)
             dirs[:] = []
             continue
         dirs[:] = [x for x in dirs if not skipped_dir(x)]
@@ -532,13 +537,19 @@ def nul(paths):
 
 def stage_tmp(p4, sid):
     """`git add` the session's scratchpad directory: every file tmp_files allows that git does not ignore, and the
-    removal of a tracked file that is gone. False when the directory is too large to stage: then only its tracked files'
-    changes are staged, so a file staged earlier and gone since does not stay staged."""
+    removal of a tracked file that is gone. A file that an earlier turn end staged in a folder nested_repo leaves out
+    is taken out of the index again, while one a commit holds keeps that commit's version there, so no deletion of it
+    is staged. False when the directory is too large to stage: then only its tracked files' changes are staged, so a
+    file staged earlier and gone since does not stay staged."""
     target = p4conf.sub(p4, "tmp", sid)
-    files = tmp_files(target) if os.path.isdir(target) else []
+    copies = []
+    files = tmp_files(target, copies) if os.path.isdir(target) else []
     git_p4(p4, "add", "-u", "--", tmp_rel(sid), timeout=25)
     if files is None:
         return False
+    if copies:
+        git_p4(p4, "--literal-pathspecs", "reset", "-q", "--pathspec-from-file=-", "--pathspec-file-nul",
+               stdin=nul([os.path.relpath(c, p4).replace("\\", "/") for c in copies]), timeout=25)
     rels = [os.path.relpath(f, p4).replace("\\", "/") for f in files]
     if rels:
         ignored = git_p4(p4, "check-ignore", "-z", "--stdin", stdin=nul(rels))
@@ -819,13 +830,15 @@ def close_idle(p4, own, hashdir=None, named=None):
 def plan_tmp(p4, sid):
     """What committing and removing a scratchpad directory would do, changing nothing, the index included ->
     {"files", "bytes", "tops", "over", "commit", "remove", "left"}. `remove` is every file a commit would hold
-    afterwards: the files stage_tmp would add and those the index already tracks. `commit` is those of them HEAD does
-    not hold as they are. `left` counts the files no commit would hold, which stay on disk. Over the cap, `commit` and
-    `remove` are empty and `left` counts every file."""
+    afterwards: the files stage_tmp would add and those the index already tracks. Of those, a file in a folder
+    nested_repo leaves out that HEAD does not hold is not counted, since stage_tmp takes it out of the index. `commit`
+    is those of them HEAD does not hold as they are. `left` counts the files no commit would hold, which stay on disk.
+    Over the cap, `commit` and `remove` are empty and `left` counts every file."""
     d, rel = p4conf.sub(p4, "tmp", sid), tmp_rel(sid)
     files, size, _last, tops, _over = measure(d)
     out = {"files": files, "bytes": size, "tops": tops, "over": False, "commit": [], "remove": [], "left": files}
-    stage = tmp_files(d)
+    copies = []
+    stage = tmp_files(d, copies)
     if stage is None:
         out["over"] = True
         return out
@@ -834,15 +847,17 @@ def plan_tmp(p4, sid):
         ignored = git_p4(p4, "check-ignore", "-z", "--stdin", stdin=nul(rels))
         skip = set(ignored.stdout.decode("utf-8", "surrogateescape").split("\0")) if ignored else set()
         rels = [r for r in rels if r not in skip]
-    tracked = git_out(p4, "ls-files", "-z", "--", rel) or ""
-    remove = sorted(set(rels) | {t for t in tracked.split("\0")
-                                 if t and os.path.isfile(os.path.join(p4, *t.split("/")))})
     held = {}
     tree = git_out(p4, "ls-tree", "-r", "-z", "HEAD", "--", rel) or ""
     for row in tree.split("\0"):
         meta, _, name = row.partition("\t")
         if name:
             held[name] = meta.split()[-1]
+    left_out = tuple(os.path.relpath(c, p4).replace("\\", "/") + "/" for c in copies)
+    tracked = git_out(p4, "ls-files", "-z", "--", rel) or ""
+    remove = sorted(set(rels) | {t for t in tracked.split("\0")
+                                 if t and os.path.isfile(os.path.join(p4, *t.split("/")))
+                                 and (t in held or not t.startswith(left_out))})
     now_is = {}
     if remove and held:
         r = git_p4(p4, "hash-object", "--stdin-paths", stdin="\n".join(remove).encode("utf-8", "surrogateescape"),

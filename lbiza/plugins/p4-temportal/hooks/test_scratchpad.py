@@ -705,6 +705,87 @@ def tmp_export_cases():
     print("test_scratchpad.py: tmp export cases green")
 
 
+def tmp_staged_copy_cases():
+    """Files of a copy or export of a repository that an earlier turn end staged leave the index again, so tmp-close
+    commits and removes the notes alone and the copy stays on disk in no commit. Before tmp-sweep left such a copy out
+    it staged the copy whole, and here the copy is what kept the scratchpad directory over tmp_max_files. The dry run of
+    ended-sweep counts the notes alone too. A file of a copy that a commit already holds stays in the index at a turn
+    end, so no deletion of it is staged."""
+    if not shutil.which("git"):
+        print("test_scratchpad.py: tmp staged copy cases skipped, no git on PATH")
+        return
+    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-staged-")
+    temp = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-temp-")
+    sid, other = "5555eeee-0000-4000-8000-000000000005", "6666ffff-0000-4000-8000-000000000006"
+    tmp_env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp, "CLAUDE_CONFIG_DIR": temp}
+    p4 = os.path.join(root, ".claude", "p4")
+    mine, rel = os.path.join(p4, "temportal", "tmp", sid), f"temportal/tmp/{sid}"
+    theirs, orel = os.path.join(p4, "temportal", "tmp", other), f"temportal/tmp/{other}"
+
+    def git(*args):
+        r = subprocess.run(["git", "-C", p4, "-c", "user.name=t", "-c", "user.email=t@t"] + list(args),
+                           capture_output=True, text=True)
+        assert r.returncode == 0, (args, r.stderr)
+        return r.stdout
+
+    def run(sub, s):
+        return run_sub(sub, {"cwd": root, "session_id": s}, tmp_env, CLAUDE_PROJECT_DIR=root)
+
+    try:
+        os.makedirs(p4)
+        git("init", "-q")
+        put(p4, "p4.json", json.dumps({"scratchpad": {"tmp_max_files": 3}}))
+        put(p4, "first.md", "first\n")
+        git("add", "first.md")
+        git("commit", "-q", "-m", "first")
+        # with the three files of the export the five files are over the cap of three, and the two notes are under it
+        put(mine, "plan.md", "- a plan\n")
+        put(mine, "notes/findings.md", "- a finding\n")
+        put(mine, "work/export/.gitignore", "__pycache__/\n")
+        put(mine, "work/export/README.md", "a repository\n")
+        put(mine, "work/export/pkg/mod.py", "x = 1\n")
+        notes = [f"{rel}/{n}" for n in ("notes/findings.md", "plan.md")]
+        copy = [f"{rel}/work/export/{n}" for n in (".gitignore", "README.md", "pkg/mod.py")]
+        git("add", "--", *copy)                 # an earlier turn end staged the export whole
+        # the session is archived and quiet, so the dry run of ended-sweep plans its close first
+        put(os.path.join(p4, "phi", "sessions", "local_5"), "session.json",
+            json.dumps({"sessionId": "local_5", "cliSessionIds": [sid], "archived": "2026-11-16 20:00"}))
+        for d, _dirs, names in os.walk(mine):
+            age(d, *[os.path.join(d, n) for n in names])
+        dry = subprocess.run([sys.executable, "-I", SCRIPT, "ended-sweep", "--dry-run", "--root", root],
+                             capture_output=True, stdin=subprocess.DEVNULL, timeout=120, env=env_with(tmp_env))
+        row = "".join(x for x in dry.stdout.decode("utf-8", "replace").splitlines() if x.startswith(f"- {rel}/ "))
+        planned = re.search(r"would commit \d+, would remove \d+", row)
+        shown = planned.group(0) if planned else f"no plan in {row!r}"
+        assert run("tmp-close", sid) == "", "tmp-close spoke"
+        kept = git("log", "--format=", "--name-only", "--grep", "kept before its removal").split()
+        print(f"test_scratchpad.py: ended-sweep --dry-run: {shown}; committed by tmp-close: {len(kept)} paths, "
+              f"{len(set(kept) & set(copy))} of them files of the copy an earlier turn end staged")
+        assert git("log", "--all", "--format=", "--name-only", "--", *copy).split() == [], "a commit holds the copy"
+        assert all(os.path.isfile(os.path.join(p4, *c.split("/"))) for c in copy), "a file of the copy was removed"
+        assert git("ls-files", "--", *copy) == "", "the copy is still in the index"
+        assert sorted(kept) == notes, kept
+        assert not os.path.exists(os.path.join(mine, "plan.md")), "a committed note is still on disk"
+        assert planned and planned.group(0) == "would commit 2, would remove 2", row
+
+        # a file of a copy that a commit holds keeps its place in the index, and only the staged ones leave it
+        put(theirs, "export/.gitattributes", "*.pt filter=lfs\n")
+        put(theirs, "export/held.md", "held by a commit\n")
+        git("add", "--", f"{orel}/export/held.md")
+        git("commit", "-q", "-m", "held")
+        put(theirs, "export/new.md", "staged by an earlier turn end\n")
+        git("add", "--", f"{orel}/export/.gitattributes", f"{orel}/export/new.md")
+        put(theirs, "note.md", "a note\n")
+        assert run("tmp-sweep", other) == "", "tmp-sweep spoke"
+        assert git("diff", "--cached", "--name-status", "--", orel).splitlines() == [f"A\t{orel}/note.md"], \
+            git("diff", "--cached", "--name-status", "--", orel)
+        assert git("ls-files", "--", f"{orel}/export").split() == [f"{orel}/export/held.md"], "held.md left the index"
+    finally:
+        for d in (root, temp):
+            shutil.rmtree(d, ignore_errors=True)
+    print("test_scratchpad.py: tmp staged copy cases green")
+
+
 def snapshot(root):
     """Every file under a folder with its size, time and bytes, the git index and refs included."""
     out = {}
@@ -927,6 +1008,7 @@ def main():
     move_cases()
     tmp_empty_and_cap_cases()
     tmp_export_cases()
+    tmp_staged_copy_cases()
     ended_cases()
     gate2_d()
     print("test_scratchpad.py: all green")
