@@ -33,6 +33,12 @@ class SkillCommands(unittest.TestCase):
         self.assertNotIn("CLAUDE_PROJECT_DIR", text)
         self.assertIn("--session ${CLAUDE_SESSION_ID}", text)
 
+    def test_cookie_example_path_is_from_the_project_root(self):
+        # lifetime.py set reads a relative path from the working folder and refuses a missing one.
+        text = SKILL.read_text(encoding="utf-8")
+        self.assertNotIn("<path under temportal/>", text)
+        self.assertIn('lifetime set ".claude/p4/temportal/tmp/<file>" 7d', text)
+
 
 if __name__ == "__main__":
     unittest.main()

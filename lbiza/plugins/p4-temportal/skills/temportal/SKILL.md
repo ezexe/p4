@@ -29,7 +29,7 @@ The retention sweep clears what is past its lifetime at each session start and s
 Set a cookie:
 
 ```bash
-CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}" sh "${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh" lifetime set "<path under temportal/>" 7d
+CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}" sh "${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh" lifetime set ".claude/p4/temportal/tmp/<file>" 7d
 ```
 
 The lifetime is `30m`, `12h`, `7d`, `2w`, an ISO date, or `session` with `--session ${CLAUDE_SESSION_ID}` to clear it when this session ends.
