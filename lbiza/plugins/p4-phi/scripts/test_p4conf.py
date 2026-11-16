@@ -72,10 +72,10 @@ class P4Conf(unittest.TestCase):
         self.assertEqual(s["recall"]["pinned_chars"], 900)
 
     def test_a_retired_section_is_dropped_from_the_file(self):
-        """No plugin reads `plans` any more (the two skills went back to their repositories): a p4.json that still
-        holds the section loses it at the next load, and nothing writes it again."""
+        """A key of RETIRED, such as `plans` or `version`, leaves a p4.json that holds it at the next load, with no
+        unknown-key line, and nothing writes it again."""
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({**p4conf.DEFAULTS, "plans": {"plans_dir": ".claude/plans", "owner_title": "the boss"},
+            json.dump({**p4conf.DEFAULTS, "plans": {"plans_dir": ".claude/plans", "owner_title": "ezexe"},
                        "version": 1}, f)
         import contextlib
         import io
