@@ -706,6 +706,21 @@ def copied(p4):
         return set()
 
 
+def copy_current(p4, name):
+    """True when `.claude/skills/<name>/` is p4-skillex's copy and matches the store skill file for file."""
+    src, target = os.path.join(skillex_dir(p4), name), os.path.join(project_skills(p4), name)
+    if not os.path.isfile(os.path.join(target, MARKER)) or not os.path.isfile(os.path.join(target, COPY_IGNORE)):
+        return False
+    files, there = {}, set()
+    for r, ds, fs in os.walk(src):
+        for f in fs:
+            if f != "sources.txt":
+                files[os.path.relpath(os.path.join(r, f), src)] = os.path.join(r, f)
+    for r, ds, fs in os.walk(target):
+        there |= {os.path.relpath(os.path.join(r, f), target) for f in fs if f not in (MARKER, COPY_IGNORE)}
+    return there == set(files) and all(_same_bytes(p, os.path.join(target, rel)) for rel, p in files.items())
+
+
 def record_copies(p4, added=(), removed=()):
     """Add to and take from `copied.json` at once, over a fresh read, so a failure later in the same run loses no
     record. Two sessions writing it in the same instant can still drop a name, which the next start records again
@@ -766,11 +781,7 @@ def mirror(p4, names=None, remove=False):
             os.replace(staging, target)
         except OSError as e:
             if not os.path.exists(target) and cross_volume(e):
-                try:                                     # .claude/skills links to another drive: copy across
-                    shutil.copytree(staging, target)
-                except OSError:
-                    shutil.rmtree(target, ignore_errors=True)
-                else:
+                if copy_marked(staging, target):         # .claude/skills links to another drive: copy across
                     shutil.rmtree(staging, ignore_errors=True)
                     record_copies(p4, added={n})
                     changed.append(n)
@@ -819,14 +830,53 @@ def set_aside(p4, target):
     deletes it. Returns where it went, or None when another session moved it first."""
     where = os.path.join(swap_dir(p4, "aside"), f"{os.path.basename(target)}.{os.getpid()}.{time.time_ns()}")
     try:
+        os.utime(target)                                 # a rename keeps the copy's age; clear_aside reads this one
         os.replace(target, where)
     except FileNotFoundError:
         return None
+    except OSError as e:
+        if not cross_volume(e) or not copy_marked(target, where):
+            raise
+        remove_marked(target)                            # across drives: copied aside, then removed marker last
+    return where
+
+
+def copy_marked(src, dst):
+    """Copy the folder `src` to `dst`, which must not exist, writing the marker first, so a copy cut short is still
+    marked as p4-skillex's. Returns False, removing what it made, when the copy fails or `dst` exists already."""
     try:
-        os.utime(where)                                  # a rename keeps the copy's age; clear_aside reads this one
+        os.makedirs(dst)
+    except OSError:
+        return False                                     # another session's copy: never touched
+    try:
+        if os.path.isfile(os.path.join(src, MARKER)):
+            shutil.copyfile(os.path.join(src, MARKER), os.path.join(dst, MARKER))
+        shutil.copytree(src, dst, dirs_exist_ok=True)
+    except OSError:
+        remove_marked(dst)
+        return False
+    return True
+
+
+def remove_marked(folder):
+    """Delete a copy with its marker last, so a removal cut short leaves a marked copy, which a later start removes."""
+    for r, ds, fs in os.walk(folder, topdown=False):
+        for f in fs:
+            if not (r == folder and f == MARKER):
+                try:
+                    os.remove(os.path.join(r, f))
+                except OSError:
+                    pass
+        for d in ds:
+            try:
+                os.rmdir(os.path.join(r, d))
+            except OSError:
+                pass
+    try:
+        os.remove(os.path.join(folder, MARKER))
+        os.rmdir(folder)
     except OSError:
         pass
-    return where
 
 
 def clear_aside(p4):
@@ -856,7 +906,8 @@ def _same_bytes(a, b):
 # ------------------------------------------------------------------------------------------------------- the watcher
 
 def brew(p4, path):
-    """Look at one written file. Returns the skill's name, whether it was created and what is similar when a skill was written, else None."""
+    """Look at one written file. When a skill was written, returns its name, whether it was created, what is similar
+    and whether its copy in `.claude/skills/` is current; else None."""
     where = where_in_temportal(p4, path)
     if not where or not os.path.isfile(path):
         return None
@@ -879,7 +930,7 @@ def brew(p4, path):
     if created:
         similar = search_similar(p4, d)
         link_similar(d, similar)
-    copied_now = name in mirror(p4, [name])
+    copied_now = name in mirror(p4, [name]) or copy_current(p4, name)
     return name, created, similar, copied_now
 
 

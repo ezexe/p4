@@ -719,6 +719,60 @@ class Loading(Store):
         self.assertTrue(os.path.isfile(os.path.join(copy, skillex.MARKER)))
         self.assertTrue(os.path.isfile(os.path.join(copy, "SKILL.md")))
 
+    def across_volumes(self):
+        real_replace = skillex.os.replace
+        skills = os.path.join(self.root, ".claude", "skills")
+
+        def across(a, b):
+            if os.path.normcase(os.path.dirname(str(a))) == os.path.normcase(skills) or \
+                    os.path.normcase(os.path.dirname(str(b))) == os.path.normcase(skills):
+                raise OSError(18, "Invalid cross-device link")
+            return real_replace(a, b)
+
+        return across, real_replace
+
+    def test_a_refresh_and_a_removal_cross_volumes(self):
+        self.store_skill("a-kept")
+        self.store_skill("b-gone")
+        skillex.cmd_start(self.p4, {})
+        self.store_skill("a-kept", "Say it differently.\n")
+        shutil.rmtree(os.path.join(self.p4, "skillex", "b-gone"))
+        across, real_replace = self.across_volumes()
+        skillex.os.replace = across
+        try:
+            skillex.cmd_start(self.p4, {})
+        finally:
+            skillex.os.replace = real_replace
+        skills = os.path.join(self.root, ".claude", "skills")
+        self.assertIn("Say it differently.", read(os.path.join(skills, "a-kept", "SKILL.md")))
+        self.assertTrue(os.path.isfile(os.path.join(skills, "a-kept", skillex.MARKER)))
+        self.assertFalse(os.path.exists(os.path.join(skills, "b-gone")))
+
+    def test_a_copy_across_volumes_cut_short_leaves_no_unmarked_folder(self):
+        self.store_skill("demo-brew")
+        across, real_replace = self.across_volumes()
+        real_copytree = skillex.shutil.copytree
+
+        def cut(*a, **k):
+            raise OSError("the hook timed out")
+
+        skillex.os.replace, skillex.shutil.copytree = across, cut
+        try:
+            skillex.cmd_start(self.p4, {})
+        finally:
+            skillex.os.replace, skillex.shutil.copytree = real_replace, real_copytree
+        copy = os.path.join(self.root, ".claude", "skills", "demo-brew")
+        self.assertFalse(os.path.isdir(copy) and not os.path.isfile(os.path.join(copy, skillex.MARKER)))
+
+    def test_a_brew_whose_copy_is_already_current_says_it_is_copied(self):
+        skillex.cmd_start(self.p4, {})
+        self.script("s1", "astcheck.py", "astcheck", "a=1")
+        self.script("s2", "astcheck.py", "astcheck", "b=2")
+        p = self.script("s3", "astcheck.py", "astcheck", "c=3")
+        self.write(p)
+        out = skillex.cmd_write(self.p4, {"session_id": "s3", "tool_input": {"file_path": p}})
+        self.assertIn("it is copied to .claude/skills/astcheck/", out["hookSpecificOutput"]["additionalContext"])
+
     def test_a_brew_whose_copy_is_held_says_so(self):
         skillex.cmd_start(self.p4, {})
         self.script("s1", "astcheck.py", "astcheck", "a=1")
