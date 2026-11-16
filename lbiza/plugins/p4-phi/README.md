@@ -25,6 +25,11 @@ A plugin hook's `updatedInput` that adds `run_in_background: true` reached the B
 The agent `p4-phi:sweep` loaded under that name, ran on Haiku, and stayed in the background though the call asked for the foreground.
 
 A long command is a `test_*.py` run, `pytest`, `unittest`, or an `npm`, `pnpm`, `cargo`, `go` or `make` `test` or `build`.
+It counts only where it is the program being run: a test file named to another program, or a call that only asks for `--version`, `--help` or `--collect-only`, is not one.
+A top session's call is moved only when it is that command and nothing else: parts before it may go to a folder or set a variable, and its output may pass through filters such as `tail` or `grep`.
+A call with a later part, such as `python test_x.py && git commit`, runs as sent, since the later part needs the command finished.
+So does a call that carries a `timeout` of its own, since the caller chose to wait.
+Those calls get the line once per step, and nothing about how they run is changed.
 In a session another one started, the call runs as sent and the line is given once per step.
 A subagent's own call is left alone, since a runner's whole work is to wait on its command.
 A plan step that only reads or searches is named for `p4-phi:sweep`, one that only runs a command for `p4-phi:runner`, and the rest for a child session.

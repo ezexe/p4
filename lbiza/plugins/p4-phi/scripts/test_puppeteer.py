@@ -709,5 +709,26 @@ class Meta(Base):
         self.assertIn(f"({TOP}) has not moved for 3.0 days", text)
 
 
+class Writes(unittest.TestCase):
+    def test_a_refused_replace_leaves_no_temp_file(self):
+        """The review of #57, item 9: Windows refuses a replace while another process holds the file open."""
+        import tempfile
+        real = os.replace
+
+        def refuse(a, b):
+            raise PermissionError("held open")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, ".cache", "app-index.json")
+            os.replace = refuse
+            try:
+                with self.assertRaises(OSError):
+                    puppeteer._write(path, "{}")
+            finally:
+                os.replace = real
+            self.assertEqual(os.listdir(os.path.dirname(path)), [])
+            puppeteer._write(path, "{}")
+            self.assertEqual(os.listdir(os.path.dirname(path)), ["app-index.json"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -109,9 +109,16 @@ def _short(s, n):
 def _write(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = f"{path}.{os.getpid()}.tmp"
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        f.write(text)
-    os.replace(tmp, path)
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except OSError:
+        try:                                       # a replace Windows refused leaves no temp file behind
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _read(path):

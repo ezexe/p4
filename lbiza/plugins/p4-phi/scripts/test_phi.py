@@ -168,6 +168,18 @@ class Requests(unittest.TestCase):
         self.assertEqual(phi.request_of(paste), said)
         self.assertEqual(phi.request_of("<system-reminder>x</system-reminder>\n" + paste), said)
         self.assertEqual(phi.request_of("see this:\n" + paste), "see this:\n" + said)
+        # the harness's own messages stay the harness's, whatever their bodies quote (review of #57, item 1)
+        for wrapped in ('<task-notification><summary>ran ' + paste + '</summary></task-notification>',
+                        '<cross-session-message from="local_x">look at ' + paste + '</cross-session-message>',
+                        '<system-reminder>x</system-reminder>\n<side-sessions-event>' + paste + '</side-sessions-event>'):
+            self.assertEqual(phi.request_of(wrapped), "", wrapped[:40])
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Tree(tmp)
+            tree.record(TOP)
+            tree.say(TOP, TASK)
+            tree.say(TOP, '<cross-session-message from="local_x">look at ' + paste + '</cross-session-message>')
+            self.assertEqual(tree.session(TOP)["turnBy"], "session", "not the person's turn")
+            self.assertEqual(tree.session(TOP)["task"], TASK)
         # a pasted page of markup is still the person's message
         self.assertEqual(phi.request_of('<pasted_content id="a1"><b>bold</b></pasted_content id="a1">'), "<b>bold</b>")
         with tempfile.TemporaryDirectory() as tmp:

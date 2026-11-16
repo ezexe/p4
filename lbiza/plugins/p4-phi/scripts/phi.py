@@ -573,10 +573,11 @@ def request_of(prompt):
         text = text[m.end():]
     text = FORK_HEAD.sub("", text, count=1)
     text = NOTES_TAIL.sub("", text).strip()
-    if PASTED.search(text):
-        # a paste is the person's message, whatever it begins with: the harness wraps none of its own in this tag
-        return PASTED.sub(lambda m: m.group(1), text).strip()
-    return "" if text.startswith("<") else text
+    if text.startswith("<") and not PASTED.match(text):
+        return ""                                  # the harness speaking, whatever its body quotes
+    # A paste is the person's message whatever it holds, but only where the message itself begins with the block or
+    # with their own words: a notification or another session's message that quotes a pasted block stays the harness's.
+    return PASTED.sub(lambda m: m.group(1), text).strip()
 
 
 def handed_over(prompt):
@@ -1706,52 +1707,129 @@ def h_restart_check(payload):
 # With no `permissionDecision`, "auto mode can deny the changed call", but "a `command` hook in settings or a plugin's
 # hooks file can change Bash, PowerShell, Monitor, Edit, Write, and NotebookEdit calls without this denial."
 
-LONG_PY = re.compile(r"(?:^|[\s\\/'\"])test_\w+\.py\b|\s-m\s+(?:pytest|unittest)\b", re.I)
+TEST_FILE = re.compile(r"^test_\w+\.py$", re.I)
 LONG_RUN = re.compile(r"^(?:(?:npm|pnpm)\s+(?:run\s+)?(?:test|build)\b|(?:cargo|go)\s+(?:test|build)\b|"
                       r"make\s+(?:-\S+\s+)*(?:test|build)\b)", re.I)
 LEVEL_STORELESS = ("level",)     # the routed checks that run in a project with no .claude/p4 store
+HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)([A-Za-z_]\w*)\1([^\n]*)\n.*?(?:\n[ \t]*\2[ \t]*(?=\n|$)|\Z)", re.S)
+ASKS_ONLY = frozenset("--version --help -h --collect-only --co --fixtures -V".split())   # asks the program, runs nothing
+PY_VALUE = frozenset("-W -X".split())            # python's options that take the next word
+GOES_THERE = frozenset("cd pushd set-location sl chdir".split())
+# what a long command's output may be piped through and still be that one command: each only reads and prints
+FILTERS = frozenset("""tail head grep rg egrep fgrep findstr sort uniq wc cut tr cat select-object select-string
+out-string more less""".split())
+REDIRECTS = re.compile(r"(?:\d?>>?&?\d?|&>)\s*\S*")
 
 
-def long_command(cmd):
-    """The kind of long command a shell call runs in its foreground, '' for none: a `test_*.py` run, pytest,
-    unittest, or an npm, pnpm, cargo, go or make `test` or `build`. Read where a program stands, never inside a
-    quoted string, so `grep pytest notes.md` is none."""
-    raw = str(cmd or "")
+def long_kind(words):
+    """The kind of long command one command is, '' for none. A test file counts only as the script python runs,
+    and pytest or unittest only as the program or the module after `-m`: `python -m py_compile test_x.py`,
+    `python tool.py test_x.py` and `python -c "import test_x"` run no test. A call that only asks the program
+    something, `--version`, `--help` or `--collect-only`, runs none either."""
+    words = [w for w in words if w]                # each word whole, a quoted one with its spaces
+    if not words:
+        return ""
+    prog = program(words[0].replace(" ", "_"))
+    args = words[1:]
+    if prog == "uv" and args[:1] == ["run"]:
+        return long_kind(args[1:])
+    if any(a in ASKS_ONLY for a in args):
+        return ""
+    if prog in ("pytest", "py.test"):
+        return "pytest"
+    if prog in PYTHONS and prog != "uv":
+        k = 0
+        while k < len(args):
+            a = args[k].strip("'\"")
+            if a == "-m":
+                mod = args[k + 1].strip("'\"") if k + 1 < len(args) else ""
+                return mod if mod in ("pytest", "unittest") else ""
+            if a == "-c" or a == "-":
+                return ""
+            if a in PY_VALUE:
+                k += 2
+                continue
+            if a.startswith("-"):
+                k += 1
+                continue
+            return "a test file" if TEST_FILE.match(a.replace("\\", "/").rsplit("/", 1)[-1]) else ""
+        return ""
+    m = LONG_RUN.match(" ".join([prog] + args))
+    return " ".join(m.group(0).split()) if m else ""
+
+
+def long_read(cmd):
+    """(the kind of long command a shell call runs, True when the call is that command and nothing else). A
+    `test_*.py` run, pytest, unittest, or an npm, pnpm, cargo, go or make `test` or `build`, read where a program
+    stands: never inside a quoted string, and never in the body of a heredoc. The call is that command alone when
+    every other part of it only goes to a folder or sets a variable before it, and its output is piped through
+    nothing but filters. `python test_x.py && git commit`, `python test_x.py > out.txt; grep FAIL out.txt` and
+    `sleep 5 && pytest` are more than the command, so nothing may be changed about how they run."""
+    raw = HEREDOC.sub(lambda m: "<<" + m.group(2) + m.group(3), str(cmd or ""))
     quoted = []
 
     def hold(m):
         quoted.append(m.group(0))
         return f"'\x00{len(quoted) - 1}\x00'"
-    for part in re.split(r"&&|\|\||;|\n|\|", QUOTED.sub(hold, raw)):
-        part = re.sub(r"^&\s*", "", part.strip())
+
+    def back(x):
+        return re.sub(r"'\x00(\d+)\x00'", lambda m: quoted[int(m.group(1))].strip("'\""), x)
+    kind, alone, seen = "", True, False
+    for stmt in re.split(r"&&|\|\||;|\n", QUOTED.sub(hold, raw)):
+        pipe = [x.strip() for x in stmt.split("|")]
+        if not any(pipe):
+            continue
+        first = re.sub(r"^&\s*", "", pipe[0])
         while True:                                # VAR=value before the program
-            bind = ASSIGN.match(part)
-            if not bind or not bind.group(3).strip() or part.startswith(("export ", "set ")):
+            bind = ASSIGN.match(first)
+            if not bind or not bind.group(3).strip() or first.startswith(("export ", "set ")):
                 break
-            part = bind.group(3).strip()
-        whole = re.sub(r"'\x00(\d+)\x00'", lambda m: quoted[int(m.group(1))], part)
-        bare = re.sub(r"'\x00(\d+)\x00'", lambda m: quoted[int(m.group(1))].strip("'\""), part)
-        prog = program(bare)
-        if prog in ("pytest", "py.test"):
-            return "pytest"
-        if prog in PYTHONS and LONG_PY.search(" " + bare):
-            m = LONG_PY.search(" " + bare).group(0)
-            return "pytest" if "pytest" in m else "unittest" if "unittest" in m else "a test file"
-        m = LONG_RUN.match(clean(bare))
-        if m:
-            return " ".join(m.group(0).split())
-        del whole
-    return ""
+            first = bind.group(3).strip()
+        heredoc = "<<" in stmt
+        found = "" if heredoc else long_kind([back(w) for w in REDIRECTS.sub(" ", first).split()])
+        if found and not kind:
+            kind = found
+            seen = True
+            if any(program(back(x)) not in FILTERS or re.search(r"(?<![0-9&>])>", x) for x in pipe[1:]):
+                alone = False                      # piped into something that does more than read and print
+            continue
+        prefix = program(back(first)) in GOES_THERE or bool(ASSIGN.match(first) and not ASSIGN.match(first).group(3).strip()) \
+            or first.startswith(("export ", "set "))
+        if seen or not prefix or len(pipe) > 1 or heredoc:
+            alone = False                          # a part after the command, or one that does work of its own
+    return kind, bool(kind) and alone
+
+
+def long_command(cmd):
+    """The kind of long command a shell call runs in its foreground, '' for none."""
+    return long_read(cmd)[0]
+
+
+LEVEL_KEEP_S = 7 * 86400         # how long a session's once-per-step memory outside a store is kept
 
 
 def level_data():
     """Where the once-per-step memory is kept in a project with no store: the plugin's own data folder.
     plugins-reference.md, "Environment variables": `${CLAUDE_PLUGIN_DATA}` is "`~/.claude/plugins/data/<id>/`,
-    created on first reference and kept across plugin updates", and it is exported to hook commands."""
-    base = os.environ.get("CLAUDE_PLUGIN_DATA") or os.path.join(
-        os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude"),
-        "plugins", "data", "p4-phi")
+    created on first reference and kept across plugin updates", and it is exported to hook commands. A harness that
+    sets none gets the system's temp folder: no folder under the person's home is guessed at."""
+    base = os.environ.get("CLAUDE_PLUGIN_DATA")
+    if not base:
+        import tempfile
+        base = os.path.join(tempfile.gettempdir(), "p4-phi")
     return os.path.join(base, "levels")
+
+
+def level_sweep(folder):
+    """A session's file there is of use while the session lives: one untouched for LEVEL_KEEP_S is removed."""
+    try:
+        old = time.time() - LEVEL_KEEP_S
+        for n in os.listdir(folder)[:500]:
+            path = os.path.join(folder, n)
+            if n.endswith(".json") and os.path.getmtime(path) < old:
+                os.remove(path)
+    except OSError:
+        pass
 
 
 def level_told(me, s, key):
@@ -1775,27 +1853,31 @@ def level_told(me, s, key):
         write_atomic(path, json.dumps({"told": (told + [key])[-50:]}) + "\n")
     except OSError:
         pass
+    level_sweep(os.path.dirname(path))
     return False
 
 
 def h_level(payload):
-    """PreToolUse on a shell call that runs a known long command in the foreground (#57). In a top session the call
-    is returned with `updatedInput`: the same input plus `run_in_background: true`, and one line saying so. In a
-    session another one started the call runs as sent and the line is given once per step. A sub-agent's call is
-    left alone: a runner's whole work is to wait on its command. Works with no store: top or child is read from the
-    session's own file where there is one, else from the app's record."""
+    """PreToolUse on a shell call that runs a known long command in the foreground (#57). In a top session a call
+    that is that command and nothing else is returned with `updatedInput`: the same input plus
+    `run_in_background: true`, and one line saying so. Every other such call runs as sent, with the line once per
+    step: in a session another one started; where the command is one part of a longer call, whose later parts need
+    it finished; and where the call carries a `timeout` of its own, since the caller chose to wait. A sub-agent's
+    call is left alone: a runner's whole work is to wait on its command. Works with no store: top or child is read
+    from the session's own file where there is one, else from the app's record."""
     if not LEVELS_ON or payload.get("agent_id") or str(payload.get("tool_name") or "") not in SHELL_TOOLS:
         return None
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     if inp.get("run_in_background") or not inp.get("command"):
         return None
-    kind = long_command(inp.get("command"))
+    kind, alone = long_read(inp.get("command"))
     if not kind:
         return None
     me = Me(payload)
     s = load_session(me.home, me.id) if me.home and me.id else {}
     child = bool(spawned_from(s) if s else spawned_from(me.rec))
-    if child:
+    waits = inp.get("timeout") is not None or inp.get("timeout_ms") is not None
+    if child or not alone or waits:
         plan = plans.load(me.home, me.id) if me.home else {}
         st = plans.step_of(plan, plan.get("current") or "") if plan.get("steps") else None
         key = nudge_key(st) if st else "kind:" + kind
@@ -1803,9 +1885,9 @@ def h_level(payload):
             return None
         RAN["level"] = "told"
         return (f"phi (p4-phi): this call runs {kind} in this session's foreground, and a command like it runs long. "
-                f"Start such a command with `run_in_background: true`, or hand it to the `p4-phi:runner` subagent, "
-                f"and go on with other work or end the turn until its completion notification; do not wait, sleep or "
-                f"poll for it. Said once for this step.")
+                f"Start such a command on a call of its own with `run_in_background: true`, or hand it to the "
+                f"`p4-phi:runner` subagent, and go on with other work or end the turn until its completion "
+                f"notification; do not wait, sleep or poll for it. Said once for this step.")
     if me.home and me.id:                          # #47: the copy this session already runs is not started again
         why = puppeteer.restart_text(me.home, me.id, str(inp.get("command")))
         if why:
@@ -2449,6 +2531,18 @@ def epoch_of(stamp):
         return None
 
 
+REPLAY_HOLD = 2 * 1024 * 1024    # how far behind the transcript's end a call with no result still holds the place
+
+
+def resume_at(waiting, end, hold=None):
+    """Where the next replay starts: at the first call still without a result, so no call is passed before its
+    result is in, whatever lines lie between the two (a sub-agent's rows, a notification, a message that arrived
+    while the call ran). A call that far behind the end was cut off and will get none, so it holds nothing."""
+    hold = REPLAY_HOLD if hold is None else hold
+    live = [w for w in waiting if end - w <= hold]
+    return min(live) if live else end
+
+
 def replay(me, s, transcript):
     """The plan calls and background launches of the transcript that no hook handled, applied in order -> the step
     boundary text of the last one, '' for none. A session whose hook list was frozen before recall's lookup entries
@@ -2470,14 +2564,11 @@ def replay(me, s, transcript):
     if not known:
         start = max(0, size - TRANSCRIPT_BYTES)
     rows, end = read_from(transcript, start, partial=not known and start > 0)
-    calls, results, notices, when, stops, where, spoke = [], {}, [], {}, [], {}, -1
+    calls, results, notices, when, stops, where = [], {}, [], {}, [], {}
     for at, d in rows:
         c = (d.get("message") or {}).get("content")
         if d.get("type") == "user" and "<task-notification>" in json.dumps(c, default=str):
             notices.append(json.dumps(c, default=str))
-        if d.get("type") == "user" and not (isinstance(c, list) and any(
-                isinstance(b, dict) and b.get("type") == "tool_result" for b in c)):
-            spoke = at                              # a new message: a call before it with no result was cut off
         for b in c if isinstance(c, list) else []:
             if not isinstance(b, dict):
                 continue
@@ -2491,8 +2582,7 @@ def replay(me, s, transcript):
                 where[b.get("id")] = at
             elif d.get("type") == "user" and b.get("type") == "tool_result":
                 results[b.get("tool_use_id")] = result_text(b)
-    waiting = [where[b.get("id")] for b in calls if b.get("id") not in results and where[b.get("id")] > spoke]
-    resume = min(waiting) if waiting else end
+    resume = resume_at([where[b.get("id")] for b in calls if b.get("id") not in results], end)
     if state.get("path") != transcript or state.get("offset") != resume:
         try:
             write_atomic(state_path, json.dumps({"path": transcript, "offset": resume}) + "\n")

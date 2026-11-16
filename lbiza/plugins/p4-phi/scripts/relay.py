@@ -321,16 +321,31 @@ def repo_of(path):
     if not d:
         return ""
     # One message's rebase check asked git `rev-parse --show-toplevel` once a path, 100 times and 2 s on a top
-    # session (2026-11-16). A repository's top folder is the nearest one at or above that holds a `.git`, a folder
-    # or a worktree's file, which lstat finds with no process started. Inside a `.git` folder git is still asked.
+    # session (2026-11-16). A repository's top folder is the nearest one at or above that holds a `.git` git would
+    # take, a folder with a HEAD or a worktree's `gitdir:` file, which lstat finds with no process started. Git
+    # names that folder with its links resolved, so it is resolved here too. Inside a `.git` folder git is asked.
     top = _dot_git_above(d)
     if top is None:
         r = _git(d, "rev-parse", "--show-toplevel")
         return norm(r.stdout.strip()) if r and r.returncode == 0 and r.stdout.strip() else ""
-    return norm(top) if top else ""
+    return norm(os.path.realpath(top)) if top else ""
 
 
+ABOVE_S = 5.0                    # how long what was found above a folder is believed: a hook's run, a watcher's tick
 _ABOVE = {}                      # a folder -> the nearest folder at or above it that holds a `.git`
+_ABOVE_AT = [0.0]                # when _ABOVE was started: a watcher lives for hours, and a `git init` comes later
+
+
+def _is_git(path):
+    """True for a `.git` git itself would take: a folder holding HEAD, or a worktree's or submodule's file that
+    names its `gitdir:`. An empty or stray `.git` is passed over, as git passes over it and looks further up."""
+    try:
+        if os.path.isdir(path):
+            return os.path.isfile(os.path.join(path, "HEAD"))
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read(64).lstrip().startswith("gitdir:")
+    except OSError:
+        return False
 
 
 def _dot_git_above(d):
@@ -339,13 +354,16 @@ def _dot_git_above(d):
     d = os.path.abspath(d)
     if re.search(r"[\\/]\.git(?:[\\/]|$)", d):
         return None
+    if time.time() - _ABOVE_AT[0] > ABOVE_S:
+        _ABOVE.clear()
+        _ABOVE_AT[0] = time.time()
     walked, cur, found = [], d, ""
     while True:
         if cur in _ABOVE:
             found = _ABOVE[cur]
             break
         walked.append(cur)
-        if os.path.lexists(os.path.join(cur, ".git")):
+        if os.path.lexists(os.path.join(cur, ".git")) and _is_git(os.path.join(cur, ".git")):
             found = cur
             break
         up = os.path.dirname(cur)

@@ -61,6 +61,7 @@ Each line names the Claude Code docs page it rests on.
 - **A read of a diff or a result** that should not lean on this session's own view goes to `p4-phi:check`, which is read-only and runs on this session's model.
 - **After starting one**, go on with other work or end the turn. Its completion notification brings the result in a later turn, so never wait in the foreground, sleep or poll. The page is `sub-agents.md`, which says a background subagent's report arrives inside a completion notification.
 - **In a top session** a foreground `test_*.py` run, `pytest`, `unittest`, or an `npm`, `pnpm`, `cargo`, `go` or `make` `test` or `build` is started in the background by the plugin's PreToolUse hook, which says so in one line. The page is `hooks.md`, under "PreToolUse decision control": `updatedInput` replaces the whole input before the tool runs.
+- **Only the command alone is moved:** a call with a later part, such as `python test_x.py && git commit`, or one that carries its own `timeout`, runs as sent and gets the line once per step. Put a long command on a call of its own.
 - **In a session another one started** the same call runs as sent, and the line is given once per step.
 - **A plan step is named for its level:** a step that only reads or searches for `p4-phi:sweep`, a step that only runs a command for `p4-phi:runner`, and the rest for a child session.
 - **To turn it off** in one project, set `phi.levels` to `false` in `.claude/p4/p4.json`. Nothing has to turn it on.

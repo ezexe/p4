@@ -11,10 +11,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import phi  # noqa: E402
 import plans  # noqa: E402
 import relay  # noqa: E402
 from test_phi import CLI, GRAND, KID, KID2, TOP, Tree, context  # noqa: E402
@@ -500,11 +502,22 @@ class TreeOfPlans(unittest.TestCase):
         self.assertEqual(p["current"], "2.2", "applied once its result is in")
         self.assertEqual([x["id"] for _, x in plans._tasks(p)], ["bg7offset1"], "a launch after the place is read too")
         self.assertEqual(offset(), os.path.getsize(path))
+        before = os.path.getsize(path)
         call(3, {"advance": True})
-        rows.append({"type": "user", "message": {"role": "user", "content": "stop, something else"}})
+        # review of #57, item 10: lines between a call and its result never move the place past the call
+        rows.append({"type": "user", "isSidechain": True, "message": {"role": "user", "content": "a sub-agent's row"}})
+        rows.append({"type": "user", "message": {"role": "user", "content": "a message that came while it ran"}})
         put()
-        message("stop, something else")
-        self.assertEqual(offset(), os.path.getsize(path), "a call cut off by a new message holds no place")
+        message("a message that came while it ran")
+        self.assertEqual(offset(), before, "the call still holds the place")
+        self.assertEqual(plans.load(t.p4, A)["current"], "2.2")
+        result(3)
+        message("go on")
+        self.assertNotEqual(plans.load(t.p4, A)["current"], "2.2", "applied once its result came")
+        self.assertEqual(offset(), os.path.getsize(path))
+        self.assertEqual(phi.resume_at([100, 900], 1000, hold=500), 900, "a call cut off long ago holds nothing")
+        self.assertEqual(phi.resume_at([100], 1000, hold=500), 1000)
+        self.assertEqual(phi.resume_at([], 1000), 1000)
 
     def task(self, host, command, task_id):
         r = self.t.hook("task", host, {"hook_event_name": "PostToolUse", "tool_name": "Bash",
@@ -611,8 +624,7 @@ class Levels(unittest.TestCase):
     """#57: work runs at the level Claude Code gives it. A top session's long foreground command is started in the
     background by the hook; a child is told once per step; a step is named for the subagent that does it."""
 
-    LONG = {"command": "cd scripts && python -I -X utf8 test_flush.py 2>&1 | tail -3", "description": "Run the tests",
-            "timeout": 300000}
+    LONG = {"command": "cd scripts && python -I -X utf8 test_flush.py 2>&1 | tail -3", "description": "Run the tests"}
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -653,6 +665,73 @@ class Levels(unittest.TestCase):
             self.assertEqual(self.pre(TOP, quiet), {}, quiet)
         self.assertEqual(self.pre(TOP, dict(self.LONG), agent_id="agent_runner1"), {},
                          "a sub-agent's call is left alone: a runner waits on its command")
+
+    def test_only_the_command_itself_is_a_long_command(self):
+        """The review of #57, items 2 to 4: (the kind, whether the call is that command and nothing else)."""
+        for cmd, want in (
+                ("cd scripts && python -I -X utf8 test_flush.py 2>&1 | tail -3", ("a test file", True)),
+                ("FOO=1 python tests/test_a.py", ("a test file", True)),
+                ('py -3 "E:/a b/test_q.py"', ("a test file", True)),
+                ("export A=1; cd x; pytest -q 2>&1 | tail -5", ("pytest", True)),
+                ("python -m unittest discover", ("unittest", True)),
+                ("py.test tests", ("pytest", True)), ("npm  test", ("npm test", True)),
+                ("cargo test --all", ("cargo test", True)), ("make -j8 test", ("make -j8 test", True)),
+                # item 2: a part after the command needs it finished, and a part before it does work of its own
+                ('python scripts/test_phi.py && git commit -m "x"', ("a test file", False)),
+                ("python test_x.py > out.txt; grep FAIL out.txt", ("a test file", False)),
+                ("sleep 5 && pytest", ("pytest", False)),
+                ("pytest -q | tee out.log", ("pytest", False)),
+                # item 3: a test file named to another program, and a call that only asks
+                ("python -m py_compile scripts/test_phi.py", ("", False)),
+                ("python scripts/phi.py show test_x.py", ("", False)),
+                ("git log | python tools/count.py test_phi.py", ("", False)),
+                ('python -c "import test_x.py"', ("", False)),
+                ("pytest --version", ("", False)), ("pytest --help", ("", False)),
+                ("python -m pytest --collect-only", ("", False)),
+                ("grep -n pytest notes.md", ("", False)), ('echo "python test_x.py"', ("", False)),
+                # item 4: a heredoc's body is text, not commands
+                ("cat > n.md <<EOF\npytest runs the suite\npython test_x.py\nEOF", ("", False)),
+                ("python - <<'PY'\nimport test_x\nPY", ("", False))):
+            self.assertEqual(phi.long_read(cmd), want, cmd)
+
+    def test_a_call_that_is_more_than_the_command_runs_as_sent(self):
+        """Items 2 and 5: only the command alone, with no timeout of its own, is moved; the rest get the line."""
+        for k, inp in enumerate(({"command": 'python scripts/test_phi.py && git commit -m "x"'},
+                                 {"command": "python test_x.py > out.txt; grep FAIL out.txt"},
+                                 {"command": "sleep 5 && pytest"},
+                                 {"command": "python test_flush.py", "timeout": 300000})):
+            self.plan(TOP, items(f"Port part {k} of the exporter", "Land it"))     # a new step: the line is owed again
+            out = self.pre(TOP, inp)
+            self.assertNotIn("updatedInput", out, inp)
+            self.assertIn("on a call of its own with `run_in_background: true`", out["additionalContext"], inp)
+
+    def test_the_shell_gate_is_as_wide_as_the_matcher(self):
+        """Item 6: what phi.long_kind takes, recall-hook.sh lets through to it."""
+        for cmd in ("py.test tests", "npm  test", "pnpm run build", "go test ./...", "make -j8 test"):
+            self.assertEqual(self.pre(TOP, {"command": cmd}).get("updatedInput"),
+                             {"command": cmd, "run_in_background": True}, cmd)
+        for cmd in ("python -m py_compile scripts/test_phi.py", "python scripts/phi.py show test_x.py",
+                    "git log | python tools/count.py test_phi.py", 'python -c "import test_x.py"', "pytest --version",
+                    "cat > n.md <<EOF\npytest runs the suite\nEOF"):
+            self.assertEqual(self.pre(TOP, {"command": cmd}), {}, cmd)
+
+    def test_the_memory_outside_a_store_is_bounded(self):
+        """Item 7: with no data folder named, no folder under the person's home is guessed at; old files go."""
+        held = os.environ.pop("CLAUDE_PLUGIN_DATA", None)
+        try:
+            self.assertTrue(phi.level_data().startswith(tempfile.gettempdir()))
+        finally:
+            if held is not None:
+                os.environ["CLAUDE_PLUGIN_DATA"] = held
+        folder = os.path.join(self._tmp.name, "levels")
+        os.makedirs(folder)
+        for name, age in (("old.json", phi.LEVEL_KEEP_S + 60), ("new.json", 60)):
+            with open(os.path.join(folder, name), "w", encoding="utf-8") as f:
+                f.write("{}")
+            at = time.time() - age
+            os.utime(os.path.join(folder, name), (at, at))
+        phi.level_sweep(folder)
+        self.assertEqual(os.listdir(folder), ["new.json"])
 
     def test_a_child_is_told_once_per_step_and_its_call_runs_as_sent(self):
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/"))

@@ -163,6 +163,58 @@ class Paths(unittest.TestCase):
             relay._git = real
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_a_repository_is_named_as_git_names_it(self):
+        """The review of #57, item 8: a stray `.git` is passed over as git passes over it, a linked path gives the
+        resolved top as git does, and what was found is believed only for ABOVE_S, so a later `git init` is seen."""
+        if not shutil.which("git"):
+            self.skipTest("no git")
+        tmp = os.path.realpath(tempfile.mkdtemp())
+
+        def says(path):
+            r = subprocess.run(["git", "-C", path, "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+            return relay.norm(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip() else ""
+        try:
+            repo = os.path.join(tmp, "r")
+            inner = os.path.join(repo, "pkg", "sub")
+            os.makedirs(os.path.join(inner, ".git"))             # an empty .git folder inside a real repository
+            os.makedirs(os.path.join(repo, "docs"))
+            with open(os.path.join(repo, "docs", ".git"), "w", encoding="utf-8") as f:
+                f.write("not a gitdir line\n")                   # and a stray file by that name
+            subprocess.run(["git", "init", "-q", repo], check=True)
+            relay._ABOVE.clear()
+            for p in (inner, os.path.join(repo, "docs")):
+                self.assertEqual(relay.repo_of(p), relay.norm(repo), p)
+            self.assertEqual(says(inner), relay.norm(repo), "git passes over the empty folder too")
+            self.assertEqual(relay.repo_of(os.path.join(inner, "x.py")), relay.norm(repo))
+            bare = os.path.join(tmp, "none", "deep")
+            os.makedirs(os.path.join(tmp, "none", ".git"))       # a stray .git with no repository above it
+            os.makedirs(bare)
+            relay._ABOVE.clear()
+            self.assertEqual((relay.repo_of(bare), says(bare)), ("", ""))
+            link = os.path.join(tmp, "link")
+            try:
+                if os.name == "nt":
+                    import _winapi
+                    _winapi.CreateJunction(repo, link)
+                else:
+                    os.symlink(repo, link)
+            except (OSError, ImportError, AttributeError):
+                link = ""
+            if link:
+                relay._ABOVE.clear()
+                self.assertEqual(relay.repo_of(os.path.join(link, "pkg")), says(os.path.join(link, "pkg")))
+                self.assertEqual(relay.repo_of(os.path.join(link, "pkg")), relay.norm(repo), "the resolved top")
+            late = os.path.join(tmp, "late", "src")
+            os.makedirs(late)
+            relay._ABOVE.clear()
+            self.assertEqual(relay.repo_of(late), "")
+            subprocess.run(["git", "init", "-q", os.path.dirname(late)], check=True)
+            self.assertEqual(relay.repo_of(late), "", "believed for ABOVE_S")
+            relay._ABOVE_AT[0] -= relay.ABOVE_S + 1
+            self.assertEqual(relay.repo_of(late), relay.norm(os.path.dirname(late)), "then looked for again")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_sessions_are_read_again_only_when_they_change(self):
         tmp = tempfile.mkdtemp()
         try:
