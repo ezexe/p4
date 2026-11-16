@@ -141,20 +141,30 @@ def write_expires(p4, d):
     os.replace(tmp, p)
 
 
+def refusal(p4, path):
+    """(rel, None) for a path under temportal/ that may take a cookie, else (rel or None, the reason it may not):
+    outside temportal/, inside memory/, on tmp/ or inside it, or one of WHOLE. `set` and the retention sweep both
+    ask it, so an entry of expires.json written by hand clears nothing `set` would refuse."""
+    rel = rel_in(p4, path)
+    if rel is None:
+        return None, f"{path} is not under {home(p4)}"
+    if never(rel):
+        return rel, f"{rel} is in {rel.split('/')[0]}/, which is never cleared"
+    if rel.split("/")[0].lower() == "tmp":
+        return rel, f"{rel} takes no cookie: a session scratchpad directory is committed before it is removed"
+    if rel.lower() in WHOLE:
+        return rel, f"{rel} takes no cookie: scratchpad/, src/ and {EXPIRES} are never cleared whole"
+    return rel, None
+
+
 def set_cookie(p4, path, lifetime, session_id="", now=None):
     """Give `path`, a file or folder under temportal/, an expiry -> (rel, expiry). A relative `path` is read from
     temportal/, and the command line makes it absolute from the working folder first. Raises ValueError for a path
     outside temportal/, inside memory/, on tmp/ or inside it, that is one of WHOLE or that does not exist, and for a
     lifetime it cannot read."""
-    rel = rel_in(p4, path)
-    if rel is None:
-        raise ValueError(f"{path} is not under {home(p4)}")
-    if never(rel):
-        raise ValueError(f"{rel} is in {rel.split('/')[0]}/, which is never cleared")
-    if rel.split("/")[0].lower() == "tmp":
-        raise ValueError(f"{rel} takes no cookie: a session scratchpad directory is committed before it is removed")
-    if rel.lower() in WHOLE:
-        raise ValueError(f"{rel} takes no cookie: scratchpad/, src/ and {EXPIRES} are never cleared whole")
+    rel, why = refusal(p4, path)
+    if why:
+        raise ValueError(why)
     if not os.path.lexists(os.path.join(home(p4), *rel.split("/"))):
         raise ValueError(f"{path} does not exist")
     when = parse_lifetime(lifetime, now)
@@ -334,8 +344,8 @@ def sweep_cookies(p4, now=None, ended_session=""):
                                              or (ended_session and v.get("session") == ended_session)))
         except (TypeError, ValueError):
             due = False
-        if not due:
-            continue
+        if not due or refusal(p4, rel)[1]:
+            continue                                    # an entry `set` would refuse is left with its file
         p = os.path.join(home(p4), *rel.split("/"))
         if os.path.lexists(p):
             remove(p)
@@ -401,7 +411,8 @@ def listing(p4, now=None):
             pass
         lines.append(line or f"cookie  {rel}  unreadable, so never cleared: {json.dumps(v)}")
     for rel, rule in sorted(rules(p4).items()):
-        lines.append(f"cache   {rel}/  " + ", ".join(f"{k}={v}" for k, v in rule.items()))
+        lines.append(f"cache   {rel}/  " + (", ".join(f"{k}={v}" for k, v in rule.items()) if isinstance(rule, dict)
+                     else f"not an object, so never applied: {json.dumps(rule)}"))
     return lines
 
 

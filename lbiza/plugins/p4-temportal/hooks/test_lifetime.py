@@ -104,6 +104,22 @@ class Lifetime(unittest.TestCase):
         self.assertFalse(os.path.exists(kept))
         self.assertTrue(os.path.isfile(moved), "the copy set aside in this start is kept")
 
+    def test_the_sweep_refuses_an_entry_set_would_refuse(self):
+        """An expires.json entry written by hand for a path `set` refuses is left with its file, and `list` prints a
+        cache rule that is not an object."""
+        files = [put(os.path.join(self.t, "memory", "MEMORY.md")), put(os.path.join(self.t, "tmp", "s1", "n.md")),
+                 put(os.path.join(self.p4, "phi", "store", "rules.md")), put(os.path.join(self.t, "scratchpad", "p.md"))]
+        entries = {"memory/MEMORY.md": {"expires": 0}, "tmp/s1": {"expires": 0}, "../phi/store": {"expires": 0},
+                   "scratchpad": {"expires": 0}}
+        lifetime.write_expires(self.p4, entries)
+        self.assertEqual(lifetime.sweep(self.p4), "")
+        for f in files:
+            self.assertTrue(os.path.isfile(f), f)
+        self.assertEqual(lifetime.read_expires(self.p4), entries)
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump({"temportal": {"cache": {"probes": 7}}}, f)
+        self.assertIn("probes", " ".join(lifetime.listing(self.p4)))
+
     def test_memory_is_never_cleared(self):
         mem = put(os.path.join(self.t, "memory", "a.md"), age_days=400)
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
