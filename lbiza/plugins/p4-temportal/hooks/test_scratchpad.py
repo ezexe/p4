@@ -929,6 +929,27 @@ def archived_by_phi_cases():
     print("test_scratchpad.py: archived by phi cases green")
 
 
+def scratchpad_dir_cases():
+    """With `scratchpad_dir` on stdin pointing under a CLAUDE_CODE_TMPDIR tree, outside the system temp directory,
+    tmp-link links that path, even before its folder exists."""
+    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-dir-")
+    temp = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-temp-")
+    sid = "aaaa1111-0000-4000-8000-00000000000a"
+    moved = os.path.join(root, "moved-tmp")
+    harness = os.path.join(moved, "claude-0", "proj", sid, "scratchpad")
+    try:
+        env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp, "CLAUDE_CODE_TMPDIR": moved}
+        out = run_sub("tmp-link", {"cwd": root, "session_id": sid, "scratchpad_dir": harness}, env,
+                      CLAUDE_PROJECT_DIR=root)
+        put(harness, "note.md", "a note\n")
+        target = os.path.join(root, ".claude", "p4", "temportal", "tmp", sid, "note.md")
+        assert os.path.isfile(target), f"the scratchpad_dir path was not linked: {out!r}"
+    finally:
+        for d in (root, temp):
+            shutil.rmtree(d, ignore_errors=True)
+    print("test_scratchpad.py: scratchpad_dir cases green")
+
+
 def snapshot(root):
     """Every file under a folder with its size, time and bytes, the git index and refs included."""
     out = {}
@@ -1155,6 +1176,7 @@ def main():
     tmp_close_bare_store_cases()
     tmp_close_cut_cases()
     archived_by_phi_cases()
+    scratchpad_dir_cases()
     ended_cases()
     gate2_d()
     print("test_scratchpad.py: all green")
