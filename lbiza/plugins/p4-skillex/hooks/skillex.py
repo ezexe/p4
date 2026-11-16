@@ -858,9 +858,20 @@ def set_aside(p4, target):
     except FileNotFoundError:
         return None
     except OSError as e:
-        if not cross_volume(e) or not copy_marked(target, where):
+        if not cross_volume(e):
             raise
-        remove_marked(target)                            # across drives: copied aside, then removed marker last
+        claim = os.path.join(swap_dir(p4, "claims"), os.path.basename(target))
+        try:
+            os.mkdir(claim)                              # one session at a time moves this copy across drives
+        except FileExistsError:
+            return None
+        try:
+            if not copy_marked(target, where):
+                raise
+            if not remove_marked(target):                # a held file: the copy stays, marked, for a later start
+                raise OSError(f"{target} is held")
+        finally:
+            shutil.rmtree(claim, ignore_errors=True)
     return where
 
 
@@ -882,7 +893,8 @@ def copy_marked(src, dst):
 
 
 def remove_marked(folder):
-    """Delete a copy with its marker last, so a removal cut short leaves a marked copy, which a later start removes."""
+    """Delete a copy with its marker last, and the marker only once nothing else is left, so a removal cut short by a
+    held file leaves a marked copy, which a later start removes. Returns whether the folder is gone."""
     for r, ds, fs in os.walk(folder, topdown=False):
         for f in fs:
             if not (r == folder and f == MARKER):
@@ -896,17 +908,22 @@ def remove_marked(folder):
             except OSError:
                 pass
     try:
+        if set(os.listdir(folder)) - {MARKER}:
+            return False                                 # something is held: the marker stays with it
         os.remove(os.path.join(folder, MARKER))
         os.rmdir(folder)
-    except OSError:
+    except FileNotFoundError:
         pass
+    except OSError:
+        return False
+    return not os.path.exists(folder)
 
 
 def clear_aside(p4):
     """Delete what set_aside moved and what staging holds once quiet for STAGING_STALE_S: a younger one belongs to a
     running session, which may still restore or fill it. A failure only waits for the next run."""
     now = time.time()
-    for sub in ("aside", "staging"):
+    for sub in ("aside", "staging", "claims"):
         d = swap_dir(p4, sub)
         for n in os.listdir(d):
             p = os.path.join(d, n)

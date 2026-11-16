@@ -772,6 +772,44 @@ class Loading(Store):
         self.assertTrue(os.path.isfile(os.path.join(skills, "a-kept", skillex.MARKER)))
         self.assertFalse(os.path.exists(os.path.join(skills, "b-gone")))
 
+    def test_a_held_copy_across_volumes_stays_marked_and_recorded(self):
+        self.store_skill("a-held")
+        skillex.cmd_start(self.p4, {})
+        held = os.path.join(self.root, ".claude", "skills", "a-held")
+        self.store_skill("a-held", "Say it differently.\n")
+        across, real_replace = self.across_volumes()
+        real_remove = skillex.os.remove
+
+        def holds(path, *a, **k):
+            if os.path.normcase(os.path.dirname(str(path))) == os.path.normcase(held) and str(path).endswith("SKILL.md"):
+                raise PermissionError("an editor holds it")
+            return real_remove(path, *a, **k)
+
+        skillex.os.replace, skillex.os.remove = across, holds
+        try:
+            skillex.cmd_start(self.p4, {})
+            shutil.rmtree(os.path.join(self.p4, "skillex", "a-held"))
+            skillex.cmd_start(self.p4, {})
+        finally:
+            skillex.os.replace, skillex.os.remove = real_replace, real_remove
+        self.assertTrue(os.path.isfile(os.path.join(held, skillex.MARKER)), "a held copy keeps its marker")
+        self.assertIn("a-held", skillex.copied(self.p4), "and its record, so a later start removes it")
+        skillex.cmd_start(self.p4, {})
+        self.assertFalse(os.path.exists(held), "once the hold is gone it leaves")
+
+    def test_a_copy_another_session_is_moving_across_volumes_is_left_to_it(self):
+        self.store_skill("demo-brew")
+        skillex.cmd_start(self.p4, {})
+        copy = os.path.join(self.root, ".claude", "skills", "demo-brew")
+        os.makedirs(os.path.join(skillex.swap_dir(self.p4, "claims"), "demo-brew"))
+        across, real_replace = self.across_volumes()
+        skillex.os.replace = across
+        try:
+            self.assertIsNone(skillex.set_aside(self.p4, copy))
+        finally:
+            skillex.os.replace = real_replace
+        self.assertTrue(os.path.isfile(os.path.join(copy, skillex.MARKER)))
+
     def test_a_copy_across_volumes_cut_short_leaves_no_unmarked_folder(self):
         self.store_skill("demo-brew")
         across, real_replace = self.across_volumes()
