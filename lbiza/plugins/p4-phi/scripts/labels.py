@@ -43,8 +43,6 @@ USAGE_WEIGHT = 0.3            # until 8.1's agreement test raises it
 HISTORY_WEIGHT = 0.5
 HISTORY_MAX = 5               # positives per history task
 HISTORY_POOL = 120            # BM25 candidates a history task's reply is checked against
-NOTIFY_RE = re.compile(r"^\s*<(task-notification|system-reminder|local-command|command-name|bash-|user-prompt)",
-                       re.I)
 
 
 # --- files -----------------------------------------------------------------------------------------------
