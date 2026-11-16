@@ -1,29 +1,25 @@
 #!/usr/bin/env python3
-"""lifetime.py — p4-temportal's lifetimes: how long a file under `<project>/.claude/p4/temportal/` is kept.
+"""lifetime.py: p4-temportal's lifetimes, how long a file under `<project>/.claude/p4/temportal/` is kept.
 
-A browser keeps two kinds of short-lived files, and so does p4-temportal:
+Two kinds of lifetime clear files, as a browser clears its cache and its cookies. A cache rule per folder, in the
+p4.json section `temportal.cache` with paths relative to temportal/, clears the files older than `max_age_days`, and
+then the oldest files while the folder holds more than `max_mb`. A cookie is one file or folder with its own expiry,
+set by `lifetime.py set <path> <lifetime>` and kept in temportal/expires.json, and the lifetime `session` clears it
+when the session that set it ends. memory/ is never cleared by a cache rule, and a cookie inside it is refused.
 
-  cache    a rule per directory in p4.json `temportal.cache`: files older than `max_age_days` are cleared, and when
-           the directory holds more than `max_mb` the oldest are cleared until it fits. Paths are relative to
-           temportal/. The defaults cover the notebook's swept logs and build output (scratchpad/.out) and the older
-           copies a layout move kept aside (.layout-conflicts).
-  cookie   one file or directory with its own expiry, set when it is written: `lifetime.py set <path> <lifetime>`,
-           where the lifetime is `30m`, `12h`, `7d`, `2w` or an ISO date. The expiries are kept in
-           temportal/expires.json. A cookie whose time is up is cleared at the next sweep. `session` is a lifetime
-           too: the file is cleared when the session that set it ends.
+A file the store's git tracks is removed with its removal staged, so its last version stays in the history, and an
+ignored or untracked file is deleted.
 
-memory/ is never cleared by a cache rule, and a cookie set inside it is refused: a memory is meant to last. tmp/<session>
-keeps its own lifetime, scratchpad.tmp_idle_days, because a tmp is committed before it is deleted.
+  sweep                    the retention sweep at SessionStart: clears what has expired and prints one line when it
+                           cleared something.
+  session-end              the retention sweep at SessionEnd, which also clears the cookies of the session that ends,
+                           silently.
+  set <path> <lifetime>    gives a file or folder under temportal/ a cookie.
+  list                     every cookie with its expiry, then every cache rule.
+  clear <path>             removes a cookie and keeps the file.
+  now                      the retention sweep, run by hand.
 
-A file the store's git repository tracks is removed with its removal staged, so its last version stays in history.
-An ignored or untracked file is simply deleted, as a browser drops its cache.
-
-  sweep (SessionStart, SessionEnd)   clear what has expired; prints one line when it cleared something.
-  set <path> <lifetime>              set a cookie (also the CLI: python3 lifetime.py set ...).
-  list                               every cookie with its expiry, then every cache rule.
-  clear <path>                       remove a cookie, keeping the file.
-
-Every failure in a hook prints a one-line notice and exits 0.
+A failure in a hook prints a one-line notice and exits 0.
 """
 
 import json
@@ -38,10 +34,10 @@ from datetime import datetime, timezone
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
-import p4conf  # noqa: E402  (the settings file, .claude/p4/p4.json)
+import p4conf  # noqa: E402 - the settings file, .claude/p4/p4.json
 
 EXPIRES = "expires.json"
-NEVER = ("memory",)                     # directories no lifetime ever clears
+NEVER = ("memory",)                     # folders no lifetime ever clears
 UNITS = {"m": 60, "h": 3600, "d": 86400, "w": 7 * 86400}
 SESSION = "session"
 
@@ -81,7 +77,7 @@ def parse_lifetime(text, now=None):
     try:
         d = datetime.fromisoformat(str(text).strip())
     except ValueError:
-        raise ValueError(f"not a lifetime: {text!r} (use 30m, 12h, 7d, 2w, an ISO date or 'session')")
+        raise ValueError(f"not a lifetime: {text!r}; use 30m, 12h, 7d, 2w, an ISO date or 'session'")
     if d.tzinfo is None:
         d = d.astimezone()
     return d.timestamp()
@@ -129,8 +125,8 @@ def write_expires(p4, d):
 
 
 def set_cookie(p4, path, lifetime, session_id="", now=None):
-    """Give `path` (under temportal/) an expiry -> (rel, expiry). Raises ValueError for a path outside temportal/,
-    inside memory/, or a lifetime it cannot read."""
+    """Give `path`, a file or folder under temportal/, an expiry -> (rel, expiry). Raises ValueError for a path
+    outside temportal/ or inside memory/, and for a lifetime it cannot read."""
     rel = rel_in(p4, path)
     if rel is None:
         raise ValueError(f"{path} is not under {home(p4)}")
@@ -140,7 +136,7 @@ def set_cookie(p4, path, lifetime, session_id="", now=None):
     d = read_expires(p4)
     if when == SESSION:
         if not session_id:
-            raise ValueError("a 'session' lifetime needs the session id (--session)")
+            raise ValueError("a 'session' lifetime needs the session id: pass --session")
         d[rel] = {"session": session_id}
     else:
         d[rel] = {"expires": round(when, 3)}
@@ -176,7 +172,7 @@ def _own_repo(p4):
 
 
 def remove(path):
-    """Delete a file or a whole directory; links are removed as links. -> files removed."""
+    """Delete a file or a whole folder, removing a link as a link -> the count of files removed."""
     if p4conf.is_link(path):
         try:
             os.unlink(path) if os.path.islink(path) else os.rmdir(path)
@@ -281,7 +277,8 @@ def sweep_cookies(p4, now=None, ended_session=""):
 
 
 def sweep(p4, now=None, ended_session=""):
-    """Both sweeps; a tracked removal is staged. -> the line to print, or ''."""
+    """The retention sweep: the cache rules, then the cookies, with a tracked removal staged -> the line to print,
+    or ''."""
     if not os.path.isdir(home(p4)):
         return ""
     cache = sweep_cache(p4, now)
@@ -292,7 +289,7 @@ def sweep(p4, now=None, ended_session=""):
         _git(p4, "add", "-u", "--", "temportal")
     parts = [f"{n} file(s) past the cache rule for {rel}/" for rel, n in cache]
     if cookies:
-        shown = ", ".join(cookies[:5]) + (f" (+{len(cookies) - 5} more)" if len(cookies) > 5 else "")
+        shown = ", ".join(cookies[:5]) + (f" and {len(cookies) - 5} more" if len(cookies) > 5 else "")
         parts.append(f"{len(cookies)} expired file(s): {shown}")
     return "p4-temportal: cleared " + "; ".join(parts) + "."
 
@@ -304,7 +301,7 @@ def listing(p4, now=None):
         if "expires" in v:
             left = float(v["expires"]) - now
             when = datetime.fromtimestamp(float(v["expires"]), timezone.utc).astimezone().isoformat(timespec="minutes")
-            lines.append(f"cookie  {rel}  expires {when}" + ("  (due)" if left <= 0 else ""))
+            lines.append(f"cookie  {rel}  expires {when}" + ("  past due" if left <= 0 else ""))
         elif "session" in v:
             lines.append(f"cookie  {rel}  until session {v['session'][:8]} ends")
     for rel, rule in sorted(rules(p4).items()):
@@ -328,20 +325,20 @@ def main():
             if line and sub == "sweep":
                 print(line)
         except Exception as e:  # noqa: BLE001 — a hook degrades, never raises
-            print(f"p4-temportal lifetime ({sub}) degraded: {type(e).__name__}: {e}")
+            print(f"p4-temportal lifetime {sub} degraded: {type(e).__name__}: {e}")
         return 0
     import argparse
     ap = argparse.ArgumentParser(prog="lifetime.py", description="p4-temportal: cookie and cache lifetimes")
-    ap.add_argument("--p4", default=None, help="the store, <project>/.claude/p4 (default: from CLAUDE_PROJECT_DIR)")
+    ap.add_argument("--p4", default=None, help="the store, <project>/.claude/p4, by default from CLAUDE_PROJECT_DIR")
     sp = ap.add_subparsers(dest="cmd", required=True)
-    s = sp.add_parser("set", help="give a file or directory under temportal/ an expiry")
+    s = sp.add_parser("set", help="give a file or folder under temportal/ an expiry")
     s.add_argument("path")
     s.add_argument("lifetime", help="30m, 12h, 7d, 2w, an ISO date, or 'session'")
     s.add_argument("--session", default=os.environ.get("CLAUDE_SESSION_ID", ""))
     c = sp.add_parser("clear", help="remove a file's expiry, keeping the file")
     c.add_argument("path")
     sp.add_parser("list", help="every cookie and cache rule")
-    sp.add_parser("now", help="sweep now")
+    sp.add_parser("now", help="run the retention sweep now")
     a = ap.parse_args(args)
     p4 = a.p4 or store_of(project_root({}))
     if a.cmd == "set":

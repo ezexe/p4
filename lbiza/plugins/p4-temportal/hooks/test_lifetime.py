@@ -126,7 +126,8 @@ class Lifetime(unittest.TestCase):
 
 
 class Layout(unittest.TestCase):
-    """A store written flat by the older plugins moves into each plugin's directory, once, as one commit."""
+    """A store with files in an earlier place of the layout moves them into each plugin's folder, once, as one
+    commit."""
 
     def setUp(self):
         self.p4 = tempfile.mkdtemp(prefix="p4-temportal-layout-")
@@ -174,7 +175,7 @@ class Layout(unittest.TestCase):
         put(os.path.join(self.p4, "recall", "store", "rules.md"), "r\n")
         put(os.path.join(self.p4, "recall", "models", "eval.tsv"), "round\n")
         put(os.path.join(self.p4, "phi", "sessions", "s", "session.json"), "{}")
-        put(os.path.join(self.p4, "models", "late.json"), "{}")         # a flat write from a machine not updated yet
+        put(os.path.join(self.p4, "models", "late.json"), "{}")         # from a machine whose plugin is behind
         put(os.path.join(self.p4, ".gitignore"), "recall/models/served/\nmodels/view/\n")
         if self.git:
             self.g("init", "-q")
@@ -194,8 +195,7 @@ class Layout(unittest.TestCase):
         self.assertEqual(p4conf.migrate_layout(self.p4), [])
 
     def test_the_layout_commit_holds_the_move_and_nothing_else(self):
-        """B2 and B3 of the marketplace test session: a pending hook edit stays pending, and a seed line an older
-        plugin appends again in the flat form is not left twice."""
+        """A pending hook edit stays pending, and a seed line appended again in the earlier form is not left twice."""
         if not self.git:
             self.skipTest("no git")
         put(os.path.join(self.p4, "phi", "store", "facts.md"), "a fact\n")
@@ -215,7 +215,7 @@ class Layout(unittest.TestCase):
         self.assertEqual(read(os.path.join(self.p4, ".gitignore")).splitlines().count("phi/models/index.json"), 1)
 
     def test_a_flat_line_for_a_folder_that_never_existed_is_rewritten_too(self):
-        """B3b of the marketplace test session: a flat store without scratchpad/ kept `scratchpad/.out/`."""
+        """A store with no scratchpad/ at its top still has its `scratchpad/.out/` line rewritten."""
         put(os.path.join(self.p4, "store", "facts.md"), "f\n")
         put(os.path.join(self.p4, ".gitignore"), "scratchpad/.out/\nmodels/served/\ntemportal/scratchpad/.out/\n")
         p4conf.migrate_layout(self.p4, commit=False)
@@ -223,8 +223,7 @@ class Layout(unittest.TestCase):
                          "phi/models/served/\ntemportal/scratchpad/.out/\n", "rewritten, and not left twice")
 
     def test_differing_ignored_caches_are_never_set_aside(self):
-        """L1 of the marketplace test session: two copies of an ignored cache left in .layout-conflicts/ and
-        committed, 5.4 MB of one machine's caches in the live store."""
+        """Two differing copies of a cache the store ignores are never set aside in .layout-conflicts/ and committed."""
         if not self.git:
             self.skipTest("no git")
         put(os.path.join(self.p4, ".gitignore"), "recall/models/index.json\n")
@@ -270,7 +269,7 @@ class Layout(unittest.TestCase):
             p4conf.TEMP_ROOTS = saved
         new = os.path.join(self.p4, "temportal", "tmp", sid)
         self.assertTrue(p4conf.is_link(harness))
-        self.assertTrue(os.path.samefile(harness, new), "the harness link reaches the new tmp")
+        self.assertTrue(os.path.samefile(harness, new), "the scratchpad link reaches its folder in temportal/tmp/")
         self.assertTrue(os.path.isfile(os.path.join(harness, "n.md")))
         p4conf._unlink(harness)
         shutil.rmtree(temp, ignore_errors=True)
