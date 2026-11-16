@@ -20,7 +20,9 @@ ignored or untracked file is deleted.
   session-end              the retention sweep at SessionEnd, which also clears the cookies of the session that ends,
                            silently.
   set <path> <lifetime>    gives a file or folder under temportal/ a cookie. The path must exist, and a relative
-                           one is read from the working folder.
+                           one is read from the working folder. The lifetime `session` ends with the session that
+                           --session names, by default CLAUDE_CODE_SESSION_ID, which Claude Code sets in its Bash
+                           and PowerShell tools and its hooks.
   list                     every cookie with its expiry, then every cache rule. An entry of expires.json that cannot
                            be read is listed as unreadable, and the retention sweep leaves it as it is.
   clear <path>             removes a cookie and keeps the file, reading a relative path from the working folder.
@@ -376,7 +378,8 @@ def main():
     s = sp.add_parser("set", help="give a file or folder under temportal/ an expiry")
     s.add_argument("path")
     s.add_argument("lifetime", help="30m, 12h, 7d, 2w, an ISO date, or 'session'")
-    s.add_argument("--session", default=os.environ.get("CLAUDE_SESSION_ID", ""))
+    s.add_argument("--session", default=os.environ.get("CLAUDE_CODE_SESSION_ID", ""),
+                   help="the session a 'session' lifetime ends with, by default CLAUDE_CODE_SESSION_ID")
     c = sp.add_parser("clear", help="remove a file's expiry, keeping the file")
     c.add_argument("path")
     sp.add_parser("list", help="every cookie and cache rule")

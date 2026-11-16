@@ -164,6 +164,14 @@ class Lifetime(unittest.TestCase):
         lifetime.sweep(self.p4, ended_session="abc")
         self.assertFalse(os.path.exists(f))
 
+    def test_a_session_cookie_takes_the_session_id_claude_code_sets(self):
+        """With only CLAUDE_CODE_SESSION_ID in the environment, `set <path> session` succeeds, and the cookie clears
+        when that session ends."""
+        f = put(os.path.join(self.t, "scratchpad", "state.md"))
+        r = run("--p4", self.p4, "set", f, "session", CLAUDE_CODE_SESSION_ID="abc")
+        run("session-end", stdin=json.dumps({"session_id": "abc"}), CLAUDE_PROJECT_DIR=self.root)
+        self.assertEqual((r.returncode, r.stderr, os.path.exists(f)), (0, "", False))
+
     def test_set_reads_a_relative_path_from_the_working_folder_and_refuses_a_missing_one(self):
         """`set notes.md 7d` run inside a folder gives that folder's file a cookie, `clear` reads its path the same
         way, and a path that does not exist is refused."""
