@@ -696,7 +696,7 @@ def mirror(p4, names=None, remove=False):
             _same_bytes(p, os.path.join(target, rel)) for rel, p in files.items())
         if same:
             continue
-        staging = os.path.join(state_dir(p4), "staging", f"{n}.{os.getpid()}.{time.time_ns()}")
+        staging = os.path.join(swap_dir(p4, "staging"), f"{n}.{os.getpid()}.{time.time_ns()}")
         try:
             for rel, p in files.items():
                 os.makedirs(os.path.dirname(os.path.join(staging, rel)), exist_ok=True)
@@ -708,13 +708,20 @@ def mirror(p4, names=None, remove=False):
         except OSError:
             shutil.rmtree(staging, ignore_errors=True)
             raise
-        old = set_aside(p4, target) if os.path.isdir(target) else None
+        try:
+            old = set_aside(p4, target) if os.path.isdir(target) else None
+        except OSError:                                  # a held folder: the old copy stays, the next start retries
+            shutil.rmtree(staging, ignore_errors=True)
+            continue
         try:
             os.replace(staging, target)
         except OSError:
             shutil.rmtree(staging, ignore_errors=True)
-            if old and not os.path.exists(target):       # not another session's copy: the old one goes back
-                os.replace(old, target)
+            if old and not os.path.exists(target) and os.path.isfile(os.path.join(old, MARKER)):
+                try:                                     # not another session's copy: the old one goes back
+                    os.replace(old, target)
+                except OSError:
+                    pass
             continue
         made_here.add(n)
         changed.append(n)
@@ -730,12 +737,22 @@ def mirror(p4, names=None, remove=False):
     return changed
 
 
+def swap_dir(p4, sub):
+    """`<project>/.claude/.skillex-swap/<sub>/`, beside `.claude/skills/` and so on its volume, where a copy is built
+    and set aside, each move one rename. The folder ignores itself, so git never sees it."""
+    base = os.path.join(os.path.dirname(project_skills(p4)), ".skillex-swap")
+    os.makedirs(os.path.join(base, sub), exist_ok=True)
+    ignore = os.path.join(base, ".gitignore")
+    if not os.path.isfile(ignore):
+        with open(ignore, "w", encoding="utf-8", newline="\n") as f:
+            f.write("*\n")
+    return os.path.join(base, sub)
+
+
 def set_aside(p4, target):
-    """Move a copy out of `.claude/skills/` whole, marker and all, into `.state/aside/`, where clear_aside deletes
-    it. Returns where it went, or None when another session moved it first."""
-    aside = os.path.join(state_dir(p4), "aside")
-    os.makedirs(aside, exist_ok=True)
-    where = os.path.join(aside, f"{os.path.basename(target)}.{os.getpid()}.{time.time_ns()}")
+    """Move a copy out of `.claude/skills/` whole, marker and all, into the swap folder's `aside/`, where clear_aside
+    deletes it. Returns where it went, or None when another session moved it first."""
+    where = os.path.join(swap_dir(p4, "aside"), f"{os.path.basename(target)}.{os.getpid()}.{time.time_ns()}")
     try:
         os.replace(target, where)
     except FileNotFoundError:
@@ -744,16 +761,15 @@ def set_aside(p4, target):
 
 
 def clear_aside(p4):
-    """Delete what set_aside moved, which is whole and nobody's, and a staging folder quiet for STAGING_STALE_S,
-    which a run that ended midway left; a staging folder still being filled belongs to a running session. A failure
-    only waits for the next run."""
+    """Delete what set_aside moved and what staging holds once quiet for STAGING_STALE_S: a younger one belongs to a
+    running session, which may still restore or fill it. A failure only waits for the next run."""
     now = time.time()
     for sub in ("aside", "staging"):
-        d = os.path.join(skillex_dir(p4), STATE, sub)
-        for n in os.listdir(d) if os.path.isdir(d) else []:
+        d = swap_dir(p4, sub)
+        for n in os.listdir(d):
             p = os.path.join(d, n)
             try:
-                stale = sub == "aside" or now - os.path.getmtime(p) > STAGING_STALE_S
+                stale = now - os.path.getmtime(p) > STAGING_STALE_S
             except OSError:
                 continue
             if stale:
@@ -809,7 +825,7 @@ def notice(results):
     return "\n".join(out)
 
 
-STAGING_STALE_S = 600                 # a staging folder quiet this long was left by a run that ended midway
+STAGING_STALE_S = 600                 # a staging or set-aside folder quiet this long is no running session's
 STATE_QUIET_S = 86400                 # a state with no tmp folder is deleted once this quiet; every Stop rewrites it
 
 

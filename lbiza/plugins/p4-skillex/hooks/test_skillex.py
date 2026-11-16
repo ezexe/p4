@@ -524,7 +524,7 @@ class Loading(Store):
         self.assertFalse(os.path.exists(copy))
 
     def test_a_staging_folder_another_session_is_filling_is_left_alone(self):
-        staging = os.path.join(self.p4, "skillex", ".state", "staging")
+        staging = skillex.swap_dir(self.p4, "staging")
         busy = put(os.path.join(staging, "other.4242.1", "SKILL.md"), "half\n")
         left = put(os.path.join(staging, "other.4243.1", "SKILL.md"), "left\n")
         old = time.time() - 2 * skillex.STAGING_STALE_S
@@ -553,7 +553,66 @@ class Loading(Store):
             skillex.os.replace = real_replace
         self.assertTrue(os.path.isfile(os.path.join(copy, skillex.MARKER)), "the old copy is back, marker and all")
         self.assertIn("Say what the skill does.", read(os.path.join(copy, "SKILL.md")))
-        self.assertIn("Say it differently.", read(os.path.join(skillex.cmd_start(self.p4, {}) and copy, "SKILL.md")))
+        self.assertTrue(skillex.cmd_start(self.p4, {})["hookSpecificOutput"]["reloadSkills"])
+        self.assertIn("Say it differently.", read(os.path.join(copy, "SKILL.md")))
+
+    def test_a_copy_that_cannot_be_set_aside_stays_and_the_rest_are_copied(self):
+        self.store_skill("a-one")
+        skillex.cmd_start(self.p4, {})
+        held = os.path.join(self.root, ".claude", "skills", "a-one")
+        self.store_skill("a-one", "Say it differently.\n")
+        self.store_skill("b-two")
+        real_replace = skillex.os.replace
+
+        def holds_a_one(a, b):
+            if os.path.normcase(str(a)) == os.path.normcase(held):
+                raise PermissionError("an editor holds a file inside")
+            return real_replace(a, b)
+
+        skillex.os.replace = holds_a_one
+        try:
+            out = skillex.cmd_start(self.p4, {})
+        finally:
+            skillex.os.replace = real_replace
+        self.assertTrue(out["hookSpecificOutput"]["reloadSkills"], "b-two's copy is announced")
+        self.assertTrue(os.path.isfile(os.path.join(self.root, ".claude", "skills", "b-two", skillex.MARKER)))
+        self.assertIn("Say what the skill does.", read(os.path.join(held, "SKILL.md")), "the held copy stays")
+        self.assertTrue(os.path.isfile(os.path.join(held, skillex.MARKER)))
+        self.assertEqual(os.listdir(skillex.swap_dir(self.p4, "staging")), [])
+        self.assertIn("Say it differently.", read(os.path.join(held, "SKILL.md")) if skillex.cmd_start(self.p4, {})
+                      else "the next start did nothing")
+
+    def test_a_copy_another_session_moved_first_is_no_error(self):
+        self.store_skill("demo-brew")
+        skillex.cmd_start(self.p4, {})
+        copy = os.path.join(self.root, ".claude", "skills", "demo-brew")
+        self.store_skill("demo-brew", "Say it differently.\n")
+        real_replace = skillex.os.replace
+
+        def moved_first(a, b):
+            if os.path.normcase(str(a)) == os.path.normcase(copy):
+                shutil.rmtree(copy)
+                raise FileNotFoundError(a)
+            return real_replace(a, b)
+
+        skillex.os.replace = moved_first
+        try:
+            skillex.cmd_start(self.p4, {})
+        finally:
+            skillex.os.replace = real_replace
+        self.assertIn("Say it differently.", read(os.path.join(copy, "SKILL.md")))
+
+    def test_a_fresh_set_aside_copy_waits_for_its_session(self):
+        aside = os.path.join(self.root, ".claude", ".skillex-swap", "aside")
+        fresh = put(os.path.join(aside, "x.4242.1", skillex.MARKER), "m\n")
+        stale = put(os.path.join(aside, "y.4243.1", skillex.MARKER), "m\n")
+        old = time.time() - 2 * skillex.STAGING_STALE_S
+        os.utime(os.path.dirname(stale), (old, old))
+        self.store_skill("demo-brew")
+        skillex.cmd_start(self.p4, {})
+        self.assertTrue(os.path.isfile(fresh), "its session may still put it back")
+        self.assertFalse(os.path.exists(os.path.dirname(stale)))
+        self.assertEqual(read(os.path.join(self.root, ".claude", ".skillex-swap", ".gitignore")), "*\n")
 
     def test_a_start_records_its_session_before_it_copies(self):
         self.store_skill("demo-brew")
@@ -610,7 +669,7 @@ class Loading(Store):
         self.assertIn("Say what the skill does.", read(os.path.join(copy, "SKILL.md")), "the old copy stands")
         self.assertTrue(skillex.cmd_start(self.p4, {})["hookSpecificOutput"]["reloadSkills"])
         self.assertIn("Say it differently.", read(os.path.join(copy, "SKILL.md")), "the next start finishes it")
-        self.assertEqual(os.listdir(os.path.join(self.p4, "skillex", ".state", "staging")), [])
+        self.assertEqual(os.listdir(skillex.swap_dir(self.p4, "staging")), [])
 
     def test_a_removal_cut_short_leaves_no_unmarked_copy(self):
         self.store_skill("demo-brew")
