@@ -552,8 +552,6 @@ def finding17(files):
 POOL_STEER_RE = re.compile(r"^- \[([a-z-]+\.md) (\d{4}-\d\d-\d\d \d\d:\d\d|\(no time\))[^\]]*\] (.*?); bears: (.*)$")
 MODEL_CREDIT_RE = re.compile(r"\(\d+, [a-z+]*\bmodel\b")
 STAMP_RE = re.compile(r"\b(20\d\d-\d\d-\d\d(?: \d\d:\d\d)?)\b")
-NEW_OF_OLD = {"local-storage.md": "rules.md", "ledger.md": "corrections.md", "tombstones.md": "retractions.md",
-              "briefs.md": "corrections.md", "data-store.md": "facts.md"}
 
 
 def parse_pool(path):
