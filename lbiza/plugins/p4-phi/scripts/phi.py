@@ -64,7 +64,8 @@ session's meta pass reconciles every top's ledger into meta-ledger.md.
 The pair (controls.py, #58): a top session ezexe filed in the sidebar section "puppeteers" controls other top
 sessions, in any store. phi reads the filing from the app's own file, keeps the controlled sessions on the
 puppeteer's record (`controls`), tells each controlled session of its puppeteer, writes the puppeteer's board, gives
-it no hand-off advice, lets its turn end on a step that waits on them, and lets it archive a complete one.
+it no hand-off advice, lets its turn end on a step that waits on them, and offers a complete one to ezexe, whose
+pick is the only thing that lets the puppeteer archive it (#63).
 
 Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `new_task` (false: off),
 `rules`, `background_chars`, `reports_chars`, `wait_s`. P4_PHI=0 turns the plugin off, P4_PHI_NEW_TASK=0 the

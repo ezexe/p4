@@ -529,7 +529,7 @@ def controls_text(home, s):
 # --- the archive guard -----------------------------------------------------------------------------------------------------
 
 def control_store(home, s, target):
-    """The store of a session a puppeteer may archive: one it controls, one in such a session's tree, one in its
+    """The store of a session a puppeteer may archive on ezexe's pick: one it controls, one in such a session's tree, one in its
     own tree, or the puppeteer that handed over to it; None when it is none of those."""
     rows = {e["sessionId"]: e.get("store") or "" for e in controlled(s)}
     if target in rows:
@@ -768,7 +768,8 @@ def hand(home, s, new):
     s["handedTo"] = {"sessionId": new, "time": PHI.now()}
     PHI.save_session(home, s)
     return (f"handed over to \"{full_title(new)}\" ({new}): it runs `controls --from {s['sessionId']}`, then keeps "
-            f"this session's outcome with `note` and archives it")
+            f"this session's outcome with `note` and offers it to ezexe to archive, as any complete session it "
+            f"controls: it archives this session only on ezexe's pick")
 
 
 def take(home, s, old):
