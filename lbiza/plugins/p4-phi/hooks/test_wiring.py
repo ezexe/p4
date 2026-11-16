@@ -263,6 +263,29 @@ class Gate(unittest.TestCase):
         self.assertTrue(self.check("WebFetch", {"url": "https://example.com"}).startswith("RAN "))
 
 
+class SharedProbe(unittest.TestCase):
+    """Both runners find their python through hooks/find-python.sh and repeat none of its search."""
+
+    def test_both_runners_source_the_one_search(self):
+        for runner in (PHI_RUN, RECALL):
+            with open(runner, encoding="utf-8") as f:
+                text = f.read()
+            self.assertIn('f="${CLAUDE_PLUGIN_ROOT}/hooks/find-python.sh"', text, runner)
+            self.assertIn('. "$f"', text, runner)
+            self.assertNotIn("for c in $order", text, runner)
+            self.assertNotIn("sys.executable", text, runner)
+
+    def test_a_missing_finder_ends_in_the_message_and_exit_0(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            env = {k: v for k, v in os.environ.items() if not k.upper().startswith(("CLAUDE", "P4_"))}
+            env.update(CLAUDE_PLUGIN_ROOT=tmp.replace("\\", "/"), CLAUDE_PROJECT_DIR=tmp)
+            for runner, name in ((PHI_RUN, "session-start"), (RECALL, "layout")):
+                r = subprocess.run([SH, runner, name], input="{}", capture_output=True, text=True, env=env, cwd=tmp,
+                                   timeout=60)
+                self.assertEqual(r.returncode, 0, (name, r.stderr))
+                self.assertIn("no working python found", r.stdout, name)
+
+
 def no_python_path(tmp):
     """A PATH that finds `sh` and `mkdir` and no python: the shell's own folder where it holds none, as Git's does
     on Windows, else a folder of links to the two."""

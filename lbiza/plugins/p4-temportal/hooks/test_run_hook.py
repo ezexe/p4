@@ -15,6 +15,7 @@ class RunHookTest(unittest.TestCase):
         self.root = self.tmp / "root"
         (self.root / "hooks").mkdir(parents=True)
         shutil.copy(HERE / "run-hook.sh", self.root / "hooks" / "run-hook.sh")
+        shutil.copy(HERE / "find-python.sh", self.root / "hooks" / "find-python.sh")
         (self.root / "hooks" / "lifetime.py").write_text("print('ran')\n")
         self.data = self.tmp / "data"
 
@@ -30,6 +31,19 @@ class RunHookTest(unittest.TestCase):
         self.assertIn("ran", out.stdout)
         self.assertTrue((self.data / ".python").is_file())
         self.assertFalse((self.root / ".python").exists())
+
+    def test_a_missing_finder_ends_in_the_message_and_exit_0(self):
+        (self.root / "hooks" / "find-python.sh").unlink()
+        out = self.run_hook("lifetime", "sweep")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("no working python found", out.stdout)
+
+    def test_find_python_equals_p4_phis(self):
+        phi = HERE.parent.parent / "p4-phi" / "hooks" / "find-python.sh"
+        if not phi.is_file():
+            self.skipTest("p4-phi is not beside this plugin")
+        self.assertEqual((HERE / "find-python.sh").read_bytes(), phi.read_bytes())
+        self.assertNotIn("for c in $order", (HERE / "run-hook.sh").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

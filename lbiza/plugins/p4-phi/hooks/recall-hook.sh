@@ -4,9 +4,7 @@
 # hook never blocks a call. Python runs isolated with -I and in UTF-8 mode with -X utf8, so stdin, stdout and every
 # file opened are UTF-8 rather than the Windows code page, and a prompt's UTF-8 punctuation never decodes into lone
 # surrogates that a later UTF-8 write refuses.
-# On Windows a `python3` on PATH can be the Store stub, so there a candidate is proven with a trivial run once and
-# remembered in the plugin's data folder, ${CLAUDE_PLUGIN_DATA}/.python, which run-hook.sh shares; elsewhere the
-# first python on PATH runs without that proof.
+# find-python.sh, which run-hook.sh shares, finds the python.
 #
 # The lookup hooks run before and after every tool call, so every process this script starts is paid twice a call.
 # The platform is read from the environment, so no `uname` runs. The gate below ends in this script, with no python
@@ -91,48 +89,13 @@ run() {
   fi
 }
 
-case "${OS:-}${OSTYPE:-}" in
-  *Windows*|*msys*|*cygwin*|*win32*) probe=1 ;;
-  *) probe=0 ;;
-esac
-
-# The proven interpreter is remembered in the plugin's data folder: plugins/manifest-reference.md, "Environment
-# variables": "`${CLAUDE_PLUGIN_ROOT}` changes when the plugin updates, so don't write state there", and
-# `${CLAUDE_PLUGIN_DATA}` is "kept across plugin updates". Where no data folder is set, the file is kept in the
-# plugin's own folder.
+f="${CLAUDE_PLUGIN_ROOT}/hooks/find-python.sh"   # a missing finder ends in the message below, never in exit 2
 known="${CLAUDE_PLUGIN_ROOT}/.python"
-if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
-  [ -d "$CLAUDE_PLUGIN_DATA" ] || mkdir -p "$CLAUDE_PLUGIN_DATA" 2>/dev/null
-  [ -d "$CLAUDE_PLUGIN_DATA" ] && known="${CLAUDE_PLUGIN_DATA}/.python"
-fi
-if [ "$probe" = 1 ] && [ -r "$known" ]; then
-  read -r c < "$known" || c=""
-  case "$c" in */*) ;; *) c="" ;; esac       # a bare name may be the WindowsApps alias: prove it again
-  if [ -n "$c" ] && command -v "$c" >/dev/null 2>&1; then
-    shift 2>/dev/null || true
-    run "$c" "$name" "$@"
-    exit 0
-  fi
-fi
-
 shift 2>/dev/null || true
-order="python3 python py"
-[ "$probe" = 1 ] && order="py python python3"   # on Windows the launcher first, the WindowsApps alias last
-for c in $order; do
-  p=$(command -v "$c" 2>/dev/null) || continue
-  case "$p" in *WindowsApps*) probe=1 ;; esac
-  if [ "$probe" = 0 ]; then
-    run "$c" "$name" "$@"
-    exit 0
-  fi
-  v=""; [ "$c" = py ] && v="-3"
-  exe=$("$c" $v -I -c "import sys; print(sys.executable.replace(chr(92), '/'))" 2>/dev/null) || continue
-  [ -n "$exe" ] && command -v "$exe" >/dev/null 2>&1 || continue
-  printf '%s\n' "$exe" > "$known" 2>/dev/null
-  c="$exe"
-  run "$c" "$name" "$@"
-  exit 0
-done
+if [ -r "$f" ]; then
+  . "$f"
+  find_python && { run "$py" "$name" "$@"; exit 0; }
+fi
 
 echo "{\"systemMessage\": \"phi (p4-phi) ${name:-?} hook: no working python found; nothing was done\"}"
 exit 0
