@@ -21,6 +21,7 @@ RUNNER = os.path.join(HERE, "run-hook.sh")
 MARK = "<!-- p4-memory: pointer"
 BUILTIN_LINES = 200         # the reference of what Claude Code loads, kept apart from p4_memory.py's constants so
 BUILTIN_BYTES = 25_000      # that a change there fails here
+STDOUT_CHARS = 10_000       # a hook's plain stdout past this reaches the session as a 2,000-character preview
 
 
 def run(sub, root, app, payload):
@@ -194,6 +195,8 @@ def gate2_a():
             "long": ({}, {"MEMORY.md": index}),
             # under 200 lines but over 25KB: the byte cut decides
             "wide": ({}, {"MEMORY.md": "".join(f"- [w{i}](w{i}.md) — {'x' * 300}\n" for i in range(150))}),
+            # under both of Claude Code's cuts but over the 10,000 characters a hook's stdout reaches the session with
+            "between": ({}, {"MEMORY.md": "".join(f"- [m{i}](m{i}.md) — {'y' * 100}\n" for i in range(120))}),
             "empty": ({}, {}),
         }
         for name, (in_app, in_p4) in cases.items():
@@ -205,19 +208,28 @@ def gate2_a():
                 put(os.path.join(app, rel), text)
             for rel, text in in_p4.items():
                 put(os.path.join(root, ".claude", "p4", "temportal", "memory", rel), text)
-            out = run_raw("migrate", root, app).splitlines()
+            raw = run_raw("migrate", root, app)
+            assert len(raw) <= STDOUT_CHARS, f"{name}: {len(raw)} characters reach the session as a preview"
+            out = raw.splitlines()
+            cut = [ln for ln in out if ln.startswith("p4-temportal: MEMORY.md cut")]
+            if cut:                                     # the cut is said once, after the index
+                assert out[-1] == cut[0] and len(cut) == 1, f"{name}: the cut line is not last\n{out[-2:]}"
+                out = out[:-1]
             # the same files in a plain memory folder, as Claude Code would load them after the move
             ref_dir = os.path.join(base, name, "builtin")
             shutil.copytree(os.path.join(root, ".claude", "p4", "temportal", "memory"), ref_dir,
                             ignore=shutil.ignore_patterns(".conflicts"))
             ref = builtin_print(ref_dir)
-            extra = len(out) - len(ref)
-            assert extra in (0, 1), f"{name}: {extra} extra lines\n" + "\n".join(out[:5])
-            if extra:
-                assert out[0].startswith("p4-temportal: ") and out[1:] == ref, \
-                    f"{name}: the notice is not one line\n{out[:3]}"
+            extra = 1 if out and out[0].startswith("p4-temportal: ") else 0
+            body = out[extra:]
+            total = len(read(os.path.join(ref_dir, "MEMORY.md")).splitlines()) if ref else 0
+            assert body == ref[:len(body)], f"{name}: output differs from what Claude Code loads\n{out[:3]}"
+            index = os.path.normpath(os.path.join(root, ".claude", "p4", "temportal", "memory", "MEMORY.md"))
+            if len(body) < total:
+                assert cut and f"{total - len(body)} of {total} lines left out" in cut[0] and index in cut[0], \
+                    f"{name}: {total - len(body)} lines left out without a word: {cut}"
             else:
-                assert out == ref, f"{name}: output differs from what Claude Code loads\n{out[:3]}"
+                assert not cut, f"{name}: a whole index was said to be cut: {cut}"
             if name == "quiet":
                 assert extra == 0, "a start with nothing to move printed a notice"
             if name == "moved":
@@ -226,6 +238,8 @@ def gate2_a():
                 assert len(out) == BUILTIN_LINES, len(out)
             if name == "wide":
                 assert len("\n".join(out).encode("utf-8")) <= BUILTIN_BYTES and len(out) < 150, len(out)
+            if name == "between":
+                assert len(body) < 120 and cut, len(body)
             if name == "empty":
                 assert out == [], out
     finally:
@@ -272,7 +286,9 @@ def crlf_cut():
         os.makedirs(os.path.dirname(path))
         with open(path, "w", encoding="utf-8", newline="") as f:
             f.write(line * 190)
-        out = [ln for ln in run_raw("migrate", root, app).splitlines() if ln.startswith("- [c]")]
+        sys.path.insert(0, HERE)
+        import p4_memory
+        out, _ = p4_memory.builtin_index(os.path.dirname(path))
         assert len(out) == BUILTIN_BYTES // 151, f"{len(out)} CRLF lines kept, {len(out) * 151} bytes on disk"
     finally:
         shutil.rmtree(base, ignore_errors=True)

@@ -42,6 +42,8 @@ POINTER_MARK = "<!-- p4-memory: pointer"    # a format the pointer files on disk
 BUILTIN_LINES = 200          # Claude Code loads the first 200 lines of MEMORY.md or its first 25KB, whichever comes
 BUILTIN_BYTES = 25_000       # first, by https://code.claude.com/docs/en/memory, and test_live_memory_limit.py
                              # measures 25KB as 25,000 bytes cut at a whole line
+STDOUT_CHARS = 10_000        # a hook's plain stdout past this reaches the session as a file path and a 2,000-character
+                             # preview, by https://code.claude.com/docs/en/hooks, section JSON output
 RETRIES = 5
 RETRY_WAIT_S = 1.0
 
@@ -246,20 +248,21 @@ def migrate(app, mem, stamp):
 
 
 def builtin_index(memdir):
-    """What Claude Code loads from a memory folder: the first BUILTIN_LINES lines of its MEMORY.md, or its first
-    BUILTIN_BYTES bytes cut at a whole line, whichever comes first."""
+    """-> (kept lines, the index's line count): what Claude Code loads from a memory folder, the first BUILTIN_LINES
+    lines of its MEMORY.md or its first BUILTIN_BYTES bytes cut at a whole line, whichever comes first."""
     index = os.path.join(memdir, "MEMORY.md")
     if not os.path.isfile(index):
-        return ""
+        return [], 0
     with open(index, "rb") as f:
-        lines = f.read().splitlines(keepends=True)[:BUILTIN_LINES]
+        lines = f.read().splitlines(keepends=True)
+    total = len(lines)
     kept, size = [], 0
-    for line in lines:
+    for line in lines[:BUILTIN_LINES]:
         size += len(line)                               # bytes on disk, a CRLF line counted with its CR
         if size > BUILTIN_BYTES:
             break
-        kept.append(line.decode("utf-8", errors="replace").replace("\r\n", "\n"))
-    return "".join(kept)
+        kept.append(line.decode("utf-8", errors="replace").rstrip("\r\n") + "\n")
+    return kept, total
 
 
 def notice(parts):
@@ -271,11 +274,26 @@ def cmd_migrate(payload):
     app, mem = appdata_memory(payload, root), p4_memory(root)
     parts, _ = migrate(app, mem, time.strftime("%Y%m%d-%H%M%S"))
     out = notice(parts)
-    if out:
-        print(out)
-    index = builtin_index(mem)          # Claude Code loaded only the pointer: print what it would have loaded
-    if index:
-        sys.stdout.write(index if index.endswith("\n") else index + "\n")
+    head = out + "\n" if out else ""
+    kept, total = builtin_index(mem)    # Claude Code loaded only the pointer: print what it would have loaded
+    path = os.path.normpath(os.path.join(mem, "MEMORY.md"))
+
+    def cut_line(n):
+        return f"p4-temportal: MEMORY.md cut here, {total - n} of {total} lines left out; the whole index is {path}.\n"
+
+    room = STDOUT_CHARS - len(head)
+    if len(kept) < total or sum(map(len, kept)) > room:
+        room -= len(cut_line(0))        # the longest the cut line can be
+    shown, size = [], 0
+    for line in kept:
+        if size + len(line) > room:
+            break
+        shown.append(line)
+        size += len(line)
+    text = head + "".join(shown) + (cut_line(len(shown)) if len(shown) < total else "")
+    sys.stdout.flush()                  # LF as counted, never the CRLF Windows text mode would write
+    sys.stdout.buffer.write(text.encode("utf-8", errors="replace"))
+    sys.stdout.buffer.flush()
     return 0
 
 
