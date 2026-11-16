@@ -558,10 +558,15 @@ def _legacy(p4):
 
 
 def _write(p4, data):
-    tmp = path(p4) + ".tmp"
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        f.write(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
-    os.replace(tmp, path(p4))
+    """Write p4.json through a temp file of this call's own, since the hooks of one event load at once."""
+    fd, tmp = tempfile.mkstemp(prefix=FILE + ".", suffix=".tmp", dir=p4)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
+        os.replace(tmp, path(p4))
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 
 def load(p4, write=True, warn=True):

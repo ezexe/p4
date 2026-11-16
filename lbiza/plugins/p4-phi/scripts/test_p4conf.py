@@ -91,6 +91,15 @@ class P4Conf(unittest.TestCase):
             self.assertNotIn(key, p4conf.DEFAULTS)
         self.assertEqual(self.read(), p4conf.DEFAULTS)
 
+    def test_a_writer_holding_a_temp_file_does_not_block_another(self):
+        """Two hooks of one event load at once: a temp file another writer still holds does not stop this write."""
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump({"memory": p4conf.DEFAULTS["memory"]}, f)
+        os.mkdir(p4conf.path(self.p4) + ".tmp")          # the name the other writer would hold
+        p4conf.load(self.p4, warn=False)
+        self.assertEqual(self.read(), p4conf.DEFAULTS)
+        self.assertEqual(sorted(os.listdir(self.p4)), sorted(["p4.json", "p4.json.tmp"]), "no temp file is left")
+
     def test_a_broken_file_is_never_overwritten(self):
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
             f.write("{not json")
