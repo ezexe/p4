@@ -300,8 +300,11 @@ def call_of(r, home=""):
     if len(bg) < BACKGROUND_MIN:
         bg = background_of(home, r["requester"], bg) if home else (
             bg + " " + background_of("", r["requester"], "")).strip()
-    return {"initiation": "user_asked", "title": r["title"], "context": "fresh", "use_worktree": False,
-            "background": bg, "prompt": r["brief"] + "\n\n" + marker(r["id"], r["requester"])}
+    import plans                                   # #61: the model and effort its brief's kind of work gets
+    return plans.with_level({"initiation": "user_asked", "title": r["title"], "context": "fresh",
+                             "use_worktree": False, "background": bg,
+                             "prompt": r["brief"] + "\n\n" + marker(r["id"], r["requester"])},
+                            r["title"] + "\n" + r["brief"])
 
 
 def hand_text(home, sid, at=None):

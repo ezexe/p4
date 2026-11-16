@@ -981,7 +981,12 @@ LEVELS = ("built-in, levels: work runs at the level Claude Code gives it, so thi
           "`p4-phi:runner`, which reports pass or fail with the failing output. A read of a diff or a result that "
           "should not lean on this session's own view goes to `p4-phi:check`. Once one is started, go on with "
           "other work or end the turn: its completion notification brings the result in a later turn, so never "
-          "wait for it in the foreground, sleep or poll. A top session keeps to orchestration.")
+          "wait for it in the foreground, sleep or poll. A top session keeps to orchestration. A child session "
+          "is started with a `model` and an `effort` that fit its step, in the terms the agents' files use: "
+          "mechanical or static work, such as docs pages, a rename or a version bump, on a cheaper model at low "
+          "or medium effort; a build that changes behaviour inherits this session's model at high effort; a "
+          "design or review step at high or above. phi names both in every start call it hands out, the brief "
+          "says them in one line, and the session that starts the child may choose otherwise in that line.")
 LEVELS_ON = True              # p4.json phi.levels: false leaves the levels rule and its checks out; nothing turns it on
 TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps a top session's work in it (#24)
 FILE_SETS = True              # p4.json phi.file_sets: false starts sessions whose briefs declare no file set (#48)
@@ -999,6 +1004,7 @@ def project_conf(store):
     FILE_SETS = d.get("file_sets") is not False
     LEVELS_ON = d.get("levels") is not False
     plans.LEVELS = LEVELS_ON
+    plans.CHILD_LEVELS = plans.child_levels(d.get("child_levels"))   # #61: one key sets each kind's defaults
 
 
 TOP_RULE = ("This is the top session of its tree, so it keeps itself free for orchestration: planning, relaying "
@@ -1034,7 +1040,8 @@ def new_top_route(owner_turn=True):
            f"card, `mcp__ccd_session__start_session` with `initiation` `own_initiative`, which ezexe presses in "
            f"this session; only where the card is refused too, write it as a start request, {request_cmd()}, "
            f"which the next turn ezexe begins in this session starts")
-    return (f"{how}, `context` `fresh`, `use_worktree: false`; its brief: the topic, ezexe's words quoted, and "
+    return (f"{how}, `context` `fresh`, `use_worktree: false`, with the `model` and `effort` the levels rule gives "
+            f"its kind of work, said in one line of the brief; its brief: the topic, ezexe's words quoted, and "
             f"the lines \"{NEW_TOP_BRIEF} {new_top_first_act()}\" Both moves are needed: the app's detach, else it "
             f"stays nested under this session and reports here, and phi's, which phi also makes at its first hook "
             f"on that line. If it has not left this session's family by its first report, call "
@@ -1701,8 +1708,10 @@ def h_nudge(payload):
                 f"completion notification. Said once for this step.")
     return (f"phi (p4-phi): this is the top session, kept free for orchestration, and step {st.get('addr')}, "
             f"\"{cut(clean(st.get('content')), 120)}\", is work: hand it to a child session with "
-            f"`mcp__ccd_session__start_session`, `context` `fresh`, `use_worktree: false`, its brief that step, a "
-            f"line `Files: <the paths it may write>` and \"report when done\", and keep this session for planning, relaying and landing. Said once for this "
+            f"`mcp__ccd_session__start_session`, `context` `fresh`, `use_worktree: false`, "
+            f"{plans.level_words(st.get('content'))}, its brief that step, a "
+            f"line `Files: <the paths it may write>`, the line `{plans.level_line(plans.child_level(st.get('content')))}` "
+            f"and \"report when done\", and keep this session for planning, relaying and landing. Said once for this "
             f"step.")
 
 

@@ -34,6 +34,21 @@ In a session another one started, the call runs as sent and the line is given on
 A subagent's own call is left alone, since a runner's whole work is to wait on its command.
 A plan step that only reads or searches is named for `p4-phi:sweep`, one that only runs a command for `p4-phi:runner`, and the rest for a child session.
 
+A child session is started with a model and an effort that fit its step.
+The agents' files give `sweep`, `runner` and `check` theirs, and `plans.child_level` gives a child session its own in the same terms.
+
+| Kind of step | Model | Effort |
+| :- | :- | :- |
+| `static`: docs pages, a rename, a version bump and other mechanical work that names no code | `claude-sonnet-5-5` | `medium` |
+| `build`: a change to behaviour, or anything that names code | the starter's own | `high` |
+| `design`: a design or review step | the starter's own | `high` |
+
+Every start call phi hands out carries them: `plans.top_advice`, `starts.call_of`, `puppeteer.call_of`, `controls.request_call` and the advice for a proposal card.
+`mcp__ccd_session__start_session` takes `model` and `effort` for a `fresh` start, read from its schema on 2026-11-16, and inherits the starter's model when `model` is left out, so an inheriting call carries `effort` alone and no call carries neither.
+The brief says the choice in one line, `Model and effort: <model> at <effort> effort`.
+The session that starts the child overrides it with lines `Model: <id>` and `Effort: <level>` in the brief.
+`scripts/test_plans.py` `Levels.test_a_child_session_is_started_with_a_model_and_an_effort_that_fit_its_step` proves it.
+
 To turn the levels off in one project, set `phi.levels` to `false` in `.claude/p4/p4.json`.
 
 ## A puppeteer and the sessions it controls
@@ -86,6 +101,7 @@ Every key is optional.
 | Key | Default | What `false` or a value does |
 | :- | :- | :- |
 | `levels` | `true` | `false`: no levels rule and no long command moved to the background |
+| `child_levels` | the table under Levels | an object: a kind, `static`, `build` or `design`, with its `model`, an id or `inherit`, and its `effort` |
 | `act_dont_wait` | `true` | `false`: the built-in act-don't-wait rule is left out |
 | `top_orchestrates` | `true` | `false`: a top session does its plan's work itself |
 | `file_sets` | `true` | `false`: a session may be started by a brief that declares no file set |

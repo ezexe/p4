@@ -806,6 +806,64 @@ class Levels(unittest.TestCase):
             True, "", levels=False)
         self.assertNotIn("p4-phi:sweep", plain, "with the levels off every work step is a child's, as before")
 
+    def test_a_child_session_is_started_with_a_model_and_an_effort_that_fit_its_step(self):
+        """#61: a child that wrote static pages under dox/ ran on its parent's model at its parent's effort."""
+        import puppeteer
+        import starts
+        docs, script = "Write the puppeteer pages under dox/", "Change how plans.py reads the address of a step"
+        self.assertEqual(plans.child_level(docs), {"model": "claude-sonnet-5-5", "effort": "medium", "kind": "static"})
+        self.assertEqual(plans.child_level(script), {"model": "inherit", "effort": "high", "kind": "build"})
+        self.assertEqual(plans.child_level("Review the relay's design")["kind"], "design")
+        self.assertEqual(plans.child_kind("Bump the version to 0.10.1"), "static")
+        self.assertEqual(plans.child_kind("Rename the README's headings and fix phi.py"), "build", "code decides")
+        s = relay._session(self.t.p4, TOP)
+        said = plans.top_advice(self.t.p4, {**s, "splitAdvised": []}, {"steps": [
+            {"addr": "1", "content": docs, "status": "pending"},
+            {"addr": "2", "content": script, "status": "pending"}]}, True, "")
+        self.assertIn(f"\"{docs}\", with `model` `claude-sonnet-5-5`, `effort` `medium`", said)
+        self.assertIn(f"\"{script}\", with no `model`, so it inherits this session's, `effort` `high`", said)
+        self.assertIn("Each brief says them in one line, `Model and effort: ", said)
+        brief = "Write the puppeteer pages. Report when done.\nFiles: dox/puppeteer.html"
+        rid, _ = starts.add(self.t.p4, TOP, "dox: the puppeteer pages", brief)
+        call = starts.call_of(starts.state(self.t.p4)[rid], self.t.p4)
+        self.assertEqual((call["model"], call["effort"]), ("claude-sonnet-5-5", "medium"), "cheaper and lower")
+        self.assertIn("\n\nModel and effort: claude-sonnet-5-5 at medium effort, since this is static or mechanical "
+                      "work (p4-phi's levels rule).\n\n" + starts.marker(rid, TOP), call["prompt"])
+        self.assertEqual(starts.requester_of(self.t.p4, call["prompt"]), (rid, TOP), "the marker is still read")
+        brief2 = "Make relay.py hold the lock in warn. Report when done.\nFiles: scripts/relay.py"
+        rid2, _ = starts.add(self.t.p4, TOP, "the relay lock", brief2)
+        call = starts.call_of(starts.state(self.t.p4)[rid2], self.t.p4)
+        self.assertNotIn("model", call, "left out, which is how the app's tool inherits the starter's model")
+        self.assertEqual(call["effort"], "high")
+        self.assertIn("Model and effort: the starter's own model at high effort, since this is a build that changes "
+                      "behaviour", call["prompt"])
+        own = brief2 + "\nModel: claude-haiku-5-5\nEffort: low"
+        rid3, _ = starts.add(self.t.p4, TOP, "the relay lock, cheaply", own)
+        call = starts.call_of(starts.state(self.t.p4)[rid3], self.t.p4)
+        self.assertEqual((call["model"], call["effort"]), ("claude-haiku-5-5", "low"), "the starter's choice wins")
+        self.assertIn("named by the starter", call["prompt"])
+        draft = {"title": "dox: the levels page", "context": "fresh", "brief": brief, "background": "b" * 90}
+        call = puppeteer.call_of(draft)
+        self.assertEqual((call["model"], call["effort"]), ("claude-sonnet-5-5", "medium"), "the prompter's draft")
+        fork = puppeteer.call_of({**draft, "context": "fork"})
+        self.assertNotIn("effort", fork, "the app gives a fork its starter's, and takes neither key")
+        for c in (plans.with_level({"context": "fresh", "title": t, "prompt": b})
+                  for t, b in (("x", ""), ("the docs", brief), ("the lock", brief2), ("Review it", "Review the diff"))):
+            self.assertIn(c["effort"], plans.EFFORTS, "a call with neither key is never handed out")
+        self.assertIn("with the `model` and `effort` the levels rule gives", phi.new_top_route())
+        self.assertIn("A card carries the `model` and `effort`", plans.CARD_EACH)
+        self.assertIn("A child session is started with a `model` and an `effort` that fit its step", phi.LEVELS)
+        old = plans.CHILD_LEVELS
+        try:
+            relay._write_json(os.path.join(self.t.p4, "p4.json"),
+                              {"phi": {"child_levels": {"static": {"model": "claude-haiku-5-5", "effort": "low"},
+                                                        "build": {"effort": "loud"}}}})
+            phi.project_conf(self.t.p4)
+            self.assertEqual(plans.child_level(docs), {"model": "claude-haiku-5-5", "effort": "low", "kind": "static"})
+            self.assertEqual(plans.child_level(script)["effort"], "high", "an effort the app does not have is ignored")
+        finally:
+            plans.CHILD_LEVELS = old
+
 
 class TopOrchestrates(unittest.TestCase):
     """Rule 1: the top session keeps itself free for orchestration. Rule 2: a child started to be archived when

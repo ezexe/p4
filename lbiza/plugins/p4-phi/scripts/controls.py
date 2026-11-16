@@ -811,8 +811,10 @@ def request_call(r):
     brief = r["brief"]
     if not PHI.NEW_TOP.search(brief):
         brief += "\n\n" + PHI.NEW_TOP_BRIEF + " " + PHI.new_top_first_act()
-    return {"initiation": "user_asked", "title": r["title"], "context": "fresh", "use_worktree": False,
-            "cwd": project, "background": bg, "prompt": brief + "\n\n" + starts.marker(r["id"], r["requester"])}
+    return plans.with_level({"initiation": "user_asked", "title": r["title"], "context": "fresh",
+                             "use_worktree": False, "cwd": project, "background": bg,
+                             "prompt": brief + "\n\n" + starts.marker(r["id"], r["requester"])},
+                            r["title"] + "\n" + r["brief"])     # #61
 
 
 def requests_text(home, s):

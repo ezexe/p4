@@ -1067,7 +1067,7 @@ def call_of(d):
     call = {"initiation": "user_asked", "title": d["title"], "context": d["context"], "prompt": d["brief"]}
     if d["context"] == "fresh":
         call.update(use_worktree=False, background=d["background"])
-    return call
+    return plans.with_level(call, d["title"] + "\n" + d["brief"])    # #61: a fresh draft names its model and effort
 
 
 # --- pioneer: the gate, then the dispatch ----------------------------------------------------------------------------

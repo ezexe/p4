@@ -398,7 +398,8 @@ CARD_EACH = ("This turn was started by another session, so the app refuses `user
              "card, `mcp__ccd_session__start_session` with `initiation` `own_initiative`, which ezexe presses in "
              "this session, so the app's parent and phi's agree. Only where the card is refused too, write it as a "
              "start request, `phi.py request \"<title>\" --brief \"<the whole brief>\"`, which the next turn "
-             "ezexe begins in this session starts as this session's child")
+             "ezexe begins in this session starts as this session's child. A card carries the `model` and `effort` "
+             "the levels rule gives its step, as a start does")
 
 
 def judge(plan, cwd):
@@ -466,9 +467,11 @@ def split_advice(home, s, plan, owner_turn, cap):
              "`use_worktree: false`, on this session's branch" if owner_turn else
              CARD_EACH)
     stay = ("; ".join(f"{a} ({why})" for a, why in kept)) or "none"
+    each = "; ".join(f"{st['addr']} with {level_words(st.get('content'))}" for st in free)     # #61
     return (f"phi (p4-phi): steps {named} can each run on their own: no path another step names, nothing leaning "
             f"on another step, more than a quick thing. {route}; one child per step, its brief that step's slice: "
-            f"the step's words, its paths and what it must leave done. Staying here as sub-steps: {stay}. {judged}")
+            f"the step's words, its paths and what it must leave done. Its model and effort: {each}. {LEVEL_HOW} "
+            f"Staying here as sub-steps: {stay}. {judged}")
 
 
 # --- the top session orchestrates ----------------------------------------------------------------------------------
@@ -544,6 +547,139 @@ def level_of(text):
     return "session"
 
 
+# --- the model and effort a child session is started with (#61) ---------------------------------------------------
+#
+# The three background agents carry a model and an effort in their files. A child session got neither: every start
+# call phi handed out named no `model` and no `effort`, so a child that wrote static pages ran on its parent's model
+# at its parent's effort. `mcp__ccd_session__start_session` takes `model`, the same family or cheaper than the
+# caller's, and `effort`, at or below the caller's, both for a `fresh` start only (its schema, read 2026-11-16).
+# The kind of a step decides: static or mechanical work on a cheaper model at low or medium effort, a build that
+# changes behaviour on the starter's own model at high effort, a design or review step at high or above.
+
+CHILD_LEVELS = {"static": {"model": "claude-sonnet-5-5", "effort": "medium"},
+                "build": {"model": "inherit", "effort": "high"},
+                "design": {"model": "inherit", "effort": "high"}}      # p4.json phi.child_levels sets each kind
+CHILD_KINDS = {"static": "static or mechanical work", "build": "a build that changes behaviour",
+               "design": "a design or review step"}
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+DESIGNS = re.compile(r"^\W*(?:re-?)?(?:design|review|architect|audit|specif|spec\b|propos|investigat|decid|"
+                     r"evaluat|assess|analy[sz]|research|plan\b)\w*", re.I)
+CODE = re.compile(r"\.(?:py|js|jsx|ts|tsx|rs|go|c|h|cc|cpp|cs|java|kt|rb|sh|ps1|sql|toml|ya?ml)\b(?!\.)"
+                  r"|\b(?:scripts?|src|hooks?|lib)/|\b(?:hook|script|function|module|class|api|test suite|"
+                  r"behaviou?r)s?\b|\b(?:fix|implement|build|refactor|port|migrat)\w*\b", re.I)
+STATIC = re.compile(r"\b(?:docs?|dox|documentation|readme|changelog|pages?|html|css|markdown|typos?|wording|"
+                    r"comments?|renam\w*|version bump|bump\w*|format\w*|static|mechanical|copy\w*|mov\w+)\b"
+                    r"|\.(?:md|html|css|txt|svg)\b", re.I)
+SAID_LEVEL = re.compile(r"(?im)^[ \t>*-]*(?:\*\*)?(model|effort)(?:\*\*)?[ \t]*:[ \t]*`?([A-Za-z0-9][\w.-]*)`?")
+LEVEL_LINE = re.compile(r"(?im)^[ \t>*-]*Model and effort:")
+
+
+def child_levels(conf):
+    """CHILD_LEVELS with a project's `phi.child_levels` laid over it: a kind's `model` and `effort`, each kept
+    only when it is a model id or one of the app's efforts."""
+    out = {k: dict(v) for k, v in CHILD_LEVELS_DEFAULT.items()}
+    for kind, given in (conf.items() if isinstance(conf, dict) else ()):
+        if kind in out and isinstance(given, dict):
+            if isinstance(given.get("model"), str) and given["model"].strip():
+                out[kind]["model"] = given["model"].strip()
+            if given.get("effort") in EFFORTS:
+                out[kind]["effort"] = given["effort"]
+    return out
+
+
+CHILD_LEVELS_DEFAULT = {k: dict(v) for k, v in CHILD_LEVELS.items()}
+
+
+def child_kind(text):
+    """'design' for a step that designs or reviews, 'static' for docs pages, a rename, a version bump or other
+    mechanical work that names no code, else 'build'."""
+    text = str(text or "")
+    if DESIGNS.search(text):
+        return "design"
+    if STATIC.search(text) and not CODE.search(text):
+        return "static"
+    return "build"
+
+
+def said_level(brief):
+    """The `model` and `effort` a brief names itself, on lines `Model: <id>` and `Effort: <level>`: the starter's
+    own choice, which wins over the rule."""
+    out = {}
+    for key, value in SAID_LEVEL.findall(str(brief or "")):
+        key = key.lower()
+        if key == "effort" and value.lower() not in EFFORTS:
+            continue
+        out.setdefault(key, value.lower() if key == "effort" else value)
+    return out
+
+
+def child_level(text, brief=""):
+    """{"model", "effort", "kind"} a child session is started with for a step or a brief: the rule's choice for its
+    kind, with what the brief itself names laid over it. `model` is 'inherit' for the starter's own."""
+    kind = child_kind(text if str(text or "").strip() else brief)
+    out = {**CHILD_LEVELS.get(kind, CHILD_LEVELS_DEFAULT[kind]), "kind": kind}
+    said = said_level(brief or text)
+    if said:
+        out.update(said, said=True)
+    return out
+
+
+def level_keys(level):
+    """The `model` and `effort` keys of a start call: `model` is left out to inherit the starter's, which is how
+    the app's tool takes it, so a call always carries `effort` and never neither."""
+    out = {"effort": level["effort"]}
+    if str(level.get("model") or "inherit").lower() != "inherit":
+        out["model"] = level["model"]
+    return out
+
+
+def level_line(level):
+    """The one line a brief says its model and effort in, so the choice is visible to the child and its reader."""
+    model = "the starter's own model" if str(level.get("model") or "inherit").lower() == "inherit" else level["model"]
+    why = "named by the starter" if level.get("said") else f"since this is {CHILD_KINDS[level['kind']]}"
+    return f"Model and effort: {model} at {level['effort']} effort, {why} (p4-phi's levels rule)."
+
+
+def with_level(call, text=""):
+    """A start call with the `model` and `effort` the rule gives its brief, and the brief saying them in one line.
+    A fork takes neither: the app gives a fork its starter's."""
+    if call.get("context") == "fork":
+        return call
+    brief = str(call.get("prompt") or "")
+    level = child_level(text or (str(call.get("title") or "") + "\n" + brief), brief)
+    out = {**call, **level_keys(level)}
+    if not LEVEL_LINE.search(brief):
+        out["prompt"] = level_said(brief, level)
+    return out
+
+
+MARKED = re.compile(r"\n\nphi start request req-[0-9a-f]{10} for \S+\s*$")
+
+
+def level_said(brief, level):
+    """`brief` with its model-and-effort line, before a start request's marker so the marker stays its last line."""
+    m = MARKED.search(brief)
+    if m:
+        return brief[:m.start()] + "\n\n" + level_line(level) + brief[m.start():]
+    return brief + "\n\n" + level_line(level)
+
+
+def level_words(text):
+    """The words a line of advice names a step's model and effort in."""
+    level = child_level(text)
+    model = ("no `model`, so it inherits this session's" if str(level["model"]).lower() == "inherit"
+             else f"`model` `{level['model']}`")
+    return f"{model}, `effort` `{level['effort']}`"
+
+
+LEVEL_HOW = ("Each call carries the `model` and `effort` named beside its steps, by the levels rule: static or "
+             "mechanical work on a cheaper model at low or medium effort, a build that changes behaviour on this "
+             "session's own model at high effort, a design or review step at high or above. An effort above this "
+             "session's own is not accepted, so pass this session's own then. Each brief says them in one line, "
+             "`Model and effort: <model> at <effort> effort`; to choose otherwise, pass another `model` or `effort` "
+             "and say so in that line.")
+
+
 def top_advice(home, s, plan, owner_turn, cap, levels=None):
     """The top session's line: each work step, or run of serial ones, to one fresh child; said once per set. ''
     when no work step is new."""
@@ -567,10 +703,13 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
         if level(g) != "session":
             return (f"step {g[0]['addr']} \"{relay._short(g[0].get('content'), 90)}\", which {LEVEL_WHAT[level(g)]}: "
                     f"a background subagent, `p4-phi:{level(g)}`, not a session")
+        kinds = [child_kind(st.get("content")) for st in g]      # #61: a run takes the level of its hardest step
+        hardest = next(st for k in ("design", "build", "static") for st, kd in zip(g, kinds) if kd == k)
+        how = level_words(hardest.get("content"))
         if len(g) == 1:
-            return f"step {g[0]['addr']} \"{relay._short(g[0].get('content'), 90)}\""
+            return f"step {g[0]['addr']} \"{relay._short(g[0].get('content'), 90)}\", with {how}"
         return (f"steps {', '.join(st['addr'] for st in g)} in order, as one child: "
-                + ", ".join(f"\"{relay._short(st.get('content'), 70)}\"" for st in g))
+                + ", ".join(f"\"{relay._short(st.get('content'), 70)}\"" for st in g) + f", with {how}")
     named = "; ".join(f"({chr(97 + k)}) {child(g)}" for k, g in enumerate(new[:26]))
     head = ("phi (p4-phi): this is the top session of its tree, so it keeps itself free for orchestration: "
             "planning, relaying between sessions, decisions with ezexe, and landing the work, meaning merge and push.")
@@ -591,7 +730,8 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
             f"child as a serial run, and steps with disjoint files each get a child: {named}. {route}. Each brief is its "
             f"steps' words, a line `Files: <the paths it may write>`, what they must leave done, and says "
             f"\"report when done\", so the child "
-            f"leaves its outcome here as a replaces: note and is treated as archived when it finishes.{agents} Staying "
+            f"leaves its outcome here as a replaces: note and is treated as archived when it finishes. {LEVEL_HOW}"
+            f"{agents} Staying "
             f"here: {stay}.")
 
 
