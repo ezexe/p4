@@ -310,6 +310,30 @@ class Watcher(Store):
         self.assertIn("scratchpad/astcheck.py", read(os.path.join(self.p4, "skillex", "astcheck", "sources.txt")))
         self.assertIn("`astcheck`", out["systemMessage"])
 
+    def test_a_session_without_a_tmp_folder_still_sees_the_notebook(self):
+        self.started_a_minute_ago("s5")                  # P4_SCRATCHPAD_TMP=0: no tmp/s5 at all
+        self.script("s1", "astcheck.py", "astcheck", "a=1")
+        self.script("s2", "astcheck.py", "astcheck", "b=2")
+        put(os.path.join(self.p4, "temportal", "scratchpad", "astcheck.py"), CHECK.format(name="astcheck", extra="c=3"))
+        out = skillex.cmd_stop(self.p4, {"session_id": "s5"})
+        self.assertEqual(self.skills(), ["astcheck"])
+        self.assertIn("`astcheck`", out["systemMessage"])
+        sessions = os.path.join(self.p4, "skillex", ".state", "sessions")
+        old = time.time() - 2 * 3600
+        os.utime(os.path.join(sessions, "s5.json"), (old, old))
+        skillex.cmd_start(self.p4, {})
+        self.assertIn("s5.json", os.listdir(sessions), "a session two hours quiet is no ended session")
+
+    def test_a_notebook_script_is_looked_at_once(self):
+        self.script("s1", "astcheck.py", "astcheck", "a=1")
+        self.script("s2", "astcheck.py", "astcheck", "b=2")
+        for s in ("s3", "s4"):
+            os.makedirs(os.path.join(self.tmp, s))
+            self.started_a_minute_ago(s)
+        put(os.path.join(self.p4, "temportal", "scratchpad", "astcheck.py"), CHECK.format(name="astcheck", extra="c=3"))
+        self.assertIn("wrote the skill", skillex.cmd_stop(self.p4, {"session_id": "s3"})["systemMessage"])
+        self.assertIsNone(skillex.cmd_stop(self.p4, {"session_id": "s4"}), "s3's Stop already looked at it")
+
     def test_stop_skips_what_the_write_hook_saw_and_keeps_the_newest_version(self):
         self.started_a_minute_ago("s3")
         self.script("s1", "astcheck.py", "astcheck", "a=1")

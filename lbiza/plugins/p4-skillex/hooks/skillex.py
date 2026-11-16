@@ -788,7 +788,7 @@ def notice(results):
 
 
 STAGING_STALE_S = 600                 # a staging folder quiet this long was left by a run that ended midway
-STATE_QUIET_S = 3600                  # a session's state whose tmp folder is gone is deleted once this quiet
+STATE_QUIET_S = 86400                 # a state with no tmp folder is deleted once this quiet; every Stop rewrites it
 
 
 def active(p4):
@@ -855,13 +855,38 @@ def cmd_start(p4, payload):
     return None
 
 
+def notebook_seen(p4):
+    """The notebook's scripts some session already looked at, by path and modification time, in `.state/notebook.json`,
+    so a script in the shared notebook is looked at once and not again at every session's Stop."""
+    try:
+        with open(os.path.join(skillex_dir(p4), STATE, "notebook.json"), encoding="utf-8") as f:
+            seen = json.load(f)
+        return seen if isinstance(seen, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def mark_notebook(p4, paths):
+    """Record `paths` of the notebook as looked at, and forget the scripts that are gone."""
+    seen = {k: v for k, v in notebook_seen(p4).items() if os.path.exists(k)}
+    for p in paths:
+        try:
+            seen[key(p)] = os.stat(p).st_mtime_ns
+        except OSError:
+            continue
+    write_json(p4, "notebook.json", seen)
+
+
 def cmd_write(p4, payload):
     path = (payload.get("tool_input") or {}).get("file_path")
     if not path or not active(p4):
         return None
     r = brew(p4, path)
     sid = payload.get("session_id")
-    if sid and where_in_temportal(p4, path):
+    where = where_in_temportal(p4, path)
+    if where and where[0] == NOTEBOOK:
+        mark_notebook(p4, [path])
+    if sid and where:
         st = read_session(p4, sid) or {"since": time.time(), "looked": {}}
         try:
             st["looked"][key(path)] = os.stat(path).st_mtime_ns
@@ -880,21 +905,29 @@ def cmd_stop(p4, payload):
     a Stop cut short by its timeout never makes the next one start over."""
     sid = safe_sid(payload.get("session_id"))
     base = os.path.join(p4, "temportal", "tmp", sid or "")
-    if not sid or not active(p4) or not os.path.isdir(base):
-        return None
+    notebook = os.path.join(p4, "temportal", NOTEBOOK)
+    if not sid or not active(p4) or not (os.path.isdir(base) or os.path.isdir(notebook)):
+        return None                                      # a session whose tmp folder is off still has the notebook
     st = read_session(p4, sid)
     write_session(p4, sid, {"since": time.time(), "looked": {}})
     if st is None:                                       # no start was recorded: nothing to compare against
         return None
-    changed = []
-    for folder in (base, os.path.join(p4, "temportal", NOTEBOOK)):     # its own scratch, and the shared notebook
+    seen = notebook_seen(p4)
+    changed, shared = [], []
+    for folder in (base, notebook):                      # its own scratch, and the shared notebook
         for p in scripts_of(folder) if os.path.isdir(folder) else []:
             try:
                 m = os.stat(p)
             except OSError:
                 continue
+            if folder == notebook and seen.get(key(p)) == m.st_mtime_ns:
+                continue                                 # another session's Stop or Write already looked at it
             if m.st_mtime > st["since"] and st["looked"].get(key(p)) != m.st_mtime_ns:
                 changed.append((m.st_mtime_ns, p))
+                if folder == notebook:
+                    shared.append(p)
+    if shared:
+        mark_notebook(p4, shared)
     results = [r for r in (brew(p4, p) for _, p in sorted(changed)) if r]
     if results:
         return {"systemMessage": notice(results)}
