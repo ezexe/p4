@@ -287,10 +287,10 @@ def sweep(p4, now=None, ended_session=""):
         return ""
     if _own_repo(p4):
         _git(p4, "add", "-u", "--", "temportal")
-    parts = [f"{n} file(s) past the cache rule for {rel}/" for rel, n in cache]
+    parts = [f"files past the cache rule: {n}, in {rel}/" for rel, n in cache]
     if cookies:
         shown = ", ".join(cookies[:5]) + (f" and {len(cookies) - 5} more" if len(cookies) > 5 else "")
-        parts.append(f"{len(cookies)} expired file(s): {shown}")
+        parts.append(f"expired files: {len(cookies)}, {shown}")
     return "p4-temportal: cleared " + "; ".join(parts) + "."
 
 

@@ -234,10 +234,10 @@ def migrate(app, mem, stamp):
     except OSError as e:
         lines.append(f"could not write the pointer MEMORY.md in {app}: {e}")
     if moved:
-        lines.append(f"moved {len(moved)} memory file(s) from the auto memory directory into "
-                     ".claude/p4/temportal/memory/")
+        lines.append(f"memory files moved from the auto memory directory into "
+                     f".claude/p4/temportal/memory/: {len(moved)}")
     if aside:
-        lines.append(f"kept {len(aside)} differing file(s): "
+        lines.append(f"differing files kept: {len(aside)}, "
                      + ", ".join(aside[:5]) + (", …" if len(aside) > 5 else "")
                      + ", in .claude/p4/temportal/memory/.conflicts/")
     if left:
@@ -320,7 +320,7 @@ def cmd_mirror(payload):
             with open(dst, "a", encoding="utf-8", newline="\n") as f:
                 f.write(("\n" if old and not old.endswith("\n") else "") + "\n".join(add) + "\n")
         write_pointer(app, mem)
-        note = (f"p4-temportal: {len(add)} index line(s) written to the pointer MEMORY.md were appended to "
+        note = (f"p4-temportal: index lines appended: {len(add)}, from the pointer MEMORY.md to "
                 f"{os.path.normpath(dst)}; the pointer is restored.")
     else:
         if os.path.isfile(dst) and not filecmp.cmp(fp, dst, shallow=False):

@@ -2,7 +2,7 @@
 """scratchpad.py: p4-temportal's scratchpad part, which keeps each session's scratchpad directory in
 `<project>/.claude/p4/temportal/tmp/<session>/` and the notebook in `<project>/.claude/p4/temportal/scratchpad/`, with
 the notebook's logs, build output and binaries in its `.out/`, which ignores itself. It moves files, and it tells the
-model nothing unless ezexe turns the two asks on.
+model only where a session's temporary files go and what it did, unless ezexe turns the two asks on.
 
   notebook-out   at SessionStart, seeds `.claude/p4/temportal/scratchpad/.out/.gitignore` with `*`, seeds it again
                  when it is missing or changed, and moves every log, build output and binary found elsewhere in the
@@ -22,8 +22,8 @@ The scratchpad directory is on unless p4.json's scratchpad.tmp is false or P4_SC
                  named after the project's path, where Claude Code put them before it named that folder by a hash.
                  Claude Code makes one for an id that never runs a hook, such as the id a session holds before it
                  takes up the one it resumes or one of the app's helpers, so no start of its own links it. An empty
-                 one quiet for scratchpad.scratch_sweep_minutes is removed instead, and so is a link whose target is
-                 gone when the store holds nothing to point it at.
+                 one quiet for scratchpad.scratch_sweep_minutes is removed instead, and so is a link to a folder of
+                 that session inside a store when that folder is gone and the store holds nothing for the session.
   tmp-sweep      at Stop, silently, links a scratchpad folder the start could not link or that appeared after it,
                  this session's or another's. Then it stages the session's scratchpad directory in the store with
                  `git add`, at every turn end: never a file git ignores, one over scratchpad.tmp_max_file_mb, the
@@ -31,11 +31,11 @@ The scratchpad directory is on unless p4.json's scratchpad.tmp is false or P4_SC
                  p4.json beside phi/, or a folder named in scratchpad.tmp_skip_dirs. A scratchpad directory over
                  scratchpad.tmp_max_files has only its tracked files' changes staged, so no file added earlier stays
                  staged after it is gone.
-  tmp-close      at SessionEnd, commits the session's scratchpad directory and only then removes it: its staged
-                 files are committed alone, leaving whatever else is staged, the files that commit holds are deleted,
-                 and the removal is committed too. A file no commit holds stays on disk. A session that starts again
-                 after its scratchpad directory was removed gets its files back from that commit. Nothing is staged,
-                 committed or removed unless `.claude/p4` is a git repository of its own.
+  tmp-close      at SessionEnd, commits the session's scratchpad directory and only then removes its files: its
+                 staged files are committed alone, leaving whatever else is staged, the files that commit holds are
+                 deleted with the folders they leave empty, and the removal is committed too. A file no commit holds
+                 stays on disk. A session that starts again after its files were removed gets them back from that
+                 commit. Nothing is staged, committed or removed unless `.claude/p4` is a git repository of its own.
 
 A session has ended when p4-phi's record of it says archived, or when its scratchpad directory and its transcript are
 quiet for scratchpad.tmp_idle_days, as when it ended without a SessionEnd. At a start, tmp-link commits and removes the
@@ -258,7 +258,7 @@ def cmd_notebook_out(payload):
     if reseeded:
         parts.append("re-seeded .claude/p4/temportal/scratchpad/.out/.gitignore with `*`")
     if moved:
-        parts.append(f"moved {len(moved)} log, build or binary file(s): "
+        parts.append(f"logs, build output and binaries moved: {len(moved)}, "
                      + ", ".join(moved[:6]) + (", …" if len(moved) > 6 else "")
                      + ", into .claude/p4/temportal/scratchpad/.out/")
     if tracked:
@@ -919,8 +919,8 @@ def cmd_ended_sweep(args):
     n_remove = sum(len(r["plan"]["remove"]) if dry else r["removed"] for r in closing)
     print(f"p4-temportal: ended sessions' scratchpad directories in {os.path.normpath(p4)}"
           + (", a dry run that changed nothing" if dry else "")
-          + f": {len(rows)} of {seen} session folder(s) ended; {will} {n_commit} file(s), {gone} {n_remove}; "
-          + f"{len(over)} folder(s) over the cap of {TMP_MAX_FILES} files left on disk.")
+          + f": session folders ended: {len(rows)} of {seen}; {will} files: {n_commit}, {gone}: {n_remove}; "
+          + f"folders left on disk over the cap: {len(over)}, the cap being {TMP_MAX_FILES} files.")
     for r in rows:
         plan, rel = r["plan"], tmp_rel(r["sid"]) + "/"
         tail = f"{plan['files']} files, {plan['bytes'] / 1048576:.1f} MB; top folders: {tops_text(plan['tops'])}"
@@ -944,7 +944,8 @@ def sweep_scratchpads(harness, own, p4dir, stamp, root=None):
     directory in the store at once, its files moved in, so none stays a plain folder: Claude Code makes one for an id
     that never runs a hook, and no start of its own would link it. An empty one quiet for SCRATCH_SWEEP_MINUTES by the
     folder and the session's transcript is removed instead, with its session folder when that is left empty. A link
-    whose target is gone is removed when the store holds no scratchpad directory for that session."""
+    to a folder of that session inside a store is removed when that folder is gone and the store holds no scratchpad
+    directory for the session."""
     out = {"linked": 0, "removed": 0}
     if SCRATCH_SWEEP_MINUTES is None or SCRATCH_SWEEP_MINUTES < 0:
         return out
@@ -1004,7 +1005,7 @@ def cmd_tmp_link(payload):
             "foreign": f"{here} is a link that does not reach {there}; left as it is",
             "failed": f"{here} could not be linked to {there}; its files move there at each turn end"}.get(state, "")
     if moved:
-        line += ("; " if line else "") + f"moved {len(moved)} file(s) it held into {there}"
+        line += ("; " if line else "") + f"files it held moved: {len(moved)}, into {there}"
     p4, sid = p4_repo(root), session_id(payload)
     if sid:
         swept = sweep_scratchpads(harness, sid, os.path.join(root, ".claude", "p4"), stamp, root)
@@ -1044,7 +1045,7 @@ def cmd_tmp_sweep(payload):
 
 
 def cmd_tmp_close(payload):
-    """SessionEnd: the session's scratchpad directory is committed, then removed. Prints nothing."""
+    """SessionEnd: the session's scratchpad directory is committed, then its files are removed. Prints nothing."""
     if not tmp_on():
         return 0
     p4, sid = p4_repo(project_root(payload)), session_id(payload)

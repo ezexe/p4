@@ -1,8 +1,8 @@
 #!/bin/sh
 # p4-temportal's hook runner: it finds a working python, runs hooks/<part>.py <subcommand> isolated with -I, passing
 # Claude Code's stdin through, and exits 0 whatever happens, so a broken hook never blocks a call. <part> is `memory`
-# for p4_memory.py, `scratchpad` for scratchpad.py or `lifetime` for lifetime.py. Each candidate is proven with a
-# trivial run first, since on Windows a `python3` on PATH can be the Store stub.
+# for p4_memory.py, `scratchpad` for scratchpad.py or `lifetime` for lifetime.py. On Windows each candidate is
+# proven with a trivial run first, since a `python3` on PATH can be the Store stub.
 # -X utf8 runs the hook in UTF-8 mode: stdin, stdout and open() are UTF-8, not the Windows code page cp1252, so a
 # prompt's UTF-8 punctuation never decodes into lone surrogates that a later UTF-8 write refuses.
 set -u
@@ -48,5 +48,5 @@ for c in $order; do
   exit 0
 done
 
-echo "p4-temportal: no working python found for $part ${1:-?}; nothing was done"
+echo "p4-temportal $part ${1:-?}: no working python found; nothing was done"
 exit 0

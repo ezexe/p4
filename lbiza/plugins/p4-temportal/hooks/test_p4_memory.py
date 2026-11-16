@@ -92,7 +92,7 @@ def behavior():
     p4mem0 = os.path.join(root0, ".claude", "p4", "temportal", "memory")
     assert read(os.path.join(p4mem0, "MEMORY.md")) == "- [a](a.md) — a\n", "the memory was not moved without .claude/p4"
     assert not os.path.exists(os.path.join(root0, ".claude", "p4", ".git")), "p4-temportal initialized a git repository"
-    assert only_pointer(app0) and "moved 1" in out, out
+    assert only_pointer(app0) and "temportal/memory/: 1" in out, out
     # the main fixture
     os.makedirs(os.path.join(root, ".claude", "p4"))
     put(os.path.join(app, "MEMORY.md"), "- [a](a.md) — a\n")
@@ -109,7 +109,7 @@ def behavior():
     assert os.path.normpath(p4mem) in read(os.path.join(app, "MEMORY.md")), "the pointer names no memory folder"
     assert os.path.isfile(transcript), "Claude Code's own files were touched"
     lines = out.splitlines()
-    assert lines[0].startswith("p4-temportal: ") and "moved 1" in lines[0] and ".conflicts/" in lines[0], out
+    assert lines[0].startswith("p4-temportal: ") and "memory/: 1" in lines[0] and ".conflicts/" in lines[0], out
     assert lines[1:] == ["- [a](a.md) — a"], out
     # a second start moves nothing and prints the index alone
     assert run("migrate", root, app, {}) == "- [a](a.md) — a", "an idle start printed more than the index"
@@ -221,7 +221,7 @@ def gate2_a():
             if name == "quiet":
                 assert extra == 0, "a start with nothing to move printed a notice"
             if name == "moved":
-                assert extra == 1 and "moved" in out[0] and "kept 1" in out[0], out[0]
+                assert extra == 1 and "moved" in out[0] and "differing files kept: 1" in out[0], out[0]
             if name == "long":
                 assert len(out) == BUILTIN_LINES, len(out)
             if name == "wide":

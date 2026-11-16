@@ -40,8 +40,8 @@ DEFAULTS = {
         "tmp_max_files": 5000,           # a scratchpad directory with more files is never committed or removed,
                                          # and only its tracked files' changes are staged
         "tmp_empty_idle_hours": 1,       # another session's empty scratchpad directory quiet this long is removed
-        "scratch_sweep_minutes": 60,     # another session's empty scratchpad folder quiet this long is removed, and
-                                         # one with files is linked at once
+        "scratch_sweep_minutes": 60,     # another session's empty scratchpad folder under the temp directory is
+                                         # removed once quiet this long, and one with files is linked at once
         # folders a scratchpad directory never stages: caches and test trees, a trailing * matching a prefix
         "tmp_skip_dirs": [".pytest_cache", "node_modules", ".venv", "venv", ".tox", ".mypy_cache", "pytest-of-*"],
         # the extensions and folder names the notebook moves into its .out/
@@ -55,12 +55,12 @@ DEFAULTS = {
     },
     "phi": {                             # p4-phi's session tree
         "home": None,                    # the git remote of a store whose session tree this project shares
-        "track": False,                  # true: phi/ is committed in the store; false: the store's git ignores it
+        "track": False,                  # true: the session tree in phi/ is committed; false: git ignores it
         "act_dont_wait": True,           # false: p4-phi's act-don't-wait rule is left out in this project
         "top_orchestrates": True,        # false: a top-level session does its plan itself, no child unless asked
         "levels": True,                  # false: no delegation rule, and no long command moved to the background
         "file_sets": True,               # false: a session may be started by a brief that declares no write set
-        "session_archives": False,       # true: a session may archive another session
+        "session_archives": False,       # true: a session may archive itself or another session
         "issues": True,                  # false: no issue is filed for the purpose of a child session that writes
     },
     "temportal": {                       # lifetimes under .claude/p4/temportal/, read by p4-temportal's lifetime.py
@@ -100,7 +100,7 @@ DEFAULTS = {
             "finding_chars": 4000,       # kept of a web call's answer
             "shown_chars": 1500,         # shown of it
             "epochs_web": 30,            # training rounds of the web model and passes of the failure model, as the
-            "epochs_shell": 6,           # search of lookups.py set them
+            "epochs_shell": 6,           # held-out runs noted in lookups.py chose them
         },
         "near": {                        # candidates from what earlier, similar tasks used, by near.py
             "on": True,
@@ -506,7 +506,7 @@ def _migrate(p4, commit):
         done[rel] = LAYOUT[k]
         line = f"moved {rel}/ to {LAYOUT[k]}/"
         if a:
-            line += f", {a} differing file(s) kept in {plugin}/{LAYOUT_CONFLICTS}/"
+            line += f", differing files: {a}, kept in {plugin}/{LAYOUT_CONFLICTS}/"
         if os.path.lexists(src):
             line += ", some files left for the next start"
         lines.append(line)
@@ -584,7 +584,8 @@ def load(p4, write=True, warn=True):
     unknown = []
     merged = _merge(DEFAULTS, over, unknown)
     if warn and unknown:
-        print(f"p4: unknown key(s) in {path(p4)}, kept but unused: {', '.join(unknown)}", file=sys.stderr)
+        print(f"p4: {path(p4)} holds keys this plugin does not read, kept as they are: {', '.join(unknown)}",
+              file=sys.stderr)
     if write and os.path.isdir(p4) and (not existed or merged != had):
         try:
             _write(p4, merged)

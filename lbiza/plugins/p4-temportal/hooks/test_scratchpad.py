@@ -132,7 +132,7 @@ def notebook_out():
             subprocess.run([git, "-C", p4, "add", "temportal/scratchpad/run.log"], check=True)
         out = sweep()
         assert out.startswith("p4-temportal: ") and "\n" not in out, f"not one line: {out}"
-        assert "re-seeded .claude/p4/temportal/scratchpad/.out/.gitignore" in out and "moved 3" in out, out
+        assert "re-seeded .claude/p4/temportal/scratchpad/.out/.gitignore" in out and "binaries moved: 3" in out, out
         with open(os.path.join(pad, ".out", ".gitignore"), encoding="utf-8") as f:
             assert f.read() == "*\n", "the .out/ ignore is not `*`"
         assert exists("notes.md") and exists("probe/main.txt"), "a note was moved"
@@ -260,7 +260,7 @@ def tmp_cases():
         assert run("tmp-link", {"P4_SCRATCHPAD_TMP": "0"}) == "", "the switch off still spoke"
         assert not os.path.exists(target), "the switch off still made .claude/p4/temportal/tmp/"
         out = run("tmp-link")
-        assert "is a link to" in out and "moved 2 file(s)" in out, out
+        assert "is a link to" in out and "files it held moved: 2" in out, out
         with open(os.path.join(target, "notes.md"), encoding="utf-8") as f:
             assert f.read() == "- a note\n", "the scratchpad's note did not move"
         assert os.path.isfile(os.path.join(target, "sub", "part.md")), "a subdirectory did not move"
@@ -724,9 +724,9 @@ def ended_cases():
         lines = sweep("--dry-run")
         assert snapshot(root) == before and git("rev-parse", "HEAD") == head, "the dry run changed something"
         assert "a dry run that changed nothing" in lines[0], lines[0]
-        assert "3 of 5 session folder(s) ended" in lines[0], lines[0]
-        assert "would commit 5 file(s), would remove 6" in lines[0], lines[0]
-        assert "1 folder(s) over the cap of 6 files left on disk" in lines[0], lines[0]
+        assert "session folders ended: 3 of 5" in lines[0], lines[0]
+        assert "would commit files: 5, would remove: 6" in lines[0], lines[0]
+        assert "folders left on disk over the cap: 1, the cap being 6 files" in lines[0], lines[0]
         assert len(lines) == 4 and lines[1] == row(lines, "big"), f"not the fullest folder first: {lines}"
         line = row(lines, "arch")
         assert " archived: would commit 3, would remove 3, would leave 1 that no commit would hold" in line, line
@@ -740,8 +740,8 @@ def ended_cases():
 
         # ended-sweep: committed, then gone from the work tree, every file readable from the commit
         lines = sweep()
-        assert "3 of 5 session folder(s) ended; committed 5 file(s), removed 6; 1 folder(s) over the cap" in lines[0], \
-            lines[0]
+        assert ("session folders ended: 3 of 5; committed files: 5, removed: 6; folders left on disk over the cap: 1"
+                in lines[0]), lines[0]
         want = {"arch": {"s.md": "staged\n", "u.md": "untracked\n", "sub/deep.md": "deep\n"},
                 "idle": {"held.md": "held already\n", "s.md": "idle staged\n", "u.md": "idle untracked\n"}}
         for k, files in want.items():
@@ -759,7 +759,7 @@ def ended_cases():
         assert git("ls-files", rel["big"]).strip() == "", "a folder over the cap was staged"
         for k in ("live", "busy"):
             assert os.path.isfile(os.path.join(tmp[k], "now.md")), f"{k}: a session written to now was swept"
-        assert "1 of 4 session folder(s) ended; would commit 0 file(s), would remove 0" in sweep("--dry-run")[0], \
+        assert "session folders ended: 1 of 4; would commit files: 0, would remove: 0" in sweep("--dry-run")[0], \
             "after ended-sweep only the folder over the cap is left to name"
         assert "does not know '--bogus'" in sweep("--bogus")[0], "an unknown argument was not refused"
 
