@@ -8,7 +8,6 @@ ap-p4_mac store (P4_MAC_STORE) and the project
 transcripts under ~/.claude/projects/-Users-ez-code-AudioPlugin/ (read-only; nothing is written beside them).
 """
 
-import json
 import os
 import shutil
 import sys
