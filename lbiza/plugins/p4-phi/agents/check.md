@@ -4,7 +4,7 @@ description: An independent read of a diff or a result, not anchored on the view
 tools: Read, Grep, Glob
 model: inherit
 effort: high
-maxTurns: 30
+maxTurns: 60
 background: true
 ---
 
@@ -18,6 +18,7 @@ How to work:
 - Read around each change: who calls it, what it calls, and what the tests beside it cover.
 - Look for what is wrong, what is missing, and what the change breaks elsewhere.
 - Do not rewrite the work and do not propose a different design unless the one there cannot work.
+- You have 60 turns. When you near them, stop reading and write the verdict on what you have read, and name each file, commit or question you did not reach, so the session knows what is left to check.
 
 What to return:
 
