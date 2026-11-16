@@ -94,7 +94,9 @@ CODE_EXT = {"py", "pyw", "sh", "bash", "zsh", "ps1", "psm1", "bat", "cmd", "js",
             "r", "jl", "scala", "groovy", "tcl", "vbs", "cmake", "gn", "gni", "html", "htm"}
 # Code by name rather than by extension: by extension alone CMakeLists.txt is a `.txt` note.
 CODE_NAMES = {"cmakelists.txt", "makefile", "gnumakefile", "dockerfile", "justfile", "rakefile"}
-SCRATCHPAD_MARKERS = ("/temp/claude/", "/tmp/claude/")          # the scratchpad paths Claude Code gives
+# the scratchpad paths Claude Code gives: under the temp folder on Windows and Linux, and /private/tmp/claude-<uid>/ on
+# macOS
+SCRATCHPAD_MARKERS = ("/temp/claude/", "/tmp/claude/", "/tmp/claude-")
 TEMP_MARKERS = ("/tmp/", "/appdata/local/temp/", "/var/folders/", "/private/tmp/", "%temp%", "%tmp%",
                 "$tmpdir", "${tmpdir}", "$env:temp", "$env:tmp")
 _PATH = r"(?:\"([^\"\n]+)\"|'([^'\n]+)'|([^\s\"'<>|;&()`]+))"

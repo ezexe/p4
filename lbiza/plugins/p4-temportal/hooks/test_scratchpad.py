@@ -1387,5 +1387,20 @@ class Cases(unittest.TestCase):
         gate2_d()
 
 
+
+class AskPaths(unittest.TestCase):
+    """Which written paths the ask names, on scratchpad.py's own functions."""
+
+    @classmethod
+    def setUpClass(cls):
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+
+    def test_the_macos_scratchpad_is_the_scratchpad(self):
+        import scratchpad as sp
+        self.assertTrue(sp.in_harness_scratchpad("/private/tmp/claude-501/-Users-ez-x/f27bc042/scratchpad/x.py"))
+        self.assertTrue(sp.in_harness_scratchpad(MAC_SCRATCH + "/probe.py"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
