@@ -30,6 +30,7 @@ def write(path, text):
 
 class Deps(unittest.TestCase):
     def setUp(self):
+        self.addCleanup(setattr, tr, "EXTERNAL", tr.EXTERNAL)    # a test sets the module's roots: put them back
         self.tmp = tempfile.TemporaryDirectory()
         t = os.path.realpath(self.tmp.name)
         self.proj, self.ext = os.path.join(t, "proj"), os.path.join(t, "elsewhere", "framework")
