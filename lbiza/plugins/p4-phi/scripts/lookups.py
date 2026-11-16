@@ -2,46 +2,45 @@
 """lookups.py: what every tool call found, kept, and checked before the next call like it runs.
 
 A session starts knowing nothing of what earlier sessions looked up or ran into, so it looks the same page up again
-and walks into the same failing command. This module records every tool call (PostToolUse, PostToolUseFailure) and
-checks a call before it runs (PreToolUse):
+and walks into the same failing command. This module records the tool calls hook.py hands it after they ran, from
+the PostToolUse and PostToolUseFailure hooks, and checks a call before it runs, from the PreToolUse hook:
 
-  record   one row per tool_use id in models/lookups.db (sqlite, this machine's, ignored by git): the tool, its
-           input, whether it worked, the error's signature when it did not, and what it found (a web call's answer,
-           a failure's last lines). A command that works right after a failed one like it becomes that failure's
-           `fix`. Findings and fixed failures are also appended to store/lookups.jsonl, which git keeps and
-           p4.py sync merges, so another machine starts with them.
-  after    a call that fails with a signature other sessions already hit is told so beside its result, with the
-           command that worked next (PostToolUse's additionalContext). This is exact: the error has happened.
-  check    before a web call, the earlier findings for the same page (or the earlier searches) are scored against
-           the new question; a strong match is handed back in place of the call (PreToolUse deny, with the finding
-           as the reason), once: the same call again runs. Before a shell command, the failure model scores it;
-           a command it expects to fail is shown the nearest earlier failure and its fix. Every other tool is
-           logged and never stopped.
-  train    `lookups.py train`: the matcher (idf-weighted cosine of the two questions) against a fitted model, held
-           out by session, on the labels the history gives for free: a pair is positive when the later call's own
-           result is like the earlier finding. The model is written only when it answers more calls than the
-           matcher at the precision `recall.lookups.min_precision` asks.
+  record   one row per tool_use id in phi/models/lookups.db, this machine's sqlite database, which the store's
+           .gitignore leaves out: the tool, the call's question and target, whether it worked, the error's
+           signature when it did not, and what it found, which is a web call's answer, a subagent's report or a
+           failure's last lines. A command that works within a few calls after a failed one like it, in the same
+           session or subagent, becomes that failure's `fix`. Web findings and fixed failures are also appended to
+           phi/store/lookups.jsonl, which git tracks and `p4.py sync` merges, so a database made on another machine
+           starts with them.
+  after    a call that fails with a signature other sessions already met is told so beside its result, with the
+           command that worked next there, as the additionalContext of its PostToolUse or PostToolUseFailure hook.
+           This is exact: the error has happened.
+  check    before a WebFetch, the earlier findings for the same page are scored against the new question, and
+           before a WebSearch those of every earlier search, leaving out a finding older than `max_age_days`; the
+           findings that reach the threshold, the best first and at most `SHOWN_ROWS`, are the answer. Before a
+           shell command, the failure model scores it, and for a command it expects to fail the answer is the
+           nearest earlier failure of the same program and its fix, if any. A call of any other tool that reaches
+           `check` is logged and never stopped. hooks/recall-hook.sh ends the check of most calls before python
+           starts, so they leave no row, and runs a clean call's record in a python the call does not wait for.
+  train    `lookups.py train`, run by hand, measures the matcher, an idf-weighted cosine of the two questions,
+           against a fitted model on calls held out by session, with the labels the history gives for free: a
+           pair is positive when the later call's own result is like the earlier finding. The failure model is
+           fitted on the earlier commands and tested on the later ones. The weights a round keeps are then fitted
+           again on all the calls, held-out ones too. A round writes phi/models/lookups-model.json whenever the
+           matcher or either model finds a threshold at `recall.lookups.min_precision`. The file always holds the
+           web model's weights, and a check uses them in place of the matcher only when the round marked them
+           `promoted`, for answering more held-out calls than the matcher; it holds the failure model's weights
+           only when that model found a threshold. Every round appends its figures to phi/models/lookups-eval.tsv.
 
-Modes (`recall.lookups` in p4.json): `web` and `shell` are each "answer" (deny once, the finding as the reason),
-"note" (the finding beside the result; the call runs), "shadow" (logged only) or "off".
+The mode of a web call is p4.json's `recall.lookups.web`, and that of a shell command `recall.lookups.shell`:
+"answer" hands the answer back in place of the call as the reason of a PreToolUse deny, once, so the same call
+made again by the same session or subagent runs; "note" puts the answer beside the result and lets the call run;
+"shadow" only logs it; "off" does not look. `recall.lookups.on` false turns recording and checking off, and
+`recall.lookups.after` false turns off only what a failure is told after it.
 
-Measured on ezexe's history (2026-11-11: 121,469 distinct calls of 241 sessions of one project, backfilled):
-  - the same shell command twice: 1.4% of 67,240. A key match answers almost nothing; likeness has to.
-  - web: 1,663 calls, 892 with an earlier call for the same page or an earlier search. Held out by session, the
-    matcher answers 535 (32%) at 0.85 precision and 716 (43%) at 0.80; the fitted model 341 and 706, so the
-    matcher is kept (`train` writes the model's weights as the road only when it answers more).
-  - failures: 2,859, of which 1,453 have a telling error line (a signature); 493 of those (34%) had already been
-    met in another session, 479 of them with a fix on record. (Counting a failure's last line as its signature
-    when it has no error line gave 1,051 "met before": mostly unrelated failures ending alike. Not done.) The
-    commonest: a shell quote left open in a heredoc (47 sessions), an unterminated Python string (24), a Windows
-    code-page encoding error (17).
-  - the failure model before a command: 0.20 precision in its top 100 against a base rate of 0.035, tested on the
-    last fifth of the commands. Not usable: `shell` is "shadow" and no weights are written.
-  - an agent's brief like an earlier brief (681 reports): the earlier report is like the new one in 1 to 10% of
-    the nearest pairs (templated briefs over different inputs). Briefs and reports are kept as rows, never served.
-  - one hook call on Windows was about 415 to 490 ms, 144 ms of it this script, the rest the shell runner. With
-    the runner's short cuts (hooks/run-hook.sh): 50 ms for a check with nothing to check, 93 ms for a clean call's
-    record (written behind the call), about 350 ms for a web check or a failure's record, which have to answer.
+A check goes by likeness and not by key, since the same command seldom runs twice: a key would answer almost
+nothing. A subagent's brief and report are kept as a row and never served: many briefs fill one template with
+different inputs, so a brief like an earlier one seldom gets a like report.
 """
 
 import argparse
@@ -61,15 +60,15 @@ import p4conf  # noqa: E402
 import ranker  # noqa: E402
 
 DB = "lookups.db"
-KEPT = "lookups.jsonl"           # store/lookups.jsonl: findings and fixed failures, tracked
+KEPT = "lookups.jsonl"           # phi/store/lookups.jsonl: web findings and fixed failures, which git tracks
 MODEL = "lookups-model.json"
 EVAL = "lookups-eval.tsv"
 MODEL_KIND = "p4 lookups model"
 ON = True
 WEB = "answer"
-SHELL = "shadow"
+SHELL = "shadow"                 # logged only: a failure foreseen from a command's words is too often wrong to stop it
 AFTER = True                     # tell a failed call what earlier sessions did about the same error
-THRESHOLD = None                 # None: the trained threshold, else FALLBACK
+THRESHOLD = None                 # None: the threshold a training round set for the road in use, else FALLBACK
 FALLBACK = 0.6
 MIN_PRECISION = 0.85
 MAX_AGE_DAYS = 30
@@ -77,22 +76,19 @@ FINDING_CHARS = 4000
 SHOWN_CHARS = 1500
 SHOWN_ROWS = 2                   # earlier findings shown for one web call
 LABEL_COS = 0.35                 # a later result this like an earlier finding: the finding would have answered.
-#                                  Measured on ezexe's history: the same page asked the same question twice
-#                                  gives results 0.52 alike at the median (a small model writes each answer), and
-#                                  two unrelated pages 0.06 at the 90th percentile, so 0.5 calls half the true
-#                                  repeats wrong; 0.35 keeps about seven in ten of them and none of the unrelated
-FIX_LOOK = 6                     # a failure is fixed by a like command among the agent's next few calls
+#                                  A small model writes each answer, so one question asked twice of one page gets
+#                                  results about half alike at the median, and unrelated pages hardly alike at all;
+#                                  0.35 keeps about seven in ten of the true repeats and none of the unrelated pairs
+FIX_LOOK = 6                     # a failure is fixed by a like command that works among the next few calls of its
+#                                  session or subagent
 FIX_COS = 0.35
-EPOCHS_WEB = 30                  # the web model's rounds (ten full-batch steps each). Swept 2026-11-11, held out:
-#                                  30, 100, 300, 1000, 3000, 10000 rounds bring the training loss from 0.366 to 0.347
-#                                  (flat from 3000) and answer 706, 725, 716, 736, 727, 725 calls at 0.80 precision
-#                                  (the matcher: 716) and 341, 303, 190, 507, 175, 180 at 0.85 (the matcher: 535).
-#                                  Longer training fits the pairs better and answers no more calls.
-EPOCHS_SHELL = 6                 # the failure model's passes. 6, 20, 60 passes: training loss 0.114, 0.087, 0.068,
-#                                  top-100 precision on the later commands 0.17, 0.16, 0.14. It learns the earlier
-#                                  commands by heart and the later ones no better.
+EPOCHS_WEB = 30                  # the web model's rounds, ten full-batch steps each: longer training fits the pairs
+#                                  better and answers no more held-out calls
+EPOCHS_SHELL = 6                 # the failure model's passes: more passes learn the earlier commands by heart and
+#                                  foresee the later ones no better
 
 SHELL_TOOLS = ("Bash", "PowerShell")
+# "NotebookRead", "MultiEdit" and "Task" are tool names of older Claude Code versions, still met in their transcripts
 KINDS = {"WebFetch": "web", "WebSearch": "web", "Bash": "shell", "PowerShell": "shell", "Read": "read",
          "NotebookRead": "read", "Grep": "search", "Glob": "search", "Edit": "edit", "Write": "edit",
          "MultiEdit": "edit", "NotebookEdit": "edit", "Agent": "agent", "Task": "agent"}
@@ -149,7 +145,8 @@ def program(cmd):
 
 
 def ask_of(tool, inp):
-    """The text a call asks with: a command, a fetch's prompt, a search's query, a pattern, a path, a task."""
+    """The text a call asks with: a command, a fetch's prompt, a search's query, a pattern, a path, or a subagent's
+    type and brief."""
     g = lambda k: str(inp.get(k) or "")  # noqa: E731
     if tool in SHELL_TOOLS:
         return WS.sub(" ", g("command")).strip()
@@ -181,7 +178,8 @@ def target_of(tool, inp):
 
 
 def key_of(tool, inp):
-    """Two calls with one key are the same call: the tool, its target and its question, spacing and case aside."""
+    """Two calls with one key are the same call: the tool, its target and its question, with spacing set aside, and
+    case too except in a command. An Edit or a Write adds a hash of the text it replaces or writes."""
     ask = ask_of(tool, inp)
     if tool in ("Edit", "Write", "MultiEdit"):
         ask += "|" + hashlib.sha1(str(inp.get("old_string") or inp.get("content") or "").encode("utf-8", "replace")
@@ -213,10 +211,10 @@ def flatten(resp, limit=200000):
 def signature(text, failed):
     """An error's signature: its telling line with the paths, numbers and hashes taken out, so the same mistake reads
     the same in another directory or on another line. A call not marked failed has one only when its last lines
-    are an unmistakable error, or a Python traceback stands anywhere in it (a command piped through `tail`, or
-    followed by `; other-command`, exits 0 with the traceback mid-output); source code that mentions an error has
-    none. A failed call with no telling line has no signature: its last line is whatever it printed, and two
-    unrelated failures must not read as one."""
+    are an unmistakable error or a Python traceback stands anywhere in it, as when a command piped through `tail`
+    or followed by `; other-command` exits 0 with the traceback mid-output; source code that mentions an error has
+    none. A failed call with no telling line and no traceback has no signature: its last line is whatever it
+    printed, and two unrelated failures must not read as one."""
     text = (text or "").replace("\r", "")              # Windows output ends its lines \r\n
     lines = [l for l in text.splitlines() if l.strip()]
     if not lines:
@@ -250,8 +248,8 @@ def model_path(p4):
 
 
 def connect(p4):
-    """The database, made when missing (and filled from store/lookups.jsonl, which another machine may have
-    written). A file that is not a database is set aside as lookups.db.bad: a call is never failed over it."""
+    """The database, made when missing and then filled from phi/store/lookups.jsonl, which another machine may have
+    written. A file that is not a database is set aside as lookups.db.bad: a call is never failed over it."""
     path = db_path(p4)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     new = not os.path.exists(path)
@@ -326,8 +324,9 @@ def flat_idf(_t):
 
 def insert(con, d, p4=None):
     """One call into the table, once per id: d is {id, time, session, agent, tool, inp, ok, text}. Returns the row
-    written, or None when the id is already there. A working shell command also becomes the fix of the agent's
-    failed command just before it, when the two are alike."""
+    written, or None when the id is already there. A working shell command also becomes the fix of the latest like
+    failed command among the few calls before it in the same session or subagent. With `p4`, a web finding and a
+    fixed failure are also appended to the tracked file."""
     tool, inp = d["tool"], d.get("inp") if isinstance(d.get("inp"), dict) else {}
     k = kind(tool)
     text = d.get("text") or ""
@@ -364,7 +363,7 @@ def insert(con, d, p4=None):
     return row
 
 
-# --- record (PostToolUse, PostToolUseFailure) ---------------------------------------------------------------
+# --- record: PostToolUse and PostToolUseFailure -------------------------------------------------------------
 
 def record(p4, payload, when):
     """Write the call's row; return the text for a failure other sessions already hit, or ''."""
@@ -406,7 +405,7 @@ def after_text(con, row):
     return out
 
 
-# --- check (PreToolUse) -------------------------------------------------------------------------------------
+# --- check: PreToolUse --------------------------------------------------------------------------------------
 
 def load_model(p4):
     try:
@@ -456,7 +455,8 @@ def web_candidates(rows, tool, target):
 
 
 def web_match(con, p4, tool, inp, when):
-    """(score, row, threshold) of the best earlier finding for this web call, or (0, None, threshold)."""
+    """`(score, row, threshold)` of the best earlier finding for this web call, or `(0.0, None, threshold)` when
+    there is none to compare. The runners-up that reach the threshold are left on `web_match.also`."""
     model = load_model(p4) or {}
     web = model.get("web") or {}
     use_model = bool(web.get("w")) and web.get("promoted")
@@ -483,8 +483,9 @@ def web_match(con, p4, tool, inp, when):
             passed.append((s, r))
         if s >= best:                          # the newest of equals
             best, best_row = s, r
-    # a page asked the same thing more than once (a long page read in parts, a first answer that fell short): the
-    # runner-up is shown too, since the best match by the question is not always the fullest answer
+    # a page asked the same thing more than once, as a long page read in parts or a first answer that fell short:
+    # the runners-up are shown too, up to SHOWN_ROWS findings, since the best match by the question is not always
+    # the fullest answer
     web_match.also = [r for _, r in sorted(passed, key=lambda t: -t[0]) if r is not best_row][:SHOWN_ROWS - 1]
     return best, best_row, thr
 
@@ -510,7 +511,9 @@ def shell_features(cmd, tool):
 
 
 def shell_match(con, p4, tool, inp):
-    """(score, the nearest earlier failure, threshold) for a shell command; (0, None, None) with no model."""
+    """`(score, row, threshold)` for a shell command: the failure model's score and, when it reaches the threshold,
+    the nearest earlier failure of the same program, one with a fix ahead by a little. `(0.0, None, None)` while the
+    store has no failure model."""
     model = (load_model(p4) or {}).get("shell") or {}
     if not model.get("w") or model.get("threshold") is None:
         return 0.0, None, None
@@ -549,7 +552,8 @@ AGAIN = "\nIf that answers it, use it. Make the same call again unchanged to run
 
 def check(p4, payload, when):
     """The hook output for a call about to run, or None: an earlier finding in place of a web call, an earlier
-    failure before a command the model expects to fail; logged either way."""
+    failure before a command the model expects to fail, as the mode says. While `on`, every call that reaches it
+    gets a row in `checks`, answered or not."""
     configure(p4)
     if not ON:
         return None
@@ -606,8 +610,9 @@ def stamp(iso):
 
 
 def backfill(p4, roots, keep_tracked=True):
-    """Every tool call of the transcripts under `roots` into the table, each tool_use id once (a resumed or forked
-    session repeats its history in a new file). Returns the rows written."""
+    """Every tool call of the transcripts under `roots` into the table, each tool_use id once, since a resumed or
+    forked session repeats its history in a new file. With `keep_tracked`, web findings and fixed failures also go
+    to the tracked file. Returns the number of rows written."""
     configure(p4)
     open_calls, done = {}, []
     for root in roots:
@@ -664,8 +669,8 @@ def backfill(p4, roots, keep_tracked=True):
 # --- training -----------------------------------------------------------------------------------------------
 
 def at_precision(scored, min_precision):
-    """The lowest threshold at which the answered calls are right at least min_precision of the time:
-    {threshold, precision, coverage, answered, right} over [(score, right)], every call counted in coverage."""
+    """The lowest threshold at which five or more answered calls are right at least min_precision of the time:
+    {threshold, precision, coverage, answered, right} over `[(score, right)]`, every call counted in coverage."""
     best = {"threshold": None, "precision": 0.0, "coverage": 0.0, "answered": 0, "right": 0}
     hits = sorted((s for s in scored if s[0] > 0), key=lambda s: -s[0])
     right = 0
@@ -703,8 +708,9 @@ def fit_named(examples, epochs=None, lr=0.5, l2=1e-4):
 
 
 def web_pairs(rows):
-    """For every web call with earlier candidates: (session, [(matcher score, features, label)]). The label is
-    free: the later call ran, so its own result says whether the earlier finding would have answered it."""
+    """For every web call whose question has words: its session, and for each earlier call of the same tool and, for
+    a WebFetch, of the same page, the matcher's score, the pair's features and its label. The label is free: the
+    later call ran, so its own result says whether the earlier finding would have answered it."""
     toks = [ranker.tokens(r["ask"]) for r in rows]
     finds = [ranker.tokens(r["finding"]) for r in rows]
     idf, fidf = idf_from(toks), idf_from(finds)
@@ -751,7 +757,7 @@ def train_web(con, folds, min_precision):
 
 
 def train_shell(con, min_precision, test_share=0.2):
-    """The failure model: fitted on the earlier commands, tested on the later ones (time order, no shuffle)."""
+    """The failure model: fitted on the earlier commands and tested on the later ones, in time order, unshuffled."""
     rows = con.execute("SELECT tool, ask, ok, sig, session FROM calls WHERE kind='shell' ORDER BY time, rowid").fetchall()
     if len(rows) < 200:
         return {"calls": len(rows), "threshold": None}
@@ -772,8 +778,9 @@ def train_shell(con, min_precision, test_share=0.2):
 
 
 def train(p4, folds=5, now=None):
-    """One round: both web roads held out by session, the shell failure model tested forward in time; the model
-    file written with whatever passed. Returns the round's figures."""
+    """One round: both web roads held out by session and the failure model tested forward in time. The model file
+    is written when the matcher or either model found a threshold, and the round's figures are appended to
+    lookups-eval.tsv and returned."""
     configure(p4)
     con = connect(p4)
     try:
@@ -825,7 +832,7 @@ def main(argv=None):
         s = sub.add_parser(name)
         s.add_argument("--p4", required=True, help="the store: <repository>/.claude/p4")
         if name == "backfill":
-            s.add_argument("roots", nargs="+", help="transcript directories (~/.claude/projects/<project>)")
+            s.add_argument("roots", nargs="+", help="transcript directories, such as ~/.claude/projects/<project>")
         if name == "train":
             s.add_argument("--folds", type=int, default=5)
     a = ap.parse_args(argv)

@@ -3,12 +3,14 @@
 
     python3 -I lbiza/plugins/p4-phi/scripts/test_lookups.py
 
-Checked: a call's key, kind and error signature; one row per tool_use id; a web finding handed back in place of the
-same question (PreToolUse deny, once: the same call again runs); a different question about the same page left
-alone; an old finding left alone; a failed command's signature recognised when it fails again in another session,
-with the command that worked after it; the modes (answer, note, shadow, off); a corrupt database never failing a
-call; the backfill from transcripts taking each tool_use id once; a training round writing a model only when it
-beats the matcher; hooks.json's matchers.
+Checked: a call's key, kind and error signature; one row per tool_use id; a clean call's row written behind the call;
+the calls recall-hook.sh ends before python starts; a web finding handed back in place of the same question as a
+PreToolUse deny, once, so the same call made again runs; a different question about the same page left alone; an
+old finding left alone; a failed command's signature recognised when it fails again in another session, with the
+command that worked after it; the modes "answer", "note" and "shadow", and `on` false, which logs nothing; a corrupt
+database never failing a call; the backfill from transcripts taking each tool_use id once; a training round
+promoting the fitted model when it answers more held-out calls than the matcher; another session's message kept as
+a row that is not ezexe's; hooks.json's matchers.
 """
 
 import json
@@ -17,7 +19,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
-os.environ["P4_PHI"] = "0"          # phi's routed checks stay out of these tests: they touch no live store
+os.environ["P4_PHI"] = "0"          # phi.py's routed checks stay out of these tests: they touch no live store
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -160,7 +162,7 @@ class Record(Base):
         self.assertEqual((r.returncode, r.stdout), (0, ""))
         r = run_hook("lookup-check", pre("Bash", {"command": "ls"}, proj=self.proj), self.proj)
         self.assertEqual((r.returncode, r.stdout), (0, ""))
-        self.assertFalse(os.path.exists(lk.db_path(self.p4)))    # no model: a command is not looked at either
+        self.assertFalse(os.path.exists(lk.db_path(self.p4)))    # no failure model: a command ends before python too
 
     def test_a_failure_keeps_its_signature_and_the_command_that_worked_next(self):
         bad = {"command": "python tools/probe.py --port narwhal"}
@@ -241,7 +243,7 @@ class Check(Base):
         self.assertIsNone(self.out(run_hook("lookup-check", p, self.proj)))
         self.conf(on=False)
         self.assertIsNone(self.out(run_hook("lookup-check", p, self.proj)))
-        self.assertEqual(self.checks(), ["note", "shadow"])           # off: not even logged
+        self.assertEqual(self.checks(), ["note", "shadow"])           # on false: not even logged
 
     def test_a_search_like_an_earlier_one_is_answered(self):
         self.out(run_hook("lookup-record", post("WebSearch", {"query": "narwhal port timeout default NARWHAL_TIMEOUT"},
@@ -256,7 +258,7 @@ class Check(Base):
         for tool, inp in (("Read", {"file_path": "README.md"}), ("Edit", {"file_path": "a", "old_string": "x",
                           "new_string": "y"}), ("Bash", {"command": "ls"}), ("Agent", {"prompt": "find the port"})):
             self.assertIsNone(self.out(run_hook("lookup-check", pre(tool, inp, proj=self.proj), self.proj)))
-        self.assertEqual(self.checks(), [])                   # the runner ends these before python: nothing to log
+        self.assertEqual(self.checks(), [])                   # recall-hook.sh ends these before python: nothing to log
 
     def test_a_corrupt_database_never_fails_a_call(self):
         self.record_fetch()
@@ -319,7 +321,7 @@ class Peer(Base):
         e = st.parse(st.read_text(path), "messages/x.md")[-1]
         self.assertEqual(e.fields["arrival"], "agent message")
         self.assertFalse(st.owner_message(e))
-        self.assertFalse(st.completed(e))                     # answered at the turn's close, like a turn
+        self.assertFalse(st.completed(e))                     # answered at the turn end, like a turn
         row, done = rows.row_close(self.p4, S1, "Took the correction: the hooks cover every tool.", "2026-11-11 08:25")
         self.assertTrue(done)
         e = st.parse(st.read_text(path), "messages/x.md")[-1]
