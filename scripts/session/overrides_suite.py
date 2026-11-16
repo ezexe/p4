@@ -25,9 +25,8 @@ Tasks (overrides_tasks.jsonl): code (hidden tests run), fences (complete, parsea
 (no fabricated facts, false premises caught), simple (right and short), format (exact form), judgment (the agent's
 call, graded by a judge model), memory (earlier turns carry a retracted rule, a repeated request, a rule whose cause
 is gone), and lessons (--extra-tasks: judged tasks a store's own recorded mistakes were turned into, train split
-only). These are the accuracy the verdicts read. protocol tasks score whether a
-contract's own conventions show (the Deviations block, a frag under src/) and are reported apart, since nothing but
-the contract asks for them. Every answer to a general task is also scanned for the contracts' own vocabulary (JARGON);
+only). These are the accuracy the verdicts read. Every answer to a general task is also scanned for the contracts'
+own vocabulary (JARGON);
 the rate is reported per pathway, since words a contract invents leak into what users read. Each task carries a reference answer; --check-graders scores every reference (each
 must pass) and every `bad` answer (each must fail) before anything is spent, so a grader fault is never read as a
 pathway's.

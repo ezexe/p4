@@ -86,8 +86,7 @@ def test_graders():
     assert os_.check_graders(tasks()) == []
     ts = tasks()
     assert len({t["id"] for t in ts}) == len(ts)
-    assert {t["category"] for t in ts} <= set(os_.GENERAL) | {"protocol"}
-    assert all(t.get("protocol_of") in CONTRACTS for t in ts if t["category"] == "protocol")
+    assert {t["category"] for t in ts} <= set(os_.GENERAL)
 
 
 def test_units():
