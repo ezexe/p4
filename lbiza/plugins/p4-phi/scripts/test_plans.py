@@ -1258,6 +1258,79 @@ class KeepGoing(unittest.TestCase):
         self.assertEqual(self.stop("All done."), {})
 
 
+class WaitsOnReports(unittest.TestCase):
+    """#55: a step that waits on other sessions' reports stays at the top, is handed to no child, and does not
+    send the turn back while a session this one started or messaged is running or has an undelivered report."""
+
+    STEPS = ("Await reports from A, B and C", "Check the trees' results against GitHub")
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP, title="top")
+        self.t.record(A, TOP, title="A, the layout child")
+        self.t.say(TOP, "Run the three trees")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    plan = TreeOfPlans.plan
+    check = TopOrchestrates.check
+
+    def stop(self, report, uuid="u1"):
+        r = self.t.stop(TOP, "Run the three trees", (), report=report, uuid=uuid)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout) if r.stdout.strip() else {}
+
+    def test_a_step_that_waits_on_reports_stays_and_lets_the_turn_end_naming_whom_it_waits_on(self):
+        t = self.t
+        groups, kept = plans.top_groups({"steps": [{"addr": str(k + 1), "content": c, "status": "pending"}
+                                                   for k, c in enumerate(self.STEPS)]}, "")
+        self.assertEqual(groups, [], "top_advice hands neither to a child")
+        self.assertEqual(kept, [("1", plans.AWAITS_WHY), ("2", plans.AWAITS_WHY)])
+        s = relay._session(t.p4, TOP)
+        self.assertEqual(plans.top_advice(t.p4, {**s, "splitAdvised": []}, {"steps": [
+            {"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate(self.STEPS)]}, True, ""), "")
+        ctx = self.plan(TOP, items(*self.STEPS)) or ""
+        self.assertNotIn("Hand its work steps to child sessions", ctx)
+        self.assertEqual(self.stop("Nothing is in yet.").get("decision"), "block",
+                         "nobody is running and no report is undelivered: the step is sent back as any other")
+        t.say(A, "Move the layout")                # A is inside a turn
+        out = self.stop("Waiting on A.", uuid="u2")
+        self.assertNotIn("decision", out, "with A running the turn may end")
+        self.assertIn("which waits on \"A, the layout child\"", out["systemMessage"])
+        self.assertIn("step 1, \"Await reports from A, B and C\"", out["systemMessage"])
+        t.stop(A, "Move the layout", report="Moved.")
+        out = self.stop("Still waiting.", uuid="u3")
+        self.assertIn("\"A, the layout child\"", out.get("systemMessage", ""), "its report is not delivered yet")
+        t.say(TOP, "what came in?")                 # the report is handed to the top session
+        self.assertEqual(self.stop("A reported.", uuid="u4").get("decision"), "block", "nothing is waited on now")
+
+    def test_other_steps_are_read_as_before(self):
+        for stays in self.STEPS + ("Collect the children's reports", "Wait until every tree reports",
+                                   "Check the acceptance session's results", "Read the reports from the fixers"):
+            self.assertEqual(plans.top_stays(stays), plans.AWAITS_WHY, stays)
+        for work in ("Collect the timings of the build in out/t.csv", "Verify phi's session tree matches the app",
+                     "Check 1: nothing hidden in AppData", "Write the report of the run in docs/run.md"):
+            self.assertEqual(plans.top_stays(work), "", work)
+
+    def test_a_top_sessions_read_only_checks_of_its_trees_are_not_handed_off_while_they_are_few(self):
+        t = self.t
+        self.plan(TOP, items("Port the exporter in src/export/flush.py to the new writer", "Merge and push main"))
+        reads = ("git log --oneline -5", "gh issue list -R ezexe/p4 --state open", "gh issue view 55 -R ezexe/p4",
+                 "git status --short", "git -C ../p4 log -1", "gh pr list")
+        for k, cmd in enumerate(reads):
+            self.assertEqual(self.check(TOP, "Bash", {"command": cmd}, f"tu-r{k}"), "", cmd)
+        said = self.check(TOP, "Bash", {"command": "git log --stat -3"}, "tu-r7")
+        self.assertIn("has now run 7 read-only checks of its trees here", said)
+        self.assertIn("`p4-phi:sweep`", said)
+        self.assertNotIn("child session", said)
+        self.assertEqual(self.check(TOP, "Bash", {"command": "git log -1"}, "tu-r8"), "", "said once for the step")
+        self.assertIn("is work: hand it to a child session",
+                      self.check(TOP, "Bash", {"command": "sed -i s/a/b/ src/export/flush.py"}, "tu-w1"),
+                      "a working command is still nudged")
+
+
 class DoerAndObject(unittest.TestCase):
     """#32: messaging or handing to sessions stays at the top; running checks yourself goes to a child."""
 

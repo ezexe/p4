@@ -1654,7 +1654,9 @@ def work_command(cmd):
                 return True
             continue
         if prog == "git":
-            words = [w for w in part.split()[1:] if not w.startswith("-")]
+            # #55: `git -C <path> log` read the path as the subcommand, so a read-only check was nudged as work
+            words = [w for w in re.sub(r"\s(?:-C|-c|--git-dir|--work-tree)\s+\S+", " ", part).split()[1:]
+                     if not w.startswith("-")]
             sub = words[0] if words else ""
             if not sub or sub in GIT_READ or sub in GIT_LANDS:
                 continue
@@ -1678,6 +1680,30 @@ def work_call(s, name, inp):
     return False
 
 
+TREE_CHECKS = 6               # read-only checks of its trees a top session runs in one work step as orchestration
+TREE_CHECK = re.compile(r"(?:^|[\s;&|(])(?:git\s+(?:-C\s+\S+\s+)?(?:log|status|diff|show|branch|fetch|rev-parse|"
+                        r"ls-files)\b|gh\s+(?:issue|pr|run|api|repo)\b|\S*phi\.py[\"']?\s+(?:tree|show|controls|"
+                        r"background)\b)", re.I)
+
+
+def tree_checked(me, s, st):
+    """A top session's read-only check of its trees in a work step, such as a session list, `git log`,
+    `gh issue list` or `gh issue view`: counted, and never handed off while they are few. Past TREE_CHECKS in one
+    step it is told once that the rest is a sweep's read. None while they are few."""
+    key = nudge_key(st)
+    held = s.get("treeChecks") if isinstance(s.get("treeChecks"), dict) else {}
+    n = (int(held.get("n") or 0) if held.get("key") == key else 0) + 1
+    s["treeChecks"] = {"key": key, "n": n}
+    save_session(me.home, s)
+    if n != TREE_CHECKS + 1:
+        return None
+    RAN["tree_checks"] = n
+    return (f"phi (p4-phi): step {st.get('addr')} has now run {n} read-only checks of its trees here. A few, such as "
+            f"a session list, `git log`, `gh issue list` or `gh issue view`, are this top session's own "
+            f"orchestration; past {TREE_CHECKS} the rest is a read across the trees: hand it to a background "
+            f"subagent, the Agent tool with `subagent_type` `p4-phi:sweep`. Said once for this step.")
+
+
 def h_nudge(payload):
     """PreToolUse on Edit, Write and shell commands in a top session with a plan: one line, once per step, that the
     work goes to a child session. Never a block; reading, git's reading and landing commands are never nudged."""
@@ -1694,6 +1720,8 @@ def h_nudge(payload):
         return None
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     if not work_call(s, str(payload.get("tool_name") or ""), inp):
+        if str(payload.get("tool_name") or "") in SHELL_TOOLS and TREE_CHECK.search(str(inp.get("command") or "")):
+            return tree_checked(me, s, st)         # #55: a few read-only checks of its trees are orchestration
         return None
     s["nudged"] = (list(s.get("nudged") or []) + [nudge_key(st)])[-50:]
     save_session(me.home, s)
@@ -2488,13 +2516,63 @@ def h_stop(payload):
         waits = controls.waited_on(now_s)          # #58: its turn may end on a step that waits on them
         RAN["waits_on"] = len(waits)
         controls.board(me.home, now_s)
+    named = ""
+    if not waits and not spawned_from(now_s):      # #55: a plain top session waiting on the sessions of its tree
+        step = plans.waiting_step(me.home, now_s["sessionId"])
+        waits = waited_on(me.home, now_s, turn.get("calls") or []) if step else []
+        if waits:
+            RAN["waits_on"] = len(waits)
+            named = (f"phi (p4-phi): this turn ends on step {step.get('addr')}, "
+                     f"\"{cut(clean(step.get('content')), 100)}\", which waits on "
+                     + ", ".join(f"\"{w}\"" for w in waits[:6])
+                     + (f" and {len(waits) - 6} more" if len(waits) > 6 else "")
+                     + ": the turn is not sent back, and a report's arrival starts the next one.")
     why = plans.keep_going(me.home, now_s, row["report"], turn.get("calls") or [], row["id"],
                            bool(payload.get("stop_hook_active")), waits=waits)
     why = "\n\n".join(p for p in (held, why) if p)   # #28: the proving test's verdict, then the open steps
     if why:                                        # #20: open steps the chain can settle send the turn back
         RAN["kept_going"] = True
         return {"decision": "block", "reason": why}
+    if named:
+        return {"systemMessage": named}            # one line to ezexe naming the sessions waited on; never a block
     return None
+
+
+def messaged(calls):
+    """The sessions a turn's calls sent a message to."""
+    out = []
+    for c in calls or []:
+        inp = c.get("input") if isinstance(c.get("input"), dict) else {}
+        name = str(c.get("name") or "")
+        to = inp.get("to") if name.endswith("SendMessage") else (
+            inp.get("session_id") or inp.get("to") if name.endswith("send_message") else "")
+        if to and str(to) not in out:
+            out.append(str(to))
+    return out
+
+
+def waited_on(home, s, calls=()):
+    """The titles of the sessions a top session's waiting step still waits on: each session it started or messaged
+    that is inside a turn, or whose report it has not been handed yet. The sessions it messaged are kept on its
+    record."""
+    sid = s["sessionId"]
+    sent = [x for x in s.get("messaged") or [] if isinstance(x, str)]
+    new = [safe_id(x) for x in messaged(calls) if safe_id(x) not in sent]
+    if new:
+        s["messaged"] = (sent + new)[-40:]
+        save_session(home, s)
+    rows = load_reports(home, sid)
+    seen = s.get("reportsSeen") if isinstance(s.get("reportsSeen"), int) else 0
+    unread = {r["sessionId"] for r in latest_reports(rows[seen:])}
+    ids = list(plans._children(home, sid)) + [x for x in sent + new if x != sid]
+    out = []
+    for k in dict.fromkeys(ids):
+        ks = load_session(home, k)
+        if not ks.get("sessionId") or relay.gone(home, ks):
+            continue
+        if puppeteer.working(home, k) or k in unread:
+            out.append(title_of(ks))
+    return out
 
 
 RAN = {}       # what the running hook learned, for its line in the session's log

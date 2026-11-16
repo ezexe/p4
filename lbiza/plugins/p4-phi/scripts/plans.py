@@ -492,10 +492,30 @@ SYNCS = re.compile(r"^\W*(?:re-?)?sync(?:s|ed|ing|hronis\w+|hroniz\w+)?\b"
                    r"|\bsync(?:s|ed|ing)?\s+(?:[\w'’-]+\s+){0,3}?stores?\b|\bp4\.py\s+sync\b", re.I)
 
 
+# #55: a step whose doer is another session, or that waits on, awaits, collects or checks other sessions' or trees'
+# reports and results. "Await reports from Puppeteer, file organization, acceptance" was read as work and advised
+# to a child, which cannot wait on reports addressed to its parent.
+AWAITS_TOP = re.compile(r"\b(?:a?wait\w*|until|hold\w*\s+for)\b[^.;]*\b(?:reports?|sessions?|trees?|tops?|results?|"
+                        r"answers?|repl(?:y|ies)|word)\b", re.I)
+OTHERS = re.compile(r"\b(?:reports?|answers?|repl(?:y|ies)|word)\s+from\b"
+                    r"|\b(?:sessions?|trees?|child(?:ren)?|tops?|siblings?|puppeteers?|orchestrators?)"
+                    r"(?:'s|s'|’s|s’|')?\s+(?:own\s+|last\s+|final\s+)?(?:reports?|results?|answers?|repl(?:y|ies)|"
+                    r"outcomes?|findings)\b", re.I)
+AWAITS_WHY = "waits on or checks other sessions' reports, which only this session receives"
+
+
+def awaits_sessions(text):
+    """True for a step that waits on, awaits, collects or checks other sessions' or trees' reports or results."""
+    text = str(text or "")
+    return bool(AWAITS_TOP.search(text) or OTHERS.search(text))
+
+
 def top_stays(text):
     """Why a top session keeps a step itself, or '' for a work step that goes to a child. The one answer for
     top_groups and for phi.nudge_step, so the advice and the nudge never disagree."""
     text = str(text or "")
+    if awaits_sessions(text):                      # #55 wins over #52's check rule for other sessions' results
+        return AWAITS_WHY
     if LANDS.search(text) or SYNCS.search(text):
         return "checks or lands the work"
     if ORCHESTRATES.search(text):
@@ -1150,6 +1170,15 @@ AWAITS = re.compile(r"\b(?:a?wait\w*|collect\w*|until|hold\w*\s+for)\b[^.;]*\b(?
 # one arrives, and the arrival starts the next turn.
 
 
+def waiting_step(home, sid):
+    """The next open step of a session's plan when it waits on other sessions' reports, else None."""
+    steps = [x for x in load(home, sid).get("steps") or [] if x.get("status") != "completed"]
+    if not steps:
+        return None
+    nxt = next((x for x in steps if x.get("status") == "in_progress"), steps[0])
+    return nxt if awaits_sessions(nxt.get("content")) or AWAITS.search(str(nxt.get("content") or "")) else None
+
+
 def keep_going(home, s, report, calls, turn_id, active=False, waits=()):
     """The Stop hook's reason to send the session back to its next open step; '' when the turn may end: no open
     step, the turn wrapped up or asked ezexe a matter of authority, the next step is one, a background task is
@@ -1165,8 +1194,8 @@ def keep_going(home, s, report, calls, turn_id, active=False, waits=()):
     if any(t.get("status") == "open" for _, t in _tasks(p)):
         return ""
     nxt = next((x for x in steps if x.get("status") == "in_progress"), steps[0])
-    if waits and AWAITS.search(str(nxt.get("content") or "")):
-        return ""                                  # #58: a puppeteer waiting on the sessions it controls
+    if waits and (AWAITS.search(str(nxt.get("content") or "")) or awaits_sessions(nxt.get("content"))):
+        return ""                                  # #58, #55: nothing can be done on it until a report arrives
     tail = str(report or "").strip()[-600:]
     asks = [q for q in re.findall(r"[^.!?\n]*\?", tail) if len(q.strip()) > 8]
     if AUTHORITY.search(str(nxt.get("content") or "")) or any(AUTHORITY.search(q) for q in asks) \
