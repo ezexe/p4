@@ -146,6 +146,13 @@ class Lifetime(unittest.TestCase):
         self.assertIn("temportal.cache", err.getvalue())
         self.assertTrue(any("not an object" in x for x in lines), lines)
 
+    def test_list_marks_an_entry_set_would_refuse(self):
+        put(os.path.join(self.t, "memory", "MEMORY.md"))
+        lifetime.write_expires(self.p4, {"memory/MEMORY.md": {"expires": 0}})
+        line = [x for x in lifetime.listing(self.p4) if "memory/MEMORY.md" in x][0]
+        self.assertIn("refused", line)
+        self.assertNotIn("past due", line)
+
     def test_memory_is_never_cleared(self):
         mem = put(os.path.join(self.t, "memory", "a.md"), age_days=400)
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:

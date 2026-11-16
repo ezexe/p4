@@ -418,6 +418,9 @@ def listing(p4, now=None):
                 line = f"cookie  {rel}  until session {v['session'][:8]} ends"
         except (TypeError, ValueError, OverflowError, OSError):
             pass
+        why = refusal(p4, rel)[1]
+        if why:
+            line = f"cookie  {rel}  refused, so never cleared: {why}"
         lines.append(line or f"cookie  {rel}  unreadable, so never cleared: {json.dumps(v)}")
     raw = p4conf.section(p4, "temportal").get("cache", {})
     if not isinstance(raw, dict):
