@@ -2,7 +2,7 @@
 """The live test of 4.7 (build step 6): does the PreToolUse `Agent` hook's `updatedInput` reach the subagent?
 
 Opt-in: P4_LIVE=1 python3 hooks/test_live_subagent.py   (it spends the signed-in account's subscription: one or two
-`claude -p` runs on haiku). P4_CLAUDE names the CLI (default: the desktop app's bundled one); ANTHROPIC_API_KEY is
+`claude -p` runs on haiku). P4_CLAUDE names the CLI (default: the `claude` on PATH); ANTHROPIC_API_KEY is
 removed from its environment, since the CLI is signed in to a claude.ai account and a key in the environment breaks
 that. `--setting-sources project,local` keeps ezexe's own settings (their hooks and installed plugins) out, so
 only this plugin (`--plugin-dir`) runs, on a fixture git project in a temp directory.
@@ -32,8 +32,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 from test_hooks import make_project  # noqa: E402
 
-CLI = os.environ.get("P4_CLAUDE", "/Users/ez/Library/Application Support/Claude/claude-code/2.1.309/300ae7409767/"
-                                  "claude.app/Contents/MacOS/claude")
+CLI = os.environ.get("P4_CLAUDE") or shutil.which("claude") or "claude"     # the CLI on PATH, on any machine
 NOTES = "Notes from this repo's memory:"
 PROMPT = ("Launch exactly one subagent with the Agent tool (subagent_type general-purpose). Its prompt must be exactly: "
           "\"check whether the quokka harness runs the zebrafish plotter golden images on every push. Use no tools; "

@@ -9,7 +9,7 @@
 # The lookup hooks run before and after every tool call (0.8.9), so every process this script starts is paid twice a
 # call. Measured on Windows, 2026-11-11 (median of 7): 415 to 490 ms a call before, of which 144 ms was hook.py.
 # Since then: the platform is read from the environment (no `uname`), the interpreter proven once is remembered in
-# the plugin's own install, ${CLAUDE_PLUGIN_ROOT}/.python (no second interpreter start), and a call lookups.py has nothing to check
+# the plugin's data folder, ${CLAUDE_PLUGIN_DATA}/.python (no second interpreter start), and a call lookups.py has nothing to check
 # (lookup-check on a tool that is neither a web call nor a shell command, or on a command while the store has no
 # failure model) ends here, with no python at all. After: 49 ms for such a check, about 250 ms for a record that
 # has to answer, and a clean call's record costs the call only this script (the python runs on behind it).
@@ -90,7 +90,14 @@ case "${OS:-}${OSTYPE:-}" in
   *) probe=0 ;;
 esac
 
-known="${CLAUDE_PLUGIN_ROOT}/.python"   # the interpreter proven once: in the plugin's own install, never %TEMP%
+# The interpreter proven once is remembered in the plugin's data folder: plugins-reference.md, "Environment
+# variables": "`${CLAUDE_PLUGIN_ROOT}` changes when the plugin updates, so don't write state there", and
+# `${CLAUDE_PLUGIN_DATA}` is "kept across plugin updates". A harness that sets no data folder keeps the old place.
+known="${CLAUDE_PLUGIN_ROOT}/.python"
+if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
+  [ -d "$CLAUDE_PLUGIN_DATA" ] || mkdir -p "$CLAUDE_PLUGIN_DATA" 2>/dev/null
+  [ -d "$CLAUDE_PLUGIN_DATA" ] && known="${CLAUDE_PLUGIN_DATA}/.python"
+fi
 if [ "$probe" = 1 ] && [ -r "$known" ]; then
   read -r c < "$known" || c=""
   case "$c" in */*) ;; *) c="" ;; esac       # a bare name cached before T2 may be the alias: probe again

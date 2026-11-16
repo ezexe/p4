@@ -2,7 +2,7 @@
 # p4-phi hook runner: find a working python, run scripts/phi.py hook <name> isolated (-I) with the harness's stdin
 # passed through, and exit 0 whatever happens, so a broken hook never blocks a call. On Windows a `python3` on PATH
 # can be the Store stub, so there a candidate is proven with a trivial run once and remembered in the plugin's
-# own install, ${CLAUDE_PLUGIN_ROOT}/.python, which recall-hook.sh shares. -X utf8 runs the hook in UTF-8 mode, not the Windows code page.
+# data folder, ${CLAUDE_PLUGIN_DATA}/.python, which recall-hook.sh shares. -X utf8 runs the hook in UTF-8 mode, not the Windows code page.
 set -u
 
 [ "${P4_PHI:-1}" = 0 ] && exit 0
@@ -18,7 +18,14 @@ case "${OS:-}${OSTYPE:-}" in
   *) probe=0 ;;
 esac
 
-known="${CLAUDE_PLUGIN_ROOT}/.python"   # the interpreter proven once: in the plugin's own install, never %TEMP%
+# The interpreter proven once is remembered in the plugin's data folder: plugins-reference.md, "Environment
+# variables": "`${CLAUDE_PLUGIN_ROOT}` changes when the plugin updates, so don't write state there", and
+# `${CLAUDE_PLUGIN_DATA}` is "kept across plugin updates". A harness that sets no data folder keeps the old place.
+known="${CLAUDE_PLUGIN_ROOT}/.python"
+if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
+  [ -d "$CLAUDE_PLUGIN_DATA" ] || mkdir -p "$CLAUDE_PLUGIN_DATA" 2>/dev/null
+  [ -d "$CLAUDE_PLUGIN_DATA" ] && known="${CLAUDE_PLUGIN_DATA}/.python"
+fi
 if [ "$probe" = 1 ] && [ -r "$known" ]; then
   read -r c < "$known" || c=""
   case "$c" in */*) ;; *) c="" ;; esac       # a bare name cached before T2 may be the alias: probe again

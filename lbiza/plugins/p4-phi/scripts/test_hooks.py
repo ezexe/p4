@@ -580,5 +580,78 @@ class SubagentStop(Base):
         self.assertTrue(any(t["kind"] == "agent" for t in lb.read_tasks(self.p4).values()))
 
 
+class ZeroConfiguration(unittest.TestCase):
+    """#57: the plugin works in a project nobody set up. An empty folder with no `.claude`, no P4_* variable and no
+    settings file: every handler runs clean, the levels rule is given, a top session's long command is moved to the
+    background, and the store is made by the plugin's own SessionStart hook, with no step from the person."""
+
+    LONG = {"command": "python -m pytest -q", "description": "Run the tests"}
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.proj = os.path.join(self.tmp.name, "a new project")
+        os.makedirs(self.proj)
+        self.sid = "eeee5555-0000-4000-8000-000000000000"
+        self.env = {k: v for k, v in os.environ.items() if not k.startswith(("P4_", "CLAUDE_", "CLAUDECODE"))}
+        # what Claude Code itself gives a plugin's hook command, and nothing of the plugin's own
+        self.env.update({"CLAUDE_PLUGIN_ROOT": ROOT, "CLAUDE_PROJECT_DIR": self.proj,
+                         "CLAUDE_PLUGIN_DATA": os.path.join(self.tmp.name, "data"),
+                         "CLAUDE_CONFIG_DIR": os.path.join(self.tmp.name, "config")})
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_hook(self, runner, name, **payload):
+        body = {"session_id": self.sid, "cwd": self.proj, **payload}
+        r = subprocess.run(["sh", os.path.join(ROOT, "hooks", runner), name], input=json.dumps(body),
+                           capture_output=True, text=True, env=self.env, timeout=90)
+        self.assertEqual(r.returncode, 0, (name, r.stderr))
+        self.assertNotIn("Traceback", r.stderr, name)
+        out = json.loads(r.stdout) if r.stdout.strip() else {}
+        self.assertNotIn("systemMessage", out, (name, out))
+        return out.get("hookSpecificOutput") or out
+
+    def handlers(self):
+        start = self.run_hook("run-hook.sh", "session-start", hook_event_name="SessionStart", source="startup")
+        said = self.run_hook("run-hook.sh", "user-prompt-submit", hook_event_name="UserPromptSubmit",
+                             prompt="Make the exporter write its ports table")
+        pre = self.run_hook("recall-hook.sh", "lookup-check", hook_event_name="PreToolUse", tool_name="Bash",
+                            tool_input=dict(self.LONG), tool_use_id="toolu_zero1")
+        plain = self.run_hook("recall-hook.sh", "lookup-check", hook_event_name="PreToolUse", tool_name="Bash",
+                              tool_input={"command": "ls"}, tool_use_id="toolu_zero2")
+        t = os.path.join(self.tmp.name, "t.jsonl")
+        write(t, json.dumps({"type": "user", "uuid": "u0", "message": {
+            "content": "Make the exporter write its ports table"}}) + "\n" + json.dumps({"type": "assistant", "message": {
+                "content": [{"type": "text", "text": "done"}]}}) + "\n")
+        stop = self.run_hook("run-hook.sh", "stop", hook_event_name="Stop", transcript_path=t,
+                             last_assistant_message="done")
+        return start, said, pre, plain, stop
+
+    def test_every_handler_runs_in_a_project_with_no_store(self):
+        start, said, pre, plain, stop = self.handlers()
+        self.assertIn("built-in, levels", start["additionalContext"])
+        self.assertIn("act-don't-wait", start["additionalContext"])
+        self.assertEqual(pre["updatedInput"], {**self.LONG, "run_in_background": True})
+        self.assertEqual((said, plain, stop), ({}, {}, {}))
+        self.assertFalse(os.path.exists(os.path.join(self.proj, ".claude")), "phi's own handlers write nothing")
+
+    def test_the_first_session_start_makes_the_store_and_the_rest_follows(self):
+        self.run_hook("recall-hook.sh", "layout", hook_event_name="SessionStart", source="startup")
+        p4 = os.path.join(self.proj, ".claude", "p4")
+        self.assertTrue(os.path.isdir(p4conf.sub(p4, "store")), "made by the plugin's own SessionStart hook")
+        conf = p4conf.load(p4, write=False)["phi"]
+        self.assertEqual((conf["levels"], conf["act_dont_wait"], conf["top_orchestrates"], conf["home"]),
+                         (True, True, True, None), "p4.json is written with the working defaults")
+        self.env["P4_PHI_WATCH"] = "0"       # only so this test leaves no watcher behind in its temporary folder
+        start, said, pre, plain, stop = self.handlers()
+        self.assertIn("built-in, levels", start["additionalContext"])
+        self.assertEqual(pre["updatedInput"]["run_in_background"], True)
+        with open(os.path.join(p4, "phi", "sessions", self.sid, "session.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["task"], "Make the exporter write its ports table")
+        self.assertTrue(os.path.exists(os.path.join(p4, "phi", "sessions", self.sid, "turns.jsonl")), "the turn kept")
+        self.assertTrue(os.path.exists(os.path.join(self.tmp.name, "data", ".python"))
+                        or os.name != "nt", "the proven interpreter is remembered in the plugin's data folder")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
