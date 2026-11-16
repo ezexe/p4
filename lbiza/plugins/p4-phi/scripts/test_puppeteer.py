@@ -322,6 +322,9 @@ class WorkerSplit(Base):
         t.say(TOP, TASK)
         first = context(t.say(KID, handed("Port the flush to the new writer and document it. Report when done.")))
         self.assertIn("Plan its split now", first)
+        self.assertIn("In these sessions the app has let a started session start others in its first turn", first,
+                      "what the app has shown, not a documented rule")
+        self.assertIn("where the app refuses that start, the part is shown as a suggested task card", first)
         self.assertIn("one per disjoint set of files", first)
         self.assertIn("Subagents keep reads, searches, single command runs and independent checks", first)
         self.assertIn("is shown as a suggested task card", first, "a writing part that comes up later is a card")

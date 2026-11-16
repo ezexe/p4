@@ -45,7 +45,7 @@ Run each with `python -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/phi.py"`, and pa
 
 The built-in rule `levels`, given at a session's start, says where work runs: the background subagents `p4-phi:sweep`, `p4-phi:runner` and `p4-phi:check`, a background command, or a worker.
 `phi.child_levels` in `.claude/p4/p4.json` sets the model and effort a worker starts with for each kind of step: by default `static` runs on `claude-sonnet-5-5` at `medium`, and `build` and `design` on the parent session's model at `high`.
-A worker splits at its first message: the app lets a session start sessions only in its first turn and in the turns ezexe's own messages open, so p4-phi tells it to plan its split then and start a session for every part that writes files or makes a decision, one per disjoint set of files.
+A worker splits at its first message: in these sessions the app has let a started session start others in its first turn and in the turns ezexe's own messages open, though no doc states it, so p4-phi tells it to plan its split then and start a session for every part that writes files or makes a decision, one per disjoint set of files, and where the app refuses that start to show the part as a suggested task card that ezexe presses.
 Subagents keep reads, searches, single command runs and independent checks.
 A writing part that comes up later is shown as a suggested task card that ezexe presses, and kept as a start request only where the card is refused too.
 A subagent that wrote files is listed on the ledger under Level misses.
