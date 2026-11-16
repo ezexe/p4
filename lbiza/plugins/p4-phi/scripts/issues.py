@@ -19,6 +19,7 @@
 phi.issues false turns the loop off. phi.py calls these from the hooks every open session already has.
 """
 
+import glob
 import json
 import os
 import re
@@ -104,12 +105,66 @@ def writing(text):
     return bool(WRITES.search(text))
 
 
+SLUG = re.compile(r"(?<![\w./\\-])([A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*)(?![\w/\\-])")
+SLUG_SAID = re.compile(r"(?:github\.com[:/]+|-R\s+|--repo\s+|\b(?:on|in|of|to|repo|repository)\s+)"
+                       r"([A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w-]*(?:\.[\w-]+)*?)(?=\.git\b|[#/\s,;:)]|\.?\s|\.?$)|"
+                       r"(?<![\w./\\-])([A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*)#\d+")
+
+
+def slugs_said(text):
+    """The `owner/name` repositories a text names as repositories, in order: after github.com, `-R`, or a word
+    like "on", or before `#N`. "ezexe/p4" is never read out of "ezexe/p4-phi"."""
+    out = []
+    for m in SLUG_SAID.finditer(str(text or "")):
+        s = (m.group(1) or m.group(2) or "").rstrip(".")
+        if s and s.lower() not in [x.lower() for x in out]:
+            out.append(s)
+    return out
+
+
+def without_slugs(text, base):
+    """The text with every `owner/name` token taken out that is no path under `base`: two parts, no file
+    extension, and nothing on disk by that name (#45: "on ezexe/p4" was read as a path in the cwd's repository, and
+    the issue was filed on the cwd's origin)."""
+    def keep(m):
+        tok = m.group(1)
+        if re.search(r"\.[A-Za-z0-9]{1,5}$", tok) and not tok.lower().endswith(".git"):
+            return m.group(0)                      # lib/x.py: a file, there or still to be written
+        if base and os.path.exists(os.path.join(base, tok)):
+            return m.group(0)
+        return " "
+    return SLUG.sub(keep, str(text or ""))
+
+
+def nested_repos(base):
+    """The repositories one or two folders under `base`, such as a plugin checkout inside a project."""
+    out = []
+    if not base or not os.path.isdir(base):
+        return out
+    for pat in ("*/.git", "*/*/.git"):
+        for g in sorted(glob.glob(os.path.join(base, pat)))[:40]:
+            out.append(relay.norm(os.path.dirname(g)))
+    return out
+
+
 def repos_named(text, base):
-    """[(repo path, 'owner/name')] of the GitHub repositories whose files the text names, in the order named."""
+    """[(repo path, 'owner/name')] of the GitHub repositories the text is about. A repository the text names by its
+    `owner/name` comes first when a checkout of it is at hand: among the repositories of the paths named, the cwd's
+    own, or one nested under the cwd. Then the repositories whose files the text names, in the order named. An
+    `owner/name` token alone never names the cwd's repository (#45)."""
+    text = str(text or "")
     out, seen = [], set()
-    cands = [relay.repo_of(p) for p in relay.paths_in(text, base)]
+    cands = [relay.repo_of(p) for p in relay.paths_in(without_slugs(text, base), base)]
     if base and FILE_RE.search(text):
         cands.append(relay.repo_of(base))
+    said = [s.lower() for s in slugs_said(text)]
+    if said:
+        local = {}
+        for repo in cands + [relay.repo_of(base) if base else ""] + nested_repos(base):
+            if repo and repo not in local:
+                local[repo] = github_of(repo).lower()
+        first = [repo for s in said for repo, slug in local.items() if slug == s]
+        cands = first + cands
     for repo in cands:
         if not repo or repo in seen:
             continue
@@ -224,6 +279,44 @@ def ensure(home, s, text, base, where, rec=None):
               "`phi.py proof \"<command>\"`); phi re-runs that test at Stop on the final head and comments the "
               "result on the issue; green work is pushed at once, without asking, and each p4 store it touched synced "
               "with `p4.py sync --push`; then, with the issue closed, this session is archived.")
+
+
+def done_text(home, s, cwd=""):
+    """What `phi.py done` says about the issue this session closes (#45: only the Stop gate named it, and only once
+    a proving test was registered, so a child that reported done never learned which issue it closes). The issue,
+    and what it still owes before it closes: the commit, the proving test, the push. Nothing is read from GitHub."""
+    iss = s.get("issue") if isinstance(s.get("issue"), dict) else None
+    if not on(home):
+        return ""
+    if not iss:
+        task = str(s.get("task") or "")
+        for repo, slug in repos_named(task, s.get("cwd") or cwd or ""):
+            nums = named_issues(task, slug)
+            if nums:
+                refs = ", ".join(f"{slug}#{n}" for n in nums[:8])
+                return (f"this session has no issue record of its own; its task names {refs}. A commit closes one "
+                        f"by saying `Closes #N` for it, and the push of that commit closes it.")
+        return ""
+    slug, n = iss["repo"], iss["number"]
+    owed = []
+    closing = [(repo, sha) for repo, sha, _, body in own_commits(s, cwd) if closes(body, slug, n)]
+    if not closing:
+        owed.append(f"a commit that says `Closes #{n}`")
+    proof = proof_of(home, s)
+    if not proof:
+        owed.append("the test that proves it, named in a plan step or with `phi.py proof \"<command>\"`")
+    if closing and not all(_pushed(repo, sha) for repo, sha in closing):
+        owed.append(f"the push of {closing[-1][1]}")
+    have = []
+    if closing:
+        have.append(f"commit {closing[-1][1]} says `Closes #{n}`")
+    if proof:
+        have.append(f"its proving test is `{proof['cmd']}`")
+    return (f"this session closes {slug}#{n} ({iss.get('url')})"
+            + (": " + "; ".join(have) if have else "") + ". "
+            + ("Still owed before it closes: " + "; ".join(owed) + "." if owed else
+               "Nothing is owed but the Stop check: phi re-runs the test on the final head and the pushed commit "
+               "closes the issue."))
 
 
 def post_plan(home, s):

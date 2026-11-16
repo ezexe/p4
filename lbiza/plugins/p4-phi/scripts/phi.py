@@ -2509,6 +2509,12 @@ def main(argv=None):
             s["done"] = {"text": clean(a.text)[:400], "time": now()}
             save_session(me.home, s)
             print("this turn will be kept as done")
+            try:                                   # #45: the issue it closes, and what that still owes
+                line = issues.done_text(me.home, s, os.getcwd()) if spawned_from(s) else ""
+            except Exception:  # noqa: BLE001
+                line = ""
+            if line:
+                print(line)
         elif a.cmd == "task":
             task = cut(a.text.strip(), TASK_CHARS)
             if len(clean(task)) < 12:

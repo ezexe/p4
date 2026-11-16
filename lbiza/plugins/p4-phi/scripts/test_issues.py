@@ -170,6 +170,48 @@ class Loop(unittest.TestCase):
                          "The x fix, whole", "the brief's title line")
         self.assertNotIn("...", issues.issue_title("", "Fix " + "the very long thing " * 12))
 
+    def test_the_repository_the_brief_names_wins_over_the_checkouts_origin(self):
+        """#45: "Fix the issues on ezexe/p4 ... the code is in <proj>/p4/..." filed ezexe/p4-phi#1 and #2, on the
+        origin of the project the session ran in, because "ezexe/p4" was read as a path there."""
+        proj = self.t.proj.replace("\\", "/")
+        write(os.path.join(proj, "top.py"), "t = 1\n")
+        for args in (("init", "-q", "-b", "main"), ("add", "top.py"), ("commit", "-qm", "one"),
+                     ("remote", "add", "origin", "https://github.com/ezexe/demo-outer.git")):
+            self.git(proj, *args)
+        brief = (f"Fix the open issues on ezexe/demo in this order, one at a time. Read each with gh issue view N -R "
+                 f"ezexe/demo. The code is in {self.work}/lib, on branch main. Commit each fix.")
+        got = issues.repos_named(brief, proj)
+        self.assertEqual(got[0][1], "ezexe/demo", got)
+        self.assertNotIn("ezexe/demo-outer", [slug for _, slug in got], "an owner/name token is no path in the cwd")
+        self.assertEqual(issues.repos_named("Fix the bug the README of ezexe/demo describes, in top.py", proj)[0][1],
+                         "ezexe/demo", "named by its slug, found nested under the cwd")
+        self.assertEqual(issues.repos_named("Fix top.py and commit it", proj)[0][1], "ezexe/demo-outer")
+        self.assertEqual(issues.slugs_said("see ezexe/p4-phi#2, then gh issue view 4 -R ezexe/p4."),
+                         ["ezexe/p4-phi", "ezexe/p4"])
+        self.assertEqual(issues.slugs_said("on ezexe/p4-phi only"), ["ezexe/p4-phi"], "never ezexe/p4 out of it")
+        ctx = context(self.t.hook("user-prompt-submit", A, {"hook_event_name": "UserPromptSubmit", "prompt": brief,
+                                                            "cwd": proj}))
+        self.assertIn("ezexe/demo#7", ctx)
+        self.assertEqual(self.t.session(A)["issue"]["repo"], "ezexe/demo")
+
+    def test_done_names_the_issue_and_what_it_still_owes(self):
+        """#45: `phi.py done` named no issue as closable."""
+        self.start_writer()
+        r = self.t.cli(A, "done", "ran test_x.py and it passed", proj=self.work)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("this session closes ezexe/demo#7", r.stdout)
+        self.assertIn("a commit that says `Closes #7`", r.stdout)
+        self.assertIn("phi.py proof", r.stdout)
+        self.commit("lib: fix x\n\nCloses #7")
+        self.finish(self.proving_test(True))
+        r = self.t.cli(A, "done", "ran test_x.py and it passed", proj=self.work)
+        self.assertIn("says `Closes #7`", r.stdout)
+        self.assertIn("Still owed before it closes: the push of", r.stdout)
+        self.assertNotIn("a commit that says", r.stdout)
+        self.t.say(B, f"Check what {self.work}/lib/x.py does for ezexe/demo#3 and ezexe/demo#4 and report it.")
+        r = self.t.cli(B, "done", "read x.py and reported it", proj=self.work)
+        self.assertIn("its task names ezexe/demo#3, ezexe/demo#4", r.stdout)
+
     def test_an_issue_the_brief_names_is_taken_not_filed_again(self):
         ctx = context(self.t.say(A, f"Build ezexe/demo issue #3: fix {self.work}/lib/x.py. Archive when done."))
         self.assertIn("ezexe/demo#3", ctx)
