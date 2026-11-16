@@ -12,9 +12,11 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "scratchpad.py")
@@ -24,6 +26,19 @@ MAC_SCRATCH = "/private/tmp/claude-501/-Users-ez-x/f27bc042/scratchpad"
 P4_SRC = "E:/projects/x/.claude/p4/temportal/src"
 PAD = "E:/projects/x/.claude/p4/temportal/scratchpad"
 ON = {"P4_SCRATCHPAD_ASKS": "1"}
+
+def wipe(path):
+    """Remove a test's tree, a git repository's read-only objects included, which rmtree alone leaves on Windows."""
+    def again(fn, p, _exc):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            fn(p)
+        except OSError:
+            pass
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=again)
+    else:
+        shutil.rmtree(path, onerror=again)
 
 
 def env_with(extra=None, **kw):
@@ -156,7 +171,7 @@ def notebook_out():
         os.remove(os.path.join(pad, ".out", ".gitignore"))
         assert "re-seeded" in sweep(), "a deleted .out/ ignore was not re-seeded"
     finally:
-        shutil.rmtree(root, ignore_errors=True)
+        wipe(root)
     print("test_scratchpad.py: notebook-out cases green")
 
 
@@ -188,7 +203,7 @@ def repo_uses():
                        "`.claude/p4/temportal/src/port/compdb.py` is used by `CMakeLists.txt`; it belongs in the repo."], out
         assert uses({}) == "", "repo-uses spoke with the switch off"
     finally:
-        shutil.rmtree(root, ignore_errors=True)
+        wipe(root)
     print("test_scratchpad.py: repo-uses cases green")
 
 
@@ -246,7 +261,7 @@ def gate2_d():
         assert r.returncode == 0, r
         assert left_in_profile() == [], f"the run left folders under {profile}: {left_in_profile()}"
     finally:
-        shutil.rmtree(root, ignore_errors=True)
+        wipe(root)
     print("test_scratchpad.py: clean start green")
 
 
@@ -304,10 +319,10 @@ def tmp_cases():
             assert os.path.samefile(harness, other), "a foreign link was changed"
         finally:
             os.rmdir(harness) if os.name == "nt" else os.unlink(harness)
-            shutil.rmtree(other, ignore_errors=True)
+            wipe(other)
     finally:
-        shutil.rmtree(root, ignore_errors=True)
-        shutil.rmtree(temp, ignore_errors=True)
+        wipe(root)
+        wipe(temp)
     print("test_scratchpad.py: tmp cases green")
 
 
@@ -416,8 +431,8 @@ def tmp_keep_cases():
                 os.rmdir(harness) if os.name == "nt" else os.unlink(harness)
             except OSError:
                 pass
-        shutil.rmtree(root, ignore_errors=True)
-        shutil.rmtree(temp, ignore_errors=True)
+        wipe(root)
+        wipe(temp)
     print("test_scratchpad.py: tmp keep cases green")
 
 
@@ -539,7 +554,7 @@ def sweep_cases():
             if os.path.lexists(pad[k]) and is_link(pad[k]):
                 unlink(pad[k])
         for d in (root, temp, cfg, other):
-            shutil.rmtree(d, ignore_errors=True)
+            wipe(d)
     print("test_scratchpad.py: sweep cases green")
 
 
@@ -635,7 +650,7 @@ def tmp_empty_and_cap_cases():
                     getattr(os.path, "isjunction", lambda q: False)(p):
                 unlink(p)
         for d in (root, temp, cfg):
-            shutil.rmtree(d, ignore_errors=True)
+            wipe(d)
     print("test_scratchpad.py: tmp empty and cap cases green")
 
 
@@ -713,7 +728,7 @@ def tmp_export_cases():
         assert not os.path.exists(os.path.join(mine, "plan.md")), "a committed note is still on disk"
     finally:
         for d in (root, temp):
-            shutil.rmtree(d, ignore_errors=True)
+            wipe(d)
     print("test_scratchpad.py: tmp export cases green")
 
 
@@ -812,7 +827,7 @@ def tmp_staged_copy_cases():
         assert not os.path.exists(os.path.join(theirs, "note.md")), "the note was not removed"
     finally:
         for d in (root, temp):
-            shutil.rmtree(d, ignore_errors=True)
+            wipe(d)
     print("test_scratchpad.py: tmp staged copy cases green")
 
 
@@ -847,7 +862,7 @@ def tmp_close_bare_store_cases():
         assert "kept before its removal" in log, log
     finally:
         for d in (root, temp):
-            shutil.rmtree(d, ignore_errors=True)
+            wipe(d)
     print("test_scratchpad.py: bare store cases green")
 
 
@@ -878,7 +893,7 @@ def tmp_close_rename_cases():
         assert left == "", f"the close left staged changes for a later commit:\n{left}"
         assert git("ls-files", "--", rel) == "", "a path of the closed folder is still tracked"
     finally:
-        shutil.rmtree(root, ignore_errors=True)
+        wipe(root)
     print("test_scratchpad.py: rename close cases green")
 
 
@@ -925,7 +940,7 @@ def tmp_close_cut_cases():
         back = [n for n in names if os.path.isfile(os.path.join(mine, n))]
         assert back == list(names), f"after a cut close the next start got back {back} of {list(names)}"
     finally:
-        shutil.rmtree(root, ignore_errors=True)
+        wipe(root)
     print("test_scratchpad.py: cut close cases green")
 
 
@@ -956,7 +971,7 @@ def archived_by_phi_cases():
         assert {sid, cli} <= got, f"archived_ids read {got} from p4-phi's own record"
     finally:
         sys.path[:] = saved
-        shutil.rmtree(home, ignore_errors=True)
+        wipe(home)
     print("test_scratchpad.py: archived by phi cases green")
 
 
@@ -982,7 +997,7 @@ def scratchpad_dir_cases():
             assert os.path.isfile(os.path.join(other, "keep.md")) and not is_link(other), f"{other} was moved"
     finally:
         for d in (root, temp):
-            shutil.rmtree(d, ignore_errors=True)
+            wipe(d)
     print("test_scratchpad.py: scratchpad_dir cases green")
 
 
@@ -1006,7 +1021,7 @@ def dangling_own_link_cases():
     finally:
         if is_link(harness):
             unlink(harness)
-        shutil.rmtree(root, ignore_errors=True)
+        wipe(root)
     print("test_scratchpad.py: dangling own link cases green")
 
 
@@ -1026,7 +1041,7 @@ def quiet_start_cases():
     finally:
         if is_link(harness):
             unlink(harness)
-        shutil.rmtree(root, ignore_errors=True)
+        wipe(root)
     print("test_scratchpad.py: quiet start cases green")
 
 
@@ -1092,7 +1107,7 @@ def parallel_hooks_cases():
               f"{floor * 1000:.0f} ms, limit {limit * 1000:.0f} ms")
         assert took <= limit, f"the SessionEnd hooks took {took:.2f} s, over {limit:.2f} s"
     finally:
-        shutil.rmtree(root, ignore_errors=True)
+        wipe(root)
     print("test_scratchpad.py: parallel hooks cases green")
 
 
@@ -1254,7 +1269,7 @@ def ended_cases():
         if os.path.lexists(p) and is_link(p):
             unlink(p)
         for d in (root, temp, cfg):
-            shutil.rmtree(d, ignore_errors=True)
+            wipe(d)
     print("test_scratchpad.py: ended cases green")
 
 
@@ -1304,33 +1319,73 @@ def move_cases():
         for d, _dirs, names in os.walk(base):
             for n in names:
                 os.chmod(os.path.join(d, n), stat.S_IWRITE)
-        shutil.rmtree(base, ignore_errors=True)
+        wipe(base)
     print("test_scratchpad.py: move cases green")
 
 
-def main():
-    asks()
-    notebook_out()
-    repo_uses()
-    tmp_cases()
-    tmp_keep_cases()
-    sweep_cases()
-    move_cases()
-    tmp_empty_and_cap_cases()
-    tmp_export_cases()
-    tmp_staged_copy_cases()
-    tmp_close_bare_store_cases()
-    tmp_close_cut_cases()
-    tmp_close_rename_cases()
-    archived_by_phi_cases()
-    scratchpad_dir_cases()
-    parallel_hooks_cases()
-    dangling_own_link_cases()
-    quiet_start_cases()
-    ended_cases()
-    gate2_d()
-    print("test_scratchpad.py: all green")
+class Cases(unittest.TestCase):
+    """Each case group a test method, so unittest and pytest collect them."""
+
+    def test_asks(self):
+        asks()
+
+    def test_notebook_out(self):
+        notebook_out()
+
+    def test_repo_uses(self):
+        repo_uses()
+
+    def test_tmp_cases(self):
+        tmp_cases()
+
+    def test_tmp_keep_cases(self):
+        tmp_keep_cases()
+
+    def test_sweep_cases(self):
+        sweep_cases()
+
+    def test_move_cases(self):
+        move_cases()
+
+    def test_tmp_empty_and_cap_cases(self):
+        tmp_empty_and_cap_cases()
+
+    def test_tmp_export_cases(self):
+        tmp_export_cases()
+
+    def test_tmp_staged_copy_cases(self):
+        tmp_staged_copy_cases()
+
+    def test_tmp_close_bare_store_cases(self):
+        tmp_close_bare_store_cases()
+
+    def test_tmp_close_cut_cases(self):
+        tmp_close_cut_cases()
+
+    def test_tmp_close_rename_cases(self):
+        tmp_close_rename_cases()
+
+    def test_archived_by_phi_cases(self):
+        archived_by_phi_cases()
+
+    def test_scratchpad_dir_cases(self):
+        scratchpad_dir_cases()
+
+    def test_parallel_hooks_cases(self):
+        parallel_hooks_cases()
+
+    def test_dangling_own_link_cases(self):
+        dangling_own_link_cases()
+
+    def test_quiet_start_cases(self):
+        quiet_start_cases()
+
+    def test_ended_cases(self):
+        ended_cases()
+
+    def test_gate2_d(self):
+        gate2_d()
 
 
 if __name__ == "__main__":
-    main()
+    unittest.main(verbosity=1)

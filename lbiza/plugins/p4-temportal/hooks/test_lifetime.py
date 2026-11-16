@@ -7,6 +7,7 @@
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,19 @@ import lifetime  # noqa: E402
 import p4conf  # noqa: E402
 
 DAY = 86400
+
+def wipe(path):
+    """Remove a test's tree, a git repository's read-only objects included, which rmtree alone leaves on Windows."""
+    def again(fn, p, _exc):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            fn(p)
+        except OSError:
+            pass
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=again)
+    else:
+        shutil.rmtree(path, onerror=again)
 
 
 def read(path):
@@ -62,7 +76,7 @@ class Lifetime(unittest.TestCase):
         os.makedirs(self.t)
 
     def tearDown(self):
-        shutil.rmtree(self.root, ignore_errors=True)
+        wipe(self.root)
 
     def test_lifetimes_parse(self):
         now = 1_000_000.0
@@ -393,7 +407,7 @@ class Layout(unittest.TestCase):
         self.git = shutil.which("git")
 
     def tearDown(self):
-        shutil.rmtree(self.p4, ignore_errors=True)
+        wipe(self.p4)
 
     def g(self, *a):
         return subprocess.run([self.git, "-C", self.p4, *a], capture_output=True, text=True, check=True).stdout
@@ -531,7 +545,7 @@ class Layout(unittest.TestCase):
         self.assertTrue(os.path.samefile(harness, new), "the scratchpad link reaches its folder in temportal/tmp/")
         self.assertTrue(os.path.isfile(os.path.join(harness, "n.md")))
         p4conf._unlink(harness)
-        shutil.rmtree(temp, ignore_errors=True)
+        wipe(temp)
 
 
 if __name__ == "__main__":

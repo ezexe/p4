@@ -12,9 +12,11 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, "p4_memory.py")
@@ -27,7 +29,20 @@ STDOUT_CHARS = 10_000       # a hook's plain stdout past this reaches the sessio
 
 SWITCHES = ("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "CLAUDE_CODE_DISABLE_CLAUDE_MDS", "CLAUDE_CODE_PROJECT_DIR_NAME")
 CONFIG = tempfile.mkdtemp(prefix="p4-temportal-memory-config-")
-atexit.register(shutil.rmtree, CONFIG, True)
+atexit.register(lambda: wipe(CONFIG))
+
+def wipe(path):
+    """Remove a test's tree, a git repository's read-only objects included, which rmtree alone leaves on Windows."""
+    def again(fn, p, _exc):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            fn(p)
+        except OSError:
+            pass
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=again)
+    else:
+        shutil.rmtree(path, onerror=again)
 
 
 def clean_env(**kw):
@@ -194,7 +209,7 @@ def behavior():
         assert subprocess.run([sh, RUNNER, "memory", "nope"], input=b"{}", env=env, capture_output=True).returncode == 0
         env["CLAUDE_PLUGIN_ROOT"] = base
         assert subprocess.run([sh, RUNNER, "memory", "migrate"], input=b"{}", env=env, capture_output=True).returncode == 0
-    shutil.rmtree(base, ignore_errors=True)
+    wipe(base)
     print("test_p4_memory.py: behavior green")
 
 
@@ -259,7 +274,7 @@ def gate2_a():
             if name == "empty":
                 assert out == [], out
     finally:
-        shutil.rmtree(base, ignore_errors=True)
+        wipe(base)
     print("test_p4_memory.py: start output green")
 
 
@@ -286,7 +301,7 @@ def gate2_b():
         assert any(p4 in s and s not in imperative for s in sentences), "the pointer does not say where the memory is"
         assert len(sentences) == 2, f"the pointer says more than where and to write there: {sentences}"
     finally:
-        shutil.rmtree(base, ignore_errors=True)
+        wipe(base)
     print("test_p4_memory.py: pointer words green")
 
 
@@ -307,7 +322,7 @@ def crlf_cut():
         out, _ = p4_memory.builtin_index(os.path.dirname(path))
         assert len(out) == BUILTIN_BYTES // 151, f"{len(out)} CRLF lines kept, {len(out) * 151} bytes on disk"
     finally:
-        shutil.rmtree(base, ignore_errors=True)
+        wipe(base)
     print("test_p4_memory.py: CRLF cut green")
 
 
@@ -419,7 +434,7 @@ def repo_key():
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
-        shutil.rmtree(base, ignore_errors=True)
+        wipe(base)
     print("test_p4_memory.py: repository key green")
 
 
@@ -456,19 +471,31 @@ def switched_off():
             else:
                 assert os.listdir(app) == ["a.md"], f"{how}: the auto memory directory was touched: {os.listdir(app)}"
     finally:
-        shutil.rmtree(base, ignore_errors=True)
+        wipe(base)
     print("test_p4_memory.py: switched off green")
 
 
-def main():
-    switched_off()
-    repo_key()
-    crlf_cut()
-    behavior()
-    gate2_a()
-    gate2_b()
-    print("test_p4_memory.py: all green")
+class Cases(unittest.TestCase):
+    """Each case group a test method, so unittest and pytest collect them."""
+
+    def test_switched_off(self):
+        switched_off()
+
+    def test_repo_key(self):
+        repo_key()
+
+    def test_crlf_cut(self):
+        crlf_cut()
+
+    def test_behavior(self):
+        behavior()
+
+    def test_gate2_a(self):
+        gate2_a()
+
+    def test_gate2_b(self):
+        gate2_b()
 
 
 if __name__ == "__main__":
-    main()
+    unittest.main(verbosity=1)
