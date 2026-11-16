@@ -885,13 +885,16 @@ def agent_warn(home, s, agent_id):
     v = int(anchor.get("version") or 0)
     lines = []
     seen = int(t.get("anchorSeen") or 0)
+    given = t.setdefault("marksGiven", [])
     if v > seen:
         for nid, at in sorted((anchor.get("changedAt") or {}).items()):
             if nid == sid or int(at or 0) <= seen:
                 continue
             n = (anchor.get("nodes") or {}).get(nid) or {}
-            marks = [m.get("claim") for m in n.get("marks") or []][-2:]
-            files = (n.get("files") or [])[:4]
+            new = [m for m in n.get("marks") or [] if relay.mark_key(nid, m) not in given]
+            given.extend(relay.mark_key(nid, m) for m in new)    # each note told once, however often its session changes
+            marks = [m.get("claim") for m in new][-2:]
+            files = [] if n.get("marks") else (n.get("files") or [])[:4]
             said = "; ".join(relay._short(x, 200) for x in marks) or (
                 "changed " + ", ".join(relay.show(f, s.get("cwd") or "") for f in files) if files else "")
             if said:

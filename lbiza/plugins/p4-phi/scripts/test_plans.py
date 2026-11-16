@@ -218,6 +218,45 @@ class TreeOfPlans(unittest.TestCase):
         self.assertEqual(plans.agent_warn(home, sa, "agenty002"), "", "a stopped subagent is told nothing")
         self.assertTrue(plans.agent_stop(home, sa, "agentz003", "no tools used"), "one that made no call is bound at stop")
 
+    def test_a_siblings_note_is_told_to_a_subagent_once_however_often_that_sibling_changes(self):
+        """A subagent's tool calls, run through the `lookup-check` and `lookup-record` hooks, tell it a sibling's note
+        once, though that sibling's entry in the parent's anchor changes twice more after it, and tell it that
+        sibling's newer note in turn."""
+        t = self.t
+        hook = os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh")
+        n = iter(range(100))
+
+        def run(name, body):
+            r = inproc.run(["sh", hook, name], input=json.dumps({"session_id": CLI[A], "cwd": t.proj, **body}),
+                           capture_output=True, text=True, timeout=60, env=t.env(A, P4_RECALL_SYNC="1"))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return r
+
+        def call():
+            """One tool call of the subagent, checked before it runs and recorded after -> what the check told it."""
+            body = {"tool_name": "Read", "tool_input": {"file_path": "README.md"}, "agent_id": "agentn004",
+                    "tool_use_id": f"toolu_sub{next(n)}"}
+            r = run("lookup-check", {**body, "hook_event_name": "PreToolUse"})
+            run("lookup-record", {**body, "hook_event_name": "PostToolUse", "tool_response": "ok"})
+            return context(r)
+
+        self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
+        run("agent", {"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_use_id": "toolu_launch",
+                      "tool_input": {"prompt": "read the layout code", "description": "probe"}})
+        self.assertEqual([call(), call()], ["", ""], "its first call binds it, and nothing changed since its launch")
+        t.cli(B, "note", "replaces: the old docs layout in docs/layout.md", "--source", "test")
+        steps = ("Write the layout docs", "Check the docs build", "Commit the docs")
+        told = []
+        for at in range(3):                       # each update of the docs child's task list changes its entry
+            self.plan(B, items(*steps, at=at))
+            told.append(call())
+        self.assertEqual(["the old docs layout" in x for x in told], [True, False, False], told)
+        t.cli(B, "note", "deprecates: the docs build script in docs/build.sh", "--source", "test")
+        self.plan(B, items(*steps, "Push the docs", at=3))
+        newer = call()
+        self.assertIn("the docs build script", newer, "a newer note of that sibling is told")
+        self.assertNotIn("the old docs layout", newer)
+
     def three(self, *extra):
         p = self.t.proj
         return items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
