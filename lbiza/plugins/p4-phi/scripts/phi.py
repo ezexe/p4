@@ -1088,6 +1088,28 @@ def caps_text(home, s):
     return ""
 
 
+FIRST_SPLIT = ("phi (p4-phi): this is this session's first message: the app lets a session start sessions only in "
+               "its first turn and in the turns ezexe's own messages open. Plan its split now, before other work: every part "
+               "of its task that writes files or makes a decision gets a session of its own, one per disjoint set of "
+               "files, started in this turn with `mcp__ccd_session__start_session`, `initiation` `user_asked`, "
+               "`context` `fresh`, `use_worktree: false`, each brief holding its `Files:` line. Subagents keep reads, "
+               "searches, single command runs and independent checks, which return a result and hold no files. A "
+               "part that writes files and comes up after this turn is kept as a start request, {request}, which "
+               "p4-phi shows ezexe as a click; it never runs in a subagent. A task that is one part with one set of "
+               "files stays here whole.")
+
+
+def first_split_text(home, s):
+    """A worker's or a soldier's first message: the line to plan its split while the app still lets it start
+    sessions. '' for an orchestrator, a later message, a session with no task, and one a cap holds."""
+    if not LEVELS_ON or not spawned_from(s) or not clean(s.get("task")) or load_turns(home, s["sessionId"]):
+        return ""
+    if caps_text(home, s):
+        return ""
+    RAN["first_split"] = True
+    return FIRST_SPLIT.format(request=request_cmd())
+
+
 def split_text(home, s, prompt, cli=""):
     """A turn another session's message started: the app refuses `user_asked` there, so a split is a suggested task
     card ezexe starts. '' for ezexe's own turns, the app's events and a session with no task."""
@@ -2329,6 +2351,9 @@ def h_user_prompt_submit(payload):
         RAN.update({"start_requests": asked.count("\n- ")} if began else {"start_waiting": True})
     if issue_line:
         parts.insert(0, issue_line)
+    first_split = first_split_text(me.home, s)
+    if first_split:
+        parts.insert(0, first_split)
     if FILE_SETS and s.get("fileSet") and load_turns(me.home, s["sessionId"]):
         held_line = files_held_text(me.home, s)    # its closing commit is pushed and it still holds files
         if held_line:
@@ -2986,7 +3011,11 @@ def h_agent_call(payload):
         text = plans.agent_warn(me.home, s, agent_id)
         RAN["agent"] = "warned" if text else "checked"
         return text or None
-    if plans.agent_bind(me.home, s, agent_id):
+    bound = plans.agent_bind(me.home, s, agent_id)
+    wrote = agent_writes([{"name": payload.get("tool_name"), "input": payload.get("tool_input")}])
+    if wrote and plans.agent_wrote(me.home, me.id, agent_id, wrote):
+        RAN["agent_wrote"] = len(wrote)
+    if bound:
         try:
             os.makedirs(os.path.dirname(agent_marker(me, agent_id)), exist_ok=True)
             with open(agent_marker(me, agent_id), "w", encoding="utf-8") as f:
@@ -2995,6 +3024,31 @@ def h_agent_call(payload):
             pass
         RAN["agent"] = "bound"
     return None
+
+
+WRITE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+
+
+def transcript_calls(path):
+    """The tool calls of a transcript, each as its name and input, in order; none when it cannot be read."""
+    out = []
+    for d in read_rows(path) if path else []:
+        content = (d.get("message") or {}).get("content") if d.get("type") == "assistant" else None
+        for b in content if isinstance(content, list) else []:
+            if isinstance(b, dict) and b.get("type") == "tool_use":
+                out.append({"name": b.get("name"), "input": b.get("input")})
+    return out
+
+
+def agent_writes(calls):
+    """The files a subagent's calls wrote, by Edit, Write, MultiEdit or NotebookEdit, each once."""
+    out = []
+    for c in calls:
+        inp = c.get("input") if isinstance(c.get("input"), dict) else {}
+        path = str(inp.get("file_path") or inp.get("notebook_path") or "")
+        if c.get("name") in WRITE_TOOLS and path and path not in out:
+            out.append(path)
+    return out
 
 
 def h_agent_stop(payload):
@@ -3006,6 +3060,9 @@ def h_agent_stop(payload):
     s = load_session(me.home, me.id)
     if s and plans.agent_stop(me.home, s, agent_id, payload.get("last_assistant_message") or ""):
         RAN["agent"] = "stopped"
+    wrote = agent_writes(transcript_calls(payload.get("agent_transcript_path") or ""))
+    if s and wrote and plans.agent_wrote(me.home, me.id, agent_id, wrote):
+        RAN["agent_wrote"] = len(wrote)
     try:
         os.remove(agent_marker(me, agent_id))
     except OSError:

@@ -409,7 +409,7 @@ def build(home, top, net=False):
     roots = app_roots(home, top)
     app = app_index(roots, home)
     ids = {sid for sid, _, _ in tree}
-    rows, shut, tasks, tied, reconcile = [], [], [], {}, []
+    rows, shut, tasks, tied, reconcile, misses = [], [], [], {}, [], []
     for sid, depth, s in tree:
         title = phi.title_of(s)
         parent = relay._parent(s)
@@ -453,6 +453,9 @@ def build(home, top, net=False):
                      "shard": relay.shard_of(s)[:6], "files": relay.edited_files(home, sid)[:40],
                      "task": _short(s.get("task"), 300), "reading": s.get("reading") or None})
         for st, t in plans._tasks(plan):
+            if t.get("agent") and t.get("wrote"):
+                misses.append({"id": str(t.get("id")), "sessionId": sid, "title": title,
+                               "step": (st or {}).get("addr", ""), "wrote": list(t["wrote"])[:8]})
             if t.get("status") == "open":
                 tasks.append({"id": str(t.get("id")), "tool": str(t.get("tool") or ""), "sessionId": sid,
                               "title": title, "step": (st or {}).get("addr", ""), "what": _short(t.get("what"), 120),
@@ -477,7 +480,7 @@ def build(home, top, net=False):
             for sid, depth, s in tree if depth and isinstance(s.get("unfinishedAtArchive"), dict)
             and not s["unfinishedAtArchive"].get("settled")]            # read from the records, with no git here
     return {"top": top, "title": phi.title_of(every.get(top, {})), "parent": relay._parent(every.get(top, {})),
-            "reconcile": reconcile, "rows": rows, "closed": shut, "tasks": tasks, "requests": asked,
+            "reconcile": reconcile, "rows": rows, "closed": shut, "tasks": tasks, "misses": misses, "requests": asked,
             "issues": tied, "groups": groups, "unfinished": left}
 
 
@@ -528,6 +531,11 @@ def render(m):
         out += [f"- {t['id']}, {t['tool'] or 'a task'} of \"{t['title']}\""
                 + (f" under step {t['step']}" if t["step"] else "") + f", open since {t['at']}: {t['what']}"
                 for t in m["tasks"]]
+    if m.get("misses"):
+        out += ["", "## Level misses", ""]
+        out += [f"- subagent {x['id']} of \"{x['title']}\" `{x['sessionId']}`"
+                + (f" under step {x['step']}" if x["step"] else "") + " wrote " + ", ".join(x["wrote"])
+                + ": a part that writes files runs in a session of its own, never in a subagent" for x in m["misses"]]
     if m["requests"]:
         out += ["", "## Start requests", ""]
         out += [f"- {r['id']} \"{r['title']}\" for {r['requester']}: {r['state']}" for r in m["requests"]]

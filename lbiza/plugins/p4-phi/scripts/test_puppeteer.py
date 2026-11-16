@@ -34,6 +34,7 @@ sys.path.insert(0, HERE)
 import phi  # noqa: E402
 import puppeteer  # noqa: E402
 import starts  # noqa: E402
+import inproc  # noqa: E402
 from test_phi import CLI, KID, KID2, GRAND, TASK, TOP, Tree, context, jload, read, transcript, write  # noqa: E402
 from test_issues import FAKE_GH, GhTree  # noqa: E402
 
@@ -271,6 +272,75 @@ class Linear(Base):
         line = context(t.say(TOP, "And how is the exporter now?"))
         self.assertIn("start requests this session filed", line)
         self.assertIn("Rename the retry helper", call_in(line)["prompt"])
+
+
+class WorkerSplit(Base):
+    """A worker splits at its first message, while the app still lets it start sessions: a part that writes files
+    or decides runs in a session of its own, and a subagent that wrote files is a level miss on the ledger."""
+
+    def plan(self, host, inp):
+        r = self.t.hook("plan", host, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                                       "tool_input": inp, "tool_response": "Plan updated."})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return context(r)
+
+    def recall(self, host, name, body):
+        r = inproc.run(["sh", os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh"), name],
+                       input=json.dumps({"session_id": CLI[host], "cwd": self.t.proj, **body}), capture_output=True,
+                       text=True, timeout=60, env=self.t.env(host, P4_RECALL_SYNC="1"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r
+
+    def test_a_workers_first_message_is_told_to_start_its_writing_parts_now(self):
+        t = self.t
+        t.say(TOP, TASK)
+        first = context(t.say(KID, handed("Port the flush to the new writer and document it. Report when done.")))
+        self.assertIn("Plan its split now", first)
+        self.assertIn("one per disjoint set of files", first)
+        self.assertIn("Subagents keep reads, searches, single command runs and independent checks", first)
+        self.assertIn("kept as a start request", first, "a writing part that comes up later waits on a click")
+        t.stop(KID, "Port the flush", report="half way")
+        self.assertNotIn("Plan its split now", context(t.say(KID, "carry on")), "said at the first message only")
+        self.assertNotIn("Plan its split now", context(t.say(TOP, "and the exporter?")), "never to an orchestrator")
+
+    def test_a_step_that_edits_files_is_named_for_a_session_and_a_read_for_a_subagent(self):
+        t = self.t
+        p = t.proj
+        t.say(TOP, TASK)
+        t.say(KID, handed("Port the flush and its docs. Report when done."))
+        ctx = self.plan(KID, {"items": [
+            {"content": f"Edit {p}/src/export/flush.py to write through the new writer", "status": "in_progress"},
+            {"content": f"Rewrite the flush page in {p}/docs/flush.md with the new calls", "status": "pending"},
+            {"content": f"Find every caller of {p}/src/export/legacy.py across the exporter", "status": "pending"}],
+            "scope": "first_task"})
+        sessions = ctx.split("can each run on their own")[0]
+        self.assertIn("\"Edit ", sessions)
+        self.assertIn("\"Rewrite the flush page", sessions)
+        self.assertNotIn("Find every caller", sessions, "a read is no session of its own")
+        self.assertIn("`p4-phi:sweep`", ctx.split("can each run on their own")[1])
+
+    def test_a_subagent_that_wrote_files_is_a_level_miss_on_the_ledger(self):
+        t = self.t
+        t.say(TOP, TASK)
+        t.say(KID, handed("Port the flush to the new writer. Report when done."))
+        self.plan(KID, {"items": [{"content": "Port the flush", "status": "in_progress"}], "scope": "first_task"})
+        self.recall(KID, "agent", {"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_use_id": "toolu_l1",
+                                   "tool_input": {"prompt": "port the flush", "description": "port"}})
+        self.recall(KID, "lookup-record", {"hook_event_name": "PostToolUse", "tool_name": "Read", "agent_id": "agw01",
+                                           "tool_input": {"file_path": "src/export/flush.py"},
+                                           "tool_use_id": "toolu_s1", "tool_response": "ok"})
+        path = os.path.join(t.tmp, "agent-agw01.jsonl")
+        transcript(path, "port the flush", [("Write", {"file_path": "src/export/flush.py", "content": "x"}, "ok")],
+                   "ported")
+        self.recall(KID, "subagent-stop", {"hook_event_name": "SubagentStop", "agent_id": "agw01",
+                                           "agent_type": "general-purpose", "agent_transcript_path": path,
+                                           "last_assistant_message": "ported"})
+        text, _ = self.ledger()
+        self.assertIn("## Level misses", text)
+        miss = text.split("## Level misses")[1]
+        self.assertIn("agw01", miss)
+        self.assertIn("src/export/flush.py", miss)
+        self.assertIn("the flush port", miss)
 
 
 class Recursive(unittest.TestCase):

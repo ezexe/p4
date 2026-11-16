@@ -453,6 +453,8 @@ def judge(plan, cwd):
 def split_advice(home, s, plan, owner_turn, cap):
     """One line naming the steps that can each run as a worker, said once per set; '' when fewer than two."""
     free, kept = judge(plan, s.get("cwd") or "")
+    subs = [st for st in free if LEVELS and level_of(st.get("content")) != "session"]
+    free = [st for st in free if st not in subs]   # a read or a run goes to its subagent, never a session
     if len(free) < 2:
         return ""
     path = os.path.join(relay._dir(home, s["sessionId"]), "session.json")
@@ -477,10 +479,14 @@ def split_advice(home, s, plan, owner_turn, cap):
              CARD_EACH)
     stay = ("; ".join(f"{a}, {why}" for a, why in kept)) or "none"
     each = "; ".join(f"{st['addr']} with {level_words(st.get('content'))}" for st in free)
+    sub = " ".join(f"Step {st['addr']} \"{relay._short(st.get('content'), 90)}\" "
+                   f"{LEVEL_WHAT[level_of(st.get('content'))]}: it goes to the background subagent "
+                   f"`p4-phi:{level_of(st.get('content'))}`, not a session." for st in subs)
     return (f"phi (p4-phi): steps {named} can each run on their own: no path another step names, nothing leaning "
-            f"on another step, more than a quick thing. {route}; one child per step, its brief that step's slice: "
-            f"the step's words, its paths and what it must leave done. Its model and effort: {each}. {LEVEL_HOW} "
-            f"Staying here as sub-steps: {stay}. {judged}")
+            f"on another step, more than a quick thing, and each writes files. {route}; one session per step, its "
+            f"brief that step's slice: the step's words, its paths and what it must leave done. Its model and "
+            f"effort: {each}. {LEVEL_HOW} " + (sub + " " if sub else "")
+            + f"Staying here as sub-steps: {stay}. {judged}")
 
 
 # --- the orchestrator orchestrates ----------------------------------------------------------------------------
@@ -912,6 +918,21 @@ def agent_warn(home, s, agent_id):
         return ""
     return ("phi (p4-phi): since you were launched, beside the session that launched you:\n"
             + "\n".join(f"- {x}" for x in lines[:6]) + "\nCheck that your work still holds before going on.")
+
+
+def agent_wrote(home, sid, agent_id, paths):
+    """A subagent wrote files: its task keeps them, so the ledger names it a level miss -> True when one is new."""
+    p = load(home, sid)
+    t = _agent(p, agent_id)
+    if not t:
+        return False
+    had = list(t.get("wrote") or [])
+    new = [x for x in paths if x not in had]
+    if not new:
+        return False
+    t["wrote"] = had + new
+    relay._write_json(_path(home, sid), p)
+    return True
 
 
 def agent_stop(home, s, agent_id, result):
