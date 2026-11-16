@@ -50,6 +50,8 @@ class Sync(unittest.TestCase):
         sh(t, "git", "init", "-q", "--bare", "-b", "main", self.origin)
         seed = os.path.join(t, "seed")
         sh(t, "git", "clone", "-q", self.origin, seed)
+        # a flat store at the top: sync.logical reads every path by its name inside the plugin's directory, so
+        # these merges hold for phi/ alike, and test_the_session_tree_merges_across_machines writes phi/ itself
         write(seed, "store/rules.md", RULES)
         write(seed, "models/labels.tsv", LABELS)
         write(seed, "models/eval.tsv", EVAL)
@@ -114,7 +116,7 @@ class Sync(unittest.TestCase):
                          "both machines' rows, the shared one once")
         cfg = json.loads(read(out, "p4.json"))
         self.assertEqual(cfg["recall"]["deps"]["roots"], ["library_packages", "/Users/x/code/chromium_git", "Z:/code/chromium_git"],
-                         "every machine's roots (mac was merged first: alphabetical)")
+                         "every machine's roots, mac's first, since the branches merge in alphabetical order")
         self.assertIs(cfg["recall"]["inject"], False, "one side changed the key: its value")
         self.assertEqual(json.loads(read(out, "models/ranker.json")), {"w": [3, 3]}, "the later round's model, whole")
         self.assertEqual(read(out, "models/eval.tsv").splitlines(),
@@ -165,7 +167,8 @@ class Sync(unittest.TestCase):
         self.assertEqual(plan["steps"][0]["status"], "completed", "the later status wins, from either side")
 
     def test_merge_plan_keeps_the_lower_sides_new_steps_and_tasks(self):
-        """MP1: the lower version's added step and its tasks were lost."""
+        """The lower version's added step is kept after the higher's steps, moved to the next free address when its
+        own is taken, and a step both sides hold keeps both sides' tasks and the later status."""
         base = {"version": 1, "steps": [{"addr": "1", "content": "a", "status": "pending"},
                                         {"addr": "2", "content": "b", "status": "pending"}]}
         lo = {"version": 2, "steps": [{"addr": "1", "content": "a", "status": "in_progress",
@@ -224,7 +227,7 @@ class Sync(unittest.TestCase):
         head = sh(self.win, "git", "rev-parse", "HEAD").strip()
         self.assertEqual((self.tip("main"), self.tip("win"), self.tip("mac")), (head, head, head))
         self.assertEqual(sh(self.win, "git", "rev-parse", "--abbrev-ref", "HEAD").strip(), "win")
-        # p4.py sync moves a flat store into the plugins' layout first (p4conf.migrate_layout)
+        # p4.py sync moves the flat store into the plugins' layout first: store.find_p4 calls p4conf.migrate_layout
         self.assertIn("t-live", read(self.win, p4conf.rel("models", "labels.tsv")))
         self.assertIn("the mac rule", read(self.win, p4conf.rel("store", "rules.md")))
         self.assertTrue(os.path.exists(os.path.join(self.win, ".github", "workflows", "p4-sync.yml")))
@@ -254,7 +257,8 @@ class Sync(unittest.TestCase):
         self.assertEqual(sync.merge_entries(twice, twice, twice).decode().count("- key: cmake"), 2, "a repeated key is two entries")
 
     def test_a_sync_names_every_entry_whose_state_changed(self):
-        """#21: the session checks what changed instead of trusting a clean merge."""
+        """A sync names each entry whose fields changed, so the session checks them instead of trusting a clean
+        merge."""
         ent = lambda name, status: f"\n- ruling: the {name} rule\n  status: {status}\n  time: 2026-11-02 10:00\n"
         write(self.win, "store/rules.md", "Rulings.\n" + ent("au", "LIVE") + ent("old", "LIVE"))
         sh(self.win, "git", "add", "-A")
@@ -273,7 +277,8 @@ class Sync(unittest.TestCase):
 
     def test_settings_git_merged_cleanly_are_still_merged_by_key(self):
         """Two machines each add a `deps` block to p4.json, far enough apart that git merges the lines without a
-        conflict and the file holds the key twice; and both change the same line of a script, which is then one side whole, never both sides' lines."""
+        conflict and the file holds the key twice; and both change the same line of a script, which is then one
+        side whole, never both sides' lines."""
         def strict(pairs):
             keys = [k for k, _ in pairs]
             self.assertEqual(len(keys), len(set(keys)), f"a key twice: {keys}")
