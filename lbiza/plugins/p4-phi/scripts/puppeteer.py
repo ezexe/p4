@@ -1652,10 +1652,10 @@ def meta_text(home, s, found):
 
 # --- the prompt hook ----------------------------------------------------------------------------------------------------
 
-def on_prompt(home, s, req, base, transcript_bytes=0, owner_turn=True, net=True):
+def on_prompt(home, s, req, base, transcript_bytes=0):
     """An ezexe message in an orchestrator: the meta pass when it is a top session, its ledger made current, then
     prompty, prompter and pioneer -> (the text for the session, the verdict or ''). `s` is changed, never saved."""
-    if not on(home) or not req or not owner_turn or not orchestrator(home, s):
+    if not on(home) or not req or not orchestrator(home, s):
         return "", ""
     parts = []
     if not relay._parent(s):
@@ -1673,7 +1673,7 @@ def on_prompt(home, s, req, base, transcript_bytes=0, owner_turn=True, net=True)
             return "\n\n".join(p for p in parts if p), "explore"
         except ValueError:
             pass
-    d = pioneer(home, s, prompter(home, s, req, read, base, transcript_bytes), read, net)
+    d = pioneer(home, s, prompter(home, s, req, read, base, transcript_bytes), read)
     parts.append(verdict_text(home, s, d))
     if d["verdict"] == "start":
         parts.append(f"If one draft would have to guess between distinct readings of the message, start none of it: "
