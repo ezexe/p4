@@ -51,14 +51,6 @@ class Tracking(unittest.TestCase):
         self.assertEqual([st["addr"] for st in free], ["2"])
 
 
-class SiblingWords(unittest.TestCase):
-    def test_phi_and_session_alone_never_bear_on_a_sibling(self):
-        step = "Check the phi session tree page for archived nodes"
-        self.assertTrue(plans.bears("the phi session ran long", step), "a child still hears its parent")
-        self.assertFalse(plans.bears_sibling("the phi session ran long", step))
-        self.assertTrue(plans.bears_sibling("the tree page lists archived nodes twice", step))
-
-
 class Tree_(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()

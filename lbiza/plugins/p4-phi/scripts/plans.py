@@ -55,12 +55,6 @@ def bears(a, b):
 SIBLING_STOP = frozenset("phi session sessions check checks step steps p4 plugin plugins".split())
 
 
-def bears_sibling(a, b):
-    """A sibling's words bear on a step only past the shared vocabulary of the tree: more than two content words
-    outside SIBLING_STOP, so {phi, session} alone never relays a sibling's report."""
-    return len((words(a) & words(b)) - SIBLING_STOP) > 2
-
-
 def addr(root, i):
     return f"{root}.{i}" if root else str(i)
 
@@ -1038,7 +1032,8 @@ def relay_bears(a, b):
 
 
 def relay_bears_sibling(a, b):
-    """bears_sibling() for a turn relayed across: past SIBLING_STOP and the tree's own vocabulary."""
+    """A sibling's turn bears on a step only past the shared vocabulary of the tree: more than two words in common
+    outside SIBLING_STOP and RELAY_COMMON, so {phi, session} alone never relays a sibling's report."""
     return len((words(a) & words(b)) - SIBLING_STOP - RELAY_COMMON) > 2
 ADDR_RE = re.compile(r"\b(?:step\s+)?(\d+(?:\.\d+)+|(?<=step )\d+)\b", re.I)
 
