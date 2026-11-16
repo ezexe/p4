@@ -122,10 +122,6 @@ def inject_mode(p4):
     return "rules-facts" if v == "rules-facts" else ("all" if v is True else "off")
 
 
-def inject_on(p4):
-    return inject_mode(p4) != "off"
-
-
 def injected(p4, lines):
     """The lines that may reach the model under the repo's mode: all of them, only the rule and fact lines (the
     kind that read right on the newer-than-the-model tasks), or none."""
