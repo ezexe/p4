@@ -87,12 +87,13 @@ class Plugins(Base):
             f"claude plugin uninstall p4-phi@{M} --scope local",
             f"claude plugin uninstall p4-phi@{M} --scope local (in {other})",
             f"claude plugin install p4-phi@{M} --scope user"],
-            "p4-recall was on for the whole user: p4-phi moves to ezexe, each project's own install removed "
-            "first in its project, so it is never installed twice (C1), and nothing is updated that is removed")
+            "p4-recall was on at user scope: p4-phi moves to user scope, each project's own install removed "
+            "first in its project, so it is never installed twice, and nothing removed is updated")
 
     def test_the_owners_config_retires_disabled_plugins_too(self):
-        """The tester's isolated copy of ezexe's config (C1, C2): p4-memory and p4-scratchpad installed and
-        disabled, p4-recall and p4-temportal for ezexe, p4-phi in two projects."""
+        """Every former plugin installed at user scope, p4-memory and p4-scratchpad disabled and p4-recall on,
+        beside p4-temportal at user scope and p4-phi in two projects: each former plugin is uninstalled, each
+        project's p4-phi is removed in its project, and p4-phi is installed once, at user scope."""
         ap = os.path.join(self.tmp, "AudioPlugin")
         self.install([("p4-memory", "user", "0.1.10", None), ("p4-scratchpad", "user", "0.1.12", None),
                       ("p4-recall", "user", "0.9.0", None), ("p4-temportal", "user", "0.2.0", None),
@@ -129,7 +130,7 @@ class Plugins(Base):
         write(mj, m)
         self.install([("p4-recall", "user", "0.9.0", None), ("p4-phi", "user", "0.7.0", None)],
                      {"p4-recall": True, "p4-phi": True})
-        self.assertEqual(catchup.plugin_commands(self.project), [], "no uninstall before p4-phi carries recall")
+        self.assertEqual(catchup.plugin_commands(self.project), [], "no uninstall before p4-phi carries retrieval")
 
     def test_old_cache_folders_are_counted_and_never_deleted(self):
         self.install([("p4-phi", "user", "0.7.0", None)], {"p4-phi": True})
@@ -145,7 +146,7 @@ class Plugins(Base):
         p4 = os.path.join(self.project, ".claude", "p4")
         os.makedirs(p4, exist_ok=True)
         self.assertIn("prune-cache", catchup.run(self.project, p4, sync=False))
-        self.assertEqual(catchup.run(self.project, p4, sync=False), "", "told once per count (C3)")
+        self.assertEqual(catchup.run(self.project, p4, sync=False), "", "told once per count")
         write(os.path.join(cache, "p4-phi", "0.5.0", "b.txt"), "z")
         self.assertIn("3 old version folder(s)", catchup.run(self.project, p4, sync=False))
         removed = catchup.prune_cache()

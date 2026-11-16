@@ -3,17 +3,20 @@
 Run by hooks/recall-hook.sh as `catch-up` on SessionStart startup, a command of its own with its own timeout. It
 prints nothing when nothing is behind. Otherwise one `systemMessage` for ezexe, never context for the model:
 
-  layout    p4conf.migrate_layout moves a store an older plugin wrote into each plugin's directory.
-  branch    when the store's git repository has an origin and this machine's branch is behind `<main>` there, the
-            same flow as `p4.py sync` runs, detached, so the start never waits on a merge; its output goes to
-            `<git dir>/p4-sync.log`. The fetch that finds out is given FETCH_S seconds. Nothing is forced and nothing
-            is pulled by hand outside that flow.
-  plugins   a retired plugin still enabled (p4-memory, p4-scratchpad, p4-recall) that the marketplace no longer
-            offers, or an installed p4-phi or
-            p4-temportal older than the marketplace's, gets the exact `claude plugin` commands that close it. They
+  layout    the lines of p4conf.migrate_layout, when it moved the store.
+  branch    when the store is a git repository of its own with an origin, and this machine's branch is behind
+            origin's `<main>`, which p4.json's `recall.sync.main` names, `p4.py sync` runs detached, so the start
+            never waits on a merge, and its output goes to `<git dir>/p4-sync.log`; when it cannot start, the line
+            gives the whole command to run instead. The fetch that finds out is given FETCH_S seconds. Nothing is
+            forced, and nothing is pulled outside `p4.py sync`.
+  plugins   a former plugin, enabled or only installed, and an installed p4-phi or p4-temportal older than the
+            marketplace's get the exact `claude plugin` commands that close them, in order. A former plugin is one
+            of RETIRED, p4-memory, p4-scratchpad or p4-recall, that the marketplace no longer offers. The commands
             are printed, never run: plugin settings are ezexe's.
-  cache     the version folders under <config>/plugins/cache/p4-marketplace/ that no install uses: how many, and
-            their size, in the same line. Nothing is deleted; the CLI never removes them either.
+  cache     the version folders under <config>/plugins/cache/p4-marketplace/ that no install uses: how many and
+            their size, in one line, said again only when the count changes. Nothing is deleted here: Claude Code
+            removes a version folder 14 days after an update or uninstall orphans it, and `catchup.py prune-cache`
+            deletes them at once when ezexe runs it.
 
 P4_PHI_CATCHUP=0 turns it off. CLAUDE_CONFIG_DIR stands in for ~/.claude, as Claude Code reads it.
 """
@@ -33,7 +36,7 @@ MARKET = "p4-marketplace"
 RETIRED = {"p4-memory": "p4-temportal", "p4-scratchpad": "p4-temportal", "p4-recall": "p4-phi"}
 CURRENT = ("p4-phi", "p4-temportal")
 FETCH_S = 5.0                 # what the fetch that finds a branch behind may take at a start
-SIZE_S = 2.0                  # what measuring the old cache folders may take
+SIZE_S = 2.0                  # what measuring the unused version folders may take
 ENV = "P4_PHI_CATCHUP"
 
 
@@ -65,7 +68,7 @@ def same_path(a, b):
 # --- plugins -------------------------------------------------------------------------------------------------
 
 def enabled(project):
-    """{(name, scope): True|False} for the p4 plugins the settings files name, user scope first."""
+    """`{(name, scope): True|False}` for the p4 plugins the settings files name, user scope first."""
     out = {}
     for scope, path in (("user", os.path.join(config_dir(), "settings.json")),
                         ("project", os.path.join(project, ".claude", "settings.json")),
@@ -78,7 +81,7 @@ def enabled(project):
 
 
 def installs(project):
-    """{name: [(scope, version, installPath)]} of the installs that apply in `project`."""
+    """`{name: [(scope, version, installPath)]}` of the installs that apply in `project`."""
     data = read_json(os.path.join(config_dir(), "plugins", "installed_plugins.json")).get("plugins") or {}
     out = {}
     for key, rows in data.items():
@@ -101,7 +104,7 @@ def all_install_paths():
 
 
 def market_versions():
-    """{name: version} the marketplace offers now: each plugin's own plugin.json, else marketplace.json."""
+    """{name: version} the marketplace offers: each plugin's own plugin.json, else marketplace.json."""
     loc = (read_json(os.path.join(config_dir(), "plugins", "known_marketplaces.json")).get(MARKET) or {}).get(
         "installLocation") or ""
     if not loc:
@@ -118,7 +121,7 @@ def market_versions():
 
 
 def every_install():
-    """[(name, scope, version, projectPath)] of every p4 install on this machine, any project."""
+    """`[(name, scope, version, projectPath)]` of every p4 install on this machine, any project."""
     data = read_json(os.path.join(config_dir(), "plugins", "installed_plugins.json")).get("plugins") or {}
     out = []
     for key, rows in data.items():
@@ -148,9 +151,10 @@ def plugin_commands(project):
         out.append(f"claude plugin uninstall {name}@{MARKET} --scope {scope}" + (f" (in {where})" if where else ""))
         if scope == "user" or need.get(RETIRED[name]) != "user":
             need[RETIRED[name]] = scope
-    # retired only once the marketplace stops offering it: a machine whose marketplace still lists p4-recall has no
-    # p4-phi that carries recall yet, and uninstalling it there would leave no recall at all. A retired plugin
-    # installed but disabled is listed too: its install record and cache folders stay until it is uninstalled.
+    # a plugin of RETIRED is former only where the marketplace no longer offers it: a marketplace that still lists
+    # p4-recall holds a p4-phi without retrieval, and uninstalling p4-recall there would leave no retrieval at all.
+    # A former plugin installed but disabled is listed too: its install record and cache folders stay until it is
+    # uninstalled.
     for (name, scope), state in sorted(on.items()):
         if state and name in RETIRED and name not in offer:
             retire(name, scope)
@@ -160,9 +164,9 @@ def plugin_commands(project):
     moves, updates = [], []
     for name in CURRENT:
         rows = have.get(name, [])
-        # the successor goes where the retired plugin was: p4-recall for the whole user and p4-phi in two projects
-        # would leave every other project without recall. Each project's own install is removed first, in that
-        # project, so the plugin is never installed twice where both scopes reach (the tester's C1).
+        # the successor goes where the former plugin was: after p4-recall at user scope, p4-phi in two projects
+        # alone would leave every other project without retrieval. Each project's own install is removed first, in
+        # that project, so the plugin is never installed twice where both scopes reach.
         to_user = need.get(name) == "user" and name in offer and "user" not in {sc for sc, _, _ in rows}
         if to_user:
             for n, scope, _, where in sorted(every, key=lambda r: (not same_path(r[3], project), r[3], r[1])):
@@ -184,7 +188,8 @@ def plugin_commands(project):
 
 
 def old_cache():
-    """(folders, bytes) of the version folders under cache/p4-marketplace that no install uses."""
+    """How many version folders under cache/p4-marketplace no install uses, and their size in bytes, negative when
+    SIZE_S ran out and the size is a floor."""
     base = os.path.join(config_dir(), "plugins", "cache", MARKET)
     used = all_install_paths()
     folders, size, end = [], 0, time.monotonic() + SIZE_S
@@ -233,8 +238,8 @@ def git(p4, *args, timeout=10):
 
 
 def behind(p4, main="main"):
-    """(branch, commits behind origin/<main>) when the store is its own repository with an origin and the fetch
-    answers within FETCH_S; None otherwise."""
+    """The branch and how many commits it is behind origin/<main>, when the store is a git repository of its own
+    with an origin and the fetch answers within FETCH_S; None otherwise."""
     top = git(p4, "rev-parse", "--show-toplevel")
     if not top or top.returncode != 0 or not same_path(top.stdout.strip(), p4):
         return None
@@ -254,7 +259,7 @@ def behind(p4, main="main"):
 
 
 def start_sync(p4):
-    """`p4.py sync --p4 <p4>`, detached, its output in <git dir>/p4-sync.log. True when it started."""
+    """Start `p4.py sync --p4 <p4>` detached, its output appended to <git dir>/p4-sync.log; True when it started."""
     gd = git(p4, "rev-parse", "--absolute-git-dir")
     log = os.path.join(gd.stdout.strip(), "p4-sync.log") if gd and gd.returncode == 0 else os.devnull
     flags = 0
@@ -275,7 +280,8 @@ def start_sync(p4):
 # --- the hook ------------------------------------------------------------------------------------------------
 
 def run(project, p4, sync=True):
-    """The line for ezexe, '' when nothing is behind."""
+    """The line for ezexe, '' when nothing is behind. On the way it calls p4conf.migrate_layout and, when the
+    store's branch is behind, starts `p4.py sync`."""
     parts = []
     if os.path.isdir(p4):
         moved = p4conf.migrate_layout(p4)
@@ -297,7 +303,8 @@ def run(project, p4, sync=True):
             cmd, _, where = c.partition(" (in ")
             shown.append(f"`{cmd}`" + (f" in {where.rstrip(')')}" if where else ""))
         parts.append("plugins behind; run, in this order: " + " ; ".join(shown))
-    # the cache line once per new count (C3): nothing removes those folders by itself, so it would print forever
+    # the cache line is said again only when the count changes: until Claude Code removes the folders, the same
+    # line would print at every start
     mark = os.path.join(p4, "phi", "catchup.json")
     told = read_json(mark).get("cacheFolders")
     if n and n != told:
@@ -311,7 +318,7 @@ def run(project, p4, sync=True):
                 f.write(json.dumps({"cacheFolders": n}) + "\n")
         except OSError:
             pass
-    return ("p4-phi catch-up: " + ". ".join(parts) + ".") if parts else ""
+    return ("phi (p4-phi): " + ". ".join(parts) + ".") if parts else ""
 
 
 def prune_cache():
@@ -343,5 +350,6 @@ if __name__ == "__main__":
         removed = prune_cache()
         print("\n".join(f"deleted {p}" for p in removed) or "no unused version folder")
         sys.exit(0)
-    print("usage: catchup.py prune-cache   (delete the plugin cache's version folders no install uses)", file=sys.stderr)
+    print("usage: catchup.py prune-cache   deletes the plugin cache's version folders that no install uses",
+          file=sys.stderr)
     sys.exit(2)
