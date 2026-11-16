@@ -21,9 +21,6 @@ TOP_EVAL = 20
 EPOCHS, LR, L2 = 25, 0.1, 1e-4
 RARE_IDF = 3.0                # a term rarer than this idf is a rare term
 KIND = "p4 recall ranker"
-BASE_FEATURES = ("bm25", "bm25-rank", "head-bm25", "file-rank", "file-top6", "top10", "overlap", "rare", "length",
-                 "file=", "kind=", "state=", "age", "recent", "no-time")
-EXTRA_FEATURES = ("dict-hit", "used=", "corrects")   # untested until eval shows the set at or above the base
 
 TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|\d+(?:\.\d+)+")
 PART_RE = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+")
@@ -138,9 +135,8 @@ def candidate_features(task_terms, cands, idf, avgdl, now, scores=None, weights=
 
     `cands` are dicts with `file`, `kind`, `state`, `time`, `toks` (the entry's tokens) and `head` (the tokens of its
     head line, the part an old child read). `scores` are the candidates' BM25 when the caller has them.
-    `extra` turns on the added features: {"dict-hit": set of candidate indices, "used": [n per candidate],
-    "corrects": set of candidate indices, "near": {candidate index: (score, 1 / (1 + rank))} (near.extend),
-    "node": set of candidate indices the tasks above the session used (node.py)}."""
+    `extra` turns on the added features: {"dict-hit": set of candidate indices, "near": {candidate index: (score,
+    1 / (1 + rank))} (near.extend), "node": set of candidate indices the tasks above the session used (node.py)}."""
     terms = list(dict.fromkeys(task_terms))
     if scores is None:
         scores = [bm25(terms, c["toks"], idf, avgdl, weights=weights) for c in cands]
@@ -184,10 +180,6 @@ def candidate_features(task_terms, cands, idf, avgdl, now, scores=None, weights=
             x[h("recent")] = 1.0 if age <= 2 else 0.0
         if "dict-hit" in extra and i in extra["dict-hit"]:
             x[h("dict-hit")] = 1.0
-        if "used" in extra:
-            x[h("used=")] = math.log1p(extra["used"][i]) / 3
-        if "corrects" in extra and i in extra["corrects"]:
-            x[h("corrects")] = 1.0
         if "node" in extra and i in extra["node"]:        # node.py: an entry the tasks above this session used
             x[h("node")] = 1.0
         if "near" in extra and i in extra["near"]:        # near.py: an entry earlier, similar tasks used
