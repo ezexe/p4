@@ -357,6 +357,23 @@ class Sync(unittest.TestCase):
         r = subprocess.run([sys.executable, "-I", os.path.join(p4, ".github", "p4_sync.py"), "--help"], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
 
+    def test_the_seeded_text_is_pinned_to_its_seed(self):
+        """seed replaces a store's copy of sync.py that differs and holds no higher SEED, so two plugin versions with
+        one SEED and two texts would rewrite each other's copies at every seed. Each SEED's text is pinned here: a
+        change to sync.py raises SEED and records its text's hash, and a copy of a lower SEED is replaced."""
+        import hashlib
+        with open(os.path.join(HERE, "sync.py"), "rb") as f:
+            text = f.read().replace(b"\r\n", b"\n")
+        self.assertEqual({sync.SEED: hashlib.sha1(text).hexdigest()[:12]}, {14: "b12f0599b2ed"},
+                         "sync.py changed: raise SEED and pin the new text")
+        p4 = os.path.join(os.path.dirname(self.origin), "p4")
+        os.makedirs(p4)
+        sync.seed(p4, "main")
+        older = text.decode().replace(f"SEED = {sync.SEED} ", f"SEED = {sync.SEED - 1} ") + "# an older plugin's\n"
+        write(p4, ".github/p4_sync.py", older)
+        self.assertEqual(sync.seed(p4, "main"), [".github/p4_sync.py"], "a copy of a lower SEED is replaced")
+        self.assertEqual(read(p4, ".github/p4_sync.py"), read(HERE, "sync.py"))
+
 
 if __name__ == "__main__":
     unittest.main()

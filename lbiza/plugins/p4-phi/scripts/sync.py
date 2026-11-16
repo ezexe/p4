@@ -54,7 +54,7 @@ MODEL_PREFIX = ("models/ranker",)
 MODEL_EXT = (".pt", ".phid")
 INDEX_LINE = re.compile(rb"^- \[[^\]]+\]\([^)]+\)")        # `- [Title](file.md) ...`, as memory/MEMORY.md lists
 NAME, EMAIL = "p4-sync", "p4-sync@users.noreply.github.com"
-SEED = 13    # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
+SEED = 14    # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
 
 
 def git(*args, check=True, cwd=None):
