@@ -70,7 +70,6 @@ VARIANT_WEIGHT = 0.5          # another form of a message's word (commits / comm
 EXPAND_WEIGHT = 0.5
 NODE_WEIGHT = 0.3            # a word of the session's own task or of a task above it in the session tree (node.py)
 NODE_TERMS = 12              # the rarest of those words that join the query; a long brief must not drown the message
-STUBS = ()
 
 QUERY_SETTINGS = {"max_lines": "MAX_LINES", "per_file": "PER_FILE", "text_chars": "TEXT_CHARS",
                   "history_chars": "HISTORY_CHARS", "candidates": "CANDIDATES", "min_rare": "MIN_RARE",
@@ -764,9 +763,6 @@ def main(argv=None):
     if argv and argv[0] == "teacher":
         import teacher
         return teacher.main(argv[1:])
-    if argv and argv[0] in STUBS:
-        print(f"p4.py {argv[0]}: not built yet", file=sys.stderr)
-        return 2
     ap = argparse.ArgumentParser(prog="p4.py", description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd")
     p = sub.add_parser("index")
@@ -849,8 +845,6 @@ def main(argv=None):
     p.add_argument("--p4")
     sub.add_parser("migrate", help="old layout into new: p4.py migrate --p4 <old tree> [--out DIR] [--apply]")
     sub.add_parser("teacher", help="the paid batches: p4.py teacher edit-labels|dictionary|facts [--fake] [--max-usd X]")
-    for s in STUBS:
-        sub.add_parser(s, help="not built yet")
     args = ap.parse_args(argv)
     if args.cmd == "index":
         return cmd_index(args)
