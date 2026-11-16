@@ -1,5 +1,6 @@
 """Offline tests for make_venv.py: where it looks for ezexe/phi, which interpreter it names, --check without a .venv,
-a build on a machine with no torch, and the oldest Python ezexe/phi installs on.
+a build on a machine with no torch, and the oldest Python ezexe/phi installs on. Each test's tree is removed
+after it.
 
     python3 scripts/test_make_venv.py
 """
@@ -7,6 +8,7 @@ a build on a machine with no torch, and the oldest Python ezexe/phi installs on.
 import contextlib
 import io
 import os
+import shutil
 import sys
 import tempfile
 import types
@@ -20,6 +22,7 @@ import make_venv as v  # noqa: E402
 class Venv(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
         self.root = self.tmp / "p4"
         self.root.mkdir()
         self._root, self._venv = v.ROOT, v.VENV
@@ -39,6 +42,14 @@ class Venv(unittest.TestCase):
         self.assertEqual(v.phi_source(None), (sib.resolve(), True))
         other = self.phi(self.tmp / "elsewhere" / "phi")
         self.assertEqual(v.phi_source(str(other)), (other.resolve(), True))
+
+    def test_each_test_removes_its_tree(self):
+        case = Venv("test_interpreter_path_per_platform")
+        case.setUp()
+        tmp = case.tmp
+        case.tearDown()
+        case.doCleanups()
+        self.assertFalse(tmp.exists(), "the tree a test made is gone after it")
 
     def test_a_named_path_that_is_not_phi_stops(self):
         (self.tmp / "notphi").mkdir()
