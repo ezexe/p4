@@ -49,7 +49,6 @@ import sys
 import tempfile
 
 TEXT_EXT = (".md", ".tsv", ".jsonl", ".txt", ".log")
-MODEL_UNIT = ()
 LOG = "models/eval.tsv"            # the training log: every machine's rounds are history, none is replaced
 MODEL_PREFIX = ("models/ranker",)
 MODEL_EXT = (".pt", ".phid")
@@ -89,7 +88,7 @@ def logical(path):
 
 def is_model(path):
     path = logical(path)
-    return path in MODEL_UNIT or path.startswith(MODEL_PREFIX) or path.endswith(MODEL_EXT)
+    return path.startswith(MODEL_PREFIX) or path.endswith(MODEL_EXT)
 
 
 def eval_log(spec_prefix):
