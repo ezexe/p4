@@ -9,7 +9,9 @@ but `archive/`, which stays at the top.
 
 A run is dry by default: it reads the per-session tree, builds the flat layout in memory, runs its checks and writes the
 report `archive/migration-<date>.md`. `--apply` also writes the flat layout into `--out`, or in place when there is
-no `--out`, where the vlds paths are removed only when nothing is unplaced. Every file of the tree is placed:
+no `--out`, where the vlds paths are removed only when nothing is unplaced. An old store anywhere else, `vlds/` at the
+top of `.claude/p4`, `.claude/vlds/` or the project's `.vlds/`, is refused by name before anything is written, dry or
+applied, since none of its entries would be read. Every file of the tree is placed:
 converted entry by entry, archived verbatim, copied into `src/`, left where it is, or dropped with its reason. An
 entry or file that fits none is listed as unplaced, by its path and line in the per-session tree.
 
@@ -57,11 +59,14 @@ def old_blocks_text(text):
 def old_stores(p4):
     found = sorted(os.path.dirname(p) for p in glob(p4, "sessions/*/vlds/index.md"))
     found += sorted({os.path.dirname(p) for p in glob(p4, "sessions/*/vlds/*.md")})
-    for legacy in (os.path.join(p4, "vlds"), os.path.join(os.path.dirname(p4), "vlds"),
-                   os.path.join(os.path.dirname(os.path.dirname(p4)), ".vlds")):
-        if os.path.isdir(legacy):
-            found.append(legacy)
-    return list(dict.fromkeys(found))
+    return list(dict.fromkeys(found + outside_stores(p4)))
+
+
+def outside_stores(p4):
+    """The old stores outside sessions/*/vlds/ that exist: `vlds/` at the top of the store, `vlds/` beside it in
+    `.claude/`, and the project's `.vlds/`. build_plan reads none of them, so run refuses a tree that has one."""
+    return [d for d in (os.path.join(p4, "vlds"), os.path.join(os.path.dirname(p4), "vlds"),
+                        os.path.join(os.path.dirname(os.path.dirname(p4)), ".vlds")) if os.path.isdir(d)]
 
 
 def glob(p4, pattern):
@@ -1029,6 +1034,10 @@ def repo_users(project, names):
 
 def run(p4, out=None, apply=False, now=None, project=None, report_path=None):
     p4 = os.path.abspath(p4)
+    outside = outside_stores(p4)
+    if outside:
+        raise SystemExit(f"migrate: {', '.join(os.path.normpath(d) for d in outside)}: an old store outside "
+                         "sessions/*/vlds/, the one place this migration reads old stores; its entries would be lost")
     now = now or datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     date = now[:10]
     out = os.path.abspath(out) if out else p4

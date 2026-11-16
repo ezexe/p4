@@ -363,6 +363,32 @@ class CurrentLayout(unittest.TestCase):
             self.assertEqual(tree(), before)
 
 
+class FlatLayout(unittest.TestCase):
+    LEDGER = ("# VLDS Ledger\n\n```yaml\ncorrection:\n  key: cmake-floor\n  time: 2026-10-29 11:05\n"
+              "  match: keep the build working under CMake 3.x\n  meant: require the latest CMake everywhere\n```\n")
+    TOMBSTONES = "# Tombstones\n\n- freed: the sibling checkout\n  time: 2026-10-29 02:17\n  cause: superseded\n"
+    DISPATCH = ("# Dispatch\n\n- fingerprint: \"pull both repos\"\n  time: 2026-10-28 23:00\n  state: SUPERSEDED\n")
+
+    def test_an_old_store_on_the_flat_layout_is_refused_by_name(self):
+        """ezexe/p4#75: an old store at .claude/p4/vlds/, .claude/vlds/ or .vlds/ held lessons a migration dropped
+        while every per-session check passed. migrate.py reads old stores only under sessions/*/vlds/, so it
+        refuses such a store, dry or applied, naming the folder, and writes nothing."""
+        for where in (("proj", ".claude", "p4", "vlds"), ("proj", ".claude", "vlds"), ("proj", ".vlds")):
+            with self.subTest(where="/".join(where)), tempfile.TemporaryDirectory() as t:
+                p4 = os.path.join(t, "proj", ".claude", "p4")
+                flat = os.path.join(t, *where)
+                for name, text in (("ledger.md", self.LEDGER), ("tombstones.md", self.TOMBSTONES),
+                                   ("dispatch.md", self.DISPATCH)):
+                    write(os.path.join(flat, name), text)
+                os.makedirs(p4, exist_ok=True)
+                for apply in (False, True):
+                    with self.assertRaises(SystemExit) as cm:
+                        migrate.run(p4, None, apply=apply, now=NOW)
+                    self.assertIn(os.path.normpath(flat), str(cm.exception))
+                    self.assertIn("outside sessions/*/vlds/", str(cm.exception))
+                self.assertFalse(os.path.exists(os.path.join(p4, "archive")), "nothing written, not even a report")
+
+
 class RealRepos(unittest.TestCase):
     """The four clones, migrated dry into a temp dir; read only."""
 
