@@ -35,6 +35,7 @@ def clean_env(**kw):
     real settings nor the real environment decide a result."""
     env = {k: v for k, v in os.environ.items() if k not in SWITCHES}
     env["CLAUDE_CONFIG_DIR"] = CONFIG
+    env["P4_MANAGED_SETTINGS"] = os.path.join(CONFIG, "no-managed-settings.json")
     env.update(kw)
     return env
 
@@ -359,6 +360,52 @@ def repo_key():
             assert read(os.path.join(shared, "MEMORY.md")) == pointer, f"{other} rewrote the main checkout's pointer"
             assert os.path.isfile(os.path.join(shared, "n.md")), f"{other} moved a file into its own store"
         os.remove(os.path.join(shared, "n.md"))
+        # a worktree start prints the store its pointer names, the main checkout's, not a store of its own
+        put(os.path.join(wt, ".claude", "p4", "temportal", "memory", "MEMORY.md"), "- [w](w.md) — w\n")
+        out = run("migrate", wt, shared, {})
+        assert "- [m](m.md) — m" in out and "- [w]" not in out, f"a worktree start printed another store\n{out}"
+        assert not out.startswith("p4-temportal: "), f"a warning with the block off\n{out}"
+        put(os.path.join(sub, ".claude", "p4", "temportal", "memory", "MEMORY.md"), "- [s](s.md) — s\n")
+        out = run("migrate", sub, shared, {})
+        assert out == "- [m](m.md) — m", f"a subdirectory start printed another store, or warned\n{out}"
+        main_store = os.path.normpath(os.path.join(main_, ".claude", "p4", "temportal", "memory"))
+
+        def warned(out, where):
+            return any(ln.startswith("p4-temportal: ") and main_store in ln and f"outside {where}" in ln and
+                       "blockWritesOutsideWorkingDirectories" in ln for ln in out.splitlines())
+
+        # the block set in the user file, under a local file holding only allow rules, is still said
+        user = os.path.join(CONFIG, "settings.json")
+        put(user, json.dumps({"permissions": {"blockWritesOutsideWorkingDirectories": True}}))
+        for where in (wt, sub):
+            put(os.path.join(where, ".claude", "settings.local.json"), json.dumps({"permissions": {"allow": ["Read"]}}))
+        try:
+            assert warned(run("migrate", wt, shared, {}), "this checkout"), "a user block under a local file was missed"
+            assert warned(run("migrate", sub, shared, {}), "this working directory"), "a subdirectory was not named"
+            # a store under, or exactly at, a user additional directory is inside
+            for added in (main_, main_store):
+                put(user, json.dumps({"permissions": {"blockWritesOutsideWorkingDirectories": True,
+                                                      "additionalDirectories": [added]}}))
+                assert not run("migrate", wt, shared, {}).startswith("p4-temportal: "), f"{added} was outside"
+            # autoMemoryDirectory naming the main store from user settings: its .md files stay writable, no warning;
+            # the same choice made by a repository file is refused, so it is said
+            block = {"blockWritesOutsideWorkingDirectories": True}
+            put(user, json.dumps({"permissions": block, "autoMemoryDirectory": main_store}))
+            assert not run("migrate", wt, main_store, {}).startswith("p4-temportal: "), "a user-chosen folder warned"
+            put(os.path.join(wt, ".claude", "settings.local.json"), json.dumps({"autoMemoryDirectory": main_store}))
+            assert warned(run("migrate", wt, main_store, {}), "this checkout"), "a repository-chosen folder was not said"
+            os.remove(user)
+            # a managed file that cannot be read fails closed
+            managed = os.path.join(base, "managed-settings.json")
+            put(managed, "{not json")
+            env = clean_env(CLAUDE_PROJECT_DIR=wt, P4_MEMORY_APPDATA=shared, P4_MANAGED_SETTINGS=managed)
+            r = subprocess.run([sys.executable, "-I", HOOK, "migrate"], input=b"{}", env=env, capture_output=True)
+            assert warned(r.stdout.decode("utf-8", "replace"), "this checkout"), "an unreadable managed file was missed"
+        finally:
+            if os.path.exists(user):
+                os.remove(user)
+            for where in (wt, sub):
+                os.remove(os.path.join(where, ".claude", "settings.local.json"))
         # autoMemoryDirectory set to the store itself: the index stays, no pointer is written over it
         store = os.path.join(main_, ".claude", "p4", "temportal", "memory")
         put(os.path.join(store, "MEMORY.md"), "- [a](a.md) — a\n")

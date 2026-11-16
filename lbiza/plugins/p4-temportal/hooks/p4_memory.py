@@ -116,6 +116,64 @@ def setting(root, name):
     return None
 
 
+def managed_settings():
+    """The managed settings file's path for this platform, by https://code.claude.com/docs/en/managed-settings."""
+    if os.environ.get("P4_MANAGED_SETTINGS"):          # tests point it at a fixture
+        return os.environ["P4_MANAGED_SETTINGS"]
+    if os.name == "nt":
+        return os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "ClaudeCode", "managed-settings.json")
+    if sys.platform == "darwin":
+        return "/Library/Application Support/ClaudeCode/managed-settings.json"
+    return "/etc/claude-code/managed-settings.json"
+
+
+def write_block(root):
+    """-> (blocked, additional directories). By the settings reference, key blockWritesOutsideWorkingDirectories, a
+    true in any loaded file turns the block on, and so does a managed file whose permissions object cannot be read.
+    Only user and managed additionalDirectories are counted, since repository settings may not add a directory to
+    the block's working directories."""
+    home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    files = [("repo", os.path.join(root, ".claude", "settings.local.json")),
+             ("repo", os.path.join(root, ".claude", "settings.json")),
+             ("user", os.path.join(home, "settings.json")), ("managed", managed_settings())]
+    blocked, extra = False, []
+    for kind, path in files:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            perms = data.get("permissions", {}) if isinstance(data, dict) else None
+        except (OSError, ValueError):
+            perms = None
+        if not isinstance(perms, dict):
+            blocked = blocked or kind == "managed"      # an unreadable managed permissions object fails closed
+            continue
+        blocked = blocked or perms.get("blockWritesOutsideWorkingDirectories") is True
+        if kind != "repo":
+            extra += [os.path.normpath(os.path.join(root, os.path.expanduser(d)))
+                      for d in perms.get("additionalDirectories") or [] if isinstance(d, str)]
+    return blocked, extra
+
+
+def chosen_by_user(root):
+    """autoMemoryDirectory comes from user or managed settings and from no repository file: by the settings
+    reference, the write block leaves auto memory .md files writable, but not in a directory the repository chose."""
+    home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    found = {}
+    for kind, path in (("repo", os.path.join(root, ".claude", "settings.local.json")),
+                       ("repo", os.path.join(root, ".claude", "settings.json")),
+                       ("user", os.path.join(home, "settings.json")), ("user", managed_settings())):
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and isinstance(data.get("autoMemoryDirectory"), str):
+            found[kind] = True
+    return found.get("user", False) and not found.get("repo", False)
+
+
 def not_main_checkout(root, app, mem):
     """A worktree or a subdirectory shares the main checkout's auto memory directory, whose pointer names the main
     checkout's store, so only a session at the main checkout moves files into it or writes its pointer."""
@@ -343,7 +401,20 @@ def notice(parts):
 def cmd_migrate(payload, first=""):
     root = project_root(payload)
     app, mem = appdata_memory(payload, root), p4_memory(root)
-    parts = [] if not_main_checkout(root, app, mem) else migrate(app, mem, time.strftime("%Y%m%d-%H%M%S"))[0]
+    if not_main_checkout(root, app, mem):
+        # the shared pointer names the main checkout's store, so that is the store this session writes and is shown
+        mem = p4_memory(repo_root(root))
+        blocked, extra = write_block(root)
+        n = norm(mem)
+        outside = not any(n == norm(d) or n.startswith(norm(d).rstrip(os.sep) + os.sep) for d in [root] + extra)
+        if norm(app) == n and chosen_by_user(root):
+            outside = False             # .md files of auto memory stay writable unless the repository chose the folder
+        subdir = norm(root).startswith(norm(repo_root(root)) + os.sep)
+        where = "this working directory" if subdir else "this checkout"
+        parts = [f"memory is written to {os.path.normpath(mem)}, outside {where}, and "
+                 "blockWritesOutsideWorkingDirectories may refuse those writes"] if blocked and outside else []
+    else:
+        parts = migrate(app, mem, time.strftime("%Y%m%d-%H%M%S"))[0]
     out = notice(parts)
     head = first + (out + "\n" if out else "")
     kept, total = builtin_index(mem)    # Claude Code loaded only the pointer: print what it would have loaded
