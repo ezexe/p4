@@ -70,6 +70,7 @@ PROMPT_CHARS = 4000              # the ceiling on what p4-phi adds beside one pr
 BACKGROUND_CHARS = 3000
 REPORTS_CHARS = 6000
 REPORT_CHARS = 4000              # of one report, kept
+FINDINGS_SHOWN = 12              # `Finding:` lines listed under a session's child reports
 TASK_CHARS = 1200
 RULE_TASK = 400                  # of the task, in the standing instruction
 LINE_TASK = 160                  # of the task, in the line beside a message
@@ -435,7 +436,8 @@ def _save_session(home, s):
         if isinstance(disk.get(k), dict):
             s[k] = {**disk[k], **(s.get(k) or {})}
     for k in ("rootStep", "shard", "disposable", "doneRetired", "archived", "appRoot", "nudged", "landingGiven",
-              "issue", "issueLooked", "controls", "puppeteerArchives", "puppeteerSeen", "handedTo", "handedFrom"):
+              "issue", "issueLooked", "findingsTold", "controls", "puppeteerArchives", "puppeteerSeen", "handedTo",
+              "handedFrom"):
         if k in disk and k not in s:
             s[k] = disk[k]
     if not s.pop("_controlsSet", None) and isinstance(disk.get("controls"), list):
@@ -837,16 +839,51 @@ def background_text(home, s, own=False, slim=False):
     return "\n".join((head, text, tail))[:BACKGROUND_CHARS]
 
 
-def reports_text(home, s, room=None):
+def findings_text(home, s, new, store=""):
+    """The line under the reports of a session's child sessions that carry `Finding:` lines, '' when none does. A
+    child session passes them up unchanged in its own report; a top-level session that a supervisor session controls
+    leaves them to that supervisor session, whose board lists them; any other top-level session publishes and places
+    them itself."""
+    found = []
+    for r in reversed(new):
+        t = r.get("turn") if isinstance(r.get("turn"), dict) else {}
+        for line in issues.findings(f"{t.get('report') or ''}\n{t.get('said') or ''}"):
+            if line not in found:
+                found.append(line)
+    if not found:
+        return ""
+    n = len(found)
+    head = f"phi (p4-phi): these reports carry {n} `Finding:` line{'s' if n != 1 else ''}"
+    listed = "\n".join(f"- {cut(x, 400)}" for x in found[:FINDINGS_SHOWN]) + (
+        f"\n- and {n - FINDINGS_SHOWN} more, each whole in its session's report" if n > FINDINGS_SHOWN else "")
+    if spawned_from(s):
+        return (f"{head}. Pass each one up unchanged in this session's own report, and publish no issue for it:\n"
+                + listed)
+    pid, _ = controls.puppeteer_of(s, store)
+    if pid:
+        return (f"{head}. They go up to the supervisor session \"{controls.full_title(pid)}\" `{pid}`, whose board "
+                f"lists them, and it publishes the issues they need and places the session that resolves each: this "
+                f"session publishes none.")
+    return (f"{head}, and no supervisor session controls this session tree, so the findings in them are this "
+            f"session's to publish and place. Check each against the open issues and the running sessions, and send "
+            f"one a running session covers to that session; for the rest, publish the issue and place the session "
+            f"that resolves it, as a child of the session in this tree that holds its files or as a new top-level "
+            f"session:\n" + listed)
+
+
+def reports_text(home, s, room=None, store=""):
     """The reports of this session's child sessions that finished a turn since it last looked, and how many rows
     that covers. Each report is shown as kept, up to REPORT_CHARS, where it fits in `room`, and cut with ... where
-    it does not; the ones there is no room for at all are named by count with their pages."""
+    it does not; the ones there is no room for at all are named by count with their pages. The `Finding:` lines they
+    carry come last, with what becomes of them, as findings_text says."""
     rows = load_reports(home, s["sessionId"])
     seen = s.get("reportsSeen") if isinstance(s.get("reportsSeen"), int) else 0
     new = latest_reports(rows[seen:])
     if not new:
         return "", len(rows)
     room = REPORTS_CHARS if room is None else min(REPORTS_CHARS, room)
+    found = findings_text(home, s, new, store)
+    room -= (len(found) + 1) if found else 0
     out = ["phi (p4-phi): reports of this session's child sessions that finished a turn since it last looked, each "
            "as kept or cut with ... where room runs short, with its page named under it."]
     shown = list(reversed(new))[:max(1, (room - len(out[0])) // 700)]
@@ -860,6 +897,8 @@ def reports_text(home, s, room=None):
             f"\"{cut(r.get('title') or r['sessionId'][:14], 40)}\" {page_path(home, r['sessionId'])}"
             for r in rest[:6]) + (f", and {len(rest) - 6} more listed on {page_path(home, s['sessionId'])}"
                                   if len(rest) > 6 else "") + ".")
+    if found:
+        out.append(found)
     return "\n".join(out), len(rows)
 
 
@@ -1499,12 +1538,10 @@ def h_plan(payload):
         feat = feature_steps_text(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user")
         text = "\n\n".join(p for p in (feat, advice, text) if p)
     if spawned_from(s) and any(k in inp for k in ("advance", "start", "done", "items")):
-        s = load_session(me.home, me.id) or s      # the issue at the first task list, then the commits' check
+        s = load_session(me.home, me.id) or s      # the issue or the findings line, then the commits' check
         cwd = payload.get("cwd") or s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or ""
-        line = issues.ensure(me.home, s, issues.plan_lines(me.home, me.id), cwd, "plan", me.rec) \
+        line = issues.ensure(me.home, s, issues.plan_lines(me.home, me.id), cwd, "plan") \
             if isinstance(inp.get("items"), list) and not load_turns(me.home, me.id) else ""
-        if not line and isinstance(inp.get("items"), list):
-            issues.post_plan(me.home, s)
         flag = issues.unclosed_text(me.home, s, cwd)
         save_session(me.home, s)
         RAN["issue"] = (s.get("issue") or {}).get("number", "")
@@ -1715,7 +1752,8 @@ def h_nudge(payload):
 
 def h_memory_gap(payload):
     """PostToolUse on Write and Edit: a feedback memory written into the project's store whose rule describes
-    session or plugin behaviour gets the advice of gaps.py to start a new top-level session for that plugin gap."""
+    session or plugin behaviour gets the line of gaps.py that writes that plugin gap into this turn's report as a
+    `Finding:` line, for the session that publishes the issue."""
     me = Me(payload)
     if not me.home or not me.id or not me.store:
         return None
@@ -1725,12 +1763,9 @@ def h_memory_gap(payload):
         return None
     import gaps
     s = load_session(me.home, me.id) or ensure_session(me.home, me.id, me.rec, me.cli)
-    text = gaps.advice(me.home, me.store, s, path, s.get("turnBy", "user") == "user", commands(),
-                       NEW_TOP_BRIEF + " " + new_top_first_act(),
+    text = gaps.advice(me.home, me.store, s, path,
                        before=gaps.before_write(path, inp, payload.get("tool_response")))   # what the file held
     RAN["memory_gap"] = bool(text)
-    if text and controls.ask_text(s):              # a controlled session asks its supervisor session, starts none
-        text += "\n\n" + controls.ask_text(s)
     return text or None
 
 
@@ -2257,14 +2292,14 @@ def h_user_prompt_submit(payload):
     issue_line = ""
     if spawned_from(s) and not load_turns(me.home, s["sessionId"]) and not s.get("issue"):
         issue_line = issues.ensure(me.home, s, req or str(payload.get("prompt") or ""),
-                                   s.get("cwd") or payload.get("cwd") or "", "brief", me.rec)   # from its brief
+                                   s.get("cwd") or payload.get("cwd") or "", "brief")   # from its brief
         RAN["issue"] = (s.get("issue") or {}).get("number", "")
     handed = given(s, me, me.home)
     room = HOOK_CHARS if handed else min(PROMPT_CHARS, HOOK_CHARS)   # the start background comes once, first message
     parts = [live_rules(s, me.store, os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or ""),
              pin_of(me.home, s), handed]
     if REPORTS:
-        text, seen = reports_text(me.home, s, room * 3 // 5)
+        text, seen = reports_text(me.home, s, room * 3 // 5, me.store)
         s["reportsSeen"] = seen
         parts.append(text)
     save_session(me.home, s)

@@ -264,9 +264,9 @@ class Recursive(unittest.TestCase):
     def test_a_route_is_registered_only_once_the_records_back_it_then_drafted_from_and_withdrawn(self):
         t = self.t
         t.say(TOP, "Fix the narwhal exporter so its flush keeps the last row of the ports table")
-        ctx = context(t.say(KID, handed(f"Fix the off-by-one in {self.work}/lib/x.py and commit it. Archive when "
-                                        f"done.")))
-        self.assertIn("ezexe/demo#7", ctx)
+        ctx = context(t.say(KID, handed(f"Fix the off-by-one in {self.work}/lib/x.py and commit it, for "
+                                        f"ezexe/demo#7. Archive when done.")))
+        self.assertIn("ezexe/demo#7, https://github.com/ezexe/demo/issues/7, named in its brief", ctx)
         write(os.path.join(self.work, "lib", "x.py"), "x = 2\n")
         self.git("commit", "-qam", "x: keep the last row\n\nCloses #7")
         routes = os.path.join(t.dir(TOP), "routes.jsonl")

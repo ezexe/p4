@@ -1,21 +1,22 @@
-"""gaps.py: a feedback memory that patches over a plugin's behaviour gets a new top-level session advised for the gap.
+"""gaps.py: a feedback memory that patches over a plugin's behaviour gets its gap written up as a finding.
 
 A session writes a feedback memory into the store's temportal/memory/ when a plugin did not do what ezexe wanted,
 such as "a child never merges" or "a store moves only by p4.py sync". Such a memory hides a gap that belongs in the
-plugin. So when a session writes a feedback memory whose rule describes session or plugin behaviour, p4-phi advises a
-new top-level session in the plugin's own project, to file the issue on the plugin's repository and have a child fix
-it. A memory about code style gets nothing, nor does one that says the plugin already carries its rule, nor a write
-that only shortens or removes text.
+plugin. No session publishes a new issue on its own, so when a session writes a feedback memory whose rule describes
+session or plugin behaviour, p4-phi tells it to write the gap into this turn's report as one `Finding:` line. That
+line goes up to the supervisor session that controls its session tree, or to its top-level session where none does,
+which publishes the issue on the plugin's repository and places the session that resolves it. A memory about code
+style gets nothing, nor does one that says the plugin already carries its rule, nor a write that only shortens or
+removes text.
 
 The plugin's project is read from CLAUDE_PLUGIN_ROOT: the git top level of the marketplace checkout it runs from,
-with `origin` as the issue repository, and the folder above it that holds a store, `.claude/p4`, when one does, so
-the new session keeps its tree there. A plugin installed from a GitHub marketplace runs from a cache that is no
-checkout: the repository is read from known_marketplaces.json, a clone of it found beside a store this machine knows
-is used, and with none the session goes to the cloud for that repository.
+with `origin` as the issue repository, and the folder above it that holds a store, `.claude/p4`, when one does. A
+plugin installed from a GitHub marketplace runs from a cache that is no checkout: the repository is read from
+known_marketplaces.json, and a clone of it found beside a store this machine knows is its project; with none, no
+checkout of it is known here.
 """
 
 import hashlib
-import json
 import os
 import re
 
@@ -211,18 +212,12 @@ def plugin_project(root=None):
     return {"cwd": "", "repo": repo, "store": "", "cloud": True}
 
 
-def brief_of(name, path, rule, repo, new_top):
-    return (f"A session wrote a feedback memory that patches over plugin behaviour, so the gap belongs in the plugin. "
-            f"The memory, `{name}` at {relay.norm(path)}, says: \"{rule}\" Check whether the plugin does this "
-            f"already; if not, file the issue with `gh issue create -R {repo}`, quoting the rule and saying what the "
-            f"plugin does now and what it should do, then have a child fix it, report when done. {new_top}")
-
-
-def advice(home, store, s, path, owner_turn, commands, new_top, root=None, before=""):
-    """The line a session gets after writing a plugin-gap memory into its project's store, once per memory content;
-    '' for any other write, for a memory whose body says the plugin already carries it, and for a write that only
-    shortens or removes text, `before` being what the file held. `home` holds the session tree, and `store` is the
-    project's store, whose memory folder holds the memory."""
+def advice(home, store, s, path, root=None, before=""):
+    """The line a session gets after writing a plugin-gap memory into its project's store, once per memory content:
+    the gap as one `Finding:` line to write into this turn's report, and the session it goes up to, which publishes
+    the issue. '' for any other write, for a memory whose body says the plugin already carries it, and for a write
+    that only shortens or removes text, `before` being what the file held. `home` holds the session tree, and `store`
+    is the project's store, whose memory folder holds the memory."""
     got = memory_of(store, path)
     if not got or not about_behaviour(got[1]):
         return ""
@@ -249,26 +244,26 @@ def advice(home, store, s, path, owner_turn, commands, new_top, root=None, befor
     if disk:
         disk["gapsTold"] = (told + [sig])[-50:]
         relay._write_json(spath, disk)
-    title = f"Plugin gap: {name}"
-    brief = brief_of(name, path, relay._short(rule, 600), proj["repo"], new_top)
-    head = (f"phi (p4-phi): the memory `{name}` you just wrote describes session or plugin behaviour, so it patches "
-            f"over a gap in the plugin, whose repository is {proj['repo']}. A new top-level session takes it, in the "
-            f"plugin's own project: ")
-    if proj["cloud"]:
-        call = {"initiation": "user_asked", "title": title, "context": "fresh", "target": "cloud",
-                "repository": proj["repo"], "prompt": brief}
-        where = "no clone of it is known on this machine, so it runs in the cloud on that repository"
+    import controls                                # the session that publishes the issues of this session tree
+    sid, title, supervisor = controls.publisher(home, s, store)
+    repo = proj["repo"]
+    says = re.sub(r"(?<!\.)\.$", "", relay._short(rule, 600))      # its last full stop would stand before the `;`
+    line = (f"Finding: the plugin in {repo} does not carry the feedback memory \"{name}\", which says: {says}; "
+            f"source: {relay.norm(path)}; test: <the test in {repo} that shows the plugin does it>; files: <the paths "
+            f"in {repo} a fix changes>")
+    if sid == s["sessionId"]:
+        up = ("This session is " + ("the supervisor session" if supervisor else
+                                    "the top-level session of its tree, and no supervisor session controls it")
+              + f", so the finding is its own to publish and place: it publishes the issue in {repo} and places the "
+                f"session that resolves it.")
     else:
-        call = {"initiation": "user_asked", "title": title, "context": "fresh", "use_worktree": False,
-                "cwd": proj["cwd"], "prompt": brief}
-        where = f"in {proj['cwd']}"
-    import plans                                   # the call carries the `model` and `effort` its kind of work gets
-    call = plans.with_level(call, title + " " + brief)
-    if not owner_turn:                             # a turn ezexe did not begin: a card, a request if it is refused
-        card = {**call, "initiation": "own_initiative"}
-        return (head + f"this turn was started by another session, not ezexe, so the app refuses `user_asked`: show "
-                f"it as a suggested task card, {where}, with `mcp__ccd_session__start_session` and "
-                f"{json.dumps(card)}, which ezexe presses in this session. Only if the card is refused too, write it "
-                f"as a start request, `{commands} request \"{title}\" --brief \"<the brief above>\"`, which the next "
-                f"turn ezexe begins in this session starts. Carry on meanwhile.")
-    return head + f"start it now, {where}, with `mcp__ccd_session__start_session` and {json.dumps(call)}."
+        who = (f"the supervisor session \"{title}\" `{sid}`, which controls this session tree," if supervisor else
+               f"the top-level session \"{title}\" `{sid}` of this session tree, which no supervisor session controls,")
+        up = (f"The report carries it up unchanged, and {who} publishes the issue and places the session that resolves "
+              f"it. This session publishes no issue and starts no session for it.")
+    where = (f" Its project on this machine is {proj['cwd']}." if proj.get("cwd") else
+             " No checkout of it is known on this machine.")
+    return (f"phi (p4-phi): the memory `{name}` you just wrote describes session or plugin behaviour, so it patches "
+            f"over a gap in the plugin, whose repository is {repo}.{where} Check whether the plugin does this already; "
+            f"if not, write the gap into this turn's report as this one line, with its test and files filled in:\n"
+            f"{line}\n{up}")

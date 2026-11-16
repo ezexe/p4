@@ -20,9 +20,12 @@ The watcher every orchestrator has is puppeteer.py's and is another thing.
                writes into it.
   the board    <the supervisor session's folder>/board.md, rewritten by its hooks and the `controls` command: each
                controlled session in a line with the path of its page, the requests addressed to the supervisor
-               session, the feedback and user memories ezexe changed during the run, its notes by kind, and the
-               archive calls let through or refused. After a compaction its path is the first thing the supervisor
-               session is handed.
+               session, the `Finding:` lines of the reports of the controlled trees, the feedback and user memories
+               ezexe changed during the run, its notes by kind, and the archive calls let through or refused. After a
+               compaction its path is the first thing the supervisor session is handed.
+  findings     no session publishes a new issue on its own. A finding goes up in the reports of the session tree as one
+               `Finding:` line, and the supervisor session that controls the tree publishes what needs an issue and
+               places the session that resolves it; where none controls the tree, its top-level session does.
   a boundary   a controlled tree has closed, or every controlled session is idle with no request waiting. The
                supervisor session is told once to end its turn on a question with two buttons. p4-phi speaks only
                when one of its hooks fires, so a boundary reached while the supervisor session is idle is told
@@ -227,7 +230,9 @@ RULE = (
     "supervisor session starts and then files in its environment's section with `mcp__ccd_sidebar__move_sessions`, "
     "never in \"{section}\". Waiting on their reports, and the few read-only checks of their results against git and "
     "GitHub, are its own work and never a child's; its turn may end while it waits, with a line naming whom it "
-    "waits on. It archives a session only on ezexe's pick, as the offer p4-phi hands it says.")
+    "waits on. The `Finding:` lines the reports of their trees carry are listed on its board under Findings, and it "
+    "publishes the issues they need and places the session that resolves each, as the board says. It archives a "
+    "session only on ezexe's pick, as the offer p4-phi hands it says.")
 PAIR = (
     "This session is controlled by a supervisor session: \"{title}\" `{pid}`, which ezexe filed in the sidebar "
     "section \"{section}\", lists this one among the sessions it controls. This session stays at the top of its own "
@@ -325,6 +330,17 @@ def ask_text(s):
     """The line that turns a controlled session's own start of a new top-level session into a request."""
     held = s.get("puppeteer") if isinstance(s.get("puppeteer"), dict) else {}
     return ASK.format(cmd=PHI.commands(), title=full_title(held["sessionId"])) if held.get("sessionId") else ""
+
+
+def publisher(home, s, store=""):
+    """The session that publishes the issues a session's findings need: the supervisor session that controls the
+    top-level session of its tree, else that top-level session, which may be the session itself. Returns its
+    sessionId, its full title, and whether it is a supervisor session."""
+    chain = PHI.chain_of(home, s["sessionId"])
+    top = (PHI.load_session(home, chain[-1]) or {"sessionId": chain[-1]}) if chain else s
+    pid = top["sessionId"] if is_puppeteer(top, store) else puppeteer_of(top, store)[0]
+    sid = pid or top["sessionId"]
+    return sid, full_title(sid, top if sid == top["sessionId"] else None), bool(pid)
 
 
 # --- sessions that come under control without a command ----------------------------------------------------------------
@@ -438,6 +454,28 @@ def requests_for(s):
     return out
 
 
+def findings(s):
+    """Each `Finding:` line of the kept reports of the sessions a supervisor session controls and of the sessions of
+    their trees, as the session that reported it, that session's record and the line. Oldest first and each line once,
+    under the session that reported it first, the deeper one when two did in the same minute, since a parent session
+    passes its children's lines up unchanged."""
+    rows = []
+    for e in controlled(s):
+        top, store = e["sessionId"], e.get("store") or ""
+        every = relay._sessions(store) if store else {}
+        chains = {k: PHI.chain_of(store, k) for k in every}
+        for sid in sorted((k for k in every if k == top or top in chains[k]), key=lambda k: -len(chains[k])):
+            for t in PHI.load_turns(store, sid):
+                for line in issues.findings(f"{t.get('report') or ''}\n{t.get('said') or ''}"):
+                    rows.append((str(t.get("time") or ""), sid, every[sid], line))
+    out, seen = [], set()
+    for _, sid, k, line in sorted(rows, key=lambda r: r[0]):
+        if line not in seen:
+            seen.add(line)
+            out.append((sid, k, line))
+    return out
+
+
 def board(home, s):
     """Rewrites board.md when what it holds changed, and returns its path."""
     sid = s["sessionId"]
@@ -475,6 +513,15 @@ def board(home, s):
               for rid, a in sorted(answers.items()) if isinstance(a, dict)]
     if not asked and not answers:
         lines.append("None.")
+    found = findings(s)
+    lines += ["", "## Findings", ""]
+    if found:
+        lines += ["The `Finding:` lines of the reports of the controlled sessions and of the sessions of their trees. "
+                  "This supervisor session publishes each one that needs an issue, once it has checked the open issues "
+                  "and the running sessions, and places the session that resolves it: the controlled session whose "
+                  "tree holds its files is sent it in one SendMessage, and one no controlled session covers gets a "
+                  "new top-level session.", ""]
+    lines += [f"- \"{full_title(sid, k)}\" `{sid}`: {line}" for sid, k, line in found] or ["None."]
     lines += ["", "## Parked", ""] + (of_kind("parked") or ["Nothing."])
     rules = [x for x in s.get("rulesChanged") or [] if isinstance(x, dict)]
     lines += ["", "## Feedback and user memories ezexe changed during the run", ""]

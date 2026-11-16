@@ -7,8 +7,9 @@ start draft, the gate and the watcher, which the functions `prompty`, `prompter`
   linear     Routing reads ezexe's message against the records the ledger is built from: the area it names, the
              live session that is that area's code owner, the running writer that holds its files. The start draft
              is the exact next session: its topic, a brief built from ezexe's words, its parent session, fork or
-             fresh, the issue it closes. The gate checks the draft: the issue exists or will be filed, no running
-             writer holds the same files, the parent session is the right orchestrator. A clean draft is handed as
+             fresh, the issue it closes. The gate checks the draft: the issue it names is open, or it names none,
+             p4-phi files none and the child's findings go up in its report; no running writer holds the same files;
+             the parent session is the right orchestrator. A clean draft is handed as
              the exact start_session call; one whose area has a live code owner is routed there with SendMessage;
              one whose writer is busy is queued as a start request behind it; one the depth or count cap holds
              starts no session. The watcher is one background process for each orchestrator: it writes
@@ -1007,8 +1008,8 @@ def topic_of(req):
 
 def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
     """The start draft for a message, the exact next session: its topic, a brief built from ezexe's words, its parent
-    session, fork or fresh, and the issue it closes or the one to file. A close registered route gives the starting
-    shape."""
+    session, fork or fresh, and the issue it closes when the words name one. A close registered route gives the
+    starting shape."""
     phi = _phi()
     sid = s["sessionId"]
     parent = sid if read["within"] or relay._parent(s) else ""
@@ -1046,7 +1047,8 @@ def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
         if named:
             lines += [f"This closes {slug}#{named}: every commit says `Closes #{named}`.", ""]
         elif slug:
-            lines += [f"p4-phi files the issue for this in {slug} at your first message.", ""]
+            lines += [f"It names no issue in {slug}, and p4-phi files none: each finding goes into the report as one "
+                      f"`Finding:` line, which the parent session passes up unchanged.", ""]
         lines += ["Done looks like: the change made, its regression test passing, committed and reported.",
                   "Report when done."]
     if not parent:
@@ -1081,8 +1083,8 @@ def call_of(d):
 # --- the gate, then the dispatch --------------------------------------------------------------------------------------
 
 def pioneer(home, s, d, read, net=True):
-    """The gate: a draft checked that its issue exists or is to be filed, that no running writer holds the same
-    files, and that its parent session is the right orchestrator. The verdict is start, route, queue, or here when
+    """The gate: a draft checked for the state of the issue it names, that no running writer holds the same files,
+    and that its parent session is the right orchestrator. The verdict is start, route, queue, or here when
     the depth or count cap holds, with what the gate saw; the draft is kept."""
     phi = _phi()
     sid = s["sessionId"]
@@ -1092,9 +1094,10 @@ def pioneer(home, s, d, read, net=True):
         state = issue_state(home, slug, int(n), net)
         gate.append(f"{d['issue']} is {state.lower()}" if state else f"gh could not read {d['issue']}")
         if state == "CLOSED":
-            gate[-1] += ", so p4-phi files a new one at the child's first message"
+            gate[-1] += ", so the child takes no issue, p4-phi files none, and its findings go up in its report"
     elif d["repo"]:
-        gate.append(f"it names no issue, so p4-phi files one in {d['repo']} at the child's first message")
+        gate.append(f"it names no issue in {d['repo']}, and p4-phi files none: the child's findings go up in its "
+                    f"report")
     else:
         gate.append("its files are in no GitHub repository, so it carries no issue")
     cap = phi.caps_text(home, s)

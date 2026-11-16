@@ -2,11 +2,13 @@
 """issues.py: the one loop a child session that changes a repository runs.
 
   issue    at its first hook, a child whose brief or task list names files in a repository with a GitHub `origin`
-           gets an issue for its purpose: the brief, the task list and the parent session's id in its body. An issue
-           its brief already names, open on that repository, is taken as its own instead of filing a second. The
-           number is kept in session.json as `issue`, and a line tells the child. A read-only child, such as a check,
-           an audit, a question or a message to pass on, gets none, and neither does a repository with no GitHub
-           remote.
+           takes the open issue its brief names on that repository as its own: the number is kept in session.json as
+           `issue`, and a line tells the child. p4-phi files no issue, since no session publishes a new issue on its
+           own: a child that takes none is told to write each finding into its report as one `Finding:` line, which
+           its parent session passes up unchanged to the supervisor session that controls its session tree, or to its
+           top-level session where none does, and that session publishes what needs an issue. A read-only child, such
+           as a check, an audit, a question or a message to pass on, gets neither, and neither does a repository with
+           no GitHub remote.
   commits  at each step boundary, a commit made since the issue was taken that closes no issue gets one line.
   proof    before the child counts as finished, its task list names the regression test that proves the issue fixed:
            a backticked command or a test file in a step that speaks of a test, or `phi.py proof "<command>"`. p4-phi
@@ -38,7 +40,6 @@ import relay  # noqa: E402
 
 GH_S = 15                       # one gh call inside a hook
 PROOF_S = 15.0                  # the regression test inside the Stop hook; a longer one finishes in the background
-BODY_CHARS = 6000
 TAIL_CHARS = 1500
 
 WRITES = re.compile(r"\b(?:build|fix|add|implement|chang|edit|writ|refactor|renam|remov|delet|mov|creat|updat|port|"
@@ -52,10 +53,28 @@ FILE_RE = re.compile(r"(?<![\w/\\.-])[\w-]+\.(?:py|js|ts|tsx|jsx|mjs|cjs|json|md
 GITHUB = re.compile(r"github\.com[:/]+([\w.-]+)/([\w.-]+?)(?:\.git)?/*$", re.I)
 NAMED = re.compile(r"(?:github\.com/([\w.-]+/[\w.-]+)/issues/|\b([\w.-]+/[\w.-]+)\s*(?:issue\s*)?#|\bissues?\s+#?|"
                    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#)(\d+)", re.I)
-URL_NUM = re.compile(r"/issues/(\d+)")
 TEST_WORD = re.compile(r"\btest|\bsuite|\bpytest\b|\bunittest\b", re.I)
 TEST_CMD = re.compile(r"`([^`\n]{3,})`")
 TEST_FILE = re.compile(r"((?:[A-Za-z]:)?[\w./\\-]*?\btest_[\w-]+\.py|[\w./\\-]*?[\w-]+_test\.py)\b")
+FINDING_FORM = ("Finding: <the claim>; source: <where it was checked>; test: <the deciding test>; files: <the paths a "
+                "fix changes>")
+FINDING = re.compile(r"(?m)^(?:[ \t>*+-]|\d+[.)])*(Finding:[ \t]*\S[^\n]*)$")
+FINDINGS_LINE = (
+    "phi (p4-phi): this session's brief names no open issue, and p4-phi files none, since no session publishes a new "
+    "issue on its own. Write each finding that needs an issue into this session's report as one line in this form: `"
+    + FINDING_FORM + "`. Its parent session passes those lines up unchanged, to the supervisor session that controls "
+    "this session tree, or to its top-level session where none does, which publishes what needs an issue and places "
+    "the session that resolves it.")
+
+
+def findings(text):
+    """The `Finding:` lines of a report, in order and each once, with their spaces made single."""
+    out = []
+    for m in FINDING.finditer(str(text or "")):
+        line = " ".join(m.group(1).split())
+        if line not in out:
+            out.append(line)
+    return out
 
 
 def on(home=""):
@@ -213,34 +232,14 @@ def plan_lines(home, sid):
                      for x in plans.load(home, sid).get("steps") or [])
 
 
-def link_of(rec):
-    for k in ("url", "webUrl", "sessionUrl", "link"):
-        v = (rec or {}).get(k)
-        if isinstance(v, str) and v.startswith(("http", "claude:")):
-            return v
-    return ""
-
-
-def issue_title(title, brief):
-    """An issue's title: the brief's own title line when it has one, else the session's title, else the brief's
-    first sentence; cut at a clause or a sentence end, never mid-phrase and never with dots."""
-    first = str(brief or "").strip().split("\n", 1)[0]
-    head = re.sub(r"^[\s#*>]+", "", first) if re.match(r"\s*#+\s", first) else ""
-    line = head or re.sub(r"^[\s#*>]+", "", str(title or "").strip().split("\n", 1)[0]) or re.sub(r"^[\s#*>]+", "", first)
-    whole = re.sub(r"\s*(?:\.\.\.|\u2026)\s*$", "", line)
-    if whole != line:
-        whole = relay.whole_phrase(whole)          # a title the app cut already: its dangling end goes too
-    return relay.clause_cut(whole, 100)
-
-
-def ensure(home, s, text, base, where, rec=None):
-    """At a child's first message, `where` "brief", or its first task list, `where` "plan": its issue, filed or
-    taken from its brief, kept in s["issue"]; s is changed and the caller saves it. Returns the line for the child,
-    '' for none."""
+def ensure(home, s, text, base, where):
+    """At a child's first message, `where` "brief", or its first task list, `where` "plan": the open issue its brief
+    names, taken as its own and kept in s["issue"], or else FINDINGS_LINE, which sends its findings up in its report.
+    p4-phi files no issue. s is changed and the caller saves it. Returns the line for the child, '' for none."""
     parent = relay._parent(s)
     if not parent or not on(home):
         return ""
-    if s.get("issue"):
+    if s.get("issue") or s.get("findingsTold"):
         return ""
     if isinstance(s.get("reading"), dict):
         return ""                                  # a reading explores and commits nothing: no issue record
@@ -256,34 +255,18 @@ def ensure(home, s, text, base, where, rec=None):
     if not repos:
         return ""
     repo, slug = repos[0]
-    named = named_issues(whole, slug)
-    n = next((k for k in named if issue_state(slug, k) == "OPEN"), 0)
-    url, adopted = (f"https://github.com/{slug}/issues/{n}", True) if n else ("", False)
-    if named and not n:
-        return ""                                  # its purpose is filed already, in issues now closed: none again
-    if not n:
-        plan = plan_lines(home, s["sessionId"])
-        title = issue_title(s.get("title"), whole)
-        link = link_of(rec)
-        body = (f"Filed by p4-phi for the child session `{s['sessionId']}`, started by `{parent}`."
-                + (f" Session: {link}" if link else "") + "\n\n### Brief\n\n" + whole[:BODY_CHARS]
-                + "\n\n### Task list\n\n" + (plan or "none yet")
-                + "\n\nThe child's commits say `Closes #N`; p4-phi re-runs the regression test that proves it at Stop "
-                  "and comments the result here, and the `Closes` commit closes this issue on reaching the default "
-                  "branch.")
-        r = gh(["issue", "create", "-R", slug, "--title", title, "--body", body])
-        m = URL_NUM.search((r.stdout or "") if r is not None and r.returncode == 0 else "")
-        if not m:
-            return ""
-        n, url = int(m.group(1)), r.stdout.strip().splitlines()[-1].strip()
-    s["issue"] = {"repo": slug, "path": repo, "number": n, "url": url, "time": now(), "adopted": adopted,
-                  "base": git(repo, "rev-parse", "HEAD"), "planPosted": bool(plan_lines(home, s["sessionId"]))}
-    return (f"phi (p4-phi): this session's purpose is {slug}#{n}, {url}, "
-            + ("named in its brief" if adopted else "filed now") + ". Its loop: each commit says `Closes #" + str(n)
-            + "`; a step of its task list names the regression test that proves it fixed, as a backticked command or "
-              "a test file, or `phi.py proof \"<command>\"` names it; p4-phi re-runs that test at Stop on the final "
-              "head, comments the result on the issue and says what is still owed; the `Closes` commit closes the "
-              "issue once it reaches the default branch.")
+    n = next((k for k in named_issues(whole, slug) if issue_state(slug, k) == "OPEN"), 0)
+    if not n:                                      # it names none, or each one it names is closed: findings go up
+        s["findingsTold"] = now()
+        return FINDINGS_LINE
+    url = f"https://github.com/{slug}/issues/{n}"
+    s["issue"] = {"repo": slug, "path": repo, "number": n, "url": url, "time": now(),
+                  "base": git(repo, "rev-parse", "HEAD")}
+    return (f"phi (p4-phi): this session's purpose is {slug}#{n}, {url}, named in its brief. Its loop: each commit "
+            f"says `Closes #{n}`; a step of its task list names the regression test that proves it fixed, as a "
+            f"backticked command or a test file, or `phi.py proof \"<command>\"` names it; p4-phi re-runs that test "
+            f"at Stop on the final head, comments the result on the issue and says what is still owed; the `Closes` "
+            f"commit closes the issue once it reaches the default branch.")
 
 
 def done_text(home, s, cwd=""):
@@ -323,18 +306,6 @@ def done_text(home, s, cwd=""):
             + ("Still owed before it closes: " + "; ".join(owed) + "." if owed else
                "Nothing is owed but the Stop check: p4-phi re-runs the test on the final head, and the commit closes "
                "the issue once it reaches the default branch."))
-
-
-def post_plan(home, s):
-    """The task list, commented on the issue once, when the issue was filed before the child had one."""
-    iss = s.get("issue") if isinstance(s.get("issue"), dict) else None
-    if not iss or iss.get("planPosted") or iss.get("adopted"):
-        return False
-    plan = plan_lines(home, s["sessionId"])
-    if not plan:
-        return False
-    iss["planPosted"] = True
-    return comment(iss["repo"], iss["number"], "The child's task list:\n\n" + plan)
 
 
 def _commits(repo, rng, limit=40):

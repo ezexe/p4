@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""issues.py: a writing child's one loop of issue, `Closes #N`, a regression test, push and archive, run through
-phi.py's own hooks with a stand-in for `gh`.
+"""issues.py: a writing child's one loop of the issue its brief names, `Closes #N`, a regression test, push and
+archive, and the `Finding:` lines that go up in its report where it names none, run through phi.py's own hooks with a
+stand-in for `gh`.
 
     python3 -I lbiza/plugins/p4-phi/scripts/test_issues.py
 
-The stand-in files issue #7 on create and answers `issue view` from a state file the test writes, as GitHub closes the
-issue once the `Closes #7` commit is pushed; a state of UNREACHABLE makes `issue view` fail, as gh fails when it
-cannot reach GitHub. It logs every call. The work repository's `origin` reads as GitHub and pushes to a bare
-repository beside it.
+The stand-in answers `issue view` from a state file the test writes, as GitHub closes the issue once the `Closes #7`
+commit is pushed; a state of UNREACHABLE makes `issue view` fail, as gh fails when it cannot reach GitHub. It logs
+every call, so a test sees that no `issue create` is made. The work repository's `origin` reads as GitHub and pushes
+to a bare repository beside it.
 """
 
 import json
@@ -21,10 +22,14 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import inproc  # noqa: E402
 import issues  # noqa: E402
-from test_phi import GRAND, KID, KID2, TOP, Tree, context, write  # noqa: E402
+from test_phi import CLI, GRAND, KID, KID2, TOP, Tree, context, read, write  # noqa: E402
 
 A, B = KID, KID2
+SUP = "local_sup00001"
+CLI.setdefault(SUP, "eeee5555-0000-4000-8000-000000000000")
+RECALL = os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh")
 FAKE_GH = r'''
 import json, os, sys
 d = os.environ["FAKE_GH_DIR"]
@@ -109,7 +114,8 @@ class Loop(unittest.TestCase):
         return json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
 
     def start_writer(self):
-        ctx = context(self.t.say(A, f"Fix the off-by-one in {self.work}/lib/x.py and commit it. Archive when done."))
+        ctx = context(self.t.say(A, f"Build ezexe/demo issue #7: fix the off-by-one in {self.work}/lib/x.py and commit "
+                                    f"it. Archive when done."))
         self.assertIn("ezexe/demo#7", ctx)
         return ctx
 
@@ -141,22 +147,25 @@ class Loop(unittest.TestCase):
             d = issues.relay._read_json(path)
         return d
 
-    def test_a_writing_child_in_a_github_repo_gets_an_issue_and_the_others_none(self):
-        ctx = self.start_writer()
-        self.assertIn("filed now", ctx)
-        self.assertIn("Closes #7", ctx)
-        iss = self.t.session(A)["issue"]
-        self.assertEqual((iss["repo"], iss["number"]), ("ezexe/demo", 7))
-        made = [c for c in self.calls() if c[:2] == ["issue", "create"]]
-        self.assertEqual(len(made), 1)
-        body = made[0][made[0].index("--body") + 1]
-        self.assertIn(TOP, body, "the parent's id is in the body")
-        self.assertIn("off-by-one", body, "the brief is in the body")
-        self.assertNotIn("#7", context(self.t.say(B, f"Check what {self.work}/lib/x.py does and report it.")))
+    def test_a_writing_child_in_a_github_repo_files_no_issue_and_is_told_to_send_its_findings_up(self):
+        """A writing child whose brief names no issue is handed the `Finding:` line once and files nothing; a
+        read-only child, a repository with no GitHub remote and P4_PHI_ISSUES=0 get neither an issue nor the line."""
+        ctx = context(self.t.say(A, f"Fix the off-by-one in {self.work}/lib/x.py and commit it. Archive when done."))
+        self.assertIn(issues.FINDINGS_LINE, ctx)
+        self.assertNotIn("issue", self.t.session(A), "no issue record")
+        self.assertNotIn("Finding:", self.plan(A, items("Fix x", "Run the tests")), "said once")
+        self.assertNotIn("Finding:", context(self.t.say(B, f"Check what {self.work}/lib/x.py does and report it.")))
         self.assertNotIn("issue", self.t.session(B), "a read-only child gets no issue")
-        self.assertNotIn("#7", context(self.t.say(GRAND, f"Fix the bug in {self.plain}/a.py and commit it.")))
+        self.assertNotIn("Finding:", context(self.t.say(GRAND, f"Fix the bug in {self.plain}/a.py and commit it.")))
         self.assertNotIn("issue", self.t.session(GRAND), "a repo with no GitHub remote gets none")
-        self.assertEqual(len([c for c in self.calls() if c[:2] == ["issue", "create"]]), 1)
+        off = "local_kid00003"
+        self.t.record(off, TOP, title="the switched-off fix")
+        self.assertNotIn("Finding:", context(self.t.say(off, f"Fix the off-by-one in {self.work}/lib/x.py and commit "
+                                                             f"it.", P4_PHI_ISSUES="0")), "the switch turns it off")
+        self.assertEqual([c for c in self.calls() if c[:2] == ["issue", "create"]], [])
+        self.assertEqual(issues.findings("Done.\n- Finding: a; source: b; test: c; files: d\n2. Finding:  e  f\n"
+                                         "No Finding: here\n> Finding: a; source: b; test: c; files: d"),
+                         ["Finding: a; source: b; test: c; files: d", "Finding: e f"], "each line once, at a line start")
 
     def test_a_reading_gets_no_issue_record(self):
         """A reading explores and commits nothing, so it gets no issue record."""
@@ -172,18 +181,6 @@ class Loop(unittest.TestCase):
         self.assertFalse([c for c in self.calls() if c[:2] == ["issue", "create"]])
         self.assertFalse(issues.writing("Fix x.py. A reading explores: change no tracked file and commit nothing."))
 
-    def test_an_issue_title_ends_at_a_clause_or_is_the_briefs_title_line(self):
-        """A title ends at a clause or is the brief's title line, and is never cut with dots mid-sentence."""
-        self.t.record(A, TOP, title="Fix the off-by-one in the exporter that drops the last row of the ports table when the ...")
-        context(self.t.say(A, f"Fix the off-by-one in the exporter that drops the last row of the ports table when the "
-                              f"table closes early, in {self.work}/lib/x.py, and commit it. Archive when done."))
-        made = [c for c in self.calls() if c[:2] == ["issue", "create"]]
-        title = made[0][made[0].index("--title") + 1]
-        self.assertEqual(title, "Fix the off-by-one in the exporter that drops the last row of the ports table")
-        self.assertEqual(issues.issue_title("a cut session title ...", "# The x fix, whole\n\nFix lib/x.py."),
-                         "The x fix, whole", "the brief's title line")
-        self.assertNotIn("...", issues.issue_title("", "Fix " + "the very long thing " * 12))
-
     def test_the_repository_the_brief_names_wins_over_the_checkouts_origin(self):
         """A repository the brief names by its `owner/name` wins over the origin of the checkout the session runs in,
         and the `owner/name` is never read as a path there."""
@@ -192,8 +189,8 @@ class Loop(unittest.TestCase):
         for args in (("init", "-q", "-b", "main"), ("add", "top.py"), ("commit", "-qm", "one"),
                      ("remote", "add", "origin", "https://github.com/ezexe/demo-outer.git")):
             self.git(proj, *args)
-        brief = (f"Fix the open issues on ezexe/demo in this order, one at a time. Read each with gh issue view N -R "
-                 f"ezexe/demo. The code is in {self.work}/lib, on branch main. Commit each fix.")
+        brief = (f"Fix the open issues on ezexe/demo in this order, one at a time, ezexe/demo#7 first. Read each with gh "
+                 f"issue view N -R ezexe/demo. The code is in {self.work}/lib, on branch main. Commit each fix.")
         got = issues.repos_named(brief, proj)
         self.assertEqual(got[0][1], "ezexe/demo", got)
         self.assertNotIn("ezexe/demo-outer", [slug for _, slug in got], "an owner/name token is no path in the cwd")
@@ -232,13 +229,14 @@ class Loop(unittest.TestCase):
         self.assertIn("named in its brief", ctx)
         self.assertFalse([c for c in self.calls() if c[:2] == ["issue", "create"]])
 
-    def test_a_brief_naming_only_closed_issues_files_none(self):
-        """A brief that names only closed issues files no new issue for work already filed."""
+    def test_a_brief_naming_only_closed_issues_files_none_and_sends_its_findings_up(self):
+        """A brief that names only closed issues takes none and files none, and its child is told to send its
+        findings up in its report."""
         write(os.path.join(self.ghdir, "state.json"), json.dumps({"3": "CLOSED", "4": "CLOSED"}))
         ctx = context(self.t.say(A, f"Fix ezexe/demo issue #3, then #4 in {self.work}/lib/x.py. Archive when done."))
         self.plan(A, items("Fix x", "Fix y"))
         self.assertNotIn("issue", self.t.session(A))
-        self.assertNotIn("filed now", ctx)
+        self.assertIn(issues.FINDINGS_LINE, ctx)
         self.assertFalse([c for c in self.calls() if c[:2] == ["issue", "create"]])
 
     def test_a_session_with_turns_already_files_none_at_its_plan(self):
@@ -435,6 +433,100 @@ class NoConsoleWindow(unittest.TestCase):
             if env is not None:
                 os.environ["P4_PHI_WATCH"] = env
         self.assertNoWindow(out, "puppeteer.ensure_watcher")
+
+
+class FindingsGoUp(unittest.TestCase):
+    """No session publishes a new issue on its own. A writing child whose brief names no issue files none and is told
+    to write each finding into its report as one `Finding:` line; the findings of a controlled tree's reports are on
+    its supervisor session's board; and the plugin-gap line names that supervisor session, not `gh issue create`."""
+
+    FORM = ("`Finding: <the claim>; source: <where it was checked>; test: <the deciding test>; files: <the paths a "
+            "fix changes>`")
+
+    def setUp(self):
+        if not shutil.which("git") or not shutil.which("sh"):
+            self.skipTest("no git or sh")
+        self._tmp = tempfile.TemporaryDirectory()
+        tmp = self._tmp.name
+        self.ghdir = os.path.join(tmp, "gh")
+        os.makedirs(self.ghdir)
+        os.environ["FAKE_GH_DIR"] = self.ghdir
+        write(os.path.join(self.ghdir, "gh.py"), FAKE_GH)
+        self.t = t = GhTree(tmp, os.path.join(self.ghdir, "gh.py"))
+        t.record(TOP, title="top")
+        t.record(A, TOP, title="the x fix")
+        t.record(SUP, title="Watch the demo trees")
+        write(os.path.join(tmp, "claude_desktop_config.json"), json.dumps({"preferences": {"epitaxyPrefs": {
+            "dframe-group-scopes": {"acct/org": {"groups": [{"id": "cg-1", "name": "puppeteers"}],
+                                                 "assignments": {"code:" + SUP: "cg-1"}}}}}}))
+        self.work = os.path.join(t.proj, "work").replace("\\", "/")
+        write(os.path.join(self.work, "lib", "x.py"), "x = 1\n")
+        for args in (("init", "-q", "-b", "main"), ("add", "-A"), ("commit", "-qm", "one"),
+                     ("remote", "add", "origin", "https://github.com/ezexe/demo.git")):
+            subprocess.run(["git", "-C", self.work, "-c", "user.name=t", "-c", "user.email=t@t", *args], check=True,
+                           capture_output=True)
+        self.plug = os.path.join(tmp, "plugproj")
+        os.makedirs(os.path.join(self.plug, ".claude", "p4"))
+        subprocess.run(["git", "init", "-q", self.plug], check=True, capture_output=True)
+        subprocess.run(["git", "-C", self.plug, "remote", "add", "origin", "https://github.com/team/plug.git"],
+                       check=True, capture_output=True)
+
+    def tearDown(self):
+        os.environ.pop("FAKE_GH_DIR", None)
+        self._tmp.cleanup()
+
+    def created(self):
+        p = os.path.join(self.ghdir, "calls.jsonl")
+        if not os.path.exists(p):
+            return []
+        with open(p, encoding="utf-8") as f:
+            return [c for c in (json.loads(x) for x in f) if c[:2] == ["issue", "create"]]
+
+    def record(self, host, tool, inp, resp, uid, **env):
+        """The `lookup-record` entry hooks.json runs after every tool call, and what it hands the session."""
+        body = {"session_id": CLI.get(host, host), "cwd": self.work, "hook_event_name": "PostToolUse",
+                "tool_name": tool, "tool_input": inp, "tool_response": resp, "tool_use_id": uid}
+        r = inproc.run(["sh", RECALL, "lookup-record"], input=json.dumps(body), capture_output=True, text=True,
+                       timeout=60, env=self.t.env(host, **env))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return context(r)
+
+    def test_a_writing_childs_findings_go_up_to_the_supervisor_session_and_no_issue_is_filed(self):
+        t = self.t
+        t.say(TOP, "Build the demo")
+        first = context(t.say(A, f"Fix the off-by-one in {self.work}/lib/x.py and commit it. Archive when done."))
+        listed = self.record(A, "mcp__ccd_turn__update_plan", {"items": [
+            {"content": "Fix the off-by-one in lib/x.py", "status": "in_progress"},
+            {"content": "Commit it", "status": "pending"}]}, "Plan updated.", "toolu_plan01")
+        with self.subTest("no issue is filed at the first message or the task list"):
+            self.assertEqual(self.created(), [])
+            self.assertNotIn("issue", t.session(A))
+        with self.subTest("the child is handed the form of a finding line, once"):
+            self.assertIn(self.FORM, first)
+            self.assertIn("passes those lines up unchanged", first)
+            self.assertNotIn("Finding:", listed, "said at the first message only")
+        t.cli(SUP, "controls", TOP)
+        kid = "Finding: lib/x.py drops the last row; source: lib/x.py line 1; test: test_x.py; files: lib/x.py"
+        top = "Finding: the importer reads one row too many; source: lib/y.py line 9; test: test_y.py; files: lib/y.py"
+        t.stop(A, "Fix the off-by-one", report="Fixed lib/x.py.\n" + kid, uuid="a1")
+        t.stop(TOP, "Build the demo", report="The demo is built.\n\n- " + top, uuid="t1")
+        t.say(SUP, "what came in?")
+        board = read(os.path.join(t.dir(SUP), "board.md"))
+        with self.subTest("each finding of the controlled tree is on the supervisor session's board"):
+            self.assertIn("\n## Findings\n", board)
+            found = board.split("\n## Findings\n", 1)[-1].split("\n## ", 1)[0]
+            self.assertIn(f"- \"top\" `{TOP}`: {top}\n", found)
+            self.assertIn(f"- \"the x fix\" `{A}`: {kid}\n", found)
+        mem = os.path.join(t.p4, "temportal", "memory", "children-on-parent-branch.md")
+        write(mem, "---\nname: children-on-parent-branch\ndescription: x\nmetadata:\n  type: feedback\n---\n\n"
+                   "A session started from another works on the parent's branch, and only the parent merges and "
+                   "pushes.\n")
+        gap = self.record(A, "Write", {"file_path": mem}, "ok", "toolu_write01", P4_PHI_PLUGIN_ROOT=self.plug)
+        with self.subTest("the plugin-gap line names the supervisor session and not `gh issue create`"):
+            self.assertIn(f"the supervisor session \"Watch the demo trees\" `{SUP}`", gap)
+            self.assertIn("Finding: ", gap)
+            self.assertNotIn("gh issue create", gap)
+        self.assertEqual(self.created(), [], "and no issue is filed by anyone")
 
 
 class Words(unittest.TestCase):

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""gaps.py: a feedback memory that patches over plugin behaviour gets a new top-level session advised for the gap.
+"""gaps.py: a feedback memory that patches over plugin behaviour gets its gap written into the turn's report as a
+`Finding:` line, for the session that publishes the issue.
 
     python3 -I lbiza/plugins/p4-phi/scripts/test_gaps.py
 """
@@ -17,7 +18,7 @@ sys.path.insert(0, HERE)
 import gaps  # noqa: E402
 import relay  # noqa: E402
 import starts  # noqa: E402
-from test_phi import TOP, Tree, context, write  # noqa: E402
+from test_phi import KID, TOP, Tree, context, write  # noqa: E402
 import inproc  # noqa: E402
 
 CHILD_RULE = ("A session started from another works on the parent's branch, in the parent's checkout, and only the "
@@ -100,24 +101,25 @@ class Hook(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def wrote(self, path, tool="Write"):
-        r = self.t.hook("memory-gap", TOP, {"hook_event_name": "PostToolUse", "tool_name": tool,
-                                            "tool_input": {"file_path": path}, "tool_response": "ok"},
+    def wrote(self, path, tool="Write", host=TOP):
+        r = self.t.hook("memory-gap", host, {"hook_event_name": "PostToolUse", "tool_name": tool,
+                                             "tool_input": {"file_path": path}, "tool_response": "ok"},
                         P4_PHI_PLUGIN_ROOT=self.plug)
         self.assertEqual(r.returncode, 0, r.stderr)
         return context(r)
 
-    def test_a_turn_ezexe_began_is_told_to_start_the_new_top_level_session_in_the_plugins_project(self):
+    def test_a_top_level_session_no_supervisor_session_controls_writes_the_gap_as_its_own_finding(self):
         self.t.say(TOP, "Build the exporter")
         got = self.wrote(memory(self.t.p4, "children-on-parent-branch", CHILD_RULE))
         self.assertIn("patches over a gap in the plugin, whose repository is team/plug", got)
-        self.assertIn("gh issue create -R team/plug", got)
-        self.assertIn("have a child fix it, report when done", got)
-        self.assertIn("only the parent merges and pushes", got, "the rule quoted")
-        self.assertIn("children-on-parent-branch.md", got, "the memory's path")
-        self.assertIn("This session is a new top session", got)
-        self.assertIn("detach_session", got)
-        self.assertIn(json.dumps(relay.norm(self.plug)), got, "cwd is the plugin's project")
+        self.assertIn("\nFinding: the plugin in team/plug does not carry the feedback memory "
+                      "\"children-on-parent-branch\", which says: ", got)
+        self.assertIn("only the parent merges and pushes; source: ", got, "the rule quoted")
+        self.assertIn("children-on-parent-branch.md; test: ", got, "the memory's path as its source")
+        self.assertIn(f"Its project on this machine is {relay.norm(self.plug)}.", got)
+        self.assertIn("so the finding is its own to publish and place", got)
+        self.assertNotIn("gh issue create", got)
+        self.assertNotIn("start_session", got, "and no session is started for the gap")
         self.assertEqual(self.wrote(memory(self.t.p4, "children-on-parent-branch", CHILD_RULE)), "", "said once")
         self.assertEqual(self.wrote(memory(self.t.p4, "four-spaces", STYLE_RULE)), "", "code style gets nothing")
         self.assertEqual(self.wrote(memory(self.t.p4, "me", CHILD_RULE, kind="user")), "", "only feedback memories")
@@ -195,18 +197,27 @@ class Hook(unittest.TestCase):
                        input=json.dumps(body), capture_output=True, text=True, timeout=60,
                        env=self.t.env(TOP, P4_PHI_PLUGIN_ROOT=self.plug))
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("gh issue create -R team/plug", json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"])
+        self.assertIn("\nFinding: the plugin in team/plug",
+                      json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"])
 
-    def test_a_turn_ezexe_did_not_begin_is_given_a_card_and_no_request_in_another_store(self):
-        """A turn ezexe did not begin gets a card in this session, and no start request kept in the plugin's store,
-        where whichever session ezexe spoke in next would take it."""
+    def test_a_turn_ezexe_did_not_begin_gets_the_same_finding_line_and_no_card_or_request(self):
+        """A turn ezexe did not begin writes the gap into its report too: no card, and no start request kept in this
+        store or in the plugin's."""
         self.t.say(TOP, "<cross-session-message from=\"local_x\">please go on</cross-session-message>")
         got = self.wrote(memory(self.t.p4, "children-on-parent-branch", CHILD_RULE))
-        self.assertIn("show it as a suggested task card", got)
-        self.assertIn("\"initiation\": \"own_initiative\"", got)
-        self.assertIn("which ezexe presses in this session", got)
-        self.assertIn("This session is a new top session", got)
+        self.assertIn("\nFinding: the plugin in team/plug", got)
+        self.assertNotIn("own_initiative", got)
+        self.assertNotIn("start request", got)
+        self.assertEqual(starts.pending(self.t.p4), [])
         self.assertEqual(starts.pending(os.path.join(self.plug, ".claude", "p4")), [])
+
+    def test_a_child_with_no_supervisor_session_above_it_writes_the_gap_for_its_top_level_session(self):
+        self.t.record(KID, TOP, title="the flush child")
+        got = self.wrote(memory(self.t.p4, "children-on-parent-branch", CHILD_RULE), host=KID)
+        self.assertIn(f"the top-level session \"top\" `{TOP}` of this session tree, which no supervisor session "
+                      f"controls, publishes the issue and places the session that resolves it", got)
+        self.assertIn("This session publishes no issue and starts no session for it.", got)
+        self.assertNotIn("gh issue create", got)
 
 
 if __name__ == "__main__":

@@ -870,8 +870,8 @@ class Levels(unittest.TestCase):
         self.assertNotIn("p4-phi:sweep", plain, "with delegation off every work step is a child's")
 
     def test_no_start_call_or_card_is_handed_out_with_neither_key(self):
-        """The plugin-gap call and a child's card advice carry the `model` and `effort` keys, and a sentence
-        beginning "Model:" is no choice of the parent session's."""
+        """A child's card advice carries the `model` and `effort` keys, the plugin-gap line hands no start call at
+        all, and a sentence beginning "Model:" is no choice of the parent session's."""
         import gaps
         plug = os.path.join(self._tmp.name, "plugproj")
         os.makedirs(os.path.join(plug, ".claude", "p4"))
@@ -885,13 +885,9 @@ class Levels(unittest.TestCase):
                     "A session started from another works on the parent's branch, and only the parent merges and "
                     "pushes.\n")
         s = relay._session(self.t.p4, TOP)
-        for owner_turn in (True, False):
-            relay._write_json(os.path.join(self.t.dir(TOP), "session.json"), {**s, "gapsTold": []})
-            said = gaps.advice(self.t.p4, self.t.p4, s, mem, owner_turn, "phi.py", "This session is a new top "
-                               "session, orchestrating its own topic.", root=plug)
-            call = json.loads(said[said.index("{"):said.rindex("}") + 1])
-            self.assertIn(call.get("effort"), plans.EFFORTS, "the plugin-gap call or card carries its effort")
-            self.assertIn("Model and effort: ", call["prompt"], "and its brief says them in one line")
+        said = gaps.advice(self.t.p4, self.t.p4, s, mem, root=plug)
+        self.assertIn("\nFinding: the plugin in team/plug", said)
+        self.assertNotIn("start_session", said, "the plugin-gap line hands no start call: its finding goes up")
         kid = phi._split_full(self.t.p4, relay._session(self.t.p4, A))
         self.assertIn("is shown as a suggested task card", kid)
         self.assertIn("It carries the `model` and `effort` a start of its kind of work carries", kid)
