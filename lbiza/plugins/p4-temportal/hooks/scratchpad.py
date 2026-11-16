@@ -90,7 +90,6 @@ import p4conf  # noqa: E402  (the settings file, .claude/p4/p4.json)
 
 ASKS_ENV = "P4_SCRATCHPAD_ASKS"
 TMP_ENV = "P4_SCRATCHPAD_TMP"
-HARNESS_ENV = "P4_SCRATCHPAD_HARNESS"   # tests and odd installs name the harness's scratchpad themselves
 TEMP_ROOTS = ("/tmp", "/private/tmp")   # beside tempfile.gettempdir(): where the harness puts its claude*
 
 CODE_EXT = {"py", "pyw", "sh", "bash", "zsh", "ps1", "psm1", "bat", "cmd", "js", "mjs", "cjs", "ts", "rb", "pl",
@@ -289,8 +288,6 @@ def session_id(payload):
 def harness_scratchpad(payload):
     """The harness's scratchpad for this session, `<temp>/claude*/<project>/<session>/scratchpad` under the system temp
     directory, /tmp or /private/tmp; it need not exist yet. None without a session id or that session's directory."""
-    if os.environ.get(HARNESS_ENV):
-        return os.environ[HARNESS_ENV]
     sid = session_id(payload)
     if not sid:
         return None
