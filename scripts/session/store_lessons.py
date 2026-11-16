@@ -1,16 +1,16 @@
 """
-What an existing p4 store says could have gone better: the lessons its sessions recorded while the old contracts ran.
-test_migrate.py checks migrate.py's counts of an old tree against these, and it runs on any p4 tree by hand.
+What an old-layout p4 store says could have gone better: the lessons its sessions recorded while the old contracts ran.
+test_migrate.py checks migrate.py's counts of an old tree against these, and the script runs on any p4 tree by hand.
 
 A lesson is an entry the store wrote because something went wrong or had to be undone:
-  correction   ledger.md        a reading that steered work and was wrong (`match:` against `meant:`)
-  retraction   tombstones.md    a rule or reading the owner freed (`freed:`, with the owner's words)
-  missed       briefs.md        what a picker left out, so the owner had to ask (`omitted:`)
-  repeat       dispatch.md      a message the barrier caught as a repeat or as superseded (state ECHO / SUPERSEDED)
-Rulings (local-storage.md) are counted too, as the owner's standing words, but are not lessons.
+  correction   ledger.md        a reading that steered work and was wrong, its `match:` against its `meant:`
+  retraction   tombstones.md    a rule or reading ezexe freed, with `freed:` and ezexe's words
+  missed       briefs.md        what a picker left out, so that ezexe had to ask, with `omitted:`
+  repeat       dispatch.md      a message the barrier caught as a repeat or as superseded, in state ECHO or SUPERSEDED
+Rulings, in local-storage.md, are counted too, as ezexe's standing words, but are not lessons.
 
-The store files mix shapes (fenced yaml blocks, dash-led entries), so entries are cut at blank lines and fences and
-kept by the field each kind carries; a file's own header, whose schema lines hold `[placeholders]`, is skipped.
+The store files mix two shapes, fenced yaml blocks and dash-led entries, so entries are cut at blank lines and fences
+and kept by the field each kind carries; a file's own header, whose schema lines hold `[placeholders]`, is skipped.
 
 Run:
   python scripts/session/store_lessons.py --p4 <a .claude/p4 directory, or a p4 repository> [--out lessons.json]
@@ -63,9 +63,8 @@ def lessons(p4):
 
 
 def live_rules(p4):
-    """The owner's LIVE rulings, newest first, each once: the new design's always-on form of a store, the owner's
-    own words as bullets. The old hook (`phi.py standing`) prints only rulings with a `form:` field, so a store that
-    records its rulings with `scope:` reaches session start with none of them; this reads every LIVE one."""
+    """ezexe's LIVE rulings, newest first, each text once: every entry of local-storage.md whose status is LIVE, read
+    for its `ruling:`, or else its `owner-words:`, whatever field scopes it."""
     seen, out = set(), []
     for store in stores(p4):
         f = store / "local-storage.md"
@@ -86,10 +85,10 @@ def live_rules(p4):
 
 
 def labels(p4):
-    """How whole the training labels are: the operator's pool, the barrier's verdicts and the completed dispatch rows
-    are what the phi models learn from, so a session that skipped the ceremony starves them. Per p4 tree: the
-    sessions with a dispatch record, those whose operator ran (a recall-pool.md), and the dispatch rows completed
-    (a state and an addressed line) against those left open."""
+    """How whole an old tree's training labels are, since the operator's pool, the barrier's verdicts and the
+    completed dispatch rows were what its models learned from. Per p4 tree: the sessions with a dispatch record, those
+    whose operator ran, which left a recall-pool.md, and the dispatch rows completed, with a state and an addressed
+    line, against those left open."""
     p4 = Path(p4)
     out = {"sessions": 0, "operator_ran": 0, "rows": 0, "completed": 0, "open": 0, "judged": 0}
     for d in sorted(p4.glob("sessions/*/vlds")):
