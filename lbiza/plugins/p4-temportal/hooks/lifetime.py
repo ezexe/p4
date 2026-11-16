@@ -15,10 +15,11 @@ ignored or untracked file is deleted.
                            cleared something.
   session-end              the retention sweep at SessionEnd, which also clears the cookies of the session that ends,
                            silently.
-  set <path> <lifetime>    gives a file or folder under temportal/ a cookie.
+  set <path> <lifetime>    gives a file or folder under temportal/ a cookie. The path must exist, and a relative
+                           one is read from the working folder.
   list                     every cookie with its expiry, then every cache rule. An entry of expires.json that cannot
                            be read is listed as unreadable, and the retention sweep leaves it as it is.
-  clear <path>             removes a cookie and keeps the file.
+  clear <path>             removes a cookie and keeps the file, reading a relative path from the working folder.
   now                      the retention sweep, run by hand.
 
 A failure in a hook prints a one-line notice and exits 0.
@@ -128,13 +129,16 @@ def write_expires(p4, d):
 
 
 def set_cookie(p4, path, lifetime, session_id="", now=None):
-    """Give `path`, a file or folder under temportal/, an expiry -> (rel, expiry). Raises ValueError for a path
-    outside temportal/ or inside memory/, and for a lifetime it cannot read."""
+    """Give `path`, a file or folder under temportal/, an expiry -> (rel, expiry). A relative `path` is read from
+    temportal/, and the command line makes it absolute from the working folder first. Raises ValueError for a path
+    outside temportal/, inside memory/ or that does not exist, and for a lifetime it cannot read."""
     rel = rel_in(p4, path)
     if rel is None:
         raise ValueError(f"{path} is not under {home(p4)}")
     if never(rel):
         raise ValueError(f"{rel} is in {rel.split('/')[0]}/, which is never cleared")
+    if not os.path.lexists(os.path.join(home(p4), *rel.split("/"))):
+        raise ValueError(f"{path} does not exist")
     when = parse_lifetime(lifetime, now)
     d = read_expires(p4)
     if when == SESSION:
@@ -355,14 +359,14 @@ def main():
     p4 = a.p4 or store_of(project_root({}))
     if a.cmd == "set":
         try:
-            rel, v = set_cookie(p4, a.path, a.lifetime, a.session)
+            rel, v = set_cookie(p4, os.path.abspath(a.path), a.lifetime, a.session)
         except ValueError as e:
             print(f"lifetime.py: {e}", file=sys.stderr)
             return 2
         print(f"{rel}: " + (f"until session {v['session'][:8]} ends" if "session" in v else
                             "expires " + datetime.fromtimestamp(v["expires"]).isoformat(timespec="minutes")))
     elif a.cmd == "clear":
-        print("cleared" if clear_cookie(p4, a.path) else "no expiry was set")
+        print("cleared" if clear_cookie(p4, os.path.abspath(a.path)) else "no expiry was set")
     elif a.cmd == "list":
         print("\n".join(listing(p4)) or "nothing has a lifetime")
     else:

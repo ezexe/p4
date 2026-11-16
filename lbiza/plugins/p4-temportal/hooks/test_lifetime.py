@@ -147,6 +147,19 @@ class Lifetime(unittest.TestCase):
         lifetime.sweep(self.p4, ended_session="abc")
         self.assertFalse(os.path.exists(f))
 
+    def test_set_reads_a_relative_path_from_the_working_folder_and_refuses_a_missing_one(self):
+        """`set notes.md 7d` run inside a folder gives that folder's file a cookie, `clear` reads its path the same
+        way, and a path that does not exist is refused."""
+        pad = os.path.join(self.t, "scratchpad")
+        put(os.path.join(pad, "notes.md"))
+        here = run("--p4", self.p4, "set", "notes.md", "7d", cwd=pad)
+        missing = run("--p4", self.p4, "set", os.path.join(pad, "gone.md"), "7d")
+        kept = sorted(lifetime.read_expires(self.p4))
+        cleared = run("--p4", self.p4, "clear", "notes.md", cwd=pad)
+        self.assertEqual((here.returncode, missing.returncode, kept, cleared.stdout),
+                         (0, 2, ["scratchpad/notes.md"], "cleared\n"))
+        self.assertIn("does not exist", missing.stderr)
+
     def test_a_path_outside_temportal_is_refused(self):
         with self.assertRaises(ValueError):
             lifetime.set_cookie(self.p4, os.path.join(self.p4, "p4.json"), "1d")
