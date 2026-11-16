@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """labels.py: the labels the retrieval ranker trains on, and the tasks they label.
 
-A label says whether an index entry bears on a task, 1 when it does and 0 when it does not. It names the source
-that wrote it and carries a weight, which scales how much a round counts it; as_label gives each source's weight.
-Three files under the store's phi/models/ hold the labels and their tasks:
+A label says whether a document bears on a task, 1 when it does and 0 when it does not, and its `entry` column holds
+that document's id. It names the source that wrote it and carries a weight, which scales how much a round counts it;
+as_label gives each source's weight. Three files under the store's phi/models/ hold the labels and their tasks:
 
   labels-raw.tsv  the labels drawn from the store's own records, before any teacher edit
                   columns: task, entry, label, source, weight, time, note
                   pool          a pick a reader made in a `recall-pool.md` or an audit file of the layout that
                                 `p4.py migrate` converts, which that command imports
-                  store         `p4.py labels --from-history`: the entries that share rare terms with a completed
+                  store         `p4.py labels --from-history`: the documents that share rare terms with a completed
                                 message's reply, for a message whose session has no pool
                   short         the same command: a short message's prior reading
   labels.tsv      the training set
@@ -164,9 +164,10 @@ def held_batches(p4):
 
 
 def follow(entry, ids, renames):
-    """A repo label's entry as the index holds it: itself when it is there; else the same entry under the path git
-    renamed its file to; else that file's own entry, when only the symbol is gone. Unchanged when the index holds
-    none of them, as for a deleted file or one never indexed on this machine."""
+    """A repo label's `entry` as the index holds it: itself when the index has that document; else the id of the same
+    document under the path git renamed its file to; else the id of that file's own document, when only the symbol
+    is gone. Unchanged when the index holds none of them, as for a deleted file or one never indexed on this
+    machine."""
     if entry in ids or not entry.startswith("repo:"):
         return entry
     path, _, sym = entry[5:].partition("#")
@@ -178,8 +179,8 @@ def follow(entry, ids, renames):
 
 
 def followed(p4, rows, idx):
-    """`(rows, moved)`: the rows with each repo entry moved by follow to where the index holds it, the renames
-    read from repo.rename_map, and how many of them moved."""
+    """`(rows, moved)`: the rows with the `entry` of each repo label moved by follow to the document the index holds,
+    the renames read from repo.rename_map, and how many of them moved."""
     import repo
     ids = {d["id"] for d in idx["docs"]}
     ren = repo.rename_map(p4)
@@ -196,8 +197,8 @@ def training_labels(p4, idx=None):
     of a held teacher batch and, unless p4.json's `recall.said.mode` is `on`, the `said` rows; and the
     labels-raw.tsv rows of every task with no `store+edited` row left, so the tasks of a held batch keep their raw
     labels. The recency rule then applies. Given the index, a label on a file renamed after the label was written,
-    or on a symbol gone from a file still there, moves by follow to the entry the index holds: a round skips a
-    label whose entry the index lacks."""
+    or on a symbol gone from a file still there, moves by follow to the document the index holds: a round skips a
+    label whose document the index lacks."""
     if idx is not None:
         got = recency(p4, _training_rows(p4))
         return followed(p4, got, idx)[0]
@@ -282,10 +283,10 @@ def paths_named(text):
 
 
 def used(doc, rare_doc, hay_toks, hay_text, prompt_text):
-    """The usage rule: an entry was used when `hay_toks`, the tokens of `hay_text`, hold two of its rare terms
-    `rare_doc`, or `hay_text` holds a path the entry names that `prompt_text` does not. For a usage label
-    `hay_text` is the turn's reply and what the turn wrote. A repository entry's own path is among the paths it
-    names."""
+    """The usage rule: a document was used when `hay_toks`, the tokens of `hay_text`, hold two of its rare terms
+    `rare_doc`, or `hay_text` holds a path the document names that `prompt_text` does not. For a usage label
+    `hay_text` is the turn's reply and what the turn wrote. A document of the repository counts its own path among
+    the paths it names."""
     if len(rare_doc & hay_toks) >= 2:
         return True
     for p in paths_named(doc.get("show", "")) | ({doc["path"]} if doc.get("file") == "repo" else set()):
@@ -319,9 +320,10 @@ def from_history(p4, idx=None, files=None):
 
     A row of at most SHORT_WORDS words takes a `short` label on a prior completed row of the same words when the
     two replies resemble each other. Any other row, in a session with no pool or audit task, takes a `store` label
-    on up to HISTORY_MAX entries from BM25's top candidates for its reply, the best by shared rare terms. Such an
-    entry is not dated after the row and is no message row, and either two of its rare terms are in the reply, one
-    of them not in the message, or it is a repository entry whose path the reply names and the message does not.
+    on up to HISTORY_MAX documents from BM25's top candidates for its reply, the best by shared rare terms. Such a
+    document is not dated after the row and is not built from a message row, and either two of its rare terms are
+    in the reply, one of them not in the message, or it is a document of the repository whose path the reply names
+    and the message does not.
     A row's reply is its `addressed:` paragraph and the `meant:` of the corrections of the same hour."""
     import p4 as cli
     if idx is None:
@@ -440,7 +442,7 @@ def served_mode(served):
 
 
 def usage_labels(p4, idx, served, reply, turn=None, task_id="", now=""):
-    """[label row] for each served entry the index holds: 1 when the turn used it by the usage rule and 0 when it
+    """[label row] for each served document the index holds: 1 when the turn used it by the usage rule and 0 when it
     did not, source `usage`, weight USAGE_WEIGHT. Rare terms the prompt holds do not count toward a use. The note
     keeps whether the lines were shown or only logged in shadow, as `used; shown` or `unused; shadow`: the hook
     deletes the served record after it writes the labels, and a label on a line the model never saw measures
@@ -502,8 +504,9 @@ def is_follow_up(prev, cur):
 # --- repo labels: what a turn did with the repository's files --------------------------------------------
 
 def repo_index(idx):
-    """The index's repository entries as five lookups: the known paths, `{path: [symbol]}`, `{path: entry id}`,
-    `{path: [(symbol, entry id)]}` and `{path: id of the newest commit entry that names it}`."""
+    """The index's documents of the repository as five lookups: the known paths, `{path: [symbol]}`,
+    `{path: document id}`, `{path: [(symbol, document id)]}` and `{path: id of the document of the newest commit
+    that names it}`."""
     known, syms, path_id, sym_ids, commit_of = set(), {}, {}, {}, {}
     for d in idx["docs"]:
         if d["file"] == "repo":
@@ -524,7 +527,7 @@ def repo_index(idx):
 
 
 def turn_repo_labels(turn, project, ri, task_id, reply="", now="", p4=""):
-    """`(rows, events)` for one turn: a label row on the path entry of each repository file the turn touched, by
+    """`(rows, events)` for one turn: a label row on the document of each repository file the turn touched, by
     transcript.file_events, with the label and weight transcript.WEIGHTS sets for its event. A positive label also
     lands on each of the file's symbols whose name, its last `::` part, is four characters or more and appears as
     a word in what the turn wrote or in its reply, and at half the weight on the newest commit that touched the
@@ -580,8 +583,8 @@ _DEP_PATHS = {}
 
 
 def is_dep_entry(p4, entry):
-    """True when a label's entry is a dependency's: a `repo:` entry whose path sits in a package that deps.py's
-    state holds. A store's package paths are read on its first call and kept in _DEP_PATHS."""
+    """True when a label's `entry` names a dependency's document: a `repo:` id whose path sits in a package that
+    deps.py's state holds. A store's package paths are read on its first call and kept in _DEP_PATHS."""
     import deps
     if p4 not in _DEP_PATHS:
         s = deps.load_state(p4)
