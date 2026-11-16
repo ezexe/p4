@@ -419,7 +419,7 @@ class ForkOrFresh(ThreeSessions):
         r = self.t.hook("start-advice", host, {"hook_event_name": "PreToolUse",
                                                "tool_name": "mcp__ccd_session__start_session",
                                                "tool_input": {"initiation": "user_asked", "context": context_,
-                                                              "title": "a child", "prompt": prompt},
+                                                              "title": "a child", "prompt": prompt + "\nFiles: none"},
                                                "transcript_path": path})
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
@@ -453,7 +453,7 @@ class ForkOrFresh(ThreeSessions):
             f.write("x")
         for extra in ({"use_worktree": True}, {"branch_name": "my-branch"}):
             r = self.t.hook("start-advice", TOP, {"tool_name": "mcp__ccd_session__start_session", "transcript_path": path,
-                                                  "tool_input": {"context": "fresh", "prompt": "write docs", **extra}})
+                                                  "tool_input": {"context": "fresh", "prompt": "write docs\nFiles: none", **extra}})
             out = json.loads(r.stdout)["hookSpecificOutput"]
             self.assertEqual(out["permissionDecision"], "ask")
             self.assertIn("use_worktree: false", out["permissionDecisionReason"])

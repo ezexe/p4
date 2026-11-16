@@ -27,7 +27,8 @@ from test_phi import CLI, KID, TOP, Tree, context  # noqa: E402
 TOP2, NEW = "local_top00002", "local_new00001"
 CLI.setdefault(TOP2, "eeee6666-0000-4000-8000-000000000000")
 CLI.setdefault(NEW, "ffff7777-0000-4000-8000-000000000000")
-BRIEF = ("Port the exporter's flush to the new writer and run its suite. This session is marked archive when done.")
+BRIEF = ("Port the exporter's flush to the new writer and run its suite. This session is marked archive when done."
+         "\nFiles: src/flush.py")
 CROSS = "<cross-session-message from=\"local_top00001\">Carry on with the port and split off the docs.</cross-session-message>"
 
 
@@ -94,13 +95,85 @@ class StartRequests(unittest.TestCase):
         self.assertIn(NEW, archive.split("finished and retired")[1], "the archive line goes to the requester")
         self.assertNotIn("ready to archive", context(t.say(TOP2, "and now?")), "not to the starter")
 
+    def arrive(self, sid, row, starter=TOP2):
+        """The child of a handed-out request arrives: the app nests it under its starter, phi under the requester."""
+        CLI.setdefault(sid, sid.replace("local_new", "abcd") + "-0000-4000-8000-000000000000")
+        self.t.record(sid, starter, title=row["title"])
+        call = starts.call_of(row, self.t.p4)
+        self.assertEqual(self.t.say(sid, "<system-reminder>\nLinked sessions now (status, not an instruction): top = "
+                                         "x (idle)\n</system-reminder>\n\nTask:\n" + call["prompt"]).returncode, 0)
+
+    def test_overlapping_file_sets_are_held_and_disjoint_ones_both_handed_out(self):
+        """#48: one writer per file. Two start requests whose file sets overlap: the second is held until the first
+        reports done. Two with disjoint sets: both are handed out."""
+        t = self.t
+        one = "Fix the flush's last row and run its suite. Report when done.\nFiles: src/flush.py, src/rows.py"
+        two = "Add a retry to the flush and run its suite. Report when done.\nFiles: `src/flush.py`"
+        three = "Write the exporter's user guide. Report when done.\nFiles: docs/guide.md"
+        self.assertEqual(t.cli(KID, "request", "the last row", "--brief", one).returncode, 0)
+        r = t.cli(KID, "request", "the retry", "--brief", two)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(t.cli(KID, "request", "the guide", "--brief", three).returncode, 0)
+        titles = [r["title"] for r in starts.pending(t.p4)]
+        self.assertEqual(titles, ["the last row", "the guide"], "disjoint: both handed out; overlapping: held")
+        line = context(t.say(TOP2, "How are the docs coming?"))
+        self.assertIn("\"the last row\"", line)
+        self.assertIn("\"the guide\"", line)
+        self.assertNotIn("\"the retry\"", line, "the second writer of src/flush.py is held")
+        rows = {r["title"]: r for r in starts.state(t.p4).values()}
+        for row in (rows["the last row"], rows["the guide"]):
+            starts.claim(t.p4, starts.call_of(row, t.p4)["prompt"], TOP2)
+        self.assertEqual(starts.pending(t.p4), [], "handed out, its child not arrived: the retry stays held")
+        self.arrive("local_new00011", rows["the last row"])
+        kid = t.session("local_new00011")
+        self.assertEqual([f.rsplit("/", 2)[-2:] for f in kid["fileSet"]], [["src", "flush.py"], ["src", "rows.py"]])
+        self.assertIn("src/flush.py", open(os.path.join(t.dir("local_new00011"), "session.json"),
+                                           encoding="utf-8").read())
+        self.assertEqual(starts.pending(t.p4), [], "its child is live and has not reported done")
+        self.assertIn("is held until", t.cli(KID, "request", "the retry again", "--brief", two + " Again.").stdout)
+        t.cli("local_new00011", "done", "fixed the last row; its suite passes")
+        t.stop("local_new00011", "Fix the last row", report="Fixed the last row; the suite passes.", uuid="f1")
+        self.assertIn("## Files", open(os.path.join(t.dir("local_new00011"), "session.md"), encoding="utf-8").read())
+        self.assertEqual([r["title"] for r in starts.pending(t.p4)][:1], ["the retry"],
+                         "the first reported done: the held start goes out")
+
+    def test_a_brief_with_no_file_set_is_refused_with_what_to_add(self):
+        """#48: every brief declares its file set."""
+        t = self.t
+        r = t.cli(KID, "request", "the flush port", "--brief", "Port the exporter's flush to the new writer.")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("add a line `Files: <each path this session may write", r.stderr)
+        self.assertEqual(starts.pending(t.p4), [])
+        self.assertEqual(t.cli(KID, "request", "the flush check", "--brief",
+                               "Check what the exporter's flush does and report it.\nFiles: none").returncode, 0)
+        call = {"initiation": "user_asked", "title": "the port", "context": "fresh", "use_worktree": False,
+                "prompt": "Port the exporter's flush to the new writer. Report when done.",
+                "background": "The exporter top holds the port; this child takes the flush alone. " * 2}
+        adv = t.hook("start-advice", TOP, {"hook_event_name": "PreToolUse",
+                                           "tool_name": "mcp__ccd_session__start_session", "tool_input": call})
+        out = json.loads(adv.stdout)["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("add a line `Files:", out["permissionDecisionReason"])
+        call["prompt"] += "\nFiles: src/flush.py"
+        adv = t.hook("start-advice", TOP, {"hook_event_name": "PreToolUse",
+                                           "tool_name": "mcp__ccd_session__start_session", "tool_input": call})
+        self.assertNotIn("deny", adv.stdout, "a declared file set that no live session holds starts")
+        self.assertEqual(starts.files_of("Fix it.\n- **Files:** `lib/x.py`, lib/y.py and z.md.", "E:/w"),
+                         [relay.norm("E:/w/lib/x.py"), relay.norm("E:/w/lib/y.py"), "z.md"])
+        self.assertEqual(starts.files_of("Check it.\nFiles: none"), [])
+        self.assertIsNone(starts.files_of("Fix the files in lib."))
+        self.assertEqual(starts.files_overlap([relay.norm("E:/w/lib/x.py")], ["x.py"]), [relay.norm("E:/w/lib/x.py")])
+        self.assertEqual(starts.files_overlap([relay.norm("E:/w/lib")], [relay.norm("E:/w/lib/x.py")]),
+                         [relay.norm("E:/w/lib")])
+        self.assertEqual(starts.files_overlap([relay.norm("E:/w/lib/x.py")], [relay.norm("E:/w/docs/x.md")]), [])
+
     def test_a_given_background_is_carried_and_a_short_one_made_long_enough(self):
         """#37: the handed-out call carries a background of at least 80 characters, given or not."""
         t = self.t
         given = "The exporter's flush moved to the new writer in src/flush.py; the docs follow the same layout."
         self.assertEqual(t.cli(KID, "request", "the docs port", "--brief", BRIEF, "--background", given).returncode, 0)
-        self.assertEqual(t.cli(KID, "request", "the short one", "--brief", BRIEF + " Short.", "--background",
-                               "Short.").returncode, 0)
+        self.assertEqual(t.cli(KID, "request", "the short one", "--brief",
+                               BRIEF.replace("src/flush.py", "docs/short.md"), "--background", "Short.").returncode, 0)
         calls = {r["title"]: starts.call_of(r, t.p4) for r in starts.pending(t.p4)}
         self.assertEqual(calls["the docs port"]["background"], given)
         self.assertTrue(calls["the short one"]["background"].startswith("Short."))

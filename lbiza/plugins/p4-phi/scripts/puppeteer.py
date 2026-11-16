@@ -878,6 +878,7 @@ def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
     paths = read["paths"] or ((route or {}).get("slice") or {}).get("paths") or []
     if paths:
         lines += ["Area: " + ", ".join(f"`{p}`" for p in paths[:8]) + ".", ""]
+    lines += ["Files: " + (", ".join(f"`{p}`" for p in paths[:8]) if paths and not reading else "none"), ""]
     if reading:
         lines += ["A reading explores: change no tracked file and commit nothing, since the readings beside this one "
                   "share the checkout. The session that started this one lands the reading that survives the merge.",

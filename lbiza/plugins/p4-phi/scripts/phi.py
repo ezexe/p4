@@ -824,17 +824,19 @@ BUILT_IN = ("built-in, act-don't-wait: a next step the chain can settle (the tas
             "wait for it on those steps, and act on the rest.")
 ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves the built-in rule out in a project (#23)
 TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps a top session's work in it (#24)
+FILE_SETS = True              # p4.json phi.file_sets: false starts sessions whose briefs declare no file set (#48)
 
 
 def project_conf(store):
     """The project's own phi keys in p4.json, read where the session runs, not from a shared home store."""
-    global ACT_DONT_WAIT, TOP_ORCHESTRATES
+    global ACT_DONT_WAIT, TOP_ORCHESTRATES, FILE_SETS
     try:
         d = p4conf.section(store, "phi", write=False) if store else {}
     except Exception:  # noqa: BLE001
         d = {}
     ACT_DONT_WAIT = d.get("act_dont_wait") is not False
     TOP_ORCHESTRATES = d.get("top_orchestrates") is not False
+    FILE_SETS = d.get("file_sets") is not False
 
 
 TOP_RULE = ("This is the top session of its tree, so it keeps itself free for orchestration: planning, relaying "
@@ -869,7 +871,8 @@ def new_top_route(owner_turn=True):
 
 def request_cmd():
     """The command that keeps a start request, as the lines that advise it give it."""
-    return f'`{commands()} request "<title>" --brief "<the whole brief>"`'
+    return (f'`{commands()} request "<title>" --brief "<the whole brief>"`, the brief declaring its file set on a '
+            f'line `Files: <paths>`')
 
 
 def depth_of(home, s):
@@ -1073,6 +1076,9 @@ def render_page(home, sid):
                f"Session `{sid}`, started by `{above}`." if above else f"Session `{sid}`, a top session.", ""]
         if s.get("task"):
             out += ["## Task", "", s["task"].strip(), ""]
+        if isinstance(s.get("fileSet"), list):
+            out += ["## Files", "", "The file set its brief declares: this session alone writes these while it is "
+                    "live.", ""] + ([f"- `{f}`" for f in s["fileSet"]] or ["- none: it writes no file"]) + [""]
         notes = load_notes(home, sid)
         if notes:
             out += ["## Notes", ""]
@@ -1501,8 +1507,8 @@ def h_nudge(payload):
     RAN["nudge"] = st.get("addr")
     return (f"phi (p4-phi): this is the top session, kept free for orchestration, and step {st.get('addr')}, "
             f"\"{cut(clean(st.get('content')), 120)}\", is work: hand it to a child session with "
-            f"`mcp__ccd_session__start_session`, `context` `fresh`, `use_worktree: false`, its brief that step and "
-            f"\"report when done\", and keep this session for planning, relaying and landing. Said once for this "
+            f"`mcp__ccd_session__start_session`, `context` `fresh`, `use_worktree: false`, its brief that step, a "
+            f"line `Files: <the paths it may write>` and \"report when done\", and keep this session for planning, relaying and landing. Said once for this "
             f"step.")
 
 
@@ -1801,6 +1807,11 @@ def h_user_prompt_submit(payload):
             and not load_turns(me.home, s["sessionId"]):
         s["disposable"] = True                     # its brief or its first message: report when done
         RAN["disposable"] = True
+    if "fileSet" not in s and not load_turns(me.home, s["sessionId"]):
+        declared = starts.files_of(payload.get("prompt"), s.get("cwd") or payload.get("cwd") or "")
+        if declared is not None:                   # #48: the file set its brief declares, kept and shown on its page
+            s["fileSet"] = declared
+            RAN["files"] = len(declared)
     if s.get("doneRetired") or s.get("archived"):
         s["doneRetired"] = s["archived"] = False   # messaged again: a live node once more
         s["reopened"] = now()
@@ -2028,6 +2039,24 @@ def h_start_advice(payload):
     if starts.claim(me.home, inp.get("prompt"), me.id):
         RAN["claimed"] = True                       # a start request's call, given exactly: the requester decided
         return None
+    brief = str(inp.get("prompt") or "")
+    if brief and not NEW_TOP.search(brief) and FILE_SETS:
+        s = load_session(me.home, me.id)
+        files = starts.files_of(brief, s.get("cwd") or payload.get("cwd") or "")
+        why = ""
+        if files is None:                           # #48: every brief declares its file set
+            why = "phi (p4-phi): this start is refused: " + starts.FILES_WANTED
+        else:
+            who, hit = starts.held_by(me.home, me.id, files)
+            if who:
+                why = (f"phi (p4-phi): this start is held: its file set shares {', '.join(hit[:5])} with {who}, "
+                       f"which is live and has not reported done, and no two sessions write the same file at once "
+                       f"(ezexe/p4#48). Send this work to that session as the next task of its serial run, or "
+                       f"start it once that session reports done.")
+        if why:
+            RAN["files"] = "none" if files is None else "held"
+            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                           "permissionDecisionReason": why}}
     wanted = "fork" if str(inp.get("context") or "fresh") == "fork" else "fresh"
     try:
         size = os.path.getsize(payload.get("transcript_path") or "")
@@ -2549,8 +2578,13 @@ def main(argv=None):
                 with open(a.brief_file, encoding="utf-8") as f:
                     brief = f.read()
             save_session(me.home, s)
-            rid, new = starts.add(me.home, s["sessionId"], a.title, brief, a.context, background=a.background)
+            rid, new = starts.add(me.home, s["sessionId"], a.title, brief, a.context, background=a.background,
+                                  declared=True)
             print(starts.requested_text(rid, new))
+            row = starts.state(me.home).get(rid) or {}
+            who, hit = starts.held_by(me.home, s["sessionId"], row.get("files") or [])
+            if who:                                # #48: one writer per file
+                print(f"phi: it is held until {who} reports done, since both would write {', '.join(hit[:5])}.")
             if a.context == "fork":
                 print("phi: a start request is always fresh: a fork would carry the starter's conversation, not "
                       "this session's, so the brief must say all the child needs.")

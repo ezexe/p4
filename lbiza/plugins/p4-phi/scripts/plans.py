@@ -537,8 +537,10 @@ def top_advice(home, s, plan, owner_turn, cap):
              "This turn was started by another session, so the app refuses `user_asked`: write each as a start "
              "request, `phi.py request \"<title>\" --brief \"<the whole brief>\"`, which the next turn ezexe "
              "begins, in any session of this store, starts as this session's child; ask ezexe nothing")
-    return (f"{head} Hand its work steps to child sessions, one child each: {named}. {route}. Each brief is its "
-            f"steps' words, their paths and what they must leave done, and says \"report when done\", so the child "
+    return (f"{head} Hand its work steps to child sessions, split by file set: steps that share a file go to one "
+            f"child as a serial run, and steps with disjoint files each get a child: {named}. {route}. Each brief is its "
+            f"steps' words, a line `Files: <the paths it may write>`, what they must leave done, and says "
+            f"\"report when done\", so the child "
             f"leaves its outcome here as a replaces: note and is treated as archived when it finishes. Staying "
             f"here: {stay}.")
 

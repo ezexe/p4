@@ -42,6 +42,96 @@ def _append(home, row):
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+# --- file sets: one writer per file in the single work tree (#48) -----------------------------------------------------
+#
+# Every brief declares the files its session may write, on a line `Files: <paths>`, or `Files: none` for a session
+# that writes nothing. No two sessions write the same file at once: a start whose file set overlaps a live session's
+# is held until that session reports done. A queue is split by these sets: tasks that share a file go to one child
+# as a serial run, and tasks with disjoint files each get a child and run at the same time.
+
+FILES_LINE = re.compile(r"(?im)^[ \t>*-]*(?:\*\*)?(?:files?|file set)(?:\*\*)?[ \t]*:[ \t]*(?:\*\*)?[ \t]*(.+?)[ \t]*$")
+NO_FILES = re.compile(r"^\W*(?:none|nothing|no files?|read[- ]only)\b", re.I)
+FILES_WANTED = ("a brief declares its file set (ezexe/p4#48): add a line `Files: <each path this session may write, "
+                "comma separated>`, or `Files: none` for a session that writes nothing. One writer per file: tasks "
+                "that share a file go to one child as a serial run, and tasks with disjoint files each get a child.")
+
+
+def files_of(brief, base=""):
+    """The file set a brief declares: [] for `Files: none`, None when it has no such line. A path with a folder is
+    normalized under `base`; a bare file name is kept as its lower-case name."""
+    m = FILES_LINE.search(str(brief or ""))
+    if not m:
+        return None
+    value = m.group(1).strip().rstrip(".")
+    if NO_FILES.match(value):
+        return []
+    out = []
+    for tok in re.split(r"\s*(?:,|;|\band\b)\s*", value):
+        ticked = re.findall(r"`([^`\s]+)`", tok)
+        plain = tok.strip().strip("'\"").rstrip(".").strip()
+        for name in ticked or ([plain.split(" ")[0]] if plain else []):
+            name = name.strip("`'\"").rstrip(".")
+            if not name:
+                continue
+            entry = relay.norm(name, base) if re.search(r"[\\/]", name) else name.lower()
+            if entry not in out:
+                out.append(entry)
+    return out
+
+
+def files_overlap(a, b):
+    """The entries two file sets share: equal or nested paths, or a bare name that is the other's file name."""
+    hit = []
+    for x in a or []:
+        for y in b or []:
+            if "/" in x and "/" in y:
+                same = relay.overlap(x, y)
+            else:
+                same = x.rsplit("/", 1)[-1] == y.rsplit("/", 1)[-1]
+            if same and x not in hit:
+                hit.append(x)
+    return hit
+
+
+def above(home, sid):
+    """A session and every session above it: a parent's file set covers its children's and never holds them."""
+    out, cur = [], sid
+    while cur and cur not in out and len(out) < 12:
+        out.append(cur)
+        cur = relay._parent(relay._session(home, cur))
+    return out
+
+
+def writers(home, skip=()):
+    """[(sessionId, title, its file set)] of the live sessions that declared files and have not reported done."""
+    out = []
+    for sid, s in relay._sessions(home).items():
+        files = s.get("fileSet")
+        if sid in skip or not isinstance(files, list) or not files or relay.gone(home, s):
+            continue
+        turns = relay._rows(os.path.join(relay._dir(home, sid), "turns.jsonl"))
+        if turns and turns[-1].get("done"):
+            continue                              # it reported done: its files are free again
+        out.append((sid, relay._title(s), files))
+    return out
+
+
+def held_by(home, requester, files, earlier=()):
+    """(who, the shared files) of the first live writer, or request handed out before it, whose file set overlaps
+    `files`; ('', []) when the start is free to go."""
+    if not files:
+        return "", []
+    for sid, title, theirs in writers(home, skip=above(home, requester)):
+        hit = files_overlap(files, theirs)
+        if hit:
+            return f"\"{title}\" ({sid})", hit
+    for r in earlier:
+        hit = files_overlap(files, r.get("files") or [])
+        if hit:
+            return f"start request {r.get('id')} \"{r.get('title')}\"", hit
+    return "", []
+
+
 def marker(rid, requester):
     return f"phi start request {rid} for {requester}."
 
@@ -76,7 +166,28 @@ def pending(home, at=None):
         if r.get("after") and _busy(home, r["after"]):
             continue                              # queued behind a writer that is still at work
         out.append(r)
-    return sorted(out, key=lambda r: float(r.get("at") or 0))
+    free = []
+    for r in sorted(out, key=lambda r: float(r.get("at") or 0)):
+        who, _ = held_by(home, r.get("requester"), r.get("files") or [], free + _handed(home, r, at))
+        if not who:                               # #48: held while a live writer or an earlier start has its files
+            free.append(r)
+    return free
+
+
+def _handed(home, r, at):
+    """The requests claimed or started before `r` whose child has not arrived or not reported done yet, and that
+    declared files: an overlapping one holds `r`."""
+    out = []
+    for x in state(home).values():
+        if x.get("id") == r.get("id") or not x.get("files") or float(x.get("at") or 0) > float(r.get("at") or 0):
+            continue
+        child = x.get("started")
+        if child and child != "withdrawn":
+            continue                              # its child is a live writer or gone: writers() answers for it
+        c = x.get("claimed") or {}
+        if not child and c and at - float(c.get("at") or 0) < CLAIM_S:
+            out.append(x)                         # handed out, its child not arrived yet
+    return out
 
 
 def _busy(home, sid):
@@ -103,22 +214,26 @@ def background_of(home, requester, given=""):
     return text
 
 
-def add(home, requester, title, brief, context="fresh", at=None, background="", after=""):
+def add(home, requester, title, brief, context="fresh", at=None, background="", after="", declared=False):
     """Keep a start request -> (its id, True when new). The same brief from the same session, still pending, is
     kept once. Its background is the one given or one built from the requester (#37). With `after`, it waits
-    behind that session while it is a busy writer (#38)."""
+    behind that session while it is a busy writer (#38). The file set its brief declares is kept on it; with
+    `declared`, a brief that declares none is refused (#48)."""
     title, brief = " ".join(str(title or "").split()), str(brief or "").strip()
     if len(title) < 3:
         raise ValueError("a start request needs the child's title")
     if len(" ".join(brief.split())) < 20:
         raise ValueError("a start request needs the child's whole brief")
+    files = files_of(brief, str(relay._session(home, requester).get("cwd") or ""))
+    if declared and files is None:
+        raise ValueError(FILES_WANTED)
     rid = "req-" + hashlib.sha1(f"{requester}\n{title}\n{brief}".encode("utf-8", "replace")).hexdigest()[:10]
     held = state(home).get(rid)
     if held and not held.get("started") and (time.time() if at is None else at) - float(held.get("at") or 0) <= EXPIRE_S:
         return rid, False
     at = time.time() if at is None else at
     _append(home, {"kind": "request", "id": rid, "at": at, "time": time.strftime("%Y-%m-%d %H:%M"),
-                   **({"after": after} if after else {}),
+                   **({"after": after} if after else {}), **({"files": files} if files else {}),
                    "requester": requester, "requesterTitle": relay._title(relay._session(home, requester)),
                    "title": title, "brief": brief, "context": "fork" if context == "fork" else "fresh",
                    "background": background_of(home, requester, background)})
@@ -149,14 +264,14 @@ def hand_text(home, sid, at=None):
             "them `user_asked`. This turn ezexe began, so start each now, with exactly the call given, before "
             "the rest of this turn's work:\n" + "\n".join(lines) + "\n"
             f"The app keeps this session as each child's parent in its own nesting, {ISSUE}; phi records the "
-            f"requester as the parent, so the child's spawnedFrom, its relays and its archive line go to the "
+            f"requester as the parent, so the child's spawnedFrom, its relays and its retirement note go to the "
             f"requester. Pass nothing on: the requester gets the child's reports in full.")
 
 
 def requested_text(rid, new):
     return ((f"kept as start request {rid}" if new else f"start request {rid} was already kept") +
             ": the next turn ezexe begins, in any session of this store, starts it with `user_asked`, and phi "
-            "makes it this session's child, its spawnedFrom, relays and archive line coming here. Do not ask "
+            "makes it this session's child, its spawnedFrom, relays and retirement note coming here. Do not ask "
             "ezexe to type anything or click a card; carry on with the rest of the task.")
 
 
