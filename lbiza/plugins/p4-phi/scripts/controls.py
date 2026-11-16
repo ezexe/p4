@@ -763,6 +763,18 @@ def offer_text(home, s, button=True):
             f"each one archived and each one left.{out}")
 
 
+def offered_ids(home, s):
+    """The sessions a puppeteer's archive offer can hold: each complete controlled session, and every finished
+    session of a controlled tree, as the multiSelect question it puts to ezexe names them."""
+    ready, _ = complete(home, s)
+    out = {sid for sid, _, _ in ready} | {k for _, _, kids in ready for k in kids}
+    for e in controlled(s):
+        store = e.get("store") or ""
+        if store:
+            out |= {k for k, _, _ in relay.ready_in_tree(store, e["sessionId"])}
+    return out
+
+
 def names_of(sid):
     """The full titles a session goes by in ezexe's answer: the app's title, and p4-phi's where it differs."""
     store = store_of(sid)

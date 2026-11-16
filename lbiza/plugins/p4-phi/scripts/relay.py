@@ -1937,19 +1937,28 @@ def names_answer(name, answer):
 
 def picked(home, top, calls, named=None):
     """The session ids ezexe picked in this turn's multiple-choice question: the ids under each offered option whose
-    label an answered AskUserQuestion of the turn carries, and each session of `named`, a map of a sessionId to the
-    full titles it goes by, that an answer names by one of those titles or by its id."""
+    label an answered AskUserQuestion of the turn carries, and each session of `named`, a map of a sessionId the gate
+    offers to the full titles it goes by, that one option of a multiSelect question names by one of those titles or
+    by its id and ezexe's answer to that question picked. The caller puts in `named` only sessions it offers."""
+    asks = [c for c in calls or [] if c.get("name") == "AskUserQuestion" and not c.get("failed")]
     offer_ = [o for o in _session(home, top).get("archiveOffer") or [] if isinstance(o, dict)]
-    said = " \n ".join(str(c.get("result") or "") for c in calls or []
-                       if c.get("name") == "AskUserQuestion" and not c.get("failed"))
+    said = " \n ".join(str(c.get("result") or "") for c in asks)
     out = []
     for o in offer_:
         if o.get("label") and str(o["label"]) in said:
             out += [i for i in o.get("ids") or [] if i not in out]
-    answers = answers_of(said) if said else []
-    for sid, names in (named or {}).items():
-        if sid not in out and any(names_answer(n, a) for n in [sid, *names] for a in answers):
-            out.append(sid)
+    for c in asks if named else []:
+        inp = c.get("input") if isinstance(c.get("input"), dict) else {}
+        questions = {str(q.get("question") or "").strip(): q for q in inp.get("questions") or [] if isinstance(q, dict)}
+        for asked, answer in ANSWERED.findall(str(c.get("result") or "")):
+            q = questions.get(asked.strip())
+            if not q or q.get("multiSelect") is not True:
+                continue                           # only the answer to a multiSelect question is a pick
+            labels = [str(o.get("label") or "") for o in q.get("options") or [] if isinstance(o, dict)]
+            for sid, names in named.items():
+                if sid not in out and any(names_answer(n, x) and names_answer(x, answer)
+                                          for n in [sid, *names] for x in labels):
+                    out.append(sid)
     return out
 
 

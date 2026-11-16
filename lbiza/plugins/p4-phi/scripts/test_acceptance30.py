@@ -161,7 +161,8 @@ class Tree_(unittest.TestCase):
         self.assertNotIn("wrap_up", mine.get("permissionDecisionReason", ""), "refused, and no button for a child")
         other = self.archive_call(TOP, KID)
         self.assertEqual(other.get("permissionDecision"), "deny")
-        self.assertIn(f"{KID} was not picked in this turn", other.get("permissionDecisionReason", ""))
+        self.assertIn(f"{KID} is not a finished session of this tree that ezexe picked",
+                      other.get("permissionDecisionReason", ""))
 
     def test_a_done_top_level_session_gets_the_button_and_one_question_on_its_finished_tree(self):
         """The button is for a top-level session, which offers the finished sessions of its tree as one

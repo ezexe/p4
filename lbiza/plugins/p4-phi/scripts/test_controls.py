@@ -27,7 +27,7 @@ import inproc  # noqa: E402
 import phi  # noqa: E402
 import relay  # noqa: E402
 import starts  # noqa: E402
-from test_phi import CLI, KID, TOP, Tree, context, memory, read, transcript, write  # noqa: E402
+from test_phi import CLI, KID, KID2, TOP, Tree, context, memory, read, transcript, write  # noqa: E402
 from test_phi import START as SESSION_START  # noqa: E402
 
 PUP, PUP2, TOP2, TOP3, NEW = ("local_pup00001", "local_pup00002", "local_top00002", "local_top00003",
@@ -83,9 +83,12 @@ class Supervisor(unittest.TestCase):
         inp = {"session_id": target, **({"reason": reason} if reason else {})}
         calls = [] if picks is None else [("AskUserQuestion", {"questions": []},
                                            "User has answered your questions: " + ", ".join(f'"{p}"' for p in picks))]
-        if answers:
-            said = ", ".join(f'"{q}"="{", ".join(labels)}"' for q, labels in answers)
-            calls = [("AskUserQuestion", {"questions": [{"question": q, "multiSelect": True} for q, _ in answers]},
+        if answers:                                # (question, picked labels[, its options[, multiSelect]])
+            said = ", ".join(f'"{a[0]}"="{", ".join(a[1])}"' for a in answers)
+            asked = [{"question": a[0], "multiSelect": a[3] if len(a) > 3 else True,
+                      "options": [{"label": x} for x in (a[2] if len(a) > 2 else [*a[1], "None of them"])]}
+                     for a in answers]
+            calls = [("AskUserQuestion", {"questions": asked},
                       f"User has answered your questions: {said}. You can now continue with the user's answers in "
                       f"mind.")]
         self._n = getattr(self, "_n", 0) + 1
@@ -241,7 +244,8 @@ class Supervisor(unittest.TestCase):
     def test_a_multiselect_answer_naming_sessions_by_full_title_passes_the_gate_with_no_offer_stored(self):
         """ezexe's picks in a multiSelect AskUserQuestion of the turn name the sessions by their full titles, and
         no offer p4-phi stored holds those labels: each named session passes the gate, for a puppeteer and for an
-        orchestrator, and a session the answer does not name is still refused."""
+        orchestrator, and a session the answer does not name is still refused. A name counts only for a session the
+        gate offers, a finished one of the caller's own tree, picked among the options of a multiSelect question."""
         t = self.t
         other = "An orchestrator nobody put under the puppeteer"
         self.finish(TOP)
@@ -254,12 +258,26 @@ class Supervisor(unittest.TestCase):
         self.assertEqual(self.archive(PUP, TOP3, answers=asked), {}, "picked by its full title")
         none = [("Which finished sessions should be archived?", ["None of them"])]
         self.assertEqual(self.archive(PUP, TOP, answers=none).get("permissionDecision"), "deny")
+        q = "Which finished sessions should be archived?"
         t.say(KID, "Task:\nBuild the flush.\nFiles: src/flush.py")
-        self.assertEqual(self.archive(TOP, KID, answers=[("Archive which?", ["the flush child"])]), {},
-                         "an orchestrator's pick by full title")
-        self.assertEqual(self.archive(TOP, KID, answers=[("Archive which?", [KID])]), {}, "or by id")
-        self.assertEqual(self.archive(TOP, KID, answers=[("Archive which?", ["the flush"])]).get(
-            "permissionDecision"), "deny", "a label that only shares words with its title is no pick")
+        self.assertEqual(self.archive(TOP, KID, answers=[(q, ["the flush child"])]).get("permissionDecision"),
+                         "deny", "a worker never finished is outside the offer, whatever the answer names")
+        self.assertEqual(self.archive(TOP, TOP3, answers=[(q, [other])]).get("permissionDecision"), "deny",
+                         "a sibling orchestrator is outside the caller's own tree")
+        t.record(KID2, started_by=TOP, title="the docs worker")
+        t.say(KID2, "Task:\nWrite the flush docs. Report when done.\nFiles: docs/flush.md")
+        t.cli(KID2, "done", "the docs page is written and committed")
+        t.stop(KID2, "Write the docs", report="Written.")
+        self.assertEqual(self.archive(TOP, KID2, answers=[(q, ["the docs worker"])]), {},
+                         "a finished worker of its tree, picked by its full title")
+        self.assertEqual(self.archive(TOP, KID2, answers=[(q, [KID2])]), {}, "or by its id")
+        self.assertEqual(self.archive(TOP, KID2, answers=[(q, ["the docs"])]).get("permissionDecision"), "deny",
+                         "a label that only shares words with its title is no pick")
+        self.assertEqual(self.archive(TOP, KID2, answers=[("Shall the docs worker go?", ["the docs worker"],
+                                                           ["the docs worker", "Keep it"], False)]).get(
+            "permissionDecision"), "deny", "only the answer to a multiSelect question is a pick")
+        self.assertEqual(self.archive(TOP, KID2, answers=[(q, ["the docs worker"], ["Some other session"])]).get(
+            "permissionDecision"), "deny", "a name the question never offered is no pick")
 
     def test_a_boundary_line_for_a_complete_tree_names_the_multiple_choice_question_and_not_the_archive_call(self):
         ctx = self.complete_top()
@@ -933,6 +951,7 @@ class LandedWorker(unittest.TestCase):
         self.edit(os.path.join(work, "lib", "x.py"), "c1")
         self.git(work, "commit", "-qam", "lib: fix the flush\n\nCloses #7")
         sha = self.git(work, "rev-parse", "--short", "HEAD")
+        t.cli(KID, "done", "the flush is fixed and committed; closes #7")
         self.edit(os.path.join(work, "lib", "y.py"), "c2")
         self.git(work, "checkout", "-q", "--", "lib/y.py")
         subprocess.run(["git", "clone", "-q", bare, land], check=True, capture_output=True)

@@ -1847,9 +1847,10 @@ def h_memory_gap(payload):
 
 def h_self_archive(payload):
     """PreToolUse on mcp__ccd_session_mgmt__archive_session. Unless p4.json sets phi.session_archives, the call is
-    denied, since archiving is ezexe's own action in the app: an orchestrator may archive only what ezexe picked
-    this turn in its multiple-choice question, and a puppeteer only a complete controlled session ezexe
-    picked. Where sessions may archive, a child's own archive is held while a background task it started has no end
+    denied, since archiving is ezexe's own action in the app: an orchestrator may archive only a finished session of
+    its own tree that ezexe picked this turn in the multiSelect question offering it, by an option's label naming it
+    by its full title or its id, and a puppeteer only a complete controlled session or a finished session of a
+    controlled tree that ezexe picked so. Where sessions may archive, a child's own archive is held while a background task it started has no end
     recorded; where they may not, the refusal names those tasks. A child that
     archives itself may never reach its Stop hook, so its turn and its last report are kept now, read from the
     transcript, and it is counted as archived as at Stop."""
@@ -1866,7 +1867,8 @@ def h_self_archive(payload):
         turn = last_turn(payload.get("transcript_path") or "") if not own and not spawned_from(s) else None
         if not own and controls.is_puppeteer(s, me.store):
             # a puppeteer archives only what ezexe picked this turn, and only a session p4-phi holds complete
-            was = target in controls.picked(me.home, s, turn, {target: controls.names_of(target)})
+            offered = target in controls.offered_ids(me.home, s)
+            was = target in controls.picked(me.home, s, turn, {target: controls.names_of(target)} if offered else None)
             left = controls.archive(me.home, s, target, str(inp.get("reason") or ""), picked=was)
             RAN["archive_refused"] = "" if not left else target[:40]
             RAN["puppeteer_archive"] = ("left " if left else "let ") + target[:40]
@@ -1880,7 +1882,8 @@ def h_self_archive(payload):
                                                f"phi (p4-phi): this puppeteer's archive of {target} is "
                                                f"refused: {left}. Name it to ezexe as left, with that reason.")}}
         if not own and not spawned_from(s):       # an orchestrator archiving what ezexe picked this turn
-            mine = load_session(me.home, target)      # a session of this orchestrator's store, by its titles
+            ready = {sid for sid, _, _ in relay.ready_in_tree(me.home, me.id)}   # its tree's finished sessions
+            mine = load_session(me.home, target) if target in ready else {}
             named = {target: [controls.full_title(target, mine), title_of(mine)]} if mine else None
             if target in relay.picked(me.home, me.id, (turn or {}).get("calls"), named):
                 RAN["archive_refused"] = ""
@@ -1891,7 +1894,8 @@ def h_self_archive(payload):
             " " + relay.BUTTON if own else
             f" p4-phi already counts a finished or superseded session as archived. An orchestrator that is done "
             f"offers its tree's finished sessions to ezexe as one multiple-choice question, `AskUserQuestion` with "
-            f"`multiSelect`, and archives only the ones ezexe picked there: {target} was not picked in this turn.")
+            f"`multiSelect`, and archives only the ones ezexe picked there: {target} is not a finished session of "
+            f"this tree that ezexe picked in that question in this turn.")
         running = puppeteer.held_tasks(me.home, me.id) if own else []
         if running:                                # a live background task holds a session's own archive
             why += (f" It also has {len(running)} background task{'s' if len(running) != 1 else ''} with no end "
