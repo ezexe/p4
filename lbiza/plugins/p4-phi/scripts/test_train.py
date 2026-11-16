@@ -6,9 +6,8 @@ measured on the picks the query serves, and the dictionary check.
 Run: python3 test_train.py
 
 The tests need only the standard library's unittest and no network, and take a few seconds. The reproduction on
-the AudioPlugin-p4 store, whose imported pools must reach FIRST_FLOOR held out, takes about a minute and a half, so
-it runs only with P4_SLOW=1 and the AudioPlugin-p4 fixture that test_store.fixture finds: it migrates the fixture
-into a temp directory first.
+the AudioPlugin-p4 store, whose imported pools must reach FIRST_FLOOR held out, measures one store for about a minute
+and a half, so it lives in the experiments repository ezexe/p4-phi, at experiments/p4-suite/test_train.py.
 """
 
 import os
@@ -26,7 +25,7 @@ import labels as lb  # noqa: E402
 import ranker  # noqa: E402
 import store as st  # noqa: E402
 import train  # noqa: E402
-from test_store import NOW, fixture, make_store, write  # noqa: E402
+from test_store import NOW, make_store, write  # noqa: E402
 
 TOPICS = ("axolotl", "bandicoot", "capybara", "dugong", "echidna", "fossa", "gharial", "hoatzin")
 
@@ -350,25 +349,6 @@ class DictionaryCheck(unittest.TestCase):
     def owner_block(self):
         text = st.read_text(self.path)
         return text[text.index("- term: capybara"):]
-
-
-class AudioPluginFloor(unittest.TestCase):
-    @unittest.skipUnless(os.environ.get("P4_SLOW") == "1" and fixture("AudioPlugin-p4"),
-                         "slow: P4_SLOW=1 and the AudioPlugin-p4 fixture")
-    def test_imported_pools_reproduce_the_floor(self):
-        import migrate
-        with tempfile.TemporaryDirectory() as t:
-            out = os.path.join(t, "p4")
-            migrate.run(fixture("AudioPlugin-p4"), out=out, apply=True, now=NOW)
-            st.build_index(out)
-            ev = train.evaluate(train.build_sets(out, sources={"pool"}))
-            print(f"\nAudioPlugin-p4 imported pools: {train.fmt(ev)}")
-            self.assertEqual(ev["n"], 24)
-            labs = [r for r in lb.read_tsv(lb.mpath(out, lb.RAW)) if r["source"] == "pool"]
-            self.assertEqual(len(labs), 274, "274 of the 280 steering lines match an entry")
-            self.assertEqual(sum(1 for r in labs if r["task"] == "pool:a3ac5de6"), 1, "1 of its 4 picks matches")
-            self.assertGreater(ev["r-precision"], ev["baseline"], "above the BM25 baseline")
-            self.assertGreaterEqual(ev["r-precision"], train.FIRST_FLOOR)
 
 
 if __name__ == "__main__":
