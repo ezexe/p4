@@ -193,6 +193,22 @@ class Record(Base):
         self.assertIn(".venv/Scripts/python tools/probe.py", ctx)
 
 
+class AfterOnce(Base):
+    def test_a_session_is_told_of_an_error_once(self):
+        """B1-72: what earlier sessions did about an error is told to a session once; the same error met again in
+        that session adds nothing, and another session is told in its turn."""
+        err = "Exit code 1\nModuleNotFoundError: No module named 'numpy'"
+        self.out(run_hook("lookup-record", post("Bash", {"command": "python tools/probe.py"}, err, S1, self.proj, "t1",
+                                                "PostToolUseFailure"), self.proj))
+        S3 = "cccc3333-0000-4000-8000-000000000000"
+        got = []
+        for session, tid in ((S2, "t2"), (S2, "t3"), (S3, "t4")):
+            o = self.out(run_hook("lookup-record", post("Bash", {"command": "python other/thing.py"}, err, session,
+                                                        self.proj, tid, "PostToolUseFailure"), self.proj))
+            got.append(bool(o))
+        self.assertEqual(got, [True, False, True])
+
+
 class Check(Base):
     def test_the_same_question_is_answered_once_then_runs(self):
         self.record_fetch()

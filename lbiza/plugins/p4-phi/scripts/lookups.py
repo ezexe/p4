@@ -422,11 +422,18 @@ def record(p4, payload, when):
 
 
 def after_text(con, row):
-    """What earlier sessions did about this error, or '' when none of them met it."""
+    """What earlier sessions did about this error, or '' when none of them met it, or when this session or subagent
+    was told already: each telling is a row of `checks` with the action `after` and the signature as `shown`."""
+    if con.execute("SELECT 1 FROM checks WHERE session=? AND agent=? AND action='after' AND shown=?",
+                   (row["session"], row["agent"], row["sig"])).fetchone():
+        return ""
     seen = con.execute("SELECT session, time, ask, fix FROM calls WHERE sig=? AND session!=? ORDER BY rowid DESC "
                        "LIMIT 200", (row["sig"], row["session"])).fetchall()
     if not seen:
         return ""
+    con.execute("INSERT INTO checks VALUES (?,?,?,?,?,?,?,?)", (row["time"], row["session"], row["agent"], row["tool"],
+                                                               row["key"], "after", 0.0, row["sig"]))
+    con.commit()
     sessions = len({r["session"] for r in seen})
     out = (f"phi (p4-phi): this error was met before, in {sessions} earlier session{'s' if sessions != 1 else ''}, "
            f"last at {seen[0]['time']}: {row['sig']}")
