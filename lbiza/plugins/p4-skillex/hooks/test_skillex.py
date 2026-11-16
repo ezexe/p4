@@ -213,9 +213,13 @@ class Watcher(Store):
         self.assertFalse(skillex.holds_secret(self.script("s3", "astcheck.py", "astcheck", 'tokens=None, mode="fast"')))
 
     def test_the_shapes_of_a_secret_and_the_code_that_only_names_one(self):
-        flagged = [("export API_KEY=abc123def456ghi", ".sh"), ("export DB_PASSWORD=correcthorse", ".sh"),
+        flagged = [("export API_KEY=abc123def456ghi", ".sh"),
                    ('curl -H "Authorization: Bearer abcdefghij0123456789klmn" x', ".sh"),
-                   ("curl -u admin:s3cretpw https://x", ".sh"), ("tool --token abc123def456ghi", ".sh"),
+                   ("curl -u admin:s3cretpw https://x", ".sh"), ("curl --user admin:s3cretpw x", ".sh"),
+                   ("curl -uadmin:s3cretpw x", ".sh"), ("tool --token abc123def456ghi", ".sh"),
+                   ("docker login -u x -p s3cretpw ghcr.io", ".sh"), ("mysql -uroot -ps3cretpw db", ".sh"),
+                   ("sshpass -p s3cretpw ssh host", ".sh"), ('r = requests.get(url, auth=("admin", "s3cretpw"))', ".py"),
+                   ('a = HTTPBasicAuth("admin", "s3cretpw")', ".py"),
                    ('cfg["password"] = "hunter2hunter2"', ".py"), ('password = "correcthorsebattery"', ".py"),
                    ('TOTP_SECRET = "JBSWY3DPEHPK3PXP"', ".py"), ("STRIPE = 'sk_live_abcdefgh12345678'", ".py"),
                    ("WEBHOOK = 'whsec_abcdefghijklmnopqrstuv'", ".py"), ("SG = 'SG.abcdefghijklmnop.qrstuvwxyz012345'", ".py"),
@@ -227,10 +231,14 @@ class Watcher(Store):
                    ('aws_secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"', ".py"),
                    ("export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", ".sh"),
                    ('requests.get("https://api.x.com/v1?api_key=9f8e7d6c5b4a3210")', ".py"),
-                   ('password = "correct horse battery staple"', ".py"), ("curl --user admin:s3cretpw x", ".sh"),
-                   ("curl -uadmin:s3cretpw x", ".sh"), ('h = "Authorization: Basic YWRtaW46czNjcmV0cHc="', ".py"),
-                   ('DB_PASS = "s3cretpw99"', ".py"), ('passphrase = "tr0ub4dor&3x"', ".py"),
-                   ('pw = os.getenv("DB_PASSWORD", "s3cretpw123")', ".py")]
+                   ('h = "Authorization: Basic YWRtaW46czNjcmV0cHc="', ".py"), ('DB_PASS = "s3cretpw99"', ".py"),
+                   ('passphrase = "tr0ub4dor&3x"', ".py"), ('pw = os.getenv("DB_PASSWORD", "s3cretpw123")', ".py"),
+                   ('pw = os.getenv("DB_PASS", "s3cretpw123")', ".py"), ('os.environ.setdefault("API_TOKEN", "abc123def456")', ".py"),
+                   ('const t = process.env.API_TOKEN || "abc123def456"', ".js"), ('echo "${API_TOKEN:-abc123def456}"', ".sh"),
+                   ('api_key = "3f9a1c2e-4b5d-6e7f-8a9b-0c1d2e3f4a5b"', ".py"),
+                   ('api_key = "key-3ax6xnjp29jd6fds4gc373sgvjxteol0"', ".py"), ("tool --password Summer.2024", ".sh"),
+                   ('private_key = "a8f3k29dk3l0s9d2"', ".py"), ('encryption_key = "a8f3k29dk3l0s9d2"', ".py"),
+                   ('credentials = "a8f3k29dk3l0s9d2"', ".py")]
         spared = [('token_url = "https://x/oauth/token"', ".py"), ('password_field = "password"', ".py"),
                   ('SECRET_NAME = "prod-db-creds"', ".py"), ("token = parts[0]", ".py"),
                   ("tokens = list(tokenize.generate_tokens(io.StringIO(src).readline))", ".py"),
@@ -246,12 +254,28 @@ class Watcher(Store):
                   ("export const tokenStore = createStore();", ".ts"),
                   ("export const tokenMap: Map<string, Token> = new Map();", ".ts"),
                   ("$password = Read-Host -AsSecureString", ".ps1"), ("$token = Get-Content tok.txt", ".ps1"),
+                  ("$securePassword = ConvertTo-SecureString $plain -AsPlainText -Force", ".ps1"),
                   ("SECRET_NAME=prod-db-creds", ".sh"), ("TOKEN_FILE=token.json", ".sh"),
                   ("secret_name=my_app_secret", ".sh"), ("docker login --password-stdin ghcr.io", ".sh"),
                   ("aws secretsmanager get-secret-value --secret-id prod/db/creds", ".sh"),
                   ("tool --token-file ~/.token", ".sh"), ("usage: tool --token YOUR_TOKEN", ".sh"),
                   ('q = "password="+password_value+"&user="', ".py"), ('token_budget = "unlimited"', ".py"),
-                  ('token_encoding = "cl100k_base"', ".py"), ('tokenizer.eos_token = "<|endoftext|>"', ".py")]
+                  ('token_encoding = "cl100k_base"', ".py"), ('tokenizer.eos_token = "<|endoftext|>"', ".py"),
+                  ('r = client.get_secret_value(SecretId="prod/db/creds")', ".py"),
+                  ('TOKEN_FILE = "config/token.json"', ".py"), ('tokenizer_name = "EleutherAI/gpt-neox-20b"', ".py"),
+                  ("export GOOGLE_APPLICATION_CREDENTIALS=keys/sa.json", ".sh"), ("SECRET_ID=prod/db/creds", ".sh"),
+                  ('API_KEY_HEADER = "X-API-Key"', ".py"), ('TOKEN_HEADER = "X-Auth-Token"', ".py"),
+                  ('{"password": "this field is required"}', ".py"), ('errors = {"token": "token has expired"}', ".py"),
+                  ('password: "must be at least eight characters"', ".js"),
+                  ("u = 'https://x/revoke?token_type_hint=refresh_token'", ".py"),
+                  ("u = 'https://api.nasa.gov/x?api_key=DEMO_KEY'", ".py"), ('t = os.getenv("TOKEN_FILE", "token.json")', ".py"),
+                  ('t = os.getenv("HF_TOKEN_PATH", "/root/.cache/huggingface/token")', ".py"),
+                  ('t = os.getenv("TOKENIZER", "bert-base-uncased")', ".py"),
+                  ("basic internationalization and basic responsibilities of the team", ".py"),
+                  ("SECRET_BACKEND=kubernetes", ".sh"), ("PASSWORD_AUTH=disabled", ".sh"),
+                  (': "${API_TOKEN:?API_TOKEN must be set}"', ".sh"), ('echo "Password: required"', ".sh"),
+                  ("train --tokenizer gpt2-medium", ".sh"), ("train --tokenizer_name gpt2-medium", ".sh"),
+                  ("train --tokenizer ./tokenizer.json", ".sh")]
         for i, (line, ext) in enumerate(flagged + spared):
             p = put(os.path.join(self.root, f"probe{i}{ext}"), line + "\n")
             self.assertEqual(skillex.holds_secret(p), (line, ext) in flagged, line)

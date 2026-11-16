@@ -15,7 +15,7 @@ The watcher looks at each script a session creates in `.claude/p4/temportal/tmp/
 A script is brewing when it is linked to scripts of two other sessions, directly or through other scripts, where two scripts are linked when the identifiers they share are at least half of all the identifiers the two hold between them.
 Markdown is never compared, since a brief handed from one session to the next recurs without being repeated work, and a folder below the session folder that holds a `.git`, a `README.md`, a `LICENSE` or another project root file is a copy of a repository and is skipped.
 A script written with the Write tool is looked at at once, and one written by a shell command at the end of the turn.
-A script that holds what looks like a secret, a private key, a known token's shape or a quoted value given to a name such as `api_key` or `password`, brews no skill.
+A script that holds what looks like a secret brews no skill: a private key, a token of a known shape, a password in a URL, a command line or an auth pair, or a value given to a name such as `api_key` or `password` that is not recognisably a reference, a placeholder, an address, a path, a file's name, a message or a name made of words.
 
 What it writes:
 
