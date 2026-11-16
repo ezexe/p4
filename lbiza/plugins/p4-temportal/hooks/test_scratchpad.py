@@ -1401,6 +1401,15 @@ class AskPaths(unittest.TestCase):
         self.assertTrue(sp.in_harness_scratchpad("/private/tmp/claude-501/-Users-ez-x/f27bc042/scratchpad/x.py"))
         self.assertTrue(sp.in_harness_scratchpad(MAC_SCRATCH + "/probe.py"))
 
+    def test_a_repositorys_tmp_folder_is_no_temp_location(self):
+        import scratchpad as sp
+        for p in ("E:/projects/x/tmp/build.py", "src/tmp/gen.py", "/home/u/repo/tmp/a.py",
+                  "E:/projects/x/.claude/p4/temportal/tmp/sid/a.py"):
+            self.assertFalse(sp.in_temp(p), p)
+        for p in ("/tmp/x.py", "/private/tmp/x.py", "/var/folders/ab/T/x.py", "/private/var/folders/ab/T/x.py", "C:/Users/u/AppData/Local/Temp/x.py",
+                  "$env:TEMP/x.py", "%TEMP%/x.py", "$TMPDIR/x.py"):
+            self.assertTrue(sp.in_temp(p), p)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

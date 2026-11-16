@@ -97,7 +97,9 @@ CODE_NAMES = {"cmakelists.txt", "makefile", "gnumakefile", "dockerfile", "justfi
 # the scratchpad paths Claude Code gives: under the temp folder on Windows and Linux, and /private/tmp/claude-<uid>/ on
 # macOS
 SCRATCHPAD_MARKERS = ("/temp/claude/", "/tmp/claude/", "/tmp/claude-")
-TEMP_MARKERS = ("/tmp/", "/appdata/local/temp/", "/var/folders/", "/private/tmp/", "%temp%", "%tmp%",
+# temp folders only where a path starts with one
+ROOT_TEMP = ("/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/")
+TEMP_MARKERS = ("/appdata/local/temp/", "%temp%", "%tmp%",
                 "$tmpdir", "${tmpdir}", "$env:temp", "$env:tmp")
 _PATH = r"(?:\"([^\"\n]+)\"|'([^'\n]+)'|([^\s\"'<>|;&()`]+))"
 WRITE_RES = [
@@ -1177,8 +1179,10 @@ def in_harness_scratchpad(path):
 
 
 def in_temp(path):
+    """True for a path in a temp folder of the system: /tmp/ only at the root, since a repository's own tmp/ folder,
+    or the store's temportal/tmp/, is no temp location."""
     p = _norm(path)
-    return any(m in p for m in TEMP_MARKERS)
+    return p.startswith(ROOT_TEMP) or any(m in p for m in TEMP_MARKERS)
 
 
 def in_notebook(path):
