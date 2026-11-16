@@ -3,7 +3,7 @@
 
 A session's record holds names and sizes, never content:
     files     each file a tool call read or edited: the turn it was last touched in, how often, whether edited
-    entries   each corpus entry a retrieval line showed the session with a handle, and the turn it was shown in
+    entries   each document a retrieval line showed the session with a handle, and the turn it was shown in
     commits   each `git commit` a command made: the repository's folder name and the subject git printed
     marks     where the context was compacted: the turn, and how many files were in view before it
     size      how big the context was at every step, what it began at and what filled it, as sizes() counts it
@@ -16,7 +16,7 @@ seeded .gitignore leaves the folder out.
 
 What reads it: describe, which `p4.py view` prints for another session to read, and stats_line, which `p4.py check`
 prints. Only describe calls in_view(v) and dropped(v), which take a loaded record:
-    in_view(v)        the paths and entry ids in view now, touched or shown since the last compaction
+    in_view(v)        the paths and document ids in view now, touched or shown since the last compaction
     dropped(v)        what was in view before the last compaction and has not been touched since
 """
 
@@ -48,8 +48,8 @@ def empty():
 
 def build(turns, project, served=None):
     """The record of one session from its transcript turns, as transcript.turns gives them, oldest first. `served`
-    is {turn index: [entry ids]} for the corpus entries the retrieval lines showed, when the caller has them;
-    refresh passes none and carries the entries over itself."""
+    is {turn index: [document ids]} for the documents the retrieval lines showed, when the caller has them;
+    refresh passes none and carries them over itself."""
     import transcript as tr
     v = empty()
     for k, turn in enumerate(turns):
@@ -82,7 +82,7 @@ def build(turns, project, served=None):
 
 
 def refresh(p4, project, session, transcript_path, served_now=None):
-    """Bring a session's record up to date with its transcript and write it; returns the record. The corpus entries
+    """Bring a session's record up to date with its transcript and write it; returns the record. The documents
     shown are carried over from the record on disk, and `served_now` adds the current turn's. A transcript with no
     turn and no call writes nothing and returns the record on disk, or an empty one."""
     import transcript as tr
@@ -92,8 +92,8 @@ def refresh(p4, project, session, transcript_path, served_now=None):
     except (OSError, ValueError):
         turns = []
     if not turns and transcript_path:
-        # a transcript with no message from ezexe, such as that of a session another session started, has a
-        # context all the same: its calls are read as one turn
+        # a transcript with no message from ezexe, such as a child session's, has a context all the same: its
+        # calls are read as one turn
         try:
             lines = tr.read_lines(transcript_path)
         except (OSError, ValueError):
@@ -129,7 +129,7 @@ def last_mark(v):
 
 
 def in_view(v):
-    """`(paths, entry ids)` the session holds now: touched or shown at or after its last compaction."""
+    """`(paths, document ids)` the session holds now: touched or shown at or after its last compaction."""
     if not v:
         return set(), set()
     cut = last_mark(v)
@@ -137,7 +137,8 @@ def in_view(v):
 
 
 def dropped(v):
-    """`(paths, entry ids)` that were in view before the last compaction and have not been touched or shown since."""
+    """`(paths, document ids)` that were in view before the last compaction and have not been touched or shown
+    since."""
     if not v or not v.get("marks"):
         return set(), set()
     cut = last_mark(v)
@@ -146,7 +147,7 @@ def dropped(v):
 
 def describe(p4, session="", limit=12):
     """Lines saying what a session has in view, for another session to read: its newest files in view, the edited
-    ones marked, its commits, how many of the corpus entries it was shown are in view, and the size of its context.
+    ones marked, its commits, how many of the documents retrieval showed it are in view, and the size of its context.
     With no session, one line for each session the store has a record of."""
     d = p4conf.sub(p4, "models", "view")
     try:
@@ -172,7 +173,7 @@ def describe(p4, session="", limit=12):
         out.append(f"  ... and {len(files) - limit} more")
     out += [f"  commit turn {c['turn']:3}  {c['repo']} {c['sha']}  {c['subject']}" for c in v["commits"][-limit:]]
     if entries:
-        out.append(f"  corpus entries shown: {len(entries)}")
+        out.append(f"  documents shown by retrieval: {len(entries)}")
     return out + size_lines(v.get("size"))
 
 

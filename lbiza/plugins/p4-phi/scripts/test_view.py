@@ -109,7 +109,7 @@ class View(unittest.TestCase):
                 f.write(json.dumps({"type": "user", "cwd": self.proj, "message": {"role": "user", "content": "look"}}) + "\n")
                 f.write(json.dumps({"type": "assistant", "message": {"id": "m1", "usage": {"input_tokens": 50000}, "content": [
                     {"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": os.path.join(self.proj, "src", "port.py")}}]}}) + "\n")
-        with open(os.path.join(d, "cccccccc-3.jsonl"), "w", encoding="utf-8") as f:      # started by another session
+        with open(os.path.join(d, "cccccccc-3.jsonl"), "w", encoding="utf-8") as f:      # a child session's transcript
             f.write(json.dumps({"type": "user", "cwd": self.proj, "origin": {"kind": "agent"}, "message": {"role": "user", "content": "go"}}) + chr(10))
             f.write(json.dumps({"type": "assistant", "message": {"id": "m9", "usage": {"input_tokens": 70000}, "content": [
                 {"type": "tool_use", "id": "t9", "name": "Read", "input": {"file_path": os.path.join(self.proj, "docs", "notes.md")}}]}}) + chr(10))
