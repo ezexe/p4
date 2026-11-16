@@ -840,6 +840,11 @@ def scratchpad_dir_cases():
         put(harness, "note.md", "a note\n")
         target = os.path.join(root, ".claude", "p4", "temportal", "tmp", sid, "note.md")
         assert os.path.isfile(target), f"the scratchpad_dir path was not linked: {out!r}"
+        # a scratchpad_dir that is not <session>/scratchpad is never emptied into the store
+        for other in (os.path.join(root, "work"), os.path.join(root, "elsewhere", sid, "notes")):
+            put(other, "keep.md", "not the scratchpad\n")
+            run_sub("tmp-link", {"cwd": root, "session_id": sid, "scratchpad_dir": other}, env, CLAUDE_PROJECT_DIR=root)
+            assert os.path.isfile(os.path.join(other, "keep.md")) and not is_link(other), f"{other} was moved"
     finally:
         for d in (root, temp):
             shutil.rmtree(d, ignore_errors=True)

@@ -239,12 +239,14 @@ def harness_scratchpad(payload):
     """The scratchpad path Claude Code gives this session, `<temp>/claude*/<project>/<session>/scratchpad` under the
     system temp directory, /tmp or /private/tmp; it need not exist yet. None without a session id or that session's
     folder."""
-    given = payload.get("scratchpad_dir")
-    if isinstance(given, str) and os.path.isabs(given):
-        return given                                   # on every hook's stdin from Claude Code 2.1.257
     sid = session_id(payload)
     if not sid:
         return None
+    given = payload.get("scratchpad_dir")              # on every hook's stdin from Claude Code 2.1.257
+    if isinstance(given, str) and os.path.isabs(given):
+        norm_given = os.path.normpath(given)
+        if os.path.basename(norm_given) == "scratchpad" and os.path.basename(os.path.dirname(norm_given)) == sid:
+            return given                               # only this session's own scratchpad is ever emptied
     seen = set()
     moved = os.environ.get("CLAUDE_CODE_TMPDIR")      # where Claude Code's temp tree was moved, before 2.1.257
     for r in ((moved,) if moved else ()) + (tempfile.gettempdir(), *TEMP_ROOTS):
