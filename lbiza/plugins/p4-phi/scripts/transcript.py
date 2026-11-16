@@ -35,7 +35,6 @@ SKILL_TOOLS = ("Skill",)
 WEIGHTS = {"edited": (1, 1.0), "invoked": (1, 0.7), "cited": (1, 0.7), "dropped": (0, 0.3), "unopened": (0, 0.2)}
 COMMAND_RE = re.compile(r"<command-name>\s*/?([\w.:/-]+)\s*</command-name>")
 ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
-PATHISH = re.compile(r"(?:[\w.~-]+/)+[\w.-]+|[\w-]+\.[A-Za-z][\w]{0,7}")
 
 
 def read_lines(path):
