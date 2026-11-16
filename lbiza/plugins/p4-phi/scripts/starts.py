@@ -175,7 +175,7 @@ def marker(rid, requester):
     return f"phi start request {rid} for {requester}."
 
 
-def state(home, at=None):
+def state(home):
     """{id: request row, with `claimed` (by, at) and `started` (child) folded in} of every request on file."""
     out = {}
     for r in relay._rows(path_of(home)):
