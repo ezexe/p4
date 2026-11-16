@@ -30,7 +30,6 @@ half, never a held-out fold, and the threshold is still chosen on the labelled t
 
 import datetime
 import json
-import math
 import os
 import random
 import re
@@ -63,7 +62,6 @@ OWED_AGE_S = 3600
 MAX_TASKS = 400               # newest tasks a round fits on, beyond the pool and edited ones (every one kept)
 EVAL_HEAD = "round\ttime\tlabels\ttasks\tper_source\tr_precision\trecall20\tprecision\tthreshold\tbaseline\t" \
             "short\trepo\tdictionary\tpromoted\twhy\n"
-NONSTORE_FILES = ("messages",)
 
 
 # --- examples ----------------------------------------------------------------------------------------------
