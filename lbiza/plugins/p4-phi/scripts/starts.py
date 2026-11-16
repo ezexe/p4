@@ -1,25 +1,25 @@
-"""starts.py: start requests, the children a session wants but cannot start, carried by the store.
+"""starts.py: start requests, the children a session wants and cannot start, kept in the store.
 
-The app refuses `mcp__ccd_session__start_session` with `initiation` `user_asked` in a turn ezexe did not begin:
-a child's turn that another session's message started, or an app event. Such a session used to fall back to a card
-or ask ezexe to type "go". Instead it writes each child it wants as a start request into the store,
-`phi.py request "<title>" --brief "<brief>"`, and carries on. At the next turn ezexe's own words begin, in any
-session of the same store, that session is handed every pending request, one line each with the exact call. When
-the start happens, the brief's marker line tells phi, at the child's first message, whose child it is: phi records
-the requester as its parent, so the child's spawnedFrom, its relays and its archive line go there. The app keeps
-the starter as the parent in its own nesting, claude-code#109282. A request not started within EXPIRE_S is dropped.
+The app refuses `mcp__ccd_session__start_session` with `initiation` `user_asked` in a turn ezexe did not begin, such
+as a child's turn that another session's message started or an app event, and anthropics/claude-code#109282 reports
+that refusal as a bug. Such a session shows the child as a suggested task card first, as phi._split_full says, and
+files a start request with `phi.py request "<title>" --brief "<brief>"` only when the card is refused too.
 
-Since #58 a request is handed only to the session that filed it, at the next turn ezexe begins in that session, so
-the app's parent and phi's agree: handed to any session of the store, a puppeteer ran the call and the app nested
-the child under the puppeteer. A session whose turn another session began shows the child as a proposal card first
-and files a request only when the card is refused too. A request filed with `to`, a puppeteer's id, asks that
-puppeteer for a new top session: it is never handed to its requester, and the puppeteer's hooks read it here.
+At the next turn ezexe begins in the session that filed a request, that session is handed each of its pending
+requests, one line each with the exact call, and no other session is handed them. The app nests a child under the
+session that makes the start call, so the app's parent and p4-phi's agree. The brief's marker line tells p4-phi at the
+child's first message whose child it is: p4-phi records the session that filed the request as the child's parent, so
+the child's reports and its archive line go there. A request not started within EXPIRE_S is dropped.
+
+A request filed with `to`, a supervisor session's id, asks that supervisor session for a new top-level session: it is
+never handed to the session that filed it, and the supervisor session's hooks read it here.
 
 <home>/phi/start-requests.jsonl holds one row a change: `request` with the brief, `claimed` when a start_session
-call carrying its marker is about to run, `started` when the child's first message arrived.
+call carrying its marker is about to run, and `started` when the child's first message arrived. A withdrawn request
+is kept as a `started` row whose child is "withdrawn".
 
-A request can wait behind a busy writer (#38): pioneer queues a draft whose files a running session holds with
-`after`, that session's id, and the request is handed out only once that session is no longer busy.
+A request can wait behind a busy writer: the gate queues a start draft whose files a running session holds as a
+request with `after`, that session's id, and the request is handed out only once that session is not busy.
 """
 
 import hashlib
@@ -33,7 +33,7 @@ import relay
 EXPIRE_S = 24 * 3600            # a request no turn of ezexe's has started by then is dropped
 CLAIM_S = 15 * 60               # a claimed request whose child never arrived is handed again after this
 MARK_RE = re.compile(r"phi start request (req-[0-9a-f]{10}) for (\S+?)\.?(?:\s|$)")
-BACKGROUND_MIN = 80             # #37: the app refuses a fresh start whose background is shorter
+BACKGROUND_MIN = 80             # the app refuses a fresh start whose background is shorter
 
 
 def path_of(home):
@@ -47,18 +47,17 @@ def _append(home, row):
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-# --- file sets: one writer per file in the single work tree (#48) -----------------------------------------------------
+# --- write sets: the files a brief declares on its `Files:` line ------------------------------------------------------
 #
-# Every brief declares the files its session may write, on a line `Files: <paths>`, or `Files: none` for a session
-# that writes nothing. No two sessions write the same file at once: a start whose file set overlaps a live session's
-# is held until that session reports done. A queue is split by these sets: tasks that share a file go to one child
-# as a serial run, and tasks with disjoint files each get a child and run at the same time.
+# FILES_WANTED states the rule a session meets, one writer per file in the single work tree. This section reads the
+# write set a brief declares and finds where two write sets overlap.
 
 FILES_LINE = re.compile(r"(?im)^[ \t>*-]*(?:\*\*)?(?:files?|file set)(?:\*\*)?[ \t]*:[ \t]*(?:\*\*)?[ \t]*(.+?)[ \t]*$")
 NO_FILES = re.compile(r"^\W*(?:none|nothing|no files?|read[- ]only)\b", re.I)
-FILES_WANTED = ("a brief declares its file set (ezexe/p4#48): add a line `Files: <each path this session may write, "
-                "comma separated>`, or `Files: none` for a session that writes nothing. One writer per file: tasks "
-                "that share a file go to one child as a serial run, and tasks with disjoint files each get a child.")
+FILES_WANTED = ("a brief declares its write set: add a line `Files: <each path this session may write, comma "
+                "separated>`, or `Files: none` for a session that writes nothing. One writer per file: a start whose "
+                "write set overlaps a live session's is held until that session reports done, tasks that share a file "
+                "go to one child as a serial run, and tasks with disjoint files each get a child.")
 
 
 LIST_END = re.compile(r"(?<=[\w`/\\)*\"'])[.:]\s+(?=[A-Z`\"'(])")   # where the list ends and a sentence begins
@@ -70,11 +69,11 @@ def _is_root(entry, base):
 
 
 def files_of(brief, base=""):
-    """The file set a brief declares: [] for `Files: none`, None when it has no such line. A path with a folder is
+    """The write set a brief declares: [] for `Files: none`, None when it has no such line. A path with a folder is
     normalized under `base`; a bare file name is kept as its lower-case name. Only the paths listed after `Files:`
     up to the end of that line are read, and only up to where the list ends and a sentence begins. A path that is
     an ancestor of another listed path, or a repository's root, is context and is not held, unless it is the only
-    path on the line (#62: a checkout's path named beside `dox/` made a child hold the whole repository)."""
+    path on the line, so a checkout named beside the files in it never holds the whole repository."""
     m = FILES_LINE.search(str(brief or ""))
     if not m:
         return None
@@ -106,7 +105,7 @@ def _listed(value, base):
 
 
 def files_overlap(a, b):
-    """The entries two file sets share: equal or nested paths, or a bare name that is the other's file name."""
+    """The entries two write sets share: equal or nested paths, or a bare name that is the other's file name."""
     hit = []
     for x in a or []:
         for y in b or []:
@@ -120,7 +119,7 @@ def files_overlap(a, b):
 
 
 def above(home, sid):
-    """A session and every session above it: a parent's file set covers its children's and never holds them."""
+    """A session and every session above it: a parent's write set covers its children's and never holds them."""
     out, cur = [], sid
     while cur and cur not in out and len(out) < 12:
         out.append(cur)
@@ -129,10 +128,10 @@ def above(home, sid):
 
 
 def stopped(s):
-    """True when the app's record shows a session's last turn was stopped (`lastTurnStopped`, read 2026-11-16 on the
-    record of a session stopped with the app's stop). Nothing in phi's own files says it, and a stopped session's
-    replacement was held behind it (#58). Its next turn clears the mark."""
-    relay.archived_in_app(s)                      # the app's records are read through relay, which phi hands them to
+    """True when the app's record of a session marks its last turn stopped, with `lastTurnStopped`; its next turn
+    clears the mark. p4-phi's own files record no stop, so without this a stopped session would keep holding its
+    write set."""
+    relay.archived_in_app(s)                      # makes sure relay.RECORD is set: phi.py hands relay the app's records
     sid = str(s.get("sessionId") or "")
     try:
         return bool(relay.RECORD and sid.startswith("local_") and relay.RECORD(sid).get("lastTurnStopped"))
@@ -141,8 +140,8 @@ def stopped(s):
 
 
 def writers(home, skip=()):
-    """[(sessionId, title, its file set)] of the live sessions that declared files and have not reported done. An
-    archived session holds nothing, and neither does one the app shows as stopped."""
+    """The live sessions that declared files and have not reported done, each as its sessionId, title and write set.
+    An archived session holds nothing, and neither does one the app shows as stopped."""
     out = []
     for sid, s in relay._sessions(home).items():
         files = s.get("fileSet")
@@ -156,14 +155,14 @@ def writers(home, skip=()):
 
 
 def held_by(home, requester, files, earlier=()):
-    """(who, the shared files) of the first live writer, or request handed out before it, whose file set overlaps
-    `files`; ('', []) when the start is free to go."""
+    """Who holds a start and the files they share: the first live writer, or request handed out before it, whose
+    write set overlaps `files`. Returns '' and [] when the start is free to go."""
     if not files:
         return "", []
     for sid, title, theirs in writers(home, skip=above(home, requester)):
         hit = files_overlap(files, theirs)
         if hit:
-            return f"\"{title}\" ({sid})", hit
+            return f"\"{title}\" `{sid}`", hit
     for r in earlier:
         hit = files_overlap(files, r.get("files") or [])
         if hit:
@@ -176,7 +175,8 @@ def marker(rid, requester):
 
 
 def state(home):
-    """{id: request row, with `claimed` (by, at) and `started` (child) folded in} of every request on file."""
+    """Every request on file by its id: its request row, with its `claimed` row folded in as `by` and `at`, and its
+    `started` row as the child's id, which is "withdrawn" for a withdrawn request."""
     out = {}
     for r in relay._rows(path_of(home)):
         rid = r.get("id")
@@ -201,7 +201,7 @@ def open_rows(home, at=None):
 
 def pending(home, at=None):
     """The requests still to start, oldest first: not started, not past EXPIRE_S, and not claimed in the last
-    CLAIM_S. One addressed to a puppeteer is not among them: the puppeteer's hooks read it (#58)."""
+    CLAIM_S. One addressed to a supervisor session is not among them: that supervisor session's hooks read it."""
     at = time.time() if at is None else at
     out = []
     for r in state(home).values():
@@ -216,7 +216,7 @@ def pending(home, at=None):
     free = []
     for r in sorted(out, key=lambda r: float(r.get("at") or 0)):
         who, _ = held_by(home, r.get("requester"), r.get("files") or [], free + _handed(home, r, at))
-        if not who:                               # #48: held while a live writer or an earlier start has its files
+        if not who:                               # held while a live writer or an earlier start has its files
             free.append(r)
     return free
 
@@ -230,7 +230,7 @@ def _handed(home, r, at):
             continue
         child = x.get("started")
         if child and child != "withdrawn":
-            continue                              # its child is a live writer or gone: writers() answers for it
+            continue                              # its child arrived: writers() answers for it, live or not
         c = x.get("claimed") or {}
         if not child and c and at - float(c.get("at") or 0) < CLAIM_S:
             out.append(x)                         # handed out, its child not arrived yet
@@ -246,14 +246,14 @@ def _busy(home, sid):
 
 
 def background_of(home, requester, given=""):
-    """A request's background: the one given, else one built from the requester's task and the store's project,
-    never shorter than BACKGROUND_MIN characters."""
+    """The background of a request's start call: the one given, else one built from the task of the session that
+    files it and the store's project, never shorter than BACKGROUND_MIN characters."""
     text = " ".join(str(given or "").split())
     if not text:
         s = relay._session(home, requester)
         task = relay._short(" ".join(str(s.get("task") or "").split()), 600)
         project = relay.norm(os.path.dirname(os.path.dirname(os.path.abspath(home))))
-        text = (f"Requested by the session \"{relay._title(s)}\" ({requester}) in the project {project}"
+        text = (f"Requested by the session \"{relay._title(s)}\" `{requester}` in the project {project}"
                 + (f", whose task is: {task}" if task else "") + ".")
     if len(text) < BACKGROUND_MIN:
         text += (" phi (p4-phi) carried this start request through the store; the brief says what the child must "
@@ -263,11 +263,11 @@ def background_of(home, requester, given=""):
 
 def add(home, requester, title, brief, context="fresh", at=None, background="", after="", declared=False,
         to=""):
-    """Keep a start request -> (its id, True when new). The same brief from the same session, still pending, is
-    kept once. Its background is the one given or one built from the requester (#37). With `after`, it waits
-    behind that session while it is a busy writer (#38). The file set its brief declares is kept on it; with
-    `declared`, a brief that declares none is refused (#48). With `to`, a puppeteer's id, it asks that puppeteer
-    for a new top session (#58)."""
+    """Keeps a start request and returns its id and True when it is new. The same brief from the same session, still
+    pending, is kept once. Its background is the one given or one built from the session that files it. With
+    `after`, a session's id, it waits behind that session while that session is a busy writer. The write set its
+    brief declares is kept on it; with `declared`, a brief that declares none is refused. With `to`, a supervisor
+    session's id, it asks that supervisor session for a new top-level session."""
     title, brief = " ".join(str(title or "").split()), str(brief or "").strip()
     if len(title) < 3:
         raise ValueError("a start request needs the child's title")
@@ -292,14 +292,14 @@ def add(home, requester, title, brief, context="fresh", at=None, background="", 
 
 
 def call_of(r, home=""):
-    """The exact start_session input that starts a request. Always fresh: a fork would carry the starter's
-    conversation, not the requester's. It carries the request's background, which the app requires (#37); a request
-    kept before backgrounds were is given one built now."""
+    """The exact start_session input that starts a request: always `context` fresh, so the brief says all the child
+    needs. It carries the request's background, which the app requires: a row with none is given one built from the
+    session that filed it, and one shorter than BACKGROUND_MIN is made long enough, as background_of does."""
     bg = str(r.get("background") or "")
     if len(bg) < BACKGROUND_MIN:
         bg = background_of(home, r["requester"], bg) if home else (
             bg + " " + background_of("", r["requester"], "")).strip()
-    import plans                                   # #61: the model and effort its brief's kind of work gets
+    import plans                                   # the model and effort its brief's kind of work gets
     return plans.with_level({"initiation": "user_asked", "title": r["title"], "context": "fresh",
                              "use_worktree": False, "background": bg,
                              "prompt": r["brief"] + "\n\n" + marker(r["id"], r["requester"])},
@@ -308,29 +308,28 @@ def call_of(r, home=""):
 
 def hand_text(home, sid, at=None):
     """The lines a session is handed at a turn ezexe began in it: each pending request it filed itself, with
-    its exact call. '' when none of its own is pending. No other session is handed a request, a puppeteer
-    included, so the app nests the child under the session that asked (#58)."""
+    its exact call; '' when none of its own is pending. No other session is handed a request, a supervisor session
+    included, so the app nests the child under the session that filed it."""
     rows = [r for r in pending(home, at) if r.get("requester") == sid]
     if not rows:
         return ""
     lines = [f"- \"{r['title']}\": `mcp__ccd_session__start_session` with "
              f"{json.dumps(call_of(r, home), ensure_ascii=False)}" for r in rows]
-    return ("phi (p4-phi): start requests this session filed in turns ezexe did not begin, when the app refused "
-            "them `user_asked`. This turn ezexe began here, so start each now, with exactly the call given, "
-            "before the rest of this turn's work:\n" + "\n".join(lines) + "\n"
-            "Each is this session's own child, in the app's nesting and in phi's, and its reports come here in "
-            "full.")
+    return ("phi (p4-phi): start requests this session filed in turns ezexe did not begin. "
+            "This turn ezexe began here, so start each now, with exactly the call given, before the rest of this "
+            "turn's work:\n" + "\n".join(lines) + "\n"
+            "Each is this session's own child, in the app's nesting and in p4-phi's.")
 
 
 def requested_text(rid, new):
     return ((f"kept as start request {rid}" if new else f"start request {rid} was already kept") +
-            ": the next turn ezexe begins in this session starts it with `user_asked`, as this session's own "
-            "child. No other session is handed it. Carry on with the rest of the task, and say in this turn's "
+            ": the next turn ezexe begins in this session starts it as this session's own child. No other session "
+            "is handed it. Carry on with the rest of the task, and say in this turn's "
             "report that a child waits on ezexe's next message here.")
 
 
 def asked_text(rid, new, title):
-    """What a session is told when it asked its puppeteer for a new top session."""
+    """What a session is told when it asked its supervisor session for a new top-level session."""
     return ((f"kept as request {rid} to this session's puppeteer" if new else f"request {rid} was already kept") +
             f": \"{title}\" is handed to it at the next turn ezexe begins there, and it starts the session, files "
             "it in this environment's section and takes it under control, or declines it. Start nothing for it "
@@ -348,7 +347,8 @@ def claim(home, prompt, by, at=None):
 
 
 def requester_of(home, prompt):
-    """(request id, requester) a started session's first message names by its marker; ('', '') for none."""
+    """The request id and the session that filed it, which a started session's first message names by its marker;
+    '' and '' for none."""
     m = MARK_RE.search(str(prompt or ""))
     if not m:
         return "", ""
@@ -364,9 +364,9 @@ def started(home, rid, child, at=None, by=""):
 
 
 def withdraw(home, rid, by="", at=None):
-    """Withdraw a pending start request by its id -> the line to print. Kept as a row in start-requests.jsonl, so
-    `pending`, `open_rows` and `hand_text` leave it out and the record of it stays (#50). An unknown id, or a
-    request already started or withdrawn, is refused."""
+    """Withdraws a pending start request by its id and returns the line to print. The withdrawal is kept as a row in
+    start-requests.jsonl, so `pending`, `open_rows` and `hand_text` leave the request out and its record stays. An
+    unknown id, or a request already started or withdrawn, is refused."""
     r = state(home).get(rid)
     if not r:
         raise ValueError(f"no start request {rid} is on file in this store")

@@ -1,29 +1,35 @@
-"""relay.py: linked sessions kept in step while they work, modelled on the node tree of phi_rank/tree.py.
+"""relay.py: what keeps the linked sessions of one session tree in step while they work, and what p4-phi does with a
+session whose work is over.
 
-phi_rank's tree has K nodes, each owning a shard of the store; a parent formed from its children; rounds shipped as
-deltas on a shared anchor; `medium` routing a question to the node that owns it and `high` consulting all. A session
-tree is kept the same way (.docs/p4/recall-node.md, "The relay"):
+The functions that read the store take its home and session ids. phi.py calls them from its hooks and commands, and
+plans.py, issues.py, puppeteer.py, controls.py, starts.py, gaps.py and prompty_eval.py call them too.
 
-  shard   what a session alone may change: paths or globs, `phi.py shard <paths>`, kept in its session.json as
-          `shard`. A parent's shard covers its children's. Two sessions under the same parent whose shards overlap
-          are told so at once, both of them: the one declaring now in the command's output, the other at its next
-          message.
+  owned paths  what a session alone may change: paths or globs, set by `phi.py shard <paths>` and kept in its
+          session.json as `shard`. A parent's owned paths cover its children's. When two sessions under the same
+          parent declare owned paths that overlap, both are told: the one declaring in the command's output, the
+          other at its next message.
   delta   a turn's change, kept on its row in turns.jsonl at Stop: the branch heads of the repositories it edited
           in, the files it changed, and its `deprecates:` and `replaces:` notes written since its last turn, with
           the paths they name.
-  anchor  <parent's folder>/anchor.json: the latest delta of each of the parent's children and the parent's own
-          `deprecates:` and `replaces:` notes, with a version that goes up when any of that changes. It is made
-          again at the Stop of the parent or any of its children.
+  anchor  <parent's folder>/anchor.json: each child's latest delta, its marked notes, owned paths, task list and
+          parent step, and the parent's own marked notes, owned paths and task list, under a version that goes up
+          when any of that changes. The top-level sessions share phi/anchor.json, which holds no heads or files. It is
+          made again at Stop, at `phi.py shard`, at each update_plan call and when a subagent is bound.
   rebase  at every message a session is given, including the app's side-session events: when its parent's anchor
-          is newer than the version it last saw, the other nodes' deprecations and replacements, first and in full,
-          then their other deltas, cut evenly to what is left of the hook's room. And a warning, before any tool
-          runs, for each of its uncommitted files or shard paths that a newer deprecation or replacement names,
-          and for each of its uncommitted files inside another node's shard: stop that work and message that
-          node. Nothing when nothing changed; a warning is given once.
-  route   a message that names a path inside another node's shard is that node's: the session is told to send it
-          there with SendMessage. Only a message no shard covers gets a new forked session (phi.new_task_text).
+          is newer than the version it last saw, the other sessions' deprecations and replacements that touch its
+          task, owned paths or open steps, in full, the rest by count and the pages that hold them, then their other
+          deltas, cut evenly to what is left of the hook's room. A first look takes what is there as seen, and a
+          fork that declared owned paths is given only what touches them. Before any tool runs, a warning for each
+          of its uncommitted files or owned paths that a newer deprecation or replacement names, and for each of its
+          uncommitted files inside another session's owned paths: stop that work and message that session. Nothing
+          when nothing changed; a warning is given once.
+  route   a message that names a path inside another session's owned paths belongs to that session: the session is
+          told to send it there with SendMessage. phi.new_task_text says where a message no owned path covers goes.
 
-Every function takes the store's home and session ids as phi.py has them; phi.py calls them from its hooks.
+The rest of the module keeps phi/ in the store's git, maps a shared store's remote to this machine's folder, advises
+fork or fresh for a start, cuts a title at a clause, fences off a finished child whose work a newer note supersedes,
+counts a finished child as archived with its outcome kept as a note on its parent, names merged worktrees for
+removal, and offers a done top-level session's finished sessions to ezexe to archive.
 """
 
 import glob
@@ -58,14 +64,14 @@ _GAVE_UP = {}                  # a lock file -> when this process stopped waitin
 
 
 def _held(path):
-    """True while this thread holds `path`'s lock (relay.locked)."""
+    """True while this thread holds `path`'s lock, taken with relay.locked."""
     return path in getattr(_HOLDS, "paths", ())
 
 
 def _write_json(path, d):
     """`d` written to `path`. A session's record is written under its lock, and with the warnings that wait on
     disk, not the copy the caller read earlier: only relay.warn and relay.take_warnings change `relayPending`,
-    under the lock, so no other read-modify-write of the record can drop a warning written meanwhile (#53)."""
+    under the lock, so no other read-modify-write of the record can drop a warning written meanwhile."""
     if os.path.basename(path) == "session.json" and not _held(path):
         with locked(path):                        # not got: the entries are read again right before the write
             keep_pending(path, d)
@@ -123,13 +129,13 @@ def _parent(s):
     return str(sp.get("sessionId") or "") if isinstance(sp, dict) else ""
 
 
-_SESSION_FILES = {}              # a session.json's path -> (mtime_ns, size, what it held), kept for one process
+_SESSION_FILES = {}              # by a session.json's path: its mtime_ns, size and what it held, kept for one process
 
 
 def _sessions(home):
-    """{sessionId: session.json} of every session in the store. One message's hook asked for this eleven times, 75
-    files each (2026-11-16), so a file is read again only when its time or size changed; each caller gets its own
-    copy of a session's top level."""
+    """Every session in the store, as its session.json by its sessionId. One message's hook can ask for this eleven
+    times over 75 files, so a file is read again only when its time or size changed; each caller gets its own copy
+    of a session's top level."""
     out = {}
     base = os.path.join(home, "phi", "sessions")
     try:
@@ -156,14 +162,14 @@ def _title(s):
     return str(s.get("title") or s.get("sessionId") or "")[:60]
 
 
-RECORD = None                    # phi.app_record, set by phi at import; read lazily otherwise
+RECORD = None                    # phi.app_record, set by phi.py at import; read lazily otherwise
 ROOTED = None                    # phi.record_in, the record looked up in the app folder it was first found in
 
 
 def archived_in_app(s):
-    """True when the app archived a session (`isArchived` in its record), or its record has gone from the app folder
-    it was first found in on this machine. A session no app runs, or one whose folder this machine lacks (a store
-    synced from another machine), is never taken as archived by a missing record."""
+    """True when the app's record of a session has `isArchived`, or the record has gone from the app folder it was
+    first found in on this machine. A session no app runs, or one whose app folder this machine lacks, as in a store
+    synced from another machine, is never taken as archived by a missing record."""
     sid = str(s.get("sessionId") or "")
     if not sid.startswith("local_"):
         return False
@@ -179,7 +185,7 @@ def archived_in_app(s):
 
 
 def gone(home, s):
-    """True when a session is out of the live tree: stale, finished and disposable, or archived in the app. An
+    """True when a session is not live: stale, counted as archived once its work was done, or archived in the app. An
     archive seen in the app is kept in its session.json, so the other machines a store syncs to see it too."""
     if not isinstance(s, dict) or not s.get("sessionId"):
         return True
@@ -205,8 +211,8 @@ def norm(p, base=""):
     if not p:
         return ""
     p = p.replace("\\", "/")
-    # /e/x as Git Bash writes E:/x, and /mnt/e/x as WSL does, before the absolute test: on Windows since Python 3.13 a
-    # path with one leading slash is not absolute, so /e/x was joined onto the base (P5)
+    # /e/x as Git Bash writes E:/x, and /mnt/e/x as WSL does, before the absolute test: on Windows, Python 3.13 and
+    # later take a path with one leading slash as not absolute, and would join /e/x onto the base
     p = re.sub(r"^/mnt/([a-zA-Z])(?=/|$)", lambda m: m.group(1).upper() + ":", p)
     p = re.sub(r"^/([a-zA-Z])(?=/|$)", lambda m: m.group(1).upper() + ":", p)
     if base and not os.path.isabs(p) and not re.match(r"^[A-Za-z]:", p):
@@ -232,7 +238,7 @@ def covers(pattern, path):
 
 
 def overlap(a, b):
-    """True when two shard entries can name the same file."""
+    """True when two path or glob entries, of owned paths or write sets, can name the same file."""
     ra, rb = _root(a), _root(b)
     return covers(a, b) or covers(b, a) or covers(ra, rb) or covers(rb, ra)
 
@@ -250,15 +256,15 @@ def paths_in(text, base=""):
     return out
 
 
-# --- shards ----------------------------------------------------------------------------------------------------------
+# --- owned paths -----------------------------------------------------------------------------------------------------
 
 def shard_of(s):
     return [x for x in (s.get("shard") or []) if isinstance(x, str) and x]
 
 
 def set_shard(home, sid, paths, base):
-    """Keep `paths` as the session's shard -> the lines to print: one per sibling whose shard overlaps. The sibling
-    is told at its next message too."""
+    """Keeps `paths` as the session's owned paths and returns the lines to print, one per sibling whose owned paths
+    overlap them. The sibling is told at its next message too."""
     path = os.path.join(_dir(home, sid), "session.json")
     s = _read_json(path)
     if not s:
@@ -268,34 +274,35 @@ def set_shard(home, sid, paths, base):
         raise ValueError("name the paths or globs this session alone may change")
     s["shard"] = shard
     _write_json(path, s)
-    # the siblings see the new shard at their next message
+    # the siblings see these owned paths at their next message
     make_anchor(home, _parent(s), time.strftime("%Y-%m-%d %H:%M"))
     lines = []
     for o, os_ in _siblings(home, s).items():
         hits = sorted({f"{a} and {b}" for a in shard for b in shard_of(os_) if overlap(a, b)})
         if not hits:
             continue
-        lines.append(f"overlaps the shard of \"{_title(os_)}\" ({o}): {'; '.join(hits[:5])}. Agree with that "
+        lines.append(f"overlaps the owned paths of \"{_title(os_)}\" `{o}`: {'; '.join(hits[:5])}. Agree with that "
                      f"session, by SendMessage to {o}, who changes what, before either edits it.")
         warn(home, o, f"shard:{sid}:{','.join(shard)}",
-             f"the session \"{_title(s)}\" ({sid}) declared a shard that overlaps yours: {'; '.join(hits[:5])}. "
+             f"the session \"{_title(s)}\" `{sid}` declared owned paths that overlap yours: {'; '.join(hits[:5])}. "
              f"Agree with it, by SendMessage to {sid}, who changes what, before either edits it.")
     return lines
 
 
 def _siblings(home, s):
-    """The live sessions beside this one: the same parent's, or for a top session every other top session in the
-    store's root, detached ones included, so tops relay to each other as siblings. An archived one is gone."""
+    """The live sessions beside this one: the same parent's, or for a top-level session every other top-level session
+    of the store, those detached to top level included, so top-level sessions are handed each other's changes as
+    siblings. A session that is not live is left out."""
     p = _parent(s)
     return {k: v for k, v in _sessions(home).items() if k != s.get("sessionId") and _parent(v) == p
             and not gone(home, v)}
 
 
 def warn(home, sid, key, text):
-    """A warning kept for a session's next message, once per key. Under the session's lock for the whole
-    read-modify-write: siblings that end their turns at once each warn the same session, and without it the later
-    write dropped the earlier warnings (#53). One that cannot get the lock is never dropped and never written
-    unlocked: it is kept on a file of its own, and the next locked write or read takes it in (drain_warnings)."""
+    """A warning kept for a session's next message, once per key, under the session's lock for the whole
+    read-modify-write, so two siblings that end their turns at once each warn the same session and both warnings
+    are kept. One that cannot get the lock is never dropped and never written
+    unlocked: it is kept on a file of its own, which drain_warnings takes in at the next locked write or read."""
     path = os.path.join(_dir(home, sid), "session.json")
     if not os.path.exists(path):                  # no record: nothing to warn, and no folder is made for the lock
         return False
@@ -344,11 +351,11 @@ def _warn(s, key, text):
         return False
     pend = s.setdefault("relayPending", [])
     if any(isinstance(w, dict) and w.get("text") == text for w in pend):
-        return False                              # R7: the same words already wait for this session
+        return False                              # the same words already wait for this session
     up = re.match(r"^plan:([^:]+):[^:]+:up$", key)
     same = [w for w in pend if isinstance(w, dict) and up and re.match(rf"^plan:{re.escape(up.group(1))}:[^:]+:up$",
                                                                       str(w.get("key") or ""))]
-    if same:                                      # RF1: one line for a child's revisions since the last look
+    if same:                                      # one line for a child's revisions since the last look
         n = sum(int(w.get("count") or 1) for w in same) + 1
         for w in same:
             pend.remove(w)
@@ -358,7 +365,7 @@ def _warn(s, key, text):
     else:
         pend.append({"key": key, "text": text})
     turns = [w for w in pend if isinstance(w, dict) and str(w.get("key", "")).startswith("turn:")]
-    for old in turns[:-TURN_WARNINGS]:                  # R6: the newest relayed turn reports only
+    for old in turns[:-TURN_WARNINGS]:                  # only the newest turn reports are kept
         pend.remove(old)
         told.append(old.get("key"))
     return True
@@ -366,7 +373,7 @@ def _warn(s, key, text):
 
 def take_warnings(home, sid, s):
     """The texts of the warnings kept for a session, taken off `s` and marked told. Called with the session's lock
-    held, by the code that hands them out, so a warning written meanwhile is never lost to that write (#53)."""
+    held, by the code that hands them out, so a warning written meanwhile is never lost to that write."""
     drain_warnings(home, sid, s)
     told = s.setdefault("relayWarned", [])
     out = []
@@ -379,7 +386,7 @@ def take_warnings(home, sid, s):
     return out
 
 
-TURN_WARNINGS = 3          # relayed turn reports kept for one session's next message; older ones are dropped as told
+TURN_WARNINGS = 3          # turn reports kept for one session's next message; older ones are dropped as told
 
 
 # --- deltas ----------------------------------------------------------------------------------------------------------
@@ -392,8 +399,8 @@ def _git(cwd, *args):
 
 
 def drive_ok(p):
-    """False for a path on a drive this machine does not have: a stored mark's path read wrongly once, such as
-    `s:/replaces`, must never reach a filesystem walk (H1)."""
+    """False for a path on a drive this machine does not have, such as `s:/replaces` from a mark's words read as a
+    path, which must never reach a filesystem walk."""
     m = re.match(r"^([A-Za-z]):", str(p or ""))
     return not m or os.path.isdir(m.group(1) + ":/")
 
@@ -409,10 +416,10 @@ def repo_of(path):
         d = up
     if not d:
         return ""
-    # One message's rebase check asked git `rev-parse --show-toplevel` once a path, 100 times and 2 s on a top
-    # session (2026-11-16). A repository's top folder is the nearest one at or above that holds a `.git` git would
-    # take, a folder with a HEAD or a worktree's `gitdir:` file, which lstat finds with no process started. Git
-    # names that folder with its links resolved, so it is resolved here too. Inside a `.git` folder git is asked.
+    # A repository's top folder is the nearest one at or above that holds a `.git` git would take, a folder with a
+    # HEAD or a worktree's `gitdir:` file, which lstat finds with no process started: asking git
+    # `rev-parse --show-toplevel` once a path costs one message's rebase check some 100 calls and 2 s. Git names
+    # that folder with its links resolved, so it is resolved here too. Inside a `.git` folder git is asked.
     top = _dot_git_above(d)
     if top is None:
         r = _git(d, "rev-parse", "--show-toplevel")
@@ -439,7 +446,7 @@ def _is_git(path):
 
 def _dot_git_above(d):
     """The nearest folder at or above `d` that holds a `.git`, '' when none does, None when `d` lies inside a `.git`
-    folder (where git answers differently)."""
+    folder, where git answers differently."""
     d = os.path.abspath(d)
     if re.search(r"[\\/]\.git(?:[\\/]|$)", d):
         return None
@@ -465,7 +472,7 @@ def _dot_git_above(d):
 
 
 def heads(repos):
-    """['<repo>@<branch> <sha8>'] of each repository."""
+    """Each repository as '<repo>@<branch> <sha8>'."""
     out = []
     for repo in sorted(set(r for r in repos if r)):
         b = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
@@ -492,18 +499,19 @@ def delta(home, s, files, cwd, since=""):
 # --- anchors ---------------------------------------------------------------------------------------------------------
 
 def anchor_path(home, parent):
-    """<parent>/anchor.json; for the top sessions, which nobody started, phi/anchor.json: the root of the tree."""
+    """<parent>/anchor.json; for the top-level sessions, which nobody started, phi/anchor.json."""
     if not parent:
         return os.path.join(home, "phi", "anchor.json")
     return os.path.join(_dir(home, parent), "anchor.json")
 
 
 def make_anchor(home, parent, now):
-    """Make <parent>/anchor.json again from the latest delta of each child and the parent's own marked notes, or
-    with no parent the root's from the top sessions' marks and plans; its version goes up only when that content
-    changed. Returns the anchor."""
-    import plans                                  # the plan tree: each node's steps, statuses and current step
-    root = not parent                             # the top sessions: only their marks and plans, never heads or files
+    """Makes <parent>/anchor.json again from each child's latest delta, marked notes, owned paths, task list and
+    parent step and from the parent's own marked notes, owned paths and task list; with no parent, phi/anchor.json
+    from the top-level sessions' marked notes, owned paths and task lists. A finished child that a newer note
+    supersedes is fenced off here. Its version goes up only when that content changed. Returns the anchor."""
+    import plans                                  # the task lists: each session's steps, statuses and current step
+    root = not parent                             # the top-level sessions: never heads or files
     every = _sessions(home)
     nodes = {}
     for sid, s in every.items():
@@ -524,7 +532,7 @@ def make_anchor(home, parent, now):
                           "shard": shard_of(s), "plan": plan, "root": str(s.get("rootStep") or "")}
     own = {} if root else {"title": _title(every.get(parent, {})), "marks": _all_marks(home, parent),
                            "shard": shard_of(every.get(parent, {})), "plan": plans.summary(home, parent)}
-    if not root:                                  # a finished child a newer note supersedes is fenced off now
+    if not root:                                  # a finished child a newer note supersedes is fenced off here
         marks_now = [(k, n.get("title") or k, m) for k, n in nodes.items() for m in n.get("marks") or []]
         marks_now += [(parent, own.get("title") or parent, m) for m in own.get("marks") or []]
         for k in list(nodes):
@@ -573,8 +581,8 @@ def uncommitted(files):
         if r:
             by_repo.setdefault(r, []).append(f)
     # every repository's status is asked at once, not one after another, and of what git lists only the entries
-    # whose file name is one asked about are put in one form: a work tree with thousands of untracked files cost a
-    # message 60 ms of that alone (2026-11-16)
+    # whose file name is one asked about are put in one form: putting all of them in one form costs a message 60 ms
+    # in a work tree with thousands of untracked files
     runs = []
     for repo, fs in by_repo.items():
         try:
@@ -621,7 +629,7 @@ def show_head(h, base):
 
 
 def show(p, base):
-    """A path as a message shows it: relative to the session's project when it lies there (R2)."""
+    """A path as a message shows it: relative to the session's project when it lies there."""
     b = norm(base) if base else ""
     if b and (p == b or p.startswith(b + "/")):
         return p[len(b) + 1:] or "."
@@ -641,8 +649,8 @@ def too_broad(p, home):
 
 
 def scratch(home, sid, f):
-    """A file in the session's own scratch folder, temportal/tmp/<session>: never a conflict (the false positive
-    of 2026-11-12, a note naming the store warned of a session's own scratch files)."""
+    """True for a file under the store's temportal/tmp, where every session's scratchpad directory lies: such a
+    file is never a conflict, so a note that names the store warns of no session's scratch files."""
     t = norm(os.path.join(home, "temportal", "tmp"))
     return covers(t, f)
 
@@ -657,7 +665,7 @@ def held_path(home, sid):
 
 
 def hold(home, sid, pieces, now=""):
-    """What did not fit beside a prompt, kept whole on the session's held.md (#43); the page's path."""
+    """Keeps what did not fit beside a prompt whole on the session's held.md and returns the page's path."""
     path = held_path(home, sid)
     pieces = [str(p) for p in pieces if p]
     if not pieces:
@@ -685,8 +693,8 @@ def page_of(home, nid):
 
 
 def touching(s, m, touches, edited=()):
-    """True when a sibling's mark bears on this session: a path it names lies in the session's shard or among the
-    files it changed, or `touches` finds its words in the session's task or open steps (#43)."""
+    """True when a sibling's mark bears on this session: a path it names lies in the session's owned paths or among
+    the files it changed, or `touches` finds its words in the session's task or open steps."""
     own = list(shard_of(s)) + list(edited)
     if any(overlap(p, o) for p in m.get("paths") or [] for o in own):
         return True
@@ -694,12 +702,12 @@ def touching(s, m, touches, edited=()):
 
 
 def rebase(home, sid, room, fair_cut, touches=None):
-    """(the text a session is given at this message, its session.json changed). '' when nothing changed. With
-    `touches`, a sibling's deprecation or replacement is given in full only when it touches this session's task,
-    shard or open steps; the rest is a count and the pages that hold them. Whatever passes `room` is named by count
-    and kept on a page, and none of it comes again (#43)."""
+    """Returns the text a session is given at this message, '' when nothing changed, and whether its session.json
+    changed. With `touches`, a sibling's deprecation or replacement is given in full only when it touches this
+    session's task, owned paths or open steps; the rest is a count and the pages that hold them. Whatever passes
+    `room` is named by count and kept on a page, and none of it comes again."""
     path = os.path.join(_dir(home, sid), "session.json")
-    with locked(path) as lk:                      # #53: the warnings are emptied under the lock relay.warn holds
+    with locked(path) as lk:                      # the warnings are emptied under the lock relay.warn holds
         return _rebase(home, sid, room, fair_cut, touches, path, lk.held)
 
 
@@ -716,13 +724,13 @@ def _rebase(home, sid, room, fair_cut, touches, path, held):
         s["anchorSeen"] = max(int(s.get("anchorSeen") or 0), int(st.get("anchorVersion") or 0))
         _write_json(path, s)
         return (f"phi (p4-phi): this session's work is superseded and it is stale in the session tree: "
-                f"\"{st.get('note')}\". Re-base onto that before going on; the session that started it treats "
-                f"it as archived, its outcome is kept there, and ezexe was told it is ready to archive."), True
+                f"\"{st.get('note')}\". Re-base onto that before going on; its outcome is kept as a note on its "
+                f"parent session."), True
     warnings = take_warnings(home, sid, s) if held else []     # not held: they wait for the next message
     told = s.setdefault("relayWarned", [])
     parent = _parent(s)
     anchor = _read_json(anchor_path(home, parent))
-    if "anchorSeen" not in s:                     # RF1: the first look takes what is there as seen, relays none of it
+    if "anchorSeen" not in s:                     # the first look takes what is there as seen and hands none of it
         s["anchorSeen"] = int(anchor.get("version") or 0)
         s["marksGiven"] = mark_keys(home, parent)
     seen = int(s.get("anchorSeen") or 0)
@@ -738,7 +746,7 @@ def _rebase(home, sid, room, fair_cut, touches, path, held):
             if nid == sid or int(changed.get(nid) or 0) <= seen:
                 continue
             for m in n.get("marks") or []:
-                key = mark_key(nid, m)                 # each mark relayed once, however often its node changes (R4)
+                key = mark_key(nid, m)                 # each mark handed once, however often its session changes
                 if key not in given:
                     given.append(key)
                     marks.append((nid, n.get("title") or nid, m))
@@ -748,20 +756,22 @@ def _rebase(home, sid, room, fair_cut, touches, path, held):
             if n.get("heads"):
                 bits.append("heads " + ", ".join(show_head(h, base) for h in n["heads"]))
             if n.get("files"):
-                bits.append(f"{len(n['files'])} file(s) changed: " + ", ".join(show(f, base) for f in n["files"][:12])
+                bits.append(f"files changed, {len(n['files'])} in all: "
+                            + ", ".join(show(f, base) for f in n["files"][:12])
                             + (" ..." if len(n["files"]) > 12 else ""))
             mark = hashlib.sha1(json.dumps([n.get("heads"), n.get("files")]).encode()).hexdigest()[:10]
             if bits and (s.setdefault("othersGiven", {}).get(nid) != mark):
                 s["othersGiven"][nid] = mark
-                others.append(f"- \"{n.get('title') or nid}\" ({nid}): " + "; ".join(bits))
+                others.append(f"- \"{n.get('title') or nid}\" `{nid}`: " + "; ".join(bits))
         s["anchorSeen"] = version
         del given[:-400]                               # the newest keys are enough to tell a mark already given
-        if s.get("forked") and shard_of(s):          # a fork keeps its own agenda: only what touches its shard
+        if s.get("forked") and shard_of(s):          # a fork keeps its own agenda: only what touches its owned paths
             own = shard_of(s)
             marks = [x for x in marks if any(overlap(p, o) for p in x[2].get("paths") or [] for o in own)]
             others = [line for line in others if any(show(o, base) in line for o in own)]
-    # the direct warnings: uncommitted files and shard paths against what is deprecated, and against other shards
-    # asked of git only when a mark or a shard is there to hold it against: two `git status` runs a message otherwise
+    # the direct warnings: uncommitted files and owned paths against what is deprecated, and against other sessions'
+    # owned paths. git is asked only when a mark or owned paths are there to hold them against, which saves two
+    # `git status` runs a message
     held = []
 
     def mine_now():
@@ -793,8 +803,8 @@ def _rebase(home, sid, room, fair_cut, touches, path, held):
             if hit and key not in told:
                 told.append(key)
                 warnings.append(f"this session has uncommitted changes to {', '.join(show(h, base) for h in hit[:5])}, "
-                                f"inside the shard of \"{n.get('title') or nid}\", {show(pat, base)}. Stop that work "
-                                f"and message {nid} by SendMessage; that session alone changes it.")
+                                f"inside the owned paths of \"{n.get('title') or nid}\", {show(pat, base)}. Stop that "
+                                f"work and message {nid} by SendMessage; that session alone changes it.")
     if not (warnings or marks or others):
         _write_json(path, s)
         return "", fresh
@@ -811,7 +821,7 @@ def _rebase(home, sid, room, fair_cut, touches, path, held):
         line = head + " ".join(f"({k + 1}) {w}" for k, w in enumerate(shown))
         if held:
             page = hold(home, sid, ["Warnings that did not fit beside one prompt:\n" + "\n".join(f"- {w}" for w in held)])
-            line += (f" {len(over)} more warning(s) did not fit here and are whole on {page}: read them before "
+            line += (f" {len(over)} more did not fit here and are whole on {page}: read them before "
                      f"going on." if over else f" It is whole on {page}.")
         parts.append(line)
         used += len(line) + 2
@@ -824,7 +834,7 @@ def _rebase(home, sid, room, fair_cut, touches, path, held):
             near, far = marks, []                      # shorter in full than the line that would name their pages
         bits = []
         if near:
-            lines = [f"- \"{t}\" ({nid}): {m.get('claim')} (source: {m.get('source')})" for nid, t, m in near]
+            lines = [f"- \"{t}\" `{nid}`: {m.get('claim')}; source: {m.get('source')}" for nid, t, m in near]
             left = max(400, room - used - 420 - (330 if far else 0))
             whole = sum(len(x) + 1 for x in lines) <= left
             if not whole:
@@ -834,7 +844,7 @@ def _rebase(home, sid, room, fair_cut, touches, path, held):
                 lines = fair_cut(lines[-keep:], left - keep)
             pages = sorted({page_of(home, nid) for nid, _, _ in near})
             bits.append(f"phi (p4-phi): what the sessions beside this one deprecated or replaced since it last "
-                        f"looked (anchor v{version}), "
+                        f"looked, at anchor v{version}, "
                         + ("in full" if whole else f"cut to the room beside one prompt and whole on "
                                                    f"{', '.join(pages[:3])}") + ":\n" + "\n".join(lines))
         if far:
@@ -842,11 +852,12 @@ def _rebase(home, sid, room, fair_cut, touches, path, held):
             for nid, _, _ in far:
                 by[nid] = by.get(nid, 0) + 1
             named = ", ".join(f"{n} on {page_of(home, nid)}" for nid, n in sorted(by.items())[:3])
-            more = f", and {len(by) - 3} more page(s) under {os.path.dirname(_dir(home, sid)).replace(chr(92), '/')}" \
+            more = (f", and the pages of {len(by) - 3} more sessions under "
+                    f"{os.path.dirname(_dir(home, sid)).replace(chr(92), '/')}") \
                 if len(by) > 3 else ""
-            bits.append(f"phi (p4-phi): {len(far)} more deprecation or replacement note(s) from the sessions beside "
-                        f"this one (anchor v{version}) are not shown: they do not touch this session's task, shard or "
-                        f"open steps, or did not fit. They are whole on their sessions' pages: {named}{more}.")
+            bits.append(f"phi (p4-phi): deprecation or replacement notes not shown: {len(far)}, from the sessions "
+                        f"beside this one at anchor v{version}. They do not touch this session's task, owned paths or "
+                        f"open steps, or did not fit, and are whole on their sessions' pages: {named}{more}.")
         parts += bits
         used += sum(len(x) + 2 for x in bits)
     if others:
@@ -854,7 +865,7 @@ def _rebase(home, sid, room, fair_cut, touches, path, held):
         keep = others[:max(0, left // 160)]
         cut = fair_cut(keep, left) if left and keep else []
         if cut:
-            more = f"\n- and {len(others) - len(cut)} more session(s) changed; `phi.py tree` lists them." \
+            more = f"\n- and {len(others) - len(cut)} more did not fit here." \
                 if len(others) > len(cut) else ""
             parts.append("phi (p4-phi): what else changed beside this session since it last looked:\n"
                          + "\n".join(cut) + more)
@@ -876,10 +887,10 @@ CLAUSE_END = re.compile(r"[,;:](?=\s)|\s[-–—]\s")
 
 
 def clause_cut(text, n):
-    """A title's worth of `text` in at most `n` characters, ended at a sentence or a clause and never mid-phrase
-    (#44, #45): whole when it fits; else up to the last sentence end in the room, else the last clause mark, else
-    the words before the last subordinate clause that the room cuts through, with no dangling word left at the
-    end. Nothing marks that it was cut: what is left reads as a title."""
+    """A title's worth of `text` in at most `n` characters, ended at a sentence or a clause and never mid-phrase:
+    whole when it fits; else up to the last sentence end in the room, else the last clause mark, else the words
+    before the last subordinate clause that the room cuts through, with no dangling word left at the end. Nothing
+    marks that it was cut: what is left reads as a title."""
     s = " ".join(str(text or "").split())
     if len(s) <= n:
         return s
@@ -906,9 +917,9 @@ def whole_phrase(cut):
 # --- routing ---------------------------------------------------------------------------------------------------------
 
 def names_nothing(p, home, base=""):
-    """True when a path names no one shard or scope: the project's root, the store, a folder above either, or a
-    drive's root. A brief that names the project names everything in it, so it is no route and no fork's share (
-    ezexe's acceptance check of 2026-11-12: the project root routed a brief falsely and advised fork six times)."""
+    """True when a path names no one session's owned paths or scope: the project's root, the store, a folder above
+    either, or a drive's root. A brief that names the project names everything in it, so the path routes no message
+    to a session and counts toward no fork's share."""
     p = norm(p)
     if not p or p == "/" or re.fullmatch(r"[a-z]:/?", p, re.I):
         return True
@@ -918,9 +929,9 @@ def names_nothing(p, home, base=""):
 
 
 def owners(home, sid, text, base):
-    """[(sessionId, title, pattern)] of the other live sessions whose shard holds a path the message names, the
-    deepest shard first: those are the nodes the message belongs to. An archived or retired session owns nothing,
-    and a path naming the whole project names no shard."""
+    """The other live sessions whose owned paths hold a path the message names, the deepest first, each as its
+    sessionId, title and pattern: the sessions the message belongs to. A session that is not live owns nothing, and
+    a path naming the whole project names no session's owned paths."""
     named = [n for n in paths_in(text, base) if not names_nothing(n, home, base)]
     if not named:
         return []
@@ -931,7 +942,7 @@ def owners(home, sid, text, base):
     while p and p not in above:
         above.add(p)
         p = _parent(every.get(p, {}))
-    below, grow = set(), {sid}                    # a parent's shard covers its children's: never routed down
+    below, grow = set(), {sid}                    # a parent's owned paths cover its children's: never routed down
     while grow:
         grow = {k for k, v in every.items() if _parent(v) in grow and k not in below and k != sid}
         below |= grow
@@ -953,34 +964,34 @@ def route_text(home, sid, text, base):
     if not got:
         return ""
     oid, title, pat = got[0]
-    return (f"phi (p4-phi): this message names {pat}, which is the shard of \"{title}\" ({oid}). Send it there with "
-            f"SendMessage (`to`: {oid}) instead of working on it here or starting a new session for it.")
+    return (f"phi (p4-phi): this message names {pat}, among the owned paths of \"{title}\" `{oid}`. Send it there "
+            f"with SendMessage to {oid} instead of working on it here.")
 
 
 def shards_line(home, sid):
-    """The other sessions' shards in a few words, for the standing instruction; '' when none declared one."""
+    """The other sessions' owned paths in a few words, for the standing instruction; '' when none declared any."""
     every = _sessions(home)
-    out = [f"\"{_title(s)}\" ({oid}): {', '.join(shard_of(s)[:3])}" for oid, s in sorted(every.items())
+    out = [f"\"{_title(s)}\" `{oid}`: {', '.join(shard_of(s)[:3])}" for oid, s in sorted(every.items())
            if oid != sid and shard_of(s) and not gone(home, s)]
     return "; ".join(out[:6])
 
 
 # --- fork or fresh -----------------------------------------------------------------------------------------------------
 #
-# Measured 2026-11-12 on this machine's app records, 84 children with a parent transcript on disk: the parent's
-# transcript held a median 2.9 MB when a fork started (quartiles 1.9 and 4.4 MB) and 2.1 MB when a fresh session
-# did. Above 1 MB a parent had a median of 2 to 27 of ezexe's turns behind it, and already held 0.76 to 0.86 of
-# the brief's words: a fork there carries the rest of the parent's work into the child, while a brief carries most
-# of what the child needs. Under 1 MB, 17 of 22 children were fresh and the parent held little. So a fork is advised
-# only from a parent whose transcript is at most FORK_MAX_BYTES, for a child whose paths cover at least
-# FORK_SHARE of the parent's scope; otherwise a fresh session.
+# On this machine's app records, 84 children with a parent transcript on disk: the parent's transcript held a median
+# 2.9 MB when a fork started, with quartiles of 1.9 and 4.4 MB, and 2.1 MB when a fresh session did. Above 1 MB a
+# parent had a median of 2 to 27 of ezexe's turns behind it, and already held 0.76 to 0.86 of the brief's words: a
+# fork there carries the rest of the parent's work into the child, while a brief carries most of what the child
+# needs. Under 1 MB, 17 of 22 children were fresh and the parent held little. So a fork is advised only from a parent
+# whose transcript is at most FORK_MAX_BYTES, for a child whose paths cover at least FORK_SHARE of the parent's
+# scope; otherwise a fresh session.
 
 FORK_MAX_BYTES = 1024 * 1024
 FORK_SHARE = 0.5
 
 
 def scope_of(home, sid):
-    """What a session covers: its shard, else the files its latest delta and its children's anchor name."""
+    """What a session covers: its owned paths, else the files its latest delta and its children's anchor name."""
     s = _session(home, sid)
     if shard_of(s):
         return shard_of(s)
@@ -995,7 +1006,7 @@ def scope_of(home, sid):
 
 
 def advise_start(home, parent, tool_input, transcript_bytes):
-    """(what is advised, "fork" or "fresh", and why) for a start_session call from `parent`."""
+    """What is advised for a start_session call from `parent`, "fork" or "fresh", and why."""
     s = _session(home, parent)
     base = s.get("cwd") or ""
     brief = " ".join(str(tool_input.get(k) or "") for k in ("prompt", "background", "title"))
@@ -1013,8 +1024,8 @@ def advise_start(home, parent, tool_input, transcript_bytes):
                    f"would carry all of it into the child's context")
     if share < FORK_SHARE:
         why.append(f"the brief's paths cover {share:.0%} of the parent's scope" + ("" if child else
-                                                                                    " (the brief names no path)"))
-    return "fresh", "; ".join(why) + ". A fresh session given a brief and phi's slice of the anchor starts on its " \
+                                                                                    ": the brief names no path"))
+    return "fresh", "; ".join(why) + ". A fresh session given a brief and p4-phi's slice of the anchor starts on its " \
                                       "own task alone"
 
 
@@ -1024,15 +1035,15 @@ def pin_text(s):
     if not task:
         return ""
     shard = shard_of(s)
-    return (f"phi (p4-phi): this session is a fork; the conversation above its first message is the parent's and "
-            f"is background, not its agenda. Its own task: \"{task}\""
-            + (f"; its shard: {', '.join(shard[:5])}." if shard else ". It has declared no shard yet: "
+    return (f"phi (p4-phi): this session is a fork; the conversation above its first message is the parent's, "
+            f"inherited as context and not its agenda. Its own task: \"{task}\""
+            + (f"; its owned paths: {', '.join(shard[:5])}." if shard else ". It has declared no owned paths yet: "
                f"`phi.py shard <paths>` names what it alone changes."))
 
 
 def slice_text(home, s):
-    """A fresh child's start: what its parent's anchor holds for the child's paths, its shard or those its task
-    names, and nothing else. One line when the parent has nothing for them."""
+    """A fresh child's start: what its parent's anchor holds for the child's paths, its owned paths or those its
+    task names, and nothing else. One line when the parent has nothing for them."""
     parent = _parent(s)
     if not parent:
         return ""
@@ -1042,9 +1053,9 @@ def slice_text(home, s):
     mine = shard_of(s) or paths_in(s.get("task") or "", base)
     ver = int(anchor.get("version") or 0)
     if not mine:
-        return ""                                 # nothing to cut the anchor by: the background says the rest (P2)
-    head = (f"phi (p4-phi): what the parent, \"{_title(ps)}\", has for this session's paths "
-            f"({', '.join(show(p, base) for p in mine[:5])}), from its anchor v{ver}. Its task: \""
+        return ""                                 # nothing to cut the anchor by: phi.background_text says the rest
+    head = (f"phi (p4-phi): what the parent, \"{_title(ps)}\", has for this session's paths, "
+            f"{', '.join(show(p, base) for p in mine[:5])}, from its anchor v{ver}. Its task: \""
             f"{_short(ps.get('task') or '', 300)}\".")
     marks, heads, files = [], set(), []
     every = list((anchor.get("nodes") or {}).items()) + [(parent, anchor.get("parent") or {})]
@@ -1053,12 +1064,12 @@ def slice_text(home, s):
             continue
         for m in n.get("marks") or []:
             if any(overlap(p, x) for p in m.get("paths") or [] for x in mine):
-                marks.append(f"- \"{n.get('title') or nid}\": {m.get('claim')} (source: {m.get('source')})")
+                marks.append(f"- \"{n.get('title') or nid}\": {m.get('claim')}; source: {m.get('source')}")
         touched = [f for f in n.get("files") or [] if any(covers(x, f) for x in mine)]
         if touched:
             files.append(f"- \"{n.get('title') or nid}\" changed {', '.join(touched[:8])}")
             heads.update(n.get("heads") or [])
-    notes = [f"- {_short(r.get('claim'), 300)} (source: {_short(r.get('source'), 120)})"
+    notes = [f"- {_short(r.get('claim'), 300)}; source: {_short(r.get('source'), 120)}"
              for r in _rows(os.path.join(_dir(home, parent), "notes.jsonl"))
              if not str(r.get("claim") or "").lower().startswith(MARKS)
              and any(overlap(p, x) for p in paths_in(r.get("claim"), base) for x in mine)]
@@ -1075,10 +1086,12 @@ def slice_text(home, s):
 
 
 def scratch_line(home, cli, base):
-    """P9: the folder a started session keeps its temporary files in, named at its start so it never asks or guesses."""
+    """The session scratchpad directory a started session keeps its temporary files in, named at its start so it
+    never asks or guesses."""
     if not cli:
         return ""
-    return (f"phi (p4-phi): this session's scratch folder is {show(norm(os.path.join(home, 'temportal', 'tmp', cli)), base)}/"
+    return (f"phi (p4-phi): this session's scratchpad directory is "
+            f"{show(norm(os.path.join(home, 'temportal', 'tmp', cli)), base)}/"
             f": temporary files go there, and are named by that path.")
 
 
@@ -1094,26 +1107,27 @@ def mark_keys(home, parent):
 
 
 def child_paths(home, s):
-    """The paths a child's start is cut to: its shard, else those its task names; [] when neither names any."""
+    """The paths a child's start is cut to: its owned paths, else those its task names; [] when neither names any."""
     base = s.get("cwd") or _session(home, _parent(s)).get("cwd") or ""
     return shard_of(s) or paths_in(s.get("task") or "", base)
 
 
 # --- phi/ tracked in the store -------------------------------------------------------------------------------------------
 #
-# The session tree reaches the other machines through the store's git, like the rest of it: session.json, turns.jsonl,
-# notes.jsonl, reports.jsonl, plan.json and anchor.json are tracked; what is per machine or made again from them is
-# ignored. The ignore lines are made sure of here, before anything is added, since the recall hook that seeds the
-# rest of .gitignore runs beside this one at a start.
+# When the store's p4.json sets phi.track, the session tree reaches the other machines through the store's git, like
+# the rest of the store: session.json, turns.jsonl, notes.jsonl, reports.jsonl, plan.json and anchor.json are tracked,
+# and what is per machine or made again from them is ignored. While phi.track is off, which is the default, the whole
+# tree is ignored, as UNTRACKED lists. The ignore lines are made sure of here, before anything is added, since the
+# retrieval hook that seeds the rest of .gitignore runs beside this one at a start.
 
 IGNORED = ("phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/sessions.md", "phi/rules.md",
            "phi/catchup.json", "phi/**/*.tmp", "phi/**/*.lock", "phi/sessions/*/.calls/", "phi/.agents/", "phi/.nudge/",
-           # #38: the puppeteer's pages are made again from the records; routes.jsonl is kept
+           # the watcher's pages are made again from the records; routes.jsonl is kept
            "phi/sessions/*/ledger.md", "phi/sessions/*/ledger.json", "phi/sessions/*/ledger.sig",
            "phi/sessions/*/watcher.json", "phi/meta-ledger.md", "phi/.issue-states.json", "phi/.routes-checked",
-           # #43: what did not fit beside a prompt, and the standing instructions in full: pages of this machine
+           # what did not fit beside a prompt, and the standing instructions in full: pages of this machine
            "phi/sessions/*/held.md", "phi/sessions/*/standing.md",
-           # #49: the sessions waiting for ezexe's archive, made again from the records
+           # the sessions waiting to be archived, made again from the records
            "phi/ready-to-archive.md",
            # what one hook read from the app's records, kept so the next reads one file: this machine's alone
            "phi/.cache/")
@@ -1124,7 +1138,7 @@ FILTER_ATTR = "phi/** filter=p4path"
 
 
 def _path_filter(home):
-    """The store's git runs pathfilter.py on phi/ (PL1): set in this machine's git config, which names this machine's
+    """The store's git runs pathfilter.py on phi/: set in this machine's git config, which names this machine's
     python and plugin, and in .gitattributes, which every machine shares. True when .gitattributes changed."""
     py = sys.executable.replace("\\", "/")
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pathfilter.py").replace("\\", "/")
@@ -1142,8 +1156,8 @@ def _path_filter(home):
     if FILTER_ATTR in {x.strip() for x in text.splitlines()}:
         return False
     with open(ga, "a", encoding="utf-8", newline="\n") as f:
-        f.write(("" if not text or text.endswith("\n") else "\n") + "# the project's root as {project} in git (p4-phi)\n"
-                + FILTER_ATTR + "\n")
+        f.write(("" if not text or text.endswith("\n") else "\n") + "# the project's root as {project} in git, "
+                "by p4-phi\n" + FILTER_ATTR + "\n")
     return True
 
 
@@ -1159,19 +1173,19 @@ def _ignore_lines(home):
     if missing:
         with open(gi, "a", encoding="utf-8", newline="\n") as f:
             f.write(("" if not text or text.endswith("\n") else "\n") + "# the session tree's per-machine and made-again "
-                    "files (p4-phi)\n" + "".join(x + "\n" for x in missing))
+                    "files, by p4-phi\n" + "".join(x + "\n" for x in missing))
     return bool(missing)
 
 
-# #35: while phi.track is off nothing of the session tree is ever committed, so all of it is ignored, under its own
+# While phi.track is off nothing of the session tree is ever committed, so all of it is ignored, under its own
 # marker line; when tracking is turned on the block comes out again, and the per-machine lines of IGNORED stay.
 UNTRACKED_MARK = "# the session tree, while phi.track is off (p4-phi)"
 UNTRACKED = ("phi/sessions/", "phi/anchor.json", "phi/reports.jsonl", "phi/start-requests.jsonl")
 
 
 def tree_ignore(home, tracked):
-    """The store's .gitignore with the untracked tree's block present (tracking off) or taken out (on). True when
-    the file changed."""
+    """The store's .gitignore with the untracked tree's block present while tracking is off, or taken out while it
+    is on. True when the file changed."""
     gi = os.path.join(home, ".gitignore")
     try:
         with open(gi, encoding="utf-8") as f:
@@ -1199,11 +1213,10 @@ def tree_ignore(home, tracked):
 
 
 def track(home, first_only=False):
-    """Stage phi/ in the store's git; the first time, commit it on its own. Returns True when it committed. Only
-    when the store's p4.json sets phi.track; otherwise the session tree is kept ignored (#35), and the IGNORED lines
-    are made sure of either way, so the puppeteer's state files never show as untracked (#56). The project's root
-    goes into git as {project} through the store's path filter (PL1), so another machine's checkout names its own
-    files."""
+    """Stages phi/ in the store's git, and the first time commits it on its own. Returns True when it committed. Only
+    when the store's p4.json sets phi.track; otherwise the session tree is kept ignored. The IGNORED lines are made
+    sure of either way, so the watcher's state files never show as untracked. The project's root goes into git as
+    {project} through the store's path filter, so another machine's checkout names its own files."""
     try:
         import p4conf
         on = bool((p4conf.section(home, "phi", write=False) or {}).get("track"))
@@ -1214,7 +1227,7 @@ def track(home, first_only=False):
     except OSError:
         dropped = False
     if not on:
-        try:                # #56: the made-again files at phi's root are ignored while tracking is off too
+        try:                # the made-again files at the root of phi/ are ignored while tracking is off too
             if os.path.isdir(home):
                 _ignore_lines(home)
         except OSError:
@@ -1246,12 +1259,14 @@ def track(home, first_only=False):
     return True
 
 
-# --- a shared home store -----------------------------------------------------------------------------------------------
+# --- one session tree for several stores: phi.home --------------------------------------------------------------------
 #
-# Related repositories can share one session tree: a project's p4.json names `phi.home`, the home store's git remote
-# (not a path, so it holds on every machine). Each machine resolves remotes to its own store folders through a map kept
-# per user, beside Claude Code's settings and in no repository: p4-stores.json, written at every start for the store
-# that started. The project's session tree goes to the home's phi/; its memory, rules and recall data stay its own.
+# Related repositories can share one session tree: a project's p4.json names `phi.home`, the git remote of the store
+# that holds the tree, which holds on every machine where a path would not. Each machine resolves remotes to its own
+# store folders through a map kept per user, beside Claude Code's settings and in no repository: p4-stores.json,
+# written at a session's start for a store whose p4.json names a home, when the folder kept for that remote differs.
+# The project's session tree goes to the phi/ of the store `phi.home` names; its memory, rules and retrieval data stay
+# its own.
 
 def stores_map_path():
     return os.environ.get("P4_PHI_STORES") or os.path.join(
@@ -1274,7 +1289,8 @@ def remote_of(store):
 
 def remember_store(store):
     """Keep this machine's folder for the store's remote in the per-user map, only for a store whose p4.json names a
-    home (the home names itself): no file outside a repository for anyone who never set one. Quiet on any failure."""
+    home; the store that is the home names itself there. No file outside a repository is written for anyone who
+    never set one. Quiet on any failure."""
     try:
         import p4conf
         if not (p4conf.section(store, "phi", write=False) or {}).get("home"):
@@ -1296,7 +1312,8 @@ def remember_store(store):
 
 
 def tree_home(store):
-    """(where the session tree of `store`'s project lives, the remote named but not found here or '')."""
+    """Where the session tree of `store`'s project lives, and the remote p4.json names when this machine has not
+    found it, else ''."""
     if not store:
         return store, ""
     try:
@@ -1315,18 +1332,18 @@ def tree_home(store):
     return store, str(named)
 
 
-# --- stale nodes ---------------------------------------------------------------------------------------------------------
+# --- stale sessions ---------------------------------------------------------------------------------------------------
 #
-# A finished child whose work a newer note supersedes holds a picture of the tree that is no longer true. Relayed to, or
-# relayed from, it can only push the others back to that picture: ezexe's "uncertainty loop", met when a migration
-# session's recall/ plus temportal/ store was superseded by the fold into phi/. So it is fenced off at once: its
-# still-true outcome kept as one note on its parent, it left out of the anchor, the slices and the relay, and the parent
-# told to archive it. A stale child that is messaged again is handed what superseded it, and is un-staled only when its
-# next turn ends having seen that anchor.
+# A finished child whose work a newer note supersedes holds a picture of the tree that is out of date. Anything handed
+# to it or from it can only push the others back to that picture, round and round. So it is fenced off at once: its
+# still-true outcome is kept as one note on its parent, it is left out of the anchor, the slices and what relay.py
+# hands the other sessions, and its parent is told it is counted as archived. A stale child that is messaged again is
+# handed what superseded it, and is live again only when its next turn ends having seen that anchor.
 
 def finished(home, sid):
-    """True when a session's work is over: its last turn was shown done or its plan has steps and none still open,
-    and nothing it changed is left uncommitted. A session with no plan and no done turn is never taken as finished."""
+    """True when a session's work is over: its last turn was shown done or its task list has steps and none still
+    open, and nothing it changed is left uncommitted. A session with no task list and no done turn is never taken as
+    finished."""
     import plans
     turns = _rows(os.path.join(_dir(home, sid), "turns.jsonl"))
     if not turns:
@@ -1337,8 +1354,8 @@ def finished(home, sid):
 
 
 def superseded(home, sid, s, others_marks):
-    """The newer note that supersedes a finished session's work: one naming a file of its last delta or its shard,
-    or sharing words with its root step. None when there is none."""
+    """The newer note that supersedes a finished session's work: one naming a file of its last delta or its owned
+    paths, or sharing words with its parent step. None when there is none."""
     import plans
     turns = _rows(os.path.join(_dir(home, sid), "turns.jsonl"))
     last = turns[-1] if turns else {}
@@ -1374,7 +1391,7 @@ def retire(home, parent, sid, s, by, version, now):
     claim = (f"replaces: \"{_title(s)}\" ({sid}) as a live node. What it left in place stays true: {left}, at "
              f"{heads}. " + findings_of(last) + " Its picture of the tree is "
              f"superseded by \"{title}\": \"{_short(m.get('claim'), 300)}\".")
-    row = {"time": now, "claim": claim[:FINDINGS_CHARS + 1600], "source": f"phi stale-node retirement, anchor v{version}",
+    row = {"time": now, "claim": claim[:FINDINGS_CHARS + 1600], "source": f"p4-phi, a stale session, anchor v{version}",
            "kind": "decision", "cliSessionId": ""}
     path = os.path.join(_dir(home, parent), "notes.jsonl")
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1436,9 +1453,9 @@ LOCK_STALE_S = 10.0
 
 
 def _pend_archive(home, parent, sid, s, kind):
-    """The parent's next message names this child to archive (stale_text). Under a lock: two children retired at
-    the same minute each read-modify-wrote the parent's session.json, and the later write lost the earlier child,
-    so the parent was never told to archive it (check 6, 2026-11-12)."""
+    """Puts this child on its parent's list for the parent's next message, which stale_text words. Under the parent's
+    lock, since two children counted as archived in the same minute would each read-modify-write the parent's
+    session.json, and the later write would drop the earlier child."""
     ppath = os.path.join(_dir(home, parent), "session.json")
     with locked(ppath) as lk:
         if not lk.held:                           # never written unlocked: kept on a file of its own, read later
@@ -1473,7 +1490,7 @@ def drain_archive(home, parent):
     return out
 
 
-# #49: briefs say "report when done"; "archive when done" in an older brief still marks the session the same way
+# a brief that says "report when done" or "archive when done" marks its session to be counted as archived when done
 DISPOSABLE = re.compile(r"\b(?:archive(?:d)?|report)\s+(?:it\s+|this session\s+)?when\s+(?:it(?:'s| is)\s+|"
                         r"you(?:'re| are)\s+)?(?:done|finished)\b", re.I)
 
@@ -1487,8 +1504,8 @@ def commits_between(repo, old, new):
 
 
 def outcome(home, sid, s):
-    """What a finished session leaves: (files changed, heads with the commits made since its first turn, what is
-    still open)."""
+    """What a finished session leaves: the files it changed, its heads, the commits made since its first turn, and
+    what is still open."""
     import plans
     turns = _rows(os.path.join(_dir(home, sid), "turns.jsonl"))
     base = s.get("cwd") or ""
@@ -1506,7 +1523,7 @@ def outcome(home, sid, s):
     p = plans.load(home, sid)
     still = [f"step {x['addr']} \"{_short(x.get('content'), 80)}\" {x.get('status') or 'pending'}"
              for x in p.get("steps") or [] if x.get("status") != "completed"]
-    still += [f"task {t.get('id')} ({_short(t.get('what'), 60)}) open" for _, t in plans._tasks(p)
+    still += [f"background task {t.get('id')}, {_short(t.get('what'), 60)}, open" for _, t in plans._tasks(p)
               if t.get("status") == "open"]
     dirty = uncommitted(files)
     if dirty:
@@ -1518,8 +1535,8 @@ CLOSES = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+((?:[\w.-]+/
 
 
 def closing_commits(home, sid, s):
-    """[(repo, short sha, subject, [issues])] of the commits a session made since its first turn whose messages
-    close an issue (`Closes #N`), oldest first."""
+    """The commits a session made since its first turn whose messages close an issue with a line such as
+    `Closes #N`, oldest first, each as its repository, short sha, subject and issues."""
     turns = _rows(os.path.join(_dir(home, sid), "turns.jsonl"))
     first, last = {}, {}
     for r in turns:
@@ -1549,7 +1566,7 @@ def closing_commits(home, sid, s):
 
 
 def stores_of(repo):
-    """The p4 stores a change in `repo` touches, as far as phi can see: the store of the repository itself, and of
+    """The stores a change in `repo` touches, as far as p4-phi can see: the store of the repository itself, and of
     the nearest folder above it that holds one, as a marketplace checkout sits inside its project."""
     out, d = [], str(repo or "")
     for _ in range(4):
@@ -1567,9 +1584,9 @@ OWED_MAX = 6                   # owed items named in one push line
 
 
 def owed(repos, main="main"):
-    """What a change in `repos` still owes before it is pushed, from what phi can see (#51): the open retrain
-    notices in `models/retrain-needed.tsv` of a store it touches, and the machine branches of that store that are
-    behind main, read from the refs already fetched. Nothing is fetched and nothing is run."""
+    """What a change in `repos` still owes before it is pushed, as far as p4-phi can see: the open retrain notices
+    in `models/retrain-needed.tsv` of a store it touches, and the machine branches of that store that are behind
+    main, read from the refs already fetched. Nothing is fetched and nothing is run."""
     out = []
     for store in dict.fromkeys(s for r in repos for s in stores_of(r)):
         try:
@@ -1580,8 +1597,8 @@ def owed(repos, main="main"):
             rows, where = [], ""
         if rows:
             parts = ", ".join(dict.fromkeys(str(r.get("component") or "a model") for r in rows))
-            out.append(f"{len(rows)} open retrain notice{'s' if len(rows) != 1 else ''} in {where} ({_short(parts, 120)}): "
-                       f"run the retrain they ask for")
+            out.append(f"{len(rows)} open retrain notice{'s' if len(rows) != 1 else ''} in {where}, "
+                       f"for {_short(parts, 120)}: run the retrain they ask for")
         top = _git(store, "rev-parse", "--show-toplevel")
         if not top or top.returncode != 0 or norm(top.stdout.strip()) != norm(store):
             continue                               # the store is not a repository of its own: no machine branches
@@ -1599,8 +1616,9 @@ def owed(repos, main="main"):
 
 
 def push_text(child_title, child, commits, owes=()):
-    """The top session's line: push and sync a finished child's issue-closing commits now, not ask. With `owes`,
-    what the change still owes comes first: finished before the push, or named in the report before it (#51)."""
+    """The top-level session's line: push and sync a finished child's issue-closing commits now, without asking.
+    With `owes`, what the change still owes comes first: finished before the push, or named in the report before
+    it."""
     named = "; ".join(f"{sha} \"{_short(subj, 80)}\" closes {', '.join(n)} in {repo}" for repo, sha, subj, n in commits)
     owes = [x for x in owes if x]
     first = ""
@@ -1609,21 +1627,21 @@ def push_text(child_title, child, commits, owes=()):
                  + (f"; and {len(owes) - OWED_MAX} more" if len(owes) > OWED_MAX else "")
                  + ". Finish each first. Where one cannot be finished from here, name it in the report before "
                    "pushing, not after.")
-    return (f"phi (p4-phi): \"{child_title}\" ({child}) finished with commits that close issues: {named}. "
-            f"ezexe's rule is that green work closing an issue is pushed at once: once its suites pass, push that "
-            f"repository's main and sync each p4 store it touches with `p4.py sync --push`, without asking ezexe, "
-            f"and say in one line what was pushed.{first} Asking stays for force-pushes, history rewrites and "
-            f"deletions.")
+    return (f"phi (p4-phi): \"{child_title}\" `{child}` finished with commits that close issues: {named}. "
+            f"Green work that closes an issue is pushed at once: "
+            f"once its suites pass, push that repository's main and sync each store it touches with "
+            f"`p4.py sync --push`, without asking ezexe, and say in one line what was pushed.{first} A force-push, a "
+            f"history rewrite or a deletion still waits on ezexe.")
 
 
-FINDINGS_CHARS = 3000          # of a retired child's final report, kept in its replaces: note
+FINDINGS_CHARS = 3000          # of the final report of a child counted as archived, kept in its replaces: note
 BARE = re.compile(r"^\W*(?:\w+\s+){0,4}(?:is\s+)?(?:done|finished|complete[d]?)(?:\s+and\s+reported)?\W*$", re.I)
 
 
 def findings_of(last):
-    """A retired child's findings from its final turn: the shown-done line, and its report in full up to
-    FINDINGS_CHARS, from the turn's earlier messages when the last one only says it is done. Says so when the turn
-    left none; never a bare "done"."""
+    """The findings of a child counted as archived, from its final turn: the shown-done line, and its report in full
+    up to FINDINGS_CHARS, from the turn's earlier messages when the last one only says it is done. Says so when the
+    turn left none; never a bare "done"."""
     done = " ".join(str(last.get("done") or "").split())
     report = str(last.get("report") or "").strip()
     said = str(last.get("said") or "").strip()
@@ -1633,17 +1651,18 @@ def findings_of(last):
         report = ""
     out = f"Shown done: \"{_short(done, 400)}\". " if done and not BARE.match(done) else ""
     if report:
-        # #34: a report leads with its result, so the head is kept and the tail cut
+        # a report leads with its result, so the head is kept and the tail cut
         cut = report if len(report) <= FINDINGS_CHARS else report[:FINDINGS_CHARS - 3].rstrip() + "..."
         return out + f"Its findings, from its final report: \"{cut}\"."
     return out + "Its final turn left no report text with findings: read its transcript before relying on it."
 
 
 def retire_done(home, parent, sid, now, extra="", archived=False):
-    """A disposable child whose work is over: its outcome kept as one replaces: note on its parent, it left out of
-    the relay, the anchors and the down-lines, and the parent told at its next message to archive it. Returns True
-    when it was retired now. With `archived`, a child that archived itself before its work was shown done (#46):
-    the note says so and names the plan steps it left open."""
+    """Counts as archived a child whose work is over, one marked `disposable` or one that archived itself: its outcome
+    is kept as one replaces: note on its parent, it is left out of what relay.py hands other sessions, the anchors and
+    the down-lines, and its parent is told at its next message that it is counted as archived. Returns True when it
+    was counted as archived now. With `archived`, the child archived itself in the app before its work was shown
+    done: the note says so and names the plan steps it left open."""
     path = os.path.join(_dir(home, sid), "session.json")
     disk = _read_json(path)
     if not parent or not disk or disk.get("doneRetired"):
@@ -1664,7 +1683,7 @@ def retire_done(home, parent, sid, now, extra="", archived=False):
              + ("; ".join(commits) or "none") + ". Still open: " + ("; ".join(still) or "nothing") + ". "
              + findings_of(last))
     row = {"time": now, "claim": claim[:FINDINGS_CHARS + 2000],
-           "source": "phi self-archive retirement" if archived else "phi report-when-done retirement",
+           "source": "phi self-archive retirement" if archived else "p4-phi, a report-when-done child",
            "kind": "decision", "cliSessionId": ""}
     npath = os.path.join(_dir(home, parent), "notes.jsonl")
     os.makedirs(os.path.dirname(npath), exist_ok=True)
@@ -1676,14 +1695,14 @@ def retire_done(home, parent, sid, now, extra="", archived=False):
     return True
 
 
-# --- merged worktrees named for removal (#22) ---------------------------------------------------------------------------
+# --- merged worktrees named for removal -------------------------------------------------------------------------------
 #
-# Leftover checkouts under .claude/worktrees (one was 394 MB, mostly an ignored build tree) confused the top session
-# and wasted disk. When a child is retired or archived, and at a top session's step boundary, the project's worktrees
-# whose branch is already in the branch it came from, and that hold nothing else, are named for removal.
+# A leftover checkout under .claude/worktrees holds disk and misleads the top-level session. When a top-level session
+# is told a child is counted as archived, and at its step boundary, the project's worktrees whose branch is already in
+# the branch it came from, and that hold nothing else, are named for removal.
 
 def worktrees(repo):
-    """[(path, branch)] of a repository's linked worktrees, the main checkout left out."""
+    """A repository's linked worktrees, each as its path and branch, the main checkout left out."""
     r = _git(repo, "worktree", "list", "--porcelain")
     if not r or r.returncode != 0:
         return []
@@ -1713,9 +1732,9 @@ def _open_pr(repo, branch):
 
 
 def merged_worktrees(repo):
-    """(those to remove: [(path, branch, base)], those kept: [(path, reason)]) of a repository's worktrees. One is
-    removed when its branch is an ancestor of the main checkout's branch or of the default branch, and it holds no
-    uncommitted, untracked or stashed work, no commit its upstream lacks and no open pull request."""
+    """A repository's worktrees to remove, each as its path, branch and base, and those kept, each as its path and
+    reason. One is removed when its branch is an ancestor of the main checkout's branch or of the default branch,
+    and it holds no uncommitted, untracked or stashed work, no commit its upstream lacks and no open pull request."""
     if not repo:
         return [], []
     head = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
@@ -1758,8 +1777,8 @@ def merged_worktrees(repo):
 
 
 def worktrees_text(home, sid, repo):
-    """The top session's line naming the merged worktrees to remove and the ones kept with why, said once per set;
-    '' when there is nothing new to say."""
+    """The top-level session's line naming the merged worktrees to remove and the ones kept with why, said once per
+    set; '' when there is nothing new to say."""
     gone, kept = merged_worktrees(repo)
     if not gone:
         return ""
@@ -1772,14 +1791,14 @@ def worktrees_text(home, sid, repo):
     if disk:
         disk["worktreesTold"] = (told + [k for k in keys if k not in told])[-100:]
         _write_json(path, disk)
-    rm = "; ".join(f"`git worktree remove \"{p}\"` then `git branch -d {b}` (in {b0})" for p, b, b0 in gone)
-    keep = "; ".join(f"{p} ({why})" for p, why in kept)
+    rm = "; ".join(f"`git worktree remove \"{p}\"` then `git branch -d {b}`, merged into {b0}" for p, b, b0 in gone)
+    keep = "; ".join(f"{p}: {why}" for p, why in kept)
     return (f"phi (p4-phi): worktrees whose branch is merged and that hold nothing else, so remove them now: {rm}."
             + (f" Kept: {keep}." if keep else ""))
 
 
 def stale_text(pend):
-    """The parent's one line about the children in `pend` to archive, stale or done; '' for none."""
+    """The parent's one line about the children in `pend` that are counted as archived, stale or done; '' for none."""
     pend = [x for x in pend or [] if isinstance(x, dict)]
     if not pend:
         return ""
@@ -1797,34 +1816,30 @@ def stale_text(pend):
     return "\n".join(out)
 
 
-# --- no session archives a session (#49) ------------------------------------------------------------------------------
+# --- counted as archived, then archived in the app --------------------------------------------------------------------
 #
-# A finished or superseded session is retired in phi at once: the replaces: note on its parent, `doneRetired` or
-# `stale` in its session.json, and `gone` true for owners, shards, the tree and the relay from that moment. The
-# archive itself is ezexe's own action in the app. ezexe is told once, by the parent's one line, and the sessions
-# still waiting for that action are listed on <home>/phi/ready-to-archive.md.
+# A finished or superseded session is counted as archived by p4-phi at once: the replaces: note on its parent,
+# `doneRetired` or `stale` in its session.json, and `gone` true for routing, owned paths, the tree and what relay.py
+# hands other sessions from that moment. Its parent is told once, and the sessions the app has not archived yet are
+# listed on <home>/phi/ready-to-archive.md. A done top-level session offers its tree's finished ones to ezexe, and
+# phi.py's archive hook, h_self_archive, says which session may call the archive tool.
 
 READY = ("The chain treats them as archived from now. They are ready to archive, but call no archive tool for them "
          "now: when the top session of this tree is done, it offers the finished sessions to ezexe as one quick "
          "select and archives exactly the ones ezexe picks.")
-NO_ARCHIVE = ("phi (p4-phi): no session archives a session, itself included (ezexe/p4#49). The archive is ezexe's "
-              "own action in the app.")
-# ezexe: "the self archival request should be simplified to a button the user can press"
-# and: "its meant for topmost level sessions but when there done(ready to get archioved) if they have still
-# sessions that are ready to be archive on quick select for user"
-BUTTON = ("This is the top session of its tree and it is done, so end this turn with `mcp__ccd_turn__wrap_up` whose "
-          "first action is the app's `archive`, and a recap of one sentence naming what was done: that puts the "
+NO_ARCHIVE = ("phi (p4-phi): no session archives a session, itself included.")
+BUTTON = ("This session is at the top level of its tree and it is done, so end this turn with `mcp__ccd_turn__wrap_up` "
+          "whose first action is the app's `archive`, and a recap of one sentence naming what was done: that puts the "
           "button in this session's next-step box, and ezexe archives it with one press. Write no paragraph asking "
           "for it, and call no archive tool for this session.")
-CHILD_DONE = ("This session was started by another, so it shows no archive button and asks for nothing: report what "
-              "was done and end the turn. It retires to the session that started it, and the chain treats it as "
-              "archived. Call no archive tool.")
+CHILD_DONE = ("This session has a parent session, so it shows no archive button and asks for nothing: report what "
+              "was done and end the turn. Call no archive tool.")
 OFFER_MAX = 4                    # options one AskUserQuestion holds
 
 
 def ready_in_tree(home, top):
-    """The sessions under `top` that phi holds as finished and the app has not archived, oldest first:
-    [(sessionId, title, parent)]."""
+    """The sessions under `top` that p4-phi holds as finished and the app has not archived, oldest first, each as its
+    sessionId, title and parent."""
     every = _sessions(home)
     out = []
     for sid, s in sorted(every.items(), key=lambda kv: str(kv[1].get("createdAt") or "")):
@@ -1840,9 +1855,10 @@ def ready_in_tree(home, top):
 
 
 def offer(home, top):
-    """The quick select a done top session puts to ezexe -> [{"label", "description", "ids"}]: one option a
-    finished session while they fit one question, else one option a parent with its children named, and one for
-    all of them. The labels are what the archive hook reads ezexe's picks by, so they are kept on the top session."""
+    """The options of the multiple-choice question a done top-level session puts to ezexe, each with a label, a
+    description and the ids it archives: one option a finished session while they fit one question, else one option
+    for all of them and one for each of the first OFFER_MAX - 1 parents, its children named. The labels are what the archive hook reads ezexe's
+    picks by, so they are kept on the top-level session."""
     ready = ready_in_tree(home, top)
     if not ready:
         return []
@@ -1873,7 +1889,7 @@ def offer(home, top):
 
 
 def offer_text(home, top):
-    """The line a done top session is handed about the finished sessions of its tree, '' when there are none."""
+    """The line a done top-level session is handed about the finished sessions of its tree, '' when there are none."""
     opts = offer(home, top)
     if not opts:
         return ""
@@ -1881,17 +1897,17 @@ def offer_text(home, top):
     lines = "\n".join(f"- label \"{o['label']}\", description \"{o['description']}\"" for o in opts)
     return (f"phi (p4-phi): {n} session{'s' if n != 1 else ''} of this tree {'are' if n != 1 else 'is'} finished and "
             f"not yet archived. In this closing turn, before `mcp__ccd_turn__wrap_up`, put them to ezexe as one "
-            f"quick select: one `AskUserQuestion` with `multiSelect` true, the question saying that archiving all of "
-            f"them is the recommended choice, and exactly these options"
+            f"multiple-choice question: one `AskUserQuestion` with `multiSelect` true, the question saying that "
+            f"archiving all of them is the recommended choice, and exactly these options"
             + (", with a last option \"None of them\"" if len(opts) == 1 else "") + f":\n{lines}\n"
             f"Archive none of them before ezexe has answered. Then call `mcp__ccd_session_mgmt__archive_session` for "
-            f"exactly the sessions under the options ezexe picked, and for no other: ezexe's selection is the user "
-            f"action, and phi lets those calls through.")
+            f"exactly the sessions under the options ezexe picked, and for no other: the pick is ezexe's, and p4-phi "
+            f"lets those calls through.")
 
 
 def picked(home, top, calls):
-    """The session ids ezexe picked in this turn's quick select: the ids under each offered option whose label an
-    answered AskUserQuestion of the turn carries."""
+    """The session ids ezexe picked in this turn's multiple-choice question: the ids under each offered option whose
+    label an answered AskUserQuestion of the turn carries."""
     offer_ = [o for o in _session(home, top).get("archiveOffer") or [] if isinstance(o, dict)]
     said = " \n ".join(str(c.get("result") or "") for c in calls or []
                        if c.get("name") == "AskUserQuestion" and not c.get("failed"))
@@ -1903,7 +1919,7 @@ def picked(home, top, calls):
 
 
 def link_of(x):
-    """A finished child as the link ezexe opens to press its archive button: [its title](#its id)."""
+    """A finished child as a link ezexe can open, written [its title](#its id)."""
     title = str(x.get("title") or x.get("id") or "").replace("[", "(").replace("]", ")")
     return f"[{title}](#{x.get('id')})"
 
@@ -1913,8 +1929,8 @@ def ready_path(home):
 
 
 def ready_page(home):
-    """<home>/phi/ready-to-archive.md: the sessions phi holds as finished or superseded that the app has not
-    archived yet, each with what it was and when. Rewritten whenever one is retired or reopened."""
+    """<home>/phi/ready-to-archive.md: the sessions p4-phi holds as finished or superseded that the app has not
+    archived yet, each with what it was and when. Rewritten whenever one is counted as archived or reopened."""
     rows = []
     for sid, s in sorted(_sessions(home).items()):
         mark = s.get("doneRetired") or s.get("stale")
@@ -1923,8 +1939,11 @@ def ready_page(home):
         when = mark.get("time", "") if isinstance(mark, dict) else ""
         rows.append(f"- \"{_title(s)}\" `{sid}`: {'superseded' if s.get('stale') else 'finished'} {when}".rstrip())
     text = "\n".join(["# Ready to archive", "",
-                      "Sessions p4-phi holds as finished or superseded and treats as archived.",
-                      "Only ezexe archives a session, in the app.", ""] + (rows or ["None."])) + "\n"
+                      "Sessions p4-phi holds as finished or superseded and counts as archived, "
+                      "not yet archived in the app.",
+                      "The page is made again whenever a session is counted as archived or messaged again, and a "
+                      "session archived in the app or live again drops off then.", ""]
+                     + (rows or ["None."])) + "\n"
     path = ready_path(home)
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1943,6 +1962,6 @@ def reopened(home, s, now):
     sid, parent = s.get("sessionId"), _parent(s)
     if parent:
         warn(home, parent, f"reopened:{sid}:{now}",
-             f"\"{_title(s)}\" ({sid}), which phi held as finished and treated as archived, was messaged again and "
-             f"is reopened: it is a live node once more, so do not count its work as over.")
+             f"\"{_title(s)}\" `{sid}`, which p4-phi held as finished and counted as archived, was messaged again and "
+             f"is reopened: it is a live session once more, so do not count its work as over.")
     ready_page(home)

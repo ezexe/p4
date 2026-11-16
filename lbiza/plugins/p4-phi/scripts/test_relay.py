@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""relay.py: shards, deltas, anchors and the rebase check, on a three-session tree run through phi's own hooks.
+"""relay.py: owned paths, deltas, anchors, the rebase check and routing, on a tree of three sessions run through
+phi.py's hooks, with fork or fresh, tracking in the store, a shared store and merged worktrees beside them.
 
     python3 -I lbiza/plugins/p4-phi/scripts/test_relay.py
 
-The tree: a top session and two sessions it started. One of them deprecates a path the other has uncommitted edits
+The tree: a top-level session and two child sessions. One of them deprecates a path the other has uncommitted edits
 in; the other is warned on its next message, before any tool runs.
 """
 
@@ -35,9 +36,9 @@ class Paths(unittest.TestCase):
         self.assertEqual(relay.norm("/e/projects/x/", ""), relay.norm("E:/projects/x", ""))
 
     def test_a_child_is_told_its_scratch_folder_and_paths_relative(self):
-        """P9 and the slice header: the child's own scratch folder, and paths as the project names them."""
+        """The child's own scratchpad directory, and the slice's paths as the project names them."""
         line = relay.scratch_line("E:/proj/.claude/p4", "abc-1", "E:/proj")
-        self.assertIn("scratch folder is .claude/p4/temportal/tmp/abc-1/", line)
+        self.assertIn("scratchpad directory is .claude/p4/temportal/tmp/abc-1/", line)
         self.assertEqual(relay.scratch_line("E:/proj/.claude/p4", "", "E:/proj"), "")
         tmp = tempfile.mkdtemp()
         try:
@@ -47,14 +48,15 @@ class Paths(unittest.TestCase):
             kid = {"sessionId": "kid", "spawnedFrom": {"sessionId": "top"}, "cwd": tmp,
                    "task": f"fix {tmp}/src/a.py"}
             text = relay.slice_text(home, kid)
-            self.assertIn("(src/a.py)", text)
+            self.assertIn("paths, src/a.py, from", text)
             self.assertNotIn(relay.norm(tmp), text.split("Its task")[0])
-            self.assertEqual(relay.slice_text(home, dict(kid, task="no path here")), "", "P2: no empty paths line")
+            self.assertEqual(relay.slice_text(home, dict(kid, task="no path here")), "", "no empty paths line")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
     def test_the_same_words_are_queued_once_and_no_cli_id_gets_no_background(self):
-        """R7: one quote relayed twice under two stamps. R8: a call with no session id given the background again."""
+        """The same words under two keys are queued once, and a call with no CLI session id is not given the
+        background again."""
         tmp = tempfile.mkdtemp()
         try:
             home = os.path.join(tmp, "p4")
@@ -74,7 +76,8 @@ class Paths(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
     def test_a_first_look_relays_no_backlog_and_revisions_collapse(self):
-        """RF1: a first look once replayed a day of revisions, 40 lines and 11.4 KB."""
+        """A first look hands on none of what was there before it, and a child's revisions since the last look
+        collapse into one line."""
         tmp = tempfile.mkdtemp()
         try:
             home = os.path.join(tmp, "p4")
@@ -97,7 +100,7 @@ class Paths(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
     def test_a_title_is_cut_at_a_clause_never_mid_phrase(self):
-        """#44: "count only the sessions that the command" and "count every session folder under"."""
+        """A cut ends where a clause ends, never mid-phrase as "count only the sessions that the command" would."""
         self.assertEqual(relay.clause_cut("count only the sessions that the command python -I phi.py tree prints", 46),
                          "count only the sessions")
         self.assertEqual(relay.clause_cut("count every session folder under E:/projects/p4-phi/.claude/p4/phi", 46),
@@ -109,13 +112,14 @@ class Paths(unittest.TestCase):
         self.assertEqual(relay.clause_cut("a short title", 46), "a short title")
 
     def test_git_bash_and_wsl_paths_are_absolute(self):
-        """P5: /e/x as Git Bash writes it is E:/x, not a path under the base."""
+        """/e/x as Git Bash writes it is E:/x, not a path under the base."""
         self.assertEqual(relay.paths_in("cat /e/projects/p4-phi/x/a1.txt", "E:/projects/p4-phi"),
                          [relay.norm("E:/projects/p4-phi/x/a1.txt")])
         self.assertEqual(relay.norm("/mnt/e/projects/x"), relay.norm("E:/projects/x"))
 
     def test_a_path_on_a_missing_drive_never_hangs(self):
-        """H1: a stored mark path on a drive this machine lacks looped repo_of forever and hung every message."""
+        """A mark's path on a drive this machine lacks gets no repository at once and warns nobody, and the mark is
+        still handed on."""
         import time
         t0 = time.time()
         self.assertEqual(relay.repo_of("s:/replaces"), "")
@@ -131,7 +135,7 @@ class Paths(unittest.TestCase):
                 "nodes": {"sib": {"title": "sib", "marks": [{"claim": "replaces: x", "time": "2026-11-12 14:00",
                                                              "paths": ["s:/replaces"]}]}}}))
             text, _ = relay.rebase(home, "kid", 9000, lambda xs, n: xs)
-            self.assertIn("replaces: x", text, "the mark is still relayed")
+            self.assertIn("replaces: x", text, "the mark is still handed on")
             self.assertNotIn("stop before any tool", text)
             self.assertLess(time.time() - t0, 10)
         finally:
@@ -142,7 +146,7 @@ class Paths(unittest.TestCase):
         self.assertEqual(got, [relay.norm("E:/w/lib/x.py"), relay.norm("E:/w/docs/old.md")])
 
     def test_a_repository_is_found_without_starting_git(self):
-        """2026-11-16: one message's rebase check asked git for a path's repository 100 times, 2 s of the hook."""
+        """A path's repository is found from the `.git` folders above it, with no git process started."""
         if not shutil.which("git"):
             self.skipTest("no git")
         tmp = os.path.realpath(tempfile.mkdtemp())
@@ -165,8 +169,8 @@ class Paths(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
     def test_a_repository_is_named_as_git_names_it(self):
-        """The review of #57, item 8: a stray `.git` is passed over as git passes over it, a linked path gives the
-        resolved top as git does, and what was found is believed only for ABOVE_S, so a later `git init` is seen."""
+        """A stray `.git` is passed over as git passes over it, a linked path gives the resolved top as git does, and
+        what was found is believed only for ABOVE_S, so a later `git init` is seen."""
         if not shutil.which("git"):
             self.skipTest("no git")
         tmp = os.path.realpath(tempfile.mkdtemp())
@@ -233,7 +237,7 @@ class Paths(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
     def test_a_path_on_a_missing_drive_has_no_repository(self):
-        # H1: dirname("s:/") is "s:/", and the walk up once never ended, hanging every prompt hook
+        # dirname("s:/") is "s:/": the walk up stops at a root, so a path on a missing drive has no repository
         for p in ("s:/replaces", "q:/no/such/dir/file.txt", "/no/such/place"):
             self.assertEqual(relay.repo_of(p), "", p)
 
@@ -272,7 +276,7 @@ class ThreeSessions(unittest.TestCase):
         return path
 
     def test_a_childs_issue_closing_commits_tell_the_top_to_push_at_once(self):
-        """#27: green work that closes an issue is pushed and synced at once, not asked."""
+        """Green work that closes an issue is pushed and synced at once, not asked."""
         t = self.t
         self.edit_uncommitted(A, ("lib", "x.py"), "c1")
         g = ["git", "-C", self.work, "-c", "user.name=t", "-c", "user.email=t@t"]
@@ -290,7 +294,7 @@ class ThreeSessions(unittest.TestCase):
         self.assertNotIn("close issues", context(t.say(TOP, "and now?")), "told once per commit")
 
     def test_a_child_closing_an_issue_in_a_store_with_an_open_retrain_notice_gets_it_named_in_the_push_line(self):
-        """#51: p4-recall 0.3.0 was pushed while its retrain had not run and the other machine was behind."""
+        """The push line names, before the push, an open retrain notice of a store the change touches."""
         import notices
         t = self.t
         self.assertEqual(relay.stores_of(self.work), [relay.norm(t.p4)], "the store of the project it sits in")
@@ -306,15 +310,15 @@ class ThreeSessions(unittest.TestCase):
         ctx = context(t.say(TOP, "what next?"))
         self.assertIn("finished with commits that close issues", ctx)
         self.assertIn("Before that push, this change owes: 1 open retrain notice in ", ctx)
-        self.assertIn("retrain-needed.tsv (json ranker)", ctx)
+        self.assertIn("retrain-needed.tsv, for json ranker", ctx)
         self.assertIn("Finish each first. Where one cannot be finished from here, name it in the report before "
                       "pushing, not after.", ctx)
         plain = relay.push_text("the child", A, [(self.work, "abc1234", "lib: fix x", ["#5"])])
-        self.assertNotIn("owes", plain, "with nothing owed the line is as it was")
+        self.assertNotIn("owes", plain, "with nothing owed, the line has no owed part")
         self.assertIn("without asking ezexe", plain)
 
     def test_a_machine_branch_of_the_store_behind_main_is_owed(self):
-        """#51: the other machine's pull is owed when its branch of the store is behind main."""
+        """The other machine's pull is owed when its branch of the store is behind main."""
         store = os.path.join(self.t.tmp, "solo", ".claude", "p4")
         bare = os.path.join(self.t.tmp, "store.git")
         os.makedirs(store)
@@ -347,11 +351,11 @@ class ThreeSessions(unittest.TestCase):
         ctx = context(r)
         first = ctx.split("\n\n")[0]
         self.assertTrue(first.startswith("phi (p4-phi): stop before any tool runs."), ctx[:300])
-        self.assertIn("this session has work/lib/x.py there", first, "paths relative to the project, once (R1, R2)")
-        self.assertEqual(first.count(A), 1, "a node's id once (R3)")
+        self.assertIn("this session has work/lib/x.py there", first, "paths relative to the project, once")
+        self.assertEqual(first.count(A), 1, "a session's id once")
         self.assertIn("message " + A, first)
         self.assertIn("deprecates: `", ctx)
-        self.assertIn("(source: commit abc123)", ctx, "a deprecation is given in full, with its source")
+        self.assertIn("; source: commit abc123", ctx, "a deprecation is given in full, with its source")
         self.assertEqual(t.session(B)["anchorSeen"], anchor["version"])
         again = context(t.say(B, "carry on"))
         self.assertNotIn("stop before any tool runs", again, "a warning is given once")
@@ -366,7 +370,7 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn("replaces: `", ctx)
 
     def test_a_note_naming_the_store_or_a_repository_top_warns_nobody(self):
-        """The false positive of 2026-11-12: a note naming the whole store warned of a session's scratch files."""
+        """A note naming the whole store or a repository's top folder warns nobody, and is still handed on in full."""
         t = self.t
         self.edit_uncommitted(B, ("lib", "x.py"), "b1")
         t.cli(A, "note", f"deprecates: any reading of `{t.p4}` as flat, and of `{self.work}` as one plugin",
@@ -374,11 +378,11 @@ class ThreeSessions(unittest.TestCase):
         t.stop(A, "broad note", uuid="a1")
         ctx = context(t.say(B, "next"))
         self.assertNotIn("stop before any tool runs", ctx)
-        self.assertIn("(source: commit ccc333)", ctx, "the note is still relayed, in full")
+        self.assertIn("; source: commit ccc333", ctx, "the note is still handed on, in full")
 
     def test_thirty_sibling_notes_stay_under_the_cap_and_come_once(self):
-        """#43: a session with 30 sibling notes pending gets hook text under the cap, the remainder named by count
-        and page, and none of the same notes on the prompt after."""
+        """A session with 30 sibling notes pending gets hook text under the cap, the remainder named by count and
+        page, and none of the same notes on the prompt after."""
         import phi
         t = self.t
         filler = "The exporter's ports table moved to the store and the old flush path is gone. " * 12
@@ -392,9 +396,9 @@ class ThreeSessions(unittest.TestCase):
         ctx = context(t.say(B, "next"))
         self.assertLessEqual(len(ctx), phi.PROMPT_CHARS, "under the cap")
         for k in range(3):
-            self.assertIn(f"(source: commit near{k})", ctx, "what touches its task is given in full")
+            self.assertIn(f"; source: commit near{k}", ctx, "what touches its task is given in full")
         self.assertNotIn("commit far", ctx, "what does not is not shown")
-        self.assertIn("27 more deprecation or replacement note(s)", ctx, "the remainder by count")
+        self.assertIn("deprecation or replacement notes not shown: 27", ctx, "the remainder by count")
         page = os.path.join(t.p4, "phi", "sessions", A, "session.md").replace("\\", "/")
         self.assertIn(f"27 on {page}", ctx, "and by the page that holds it")
         self.assertIn("narwhal exporter build 26", open(page, encoding="utf-8").read(), "the page holds them whole")
@@ -405,7 +409,7 @@ class ThreeSessions(unittest.TestCase):
         self.assertNotIn("replaces:", context(t.say(B, "third")), "nor when the sibling changes again")
 
     def test_thirty_warnings_stay_under_the_cap_and_the_rest_is_held(self):
-        """#43: the hub is no exception: what does not fit is named by count and kept on held.md, once."""
+        """A top-level session too: what does not fit is named by count and kept on held.md, once."""
         import phi
         t = self.t
         for k in range(30):
@@ -413,13 +417,13 @@ class ThreeSessions(unittest.TestCase):
         ctx = context(t.say(TOP, "what now?"))
         self.assertLessEqual(len(ctx), phi.PROMPT_CHARS)
         self.assertIn("warning 00 of thirty", ctx)
-        self.assertRegex(ctx, r"\d+ more warning\(s\) did not fit here and are whole on ")
+        self.assertRegex(ctx, r"\d+ more did not fit here and are whole on ")
         held = open(os.path.join(t.p4, "phi", "sessions", TOP, "held.md"), encoding="utf-8").read()
         self.assertIn("warning 29 of thirty", held)
         self.assertNotIn("of thirty", context(t.say(TOP, "and now?")), "none of them again")
 
     def test_a_mark_is_relayed_once(self):
-        """R4: a node that changes again does not send its older marks again."""
+        """A session that changes again does not send its older marks again."""
         t = self.t
         t.cli(A, "note", f"replaces: `{self.x('docs', 'd.md')}` with the README", "--source", "commit ddd444")
         t.stop(A, "one", uuid="a1")
@@ -437,7 +441,7 @@ class ThreeSessions(unittest.TestCase):
             subprocess.run(["git", "-C", t.p4, *args], check=True, capture_output=True)
         self.assertFalse(relay.track(t.p4, first_only=True), "off until p4.json sets phi.track")
         status = subprocess.run(["git", "-C", t.p4, "status", "--porcelain", "-uall"], capture_output=True,
-                                text=True).stdout                  # #35: with tracking off, no tree file shows
+                                text=True).stdout                  # with tracking off, no tree file shows
         self.assertEqual(t.stop(TOP, "plan it", report="Planned.", uuid="tr1").returncode, 0)
         self.assertEqual(t.stop(A, "move it", report="Moved.", uuid="tr2").returncode, 0)
         self.assertTrue(os.path.exists(os.path.join(t.p4, "phi", "reports.jsonl")))
@@ -452,7 +456,7 @@ class ThreeSessions(unittest.TestCase):
         self.assertTrue(any(x.endswith("/session.json") for x in files))
         self.assertFalse(any(x.endswith(("log.jsonl", "session.md")) for x in files), "per machine or made again")
         self.assertNotIn(relay.UNTRACKED_MARK, open(os.path.join(t.p4, ".gitignore"), encoding="utf-8").read(),
-                         "#35: tracking on takes the untracked tree's block out")
+                         "tracking on takes the untracked tree's block out")
         self.assertFalse(relay.track(t.p4, first_only=True), "committed once")
         t.cli(B, "note", "the session tree is tracked in the store now", "--source", "test")
         relay.track(t.p4)
@@ -464,12 +468,12 @@ class ThreeSessions(unittest.TestCase):
                                    capture_output=True, text=True).stdout
         on_disk = open(os.path.join(t.p4, "phi", "sessions", A, "session.json"), encoding="utf-8").read()
         self.assertIn(root, on_disk.replace("\\\\", "/"), "the file on disk names this machine's root")
-        self.assertIn("{project}", committed, "PL1: git holds the root as {project}")
+        self.assertIn("{project}", committed, "git holds the root as {project}")
         self.assertNotIn(root.lower(), committed.lower().replace("\\\\", "/"))
 
     def test_the_puppeteers_state_files_are_ignored_with_tracking_off_and_on(self):
-        """#56: a store is settled when only hook-committed paths show, so the puppeteer's three state files at phi's
-        root never show as untracked, whether phi.track is off or on."""
+        """A store is settled when only hook-committed paths show, so the watcher's three state files at the root of
+        phi/ never show as untracked, whether phi.track is off or on."""
         t = self.t
         state = ("phi/.issue-states.json", "phi/.routes-checked", "phi/meta-ledger.md")
         for line in state:
@@ -512,31 +516,31 @@ class ThreeSessions(unittest.TestCase):
         r = t.cli(A, "shard", self.x("lib"))
         self.assertIn("kept as this session's shard", r.stdout)
         r = t.cli(B, "shard", self.x("lib", "x.py"), self.x("docs"))
-        self.assertIn("overlaps the shard of \"the layout work\"", r.stdout)
+        self.assertIn("overlaps the owned paths of \"the layout work\"", r.stdout)
         ctx = context(t.say(A, "next"))
-        self.assertIn(f"the session \"the recall work\" ({B}) declared a shard that overlaps yours", ctx)
-        self.assertNotIn("overlaps yours", context(t.say(A, "and next")), "told once")
+        self.assertIn(f"the session \"the recall work\" `{B}` declared owned paths that overlap yours", ctx)
+        self.assertNotIn("overlap yours", context(t.say(A, "and next")), "told once")
 
     def test_uncommitted_edits_in_another_nodes_shard_are_stopped(self):
         t = self.t
         t.cli(A, "shard", self.x("lib"))
         self.edit_uncommitted(B, ("lib", "y.py"), "b1")
         ctx = context(t.say(B, "next"))
-        self.assertIn("inside the shard of \"the layout work\"", ctx)
+        self.assertIn("inside the owned paths of \"the layout work\"", ctx)
         self.assertTrue(ctx.startswith("phi (p4-phi): stop before any tool runs."))
 
     def test_a_message_about_another_nodes_shard_is_routed_there(self):
         t = self.t
         t.cli(A, "shard", self.x("lib"))
         ctx = context(t.say(B, f"please fix {self.x('lib', 'y.py')} too"))
-        self.assertIn(f"which is the shard of \"the layout work\" ({A}). Send it there with SendMessage", ctx)
+        self.assertIn(f"among the owned paths of \"the layout work\" `{A}`. Send it there with SendMessage", ctx)
         self.assertNotIn("Send it there", context(t.say(B, f"please fix {self.x('docs', 'd.md')}")),
-                         "a path no shard covers stays here")
+                         "a path no session owns stays here")
         self.assertNotIn("Send it there", context(t.say(TOP, f"look at {self.x('lib', 'y.py')}")),
-                         "a parent's shard covers its children's: the parent is not routed down")
+                         "a parent's owned paths cover its children's: the parent is not routed down")
 
     def test_an_archived_session_owns_no_shard_and_is_not_listed(self):
-        """Check 6: archived local_42ccf928 was still a routing target and still in the shards-now list."""
+        """An archived session owns no paths a message is routed by, and is left out of the owned-paths line."""
         t = self.t
         t.cli(A, "shard", self.x("lib"))
         self.assertIn(A, relay.shards_line(t.p4, B))
@@ -549,7 +553,8 @@ class ThreeSessions(unittest.TestCase):
         self.assertNotIn("Send it there", context(t.say(B, f"please fix {self.x('lib', 'y.py')} too")))
 
     def test_the_project_root_the_store_and_a_drive_name_no_shard(self):
-        """Check 6: a brief naming the project root was routed to a shard under it, and fork advised six times."""
+        """The project's root, the store, the folder above the project and a drive's root name no session's owned
+        paths, and a brief that names only the root is advised fresh."""
         t = self.t
         t.cli(A, "shard", self.x("lib"))
         for whole in (t.proj, t.p4, os.path.dirname(t.proj), os.path.splitdrive(t.proj)[0] + "/"):
@@ -629,14 +634,14 @@ class ForkOrFresh(ThreeSessions):
         self.assertEqual(guard(B, "git switch -c mine")["permissionDecision"], "ask")
         self.assertIsNotNone(guard(B, "", tool="EnterWorktree"))
         self.assertIsNone(guard(B, "git status && git commit -qm x"), "ordinary git is never asked")
-        self.assertIsNone(guard(B, "grep -n 'git checkout -b' docs.md"), "quoted text is not a command (G1)")
+        self.assertIsNone(guard(B, "grep -n 'git checkout -b' docs.md"), "quoted text is not a command")
         self.assertIsNone(guard(B, "git checkout -- lib/x.py"), "restoring a file is not a branch change")
-        self.assertEqual(guard(B, "git switch main")["permissionDecision"], "ask", "a branch change in a child (G2)")
+        self.assertEqual(guard(B, "git switch main")["permissionDecision"], "ask", "a branch change in a child")
         self.assertIn("moves the parent's too", guard(B, "git checkout feature/x")["permissionDecisionReason"])
-        self.assertIsNone(guard(TOP, "git switch -c mine"), "a top session decides its own branches")
+        self.assertIsNone(guard(TOP, "git switch -c mine"), "a top-level session decides its own branches")
 
     def test_a_hand_pull_or_push_in_a_store_is_asked_and_names_p4_sync(self):
-        """#21: a store moves only by p4.py sync."""
+        """A store moves only by p4.py sync."""
         p4 = self.t.p4
         subprocess.run(["git", "init", "-q", p4], check=True, capture_output=True)
         clone = os.path.join(p4, "temportal", "tmp", "s1", "p4")
@@ -654,11 +659,11 @@ class ForkOrFresh(ThreeSessions):
         self.assertIn("force-push", guard(TOP, f'git -C "{p4}" push --force origin win')["permissionDecisionReason"])
         self.assertIsNotNone(guard(TOP, "git push", cwd=p4), "the call's own folder")
         self.assertIsNone(guard(TOP, f"git -C {self.work} push"), "a project checkout is not a store")
-        self.assertIsNone(guard(TOP, f"cd {clone} && git push origin main"), "a clone kept in the store's tmp")
+        self.assertIsNone(guard(TOP, f"cd {clone} && git push origin main"), "a clone kept in a scratchpad directory")
         self.assertIsNone(guard(TOP, f"git -C {p4} status"), "reading a store is never asked")
 
     def test_a_child_landing_work_is_asked_unless_its_brief_gave_it_the_landing(self):
-        """#19: only the parent merges and pushes."""
+        """Only the parent merges and pushes, unless the child's brief or its parent hands it the landing."""
         def guard(host, cmd):
             r = self.t.hook("branch-guard", host, {"tool_name": "Bash", "tool_input": {"command": cmd}})
             return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
@@ -668,7 +673,7 @@ class ForkOrFresh(ThreeSessions):
             self.assertIn("merges and pushes", out["permissionDecisionReason"])
         self.assertIsNone(guard(B, "git merge-base --is-ancestor a b"), "merge-base lands nothing")
         self.assertIsNone(guard(B, "git log --grep 'push'"), "quoted words are not a command")
-        self.assertIsNone(guard(TOP, "git push origin main"), "the top session lands the work")
+        self.assertIsNone(guard(TOP, "git push origin main"), "the top-level session lands the work")
         s = relay._session(self.t.p4, B)
         s["task"] = "Fix it, run the suites, then push main yourself."
         relay._write_json(os.path.join(relay._dir(self.t.p4, B), "session.json"), s)
@@ -694,24 +699,25 @@ class ForkOrFresh(ThreeSessions):
         ctx = context(t.say(GRAND, f"Make `{self.x('lib')}` read its paths from p4conf"))
         self.assertIn("what the parent, \"top\", has for this session's paths", ctx)
         self.assertIn("deprecates: `", ctx)
-        self.assertIn("(source: commit aaa111)", ctx)
+        self.assertIn("; source: commit aaa111", ctx)
         self.assertNotIn("bbb222", ctx, "what does not touch the child's paths is left out")
         self.assertIn("Heads to build on:", ctx)
 
     def test_a_fresh_childs_start_waits_for_its_brief_and_replaces_the_parents_background(self):
-        """F1 and F2 of the marketplace test session."""
+        """No slice before the brief, and the slice holds the parent's notes on the child's paths and no sibling's last
+        turn."""
         t = self.t
         t.cli(TOP, "note", f"the docs keep their old layout in `{self.x('docs', 'd.md')}`", "--source", "fff666")
         t.cli(TOP, "note", f"the lib reads `{self.x('lib', 'x.py')}` first", "--source", "ggg777")
         t.stop(A, "a sibling's turn", uuid="a1")
         t.record(GRAND, TOP, title="the lib child")
         start = context(t.hook("session-start", GRAND, {"hook_event_name": "SessionStart", "source": "startup"}))
-        self.assertNotIn("has for this session's paths", start, "no slice before the brief (F1)")
+        self.assertNotIn("has for this session's paths", start, "no slice before the brief")
         ctx = context(t.say(GRAND, f"Make `{self.x('lib')}` read its paths from p4conf"))
         self.assertIn("has for this session's paths", ctx)
         self.assertIn("ggg777", ctx, "the parent's note on the child's paths")
-        self.assertNotIn("fff666", ctx, "the parent's note on other paths is left out (F2)")
-        self.assertNotIn("The last turn of", ctx, "the siblings' last turns are left out (F2)")
+        self.assertNotIn("fff666", ctx, "the parent's note on other paths is left out")
+        self.assertNotIn("The last turn of", ctx, "the siblings' last turns are left out")
 
     def test_a_fresh_child_the_parent_has_nothing_for_is_told_in_one_line(self):
         t = self.t
@@ -729,13 +735,13 @@ class ForkOrFresh(ThreeSessions):
         t.cli(GRAND, "shard", self.x("lib", "y.py"))
         later = context(t.say(GRAND, "carry on"))
         self.assertIn(f"Its own task: \"{brief}\"", later)
-        self.assertIn("its shard: " + relay.norm(self.x("lib", "y.py")), later)
+        self.assertIn("its owned paths: " + relay.norm(self.x("lib", "y.py")), later)
         self.assertNotIn("what the parent", later, "a fork is not given the fresh child's slice")
 
 
 
 class MergedWorktrees(unittest.TestCase):
-    """#22: merged worktrees and their branches are named for removal; the others are kept with why."""
+    """Merged worktrees and their branches are named for removal; the others are kept with why."""
 
     def test_merged_clean_worktrees_are_named_and_the_rest_kept(self):
         if not shutil.which("git"):
@@ -770,7 +776,7 @@ class MergedWorktrees(unittest.TestCase):
 
 
 class SharedHome(unittest.TestCase):
-    """Two projects naming one home store: a session in one hears a session in the other."""
+    """Two projects naming one store as `phi.home`: a session in one hears a session in the other."""
 
     def setUp(self):
         if not shutil.which("git"):
@@ -814,7 +820,7 @@ class SharedHome(unittest.TestCase):
         a.stop(A, "deprecate v1", uuid="a1", P4_PHI_STORES=self.stores)
         ctx = context(b.say(B, "next", P4_PHI_STORES=self.stores))
         self.assertIn("deprecates: the exporter's v1 table", ctx)
-        self.assertIn("(source: commit iii999)", ctx)
+        self.assertIn("; source: commit iii999", ctx)
 
     def test_no_map_is_written_by_a_store_that_names_no_home(self):
         other = Tree(os.path.join(self._tmp.name, "plain"))
@@ -859,8 +865,8 @@ class WarnTogether(unittest.TestCase):
             shutil.rmtree(home, ignore_errors=True)
 
     def test_a_record_that_reads_empty_keeps_the_warning_for_later(self):
-        """#53, from the read of its commit: session.json reads empty while another writer's os.replace is under
-        way on Windows, and the warning was dropped."""
+        """A warning that meets a record reading empty, as while another writer's os.replace is under way on Windows,
+        is kept on a file of its own and taken in at the next locked write."""
         home = tempfile.mkdtemp(prefix="p4-phi-warn-")
         read = relay._read_json
         try:
@@ -879,7 +885,8 @@ class WarnTogether(unittest.TestCase):
             shutil.rmtree(home, ignore_errors=True)
 
     def test_another_write_of_the_record_never_drops_a_waiting_warning(self):
-        """#53: phi.save_session and the other read-modify-writes of session.json held a copy read earlier."""
+        """No other write of the record drops a waiting warning, however old the copy it writes, from phi.save_session
+        or a plain write alike."""
         import threading
         import phi
         home = tempfile.mkdtemp(prefix="p4-phi-warn-")
