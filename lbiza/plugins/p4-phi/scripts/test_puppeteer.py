@@ -15,7 +15,7 @@ session is archived with its outcome kept; a later message with matching words i
 whose issue was reopened is withdrawn.
 parallel: an under-determined message becomes one child for each reading; readings whose results agree collapse, and
 readings that fork become one question with options and a default, which the orchestrator can settle itself.
-meta: a message of ezexe's to a top-level session runs the meta pass over every top-level session's ledger into
+meta: a message of ezexe's to an orchestrator runs the meta pass over every orchestrator's ledger into
 meta-ledger.md, with the duplicate topic, the conflict over one file and the stale topic it finds.
 """
 
@@ -85,7 +85,7 @@ class Linear(Base):
         self.assertIn("# Ledger: the exporter top", text)
         self.assertIn("Nothing diverges", text)
         rows = [x for x in text.split("## Sessions")[1].split("\n## ")[0].splitlines() if x.strip().startswith("- ")]
-        self.assertEqual(len(rows), 2, "the top-level session and the one child p4-phi holds: a row each")
+        self.assertEqual(len(rows), 2, "the orchestrator and the one child p4-phi holds: a row each")
         self.assertIn(f"`{TOP}`: working", rows[0])
         self.assertTrue(rows[1].startswith(f"  - \"the flush port\" `{KID}`: working; no turn yet"), rows[1])
         before = os.stat(self.path(TOP, "ledger.md")).st_mtime_ns
@@ -183,7 +183,7 @@ class Linear(Base):
         t.say(KID, handed(call["prompt"]))
         self.assertEqual(t.session(KID)["draft"], did, "the child knows the draft it came from")
         other = context(t.say(TOP, "Write a changelog generator for the billing dashboard's release notes"))
-        self.assertIn("so it is a new top-level session", other)
+        self.assertIn("so it is a new orchestrator", other)
         self.assertIn(phi.NEW_TOP_BRIEF, call_in(other)["prompt"])
 
     def test_a_draft_whose_area_has_a_live_owner_is_routed_there(self):
@@ -288,11 +288,11 @@ class Recursive(unittest.TestCase):
         self.assertIn("backed, by commit", out)
         row = [json.loads(x) for x in read(routes).splitlines()][0]
         self.assertEqual((row["issue"], row["context"], row["session"]), ("ezexe/demo#7", "fresh", KID))
-        self.assertIn("narwhal exporter", row["words"], "the request's words are the top-level session's task")
+        self.assertIn("narwhal exporter", row["words"], "the request's words are the orchestrator's task")
         self.assertIn("Fix the off-by-one", row["slice"]["brief"])
         self.assertEqual(self.why().count("registered rt-"), 0, "once")
         s = t.session(TOP)
-        s["archived"] = True                       # the topic landed, so its top-level session was archived too
+        s["archived"] = True                       # the topic landed, so its orchestrator was archived too
         write(os.path.join(t.dir(TOP), "session.json"), json.dumps(s))
         t.say(TOP2, "Look after the billing dashboard")
         t.stop(TOP2, "Look after the billing dashboard", report="ok")
@@ -694,12 +694,12 @@ class Meta(Base):
                report="edited too", uuid="u1")
         ctx = context(t.say(TOP2, ASK))
         page = read(os.path.join(t.p4, "phi", "meta-ledger.md"))
-        self.assertIn("the meta pass over every top-level session's ledger", ctx)
+        self.assertIn("the meta pass over every orchestrator's ledger", ctx)
         self.assertIn("carry one topic", ctx)
         self.assertIn(f"\"the exporter top\" `{TOP}` and \"the other exporter top\" `{TOP2}` carry one topic", page)
         self.assertIn("both changed or hold", page)
-        self.assertIn("flush.py", page.split("## Conflicts between top sessions")[1].split("##")[0])
-        self.assertNotIn("the meta pass over every top-level session's ledger", context(t.say(TOP2, ASK)),
+        self.assertIn("flush.py", page.split("## Conflicts between orchestrators")[1].split("##")[0])
+        self.assertNotIn("the meta pass over every orchestrator's ledger", context(t.say(TOP2, ASK)),
                          "a finding is told once")
         before = os.stat(os.path.join(t.p4, "phi", "meta-ledger.md")).st_mtime_ns
         t.say(TOP2, ASK)
@@ -709,7 +709,7 @@ class Meta(Base):
             text, found, _ = puppeteer.meta_pass(t.p4, at=time.time() + 3 * 86400)
         finally:
             os.environ.pop("P4_PHI_APP_SESSIONS", None)
-        self.assertEqual(len(found["stale"]), 1, "the top-level session inside a turn is at work, not stale")
+        self.assertEqual(len(found["stale"]), 1, "the orchestrator inside a turn is at work, not stale")
         self.assertIn(f"`{TOP}` has not moved for 3.0 days", text)
 
 

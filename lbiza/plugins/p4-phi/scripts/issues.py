@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""issues.py: the one loop a child session that changes a repository runs.
+"""issues.py: the one loop a worker that changes a repository runs.
 
   issue    at its first hook, a child whose brief or task list names files in a repository with a GitHub `origin`
            takes the open issue its brief names on that repository as its own: the number is kept in session.json as
            `issue`, and a line tells the child. p4-phi files no issue, since no session publishes a new issue on its
            own: a child that takes none is told to write each finding into its report as one `Finding:` line, which
-           its parent session passes up unchanged to the supervisor session that controls its session tree, or to its
-           top-level session where none does, and that session publishes what needs an issue. A read-only child, such
+           its parent session passes up unchanged to the puppeteer that controls its session tree, or to its
+           orchestrator where none does, and that session publishes what needs an issue. A read-only child, such
            as a check, an audit, a question or a message to pass on, gets neither, and neither does a repository with
            no GitHub remote.
   commits  at each step boundary, a commit made since the issue was taken that closes no issue gets one line.
@@ -62,8 +62,8 @@ FINDING = re.compile(r"(?m)^(?:[ \t>*+-]|\d+[.)])*(Finding:[ \t]*\S[^\n]*)$")
 FINDINGS_LINE = (
     "phi (p4-phi): this session's brief names no open issue, and p4-phi files none, since no session publishes a new "
     "issue on its own. Write each finding that needs an issue into this session's report as one line in this form: `"
-    + FINDING_FORM + "`. Its parent session passes those lines up unchanged, to the supervisor session that controls "
-    "this session tree, or to its top-level session where none does, which publishes what needs an issue and places "
+    + FINDING_FORM + "`. Its parent session passes those lines up unchanged, to the puppeteer that controls "
+    "this session tree, or to its orchestrator where none does, which publishes what needs an issue and places "
     "the session that resolves it.")
 
 

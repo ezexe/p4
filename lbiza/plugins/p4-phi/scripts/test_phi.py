@@ -8,9 +8,9 @@ words; a session's last turn with no human prompt, found from the transcript's e
 from the app's record, with nothing in the payload saying it; the sessions above it given their files from their
 records; a `spawnedFrom` the app writes late read from the notes folder first and corrected by the record; a session
 with no store of its own living in its parent session's store; every finished turn kept, done or not, once per turn;
-its report appended to the parent session's reports and given to that session at its next message, once; a child
-session given the tasks and notes of the sessions above it and the last turn of its siblings; a top-level session
-given the last turns of the top-level sessions before it, with no likeness of words involved; a note refused without
+its report appended to the parent session's reports and given to that session at its next message, once; a
+worker given the tasks and notes of the sessions above it and the last turn of its siblings; an orchestrator
+given the last turns of the orchestrators before it, with no likeness of words involved; a note refused without
 a source; a session detached to top level, and reparented; a session's own turns after a compaction; silence where
 there is nothing to say; the standing instruction for a message about something else, once in full and then in a
 line beside each of ezexe's messages, never beside Claude Code's; a feature request as a new topic; a turn another
@@ -117,7 +117,7 @@ class Tree:
         return jload(os.path.join(self.dir(host), "session.json"))
 
     def started_by(self, host):
-        """The sessionId and source of a session's `spawnedFrom`, both '' for a top-level session."""
+        """The sessionId and source of a session's `spawnedFrom`, both '' for an orchestrator."""
         s = self.session(host).get("spawnedFrom") or {}
         return s.get("sessionId", ""), s.get("source", "")
 
@@ -279,7 +279,7 @@ class Sessions(unittest.TestCase):
         self.assertEqual(s["startChain"], {"firstSessionId": TOP, "depth": 1})
         self.assertEqual(s["title"], "Fix the dropped row")
         self.assertEqual(s["cliSessionIds"], [CLI[KID]])
-        self.assertNotIn("spawnedFrom", self.t.session(TOP))       # a top-level session: its record, started by none
+        self.assertNotIn("spawnedFrom", self.t.session(TOP))       # an orchestrator: its record, started by none
 
     def test_a_deep_session_gets_every_session_above_it(self):
         self.t.say(GRAND, "bisect it")
@@ -410,7 +410,7 @@ class Turns(unittest.TestCase):
     def test_the_report_reaches_the_parent_session_once(self):
         self.kid_stops()
         text = context(self.t.say(TOP, "<side-sessions-event>Fix the dropped row finished a turn</side-sessions-event>"))
-        self.assertIn("reports of this session's child sessions", text)
+        self.assertIn("reports of this session's workers", text)
         self.assertIn("Fix the dropped row", text)
         self.assertIn(LONG, text)                       # more than the 400 characters the app delivers
         self.assertGreater(len(LONG), 400)
@@ -433,8 +433,8 @@ class Turns(unittest.TestCase):
         self.assertEqual(t["sessions"], ["\"Fix the dropped row\": done"])
         page = read(os.path.join(self.t.dir(TOP), "session.md"))
         self.assertIn(TASK, page)
-        self.assertIn("a top-level session", page)
-        self.assertIn("## Child sessions", page)
+        self.assertIn("an orchestrator", page)
+        self.assertIn("## Workers", page)
         self.assertIn("Fix the dropped row", page)
         tops = phi.load_reports(self.t.p4, "")
         self.assertEqual(tops[-1]["sessionId"], TOP)
@@ -480,7 +480,7 @@ class Background(unittest.TestCase):
                          [(START, TOP), (PROMPT, TOP), (PROMPT, TOP)])
 
     def test_a_child_whose_cli_id_is_its_host_id_unprefixed_still_gets_its_background(self):
-        # the app gives many child sessions a CLI id equal to the host id without "local_"
+        # the app gives many workers a CLI id equal to the host id without "local_"
         same = KID2.removeprefix("local_")
         self.t.cli(TOP, "note", "The ports table is written by flush_rows in export/flush.py", "--source", "x")
         context(self.t.hook(START, KID2, {"hook_event_name": "SessionStart", "source": "startup"}, cli=same,
@@ -499,7 +499,7 @@ class Background(unittest.TestCase):
                     "Stopped: the fix needs ezexe's word on the format.")
         self.start(KID2)
         text = context(self.t.say(KID2, "Check the ports table"))          # no path named: the whole background
-        self.assertIn("the other child sessions of \"Narwhal exporter\"", text)
+        self.assertIn("the other workers of \"Narwhal exporter\"", text)
         self.assertIn("Fix the dropped row", text)
         self.assertIn("not shown done", text)
         self.assertIn("edited export/flush.py", text)
@@ -514,7 +514,7 @@ class Background(unittest.TestCase):
         self.assertEqual(self.start(other), phi.builtin_text())   # in the app a start is given no background,
         # since its parent session is not known yet; it has the built-in rules, the store having no memories here
         text = context(self.t.say(other, "paint the fence green"))
-        self.assertIn("the top-level sessions in this project before this one", text)
+        self.assertIn("the orchestrators in this project before this one", text)
         self.assertIn(TASK, text)
         self.assertIn("Half done.", text)
 
@@ -598,7 +598,7 @@ class NewTask(unittest.TestCase):
         self.assertIn("this session's task", first)
         self.assertIn("about something else", first)
         self.assertIn("start_session", first)
-        self.assertIn("new top-level session", first)
+        self.assertIn("new orchestrator", first)
         self.assertIn("`context` `fresh`", first)
         self.assertIn("stay with the task", first)
         self.assertIn("ezexe", first)
@@ -611,7 +611,7 @@ class NewTask(unittest.TestCase):
 
     def test_a_top_level_sessions_new_topic_is_a_new_top_level_session_detached_to_top_level(self):
         first = self.say(TOP, TASK)
-        self.assertIn("A new topic gets a new top-level session of its own", first)
+        self.assertIn("A new topic gets a new orchestrator of its own", first)
         self.assertIn("`initiation` `user_asked`", first)
         self.assertIn("`use_worktree: false`", first)
         self.assertIn(phi.NEW_TOP_BRIEF, first)
@@ -619,7 +619,7 @@ class NewTask(unittest.TestCase):
         self.assertIn("phi.py\" detach`", first, "the brief names phi.py's detach too")
         self.assertIn("call `mcp__ccd_session_mgmt__detach_session` with its id yourself", first,
                       "the parent session's line names the app's move")
-        self.assertIn("start a new top-level session", self.say(TOP, "also, the fence colour?"))
+        self.assertIn("start a new orchestrator", self.say(TOP, "also, the fence colour?"))
         told = self.say(KID, "Task:\nPick the fence colour. ezexe's words: \"the fence colour?\" "
                         + phi.NEW_TOP_BRIEF + " " + phi.new_top_first_act())
         self.assertIn("p4-phi detached it to top level at this first message", told)
@@ -632,7 +632,7 @@ class NewTask(unittest.TestCase):
         self.say(KID, "carry on")
         self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID)), "", "the app's record does not undo it")
         self.assertIn(KID, relay._siblings(self.t.p4, phi.load_session(self.t.p4, TOP)),
-                      "top-level sessions are siblings")
+                      "orchestrators are siblings")
         self.t.record(KID2, TOP, "a plain child")
         self.say(KID2, "Task:\nWrite the docs; this is not a new top")
         self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID2)), TOP, "an unmarked brief stays a child")
@@ -673,7 +673,7 @@ class NewTask(unittest.TestCase):
                                   "tool_response": "Plan updated."})
         self.t.stop(KID, "Pick the fence colour", report="Picked green; done.")
         s = phi.load_session(self.t.p4, KID)
-        self.assertFalse(s.get("doneRetired"), "a top-level session is counted as archived on no parent")
+        self.assertFalse(s.get("doneRetired"), "an orchestrator is counted as archived on no parent")
         self.assertEqual(plans.root_of(self.t.p4, s), "")
         self.assertFalse(phi.load_notes(self.t.p4, TOP), "no replaces: note on the former parent session")
         self.assertNotIn(KID, json.dumps(phi.load_session(self.t.p4, TOP).get("staleChildren") or []))
@@ -684,7 +684,7 @@ class NewTask(unittest.TestCase):
         first = self.say(KID, HANDED)
         self.assertIn(f"hand it up to your parent session, {TOP}, with SendMessage", first)
         self.assertIn("start no session for it", first)
-        self.assertNotIn("new top-level session of its own", first)
+        self.assertNotIn("new orchestrator of its own", first)
         line = self.say(KID, "and what about the fence?")
         self.assertIn(f"hand it up to {TOP}", line)
         self.assertNotIn("forked", line)
@@ -747,7 +747,7 @@ class NewTask(unittest.TestCase):
         r = self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "compact"}, P4_PHI_NEW_TASK="1")
         text = context(r)
         self.assertIn(TASK, text)
-        self.assertIn("start a new top-level session", text)
+        self.assertIn("start a new orchestrator", text)
         page = os.path.join(self.t.dir(TOP), "standing.md").replace("\\", "/")
         self.assertIn(page, text, "after a compaction, a line with its page, not the instruction in full")
         self.assertNotIn("start_session", text)
@@ -932,7 +932,7 @@ class Rules(unittest.TestCase):
         self.assertLessEqual(len(first), phi.HOOK_CHARS)
 
     def test_the_start_text_keeps_to_the_hooks_room_with_every_line_it_carries(self):
-        """A supervisor session whose p4.json names a shared store this machine has not seen, started again after a
+        """A puppeteer whose p4.json names a shared store this machine has not seen, started again after a
         clear and after a compaction, with the default start background and with one set longer than the hook's room:
         each start text is at most HOOK_CHARS and still carries the standing instruction and the missing-home line,
         and after a compaction the line that names its board comes first."""
@@ -963,7 +963,7 @@ class Rules(unittest.TestCase):
                 if chars == phi.BACKGROUND_CHARS:
                     self.assertIn("feedback and user memories", text, "the rules keep the room the others leave")
                 if source == "compact":
-                    self.assertTrue(text.startswith("phi (p4-phi): this session is a supervisor session and its "
+                    self.assertTrue(text.startswith("phi (p4-phi): this session is a puppeteer and its "
                                                     "context was compacted"), text[:200])
         self.assertLessEqual(max(sizes.values()), phi.HOOK_CHARS, sizes)
 

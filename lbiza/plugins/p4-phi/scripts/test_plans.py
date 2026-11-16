@@ -687,7 +687,7 @@ class TreeOfPlans(unittest.TestCase):
 
 
 class Levels(unittest.TestCase):
-    """Delegation: a top-level session's long foreground command is started in the background by the hook; a child
+    """Delegation: an orchestrator's long foreground command is started in the background by the hook; a child
     is told once per step; a step is named for the subagent that does it."""
 
     LONG = {"command": "cd scripts && python -I -X utf8 test_flush.py 2>&1 | tail -3", "description": "Run the tests"}
@@ -861,7 +861,7 @@ class Levels(unittest.TestCase):
                                    f"Port the exporter in {p}/src/export/flush.py to the new writer"))
         self.assertIn("which only reads or searches: a background subagent, `p4-phi:sweep`, not a session", ctx)
         self.assertIn("which only runs a command: a background subagent, `p4-phi:runner`, not a session", ctx)
-        self.assertIn("mcp__ccd_session__start_session", ctx, "the step that writes still goes to a child session")
+        self.assertIn("mcp__ccd_session__start_session", ctx, "the step that writes still goes to a worker")
         self.assertIn("split by the files they write", ctx)
         s = relay._session(self.t.p4, TOP)
         plain = plans.top_advice(self.t.p4, {**s, "splitAdvised": []}, {"steps": [
@@ -950,7 +950,7 @@ class Levels(unittest.TestCase):
             self.assertIn(c["effort"], plans.EFFORTS, "a call with neither key is never handed out")
         self.assertIn("with the `model` and `effort` its kind of work gets", phi.new_top_route())
         self.assertIn("carrying the `model` and `effort` named beside its step", plans.CARD_EACH)
-        self.assertIn("A child session is started with a `model` and an `effort` that fit its step", phi.LEVELS)
+        self.assertIn("A worker is started with a `model` and an `effort` that fit its step", phi.LEVELS)
         old = plans.CHILD_LEVELS
         try:
             relay._write_json(os.path.join(self.t.p4, "p4.json"),
@@ -964,7 +964,7 @@ class Levels(unittest.TestCase):
 
 
 class TopOrchestrates(unittest.TestCase):
-    """A top-level session keeps itself free for orchestration. A child whose brief says "report when done" leaves
+    """An orchestrator keeps itself free for orchestration. A child whose brief says "report when done" leaves
     its outcome on its parent as a replaces: note and counts as archived, and the parent's line offers it to ezexe
     with no archive call. A child archived in the app leaves the down-lines and the anchor."""
 
@@ -996,13 +996,13 @@ class TopOrchestrates(unittest.TestCase):
         p = self.t.proj
         ctx = self.plan(TOP, items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
                                    "Run the suites, commit and push the exporter"))
-        self.assertIn("top-level session of its tree", ctx)
+        self.assertIn("orchestrator of its tree", ctx)
         self.assertIn("(a) step 1 \"Port the exporter", ctx)
         self.assertIn("`initiation` `user_asked`", ctx)
         self.assertIn("report when done", ctx)
         self.assertIn("Staying here: 2, checks or lands the work", ctx)
         self.assertNotIn("(b)", ctx, "the landing step is no child")
-        self.assertNotIn("top-level session of its tree", self.plan(TOP, {"advance": True}) or "", "said once per set")
+        self.assertNotIn("orchestrator of its tree", self.plan(TOP, {"advance": True}) or "", "said once per set")
         landing = {"steps": [{"addr": str(k + 1), "content": c, "status": "pending"} for k, c in
                              enumerate(("Test and commit the port", "Merge and push main", "Release 0.9"))]}
         groups, kept = plans.top_groups(landing, "")
@@ -1026,7 +1026,7 @@ class TopOrchestrates(unittest.TestCase):
         p = self.t.proj
         ctx = self.plan(TOP, items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
                                    "Run the suites, commit and push the exporter"))
-        self.assertNotIn("top-level session of its tree", ctx or "")
+        self.assertNotIn("orchestrator of its tree", ctx or "")
         self.assertEqual(self.check(TOP, "Edit", {"file_path": f"{p}/src/export/flush.py"}, "tk1"), "",
                          "no nudge to hand the step to a child")
         self.assertNotIn("keeps itself free for orchestration",
@@ -1043,7 +1043,7 @@ class TopOrchestrates(unittest.TestCase):
         self.assertNotIn("(c)", ctx)
         self.assertIn("4, checks or lands the work", ctx)
         kid = self.plan(A, items(f"Write the parser in {p}/src/parse.py", f"Document it in {p}/docs/layout.md now"))
-        self.assertNotIn("top-level session of its tree", kid or "", "a child keeps the split rules of a child")
+        self.assertNotIn("orchestrator of its tree", kid or "", "a child keeps the split rules of a child")
 
     def test_the_nudge_fires_once_on_a_top_session_edit_and_never_on_git_status(self):
         p = self.t.proj
@@ -1055,8 +1055,8 @@ class TopOrchestrates(unittest.TestCase):
         self.assertEqual(self.check(TOP, "Read", {"file_path": f"{p}/src/export/flush.py"}, "toolu_n3"), "")
         said = self.check(TOP, "Edit", {"file_path": f"{p}/src/export/flush.py", "old_string": "a", "new_string": "b"},
                           "toolu_n4")
-        self.assertIn("this is the top-level session", said)
-        self.assertIn("hand it to a child session", said)
+        self.assertIn("this is the orchestrator", said)
+        self.assertIn("hand it to a worker", said)
         self.assertFalse(os.path.exists(marker), "disarmed once said")
         self.assertEqual(self.check(TOP, "Edit", {"file_path": f"{p}/src/export/x.py"}, "toolu_n5"), "", "once a step")
         self.plan(TOP, {"advance": True})
@@ -1114,7 +1114,7 @@ class TopOrchestrates(unittest.TestCase):
         # two steps that share no file each get a child
         self.assertEqual([[st["addr"] for st in g] for g in groups], [["1"], ["2"]])
         self.assertEqual([a for a, _ in kept], ["3", "4", "5"],
-                         "only landing and managing a child stay with the top-level session")
+                         "only landing and managing a child stay with the orchestrator")
 
     def test_one_function_answers_for_the_advice_and_the_nudge(self):
         """top_groups and nudge_step take one answer, top_stays, so the advice and the nudge never disagree."""
@@ -1129,7 +1129,7 @@ class TopOrchestrates(unittest.TestCase):
         self.plan(TOP, items("Verify phi's session tree matches the app", "Sync the store"))
         s = relay._session(self.t.p4, TOP)
         self.assertEqual((phi.nudge_step(self.t.p4, s) or {}).get("content"),
-                         "Verify phi's session tree matches the app", "the top-level session is nudged to hand it off")
+                         "Verify phi's session tree matches the app", "the orchestrator is nudged to hand it off")
         self.plan(TOP, {"advance": True})
         self.assertIsNone(phi.nudge_step(self.t.p4, relay._session(self.t.p4, TOP)), "syncing a store is its own")
 
@@ -1255,7 +1255,7 @@ class TopOrchestrates(unittest.TestCase):
                 '$P = "E:/p4/phi.py"; & python $P note "x"')):
             self.assertEqual(self.check(TOP, "Bash", {"command": cmd}, f"toolu_p{k}"), "", cmd)
         self.assertTrue(os.path.exists(marker), "still armed")
-        self.assertIn("this is the top-level session",
+        self.assertIn("this is the orchestrator",
                       self.check(TOP, "Bash", {"command": 'P=x; python "$P" note y && make'}, "toolu_p9"))
 
     def test_top_level_sessions_hear_each_other_as_siblings_and_an_archived_one_drops_out(self):
@@ -1263,7 +1263,7 @@ class TopOrchestrates(unittest.TestCase):
         t.record(T2, title="the second top")
         t.say(T2, "Rework the fence exporter")
         self.plan(TOP, items("Port the fence exporter's ports table to the new writer", "Commit and push"))
-        self.assertIn(T2, relay._siblings(t.p4, relay._session(t.p4, TOP)), "two top-level sessions are siblings")
+        self.assertIn(T2, relay._siblings(t.p4, relay._session(t.p4, TOP)), "two orchestrators are siblings")
         self.assertIn(TOP, relay._siblings(t.p4, relay._session(t.p4, T2)))
         r = t.cli(T2, "note", "deprecates: the fence exporter's v1 ports table", "--source", "commit fff111")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -1271,7 +1271,7 @@ class TopOrchestrates(unittest.TestCase):
                                          "v1 is gone.", uuid="t2a")
         ctx = context(t.say(TOP, "next"))
         self.assertIn("deprecates: the fence exporter's v1 ports table", ctx,
-                      "a deprecation crosses between top-level sessions")
+                      "a deprecation crosses between orchestrators")
         self.assertIn("\"the second top\", a session beside you, ended a turn whose words bear on your open step",
                       ctx, "a turn report crosses as a sibling's")
         anchor = json.load(open(relay.anchor_path(t.p4, ""), encoding="utf-8"))
@@ -1283,13 +1283,13 @@ class TopOrchestrates(unittest.TestCase):
         with open(rec, "w", encoding="utf-8") as f:
             f.write(json.dumps(d))
         self.assertNotIn(T2, relay._siblings(t.p4, relay._session(t.p4, TOP)),
-                         "a top-level session archived in the app drops out")
+                         "an orchestrator archived in the app drops out")
         t.stop(TOP, "a turn", uuid="t1a")
         anchor = json.load(open(relay.anchor_path(t.p4, ""), encoding="utf-8"))
         self.assertNotIn(T2, anchor["nodes"], "and leaves the top level's anchor")
         tree = t.cli(TOP, "tree").stdout
         self.assertIn(TOP, tree)
-        self.assertNotIn(T2, tree, "an archived top-level session is not printed")
+        self.assertNotIn(T2, tree, "an archived orchestrator is not printed")
 
     def test_a_child_archived_by_hand_is_not_named_for_archiving(self):
         t, C = self.t, self.C
@@ -1362,8 +1362,8 @@ class KeepGoing(unittest.TestCase):
 
 
 class WaitsOnReports(unittest.TestCase):
-    """A step that waits on other sessions' reports stays with the top-level session, is handed to no child, and
-    does not send the turn back while a child session or a session this one messaged is running or has an
+    """A step that waits on other sessions' reports stays with the orchestrator, is handed to no child, and
+    does not send the turn back while a worker or a session this one messaged is running or has an
     undelivered report."""
 
     STEPS = ("Await reports from A, B and C", "Check the trees' results against GitHub")
@@ -1396,7 +1396,7 @@ class WaitsOnReports(unittest.TestCase):
         self.assertEqual(plans.top_advice(t.p4, {**s, "splitAdvised": []}, {"steps": [
             {"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate(self.STEPS)]}, True, ""), "")
         ctx = self.plan(TOP, items(*self.STEPS)) or ""
-        self.assertNotIn("Hand its work steps to child sessions", ctx)
+        self.assertNotIn("Hand its work steps to workers", ctx)
         self.assertEqual(self.stop("Nothing is in yet.").get("decision"), "block",
                          "nobody is running and no report is undelivered: the step is sent back as any other")
         t.say(A, "Move the layout")                # A is inside a turn
@@ -1407,7 +1407,7 @@ class WaitsOnReports(unittest.TestCase):
         t.stop(A, "Move the layout", report="Moved.")
         out = self.stop("Still waiting.", uuid="u3")
         self.assertIn("\"A, the layout child\"", out.get("systemMessage", ""), "its report is not delivered yet")
-        t.say(TOP, "what came in?")                 # the report is handed to the top-level session
+        t.say(TOP, "what came in?")                 # the report is handed to the orchestrator
         self.assertEqual(self.stop("A reported.", uuid="u4").get("decision"), "block", "nothing is waited on now")
 
     def test_other_steps_stay_or_go_by_the_same_rules(self):
@@ -1430,15 +1430,15 @@ class WaitsOnReports(unittest.TestCase):
         said = self.check(TOP, "Bash", {"command": "git log --stat -3"}, "tu-r7")
         self.assertIn("has now run 7 read-only checks of its trees here", said)
         self.assertIn("`p4-phi:sweep`", said)
-        self.assertNotIn("child session", said)
+        self.assertNotIn("worker", said)
         self.assertEqual(self.check(TOP, "Bash", {"command": "git log -1"}, "tu-r8"), "", "said once for the step")
-        self.assertIn("is work: hand it to a child session",
+        self.assertIn("is work: hand it to a worker",
                       self.check(TOP, "Bash", {"command": "sed -i s/a/b/ src/export/flush.py"}, "tu-w1"),
                       "a working command is still nudged")
 
 
 class DoerAndObject(unittest.TestCase):
-    """Messaging or handing to sessions stays with the top-level session; running checks yourself goes to a child."""
+    """Messaging or handing to sessions stays with the orchestrator; running checks yourself goes to a child."""
 
     def kept(self, text):
         _, kept = plans.top_groups({"steps": [{"addr": "1", "content": text, "status": "pending"}]}, "")

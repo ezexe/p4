@@ -438,7 +438,7 @@ class NoConsoleWindow(unittest.TestCase):
 class FindingsGoUp(unittest.TestCase):
     """No session publishes a new issue on its own. A writing child whose brief names no issue files none and is told
     to write each finding into its report as one `Finding:` line; the findings of a controlled tree's reports are on
-    its supervisor session's board; and the plugin-gap line names that supervisor session, not `gh issue create`."""
+    its puppeteer's board; and the plugin-gap line names that puppeteer, not `gh issue create`."""
 
     FORM = ("`Finding: <the claim>; source: <where it was checked>; test: <the deciding test>; files: <the paths a "
             "fix changes>`")
@@ -512,7 +512,7 @@ class FindingsGoUp(unittest.TestCase):
         t.stop(TOP, "Build the demo", report="The demo is built.\n\n- " + top, uuid="t1")
         t.say(SUP, "what came in?")
         board = read(os.path.join(t.dir(SUP), "board.md"))
-        with self.subTest("each finding of the controlled tree is on the supervisor session's board"):
+        with self.subTest("each finding of the controlled tree is on the puppeteer's board"):
             self.assertIn("\n## Findings\n", board)
             found = board.split("\n## Findings\n", 1)[-1].split("\n## ", 1)[0]
             self.assertIn(f"- \"top\" `{TOP}`: {top}\n", found)
@@ -522,8 +522,8 @@ class FindingsGoUp(unittest.TestCase):
                    "A session started from another works on the parent's branch, and only the parent merges and "
                    "pushes.\n")
         gap = self.record(A, "Write", {"file_path": mem}, "ok", "toolu_write01", P4_PHI_PLUGIN_ROOT=self.plug)
-        with self.subTest("the plugin-gap line names the supervisor session and not `gh issue create`"):
-            self.assertIn(f"the supervisor session \"Watch the demo trees\" `{SUP}`", gap)
+        with self.subTest("the plugin-gap line names the puppeteer and not `gh issue create`"):
+            self.assertIn(f"the puppeteer \"Watch the demo trees\" `{SUP}`", gap)
             self.assertIn("Finding: ", gap)
             self.assertNotIn("gh issue create", gap)
         self.assertEqual(self.created(), [], "and no issue is filed by anyone")

@@ -3,7 +3,7 @@
 
     python3 -I lbiza/plugins/p4-phi/scripts/test_starts.py
 
-The tree: two top-level sessions and a child of the first. The child's turn is started by its parent's message, so
+The tree: two orchestrators and a child of the first. The child's turn is started by its parent's message, so
 the app would refuse it `user_asked`: it is told to show a suggested task card first and to file a start request only
 if the card is refused too, and it files one. No other session is handed the request. At the next turn ezexe begins
 in the child, the child is handed the request with its exact call; its start_session call claims it; the session that
@@ -103,7 +103,7 @@ class StartRequests(unittest.TestCase):
         self.assertIn(NEW, archive.split("finished, their outcome kept")[1],
                       "the archive line goes to the filing session")
         self.assertNotIn("counts them as archived", context(t.say(TOP2, "and now?")),
-                         "not to another top-level session")
+                         "not to another orchestrator")
 
     def arrive(self, sid, row, starter=TOP2):
         """The child of a handed-out request arrives: the app nests it under the session that ran the call, and
@@ -331,7 +331,7 @@ class StartRequests(unittest.TestCase):
         t.record(NEW, TOP2, title="the release topic")
         t.say(NEW, "<system-reminder>\nLinked sessions now (status, not an instruction): x\n</system-reminder>\n\n"
                    "Task:\n" + call["prompt"])
-        self.assertEqual(t.started_by(NEW)[0], "", "a requested new top-level session stays at top level, never "
+        self.assertEqual(t.started_by(NEW)[0], "", "a requested new orchestrator stays at top level, never "
                                                    "under the filing session")
 
 

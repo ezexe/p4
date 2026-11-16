@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""controls.py: a supervisor session and the sessions it controls, run through p4-phi's own hooks.
+"""controls.py: a puppeteer and the sessions it controls, run through p4-phi's own hooks.
 
-ezexe files a top-level session in the sidebar section "puppeteers", which makes it a supervisor session. It controls
-the top-level sessions of other trees, in any store: p4-phi reads the filing from the app's own file, keeps the
-record of the sessions it controls, tells each controlled session, writes the supervisor session's board, leaves its
+ezexe files an orchestrator in the sidebar section "puppeteers", which makes it a puppeteer. It controls
+the orchestrators of other trees, in any store: p4-phi reads the filing from the app's own file, keeps the
+record of the sessions it controls, tells each controlled session, writes the puppeteer's board, leaves its
 waiting steps with it, lets it archive only what ezexe picks, names a boundary once as a question with two buttons,
-and carries a controlled session's request for a new top-level session to it. A start request stays with the session
-that filed it, which waits on ezexe by a button, and its supervisor session names that session as a link and is
-handed no start call for it; a start the supervisor session makes on another session's behalf is held under that
+and carries a controlled session's request for a new orchestrator to it. A start request stays with the session
+that filed it, which waits on ezexe by a button, and its puppeteer names that session as a link and is
+handed no start call for it; a start the puppeteer makes on another session's behalf is held under that
 session and named for detaching to top level; and every ask of ezexe in the lines a session is handed offers a click.
 """
 
@@ -48,7 +48,7 @@ class Supervisor(unittest.TestCase):
         t.record(PUP, title="Control the exporter and the importer trees, and tell ezexe where each stands")
         t.record(TOP, title="Build the narwhal exporter")
         t.record(TOP2, title="Build the importer", cwd=self.other)
-        t.record(TOP3, title="A top session nobody put under the puppeteer")
+        t.record(TOP3, title="An orchestrator nobody put under the puppeteer")
         t.record(KID, started_by=TOP, title="the flush child")
         self.file("puppeteers", PUP)
 
@@ -99,20 +99,20 @@ class Supervisor(unittest.TestCase):
         self.assertIn("no session is controlled yet", r.stdout)
         r = t.cli(TOP, "controls", TOP3)
         self.assertEqual(r.returncode, 2, "a session outside the section is refused")
-        self.assertIn("not a supervisor session", r.stderr)
+        self.assertIn("not a puppeteer", r.stderr)
         self.assertIn("no section", r.stderr)
         self.assertNotIn("controls", t.session(TOP), "and records nothing")
         t.say(KID, "Fix the row")
         self.file("puppeteers", PUP, KID)
         r = t.cli(KID, "controls")
-        self.assertEqual(r.returncode, 2, "a child filed there is no supervisor session")
+        self.assertEqual(r.returncode, 2, "a child filed there is no puppeteer")
         self.assertIn("started by another session", r.stderr)
         self.file("Puppeteers", PUP)
         self.assertEqual(t.cli(PUP, "controls").returncode, 0, "the section's name is matched whatever its case")
         self.file("wrappin up", PUP)
         self.assertEqual(t.cli(PUP, "controls").returncode, 2, "another section marks nothing")
         self.file("puppeteers", PUP, shape=["reshaped"])
-        self.assertEqual(t.cli(PUP, "controls").returncode, 2, "a reshaped file makes nobody a supervisor session")
+        self.assertEqual(t.cli(PUP, "controls").returncode, 2, "a reshaped file makes nobody a puppeteer")
         os.remove(os.path.join(t.tmp, "claude_desktop_config.json"))
         self.assertEqual(t.cli(PUP, "controls").returncode, 2, "and so does a missing one")
 
@@ -128,12 +128,12 @@ class Supervisor(unittest.TestCase):
     def test_a_supervisor_session_is_told_once_what_it_is_and_the_sighting_is_kept(self):
         t = self.t
         ctx = context(t.say(PUP, "Control the two trees"))
-        self.assertIn("This session is a supervisor session: ezexe filed it in the sidebar section \"puppeteers\"", ctx)
+        self.assertIn("This session is a puppeteer: ezexe filed it in the sidebar section \"puppeteers\"", ctx)
         self.assertIn("phi.py\" controls <sessionId>", ctx)
         self.assertNotIn("multiSelect", ctx, "the rule points at the archive offer and does not restate it")
         self.assertTrue(t.session(PUP).get("puppeteerSeen"))
-        self.assertNotIn("This session is a supervisor session", context(t.say(PUP, "and now?")), "said once")
-        self.assertNotIn("This session is a supervisor session", context(t.say(TOP, "Build the exporter")))
+        self.assertNotIn("This session is a puppeteer", context(t.say(PUP, "and now?")), "said once")
+        self.assertNotIn("This session is a puppeteer", context(t.say(TOP, "Build the exporter")))
         self.assertIn("p4-phi first saw this session in the section at", t.cli(PUP, "controls").stdout)
 
     # --- the record of controlled sessions ----------------------------------------------------------------------------
@@ -152,8 +152,8 @@ class Supervisor(unittest.TestCase):
         self.assertIn(f"\"Build the importer\" `{TOP2}`", r.stdout)
         self.assertIn("working: its last message has no turn's end recorded after it", r.stdout)
         r = t.cli(PUP, "controls", KID)
-        self.assertEqual(r.returncode, 2, "a child is reached through its top-level session")
-        self.assertIn("a supervisor session controls top-level sessions", r.stderr)
+        self.assertEqual(r.returncode, 2, "a child is reached through its orchestrator")
+        self.assertIn("a puppeteer controls orchestrators", r.stderr)
         self.assertEqual(t.cli(PUP, "controls", PUP).returncode, 2, "nor itself")
         t.say(PUP, "where does each stand?")
         self.assertEqual(len(t.session(PUP)["controls"]), 2, "a hook's save keeps the list")
@@ -167,36 +167,36 @@ class Supervisor(unittest.TestCase):
         t.say(TOP3, "Something else")
         t.cli(PUP, "controls", TOP, TOP2)
         ctx = context(t.say(TOP, "carry on"))
-        self.assertIn("This session is controlled by a supervisor session: \"Control the exporter and the importer "
+        self.assertIn("This session is controlled by a puppeteer: \"Control the exporter and the importer "
                       f"trees, and tell ezexe where each stands\" `{PUP}`", ctx)
         self.assertIn("stays at the top of its own tree, in its own section", ctx)
         self.assertIn("Its tree is archived only on ezexe's pick", ctx)
         self.assertEqual(t.session(TOP)["puppeteer"]["sessionId"], PUP, "kept on its own record, in its own store")
-        self.assertNotIn("This session is controlled by a supervisor session", context(t.say(TOP, "and now?")),
+        self.assertNotIn("This session is controlled by a puppeteer", context(t.say(TOP, "and now?")),
                          "said once")
         ctx = context(t.say(TOP2, "carry on", proj=self.other))
-        self.assertIn("This session is controlled by a supervisor session", ctx,
+        self.assertIn("This session is controlled by a puppeteer", ctx,
                       "a session in another store is told by its own hook")
-        self.assertNotIn("controlled by a supervisor session", context(t.say(TOP3, "carry on")),
-                         "an uncontrolled top-level session: nothing")
+        self.assertNotIn("controlled by a puppeteer", context(t.say(TOP3, "carry on")),
+                         "an uncontrolled orchestrator: nothing")
         relay._write_json(os.path.join(t.dir(TOP3), "session.json"),
                           {**t.session(TOP3), "controls": [{"sessionId": KID, "store": t.p4}]})
         relay._write_json(os.path.join(t.dir(TOP), "session.json"),
                           {**t.session(TOP), "controls": [{"sessionId": TOP3, "store": t.p4}]})
-        self.assertNotIn("controlled by a supervisor session", context(t.say(TOP3, "and now?")),
+        self.assertNotIn("controlled by a puppeteer", context(t.say(TOP3, "and now?")),
                          "listed by a session outside the section: told nothing")
         t.cli(PUP, "controls", "--drop", TOP)
         ctx = context(t.say(TOP, "and after?"))
-        self.assertIn("This session has left the control of its supervisor session", ctx)
+        self.assertIn("This session has left the control of its puppeteer", ctx)
         self.assertNotIn("puppeteer", t.session(TOP))
-        self.assertNotIn("left the control of its supervisor session", context(t.say(TOP, "and then?")), "said once")
+        self.assertNotIn("left the control of its puppeteer", context(t.say(TOP, "and then?")), "said once")
 
     # --- the archive guard --------------------------------------------------------------------------------------------
 
     TITLE = "Build the narwhal exporter"
 
     def complete_top(self):
-        """TOP finished and controlled, and the supervisor session handed the line that offers it."""
+        """TOP finished and controlled, and the puppeteer handed the line that offers it."""
         t = self.t
         self.finish(TOP)
         t.say(PUP, "Control the tree")
@@ -209,7 +209,7 @@ class Supervisor(unittest.TestCase):
         self.assertEqual(out.get("permissionDecision"), "deny", "complete, controlled and reasoned, but not picked")
         why = out["permissionDecisionReason"]
         self.assertIn("Not picked by ezexe in this turn", why)
-        self.assertIn("a supervisor session archives only what ezexe picks", why)
+        self.assertIn("a puppeteer archives only what ezexe picks", why)
         self.assertIn("p4-phi's records hold it complete, so it can be offered", why)
         out = self.archive(PUP, TOP, picks=["Some other session"])
         self.assertEqual(out.get("permissionDecision"), "deny", "a multiple-choice answer that picked another")
@@ -230,7 +230,7 @@ class Supervisor(unittest.TestCase):
 
     def test_a_boundary_line_for_a_complete_tree_names_the_multiple_choice_question_and_not_the_archive_call(self):
         ctx = self.complete_top()
-        self.assertIn("1 session this supervisor session controls is complete", ctx)
+        self.assertIn("1 session this puppeteer controls is complete", ctx)
         self.assertIn("one `AskUserQuestion` with `multiSelect` true", ctx)
         self.assertIn(f"- label \"{self.TITLE}\", description \"Archive {TOP}.\"", ctx)
         self.assertIn("with a last option \"None of them\"", ctx)
@@ -249,7 +249,7 @@ class Supervisor(unittest.TestCase):
         t.say(PUP, "Control the trees")
         t.cli(PUP, "controls", TOP, TOP2)
         ctx = context(t.say(PUP, "a report came in"))
-        self.assertIn(f"\"{self.TITLE}\" `{TOP}`, a session this supervisor session controls, is complete", ctx)
+        self.assertIn(f"\"{self.TITLE}\" `{TOP}`, a session this puppeteer controls, is complete", ctx)
         self.assertIn("buttons are the replies \"Archive it\" and \"Not now\"", ctx)
         self.assertIn("Not offered, and named to ezexe as left with the reason: \"Build the importer\"", ctx)
         self.assertNotIn("a boundary", ctx)
@@ -266,7 +266,7 @@ class Supervisor(unittest.TestCase):
         t = self.t
         t.record(TOP4, title="Build the ports table")
         t.record(TOP5, title="Build the moon format reader")
-        five = [(TOP, self.TITLE), (TOP2, "Build the importer"), (TOP3, "A top session nobody put under the puppeteer"),
+        five = [(TOP, self.TITLE), (TOP2, "Build the importer"), (TOP3, "An orchestrator nobody put under the puppeteer"),
                 (TOP4, "Build the ports table"), (TOP5, "Build the moon format reader")]
         for sid, _ in five:
             self.finish(sid, proj=self.other if sid == TOP2 else None)
@@ -275,7 +275,7 @@ class Supervisor(unittest.TestCase):
         ctx = context(t.say(PUP, "five reports came in"))
         self.assertEqual({o["label"]: o["ids"] for o in t.session(PUP)["archiveOffer"]},
                          {title: [sid] for sid, title in five}, "each session under an option of its own")
-        self.assertIn("5 sessions this supervisor session controls are complete", ctx)
+        self.assertIn("5 sessions this puppeteer controls are complete", ctx)
         self.assertIn("put them to ezexe as 2 multiple-choice questions in one `AskUserQuestion`", ctx)
         asked = ctx.split("under these questions:\nQuestion 1:\n", 1)[-1].split("\nArchive none of them", 1)[0]
         asked = asked.split("\nQuestion 2:\n")
@@ -295,11 +295,11 @@ class Supervisor(unittest.TestCase):
         t.stop(KID, "Fix the row", report="Fixed.")
         self.complete_top()
         out = self.archive(TOP, KID)
-        self.assertEqual(out.get("permissionDecision"), "deny", "a top-level session outside the section: refused")
+        self.assertEqual(out.get("permissionDecision"), "deny", "an orchestrator outside the section: refused")
         self.assertIn("this archive call is refused", out["permissionDecisionReason"])
         out = self.archive(PUP, TOP3, picks=[self.TITLE])
         self.assertEqual(out.get("permissionDecision"), "deny")
-        self.assertIn("is not a session this supervisor session controls", out["permissionDecisionReason"])
+        self.assertIn("is not a session this puppeteer controls", out["permissionDecisionReason"])
         self.assertEqual(self.archive(PUP, TOP, picks=[self.TITLE]), {})
         t.say(TOP, "one more thing")
         out = self.archive(PUP, TOP, picks=[self.TITLE])
@@ -339,7 +339,7 @@ class Supervisor(unittest.TestCase):
         self.assertEqual(self.archive(PUP, TOP2, picks=["Build the importer"]), {})
         t.say(PUP, "where does each stand?")
         t.cli(PUP, "controls")
-        self.assertEqual(snap(), before, "the supervisor session writes nothing into a controlled store")
+        self.assertEqual(snap(), before, "the puppeteer writes nothing into a controlled store")
         self.assertTrue(t.session(PUP)["puppeteerArchives"][-1]["let"], "its record is in its own store")
 
     # --- its own steps ------------------------------------------------------------------------------------------------
@@ -350,9 +350,9 @@ class Supervisor(unittest.TestCase):
                  "Check the trees' results against GitHub", "Rewrite flush_rows in src/exporter.py")
         t.say(PUP, "Control the two trees")
         t.say(TOP3, "Control the two trees")
-        self.assertIn("child session", context(self.plan(TOP3, *steps)), "any other top-level session")
+        self.assertIn("worker", context(self.plan(TOP3, *steps)), "any other orchestrator")
         ctx = context(self.plan(PUP, *steps))
-        self.assertNotIn("child session", ctx)
+        self.assertNotIn("worker", ctx)
         self.assertNotIn("start_session", ctx)
         self.assertFalse(os.path.exists(os.path.join(t.p4, "phi", ".nudge", CLI[PUP])), "and no nudge")
         t.say(TOP, "Build it")                      # a controlled session, mid-turn
@@ -367,7 +367,7 @@ class Supervisor(unittest.TestCase):
         self.assertEqual(json.loads(r.stdout).get("decision"), "block", "nobody left to wait on: back to the step")
         r = t.stop(TOP3, "Control the two trees", report="Waiting.")
         self.assertEqual(json.loads(r.stdout).get("decision"), "block",
-                         "a top-level session outside the section is sent back to its step")
+                         "an orchestrator outside the section is sent back to its step")
 
     # --- the board ------------------------------------------------------------------------------------------------------
 
@@ -410,7 +410,7 @@ class Supervisor(unittest.TestCase):
         r = t.hook("session-start", PUP, {"hook_event_name": "SessionStart", "source": "compact"})
         ctx = context(r)
         board = os.path.join(t.dir(PUP), "board.md").replace("\\", "/")
-        self.assertTrue(ctx.startswith("phi (p4-phi): this session is a supervisor session and its context was "
+        self.assertTrue(ctx.startswith("phi (p4-phi): this session is a puppeteer and its context was "
                                        "compacted. Read its board before anything else: " + board), ctx[:300])
         self.assertTrue(os.path.exists(board))
         self.assertEqual(t.session(PUP)["compactions"], 1)
@@ -457,7 +457,7 @@ class Supervisor(unittest.TestCase):
         s = t.session(PUP)
         relay._write_json(os.path.join(t.dir(PUP), "session.json"), {**s, "compactions": 3, "boundary": {}})
         ctx = context(t.say(PUP, "and now?"))
-        self.assertIn("the app's `new_session` action, which starts the successor supervisor session from the board",
+        self.assertIn("the app's `new_session` action, which starts the successor puppeteer from the board",
                       ctx)
 
     def test_a_controlled_tree_that_closed_is_a_boundary_named_once_while_another_still_works(self):
@@ -507,11 +507,11 @@ class Supervisor(unittest.TestCase):
         t.say(PUP2, "what is ready?")
         old = "Control the exporter and the importer trees, and tell ezexe where each stands"
         self.assertIn(old, [o["label"] for o in t.session(PUP2)["archiveOffer"]],
-                      "the old supervisor session, handed over and done, is offered")
+                      "the old puppeteer, handed over and done, is offered")
         self.assertEqual(self.archive(PUP2, PUP, picks=[old]), {}, "and archived by the new one on ezexe's pick")
         self.assertEqual(self.archive(PUP2, TOP3, picks=[old]).get("permissionDecision"), "deny")
 
-    # --- a new top-level session goes through the supervisor session ----------------------------------------------------
+    # --- a new orchestrator goes through the puppeteer ----------------------------------------------------
 
     def test_a_controlled_top_session_asks_its_supervisor_session_and_its_own_start_is_refused(self):
         t = self.t
@@ -525,7 +525,7 @@ class Supervisor(unittest.TestCase):
                            if k != "newTaskToldAt"})
         ctx = context(t.say(TOP2, "Also, what about a new exporter for the moon format?", proj=self.other,
                             P4_PHI_NEW_TASK="1"))
-        self.assertIn("This session is controlled by a supervisor session", ctx)
+        self.assertIn("This session is controlled by a puppeteer", ctx)
         self.assertIn("--to-puppeteer", ctx)
         self.assertNotIn("start_session", ctx, "handed a new-topic line, it is given no start call")
         new_top = BRIEF + "\n" + phi.NEW_TOP_BRIEF
@@ -533,48 +533,48 @@ class Supervisor(unittest.TestCase):
                                           "tool_input": {"initiation": "user_asked", "title": "the retry",
                                                          "prompt": new_top}}, proj=self.other)
         out = json.loads(r.stdout)["hookSpecificOutput"]
-        self.assertEqual(out["permissionDecision"], "deny", "its own start of a new top-level session is refused")
+        self.assertEqual(out["permissionDecision"], "deny", "its own start of a new orchestrator is refused")
         self.assertIn("--to-puppeteer", out["permissionDecisionReason"])
         r = t.hook("start-advice", TOP3, {"hook_event_name": "PreToolUse", "tool_name": START,
                                           "tool_input": {"initiation": "user_asked", "title": "the retry",
                                                          "prompt": new_top}})
-        self.assertNotIn("\"deny\"", r.stdout, "a top-level session with no supervisor session starts its own")
+        self.assertNotIn("\"deny\"", r.stdout, "an orchestrator with no puppeteer starts its own")
         r = t.cli(TOP3, "request", "the retry", "--brief", BRIEF, "--to-puppeteer")
         self.assertEqual(r.returncode, 2)
-        self.assertIn("has no supervisor session", r.stderr)
+        self.assertIn("has no puppeteer", r.stderr)
         r = t.cli(TOP2, "request", "the retry", "--brief", BRIEF, "--to-puppeteer", proj=self.other)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("to this session's supervisor session", r.stdout)
+        self.assertIn("to this session's puppeteer", r.stdout)
         self.assertIn("Start nothing for it here", r.stdout)
         row = next(iter(starts.state(self.store2).values()))
         self.assertEqual(row["to"], PUP, "kept in the store of the session that filed it")
-        self.assertEqual(starts.state(t.p4), {}, "and nothing in the supervisor session's")
+        self.assertEqual(starts.state(t.p4), {}, "and nothing in the puppeteer's")
         self.assertNotIn("start requests", context(t.say(TOP2, "and now?", proj=self.other)),
                          "never handed back to the session that filed it")
-        # the supervisor session reads it where it lies, at a turn ezexe began
+        # the puppeteer reads it where it lies, at a turn ezexe began
         ctx = context(t.say(PUP, "what is waiting?"))
-        self.assertIn("controlled sessions ask this supervisor session for new top-level sessions", ctx)
+        self.assertIn("controlled sessions ask this puppeteer for new orchestrators", ctx)
         self.assertIn("to be filed in the ungrouped list under its project", ctx)
         call = json.loads(ctx.split("`mcp__ccd_session__start_session` with ", 1)[1].split("\n", 1)[0])
         self.assertEqual(os.path.normcase(os.path.normpath(call["cwd"])),
                          os.path.normcase(os.path.normpath(self.other)), "in the environment of the session that filed it")
         self.assertIn(phi.NEW_TOP_BRIEF, call["prompt"])
         self.assertIn(f"for {TOP2}.", call["prompt"])
-        self.assertIn("## Requests to this supervisor session", read(os.path.join(t.dir(PUP), "board.md")))
-        self.assertNotIn("a boundary", ctx, "never while a controlled session waits on the supervisor session's answer")
-        # it starts it: the new session arrives in the store of the session that filed the request, a top-level
-        # session, and is taken under control
+        self.assertIn("## Requests to this puppeteer", read(os.path.join(t.dir(PUP), "board.md")))
+        self.assertNotIn("a boundary", ctx, "never while a controlled session waits on the puppeteer's answer")
+        # it starts it: the new session arrives in the store of the session that filed the request, an
+        # orchestrator, and is taken under control
         t.record(NEW, started_by=PUP, title="the retry", cwd=self.other)
         t.say(NEW, "Task:\n" + call["prompt"], proj=self.other)
         self.assertEqual(starts.open_rows(self.store2), [], "the request is started")
         self.file("puppeteers", PUP, more={TOP2: "importers"})
         ctx = context(t.say(PUP, "and now?"))
-        self.assertIn(f"\"the retry\" `{NEW}` is a top-level session this supervisor session started, so it is "
+        self.assertIn(f"\"the retry\" `{NEW}` is an orchestrator this puppeteer started, so it is "
                       f"controlled", ctx)
         self.assertIn("File it in the section \"importers\" with `mcp__ccd_sidebar__move_sessions`, never in "
                       "\"puppeteers\"", ctx)
         self.assertIn(NEW, [e["sessionId"] for e in t.session(PUP)["controls"]])
-        self.assertIn("This session is controlled by a supervisor session", context(t.say(NEW, "carry on",
+        self.assertIn("This session is controlled by a puppeteer", context(t.say(NEW, "carry on",
                                                                                           proj=self.other)))
 
     def test_a_controlled_sessions_refused_start_says_this_session_is_controlled_by_a_supervisor_session(self):
@@ -591,7 +591,7 @@ class Supervisor(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         out = json.loads(r.stdout)["hookSpecificOutput"]
         self.assertEqual(out["permissionDecision"], "deny")
-        self.assertIn("this session is controlled by a supervisor session", out["permissionDecisionReason"])
+        self.assertIn("this session is controlled by a puppeteer", out["permissionDecisionReason"])
 
     def test_a_declined_request_is_closed_and_the_session_that_filed_it_is_told(self):
         t = self.t
@@ -604,7 +604,7 @@ class Supervisor(unittest.TestCase):
         r = t.cli(PUP, "controls", "--decline", rid, "ezexe froze the retry work, and it duplicates issue 50")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("declined", read(os.path.join(t.dir(PUP), "board.md")))
-        self.assertNotIn("ask this supervisor session", context(t.say(PUP, "what is waiting?")))
+        self.assertNotIn("ask this puppeteer", context(t.say(PUP, "what is waiting?")))
         ctx = context(t.say(TOP2, "and the retry?", proj=self.other))
         self.assertIn("declined the request", ctx)
         self.assertIn("ezexe froze the retry work", ctx)
@@ -619,10 +619,10 @@ class Supervisor(unittest.TestCase):
         t.cli(PUP, "controls", TOP)
         self.assertNotIn("does not control", context(t.say(PUP, "anything new?")))
         relay._write_json(os.path.join(t.dir(TOP3), "session.json"),
-                          {"sessionId": TOP3, "title": "A top session nobody put under the puppeteer",
+                          {"sessionId": TOP3, "title": "An orchestrator nobody put under the puppeteer",
                            "createdAt": "2999-01-01 00:00", "cwd": t.proj})
         ctx = context(t.say(PUP, "anything new?"))
-        self.assertIn(f"\"A top session nobody put under the puppeteer\" `{TOP3}` is a new top-level session", ctx)
+        self.assertIn(f"\"An orchestrator nobody put under the puppeteer\" `{TOP3}` is a new orchestrator", ctx)
         self.assertIn(f"controls {TOP3}` takes it under control", ctx)
         self.assertNotIn("does not control", context(t.say(PUP, "and now?")), "named once")
 
@@ -641,7 +641,7 @@ class Supervisor(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             return context(r)
         said = go(TOP3)
-        self.assertIn("this go to \"A top session nobody put under the puppeteer\" is early", said)
+        self.assertIn("this go to \"An orchestrator nobody put under the puppeteer\" is early", said)
         self.assertIn(f"\"Build the narwhal exporter\" `{TOP}` holds ", said, "the holder by its full title")
         self.assertIn("writer.py", said)
         self.assertIn(" files --release`", said)
@@ -668,8 +668,8 @@ class Supervisor(unittest.TestCase):
 class TreeAndClicks(unittest.TestCase):
     """The tree in the app is the true tree, and ezexe acts by click where one exists. A child's start request is
     started by the child itself, which waits on ezexe by a blocked wrap-up whose first button starts it; its
-    supervisor session names the child as a link with the count it holds and is handed no start call for it; a start
-    the supervisor session makes on the child's behalf anyway is held under the child in p4-phi, named for detaching
+    puppeteer names the child as a link with the count it holds and is handed no start call for it; a start
+    the puppeteer makes on the child's behalf anyway is held under the child in p4-phi, named for detaching
     to top level and kept on the board as an exception; and every ask of ezexe in the lines the session modules hand
     a session offers a click."""
 
@@ -721,10 +721,10 @@ class TreeAndClicks(unittest.TestCase):
                                                                               "not begin while it holds the request")
             self.assertNotIn("`mcp__ccd_session__start_session` with", again)
         ctx = context(t.say(PUP, "what is waiting?"))
-        with self.subTest("its supervisor session's next turn names the child as a link with the count it holds"):
+        with self.subTest("its puppeteer's next turn names the child as a link with the count it holds"):
             self.assertIn(f"- [the flush child](#{KID}): 1 start request", ctx)
             self.assertIn("Start none of them here", ctx)
-        with self.subTest("and drafts no start call for the supervisor session"):
+        with self.subTest("and drafts no start call for the puppeteer"):
             self.assertNotIn(START, ctx)
             self.assertNotIn(self.row["id"], ctx)
         with self.subTest("the board names the child as a link with the count it holds"):
@@ -755,7 +755,7 @@ class TreeAndClicks(unittest.TestCase):
         with self.subTest("p4-phi holds the new session under the child that filed the request"):
             self.assertEqual(t.started_by(NEW), (KID, "requested"))
         ctx = context(t.say(PUP, "what came in?"))
-        with self.subTest("its supervisor session is told to detach it to top level in the app"):
+        with self.subTest("its puppeteer is told to detach it to top level in the app"):
             self.assertIn(f"[the flush port](#{NEW})", ctx)
             self.assertIn(f"call `mcp__ccd_session_mgmt__detach_session` with `{NEW}`", ctx)
         with self.subTest("and the board names it as an exception"):
@@ -763,7 +763,7 @@ class TreeAndClicks(unittest.TestCase):
             made = made.split("\n## ")[0]
             self.assertIn(f"[the flush port](#{NEW})", made)
             self.assertIn(f"[the flush child](#{KID})", made)
-            self.assertIn("nests it under this supervisor session", made)
+            self.assertIn("nests it under this puppeteer", made)
         app = os.path.join(t.app, NEW + ".json")
         write(app, json.dumps({**json.loads(read(app)), "lineageDetached": True}))     # detached to top level
         with self.subTest("once the app shows it at top level, it is named no more and the board says so"):

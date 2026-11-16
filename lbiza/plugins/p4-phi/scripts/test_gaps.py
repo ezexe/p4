@@ -128,7 +128,7 @@ class Hook(unittest.TestCase):
     def test_a_memory_the_plugin_carries_now_keeps_no_start_request(self):
         """A memory that says the plugin already carries its rule, as "p4-phi carries this now" does, gets nothing."""
         carried = ("p4-phi carries this now: when a child finishes with commits carrying `Closes #N`, `relay.py` tells "
-                   "the top session to push main and sync each store at once, so follow that line.")
+                   "the orchestrator to push main and sync each store at once, so follow that line.")
         self.t.say(TOP, "<cross-session-message from=\"local_x\">tidy the memories</cross-session-message>")
         self.assertEqual(self.wrote(memory(self.t.p4, "always-push-issue-work", carried)), "")
         self.assertEqual(starts.pending(self.t.p4), [], "no start request is kept in this store")
@@ -136,7 +136,7 @@ class Hook(unittest.TestCase):
         self.assertNotIn("gapsTold", self.t.session(TOP), "and it is not counted as a gap told")
         both = "p4-temportal and p4-phi carry this now: a session's scratchpad links to the store's tmp folder."
         self.assertEqual(self.wrote(memory(self.t.p4, "temp-files-in-p4-tmp", both)), "")
-        self.assertTrue(gaps.carried("The archiving of a child session is built into p4-phi since 0.8."))
+        self.assertTrue(gaps.carried("The archiving of a worker is built into p4-phi since 0.8."))
         self.assertFalse(gaps.carried(CHILD_RULE))
         self.t.say(TOP, "and the rest")
         self.assertIn("patches over a gap", self.wrote(memory(self.t.p4, "children-on-parent-branch", CHILD_RULE)),
@@ -144,7 +144,7 @@ class Hook(unittest.TestCase):
 
     def test_a_negated_form_is_a_real_gap(self):
         """A negated or wished-for form, such as "p4-phi does not carry this yet", is no carried rule."""
-        for gap in ("p4-phi does not carry this yet: a child session never pushes, and only the parent merges.",
+        for gap in ("p4-phi does not carry this yet: a worker never pushes, and only the parent merges.",
                     "p4-phi doesn't carry this, so sessions keep the rule by hand.",
                     "The plugin should carry this: a store moves only by p4.py sync.",
                     "p4-phi never carried this rule for sub-agents.",
@@ -154,16 +154,16 @@ class Hook(unittest.TestCase):
         for done in ("p4-phi carries this now: the act-don't-wait line is given to every session.",
                      "p4-temportal and p4-phi carry this now, so don't write temporary files elsewhere.",
                      "It was not built in at first. p4-phi carries this now.",
-                     "The archiving of a child session is built into p4-phi since 0.8."):
+                     "The archiving of a worker is built into p4-phi since 0.8."):
             self.assertTrue(gaps.carried(done), done)
         self.t.say(TOP, "Build the exporter")
-        got = self.wrote(memory(self.t.p4, "child-never-pushes", "p4-phi does not carry this yet: a child session "
+        got = self.wrote(memory(self.t.p4, "child-never-pushes", "p4-phi does not carry this yet: a worker "
                                 "never pushes a branch, and only the parent session merges and pushes."))
         self.assertIn("patches over a gap in the plugin", got, "a negated form still gets the advice")
 
     def test_a_write_that_only_shortens_or_removes_text_is_no_new_gap(self):
         self.t.say(TOP, "Build the exporter")
-        long = CHILD_RULE + "\n\nA child session never pushes a branch, and its report names every merge it wants."
+        long = CHILD_RULE + "\n\nA worker never pushes a branch, and its report names every merge it wants."
         path = memory(self.t.p4, "children-on-parent-branch", long)
         whole = open(path, encoding="utf-8").read()
         memory(self.t.p4, "children-on-parent-branch", CHILD_RULE)
@@ -175,13 +175,13 @@ class Hook(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             return context(r)
         self.assertEqual(wrote("Write", {}, {"type": "update", "originalFile": whole}), "", "a Write that shortened it")
-        cut = "\n\nA child session never pushes a branch, and its report names every merge it wants."
+        cut = "\n\nA worker never pushes a branch, and its report names every merge it wants."
         self.assertEqual(wrote("Edit", {"old_string": CHILD_RULE + cut, "new_string": CHILD_RULE}, "ok"), "",
                          "an Edit that removed a sentence")
         self.assertTrue(gaps.only_shortens(whole, open(path, encoding="utf-8").read()))
         self.assertFalse(gaps.only_shortens(open(path, encoding="utf-8").read(), whole), "text was added")
         self.assertFalse(gaps.only_shortens("", whole), "a new file shortens nothing")
-        added = CHILD_RULE.replace("only the parent merges and pushes", "only the top session merges, pushes and syncs")
+        added = CHILD_RULE.replace("only the parent merges and pushes", "only the orchestrator merges, pushes and syncs")
         memory(self.t.p4, "children-on-parent-branch", added)
         self.assertIn("patches over a gap", wrote("Write", {}, {"type": "update", "originalFile": whole}),
                       "a write that says something new is a gap")
@@ -214,7 +214,7 @@ class Hook(unittest.TestCase):
     def test_a_child_with_no_supervisor_session_above_it_writes_the_gap_for_its_top_level_session(self):
         self.t.record(KID, TOP, title="the flush child")
         got = self.wrote(memory(self.t.p4, "children-on-parent-branch", CHILD_RULE), host=KID)
-        self.assertIn(f"the top-level session \"top\" `{TOP}` of this session tree, which no supervisor session "
+        self.assertIn(f"the orchestrator \"top\" `{TOP}` of this session tree, which no puppeteer "
                       f"controls, publishes the issue and places the session that resolves it", got)
         self.assertIn("This session publishes no issue and starts no session for it.", got)
         self.assertNotIn("gh issue create", got)

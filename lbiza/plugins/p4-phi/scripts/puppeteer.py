@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """puppeteer.py: the four steps p4-phi takes for an orchestrator, after the four diagrams of ezexe/p4's README.md.
 
-An orchestrator is a top-level session with a task, or any session that started sessions. Its steps are routing, the
+It acts for an orchestrator with a task, or any session that started sessions. Its steps are routing, the
 start draft, the gate and the watcher, which the functions `prompty`, `prompter`, `pioneer` and `watch` run:
 
   linear     Routing reads ezexe's message against the records the ledger is built from: the area it names, the
@@ -23,8 +23,8 @@ start draft, the gate and the watcher, which the functions `prompty`, `prompter`
   parallel   an under-determined message becomes one child for each distinct reading. Each ends its report with a
              `Result:` line, and the orchestrator merges them: readings that converge collapse to one result, and
              only a fork that survives the merge goes to ezexe, as one question with options and a default.
-  meta       the top-level session that receives ezexe's message first runs a meta pass over every top-level
-             session's ledger and writes <home>/phi/meta-ledger.md: duplicate topics, top-level sessions in conflict
+  meta       the orchestrator that receives ezexe's message first runs a meta pass over every
+             orchestrator's ledger and writes <home>/phi/meta-ledger.md: duplicate topics, orchestrators in conflict
              over the same files or issue, stale topics, and what is left open for the next generation.
 
 p4-phi's hooks are command hooks, which start no session and send no message, so the gate's verdict is the exact call
@@ -74,7 +74,7 @@ OWNER_WORDS = 8                  # content words a message shares with a live se
 MODEL_FILE = "prompty.json"      # <store>/phi/models/prompty.json: the trained code owner and route scorers, if any
 TOPIC_WORDS = 3                  # content words a message shares with this session's task to be part of its topic
 QUICK_WORDS = 6                  # a message of fewer content words is a quick thing, never drafted
-STALE_S = 24 * 3600.0            # a top-level session with open work and no turn this long is stale
+STALE_S = 24 * 3600.0            # an orchestrator with open work and no turn this long is stale
 WORDS_CHARS = 1500               # of ezexe's words, quoted in a brief
 STOP = frozenset("""phi session sessions p4 plugin plugins please make sure also just now then when with that this
 there their them they have has should would could will want need like into from about your you our out get got use
@@ -178,7 +178,7 @@ def subtree(home, top, every=None):
 
 
 def orchestrator(home, s, every=None):
-    """True for an orchestrator: a top-level session with a task, or any session that started sessions."""
+    """True for a session that orchestrates: an orchestrator with a task, or any session that started sessions."""
     if not isinstance(s, dict) or not s.get("sessionId"):
         return False
     if not relay._parent(s):
@@ -483,7 +483,7 @@ def build(home, top, net=False):
 
 def render(m):
     """A ledger's data as ledger.md. It carries no clock, so the same records give the same page."""
-    where = f"started by `{m['parent']}`" if m["parent"] else "a top-level session"
+    where = f"started by `{m['parent']}`" if m["parent"] else "an orchestrator"
     out = [f"# Ledger: {m['title']}", "",
            f"Orchestrator `{m['top']}`, {where}.",
            "Written by p4-phi from its own records and the app's session records, by its watcher, its prompt hook, its "
@@ -740,8 +740,8 @@ def closing_pushed(home, s, slug, n, repo):
 
 
 def backed(home, s, net=False):
-    """Returns True and the closing commit when the records back a landed topic's reports: the session and its child
-    sessions are archived with their outcome kept, its issue is closed, and a commit that closes it is pushed.
+    """Returns True and the closing commit when the records back a landed topic's reports: the session and its
+    workers are archived with their outcome kept, its issue is closed, and a commit that closes it is pushed.
     Returns False and what is missing otherwise."""
     sid = s["sessionId"]
     slug, n, repo = topic_issue(s)
@@ -779,8 +779,8 @@ def route_of(home, s, commit):
     base = s.get("cwd") or above.get("cwd") or ""
     return {"kind": "route", "id": "rt-" + hashlib.sha1(f"{sid}\n{slug}#{n}".encode()).hexdigest()[:10],
             "time": now(), "at": time.time(), "words": _short(said, WORDS_CHARS), "topic": phi.title_of(s),
-            "shape": {"parent": "a child of a top-level session" if parent and not relay._parent(above) else
-                      "a top-level session" if not parent else "a child of an orchestrator",
+            "shape": {"parent": "a child of an orchestrator" if parent and not relay._parent(above) else
+                      "an orchestrator" if not parent else "a child of an orchestrator",
                       "children": len(subtree(home, sid)) - 1, "archiveWhenDone": bool(s.get("disposable")),
                       "steps": [_short(x.get("content"), 100) for x in plan.get("steps") or []][:12]},
             "slice": {"brief": _short(s.get("task"), WORDS_CHARS),
@@ -1115,7 +1115,7 @@ def pioneer(home, s, d, read, net=True):
         verdict = "start"
         gate.append("no running writer holds its files")
     gate.append("its parent is this session, the orchestrator of its topic" if d["parent"] else
-                "it is outside this session's topic, so it is a new top-level session")
+                "it is outside this session's topic, so it is a new orchestrator")
     if d.get("reading") and verdict == "queue":
         verdict = "start"                           # a reading changes no file, so no writer is in its way
     d.update(verdict=verdict, gate=gate, owner=owner, busy=held)
@@ -1566,7 +1566,7 @@ def restart_text(home, sid, command):
             f"was missed, start it again: p4-phi lets the next start through and keeps it as a repeat of {first['id']}.")
 
 
-# --- meta: the top-level sessions' ledgers reconciled -----------------------------------------------------------------
+# --- meta: the orchestrators' ledgers reconciled -----------------------------------------------------------------
 
 def meta_path(home):
     return os.path.join(home, "phi", "meta-ledger.md").replace("\\", "/")
@@ -1584,8 +1584,8 @@ def last_moved(home, sid):
 
 
 def meta_pass(home, at=None):
-    """The meta pass over every live top-level session's ledger. Returns meta-ledger.md's text, its findings, and
-    True when the page was rewritten. The findings: duplicate topics, top-level sessions in conflict over the same
+    """The meta pass over every live orchestrator's ledger. Returns meta-ledger.md's text, its findings, and
+    True when the page was rewritten. The findings: duplicate topics, orchestrators in conflict over the same
     issue or the same files, stale topics, and what is left open, which seeds the next generation of topics."""
     phi = _phi()
     at = time.time() if at is None else at
@@ -1640,19 +1640,19 @@ def meta_pass(home, at=None):
         seeds.append(f"start request {r['id']} \"{r.get('title')}\" waits on a turn ezexe begins in {who}, by the "
                      f"button its turn ended on.")
     out = ["# Meta-ledger", "",
-           "Written by p4-phi's meta pass, which the top-level session that receives ezexe's message runs over every "
-           "top-level session's ledger before it reads the message.",
-           "Rewritten only when what it finds changes. A top-level session told of a finding settles it with the other "
-           "top-level session through SendMessage, and puts to ezexe, as one `AskUserQuestion` with an option for each "
+           "Written by p4-phi's meta pass, which the orchestrator that receives ezexe's message runs over every "
+           "orchestrator's ledger before it reads the message.",
+           "Rewritten only when what it finds changes. An orchestrator told of a finding settles it with the other "
+           "orchestrator through SendMessage, and puts to ezexe, as one `AskUserQuestion` with an option for each "
            "side, only a conflict the two cannot settle.", "",
-           "## Top-level sessions", ""]
+           "## Orchestrators", ""]
     out += [f"- {name[t]}: live sessions {len(led[t].get('rows') or [])}, open steps "
             f"{sum(len(r.get('open') or []) for r in led[t].get('rows') or [])}, ledger "
             f"{ledger_path(home, t)}" for t in tops] or ["- None."]
-    for head, items, none in (("Duplicate topics", dup, "No two top-level sessions carry one topic."),
-                              ("Conflicts between top sessions", clash,
-                               "No two top-level sessions hold the same issue or the same files."),
-                              ("Stale or landed topics", stale, "No top-level session is stale."),
+    for head, items, none in (("Duplicate topics", dup, "No two orchestrators carry one topic."),
+                              ("Conflicts between orchestrators", clash,
+                               "No two orchestrators hold the same issue or the same files."),
+                              ("Stale or landed topics", stale, "No orchestrator is stale."),
                               ("Next generation", seeds, "Nothing is left open without a session at work on it.")):
         out += ["", f"## {head}", ""] + ([f"- {x}" for x in items] or [f"- {none}"])
     text = "\n".join(out) + "\n"
@@ -1663,16 +1663,16 @@ def meta_pass(home, at=None):
 
 
 def meta_text(home, s, found):
-    """The findings of a meta pass this top-level session was not told yet, in a few lines. It changes s."""
+    """The findings of a meta pass this orchestrator was not told yet, in a few lines. It changes s."""
     told = [x for x in s.get("metaTold") or [] if isinstance(x, str)]
     new = [k for k in found["keys"] if k not in told and s["sessionId"] in k]
     if not new:
         return ""
     s["metaTold"] = (told + new)[-200:]
     mine = [x for x in found["duplicates"] + found["conflicts"] + found["stale"] if s["sessionId"] in x]
-    return ("phi (p4-phi): the meta pass over every top-level session's ledger, written to "
+    return ("phi (p4-phi): the meta pass over every orchestrator's ledger, written to "
             f"{meta_path(home)}, found for this session: " + " ".join(mine[:4])
-            + " Settle what can be settled without ezexe: a duplicate or a conflict with another top-level session "
+            + " Settle what can be settled without ezexe: a duplicate or a conflict with another orchestrator "
               "goes to that session with SendMessage, and a session whose work is over is named to ezexe as a link to "
               "open and archive; only a conflict the two sessions cannot settle goes to ezexe, as one "
               "`AskUserQuestion` with an option for each side.")
@@ -1681,7 +1681,7 @@ def meta_text(home, s, found):
 # --- the prompt hook ----------------------------------------------------------------------------------------------------
 
 def on_prompt(home, s, req, base, transcript_bytes=0):
-    """A message of ezexe's in an orchestrator: the meta pass when it is a top-level session, its ledger made
+    """A message of ezexe's in an orchestrator: the meta pass when it is an orchestrator, its ledger made
     current, then routing, the start draft and the gate. Returns the text for the session and the verdict, which is
     empty when no draft was made. It changes `s` and never saves it."""
     if not on(home) or not req or not orchestrator(home, s):

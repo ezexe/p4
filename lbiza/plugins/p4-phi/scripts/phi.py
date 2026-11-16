@@ -2,10 +2,10 @@
 """phi.py: what linked sessions hand each other, kept on the app's own session tree.
 
 Each session has a folder <home>/phi/sessions/<sessionId>/ in the store its tree lives in: the store of its
-top-level session's project, or the shared store that p4.json's `phi.home` names. The folder holds session.json, the
+orchestrator's project, or the shared store that p4.json's `phi.home` names. The folder holds session.json, the
 app's fields for the session with its task; turns.jsonl, a line for each finished turn; notes.jsonl; reports.jsonl,
-the reports of its child sessions; log.jsonl, a line for each hook call; and session.md, the session as one page.
-The reports of top-level sessions are in <home>/phi/reports.jsonl.
+the reports of its workers; log.jsonl, a line for each hook call; and session.md, the session as one page.
+The reports of orchestrators are in <home>/phi/reports.jsonl.
 
 A hook's payload does not say which session started this one. The app's record says it in `spawnedFrom.sessionId`,
 but for a fresh child the app may write it only after the first message, so the notes folder that message names is
@@ -15,11 +15,11 @@ The hooks, each in its h_ function:
 - SessionStart gives the rules, as rules_text says, and the start background to a fork, after a compaction or a
   clear, and to a session no app runs.
 - UserPromptSubmit keeps the first request as the task and gives the start background with the first message when
-  the start did not, then the reports of the child sessions that finished a turn since the last look, the standing
+  the start did not, then the reports of the workers that finished a turn since the last look, the standing
   instruction and what the sessions beside it changed; what does not fit in the hook's room is held whole on held.md.
 - Stop keeps the turn and appends it to the parent session's reports, sends the turn back while steps the session
   tree can settle are open, runs a writing child's issue gate, counts a child marked report when done as archived,
-  tells the top-level session to push issue-closing commits and makes the anchors.
+  tells the orchestrator to push issue-closing commits and makes the anchors.
 - The checks before and after a tool call ride on the retrieval hooks' entries, through `routed`.
 
 Commands: note, done, task, shard, files, show, tree, background, detach, reparent, disposable, request, proof and
@@ -54,7 +54,7 @@ import issues  # noqa: E402  a writing child's issue, its Closes #N commit, regr
 import puppeteer  # noqa: E402  the watcher's ledger, routing, start drafts, the gate, routes, readings, meta pass
 
 puppeteer.PHI = sys.modules[__name__]   # phi.py runs as a script, so puppeteer.py is handed this module, not a copy
-import controls  # noqa: E402  a supervisor session filed in the sidebar section, and the sessions it controls
+import controls  # noqa: E402  a puppeteer filed in the sidebar section, and the sessions it controls
 
 controls.PHI = sys.modules[__name__]
 
@@ -193,7 +193,7 @@ def session_dir(home, sid):
 
 
 def reports_path(home, sid):
-    """The reports of the child sessions of `sid`; with no `sid`, of the top-level sessions."""
+    """The reports of the workers of `sid`; with no `sid`, of the orchestrators."""
     return os.path.join(session_dir(home, sid), "reports.jsonl") if sid else os.path.join(home, "phi", "reports.jsonl")
 
 
@@ -318,7 +318,7 @@ def record_of_cli(cli):
 
 
 def spawned_from(d):
-    """The sessionId in a record's or a session.json's `spawnedFrom`, '' for a top-level session."""
+    """The sessionId in a record's or a session.json's `spawnedFrom`, '' for an orchestrator."""
     s = d.get("spawnedFrom") if isinstance(d, dict) else None
     return safe_id(s.get("sessionId")) if isinstance(s, dict) and s.get("sessionId") else ""
 
@@ -331,8 +331,8 @@ def store_at(folder):
 
 
 def home_of_record(rec, depth=0):
-    """The store a session's tree lives in: that of its parent session, and its own folder's for a top-level
-    session."""
+    """The store a session's tree lives in: that of its parent session, and its own folder's for an
+    orchestrator."""
     if not rec or depth > CHAIN_MAX:
         return ""
     above = spawned_from(rec)
@@ -344,9 +344,9 @@ def home_of_record(rec, depth=0):
 
 
 def own_store(rec, sid, project=""):
-    """The store of a session's own folder when it holds the session as a top-level session, '' otherwise. A
-    top-level session that a supervisor session started in another environment lives in that environment's store,
-    not in the supervisor session's."""
+    """The store of a session's own folder when it holds the session as an orchestrator, '' otherwise. A
+    orchestrator that a puppeteer started in another environment lives in that environment's store,
+    not in the puppeteer's."""
     own = store_at(project) or store_at((rec or {}).get("cwd")) or store_at((rec or {}).get("originCwd"))
     if not own or not sid:
         return ""
@@ -366,7 +366,7 @@ class Me:
         self.hint = ""
         self.cli = str(payload.get("session_id") or os.environ.get("CLAUDE_CODE_SESSION_ID") or "")
         host = os.environ.get("CLAUDE_CODE_HOST_SESSION_ID") or ""
-        # A CLI id equal to the host id without "local_" is normal: the app gives many child sessions that pair of
+        # A CLI id equal to the host id without "local_" is normal: the app gives many workers that pair of
         # ids, so it is no stray id.
         self.rec = app_record(session or host) if (session or host) else record_of_cli(self.cli)
         self.id = session or host or str(self.rec.get("sessionId") or "") or self.cli
@@ -441,7 +441,7 @@ def _save_session(home, s):
         if k in disk and k not in s:
             s[k] = disk[k]
     if not s.pop("_controlsSet", None) and isinstance(disk.get("controls"), list):
-        s["controls"] = disk["controls"]          # only `controls` and a supervisor session's own start change it
+        s["controls"] = disk["controls"]          # only `controls` and a puppeteer's own start change it
     if int(disk.get("anchorSeen") or 0) > int(s.get("anchorSeen") or 0):
         s["anchorSeen"] = disk["anchorSeen"]
     if str(disk.get("fileSetAt") or "") > str(s.get("fileSetAt") or ""):
@@ -460,7 +460,7 @@ def _save_session(home, s):
 def ensure_session(home, sid, rec=None, cli="", depth=0, hint=""):
     """session.json, made if new, with those of the sessions above it made too: a session this plugin never ran in
     gets its file from the app's record. `spawnedFrom` there is what the tree is read from: the record sets it for
-    a new session, for one that looked like a top-level session before its record said otherwise, and for one read
+    a new session, for one that looked like an orchestrator before its record said otherwise, and for one read
     from the notes folder. One detached to top level or reparented is left as set."""
     sid = safe_id(sid)
     s = load_session(home, sid)
@@ -559,7 +559,7 @@ def latest_reports(rows, skip=""):
 # --- requests and turns ----------------------------------------------------------------------------------------------
 
 def request_of(prompt):
-    """The request inside a message. A child session gets its task under leading <system-reminder> blocks and a
+    """The request inside a message. A worker gets its task under leading <system-reminder> blocks and a
     `Background ... Task:` wrapper, and a forked one under the app's line `Task (from the session that started this
     one):`; this takes those off. A `<pasted_content id="..">` block is what a person pasted, so its inner text is
     the request, also when the message is nothing but the block. '' when nothing is left or what is left is Claude
@@ -581,7 +581,7 @@ def request_of(prompt):
 
 def handed_over(prompt):
     """Does a message look like a task another session handed over: the wrapper, the linked-sessions reminder, or
-    the shared notes folder. Such a session is a child session, whether or not the app has recorded it yet."""
+    the shared notes folder. Such a session is a worker, whether or not the app has recorded it yet."""
     text = prompt if isinstance(prompt, str) else ""
     body = text
     while REMINDER.match(body):
@@ -765,7 +765,7 @@ def turn_lines(title, t, report=300, prompt=200):
     if t.get("steps"):
         out.append("  steps: " + cut("; ".join(t["steps"]), 400))
     if t.get("sessions"):
-        out.append("  child sessions: " + cut("; ".join(t["sessions"]), 300))
+        out.append("  workers: " + cut("; ".join(t["sessions"]), 300))
     if t.get("failed"):
         out.append("  failed: " + cut("; ".join(t["failed"]), 300))
     if t.get("report"):
@@ -781,7 +781,7 @@ def commands():
 
 def background_text(home, s, own=False, slim=False):
     """The start background a session is given: the tasks of the sessions above it, their notes, the last turn of
-    each of its siblings, which for a top-level session are the top-level sessions before it, and with `own` its own
+    each of its siblings, which for an orchestrator are the orchestrators before it, and with `own` its own
     turns. With `slim` the notes and the siblings' turns are left out, for a fresh child whose slice of its parent's
     anchor holds what bears on its paths, and after a compaction. '' when none of that exists."""
     sid, above = s["sessionId"], spawned_from(s)
@@ -808,8 +808,8 @@ def background_text(home, s, own=False, slim=False):
     others = [] if slim else nd.by_overlap(others, own_task,
                                            key=lambda r: f"{r.get('title', '')} {r.get('turn', {}).get('prompt', '')}")
     if others:
-        who = f"the other child sessions of \"{title_of(chain[0])}\"" if chain else \
-            "the top-level sessions in this project before this one"
+        who = f"the other workers of \"{title_of(chain[0])}\"" if chain else \
+            "the orchestrators in this project before this one"
         body += [f"The last turn of {who}:"]
         for r in others:
             body += turn_lines(r.get("title") or r["sessionId"][:14], r["turn"])
@@ -840,9 +840,9 @@ def background_text(home, s, own=False, slim=False):
 
 
 def findings_text(home, s, new, store=""):
-    """The line under the reports of a session's child sessions that carry `Finding:` lines, '' when none does. A
-    child session passes them up unchanged in its own report; a top-level session that a supervisor session controls
-    leaves them to that supervisor session, whose board lists them; any other top-level session publishes and places
+    """The line under the reports of a session's workers that carry `Finding:` lines, '' when none does. A
+    worker passes them up unchanged in its own report; an orchestrator that a puppeteer controls
+    leaves them to that puppeteer, whose board lists them; any other orchestrator publishes and places
     them itself."""
     found = []
     for r in reversed(new):
@@ -861,18 +861,18 @@ def findings_text(home, s, new, store=""):
                 + listed)
     pid, _ = controls.puppeteer_of(s, store)
     if pid:
-        return (f"{head}. They go up to the supervisor session \"{controls.full_title(pid)}\" `{pid}`, whose board "
+        return (f"{head}. They go up to the puppeteer \"{controls.full_title(pid)}\" `{pid}`, whose board "
                 f"lists them, and it publishes the issues they need and places the session that resolves each: this "
                 f"session publishes none.")
-    return (f"{head}, and no supervisor session controls this session tree, so the findings in them are this "
+    return (f"{head}, and no puppeteer controls this session tree, so the findings in them are this "
             f"session's to publish and place. Check each against the open issues and the running sessions, and send "
             f"one a running session covers to that session; for the rest, publish the issue and place the session "
-            f"that resolves it, as a child of the session in this tree that holds its files or as a new top-level "
-            f"session:\n" + listed)
+            f"that resolves it, as a child of the session in this tree that holds its files or as a new orchestrator"
+            f":\n" + listed)
 
 
 def reports_text(home, s, room=None, store=""):
-    """The reports of this session's child sessions that finished a turn since it last looked, and how many rows
+    """The reports of this session's workers that finished a turn since it last looked, and how many rows
     that covers. Each report is shown as kept, up to REPORT_CHARS, where it fits in `room`, and cut with ... where
     it does not; the ones there is no room for at all are named by count with their pages. The `Finding:` lines they
     carry come last, with what becomes of them, as findings_text says."""
@@ -884,7 +884,7 @@ def reports_text(home, s, room=None, store=""):
     room = REPORTS_CHARS if room is None else min(REPORTS_CHARS, room)
     found = findings_text(home, s, new, store)
     room -= (len(found) + 1) if found else 0
-    out = ["phi (p4-phi): reports of this session's child sessions that finished a turn since it last looked, each "
+    out = ["phi (p4-phi): reports of this session's workers that finished a turn since it last looked, each "
            "as kept or cut with ... where room runs short, with its page named under it."]
     shown = list(reversed(new))[:max(1, (room - len(out[0])) // 700)]
     rest = [r for r in reversed(new) if r not in shown]
@@ -987,12 +987,12 @@ LEVELS = ("built-in, levels: work is delegated to where Claude Code runs it best
           "`p4-phi:runner` or to a Bash or PowerShell call of its own with `run_in_background: true`; a read of a "
           "diff or a result that should not lean on this session's own view goes to `p4-phi:check`. Once one is "
           "started, go on with other work or end the turn: its completion notification brings the result in a "
-          "later turn, so never wait for it in the foreground, sleep or poll. A child session is started with a "
+          "later turn, so never wait for it in the foreground, sleep or poll. A worker is started with a "
           "`model` and an `effort` that fit its step, as the advice that hands out each start call names them; an "
           "effort above this session's own is not accepted.")
 plans.BUILT_INS = tuple(x.split(": ", 1)[0].replace("built-in, ", "") for x in (BUILT_IN, LEVELS))   # plans.py's names
 LEVELS_ON = True              # p4.json phi.levels: false leaves the delegation rule and its checks out
-TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps a top-level session's work in it
+TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps an orchestrator's work in it
 FILE_SETS = True              # p4.json phi.file_sets: false starts sessions whose briefs declare no write set
 
 
@@ -1012,9 +1012,9 @@ def project_conf(store):
     plans.CHILD_LEVELS = plans.child_levels(d.get("child_levels"))   # one key sets each kind's model and effort
 
 
-TOP_RULE = ("This is the top-level session of its tree, so it keeps itself free for orchestration: planning, "
+TOP_RULE = ("This is the orchestrator of its tree, so it keeps itself free for orchestration: planning, "
             "messaging between sessions, decisions with ezexe, and landing the work, meaning merge and push. "
-            "Its work steps go to fresh child sessions, a serial run to one child, each brief saying \"report "
+            "Its work steps go to fresh workers, a serial run to one child, each brief saying \"report "
             "when done\"; the steps that test-and-commit, merge, push or release stay here.")
 
 
@@ -1023,23 +1023,23 @@ NEW_TOP_BRIEF = "This session is a new top session, orchestrating its own topic.
 
 
 def new_top_first_act():
-    """What a new top-level session does first: detach to top level from its parent session in the app, then in
+    """What a new orchestrator does first: detach to top level from its parent session in the app, then in
     p4-phi."""
     return (f"Its first act: `mcp__ccd_session_mgmt__detach_session` with `\"self\"`, so the app stops nesting it and "
             f"its reports stop going to its parent session, then `{commands()} detach`.")
 
 
-ASK_ROUTE = ""                # set for a controlled session, which starts no new top-level session itself
+ASK_ROUTE = ""                # set for a controlled session, which starts no new orchestrator itself
 
 
 def asks(s):
-    """Kept for this hook's run: how a controlled session gets a new top-level session from its supervisor
-    session."""
+    """Kept for this hook's run: how a controlled session gets a new orchestrator from its
+    puppeteer."""
     globals()["ASK_ROUTE"] = controls.ask_route(s) if isinstance(s, dict) and not spawned_from(s) else ""
 
 
 def new_top_route(owner_turn=True):
-    """How a top-level session starts a new top-level session for a topic outside its task."""
+    """How an orchestrator starts a new orchestrator for a topic outside its task."""
     if ASK_ROUTE:
         return ASK_ROUTE
     how = ("Start it with `mcp__ccd_session__start_session`, `initiation` `user_asked`" if owner_turn else
@@ -1052,7 +1052,7 @@ def new_top_route(owner_turn=True):
             f"the lines \"{NEW_TOP_BRIEF} {new_top_first_act()}\" Both moves are needed: the app's detach to top "
             f"level, else it stays nested under this session and reports here, and p4-phi's, which p4-phi also makes "
             f"at the new session's first hook on that line. If it is still nested under this session at its first "
-            f"report, call `mcp__ccd_session_mgmt__detach_session` with its id yourself. Top-level sessions are "
+            f"report, call `mcp__ccd_session_mgmt__detach_session` with its id yourself. Orchestrators are "
             f"siblings, so each is told what the others change.")
 
 
@@ -1063,7 +1063,7 @@ def request_cmd():
 
 
 def depth_of(home, s):
-    """How many sessions lie above this one: 0 for a top-level session."""
+    """How many sessions lie above this one: 0 for an orchestrator."""
     n, seen, cur = 0, set(), s
     while spawned_from(cur) and spawned_from(cur) not in seen and n < 20:
         seen.add(spawned_from(cur))
@@ -1132,8 +1132,8 @@ def keep_standing(home, sid, name, text):
 def _split_full(home, s):
     if not spawned_from(s):
         return ("phi (p4-phi): this turn was started by another session, not ezexe, so the app refuses "
-                "`mcp__ccd_session__start_session` with `user_asked`. A topic in it outside this top-level session's "
-                "task gets a new top-level session of its own. " + new_top_route(False) + " Do the rest here.")
+                "`mcp__ccd_session__start_session` with `user_asked`. A topic in it outside this orchestrator's "
+                "task gets a new orchestrator of its own. " + new_top_route(False) + " Do the rest here.")
     return ("phi (p4-phi): this turn was started by another session, not ezexe, so the app refuses "
             "`mcp__ccd_session__start_session` with `user_asked`. Work in it that is a task of its own, outside "
             "this session's task, is shown as a suggested task card, `mcp__ccd_session__start_session` with "
@@ -1160,7 +1160,7 @@ def feature_request(home, s, req):
 
 
 def feature_steps_text(home, s, plan, owner_turn):
-    """A top-level session's own steps that are new features: each gets a new top-level session, once per step."""
+    """An orchestrator's own steps that are new features: each gets a new orchestrator, once per step."""
     if spawned_from(s):
         return ""
     path = os.path.join(session_dir(home, s["sessionId"]), "session.json")
@@ -1175,7 +1175,7 @@ def feature_steps_text(home, s, plan, owner_turn):
         write_atomic(path, json.dumps(disk, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
     named = "; ".join(f"step {st.get('addr')} \"{cut(clean(st.get('content')), 90)}\"" for st in new)
     return (f"phi (p4-phi): {named} is a new feature, and a feature is a new topic even within this task: it gets a "
-            f"new top-level session of its own, not a child or a step here. {new_top_route(owner_turn)}")
+            f"new orchestrator of its own, not a child or a step here. {new_top_route(owner_turn)}")
 
 
 def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
@@ -1193,7 +1193,7 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
         RAN["new_task"] = "page"                   # after a compaction, a line with its page, not in full
         up = spawned_from(s)
         where = (f"hand it up to {up} with SendMessage, ezexe's words quoted" if up else
-                 f"start a new top-level session for it, its brief ending \"{NEW_TOP_BRIEF}\"")
+                 f"start a new orchestrator for it, its brief ending \"{NEW_TOP_BRIEF}\"")
         return (f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" When a message from ezexe is about "
                 f"something else, {where}, and stay with the task. The standing instruction, handed in full "
                 f"before the compaction, is whole on {standing_path(home, s['sessionId'])}.")
@@ -1206,12 +1206,12 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
         if parent:
             elsewhere = (f"do not turn this session to it, and start no session for it: hand it up to your parent "
                          f"session, {parent}, with SendMessage, ezexe's words quoted, tell "
-                         f"ezexe in one line that it went up, and stay with the task. Only a top-level session starts "
+                         f"ezexe in one line that it went up, and stay with the task. Only an orchestrator starts "
                          f"a session for a new topic. A message about a path among another session's owned paths is "
                          f"that session's: send it there with SendMessage instead{shards}. "
                          f"A quick thing, such as a ")
         else:
-            elsewhere = (f"do not turn this session to it. A new topic gets a new top-level session of its own, a "
+            elsewhere = (f"do not turn this session to it. A new topic gets a new orchestrator of its own, a "
                          f"sibling of this one, so this session stays orchestrating its topic. {new_top_route(True)} "
                          f"Tell ezexe in one line which session has it, and stay with the task. A message about a path "
                          f"among another session's owned paths is that session's: send it there with SendMessage "
@@ -1239,10 +1239,10 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
         if parent:
             return (f"phi (p4-phi): this message asks for something new that is not in this session's task list, and "
                     f"a feature is a new topic even within a broad task: hand it up to {parent} with SendMessage, "
-                    f"ezexe's words quoted, as a new topic for a new top-level session, and stay with the task.")
+                    f"ezexe's words quoted, as a new topic for a new orchestrator, and stay with the task.")
         return (f"phi (p4-phi): this message asks for something new that is not in this session's task list. A "
                 f"feature is a new topic even within a broad task like \"{cut(task, LINE_TASK)}\", so it gets a new "
-                f"top-level session of its own, a sibling of this one. "
+                f"orchestrator of its own, a sibling of this one. "
                 f"{new_top_route(s.get('turnBy', 'user') == 'user')} Tell ezexe in one line which session has it, and "
                 f"stay with the task.")
     if parent:
@@ -1250,13 +1250,13 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
                 f"else, hand it up to {parent} with SendMessage, ezexe's words quoted, and stay with the task; "
                 f"otherwise carry on.")
     return (f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" If this message is about something "
-            f"else, start a new top-level session for it as the standing instruction says, its brief ending "
+            f"else, start a new orchestrator for it as the standing instruction says, its brief ending "
             f"\"{NEW_TOP_BRIEF}\", and stay with the task; otherwise carry on.")
 
 
 def render_page(home, sid):
-    """session.md: a session as one page, with its task, notes, turns and child sessions, rewritten from its files.
-    With no `sid`, sessions.md: the top-level sessions of the project."""
+    """session.md: a session as one page, with its task, notes, turns and workers, rewritten from its files.
+    With no `sid`, sessions.md: the orchestrators of the project."""
     out = []
     if sid:
         s = load_session(home, sid)
@@ -1264,7 +1264,7 @@ def render_page(home, sid):
             return
         above = spawned_from(s)
         out = [f"# {title_of(s)}", "",
-               f"Session `{sid}`, started by `{above}`." if above else f"Session `{sid}`, a top-level session.", ""]
+               f"Session `{sid}`, started by `{above}`." if above else f"Session `{sid}`, an orchestrator.", ""]
         if s.get("task"):
             out += ["## Task", "", s["task"].strip(), ""]
         if isinstance(s.get("fileSet"), list):
@@ -1282,11 +1282,11 @@ def render_page(home, sid):
                 out += turn_lines(title_of(s), t, report=1200, prompt=400)
             out.append("")
     else:
-        out = ["# Top-level sessions of this project", ""]
+        out = ["# Orchestrators of this project", ""]
     rows = latest_reports(load_reports(home, sid, TAIL_BYTES))[:40]
     if rows:
         if sid:
-            out += ["## Child sessions, newest first", ""]
+            out += ["## Workers, newest first", ""]
         for r in rows:
             out += turn_lines(r.get("title") or r["sessionId"][:14], r["turn"], report=600, prompt=300)
             out.append(f"  session: `{r['sessionId']}`")
@@ -1533,9 +1533,9 @@ def h_plan(payload):
         cap = caps_text(me.home, s)
         advise = plans.split_advice if spawned_from(s) else plans.top_advice if TOP_ORCHESTRATES else None
         if advise is plans.top_advice and controls.is_puppeteer(s, me.store):
-            advise = None                          # a supervisor session's steps are its own; it hands none out
+            advise = None                          # a puppeteer's steps are its own; it hands none out
             RAN["pair"] = "puppeteer"
-        advice = advise(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user", cap)             if advise else ""                      # none where the top-level session does its own steps
+        advice = advise(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user", cap)             if advise else ""                      # none where the orchestrator does its own steps
         RAN["split"] = "advised" if advice else ""
         feat = feature_steps_text(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user")
         text = "\n\n".join(p for p in (feat, advice, text) if p)
@@ -1551,7 +1551,7 @@ def h_plan(payload):
     if not spawned_from(s) and any(k in inp for k in ("advance", "start", "done", "items")):
         wt = relay.worktrees_text(me.home, me.id, relay.repo_of(s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR")
                                                                 or ""))
-        if wt:                                     # at a top-level session's step boundary, worktrees to remove
+        if wt:                                     # at an orchestrator's step boundary, worktrees to remove
             RAN["worktrees"] = wt.count("git worktree remove")
             text = "\n\n".join(p for p in (text, wt) if p)
     nudge_arm(me, load_session(me.home, me.id) or s)
@@ -1559,9 +1559,9 @@ def h_plan(payload):
     return text or None
 
 
-# --- the nudge: a top-level session doing a work step itself ------------------------------------------------------
+# --- the nudge: an orchestrator doing a work step itself ------------------------------------------------------
 #
-# The marker <store>/phi/.nudge/<CLI session id> exists while a top-level session's step in progress is a work step it
+# The marker <store>/phi/.nudge/<CLI session id> exists while an orchestrator's step in progress is a work step it
 # has not been nudged on; recall-hook.sh lets an Edit, Write or shell call through to python only while a marker names
 # the call's session, so every other call pays nothing.
 
@@ -1585,7 +1585,7 @@ def nudge_key(step):
 
 
 def nudge_step(home, s):
-    """The top-level session's step in progress when it is a work step not nudged on yet, else None."""
+    """The orchestrator's step in progress when it is a work step not nudged on yet, else None."""
     if not s or spawned_from(s) or not TOP_ORCHESTRATES or controls.is_puppeteer(s, store_at(s.get("cwd"))):
         return None
     plan = plans.load(home, s["sessionId"])
@@ -1689,14 +1689,14 @@ def work_call(s, name, inp):
     return False
 
 
-TREE_CHECKS = 6               # read-only checks of its trees a top-level session runs in one work step as orchestration
+TREE_CHECKS = 6               # read-only checks of its trees an orchestrator runs in one work step as orchestration
 TREE_CHECK = re.compile(r"(?:^|[\s;&|(])(?:git\s+(?:-C\s+\S+\s+)?(?:log|status|diff|show|branch|fetch|rev-parse|"
                         r"ls-files)\b|gh\s+(?:issue|pr|run|api|repo)\b|\S*phi\.py[\"']?\s+(?:tree|show|controls|"
                         r"background)\b)", re.I)
 
 
 def tree_checked(me, s, st):
-    """A top-level session's read-only check of its trees in a work step, such as a session list, `git log`,
+    """An orchestrator's read-only check of its trees in a work step, such as a session list, `git log`,
     `gh issue list` or `gh issue view`: counted, and never handed off while they are few. Past TREE_CHECKS in one
     step it is told once that the rest is a read for `p4-phi:sweep`. None while they are few."""
     key = nudge_key(st)
@@ -1708,14 +1708,14 @@ def tree_checked(me, s, st):
         return None
     RAN["tree_checks"] = n
     return (f"phi (p4-phi): step {st.get('addr')} has now run {n} read-only checks of its trees here. A few, such as "
-            f"a session list, `git log`, `gh issue list` or `gh issue view`, are this top-level session's own "
+            f"a session list, `git log`, `gh issue list` or `gh issue view`, are this orchestrator's own "
             f"orchestration; past {TREE_CHECKS} the rest is a read across the trees: hand it to the background "
             f"subagent `p4-phi:sweep`. Said once for this step.")
 
 
 def h_nudge(payload):
-    """PreToolUse on Edit, Write and shell commands in a top-level session with a task list: one line, once per
-    step, that the work goes to a child session. Never a block; reading, git's reading and landing commands are never
+    """PreToolUse on Edit, Write and shell commands in an orchestrator with a task list: one line, once per
+    step, that the work goes to a worker. Never a block; reading, git's reading and landing commands are never
     nudged."""
     me = Me(payload)
     if not me.home or not me.id or not me.cli or not os.path.exists(nudge_marker(me)):
@@ -1739,12 +1739,12 @@ def h_nudge(payload):
     RAN["nudge"] = st.get("addr")
     level = plans.level_of(st.get("content")) if LEVELS_ON else "session"
     if level != "session":                         # a step a subagent does needs no session
-        return (f"phi (p4-phi): this is the top-level session, kept free for orchestration, and step "
+        return (f"phi (p4-phi): this is the orchestrator, kept free for orchestration, and step "
                 f"{st.get('addr')}, \"{cut(clean(st.get('content')), 120)}\", {plans.LEVEL_WHAT[level]}: hand it to "
                 f"the background subagent `p4-phi:{level}`. "
                 f"Said once for this step.")
-    return (f"phi (p4-phi): this is the top-level session, kept free for orchestration, and step {st.get('addr')}, "
-            f"\"{cut(clean(st.get('content')), 120)}\", is work: hand it to a child session with "
+    return (f"phi (p4-phi): this is the orchestrator, kept free for orchestration, and step {st.get('addr')}, "
+            f"\"{cut(clean(st.get('content')), 120)}\", is work: hand it to a worker with "
             f"`mcp__ccd_session__start_session`, `context` `fresh`, `use_worktree: false`, "
             f"{plans.level_words(st.get('content'))}, its brief that step, a "
             f"line `Files: <the paths it may write>`, the line `{plans.level_line(plans.child_level(st.get('content')))}` "
@@ -1773,8 +1773,8 @@ def h_memory_gap(payload):
 
 def h_self_archive(payload):
     """PreToolUse on mcp__ccd_session_mgmt__archive_session. Unless p4.json sets phi.session_archives, the call is
-    denied, since archiving is ezexe's own action in the app: a top-level session may archive only what ezexe picked
-    this turn in its multiple-choice question, and a supervisor session only a complete controlled session ezexe
+    denied, since archiving is ezexe's own action in the app: an orchestrator may archive only what ezexe picked
+    this turn in its multiple-choice question, and a puppeteer only a complete controlled session ezexe
     picked. Where sessions may archive, a child's own archive is held while a background task it started has no end
     recorded; where they may not, the refusal names those tasks. A child that
     archives itself may never reach its Stop hook, so its turn and its last report are kept now, read from the
@@ -1791,7 +1791,7 @@ def h_self_archive(payload):
         RAN["archive_refused"] = "self" if own else target[:40]
         turn = last_turn(payload.get("transcript_path") or "") if not own and not spawned_from(s) else None
         if not own and controls.is_puppeteer(s, me.store):
-            # a supervisor session archives only what ezexe picked this turn, and only a session p4-phi holds complete
+            # a puppeteer archives only what ezexe picked this turn, and only a session p4-phi holds complete
             was = target in controls.picked(me.home, s, turn)
             left = controls.archive(me.home, s, target, str(inp.get("reason") or ""), picked=was)
             RAN["archive_refused"] = "" if not left else target[:40]
@@ -1803,9 +1803,9 @@ def h_self_archive(payload):
                 return None
             return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                            "permissionDecisionReason": (
-                                               f"phi (p4-phi): this supervisor session's archive of {target} is "
+                                               f"phi (p4-phi): this puppeteer's archive of {target} is "
                                                f"refused: {left}. Name it to ezexe as left, with that reason.")}}
-        if not own and not spawned_from(s):       # a top-level session archiving what ezexe picked this turn
+        if not own and not spawned_from(s):       # an orchestrator archiving what ezexe picked this turn
             if target in relay.picked(me.home, me.id, (turn or {}).get("calls")):
                 RAN["archive_refused"] = ""
                 RAN["archive_picked"] = target[:40]
@@ -1813,7 +1813,7 @@ def h_self_archive(payload):
         why = relay.NO_ARCHIVE + (
             " This session's turn is kept. " + relay.CHILD_DONE if own and spawned_from(s) else
             " " + relay.BUTTON if own else
-            f" p4-phi already counts a finished or superseded session as archived. A top-level session that is done "
+            f" p4-phi already counts a finished or superseded session as archived. An orchestrator that is done "
             f"offers its tree's finished sessions to ezexe as one multiple-choice question, `AskUserQuestion` with "
             f"`multiSelect`, and archives only the ones ezexe picked there: {target} was not picked in this turn.")
         running = puppeteer.held_tasks(me.home, me.id) if own else []
@@ -1862,7 +1862,7 @@ def h_restart_check(payload):
                                    "permissionDecisionReason": why}}
 
 
-# --- delegation: a long command never holds a top-level session's turn ----------------------------------------------
+# --- delegation: a long command never holds an orchestrator's turn ----------------------------------------------
 #
 # hooks.md, "PreToolUse decision control": `updatedInput` "Modifies the tool's input parameters before execution.
 # Replaces the entire input object, so include unchanged fields alongside modified ones. Claude Code evaluates
@@ -2023,10 +2023,10 @@ def level_told(me, s, key):
 
 
 def h_level(payload):
-    """PreToolUse on a shell call that runs a known long command in the foreground. In a top-level session a call
+    """PreToolUse on a shell call that runs a known long command in the foreground. In an orchestrator a call
     that is that command and nothing else is returned with `updatedInput`: the same input plus
     `run_in_background: true`, and one line saying so. Every other such call runs as sent, with the line once per
-    step: in a child session; where the command is one part of a longer call, whose later parts need it finished;
+    step: in a worker; where the command is one part of a longer call, whose later parts need it finished;
     and where the call carries a `timeout` of its own, since the caller chose to wait. A subagent's call is left
     alone: a runner's whole work is to wait on its command. Works with no store: top-level or child is read from the
     session's own file where there is one, else from the app's record."""
@@ -2063,8 +2063,8 @@ def h_level(payload):
     RAN["level"] = "background"
     return {"hookSpecificOutput": {
         "hookEventName": "PreToolUse", "updatedInput": {**inp, "run_in_background": True},
-        "additionalContext": (f"phi (p4-phi): this call runs {kind}, which runs long, and this is the top-level "
-                              f"session, so p4-phi started it in the background by adding `run_in_background: true`. "
+        "additionalContext": (f"phi (p4-phi): this call runs {kind}, which runs long, and this is the orchestrator"
+                              f", so p4-phi started it in the background by adding `run_in_background: true`. "
                               f"Go on with other work or end the turn: its completion notification brings the result, "
                               f"so never wait for it, sleep or poll.")}}
 
@@ -2148,7 +2148,7 @@ def h_session_start(payload):
                                                f"seen it; the tree stays in this project's store.") if p)
     first = ""
     if source == "compact" and controls.is_puppeteer(s, me.store):
-        first = controls.compacted(me.home, s)     # a supervisor session's board path before anything else
+        first = controls.compacted(me.home, s)     # a puppeteer's board path before anything else
         RAN["pair"] = "compacted"
     text = cut(text, HOOK_CHARS - len(first) - len(rule) - 6)    # the room the lines around it leave
     rules = rules_text(me.store, HOOK_CHARS - len(first) - len(text) - len(rule) - 6,
@@ -2238,14 +2238,14 @@ def h_user_prompt_submit(payload):
         return None
     if me.store and not same_store(me.store, me.home) and NEW_TOP.search(str(payload.get("prompt") or "")) \
             and not load_session(me.home, me.id).get("sessionId"):
-        me.home = me.store                         # a new top-level session from another environment's session
+        me.home = me.store                         # a new orchestrator from another environment's session
         RAN["own_store"] = True
     configure(me.home)
     s = ensure_session(me.home, me.id, me.rec, me.cli, hint=me.hint)
     ran_for(s, me)
     detached_now = False
     if spawned_from(s) and NEW_TOP.search(str(payload.get("prompt") or "")) and not load_turns(me.home, s["sessionId"]):
-        reparent(me.home, s["sessionId"], "", "detached")     # its brief marks it a new top-level session
+        reparent(me.home, s["sessionId"], "", "detached")     # its brief marks it a new orchestrator
         s = load_session(me.home, s["sessionId"])
         RAN["new_top"] = True
         detached_now = True
@@ -2333,13 +2333,13 @@ def h_user_prompt_submit(payload):
             RAN["files_held"] = len(s["fileSet"])
             save_session(me.home, s)
     if detached_now:
-        parts.insert(0, "phi (p4-phi): this session's brief marks it a new top-level session, so p4-phi detached it "
+        parts.insert(0, "phi (p4-phi): this session's brief marks it a new orchestrator, so p4-phi detached it "
                         "to top level at this first message. Now call `mcp__ccd_session_mgmt__detach_session` with "
                         "`\"self\"` before anything else, so the app stops nesting it under its parent session and its "
-                        "reports stop going there; it orchestrates its own topic, and the other top-level sessions are "
+                        "reports stop going there; it orchestrates its own topic, and the other orchestrators are "
                         "its siblings.")
     if not spawned_from(s):
-        try:                                       # a supervisor session and the sessions it controls
+        try:                                       # a puppeteer and the sessions it controls
             parts[0:0] = pair_parts(me, s, req if req and not handed_over(payload.get("prompt")) else "", parts[0])
         except Exception:  # noqa: BLE001
             pass
@@ -2376,11 +2376,11 @@ def h_user_prompt_submit(payload):
 
 
 def pair_parts(me, s, req, changed=""):
-    """Beside a top-level session's message. A supervisor session gets what it is, once; its child sessions, now
-    controlled; a top-level session ezexe started beside them; the controlled sessions' reports by reference; at a
+    """Beside an orchestrator's message. A puppeteer gets what it is, once; the orchestrators it
+    started, now controlled; an orchestrator ezexe started beside them; the controlled sessions' reports by reference; at a
     turn ezexe began, the requests addressed to it and where ezexe's message belongs; the sessions of the controlled
-    trees that hold start requests, as links; the sessions it started on another session's behalf, to detach to top
-    level; a boundary; and its board rewritten. Any other top-level session gets its supervisor session, once, and
+    trees that hold start requests, as links; each start it made on another session's behalf, to detach to top
+    level; a boundary; and its board rewritten. Any other orchestrator gets its puppeteer, once, and
     what became of the requests it sent it."""
     out = []
     if not controls.is_puppeteer(s, me.store):
@@ -2400,7 +2400,7 @@ def pair_parts(me, s, req, changed=""):
         out.append("phi (p4-phi): " + " ".join(lines))
     seen = controls.reports(s)
     if seen:
-        out.append("phi (p4-phi): the sessions this supervisor session controls ended turns. Each is one line and its "
+        out.append("phi (p4-phi): the sessions this puppeteer controls ended turns. Each is one line and its "
                    "page, which holds up to 1,200 characters of the report; read a page only when its detail is "
                    "needed:\n" + "\n".join(seen))
     if req:
@@ -2501,7 +2501,7 @@ def h_stop(payload):
         cur = load_session(me.home, s["sessionId"]) or s
         told = list(cur.get("closesTold") or [])
         new = [c for c in relay.closing_commits(me.home, s["sessionId"], cur) if c[1] not in told]
-        if new:                                    # the top-level session pushes issue-closing work at once
+        if new:                                    # the orchestrator pushes issue-closing work at once
             top = (chain_of(me.home, s["sessionId"]) or [above])[-1]
             relay.warn(me.home, top, "push:" + s["sessionId"] + ":" + ",".join(c[1] for c in new),
                        relay.push_text(title_of(cur), s["sessionId"], new,
@@ -2527,7 +2527,7 @@ def h_stop(payload):
         RAN["waits_on"] = len(waits)
         controls.board(me.home, now_s)
     named = ""
-    if not waits and not spawned_from(now_s):      # a plain top-level session waiting on the sessions of its tree
+    if not waits and not spawned_from(now_s):      # a plain orchestrator waiting on the sessions of its tree
         step = plans.waiting_step(me.home, now_s["sessionId"])
         waits = waited_on(me.home, now_s, turn.get("calls") or []) if step else []
         if waits:
@@ -2562,7 +2562,7 @@ def messaged(calls):
 
 
 def waited_on(home, s, calls=()):
-    """The titles of the sessions a top-level session's waiting step still waits on: each child session or session it
+    """The titles of the sessions an orchestrator's waiting step still waits on: each worker or session it
     messaged that is inside a turn, or whose report it has not been handed yet. The sessions it messaged are kept on
     its record."""
     sid = s["sessionId"]
@@ -2600,7 +2600,7 @@ def log_run(name, text, started):
 
 
 def h_go_guard(payload):
-    """PreToolUse on a message one session sends another: a supervisor session's go to a waiting writer is warned
+    """PreToolUse on a message one session sends another: a puppeteer's go to a waiting writer is warned
     about while another session it controls still holds a file in that writer's write set. Never a block."""
     me = Me(payload)
     if not me.home or not me.id:
@@ -2618,15 +2618,15 @@ def h_go_guard(payload):
 
 
 def h_start_advice(payload):
-    """PreToolUse on mcp__ccd_session__start_session. It denies three starts: a controlled session's new top-level
-    session, which its supervisor session starts instead; a start whose brief declares no write set; and a start
+    """PreToolUse on mcp__ccd_session__start_session. It denies three starts: a controlled session's new
+    orchestrator, which its puppeteer starts instead; a start whose brief declares no write set; and a start
     whose write set a live session holds. For the rest it advises fork or fresh by relay.advise_start, from the
     parent's transcript size and how much of the parent's scope the brief's paths cover, and asks before a worktree
     or a branch of the child's own: silent when the call already does what is advised, else a permission `ask` with
     the reason, so ezexe sees it and decides. A PreToolUse `permissionDecision` is `allow`, `deny`, `ask` or `defer`;
     where `permissions.denyInsteadOfPrompting` is set, a call that would wait on a prompt is denied. The input is
     never rewritten with `updatedInput`, since a fresh start needs a brief and background only the caller can
-    write. A supervisor session's start of another session's start request goes through, claimed as made on that
+    write. A puppeteer's start of another session's start request goes through, claimed as made on that
     session's behalf, with the line that has the new session detached to top level."""
     me = Me(payload)
     if not me.home or not me.id:
@@ -2635,7 +2635,7 @@ def h_start_advice(payload):
     if inp.get("proposal_id") and not inp.get("prompt"):
         return None                                 # starting a card already made: nothing to decide
     made = controls.behalf(me.home, load_session(me.home, me.id), inp.get("prompt"), me.store)
-    if made:                                        # a supervisor session starting another session's start request
+    if made:                                        # a puppeteer starting another session's start request
         starts.claim(made[1], inp.get("prompt"), me.id)
         RAN["behalf"] = made[0]["id"]
         return controls.behalf_line(made[0])
@@ -2646,7 +2646,7 @@ def h_start_advice(payload):
     if brief and NEW_TOP.search(brief):
         mine = load_session(me.home, me.id)
         if not spawned_from(mine) and controls.ask_text(mine) and controls.puppeteer_of(mine, me.store)[0]:
-            RAN["asked_of_puppeteer"] = True       # asked of its supervisor session, never started here
+            RAN["asked_of_puppeteer"] = True       # asked of its puppeteer, never started here
             return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                            "permissionDecisionReason": (
                                                "phi (p4-phi): this start is refused: "
@@ -2701,7 +2701,7 @@ LANDING_GIVEN = re.compile(r"\b(?:push|merg|land)\w*\b[^.\n]{0,60}\byourself\b|\
 
 
 def h_branch_guard(payload):
-    """PreToolUse on EnterWorktree and shell calls in a child session: making a worktree or a branch of its own is
+    """PreToolUse on EnterWorktree and shell calls in a worker: making a worktree or a branch of its own is
     asked first, since a child works on its parent's branch. So is landing work, a git push, merge, rebase or pull,
     which the parent session does, unless the child's brief handed it the landing or it works on an issue of its
     own. Silent otherwise."""
@@ -3197,13 +3197,13 @@ def main(argv=None):
             p.add_argument("--background", default="", help="the child's start background, one built from this "
                                                               "session's task and the project when left out")
             p.add_argument("--to-puppeteer", action="store_true",
-                           help="ask this session's supervisor session for a new top-level session, and start none")
+                           help="ask this session's puppeteer for a new orchestrator, and start none")
         if name == "controls":
-            p.add_argument("ids", nargs="*", help="top-level sessions this supervisor session controls; none prints "
+            p.add_argument("ids", nargs="*", help="orchestrators this puppeteer controls; none prints "
                                                   "where each stands")
             p.add_argument("--drop", action="append", default=[], help="a session it no longer controls")
-            p.add_argument("--hand", default="", help="the fresh supervisor session this one hands over to")
-            p.add_argument("--from", dest="take", default="", help="the supervisor session that handed over to "
+            p.add_argument("--hand", default="", help="the fresh puppeteer this one hands over to")
+            p.add_argument("--from", dest="take", default="", help="the puppeteer that handed over to "
                                                                    "this one")
             p.add_argument("--decline", nargs=2, metavar=("REQUEST", "WHY"), help="a request addressed to it")
 
@@ -3228,8 +3228,8 @@ def main(argv=None):
                 print("phi: name the session to detach to top level, or run this from inside it", file=sys.stderr)
                 return 2
             a.moved = a.moved or me.id
-            print("detached to top level: it is a top-level session now" if reparent(me.home, a.moved, "", "detached")
-                  else "already a top-level session")
+            print("detached to top level: it is an orchestrator now" if reparent(me.home, a.moved, "", "detached")
+                  else "already an orchestrator")
             return 0
         if a.cmd == "reparent":
             print("reparented" if reparent(me.home, a.moved, a.under) else "already there")
@@ -3277,7 +3277,7 @@ def main(argv=None):
         if a.cmd == "controls":
             if not controls.is_puppeteer(s, me.store):
                 held = controls.section_of(s["sessionId"])
-                raise ValueError(f"this session is not a supervisor session: that is a top-level session ezexe filed "
+                raise ValueError(f"this session is not a puppeteer: that is an orchestrator ezexe filed "
                                  f"in the sidebar section \"{controls.section_name(me.store) or controls.SECTION}\", "
                                  f"and the app's file shows this one in " + (f"\"{held}\"" if held else "no section")
                                  + (", started by another session" if spawned_from(s) else ""))
@@ -3304,10 +3304,10 @@ def main(argv=None):
                 with open(a.brief_file, encoding="utf-8") as f:
                     brief = f.read()
             save_session(me.home, s)
-            if a.to_puppeteer:                     # a new top-level session is asked of the supervisor session
+            if a.to_puppeteer:                     # a new orchestrator is asked of the puppeteer
                 pid, _ = controls.puppeteer_of(s, me.store)
                 if not pid:
-                    raise ValueError("this session has no supervisor session: no session filed in the sidebar "
+                    raise ValueError("this session has no puppeteer: no session filed in the sidebar "
                                      "section lists it under `controls`")
                 rid, new = starts.add(me.home, s["sessionId"], a.title, brief, "fresh", background=a.background,
                                       declared=True, to=pid)
@@ -3347,7 +3347,7 @@ def main(argv=None):
             s["done"] = {"text": clean(a.text)[:400], "time": now()}
             save_session(me.home, s)
             print("this turn will be kept as done")
-            if spawned_from(s):                    # the button is for a top-level session only
+            if spawned_from(s):                    # the button is for an orchestrator only
                 print(relay.CHILD_DONE)
             else:
                 print(relay.BUTTON)

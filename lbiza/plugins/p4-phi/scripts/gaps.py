@@ -4,7 +4,7 @@ A session writes a feedback memory into the store's temportal/memory/ when a plu
 such as "a child never merges" or "a store moves only by p4.py sync". Such a memory hides a gap that belongs in the
 plugin. No session publishes a new issue on its own, so when a session writes a feedback memory whose rule describes
 session or plugin behaviour, p4-phi tells it to write the gap into this turn's report as one `Finding:` line. That
-line goes up to the supervisor session that controls its session tree, or to its top-level session where none does,
+line goes up to the puppeteer that controls its session tree, or to its orchestrator where none does,
 which publishes the issue on the plugin's repository and places the session that resolves it. A memory about code
 style gets nothing, nor does one that says the plugin already carries its rule, nor a write that only shortens or
 removes text.
@@ -252,13 +252,13 @@ def advice(home, store, s, path, root=None, before=""):
             f"source: {relay.norm(path)}; test: <the test in {repo} that shows the plugin does it>; files: <the paths "
             f"in {repo} a fix changes>")
     if sid == s["sessionId"]:
-        up = ("This session is " + ("the supervisor session" if supervisor else
-                                    "the top-level session of its tree, and no supervisor session controls it")
+        up = ("This session is " + ("the puppeteer" if supervisor else
+                                    "the orchestrator of its tree, and no puppeteer controls it")
               + f", so the finding is its own to publish and place: it publishes the issue in {repo} and places the "
                 f"session that resolves it.")
     else:
-        who = (f"the supervisor session \"{title}\" `{sid}`, which controls this session tree," if supervisor else
-               f"the top-level session \"{title}\" `{sid}` of this session tree, which no supervisor session controls,")
+        who = (f"the puppeteer \"{title}\" `{sid}`, which controls this session tree," if supervisor else
+               f"the orchestrator \"{title}\" `{sid}` of this session tree, which no puppeteer controls,")
         up = (f"The report carries it up unchanged, and {who} publishes the issue and places the session that resolves "
               f"it. This session publishes no issue and starts no session for it.")
     where = (f" Its project on this machine is {proj['cwd']}." if proj.get("cwd") else

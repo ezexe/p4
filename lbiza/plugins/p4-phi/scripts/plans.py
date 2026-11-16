@@ -5,7 +5,7 @@ advice and checks that ride on them.
              done and start, is applied to <session>/plan.json: its steps with their addresses, statuses and the step
              in progress. The `lookup-record` hook routes each call there after it runs, and a session whose hooks
              lack that route has its calls read back from its transcript at its next message.
-  address    a top-level session's steps are 1, 2, 3. A child started for a step of its parent's task list has that
+  address    an orchestrator's steps are 1, 2, 3. A child started for a step of its parent's task list has that
              step's address as its parent step, so its steps are Y.1, Y.2. The parent step is the address the brief
              names, such as "step 2.3", else the parent's open step whose words the brief matches best, else the
              parent's step in progress.
@@ -20,7 +20,7 @@ advice and checks that ride on them.
              message, through relay.warn, to the children it is the parent step of, down, to the siblings whose step
              in progress shares its words, across, and to the parent, up. A child whose parent step is removed is
              told so.
-  advice     the open steps that can each run on their own are named for children of their own; a top-level session
+  advice     the open steps that can each run on their own are named for children of their own; an orchestrator
              hands each work step out, a step that only reads or only runs a command to a background subagent, and
              keeps orchestration and landing; each start names the model and effort its kind of work gets.
   subagents  a subagent the Agent tool starts is a task of the step in progress, told what changed beside it.
@@ -71,7 +71,7 @@ def addr(root, i):
 
 def root_of(home, s):
     """A session's parent step: the address its brief names, else the parent's open step its brief's words match
-    best, else the parent's step in progress now; '' for a top-level session or a parent with no task list. Siblings
+    best, else the parent's step in progress now; '' for an orchestrator or a parent with no task list. Siblings
     started in one step for different steps of the task list each get their own."""
     if s.get("rootStep") is not None:
         return str(s.get("rootStep") or "")
@@ -210,7 +210,7 @@ def record(home, s, inp, transcript=""):
     if disk and disk.get("rootStep") != s["rootStep"]:
         disk["rootStep"] = s["rootStep"]
         relay._write_json(spath, disk)
-    relay.make_anchor(home, parent, _now())       # the parent's anchor, or the top level's for a top-level session
+    relay.make_anchor(home, parent, _now())       # the parent's anchor, or the top level's for an orchestrator
     relay.make_anchor(home, sid, _now())
     if revision:
         relay_revision(home, s, plan, revision)
@@ -357,7 +357,7 @@ def _boundary(home, s, plan, started, text, lines, path, held):
 # --- the split advice ----------------------------------------------------------------------------------------------
 #
 # At a task list's first whole list and at each revision, judge() reads the open steps: a step that names a path no
-# other step names and that none of judge's reasons keeps here can run as its own child session. Two or more such
+# other step names and that none of judge's reasons keeps here can run as its own worker. Two or more such
 # steps are named in one line; the rest stay here as sub-steps.
 
 DEPENDS = re.compile(r"\b(after|then|once|using|uses|based on|depends? on|following|built on|with the results?|"
@@ -370,7 +370,7 @@ LANDS = re.compile(r"^\W*(?:run\b[^,.;]*\b(?:tests?|suites?|checks?)|report|wrap
                    r"pushed|work|changes?|diff|results?|commits?|suites?|tests?|build|outcome|fix(?:es)?|it|them)\b)"
                    r"|\b(?:commit|merge|push|ship|release|land|fast-forward)\b", re.I)
 # checks or lands the session's own work. A check of anything else is work, such as "Check 1: nothing hidden in
-# AppData", one of the checks a top-level session's children are for
+# AppData", one of the checks an orchestrator's children are for
 ORCHESTRATES = re.compile(r"^\W*(?:start|kick\s*off|launch)\s+(?!writing|adding|implementing|making)"
                           r"(?:[\w'’-]+\s+){0,5}?(?:checks?|tests?|sessions?)\b"
                           r"|^\W*(?:run|re-?run)\s+(?:[\w'’-]+\s+){0,5}?(?:sessions?|acceptance\s+(?:checks?|tests?|runs?))\b", re.I)
@@ -381,14 +381,14 @@ ORCHESTRATES = re.compile(r"^\W*(?:start|kick\s*off|launch)\s+(?!writing|adding|
 MANAGES = re.compile(r"\b(?:un)?(?:archiv|relay|messag|start|stop|review|check|brief|spawn|ask|tell|nudg|queu|send|"
                      r"sent|pass|hand|forward)\w*\b"
                      r"[^.;]*?\b(?:child(?:ren)?|(?:sub-?)?sessions?)\b(?!\s+(?:tree|page|record|files?|json|logs?|"
-                     r"state|ids?|store))"   # manages a child session: orchestration, not "check phi session tree"
+                     r"state|ids?|store))"   # manages a worker: orchestration, not "check phi session tree"
                      # queues, sends, passes, hands or forwards something to a session named by its id, its quoted
                      # title or its role, such as "Queue issues #19-#24 to p4-phi fixer"
                      r"|\b(?:queu|send|sent|pass|hand|forward)\w*\b[^.;]*?\b(?:to|for)\s+(?:the\s+)?"
                      r"(?:local_[\w-]+|[\"“'][^\"”']+[\"”']|(?:[\w'’-]+\s+){0,3}?(?:top|parent|orchestrator|fixer|"
                      r"tester|starter|builder|sibling|checker|owner of)(?:s|'s|’s)?\b)", re.I)
-# "Hand fixes to sibling's fixers, stop duplicates" is messaging sessions, so it stays with the top-level session
-# tracks what another does: a ledger line, a step whose doer is another session, a fixer, a top-level session or
+# "Hand fixes to sibling's fixers, stop duplicates" is messaging sessions, so it stays with the orchestrator
+# tracks what another does: a ledger line, a step whose doer is another session, a fixer, an orchestrator or
 # ezexe, or that ezexe decides, such as "Ledger: p4-phi fixer pushes #25" or "ezexe updates the Mac's plugins"
 TRACKS = re.compile(r"^\W*(?:ledger|track(?:s|ing)?)\b"
                     r"|^\W*(?:[\w'-]+\s+){0,3}?(?:fixer|top session|other session|another session|parent|"
@@ -430,7 +430,7 @@ def judge(plan, cwd):
         elif ORCHESTRATES.search(text):
             kept.append((a, "starts a check, test or session, which is orchestration"))
         elif MANAGES.search(text):
-            kept.append((a, "manages a child session"))
+            kept.append((a, "manages a worker"))
         elif TABULATES.search(text):
             kept.append((a, "compiles or reports the other steps' results"))
         elif TRACKS.search(text):
@@ -451,7 +451,7 @@ def judge(plan, cwd):
 
 
 def split_advice(home, s, plan, owner_turn, cap):
-    """One line naming the steps that can each run as a child session, said once per set; '' when fewer than two."""
+    """One line naming the steps that can each run as a worker, said once per set; '' when fewer than two."""
     free, kept = judge(plan, s.get("cwd") or "")
     if len(free) < 2:
         return ""
@@ -467,7 +467,7 @@ def split_advice(home, s, plan, owner_turn, cap):
     named = "; ".join(f"{st['addr']} \"{relay._short(st.get('content'), 90)}\"" for st in free)
     judged = ("Judged by the paths each step names and by its words: a step stays here when it names no path, shares "
               "a path with another step, leans on or waits on other work, passes work on, checks or lands work, "
-              "starts a check or session, manages a child session, compiles results, tracks what another does or "
+              "starts a check or session, manages a worker, compiles results, tracks what another does or "
               "ezexe decides, or has fewer than four content words.")
     if cap:
         return (f"phi (p4-phi): steps {named} could each run on their own, but {cap[0].lower() + cap[1:]} "
@@ -483,14 +483,14 @@ def split_advice(home, s, plan, owner_turn, cap):
             f"Staying here as sub-steps: {stay}. {judged}")
 
 
-# --- the top-level session orchestrates ----------------------------------------------------------------------------
+# --- the orchestrator orchestrates ----------------------------------------------------------------------------
 #
 # A session with no parent keeps itself free for orchestration: planning, messaging and managing sessions, decisions
 # with ezexe, and landing work. Each work step of its task list goes to a fresh child, not only the independent ones,
 # and a serial run, work steps that lean on the step before them or share a path with it, goes to one child that does
 # them in order. With delegation on, a step that only reads or only runs a command goes to a background subagent
 # instead. A step that checks or lands work, such as a test-and-commit, merge, push, release or sync, waits on or
-# passes on work, starts a check or session, manages a child session, compiles results or tracks what another does
+# passes on work, starts a check or session, manages a worker, compiles results or tracks what another does
 # stays; top_stays gives the reason for each.
 
 # a step that begins with one of these is read-only work of its own, a child's, such as "Verify phi's session tree
@@ -498,7 +498,7 @@ def split_advice(home, s, plan, owner_turn, cap):
 # sub-session, or checks or lands the work.
 CHECK_WORK = re.compile(r"^\W*(?:re-?)?(?:check|verify|validate|audit|inspect|confirm)\w*\b", re.I)
 CHILD_WORD = re.compile(r"\b(?:child(?:ren)?(?:'s|’s)?|sub-?sessions?)\b", re.I)
-# syncing a store is landing work: the top-level session is the one that pushes and syncs each store
+# syncing a store is landing work: the orchestrator is the one that pushes and syncs each store
 SYNCS = re.compile(r"^\W*(?:re-?)?sync(?:s|ed|ing|hronis\w+|hroniz\w+)?\b"
                    r"|\bsync(?:s|ed|ing)?\s+(?:[\w'’-]+\s+){0,3}?stores?\b|\bp4\.py\s+sync\b", re.I)
 
@@ -526,7 +526,7 @@ def awaits_sessions(text):
 
 
 def top_stays(text):
-    """Why a top-level session keeps a step itself, or '' for a work step that goes to a child. The one answer for
+    """Why an orchestrator keeps a step itself, or '' for a work step that goes to a child. The one answer for
     top_groups and for phi.nudge_step, so the advice and the nudge never disagree."""
     text = str(text or "")
     if awaits_sessions(text):                      # waiting on other sessions' results wins over the check rule
@@ -537,7 +537,7 @@ def top_stays(text):
         return "starts a check, test or session, which is orchestration"
     checks = CHECK_WORK.match(text)
     if CHILD_WORD.search(text) if checks else MANAGES.search(text):
-        return "manages a child session, which is orchestration"
+        return "manages a worker, which is orchestration"
     if TABULATES.search(text):
         return "compiles or reports the other steps' results"
     if TRACKS.search(text):
@@ -549,7 +549,7 @@ def top_stays(text):
 
 
 def top_groups(plan, cwd):
-    """The open steps of a top-level session's task list, split into the serial runs of work steps, each run one
+    """The open steps of an orchestrator's task list, split into the serial runs of work steps, each run one
     child's to do in order, and the address and the reason of each step that stays."""
     steps = [st for st in plan.get("steps") or [] if st.get("status") != "completed"]
     groups, kept, run = [], [], []
@@ -578,7 +578,7 @@ def top_groups(plan, cwd):
 # --- delegation: where a step runs --------------------------------------------------------------------------------
 #
 # A step that only reads or searches is a background subagent's, `p4-phi:sweep`; one that only runs a command is
-# `p4-phi:runner`'s; the rest is a child session's. sub-agents.md says "Background subagents run concurrently while
+# `p4-phi:runner`'s; the rest is a worker's. sub-agents.md says "Background subagents run concurrently while
 # you continue working", and plugins/components.md, under "Agents", names a plugin's agent `<plugin>:<name>`.
 
 READS = re.compile(r"^\W*(?:find|search|look\s+(?:for|up|at|into|through)|read|grep|list|locate|survey|scan|map|"
@@ -604,7 +604,7 @@ def level_of(text):
     return "session"
 
 
-# --- the model and effort a child session is started with ---------------------------------------------------------
+# --- the model and effort a worker is started with ---------------------------------------------------------
 #
 # The three background subagents carry a model and an effort in their files, and every start call p4-phi hands out
 # carries an `effort`, and a `model` unless it keeps the parent session's. `mcp__ccd_session__start_session` takes
@@ -676,7 +676,7 @@ def said_level(brief):
 
 
 def child_level(text, brief=""):
-    """{"model", "effort", "kind"} a child session is started with for a step or a brief: its kind's entry of
+    """{"model", "effort", "kind"} a worker is started with for a step or a brief: its kind's entry of
     CHILD_LEVELS, with what the brief itself names laid over it. `model` is 'inherit' for the parent session's own."""
     kind = child_kind(text if str(text or "").strip() else brief)
     out = {**CHILD_LEVELS.get(kind, CHILD_LEVELS_DEFAULT[kind]), "kind": kind}
@@ -746,7 +746,7 @@ LEVEL_HOW = ("Each call carries the `model` and `effort` named beside its steps,
 
 
 def top_advice(home, s, plan, owner_turn, cap, levels=None):
-    """The top-level session's line: each work step, or serial run, to one fresh child, and with delegation on each
+    """The orchestrator's line: each work step, or serial run, to one fresh child, and with delegation on each
     step that only reads or only runs a command to a background subagent; said once per set. '' when no work step
     is new."""
     groups, kept = top_groups(plan, s.get("cwd") or "")
@@ -777,7 +777,7 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
         return (f"steps {', '.join(st['addr'] for st in g)} in order, as one child: "
                 + ", ".join(f"\"{relay._short(st.get('content'), 70)}\"" for st in g) + f", with {how}")
     named = "; ".join(f"({chr(97 + k)}) {child(g)}" for k, g in enumerate(new[:26]))
-    head = ("phi (p4-phi): this is the top-level session of its tree, so it keeps itself free for orchestration: "
+    head = ("phi (p4-phi): this is the orchestrator of its tree, so it keeps itself free for orchestration: "
             "planning, messaging and managing sessions, decisions with ezexe, and landing the work, meaning merge "
             "and push.")
     stay = ("; ".join(f"{a}, {why}" for a, why in kept)) or "none"
@@ -791,7 +791,7 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
     route = ("Start each now with `mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, "
              "`use_worktree: false`, on this session's branch" if owner_turn else
              CARD_EACH)
-    return (f"{head} Hand its work steps to child sessions, split by the files they write: steps that share a file go "
+    return (f"{head} Hand its work steps to workers, split by the files they write: steps that share a file go "
             f"to one child as a serial run, and steps with disjoint files each get a child: {named}. {route}. Each "
             f"brief is its steps' words, a line `Files: <the paths it may write>`, what they must leave done, and "
             f"\"report when done\", so the child "
@@ -1165,7 +1165,7 @@ def turn_relay(home, s, row, calls):
     ask = waiting_on(report)
     if parent and ask:
         relay.warn(home, parent, f"wait:{sid}:{stamp}",
-                   f"\"{title}\", your child session, ended its turn on a question: \"{relay._short(ask, 240)}\". "
+                   f"\"{title}\", your worker, ended its turn on a question: \"{relay._short(ask, 240)}\". "
                    f"It names no matter of ezexe's authority, so answer it with SendMessage to {sid} "
                    f"from what the session tree knows, rather than leaving it waiting.")
     return unsent

@@ -13,11 +13,11 @@ the child's reports and its archive line go there. A request not started within 
 
 Until then the session waits on ezexe by a click: each turn ezexe did not begin ends on a blocked wrap-up whose
 question names the requests it holds and whose first button starts them, so the app marks it as needing ezexe and
-the press of that button is the turn ezexe begins there. A supervisor session names such a session as a link and
+the press of that button is the turn ezexe begins there. A puppeteer names such a session as a link and
 starts none of its requests, as controls.py says.
 
-A request filed with `to`, a supervisor session's id, asks that supervisor session for a new top-level session: it is
-never handed to the session that filed it, and the supervisor session's hooks read it here.
+A request filed with `to`, a puppeteer's id, asks that puppeteer for a new orchestrator: it is
+never handed to the session that filed it, and the puppeteer's hooks read it here.
 
 <home>/phi/start-requests.jsonl holds one row a change: `request` with the brief, `claimed` when a start_session
 call carrying its marker is about to run, and `started` when the child's first message arrived. A withdrawn request
@@ -206,7 +206,7 @@ def open_rows(home, at=None):
 
 def pending(home, at=None):
     """The requests still to start, oldest first: not started, not past EXPIRE_S, and not claimed in the last
-    CLAIM_S. One addressed to a supervisor session is not among them: that supervisor session's hooks read it."""
+    CLAIM_S. One addressed to a puppeteer is not among them: that puppeteer's hooks read it."""
     at = time.time() if at is None else at
     out = []
     for r in state(home).values():
@@ -271,8 +271,8 @@ def add(home, requester, title, brief, context="fresh", at=None, background="", 
     """Keeps a start request and returns its id and True when it is new. The same brief from the same session, still
     pending, is kept once. Its background is the one given or one built from the session that files it. With
     `after`, a session's id, it waits behind that session while that session is a busy writer. The write set its
-    brief declares is kept on it; with `declared`, a brief that declares none is refused. With `to`, a supervisor
-    session's id, it asks that supervisor session for a new top-level session."""
+    brief declares is kept on it; with `declared`, a brief that declares none is refused. With `to`, a
+    puppeteer's id, it asks that puppeteer for a new orchestrator."""
     title, brief = " ".join(str(title or "").split()), str(brief or "").strip()
     if len(title) < 3:
         raise ValueError("a start request needs the child's title")
@@ -313,7 +313,7 @@ def call_of(r, home=""):
 
 def hand_text(home, sid, at=None):
     """The lines a session is handed at a turn ezexe began in it: each pending request it filed itself, with
-    its exact call; '' when none of its own is pending. No other session is handed a request, a supervisor session
+    its exact call; '' when none of its own is pending. No other session is handed a request, a puppeteer
     included, so the app nests the child under the session that filed it."""
     rows = [r for r in pending(home, at) if r.get("requester") == sid]
     if not rows:
@@ -367,9 +367,9 @@ def waiting_text(home, sid, at=None):
 
 
 def asked_text(rid, new, title, pid, ptitle):
-    """What a session is told when it asked its supervisor session for a new top-level session: the supervisor
-    session as the link ezexe opens to begin the turn that starts it."""
-    return ((f"kept as request {rid} to this session's supervisor session" if new
+    """What a session is told when it asked its puppeteer for a new orchestrator: the
+    puppeteer as the link ezexe opens to begin the turn that starts it."""
+    return ((f"kept as request {rid} to this session's puppeteer" if new
              else f"request {rid} was already kept") +
             f": \"{title}\" is handed to it at the next turn ezexe begins there, by the link "
             f"{relay.link_of({'id': pid, 'title': ptitle or pid})} ezexe opens to send it one message, and it starts "

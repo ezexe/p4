@@ -4,7 +4,7 @@ phi.py's hooks, with fork or fresh, tracking in the store, a shared store and me
 
     python3 -I lbiza/plugins/p4-phi/scripts/test_relay.py
 
-The tree: a top-level session and two child sessions. One of them deprecates a path the other has uncommitted edits
+The tree: an orchestrator and two workers. One of them deprecates a path the other has uncommitted edits
 in; the other is warned on its next message, before any tool runs.
 """
 
@@ -119,7 +119,7 @@ class Paths(unittest.TestCase):
         self.assertEqual(relay.norm("/mnt/e/projects/x"), relay.norm("E:/projects/x"))
 
     def test_a_path_on_a_missing_drive_never_hangs(self):
-        """A mark's path on a drive this machine lacks gets no repository at once and warns nobody, and the mark is
+        """A mark's path on a drive this machine lacks gets no repository at once and warns nobody, and that mark is
         still handed on."""
         import time
         t0 = time.time()
@@ -410,7 +410,7 @@ class ThreeSessions(unittest.TestCase):
         self.assertNotIn("replaces:", context(t.say(B, "third")), "nor when the sibling changes again")
 
     def test_thirty_warnings_stay_under_the_cap_and_the_rest_is_held(self):
-        """A top-level session too: what does not fit is named by count and kept on held.md, once."""
+        """An orchestrator too: what does not fit is named by count and kept on held.md, once."""
         import phi
         t = self.t
         for k in range(30):
@@ -579,7 +579,7 @@ class ThreeSessions(unittest.TestCase):
 
     def test_a_child_a_sibling_supersedes_is_offered_to_ezexe_when_the_top_level_session_is_done(self):
         """A finished child whose work a sibling's newer note supersedes is counted as archived and listed on
-        ready-to-archive.md, and the done top-level session puts it to ezexe as an option of its multiple-choice
+        ready-to-archive.md, and the done orchestrator puts it to ezexe as an option of its multiple-choice
         question."""
         t = self.t
         t.cli(A, "shard", self.x("lib"))
@@ -591,7 +591,7 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn(A, open(relay.ready_path(t.p4), encoding="utf-8").read(), "listed on ready-to-archive.md")
         said = t.cli(TOP, "done", "both plugins built and their suites pass").stdout
         self.assertIn(f"- label \"the layout work\", description \"Archive {A}.\"", said,
-                      "an option of the question the done top-level session puts to ezexe")
+                      "an option of the question the done orchestrator puts to ezexe")
 
 
 
@@ -655,7 +655,7 @@ class ForkOrFresh(ThreeSessions):
         self.assertIsNone(guard(B, "git checkout -- lib/x.py"), "restoring a file is not a branch change")
         self.assertEqual(guard(B, "git switch main")["permissionDecision"], "ask", "a branch change in a child")
         self.assertIn("moves the parent's too", guard(B, "git checkout feature/x")["permissionDecisionReason"])
-        self.assertIsNone(guard(TOP, "git switch -c mine"), "a top-level session decides its own branches")
+        self.assertIsNone(guard(TOP, "git switch -c mine"), "an orchestrator decides its own branches")
 
     def test_a_hand_pull_or_push_in_a_store_is_asked_and_names_p4_sync(self):
         """A store moves only by p4.py sync."""
@@ -690,7 +690,7 @@ class ForkOrFresh(ThreeSessions):
             self.assertIn("merges and pushes", out["permissionDecisionReason"])
         self.assertIsNone(guard(B, "git merge-base --is-ancestor a b"), "merge-base lands nothing")
         self.assertIsNone(guard(B, "git log --grep 'push'"), "quoted words are not a command")
-        self.assertIsNone(guard(TOP, "git push origin main"), "the top-level session lands the work")
+        self.assertIsNone(guard(TOP, "git push origin main"), "the orchestrator lands the work")
         s = relay._session(self.t.p4, B)
         s["task"] = "Fix it, run the suites, then push main yourself."
         relay._write_json(os.path.join(relay._dir(self.t.p4, B), "session.json"), s)
@@ -792,7 +792,7 @@ class MergedWorktrees(unittest.TestCase):
             self.assertEqual(relay.worktrees_text(home, "local_top", relay.repo_of(repo)), "", "said once per set")
 
     def test_a_worktree_is_kept_for_a_stash_unpushed_commits_no_branch_or_pull_requests_gh_could_not_read(self):
-        """At a top-level session's step boundary, with no gh on PATH and with a gh that fails, a merged worktree
+        """At an orchestrator's step boundary, with no gh on PATH and with a gh that fails, a merged worktree
         whose branch has an upstream is kept as one whose pull requests could not be read, never named for removal
         as one with none. One with a stash, one with commits its upstream lacks and a detached checkout are kept with
         theirs, and a merged one that holds nothing else is named."""

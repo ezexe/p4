@@ -13,7 +13,7 @@ plans.py, issues.py, puppeteer.py, controls.py, starts.py, gaps.py and prompty_e
           the paths they name.
   anchor  <parent's folder>/anchor.json: each child's latest delta, its marked notes, owned paths, task list and
           parent step, and the parent's own marked notes, owned paths and task list, under a version that goes up
-          when any of that changes. The top-level sessions share phi/anchor.json, which holds no heads or files. It is
+          when any of that changes. The orchestrators share phi/anchor.json, which holds no heads or files. It is
           made again at Stop, at `phi.py shard`, at each update_plan call and when a subagent is bound.
   rebase  at every message a session is given, including the app's side-session events: when its parent's anchor
           is newer than the version it last saw, the other sessions' deprecations and replacements that touch its
@@ -29,7 +29,7 @@ plans.py, issues.py, puppeteer.py, controls.py, starts.py, gaps.py and prompty_e
 The rest of the module keeps phi/ in the store's git, maps a shared store's remote to this machine's folder, advises
 fork or fresh for a start, cuts a title at a clause, fences off a finished child whose work a newer note supersedes,
 counts a finished child as archived with its outcome kept as a note on its parent, names merged worktrees for
-removal, and offers a done top-level session's finished sessions to ezexe to archive.
+removal, and offers a done orchestrator's finished sessions to ezexe to archive.
 """
 
 import glob
@@ -290,8 +290,8 @@ def set_shard(home, sid, paths, base):
 
 
 def _siblings(home, s):
-    """The live sessions beside this one: the same parent's, or for a top-level session every other top-level session
-    of the store, those detached to top level included, so top-level sessions are handed each other's changes as
+    """The live sessions beside this one: the same parent's, or for an orchestrator every other orchestrator
+    of the store, those detached to top level included, so orchestrators are handed each other's changes as
     siblings. A session that is not live is left out."""
     p = _parent(s)
     return {k: v for k, v in _sessions(home).items() if k != s.get("sessionId") and _parent(v) == p
@@ -499,7 +499,7 @@ def delta(home, s, files, cwd, since=""):
 # --- anchors ---------------------------------------------------------------------------------------------------------
 
 def anchor_path(home, parent):
-    """<parent>/anchor.json; for the top-level sessions, which nobody started, phi/anchor.json."""
+    """<parent>/anchor.json; for the orchestrators, which nobody started, phi/anchor.json."""
     if not parent:
         return os.path.join(home, "phi", "anchor.json")
     return os.path.join(_dir(home, parent), "anchor.json")
@@ -508,10 +508,10 @@ def anchor_path(home, parent):
 def make_anchor(home, parent, now):
     """Makes <parent>/anchor.json again from each child's latest delta, marked notes, owned paths, task list and
     parent step and from the parent's own marked notes, owned paths and task list; with no parent, phi/anchor.json
-    from the top-level sessions' marked notes, owned paths and task lists. A finished child that a newer note
+    from the orchestrators' marked notes, owned paths and task lists. A finished child that a newer note
     supersedes is fenced off here. Its version goes up only when that content changed. Returns the anchor."""
     import plans                                  # the task lists: each session's steps, statuses and current step
-    root = not parent                             # the top-level sessions: never heads or files
+    root = not parent                             # the orchestrators: never heads or files
     every = _sessions(home)
     nodes = {}
     for sid, s in every.items():
@@ -1616,7 +1616,7 @@ def owed(repos, main="main"):
 
 
 def push_text(child_title, child, commits, owes=()):
-    """The top-level session's line: push and sync a finished child's issue-closing commits now, without asking.
+    """The orchestrator's line: push and sync a finished child's issue-closing commits now, without asking.
     With `owes`, what the change still owes comes first: finished before the push, or named in the report before
     it."""
     named = "; ".join(f"{sha} \"{_short(subj, 80)}\" closes {', '.join(n)} in {repo}" for repo, sha, subj, n in commits)
@@ -1698,7 +1698,7 @@ def retire_done(home, parent, sid, now, extra="", archived=False):
 
 # --- merged worktrees named for removal -------------------------------------------------------------------------------
 #
-# A leftover checkout under .claude/worktrees holds disk and misleads the top-level session. When a top-level session
+# A leftover checkout under .claude/worktrees holds disk and misleads the orchestrator. When an orchestrator
 # is told a child is counted as archived, and at its step boundary, the project's worktrees whose branch is already in
 # the branch it came from, and that hold nothing else, are named for removal.
 
@@ -1783,7 +1783,7 @@ def merged_worktrees(repo):
 
 
 def worktrees_text(home, sid, repo):
-    """The top-level session's line naming the merged worktrees to remove and the ones kept with why, said once per
+    """The orchestrator's line naming the merged worktrees to remove and the ones kept with why, said once per
     set; '' when there is nothing new to say."""
     gone, kept = merged_worktrees(repo)
     if not gone:
@@ -1827,10 +1827,10 @@ def stale_text(pend):
 # A finished or superseded session is counted as archived by p4-phi at once: the replaces: note on its parent,
 # `doneRetired` or `stale` in its session.json, and `gone` true for routing, owned paths, the tree and what relay.py
 # hands other sessions from that moment. Its parent is told once, and the sessions the app has not archived yet are
-# listed on <home>/phi/ready-to-archive.md. A done top-level session offers its tree's finished ones to ezexe, and
+# listed on <home>/phi/ready-to-archive.md. A done orchestrator offers its tree's finished ones to ezexe, and
 # phi.py's archive hook, h_self_archive, says which session may call the archive tool.
 
-READY = ("p4-phi counts them as archived from now. Call no archive tool for them: when the top-level session of this "
+READY = ("p4-phi counts them as archived from now. Call no archive tool for them: when the orchestrator of this "
          "tree is done, it puts its finished sessions to ezexe as one multiple-choice question and archives exactly "
          "the ones ezexe picks.")
 NO_ARCHIVE = ("phi (p4-phi): this archive call is refused: a session is archived by ezexe's own press or pick.")
@@ -1861,10 +1861,10 @@ def ready_in_tree(home, top):
 
 
 def offer(home, top):
-    """The options of the multiple-choice question a done top-level session puts to ezexe, each with a label, a
+    """The options of the multiple-choice question a done orchestrator puts to ezexe, each with a label, a
     description and the ids it archives: one option a finished session while they fit one question, else one option
     for all of them and one for each of the first OFFER_MAX - 1 parents, its children named. The labels are what the archive hook reads ezexe's
-    picks by, so they are kept on the top-level session."""
+    picks by, so they are kept on the orchestrator."""
     ready = ready_in_tree(home, top)
     if not ready:
         return []
@@ -1895,7 +1895,7 @@ def offer(home, top):
 
 
 def offer_text(home, top):
-    """The line a done top-level session is handed about the finished sessions of its tree, '' when there are none."""
+    """The line a done orchestrator is handed about the finished sessions of its tree, '' when there are none."""
     opts = offer(home, top)
     if not opts:
         return ""
