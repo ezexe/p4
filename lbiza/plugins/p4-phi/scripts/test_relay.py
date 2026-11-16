@@ -332,6 +332,35 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn("{project}", committed, "PL1: git holds the root as {project}")
         self.assertNotIn(root.lower(), committed.lower().replace("\\\\", "/"))
 
+    def test_the_puppeteers_state_files_are_ignored_with_tracking_off_and_on(self):
+        """#56: a store is settled when only hook-committed paths show, so the puppeteer's three state files at phi's
+        root never show as untracked, whether phi.track is off or on."""
+        t = self.t
+        state = ("phi/.issue-states.json", "phi/.routes-checked", "phi/meta-ledger.md")
+        for line in state:
+            self.assertIn(line, relay.IGNORED)
+        subprocess.run(["git", "-C", t.p4, "init", "-q"], check=True, capture_output=True)
+        for line in state:
+            write(os.path.join(t.p4, *line.split("/")), "{}\n")
+
+        def shown():
+            out = subprocess.run(["git", "-C", t.p4, "status", "--porcelain", "-uall"], capture_output=True,
+                                 text=True).stdout
+            return [x for x in out.splitlines() if x.endswith(state)]
+
+        self.assertEqual(len(shown()), 3, "untracked before the lines are there")
+        self.assertFalse(relay.track(t.p4), "tracking is off")
+        self.assertEqual(shown(), [], "off: ignored all the same")
+        text = open(os.path.join(t.p4, ".gitignore"), encoding="utf-8").read()
+        relay.track(t.p4)
+        self.assertEqual(open(os.path.join(t.p4, ".gitignore"), encoding="utf-8").read(), text, "written once")
+        write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"track": True}}))
+        relay.track(t.p4)
+        self.assertEqual(shown(), [], "on: still ignored")
+        lines = open(os.path.join(t.p4, ".gitignore"), encoding="utf-8").read().splitlines()
+        for line in state:
+            self.assertEqual(lines.count(line), 1, line)
+
     def test_the_path_filter_round_trips_every_spelling(self):
         root = "E:/projects/x"
         text = ('{"cwd": "E:\\\\projects\\\\x", "a": "e:/projects/x/lib/a.py", "b": "/e/projects/x/b", '

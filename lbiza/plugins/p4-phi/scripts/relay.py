@@ -1016,7 +1016,8 @@ def tree_ignore(home, tracked):
 
 def track(home, first_only=False):
     """Stage phi/ in the store's git; the first time, commit it on its own. Returns True when it committed. Only
-    when the store's p4.json sets phi.track; otherwise the session tree is kept ignored (#35). The project's root
+    when the store's p4.json sets phi.track; otherwise the session tree is kept ignored (#35), and the IGNORED lines
+    are made sure of either way, so the puppeteer's state files never show as untracked (#56). The project's root
     goes into git as {project} through the store's path filter (PL1), so another machine's checkout names its own
     files."""
     try:
@@ -1029,6 +1030,11 @@ def track(home, first_only=False):
     except OSError:
         dropped = False
     if not on:
+        try:                # #56: the made-again files at phi's root are ignored while tracking is off too
+            if os.path.isdir(home):
+                _ignore_lines(home)
+        except OSError:
+            pass
         return False
     top = _git(home, "rev-parse", "--show-toplevel")
     if not top or top.returncode != 0 or norm(top.stdout.strip()) != norm(home):
