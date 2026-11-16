@@ -1,48 +1,55 @@
 #!/usr/bin/env python3
-"""teacher.py: the paid batches of build step 9 (fresh-marketplace.md 1a, 5.2, 5.3, 5.6, 5.7). Never run by a hook.
+"""teacher.py: the paid batches in which a teacher model edits the retrieval ranker's training labels, fills the
+vocabulary's meanings and writes sourced facts. Never run by a hook.
 
   p4.py teacher edit-labels [--limit N] [--re-edit] [--second-opinion N] [--max-usd X] [--estimate] [--fake]
-      For each task of models/tasks.tsv (newest first; short turns need no teacher, 5.4) the teacher model is sent
-      the task and its date, the store's picks (labels-raw.tsv), the repo's entries newer than the teacher's own
-      training cutoff that bear on the task (1a), and the candidates (the union of BM25's top 60 and the ranker's
-      top 60, each cut to 140 characters). It answers keep or drop for each stored pick and add for any candidate
-      that bears on the task, each with a reason. Written: models/label-edits.md (by task: every decision, its
-      reason, the teacher's model id, the date) and models/labels.tsv rows with source `store+edited` (kept and
-      added picks label 1, dropped picks label 0; `teacher` is the model that answered, `response.model`).
-      Without --re-edit a task already edited is skipped; with it only the tasks whose edits came from a different
+      The tasks of models/tasks.tsv not yet edited go to the teacher model one call each, newest first and those
+      of kind `short` left out, each with the task and its date; its stored picks, the entries its labels-raw.tsv
+      rows label 1; up to NEWER_MAX rulings, corrections, retractions and facts newer than the teacher's training
+      cutoff and not after the task that share words with it; and the candidates, the union of BM25's top CAND_K
+      and, when there is a ranker, its top CAND_K. Each entry goes as one line, its date, kind and text cut to
+      CAND_CHARS characters. The teacher answers keep or drop for each stored pick and add for any candidate or
+      newer entry that bears on the task, each with a reason. The run writes models/label-edits.md by task, every
+      decision with its reason, the teacher's model id and the date, and models/labels.tsv rows of source
+      `store+edited`: a kept or added entry is labelled 1 and a dropped pick 0, and the `teacher` column holds the
+      model that answered, `response.model`. With --re-edit only the tasks whose edits came from a different
       teacher are redone, newest first, as many as --max-usd allows.
-      --second-opinion N sends N of the batch's tasks (the newest; when the run edits nothing new, the newest of
-      the last batch) to Claude Opus 5.5 with the same prompt, and reports the agreement F1 over the positives;
-      below 0.65 the batch is held (models/teacher-batches.json), and held rows are not trained on.
+      --second-opinion N sends the batch's newest N tasks, or the last batch's when the run edits nothing new, to
+      the SECOND_OPINION model with the same prompt, and reports the agreement F1 over the positives. Below
+      AGREE_MIN the batch is held in models/teacher-batches.json, and training leaves a held batch's rows out.
   p4.py teacher dictionary [--re-edit] [--max-usd X] [--estimate] [--fake]
-      Writes `means:` for the pending entries of store/vocabulary.md, 20 per call, from their `because:` quotes
-      alone. Only an entry still pending when its batch is written is filled; an entry ezexe wrote or edited is
-      never overwritten (`means-by:` records the model, the date and a hash of the meaning it wrote, so ezexe's
-      later edit is seen; --re-edit redoes only meanings another teacher wrote that nobody has edited since).
+      Writes `means:` for the pending entries of store/vocabulary.md, DICT_BATCH to a call, from their `because:`
+      quotes alone. An entry is filled only while its meaning is still the one its batch was built with, so an
+      edit ezexe makes meanwhile stands, and an entry of source `owner` is never written. `means-by:` records the
+      model, the date and a hash of the meaning it wrote, so an edit made later no longer matches its hash, and
+      --re-edit redoes only the meanings another teacher wrote that nobody has edited since.
   p4.py teacher facts [--limit N] [--max-usd X] [--estimate] [--fake]
-      Writes store/facts.md, the file recall serves under `inject: rules-facts` and the one every branch of ap-p4
-      left empty because nothing wrote it. For each ezexe message that asked for a recommendation (a question with
-      should / best / which way / recommend, ASK_RE; newest first; one not yet answered, by its `from:`) the model
-      is sent the message with the `web_search_20260209` tool and told to find the current official documentation
-      and recommend what it says; a second, structured call turns that answer into a claim and a source. The
-      source URL is one the search results returned (never one the model only named): an answer that cites none,
-      or says the documentation does not settle it, writes nothing (a claim without a source stays out). Written:
-      one entry of claim, source, verified (now), by (the model that answered), time (ezexe's message), from
-      (the message row's id), appended to store/facts.md. A search costs SEARCH_USD on top of the tokens and the
-      estimate assumes every allowed search is run.
+      Appends to store/facts.md, the file retrieval serves under `inject: rules-facts`. Every message of ezexe's
+      own that was addressed, that asks_recommendation reads as asking for a recommendation and that no facts.md
+      entry names in its `from:` goes to the model, newest first, with the `web_search_20260209` tool and the
+      instruction to find the current official documentation and recommend what it says; a second, structured
+      call turns that answer into a claim and a source. The source URL is one the search results returned, never
+      one the model only named, so an answer with no such URL writes nothing, and neither does one that says the
+      documentation does not settle it. Each fact is one entry: its claim and source, `verified:` the time of the
+      run, `by:` the model that answered, `time:` the time of ezexe's message and `from:` the message row's id.
+      A search costs SEARCH_USD on top of the tokens, and the estimate assumes every allowed search is run.
 
-Cost control, as scripts/session/overrides_suite.py: every request is built first and its input counted with the
-API's token counter (`client.messages.count_tokens`, free); the estimate (input at the model's price, plus
-OUT_EST output tokens a call, thinking included, at its output price) is refused above --max-usd before anything
-is spent; the real spend is read from each `response.usage` and appended to models/spend.json, and a run stops
-before a call that would take the real spend past --max-usd. Retries are the SDK's (max_retries). A refusal
-(`stop_reason == "refusal"`) is recorded in label-edits.md and the task skipped. `--fake` runs offline with a
-deterministic client, for the tests; `--estimate` counts and prints the estimate and calls nothing.
+Cost control: every request is built first and its input counted with the API's token counter,
+`client.messages.count_tokens`, which costs nothing. The estimate prices that input at the model's input price
+and OUT_EST output tokens a call, thinking included, at its output price. A run whose estimate passes --max-usd
+sends nothing, but for edit-labels --re-edit, which sends the newest tasks the budget covers. The real spend is
+read from each `response.usage` and appended to models/spend.json, and a run stops before a call whose estimate
+would take the real spend past --max-usd. Retries are the SDK's, with the max_retries client_for sets. A refusal,
+`stop_reason == "refusal"`, skips its task or batch, and edit-labels records it in label-edits.md. `--fake` runs
+offline with a deterministic client, for the tests; `--estimate` counts and prints the estimate and sends nothing.
 
-The teacher is `teacher-model:` in models/config.json (default claude-fable-5-1), overridable with --teacher. It
-runs with adaptive thinking (Fable runs it always) and structured output (`output_config.format`, a json_schema).
-No server-side fallback is enabled: a refusal falls to another model, and labels must carry the teacher that made
-them (Opus is not a teacher, design section 2), so a refused task is skipped instead.
+The teacher is p4.json's `recall.teacher.model`, or DEFAULT_TEACHER when that is empty, and --teacher overrides
+it; cutoff_of gives its training cutoff, and --cutoff overrides that. Every call runs with adaptive thinking,
+which a Fable model runs in any case, at the effort EFFORT, and every call but the search asks for structured
+output, `output_config.format` with a json_schema. No server-side fallback is enabled, since it would have
+another model answer a refused request where a label is to come from the teacher; a refused task is skipped
+instead. The teacher's settings are p4.json's `recall.teacher`, whose defaults p4conf.py holds, and read_config
+sets this module's constants from them.
 """
 
 import argparse
@@ -64,30 +71,28 @@ import store as st  # noqa: E402
 
 DEFAULT_TEACHER = "claude-fable-5-1"
 SECOND_OPINION = "claude-opus-5-5"
-# $ per million tokens, input and output (the claude-api skill's table, cached 2026-10-06; the design's 5.7)
+# $ per million tokens, input and output, by model id; a model id no key prefixes is priced as DEFAULT_TEACHER
 PRICES = {"claude-fable-5-1": (10.0, 50.0), "claude-opus-5-5": (4.0, 20.0), "claude-sonnet-5-5": (2.0, 10.0),
           "claude-haiku-5-5": (0.10, 0.50)}
-# Training cutoffs, by model id (1a). Only Claude Opus 5.5's is published in what this repo holds (June 2026, the
-# claude-api skill's migration guide); the others are not known here and resolve to the table's oldest known
-# cutoff, which errs toward sending more entries as newer. `teacher-cutoff:` in models/config.json, or --cutoff,
-# sets it when it is known.
+# Training cutoffs as YYYY-MM, by model id. cutoff_of gives a model whose cutoff is None, or that the table lacks,
+# the table's oldest known cutoff, which errs toward marking more entries as newer than the teacher's training.
 CUTOFFS = {"claude-opus-5-5": "2026-06", "claude-fable-5-1": None, "claude-sonnet-5-5": None,
            "claude-haiku-5-5": None}
 CAND_K = 60                   # BM25's top and the ranker's top, each
-CAND_CHARS = 140
+CAND_CHARS = 140              # an entry's date, kind and text are cut to this length
 NEWER_MAX = 12                # entries newer than the cutoff sent with a task
-DICT_BATCH = 20
+DICT_BATCH = 20               # vocabulary entries sent in one dictionary call
 MAX_TOKENS = 16000
 EFFORT = "high"
-OUT_EST = {"edit-labels": 3000, "dictionary": 4000, "facts": 4000, "facts-extract": 600}   # output tokens a call,
-                                                                                            # thinking included (assumed)
+# The output tokens a call is assumed to take, thinking included, for the estimate
+OUT_EST = {"edit-labels": 3000, "dictionary": 4000, "facts": 4000, "facts-extract": 600}
 SEARCH_MAX_USES = 5           # web searches a facts call may run
-SEARCH_USD = 0.01             # per search, on top of the tokens ($10 per 1,000 searches)
-# an ezexe message asking for a recommendation (served_back.ASK_RE), with a question mark
+SEARCH_USD = 0.01             # per search, on top of the tokens: $10 per 1,000 searches
+# Words that ask for a recommendation; asks_recommendation also wants a question mark
 ASK_RE = re.compile(r"(?i)\b(should|better|best|recommend|suggest|which (one|way|approach|option)|what (do|would) you "
                     r"(think|suggest|recommend|do)|or (should|just)|is it (worth|better|ok|fine|right)|do (i|we) need|"
                     r"proper|optimal|correct way)\b")
-AGREE_MIN = 0.65              # 5.6: Colab's two teachers agreed at 0.754
+AGREE_MIN = 0.65              # second-opinion F1 below which a batch is held; two teachers agree at 0.754
 EDITS_MD = "label-edits.md"
 SPEND = "spend.json"
 EDITS_HEAD = ("# Label edits\n\nEvery keep, drop and add the teacher made to the store's labels, by task: the "
@@ -113,8 +118,9 @@ def cost(model, usage):
 
 
 def read_config(p4):
-    """recall.teacher of p4.json (the retired models/config.json's values when p4.json is absent), under the
-    old key names, after setting the teacher's constants from it."""
+    """Set this module's constants from p4.json's `recall.teacher` and return its `model` and `cutoff` under the
+    keys `teacher-model` and `teacher-cutoff`. Nothing is written; in a store without p4.json, p4conf.load places
+    the retired models/config.json's values there."""
     import p4conf
     t = p4conf.configure(globals(), p4, "recall.teacher", {"second_opinion": "SECOND_OPINION", "effort": "EFFORT", "max_tokens": "MAX_TOKENS",
                                 "agree_min": "AGREE_MIN", "newer_max": "NEWER_MAX", "cand_k": "CAND_K",
@@ -127,8 +133,8 @@ def teacher_of(p4, override=""):
 
 
 def cutoff_of(model, p4=None, override=""):
-    """The model's training cutoff as YYYY-MM: --cutoff, then `teacher-cutoff:` in config.json when `model` is the
-    configured teacher, then the table, then the table's oldest known cutoff."""
+    """The model's training cutoff as YYYY-MM: --cutoff, then p4.json's `recall.teacher.cutoff` when `model` is
+    the configured teacher, then CUTOFFS, then the oldest cutoff CUTOFFS holds."""
     if override:
         return override[:7]
     if p4:
@@ -147,7 +153,7 @@ def same_teacher(a, b):
 
 
 def add_spend(p4, step, model, usage, usd, note=""):
-    """Append one call's real spend to models/spend.json: {"steps": {step: usd}, "calls": [...]}."""
+    """Append one call's real spend to models/spend.json: `{"steps": {step: usd}, "calls": [...], "total": usd}`."""
     path = lb.mpath(p4, SPEND)
     try:
         with open(path, encoding="utf-8") as f:
@@ -189,10 +195,11 @@ def fake_words(s):
 
 
 class FakeClient:
-    """Offline and deterministic. edit-labels: a stored pick is kept when it shares a word with the task, dropped
-    otherwise; a candidate is added when it shares two (three for an Opus model, so a second opinion can disagree).
-    dictionary: a meaning made from the first quote. A task whose text holds FAKE-REFUSE is refused. Counts a token
-    per four characters; `answer_as` is the model id it reports (response.model)."""
+    """Offline and deterministic. edit-labels: a stored pick is kept when it shares a word with the task and
+    dropped otherwise; a candidate or newer entry is added when it shares two, or three for an Opus model, so that
+    a second opinion can disagree. dictionary: a meaning made from the first quote. facts: fake_search's answer,
+    and fake_fact's fields read back from it. A prompt that holds FAKE-REFUSE is refused. It counts a token per
+    four characters; `answer_as` is the model id it reports as `response.model`."""
 
     def __init__(self, answer_as=None):
         self.messages = self
@@ -250,8 +257,8 @@ class FakeClient:
 
     @staticmethod
     def fake_search(prompt, answered, n_in):
-        """A grounded answer: one web_search_tool_result block naming a documentation page made from the message's
-        first words, and a text block citing it; FAKE-UNSETTLED in the message makes the answer say the
+        """A grounded answer: one web_search_tool_result block naming a documentation page made from two words of
+        the prompt's last line, and a text block citing it. FAKE-UNSETTLED in the prompt makes the answer say the
         documentation does not settle it."""
         words = sorted(fake_words(prompt.split("\n")[-1]))[:2] or ["docs"]
         url = "https://docs.example.org/" + "-".join(words)
@@ -319,8 +326,9 @@ class Fatal(Exception):
 
 
 def call(client, kw):
-    """(status, data, response): status ok | refusal | max_tokens | unparsed | error. A request the API rejects
-    as malformed or unauthorized stops the batch (Fatal): every later call would fail the same way."""
+    """Returns `(status, data, response)`, status `ok | refusal | max_tokens | unparsed | error`. A request the API
+    rejects as malformed, unauthorized, forbidden or naming no such model raises Fatal, which stops the batch,
+    since every later call would fail the same way."""
     try:
         r = client.messages.create(**kw)
     except Exception as e:  # noqa: BLE001 - the SDK has retried what is retryable
@@ -341,7 +349,7 @@ def call(client, kw):
         return "unparsed", {"text": clip(text, 200)}, r
 
 
-# --- edit-labels (5.2) -----------------------------------------------------------------------------------
+# --- edit-labels -----------------------------------------------------------------------------------------
 
 EDIT_SCHEMA = {
     "type": "object",
@@ -362,7 +370,7 @@ EDIT_SCHEMA = {
 
 def edit_system(cutoff):
     return (
-        "You review the training labels of a recall model that is trained on one software repository and its "
+        "You review the training labels of a recall model that is trained on one software repository and "
         "ezexe's history. A task is a message ezexe sent on a given date. The stored picks are the entries a "
         "mechanical labeler marked as bearing on it; the candidates are other entries a search found. An entry "
         "bears on the task when an assistant answering that message on that date is better off for having it in "
@@ -412,8 +420,9 @@ def newer_than(d, cutoff, facts):
 
 
 class Context:
-    """What every task of a batch shares: the index (with the held entries, for picks made while FREED), the
-    ranker, the facts' recency fields, the pool heads."""
+    """What every task of a batch shares: the index; the index with the held entries beside it, which a pool task
+    may have picked; the ranker; the facts' fields by id; each entry's head tokens for the `head-bm25` feature;
+    the tasks; and the raw labels by task."""
 
     def __init__(self, p4):
         import train
@@ -432,8 +441,9 @@ class Context:
 
 
 def candidates(ctx, task, pool):
-    """[doc] the union of BM25's top CAND_K and the ranker's top CAND_K among the entries the task could have been
-    shown (train.eligible); a pool task's from the store's entries alone, as its training candidates are."""
+    """`[doc]`: the union of BM25's top CAND_K and, when there is a ranker, its top CAND_K, among the entries the
+    task could have been shown, as train.eligible decides. A pool task's come from the rulings, corrections,
+    retractions and facts alone, held ones included, as its training candidates do."""
     files = set(st.STORE_FILES) if pool else None
     idx = ctx.hidx if pool else ctx.idx
     xs, _, cand, sc = ctx.train.task_examples(idx, task, set(), limit=0 if pool else ctx.train.CANDIDATES,
@@ -450,8 +460,9 @@ def candidates(ctx, task, pool):
 
 
 def newer_entries(ctx, task, cutoff, exclude):
-    """The store's live entries newer than `cutoff` and no later than the task that bear on it (BM25 > 0 on the
-    task's words), strongest first, at most NEWER_MAX (1a)."""
+    """The live rulings, corrections, retractions and facts newer than `cutoff` and no later than the task that
+    share a word with it, a BM25 score above 0: a fact with a `prior:` or `checked:` field first, then the
+    strongest, at most NEWER_MAX."""
     import p4 as cli
     terms = list(dict.fromkeys(ranker.tokens(task["text"])))
     if not terms:
@@ -469,13 +480,13 @@ def newer_entries(ctx, task, cutoff, exclude):
         f = ctx.facts.get(d["id"]) or {}
         marked = bool((f.get("prior") or "").strip() or (f.get("checked") or "").strip())
         got.append((marked, s, d))
-    # a fact marked as contradicting a training-era prior, or checked against its source, comes first (3.5)
+    # a fact marked as contradicting a training-era prior, or checked against its source, comes first
     got.sort(key=lambda x: (not x[0], -x[1], x[2]["id"]))
     return [d for _, _, d in got[:NEWER_MAX]]
 
 
 def build_item(ctx, tid, cutoff):
-    """{task, handles: {handle: entry id}, picks: [handle], user: str, pool: bool} for one task."""
+    """One task's `{task, time, text, handles: {handle: entry id}, picks: [handle], pool: bool, user: prompt}`."""
     task = ctx.tasks[tid]
     raw = ctx.raw.get(tid, [])
     pick_ids = list(dict.fromkeys(r["entry"] for r in raw if str(r.get("label")) == "1"))
@@ -526,8 +537,9 @@ def build_item(ctx, tid, cutoff):
 
 
 def parse_edit(item, data):
-    """[(decision, handle, entry id, reason)]: every stored pick decided (one the answer left out is kept, said so),
-    then the adds that name a candidate or newer entry; unknown handles are counted in `bad`."""
+    """`([(decision, handle, entry id, reason)], bad)`: every stored pick decided, a pick the answer left out kept
+    with a reason that says so, then the adds that name a candidate or newer entry. `bad` counts a decision on a
+    handle that is no stored pick and an add of a handle not sent or already added."""
     out, bad = [], 0
     got = {}
     for p in data.get("picks", []) or []:
@@ -564,7 +576,8 @@ def edited_by(p4):
 
 
 def pick_tasks(p4, ctx, teacher, re_edit, limit):
-    """The task ids to edit, newest first: not yet edited, or (re-edit) edited by another teacher."""
+    """The task ids to edit, newest first and those of kind `short` left out: the ones not yet edited, or with
+    `re_edit` the ones another teacher edited."""
     done = edited_by(p4)
     ids = [t for t, r in ctx.tasks.items() if r.get("kind") != "short"]
     if re_edit:
@@ -599,12 +612,12 @@ def edit_rows(item, decisions, teacher, when, bid):
 
 
 def replace_task_rows(p4, rows, tasks):
-    """labels.tsv with the store+edited rows of `tasks` replaced by `rows` (every other row as it was)."""
+    """Rewrite labels.tsv with the store+edited rows of `tasks` replaced by `rows`, every other row as it was."""
     lb.replace_source(p4, lb.TRAIN, lb.TRAIN_HEAD, "store+edited", rows, tasks=set(tasks))
 
 
 def f1_agreement(a, b):
-    """Micro F1 over (task, entry) positives: {task: set} against {task: set}, on the tasks both answered."""
+    """Micro F1 over `(task, entry)` positives, `{task: set}` against `{task: set}`, on the tasks both answered."""
     common = set(a) & set(b)
     pa = {(t, e) for t in common for e in a[t]}
     pb = {(t, e) for t in common for e in b[t]}
@@ -632,8 +645,8 @@ class Budget:
 
 
 def run_calls(p4, client, plan, budget, step, out=print):
-    """Send each planned request in order, recording the spend; stop before one that would pass the budget.
-    plan: [(key, kw, est)]. Yields (key, status, data, model answered)."""
+    """Send each planned request in order, recording the spend, and stop before one whose estimate would pass the
+    budget. `plan` is `[(key, kw, est)]`; yields `(key, status, data, model that answered)`."""
     for key, kw, est in plan:
         if not budget.room(est):
             out(f"teacher: stopped before {key}: ${budget.spent:.2f} spent, this call's ${est:.3f} would pass "
@@ -648,7 +661,7 @@ def run_calls(p4, client, plan, budget, step, out=print):
 
 
 def edit_labels(p4, args, client=None, out=print):
-    """The edit-labels batch and its second opinion. Returns a summary dict (also for the tests)."""
+    """The edit-labels batch and its second opinion. Returns a summary dict, which the tests read too."""
     teacher = teacher_of(p4, args.teacher)
     cutoff = cutoff_of(teacher, p4, args.cutoff)
     client = client or client_for(args.fake)
@@ -690,7 +703,7 @@ def edit_labels(p4, args, client=None, out=print):
                "so_estimate": so_est, "edited": 0, "refused": 0, "failed": 0, "spent": 0.0, "f1": None,
                "status": "", "batch": ""}
     summary.update(input_tokens=n_in, so_input_tokens=so_in)
-    out(f"teacher edit-labels: {len(ids)} tasks for {teacher} (cutoff {cutoff}), {n_in:,} input tokens + "
+    out(f"teacher edit-labels: {len(ids)} tasks for {teacher} with cutoff {cutoff}, {n_in:,} input tokens + "
         f"{OUT_EST['edit-labels']:,} output a call, estimated ${est:.2f}"
         + (f"; second opinion on {len(so_ids)} tasks with {SECOND_OPINION}, {so_in:,} input tokens, estimated "
            f"${so_est:.2f}" if so_n else "")
@@ -700,7 +713,7 @@ def edit_labels(p4, args, client=None, out=print):
         return summary
     if est + so_est > args.max_usd:
         if args.re_edit and plan:
-            # 1a: a teacher change re-edits the newest tasks first, as many as the budget allows
+            # a teacher change re-edits the newest tasks first, as many as the budget allows
             keep, run = [], so_est
             for p in plan:
                 if run + p[2] > args.max_usd:
@@ -741,7 +754,7 @@ def edit_labels(p4, args, client=None, out=print):
                              "time": when, "tasks": batch_tasks, "status": "ok", "kind": "edit-labels"})
         summary["batch"] = bid
     summary["spent"] = budget.spent
-    # the second opinion (5.6)
+    # the second opinion
     if so_plan and summary["status"] != "fatal":
         target = bid if batch_tasks else so_bid
         done_now = {}
@@ -774,15 +787,15 @@ def edit_labels(p4, args, client=None, out=print):
                         f"{f1:.3f}" + (f" (below {AGREE_MIN}: the batch is held for ezexe)\n" if held else "\n"))
             summary["f1"], summary["held"] = f1, held
             out(f"teacher: second opinion F1 {f1:.3f} over {len(theirs)} tasks"
-                + (f": below {AGREE_MIN}, batch {target} held" if held else f" (at or above {AGREE_MIN})"))
+                + (f": below {AGREE_MIN}, batch {target} held" if held else f", at or above {AGREE_MIN}"))
     summary["spent"] = budget.spent
     summary["status"] = summary["status"] or "done"
     out(f"teacher edit-labels: {summary['edited']} edited, {summary['refused']} refused, {summary['failed']} failed; "
-        f"${budget.spent:.2f} spent (models/{SPEND})")
+        f"${budget.spent:.2f} spent, recorded in models/{SPEND}")
     return summary
 
 
-# --- dictionary (5.3) ------------------------------------------------------------------------------------
+# --- dictionary ------------------------------------------------------------------------------------------
 
 DICT_SCHEMA = {
     "type": "object",
@@ -806,7 +819,7 @@ def means_hash(text):
 
 
 def means_by(e):
-    """(model, date, hash) of an entry's `means-by:` line, or None."""
+    """`(model, date, hash)` of an entry's `means-by:` line, or None."""
     v = (e.fields.get("means-by") or "").split()
     return (v[0], " ".join(v[1:-1]), v[-1]) if len(v) >= 3 else None
 
@@ -816,8 +829,8 @@ def owner_entry(e):
 
 
 def dict_targets(p4, teacher, re_edit):
-    """The vocabulary entries to write: pending ones (never ezexe's); with --re-edit also meanings another
-    teacher wrote that are unchanged since (their hash still matches)."""
+    """The vocabulary entries to write, none of source `owner`: the pending ones, and with `re_edit` also those
+    whose meaning another teacher wrote and whose `means-by:` hash still matches it."""
     out = []
     for e in st.load_file(p4, st.VOCABULARY):
         if e.head != "term" or owner_entry(e):
@@ -844,9 +857,10 @@ def dict_user(batch):
 
 
 def write_meanings(p4, answers, teacher, when, re_edit=False):
-    """Fill `means:` for {(line, term, old means): new means}, re-reading vocabulary.md first: an entry is written
-    only when it still stands at that line with that term and the meaning it had when the batch was built (so an
-    ezexe's edit made meanwhile wins), and never when its source is ezexe's. Only the entry's `means:` and
+    """Fill `means:` for `{(line, term, old means): new means}`, re-reading vocabulary.md first. The entry with
+    that term nearest that line is written only while its meaning is still the one the batch was built with, so
+    an edit ezexe made meanwhile wins, and never when its source is `owner`. A meaning that is not pending is
+    rewritten only with `re_edit` and a `means-by:` hash that still matches it. Only the entry's `means:` and
     `means-by:` lines change. Returns the count written."""
     path = os.path.join(st.store_dir(p4), st.VOCABULARY)
     text = st.read_text(path)
@@ -855,7 +869,7 @@ def write_meanings(p4, answers, teacher, when, re_edit=False):
     n = 0
     found = []
     for (line, term, old), means in answers.items():
-        # the entry by its term, nearest the line it stood at (an earlier batch's write may have moved it)
+        # the entry by its term, nearest the line it stood at, since an earlier batch's write may have moved it
         same = [e for e in parsed if e.value.strip() == term]
         if same:
             found.append((min(same, key=lambda e: abs(e.line - line)), old, means))
@@ -950,11 +964,11 @@ def dictionary(p4, args, client=None, out=print):
     summary["spent"] = budget.spent
     summary["status"] = summary["status"] or "done"
     out(f"teacher dictionary: {summary['written']} meanings written, {summary['refused']} batches refused, "
-        f"{summary['failed']} failed; ${budget.spent:.2f} spent (models/{SPEND})")
+        f"{summary['failed']} failed; ${budget.spent:.2f} spent, recorded in models/{SPEND}")
     return summary
 
 
-# --- facts (the file recall serves under inject: rules-facts; nothing else writes it) -------------------------
+# --- facts: store/facts.md, which retrieval serves under inject: rules-facts -----------------------------
 
 FACTS_SYSTEM = (
     "You are answering ezexe, who maintains a software project, and you must not answer from memory. Search for the current "
@@ -983,8 +997,8 @@ def asks_recommendation(text):
 
 
 def fact_targets(p4, limit=None, files=None):
-    """ezexe message rows that asked for a recommendation and have no facts.md entry pointing at them
-    (`from:`), newest first; `limit` keeps the newest N."""
+    """The rows of ezexe's own messages that were addressed, that asks_recommendation accepts and that no facts.md
+    entry names in its `from:`, newest first; `limit` keeps the newest N."""
     files = files if files is not None else st.load_store(p4)
     done = {e.fields.get("from", "").strip() for e in files.get("facts.md", [])}
     rows = []
@@ -1007,9 +1021,9 @@ def search_request(model, user):
 
 
 def search_call(client, kw):
-    """(status, text, urls, searches, responses): the answer's text, the URLs the search results returned (tool
-    result blocks and citations: never a URL the model only named), the searches run. A pause_turn is continued,
-    up to three times."""
+    """Returns `(status, text, urls, searches, responses)`: the answer's text, the URLs that the search's result
+    blocks and the text's citations returned, never a URL the model only named, and the searches run. A
+    pause_turn is continued, in at most three calls in all."""
     messages = list(kw["messages"])
     text, urls, searches, responses = "", [], 0, []
     for _ in range(3):
@@ -1054,7 +1068,7 @@ def append_facts(p4, entries):
 
 
 def facts(p4, args, client=None, out=print):
-    """The facts batch. Returns a summary dict (also for the tests)."""
+    """The facts batch. Returns a summary dict, which the tests read too."""
     teacher = teacher_of(p4, args.teacher)
     client = client or client_for(args.fake)
     rows = fact_targets(p4, args.limit)
@@ -1133,7 +1147,7 @@ def facts(p4, args, client=None, out=print):
                 source = urls[0]
             append_facts(p4, [fact_entry(claim, source, when, model, e)])
             summary["written"] += 1
-            out(f"  {e.id}: {clip(claim, 100)} ({source})")
+            out(f"  {e.id}: {clip(claim, 100)}; source {source}")
     except Fatal as ex:
         out(f"teacher: stopped, the API rejected the request: {ex}")
         summary["status"] = "fatal"
@@ -1141,25 +1155,25 @@ def facts(p4, args, client=None, out=print):
     summary["status"] = summary["status"] or "done"
     out(f"teacher facts: {summary['written']} facts written, {summary['unsettled']} unsettled, "
         f"{summary['unsourced']} unsourced, {summary['refused']} refused, {summary['failed']} failed; "
-        f"{summary['searches']} searches; ${budget.spent:.2f} spent (models/{SPEND})")
+        f"{summary['searches']} searches; ${budget.spent:.2f} spent, recorded in models/{SPEND}")
     return summary
 
 
 # --- the command line ------------------------------------------------------------------------------------
 
 def parser():
-    ap = argparse.ArgumentParser(prog="p4.py teacher", description="the paid batches (build step 9)")
+    ap = argparse.ArgumentParser(prog="p4.py teacher", description="the paid batches of the teacher model")
     ap.add_argument("action", choices=("edit-labels", "dictionary", "facts"))
     ap.add_argument("--p4")
     ap.add_argument("--limit", type=int, default=None,
-                    help="edit-labels: the newest N tasks; dictionary: the first N batches of 20; facts: the newest "
+                    help="edit-labels: the newest N tasks; dictionary: the first N batches; facts: the newest "
                          "N recommendation questions")
     ap.add_argument("--re-edit", action="store_true")
     ap.add_argument("--second-opinion", type=int, default=0, metavar="N")
     ap.add_argument("--max-usd", type=float, default=1.0)
     ap.add_argument("--estimate", action="store_true", help="count the input, print the estimate, send nothing")
     ap.add_argument("--fake", action="store_true", help="the offline deterministic client")
-    ap.add_argument("--teacher", default="", help="override models/config.json teacher-model")
+    ap.add_argument("--teacher", default="", help="the teacher model id, in place of p4.json's recall.teacher.model")
     ap.add_argument("--cutoff", default="", help="the teacher's training cutoff, YYYY-MM")
     ap.add_argument("--batch", default="", help=argparse.SUPPRESS)
     ap.add_argument("--now", default="", help=argparse.SUPPRESS)

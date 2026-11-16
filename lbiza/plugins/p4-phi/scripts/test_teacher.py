@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Tests for teacher.py, the paid batches of build step 9 (fresh-marketplace.md 1a, 5.2, 5.3, 5.6, 5.7; 8.1's
-`teacher --fake` bullet), and for `eval`'s raw-against-edited comparison. Every test runs offline on the fake
-client: no API call, nothing spent.
+"""Tests for teacher.py, the paid batches of the teacher model, and for `eval`'s raw-against-edited comparison.
+Every test runs offline on the fake client: no API call, nothing spent.
 
-Run: python3 test_teacher.py   (stdlib unittest, offline, seconds)
+Run: python3 test_teacher.py
 """
 
 import json
@@ -149,7 +148,8 @@ class Newer(Base):
         self.assertNotIn("firmware is 3.9", sec, "an entry older than the cutoff is not in the newer section")
         self.assertNotIn("firmware is 5.0", item["user"], "an entry dated after the task is not sent")
         self.assertTrue(any(h.startswith("n") for h in item["handles"]))
-        # a later cutoff leaves it out; the cutoff comes from the table, config.json or --cutoff
+        # a later cutoff leaves it out. The cutoff comes from --cutoff, p4.json's recall.teacher.cutoff or the
+        # table; this store has no p4.json, so p4conf.load reads the retired models/config.json in its place.
         item2 = te.build_item(ctx, tid, "2026-10")
         sec2 = item2["user"].split("Entries newer than your training cutoff")[1].split("Candidates")[0]
         self.assertNotIn("firmware is 4.2", sec2)
@@ -392,7 +392,7 @@ class Eval(Base):
 
     def test_train_holds_edits_below_raw(self):
         te.edit_labels(self.p4, args(), client=te.FakeClient(), out=quiet)
-        # spoil the edits: the batch's rows become the noisy store's labels (the rules naming neither topic)
+        # spoil the edits: the batch's rows become a noisy store's labels, on the rules naming neither topic
         bid = next(iter(lb.read_batches(self.p4)))
         noisy = synthetic(os.path.join(self.tmp.name, "n"), n_tasks=8, noisy=True)
         rows = [{**r, "source": "store+edited", "weight": "1.0", "teacher": "claude-fable-5-1", "edited": NOW,
@@ -466,7 +466,7 @@ class Facts(Base):
         self.assertEqual(len(self.facts_entries()), 2)
         idx = st.build_index(self.p4)
         self.assertTrue(any(d["file"] == "facts.md" and d.get("fkind") == "fact sourced" for d in idx["docs"]),
-                        "recall indexes the new facts")
+                        "retrieval indexes the new facts")
 
     def test_unsettled_and_unsourced_write_nothing(self):
         self.messages(self.ROWS[:1] + [
