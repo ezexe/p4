@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Two trees · p4-phi dox</title>
+<meta name="description" content="p4-phi's session tree beside the node tree of the phi repository: what a node is, what a link means, how each tree is made, and where the two are the same idea.">
+<style>
+:root{
+  --bg:#f5f3ec; --panel:#fffdf7; --sunk:#efece2; --ink:#1d1c19; --soft:#5d5a52; --line:#d9d4c6; --link:#a9a392;
+  --phi:#0b6b66; --phi-bg:#dcefec; --app:#a85507; --app-bg:#f8e7d2; --you:#6a4bb0; --you-bg:#ebe4f7;
+  --ok:#2c7a3f; --bad:#b3261e; --bad-bg:#fbe5e2;
+  --mono:ui-monospace,"Cascadia Code","SF Mono",Menlo,Consolas,monospace;
+  --sans:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#131418; --panel:#1b1d23; --sunk:#16171c; --ink:#e9e6dd; --soft:#a29e93; --line:#33363f; --link:#5b5f6b;
+    --phi:#62d2c6; --phi-bg:#16312f; --app:#f1ab52; --app-bg:#3a2a14; --you:#b9a2f2; --you-bg:#2a2340;
+    --ok:#7fd494; --bad:#ff8a80; --bad-bg:#3d1c1a;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#131418; --panel:#1b1d23; --sunk:#16171c; --ink:#e9e6dd; --soft:#a29e93; --line:#33363f; --link:#5b5f6b;
+  --phi:#62d2c6; --phi-bg:#16312f; --app:#f1ab52; --app-bg:#3a2a14; --you:#b9a2f2; --you-bg:#2a2340;
+  --ok:#7fd494; --bad:#ff8a80; --bad-bg:#3d1c1a;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 var(--sans)}
+.wrap{max-width:1240px;margin:0 auto;padding:24px 16px 64px}
+a{color:var(--phi)}
+code,pre{font-family:var(--mono)}
+code{font-size:.88em;background:var(--sunk);border-radius:4px;padding:1px 4px;overflow-wrap:anywhere}
+:focus-visible{outline:2px solid var(--phi);outline-offset:2px}
+button,select,input{font:inherit;color:inherit}
+
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.mark{font:600 13px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--phi);text-decoration:none}
+.mark:hover{text-decoration:underline}
+.pill{font:600 12px/1 var(--mono);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:9px 13px;cursor:pointer;white-space:nowrap}
+.pill:hover{border-color:var(--phi)}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 0}
+.tabs a{font:600 13px/1 var(--sans);text-decoration:none;color:var(--soft);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:8px 13px}
+.tabs a:hover{border-color:var(--phi)}
+.tabs a[aria-current="page"]{background:var(--phi);border-color:var(--phi);color:var(--panel)}
+h1{font-size:clamp(30px,5.4vw,46px);line-height:1.08;letter-spacing:-.02em;margin:16px 0 10px;text-wrap:balance}
+.lede{color:var(--soft);max-width:70ch;margin:0 0 20px}
+
+.pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;align-items:start}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;min-width:0}
+.card.s{border-top:3px solid var(--phi)} .card.p{border-top:3px solid var(--app)}
+.head{padding:14px 14px 0}
+.kick{font:600 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;margin:0 0 6px}
+.s .kick{color:var(--phi)} .p .kick{color:var(--app)}
+.head h2{font-size:20px;line-height:1.2;margin:0 0 4px;letter-spacing:-.01em}
+.head p{margin:0;color:var(--soft);font-size:14.5px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 14px 0}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--line);border-radius:14px;padding:2px;background:var(--sunk)}
+.seg button{border:0;background:none;border-radius:999px;padding:7px 12px;font:600 12.5px/1 var(--sans);cursor:pointer;color:var(--soft)}
+.seg button[aria-pressed="true"]{background:var(--app);color:var(--panel)}
+.btn{border:1px solid var(--line);background:var(--bg);border-radius:9px;padding:8px 11px;font-size:13.5px;font-weight:600;cursor:pointer;min-height:36px}
+.btn:hover:not(:disabled){border-color:var(--ink)}
+.btn:disabled{opacity:.42;cursor:not-allowed}
+.slide{display:flex;align-items:center;gap:8px;font:13px var(--mono);color:var(--soft);flex:1;min-width:150px}
+.slide input{flex:1;min-width:0;accent-color:var(--app)}
+.slide b{color:var(--ink);min-width:1.2em;text-align:right}
+.svgwrap{padding:10px 10px 2px}
+.svgwrap svg{display:block;width:100%;height:auto;user-select:none;-webkit-user-select:none}
+.said{margin:0 14px 10px;font-size:14px;color:var(--soft);min-height:3.1em}
+.con{margin:0 14px 14px;background:var(--sunk);border:1px solid var(--line);border-radius:10px;padding:9px 11px;font:12.5px/1.5 var(--mono);overflow-wrap:anywhere;min-height:40px}
+.con::before{content:"$ ";color:var(--soft)}
+.con.call::before{content:""}
+
+/* svg, in the language of session-tree.html */
+.node{cursor:pointer}
+.node .box{fill:var(--panel);stroke:var(--line);stroke-width:1.4}
+.node:hover .box{stroke:var(--soft)}
+.node.sel .box{stroke:var(--phi);stroke-width:2.4;fill:var(--phi-bg)}
+.p .node.sel .box,.p .node.in .box{stroke:var(--app);fill:var(--app-bg)}
+.p .node.sel .box{stroke-width:2.4}
+.node.one .box{stroke:var(--app)}
+.node.zero .box{stroke:var(--link);stroke-dasharray:3 3}
+.node.dim{opacity:.3}
+.node.retired{opacity:.62}
+.node.retired .box{stroke-dasharray:5 4}
+.node .t{font:600 13.5px var(--sans);fill:var(--ink)}
+.node .m{font:11px var(--mono);fill:var(--soft)}
+.node .c{font:600 11px var(--mono);fill:var(--ink);text-anchor:middle;dominant-baseline:central}
+.node .dot{fill:var(--link)} .node .dot.run{fill:var(--app)} .node .dot.done{fill:var(--ok)}
+.link{fill:none;stroke:var(--link);stroke-width:1.6}
+.link.dim{opacity:.25}
+.rail{fill:none;stroke:var(--link);stroke-width:1.4;stroke-dasharray:2 4}
+.rootlabel{font:600 10.5px var(--mono);fill:var(--soft);letter-spacing:.08em}
+
+h2.sect{font-size:24px;letter-spacing:-.01em;margin:36px 0 6px}
+p.under{color:var(--soft);max-width:70ch;margin:0 0 14px}
+.rows{display:grid;gap:10px}
+.row{display:grid;grid-template-columns:150px repeat(3,minmax(0,1fr));gap:0;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.row>*{padding:12px 14px;font-size:14.5px;min-width:0}
+.row h3{margin:0;font:600 12px/1.35 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--soft);background:var(--sunk)}
+.row div{border-left:1px solid var(--line)}
+.row div b{display:block;font:600 10.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}
+.row div.cs b{color:var(--phi)} .row div.cp b{color:var(--app)}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+.box2{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.box2 h3{margin:0 0 8px;font-size:17px}
+.box2 ol,.box2 ul{margin:0;padding-left:20px;font-size:14.5px}
+.box2 li{margin:6px 0}
+.box2 li b{font-weight:650}
+.box2.open{border-style:dashed;border-color:var(--you);grid-column:1/-1}
+footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-size:14px;color:var(--soft)}
+
+@media (max-width:980px){
+  .pair,.cols{grid-template-columns:minmax(0,1fr)}
+  .row{grid-template-columns:minmax(0,1fr)}
+  .row div{border-left:0;border-top:1px solid var(--line)}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <a class="mark" href="index.html">← p4-phi · dox</a>
+    <button class="pill" id="theme" type="button" aria-label="Switch between light and dark">theme</button>
+  </div>
+  <nav class="tabs" aria-label="Pages about the tree">
+    <a href="session-tree.html">The session tree</a>
+    <a href="tree-compare.html" aria-current="page">Compared with phi's node tree</a>
+  </nav>
+  <h1>Two trees that share a name</h1>
+  <p class="lede">p4-phi links Claude desktop sessions into a tree. The phi repository has a tree of its own, which its <a href="https://ezexe.github.io/phi/docs/phi/phi.jsx.html">Phi Register page</a> draws on the TREE tab and which <code>phi_rank/tree.py</code> builds out of small rankers. Change each tree below, then read the two side by side.</p>
+
+  <div class="pair">
+    <section class="card s" aria-label="The session tree of p4-phi">
+      <div class="head">
+        <p class="kick">p4-phi · ezexe/p4</p>
+        <h2>The session tree</h2>
+        <p>A node is a session. You make the tree one move at a time, and phi writes each move down.</p>
+      </div>
+      <div class="bar">
+        <button type="button" class="btn" id="sChild">Start a child</button>
+        <button type="button" class="btn" id="sDetach">Detach in phi</button>
+        <button type="button" class="btn" id="sDone">Mark done</button>
+        <button type="button" class="btn" id="sReset">Reset</button>
+      </div>
+      <div class="svgwrap"><svg id="stree" role="group" aria-label="Sessions and who started whom"></svg></div>
+      <p class="said" id="sSaid" aria-live="polite"></p>
+      <div class="con" id="sCon"></div>
+    </section>
+
+    <section class="card p" aria-label="The node tree of phi">
+      <div class="head">
+        <p class="kick">phi · ezexe/phi</p>
+        <h2>The node tree</h2>
+        <p>A node is a call or an address. You choose one number, and the whole tree follows from it.</p>
+      </div>
+      <div class="bar">
+        <div class="seg" role="group" aria-label="Which tree of phi to draw">
+          <button type="button" data-kind="call" aria-pressed="true">The call tree the page draws</button>
+          <button type="button" data-kind="addr" aria-pressed="false">The node tree phi_rank builds</button>
+        </div>
+        <label class="slide"><span id="pName">n</span><input id="pNum" type="range" min="2" max="6" value="5" aria-label="The number the tree follows from"><b id="pVal">5</b></label>
+      </div>
+      <div class="svgwrap"><svg id="ptree" role="group" aria-label="Nodes and their links"></svg></div>
+      <p class="said" id="pSaid" aria-live="polite"></p>
+      <div class="con" id="pCon"></div>
+    </section>
+  </div>
+
+  <h2 class="sect">Side by side</h2>
+  <p class="under">The first column is p4-phi. The other two are the phi repository: the tree its page draws, and the tree its code builds and keeps.</p>
+  <div class="rows">
+    <div class="row">
+      <h3>What a node is</h3>
+      <div class="cs"><b>Session tree</b>One session of the Claude desktop app, with a task, turns, notes and a page.</div>
+      <div class="cp"><b>Call tree, drawn</b>One call of <code>fib(k)</code>. The page keeps it as an object with <code>n</code>, <code>left</code>, <code>right</code>, <code>leafCount</code> and a random <code>id</code>.</div>
+      <div class="cp"><b>Node tree, built</b>One small ranker at a store address. An address is a string of 1 for <code>p4</code> and 0 for <code>.claude</code>. It starts and ends with 1 and never holds two 1s in a row.</div>
+    </div>
+    <div class="row">
+      <h3>What a link means</h3>
+      <div class="cs"><b>Session tree</b>This session started that one. phi hands tasks and notes down the link, and reports and <code>replaces:</code> notes up it.</div>
+      <div class="cp"><b>Call tree, drawn</b>This call made that call. The left link goes to <code>fib(k-1)</code> and the right link to <code>fib(k-2)</code>.</div>
+      <div class="cp"><b>Node tree, built</b>The store at this address was grown under that one. A node with children starts its training from the mean of their weights.</div>
+    </div>
+    <div class="row">
+      <h3>How a node is created</h3>
+      <div class="cs"><b>Session tree</b>A session calls <code>mcp__ccd_session__start_session</code>, or keeps a start request with <code>phi.py request</code> that ezexe's next turn starts.</div>
+      <div class="cp"><b>Call tree, drawn</b>You move the slider. <code>buildTree(n)</code> makes every node of the tree at once, by recursion.</div>
+      <div class="cp"><b>Node tree, built</b>You run <code>python -m phi_rank.tree train</code> with <code>--k</code>. It trains the first K addresses, the deepest first, each on one shard of the store's tracked text.</div>
+    </div>
+    <div class="row">
+      <h3>How a node is moved</h3>
+      <div class="cs"><b>Session tree</b><code>phi.py detach</code> makes it a top session. <code>phi.py reparent</code> puts it, with every session it started, under another.</div>
+      <div class="cp"><b>Call tree, drawn</b>It is never moved. A node's place follows from its number.</div>
+      <div class="cp"><b>Node tree, built</b>It is never moved. <code>parent(a)</code> computes a node's parent from its address alone.</div>
+    </div>
+    <div class="row">
+      <h3>How a node is retired</h3>
+      <div class="cs"><b>Session tree</b>One at a time. A done child leaves its outcome on its parent as a <code>replaces:</code> note, and ezexe archives it. A message brings it back.</div>
+      <div class="cp"><b>Call tree, drawn</b>All at once. A new <code>n</code> replaces the whole tree with a new one.</div>
+      <div class="cp"><b>Node tree, built</b>All at once. A new training run writes <code>tree.json</code> again, and the tree is loaded from the addresses that file lists.</div>
+    </div>
+    <div class="row">
+      <h3>What is stored, and where</h3>
+      <div class="cs"><b>Session tree</b><code>spawnedFrom</code> in each <code>session.json</code>, under <code>&lt;project&gt;/.claude/p4/phi/sessions/&lt;sessionId&gt;/</code>. The app keeps its own record of the nesting.</div>
+      <div class="cp"><b>Call tree, drawn</b>Nothing. The tree lives in the page's memory and is built again each time.</div>
+      <div class="cp"><b>Node tree, built</b><code>tree/&lt;address&gt;.pt</code> for each node, <code>tree.json</code> and <code>tree-oof.json</code>, in the store's <code>models/</code>. No file holds a link.</div>
+    </div>
+    <div class="row">
+      <h3>What the tree is for</h3>
+      <div class="cs"><b>Session tree</b>Deciding who is given a session's background, notes and reports.</div>
+      <div class="cp"><b>Call tree, drawn</b>Showing that <code>fib(n)</code> holds a whole <code>fib(n-1)</code> and a whole <code>fib(n-2)</code>.</div>
+      <div class="cp"><b>Node tree, built</b>Answering by effort. At medium one node answers, the one the task is routed to. At high every node answers and the scores are averaged.</div>
+    </div>
+  </div>
+
+  <h2 class="sect">The same idea, and where it stops</h2>
+  <div class="cols">
+    <div class="box2">
+      <h3>Where they are the same idea</h3>
+      <ol>
+        <li><b>A child exists because its parent made it.</b> A call makes two calls, a store is grown under a store, and a session starts a session.</li>
+        <li><b>Results travel up the link.</b> A call returns its sum to its caller. A parent ranker starts from the mean of its children's weights. A session's reports and its <code>replaces:</code> note go to the session that started it.</li>
+        <li><b>A subtree is one whole thing.</b> <code>fib(6)</code> holds a complete <code>fib(5)</code>. A reparent moves a session with every session it started, and <code>phi.py tree</code> stops printing everything under an archived session.</li>
+        <li><b>The work is at the leaves.</b> The call tree's value is its count of base cases. A leaf ranker is trained from scratch. In p4-phi a leaf is one issue, one file set, one proving test and one commit, and a top session keeps itself for orchestration.</li>
+      </ol>
+    </div>
+    <div class="box2">
+      <h3>Where they differ</h3>
+      <ol>
+        <li><b>A computed parent against a recorded one.</b> In phi a node's parent follows from its number or its address. In p4-phi the parent is written in <code>spawnedFrom</code>, so it can be rewritten, and the app's record can disagree with it.</li>
+        <li><b>One number against many moves.</b> <code>n</code> or <code>K</code> fixes the whole shape of a phi tree. The session tree has no shape until you start, detach, reparent and retire sessions.</li>
+        <li><b>Sides against no sides.</b> Left and right mean different things in the call tree. Sessions under one parent have no order beyond when they were created.</li>
+        <li><b>Repeats against one of each.</b> The same subtree appears many times in the call tree. Each session appears once.</li>
+        <li><b>One root against several.</b> A phi tree has one root, <code>fib(n)</code> or the address <code>1</code>. A p4-phi store has many top sessions, which relay to each other as siblings.</li>
+        <li><b>Retired whole against retired one by one.</b> A phi tree is replaced as a whole. A session leaves alone, and its outcome stays behind as a note.</li>
+      </ol>
+    </div>
+    <div class="box2 open">
+      <h3>What the two sources do not say</h3>
+      <ul>
+        <li>Neither tree names the other. <code>phi.jsx</code> calls its drawing the recursive Fibonacci call tree, and <code>tree.py</code> calls its tree the node tree. This page cannot tell you that one was drawn to explain the other.</li>
+        <li>The two phi trees do not have the same shape. The call tree is binary. In the address tree the root <code>1</code> gains a child at every address length, as the drawing above shows from K = 4 on.</li>
+        <li>Nothing in either repository says that p4-phi's session tree was modelled on phi's tree. The shared name is all the sources show.</li>
+        <li>The Phi Register page prints 13 as the value of <code>fib(6)</code>, which is the tree's leaf count. The function in <code>phi.md</code> returns 0 for <code>fib(0)</code>, so the leaves of that tree sum to 8. This page cannot tell you which reading the page intends.</li>
+        <li><code>build</code> in <code>tree.py</code> deletes no file. This page cannot tell you what happens to the files of a larger tree when you train a smaller one.</li>
+        <li>No trained tree was found in the store of either checkout this page was written from, so the address drawing follows <code>addresses(k)</code> and <code>parent(a)</code>, not a <code>tree.json</code> on disk.</li>
+      </ul>
+    </div>
+  </div>
+
+  <footer>
+    The p4-phi column is read from <code>phi.py</code>, <code>relay.py</code>, <code>starts.py</code> and the <code>phi</code> skill in <a href="https://github.com/ezexe/p4">ezexe/p4</a>. The phi columns are read from <a href="https://github.com/ezexe/phi/blob/main/.docs/phi/phi.jsx"><code>.docs/phi/phi.jsx</code></a>, <code>.docs/phi/phi.md</code> and <a href="https://github.com/ezexe/phi/blob/main/phi_rank/tree.py"><code>phi_rank/tree.py</code></a> in <a href="https://github.com/ezexe/phi">ezexe/phi</a>. Both drawings are models in your browser. Open the <a href="https://ezexe.github.io/phi/docs/phi/phi.jsx.html">Phi Register page</a> for phi's own drawing, with zoom, pan and the trees up to <code>fib(9)</code>.
+  </footer>
+</div>
+
+<script>
+(function(){
+"use strict";
+/* ---------- theme ---------- */
+var root=document.documentElement,TKEY="dox-theme",tbtn=document.getElementById("theme");
+function tcur(){return root.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")}
+function tlabel(){tbtn.textContent=tcur()==="dark"?"light theme":"dark theme"}
+try{var ts=localStorage.getItem(TKEY);if(ts==="dark"||ts==="light")root.setAttribute("data-theme",ts)}catch(e){}
+tlabel();
+try{matchMedia("(prefers-color-scheme: dark)").addEventListener("change",tlabel)}catch(e){}
+tbtn.addEventListener("click",function(){var n=tcur()==="dark"?"light":"dark";root.setAttribute("data-theme",n);try{localStorage.setItem(TKEY,n)}catch(e){}tlabel()});
+
+var NS="http://www.w3.org/2000/svg";
+function $(id){return document.getElementById(id)}
+function s(tag,attrs,text){var e=document.createElementNS(NS,tag);if(attrs)for(var k in attrs)e.setAttribute(k,attrs[k]);if(text!==undefined)e.textContent=text;return e}
+function wipe(e){while(e.firstChild)e.removeChild(e.firstChild)}
+function fit(t,text,max){t.textContent=text;if(t.getComputedTextLength()<=max)return;var n=text.length;while(n>1){n--;t.textContent=text.slice(0,n).replace(/\s+$/,"")+"…";if(t.getComputedTextLength()<=max)break}}
+function key(g,fn){g.addEventListener("click",fn);g.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();fn()}})}
+
+/* ---------- the session tree: made by moves, the parent recorded ---------- */
+var PHI="phi.py",TITLES=["Build the parser","Write the proving test","Check the fix against the issue","Trace the slow start","Audit the hook timeouts"];
+var S,stree=$("stree");
+function sLoad(){
+  S={n:{},order:[],seq:0,sel:null,t:0};
+  var a=sMk("Plan the release",null,"not shown done"),b=sMk("Build the changelog writer",a,"not shown done");
+  sMk("Check the version bump",a,"done");sMk("Docs site upkeep",null,"not shown done");
+  S.sel=b;
+  sSay("Select a session, then make a move. Each move changes one link, and phi writes it down.","phi.py tree");
+}
+function sMk(title,par,state){var id="s"+(++S.seq);S.n[id]={id:id,title:title,par:par||null,state:state||"no turn yet",retired:false};S.order.push(id);return id}
+function sKids(id){return S.order.filter(function(k){return S.n[k].par===id})}
+function sSay(text,con,call){$("sSaid").textContent=text;var c=$("sCon");c.textContent=con;c.className="con"+(call?" call":"")}
+function sDraw(){
+  var W=Math.max(260,stree.parentNode.clientWidth-20),H=44,GAP=9,TOP=30,IND=W<420?16:26,X0=26;
+  var rows=[];(function walk(ids,d){ids.forEach(function(id){rows.push({id:id,d:d});walk(sKids(id),d+1)})})(sKids(null),0);
+  var Ht=TOP+rows.length*(H+GAP)+2;
+  stree.setAttribute("viewBox","0 0 "+W+" "+Ht);wipe(stree);
+  stree.appendChild(s("text",{class:"rootlabel",x:6,y:15},"ROOT · top sessions are siblings"));
+  var pos={};rows.forEach(function(r,i){var x=X0+r.d*IND;pos[r.id]={x:x,y:TOP+i*(H+GAP),w:W-4-x}});
+  var tops=sKids(null);
+  if(tops.length){var dd="M10 22 V"+(pos[tops[tops.length-1]].y+H/2);tops.forEach(function(k){dd+=" M10 "+(pos[k].y+H/2)+" H"+X0});stree.appendChild(s("path",{class:"rail",d:dd}))}
+  rows.forEach(function(r){var n=S.n[r.id];if(!n.par)return;var p=pos[n.par],c=pos[r.id],sx=p.x+9,ey=c.y+H/2;
+    stree.appendChild(s("path",{class:"link",d:"M"+sx+" "+(p.y+H)+" V"+(ey-8)+" Q"+sx+" "+ey+" "+(sx+8)+" "+ey+" H"+c.x}))});
+  rows.forEach(function(r){
+    var n=S.n[r.id],p=pos[r.id],g=s("g",{class:"node"+(S.sel===r.id?" sel":"")+(n.retired?" retired":""),transform:"translate("+p.x+","+p.y+")",tabindex:0,role:"button"});
+    var meta=(n.retired?"done, retired to its parent":n.state)+(n.par?"":" · a top session");
+    g.setAttribute("aria-label",n.title+", "+meta);
+    g.appendChild(s("rect",{class:"box",width:p.w,height:H,rx:10}));
+    var t=s("text",{class:"t",x:12,y:19}),m=s("text",{class:"m",x:12,y:34});g.appendChild(t);g.appendChild(m);
+    g.appendChild(s("circle",{class:"dot "+(n.state==="done"?"done":n.state==="not shown done"?"run":""),cx:p.w-13,cy:15,r:4.5}));
+    stree.appendChild(g);fit(t,n.title,p.w-12-28);fit(m,meta,p.w-20);
+    key(g,function(){S.sel=r.id;sDraw()});
+  });
+  var n=S.sel&&S.n[S.sel];
+  $("sChild").disabled=!n||n.retired;$("sDetach").disabled=!n||!n.par;$("sDone").disabled=!n||n.retired||(n.state==="done"&&!n.par);
+}
+$("sChild").addEventListener("click",function(){var p=S.n[S.sel],title=TITLES[(S.t++)%TITLES.length];
+  if(p.state==="no turn yet")p.state="not shown done";sMk(title,p.id);
+  sSay("\""+p.title+"\" started \""+title+"\". phi wrote the parent's id into the child's spawnedFrom.","mcp__ccd_session__start_session {\"title\": \""+title+"\", \"context\": \"fresh\", …}",true);sDraw()});
+$("sDetach").addEventListener("click",function(){var n=S.n[S.sel];n.par=null;
+  sSay("\""+n.title+"\" is a top session now, with every session it started still under it. phi rewrote its spawnedFrom.",PHI+" detach <sessionId>");sDraw()});
+$("sDone").addEventListener("click",function(){var n=S.n[S.sel];n.state="done";
+  if(n.par){n.retired=true;sSay("\""+n.title+"\" retired alone. Its outcome stays on \""+S.n[n.par].title+"\" as a replaces: note, and the node waits for ezexe to archive it.",PHI+" done \"<what was run and what it showed>\"")}
+  else sSay("\""+n.title+"\" is done. A top session has no parent to retire to, so it closes with an archive button for ezexe.",PHI+" done \"<what was run and what it showed>\"");sDraw()});
+$("sReset").addEventListener("click",function(){sLoad();sDraw()});
+
+/* ---------- phi's trees: one number, the parent computed ---------- */
+var P={kind:"call",num:{call:5,addr:5},sel:null},ptree=$("ptree");
+/* the call tree, as buildTree in .docs/phi/phi.jsx makes it: fib(k) calls fib(k-1) on the left, fib(k-2) on the right */
+function callTree(n,path){var o={n:n,id:path,label:n<=1?String(n):"("+n+")",kids:[]};if(n>1)o.kids=[callTree(n-1,path+"L"),callTree(n-2,path+"R")];return o}
+/* the address tree, as addresses(k) and parent(a) in phi_rank/tree.py make it */
+function addresses(k){var out=[],m=1;while(out.length<k){var row=[];for(var i=0;i<(1<<m);i++){var a=(i.toString(2)+"").padStart(m,"0");if(a[0]==="1"&&a[m-1]==="1"&&a.indexOf("11")<0)row.push(a)}row.sort();out=out.concat(row);m++}return out.slice(0,k)}
+function parentOf(a){return a==="1"?null:a.slice(0,-1).replace(/0+$/,"")}
+function addrTree(k){var as=addresses(k),by={};as.forEach(function(a){by[a]={id:a,label:a,kids:[]}});as.forEach(function(a){var p=parentOf(a);if(p)by[p].kids.push(by[a])});
+  var order=as.slice().sort(function(x,y){return y.length-x.length||(x<y?-1:1)});order.forEach(function(a,i){by[a].shard=i+1});return by["1"]}
+function flat(t){var out=[];(function w(x,d,p){x.d=d;x.par=p;out.push(x);x.kids.forEach(function(c){w(c,d+1,x)})})(t,0,null);return out}
+function under(x){var ids={};(function w(y){ids[y.id]=1;y.kids.forEach(w)})(x);return ids}
+function pDraw(){
+  var call=P.kind==="call",num=P.num[P.kind],tree=call?callTree(num,"r"):addrTree(num),all=flat(tree);
+  var bw=call?24:Math.max(30,11+7.2*all.reduce(function(m,x){return Math.max(m,x.label.length)},1)),bh=24,sx=bw+(call?4:8),sy=46,leaf=0,deep=0;
+  (function place(x){deep=Math.max(deep,x.d);if(!x.kids.length){x.x=leaf++}else{x.kids.forEach(place);x.x=(x.kids[0].x+x.kids[x.kids.length-1].x)/2}})(tree);
+  var W=Math.max(300,leaf*sx+8),off=(W-leaf*sx)/2+sx/2,Ht=deep*sy+bh+12;
+  ptree.setAttribute("viewBox","0 0 "+W+" "+Ht);ptree.style.maxWidth=Math.round(W*1.5)+"px";ptree.style.margin="0 auto";wipe(ptree);
+  var sel=P.sel&&all.filter(function(x){return x.id===P.sel})[0],lit=sel?under(sel):null;
+  function X(x){return off+x.x*sx} function Y(x){return 6+x.d*sy}
+  all.forEach(function(x){if(!x.par)return;var x1=X(x.par),y1=Y(x.par)+bh,x2=X(x),y2=Y(x),my=(y1+y2)/2;
+    ptree.appendChild(s("path",{class:"link"+(lit&&!lit[x.id]?" dim":""),d:"M"+x1+" "+y1+" C"+x1+" "+my+" "+x2+" "+my+" "+x2+" "+y2}))});
+  all.forEach(function(x){
+    var cls="node"+(call&&x.n===1?" one":"")+(call&&x.n===0?" zero":"")+(lit?(lit[x.id]?(x===sel?" sel":" in"):" dim"):"");
+    var g=s("g",{class:cls,transform:"translate("+(X(x)-bw/2)+","+Y(x)+")",tabindex:0,role:"button","aria-label":call?"fib("+x.n+")":"address "+x.label});
+    g.appendChild(s("rect",{class:"box",width:bw,height:bh,rx:call?12:8}));g.appendChild(s("text",{class:"c",x:bw/2,y:bh/2+.5},x.label));
+    ptree.appendChild(g);key(g,function(){P.sel=P.sel===x.id?null:x.id;pDraw()});
+  });
+  var leaves=all.filter(function(x){return !x.kids.length}).length,ones=all.filter(function(x){return x.n===1}).length,said;
+  if(call){
+    if(sel&&sel.n>1){var u=Object.keys(lit).length;said="This fib("+sel.n+") holds a whole fib("+(sel.n-1)+") on its left and a whole fib("+(sel.n-2)+") on its right: "+u+" nodes in all. Nobody put them there. They follow from the number "+sel.n+".";}
+    else if(sel)said="This is a base case, fib("+sel.n+"). It makes no call, so it is a leaf.";
+    else said="fib("+num+") makes "+all.length+" calls. "+leaves+" of them are leaves: "+ones+(ones===1?" one":" ones")+" and "+(leaves-ones)+(leaves-ones===1?" zero":" zeros")+". Select a node to see the smaller tree it holds.";
+    $("pCon").textContent="buildTree("+num+")";$("pCon").className="con call";
+  }else{
+    if(sel){var p=parentOf(sel.id);said="The node "+sel.id+(p?" was grown under "+p+", which parent(a) reads from the address alone.":" is the root, the store itself.")+" It is trained "+nth(sel.shard)+" of "+num+", "+(sel.kids.length?"starting from the mean of its children's weights.":"starting from scratch.")+" Its file is models/tree/"+sel.id+".pt.";}
+    else said="K = "+num+" gives the first "+num+" address"+(num===1?"":"es")+", shortest first. The deepest node is trained first, on the oldest shard of the store's tracked text. Select a node to see where it starts from.";
+    $("pCon").textContent="python -m phi_rank.tree train --p4 <p4 root> --pairs pairs.jsonl --k "+num;$("pCon").className="con";
+  }
+  $("pSaid").textContent=said;
+}
+function nth(i){return ["first","second","third","fourth","fifth","sixth","seventh","eighth"][i-1]||(i+"th")}
+function pSet(kind){
+  P.kind=kind;P.sel=null;var call=kind==="call",r=$("pNum");
+  r.min=call?2:1;r.max=call?6:8;r.value=P.num[kind];$("pName").textContent=call?"n":"K";$("pVal").textContent=P.num[kind];
+  document.querySelectorAll(".seg button").forEach(function(b){b.setAttribute("aria-pressed",b.getAttribute("data-kind")===kind?"true":"false")});
+  pDraw();
+}
+document.querySelectorAll(".seg button").forEach(function(b){b.addEventListener("click",function(){pSet(b.getAttribute("data-kind"))})});
+$("pNum").addEventListener("input",function(){P.num[P.kind]=+this.value;P.sel=null;$("pVal").textContent=this.value;pDraw()});
+
+sLoad();sDraw();pSet("call");
+var rw=0,box=stree.parentNode;
+if(window.ResizeObserver)new ResizeObserver(function(){var w=box.clientWidth;if(w!==rw){rw=w;sDraw()}}).observe(box);
+else window.addEventListener("resize",sDraw);
+})();
+</script>
+</body>
+</html>

@@ -59,6 +59,7 @@ Whichever top session receives ezexe's message runs the meta pass over every top
 The pass finds duplicate topics, top sessions in conflict over the same files or issue, and stale topics, and it seeds the next generation of topics from what is left open.
 
 The two plugins that carry all of this, p4-phi and p4-temportal, are described in [`lbiza/README.md`](lbiza/README.md).
+The interactive docs are published at [ezexe.github.io/p4](https://ezexe.github.io/p4/), where [the session tree](https://ezexe.github.io/p4/session-tree.html) lets you make each move on a live tree.
 
 <div align="center">
 
