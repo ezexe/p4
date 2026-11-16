@@ -30,6 +30,15 @@ LIVE = os.environ.get("P4_SKILLEX_LIVE") == "1" and CLAUDE
 CLOSED = "http://127.0.0.1:9"
 NAME = "demo-brew"
 DUMP = "import sys\nopen(sys.argv[1], 'w', encoding='utf-8').write(sys.stdin.read())\n"
+INSTALL = """import json, os, sys, time
+d = os.path.join(sys.argv[1], ".claude", "skills", "demo-late")
+time.sleep(1.5)
+os.makedirs(d, exist_ok=True)
+with open(os.path.join(d, "SKILL.md"), "w") as f:
+    f.write("---\\nname: demo-late\\ndescription: written by a start hook.\\n---\\nSay late.\\n")
+if sys.argv[2] == "1":
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "reloadSkills": True}}))
+"""
 
 
 def run_claude(project, prompt, *extra, wait_s=60):
@@ -105,6 +114,26 @@ class Live(unittest.TestCase):
         self.assertIn("p4-skillex", [p["name"] for p in init["plugins"]])
         self.assertIn(NAME, init["skills"])
         self.assertTrue(os.path.isfile(os.path.join(self.root, ".claude", "skills", NAME, skillex.MARKER)))
+
+    def test_reload_skills_is_what_lists_a_skill_a_start_hook_writes(self):
+        """The field p4-skillex's start returns, decided: the hooks reference promises it under "Reload skills that a
+        hook installs", and here a start hook that writes a skill a moment after the start shows it at init only
+        when it returns `reloadSkills`."""
+        install = os.path.join(self.root, "install.py")
+        with open(install, "w", encoding="utf-8") as f:
+            f.write(INSTALL)
+        py = sys.executable.replace("\\", "/")
+        listed = {}
+        for reload in (False, True):
+            shutil.rmtree(os.path.join(self.root, ".claude", "skills"), ignore_errors=True)
+            os.makedirs(os.path.join(self.root, ".claude", "skills"))
+            hook = {"type": "command", "command": f'"{py}" -I "{install.replace(os.sep, "/")}" '
+                                                  f'"{self.root.replace(os.sep, "/")}" {int(reload)}'}
+            with open(os.path.join(self.root, ".claude", "settings.json"), "w", encoding="utf-8") as f:
+                json.dump({"hooks": {"SessionStart": [{"hooks": [hook]}]}}, f)
+            init, kinds = run_claude(self.root, "x", "--setting-sources", "project")
+            listed[reload] = "demo-late" in init["skills"]
+        self.assertEqual(listed, {False: False, True: True})
 
     def test_gap_under_print_the_first_prompt_misses_a_skill_the_start_hook_reloaded(self):
         """A platform gap, kept as a test so a fix shows: the skill is in the init listing after reloadSkills, yet
