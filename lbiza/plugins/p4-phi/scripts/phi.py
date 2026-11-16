@@ -1133,7 +1133,8 @@ def _split_full(home, s):
             "`mcp__ccd_session__start_session` with `user_asked`. Work in it that is a task of its own, outside "
             "this session's task, is shown as a proposal card, `mcp__ccd_session__start_session` with "
             "`initiation` `own_initiative`, which ezexe presses in this session, so the app's parent and phi's "
-            f"agree. Only where the card is refused too, write it as a start request, {request_cmd()}: the next "
+            f"agree. {plans.LEVEL_CARD} Only where the card is refused too, write it as a start request, "
+            f"{request_cmd()}: the next "
             "turn ezexe begins in this session starts it as this session's child. Do the rest here; a question "
             "the chain can settle is answered, not waited on.")
 

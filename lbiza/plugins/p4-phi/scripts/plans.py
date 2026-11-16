@@ -611,7 +611,11 @@ CODE = re.compile(r"\.(?:py|js|jsx|ts|tsx|rs|go|c|h|cc|cpp|cs|java|kt|rb|sh|ps1|
 STATIC = re.compile(r"\b(?:docs?|dox|documentation|readme|changelog|pages?|html|css|markdown|typos?|wording|"
                     r"comments?|renam\w*|version bump|bump\w*|format\w*|static|mechanical|copy\w*|mov\w+)\b"
                     r"|\.(?:md|html|css|txt|svg)\b", re.I)
-SAID_LEVEL = re.compile(r"(?im)^[ \t>*-]*(?:\*\*)?(model|effort)(?:\*\*)?[ \t]*:[ \t]*`?([A-Za-z0-9][\w.-]*)`?")
+# a line that is `Model: <id>` or `Effort: <level>` and nothing more: a sentence that begins with either word, such
+# as "Model: ranker.pt is rebuilt", names no choice
+SAID_LEVEL = re.compile(r"(?im)^[ \t>*-]*(?:\*\*)?(model|effort)(?:\*\*)?[ \t]*:[ \t]*(?:\*\*)?[ \t]*`?"
+                        r"([A-Za-z0-9][\w.-]*?)`?[ \t.]*$")
+MODEL_ID = re.compile(r"^(?:claude-[a-z0-9][a-z0-9.-]*|fable|mythos|opus|sonnet|haiku|inherit)$", re.I)
 LEVEL_LINE = re.compile(r"(?im)^[ \t>*-]*Model and effort:")
 
 
@@ -650,7 +654,9 @@ def said_level(brief):
         key = key.lower()
         if key == "effort" and value.lower() not in EFFORTS:
             continue
-        out.setdefault(key, value.lower() if key == "effort" else value)
+        if key == "model" and not MODEL_ID.match(value):
+            continue                               # "Model: ranker.pt is rebuilt" names no model to start with
+        out.setdefault(key, value.lower())
     return out
 
 
@@ -713,6 +719,10 @@ def level_words(text):
     return f"{model}, `effort` `{level['effort']}`"
 
 
+LEVEL_CARD = ("It carries the `model` and `effort` the levels rule gives its kind of work, as a start does: static or "
+              "mechanical work on a cheaper model at low or medium effort, a build that changes behaviour on this "
+              "session's own model at high effort, a design or review step at high or above; its brief says them "
+              "in one line, `Model and effort: <model> at <effort> effort`.")
 LEVEL_HOW = ("Each call carries the `model` and `effort` named beside its steps, by the levels rule: static or "
              "mechanical work on a cheaper model at low or medium effort, a build that changes behaviour on this "
              "session's own model at high effort, a design or review step at high or above. An effort above this "

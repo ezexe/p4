@@ -806,6 +806,44 @@ class Levels(unittest.TestCase):
             True, "", levels=False)
         self.assertNotIn("p4-phi:sweep", plain, "with the levels off every work step is a child's, as before")
 
+    def test_no_start_call_or_card_is_handed_out_with_neither_key(self):
+        """#61, from the read of its commit: the plugin-gap call and a child's card advice named neither, and a
+        sentence beginning "Model:" was taken for the starter's choice."""
+        import gaps
+        plug = os.path.join(self._tmp.name, "plugproj")
+        os.makedirs(os.path.join(plug, ".claude", "p4"))
+        subprocess.run(["git", "init", "-q", plug], check=True, capture_output=True)
+        subprocess.run(["git", "-C", plug, "remote", "add", "origin", "https://github.com/team/plug.git"],
+                       check=True, capture_output=True)
+        mem = os.path.join(self.t.p4, "temportal", "memory", "children-on-parent-branch.md")
+        os.makedirs(os.path.dirname(mem), exist_ok=True)
+        with open(mem, "w", encoding="utf-8") as f:
+            f.write("---\nname: children-on-parent-branch\ndescription: x\nmetadata:\n  type: feedback\n---\n\n"
+                    "A session started from another works on the parent's branch, and only the parent merges and "
+                    "pushes.\n")
+        s = relay._session(self.t.p4, TOP)
+        for owner_turn in (True, False):
+            relay._write_json(os.path.join(self.t.dir(TOP), "session.json"), {**s, "gapsTold": []})
+            said = gaps.advice(self.t.p4, self.t.p4, s, mem, owner_turn, "phi.py", "This session is a new top "
+                               "session, orchestrating its own topic.", root=plug)
+            call = json.loads(said[said.index("{"):said.rindex("}") + 1])
+            self.assertIn(call.get("effort"), plans.EFFORTS, "the plugin-gap call or card carries its effort")
+            self.assertIn("Model and effort: ", call["prompt"], "and its brief says them in one line")
+        kid = phi._split_full(self.t.p4, relay._session(self.t.p4, A))
+        self.assertIn("is shown as a proposal card", kid)
+        self.assertIn("It carries the `model` and `effort` the levels rule gives its kind of work", kid)
+        self.assertIn("with the `model` and `effort` the levels rule gives", phi._split_full(self.t.p4, s))
+        self.assertEqual(plans.said_level("Model: ranker.pt is rebuilt\nEffort: low on the first pass"), {},
+                         "a sentence that begins with Model: or Effort: names no choice")
+        self.assertEqual(plans.said_level("Model: ranker.pt\nEffort: loud"), {}, "nor an unknown model or effort")
+        self.assertEqual(plans.said_level("- **Model:** `claude-haiku-5-5`.\nEffort: Low"),
+                         {"model": "claude-haiku-5-5", "effort": "low"})
+        self.assertEqual(plans.said_level("Model: sonnet\nEffort: medium"), {"model": "sonnet", "effort": "medium"})
+        call = plans.with_level({"context": "fresh", "title": "the ranker",
+                                 "prompt": "Rebuild it in train.py.\nModel: ranker.pt is rebuilt"})
+        self.assertNotIn("model", call, "the rule's choice stands: a build inherits")
+        self.assertEqual(call["effort"], "high")
+
     def test_a_child_session_is_started_with_a_model_and_an_effort_that_fit_its_step(self):
         """#61: a child that wrote static pages under dox/ ran on its parent's model at its parent's effort."""
         import puppeteer

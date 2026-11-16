@@ -246,6 +246,8 @@ def advice(home, store, s, path, owner_turn, commands, new_top, root=None, befor
         call = {"initiation": "user_asked", "title": title, "context": "fresh", "use_worktree": False,
                 "cwd": proj["cwd"], "prompt": brief}
         where = f"in {proj['cwd']}"
+    import plans                                   # #61: no start call or card is handed out with neither key
+    call = plans.with_level(call, title + " " + brief)
     if not owner_turn:                             # #58: a card in the session that asked, never another's turn
         card = {**call, "initiation": "own_initiative"}
         return (head + f"this turn was started by another session, not ezexe, so the app refuses `user_asked`: show "
