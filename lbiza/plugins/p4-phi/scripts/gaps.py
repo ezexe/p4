@@ -1,16 +1,17 @@
-"""gaps.py: a memory that patches over a plugin's behaviour starts a new top session for that plugin gap.
+"""gaps.py: a feedback memory that patches over a plugin's behaviour gets a new top-level session advised for the gap.
 
-A session writes a feedback memory into the store's temportal/memory/ when a plugin did not do what ezexe wanted:
-"a child never merges", "a store moves only by p4.py sync". Each such memory hid a gap that belonged in the plugin,
-and an audit had to find six of them later and file them as issues. So when a session writes a feedback memory whose
-rule describes session or plugin behaviour, phi advises a new top session in the plugin's own project, to file the
-issue on the plugin's repository and have a child fix it. A memory about code style gets nothing.
+A session writes a feedback memory into the store's temportal/memory/ when a plugin did not do what ezexe wanted,
+such as "a child never merges" or "a store moves only by p4.py sync". Such a memory hides a gap that belongs in the
+plugin. So when a session writes a feedback memory whose rule describes session or plugin behaviour, p4-phi advises a
+new top-level session in the plugin's own project, to file the issue on the plugin's repository and have a child fix
+it. A memory about code style gets nothing, nor does one that says the plugin already carries its rule, nor a write
+that only shortens or removes text.
 
 The plugin's project is read from CLAUDE_PLUGIN_ROOT: the git top level of the marketplace checkout it runs from,
-with `origin` as the issue repository, and the folder above it that holds a p4 store, when one does, so the new
-session keeps its tree there. A plugin installed from a GitHub marketplace runs from a cache that is no checkout: the
-repository is read from known_marketplaces.json, a clone of it found beside a store this machine knows is used, and
-with none the session goes to the cloud for that repository.
+with `origin` as the issue repository, and the folder above it that holds a store, `.claude/p4`, when one does, so
+the new session keeps its tree there. A plugin installed from a GitHub marketplace runs from a cache that is no
+checkout: the repository is read from known_marketplaces.json, a clone of it found beside a store this machine knows
+is used, and with none the session goes to the cloud for that repository.
 """
 
 import hashlib
@@ -31,8 +32,8 @@ STYLE = re.compile(r"\b(indent\w*|tabs?|spaces|naming|variable names?|braces?|se
 FRONT = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?(.*)\Z", re.S)
 
 
-# #50: a memory that says the plugin carries its rule now records a gap as closed, the opposite of a new one. Three
-# memories shortened to that form each got a start request for a needless top session.
+# a memory that says the plugin carries its rule records a gap as closed, the opposite of a new one, so it gets no
+# advice and no start request
 CARRIED = re.compile(r"\b(?:p4-[\w-]+|phi|the plugins?)\b[^.\n]{0,80}?\bcarr(?:y|ies|ied)\s+(?:this|it|that|the rule)\b"
                      r"|\bcarr(?:y|ies|ied)\s+(?:this|it|that)\s+(?:now|already)\b"
                      r"|\b(?:is|are)\s+(?:now\s+)?built into\s+(?:p4-[\w-]+|phi|the plugins?)\b", re.I)
@@ -45,7 +46,7 @@ NOT_YET = re.compile(r"^\W*(?:yet|either|at all)\b", re.I)
 
 
 def carried(body):
-    """True when a memory's body says the plugin carries its rule now. A negated or wished-for form, such as
+    """True when a memory's body says the plugin already carries its rule. A negated or wished-for form, such as
     "p4-phi does not carry this yet" or "p4-phi should carry this", says the opposite: a real gap."""
     text = str(body or "")
     for m in CARRIED.finditer(text):
@@ -100,7 +101,7 @@ def memory_dir(store):
 
 
 def memory_of(store, path):
-    """(name, rule body) of a feedback memory written at `path` in the store's memory folder; None otherwise."""
+    """The name and rule body of a feedback memory written at `path` in the store's memory folder; None otherwise."""
     p, mem = relay.norm(path), memory_dir(store)
     if not mem or not p.startswith(mem + "/") or not p.endswith(".md") or p.endswith("/memory.md"):
         return None
@@ -176,7 +177,7 @@ def _known_clone(repo):
 
 
 def project_with_store(top):
-    """The plugin's project: the checkout's top level, or the nearest folder above it holding a p4 store."""
+    """The plugin's project: the checkout's top level, or the nearest folder above it holding a store, `.claude/p4`."""
     d = top
     for _ in range(3):
         if os.path.isdir(os.path.join(d, ".claude", "p4")):
@@ -219,9 +220,9 @@ def brief_of(name, path, rule, repo, new_top):
 
 def advice(home, store, s, path, owner_turn, commands, new_top, root=None, before=""):
     """The line a session gets after writing a plugin-gap memory into its project's store, once per memory content;
-    '' for any other write, for a memory whose body says the plugin carries it now, and for a write that only
-    shortens or removes text, `before` being what the file held (#50). `home` holds the session tree, `store`
-    the project's memory."""
+    '' for any other write, for a memory whose body says the plugin already carries it, and for a write that only
+    shortens or removes text, `before` being what the file held. `home` holds the session tree, and `store` is the
+    project's store, whose memory folder holds the memory."""
     got = memory_of(store, path)
     if not got or not about_behaviour(got[1]):
         return ""
@@ -251,7 +252,8 @@ def advice(home, store, s, path, owner_turn, commands, new_top, root=None, befor
     title = f"Plugin gap: {name}"
     brief = brief_of(name, path, relay._short(rule, 600), proj["repo"], new_top)
     head = (f"phi (p4-phi): the memory `{name}` you just wrote describes session or plugin behaviour, so it patches "
-            f"over a gap in the plugin ({proj['repo']}). A new top session takes it, in the plugin's own project: ")
+            f"over a gap in the plugin, whose repository is {proj['repo']}. A new top-level session takes it, in the "
+            f"plugin's own project: ")
     if proj["cloud"]:
         call = {"initiation": "user_asked", "title": title, "context": "fresh", "target": "cloud",
                 "repository": proj["repo"], "prompt": brief}
@@ -260,13 +262,13 @@ def advice(home, store, s, path, owner_turn, commands, new_top, root=None, befor
         call = {"initiation": "user_asked", "title": title, "context": "fresh", "use_worktree": False,
                 "cwd": proj["cwd"], "prompt": brief}
         where = f"in {proj['cwd']}"
-    import plans                                   # #61: no start call or card is handed out with neither key
+    import plans                                   # the call carries the `model` and `effort` its kind of work gets
     call = plans.with_level(call, title + " " + brief)
-    if not owner_turn:                             # #58: a card in the session that asked, never another's turn
+    if not owner_turn:                             # a turn ezexe did not begin: a card, a request if it is refused
         card = {**call, "initiation": "own_initiative"}
         return (head + f"this turn was started by another session, not ezexe, so the app refuses `user_asked`: show "
-                f"it as a proposal card, {where}, with `mcp__ccd_session__start_session` and {json.dumps(card)}, "
-                f"which ezexe presses in this session. Only if the card is refused too, write it as a start "
-                f"request, `{commands} request \"{title}\" --brief \"<the brief above>\"`, which the next turn "
-                f"ezexe begins in this session starts. Carry on meanwhile.")
+                f"it as a suggested task card, {where}, with `mcp__ccd_session__start_session` and "
+                f"{json.dumps(card)}, which ezexe presses in this session. Only if the card is refused too, write it "
+                f"as a start request, `{commands} request \"{title}\" --brief \"<the brief above>\"`, which the next "
+                f"turn ezexe begins in this session starts. Carry on meanwhile.")
     return head + f"start it now, {where}, with `mcp__ccd_session__start_session` and {json.dumps(call)}."

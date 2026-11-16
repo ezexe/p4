@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""issues.py (#28): a writing child's one loop of issue, `Closes #N`, a proving test, push and archive, run through
-phi's own hooks with a stand-in for `gh`.
+"""issues.py: a writing child's one loop of issue, `Closes #N`, a regression test, push and archive, run through
+phi.py's own hooks with a stand-in for `gh`.
 
     python3 -I lbiza/plugins/p4-phi/scripts/test_issues.py
 
-The stand-in files issue #7 on create, answers `issue view` from a state file the test writes (GitHub closing the
-issue when the `Closes #7` commit is pushed), and logs every call. The work repository's `origin` reads as GitHub
+The stand-in files issue #7 on create, answers `issue view` from a state file the test writes, as GitHub closes the
+issue once the `Closes #7` commit is pushed, and logs every call. The work repository's `origin` reads as GitHub
 and pushes to a bare repository beside it.
 """
 
@@ -146,7 +146,7 @@ class Loop(unittest.TestCase):
         self.assertEqual(len([c for c in self.calls() if c[:2] == ["issue", "create"]]), 1)
 
     def test_a_reading_gets_no_issue_record(self):
-        """#44: reading 2 of the live proof got ezexe/p4#40 and #42; a reading explores and commits nothing."""
+        """A reading explores and commits nothing, so it gets no issue record."""
         brief = (f"# Reading 2: count the rows\n\nThis session takes one reading of those words, reading 2 of 2: fix "
                  f"the count in {self.work}/lib/x.py\nA reading explores: change no tracked file and commit nothing, "
                  f"since the readings beside this one share the checkout.\nArchive when done.\n\n"
@@ -155,12 +155,12 @@ class Loop(unittest.TestCase):
         self.assertNotIn("#7", ctx)
         self.assertNotIn("issue", self.t.session(A))
         self.plan(A, items("Fix the count in lib/x.py", "Report the result"))
-        self.assertNotIn("issue", self.t.session(A), "nor at its plan")
+        self.assertNotIn("issue", self.t.session(A), "nor at its task list")
         self.assertFalse([c for c in self.calls() if c[:2] == ["issue", "create"]])
         self.assertFalse(issues.writing("Fix x.py. A reading explores: change no tracked file and commit nothing."))
 
     def test_an_issue_title_ends_at_a_clause_or_is_the_briefs_title_line(self):
-        """#44, #45: titles were cut with dots in the middle of a sentence."""
+        """A title ends at a clause or is the brief's title line, and is never cut with dots mid-sentence."""
         self.t.record(A, TOP, title="Fix the off-by-one in the exporter that drops the last row of the ports table when the ...")
         context(self.t.say(A, f"Fix the off-by-one in the exporter that drops the last row of the ports table when the "
                               f"table closes early, in {self.work}/lib/x.py, and commit it. Archive when done."))
@@ -172,8 +172,8 @@ class Loop(unittest.TestCase):
         self.assertNotIn("...", issues.issue_title("", "Fix " + "the very long thing " * 12))
 
     def test_the_repository_the_brief_names_wins_over_the_checkouts_origin(self):
-        """#45: "Fix the issues on ezexe/p4 ... the code is in <proj>/p4/..." filed ezexe/p4-phi#1 and #2, on the
-        origin of the project the session ran in, because "ezexe/p4" was read as a path there."""
+        """A repository the brief names by its `owner/name` wins over the origin of the checkout the session runs in,
+        and the `owner/name` is never read as a path there."""
         proj = self.t.proj.replace("\\", "/")
         write(os.path.join(proj, "top.py"), "t = 1\n")
         for args in (("init", "-q", "-b", "main"), ("add", "top.py"), ("commit", "-qm", "one"),
@@ -196,7 +196,7 @@ class Loop(unittest.TestCase):
         self.assertEqual(self.t.session(A)["issue"]["repo"], "ezexe/demo")
 
     def test_done_names_the_issue_and_what_it_still_owes(self):
-        """#45: `phi.py done` named no issue as closable."""
+        """`phi.py done` names the issue the session closes and what it still owes."""
         self.start_writer()
         r = self.t.cli(A, "done", "ran test_x.py and it passed", proj=self.work)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -220,7 +220,7 @@ class Loop(unittest.TestCase):
         self.assertFalse([c for c in self.calls() if c[:2] == ["issue", "create"]])
 
     def test_a_brief_naming_only_closed_issues_files_none(self):
-        """#39: a queue's brief named #28, closed by then, and its plan filed a new issue for work already filed."""
+        """A brief that names only closed issues files no new issue for work already filed."""
         write(os.path.join(self.ghdir, "state.json"), json.dumps({"3": "CLOSED", "4": "CLOSED"}))
         ctx = context(self.t.say(A, f"Fix ezexe/demo issue #3, then #4 in {self.work}/lib/x.py. Archive when done."))
         self.plan(A, items("Fix x", "Fix y"))
@@ -229,7 +229,7 @@ class Loop(unittest.TestCase):
         self.assertFalse([c for c in self.calls() if c[:2] == ["issue", "create"]])
 
     def test_a_session_with_turns_already_files_none_at_its_plan(self):
-        """#39: a session already at work when the loop went live filed an issue at its next plan."""
+        """A session that already has turns of its own files no issue at its next task list."""
         self.t.say(B, "Look around")
         self.assertEqual(self.t.stop(B, "Look around", report="Looked.", uuid="b1").returncode, 0)
         self.t.cli(B, "task", f"Fix the off-by-one in {self.work}/lib/x.py and commit it")
@@ -278,19 +278,19 @@ class Loop(unittest.TestCase):
         self.assertEqual(out.get("decision"), "block")
         self.assertIn("push the `Closes #7` commit", out.get("reason", ""))
         self.assertIn("p4.py sync --push", out.get("reason", ""))
-        self.assertFalse(self.t.session(A).get("doneRetired"), "not retired before the push closes the issue")
+        self.assertFalse(self.t.session(A).get("doneRetired"), "not counted as archived before the push closes it")
         guard = self.t.hook("branch-guard", A, {"hook_event_name": "PreToolUse", "tool_name": "Bash",
                                                  "tool_input": {"command": "git push -u origin main"}})
         self.assertEqual(guard.stdout.strip(), "", "a child with an issue lands its own work")
         self.git(self.work, "push", "-q", "-u", "origin", "main")
         write(os.path.join(self.ghdir, "state.json"), json.dumps({"7": "CLOSED"}))
         self.assertEqual(self.stop("g2").get("decision"), None)
-        self.assertTrue(self.t.session(A).get("doneRetired"), "retired once proven and closed")
+        self.assertTrue(self.t.session(A).get("doneRetired"), "counted as archived once proven and closed")
         said = [c for c in self.calls() if c[:2] == ["issue", "comment"]]
         self.assertTrue(any("passed" in c[c.index("--body") + 1] for c in said))
         with open(os.path.join(self.t.dir(TOP), "notes.jsonl"), encoding="utf-8") as f:
             notes = f.read()
-        self.assertIn("https://github.com/ezexe/demo/issues/7 (closed)", notes)
+        self.assertIn("https://github.com/ezexe/demo/issues/7, closed", notes)
         self.assertIn("lib: fix x", notes)
         self.assertIn("test_x.py", notes)
         self.assertIn(A, context(self.t.say(TOP, "what next?")), "the parent gets its archive line")

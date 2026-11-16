@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""#30: the six misreads the acceptance re-run at 336627d left.
+"""How a top-level session reads its steps, how an empty session is shown in the tree, and how finished children
+are archived.
 
     python3 -I lbiza/plugins/p4-phi/scripts/test_acceptance30.py
 """
@@ -40,7 +41,7 @@ class SplitReads(unittest.TestCase):
 
 class Tracking(unittest.TestCase):
     def test_a_step_another_does_or_ezexe_decides_stays_at_the_top(self):
-        """#31: tracking steps stay at the top."""
+        """Tracking steps stay with the top-level session."""
         groups, kept = plans.top_groups(plan_of(
             "Ledger: p4-phi fixer pushes #25", "ezexe updates the Mac's plugins", "Track the #28 builder's progress",
             "The top session merges the fold branch", "Write the sync script in src/sync.py"), "")
@@ -94,7 +95,7 @@ class Tree_(unittest.TestCase):
 
 
     def test_a_child_archiving_itself_with_open_steps_still_retires_with_them_named(self):
-        """#46: check 2's child archived itself with steps 2.2 to 2.4 open, and its parent heard nothing."""
+        """A child that archives itself with steps still open counts as archived, and its parent's note names them."""
         self.t.say(KID, "Fix the row in the exporter")
         r = self.t.hook("plan", KID, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
                                       "tool_input": {"items": [{"content": "Read flush_rows", "status": "completed"},
@@ -129,7 +130,7 @@ class Tree_(unittest.TestCase):
         return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else {}
 
     def test_a_finished_child_is_archived_by_no_session_and_ezexe_is_told_once(self):
-        """#49: no session archives a session; the chain treats a finished one as archived at once."""
+        """No session archives a session; the session tree counts a finished one as archived at once."""
         self.t.say(KID, "Fix the row in the exporter, report when done")
         self.assertTrue(relay._session(self.t.p4, KID).get("disposable"), "report when done marks it")
         said = self.t.cli(KID, "done", "test_flush.py: 3 tests OK").stdout
@@ -140,7 +141,7 @@ class Tree_(unittest.TestCase):
         self.t.stop(KID, "Fix the row in the exporter, report when done", report="Fixed flush_rows; 3 tests pass.")
         kid = relay._session(self.t.p4, KID)
         self.assertTrue(kid.get("doneRetired"))
-        self.assertTrue(relay.gone(self.t.p4, kid), "the chain treats it as archived from that moment")
+        self.assertTrue(relay.gone(self.t.p4, kid), "the session tree counts it as archived from that moment")
         notes = phi.load_notes(self.t.p4, TOP)
         self.assertTrue(notes and notes[-1]["claim"].startswith("replaces:") and KID in notes[-1]["claim"])
         self.assertIn("ezexe archives it in the app", notes[-1]["claim"])
@@ -163,8 +164,8 @@ class Tree_(unittest.TestCase):
         self.assertIn(f"{KID} was not picked in this turn", other.get("permissionDecisionReason", ""))
 
     def test_a_done_top_session_gets_the_button_and_a_quick_select_of_its_finished_tree(self):
-        """#49, as ezexe narrowed it: the button is for a topmost session, which offers the finished sessions of
-        its tree as one multi-select and archives exactly the ones picked."""
+        """The button is for a top-level session, which offers the finished sessions of its tree as one
+        multiple-choice question and archives exactly the ones picked."""
         kids = {KID: "the row fix", KID2: "the header fix", "local_kid00003": "the footer fix"}
         self.t.record(KID2, TOP, title=kids[KID2])
         self.t.record("local_kid00003", TOP, title=kids["local_kid00003"])
@@ -180,7 +181,7 @@ class Tree_(unittest.TestCase):
         self.assertIn("one `AskUserQuestion` with `multiSelect` true", said)
         labels = [relay._title(relay._session(self.t.p4, k)) for k in kids]
         for label in labels:
-            self.assertIn(f"label \"{label}\"", said, "the three sessions for the quick select")
+            self.assertIn(f"label \"{label}\"", said, "the three sessions as options of the question")
         self.assertIn("Archive none of them before ezexe has answered", said)
         self.assertEqual(self.archive_call(TOP, KID).get("permissionDecision"), "deny", "no archive before a pick")
         answer = f"User has answered your questions: \"Which finished sessions to archive?\"=\"{labels[0]}, {labels[2]}\"."
@@ -217,7 +218,7 @@ class Tree_(unittest.TestCase):
                          ["local_f2", "local_f3", "local_f4", "local_f5"])
 
     def test_a_retired_session_messaged_again_is_named_as_reopened(self):
-        """#49: the mark does not hide live work."""
+        """The mark of a finished session does not hide live work."""
         self.t.say(KID, "Fix the row in the exporter, report when done")
         self.t.cli(KID, "done", "test_flush.py: 3 tests OK")
         self.t.stop(KID, "Fix the row in the exporter, report when done", report="Fixed flush_rows.")

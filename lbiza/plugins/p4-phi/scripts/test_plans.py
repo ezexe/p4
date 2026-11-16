@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""plans.py: step addresses, the plan tree, the check at each step boundary and revisions relayed, on a three-session
-tree run through phi's own hooks.
+"""plans.py: step addresses, the tree of task lists, the check at each step boundary and the revisions told to the
+sessions they bear on, on a three-session tree run through phi.py's own hooks.
 
     python3 -I lbiza/plugins/p4-phi/scripts/test_plans.py
 """
@@ -46,7 +46,7 @@ class Apply(unittest.TestCase):
 
 
 class Tasks(unittest.TestCase):
-    """RB1 and P6 of the marketplace test session: tasks stay with their step's words, and an old task is unknown."""
+    """Background tasks stay with their step's words, and an old task is unknown."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -83,7 +83,8 @@ class Tasks(unittest.TestCase):
         self.assertEqual(p["steps"][0]["tasks"][0]["status"], "open", "check_tasks reads; the boundary writes")
 
     def test_a_stopped_task_closes_and_a_foreground_agent_is_no_task(self):
-        """RB1's rest: TaskStop sends no notice, and a finished agent's words may name the background."""
+        """TaskStop sends no notice, so its call closes the task, and a finished agent whose words mention background
+        tasks is no task itself."""
         home = self.t.p4
         plans.record(home, self.s, items("Watch the build", "Write the report"))
         plans.register(home, self.s, "Monitor", {"command": "tail -f log", "timeout_ms": 300000},
@@ -140,11 +141,11 @@ class TreeOfPlans(unittest.TestCase):
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
         self.assertEqual([x["addr"] for x in plans.load(self.t.p4, A)["steps"]], ["2.1", "2.2", "2.3"])
         anchor = json.load(open(relay.anchor_path(self.t.p4, TOP), encoding="utf-8"))
-        self.assertEqual(anchor["nodes"][A]["plan"]["current"], "2.1", "the parent's anchor is the plan tree")
+        self.assertEqual(anchor["nodes"][A]["plan"]["current"], "2.1", "the parent's anchor is the tree of task lists")
         self.assertEqual(anchor["parent"]["plan"]["current"], "2")
 
     def test_siblings_started_in_one_step_get_the_steps_their_briefs_name(self):
-        """Two children started while the parent is on step 2, one for its docs step: each its own root."""
+        """Two children started while the parent is on step 2, one for its docs step: each its own parent step."""
         home = self.t.p4
         s = {"sessionId": "x", "spawnedFrom": {"sessionId": TOP}, "task": "Write the layout docs for the store"}
         self.assertEqual(plans.root_of(home, s), "3")
@@ -158,7 +159,7 @@ class TreeOfPlans(unittest.TestCase):
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
         sa = relay._session(home, A)
         text = plans.agent_launch(home, sa, "toolu_a1", {"prompt": "read the layout code", "description": "probe"})
-        self.assertIn("sub-agent of", text)
+        self.assertIn("subagent of", text)
         self.assertIn("step 2.1", text)
         self.assertTrue(plans.agent_bind(home, sa, "agentx001"), "its first tool call binds its id")
         self.assertFalse(plans.agent_bind(home, sa, "agentx001"))
@@ -175,10 +176,11 @@ class TreeOfPlans(unittest.TestCase):
         self.assertIn("the old docs layout", warned)
         self.assertEqual(plans.agent_warn(home, sa, "agentx001"), "", "told once")
         self.plan(A, items("Rewrite p4conf.LAYOUT and OLDER", "Move recall/ into phi/", "Commit the move"))
-        self.assertEqual(plans.load(home, A)["steps"][0]["tasks"][0]["id"], "agentx001", "SA1: reworded in place")
+        self.assertEqual(plans.load(home, A)["steps"][0]["tasks"][0]["id"], "agentx001", "reworded in place")
         self.assertIn("now reads \"Rewrite p4conf.LAYOUT and OLDER\"", plans.agent_warn(home, sa, "agentx001"))
-        self.assertIn(f"down: \"the layout child\" launched sub-agent agentx001 for its step 2.1",
-                      " ".join(w["text"] for w in relay._session(home, TOP).get("relayPending") or []), "SA2")
+        self.assertIn(f"down: \"the layout child\" launched subagent agentx001 for its step 2.1",
+                      " ".join(w["text"] for w in relay._session(home, TOP).get("relayPending") or []),
+                      "the parent is told the subagent's id")
 
     def test_a_sub_agents_step_revised_and_its_stop(self):
         home = self.t.p4
@@ -193,7 +195,7 @@ class TreeOfPlans(unittest.TestCase):
         self.assertTrue(plans.agent_stop(home, sa, "agenty002", "Moved; tests green."))
         task = plans.load(home, A)["steps"][0]["tasks"][0]
         self.assertEqual((task["status"], task["result"]), ("completed", "Moved; tests green."))
-        self.assertEqual(plans.agent_warn(home, sa, "agenty002"), "", "a stopped sub-agent is told nothing")
+        self.assertEqual(plans.agent_warn(home, sa, "agenty002"), "", "a stopped subagent is told nothing")
         self.assertTrue(plans.agent_stop(home, sa, "agentz003", "no tools used"), "one that made no call is bound at stop")
 
     def three(self, *extra):
@@ -215,14 +217,14 @@ class TreeOfPlans(unittest.TestCase):
         done = self.three()
         done["items"][0]["status"] = "completed"
         done["items"][1]["status"] = "in_progress"
-        self.assertNotIn("can each run", self.plan(B, done) or "", "SP1: steps advised before are not again")
+        self.assertNotIn("can each run", self.plan(B, done) or "", "steps advised before are not again")
         more = self.three(f"Draw the import graph of {self.t.proj}/tools/graph.py for the docs site")
         again = self.plan(B, more) or ""
         self.assertIn("2.4", again.split("can each run")[0], "a new free step is named")
         self.assertNotIn("2.2 \"", again.split("can each run")[0])
 
     def test_steps_naming_no_file_stay_and_drawn_trees_match_nothing(self):
-        """The gap: SA1 and SA2 named no file and both edited plans.py. The noise: a drawn tree's addresses."""
+        """A step that names no file stays, and neither a session link nor a drawn tree's addresses match a step."""
         plan = {"steps": [{"addr": "1", "content": "SA1 keep tasks of a reworded step", "status": "in_progress"},
                           {"addr": "2", "content": "SA2 anchor and down-line for sub-agents", "status": "pending"}]}
         free, kept = plans.judge(plan, "")
@@ -231,7 +233,7 @@ class TreeOfPlans(unittest.TestCase):
         steps = [{"addr": "1", "content": "Waits and relays stay in place"},
                  {"addr": "2", "content": "Run every suite, commit, fast-forward"}]
         linked = ("Started:\n- [Record and check phi's own lines\u2026](claude://claude.ai/epitaxy/local_ab12)\n"
-                  "- claude://claude.ai/epitaxy/local_cd34")             # #33: a session link names no step
+                  "- claude://claude.ai/epitaxy/local_cd34")             # a session link names no step
         own = [{"addr": "3", "content": "Record and check phi's own lines"}]
         self.assertEqual(plans.matches(linked, own, [], ""), [])
         self.assertNotIn("Record", plans.own_removed(linked))
@@ -241,7 +243,7 @@ class TreeOfPlans(unittest.TestCase):
         self.assertEqual(plans.matches(report, steps, [], ""), [])
 
     def test_a_plan_of_waits_and_relays_is_serial(self):
-        """SP2, live: four serial steps were advised to split."""
+        """A task list made mostly of waits and messages is serial, so none of its steps is advised to split."""
         plan = {"steps": [{"addr": "1", "content": "Wait for SA1 and SA2 on main", "status": "in_progress"},
                           {"addr": "2", "content": "Tester confirms nodes_test 14/14 on both lists", "status": "pending"},
                           {"addr": "3", "content": "Push p4 and phi main", "status": "pending"},
@@ -252,18 +254,18 @@ class TreeOfPlans(unittest.TestCase):
         self.assertEqual(plans.split_advice(self.t.p4, relay._session(self.t.p4, B), plan, True, ""), "")
         mine = {"steps": [{"addr": "1", "content": "Waits and relays stay in place", "status": "in_progress"},
                           {"addr": "2", "content": "Run every suite, commit, fast-forward", "status": "pending"}]}
-        self.assertEqual(plans.judge(mine, "")[0], [], "a landing step anywhere in its words, live")
+        self.assertEqual(plans.judge(mine, "")[0], [], "a landing step anywhere in its words stays")
 
     def test_a_step_that_checks_or_lands_the_others_stays(self):
         self.t.say(B, "Do the parts")
         ctx = self.plan(B, self.three("Test, commit and fast-forward main after review"))
-        self.assertIn("2.4 (", ctx)
+        self.assertIn("2.4, ", ctx)
         self.assertNotIn("2.4 \"", ctx.split("can each run")[0])
 
     def test_a_step_using_anothers_results_stays_in_place(self):
         self.t.say(B, "Do the parts")
         ctx = self.plan(B, self.three("Write the summary report using the exporter's results for the release"))
-        self.assertIn("2.4 (leans on another step (\"using\"))", ctx)
+        self.assertIn("2.4, leans on another step, \"using\"", ctx)
         self.assertNotIn("2.4 \"", ctx.split("can each run")[0])
 
     def test_two_steps_on_one_file_stay_in_place(self):
@@ -284,13 +286,13 @@ class TreeOfPlans(unittest.TestCase):
         self.assertNotIn("user_asked", ctx)
 
     def test_in_a_turn_another_session_began_the_advice_is_cards_then_start_requests(self):
-        """#58: a card ezexe presses in this session, and a start request only where the card is refused too."""
+        """A turn another session began gets suggested task cards, never a `user_asked` start."""
         self.t.say(B, "Do the three parts")
         self.t.say(B, '<cross-session-message from="local_x">go on</cross-session-message>')
         ctx = self.plan(B, self.three())
-        self.assertIn("show each as a proposal card", ctx)
-        self.assertIn("`initiation` `own_initiative`, which ezexe presses in this session", ctx)
-        self.assertIn("write it as a start request, `phi.py request", ctx)
+        self.assertIn("show each as a suggested task card", ctx)
+        self.assertIn("`initiation` `own_initiative`", ctx)
+        self.assertIn("carrying the `model` and `effort` named beside its step", ctx)
         self.assertNotIn("`initiation` `user_asked`", ctx)
         self.assertNotIn("any session of this store", ctx)
 
@@ -305,7 +307,7 @@ class TreeOfPlans(unittest.TestCase):
         self.assertTrue(any("ended its turn on a question" in w["text"] and A in w["text"] for w in pend))
 
     def test_an_up_line_is_said_once(self):
-        """P1: "the parent has moved past your root step" came at every boundary after."""
+        """An up line, such as "the parent has moved past your root step", is said once, not at every boundary."""
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move", "Tell docs"))
         self.plan(TOP, items("Port the hooks", "Move the store layout into phi", "Write the layout docs", at=2))
         first = self.plan(A, {"advance": True})
@@ -321,8 +323,8 @@ class TreeOfPlans(unittest.TestCase):
                              at=1))
         ctx = self.plan(A, {"advance": True})
         self.assertIn("step 2.3 starts now", ctx)
-        self.assertIn("your root step 2 in the plan of \"top\" was revised", ctx)
-        self.assertNotIn("up: the parent revised your root step 2", ctx, "P1: the relayed revision says it once")
+        self.assertIn("your root step 2 in the task list of \"top\" was revised", ctx)
+        self.assertNotIn("up: the parent revised your root step 2", ctx, "the warning about the revision says it once")
         self.assertEqual(ctx.count("root step 2"), 1)
         self.assertEqual(self.plan(A, {"items": [{"content": "Rewrite p4conf.LAYOUT", "status": "completed"},
                                                  {"content": "Move recall/ into phi/", "status": "completed"},
@@ -337,7 +339,7 @@ class TreeOfPlans(unittest.TestCase):
         ctx = context(t.say(A, "carry on"))
         self.assertTrue(ctx.startswith("phi (p4-phi): stop before any tool runs."), ctx[:200])
         self.assertIn("your root step 2", ctx)
-        self.assertIn("was removed from the plan", ctx)
+        self.assertIn("was removed from the task list", ctx)
 
     def test_a_siblings_step_that_changes_the_next_step_is_relayed_across(self):
         t = self.t
@@ -348,7 +350,7 @@ class TreeOfPlans(unittest.TestCase):
         self.plan(A, items("Rewrite the p4conf layout table", "Move recall/ into phi/", "Commit the move"))
         ctx = self.plan(B, {"advance": True})
         self.assertIn("step 3.2 starts now", ctx)
-        self.assertIn("revised step(s) 2.1 of its plan", ctx, "the revision, relayed across")
+        self.assertIn("revised its task list at 2.1", ctx, "the revision, told across")
         self.assertIn("across: \"the layout child\" is on 2.1", ctx, "the sibling's step in progress")
 
     def test_down_the_parent_sees_its_childrens_progress_at_its_own_boundary(self):
@@ -359,13 +361,13 @@ class TreeOfPlans(unittest.TestCase):
         self.assertNotIn("down:", self.plan(TOP, {"advance": True}), "told again only when it moved")
 
     def test_the_parents_report_reaches_the_child_whose_check_it_voids(self):
-        """The miss this closes: a parent's turn report voided a child's checks and the child was never told."""
+        """A parent's turn report that voids a child's checks reaches the child."""
         t = self.t
         self.plan(A, items("Run the relay suite against the notes relay", "Check the fresh slice sizes"))
         report = "The plan-step relay replaces the notes relay, so the relay suite checks are void."
         t.stop(TOP, "decide the relay", report=report, uuid="p1")
         ctx = self.plan(A, {"advance": True})
-        self.assertIn("ended a turn whose words bear on your open step(s): 2.1", ctx)
+        self.assertIn("ended a turn whose words bear on your open steps: 2.1", ctx)
         self.assertIn(report, ctx, "the parent's own words, quoted")
         nag = context(t.say(TOP, "next"))
         self.assertIn(f"your last turn changed step(s) 2.1", nag)
@@ -373,14 +375,14 @@ class TreeOfPlans(unittest.TestCase):
         self.assertNotIn("relay it", context(t.say(TOP, "and next")), "said once")
 
     def test_a_progress_report_naming_a_childs_work_is_not_nagged(self):
-        """The miss this closes: a parent's progress report shared words with a child's steps and was nagged as a
-        change it never sent."""
+        """A parent's progress report that shares words with a child's steps is delivered, and the parent is not
+        nagged for a change it never sent."""
         t = self.t
         self.plan(A, items("Run the relay suite against the notes relay", "Check the fresh slice sizes"))
         report = ("The layout child is running the relay suite against the notes relay now; the fresh slice sizes "
                   "are next.")
         t.stop(TOP, "progress", report=report, uuid="p3")
-        self.assertIn("bear on your open step(s): 2.1", self.plan(A, {"advance": True}), "still relayed down")
+        self.assertIn("bear on your open steps: 2.1", self.plan(A, {"advance": True}), "still delivered down")
         self.assertNotIn("relay it", context(t.say(TOP, "next")), "progress is no change")
         t.stop(TOP, "decide", [("mcp__ccd_session_mgmt__send_message", {"session_id": A, "message": "void"}, "sent")],
                report="The relay suite checks are void; the notes relay is replaced.", uuid="p4")
@@ -394,7 +396,7 @@ class TreeOfPlans(unittest.TestCase):
         self.assertNotIn("relay it", context(t.say(TOP, "next")))
 
     def lookup(self, host, name, payload, wait=False):
-        """A tool call through recall's lookup entry, as every session's frozen hook list runs it."""
+        """A tool call through the `lookup-record` hook, which hooks.json runs after every tool call."""
         t = self.t
         root = os.path.dirname(HERE)
         body = {"session_id": host, "cwd": t.proj, "hook_event_name": "PostToolUse", **payload}
@@ -405,8 +407,8 @@ class TreeOfPlans(unittest.TestCase):
         return json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
 
     def test_the_plan_check_runs_through_recalls_lookup_entry_once(self):
-        """L3: a session's hook list is read once at its start, so the plan check rides on lookup-record, which every
-        open session has; a session that also has the dedicated entry runs it once."""
+        """The task-list check rides on the `lookup-record` hook, which hooks.json registers for every tool call; a
+        call that also reaches phi.py's own `plan` entry is applied once."""
         t = self.t
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
         call = {"tool_name": "mcp__ccd_turn__update_plan", "tool_input": {"advance": True},
@@ -419,16 +421,16 @@ class TreeOfPlans(unittest.TestCase):
         self.assertEqual(r.stdout.strip(), "", "the same call through the dedicated entry is not run again")
         self.assertEqual(plans.load(t.p4, A)["current"], "2.2", "advanced once")
         logged = [x.get("hook") for x in t.log(A)]
-        self.assertIn("plan", logged, "the routed check writes its log line (P7)")
+        self.assertIn("plan", logged, "the routed check writes its log line")
         self.lookup(A, "lookup-record", {"tool_name": "Monitor", "tool_input": {"command": "tail -f x.log"},
                                          "tool_response": "Monitor started (task bz4dv0pvj, expires in 30m)",
                                          "tool_use_id": "toolu_route02"}, wait=True)   # a clean call runs detached
         self.assertEqual(plans.load(t.p4, A)["steps"][1]["tasks"][0]["id"], "bz4dv0pvj",
-                         "a Monitor is recorded by the id its result gives (M1)")
+                         "a Monitor is recorded by the id its result gives")
 
     def test_a_session_whose_hook_list_lacks_the_route_gets_its_plan_from_its_transcript(self):
-        """Sessions started before the lookup entries reached them hold only phi's own entries: their update_plan
-        calls are read back from the transcript at the next message, each once."""
+        """A session whose loaded hooks lack the `lookup-record` route, as before `/reload-plugins` loads a newer
+        hooks.json, has its update_plan calls read back from the transcript at the next message, each once."""
         t = self.t
         path = os.path.join(self._tmp.name, "a-transcript.jsonl")
         rows = [{"type": "user", "message": {"role": "user", "content": "Move the store layout into phi, in steps"}}]
@@ -458,8 +460,8 @@ class TreeOfPlans(unittest.TestCase):
         self.assertEqual(plans.load(t.p4, A)["current"], "2.2", "a replayed call is not applied again by a hook")
 
     def test_the_transcript_is_read_on_from_where_the_last_replay_stopped(self):
-        """2026-11-16: each message and each Stop parsed the whole transcript again for the few lines written since.
-        The place kept is the first call still without a result, so no call is passed before its result is in."""
+        """Each message and each Stop read the transcript on from the place kept, the first call still without a
+        result, so no call is passed before its result is in."""
         t = self.t
         path = os.path.join(self._tmp.name, "b-transcript.jsonl")
         rows = [{"type": "user", "message": {"role": "user", "content": "Move the store layout into phi, in steps"}}]
@@ -506,7 +508,7 @@ class TreeOfPlans(unittest.TestCase):
         self.assertEqual(offset(), os.path.getsize(path))
         before = os.path.getsize(path)
         call(3, {"advance": True})
-        # review of #57, item 10: lines between a call and its result never move the place past the call
+        # lines between a call and its result never move the place past the call
         rows.append({"type": "user", "isSidechain": True, "message": {"role": "user", "content": "a sub-agent's row"}})
         rows.append({"type": "user", "message": {"role": "user", "content": "a message that came while it ran"}})
         put()
@@ -551,7 +553,8 @@ class TreeOfPlans(unittest.TestCase):
         ctx = self.plan(B, {"advance": True})
         self.assertIn("task bgcheck01", ctx)
         self.assertIn("`TaskStop bgcheck01`", ctx)
-        self.assertIn("step 3.1 was marked done while task bgcheck01 under it is flagged and still open", ctx)
+        self.assertIn("step 3.1 was marked done while background task bgcheck01 under it is flagged and still "
+                      "open", ctx)
         notice = ("<task-notification>\n<task-id>bgcheck01</task-id>\n<status>completed</status>\n"
                   "<summary>Background command finished</summary>\n</task-notification>")
         t.say(B, notice)
@@ -590,26 +593,27 @@ class TreeOfPlans(unittest.TestCase):
         self.assertIn("this session's work is superseded and it is stale", told)
         t.record(KID2 + "x", TOP, title="a pathless child")
         whole = context(t.say(KID2 + "x", "Help out wherever needed"))
-        turns = whole.split("The last turn of", 1)[1].split("The page this comes from", 1)[0]             if "The last turn of" in whole else ""
-        self.assertNotIn("the layout child", turns, "a stale node's last turn is no background (ST3)")
+        turns = (whole.split("The last turn of", 1)[1].split("The page this comes from", 1)[0]
+                 if "The last turn of" in whole else "")
+        self.assertNotIn("the layout child", turns, "a stale session's last turn is no part of a start background")
         t.record(GRAND, TOP, title="a later child")
         self.assertNotIn("the layout child", context(t.say(GRAND, "Write `docs/exporter.md`, step 2")),
                          "left out of a fresh child's start")
         self.plan(TOP, items("Move the store layout into recall", "Write the exporter docs for phi", at=1))
-        self.assertIn("your root step 2 in the plan of \"top\" was revised", self.plan(B, {"advance": True}),
-                      "the other two keep relaying")
+        self.assertIn("your root step 2 in the task list of \"top\" was revised", self.plan(B, {"advance": True}),
+                      "the other two keep getting the warnings")
         t.stop(A, "re-based", report="Re-based onto phi/.", uuid="a2")
-        self.assertNotIn("stale", t.session(A), "told and a turn of its own ended since: live again (ST1)")
+        self.assertNotIn("stale", t.session(A), "told, and with a turn of its own ended since, live again")
         t.stop(B, "another turn", uuid="b2")
         kept = [json.loads(l) for l in open(os.path.join(t.dir(TOP), "notes.jsonl"), encoding="utf-8")]
-        self.assertEqual(sum(1 for k in kept if "as a live node" in k["claim"]), 1, "never retired twice (ST2)")
+        self.assertEqual(sum(1 for k in kept if "as a live node" in k["claim"]), 1, "never counted as archived twice")
 
     def test_a_fresh_child_starts_with_its_root_step_and_a_fork_has_it_pinned(self):
         t = self.t
         t.record(GRAND, TOP, title="the step child")
         ctx = context(t.say(GRAND, "Write the docs for step 3"))
-        self.assertIn("this session is for step 3 of its parent's plan, \"Write the layout docs\"", ctx)
-        self.assertIn("- 2 [in_progress] Move the store layout into phi", ctx, "the parent's plan around it")
+        self.assertIn("this session is for step 3 of its parent's task list, \"Write the layout docs\"", ctx)
+        self.assertIn("- 2 [in_progress] Move the store layout into phi", ctx, "the parent's task list around it")
         self.assertIn("3.1, 3.2, and so on", ctx)
         t2 = Tree(os.path.join(self._tmp.name, "f"))
         t2.record(TOP, title="top")
@@ -623,8 +627,8 @@ class TreeOfPlans(unittest.TestCase):
 
 
 class Levels(unittest.TestCase):
-    """#57: work runs at the level Claude Code gives it. A top session's long foreground command is started in the
-    background by the hook; a child is told once per step; a step is named for the subagent that does it."""
+    """Delegation: a top-level session's long foreground command is started in the background by the hook; a child
+    is told once per step; a step is named for the subagent that does it."""
 
     LONG = {"command": "cd scripts && python -I -X utf8 test_flush.py 2>&1 | tail -3", "description": "Run the tests"}
 
@@ -643,7 +647,7 @@ class Levels(unittest.TestCase):
     plan = TreeOfPlans.plan
 
     def pre(self, host, inp, tool="Bash", tree=None, **more):
-        """A shell call's PreToolUse through recall's lookup-check entry -> the hook's own output, {} for none."""
+        """A shell call's PreToolUse through the `lookup-check` hook -> the hook's own output, {} for none."""
         t = tree or self.t
         self.n += 1
         body = {"session_id": CLI[host], "cwd": t.proj, "hook_event_name": "PreToolUse", "tool_name": tool,
@@ -666,10 +670,10 @@ class Levels(unittest.TestCase):
                       {**self.LONG, "run_in_background": True}):
             self.assertEqual(self.pre(TOP, quiet), {}, quiet)
         self.assertEqual(self.pre(TOP, dict(self.LONG), agent_id="agent_runner1"), {},
-                         "a sub-agent's call is left alone: a runner waits on its command")
+                         "a subagent's call is left alone: a runner waits on its command")
 
     def test_only_the_command_itself_is_a_long_command(self):
-        """The review of #57, items 2 to 4: (the kind, whether the call is that command and nothing else)."""
+        """What phi.long_read returns for each command: the kind, and whether the call is that command alone."""
         for cmd, want in (
                 ("cd scripts && python -I -X utf8 test_flush.py 2>&1 | tail -3", ("a test file", True)),
                 ("FOO=1 python tests/test_a.py", ("a test file", True)),
@@ -678,12 +682,12 @@ class Levels(unittest.TestCase):
                 ("python -m unittest discover", ("unittest", True)),
                 ("py.test tests", ("pytest", True)), ("npm  test", ("npm test", True)),
                 ("cargo test --all", ("cargo test", True)), ("make -j8 test", ("make -j8 test", True)),
-                # item 2: a part after the command needs it finished, and a part before it does work of its own
+                # a part after the command needs it finished, and a part before it does work of its own
                 ('python scripts/test_phi.py && git commit -m "x"', ("a test file", False)),
                 ("python test_x.py > out.txt; grep FAIL out.txt", ("a test file", False)),
                 ("sleep 5 && pytest", ("pytest", False)),
                 ("pytest -q | tee out.log", ("pytest", False)),
-                # item 3: a test file named to another program, and a call that only asks
+                # a test file named to another program, and a call that only asks
                 ("python -m py_compile scripts/test_phi.py", ("", False)),
                 ("python scripts/phi.py show test_x.py", ("", False)),
                 ("git log | python tools/count.py test_phi.py", ("", False)),
@@ -691,13 +695,13 @@ class Levels(unittest.TestCase):
                 ("pytest --version", ("", False)), ("pytest --help", ("", False)),
                 ("python -m pytest --collect-only", ("", False)),
                 ("grep -n pytest notes.md", ("", False)), ('echo "python test_x.py"', ("", False)),
-                # item 4: a heredoc's body is text, not commands
+                # a heredoc's body is text, not commands
                 ("cat > n.md <<EOF\npytest runs the suite\npython test_x.py\nEOF", ("", False)),
                 ("python - <<'PY'\nimport test_x\nPY", ("", False))):
             self.assertEqual(phi.long_read(cmd), want, cmd)
 
     def test_a_call_that_is_more_than_the_command_runs_as_sent(self):
-        """Items 2 and 5: only the command alone, with no timeout of its own, is moved; the rest get the line."""
+        """Only the command alone, with no timeout of its own, is moved to the background; the rest get the line."""
         for k, inp in enumerate(({"command": 'python scripts/test_phi.py && git commit -m "x"'},
                                  {"command": "python test_x.py > out.txt; grep FAIL out.txt"},
                                  {"command": "sleep 5 && pytest"},
@@ -708,7 +712,7 @@ class Levels(unittest.TestCase):
             self.assertIn("on a call of its own with `run_in_background: true`", out["additionalContext"], inp)
 
     def test_the_shell_gate_is_as_wide_as_the_matcher(self):
-        """Item 6: what phi.long_kind takes, recall-hook.sh lets through to it."""
+        """What phi.long_kind takes, recall-hook.sh lets through to it."""
         for cmd in ("py.test tests", "npm  test", "pnpm run build", "go test ./...", "make -j8 test"):
             self.assertEqual(self.pre(TOP, {"command": cmd}).get("updatedInput"),
                              {"command": cmd, "run_in_background": True}, cmd)
@@ -718,7 +722,7 @@ class Levels(unittest.TestCase):
             self.assertEqual(self.pre(TOP, {"command": cmd}), {}, cmd)
 
     def test_the_memory_outside_a_store_is_bounded(self):
-        """Item 7: with no data folder named, no folder under the person's home is guessed at; old files go."""
+        """With no data folder named, no folder under the person's home is guessed at, and old files go."""
         held = os.environ.pop("CLAUDE_PLUGIN_DATA", None)
         try:
             self.assertTrue(phi.level_data().startswith(tempfile.gettempdir()))
@@ -766,7 +770,7 @@ class Levels(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(t2.proj, ".claude")), "nothing written into the project")
 
     def test_a_command_already_running_is_not_started_again_by_the_rewrite(self):
-        """#47: restart-check reads `run_in_background`, which the rewritten call gains only after the hooks."""
+        """restart-check reads `run_in_background`, which the rewritten call gains only after the hooks."""
         r = self.t.hook("task", TOP, {"hook_event_name": "PostToolUse", "tool_name": "Bash",
                                       "tool_input": {**self.LONG, "run_in_background": True},
                                       "tool_response": {"stdout": "", "backgroundTaskId": "bg7level01"}})
@@ -776,8 +780,8 @@ class Levels(unittest.TestCase):
         self.assertIn("bg7level01", out["permissionDecisionReason"])
 
     def test_a_launch_the_transcript_shows_without_the_field_is_still_recorded(self):
-        """The transcript keeps a call's input as it was sent, so a command the hook moved back is known by its
-        result (measured 2026-11-16, CLI 2.1.322)."""
+        """The transcript keeps a call's input as it was sent, so a command the hook moved to the background is known
+        by its result."""
         s = relay._session(self.t.p4, TOP)
         got = plans.register(self.t.p4, s, "Bash", dict(self.LONG),
                              "Command running in background with ID: bg7level02. Output is being written to: x", "")
@@ -798,16 +802,16 @@ class Levels(unittest.TestCase):
         self.assertIn("which only reads or searches: a background subagent, `p4-phi:sweep`, not a session", ctx)
         self.assertIn("which only runs a command: a background subagent, `p4-phi:runner`, not a session", ctx)
         self.assertIn("mcp__ccd_session__start_session", ctx, "the step that writes still goes to a child session")
-        self.assertIn("completion notification", ctx)
+        self.assertIn("split by the files they write", ctx)
         s = relay._session(self.t.p4, TOP)
         plain = plans.top_advice(self.t.p4, {**s, "splitAdvised": []}, {"steps": [
             {"addr": "9", "content": "Find where the ports table is read across lib/", "status": "pending"}]},
             True, "", levels=False)
-        self.assertNotIn("p4-phi:sweep", plain, "with the levels off every work step is a child's, as before")
+        self.assertNotIn("p4-phi:sweep", plain, "with delegation off every work step is a child's")
 
     def test_no_start_call_or_card_is_handed_out_with_neither_key(self):
-        """#61, from the read of its commit: the plugin-gap call and a child's card advice named neither, and a
-        sentence beginning "Model:" was taken for the starter's choice."""
+        """The plugin-gap call and a child's card advice carry the `model` and `effort` keys, and a sentence
+        beginning "Model:" is no choice of the parent session's."""
         import gaps
         plug = os.path.join(self._tmp.name, "plugproj")
         os.makedirs(os.path.join(plug, ".claude", "p4"))
@@ -830,7 +834,7 @@ class Levels(unittest.TestCase):
             self.assertIn("Model and effort: ", call["prompt"], "and its brief says them in one line")
         kid = phi._split_full(self.t.p4, relay._session(self.t.p4, A))
         self.assertIn("is shown as a proposal card", kid)
-        self.assertIn("It carries the `model` and `effort` the levels rule gives its kind of work", kid)
+        self.assertIn("It carries the `model` and `effort` a start of its kind of work carries", kid)
         self.assertIn("with the `model` and `effort` the levels rule gives", phi._split_full(self.t.p4, s))
         self.assertEqual(plans.said_level("Model: ranker.pt is rebuilt\nEffort: low on the first pass"), {},
                          "a sentence that begins with Model: or Effort: names no choice")
@@ -840,11 +844,11 @@ class Levels(unittest.TestCase):
         self.assertEqual(plans.said_level("Model: sonnet\nEffort: medium"), {"model": "sonnet", "effort": "medium"})
         call = plans.with_level({"context": "fresh", "title": "the ranker",
                                  "prompt": "Rebuild it in train.py.\nModel: ranker.pt is rebuilt"})
-        self.assertNotIn("model", call, "the rule's choice stands: a build inherits")
+        self.assertNotIn("model", call, "its kind's choice stands: a build inherits")
         self.assertEqual(call["effort"], "high")
 
     def test_a_child_session_is_started_with_a_model_and_an_effort_that_fit_its_step(self):
-        """#61: a child that wrote static pages under dox/ ran on its parent's model at its parent's effort."""
+        """A child that writes static pages under dox/ starts on a cheaper model and a lower effort than its parent."""
         import puppeteer
         import starts
         docs, script = "Write the puppeteer pages under dox/", "Change how plans.py reads the address of a step"
@@ -865,30 +869,31 @@ class Levels(unittest.TestCase):
         call = starts.call_of(starts.state(self.t.p4)[rid], self.t.p4)
         self.assertEqual((call["model"], call["effort"]), ("claude-sonnet-5-5", "medium"), "cheaper and lower")
         self.assertIn("\n\nModel and effort: claude-sonnet-5-5 at medium effort, since this is static or mechanical "
-                      "work (p4-phi's levels rule).\n\n" + starts.marker(rid, TOP), call["prompt"])
+                      "work.\n\n" + starts.marker(rid, TOP), call["prompt"])
         self.assertEqual(starts.requester_of(self.t.p4, call["prompt"]), (rid, TOP), "the marker is still read")
         brief2 = "Make relay.py hold the lock in warn. Report when done.\nFiles: scripts/relay.py"
         rid2, _ = starts.add(self.t.p4, TOP, "the relay lock", brief2)
         call = starts.call_of(starts.state(self.t.p4)[rid2], self.t.p4)
-        self.assertNotIn("model", call, "left out, which is how the app's tool inherits the starter's model")
+        self.assertNotIn("model", call, "left out, which is how the app's tool inherits the parent session's model")
         self.assertEqual(call["effort"], "high")
-        self.assertIn("Model and effort: the starter's own model at high effort, since this is a build that changes "
-                      "behaviour", call["prompt"])
+        self.assertIn("Model and effort: the parent session's own model at high effort, since this is a build that "
+                      "changes behaviour", call["prompt"])
         own = brief2 + "\nModel: claude-haiku-5-5\nEffort: low"
         rid3, _ = starts.add(self.t.p4, TOP, "the relay lock, cheaply", own)
         call = starts.call_of(starts.state(self.t.p4)[rid3], self.t.p4)
-        self.assertEqual((call["model"], call["effort"]), ("claude-haiku-5-5", "low"), "the starter's choice wins")
-        self.assertIn("named by the starter", call["prompt"])
+        self.assertEqual((call["model"], call["effort"]), ("claude-haiku-5-5", "low"),
+                         "the parent session's choice wins")
+        self.assertIn("named by the parent session", call["prompt"])
         draft = {"title": "dox: the levels page", "context": "fresh", "brief": brief, "background": "b" * 90}
         call = puppeteer.call_of(draft)
-        self.assertEqual((call["model"], call["effort"]), ("claude-sonnet-5-5", "medium"), "the prompter's draft")
+        self.assertEqual((call["model"], call["effort"]), ("claude-sonnet-5-5", "medium"), "the start draft's call")
         fork = puppeteer.call_of({**draft, "context": "fork"})
-        self.assertNotIn("effort", fork, "the app gives a fork its starter's, and takes neither key")
+        self.assertNotIn("effort", fork, "the app gives a fork its parent session's, and takes neither key")
         for c in (plans.with_level({"context": "fresh", "title": t, "prompt": b})
                   for t, b in (("x", ""), ("the docs", brief), ("the lock", brief2), ("Review it", "Review the diff"))):
             self.assertIn(c["effort"], plans.EFFORTS, "a call with neither key is never handed out")
         self.assertIn("with the `model` and `effort` the levels rule gives", phi.new_top_route())
-        self.assertIn("A card carries the `model` and `effort`", plans.CARD_EACH)
+        self.assertIn("carrying the `model` and `effort` named beside its step", plans.CARD_EACH)
         self.assertIn("A child session is started with a `model` and an `effort` that fit its step", phi.LEVELS)
         old = plans.CHILD_LEVELS
         try:
@@ -903,8 +908,9 @@ class Levels(unittest.TestCase):
 
 
 class TopOrchestrates(unittest.TestCase):
-    """Rule 1: the top session keeps itself free for orchestration. Rule 2: a child started to be archived when
-    done leaves its outcome on the parent and is named for archiving. And an archived child leaves the relay."""
+    """A top-level session keeps itself free for orchestration. A child whose brief says "report when done" leaves
+    its outcome on its parent as a replaces: note and counts as archived, and the parent's line offers it to ezexe
+    with no archive call. A child archived in the app leaves the down-lines and the anchor."""
 
     C = "local_kid00003"
 
@@ -921,7 +927,7 @@ class TopOrchestrates(unittest.TestCase):
     plan = TreeOfPlans.plan
 
     def check(self, host, tool, inp, tid):
-        """A tool call's PreToolUse through recall's lookup-check entry, as every open session runs it."""
+        """A tool call's PreToolUse through the `lookup-check` hook, which hooks.json runs before every tool call."""
         root = os.path.dirname(HERE)
         body = {"session_id": CLI[host], "cwd": self.t.proj, "hook_event_name": "PreToolUse", "tool_name": tool,
                 "tool_input": inp, "tool_use_id": tid}
@@ -934,20 +940,20 @@ class TopOrchestrates(unittest.TestCase):
         p = self.t.proj
         ctx = self.plan(TOP, items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
                                    "Run the suites, commit and push the exporter"))
-        self.assertIn("top session of its tree", ctx)
+        self.assertIn("top-level session of its tree", ctx)
         self.assertIn("(a) step 1 \"Port the exporter", ctx)
         self.assertIn("`initiation` `user_asked`", ctx)
         self.assertIn("report when done", ctx)
-        self.assertIn("Staying here: 2 (checks or lands the work)", ctx)
+        self.assertIn("Staying here: 2, checks or lands the work", ctx)
         self.assertNotIn("(b)", ctx, "the landing step is no child")
-        self.assertNotIn("top session of its tree", self.plan(TOP, {"advance": True}) or "", "said once per set")
+        self.assertNotIn("top-level session of its tree", self.plan(TOP, {"advance": True}) or "", "said once per set")
         landing = {"steps": [{"addr": str(k + 1), "content": c, "status": "pending"} for k, c in
                              enumerate(("Test and commit the port", "Merge and push main", "Release 0.9"))]}
         groups, kept = plans.top_groups(landing, "")
         self.assertEqual((groups, [a for a, _ in kept]), ([], ["1", "2", "3"]))
 
     def test_handing_something_to_a_named_session_is_orchestration(self):
-        """Steps that queue, send, pass, hand or forward something to a named session stay at the top."""
+        """A step that queues, sends, passes, hands or forwards something to a named session is orchestration."""
         named = ("Queue issues #19-#24 to p4-phi fixer", "Send the findings to local_06483534-0275",
                  "Pass the audit to \"Raise memory patches\"", "Hand the leftover queue to the new owner of p4-phi",
                  "Forward the issue links to the top session", "Relay issue links and queue to top")
@@ -958,13 +964,13 @@ class TopOrchestrates(unittest.TestCase):
         self.assertEqual([st["content"] for g in groups for st in g], list(work), "work goes to children")
 
     def test_a_project_can_keep_its_work_in_the_top_session(self):
-        """#24: p4.json phi.top_orchestrates false leaves out the top rule, its split advice and its nudge."""
+        """p4.json's phi.top_orchestrates false leaves out the top-level rule, its split advice and its nudge."""
         with open(os.path.join(self.t.p4, "p4.json"), "w", encoding="utf-8") as f:
             json.dump({"phi": {"top_orchestrates": False}}, f)
         p = self.t.proj
         ctx = self.plan(TOP, items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
                                    "Run the suites, commit and push the exporter"))
-        self.assertNotIn("top session of its tree", ctx or "")
+        self.assertNotIn("top-level session of its tree", ctx or "")
         self.assertEqual(self.check(TOP, "Edit", {"file_path": f"{p}/src/export/flush.py"}, "tk1"), "",
                          "no nudge to hand the step to a child")
         self.assertNotIn("keeps itself free for orchestration",
@@ -979,9 +985,9 @@ class TopOrchestrates(unittest.TestCase):
         self.assertIn("(a) steps 1, 2 in order, as one child", ctx)
         self.assertIn("(b) step 3 \"Document", ctx)
         self.assertNotIn("(c)", ctx)
-        self.assertIn("4 (checks or lands the work)", ctx)
+        self.assertIn("4, checks or lands the work", ctx)
         kid = self.plan(A, items(f"Write the parser in {p}/src/parse.py", f"Document it in {p}/docs/layout.md now"))
-        self.assertNotIn("top session of its tree", kid or "", "a child keeps today's split rules")
+        self.assertNotIn("top-level session of its tree", kid or "", "a child keeps the split rules of a child")
 
     def test_the_nudge_fires_once_on_a_top_session_edit_and_never_on_git_status(self):
         p = self.t.proj
@@ -1025,13 +1031,13 @@ class TopOrchestrates(unittest.TestCase):
         self.assertNotIn(C, (relay._read_json(relay.anchor_path(t.p4, TOP)).get("nodes") or {}))
         line = context(t.say(TOP, "what next"))
         self.assertIn("offers the finished sessions to ezexe as one quick select", line)
-        self.assertNotIn("archive_session", line, "#49: no archive call is handed out")
+        self.assertNotIn("archive_session", line, "no archive call is handed out")
         self.assertIn(C, line.split("finished and retired")[1])
         self.assertNotIn("finished and retired", context(t.say(TOP, "and then")), "said once")
 
     def test_a_numbered_check_is_work_and_starting_a_check_is_orchestration(self):
-        """Check 6: "Check 1: nothing hidden in AppData" was kept on the top as landing work, and "Start
-        ezexe's-eye acceptance check" was advised as work."""
+        """A numbered check of anything else, such as "Check 1: nothing hidden in AppData", is work, and starting a
+        check, such as "Start ezexe's-eye acceptance check", is orchestration."""
         groups, kept = plans.top_groups({"steps": [
             {"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate((
                 "Check 1: nothing hidden in AppData", "Start ezexe's-eye acceptance check",
@@ -1049,12 +1055,13 @@ class TopOrchestrates(unittest.TestCase):
             "Check 1: nothing hidden in AppData or %TEMP%", "Verify phi's session tree matches the app",
             "Check the docs child's progress", "Commit locally", "Sync the store"))]}
         groups, kept = plans.top_groups(plan, "")
-        # the issue wrote [["1", "2"]] against 280a473; since #48 two steps that share no file each get a child
+        # two steps that share no file each get a child
         self.assertEqual([[st["addr"] for st in g] for g in groups], [["1"], ["2"]])
-        self.assertEqual([a for a, _ in kept], ["3", "4", "5"], "only landing and managing a child stay on the top")
+        self.assertEqual([a for a, _ in kept], ["3", "4", "5"],
+                         "only landing and managing a child stay with the top-level session")
 
     def test_one_function_answers_for_the_advice_and_the_nudge(self):
-        """#52: top_groups and nudge_step read the same patterns in two places, and could disagree."""
+        """top_groups and nudge_step take one answer, top_stays, so the advice and the nudge never disagree."""
         for work in ("Verify the tree", "Confirm the store holds no stray file", "Validate the manifest in src/m.json",
                      "Check 3: confirm the docs match the code", "Audit the hooks for a missing matcher",
                      "Inspect the anchor for stale nodes", "Write the sync script in src/sync.py"):
@@ -1066,7 +1073,7 @@ class TopOrchestrates(unittest.TestCase):
         self.plan(TOP, items("Verify phi's session tree matches the app", "Sync the store"))
         s = relay._session(self.t.p4, TOP)
         self.assertEqual((phi.nudge_step(self.t.p4, s) or {}).get("content"),
-                         "Verify phi's session tree matches the app", "the top is nudged to hand it off")
+                         "Verify phi's session tree matches the app", "the top-level session is nudged to hand it off")
         self.plan(TOP, {"advance": True})
         self.assertIsNone(phi.nudge_step(self.t.p4, relay._session(self.t.p4, TOP)), "syncing a store is its own")
 
@@ -1080,7 +1087,8 @@ class TopOrchestrates(unittest.TestCase):
         self.assertEqual([a for a, _ in kept], ["1", "2", "3"])
 
     def test_two_children_retired_at_once_are_both_named_for_archiving(self):
-        """Check 6: two unlocked read-modify-writes of the parent's session.json lost one child."""
+        """Children counted as archived at once are all kept, since each write of the parent's session.json takes its
+        lock."""
         import threading
         home = self.t.p4
         ids = [f"local_race{k:04d}" for k in range(8)]
@@ -1095,8 +1103,8 @@ class TopOrchestrates(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(relay._dir(home, TOP), "session.json.lock")))
 
     def test_a_retired_childs_note_keeps_the_findings_of_its_final_report(self):
-        """Check 2: the replaces: note kept only "Check 2 is done and reported", the findings being in the message
-        before it."""
+        """An archived child's replaces: note keeps the findings of its final report, even when they stand in the
+        message before its last one."""
         t, C = self.t, self.C
         t.record(C, TOP, title="check 2")
         t.say(C, HANDED_DISPOSABLE)
@@ -1118,7 +1126,7 @@ class TopOrchestrates(unittest.TestCase):
         self.assertIn(findings, notes[0])
         self.assertIn("Its findings, from its final report", notes[0])
         head = "Check 2 result: both stores FAIL"
-        long = relay.findings_of({"report": head + "\n" + "detail line. " * 400})      # #34: 5,000+ characters
+        long = relay.findings_of({"report": head + "\n" + "detail line. " * 400})      # over 5,000 characters
         self.assertIn(head, long, "the head of a long report is kept")
         self.assertTrue(long.endswith('...".'), "its tail is cut and marked")
         self.assertLess(len(long), relay.FINDINGS_CHARS + 100)
@@ -1159,7 +1167,7 @@ class TopOrchestrates(unittest.TestCase):
         t.say(B, "Write the docs")
         self.assertIn(B, plans._children(t.p4, TOP))
         os.remove(os.path.join(t.app, B + ".json"))
-        self.assertNotIn(B, plans._children(t.p4, TOP), "a record gone from the app is gone from the tree")
+        self.assertNotIn(B, plans._children(t.p4, TOP), "a record deleted from the app leaves the session tree")
 
     def test_a_session_management_step_stays_at_the_top(self):
         p = self.t.proj
@@ -1199,14 +1207,15 @@ class TopOrchestrates(unittest.TestCase):
         t.record(T2, title="the second top")
         t.say(T2, "Rework the fence exporter")
         self.plan(TOP, items("Port the fence exporter's ports table to the new writer", "Commit and push"))
-        self.assertIn(T2, relay._siblings(t.p4, relay._session(t.p4, TOP)), "two tops are siblings")
+        self.assertIn(T2, relay._siblings(t.p4, relay._session(t.p4, TOP)), "two top-level sessions are siblings")
         self.assertIn(TOP, relay._siblings(t.p4, relay._session(t.p4, T2)))
         r = t.cli(T2, "note", "deprecates: the fence exporter's v1 ports table", "--source", "commit fff111")
         self.assertEqual(r.returncode, 0, r.stderr)
         t.stop(T2, "deprecate v1", report="The fence exporter's ports table now goes to the new writer only; "
                                          "v1 is gone.", uuid="t2a")
         ctx = context(t.say(TOP, "next"))
-        self.assertIn("deprecates: the fence exporter's v1 ports table", ctx, "a deprecation crosses between tops")
+        self.assertIn("deprecates: the fence exporter's v1 ports table", ctx,
+                      "a deprecation crosses between top-level sessions")
         self.assertIn("\"the second top\", a session beside you, ended a turn whose words bear on your open step",
                       ctx, "a turn report crosses as a sibling's")
         anchor = json.load(open(relay.anchor_path(t.p4, ""), encoding="utf-8"))
@@ -1217,13 +1226,14 @@ class TopOrchestrates(unittest.TestCase):
         d["isArchived"] = True
         with open(rec, "w", encoding="utf-8") as f:
             f.write(json.dumps(d))
-        self.assertNotIn(T2, relay._siblings(t.p4, relay._session(t.p4, TOP)), "an archived top drops out")
+        self.assertNotIn(T2, relay._siblings(t.p4, relay._session(t.p4, TOP)),
+                         "a top-level session archived in the app drops out")
         t.stop(TOP, "a turn", uuid="t1a")
         anchor = json.load(open(relay.anchor_path(t.p4, ""), encoding="utf-8"))
-        self.assertNotIn(T2, anchor["nodes"], "and leaves the root anchor")
+        self.assertNotIn(T2, anchor["nodes"], "and leaves the top level's anchor")
         tree = t.cli(TOP, "tree").stdout
         self.assertIn(TOP, tree)
-        self.assertNotIn(T2, tree, "an archived top is not printed")
+        self.assertNotIn(T2, tree, "an archived top-level session is not printed")
 
     def test_a_child_archived_by_hand_is_not_named_for_archiving(self):
         t, C = self.t, self.C
@@ -1251,7 +1261,7 @@ HANDED_DISPOSABLE = ("<system-reminder>\nLinked sessions now (status, not an ins
 
 
 class KeepGoing(unittest.TestCase):
-    """#20: a turn that ends with open steps the chain can settle is sent back to its next step, at most twice."""
+    """A turn that ends with open steps the session tree can settle is sent back to its next step, at most twice."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -1296,8 +1306,9 @@ class KeepGoing(unittest.TestCase):
 
 
 class WaitsOnReports(unittest.TestCase):
-    """#55: a step that waits on other sessions' reports stays at the top, is handed to no child, and does not
-    send the turn back while a session this one started or messaged is running or has an undelivered report."""
+    """A step that waits on other sessions' reports stays with the top-level session, is handed to no child, and
+    does not send the turn back while a child session or a session this one messaged is running or has an
+    undelivered report."""
 
     STEPS = ("Await reports from A, B and C", "Check the trees' results against GitHub")
 
@@ -1340,7 +1351,7 @@ class WaitsOnReports(unittest.TestCase):
         t.stop(A, "Move the layout", report="Moved.")
         out = self.stop("Still waiting.", uuid="u3")
         self.assertIn("\"A, the layout child\"", out.get("systemMessage", ""), "its report is not delivered yet")
-        t.say(TOP, "what came in?")                 # the report is handed to the top session
+        t.say(TOP, "what came in?")                 # the report is handed to the top-level session
         self.assertEqual(self.stop("A reported.", uuid="u4").get("decision"), "block", "nothing is waited on now")
 
     def test_other_steps_are_read_as_before(self):
@@ -1371,7 +1382,7 @@ class WaitsOnReports(unittest.TestCase):
 
 
 class DoerAndObject(unittest.TestCase):
-    """#32: messaging or handing to sessions stays at the top; running checks yourself goes to a child."""
+    """Messaging or handing to sessions stays with the top-level session; running checks yourself goes to a child."""
 
     def kept(self, text):
         _, kept = plans.top_groups({"steps": [{"addr": "1", "content": text, "status": "pending"}]}, "")
@@ -1385,13 +1396,13 @@ class DoerAndObject(unittest.TestCase):
 
 
 class OwnLines(unittest.TestCase):
-    """R6: a report quoting phi's relay must not be relayed again, and queued turn reports stay few."""
+    """A report quoting p4-phi's own lines is not delivered again, and queued turn reports stay few."""
 
     def test_phi_lines_are_taken_out_of_a_report(self):
         report = ("I wrote x.txt and marked step x done.\n"
                   "phi (p4-phi): step 1.1 starts now, \"x: write nodetest/split/x.txt\". What bears on it:\n"
                   "- across: \"Live node test A\" is on 1.3, \"Ask a sub-agent to summarise nodetest/a1.txt\".\n"
-                  "B ended a turn whose words bear on your open step(s): 1.1. Check whether those steps still hold.")
+                  "B ended a turn whose words bear on your open steps: 1.1. Check whether those steps still hold.")
         got = plans.own_removed(report)
         self.assertIn("I wrote x.txt", got)
         for gone in ("phi (p4-phi)", "across:", "bear on your open step", "nodetest/a1.txt"):
@@ -1414,14 +1425,14 @@ class OwnLines(unittest.TestCase):
                          "words that are about the step still bear on it")
 
     def test_the_rule_names_are_read_from_the_rules_phi_hands_out(self):
-        """#54: a hand list of memory slugs would go stale as memories change."""
+        """The rule names come from the rules page p4-phi writes, so they follow the memories as they change."""
         home = tempfile.mkdtemp(prefix="p4-phi-rules-")
         try:
             os.makedirs(os.path.join(home, "phi"))
             with open(os.path.join(home, "phi", "rules.md"), "w", encoding="utf-8") as f:
                 f.write("# The store's rules, in full\n\n## tree-records-stay\n\nKeep them.\n\n## records\n\nOne.\n")
             self.assertEqual(plans.rule_names(home) - set(plans.BUILT_INS), {"tree-records-stay", "records"})
-            self.assertIn("act-don't-wait", plans.rule_names(), "the built-in ones are phi's own")
+            self.assertIn("act-don't-wait", plans.rule_names(), "the built-in ones are p4-phi's own")
             steps = [{"addr": "6.4", "content": "Read phi session records for this session tree check",
                       "status": "pending"}]
             recited = ("I hold tree-records-stay, so the tree records are kept.\n"

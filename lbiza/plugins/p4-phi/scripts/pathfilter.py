@@ -1,4 +1,4 @@
-"""git clean/smudge filter for the store's tracked phi/ files (PL1).
+"""git clean/smudge filter for the store's tracked phi/ files.
 
 The session tree names files by this machine's absolute paths: E:/projects/x, /e/projects/x, E:\\projects\\x. In git
 the project's root is held as {project}, and each machine's checkout writes its own root back in its place, so a tree

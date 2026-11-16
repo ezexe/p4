@@ -1,24 +1,34 @@
-"""plans.py: each session's plan as numbered steps, and the plan tree its parent's anchor holds.
+"""plans.py: each session's task list as numbered steps, the tree of task lists its parent's anchor holds, and the
+advice and checks that ride on them.
 
-ezexe's words, 2026-11-12: "i plan to do this in xyz steps ... step x becomes something you split into 'x' num
-steps ... and then for each step of x in xyz double check your parent to relay up accross or down if that step needs
-to be revised based on where there currently up to in there x of xyz".
-
-  plan     a session's plan is the list it keeps with `mcp__ccd_turn__update_plan`. A PostToolUse hook on that tool
-           applies each call (a whole new list, an advance, done and start) to <session>/plan.json: its steps with
-           their addresses, statuses and the step in progress.
-  address  a top session's steps are 1, 2, 3. A session started for a step of its parent's plan has that step's
-           address as its root, so its steps are Y.1, Y.2. The root is the address the brief names ("step 2.3"),
-           else the parent's step in progress when the child first spoke.
-  tree     the parent's anchor (relay.make_anchor) holds every child's plan and its own.
-  check    at each step boundary, when a step moves to in progress, a session is told what bears on that step:
-             up      the parent's step it owns was revised, removed or passed
-             across  a sibling's step in progress that shares its words, or touches its shard
-             down    its children's progress on their steps, when it moved since the last check
-           and the warnings kept for it. Nothing when nothing bears on it.
-  revision a session that replaces its list revises its plan. A changed or removed step is relayed on the next
-           message (relay.warn) to the children rooted at it, down, to the siblings whose step in progress shares
-           its words, across, and to the parent, up. A child whose root step is removed is told its root is gone.
+  task list  the list a session keeps with `mcp__ccd_turn__update_plan`. Each call, a whole new list, an advance, or
+             done and start, is applied to <session>/plan.json: its steps with their addresses, statuses and the step
+             in progress. The `lookup-record` hook routes each call there after it runs, and a session whose hooks
+             lack that route has its calls read back from its transcript at its next message.
+  address    a top-level session's steps are 1, 2, 3. A child started for a step of its parent's task list has that
+             step's address as its parent step, so its steps are Y.1, Y.2. The parent step is the address the brief
+             names, such as "step 2.3", else the parent's open step whose words the brief matches best, else the
+             parent's step in progress.
+  tree       the parent's anchor, made by relay.make_anchor, holds every child's task list and its own.
+  check      at each step boundary, when a step moves to in progress, a session is told what bears on that step:
+               up      its parent step was revised, removed or passed
+               across  a sibling's step in progress shares its words, or touches its owned paths
+               down    its children's progress on their steps, when it moved since the last check
+               task    a background task something moved under, or a step marked done over a flagged open task
+             and the warnings kept for it. Nothing when nothing bears on it.
+  revision   a session that replaces its list revises its task list. A changed or removed step is told on the next
+             message, through relay.warn, to the children it is the parent step of, down, to the siblings whose step
+             in progress shares its words, across, and to the parent, up. A child whose parent step is removed is
+             told so.
+  advice     the open steps that can each run on their own are named for children of their own; a top-level session
+             hands each work step out, a step that only reads or only runs a command to a background subagent, and
+             keeps orchestration and landing; each start names the model and effort its kind of work gets.
+  subagents  a subagent the Agent tool starts is a task of the step in progress, told what changed beside it.
+  turns      at Stop, a turn's report is matched against the open steps of the session's children and siblings and
+             delivered to those it bears on, and a turn that ends with open steps the session tree can settle is
+             sent back to its next step.
+  tasks      a background task is recorded under the step that started it and checked at each step boundary against
+             what moved since it started.
 """
 
 import hashlib
@@ -60,9 +70,9 @@ def addr(root, i):
 
 
 def root_of(home, s):
-    """A session's root step: the address its brief names, else the parent's open step its brief's words match
-    best, else the parent's step in progress now; '' for a top session or a parent with no plan. Siblings started
-    in one step for different steps of the plan each get their own root."""
+    """A session's parent step: the address its brief names, else the parent's open step its brief's words match
+    best, else the parent's step in progress now; '' for a top-level session or a parent with no task list. Siblings
+    started in one step for different steps of the task list each get their own."""
     if s.get("rootStep") is not None:
         return str(s.get("rootStep") or "")
     parent = relay._parent(s)
@@ -97,7 +107,8 @@ def step_of(plan, a):
 
 
 def apply(plan, inp, root):
-    """Apply one update_plan call -> (plan, the address that moved to in progress or '', the revision or None)."""
+    """Apply one update_plan call. Returns the task list, the address that moved to in progress or '', and the
+    revision or None."""
     steps = [dict(x) for x in plan.get("steps") or []]
     before = {x["addr"]: x.get("content", "") for x in steps}
     current = plan.get("current") or ""
@@ -152,7 +163,7 @@ def apply(plan, inp, root):
 
 
 def summary(home, sid):
-    """What the anchor keeps of a session's plan."""
+    """What the anchor keeps of a session's task list."""
     p = load(home, sid)
     if not p.get("steps"):
         return {}
@@ -165,7 +176,8 @@ def summary(home, sid):
 
 
 def record(home, s, inp, transcript=""):
-    """The PostToolUse hook's work for one update_plan call -> the additionalContext text, '' for none."""
+    """The work for one update_plan call, at its PostToolUse or read back from the transcript -> the
+    additionalContext text, '' for none."""
     sid = s["sessionId"]
     old = load(home, sid)
     root = old.get("root") if old.get("steps") else root_of(home, s)
@@ -179,11 +191,11 @@ def record(home, s, inp, transcript=""):
     plan, started, revision = apply(old, inp, root or "")
     placed = set()
     news = {st.get("content", "") for st in plan.get("steps") or []}
-    for st in plan.get("steps") or []:            # a task stays with its step's words, not its number (P6)
+    for st in plan.get("steps") or []:            # a task stays with its step's words, not its number
         if st.get("content", "") in keep:
             st["tasks"] = keep[st["content"]]
             placed.add(st["content"])
-    for st in plan.get("steps") or []:            # SA1: a step reworded in place keeps its tasks by address
+    for st in plan.get("steps") or []:            # a step reworded in place keeps its tasks by address
         was = at.get(st.get("addr"))
         if was and was not in placed and was not in news and st.get("content", "") not in olds:
             st["tasks"] = list(st.get("tasks") or []) + keep[was]
@@ -198,7 +210,7 @@ def record(home, s, inp, transcript=""):
     if disk and disk.get("rootStep") != s["rootStep"]:
         disk["rootStep"] = s["rootStep"]
         relay._write_json(spath, disk)
-    relay.make_anchor(home, parent, _now())       # the parent's anchor, or the root's for a top session
+    relay.make_anchor(home, parent, _now())       # the parent's anchor, or the top level's for a top-level session
     relay.make_anchor(home, sid, _now())
     if revision:
         relay_revision(home, s, plan, revision)
@@ -219,7 +231,7 @@ def _children(home, sid):
 
 
 def relay_revision(home, s, plan, rev):
-    """A revised plan, told on the next message to whoever owns or uses what changed."""
+    """A revised task list, told on the next message to whoever serves or uses what changed."""
     sid, title = s["sessionId"], relay._title(s)
     stamp = hashlib.sha1(json.dumps(rev, sort_keys=True).encode()).hexdigest()[:10]
     new = {x["addr"]: x["content"] for x in plan.get("steps") or []}
@@ -227,18 +239,18 @@ def relay_revision(home, s, plan, rev):
         r = str(ks.get("rootStep") or "")
         if r in (rev.get("moved") or {}):
             relay.warn(home, kid, f"plan:{sid}:{stamp}:moved",
-                       f"your root step {r} in the plan of \"{title}\" is now numbered {rev['moved'][r]}; the step "
-                       f"itself is unchanged.")
+                       f"your root step {r} in the task list of \"{title}\" is now numbered {rev['moved'][r]}; the "
+                       f"step itself is unchanged.")
         if r in rev["removed"]:
             relay.warn(home, kid, f"plan:{sid}:{stamp}:gone",
-                       f"your root step {r}, \"{relay._short(rev['was'][r], 160)}\", was removed from the plan of "
-                       f"\"{title}\", the session that started you. Stop before the next tool and message {sid}: "
+                       f"your root step {r}, \"{relay._short(rev['was'][r], 160)}\", was removed from the task list "
+                       f"of \"{title}\", your parent session. Stop before the next tool and message {sid}: "
                        f"your work may no longer be wanted.")
         elif r in rev["changed"]:
             was, now_ = relay._short(rev["was"][r], 160), relay._short(new[r], 160)
             relay.warn(home, kid, f"plan:{sid}:{stamp}:{r}",
-                       f"your root step {r} in the plan of \"{title}\" was revised from \"{was}\" to \"{now_}\". "
-                       f"Check whether your steps still serve it.")
+                       f"your root step {r} in the task list of \"{title}\" was revised from \"{was}\" to "
+                       f"\"{now_}\". Check whether your steps still serve it.")
     touched = rev["changed"] + rev["removed"]
     for oid, os_ in _siblings(home, s).items() if touched else []:
         cur = step_of(load(home, oid), load(home, oid).get("current") or "")
@@ -247,7 +259,7 @@ def relay_revision(home, s, plan, rev):
         hits = [a for a in touched if bears(rev["was"][a], cur.get("content")) or bears(new.get(a, ""), cur.get("content"))]
         if hits:
             relay.warn(home, oid, f"plan:{sid}:{stamp}:across",
-                       f"\"{title}\" revised step(s) {', '.join(hits)} of its plan, which share words with your step "
+                       f"\"{title}\" revised its task list at {', '.join(hits)}, which share words with your step "
                        f"{cur['addr']}, \"{relay._short(cur.get('content'), 120)}\": "
                        + "; ".join(f"{a}: \"{relay._short(rev['was'][a], 100)}\" -> "
                                    f"\"{relay._short(new.get(a, 'removed'), 100)}\"" for a in hits) + ".")
@@ -255,7 +267,7 @@ def relay_revision(home, s, plan, rev):
     if parent and touched:
         relay.warn(home, parent, f"plan:{sid}:{stamp}:up",
                    f"\"{title}\", started for " + (f"your step {plan['root']}" if plan.get("root") else
-                                                     "a step you have no plan for") + ", revised its plan: "
+                                                     "a step not in your task list") + ", revised its plan: "
                    + ", ".join(f"{a} {'removed' if a in rev['removed'] else 'changed'}" for a in touched) + ".")
 
 
@@ -275,12 +287,12 @@ def boundary(home, s, plan, started, transcript=""):
             for t in flagged_open(plan, st["addr"]):
                 if not t.get("doneSaid"):
                     t["doneSaid"] = True
-                    lines.append(f"step {st['addr']} was marked done while task {t['id']} under it is flagged and "
-                                 f"still open; say so in that step's report, or stop the task.")
+                    lines.append(f"step {st['addr']} was marked done while background task {t['id']} under it is "
+                                 f"flagged and still open; say so in that step's report, or stop the task.")
     if moved or any(t.get("doneSaid") for _, t in _tasks(plan)):
         relay._write_json(_path(home, sid), plan)
     path = os.path.join(relay._dir(home, sid), "session.json")
-    with relay.locked(path) as lk:                # #53: emptied under the lock relay.warn holds
+    with relay.locked(path) as lk:                # emptied under the lock relay.warn holds
         return _boundary(home, s, plan, started, text, lines, path, lk.held)
 
 
@@ -297,13 +309,14 @@ def _boundary(home, s, plan, started, text, lines, path, held):
         if ps is None and pp.get("steps"):
             lines.append(f"up: your root step {root} is no longer in the parent's plan.")
         elif ps is not None:
-            relayed = any(f"your root step {root} " in x for x in lines)   # P1: the relayed revision said it
+            relayed = any(f"your root step {root} " in x for x in lines)   # a warning about the revision said it
             if plan.get("rootText") and ps.get("content") != plan.get("rootText") and not relayed:
                 lines.append(f"up: the parent revised your root step {root} to \"{relay._short(ps.get('content'), 160)}\" "
                              f"since you started on it.")
             if ps.get("status") == "completed" or (pp.get("current") and pp.get("current") != root
                                                    and _after(pp.get("current"), root)):
-                lines.append(f"up: the parent has moved past your root step {root}; it is on {pp.get('current') or 'none'}.")
+                lines.append(f"up: the parent has moved past your root step {root}; "
+                             f"it is on {pp.get('current') or 'none'}.")
     shard = relay.shard_of(disk or s)
     for oid, os_ in sorted(_siblings(home, s).items()):
         op = load(home, oid)
@@ -323,7 +336,7 @@ def _boundary(home, s, plan, started, text, lines, path, held):
         done = sum(1 for x in kp["steps"] if x.get("status") == "completed")
         lines.append(f"down: \"{relay._title(ks)}\" has {done} of {len(kp['steps'])} steps done"
                      + (f", now on {kp['current']}" if kp.get("current") else "") + ".")
-    told = disk.setdefault("upTold", [])         # P1: an up line is said once, not at every boundary after
+    told = disk.setdefault("upTold", [])         # an up line is said once, not at every boundary after
     kept = []
     for x in lines:
         if x in kept:
@@ -343,61 +356,62 @@ def _boundary(home, s, plan, started, text, lines, path, held):
 
 # --- the split advice ----------------------------------------------------------------------------------------------
 #
-# At a plan's first whole list and at each revision, the open steps are judged: a step that names no path another
-# step names, has no wording that leans on another step and is more than a quick thing can run as its own child
-# session. Two or more such steps are named in one line; the rest stay here as sub-steps.
+# At a task list's first whole list and at each revision, judge() reads the open steps: a step that names a path no
+# other step names and that none of judge's reasons keeps here can run as its own child session. Two or more such
+# steps are named in one line; the rest stay here as sub-steps.
 
 DEPENDS = re.compile(r"\b(after|then|once|using|uses|based on|depends? on|following|built on|with the results?|"
                      r"results? of|output of|from (?:the )?(?:step|previous|last)|step \d+)\b", re.I)
 WAITS = re.compile(r"\b(wait(?:s|ing)?|until|confirm\w*|verif\w*|can go|when\b[^.]*\blands?|tell|notify|relay\w*|"
-                   r"send|ask|hand (?:off|over)|report back)\b", re.I)   # SP2: a step that waits on or relays work
+                   r"send|ask|hand (?:off|over)|report back)\b", re.I)   # a step that waits on or passes on work
 QUICK_WORDS = 4               # a step of fewer content words is a quick thing, done here
 LANDS = re.compile(r"^\W*(?:run\b[^,.;]*\b(?:tests?|suites?|checks?)|report|wrap)\b"
                    r"|^\W*(?:tests?|verify|check|review)\b(?!\s*#?\d)(?=[^.;:]*\b(?:own (?:work|changes?|commits?|diff|steps?)|landed|merged|committed|"
                    r"pushed|work|changes?|diff|results?|commits?|suites?|tests?|build|outcome|fix(?:es)?|it|them)\b)"
                    r"|\b(?:commit|merge|push|ship|release|land|fast-forward)\b", re.I)
-# checks or lands the session's own work. A check of anything else is work: "Check 1: nothing hidden in AppData" was
-# kept on a top session as landing work, though it was one of the checks its children were for
+# checks or lands the session's own work. A check of anything else is work, such as "Check 1: nothing hidden in
+# AppData", one of the checks a top-level session's children are for
 ORCHESTRATES = re.compile(r"^\W*(?:start|kick\s*off|launch)\s+(?!writing|adding|implementing|making)"
                           r"(?:[\w'’-]+\s+){0,5}?(?:checks?|tests?|sessions?)\b"
                           r"|^\W*(?:run|re-?run)\s+(?:[\w'’-]+\s+){0,5}?(?:sessions?|acceptance\s+(?:checks?|tests?|runs?))\b", re.I)
-# starts a check, test or session, which is orchestration: "Start ezexe's-eye acceptance check" was advised as work.
-# #32: the doer and the object decide. Running or re-running checks or tests oneself is work for a child: "Re-run
-# failed checks 1, 2, 6" stayed at the top. Starting a check, test or session, and running a session or the
-# acceptance check, which an acceptance session does, stay orchestration.
+# starts a check, test or session, which is orchestration, such as "Start ezexe's-eye acceptance check". The doer
+# and the object decide: running or re-running checks or tests oneself is work for a child, such as "Re-run failed
+# checks 1, 2, 6", while starting a check, test or session, and running a session or the acceptance check, which an
+# acceptance session does, stay orchestration.
 MANAGES = re.compile(r"\b(?:un)?(?:archiv|relay|messag|start|stop|review|check|brief|spawn|ask|tell|nudg|queu|send|"
                      r"sent|pass|hand|forward)\w*\b"
                      r"[^.;]*?\b(?:child(?:ren)?|(?:sub-?)?sessions?)\b(?!\s+(?:tree|page|record|files?|json|logs?|"
                      r"state|ids?|store))"   # manages a child session: orchestration, not "check phi session tree"
                      # queues, sends, passes, hands or forwards something to a session named by its id, its quoted
-                     # title or its role: "Queue issues #19-#24 to p4-phi fixer" was advised as work
+                     # title or its role, such as "Queue issues #19-#24 to p4-phi fixer"
                      r"|\b(?:queu|send|sent|pass|hand|forward)\w*\b[^.;]*?\b(?:to|for)\s+(?:the\s+)?"
                      r"(?:local_[\w-]+|[\"“'][^\"”']+[\"”']|(?:[\w'’-]+\s+){0,3}?(?:top|parent|orchestrator|fixer|"
                      r"tester|starter|builder|sibling|checker|owner of)(?:s|'s|’s)?\b)", re.I)
-# #32: "Hand fixes to sibling's fixers, stop duplicates" is messaging sessions, so it stays at the top
-# tracks what another does: a ledger line, a step whose doer is another session, a fixer, a top session, or ezexe,
-# or that ezexe decides (#31: "Ledger: p4-phi fixer pushes #25" and "ezexe updates the Mac's plugins" were work)
+# "Hand fixes to sibling's fixers, stop duplicates" is messaging sessions, so it stays with the top-level session
+# tracks what another does: a ledger line, a step whose doer is another session, a fixer, a top-level session or
+# ezexe, or that ezexe decides, such as "Ledger: p4-phi fixer pushes #25" or "ezexe updates the Mac's plugins"
 TRACKS = re.compile(r"^\W*(?:ledger|track(?:s|ing)?)\b"
                     r"|^\W*(?:[\w'-]+\s+){0,3}?(?:fixer|top session|other session|another session|parent|"
                     r"orchestrator|builder|tester|ezexe)\s+(?:will\s+|to\s+)?(?:\w+s|decides?|approves?)\b"
                     r"|\bezexe\s+(?:decides|approves|chooses|signs off|rules)\b|\bfor ezexe to\b", re.I)
-# compiles, reports or tabulates the other steps' results: "Final six-row pass/fail table" was handed to a child
+# compiles, reports or tabulates the other steps' results, such as "Final six-row pass/fail table"
 TABULATES = re.compile(r"^\W*(?:final\s+)?(?:[\w/-]+\s+){0,3}?(?:pass/fail\s+)?(?:table|tally|summary|scorecard)\b"
                        r"|\b(?:compil|tabulat|collat|summari[sz]|tall(?:y|ies))\w*\b[^.;]*\b(?:results?|outcomes?|"
                        r"findings|steps?|checks?)\b", re.I)
 
 
-# #58: a start the app refuses is shown as a card in the session that asked, so the app's parent and phi's agree
-CARD_EACH = ("This turn was started by another session, so the app refuses `user_asked`: show each as a proposal "
-             "card, `mcp__ccd_session__start_session` with `initiation` `own_initiative`, which ezexe presses in "
-             "this session, so the app's parent and phi's agree. Only where the card is refused too, write it as a "
-             "start request, `phi.py request \"<title>\" --brief \"<the whole brief>\"`, which the next turn "
-             "ezexe begins in this session starts as this session's child. A card carries the `model` and `effort` "
-             "the levels rule gives its step, as a start does")
+# a start the app refuses in a turn ezexe did not begin is a suggested task card in the session that asked
+CARD_EACH = ("This turn was started by another session, so the app refuses `user_asked`: show each as a suggested "
+             "task card, `mcp__ccd_session__start_session` with `initiation` `own_initiative`, which ezexe presses in "
+             "this session, so the app's parent and p4-phi's agree. Only where the card is refused too, write it as a "
+             "start request, `phi.py request \"<title>\" --brief \"<the whole brief>\"`, which the next turn ezexe "
+             "begins in this session starts as this session's child. Each card goes out carrying the `model` and "
+             "`effort` named beside its step, as a start does")
 
 
 def judge(plan, cwd):
-    """The open steps -> (those that can each run on their own, [(address, why it stays)])."""
+    """Judges the open steps. Returns those that can each run on their own, and the address and the reason of each
+    step that stays."""
     steps = [st for st in plan.get("steps") or [] if st.get("status") != "completed"]
     paths = {st["addr"]: relay.paths_in(st.get("content"), cwd) for st in steps}
     free, kept = [], []
@@ -408,9 +422,9 @@ def judge(plan, cwd):
                   if any(relay.overlap(p, q) for q in paths[o["addr"]])]
         wait = WAITS.search(text)
         if dep:
-            kept.append((a, f"leans on another step (\"{dep.group(0)}\")"))
+            kept.append((a, f"leans on another step, \"{dep.group(0)}\""))
         elif wait:
-            kept.append((a, f"waits on or relays other work (\"{wait.group(0)}\")"))
+            kept.append((a, f"waits on or passes on other work, \"{wait.group(0)}\""))
         elif LANDS.search(text):
             kept.append((a, "checks or lands the other steps' work"))
         elif ORCHESTRATES.search(text):
@@ -430,8 +444,8 @@ def judge(plan, cwd):
         else:
             free.append(st)
     waits = sum(1 for _, why in kept if why.startswith("waits on"))
-    if steps and waits * 2 >= len(steps):          # SP2: a plan of waits and relays is serial as a whole
-        kept += [(st["addr"], "the plan is mostly waits and relays, so serial") for st in free]
+    if steps and waits * 2 >= len(steps):          # a task list of waits and messages is serial as a whole
+        kept += [(st["addr"], "the task list is mostly waits and messages, so serial") for st in free]
         free = []
     return free, kept
 
@@ -446,49 +460,52 @@ def split_advice(home, s, plan, owner_turn, cap):
     told = [x for x in disk.get("splitAdvised") or [] if isinstance(x, str)]
     new = [st for st in free if st.get("content", "") not in told]
     if not new:
-        return ""                                 # SP1: a step advised once is never advised again
+        return ""                                 # a step advised once is never advised again
     disk["splitAdvised"] = s["splitAdvised"] = told + [st.get("content", "") for st in new]
     relay._write_json(path, disk)
     free = new
     named = "; ".join(f"{st['addr']} \"{relay._short(st.get('content'), 90)}\"" for st in free)
-    judged = ("Judged by the paths each step names, and a step naming none stays; wording that leans on another "
-              "step (after, then, once, using, the result of, step N) or waits on or relays work; and size: fewer "
-              "than four content words is a quick thing.")
+    judged = ("Judged by the paths each step names and by its words: a step stays here when it names no path, shares "
+              "a path with another step, leans on or waits on other work, passes work on, checks or lands work, "
+              "starts a check or session, manages a child session, compiles results, tracks what another does or "
+              "ezexe decides, or has fewer than four content words.")
     if cap:
         return (f"phi (p4-phi): steps {named} could each run on their own, but {cap[0].lower() + cap[1:]} "
                 f"Every step stays here as a sub-step. {judged}")
     route = ("Start each now with `mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, "
              "`use_worktree: false`, on this session's branch" if owner_turn else
              CARD_EACH)
-    stay = ("; ".join(f"{a} ({why})" for a, why in kept)) or "none"
-    each = "; ".join(f"{st['addr']} with {level_words(st.get('content'))}" for st in free)     # #61
+    stay = ("; ".join(f"{a}, {why}" for a, why in kept)) or "none"
+    each = "; ".join(f"{st['addr']} with {level_words(st.get('content'))}" for st in free)
     return (f"phi (p4-phi): steps {named} can each run on their own: no path another step names, nothing leaning "
             f"on another step, more than a quick thing. {route}; one child per step, its brief that step's slice: "
             f"the step's words, its paths and what it must leave done. Its model and effort: {each}. {LEVEL_HOW} "
             f"Staying here as sub-steps: {stay}. {judged}")
 
 
-# --- the top session orchestrates ----------------------------------------------------------------------------------
+# --- the top-level session orchestrates ----------------------------------------------------------------------------
 #
-# A session with no parent keeps itself free for orchestration: planning, relaying between sessions, decisions with
-# ezexe, and landing work. Every work step of its plan goes to a fresh child, not only the independent ones; a run
-# of serial work steps (one leaning on the step before it, or sharing a path with it) is one child that does them in
-# order. A step that checks or lands work (test-and-commit, merge, push, release), waits on and relays work, or
-# manages a child session (archives, relays to, messages, starts, reviews or checks one) stays.
+# A session with no parent keeps itself free for orchestration: planning, messaging and managing sessions, decisions
+# with ezexe, and landing work. Each work step of its task list goes to a fresh child, not only the independent ones,
+# and a serial run, work steps that lean on the step before them or share a path with it, goes to one child that does
+# them in order. With delegation on, a step that only reads or only runs a command goes to a background subagent
+# instead. A step that checks or lands work, such as a test-and-commit, merge, push, release or sync, waits on or
+# passes on work, starts a check or session, manages a child session, compiles results or tracks what another does
+# stays; top_stays gives the reason for each.
 
-# #52: a step that begins with one of these is read-only work of its own, a child's: "Verify phi's session tree
-# matches the app" stayed at the top on WAITS, which matches `verif` and `confirm` anywhere and was tried before the
-# step was read as work. It stays only when it names a child or a sub-session, or checks or lands the work.
+# a step that begins with one of these is read-only work of its own, a child's, such as "Verify phi's session tree
+# matches the app", though WAITS matches `verif` and `confirm` anywhere. It stays only when it names a child or a
+# sub-session, or checks or lands the work.
 CHECK_WORK = re.compile(r"^\W*(?:re-?)?(?:check|verify|validate|audit|inspect|confirm)\w*\b", re.I)
 CHILD_WORD = re.compile(r"\b(?:child(?:ren)?(?:'s|’s)?|sub-?sessions?)\b", re.I)
-# syncing a store is landing work: the top session is the one that pushes and syncs each store
+# syncing a store is landing work: the top-level session is the one that pushes and syncs each store
 SYNCS = re.compile(r"^\W*(?:re-?)?sync(?:s|ed|ing|hronis\w+|hroniz\w+)?\b"
                    r"|\bsync(?:s|ed|ing)?\s+(?:[\w'’-]+\s+){0,3}?stores?\b|\bp4\.py\s+sync\b", re.I)
 
 
-# #55: a step whose doer is another session, or that waits on, awaits, collects or checks other sessions' or trees'
-# reports and results. "Await reports from Puppeteer, file organization, acceptance" was read as work and advised
-# to a child, which cannot wait on reports addressed to its parent.
+# a step whose doer is another session, or that waits on, awaits, collects or checks other sessions' or trees'
+# reports and results, such as "Await reports from Puppeteer, file organization, acceptance". It stays, since a
+# child cannot wait on reports addressed to its parent.
 AWAITS_TOP = re.compile(r"\b(?:a?wait\w*|until|hold\w*\s+for)\b[^.;]*\b(?:reports?|sessions?|trees?|tops?|results?|"
                         r"answers?|repl(?:y|ies)|word)\b", re.I)
 OTHERS = re.compile(r"\b(?:reports?|answers?|repl(?:y|ies)|word)\s+from\b"
@@ -509,10 +526,10 @@ def awaits_sessions(text):
 
 
 def top_stays(text):
-    """Why a top session keeps a step itself, or '' for a work step that goes to a child. The one answer for
+    """Why a top-level session keeps a step itself, or '' for a work step that goes to a child. The one answer for
     top_groups and for phi.nudge_step, so the advice and the nudge never disagree."""
     text = str(text or "")
-    if awaits_sessions(text):                      # #55 wins over #52's check rule for other sessions' results
+    if awaits_sessions(text):                      # waiting on other sessions' results wins over the check rule
         return AWAITS_WHY
     if LANDS.search(text) or SYNCS.search(text):
         return "checks or lands the work"
@@ -527,12 +544,13 @@ def top_stays(text):
         return "tracks what another session or ezexe does or decides"
     wait = WAITS.search(text)
     if wait and not checks:
-        return f"waits on or relays work (\"{wait.group(0)}\")"
+        return f"waits on or passes on work, \"{wait.group(0)}\""
     return ""
 
 
 def top_groups(plan, cwd):
-    """The open steps of a top session's plan -> ([[work steps one child does in order]], [(address, why it stays)])."""
+    """The open steps of a top-level session's task list, split into the serial runs of work steps, each run one
+    child's to do in order, and the address and the reason of each step that stays."""
     steps = [st for st in plan.get("steps") or [] if st.get("status") != "completed"]
     groups, kept, run = [], [], []
     for st in steps:
@@ -557,11 +575,11 @@ def top_groups(plan, cwd):
     return groups, kept
 
 
-# --- the level a step runs at (#57) ---------------------------------------------------------------------------------
+# --- delegation: where a step runs --------------------------------------------------------------------------------
 #
 # A step that only reads or searches is a background subagent's, `p4-phi:sweep`; one that only runs a command is
-# `p4-phi:runner`'s; the rest is a child session's. sub-agents.md: "Background subagents run concurrently while you
-# continue working", and a plugin's agent is named `<plugin>:<name>` (plugins/components.md, "Agents").
+# `p4-phi:runner`'s; the rest is a child session's. sub-agents.md says "Background subagents run concurrently while
+# you continue working", and plugins/components.md, under "Agents", names a plugin's agent `<plugin>:<name>`.
 
 READS = re.compile(r"^\W*(?:find|search|look\s+(?:for|up|at|into|through)|read|grep|list|locate|survey|scan|map|"
                    r"inventory|explore|trace|identify|count|collect|gather|sweep)\b", re.I)
@@ -571,7 +589,7 @@ WRITES = re.compile(r"\b(?:fix\w*|writ\w*|add\w*|chang\w*|edit\w*|implement\w*|u
                     r"push\w*|merg\w*|land\w*|releas\w*|ship\w*|install\w*)\b", re.I)
 LEVELS = True                 # phi.project_conf sets it from p4.json phi.levels
 LEVEL_WHAT = {"sweep": "only reads or searches", "runner": "only runs a command"}
-LAUNCHED = re.compile(r"\s*Command running in background with ID", re.I)   # a shell call's result when it was moved back
+LAUNCHED = re.compile(r"\s*Command running in background with ID", re.I)   # a shell call's result in the background
 
 
 def level_of(text):
@@ -586,14 +604,13 @@ def level_of(text):
     return "session"
 
 
-# --- the model and effort a child session is started with (#61) ---------------------------------------------------
+# --- the model and effort a child session is started with ---------------------------------------------------------
 #
-# The three background agents carry a model and an effort in their files. A child session got neither: every start
-# call phi handed out named no `model` and no `effort`, so a child that wrote static pages ran on its parent's model
-# at its parent's effort. `mcp__ccd_session__start_session` takes `model`, the same family or cheaper than the
-# caller's, and `effort`, at or below the caller's, both for a `fresh` start only (its schema, read 2026-11-16).
-# The kind of a step decides: static or mechanical work on a cheaper model at low or medium effort, a build that
-# changes behaviour on the starter's own model at high effort, a design or review step at high or above.
+# The three background subagents carry a model and an effort in their files, and every start call p4-phi hands out
+# carries an `effort`, and a `model` unless it keeps the parent session's. `mcp__ccd_session__start_session` takes
+# `model`, the same family or cheaper than the caller's, and `effort`, at or below the caller's, both for a `fresh`
+# start only, as its schema says. The kind of a step picks its entry of CHILD_LEVELS, which p4.json's
+# phi.child_levels can set; LEVEL_HOW says the rule to the session that makes the call.
 
 CHILD_LEVELS = {"static": {"model": "claude-sonnet-5-5", "effort": "medium"},
                 "build": {"model": "inherit", "effort": "high"},
@@ -645,8 +662,8 @@ def child_kind(text):
 
 
 def said_level(brief):
-    """The `model` and `effort` a brief names itself, on lines `Model: <id>` and `Effort: <level>`: the starter's
-    own choice, which wins over the rule."""
+    """The `model` and `effort` a brief names itself, on lines `Model: <id>` and `Effort: <level>`: the parent
+    session's own choice, which wins over its kind's."""
     out = {}
     for key, value in SAID_LEVEL.findall(str(brief or "")):
         key = key.lower()
@@ -659,8 +676,8 @@ def said_level(brief):
 
 
 def child_level(text, brief=""):
-    """{"model", "effort", "kind"} a child session is started with for a step or a brief: the rule's choice for its
-    kind, with what the brief itself names laid over it. `model` is 'inherit' for the starter's own."""
+    """{"model", "effort", "kind"} a child session is started with for a step or a brief: its kind's entry of
+    CHILD_LEVELS, with what the brief itself names laid over it. `model` is 'inherit' for the parent session's own."""
     kind = child_kind(text if str(text or "").strip() else brief)
     out = {**CHILD_LEVELS.get(kind, CHILD_LEVELS_DEFAULT[kind]), "kind": kind}
     said = said_level(brief or text)
@@ -670,8 +687,8 @@ def child_level(text, brief=""):
 
 
 def level_keys(level):
-    """The `model` and `effort` keys of a start call: `model` is left out to inherit the starter's, which is how
-    the app's tool takes it, so a call always carries `effort` and never neither."""
+    """The `model` and `effort` keys of a start call: `model` is left out to inherit the parent session's, which is
+    how the app's tool takes it, so a call always carries `effort` and never neither."""
     out = {"effort": level["effort"]}
     if str(level.get("model") or "inherit").lower() != "inherit":
         out["model"] = level["model"]
@@ -680,14 +697,15 @@ def level_keys(level):
 
 def level_line(level):
     """The one line a brief says its model and effort in, so the choice is visible to the child and its reader."""
-    model = "the starter's own model" if str(level.get("model") or "inherit").lower() == "inherit" else level["model"]
-    why = "named by the starter" if level.get("said") else f"since this is {CHILD_KINDS[level['kind']]}"
-    return f"Model and effort: {model} at {level['effort']} effort, {why} (p4-phi's levels rule)."
+    model = ("the parent session's own model" if str(level.get("model") or "inherit").lower() == "inherit"
+             else level["model"])
+    why = "named by the parent session" if level.get("said") else f"since this is {CHILD_KINDS[level['kind']]}"
+    return f"Model and effort: {model} at {level['effort']} effort, {why}."
 
 
 def with_level(call, text=""):
-    """A start call with the `model` and `effort` the rule gives its brief, and the brief saying them in one line.
-    A fork takes neither: the app gives a fork its starter's."""
+    """A start call with the `model` and `effort` its brief's kind of work gets, and the brief saying them in one
+    line. A fork takes neither: the app gives a fork its parent session's."""
     if call.get("context") == "fork":
         return call
     brief = str(call.get("prompt") or "")
@@ -717,21 +735,20 @@ def level_words(text):
     return f"{model}, `effort` `{level['effort']}`"
 
 
-LEVEL_CARD = ("It carries the `model` and `effort` the levels rule gives its kind of work, as a start does: static or "
-              "mechanical work on a cheaper model at low or medium effort, a build that changes behaviour on this "
-              "session's own model at high effort, a design or review step at high or above; its brief says them "
-              "in one line, `Model and effort: <model> at <effort> effort`.")
-LEVEL_HOW = ("Each call carries the `model` and `effort` named beside its steps, by the levels rule: static or "
-             "mechanical work on a cheaper model at low or medium effort, a build that changes behaviour on this "
-             "session's own model at high effort, a design or review step at high or above. An effort above this "
+LEVEL_CARD = ("It carries the `model` and `effort` a start of its kind of work carries, said in one line of its brief, "
+              "`Model and effort: <model> at <effort> effort`.")
+LEVEL_HOW = ("Each call carries the `model` and `effort` named beside its steps, which the kind of work decides: by "
+             "default static or mechanical work runs on a cheaper model at medium effort, and a build that changes "
+             "behaviour or a design or review step on this session's own model at high effort. An effort above this "
              "session's own is not accepted, so pass this session's own then. Each brief says them in one line, "
              "`Model and effort: <model> at <effort> effort`; to choose otherwise, pass another `model` or `effort` "
              "and say so in that line.")
 
 
 def top_advice(home, s, plan, owner_turn, cap, levels=None):
-    """The top session's line: each work step, or run of serial ones, to one fresh child; said once per set. ''
-    when no work step is new."""
+    """The top-level session's line: each work step, or serial run, to one fresh child, and with delegation on each
+    step that only reads or only runs a command to a background subagent; said once per set. '' when no work step
+    is new."""
     groups, kept = top_groups(plan, s.get("cwd") or "")
     path = os.path.join(relay._dir(home, s["sessionId"]), "session.json")
     disk = relay._read_json(path)
@@ -752,7 +769,7 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
         if level(g) != "session":
             return (f"step {g[0]['addr']} \"{relay._short(g[0].get('content'), 90)}\", which {LEVEL_WHAT[level(g)]}: "
                     f"a background subagent, `p4-phi:{level(g)}`, not a session")
-        kinds = [child_kind(st.get("content")) for st in g]      # #61: a run takes the level of its hardest step
+        kinds = [child_kind(st.get("content")) for st in g]      # a run takes the model and effort of its hardest step
         hardest = next(st for k in ("design", "build", "static") for st, kd in zip(g, kinds) if kd == k)
         how = level_words(hardest.get("content"))
         if len(g) == 1:
@@ -760,13 +777,12 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
         return (f"steps {', '.join(st['addr'] for st in g)} in order, as one child: "
                 + ", ".join(f"\"{relay._short(st.get('content'), 70)}\"" for st in g) + f", with {how}")
     named = "; ".join(f"({chr(97 + k)}) {child(g)}" for k, g in enumerate(new[:26]))
-    head = ("phi (p4-phi): this is the top session of its tree, so it keeps itself free for orchestration: "
-            "planning, relaying between sessions, decisions with ezexe, and landing the work, meaning merge and push.")
-    stay = ("; ".join(f"{a} ({why})" for a, why in kept)) or "none"
+    head = ("phi (p4-phi): this is the top-level session of its tree, so it keeps itself free for orchestration: "
+            "planning, messaging and managing sessions, decisions with ezexe, and landing the work, meaning merge "
+            "and push.")
+    stay = ("; ".join(f"{a}, {why}" for a, why in kept)) or "none"
     subs = [g for g in new[:26] if level(g) != "session"]
-    agents = (" A step named for a subagent starts with the Agent tool, `subagent_type` as named, and comes back as a "
-              "completion notification in a later turn: go on or end the turn, and do not wait, sleep or poll for "
-              "it.") if subs else ""
+    agents = "" if subs else ""                    # the subagent's name beside its step says enough
     if cap:
         return (f"{head} Its work steps would each go to a child: {named}. But {cap[0].lower() + cap[1:]} "
                 f"Staying here meanwhile: every step.{agents}")
@@ -775,22 +791,22 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
     route = ("Start each now with `mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, "
              "`use_worktree: false`, on this session's branch" if owner_turn else
              CARD_EACH)
-    return (f"{head} Hand its work steps to child sessions, split by file set: steps that share a file go to one "
-            f"child as a serial run, and steps with disjoint files each get a child: {named}. {route}. Each brief is its "
-            f"steps' words, a line `Files: <the paths it may write>`, what they must leave done, and says "
+    return (f"{head} Hand its work steps to child sessions, split by the files they write: steps that share a file go "
+            f"to one child as a serial run, and steps with disjoint files each get a child: {named}. {route}. Each "
+            f"brief is its steps' words, a line `Files: <the paths it may write>`, what they must leave done, and "
             f"\"report when done\", so the child "
-            f"leaves its outcome here as a replaces: note and is treated as archived when it finishes. {LEVEL_HOW}"
+            f"leaves its outcome here as a replaces: note and counts as archived when it finishes. {LEVEL_HOW}"
             f"{agents} Staying "
             f"here: {stay}.")
 
 
-# --- sub-agents as child nodes of the step that launched them ------------------------------------------------------
+# --- subagents as tasks of the step that launched them -------------------------------------------------------------
 #
-# A sub-agent's hook payloads carry the launching session's session_id and the sub-agent's own agent_id (measured
-# by the marketplace test session, 2026-11-12). At the Agent call it is a pending node under the step in progress,
-# given that step's slice in its prompt; its first tool call binds its id to the node; each later call is warned of
-# what changed beside the launching session since; its stop attaches its result. The node is a task of the step, so
-# the anchor carries it to the parent like any background task.
+# A subagent's hook input carries the launching session's `session_id` and its own `agent_id`, as the hooks reference
+# documents for every hook inside a subagent. At the Agent call it is a pending task under the step in progress,
+# given that step's slice in its prompt; its first tool call binds its id to the task; each later call is warned of
+# what changed beside the launching session since; its stop attaches its result. As a task of the step, the anchor
+# carries it to the parent like any background task.
 
 PENDING_S = 3600              # a launch no tool call bound within this long is dropped
 
@@ -800,7 +816,7 @@ def _agent(p, agent_id):
 
 
 def agent_launch(home, s, tool_use_id, inp):
-    """The Agent call, before it runs: a pending node under the step in progress -> the text for its prompt."""
+    """The Agent call, before it runs: a pending task under the step in progress -> the text for its prompt."""
     import time as _t
     sid = s["sessionId"]
     p = load(home, sid)
@@ -817,7 +833,7 @@ def agent_launch(home, s, tool_use_id, inp):
     relay._write_json(_path(home, sid), p)
     if not st:
         return ""
-    head = (f"phi (p4-phi): you are a sub-agent of \"{relay._title(s)}\", launched for its step {st['addr']}, "
+    head = (f"phi (p4-phi): you are a subagent of \"{relay._title(s)}\", launched for its step {st['addr']}, "
             f"\"{relay._short(st.get('content'), 200)}\". Keep to that step; what you find goes back in your result.")
     piece = relay.slice_text(home, {"sessionId": "agent", "spawnedFrom": {"sessionId": parent}, "task": prompt,
                                     "cwd": s.get("cwd") or ""}) if parent else ""
@@ -825,7 +841,7 @@ def agent_launch(home, s, tool_use_id, inp):
 
 
 def agent_bind(home, s, agent_id):
-    """A sub-agent's tool call: its id bound to the oldest pending launch -> True when newly bound."""
+    """A subagent's tool call: its id bound to the oldest pending launch -> True when newly bound."""
     import time as _t
     sid = s["sessionId"]
     p = load(home, sid)
@@ -833,7 +849,7 @@ def agent_bind(home, s, agent_id):
         return False
     pend = p.get("agentsPending") or {}
     key = min(pend, key=lambda k: int(pend[k].get("epoch") or 0)) if pend else None
-    got = pend.pop(key) if key else {"step": p.get("current") or "", "anchorSeen": 0, "what": "a sub-agent"}
+    got = pend.pop(key) if key else {"step": p.get("current") or "", "anchorSeen": 0, "what": "a subagent"}
     if not pend:
         p.pop("agentsPending", None)
     epoch = int(got.get("epoch") or _t.time())
@@ -846,19 +862,19 @@ def agent_bind(home, s, agent_id):
     else:
         st.setdefault("tasks", []).append(task)
     relay._write_json(_path(home, sid), p)
-    parent = relay._parent(s)                     # SA2: the anchors carry it now, and the parent is told its id
+    parent = relay._parent(s)                     # the anchors carry it, and the parent is told its id
     relay.make_anchor(home, parent, _now())
     relay.make_anchor(home, sid, _now())
     if parent:
-        where = f"its step {st['addr']}" if st else "no step of its plan"
+        where = f"its step {st['addr']}" if st else "no step of its task list"
         relay.warn(home, parent, f"agent:{sid}:{agent_id}",
-                   f"down: \"{relay._title(s)}\" launched sub-agent {agent_id} for {where}"
+                   f"down: \"{relay._title(s)}\" launched subagent {agent_id} for {where}"
                    + (f", \"{relay._short(task['what'], 120)}\"" if task.get("what") else "") + ".")
     return True
 
 
 def agent_warn(home, s, agent_id):
-    """A sub-agent's next tool call: what changed beside the launching session since it was launched or last told,
+    """A subagent's next tool call: what changed beside the launching session since it was launched or last told,
     and its step revised or gone; '' when nothing did."""
     sid = s["sessionId"]
     p = load(home, sid)
@@ -882,7 +898,7 @@ def agent_warn(home, s, agent_id):
                 lines.append(f"\"{n.get('title') or nid}\": {said}")
     step = next((st for st in p.get("steps") or [] for x in st.get("tasks") or [] if x is t), None)
     if t.get("stepText") and step is None:
-        lines.append("the step you were launched for is no longer in the launching session's plan")
+        lines.append("the step you were launched for is no longer in the launching session's task list")
     elif step is not None and t.get("stepText") and step.get("content") != t["stepText"]:
         lines.append(f"the step you were launched for now reads \"{relay._short(step.get('content'), 160)}\"")
         t["stepText"] = step.get("content")
@@ -896,7 +912,7 @@ def agent_warn(home, s, agent_id):
 
 
 def agent_stop(home, s, agent_id, result):
-    """The sub-agent stopped: its node closed with its result -> True when a node was closed."""
+    """The subagent stopped: its task closed with its result -> True when a task was closed."""
     sid = s["sessionId"]
     agent_bind(home, s, agent_id)                 # one that made no tool call is bound now
     p = load(home, sid)
@@ -909,15 +925,15 @@ def agent_stop(home, s, agent_id, result):
 
 
 def _after(a, b):
-    """True when address a comes after address b in the parent's plan."""
+    """True when address a comes after address b in the parent's task list."""
     def key(x):
         return [int(p) for p in str(x).split(".") if p.isdigit()]
     return key(a) > key(b)
 
 
 def slice_for(home, s):
-    """A fresh child's root step and its slice of the parent's plan tree: the steps around the root, and the
-    siblings' steps in progress that share its words. '' when the child has no root."""
+    """A fresh child's parent step and its slice of the parent's task list: the steps around it, and the siblings'
+    steps in progress that share its words. '' when the child has no parent step."""
     root = root_of(home, s)
     parent = relay._parent(s)
     if not root or not parent:
@@ -926,11 +942,12 @@ def slice_for(home, s):
     steps = pp.get("steps") or []
     at = next((k for k, x in enumerate(steps) if x["addr"] == root), None)
     if at is None:
-        return f"phi (p4-phi): this session is for step {root} of its parent's plan, which no longer holds it."
+        return f"phi (p4-phi): this session is for step {root} of its parent's task list, which no longer holds it."
     around = steps[max(0, at - 1):at + 2]
-    out = [f"phi (p4-phi): this session is for step {root} of its parent's plan, \"{relay._short(steps[at]['content'], 200)}\"."
+    out = [f"phi (p4-phi): this session is for step {root} of its parent's task list, "
+           f"\"{relay._short(steps[at]['content'], 200)}\"."
            " Its own steps are numbered under it: " + addr(root, 1) + ", " + addr(root, 2) + ", and so on.",
-           "The parent's plan around it:"]
+           "The parent's task list around it:"]
     out += [f"- {x['addr']} [{x.get('status')}] {relay._short(x.get('content'), 140)}" for x in around]
     near = []
     for oid, os_ in sorted(_siblings(home, s).items()):
@@ -945,20 +962,20 @@ def slice_for(home, s):
 
 # --- a turn is a delta too ---------------------------------------------------------------------------------------------
 #
-# The miss of 2026-11-12 that this closes: a parent told ezexe which of a child's checks its new design would void,
-# in a plain turn report, and never told the child. Notes and plan changes were relayed; the report was not.
+# A turn's report can change a child's or a sibling's step as much as a note or a task-list revision can, so at Stop
+# its words are matched against their open steps and delivered to the sessions they bear on.
 
 SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
-# R6: a report that quotes what phi told the session would be matched again and relayed again, growing each round.
-# phi's own lines, and any sentence quoting them, are taken out of a report before it is matched.
+# a report that quotes what p4-phi told the session would be matched and delivered again, growing each round, so
+# p4-phi's own lines, and any sentence quoting them, are taken out of a report before it is matched
 OWN_LINE = re.compile(r"^\s*(?:[-*>`\"]\s*)*(?:phi \(p4-phi\)|p4-phi[ :(]|p4-temportal:|(?:up|across|down):)", re.I)
 OWN_WORDS = ("phi (p4-phi)", "words bear on your open step", "check whether those steps still hold",
              "stop before any tool runs")
 
 
-# #33: a session link names a session, not a step: the link and its label are never matched against step words.
-# #54: the app tells sessions to write a session link as `[title](#local_<id>)`, so that form goes with its label
-# too, and so do bare session ids and the paths of sessions' pages under phi/sessions/.
+# a session link names a session, not a step: the link and its label are never matched against step words. The app
+# tells sessions to write a session link as `[title](#local_<id>)`, so that form goes with its label too, and so do
+# bare session ids and the paths of sessions' pages under phi/sessions/.
 SESSION_LINK = re.compile(r"\[[^\]\n]*\]\(\s*(?:claude://[^)\s]*|#?local_[0-9A-Za-z][\w-]*"
                           r"|#?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f-]{4,})\s*\)|<?claude://[^\s)>]+>?", re.I)
 SESSION_PAGE = re.compile(r"`?[^\s`]*phi[\\/]+sessions[\\/][^\s`]*`?", re.I)
@@ -970,12 +987,12 @@ STARTUP = re.compile(r"\b(?:standing rules?|start-?up rules?|rules? from (?:the 
 RULE_LINE = re.compile(r"^\s*[-*]\s*(?:built-in,\s*)?([a-z0-9][a-z0-9']*(?:-[a-z0-9']+)*):\s")
 BUILT_IN_LINE = re.compile(r"^\s*[-*]\s*built-in,\s*[a-z0-9'-]+:\s")
 BUILT_INS = ()                # phi.py sets it to the names of the rules it carries itself
-_RULES = {}                   # a store -> (its rules page's mtime, the rule names on it)
+_RULES = {}                   # a store -> its rules page's mtime and the rule names on it
 
 
 def rule_names(home=""):
-    """The names of the rules phi hands out at a session's start: its built-in ones, and the store's, read from
-    the page phi writes them on, <home>/phi/rules.md, so the list stays true as memories change."""
+    """The names of the rules p4-phi hands out at a session's start: its built-in ones, and the store's, read from
+    the page p4-phi writes them on, <home>/phi/rules.md, so the list stays true as memories change."""
     names = set(BUILT_INS)
     if home:
         path = os.path.join(home, "phi", "rules.md")
@@ -1012,34 +1029,35 @@ def links_removed(text):
 
 
 def own_removed(text, home=""):
-    """`text` without phi's own relay lines, the sentences that quote them, session links with their labels,
-    session ids and pages, the bullets that are startup rules and the sentences that recite them (#54)."""
+    """`text` without p4-phi's own lines, the sentences that quote them, session links with their labels, session
+    ids and pages, the bullets that are startup rules and the sentences that recite them."""
     names = rule_names(home)
     keep = [ln for ln in links_removed(text).splitlines() if not OWN_LINE.match(ln) and not rule_bullet(ln, names)]
     sents = [x for x in SENTENCE.split("\n".join(keep)) if x.strip()]
     return "\n".join(x for x in sents if not any(w in x.lower() for w in OWN_WORDS) and not recites(x, names))
 
 
-# #54: the words every report uses about the tree never count toward a relayed turn's match, in either direction
+# the words every report uses about the tree never count toward a delivered turn's match, in either direction
 RELAY_COMMON = frozenset("""phi p4 session sessions local top tops parent parents child children sibling siblings rule
 rules memory memories page pages link links archive archived archives report reports reported done turn
 turns""".split())
 
 
 def relay_bears(a, b):
-    """bears() for a turn relayed down to a child: the tree's own vocabulary never counts."""
+    """bears() for a turn delivered down to a child: the tree's own vocabulary never counts."""
     return len((words(a) & words(b)) - RELAY_COMMON) >= SHARE
 
 
 def relay_bears_sibling(a, b):
     """A sibling's turn bears on a step only past the shared vocabulary of the tree: more than two words in common
-    outside SIBLING_STOP and RELAY_COMMON, so {phi, session} alone never relays a sibling's report."""
+    outside SIBLING_STOP and RELAY_COMMON, so {phi, session} alone never delivers a sibling's report."""
     return len((words(a) & words(b)) - SIBLING_STOP - RELAY_COMMON) > 2
 ADDR_RE = re.compile(r"\b(?:step\s+)?(\d+(?:\.\d+)+|(?<=step )\d+)\b", re.I)
 
 
 def open_steps(home, sid):
-    """The steps of a session's plan not yet completed, with the background checks still open under them."""
+    """The steps of a session's task list not yet completed, each as stored, with its background tasks of every
+    status."""
     p = load(home, sid)
     return [x for x in p.get("steps") or [] if x.get("status") != "completed"]
 
@@ -1057,8 +1075,9 @@ def prose(text, home=""):
 
 
 def matches(text, steps, shard, base, loose=True, bear=None, home=""):
-    """[(step, the sentences of `text` that bear on it)]: a step is matched by its address, by a path in the
-    session's shard, or by sharing SHARE content words with a sentence. Code blocks and drawn trees are left out."""
+    """Each step that `text` bears on, with the sentences of `text` that bear on it: a step is matched by its
+    address, by a path among the session's owned paths, or by sharing SHARE content words with a sentence. Code blocks
+    and drawn trees are left out."""
     text = prose(text, home)
     bear = bear or bears
     names = rule_names(home)
@@ -1081,7 +1100,7 @@ def matches(text, steps, shard, base, loose=True, bear=None, home=""):
     return out
 
 
-# A parent's report that shares words with a child's step is relayed to the child, but the parent is nagged that it
+# A parent's report that shares words with a child's step is delivered to the child, but the parent is nagged that it
 # sent nothing only when the sentence changes the step: a progress report that names the child's work is no change.
 CHANGES = re.compile(r"\b(?:void\w*|replac\w*|deprecat\w*|supersed\w*|no longer|instead|drop(?:s|ped)?|"
                      r"remov\w*|cancel\w*|revis\w*|renam\w*|obsolete|wrong|broke\w*|stop(?:s|ped)?|undo\w*|"
@@ -1089,9 +1108,10 @@ CHANGES = re.compile(r"\b(?:void\w*|replac\w*|deprecat\w*|supersed\w*|no longer|
 
 
 def turn_relay(home, s, row, calls):
-    """At Stop: the turn's report and plan, matched against the open steps of this session's children (down) and of
-    its siblings (across). Each match is relayed with the turn's own words quoted. Returns the children a match
-    reached that the turn sent no SendMessage to, as [(child id, addresses)], for the parent's next message."""
+    """At Stop: the turn's report and step in progress, matched against the open steps of this session's children,
+    down, and of its siblings, across. Each match is delivered with the turn's own words quoted. Returns the
+    children a match reached that the turn sent no SendMessage to, each as its id and the addresses, for the parent's
+    next message."""
     sid, title = s["sessionId"], relay._title(s)
     report = own_removed(row.get("report"), home)
     mine = load(home, sid)
@@ -1102,7 +1122,7 @@ def turn_relay(home, s, row, calls):
     path = os.path.join(relay._dir(home, sid), "session.json")
     disk = relay._read_json(path)
     if step and step == disk.get("stepRelayed"):
-        step = ""                                 # R7: an unchanged step was matched and relayed again every turn
+        step = ""                                 # an unchanged step is matched once, not again every turn
     elif step:
         disk["stepRelayed"] = s["stepRelayed"] = step
         relay._write_json(path, disk)
@@ -1128,9 +1148,9 @@ def turn_relay(home, s, row, calls):
             continue
         lines = [f"{st['addr']} \"{relay._short(st.get('content'), 100)}\": " +
                  " ".join(f"\"{relay._short(q, 220)}\"" for q in quotes) for st, quotes in got]
-        who = "the session that started you" if way == "down" else "a session beside you"
+        who = "your parent session" if way == "down" else "a session beside you"
         relay.warn(home, oid, f"turn:{sid}:{stamp}",
-                   f"\"{title}\", {who}, ended a turn whose words bear on your open step(s): " + "; ".join(lines)
+                   f"\"{title}\", {who}, ended a turn whose words bear on your open steps: " + "; ".join(lines)
                    + ". Check whether those steps still hold.")
         strict = {st["addr"] for st, _ in matches(text, open_steps(home, oid), relay.shard_of(os_),
                                                   os_.get("cwd") or s.get("cwd") or "", loose=False, home=home)}
@@ -1142,9 +1162,9 @@ def turn_relay(home, s, row, calls):
     ask = waiting_on(report)
     if parent and ask:
         relay.warn(home, parent, f"wait:{sid}:{stamp}",
-                   f"\"{title}\", a session you started, ended its turn on a question: \"{relay._short(ask, 240)}\". "
-                   f"It names no matter of ezexe's authority, so answer it with SendMessage (`to`: {sid}) "
-                   f"from what the chain knows, rather than leaving it waiting.")
+                   f"\"{title}\", your child session, ended its turn on a question: \"{relay._short(ask, 240)}\". "
+                   f"It names no matter of ezexe's authority, so answer it with SendMessage to {sid} "
+                   f"from what the session tree knows, rather than leaving it waiting.")
     return unsent
 
 
@@ -1163,10 +1183,11 @@ def waiting_on(report):
     return "" if AUTHORITY.search(q) else q
 
 
-# --- a turn that ends with open steps the chain can settle (#20) ------------------------------------------------------
+# --- a turn that ends with open steps the session tree can settle ----------------------------------------------------
 #
-# A session that ends its turn with plan steps still open, none of them waiting on ezexe's authority, costs ezexe
-# a message just to restart agreed work. At Stop it is sent back once or twice a turn with the next open step.
+# A session that ends its turn with steps of its task list still open, none of them waiting on ezexe's authority,
+# would cost ezexe a message just to restart agreed work, so at Stop it is sent back with its next open step, at most
+# KEEP_GOING_MAX times a turn.
 
 KEEP_GOING_MAX = 2             # times one turn is sent back
 WAITS_ON_OWNER = re.compile(r"\b(?:wait\w*|blocked|need\w*|until)\b[^.\n]{0,80}\b(?:user|owner|boss|ezexe|your|you)\b|"
@@ -1175,12 +1196,12 @@ WAITS_ON_OWNER = re.compile(r"\b(?:wait\w*|blocked|need\w*|until)\b[^.\n]{0,80}\
 
 AWAITS = re.compile(r"\b(?:a?wait\w*|collect\w*|until|hold\w*\s+for)\b[^.;]*\b(?:reports?|sessions?|trees?|tops?|"
                     r"results?|finish\w*|done|land\w*|answers?|repl(?:y|ies)|word)\b", re.I)
-# #58, the puppeteer's part of #55: a step that waits on other sessions' reports. Nothing can be done on it until
-# one arrives, and the arrival starts the next turn.
+# a step that waits on other sessions' reports: nothing can be done on it until one arrives, and the arrival starts
+# the next turn
 
 
 def waiting_step(home, sid):
-    """The next open step of a session's plan when it waits on other sessions' reports, else None."""
+    """The next open step of a session's task list when it waits on other sessions' reports, else None."""
     steps = [x for x in load(home, sid).get("steps") or [] if x.get("status") != "completed"]
     if not steps:
         return None
@@ -1191,8 +1212,8 @@ def waiting_step(home, sid):
 def keep_going(home, s, report, calls, turn_id, active=False, waits=()):
     """The Stop hook's reason to send the session back to its next open step; '' when the turn may end: no open
     step, the turn wrapped up or asked ezexe a matter of authority, the next step is one, a background task is
-    still open (its notice starts the next turn), this turn was sent back KEEP_GOING_MAX times already, or the
-    session is a puppeteer whose next step waits on sessions it controls, `waits` naming those not yet complete."""
+    still open, since its notice starts the next turn, this turn was sent back KEEP_GOING_MAX times already, or the
+    next step waits on other sessions' reports while `waits` names sessions not yet complete."""
     p = load(home, s["sessionId"])
     steps = [x for x in p.get("steps") or [] if x.get("status") != "completed"]
     if not steps:
@@ -1204,7 +1225,7 @@ def keep_going(home, s, report, calls, turn_id, active=False, waits=()):
         return ""
     nxt = next((x for x in steps if x.get("status") == "in_progress"), steps[0])
     if waits and (AWAITS.search(str(nxt.get("content") or "")) or awaits_sessions(nxt.get("content"))):
-        return ""                                  # #58, #55: nothing can be done on it until a report arrives
+        return ""                                  # nothing can be done on it until a report arrives
     tail = str(report or "").strip()[-600:]
     asks = [q for q in re.findall(r"[^.!?\n]*\?", tail) if len(q.strip()) > 8]
     if AUTHORITY.search(str(nxt.get("content") or "")) or any(AUTHORITY.search(q) for q in asks) \
@@ -1223,27 +1244,28 @@ def keep_going(home, s, report, calls, turn_id, active=False, waits=()):
     return (f"phi (p4-phi): step {nxt.get('addr')} \"{relay._short(nxt.get('content'), 120)}\" is still "
             f"{nxt.get('status') or 'pending'}" + (f", with {others} more open after it" if others else "") +
             ", and nothing in this turn's end waits on ezexe's authority. Carry on with it now. If it truly waits "
-            "on a permission, a credential, spending, a push or another outward or irreversible step, say which in "
-            "one line and end the turn; if the step is done or dropped, update the plan.")
+            "on a matter of ezexe's authority, permissions or security settings, credentials, spending, or an action "
+            "that cannot be undone or publishes outward, say which in one line and end the turn; if the step is done "
+            "or dropped, update the task list.")
 
 
 # --- background tasks under a step -------------------------------------------------------------------------------------
 #
-# A step's background work, a Bash run in the background, a Monitor, an Agent or a Workflow, is recorded under the step
-# in progress with what it ran against: the heads of the repositories its command names, its paths and its words. At
-# each step boundary an open task is checked against what moved since it started. Found 2026-11-12 in this session's
-# own transcript and phi's log: a completion notice that arrives while the session is idle starts a turn, and
-# UserPromptSubmit fires with the notice as its message; one that arrives during a turn is queued as an attachment and
-# no hook fires. So completions are read from the message at UserPromptSubmit, and from the transcript's tail at Stop
-# and at each step boundary.
+# A step's background tasks, a Bash command run in the background, a Monitor, an Agent or a Workflow, are recorded
+# under the step in progress with what each ran against: the heads of the repositories its command names, its paths
+# and its words. At each step boundary an open task is checked against what moved since it started. A completion
+# notice that arrives while the session is idle starts a turn, and UserPromptSubmit fires with the notice as its
+# prompt; the Stop hook's input also lists the work still in flight as `background_tasks`, which this module does not
+# read. Completions are read from the message at UserPromptSubmit, and from the transcript's tail at Stop and at each
+# step boundary.
 
 TASK_ID = re.compile(r"(?:background with ID|task[_ -]?id|agentId|ID)[\"':\s=]+([A-Za-z0-9_-]{6,})"
-                     r"|\(task\s+([A-Za-z0-9_-]{6,})", re.I)      # M1: "Monitor started (task bz4dv0pvj, ..."
+                     r"|\(task\s+([A-Za-z0-9_-]{6,})", re.I)      # the Monitor's "(task bz4dv0pvj, ..."
 NOTICE = re.compile(r"<task-id>\s*([^<\s]+)\s*</task-id>.*?<status>\s*([^<\s]+)\s*</status>"
                     r"(?:.*?<summary>(.*?)</summary>)?", re.S)
 NEAR_DONE_S = 600             # a task older than this may be near done: finish and record rather than stop
 JOB_GAP_S = 3600              # the job-gap budget: an open task this far past its own timeout with no notice read is
-                              # taken as unknown, never flagged (a stopped task, an expired Monitor, a lost notice)
+                              # taken as unknown, never flagged: a stopped task, an expired Monitor or a lost notice
 STOPPED = re.compile(r'"name"\s*:\s*"(?:TaskStop|KillShell)"\s*,\s*"input"\s*:\s*\{[^{}]*?'
                      r'"(?:task_id|shell_id|id)"\s*:\s*"([A-Za-z0-9_-]{6,})"')
 BACKGROUND_AGENT = re.compile(r"(?:launched|running|runs) in the background|async agent|run_in_background", re.I)
@@ -1254,7 +1276,7 @@ def register(home, s, tool, inp, response, cwd, at_epoch=None):
     foreground or names no task id."""
     if tool in ("Bash", "PowerShell") and not inp.get("run_in_background") and not LAUNCHED.match(
             response if isinstance(response, str) else ""):
-        return None                               # a foreground command; one a hook moved back is known by its result
+        return None                               # a foreground command; one a hook moved to the background shows it
     if tool == "Agent" and not inp.get("run_in_background") and not BACKGROUND_AGENT.search(str(response)):
         return None                               # a foreground agent has finished by its result
     text = response if isinstance(response, str) else json.dumps(response, default=str)
@@ -1278,7 +1300,7 @@ def register(home, s, tool, inp, response, cwd, at_epoch=None):
     p = load(home, sid)
     first = running(p, task["what"])
     if first:
-        task["repeatOf"] = first["id"]             # #47: started again while an earlier copy was still running
+        task["repeatOf"] = first["id"]             # started again while an earlier copy is still running
     st = step_of(p, p.get("current") or "") if p.get("steps") else None
     if st is None:
         p.setdefault("loose", []).append(task)
@@ -1293,7 +1315,7 @@ def same_command(a, b):
 
 
 def running(p, what):
-    """The earliest open background task of a plan that runs the same command, None for none (#47)."""
+    """The earliest open background task of a task list that runs the same command, None for none."""
     what = relay._short(what, 200)
     return next((t for _, t in _tasks(p) if t.get("status") == "open" and t.get("tool") != "Agent"
                  and same_command(t.get("what"), what)), None)
@@ -1312,7 +1334,7 @@ def pickup(home, sid, text):
     p = load(home, sid)
     closed = []
     found = {m.group(1): (m.group(2).lower(), (m.group(3) or "").strip()) for m in NOTICE.finditer(str(text or ""))}
-    for m in STOPPED.finditer(str(text or "")):   # RB1: a TaskStop sends no notice; its call closes the task
+    for m in STOPPED.finditer(str(text or "")):   # a TaskStop sends no notice; its call closes the task
         found.setdefault(m.group(1), ("stopped", "stopped by TaskStop"))
     if not found:
         return closed
@@ -1337,7 +1359,7 @@ def transcript_tail(path, size=200000):
 
 
 def check_tasks(home, s, plan):
-    """The open tasks something moved under since they started -> lines with the id and what to do."""
+    """The open background tasks something moved under since they started -> lines with the id and what to do."""
     import time as _t
     lines, changed = [], False
     parent = relay._parent(s)
@@ -1377,8 +1399,8 @@ def check_tasks(home, s, plan):
         advice = (f"it has run {int(age // 60)} min and may be near done: let it finish and record its result as "
                   f"against the old head" if age > NEAR_DONE_S else
                   f"`TaskStop {t['id']}`, then re-run it against the new head if it is still wanted")
-        lines.append(f"task {t['id']} ({t.get('tool')}: {relay._short(t.get('what'), 80)}): " + "; ".join(why)
-                     + f". {advice}.")
+        lines.append(f"background task {t['id']}, the {t.get('tool')} call \"{relay._short(t.get('what'), 80)}\": "
+                     + "; ".join(why) + f". {advice}.")
     return lines, changed
 
 

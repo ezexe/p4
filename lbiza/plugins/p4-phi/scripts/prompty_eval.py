@@ -1,26 +1,28 @@
 #!/usr/bin/env python3
-"""prompty_eval.py: prompty's owner and route picks measured on a store's own history (ezexe/p4#41).
+"""prompty_eval.py: the routing step's owner and route picks measured on a store's own history, and its scorer trained.
 
     python -I -X utf8 prompty_eval.py --p4 <store> [--json]
+    python -I -X utf8 prompty_eval.py --p4 <store> --train
 
-It reads the store and writes nothing into it.
+It reads the store and writes nothing into it, but for `--train`, which keeps an owner scorer trained on this history
+in the store's phi/models/prompty.json when it beats shared content words and naming none on held-out sessions.
 
-The labelled set. Each kept turn of a session whose prompt is ezexe's own message and is work as prompty reads work
+The labelled set. Each kept turn of a session whose prompt is ezexe's own message and is work as routing reads work
 is one example: the message, its time, and the session that received it. Its owner label is the session that ended
 up doing its work:
 
   relayed   another session that was live at that time and whose later turn quotes the message, 60 characters of
-            it or more, as a relay with ezexe's words quoted does: that session is the right owner.
+            it or more, as a message passing ezexe's words on does: that session is the right owner.
   new       a session started after the message whose brief quotes it: the work went to a new session, so no live
             session owned it and the right pick is none.
   here      neither: the receiving session did the work itself, so again no other live session owned it.
 
-A scorer is given the message and the tasks of the other sessions that existed then, as prompty is, and picks one
-owner or none. It is right when it picks the labelled session, or none where the label is none.
+A scorer is given the message and the tasks of the other sessions that existed then, as the routing step is, and
+picks one owner or none. It is right when it picks the labelled session, or none where the label is none.
 
 The scorers:
 
-  overlap   prompty's rule today: the candidate whose task shares the most content words with the message, at
+  overlap   routing's fallback: the candidate whose task shares the most content words with the message, at
             OWNER_WORDS or more.
   bm25      the ranker's road with no trained model, as p4.py runs it: BM25 over ranker.tokens with idf from the
             candidates, the top candidate at a threshold chosen on the training folds.
@@ -57,7 +59,7 @@ def turns_of(home, sid):
 
 
 def own_words(prompt):
-    """True when a kept prompt is ezexe's own typing: not a handed brief, a relay or an app event."""
+    """True when a kept prompt is ezexe's own typing: not a handed brief, a cross-session message or an app event."""
     p = str(prompt or "").lstrip()
     return bool(p) and not p.startswith("<") and "cross-session-message" not in p and "task-notification" not in p \
         and "phi draft drf-" not in p and "phi reading grp-" not in p and "phi start request req-" not in p \
@@ -72,8 +74,8 @@ def quotes(later, message):
 
 
 def closed_at(s, turns):
-    """When a session left the live tree, '' while it is live: the time phi kept for its retirement or archive, or
-    its last turn's when it is gone with no time kept."""
+    """When a session left the live tree, '' while it is live: the time p4-phi kept when it counted the session as
+    archived or found it archived in the app, or its last turn's when it left with no time kept."""
     for k in ("doneRetired", "stale"):
         if isinstance(s.get(k), dict) and s[k].get("time"):
             return str(s[k]["time"])
@@ -85,7 +87,8 @@ def closed_at(s, turns):
 
 
 def examples(home):
-    """The labelled set of a store -> [{message, time, session, label, kind, cands: [(sid, task)]}]."""
+    """The labelled set of a store: one dict an example, with its message, time, session, label, kind and case, and
+    its cands, each a session id with that session's task."""
     every = relay._sessions(home)
     rows = {sid: turns_of(home, sid) for sid in every}
     born = {sid: str(s.get("createdAt") or (rows[sid][0].get("time") if rows[sid] else "") or "") for sid, s in every.items()}
@@ -93,14 +96,14 @@ def examples(home):
     out, seen = [], set()
     kids = {relay._parent(s) for s in every.values()}
     for sid, s in every.items():
-        orchestrates = not relay._parent(s) or sid in kids     # prompty reads a message only in an orchestrator
+        orchestrates = not relay._parent(s) or sid in kids     # routing reads a message only in an orchestrator
         for k, t in enumerate(rows[sid]):
             msg = str(t.get("prompt") or "")
             if not own_words(msg) or (k == 0 and relay._parent(s)) or (sid, flat(msg)) in seen:
                 continue                           # a child's first prompt is its brief, not ezexe's message
             seen.add((sid, flat(msg)))
             if not (issues.writing(msg) and len(puppeteer.words(msg)) >= puppeteer.QUICK_WORDS):
-                continue                           # prompty reads only work: a question or a quick thing is left
+                continue                           # routing reads only work: a question or a quick thing is left out
             when = str(t.get("time") or "")
             above, cur = set(), sid
             while cur and cur not in above:
@@ -143,7 +146,7 @@ def pick_overlap(ex, need=None):
 
 
 def features(ex):
-    """(candidate ids, one feature dict a candidate, BM25 scores) of an example, as the ranker reads a candidate."""
+    """An example's candidate ids, one feature dict for each candidate and the BM25 scores, as the ranker reads them."""
     xs, bm = puppeteer.pair_features(ex["message"], [task for _, task in ex["cands"]], ex["time"])
     return [sid for sid, _ in ex["cands"]], xs, bm
 
@@ -160,7 +163,8 @@ def right(pick, ex):
 
 
 def best_threshold(rows):
-    """The threshold over (ids, scores, example) rows that gets the most right; the higher of equals."""
+    """The threshold that gets the most rows right, each row the ids, the scores and the example; the higher of
+    equals."""
     cuts = sorted({round(max(sc), 4) for _, sc, _ in rows if sc} | {float("inf")})
     return max(cuts, key=lambda c: (sum(right(pick_scored(ids, sc, c), ex) for ids, sc, ex in rows), c))
 
@@ -222,8 +226,8 @@ def keep(home, kind, model, stats):
 
 
 def routes(home, exs):
-    """How the registered routes fare: {routes, matched, right} with overlap, a route right when its topic session
-    is the one that did the message's work."""
+    """How the registered routes fare: {routes, matched, right}, a message matched when puppeteer.score_routes ranks
+    any route for it, and a route right when its topic session is the one that did the message's work."""
     every = puppeteer.all_routes(home)
     matched = hit = 0
     for e in exs:
@@ -239,8 +243,8 @@ def main(argv=None):
     ap.add_argument("--p4", required=True, help="the store whose session history is measured")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--train", action="store_true",
-                    help="keep an owner scorer trained on this history in phi/models/prompty.json, only when it beat "
-                         "word overlap and naming none on held-out sessions")
+                    help="keep an owner scorer trained on this history in phi/models/prompty.json, only when it beats "
+                         "shared content words and naming none on held-out sessions")
     a = ap.parse_args(argv)
     exs = examples(a.p4)
     others = [e for e in exs if e["case"] == "others"]
@@ -258,7 +262,7 @@ def main(argv=None):
         print(f"owner by {name}: {m['right']} of {m['n']} right, {m['false_owner']} wrong owners named, "
               f"{m['missed']} of {m['owned']} owned messages missed")
     r = res["routes"]
-    print(f"routes: {r['routes']} registered; overlap matched {r['matched']} of {r['messages']} messages, "
+    print(f"routes: {r['routes']} registered; matched {r['matched']} of {r['messages']} messages, "
           f"{r['right']} to the session that did the work")
     if a.train:
         m = res["owners"]
@@ -267,8 +271,9 @@ def main(argv=None):
             model = train(exs)
             print("kept: " + keep(a.p4, "owners", model, {"cases": len(exs), "right": m["ranker"]["right"]}))
         else:
-            print(f"no owner scorer kept: held out, the ranker got {m['ranker']['right'] if m else 0} right and the "
-                  f"better of word overlap and naming none got {rivals}; word overlap stays the fallback")
+            print(f"no owner scorer kept: held out, the ranker got {m['ranker']['right'] if m else 0} right and "
+                  f"the better of shared content words and naming none got {rivals}; shared content words stay the "
+                  f"fallback")
     return 0
 
 

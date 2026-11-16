@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gaps.py: a feedback memory that patches over plugin behaviour starts a new top session for that plugin gap.
+"""gaps.py: a feedback memory that patches over plugin behaviour gets a new top-level session advised for the gap.
 
     python3 -I lbiza/plugins/p4-phi/scripts/test_gaps.py
 """
@@ -109,7 +109,7 @@ class Hook(unittest.TestCase):
     def test_an_owner_turn_is_told_to_start_the_new_top_in_the_plugins_project(self):
         self.t.say(TOP, "Build the exporter")
         got = self.wrote(memory(self.t.p4, "children-on-parent-branch", CHILD_RULE))
-        self.assertIn("patches over a gap in the plugin (team/plug)", got)
+        self.assertIn("patches over a gap in the plugin, whose repository is team/plug", got)
         self.assertIn("gh issue create -R team/plug", got)
         self.assertIn("have a child fix it, report when done", got)
         self.assertIn("only the parent merges and pushes", got, "the rule quoted")
@@ -123,7 +123,7 @@ class Hook(unittest.TestCase):
         self.assertEqual(self.wrote(os.path.join(self.t.proj, "notes.md")), "", "a file outside the memory folder")
 
     def test_a_memory_the_plugin_carries_now_keeps_no_start_request(self):
-        """#50: three memories shortened to "p4-phi carries this now" each got a request for a needless top session."""
+        """A memory that says the plugin already carries its rule, as "p4-phi carries this now" does, gets nothing."""
         carried = ("p4-phi carries this now: when a child finishes with commits carrying `Closes #N`, `relay.py` tells "
                    "the top session to push main and sync each store at once, so follow that line.")
         self.t.say(TOP, "<cross-session-message from=\"local_x\">tidy the memories</cross-session-message>")
@@ -140,7 +140,7 @@ class Hook(unittest.TestCase):
                       "a memory that records a new gap is still told")
 
     def test_a_negated_form_is_a_real_gap(self):
-        """#50, from the read of its commit: "p4-phi does not carry this yet" was read as carried."""
+        """A negated or wished-for form, such as "p4-phi does not carry this yet", is no carried rule."""
         for gap in ("p4-phi does not carry this yet: a child session never pushes, and only the parent merges.",
                     "p4-phi doesn't carry this, so sessions keep the rule by hand.",
                     "The plugin should carry this: a store moves only by p4.py sync.",
@@ -184,7 +184,7 @@ class Hook(unittest.TestCase):
                       "a write that says something new is a gap")
 
     def test_the_advice_rides_on_recalls_record_entry(self):
-        """Open sessions froze their hook lists at start: the check reaches them through lookup-record."""
+        """The check reaches a session through the `lookup-record` hook, which hooks.json runs after every tool call."""
         self.t.say(TOP, "Build the exporter")
         path = memory(self.t.p4, "children-on-parent-branch", CHILD_RULE)
         body = {"session_id": "aaaa1111-0000-4000-8000-000000000000", "cwd": self.t.proj,
@@ -197,10 +197,11 @@ class Hook(unittest.TestCase):
         self.assertIn("gh issue create -R team/plug", json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"])
 
     def test_a_turn_the_owner_did_not_begin_is_given_a_card_and_no_request_in_another_store(self):
-        """#58: a request kept in the plugin's store was handed to whichever session ezexe spoke in next there."""
+        """A turn ezexe did not begin gets a card in this session, and no start request kept in the plugin's store,
+        where whichever session ezexe spoke in next would take it."""
         self.t.say(TOP, "<cross-session-message from=\"local_x\">please go on</cross-session-message>")
         got = self.wrote(memory(self.t.p4, "children-on-parent-branch", CHILD_RULE))
-        self.assertIn("show it as a proposal card", got)
+        self.assertIn("show it as a suggested task card", got)
         self.assertIn("\"initiation\": \"own_initiative\"", got)
         self.assertIn("which ezexe presses in this session", got)
         self.assertIn("This session is a new top session", got)

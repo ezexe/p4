@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
-"""issues.py: the one loop a child session that changes a repository runs (#28).
+"""issues.py: the one loop a child session that changes a repository runs.
 
-  issue    at its first hook, a child whose brief or plan names files in a repository with a GitHub `origin` gets an
-           issue for its purpose: the brief, the plan and the parent's id in its body. An issue its brief already
-           names, open on that repository, is taken as its own instead of filing a second. The number is kept in
-           session.json as `issue`, and a line tells the child. A read-only child (a check, an audit, a question, a
-           relay) gets none, and neither does a repository with no GitHub remote.
+  issue    at its first hook, a child whose brief or task list names files in a repository with a GitHub `origin`
+           gets an issue for its purpose: the brief, the task list and the parent session's id in its body. An issue
+           its brief already names, open on that repository, is taken as its own instead of filing a second. The
+           number is kept in session.json as `issue`, and a line tells the child. A read-only child, such as a check,
+           an audit, a question or a message to pass on, gets none, and neither does a repository with no GitHub
+           remote.
   commits  at each step boundary, a commit made since the issue was taken that closes no issue gets one line.
-  proof    before the child counts as finished, its plan names the test that proves the issue fixed: a backticked
-           command or a test file in a step that speaks of a test, or `phi.py proof "<command>"`. phi runs it again at
-           Stop on the final head and comments the result on the issue; a failing test keeps the child open.
-  push     the proven work is pushed at once and its p4 stores synced with `p4.py sync --push`; the push of the
-           `Closes #N` commit closes the issue. Force-pushes and history rewrites still ask.
-  archive  only with the issue closed and the test passed does archive-when-done retire the child, its outcome note on
-           the parent carrying the issue link, the commit and the test.
+  proof    before the child counts as finished, its task list names the regression test that proves the issue fixed:
+           a backticked command or a test file in a step that speaks of a test, or `phi.py proof "<command>"`. p4-phi
+           runs it again at Stop on the final head and comments the result on the issue; a failing test keeps the
+           child open.
+  push     the proven work is pushed at once and each store it touched synced with `p4.py sync --push`; the
+           `Closes #N` commit closes the issue once it reaches the default branch. Anything that cannot be undone,
+           such as a force-push, a history rewrite or a deletion, still asks.
+  archive  a finished child, marked `disposable` or archiving itself, is counted as archived only with the issue
+           closed and the test passed, its outcome note on the parent carrying the issue link, the commit and the test.
+           A child that archives itself before it is finished is counted as archived at once, its open steps named.
 
-`gh` is P4_PHI_GH when set (a .py file is run with this python), else `gh` on PATH. P4_PHI_ISSUES=0 or p4.json's
-phi.issues false turns the loop off. phi.py calls these from the hooks every open session already has.
+`gh` is P4_PHI_GH when set, and a .py file named there is run with this Python; else `gh` on PATH. P4_PHI_ISSUES=0
+or p4.json's phi.issues false turns the loop off. phi.py calls these from its hooks.
 """
 
 import glob
@@ -33,7 +37,7 @@ if HERE not in sys.path:
 import relay  # noqa: E402
 
 GH_S = 15                       # one gh call inside a hook
-PROOF_S = 15.0                  # the proving test inside the Stop hook; a longer one finishes in the background
+PROOF_S = 15.0                  # the regression test inside the Stop hook; a longer one finishes in the background
 BODY_CHARS = 6000
 TAIL_CHARS = 1500
 
@@ -94,7 +98,7 @@ def github_of(repo):
 
 
 def writing(text):
-    """True when a brief or plan asks for changes, not a check, an audit, a question or a relay."""
+    """True when a brief or task list asks for changes, not a check, an audit, a question or a message to pass on."""
     text = str(text or "")
     if READ_ONLY.search(text):
         return False
@@ -123,8 +127,8 @@ def slugs_said(text):
 
 def without_slugs(text, base):
     """The text with every `owner/name` token taken out that is no path under `base`: two parts, no file
-    extension, and nothing on disk by that name (#45: "on ezexe/p4" was read as a path in the cwd's repository, and
-    the issue was filed on the cwd's origin)."""
+    extension, and nothing on disk by that name, so a repository named as "on ezexe/p4" is never read as a path in
+    the cwd's repository."""
     def keep(m):
         tok = m.group(1)
         if re.search(r"\.[A-Za-z0-9]{1,5}$", tok) and not tok.lower().endswith(".git"):
@@ -147,10 +151,10 @@ def nested_repos(base):
 
 
 def repos_named(text, base):
-    """[(repo path, 'owner/name')] of the GitHub repositories the text is about. A repository the text names by its
-    `owner/name` comes first when a checkout of it is at hand: among the repositories of the paths named, the cwd's
-    own, or one nested under the cwd. Then the repositories whose files the text names, in the order named. An
-    `owner/name` token alone never names the cwd's repository (#45)."""
+    """The GitHub repositories the text is about, each as its path and its `owner/name`. A repository the text names
+    by its `owner/name` comes first when a checkout of it is at hand: among the repositories of the paths named, the
+    cwd's own, or one nested under the cwd. Then the repositories whose files the text names, in the order named. An
+    `owner/name` token alone never names the cwd's repository."""
     text = str(text or "")
     out, seen = [], set()
     cands = [relay.repo_of(p) for p in relay.paths_in(without_slugs(text, base), base)]
@@ -219,7 +223,7 @@ def link_of(rec):
 
 def issue_title(title, brief):
     """An issue's title: the brief's own title line when it has one, else the session's title, else the brief's
-    first sentence; cut at a clause or a sentence end, never mid-phrase and never with dots (#44, #45)."""
+    first sentence; cut at a clause or a sentence end, never mid-phrase and never with dots."""
     first = str(brief or "").strip().split("\n", 1)[0]
     head = re.sub(r"^[\s#*>]+", "", first) if re.match(r"\s*#+\s", first) else ""
     line = head or re.sub(r"^[\s#*>]+", "", str(title or "").strip().split("\n", 1)[0]) or re.sub(r"^[\s#*>]+", "", first)
@@ -230,15 +234,16 @@ def issue_title(title, brief):
 
 
 def ensure(home, s, text, base, where, rec=None):
-    """At a child's first message (`where` "brief") or its first plan ("plan"): its issue, filed or taken from its
-    brief, kept in s["issue"] (s is changed, the caller saves it). Returns the line for the child, '' for none."""
+    """At a child's first message, `where` "brief", or its first task list, `where` "plan": its issue, filed or
+    taken from its brief, kept in s["issue"]; s is changed and the caller saves it. Returns the line for the child,
+    '' for none."""
     parent = relay._parent(s)
     if not parent or not on(home):
         return ""
     if s.get("issue"):
         return ""
     if isinstance(s.get("reading"), dict):
-        return ""                                  # #44: a reading explores and commits nothing: no issue record
+        return ""                                  # a reading explores and commits nothing: no issue record
     looked = list(s.get("issueLooked") or [])
     if where in looked:
         return ""
@@ -262,9 +267,10 @@ def ensure(home, s, text, base, where, rec=None):
         link = link_of(rec)
         body = (f"Filed by p4-phi for the child session `{s['sessionId']}`, started by `{parent}`."
                 + (f" Session: {link}" if link else "") + "\n\n### Brief\n\n" + whole[:BODY_CHARS]
-                + "\n\n### Plan\n\n" + (plan or "(none yet)")
-                + "\n\nThe child's commits say `Closes #N`; phi re-runs the test that proves it at Stop, comments the "
-                  "result here, and retires the child once this closes.")
+                + "\n\n### Task list\n\n" + (plan or "none yet")
+                + "\n\nThe child's commits say `Closes #N`; p4-phi re-runs the regression test that proves it at Stop "
+                  "and comments the result here, and the `Closes` commit closes this issue on reaching the default "
+                  "branch.")
         r = gh(["issue", "create", "-R", slug, "--title", title, "--body", body])
         m = URL_NUM.search((r.stdout or "") if r is not None and r.returncode == 0 else "")
         if not m:
@@ -272,18 +278,18 @@ def ensure(home, s, text, base, where, rec=None):
         n, url = int(m.group(1)), r.stdout.strip().splitlines()[-1].strip()
     s["issue"] = {"repo": slug, "path": repo, "number": n, "url": url, "time": now(), "adopted": adopted,
                   "base": git(repo, "rev-parse", "HEAD"), "planPosted": bool(plan_lines(home, s["sessionId"]))}
-    return (f"phi (p4-phi): this session's purpose is {slug}#{n} ({url}), "
+    return (f"phi (p4-phi): this session's purpose is {slug}#{n}, {url}, "
             + ("named in its brief" if adopted else "filed now") + ". Its loop: each commit says `Closes #" + str(n)
-            + "`; a plan step names the test that proves it fixed (a backticked command or a test file, or "
-              "`phi.py proof \"<command>\"`); phi re-runs that test at Stop on the final head and comments the "
-              "result on the issue; green work is pushed at once, without asking, and each p4 store it touched synced "
-              "with `p4.py sync --push`; then, with the issue closed, this session is retired to its parent.")
+            + "`; a step of its task list names the regression test that proves it fixed, as a backticked command or "
+              "a test file, or `phi.py proof \"<command>\"` names it; p4-phi re-runs that test at Stop on the final "
+              "head, comments the result on the issue and says what is still owed; the `Closes` commit closes the "
+              "issue once it reaches the default branch.")
 
 
 def done_text(home, s, cwd=""):
-    """What `phi.py done` says about the issue this session closes (#45: only the Stop gate named it, and only once
-    a proving test was registered, so a child that reported done never learned which issue it closes). The issue,
-    and what it still owes before it closes: the commit, the proving test, the push. Nothing is read from GitHub."""
+    """What `phi.py done` says about the issue this session closes, so a child that reports done learns which issue
+    it closes and what it still owes before it closes: the commit, the regression test, the push. Nothing is read
+    from GitHub."""
     iss = s.get("issue") if isinstance(s.get("issue"), dict) else None
     if not on(home):
         return ""
@@ -294,7 +300,7 @@ def done_text(home, s, cwd=""):
             if nums:
                 refs = ", ".join(f"{slug}#{n}" for n in nums[:8])
                 return (f"this session has no issue record of its own; its task names {refs}. A commit closes one "
-                        f"by saying `Closes #N` for it, and the push of that commit closes it.")
+                        f"by saying `Closes #N` for it, once that commit reaches the default branch.")
         return ""
     slug, n = iss["repo"], iss["number"]
     owed = []
@@ -303,23 +309,24 @@ def done_text(home, s, cwd=""):
         owed.append(f"a commit that says `Closes #{n}`")
     proof = proof_of(home, s)
     if not proof:
-        owed.append("the test that proves it, named in a plan step or with `phi.py proof \"<command>\"`")
+        owed.append("the regression test that proves it, named in a step of the task list or with "
+                    "`phi.py proof \"<command>\"`")
     if closing and not all(_pushed(repo, sha) for repo, sha in closing):
         owed.append(f"the push of {closing[-1][1]}")
     have = []
     if closing:
         have.append(f"commit {closing[-1][1]} says `Closes #{n}`")
     if proof:
-        have.append(f"its proving test is `{proof['cmd']}`")
-    return (f"this session closes {slug}#{n} ({iss.get('url')})"
+        have.append(f"its regression test is `{proof['cmd']}`")
+    return (f"this session closes {slug}#{n}, {iss.get('url')}"
             + (": " + "; ".join(have) if have else "") + ". "
             + ("Still owed before it closes: " + "; ".join(owed) + "." if owed else
-               "Nothing is owed but the Stop check: phi re-runs the test on the final head and the pushed commit "
-               "closes the issue."))
+               "Nothing is owed but the Stop check: p4-phi re-runs the test on the final head, and the commit closes "
+               "the issue once it reaches the default branch."))
 
 
 def post_plan(home, s):
-    """The plan, commented on the issue once, when the issue was filed before the child had one."""
+    """The task list, commented on the issue once, when the issue was filed before the child had one."""
     iss = s.get("issue") if isinstance(s.get("issue"), dict) else None
     if not iss or iss.get("planPosted") or iss.get("adopted"):
         return False
@@ -327,7 +334,7 @@ def post_plan(home, s):
     if not plan:
         return False
     iss["planPosted"] = True
-    return comment(iss["repo"], iss["number"], "The child's plan:\n\n" + plan)
+    return comment(iss["repo"], iss["number"], "The child's task list:\n\n" + plan)
 
 
 def _commits(repo, rng, limit=40):
@@ -349,8 +356,8 @@ def closes(body, slug, n):
 
 
 def own_commits(s, cwd=""):
-    """[(repo, sha, subject, body)] of the commits made since the issue was taken, in its repository and in the
-    session's own checkout when that is a clone of the same one."""
+    """The commits made since the issue was taken, each as its repo, sha, subject and body, in the issue's
+    repository and in the session's own checkout when that is a clone of the same one."""
     iss = s.get("issue") or {}
     out, seen = [], set()
     repos = [iss.get("path") or ""]
@@ -375,7 +382,7 @@ def own_commits(s, cwd=""):
 
 
 def unclosed_text(home, s, cwd=""):
-    """At a step boundary: this child's commits that do not say `Closes #N`, each named once (s is changed)."""
+    """At a step boundary: this child's commits that do not say `Closes #N`, each named once; s is changed."""
     iss = s.get("issue") if isinstance(s.get("issue"), dict) else None
     if not iss or not on(home):
         return ""
@@ -393,7 +400,7 @@ def unclosed_text(home, s, cwd=""):
             f"the next one `Closes #{n}`, or amend an unpushed one's message.")
 
 
-# --- the proving test -------------------------------------------------------------------------------------------------
+# --- the regression test ----------------------------------------------------------------------------------------------
 
 def proof_path(home, sid):
     return os.path.join(relay._dir(home, sid), "proof.json")
@@ -413,8 +420,9 @@ def find_file(repo, name):
 
 
 def proof_of(home, s):
-    """{'cmd', 'cwd', 'step'} of the test that proves the issue fixed: named by `phi.py proof`, else by a plan step
-    that speaks of a test and names a backticked command or a test file; None when none is named."""
+    """{'cmd', 'cwd', 'step'} of the regression test that proves the issue fixed: named by `phi.py proof`, else by a
+    step of the task list that speaks of a test and names a backticked command or a test file; None when none is
+    named."""
     import plans
     iss = s.get("issue") or {}
     if isinstance(iss.get("test"), dict) and iss["test"].get("cmd"):
@@ -442,7 +450,7 @@ def _argv(cmd):
 
 
 def run_now(cmd, cwd, timeout):
-    """(exit code, output tail), or (None, '') when it outlasted `timeout`."""
+    """The exit code and the output's tail, or None and '' when it outlasted `timeout`."""
     argv, shell = _argv(cmd)
     try:
         r = subprocess.run(argv, shell=shell, cwd=cwd or None, capture_output=True, text=True, encoding="utf-8",
@@ -508,9 +516,10 @@ def _told(iss, key):
 
 
 def gate(home, s, cwd=""):
-    """At the Stop of a finished child with an issue: (ok, reason, note). ok when the test passed on the final head
-    and the issue is closed; the reason sends the turn back, said once for each state of the head; the note is what
-    the retirement keeps. s is changed; the caller saves it. A child with no issue is always ok."""
+    """At the Stop of a finished child with an issue: returns ok, the reason and the note. ok is true when the test
+    passed on the final head and the issue is closed; the reason sends the turn back, said once for each state of the
+    head; the note is what the child's replaces: note on its parent keeps when the child is counted as archived. s is
+    changed; the caller saves it. A child with no issue is always ok."""
     iss = s.get("issue") if isinstance(s.get("issue"), dict) else None
     if not iss or not on(home):
         return True, "", ""
@@ -519,27 +528,27 @@ def gate(home, s, cwd=""):
     proof = proof_of(home, s)
     if not proof:
         return False, ("" if _told(iss, "no-test") else
-                       f"phi (p4-phi): this session's work looks finished, but its plan names no test that proves "
-                       f"{ref} fixed. Add a plan step naming it, a backticked command or a test file, or run "
-                       f"`phi.py proof \"<command>\"`; phi re-runs it at Stop before this session is retired."), ""
+                       f"phi (p4-phi): this session's work looks finished, but its task list names no regression test "
+                       f"that proves {ref} fixed. Add a step naming it, a backticked command or a test file, or run "
+                       f"`phi.py proof \"<command>\"`."), ""
     d = proven(home, s, proof)
     head, state = d.get("head") or "?", d.get("state") or "running"
     if state in ("passed", "failed") and d.get("commented") != f"{head}:{state}":
-        body = (f"p4-phi re-ran the proving test `{proof['cmd']}` on {head}: **{state}** (exit {d.get('code')})."
+        body = (f"p4-phi re-ran the regression test `{proof['cmd']}` on {head}: **{state}**, exit code {d.get('code')}."
                 + (f"\n\n```\n{str(d.get('tail') or '')[-1200:]}\n```" if d.get("tail") else ""))
         if comment(slug, n, body):
             d["commented"] = f"{head}:{state}"
             relay._write_json(proof_path(home, s["sessionId"]), d)
     if state == "running":
         return False, ("" if _told(iss, f"running:{head}") else
-                       f"phi (p4-phi): the proving test `{proof['cmd']}` outlasted the Stop hook and runs on in the "
-                       f"background on {head}. Run it yourself to see its result, then end the turn; phi reads its "
-                       f"own run's result at the next Stop."), ""
+                       f"phi (p4-phi): the regression test `{proof['cmd']}` outlasted the Stop hook and runs on in "
+                       f"the background on {head}. Run it yourself to see its result, then end the turn; p4-phi reads "
+                       f"its own run's result at the next Stop."), ""
     if state == "failed":
         tail = relay._short(" ".join(str(d.get("tail") or "").split()[-80:]), 600)
         return False, ("" if _told(iss, f"failed:{head}") else
-                       f"phi (p4-phi): phi re-ran the proving test `{proof['cmd']}` on {head} and it failed (exit "
-                       f"{d.get('code')}), so this session stays open and is not retired until it passes. Its last "
+                       f"phi (p4-phi): the regression test `{proof['cmd']}` failed on {head} with exit code "
+                       f"{d.get('code')}, so this session stays open until it passes. Its last "
                        f"lines: {tail}"), ""
     mine = own_commits(s, cwd)
     closing = [(repo, sha, subj) for repo, sha, subj, body in mine if closes(body, slug, n)]
@@ -548,18 +557,20 @@ def gate(home, s, cwd=""):
     if st == "CLOSED" or (not st and pushed):
         sha, subj = (closing[-1][1], closing[-1][2]) if closing else ("", "")
         iss["closed"] = now()
-        note = (f"Issue: {iss['url']} (closed). Closing commit: "
+        note = (f"Issue: {iss['url']}, closed. Closing commit: "
                 + (f"{sha} \"{relay._short(subj, 80)}\"" if sha else "none found") + f". Proven by `{proof['cmd']}` "
                 f"on {head}: passed.")
         return True, "", note
     if not closing:
-        why = (f"phi (p4-phi): the proving test passed on {head}, but no commit of this session says `Closes #{n}`. "
-               f"Commit the work with `Closes #{n}` in its message, then push it at once, without asking.")
+        why = (f"phi (p4-phi): the regression test passed on {head}, but no commit of this session says "
+               f"`Closes #{n}`. Commit the work with `Closes #{n}` in its message, then push it at once, without "
+               f"asking.")
         return False, ("" if _told(iss, f"no-close:{head}") else why), ""
     if not pushed:
-        why = (f"phi (p4-phi): the proving test passed on {head}. ezexe's rule is that green issue work is pushed at "
-               f"once: push the `Closes #{n}` commit {closing[-1][1]} now, without asking, and sync each p4 store it "
-               f"touched with `p4.py sync --push`; the push closes {ref}. Force-pushes and history rewrites still ask.")
+        why = (f"phi (p4-phi): the regression test passed on {head}, and green issue work is pushed at once: push "
+               f"the `Closes #{n}` commit {closing[-1][1]} now, without asking, and sync each store it touched with "
+               f"`p4.py sync --push`; the push closes {ref}. Anything that cannot be undone, such as a force-push, a "
+               f"history rewrite or a deletion, still asks.")
         return False, ("" if _told(iss, f"push:{head}") else why), ""
     why = (f"phi (p4-phi): the `Closes #{n}` commit {closing[-1][1]} is pushed, but {ref} is still open: GitHub closes "
            f"it when that commit reaches the default branch. Land it there, or close it with `gh issue close {n} -R "
