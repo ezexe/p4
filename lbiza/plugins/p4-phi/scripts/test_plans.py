@@ -112,6 +112,25 @@ class Tasks(unittest.TestCase):
         plans.check_tasks(home, self.s, p)
         self.assertEqual(p["loose"][0]["status"], "unknown")
 
+    def test_a_background_tasks_timeout_is_read_as_milliseconds(self):
+        """Bash and PowerShell take `timeout` in milliseconds and Monitor takes `timeout_ms` in milliseconds, so a
+        launch of each with 60000 through the `lookup-record` hook is a background task of 60 seconds."""
+        hook = os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh")
+        for k, (tool, inp, response) in enumerate((
+                ("Bash", {"command": "sh smoke.sh", "run_in_background": True, "timeout": 60000},
+                 {"stdout": "", "backgroundTaskId": "bsixty001"}),
+                ("PowerShell", {"command": "pwsh smoke.ps1", "run_in_background": True, "timeout": 60000},
+                 {"stdout": "", "backgroundTaskId": "bsixty002"}),
+                ("Monitor", {"command": "tail -f smoke.log", "description": "smoke log", "timeout_ms": 60000},
+                 "Monitor started (task bsixty003, timeout 60000ms)."))):
+            body = {"session_id": CLI[TOP], "cwd": self.t.proj, "hook_event_name": "PostToolUse", "tool_name": tool,
+                    "tool_input": inp, "tool_response": response, "tool_use_id": f"toolu_sixty{k}"}
+            r = inproc.run(["sh", hook, "lookup-record"], input=json.dumps(body), capture_output=True, text=True,
+                           timeout=60, env=self.t.env(TOP, P4_RECALL_SYNC="1"))
+            self.assertEqual(r.returncode, 0, r.stderr)
+        got = {t["tool"]: t.get("timeoutS") for t in plans.load(self.t.p4, TOP).get("loose") or []}
+        self.assertEqual(got, {"Bash": 60, "PowerShell": 60, "Monitor": 60})
+
 
 class TreeOfPlans(unittest.TestCase):
     def setUp(self):

@@ -1288,9 +1288,9 @@ def register(home, s, tool, inp, response, cwd, at_epoch=None):
     repos = {relay.repo_of(p) for p in paths} | ({relay.repo_of(cwd)} if cwd else set())
     task = {"id": m.group(1) or m.group(2), "tool": tool, "what": relay._short(what, 200), "heads": relay.heads(repos),
             "paths": paths, "status": "open"}
-    limit = inp.get("timeout_ms") or inp.get("timeout")
+    limit = inp.get("timeout_ms") or inp.get("timeout")      # milliseconds in Bash and PowerShell as in Monitor
     if isinstance(limit, (int, float)) and limit > 0:
-        task["timeoutS"] = int(limit / 1000) if inp.get("timeout_ms") or limit > 100000 else int(limit)
+        task["timeoutS"] = int(limit / 1000)
     import time as _t
     epoch = int(at_epoch or _t.time())
     task["epoch"], task["at"] = epoch, _t.strftime("%Y-%m-%d %H:%M", _t.localtime(epoch))
