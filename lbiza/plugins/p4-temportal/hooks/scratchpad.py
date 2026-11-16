@@ -430,6 +430,11 @@ def link_tmp(harness, target, stamp):
     elsewhere, which is left as it is, or "failed" when something in it could not move or no link could be made, and a
     plain folder then stays in its place."""
     os.makedirs(target, exist_ok=True)
+    if is_link(harness) and own_dangling(harness, target):
+        try:
+            remove_link(harness)                       # this session's link into an older layout: made again
+        except OSError:
+            return "failed", []
     if is_link(harness):
         return ("kept" if same_dir(harness, target) else "foreign"), []
     moved = []
@@ -449,6 +454,22 @@ def link_tmp(harness, target, stamp):
         os.makedirs(harness, exist_ok=True)              # Claude Code still finds a folder to write to
         return "failed", moved
     return "linked", moved
+
+
+def own_dangling(harness, target):
+    """A link that reaches nothing and names this session's folder in an earlier place of the store's layout,
+    `.claude/p4/tmp/<sid>`, while `target` is its place now."""
+    if os.path.exists(harness):
+        return False
+    try:
+        dest = os.readlink(harness)
+    except (OSError, ValueError):
+        return False
+    if dest.startswith("\\\\?\\"):
+        dest = dest[4:]
+    p4 = os.path.dirname(os.path.dirname(os.path.dirname(target)))
+    older = [os.path.join(p4, *o.split("/"), os.path.basename(target)) for o in p4conf.OLDER["tmp"]]
+    return any(os.path.normcase(os.path.normpath(dest)) == os.path.normcase(os.path.normpath(o)) for o in older)
 
 
 def linked_to(harness, target):

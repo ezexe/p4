@@ -950,6 +950,30 @@ def scratchpad_dir_cases():
     print("test_scratchpad.py: scratchpad_dir cases green")
 
 
+def dangling_own_link_cases():
+    """A session whose scratchpad link dangles to `.claude/p4/tmp/<sid>`, the older layout's place, while
+    `temportal/tmp/<sid>` exists gets a working link at its start, not a foreign notice."""
+    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-dangling-")
+    sid = "cccc3333-0000-4000-8000-00000000000c"
+    harness = os.path.join(root, "harness", sid, "scratchpad")
+    old = os.path.join(root, ".claude", "p4", "tmp", sid)
+    target = os.path.join(root, ".claude", "p4", "temportal", "tmp", sid)
+    try:
+        os.makedirs(old)
+        link(harness, old)
+        shutil.rmtree(os.path.join(root, ".claude", "p4", "tmp"))
+        put(target, "kept.md", "kept\n")
+        out = run_sub("tmp-link", {"cwd": root, "session_id": sid, "scratchpad_dir": harness}, None,
+                      CLAUDE_PROJECT_DIR=root)
+        assert "does not reach" not in out, f"the session's own dangling link was called foreign: {out}"
+        assert os.path.isfile(os.path.join(harness, "kept.md")), f"the link was not repaired: {out}"
+    finally:
+        if is_link(harness):
+            unlink(harness)
+        shutil.rmtree(root, ignore_errors=True)
+    print("test_scratchpad.py: dangling own link cases green")
+
+
 def event_hooks(event):
     with open(HOOKS_JSON, encoding="utf-8") as f:
         return [h["command"] for g in json.load(f)["hooks"][event] for h in g["hooks"]]
@@ -1234,6 +1258,7 @@ def main():
     archived_by_phi_cases()
     scratchpad_dir_cases()
     parallel_hooks_cases()
+    dangling_own_link_cases()
     ended_cases()
     gate2_d()
     print("test_scratchpad.py: all green")
