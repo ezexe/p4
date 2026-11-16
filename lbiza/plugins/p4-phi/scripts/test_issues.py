@@ -117,8 +117,9 @@ class Loop(unittest.TestCase):
         write(os.path.join(self.work, "lib", "x.py"), text)
         self.git(self.work, "commit", "-qam", msg)
 
-    def regression_test(self, ok):
-        write(os.path.join(self.work, "test_x.py"), "import sys\nsys.exit(%d)\n" % (0 if ok else 1))
+    def regression_test(self, ok, wait=0):
+        write(os.path.join(self.work, "test_x.py"),
+              "import sys, time\ntime.sleep(%s)\nsys.exit(%d)\n" % (wait, 0 if ok else 1))
         self.git(self.work, "add", "test_x.py")
         exe = sys.executable.replace("\\", "/")
         return f"Run `\"{exe}\" -I test_x.py` to prove the fix"
@@ -126,10 +127,19 @@ class Loop(unittest.TestCase):
     def finish(self, test_step):
         self.plan(A, items("Fix x", test_step, status="completed"))
 
-    def stop(self, uuid):
-        r = self.t.stop(A, "finish", report="Fixed x; the test passes.", uuid=uuid)
+    def stop(self, uuid, **env):
+        r = self.t.stop(A, "finish", report="Fixed x; the test passes.", uuid=uuid, **env)
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout) if r.stdout.strip() else {}
+
+    def settled(self, path, wait=30.0):
+        """proof.json once its run in the background has written a result, or as it is after `wait` seconds."""
+        end = time.time() + wait
+        d = issues.relay._read_json(path)
+        while d.get("state") == "running" and time.time() < end:
+            time.sleep(0.1)
+            d = issues.relay._read_json(path)
+        return d
 
     def test_a_writing_child_in_a_github_repo_gets_an_issue_and_the_others_none(self):
         ctx = self.start_writer()
@@ -322,6 +332,29 @@ class Loop(unittest.TestCase):
         self.assertTrue(self.t.session(A).get("doneRetired"), "counted as archived once gh shows the issue closed")
         with open(notes, encoding="utf-8") as f:
             self.assertIn("https://github.com/ezexe/demo/issues/7, closed", f.read())
+
+    def test_a_run_in_the_background_whose_process_is_gone_is_run_again_at_the_next_stop(self):
+        """A regression test that outlasts P4_PHI_PROOF_S runs on in the background through the `proof-run` entry,
+        which writes its result to proof.json. A run in the background that died leaves proof.json in state running
+        with its process gone. The next Stop does not take that as running: it runs the test again and takes its
+        result."""
+        self.start_writer()
+        step = self.regression_test(True, wait=0.2)
+        self.commit("lib: fix x\n\nCloses #7")
+        self.finish(step)
+        out = self.stop("b1", P4_PHI_PROOF_S="0.05")
+        path = os.path.join(self.t.dir(A), "proof.json")
+        ran = self.settled(path)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("runs on in the background", out.get("reason", ""))
+        self.assertEqual(ran.get("state"), "passed", "the `proof-run` entry wrote the result of the run")
+        ended = subprocess.Popen([sys.executable, "-I", "-c", ""])
+        ended.wait()
+        left = {k: ran[k] for k in ("cmd", "cwd", "head", "time")}
+        write(path, json.dumps(dict(left, state="running", pid=ended.pid)))
+        out = self.stop("b2")
+        self.assertEqual(issues.relay._read_json(path).get("state"), "passed", "the test ran again")
+        self.assertIn("push the `Closes #7` commit", out.get("reason", ""), "and its pass was taken")
 
 
 CONSOLE = """import ctypes, json, os, subprocess, sys

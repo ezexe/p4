@@ -474,25 +474,51 @@ def run_background(home, sid, cmd, cwd, head):
         subprocess.Popen([sys.executable, "-I", "-X", "utf8", os.path.abspath(__file__), "proof-run", path],
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                          creationflags=flags, start_new_session=os.name != "nt", close_fds=True)
-    except OSError:
+    except OSError:                                # proof.json names no process, so the next Stop runs the test again
         pass
 
 
 def proof_run(path):
-    d = relay._read_json(path)
+    """The `proof-run` entry: runs the test proof.json names and writes its result there; while the test runs,
+    proof.json names this process as `pid`."""
+    d = dict(relay._read_json(path), pid=os.getpid())
+    relay._write_json(path, d)
     code, tail = run_now(d.get("cmd") or "", d.get("cwd") or "", 3600)
     d.update(state="passed" if code == 0 else "failed", code=code, tail=tail, time=now())
     relay._write_json(path, d)
 
 
+def _alive(pid):
+    """True while the process `pid` runs."""
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return False
+        return True
+    import ctypes
+    k = ctypes.WinDLL("kernel32")
+    k.OpenProcess.restype = ctypes.c_void_p
+    h = k.OpenProcess(0x00100000, False, pid)                       # SYNCHRONIZE
+    if not h:
+        return False
+    try:
+        return k.WaitForSingleObject(ctypes.c_void_p(h), 0) == 0x102    # WAIT_TIMEOUT: it has not ended
+    finally:
+        k.CloseHandle(ctypes.c_void_p(h))
+
+
 def proven(home, s, proof):
-    """proof.json for the test on the current head: run now when it has no result for that head, in the background
-    when it outlasts PROOF_S."""
+    """proof.json for the test on the current head: run now when it has no result for that head and no live process
+    runs it, in the background when it outlasts PROOF_S."""
     cwd = proof.get("cwd") or (s.get("issue") or {}).get("path") or ""
     head = git(cwd, "rev-parse", "--short", "HEAD") if cwd else ""
     path = proof_path(home, s["sessionId"])
     d = relay._read_json(path)
-    if d.get("cmd") == proof["cmd"] and d.get("head") == head and d.get("state") in ("passed", "failed", "running"):
+    if d.get("cmd") == proof["cmd"] and d.get("head") == head and (
+            d.get("state") in ("passed", "failed") or d.get("state") == "running" and _alive(d.get("pid"))):
         return d
     try:
         limit = float(os.environ.get("P4_PHI_PROOF_S") or PROOF_S)
