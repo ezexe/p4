@@ -298,6 +298,19 @@ class Check(Base):
         self.assertIn("45 seconds", why, "the same domains in another order and case, in the same mode")
         self.assertNotIn("30 seconds", why)
 
+    def test_a_page_with_a_long_address_is_answered_and_kept_apart(self):
+        """A page address longer than the 400 characters a stored target holds is answered by an earlier finding for
+        it, and never by one for another long address that shares its first 400 characters."""
+        long_url = URL + "/" + "a" * 430
+        other = URL + "/" + "a" * 430 + "/other"
+        self.record_fetch(url=long_url)
+        hso = self.out(run_hook("lookup-check", pre("WebFetch", {"url": long_url, "prompt": ASK}, proj=self.proj),
+                                self.proj))["hookSpecificOutput"]
+        self.assertEqual(hso["permissionDecision"], "deny")
+        self.assertIn("30 seconds", hso["permissionDecisionReason"])
+        self.assertIsNone(self.out(run_hook("lookup-check", pre("WebFetch", {"url": other, "prompt": ASK},
+                                                                proj=self.proj, tid="t-other"), self.proj)))
+
     def test_other_tools_are_never_stopped(self):
         self.record_fetch()
         for tool, inp in (("Read", {"file_path": "README.md"}), ("Edit", {"file_path": "a", "old_string": "x",

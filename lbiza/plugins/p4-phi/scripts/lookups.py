@@ -167,20 +167,28 @@ def ask_of(tool, inp):
         return str(inp)
 
 
+TARGET_CHARS = 400               # a target as the table keeps it: a longer one is cut and its whole hash appended
+
+
 def target_of(tool, inp):
     """What a call is about, exactly: a page and the character a fetch starts reading it at, a search's domains and
-    mode, a file, a program. Calls about the same target are the candidates."""
+    mode, a file, a program. Calls about the same target are the candidates. One longer than TARGET_CHARS is its
+    start and a hash of the whole, so it fits the table and stays apart from another that starts the same."""
     if tool == "WebFetch":
         try:
             at = int(inp.get("offset") or 0)
         except (TypeError, ValueError):
             at = 0
-        return norm_url(inp.get("url")) + (f"#offset={at}" if at > 0 else "")
-    if tool == "WebSearch":
-        return "search" + search_scope(inp)
-    if tool in SHELL_TOOLS:
-        return program(str(inp.get("command") or ""))
-    return norm_path(str(inp.get("file_path") or inp.get("notebook_path") or inp.get("path") or ""))
+        t = norm_url(inp.get("url")) + (f"#offset={at}" if at > 0 else "")
+    elif tool == "WebSearch":
+        t = "search" + search_scope(inp)
+    elif tool in SHELL_TOOLS:
+        t = program(str(inp.get("command") or ""))
+    else:
+        t = norm_path(str(inp.get("file_path") or inp.get("notebook_path") or inp.get("path") or ""))
+    if len(t) <= TARGET_CHARS:
+        return t
+    return t[:TARGET_CHARS - 17] + "~" + hashlib.sha1(t.encode("utf-8", "replace")).hexdigest()[:16]
 
 
 def search_scope(inp):
@@ -365,7 +373,7 @@ def insert(con, d, p4=None):
     else:
         finding = ""
     row = {"id": d["id"], "time": d.get("time") or "", "session": d.get("session") or "", "agent": d.get("agent") or "",
-           "tool": tool, "kind": k, "key": key_of(tool, inp), "target": target_of(tool, inp)[:400],
+           "tool": tool, "kind": k, "key": key_of(tool, inp), "target": target_of(tool, inp),
            "ask": ask_of(tool, inp)[:2000], "ok": ok, "sig": sig, "finding": finding, "fix": ""}
     cur = con.execute("INSERT OR IGNORE INTO calls VALUES (:id,:time,:session,:agent,:tool,:kind,:key,:target,:ask,"
                       ":ok,:sig,:finding,:fix)", row)
