@@ -83,6 +83,7 @@ phi/sessions.md
 phi/rules.md
 phi/catchup.json
 phi/**/*.tmp
+phi/**/*.lock
 phi/sessions/*/.calls/
 phi/.agents/
 phi/.nudge/

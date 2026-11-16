@@ -286,12 +286,15 @@ def boundary(home, s, plan, started, transcript=""):
     if moved or any(t.get("doneSaid") for _, t in _tasks(plan)):
         relay._write_json(_path(home, sid), plan)
     path = os.path.join(relay._dir(home, sid), "session.json")
+    with relay.locked(path) as lk:                # #53: emptied under the lock relay.warn holds
+        return _boundary(home, s, plan, started, text, lines, path, lk.held)
+
+
+def _boundary(home, s, plan, started, text, lines, path, held):
+    sid = s["sessionId"]
     disk = relay._read_json(path)
-    for w in disk.get("relayPending") or []:
-        if isinstance(w, dict):
-            lines.append(w["text"])
-            disk.setdefault("relayWarned", []).append(w.get("key"))
-    disk["relayPending"] = []
+    if held and disk:                             # not held: the warnings wait for the next boundary or message
+        lines.extend(relay.take_warnings(home, sid, disk))
     parent = relay._parent(s)
     root = plan.get("root") or ""
     if parent and root:

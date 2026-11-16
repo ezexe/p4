@@ -259,11 +259,48 @@ def _siblings(home, s):
 
 
 def warn(home, sid, key, text):
-    """A warning kept for a session's next message, once per key."""
+    """A warning kept for a session's next message, once per key. Under the session's lock for the whole
+    read-modify-write: siblings that end their turns at once each warn the same session, and without it the later
+    write dropped the earlier warnings (#53). One that cannot get the lock is never dropped and never written
+    unlocked: it is kept on a file of its own, and the next locked write or read takes it in (drain_warnings)."""
     path = os.path.join(_dir(home, sid), "session.json")
-    s = _read_json(path)
-    if not s:
+    if not os.path.exists(path):                  # no record: nothing to warn, and no folder is made for the lock
         return False
+    with locked(path) as lk:
+        if not lk.held:
+            name = hashlib.sha1(f"{key} {text}".encode("utf-8", "replace")).hexdigest()[:16]
+            _write_json(os.path.join(_dir(home, sid), f"warn-pending-{name}.json"),
+                        {"key": key, "text": text, "time": time.time()})
+            return True
+        s = _read_json(path)
+        if not s:
+            return False
+        took = drain_warnings(home, sid, s)
+        added = _warn(s, key, text)
+        if took or added:
+            _write_json(path, s)
+        return added
+
+
+def drain_warnings(home, sid, s):
+    """The warnings a locked write could not put on the session, from their own files, oldest first, into `s`; the
+    files are removed. Called with the session's lock held. True when `s` changed."""
+    rows = []
+    for p in glob.glob(os.path.join(_dir(home, sid), "warn-pending-*.json")):
+        d = _read_json(p)
+        if isinstance(d, dict) and d.get("key") and d.get("text"):
+            rows.append((float(d.get("time") or 0), str(d["key"]), str(d["text"])))
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    changed = False
+    for _, key, text in sorted(rows):
+        changed = _warn(s, key, text) or changed
+    return changed
+
+
+def _warn(s, key, text):
     told = s.setdefault("relayWarned", [])
     if key in told:
         return False
@@ -286,8 +323,22 @@ def warn(home, sid, key, text):
     for old in turns[:-TURN_WARNINGS]:                  # R6: the newest relayed turn reports only
         pend.remove(old)
         told.append(old.get("key"))
-    _write_json(path, s)
     return True
+
+
+def take_warnings(home, sid, s):
+    """The texts of the warnings kept for a session, taken off `s` and marked told. Called with the session's lock
+    held, by the code that hands them out, so a warning written meanwhile is never lost to that write (#53)."""
+    drain_warnings(home, sid, s)
+    told = s.setdefault("relayWarned", [])
+    out = []
+    for w in s.get("relayPending") or []:
+        if isinstance(w, dict):
+            out.append(w["text"])
+            if w.get("key") not in told:
+                told.append(w.get("key"))
+    s["relayPending"] = []
+    return out
 
 
 TURN_WARNINGS = 3          # relayed turn reports kept for one session's next message; older ones are dropped as told
@@ -610,6 +661,11 @@ def rebase(home, sid, room, fair_cut, touches=None):
     shard or open steps; the rest is a count and the pages that hold them. Whatever passes `room` is named by count
     and kept on a page, and none of it comes again (#43)."""
     path = os.path.join(_dir(home, sid), "session.json")
+    with locked(path) as lk:                      # #53: the warnings are emptied under the lock relay.warn holds
+        return _rebase(home, sid, room, fair_cut, touches, path, lk.held)
+
+
+def _rebase(home, sid, room, fair_cut, touches, path, held):
     s = _read_json(path)
     if not s:
         return "", False
@@ -624,10 +680,8 @@ def rebase(home, sid, room, fair_cut, touches=None):
         return (f"phi (p4-phi): this session's work is superseded and it is stale in the session tree: "
                 f"\"{st.get('note')}\". Re-base onto that before going on; the session that started it treats "
                 f"it as archived, its outcome is kept there, and ezexe was told it is ready to archive."), True
-    warnings = [w["text"] for w in s.get("relayPending") or [] if isinstance(w, dict)]
+    warnings = take_warnings(home, sid, s) if held else []     # not held: they wait for the next message
     told = s.setdefault("relayWarned", [])
-    told.extend(w["key"] for w in s.get("relayPending") or [] if isinstance(w, dict) and w.get("key") not in told)
-    s["relayPending"] = []
     parent = _parent(s)
     anchor = _read_json(anchor_path(home, parent))
     if "anchorSeen" not in s:                     # RF1: the first look takes what is there as seen, relays none of it
@@ -1015,7 +1069,7 @@ def child_paths(home, s):
 # rest of .gitignore runs beside this one at a start.
 
 IGNORED = ("phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/sessions.md", "phi/rules.md",
-           "phi/catchup.json", "phi/**/*.tmp", "phi/sessions/*/.calls/", "phi/.agents/", "phi/.nudge/",
+           "phi/catchup.json", "phi/**/*.tmp", "phi/**/*.lock", "phi/sessions/*/.calls/", "phi/.agents/", "phi/.nudge/",
            # #38: the puppeteer's pages are made again from the records; routes.jsonl is kept
            "phi/sessions/*/ledger.md", "phi/sessions/*/ledger.json", "phi/sessions/*/ledger.sig",
            "phi/sessions/*/watcher.json", "phi/meta-ledger.md", "phi/.issue-states.json", "phi/.routes-checked",

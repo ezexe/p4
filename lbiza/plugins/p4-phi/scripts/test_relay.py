@@ -8,6 +8,7 @@ in; the other is warned on its next message, before any tool runs.
 """
 
 import json
+import glob
 import os
 import shutil
 import subprocess
@@ -788,6 +789,50 @@ class SharedHome(unittest.TestCase):
         self.assertIn("names the home store git@example.com:team/elsewhere.git, which this machine has not seen", ctx)
         a.say(A, "Rework the exporter", P4_PHI_STORES=self.stores)
         self.assertTrue(os.path.isdir(os.path.join(a.p4, "phi", "sessions", A)), "the tree stays in its own store")
+
+
+class WarnTogether(unittest.TestCase):
+    def test_concurrent_warnings_keep_every_one(self):
+        import threading
+        home = tempfile.mkdtemp(prefix="p4-phi-warn-")
+        try:
+            top = "local_topwarn"
+            path = os.path.join(relay._dir(home, top), "session.json")
+            relay._write_json(path, {"sessionId": top})
+            gate = threading.Barrier(12)
+
+            def one(k):
+                gate.wait()
+                relay.warn(home, top, f"key{k}", f"warning number {k}")
+            runs = [threading.Thread(target=one, args=(k,)) for k in range(12)]
+            for r in runs:
+                r.start()
+            for r in runs:
+                r.join()
+            pend = relay._read_json(path).get("relayPending")
+            self.assertEqual(len(pend), 12, "no warning is lost to another's write")
+            self.assertFalse(os.path.exists(path + ".lock"))
+        finally:
+            shutil.rmtree(home, ignore_errors=True)
+
+    def test_a_warning_that_cannot_get_the_lock_is_kept_and_drained(self):
+        home = tempfile.mkdtemp(prefix="p4-phi-warn-")
+        wait = relay.LOCK_WAIT_S
+        try:
+            top = "local_topwarn"
+            path = os.path.join(relay._dir(home, top), "session.json")
+            relay._write_json(path, {"sessionId": top})
+            relay.LOCK_WAIT_S = 0.05
+            with relay.locked(path):
+                self.assertTrue(relay.warn(home, top, "key1", "held back"))
+                self.assertFalse(relay._read_json(path).get("relayPending"), "never written unlocked")
+            relay.warn(home, top, "key2", "written under the lock")
+            pend = relay._read_json(path).get("relayPending")
+            self.assertEqual(sorted(w["text"] for w in pend), ["held back", "written under the lock"])
+            self.assertEqual(glob.glob(os.path.join(relay._dir(home, top), "warn-pending-*.json")), [])
+        finally:
+            relay.LOCK_WAIT_S = wait
+            shutil.rmtree(home, ignore_errors=True)
 
 
 if __name__ == "__main__":
