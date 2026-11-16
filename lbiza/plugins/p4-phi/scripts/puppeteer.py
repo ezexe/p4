@@ -57,7 +57,6 @@ WATCH_S = 5.0                    # the watcher's tick
 WATCH_SLOW_S = 30.0              # its tick once nothing changed for WATCH_CALM_S
 WATCH_CALM_S = 600.0
 WATCH_QUIT_S = 24 * 3600.0       # a watcher whose sources stood still this long ends; the next hook starts another
-BEAT_S = 30.0                    # how often a watcher says it is alive
 BEAT_DEAD_S = 300.0              # a watcher silent this long is taken as gone: far past its slowest look
 ISSUE_TTL_S = 120.0              # how long an issue's state read from GitHub is believed
 GH_S = 6                         # one gh call of the puppeteer's, which a prompt hook may be waiting on
