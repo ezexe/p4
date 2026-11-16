@@ -2194,16 +2194,6 @@ def started_by(me, payload):
     return me
 
 
-def within(parts, room=None):
-    """The parts joined, cut evenly to the hook's room: Claude Code files away a hook's text past 10,000 characters
-    (RF1: a first look once gave 11.4 KB)."""
-    room = HOOK_CHARS if room is None else room
-    parts = [p for p in parts if p]
-    if sum(len(p) + 2 for p in parts) <= room:
-        return "\n\n".join(parts)
-    return "\n\n".join(fair_cut(parts, room - 2 * len(parts)))
-
-
 def fit(parts, room, home, sid):
     """The parts that fit in `room`, in their order, each whole; what does not fit is kept whole on the session's
     held.md and named by count, by that page and by how each begins (#43). No piece is shown cut: on the first
