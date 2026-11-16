@@ -20,7 +20,8 @@ from its row.
 Evaluation holds out one task at a time for up to LOO_MAX tasks. Above that, `folds` sorts the tasks by time and
 deals them into FOLDS folds in turn, grouping by nothing, so two tasks of one session can fall on both sides of a
 fold. A round reports R-precision, recall@20 and the precision of the threshold's picks, beside the BM25 baseline,
-the R-precision of BM25's own order of the same candidates.
+the R-precision of BM25's own order of the same candidates. The picks are those the query would serve, at most
+PER_FILE documents of one file, and the round chooses its threshold and saves its model with that cap.
 
 The silence tasks. Every task a round fits on has a positive among its candidates, and the ranker's features are
 relative, such as BM25 over the top candidate's and the rank, so the top candidate of an ordinary message scores
@@ -60,7 +61,8 @@ LOO_MAX = 40
 FOLDS = 5
 FLOOR_DROP = 0.02
 MIN_PRECISION = 0.6
-FIRST_FLOOR = 0.36            # until a round is promoted, the R-precision the pool-labelled tasks must reach
+PER_FILE = 2                  # documents of one file the query picks at most, p4.json's recall.query.per_file
+FIRST_FLOOR = 0.36           # until a round is promoted, the R-precision the pool-labelled tasks must reach
 OWED_LABELS = 10
 OWED_AGE_S = 3600
 MAX_TASKS = 400               # newest tasks a round fits on beyond the pool and edited ones, which it always keeps
@@ -419,11 +421,13 @@ def folds(sets):
     return [order[f::FOLDS] for f in range(FOLDS)]
 
 
-def evaluate(sets, per_file=ranker.PER_FILE, quiet=True):
+def evaluate(sets, per_file=None, quiet=True):
     """Held-out numbers over the sets: `{r-precision, recall@20, precision, f1, baseline, top5, threshold, n,
     missed}`, the same for each of the `pool`, `repo` and `history` subsets that has tasks, each task's numbers
-    under `rows`, and the count of silence tasks under `silent`. None when fewer than 3 tasks have a positive among
-    their candidates."""
+    under `rows`, and the count of silence tasks under `silent`. A fold's threshold is chosen, and its picks are
+    counted, at most `per_file` documents of one file, PER_FILE when it is not given. None when fewer than 3 tasks
+    have a positive among their candidates."""
+    per_file = per_file or PER_FILE
     silent = [s for s in sets if s.get("source") == "silent"]
     live = [s for s in sets if not s["missed"] and s.get("source") != "silent"]
     missed = [s for s in sets if s["missed"]]
@@ -573,12 +577,14 @@ def node_on(p4):
 
 
 def configure(p4):
-    """Apply the store's p4.json `recall.train` to the training constants, reading the file and never writing it."""
+    """Apply the store's p4.json `recall.train` to the training constants, and its `recall.query.per_file` to
+    PER_FILE, reading the file and never writing it."""
     import p4conf
     p4conf.configure(globals(), p4, "recall.train", {
         "candidates": "CANDIDATES", "train_neg": "TRAIN_NEG", "folds": "FOLDS", "floor_drop": "FLOOR_DROP",
         "min_precision": "MIN_PRECISION", "first_floor": "FIRST_FLOOR", "owed_labels": "OWED_LABELS",
         "owed_age_s": "OWED_AGE_S", "max_tasks": "MAX_TASKS"}, write=False)
+    p4conf.configure(globals(), p4, "recall.query", {"per_file": "PER_FILE"}, write=False)
 
 
 def run_round(p4, write=True, now=None, idx=None, sources=None, quiet=False, dictionary=True):
@@ -668,16 +674,16 @@ def run_round(p4, write=True, now=None, idx=None, sources=None, quiet=False, dic
     if ev is not None:
         w = fit_sets([s for s in sets if not s["missed"]])
         live = [s for s in sets if not s["missed"] and s.get("source") != "silent"]
-        t = ranker.best_threshold([(s["files"], s["ys"], scored(w, s)) for s in live], 2, MIN_PRECISION)
+        t = ranker.best_threshold([(s["files"], s["ys"], scored(w, s)) for s in live], PER_FILE, MIN_PRECISION)
         row["threshold"] = f"{t:.2f}"
         silent = [s for s in sets if s.get("source") == "silent"]
         if silent:
             # fitted, so an optimistic number: the share of the silence tasks the round's own model would print for
-            loud = sum(1 for s in silent if ranker.select(s["files"], scored(w, s), t, 2, limit=1))
+            loud = sum(1 for s in silent if ranker.select(s["files"], scored(w, s), t, PER_FILE, limit=1))
             ev["silent"] = {"n": len(silent), "loud": loud / len(silent)}
         if write and promote:
             ranker.save(p4conf.sub(p4, "models", "ranker.json"), w, t, round_=int(row["round"]), trained=now,
-                        per_file=2, floor={"r-precision": round(ev["r-precision"], 4),
+                        per_file=PER_FILE, floor={"r-precision": round(ev["r-precision"], 4),
                                            "precision": round(ev["precision"], 4),
                                            "short": round(short["rate"], 4)},
                         features=["base"] + (["near"] if __import__("near").ON else []) + (["node"] if node_on(p4) else []),

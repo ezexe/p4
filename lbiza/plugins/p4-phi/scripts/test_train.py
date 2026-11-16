@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for train.py: a round's promotion against its floors, `owed`, a round that writes nothing, the held
-documents among a pool task's candidates, the BM25 baseline's count of undrawn positives, and the dictionary check.
+documents among a pool task's candidates, the BM25 baseline's count of undrawn positives, a round's precision
+measured on the picks the query serves, and the dictionary check.
 
 Run: python3 test_train.py
 
@@ -165,6 +166,53 @@ class BaselineScaling(unittest.TestCase):
         ev = train.evaluate(sets)
         self.assertAlmostEqual(ev["baseline"], 0.5, msg="BM25 found 1 of the 2 labelled positives")
         self.assertLessEqual(ev["r-precision"], 0.5, msg="the ranker is held to the same denominator")
+
+
+class PerFile(unittest.TestCase):
+    """A round measures the picks the query serves: at most p4.json's `recall.query.per_file` documents of one file."""
+
+    @staticmethod
+    def sets():
+        # each task: three like documents of one file, the first two right and the third wrong, and an unlike one of
+        # another file; the query picks at most two documents of a file, so it serves the right two alone
+        like = {ranker.h("bias"): 1.0, ranker.h("like"): 1.0}
+        unlike = {ranker.h("bias"): 1.0, ranker.h("unlike"): 1.0}
+        return [{"task": f"t{k}", "xs": [dict(like), dict(like), dict(like), dict(unlike)], "ys": [1, 1, 0, 0],
+                 "w": [1.0] * 4, "files": ["a.md", "a.md", "a.md", "b.md"], "bm25": [3.0, 2.0, 1.0, 0.5], "n_pos": 2,
+                 "source": "repo", "sources": ["repo"], "missed": False, "time": str(k)} for k in range(6)]
+
+    def setUp(self):
+        self._kept = {k: getattr(train, k) for k in ("MIN_PRECISION", "build_sets")}
+        self._per_file = getattr(train, "PER_FILE", None)
+
+    def tearDown(self):
+        for k, v in self._kept.items():
+            setattr(train, k, v)
+        if self._per_file is not None:
+            train.PER_FILE = self._per_file
+
+    def test_the_precision_is_that_of_the_served_picks(self):
+        self.assertAlmostEqual(train.evaluate(self.sets())["precision"], 1.0)
+        self.assertAlmostEqual(train.evaluate(self.sets(), per_file=3)["precision"], 2 / 3, places=3,
+                               msg="the fixture tells the two caps apart")
+
+    def test_a_round_is_not_held_by_a_pick_the_query_never_serves(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        p4 = synthetic(tmp.name)
+        conf = p4conf.load(p4)
+        conf["recall"]["train"]["min_precision"] = 0.9
+        p4conf._write(p4, conf)
+        train.build_sets = lambda *a, **k: self.sets()
+        row = train.run_round(p4, now=NOW, dictionary=False)
+        self.assertEqual(row["promoted"], "promoted", row["why"])
+        self.assertEqual(row["precision"], "1.0000")
+        self.assertEqual(ranker.load(p4conf.sub(p4, "models", "ranker.json"))["per_file"], 2)
+        conf["recall"]["query"]["per_file"] = 3
+        p4conf._write(p4, conf)
+        row = train.run_round(p4, now=NOW, dictionary=False)
+        self.assertEqual(row["precision"], "0.6667", "a store that serves three of a file is measured at three")
+        self.assertIn("below 0.9", row["why"])
 
 
 class DictionaryCheck(unittest.TestCase):
