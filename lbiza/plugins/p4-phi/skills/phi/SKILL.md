@@ -47,7 +47,7 @@ The built-in rule `levels`, given at a session's start, says where work runs: th
 `phi.child_levels` in `.claude/p4/p4.json` sets the model and effort a worker starts with for each kind of step: by default `static` runs on `claude-sonnet-5-5` at `medium`, and `build` and `design` on the parent session's model at `high`.
 A worker splits at its first message: the app lets a session start sessions only in its first turn and in the turns ezexe's own messages open, so p4-phi tells it to plan its split then and start a session for every part that writes files or makes a decision, one per disjoint set of files.
 Subagents keep reads, searches, single command runs and independent checks.
-A writing part that comes up later is kept as a start request, which ezexe starts by a click.
+A writing part that comes up later is shown as a suggested task card that ezexe presses, and kept as a start request only where the card is refused too.
 A subagent that wrote files is listed on the ledger under Level misses.
 Before a session creates anything new, such as a module, a page, a format or a kind of test, it finds the documented terms for it and a published implementation guide for that kind of work, logs both with their sources in its decisions file, and builds by them: a writing worker's first message and every start draft carry that line.
 A task list whose first creating step has no such research step before it is advised one, once.

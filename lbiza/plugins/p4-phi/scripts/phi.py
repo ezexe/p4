@@ -1094,9 +1094,10 @@ FIRST_SPLIT = ("phi (p4-phi): this is this session's first message: the app lets
                "files, started in this turn with `mcp__ccd_session__start_session`, `initiation` `user_asked`, "
                "`context` `fresh`, `use_worktree: false`, each brief holding its `Files:` line. Subagents keep reads, "
                "searches, single command runs and independent checks, which return a result and hold no files. A "
-               "part that writes files and comes up after this turn is kept as a start request, {request}, which "
-               "p4-phi shows ezexe as a click; it never runs in a subagent. A task that is one part with one set of "
-               "files stays here whole.")
+               "part that writes files and comes up after this turn is shown as a suggested task card, the start "
+               "tool's `initiation` `own_initiative`, which ezexe presses in this session; only where the card is refused too is it kept as a start request, {request}, which the next "
+               "turn ezexe begins in this session starts. It never runs in a subagent. A task that is one part with "
+               "one set of files stays here whole.")
 
 
 RESEARCH = ("Before it creates anything new, such as a module, a page, a format or a kind of test, this session finds "
