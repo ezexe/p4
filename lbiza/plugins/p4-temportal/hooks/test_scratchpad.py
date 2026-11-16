@@ -950,6 +950,62 @@ def scratchpad_dir_cases():
     print("test_scratchpad.py: scratchpad_dir cases green")
 
 
+def event_hooks(event):
+    with open(HOOKS_JSON, encoding="utf-8") as f:
+        return [h["command"] for g in json.load(f)["hooks"][event] for h in g["hooks"]]
+
+
+def parallel_hooks_cases():
+    """The five SessionStart hooks run at once, as Claude Code runs the hooks of one event, on a store with the older
+    layout leave one moved layout, no layout lock and one p4.json that parses; the two SessionEnd hooks run at once
+    on that small store finish within the 1.5-second budget of a SessionEnd."""
+    sh = shutil.which("sh")
+    if not sh or not shutil.which("git"):
+        print("test_scratchpad.py: parallel hooks cases skipped, no sh or git on PATH")
+        return
+    import time
+    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-parallel-")
+    sid = "bbbb2222-0000-4000-8000-00000000000b"
+    p4 = os.path.join(root, ".claude", "p4")
+    old = {"memory/MEMORY.md": "- [a](a.md) — a\n", "scratchpad/plan.md": "- a plan\n",
+           f"tmp/{sid}/n.md": "a note\n", "src/probe.py": "print(1)\n"}
+    try:
+        os.makedirs(p4)
+        for args in (["init", "-q"], ["config", "user.name", "t"], ["config", "user.email", "t@t"]):
+            subprocess.run(["git", "-C", p4] + args, check=True, capture_output=True)
+        for rel, text in old.items():
+            put(p4, rel, text)
+        subprocess.run(["git", "-C", p4, "add", "-A"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", p4, "commit", "-q", "-m", "old layout"], check=True, capture_output=True)
+        env = env_with(None, CLAUDE_PLUGIN_ROOT=os.path.dirname(HERE), CLAUDE_PROJECT_DIR=root,
+                       CLAUDE_CONFIG_DIR=os.path.join(root, ".config"))
+        stdin = json.dumps({"cwd": root, "session_id": sid, "source": "startup"}).encode()
+
+        def at_once(event):
+            procs = [subprocess.Popen([sh, "-c", c], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, env=env) for c in event_hooks(event)]
+            for p in procs:
+                p.communicate(stdin, timeout=120)
+            assert all(p.returncode == 0 for p in procs), [p.returncode for p in procs]
+
+        at_once("SessionStart")
+        left = [rel for rel in old if os.path.exists(os.path.join(p4, *rel.split("/")))]
+        assert left == [], f"files left in the older layout: {left}"
+        moved = [rel for rel in old if not os.path.isfile(os.path.join(p4, "temportal", *rel.split("/")))]
+        assert moved == [], f"files missing from the new layout: {moved}"
+        assert not os.path.exists(os.path.join(p4, ".layout.lock")), "the layout lock was left"
+        with open(os.path.join(p4, "p4.json"), encoding="utf-8") as f:
+            json.load(f)
+        start = time.monotonic()
+        at_once("SessionEnd")
+        took = time.monotonic() - start
+        print(f"test_scratchpad.py: the two SessionEnd hooks at once took {took * 1000:.0f} ms")
+        assert took <= 1.5, f"the SessionEnd hooks took {took:.2f} s, over the 1.5 s budget"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("test_scratchpad.py: parallel hooks cases green")
+
+
 def snapshot(root):
     """Every file under a folder with its size, time and bytes, the git index and refs included."""
     out = {}
@@ -1177,6 +1233,7 @@ def main():
     tmp_close_cut_cases()
     archived_by_phi_cases()
     scratchpad_dir_cases()
+    parallel_hooks_cases()
     ended_cases()
     gate2_d()
     print("test_scratchpad.py: all green")
