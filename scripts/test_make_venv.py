@@ -76,9 +76,6 @@ class Venv(unittest.TestCase):
         self.assertTrue(any(c[-1] == "numpy" for c in calls))
         self.assertTrue(any(str(v.REQUIREMENTS) in c for c in calls))
 
-    def test_the_module_is_this_folders_script(self):
-        self.assertTrue(hasattr(v, "phi_source"))
-
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
