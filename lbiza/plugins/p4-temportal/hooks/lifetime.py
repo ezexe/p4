@@ -78,8 +78,15 @@ def home(p4):
     return os.path.join(p4, "temportal")
 
 
-def rules(p4):
-    return p4conf.section(p4, "temportal").get("cache", {})
+def rules(p4, warn=True):
+    """The cache rules of p4.json, or none when `temportal.cache` is not an object, with a line saying so."""
+    r = p4conf.section(p4, "temportal").get("cache", {})
+    if isinstance(r, dict):
+        return r
+    if warn:
+        print(f"p4-temportal: temportal.cache in p4.json is not an object, so no cache rule applies: {json.dumps(r)}",
+              file=sys.stderr)
+    return {}
 
 
 def parse_lifetime(text, now=None):
@@ -412,7 +419,10 @@ def listing(p4, now=None):
         except (TypeError, ValueError, OverflowError, OSError):
             pass
         lines.append(line or f"cookie  {rel}  unreadable, so never cleared: {json.dumps(v)}")
-    for rel, rule in sorted(rules(p4).items()):
+    raw = p4conf.section(p4, "temportal").get("cache", {})
+    if not isinstance(raw, dict):
+        lines.append(f"cache   temportal.cache is not an object, so no cache rule applies: {json.dumps(raw)}")
+    for rel, rule in sorted(rules(p4, warn=False).items()):
         lines.append(f"cache   {rel}/  " + (", ".join(f"{k}={v}" for k, v in rule.items()) if isinstance(rule, dict)
                      else f"not an object, so never applied: {json.dumps(rule)}"))
     return lines

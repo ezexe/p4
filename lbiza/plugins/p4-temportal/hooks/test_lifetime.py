@@ -132,6 +132,20 @@ class Lifetime(unittest.TestCase):
         moved = os.path.join(self.p4, "phi", p4conf.LAYOUT_CONFLICTS, "recall", "store", "kept.txt")
         self.assertTrue(os.path.isfile(moved), "the copy set aside in this start is kept")
 
+    def test_a_cache_section_that_is_not_an_object_is_no_rules(self):
+        import contextlib
+        import io
+        old = put(os.path.join(self.t, "scratchpad", ".out", "old.log"), age_days=400)
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump({"temportal": {"cache": 7}}, f)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(lifetime.sweep(self.p4), "")
+            lines = lifetime.listing(self.p4)
+        self.assertTrue(os.path.exists(old))
+        self.assertIn("temportal.cache", err.getvalue())
+        self.assertTrue(any("not an object" in x for x in lines), lines)
+
     def test_memory_is_never_cleared(self):
         mem = put(os.path.join(self.t, "memory", "a.md"), age_days=400)
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
