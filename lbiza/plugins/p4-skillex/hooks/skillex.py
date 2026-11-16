@@ -72,7 +72,10 @@ SECRETS = [re.compile(p) for p in (
     r"(?:[Aa]uthorization:\s*|[\"'])(?:Bearer|Basic)\s+(?![{$%<])[A-Za-z0-9._~+/=-]{16,}|\bBearer\s+(?![{$%<])[A-Za-z0-9._~+/=-]{20,}",
     r"://[^/\s:@'\"{}$%<]+:(?![{$%<])[^/\s@'\"{}]{3,}@",
     r"\bcurl\b[^\n]*\s(?:-u\s*|--user[ =])['\"]?[^\s:'\"$%-][^\s:'\"$%]*:(?![$%{])[^\s'\"]{3,}",
-    r"\b(?:docker\s+login|mysql|mysqldump|sshpass)\b[^\n]*\s-p\s*['\"]?(?![$%{-])[^\s'\"]{4,}",
+    r"\b(?:mysql|mysqldump)\b[^\n;&|]*\s-p(?![$%{'\"\s])[^\s'\"]{4,}",
+    r"\b(?:docker\s+login|sshpass)\b[^\n;&|]*?\s-p\s+['\"]?(?![$%{-]|\d+(?::\d+)?\b)[^\s'\"]{4,}",
+    r"[Aa]uthorization[\"']?\s*[:=]\s*[\"']?(?:[A-Za-z]+\s+)?(?![{$%<])[A-Za-z0-9._~+/=-]{16,}",
+    r"ConvertTo-SecureString\s+[\"'][^\"'$]{6,}[\"']\s+-AsPlainText",
     r"(?:\bauth\s*=\s*\(|HTTPBasicAuth\(|HTTPDigestAuth\()\s*['\"][^'\"\n]+['\"]\s*,\s*['\"](?![$%{])[^'\"\n]{6,}['\"]",
 )]
 # A secret's name, and the names that only describe one, such as TOKEN_FILE, secret_id or token_type_hint.
@@ -89,6 +92,7 @@ GIVEN = [re.compile(p) for p in (
     r"(?i)(?:getenv|environ\.get|environ\.setdefault)\(\s*['\"](" + _NAME + r")['\"]\s*,\s*(?:\"([^\"\n]{8,})\"|'([^'\n]{8,})')()",
     r"(?i)\$\{(" + _NAME + r"):?-()()([^}\s]{8,})\}",
     r"(?i)process\.env\.(" + _NAME + r")\s*(?:\|\||\?\?)\s*(?:\"([^\"\n]{8,})\"|'([^'\n]{8,})')()",
+    r"(?i)\b(" + _NAME + r")\s*:\s*[A-Za-z_][\w.\[\], |]*\s*=\s*(?:\"([^\"\n]{8,})\"|'([^'\n]{8,})')()",
 )]
 SHELL_EXT = (".sh", ".bat", ".cmd", ".ps1")
 FILE_EXT = r"\.(?:json|ya?ml|toml|txt|env|ini|cfg|conf|pem|key|crt|db|sqlite|py|sh|js|ts|md|log|out)"
@@ -246,6 +250,8 @@ def secret_value(value):
         return False                                     # a constant's name or a placeholder such as YOUR_API_KEY
     if UUID.search(v):
         return True
+    if entropy(v) < 1.5:
+        return False                                     # a placeholder such as xxxxxxxxxxxx
     if re.match(r"(?:[/~\\]|\.{1,2}[/\\]|[A-Za-z]:[/\\])", v) or re.search(FILE_EXT + r"$", v, re.I):
         return False                                     # a path by its start, or a file's name
     if "/" in v and not re.search(r"[+=]", v) and not (len(v) >= 20 and entropy(v) >= 4.5) and \

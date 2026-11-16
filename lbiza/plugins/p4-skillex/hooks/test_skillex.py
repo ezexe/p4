@@ -238,7 +238,12 @@ class Watcher(Store):
                    ('api_key = "3f9a1c2e-4b5d-6e7f-8a9b-0c1d2e3f4a5b"', ".py"),
                    ('api_key = "key-3ax6xnjp29jd6fds4gc373sgvjxteol0"', ".py"), ("tool --password Summer.2024", ".sh"),
                    ('private_key = "a8f3k29dk3l0s9d2"', ".py"), ('encryption_key = "a8f3k29dk3l0s9d2"', ".py"),
-                   ('credentials = "a8f3k29dk3l0s9d2"', ".py")]
+                   ('credentials = "a8f3k29dk3l0s9d2"', ".py"), ("mysql -uroot -ps3cretpw db", ".sh"),
+                   ('API_KEY: str = "a8f3k29dk3l0s9d2"', ".py"), ('password: str = "s3cretpw99"', ".py"),
+                   ('const apiKey: string = "a8f3k29dk3l0s9d2";', ".ts"),
+                   ('h = {"Authorization": "Token a8f3k29dk3l0s9d2abcd"}', ".py"),
+                   ('curl -H "Authorization: Token a8f3k29dk3l0s9d2abcd" x', ".sh"),
+                   ('$pw = ConvertTo-SecureString "P@ssw0rd123" -AsPlainText -Force', ".ps1")]
         spared = [('token_url = "https://x/oauth/token"', ".py"), ('password_field = "password"', ".py"),
                   ('SECRET_NAME = "prod-db-creds"', ".py"), ("token = parts[0]", ".py"),
                   ("tokens = list(tokenize.generate_tokens(io.StringIO(src).readline))", ".py"),
@@ -275,7 +280,11 @@ class Watcher(Store):
                   ("SECRET_BACKEND=kubernetes", ".sh"), ("PASSWORD_AUTH=disabled", ".sh"),
                   (': "${API_TOKEN:?API_TOKEN must be set}"', ".sh"), ('echo "Password: required"', ".sh"),
                   ("train --tokenizer gpt2-medium", ".sh"), ("train --tokenizer_name gpt2-medium", ".sh"),
-                  ("train --tokenizer ./tokenizer.json", ".sh")]
+                  ("train --tokenizer ./tokenizer.json", ".sh"), ("mysql -u root -p mydb < dump.sql", ".sh"),
+                  ("mysqldump -u root -p mydb > out.sql", ".sh"),
+                  ("docker run --name mysql -p 3306:3306 -e X=1 mysql:8", ".sh"),
+                  ('sshpass -p "$PW" ssh -p 2222 host', ".sh"), ('api_key = "xxxxxxxxxxxxxxxxxxxx"', ".py"),
+                  ('h = {"Authorization": f"Bearer {token}"}', ".py"), ('h = {"Authorization": "Token " + token}', ".py")]
         for i, (line, ext) in enumerate(flagged + spared):
             p = put(os.path.join(self.root, f"probe{i}{ext}"), line + "\n")
             self.assertEqual(skillex.holds_secret(p), (line, ext) in flagged, line)
