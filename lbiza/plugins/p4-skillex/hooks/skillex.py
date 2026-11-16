@@ -838,7 +838,8 @@ def cmd_write(p4, payload):
 
 
 def cmd_stop(p4, payload):
-    """Look at the session's scripts changed since its last look that the Write hook has not seen, oldest first,
+    """Look at the scripts changed since the session's last look in its own tmp folder and in the notebook that the
+    Write hook has not seen, oldest first,
     so the newest version is the one a skill keeps. The new time of the look is saved before any script is read, so
     a Stop cut short by its timeout never makes the next one start over."""
     sid = safe_sid(payload.get("session_id"))
@@ -850,8 +851,8 @@ def cmd_stop(p4, payload):
     if st is None:                                       # no start was recorded: nothing to compare against
         return None
     changed = []
-    if os.path.isdir(base):
-        for p in scripts_of(base):
+    for folder in (base, os.path.join(p4, "temportal", NOTEBOOK)):     # its own scratch, and the shared notebook
+        for p in scripts_of(folder) if os.path.isdir(folder) else []:
             try:
                 m = os.stat(p)
             except OSError:

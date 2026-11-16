@@ -299,6 +299,17 @@ class Watcher(Store):
         self.assertIn("`astcheck`", out["systemMessage"])
         self.assertIsNone(skillex.cmd_stop(self.p4, {"session_id": "s3"}), "nothing changed since the last look")
 
+    def test_a_script_a_shell_command_writes_into_the_notebook_is_seen_at_stop(self):
+        os.makedirs(os.path.join(self.tmp, "s3"))
+        self.started_a_minute_ago("s3")
+        self.script("s1", "astcheck.py", "astcheck", "a=1")
+        self.script("s2", "astcheck.py", "astcheck", "b=2")
+        put(os.path.join(self.p4, "temportal", "scratchpad", "astcheck.py"), CHECK.format(name="astcheck", extra="c=3"))
+        out = skillex.cmd_stop(self.p4, {"session_id": "s3"})
+        self.assertEqual(self.skills(), ["astcheck"])
+        self.assertIn("scratchpad/astcheck.py", read(os.path.join(self.p4, "skillex", "astcheck", "sources.txt")))
+        self.assertIn("`astcheck`", out["systemMessage"])
+
     def test_stop_skips_what_the_write_hook_saw_and_keeps_the_newest_version(self):
         self.started_a_minute_ago("s3")
         self.script("s1", "astcheck.py", "astcheck", "a=1")
