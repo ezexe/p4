@@ -50,9 +50,9 @@ def path(p4):
 
 
 def tag(pairs):
-    """The lines and {handle: entry id} for a list of pairs of a line and its entry id. The line of a rule,
-    correction, retraction or fact gets the next handle of `[r1]`, `[r2]` and so on, after its leading `- ` or
-    first when it has none; any other line is left as it is."""
+    """The lines and {handle: document id} for a list of pairs of a line and its id. The line of a rule, correction,
+    retraction or fact gets the next handle of `[r1]`, `[r2]` and so on, after its leading `- ` or first when it has
+    none; any other line is left as it is."""
     import store as st
     lines, handles = [], {}
     for line, eid in pairs:
