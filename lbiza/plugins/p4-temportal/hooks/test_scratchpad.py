@@ -1424,6 +1424,29 @@ class AskPaths(unittest.TestCase):
         for tool in ("Write", "Edit", "Bash", "PowerShell", "NotebookEdit"):
             self.assertIn(tool, ask["matcher"].split("|"))
 
+    def test_the_runner_skips_the_ask_only_when_it_is_off(self):
+        """run-hook.sh starts no python for the ask while it is off, and runs it in every form asks_on() reads as
+        on: the ask is given exactly when the asks are on."""
+        proj = tempfile.mkdtemp(prefix="p4-temportal-runner-ask-")
+        self.addCleanup(wipe, proj)
+        os.makedirs(os.path.join(proj, ".claude", "p4"))
+        payload = json.dumps({"tool_name": "Write", "cwd": proj, "tool_input": {"file_path": "/tmp/x.py"}})
+        cases = [('{"scratchpad": {"asks": true}}', None, True), ('{"scratchpad": {"asks" : true}}', None, True),
+                 ('{"scratchpad": {"asks": 1}}', None, True), ('{"scratchpad": {"asks": "yes"}}', None, True),
+                 ('{\n "scratchpad": {\n  "asks": true\n }\n}', None, True), ("{}", " 1", True),
+                 ('{"scratchpad": {"asks": false}}', None, False), ('{"scratchpad": {"asks": 0}}', None, False),
+                 ("{}", None, False), ('{"scratchpad": {"asks": true}}', "0", False)]
+        for conf, env_val, on in cases:
+            with open(os.path.join(proj, ".claude", "p4", "p4.json"), "w", encoding="utf-8") as f:
+                f.write(conf)
+            env = {k: v for k, v in os.environ.items() if k != "P4_SCRATCHPAD_ASKS"}
+            env.update(CLAUDE_PLUGIN_ROOT=os.path.dirname(HERE), CLAUDE_PROJECT_DIR=proj)
+            if env_val is not None:
+                env["P4_SCRATCHPAD_ASKS"] = env_val
+            r = subprocess.run(["sh", os.path.join(HERE, "run-hook.sh"), "scratchpad", "ask"], input=payload.encode(),
+                               env=env, capture_output=True, cwd=proj)
+            self.assertEqual("permissionDecision" in r.stdout.decode("utf-8", "replace"), on, (conf, env_val))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
