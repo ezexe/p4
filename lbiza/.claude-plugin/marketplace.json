@@ -37,6 +37,7 @@
   ],
   "renames": {
     "p4-memory": "p4-temportal",
-    "p4-scratchpad": "p4-temportal"
+    "p4-scratchpad": "p4-temportal",
+    "p4-recall": "p4-phi"
   }
 }

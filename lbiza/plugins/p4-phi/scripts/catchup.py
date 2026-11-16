@@ -11,8 +11,8 @@ prints nothing when nothing is behind. Otherwise one `systemMessage` for ezexe, 
             FETCH_S seconds. Nothing is forced, and nothing is pulled outside `p4.py sync`.
   plugins   a former plugin, enabled or only installed, and an installed p4-phi or p4-temportal older than the
             marketplace's get the exact `claude plugin` commands that close them, in order. A former plugin is a key
-            of RETIRED, p4-memory, p4-scratchpad or p4-recall, which the marketplace no longer offers. The commands
-            are printed, never run: plugin settings are ezexe's.
+            of the marketplace's `renames` map that names a plugin in its place, and which the marketplace no longer
+            offers. The commands are printed, never run: plugin settings are ezexe's.
   cache     the version folders under <config>/plugins/cache/p4-marketplace/ that no install uses: how many and
             their size, in one line, said again only when the count changes. Nothing is deleted here: Claude Code
             removes a version folder 14 days after an update or uninstall orphans it, and `catchup.py prune-cache`
@@ -33,7 +33,6 @@ if HERE not in sys.path:
 import p4conf  # noqa: E402
 
 MARKET = "p4-marketplace"
-RETIRED = {"p4-memory": "p4-temportal", "p4-scratchpad": "p4-temportal", "p4-recall": "p4-phi"}
 CURRENT = ("p4-phi", "p4-temportal")
 FETCH_S = 5.0                 # what the fetch that finds a branch behind may take at a start
 SIZE_S = 2.0                  # what measuring the unused version folders may take
@@ -103,10 +102,23 @@ def all_install_paths():
             if isinstance(r, dict) and r.get("installPath")]
 
 
+def market_location():
+    """Where Claude Code keeps this machine's copy of the marketplace, '' when it knows none."""
+    return (read_json(os.path.join(config_dir(), "plugins", "known_marketplaces.json")).get(MARKET) or {}).get(
+        "installLocation") or ""
+
+
+def retired():
+    """{former plugin: the plugin in its place}: the marketplace's `renames` map, which maps a former name to its new
+    one or to null, less the names mapped to null, which nothing takes the place of."""
+    loc = market_location()
+    renames = read_json(os.path.join(loc, ".claude-plugin", "marketplace.json")).get("renames") if loc else None
+    return {k: v for k, v in (renames or {}).items() if isinstance(k, str) and isinstance(v, str) and v}
+
+
 def market_versions():
     """{name: version} the marketplace offers: each plugin's own plugin.json, else marketplace.json."""
-    loc = (read_json(os.path.join(config_dir(), "plugins", "known_marketplaces.json")).get(MARKET) or {}).get(
-        "installLocation") or ""
+    loc = market_location()
     if not loc:
         return {}
     out = {}
@@ -140,6 +152,7 @@ def plugin_commands(project):
     on = enabled(project)
     have = installs(project)
     offer = market_versions()
+    former = retired()
     every = every_install()
     out, need, seen = [], {}, set()
 
@@ -149,17 +162,17 @@ def plugin_commands(project):
             return
         seen.add(key)
         out.append(f"claude plugin uninstall {name}@{MARKET} --scope {scope}" + (f" (in {where})" if where else ""))
-        if scope == "user" or need.get(RETIRED[name]) != "user":
-            need[RETIRED[name]] = scope
-    # a plugin of RETIRED is former only where the marketplace no longer offers it: a marketplace that still lists
+        if scope == "user" or need.get(former[name]) != "user":
+            need[former[name]] = scope
+    # a renamed plugin is former only where the marketplace no longer offers it: a marketplace that still lists
     # p4-recall holds a p4-phi without retrieval, and uninstalling p4-recall there would leave no retrieval at all.
     # A former plugin installed but disabled is listed too: its install record and cache folders stay until it is
     # uninstalled.
     for (name, scope), state in sorted(on.items()):
-        if state and name in RETIRED and name not in offer:
+        if state and name in former and name not in offer:
             retire(name, scope)
     for name, scope, _, where in sorted(every):
-        if name in RETIRED and name not in offer:
+        if name in former and name not in offer:
             retire(name, scope, "" if scope == "user" or same_path(where, project) else where)
     moves, updates = [], []
     for name in CURRENT:

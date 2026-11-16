@@ -38,7 +38,8 @@ class Base(unittest.TestCase):
               {M: {"source": {"source": "directory", "path": self.market}, "installLocation": self.market}})
         write(os.path.join(self.market, ".claude-plugin", "marketplace.json"), {"name": M, "plugins": [
             {"name": "p4-phi", "source": "./plugins/p4-phi", "version": "0.7.0"},
-            {"name": "p4-temportal", "source": "./plugins/p4-temportal", "version": "0.2.0"}]})
+            {"name": "p4-temportal", "source": "./plugins/p4-temportal", "version": "0.2.0"}],
+            "renames": {"p4-memory": "p4-temportal", "p4-scratchpad": "p4-temportal", "p4-recall": "p4-phi"}})
         for name, v in (("p4-phi", "0.7.0"), ("p4-temportal", "0.2.0")):
             write(os.path.join(self.market, "plugins", name, ".claude-plugin", "plugin.json"), {"name": name, "version": v})
 
@@ -69,6 +70,20 @@ class Base(unittest.TestCase):
 
 
 class Plugins(Base):
+    def test_a_name_the_marketplace_renames_is_retired(self):
+        """ezexe/p4#185: the retired plugins are the marketplace's `renames`, row P14 of the platform page, so a name
+        only that map holds is uninstalled in favour of the plugin it names, and a name mapped to null is not."""
+        path = os.path.join(self.market, ".claude-plugin", "marketplace.json")
+        with open(path, encoding="utf-8") as f:
+            m = json.load(f)
+        m["renames"].update({"p4-old-name": "p4-phi", "p4-gone": None})
+        write(path, m)
+        self.install([("p4-old-name", "user", "0.1.0", None), ("p4-gone", "user", "0.1.0", None),
+                      ("p4-phi", "user", "0.7.0", None)], {"p4-old-name": True, "p4-gone": True, "p4-phi": True})
+        cmds = catchup.plugin_commands(self.project)
+        self.assertIn(f"claude plugin uninstall p4-old-name@{M} --scope user", cmds)
+        self.assertFalse(any("p4-gone" in c for c in cmds), cmds)
+
     def test_nothing_behind_is_silent(self):
         self.install([("p4-phi", "user", "0.7.0", None), ("p4-temportal", "user", "0.2.0", None)],
                      {"p4-phi": True, "p4-temportal": True, "p4-recall": False})
