@@ -189,7 +189,11 @@ def standing(store, sid):
     if working:
         against.append("its last message has no turn's end recorded after it, so it is mid-turn")
     steps = plans.open_steps(store, sid)
-    if steps:
+    try:
+        commits = relay.closing_commits(store, sid, s)
+    except Exception:  # noqa: BLE001
+        commits = []
+    if steps and not issues_closed(s, commits):    # once its issues are closed, a stale step holds nothing
         against.append(f"{len(steps)} open plan step{'s' if len(steps) != 1 else ''}, the next "
                        f"\"{PHI.cut(PHI.clean(steps[0].get('content')), 80)}\"")
     tasks = _watcher().held_tasks(store, sid)
@@ -206,16 +210,32 @@ def standing(store, sid):
         against.append(f"{len(asked)} start request{'s' if len(asked) != 1 else ''} of its own waiting, the first "
                        f"\"{asked[0].get('title')}\", which it starts at a turn ezexe begins there: ezexe opens "
                        f"{link(sid)} and presses the button its turn ended on")
-    try:
-        for path, sha, _, closes in relay.closing_commits(store, sid, s):
-            if not issues._pushed(path, sha):
-                against.append(f"commit {sha}, which closes #{', #'.join(closes)}, is on no remote branch")
-    except Exception:  # noqa: BLE001
-        pass
+    for path, sha, _, closes in commits:
+        try:
+            if not issues.landed(path, sha, closes):
+                against.append(f"commit {sha}, which closes {', '.join(closes)}, is on no remote branch, and no "
+                               f"commit there closes the same issue or carries the same change")
+        except Exception:  # noqa: BLE001
+            pass
     turns = PHI.load_turns(store, sid)
     every = plans.load(store, sid).get("steps") or []
     shown = bool(turns and turns[-1].get("done")) or bool(every) and not steps
     return ("working" if working else "open" if against else "shown done" if shown else "not shown done"), against
+
+
+def issues_closed(s, commits):
+    """True when a session names issues, by its own issue or its closing commits, and GitHub shows each closed."""
+    named = set()
+    held = s.get("issue") if isinstance(s.get("issue"), dict) else {}
+    if held.get("repo") and str(held.get("number") or "").isdigit():
+        named.add((held["repo"], int(held["number"])))
+    for path, _, _, closes in commits:
+        for c in closes:
+            slug, _, n = str(c).rpartition("#")
+            slug = slug or issues.github_of(path)
+            if slug and n.isdigit():
+                named.add((slug, int(n)))
+    return bool(named) and all(issues.issue_state(slug, n) == "CLOSED" for slug, n in sorted(named))
 
 
 def last_report(store, sid):

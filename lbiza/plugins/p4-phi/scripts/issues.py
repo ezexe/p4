@@ -582,6 +582,26 @@ def _pushed(repo, sha):
     return bool(out.strip())
 
 
+def landed(repo, sha, closes):
+    """True when a commit that closes the issues `closes` names, each as `#N` or `owner/name#N`, has landed: it is on
+    a remote branch, a commit on a remote branch closes the same issue, or a patch-equivalent commit is on one, as
+    `git cherry` finds a commit an orchestrator landed by cherry-pick or rebase under a new hash."""
+    if _pushed(repo, sha):
+        return True
+    for c in closes:
+        n = str(c).rpartition("#")[2]
+        if n.isdigit() and git(repo, "log", "--remotes", "-E", "-i", "-n", "1", "--format=%h",
+                               rf"--grep=(close[sd]?|fix(e[sd])?|resolve[sd]?) +([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#{n}"
+                               r"([^0-9]|$)"):
+            return True
+    for branch in git(repo, "branch", "-r", "--format=%(refname:short)").split():
+        if "->" in branch or branch.endswith("/HEAD"):
+            continue
+        if any(x.startswith("-") for x in git(repo, "cherry", branch, sha, sha + "~1").splitlines()):
+            return True
+    return False
+
+
 if __name__ == "__main__":
     if sys.argv[1:2] == ["proof-run"] and len(sys.argv) > 2:
         proof_run(sys.argv[2])

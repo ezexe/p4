@@ -15,6 +15,8 @@ import ast
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -871,6 +873,90 @@ class Waits(unittest.TestCase):
                 {"addr": "1", "content": "Rewrite the exporter", "status": "in_progress"}]})
             self.assertIn("is still in_progress", plans.keep_going(home, s, "Not yet.", [], "t2", waits=["A"]),
                           "a step that is work is not a wait")
+
+
+class LandedWorker(unittest.TestCase):
+    """A worker whose work its orchestrator landed under new hashes, and whose issue is closed, is complete."""
+
+    file = Supervisor.file
+    archive = Supervisor.archive
+
+    def setUp(self):
+        if not shutil.which("git") or not shutil.which("sh"):
+            self.skipTest("no git or sh")
+        from test_issues import FAKE_GH, GhTree
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        tmp = self._tmp.name
+        ghdir = os.path.join(tmp, "gh")
+        os.makedirs(ghdir)
+        write(os.path.join(ghdir, "gh.py"), FAKE_GH)
+        write(os.path.join(ghdir, "state.json"), json.dumps({"7": "CLOSED"}))
+        os.environ["FAKE_GH_DIR"] = ghdir
+        self.addCleanup(os.environ.pop, "FAKE_GH_DIR", None)
+        self.t = t = GhTree(tmp, os.path.join(ghdir, "gh.py"))
+        t.record(PUP, title="Control the exporter tree")
+        t.record(TOP, title="Build the narwhal exporter")
+        t.record(KID, started_by=TOP, title="the flush child")
+        self.file("puppeteers", PUP)
+
+    def git(self, repo, *args):
+        return subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", *args], check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def edit(self, path, uuid):
+        """The worker edits a file in a turn of its own."""
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("more = 2\n")
+        self.assertEqual(self.t.stop(KID, "edit it", [("Edit", {"file_path": path}, "ok")], uuid=uuid).returncode, 0)
+
+    def test_a_worker_landed_by_cherry_pick_with_its_issue_closed_passes_the_archive_gate(self):
+        t = self.t
+        work = os.path.join(t.proj, "work").replace("\\", "/")
+        bare = os.path.join(t.tmp, "bare.git").replace("\\", "/")
+        land = os.path.join(t.tmp, "land").replace("\\", "/")
+        write(os.path.join(work, "lib", "x.py"), "x = 1\n")
+        write(os.path.join(work, "lib", "y.py"), "y = 1\n")
+        for args in (("init", "-q", "-b", "main"), ("add", "-A"), ("commit", "-qm", "one")):
+            self.git(work, *args)
+        self.git(work, "remote", "add", "origin", "https://github.com/ezexe/demo.git")
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", bare], check=True, capture_output=True)
+        self.git(work, "push", "-q", bare, "main")
+        t.say(PUP, "Control the trees")
+        t.say(TOP, "Build the exporter")
+        t.cli(PUP, "controls", TOP)
+        t.say(KID, "Task:\nFix the flush for ezexe/demo#7. Report when done.\nFiles: work/lib/x.py")
+        t.hook("plan", KID, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                             "tool_input": {"items": [{"content": "Fix the flush", "status": "completed"},
+                                                      {"content": "Tell the parent session", "status": "pending"}]},
+                             "tool_response": "Plan updated."})
+        self.edit(os.path.join(work, "lib", "x.py"), "c1")
+        self.git(work, "commit", "-qam", "lib: fix the flush\n\nCloses #7")
+        sha = self.git(work, "rev-parse", "--short", "HEAD")
+        self.edit(os.path.join(work, "lib", "y.py"), "c2")
+        self.git(work, "checkout", "-q", "--", "lib/y.py")
+        subprocess.run(["git", "clone", "-q", bare, land], check=True, capture_output=True)
+        write(os.path.join(land, "README.md"), "the exporter\n")
+        self.git(land, "add", "-A")
+        self.git(land, "commit", "-qm", "docs: a readme")
+        self.git(land, "fetch", "-q", work, "main:refs/heads/worker")
+        self.git(land, "cherry-pick", sha)                # the orchestrator lands it under a new hash
+        self.git(land, "push", "-q", "origin", "main")
+        self.git(work, "fetch", "-q", bare, "main:refs/remotes/origin/main")
+        self.assertEqual(self.git(work, "branch", "-r", "--contains", sha), "", "its own hash is on no remote branch")
+        out = self.archive(PUP, KID, answers=[("Which finished sessions should be archived?", ["the flush child"])])
+        self.assertEqual(out, {}, out)
+        import issues
+        write(os.path.join(work, "lib", "y.py"), "y = 2\n")
+        self.git(work, "commit", "-qam", "lib: tidy y")
+        tidy = self.git(work, "rev-parse", "--short", "HEAD")
+        self.assertFalse(issues.landed(work, tidy, ["#8"]), "on no remote branch, in no form")
+        self.git(land, "fetch", "-q", work, "main:refs/heads/worker")
+        self.git(land, "cherry-pick", tidy)
+        self.git(land, "commit", "-q", "--amend", "-m", "lib: y is two")     # landed reworded, closing nothing
+        self.git(land, "push", "-q", "origin", "main")
+        self.git(work, "fetch", "-q", bare, "main:refs/remotes/origin/main")
+        self.assertTrue(issues.landed(work, tidy, ["#8"]), "git cherry finds the same change under a new hash")
 
 
 if __name__ == "__main__":
