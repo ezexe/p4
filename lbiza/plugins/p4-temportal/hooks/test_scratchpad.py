@@ -502,7 +502,7 @@ def sweep_cases():
 
         assert real_folders() == ["a", "b", "c", "g", "h", "i", "j", "s"], real_folders()
         out = run_sub("tmp-link", {"cwd": root, "session_id": sids["s"]}, tmp_env, CLAUDE_PROJECT_DIR=root)
-        assert "this session's scratchpad" in out and "is a link to" in out, out
+        assert "this session's scratchpad" not in out, f"a new link with nothing moved was said: {out}"
         assert "other sessions' scratchpads: 4 linked, 4 removed" in out, out
         assert real_folders() == [], f"plain scratchpad folders left after a start: {real_folders()}"
         assert points_at(pad["s"]) == os.path.normcase(new["s"]), "this session's scratchpad was not linked"
@@ -974,6 +974,26 @@ def dangling_own_link_cases():
     print("test_scratchpad.py: dangling own link cases green")
 
 
+def quiet_start_cases():
+    """An ordinary start, a new session whose scratchpad holds nothing yet, is linked without a word: the
+    SessionStart characters of tmp-link are counted and must be 0."""
+    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-quiet-")
+    sid = "dddd4444-0000-4000-8000-00000000000d"
+    harness = os.path.join(root, "harness", sid, "scratchpad")
+    try:
+        os.makedirs(harness)
+        out = run_sub("tmp-link", {"cwd": root, "session_id": sid, "scratchpad_dir": harness}, None,
+                      CLAUDE_PROJECT_DIR=root)
+        print(f"test_scratchpad.py: an ordinary start printed {len(out)} characters")
+        assert is_link(harness), "the scratchpad was not linked"
+        assert out == "", f"an ordinary start printed {len(out)} characters: {out}"
+    finally:
+        if is_link(harness):
+            unlink(harness)
+        shutil.rmtree(root, ignore_errors=True)
+    print("test_scratchpad.py: quiet start cases green")
+
+
 def event_hooks(event):
     with open(HOOKS_JSON, encoding="utf-8") as f:
         return [h["command"] for g in json.load(f)["hooks"][event] for h in g["hooks"]]
@@ -1259,6 +1279,7 @@ def main():
     scratchpad_dir_cases()
     parallel_hooks_cases()
     dangling_own_link_cases()
+    quiet_start_cases()
     ended_cases()
     gate2_d()
     print("test_scratchpad.py: all green")

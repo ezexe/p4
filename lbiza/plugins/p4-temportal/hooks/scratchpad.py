@@ -1061,9 +1061,10 @@ def cmd_tmp_link(payload):
     stamp = time.strftime("%Y%m%d-%H%M%S")
     state, moved = link_tmp(harness, target, stamp)
     here, there = os.path.normpath(harness), os.path.normpath(target)
-    line = {"linked": f"this session's scratchpad {here} is a link to {there}, where its temporary files go",
-            "foreign": f"{here} is a link that does not reach {there}; left as it is",
+    line = {"foreign": f"{here} is a link that does not reach {there}; left as it is",
             "failed": f"{here} could not be linked to {there}; its files move there at each turn end"}.get(state, "")
+    if moved and state == "linked":                   # a new link alone is said by the skill, not at every start
+        line = f"this session's scratchpad {here} is a link to {there}, where its temporary files go"
     if moved:
         line += ("; " if line else "") + f"files it held moved: {len(moved)}, into {there}"
     p4, sid = p4_repo(root), session_id(payload)
