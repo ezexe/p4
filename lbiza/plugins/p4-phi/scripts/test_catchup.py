@@ -90,7 +90,7 @@ class Plugins(Base):
             "p4-recall was on at user scope: p4-phi moves to user scope, each project's own install removed "
             "first in its project, so it is never installed twice, and nothing removed is updated")
 
-    def test_the_owners_config_retires_disabled_plugins_too(self):
+    def test_ezexes_config_retires_disabled_plugins_too(self):
         """Every former plugin installed at user scope, p4-memory and p4-scratchpad disabled and p4-recall on,
         beside p4-temportal at user scope and p4-phi in two projects: each former plugin is uninstalled, each
         project's p4-phi is removed in its project, and p4-phi is installed once, at user scope."""
@@ -132,7 +132,7 @@ class Plugins(Base):
                      {"p4-recall": True, "p4-phi": True})
         self.assertEqual(catchup.plugin_commands(self.project), [], "no uninstall before p4-phi carries retrieval")
 
-    def test_old_cache_folders_are_counted_and_never_deleted(self):
+    def test_old_cache_folders_are_counted_and_deleted_only_by_prune_cache(self):
         self.install([("p4-phi", "user", "0.7.0", None)], {"p4-phi": True})
         cache = os.path.join(self.conf, "plugins", "cache", M)
         write(os.path.join(cache, "p4-recall", "0.8.21", "scripts", "big.py"), "x" * 2048)
