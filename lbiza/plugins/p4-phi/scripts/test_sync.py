@@ -326,7 +326,7 @@ class Sync(unittest.TestCase):
         self.assertEqual(m({"a": 1, "b": 1}, {"a": 1}, {"a": 1, "b": 1}), {"a": 1}, "we removed b, they left it: gone")
         self.assertEqual(m(None, {"l": ["x"]}, {"l": ["y", "x"]}), {"l": ["x", "y"]})
 
-    def test_seed_writes_updates_and_respects_the_owner(self):
+    def test_seed_writes_updates_and_keeps_a_copy_without_the_seed_line(self):
         p4 = os.path.join(os.path.dirname(self.origin), "p4")
         os.makedirs(p4)
         self.assertEqual(sync.seed(p4, "trunk"), [".github/p4_defaults.json", ".github/workflows/p4-sync.yml", ".github/p4_sync.py"])
