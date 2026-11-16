@@ -1410,6 +1410,20 @@ class AskPaths(unittest.TestCase):
                   "$env:TEMP/x.py", "%TEMP%/x.py", "$TMPDIR/x.py"):
             self.assertTrue(sp.in_temp(p), p)
 
+    def test_powershell_and_notebookedit_writes_are_read(self):
+        import scratchpad as sp
+        for cmd in ('"print(1)" > $env:TEMP/x.py', 'Set-Content -Path $env:TEMP/x.py -Value "print(1)"',
+                    '"print(1)" | Out-File -FilePath $env:TEMP/x.py'):
+            got = sp.written_paths({"tool_name": "PowerShell", "tool_input": {"command": cmd}})
+            self.assertIn("$env:TEMP/x.py", got, cmd)
+        got = sp.written_paths({"tool_name": "NotebookEdit", "tool_input": {"notebook_path": "/tmp/n.ipynb"}})
+        self.assertEqual(got, ["/tmp/n.ipynb"])
+        with open(HOOKS_JSON, encoding="utf-8") as f:
+            pre = json.load(f)["hooks"]["PreToolUse"]
+        ask = [h for h in pre if any("scratchpad ask" in c["command"] for c in h["hooks"])][0]
+        for tool in ("Write", "Edit", "Bash", "PowerShell", "NotebookEdit"):
+            self.assertIn(tool, ask["matcher"].split("|"))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

@@ -91,7 +91,8 @@ TEMP_ROOTS = ("/tmp", "/private/tmp")   # beside tempfile.gettempdir(): where Cl
 
 CODE_EXT = {"py", "pyw", "sh", "bash", "zsh", "ps1", "psm1", "bat", "cmd", "js", "mjs", "cjs", "ts", "rb", "pl",
             "lua", "php", "go", "rs", "c", "cc", "cpp", "h", "hpp", "cs", "java", "kt", "swift", "sql", "awk",
-            "r", "jl", "scala", "groovy", "tcl", "vbs", "cmake", "gn", "gni", "html", "htm"}
+            "r", "jl", "scala", "groovy", "tcl", "vbs", "cmake", "gn", "gni", "html", "htm",
+            "ipynb"}
 # Code by name rather than by extension: by extension alone CMakeLists.txt is a `.txt` note.
 CODE_NAMES = {"cmakelists.txt", "makefile", "gnumakefile", "dockerfile", "justfile", "rakefile"}
 # the scratchpad paths Claude Code gives: under the temp folder on Windows and Linux, and /private/tmp/claude-<uid>/ on
@@ -106,6 +107,9 @@ WRITE_RES = [
     re.compile(r">{1,2}[ \t]*" + _PATH),
     re.compile(r"\btee\b(?:[ \t]+-[A-Za-z]+)*[ \t]+" + _PATH),
     re.compile(r"\bopen\(\s*(?:\"([^\"\n]+)\"|'([^'\n]+)')\s*,\s*[\"'][aw]"),
+    # PowerShell's writers, by their path parameter
+    re.compile(r"(?i)\b(?:Set-Content|Add-Content|Out-File|New-Item)\b[^\n|;]*?-(?:Path|FilePath|LiteralPath)[ \t]+"
+               + _PATH),
 ]
 ARGS_RES = [re.compile(r"\b(?:cp|mv)\b([^\n|;&]*)")]
 TOKEN_RE = re.compile(r"\"[^\"\n]*\"|'[^'\n]*'|\S+")
@@ -1199,10 +1203,10 @@ def written_paths(payload):
     inp = payload.get("tool_input") or {}
     if not isinstance(inp, dict):
         return []
-    if tool in ("Write", "Edit"):
-        fp = str(inp.get("file_path") or "")
+    if tool in ("Write", "Edit", "NotebookEdit"):
+        fp = str(inp.get("file_path") or inp.get("notebook_path") or "")
         return [fp] if fp else []
-    if tool != "Bash":
+    if tool not in ("Bash", "PowerShell"):
         return []
     cmd = str(inp.get("command") or "")
     out = []
