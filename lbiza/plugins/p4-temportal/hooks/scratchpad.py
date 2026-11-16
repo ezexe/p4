@@ -45,6 +45,17 @@ The session's temp directory, ON unless p4.json's scratchpad.tmp is false or P4_
                                starts again after its tmp was closed gets its files back from that commit.
                                Nothing is staged, committed or deleted unless `.claude/p4` is a git repository of
                                its own.
+  ended sessions (#56)         a session has ended when p4-phi's record of it says archived, or when its tmp and its
+                               transcript are quiet for scratchpad.tmp_idle_days. Its tmp, staged and untracked alike,
+                               is closed as SessionEnd closes one, at a start (tmp-link) and by `ended-sweep`: nothing
+                               is removed without a commit that holds it. A tmp over scratchpad.tmp_max_files cannot
+                               be committed, so nothing of it is removed: it is named with its file count and size,
+                               once at a start, and removing it is ezexe's to choose.
+  ended-sweep                  run by hand, never by a hook, and reads no stdin:
+                               `scratchpad.py ended-sweep [--dry-run] [--idle-days N] [--root <project>]`. Every ended
+                               session's tmp is closed and listed with what was committed, removed and left.
+                               `--dry-run` changes nothing, not the index and not p4.json, and lists what would be
+                               committed and removed: the counts, and the top folders of each tmp.
 
 Two asks, OFF unless the environment sets P4_SCRATCHPAD_ASKS=1 (design section 3.2, untested until measured):
 
@@ -130,19 +141,22 @@ TMP_MAX_FILES = 5000        # a tmp with more files is left alone: not staged, n
 TMP_IDLE_CLOSES = 5         # idle tmps closed at one start, at most
 TMP_EMPTY_IDLE_HOURS = 1    # another session's empty tmp quiet this long is removed at a start
 SCRATCH_SWEEP_MINUTES = 60  # another session's empty scratchpad quiet this long is removed, not linked
+TMP_ENDED_QUIET_HOURS = 1   # an ended session's tmp is closed only when nothing wrote to it for this long
+TMP_TOP_FOLDERS = 5         # folders named for one tmp in ended-sweep's list
 TMP_SKIP_DIRS = [".pytest_cache", "node_modules", ".venv", "venv", ".tox", ".mypy_cache", "pytest-of-*"]
 SID_RE = re.compile(r"[A-Za-z0-9_-]+")
 
 
-def configure(payload):
-    """The scratchpad section of <project>/.claude/p4/p4.json over the constants (the file written when missing)."""
-    p4 = os.path.join(project_root(payload), ".claude", "p4")
+def configure(payload, write=True, root=None):
+    """The scratchpad section of <project>/.claude/p4/p4.json over the constants (the file written when missing,
+    unless `write` is False)."""
+    p4 = os.path.join(root or project_root(payload), ".claude", "p4")
     p4conf.configure(globals(), p4, "scratchpad", {
         "asks": "ASKS", "tmp": "TMP", "tmp_idle_days": "TMP_IDLE_DAYS", "tmp_max_file_mb": "TMP_MAX_FILE_MB",
         "tmp_max_files": "TMP_MAX_FILES", "tmp_empty_idle_hours": "TMP_EMPTY_IDLE_HOURS",
         "scratch_sweep_minutes": "SCRATCH_SWEEP_MINUTES", "tmp_skip_dirs": "TMP_SKIP_DIRS", "ignorable_ext": "IGNORABLE_EXT", "ignorable_dirs": "IGNORABLE_DIRS",
         "repo_uses_min_name": "REPO_USES_MIN_NAME", "repo_uses_max": "REPO_USES_MAX",
-        "repo_uses_lines": "REPO_USES_LINES"})
+        "repo_uses_lines": "REPO_USES_LINES"}, write=write)
 
 
 def layout(payload):
@@ -707,15 +721,96 @@ def temp_dirs(harness, own, root):
     return out
 
 
-def close_idle(p4, own, hashdir=None):
-    """Other sessions' tmps nothing has written to for TMP_IDLE_DAYS: sessions that ended without a SessionEnd.
-    At most TMP_IDLE_CLOSES a start. An empty one, quiet for TMP_EMPTY_IDLE_HOURS with its session's transcript, is
+def archived_ids(p4):
+    """The session ids p4-phi's records hold as archived: the `sessionId` and every `cliSessionIds` entry of a
+    `phi/sessions/*/session.json` whose `archived` is set. Read-only, and empty where p4-phi keeps nothing."""
+    out = set()
+    for f in glob.glob(os.path.join(glob.escape(p4), "phi", "sessions", "*", "session.json")):
+        try:
+            with open(f, encoding="utf-8") as fh:
+                rec = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(rec, dict) or not rec.get("archived"):
+            continue
+        ids = rec.get("cliSessionIds")
+        for i in [rec.get("sessionId"), *(ids if isinstance(ids, list) else [])]:
+            if isinstance(i, str) and i:
+                out.add(i)
+    return out
+
+
+def measure(path, cap=None):
+    """A tmp as it is on disk -> (files, bytes, latest write, {top entry: files}, over). Every file counts, a
+    clone's and an ignored one too; a link is never followed. A file in the tmp itself counts under ''. With `cap`
+    the walk stops past that many files and `over` is True: the numbers are then a lower bound."""
+    files, size, last, tops = 0, 0, mtime(path), {}
+    for d, dirs, names in os.walk(path):
+        dirs[:] = [x for x in dirs if not is_link(os.path.join(d, x))]
+        rel = os.path.relpath(d, path)
+        top = "" if rel == "." else rel.replace("\\", "/").split("/")[0] + "/"
+        for n in names:
+            try:
+                st = os.lstat(os.path.join(d, n))
+            except OSError:
+                continue
+            files += 1
+            size += st.st_size
+            last = max(last, st.st_mtime)
+            tops[top] = tops.get(top, 0) + 1
+            if cap is not None and files > cap:
+                return files, size, last, tops, True
+    return files, size, last, tops, False
+
+
+def ended(sid, d, now, idle_days, archived, cap=None):
+    """Why another session's tmp counts as ended, or '': "archived" by p4-phi's record, or "idle N days" when the
+    tmp and the session's transcript are quiet for `idle_days`. Either way nothing wrote to it for
+    TMP_ENDED_QUIET_HOURS. A tmp with more than `cap` files is judged by its transcript alone, and is not ended
+    when none is found."""
+    _files, _size, last, _tops, over = measure(d, cap)
+    seen = transcript_time(sid)
+    last = (seen or now) if over else max(last, seen)
+    if last > now - TMP_ENDED_QUIET_HOURS * 3600:
+        return ""
+    if sid in archived:
+        return "archived"
+    if idle_days is not None and idle_days >= 0 and last <= now - idle_days * 86400:
+        return f"idle {int((now - last) // 86400)} days"
+    return ""
+
+
+def named_mark(p4, sid):
+    """Where it is noted that an ended tmp over the cap was named: in the repo's git directory, as closed_mark."""
+    gd = git_out(p4, "rev-parse", "--absolute-git-dir")
+    return os.path.join(gd.strip(), "p4-tmp-named", sid) if gd else None
+
+
+def tops_text(tops):
+    """The folders of a tmp holding the most files, most first: `runs/ 5000, smoke/ 3691, its own files 12`."""
+    order = sorted(tops.items(), key=lambda kv: (-kv[1], kv[0]))
+    return ", ".join(f"{k or 'its own files'} {n}" for k, n in order[:TMP_TOP_FOLDERS]) or "none"
+
+
+def over_line(sid, why, d):
+    """An ended session's tmp over the file cap, named with its file count and size: it is left as it is."""
+    files, size, _last, tops, _over = measure(d)
+    return (f"{tmp_rel(sid)}/ of an ended session, {why}, holds {files} files and {size / 1048576:.1f} MB, over the "
+            f"cap of {TMP_MAX_FILES} files, so it is not committed and nothing of it is removed: removing it is "
+            f"ezexe's to choose; top folders: {tops_text(tops)}")
+
+
+def close_idle(p4, own, hashdir=None, named=None):
+    """Other sessions' tmps whose session has ended (see ended): archived in p4-phi's record, or nothing written for
+    TMP_IDLE_DAYS, a session that ended without a SessionEnd. Each is closed as SessionEnd closes one, staged and
+    untracked files alike. At most TMP_IDLE_CLOSES a start. One over TMP_MAX_FILES is left whole, and a line naming
+    it is added to `named`, once. An empty one, quiet for TMP_EMPTY_IDLE_HOURS with its session's transcript, is
     removed with the scratchpad links under `hashdir` (one folder or several) that point at it."""
     base = p4conf.sub(p4, "tmp")
     if TMP_IDLE_DAYS is None or TMP_IDLE_DAYS < 0 or not os.path.isdir(base):
         return 0
     now = time.time()
-    limit, done = now - TMP_IDLE_DAYS * 86400, 0
+    done, archived = 0, archived_ids(p4)
     for sid in sorted(os.listdir(base)):
         d = os.path.join(base, sid)
         if sid == own or not os.path.isdir(d) or is_link(d) or not SID_RE.fullmatch(sid):
@@ -735,7 +830,21 @@ def close_idle(p4, own, hashdir=None):
             except OSError:
                 pass
             continue
-        if done >= TMP_IDLE_CLOSES or max(newest(d), transcript_time(sid)) > limit:
+        if done >= TMP_IDLE_CLOSES:
+            continue
+        why = ended(sid, d, now, TMP_IDLE_DAYS, archived, TMP_MAX_FILES)
+        if not why:
+            continue
+        if tmp_files(d) is None:                       # over the cap: left whole, and named once
+            mark = named_mark(p4, sid)
+            if named is not None and mark and not os.path.exists(mark):
+                named.append(over_line(sid, why, d))
+                try:
+                    os.makedirs(os.path.dirname(mark), exist_ok=True)
+                    with open(mark, "w", encoding="utf-8") as f:
+                        f.write(time.strftime("%Y-%m-%d %H:%M") + "\n")
+                except OSError:
+                    pass
             continue
         if close_tmp(p4, sid):
             done += 1
@@ -744,6 +853,133 @@ def close_idle(p4, own, hashdir=None):
             except OSError:
                 pass
     return done
+
+
+def plan_tmp(p4, sid):
+    """What closing a tmp would do, without changing anything, the index included -> {"files", "bytes", "tops",
+    "over", "commit", "remove", "left"}. `remove` is every file a commit would hold after the close: the files
+    stage_tmp would add and those the index already tracks. `commit` is those of them HEAD does not hold as they
+    are. `left` counts the files no commit would hold, which stay on disk. Over the cap, all three are empty."""
+    d, rel = p4conf.sub(p4, "tmp", sid), tmp_rel(sid)
+    files, size, _last, tops, _over = measure(d)
+    out = {"files": files, "bytes": size, "tops": tops, "over": False, "commit": [], "remove": [], "left": files}
+    stage = tmp_files(d)
+    if stage is None:
+        out["over"] = True
+        return out
+    rels = [os.path.relpath(f, p4).replace("\\", "/") for f in stage]
+    if rels:
+        ignored = git_p4(p4, "check-ignore", "-z", "--stdin", stdin=nul(rels))
+        skip = set(ignored.stdout.decode("utf-8", "surrogateescape").split("\0")) if ignored else set()
+        rels = [r for r in rels if r not in skip]
+    tracked = git_out(p4, "ls-files", "-z", "--", rel) or ""
+    remove = sorted(set(rels) | {t for t in tracked.split("\0")
+                                 if t and os.path.isfile(os.path.join(p4, *t.split("/")))})
+    held = {}
+    tree = git_out(p4, "ls-tree", "-r", "-z", "HEAD", "--", rel) or ""
+    for row in tree.split("\0"):
+        meta, _, name = row.partition("\t")
+        if name:
+            held[name] = meta.split()[-1]
+    now_is = {}
+    if remove and held:
+        r = git_p4(p4, "hash-object", "--stdin-paths", stdin="\n".join(remove).encode("utf-8", "surrogateescape"),
+                   timeout=120)
+        got = r.stdout.decode("ascii", "replace").split() if r and r.returncode == 0 else []
+        if len(got) == len(remove):
+            now_is = dict(zip(remove, got))
+    out["remove"] = remove
+    out["commit"] = [r for r in remove if r not in held or now_is.get(r) != held[r]]
+    out["left"] = max(0, files - len(remove))
+    return out
+
+
+def sweep_ended(p4, dry, idle_days=None):
+    """Every ended session's tmp in the store, closed as SessionEnd would, or with `dry` only planned -> (rows of
+    {"sid", "why", "plan", "head", "removed"}, the fullest tmp first; the session folders looked at). A tmp over
+    the cap is never closed."""
+    base, now, rows = p4conf.sub(p4, "tmp"), time.time(), []
+    if not os.path.isdir(base):
+        return rows, 0
+    days = TMP_IDLE_DAYS if idle_days is None else idle_days
+    archived, seen = archived_ids(p4), 0
+    for sid in sorted(os.listdir(base)):
+        d = os.path.join(base, sid)
+        if not os.path.isdir(d) or is_link(d) or not SID_RE.fullmatch(sid) or not os.listdir(d):
+            continue
+        seen += 1
+        why = ended(sid, d, now, days, archived)
+        if not why:
+            continue
+        plan = plan_tmp(p4, sid)
+        row = {"sid": sid, "why": why, "plan": plan, "head": "", "removed": 0}
+        if not dry and not plan["over"]:
+            row["head"] = close_tmp(p4, sid)
+            row["removed"] = sum(1 for r in plan["remove"] if not os.path.exists(os.path.join(p4, *r.split("/"))))
+            try:
+                os.rmdir(d)                            # when nothing uncommitted is left in it
+            except OSError:
+                pass
+        rows.append(row)
+    rows.sort(key=lambda r: (-r["plan"]["files"], r["sid"]))
+    return rows, seen
+
+
+def cmd_ended_sweep(args):
+    """`ended-sweep [--dry-run] [--idle-days N] [--root <project>]`, run by hand: see the module's text."""
+    dry, days, root, k = False, None, None, 0
+    while k < len(args):
+        a = args[k]
+        if a == "--dry-run":
+            dry = True
+        elif a in ("--idle-days", "--root") and k + 1 < len(args):
+            k += 1
+            if a == "--root":
+                root = args[k]
+            else:
+                try:
+                    days = float(args[k])
+                except ValueError:
+                    print(f"p4-temportal: --idle-days takes a number, not {args[k]!r}; nothing was done.")
+                    return 0
+        else:
+            print(f"p4-temportal: ended-sweep does not know {a!r}; nothing was done. "
+                  "Usage: scratchpad.py ended-sweep [--dry-run] [--idle-days N] [--root <project>]")
+            return 0
+        k += 1
+    root = os.path.abspath(root or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    configure({}, write=not dry, root=root)
+    p4 = p4_repo(root)
+    if not p4:
+        print(f"p4-temportal: {os.path.join(root, '.claude', 'p4')} is not a git repository of its own; "
+              "nothing was done.")
+        return 0
+    rows, seen = sweep_ended(p4, dry, days)
+    closing = [r for r in rows if not r["plan"]["over"]]
+    over = [r for r in rows if r["plan"]["over"]]
+    will = "would commit" if dry else "committed"
+    gone = "would remove" if dry else "removed"
+    n_commit = sum(len(r["plan"]["commit"]) for r in closing if dry or r["head"])
+    n_remove = sum(len(r["plan"]["remove"]) if dry else r["removed"] for r in closing)
+    print(f"p4-temportal: ended sessions' tmp in {os.path.normpath(p4)}"
+          + (", a dry run that changed nothing" if dry else "")
+          + f": {len(rows)} of {seen} session folder(s) ended; {will} {n_commit} file(s), {gone} {n_remove}; "
+          + f"{len(over)} folder(s) over the cap of {TMP_MAX_FILES} files left on disk.")
+    for r in rows:
+        plan, rel = r["plan"], tmp_rel(r["sid"]) + "/"
+        tail = f"{plan['files']} files, {plan['bytes'] / 1048576:.1f} MB; top folders: {tops_text(plan['tops'])}"
+        if plan["over"]:
+            print(f"- {rel} {r['why']}: over the cap, so not committed and nothing removed, and removing it is "
+                  f"ezexe's to choose; {tail}")
+        elif dry:
+            print(f"- {rel} {r['why']}: would commit {len(plan['commit'])}, would remove {len(plan['remove'])}, "
+                  f"would leave {plan['left']} that no commit would hold; {tail}")
+        elif r["head"]:
+            print(f"- {rel} {r['why']}: committed {len(plan['commit'])}, removed {r['removed']}, its files are in "
+                  f"{r['head'][:8]}, left {plan['files'] - r['removed']} that no commit holds; {tail}")
+        else:
+            print(f"- {rel} {r['why']}: nothing removed, since no commit holds its files; {tail}")
+    return 0
 
 
 def sweep_scratchpads(harness, own, p4dir, stamp, root=None):
@@ -830,7 +1066,10 @@ def cmd_tmp_link(payload):
         back = restore_tmp(p4, sid)
         if back:
             line += ("; " if line else "") + f"this session's tmp files were restored from commit {back[:8]} into {there}"
-        close_idle(p4, sid, temp_dirs(harness, sid, root))
+        named = []
+        close_idle(p4, sid, temp_dirs(harness, sid, root), named)
+        for n in named:
+            line += ("; " if line else "") + n
     if line:
         print("p4-temportal: " + line + ".")
     return 0
@@ -1011,6 +1250,12 @@ def main():
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
     sub = sys.argv[1] if len(sys.argv) > 1 else ""
+    if sub == "ended-sweep":                           # run by hand: no payload on stdin to wait for
+        try:
+            return cmd_ended_sweep(sys.argv[2:])
+        except Exception as e:  # noqa: BLE001
+            print(f"p4-temportal scratchpad ({sub}) degraded: {type(e).__name__}: {e}")
+            return 0
     payload = payload_from_stdin()
     try:
         configure(payload)

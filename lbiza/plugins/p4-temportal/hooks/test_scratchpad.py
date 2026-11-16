@@ -620,6 +620,166 @@ def tmp_empty_and_cap_cases():
     print("test_scratchpad.py: tmp empty and cap cases green")
 
 
+def snapshot(root):
+    """Every file under a folder with its size, time and bytes, the git index and refs included."""
+    out = {}
+    for d, _dirs, names in os.walk(root):
+        for n in names:
+            p = os.path.join(d, n)
+            with open(p, "rb") as f:
+                out[os.path.relpath(p, root)] = (os.path.getmtime(p), f.read())
+    return out
+
+
+def ended_cases():
+    """#56: the tmp of an ended session, one p4-phi's record says is archived or one idle past the limit, is closed
+    as SessionEnd closes one, staged and untracked files alike: committed, then gone from the work tree, every file
+    readable from the commit; an ignored file is left alone. A tmp over the file cap is still on disk, whole, and is
+    named with its file count and size, by ended-sweep and once at a start. A session written to now is not ended,
+    archived or not. `ended-sweep --dry-run` changes nothing, the index and p4.json included, and lists what it
+    would commit and remove with the counts and the top folders. A start closes an archived session's tmp too."""
+    if not shutil.which("git"):
+        print("test_scratchpad.py: ended cases skipped (no git on PATH)")
+        return
+    root = tempfile.mkdtemp(prefix="p4-scratchpad-ended-")
+    temp = tempfile.mkdtemp(prefix="p4-scratchpad-temp-")
+    cfg = tempfile.mkdtemp(prefix="p4-scratchpad-cfg-")
+    names = ("arch", "idle", "live", "busy", "big", "late", "own")
+    ids = {k: f"{i}{i}{i}{i}eeee-0000-4000-8000-00000000000{i}" for i, k in enumerate(names, 1)}
+    tmp_env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp, "CLAUDE_CONFIG_DIR": cfg}
+    hashdir = os.path.join(temp, "claude", "30ad6e18862a20e8")
+    p4 = os.path.join(root, ".claude", "p4")
+    tmp = {k: os.path.join(p4, "temportal", "tmp", s) for k, s in ids.items()}
+    rel = {k: f"temportal/tmp/{s}" for k, s in ids.items()}
+
+    def git(*args):
+        r = subprocess.run(["git", "-C", p4] + list(args), capture_output=True, text=True)
+        assert r.returncode == 0, (args, r.stderr)
+        return r.stdout
+
+    def old(k, hours=2):
+        for d, _dirs, files in os.walk(tmp[k]):
+            age(d, *[os.path.join(d, n) for n in files], hours=hours)
+
+    def sweep(*args):
+        r = subprocess.run([sys.executable, "-I", SCRIPT, "ended-sweep", *args, "--root", root], capture_output=True,
+                           stdin=subprocess.DEVNULL, timeout=120, env=env_with(tmp_env))
+        assert r.returncode == 0, r
+        return r.stdout.decode("utf-8", "replace").strip().splitlines()
+
+    def row(lines, k):
+        hit = [x for x in lines if x.startswith(f"- {rel[k]}/ ")]
+        return hit[0] if hit else ""
+
+    try:
+        os.makedirs(p4)
+        subprocess.run(["git", "init", "-q", p4], check=True)
+        git("config", "user.name", "t")
+        git("config", "user.email", "t@t")
+        put(p4, ".gitignore", "*.pyc\n")
+        put(p4, "p4.json", json.dumps({"version": 1, "scratchpad": {"tmp_max_files": 6}}))
+        put(tmp["idle"], "held.md", "held already\n")
+        git("add", ".gitignore", rel["idle"] + "/held.md")
+        git("commit", "-q", "-m", "first")
+        put(p4, "store/other.md", "another session's work, staged\n")
+        git("add", "store/other.md")
+        # p4-phi's records: arch, busy, big and late are archived; idle and live have no record
+        for n, k in enumerate(("arch", "busy", "big", "late")):
+            put(os.path.join(p4, "phi", "sessions", f"local_{n}"), "session.json",
+                json.dumps({"sessionId": f"local_{n}", "cliSessionIds": [ids[k]], "archived": "2026-11-12 20:07"}))
+        # arch: a staged file, two untracked and one the repo ignores, quiet two hours
+        put(tmp["arch"], "s.md", "staged\n")
+        git("add", rel["arch"] + "/s.md")
+        put(tmp["arch"], "u.md", "untracked\n")
+        put(tmp["arch"], "sub/deep.md", "deep\n")
+        put(tmp["arch"], "mod.pyc", "ignored\n")
+        old("arch")
+        # idle: no record, nothing written for thirty days; one file committed, one staged, one untracked
+        put(tmp["idle"], "s.md", "idle staged\n")
+        git("add", rel["idle"] + "/s.md")
+        put(tmp["idle"], "u.md", "idle untracked\n")
+        old("idle", hours=30 * 24)
+        # live has no record and busy is archived, and both were written to now: neither has ended
+        put(tmp["live"], "now.md", "live\n")
+        put(tmp["busy"], "now.md", "busy\n")
+        # big: archived, ten files against a cap of six, its transcript quiet two hours
+        for n in range(8):
+            put(tmp["big"], f"runs/r{n}.md", "run\n")
+        for n in range(2):
+            put(tmp["big"], f"smoke/s{n}.md", "smoke\n")
+        old("big")
+        put(os.path.join(cfg, "projects", "E--x"), ids["big"] + ".jsonl", "{}\n")
+        age(os.path.join(cfg, "projects", "E--x", ids["big"] + ".jsonl"))
+
+        # the dry run changes nothing and lists what it would do
+        before, head = snapshot(root), git("rev-parse", "HEAD")
+        lines = sweep("--dry-run")
+        assert snapshot(root) == before and git("rev-parse", "HEAD") == head, "the dry run changed something"
+        assert "a dry run that changed nothing" in lines[0], lines[0]
+        assert "3 of 5 session folder(s) ended" in lines[0], lines[0]
+        assert "would commit 5 file(s), would remove 6" in lines[0], lines[0]
+        assert "1 folder(s) over the cap of 6 files left on disk" in lines[0], lines[0]
+        assert len(lines) == 4 and lines[1] == row(lines, "big"), f"not the fullest folder first: {lines}"
+        line = row(lines, "arch")
+        assert " archived: would commit 3, would remove 3, would leave 1 that no commit would hold" in line, line
+        assert "4 files" in line and "top folders: its own files 3, sub/ 1" in line, line
+        line = row(lines, "idle")
+        assert re.search(r" idle (29|30) days: would commit 2, would remove 3, would leave 0 ", line), line
+        line = row(lines, "big")
+        assert " archived: over the cap" in line and "nothing removed" in line and "ezexe" in line, line
+        assert "10 files" in line and "top folders: runs/ 8, smoke/ 2" in line, line
+        assert not row(lines, "live") and not row(lines, "busy"), "a session written to now was listed as ended"
+
+        # the sweep: committed, then gone from the work tree, every file readable from the commit
+        lines = sweep()
+        assert "3 of 5 session folder(s) ended; committed 5 file(s), removed 6; 1 folder(s) over the cap" in lines[0], \
+            lines[0]
+        want = {"arch": {"s.md": "staged\n", "u.md": "untracked\n", "sub/deep.md": "deep\n"},
+                "idle": {"held.md": "held already\n", "s.md": "idle staged\n", "u.md": "idle untracked\n"}}
+        for k, files in want.items():
+            kept = re.search(r"its files are in ([0-9a-f]{8})", row(lines, k))
+            assert kept, f"{k}: no commit named in {row(lines, k)!r}"
+            for name, text in files.items():
+                assert not os.path.exists(os.path.join(tmp[k], *name.split("/"))), f"{k}/{name} is still on disk"
+                assert git("show", f"{kept.group(1)}:{rel[k]}/{name}") == text, f"{k}/{name} is not in the commit"
+        assert sorted(os.listdir(tmp["arch"])) == ["mod.pyc"], "an ignored file was not left alone"
+        assert not os.path.exists(tmp["idle"]), "an emptied tmp was left"
+        assert git("ls-files", rel["arch"], rel["idle"]).strip() == "", "the removal is not committed"
+        assert git("diff", "--cached", "--name-only").split() == ["store/other.md"], "another staged file was swept in"
+        assert "over the cap" in row(lines, "big") and "10 files" in row(lines, "big"), row(lines, "big")
+        assert sum(len(f) for _d, _s, f in os.walk(tmp["big"])) == 10, "a folder over the cap lost a file"
+        assert git("ls-files", rel["big"]).strip() == "", "a folder over the cap was staged"
+        for k in ("live", "busy"):
+            assert os.path.isfile(os.path.join(tmp[k], "now.md")), f"{k}: a session written to now was swept"
+        assert "1 of 4 session folder(s) ended; would commit 0 file(s), would remove 0" in sweep("--dry-run")[0], \
+            "after the sweep only the folder over the cap is left to name"
+        assert "does not know '--bogus'" in sweep("--bogus")[0], "an unknown argument was not refused"
+
+        # a start closes an archived session's tmp too, and names the folder over the cap once
+        put(tmp["late"], "s.md", "late staged\n")
+        git("add", rel["late"] + "/s.md")
+        put(tmp["late"], "u.md", "late untracked\n")
+        old("late")
+        os.makedirs(os.path.join(hashdir, ids["own"], "scratchpad"))
+        payload = {"cwd": root, "session_id": ids["own"]}
+        out = run_sub("tmp-link", payload, tmp_env, CLAUDE_PROJECT_DIR=root)
+        assert not os.path.exists(tmp["late"]), "a start left an archived session's tmp"
+        assert git("show", f"HEAD~1:{rel['late']}/u.md") == "late untracked\n", "its untracked file is in no commit"
+        assert git("show", f"HEAD~1:{rel['late']}/s.md") == "late staged\n", "its staged file is in no commit"
+        assert out.count(rel["big"] + "/ of an ended session, archived, holds 10 files") == 1, out
+        assert "over the cap of 6 files" in out and "ezexe" in out and "runs/ 8, smoke/ 2" in out, out
+        again = run_sub("tmp-link", payload, tmp_env, CLAUDE_PROJECT_DIR=root)
+        assert rel["big"] not in again, f"a folder over the cap was named twice: {again}"
+        assert sum(len(f) for _d, _s, f in os.walk(tmp["big"])) == 10, "a start removed from a folder over the cap"
+    finally:
+        p = os.path.join(hashdir, ids["own"], "scratchpad")
+        if os.path.lexists(p) and is_link(p):
+            unlink(p)
+        for d in (root, temp, cfg):
+            shutil.rmtree(d, ignore_errors=True)
+    print("test_scratchpad.py: ended cases green")
+
+
 def move_cases():
     """A folder that cannot be renamed into the tmp, as from the temp drive to the project's, is copied and removed
     with its read-only files, so a scratchpad holding a clone still ends as the link; a copy that fails is taken
@@ -678,6 +838,7 @@ def main():
     sweep_cases()
     move_cases()
     tmp_empty_and_cap_cases()
+    ended_cases()
     gate2_d()
     print("test_scratchpad.py: all green")
 
