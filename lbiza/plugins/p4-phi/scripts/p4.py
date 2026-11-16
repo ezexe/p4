@@ -1,23 +1,52 @@
 #!/usr/bin/env python3
-"""p4.py: the recall's one script (fresh-marketplace.md 3.4).
+"""p4.py: the command line of p4-phi's retrieval and of the store it reads.
 
-  index [--force] [--repo] [--deps] [--project D]  rebuild models/index.json when a store, memory or src file is
-                                       newer; --repo first brings the repository's entries up to date (repo.py,
-                                       4.1a), --deps the dependencies' (deps.py: frameworks, library packages,
-                                       external modules; a package installed or updated is read again)
-  query --text T [--session S]         the recall lines for one message: 0 lines for an ordinary message,
-                                       otherwise at most 5, each `- <date> <kind>: <text> (<file>:<line>)`
-  labels [--from-history] [--from-transcripts --project D --slug DIR ...] [--reexploration]
-                                       list the label set with counts per source; import or derive labels
-  train [--if-owed], eval              fit, evaluate held out, promote past the floor (train.py)
-  check                                store health: counts, statuses, orphan labels, the jargon rate
-  migrate [--apply] ...                the old layout into the new (scripts/migrate.py)
-  teacher edit-labels|dictionary|facts [--re-edit] [--second-opinion N] [--max-usd X] [--estimate] [--fake]
-                                       the paid batches (scripts/teacher.py, build step 9); never run by a hook;
-                                       facts answers ezexe's recommendation questions from the current
-                                       documentation (web search) into store/facts.md
+  index [--force] [--repo] [--deps] [--project D]
+      Rebuild the index, phi/models/index.json, when it is missing, of another version or out of date with the
+      files it reads, or always with --force. --repo first brings the repository's entries up to date through
+      repo.py, and --deps the entries of the project's frameworks, library packages and external modules through
+      deps.py, which reads a package again when it was installed or updated.
+  view [SESSION] [--backfill] [--project D] [--slug DIR ...]
+      Print what a session has in view, for another session to read, or one line for each session with a record
+      when none is named. --backfill builds the record of every session whose transcript is on this machine.
+  said applied|set-aside|lacked [HANDLE ...] --session S [--why W]
+      Record, through said.py, a session's statement about a line the prompt hook showed it this turn or about
+      one it lacked.
+  sync [--all] [--push] [--main B]
+      Seed the store's sync workflow and its script, committing them when they were written, commit the tracked
+      files the hooks changed, and merge origin's copies of this machine's branch and of main into the branch.
+      --all merges every machine's branch into main instead, and --push sends the result to origin.
+  labels [--from-history] [--from-transcripts] [--reexploration] [--all-sessions] [--project D] [--slug DIR ...]
+      Print the label set's positives and negatives for each file and source, and the number of tasks.
+      --from-history first writes the labels of the completed message rows, --from-transcripts the repo labels of
+      the transcripts' turns, with --all-sessions those of transcripts no message row names too, and
+      --reexploration measures the tool calls and input tokens a turn spent before it opened a file it later
+      edited or cited, and how often retrieval's top 5 named that file.
+  train [--if-owed] [--sources S] [--now T]
+      Run one round of train.py: evaluate held out, fit, check the dictionary, write the ranker to
+      phi/models/ranker.json when it passes every check of the round, and append the round to
+      phi/models/eval.tsv. --if-owed returns at once unless a round is owed.
+  eval [--json] [--no-dictionary] [--sources S] [--now T]
+      Print the numbers of the same round, writing nothing.
+  query --text T [--session S] [--now T] [--json]
+      Print the retrieval lines for one message: none for an ordinary message, otherwise at most MAX_LINES, a
+      corpus entry's line shaped `- <date> <kind>: <text> (<path>:<line>)`.
+  check
+      Print the store's health: the corpus files' entries by state, the message rows, the vocabulary, the labels
+      that name no indexed entry, the counts of repo.py, deps.py, view.py and said.py, and the jargon rate of
+      what retrieval would print.
+  migrate --p4 TREE [--out DIR] [--apply] [--now T] [--project D] [--report F]
+      Convert a store in the vlds plugin's layout into the store's files through migrate.py; without --apply it
+      writes only its report.
+  teacher edit-labels|dictionary|facts [--limit N] [--re-edit] [--second-opinion N] [--max-usd X] [--estimate]
+          [--fake]
+      Run a paid batch of teacher.py, which no hook runs. edit-labels has the teacher model keep, drop or add the
+      labels of each task; dictionary writes the meaning of each pending vocabulary entry; facts answers ezexe's
+      recommendation questions from the current documentation, found by web search, into phi/store/facts.md.
 
-Every subcommand takes `--p4 <dir>` (the .claude/p4 directory; default from CLAUDE_PROJECT_DIR or the cwd).
+Every subcommand but migrate takes `--p4 <dir>`, the store's directory `.claude/p4` or the project that holds it,
+and without it finds the store from CLAUDE_PROJECT_DIR or the working directory; p4conf.migrate_layout first moves
+a store an older plugin wrote flat into the layout. migrate's --p4 is the tree it converts.
 """
 
 import argparse
@@ -39,32 +68,25 @@ PER_FILE = 2
 TEXT_CHARS = 160
 HISTORY_CHARS = 120
 CANDIDATES = 200
-MIN_RARE = 2                  # without a trained ranker a line must share this many of the message's words...
-# ...cover this share of the message's words (every word not common and not a number, counted even when the store
-# has never seen it, so a message about something else covers little), cover this share of their idf (a word the
-# store lacks weighs the most a word can), and be dense enough in the entry. Chosen 2026-11-01
-# on a held-out split (the pools and history labels of AudioPlugin-p4 and ap-p4_mac should print; the suite's
-# general prompts must stay silent), with the regression cases of test_query.Regressions as a constraint. Before
-# (half the store-known words or six of them): suite prompts silent 84% on ap-p4_mac and 89% on AudioPlugin-p4,
-# held-out F1 0.065, a right line for 23% of held-out tasks. After: silent 100% on both, held-out F1 0.079, a right
-# line for 20%.
-FALLBACK_COVER = 0.75         # shared words over the message's words
-FALLBACK_ICOVER = 0.65        # their idf over the message's idf
-FALLBACK_DENSE = 0.35         # shared words per square root of the entry's length: a long entry needs more of them
-# A file entry is a path and a symbol's name: a sentence asking about it never covers three quarters of itself with
-# one, so the question whose best entries were the right headers (4 of its 7 words each) printed nothing. A file
-# entry also prints on this second gate. Measured 2026-11-11 on a store's 301 labelled tasks and 38 general prompts:
-# precision 0.076 -> 0.075, lines 473 -> 494, one more task with a right line, every general prompt still silent
-# (3 shared words, or cover 0.40 with density 0.60, broke one or cost a tenth of the precision).
+# Without a trained ranker, fallback_order prints an entry that passes the four gates below, or a file entry that
+# passes the three after them. The gates count the message's words: each word that is neither common nor a number,
+# even one the index lacks, so a message about something else covers little of itself with any entry. Looser values
+# let the general prompts of scripts/session/overrides_tasks.jsonl print, and tighter ones drop the entries that
+# labelled tasks are about; test_query.Regressions holds questions that must print and messages that must not.
+MIN_RARE = 2                  # the entry holds at least this many of the message's words...
+FALLBACK_COVER = 0.75         # ...they are this share of the message's words...
+FALLBACK_ICOVER = 0.65        # ...their idf is this share of the message's, a word the index lacks weighing most...
+FALLBACK_DENSE = 0.35         # ...and this many per square root of the entry's length: a long entry needs more
+# A file entry is a path and a symbol's name, so a question about it seldom covers FALLBACK_COVER of its own words
+# with one: a file entry that fails the gates above prints when it passes these three instead. A lower FILE_SHARED
+# or FILE_COVER lets a general prompt print or costs precision.
 FILE_SHARED = 4               # a file entry: this many of the message's words...
 FILE_COVER = 0.55             # ...covering this share of them...
 FILE_DENSE = 0.75             # ...and making up most of the entry
-# lines in the order of how many of the message's words they share, BM25 within a tie; a same-minute ruling stands in
-# for its correction or retraction (standing_first).
-VARIANT_WEIGHT = 0.5          # another form of a message's word (commits / committed / commit) counts half
-EXPAND_WEIGHT = 0.5
-NODE_WEIGHT = 0.3            # a word of the session's own task or of a task above it in the session tree (node.py)
-NODE_TERMS = 12              # the rarest of those words that join the query; a long brief must not drown the message
+VARIANT_WEIGHT = 0.5          # the BM25 weight of another form of a message's word, such as committed for commits
+EXPAND_WEIGHT = 0.5           # the query weight of a word that a dictionary entry's meaning adds
+NODE_WEIGHT = 0.3            # the query weight of a word of the session's task, the tasks above it or their notes
+NODE_TERMS = 12              # how many join the query, the rarest first, so a long brief cannot drown the message
 
 QUERY_SETTINGS = {"max_lines": "MAX_LINES", "per_file": "PER_FILE", "text_chars": "TEXT_CHARS",
                   "history_chars": "HISTORY_CHARS", "candidates": "CANDIDATES", "min_rare": "MIN_RARE",
@@ -75,7 +97,8 @@ QUERY_SETTINGS = {"max_lines": "MAX_LINES", "per_file": "PER_FILE", "text_chars"
 
 
 def configure(p4):
-    """recall.query of the store's p4.json over the query constants (read, never written, here)."""
+    """Set the query constants that QUERY_SETTINGS maps from the section `recall.query` of the store's p4.json,
+    which this reads and never writes."""
     import p4conf
     p4conf.configure(globals(), p4, "recall.query", QUERY_SETTINGS, write=False)
 
@@ -85,10 +108,11 @@ def clip(s, n):
     return s if len(s) <= n else s[:n - 1].rstrip() + "…"
 
 
-# --- the query (4.4, 4.5) --------------------------------------------------------------------------------
+# --- the query -------------------------------------------------------------------------------------------
 
 def history_line(idx, tok, message):
-    """4.4 step 1: a short message seen at least twice before, with a completed row."""
+    """The line for a short message sent at least KNOWN_SHORT_MIN times before, at least once with a completed
+    row: how the last completed row took it, or the two readings taken most often when the last three differ."""
     rows = idx["short"].get(tok, [])
     done = [r for r in rows if r[2] and r[3]]
     if len(rows) < st.KNOWN_SHORT_MIN or not done:
@@ -107,7 +131,8 @@ def history_line(idx, tok, message):
 
 
 def repeat_line(idx, tok, session):
-    """4.4's resemblance rule: an earlier message of this session like this one, its row completed."""
+    """The line for the newest earlier message of this session that resembles this one and has a completed row:
+    what it was answered with."""
     if not session:
         return None
     rows = idx["sessions"].get(session[:8]) or idx["sessions"].get(session)
@@ -119,7 +144,7 @@ def repeat_line(idx, tok, session):
 
 
 def dictionary_hits(idx, tok, terms):
-    """[vocab entry] whose term the message holds (an `on` entry with its meaning written)."""
+    """The vocabulary entries whose term the message holds, each of them `on` and with its meaning written."""
     tset = set(terms)
     out = []
     for v in idx.get("vocab", []):
@@ -138,8 +163,8 @@ stem = ranker.stem
 
 
 def variants(idx, t):
-    """The index's other forms of a word (same stem): from the index's `stems` table (built with it), or built once
-    per loaded index from the postings when the index has none."""
+    """The index's other forms of a word, those with the same stem. They come from the `stems` table built with the
+    index, or from one built from the postings once per loaded index when the index has none."""
     m = idx.get("stems")
     if m is None:
         m = idx.get("_stems")
@@ -150,8 +175,8 @@ def variants(idx, t):
 
 
 def content_terms(idx, terms):
-    """The message's own content words: not common, not bare numbers, and present in the index (directly or in
-    another form)."""
+    """The message's content words that the index holds, as they are or in another form: neither common words nor
+    bare numbers."""
     return [t for t in terms if t not in st.COMMON and not t.isdigit()
             and (t in idx["post"] or variants(idx, t))]
 
@@ -180,7 +205,7 @@ def idf_map(idx, terms):
 
 
 def entry_line(d):
-    if d.get("file") == "repo":                   # 4.1a: never a file's contents
+    if d.get("file") == "repo":                   # a path and what it names, never the file's contents
         return f"- file: {clip(d['show'], TEXT_CHARS)}" + (f" (line {d['line']})" if d.get("line", 1) > 1 else "")
     if d.get("file") == "commit":
         return f"- commit {d['time'][:10]}: {clip(d['show'], TEXT_CHARS)}"
@@ -190,7 +215,8 @@ def entry_line(d):
 
 
 def superseded_ids(idx, now):
-    """Facts a newer fact supersedes, for a message dated after the newer one (1a): never printed."""
+    """The ids of the facts a newer fact supersedes, unless the message is dated before that newer fact: they leave
+    the candidates, so they never print."""
     sup = idx.get("sup")
     if sup is None:
         sup = [[d.get("time") or "", d["supersedes"]] for d in idx["docs"] if d.get("supersedes")]
@@ -198,8 +224,9 @@ def superseded_ids(idx, now):
 
 
 def rank(p4, text, idx=None, model=None, k=5, now=None):
-    """The ids of the top k candidates for a message, the threshold aside: the trained ranker's order when there is
-    one, BM25's otherwise, the dictionary applied. The dictionary check and the re-exploration measure read it."""
+    """The ids of the top k candidates for a message, with no threshold: the trained ranker's order when there is
+    one, BM25's otherwise, the dictionary's expansion applied. train.py's dictionary check and labels.py's
+    re-exploration measure call it."""
     if idx is None:
         idx, _ = st.ensure_index(p4)
     if model is None:
@@ -239,8 +266,9 @@ def rank(p4, text, idx=None, model=None, k=5, now=None):
 
 
 def near_candidates(p4, model, docs, cand, text, session, gone):
-    """(the candidates with near.py's entries appended, their features) when the served model was trained with
-    them; (the candidates as they are, None) otherwise, or when no round has left a memory yet."""
+    """The candidates with near.py's entries that BM25 did not draw appended, and the `near` feature of every
+    candidate among near.py's entries, when the loaded ranker was trained with that feature. The candidates as they
+    are and None otherwise, or when no training round has left near.py a memory it can read."""
     if "near" not in (model or {}).get("features", []):
         return cand, None
     import near
@@ -253,9 +281,10 @@ def near_candidates(p4, model, docs, cand, text, session, gone):
 
 
 def node_weights(idx, node, terms, weight=None, top=None):
-    """{word: weight} for the node's words (.docs/p4/recall-node.md): the content words of the session's own task and
-    of the tasks above it that the message lacks, the `top` rarest by idf, each at `weight`. The gates that keep
-    recall silent never read these: a node only reorders and widens what the message's own words let through."""
+    """The words that the session's place in the session tree adds to the query, each mapped to `weight`: the content
+    words of its own task, of the tasks above it and of their notes that the index holds and the message lacks, the
+    `top` rarest by idf. The gates that keep retrieval silent never count them: they only reorder and widen what the
+    message's own words let through."""
     if not node:
         return {}
     weight = NODE_WEIGHT if weight is None else weight
@@ -269,16 +298,20 @@ def node_weights(idx, node, terms, weight=None, top=None):
 
 
 def message_words(terms):
-    """The message's words a line must account for: not common, not bare numbers, whether or not the store has them."""
+    """The message's words a line must account for: neither common words nor bare numbers, held by the index or not."""
     return [t for t in terms if t not in st.COMMON and not t.isdigit()]
 
 
 def fallback_order(idx, terms, weights, points, gone, min_shared=None, cover=None, icover=None, dense=None,
                    node_ids=None):
-    """The no-ranker road (4.5: a fresh repo): BM25 over the message's words, their other forms at half weight and
-    the dictionary's expansions; a line prints when it shares at least `min_shared` of the message's words (a word
-    or another form of it), and those cover `cover` of the message's words and `icover` of their idf, densely
-    enough in the entry (`dense`). An entry a dictionary hit points at needs no more."""
+    """The no-ranker road, taken while the store has no ranker it can read: BM25 over the message's words, their
+    other forms at VARIANT_WEIGHT and the words in `weights`. An entry prints when it holds at least `min_shared` of
+    the message's words, each as it is or in another form, and those make up at least `cover` of the message's words
+    and `icover` of their idf, with at least `dense` of them per square root of the entry's length; a file entry
+    that misses these gates may pass on FILE_SHARED, FILE_COVER and FILE_DENSE instead. An entry a dictionary hit
+    points at needs no more, and one of `node_ids` needs one of the message's words. The entries come in the order
+    of how many of the message's words they hold, BM25's within a tie, and standing_first puts a ruling in place of
+    its same-minute correction or retraction."""
     min_shared = MIN_RARE if min_shared is None else min_shared
     cover = FALLBACK_COVER if cover is None else cover
     icover = FALLBACK_ICOVER if icover is None else icover
@@ -318,7 +351,7 @@ def fallback_order(idx, terms, weights, points, gone, min_shared=None, cover=Non
             out.append((i, len(q) + 1))          # an entry the dictionary points at needs no more
             continue
         if node_ids and d["id"] in node_ids and got:
-            out.append((i, len(got)))            # an entry the node's tasks used: one of the message's words is enough
+            out.append((i, len(got)))            # labelled for a task above the session: one shared word is enough
             continue
         if len(got) < min_shared or c < cover or ic < icover or dn < dense:
             if not (d["kind"] == "file" and len(got) >= FILE_SHARED and c >= FILE_COVER and dn >= FILE_DENSE):
@@ -329,8 +362,8 @@ def fallback_order(idx, terms, weights, points, gone, min_shared=None, cover=Non
 
 
 def standing_first(idx, order):
-    """A correction or retraction written in the same minute as a ruling is the reading that ruling settled: the
-    ruling, the standing form, takes its place in the order (once), so one fact is not printed three ways."""
+    """A correction or retraction written in the same minute as a ruling is the reading that ruling settled, so the
+    ruling, the standing form, takes its place in the order, once, and one fact is not printed three ways."""
     rules = idx.get("rule_at")
     if rules is None:
         rules = idx["rule_at"] = st.rule_minutes(idx["docs"])
@@ -351,8 +384,9 @@ def standing_first(idx, order):
 
 
 def live_node(p4, session):
-    """(node, entries) for the running session when recall.node.on: its place in phi's session tree and the
-    entries labelled positive for the tasks of the sessions above it. (None, set()) when off or unknown."""
+    """The running session's place in the session tree and the entries labelled positive for the tasks of the
+    sessions above it, when `recall.node.on` is set. None and an empty set when it is off or the session is unknown;
+    the place and an empty set when no session is above it."""
     import p4conf
     if not p4conf.section(p4, "recall", write=False).get("node", {}).get("on"):
         return None, set()
@@ -368,10 +402,12 @@ def live_node(p4, session):
 
 
 def query(p4, text, session=None, now=None, idx=None, model=None, node=None, node_ids=None, hide=None):
-    """{"lines": [...], "ids": [...], "jargon_dropped": n, "road": "..."}: the recall for one message. `node` is the
-    session's place in the session tree (node.py): its tasks' words join the query at NODE_WEIGHT. `node_ids` are
-    entries the tasks above it were labelled with: candidates, and through the gates on one shared word. `hide` are
-    entries never printed: a replay of an older message hides what was written after it."""
+    """The retrieval lines for one message, as `{"lines": [...], "ids": [...], "jargon_dropped": n, "road": "..."}`,
+    where `road` names the ways the lines came. `node` is the session's place in the session tree: the words of its
+    tasks join the query at NODE_WEIGHT. `node_ids` are the entries the tasks above it were labelled with: the
+    no-ranker road takes them as candidates that pass on one shared word, and a ranker trained with the `node`
+    feature takes them as candidates that feature marks. `hide` names entries never printed, such as those written
+    after the message a replay asks about."""
     configure(p4)
     if idx is None:
         idx, _ = st.ensure_index(p4)
@@ -379,8 +415,8 @@ def query(p4, text, session=None, now=None, idx=None, model=None, node=None, nod
         rpath = p4conf.sub(p4, "models", "ranker.json")
         model = ranker.load(rpath)
         if model is None and os.path.exists(rpath):
-            # a file that is there and not a readable ranker of this kind: the no-ranker road, and one notice a day
-            # for the p4-model skill (notices.py), never a failure in the hook's own time
+            # a file that is there but is no readable ranker of this kind: the no-ranker road, and a notice for the
+            # p4-model skill through notices.notify, at most one a day; a failure to write it never fails the query
             try:
                 import notices
                 notices.notify(p4, "json ranker", ValueError("models/ranker.json is unreadable or not a p4 recall ranker"), session or "")
@@ -502,7 +538,7 @@ def cmd_index(args):
         import repo
         project = args.project or repo.project_of(p4)
         s = repo.build(p4, project)
-        print(f"index --repo: {s['changed']} files read again ({s['reread']} kept, {s['removed']} removed), "
+        print(f"index --repo: {s['changed']} files read again, {s['reread']} kept and {s['removed']} removed; "
               f"{s['new_commits']} new commits; {s['files']} files, {s['entries']} file entries, {s['commits']} "
               f"commits; excluded " + ", ".join(f"{k} {v}" for k, v in sorted(s["excluded"].items()))
               + (f"; {s['cut']} files past the {repo.MAX_FILE_ENTRIES:,}-entry cap" if s["cut"] else ""))
@@ -511,8 +547,8 @@ def cmd_index(args):
         import repo
         deps.configure(p4)
         s = deps.build(p4, args.project or repo.project_of(p4))
-        print(f"index --deps: {s['packages']} packages in {s['roots']} roots, {s['read']} read again "
-              f"({s['installed']} installed, {s['updated']} updated, {s['removed']} removed); {s['entries']} entries"
+        print(f"index --deps: {s['packages']} packages in {s['roots']} roots, {s['read']} read again, "
+              f"{s['installed']} installed, {s['updated']} updated, {s['removed']} removed; {s['entries']} entries"
               + (f"; {s['cut']} packages past the {deps.MAX_ENTRIES:,}-entry cap" if s["cut"] else ""))
     if args.force or st.index_stale(p4):
         idx = st.build_index(p4)
@@ -523,9 +559,12 @@ def cmd_index(args):
 
 
 def cmd_sync(args):
-    """Seed the store's workflow and script and commit them when they changed; commit the tracked files the hooks
-    have changed; then `sync.py pull` (this machine's branch takes in main) or, with --all, push this branch,
-    `sync.py all` (every branch into main and up to it, in a worktree) and move this branch up to the result."""
+    """Seed the store's sync workflow and its script and commit them when sync.seed wrote them. Without --all, run
+    `sync.py pull --snapshot`: commit the tracked files the hooks changed, then merge origin's copies of this
+    machine's branch and of main into it. With --all, commit those files and run `sync.py all`, which merges every
+    machine's branch into main in a worktree of its own. With --push, `pull` pushes the branch it merged into and
+    `all` pushes main and moves every branch up to it; before `all`, this branch takes in origin's copy of it when
+    that has commits it lacks and is pushed, and after it `sync.py catch-up` moves this branch up to the merge."""
     import p4conf
     import sync
     p4 = p4_dir(args)
@@ -577,7 +616,7 @@ def cmd_check(args):
             states[e.state] = states.get(e.state, 0) + 1
         print(f"  {f}: {len(files.get(f, []))} entries " + ", ".join(f"{k} {v}" for k, v in sorted(states.items())))
     rows = [e for k, v in files.items() if k.startswith(st.MESSAGES + "/") for e in v]
-    # completed as store_lessons.labels counts it: a state and an addressed line
+    # a completed row: an addressed line, and a state of FRESH, ECHO or SUPERSEDED
     done = sum(1 for e in rows if st.completed(e)
                and re.match(r"\s*(FRESH|ECHO|SUPERSEDED)\b", e.fields.get("state", "")))
     judged = sum(1 for e in rows if re.match(r"\s*(ECHO|SUPERSEDED)", e.fields.get("state", ""))
@@ -619,9 +658,10 @@ def cmd_check(args):
         print("  " + sl)
     jar = sum(1 for d in idx["docs"] if not d.get("plain") and st.JARGON.search(entry_line(d)))
     rate = jar / len(idx["docs"]) if idx["docs"] else 0.0
-    print(f"  index: {idx['n']} entries ({'rebuilt' if rebuilt else 'fresh'}); excluded "
+    print(f"  index: {idx['n']} entries, {'rebuilt' if rebuilt else 'fresh'}; excluded "
           + ", ".join(f"{k} {v}" for k, v in sorted(idx.get("excluded", {}).items()))
-          + f"; jargon rate of what recall would print {rate:.1%} ({jar} entries without plain:; target under 10%)")
+          + f"; jargon rate of what retrieval would print {rate:.1%}, {jar} entries with jargon and no plain:; "
+            f"target under 10%")
     return 0
 
 
@@ -645,8 +685,8 @@ def cmd_labels(args):
                   f"{d['read']} packages read again, the turns labelled a second time")
             r = lb.from_transcripts(p4, project, args.slug, idx=idx, all_sessions=args.all_sessions)
         print(f"labels --from-transcripts: {r['dep_rows']} of the {r['rows']} repo labels are on dependency entries")
-        print(f"labels --from-transcripts: {r['transcripts']} transcripts, {r['turns']} turns ({r['matched_rows']} "
-              f"matched to rows), {r['tasks']} tasks, {r['rows']} repo labels: "
+        print(f"labels --from-transcripts: {r['transcripts']} transcripts, {r['turns']} turns, {r['matched_rows']} "
+              f"of them matched to rows, {r['tasks']} tasks, {r['rows']} repo labels: "
               + ", ".join(f"{k} {v}" for k, v in sorted(r["labels"].items())))
     if args.reexploration:
         project = args.project or __import__("repo").project_of(p4)
@@ -654,9 +694,9 @@ def cmd_labels(args):
         if not r["turns"]:
             print("re-exploration: no turn opened a file it later edited or cited")
         else:
-            print(f"re-exploration (free half, {r['turns']} turns): before the first relevant file was opened "
-                  f"{r['calls']:.2f} tool calls and {r['tokens']:,.0f} input tokens on average; recall's top 5 named "
-                  f"that file in {r['hit_rate']:.0%} of turns; with it, {r['cf_calls']:.2f} calls and "
+            print(f"re-exploration over {r['turns']} turns: before the first relevant file was opened "
+                  f"{r['calls']:.2f} tool calls and {r['tokens']:,.0f} input tokens on average; retrieval's top 5 "
+                  f"named that file in {r['hit_rate']:.0%} of turns; with it, {r['cf_calls']:.2f} calls and "
                   f"{r['cf_tokens']:,.0f} tokens")
     for (f, src), (pos, neg) in sorted(lb.per_source(p4).items()):
         print(f"  {f} {src or '(none)'}: {pos} positive, {neg} negative")
@@ -696,21 +736,21 @@ def main(argv=None):
     p.add_argument("--repo", action="store_true")
     p.add_argument("--deps", action="store_true")
     p.add_argument("--project", default="")
-    p = sub.add_parser("view", help="what a session has in view, for another session to read (view.py)")
+    p = sub.add_parser("view", help="what a session has in view, for another session to read")
     p.add_argument("session", nargs="?", default="", help="a session id or its first 8 characters; none lists them")
     p.add_argument("--backfill", action="store_true", help="build the record of every session whose transcript is here")
     p.add_argument("--project", default="")
     p.add_argument("--slug", nargs="*", default=[])
     p.add_argument("--p4")
-    p = sub.add_parser("said", help="a session's statement about a line it was shown (said.py)")
+    p = sub.add_parser("said", help="a session's statement about a line it was shown, or one it lacked")
     p.add_argument("act", choices=("applied", "set-aside", "lacked"))
     p.add_argument("handles", nargs="*")
     p.add_argument("--session", required=True)
     p.add_argument("--why", default="")
     p.add_argument("--p4")
-    p = sub.add_parser("sync", help="keep every machine's branch of the store in step (sync.py)")
+    p = sub.add_parser("sync", help="keep every machine's branch of the store in step")
     p.add_argument("--p4")
-    p.add_argument("--all", action="store_true", help="merge every machine's branch into main and move them up to it")
+    p.add_argument("--all", action="store_true", help="merge every branch into main; with --push, move them up to it")
     p.add_argument("--push", action="store_true")
     p.add_argument("--main", default="")
     p = sub.add_parser("labels")
@@ -739,7 +779,7 @@ def main(argv=None):
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("check")
     p.add_argument("--p4")
-    sub.add_parser("migrate", help="old layout into new: p4.py migrate --p4 <old tree> [--out DIR] [--apply]")
+    sub.add_parser("migrate", help="convert a vlds-layout store: p4.py migrate --p4 <tree> [--out DIR] [--apply]")
     sub.add_parser("teacher", help="the paid batches: p4.py teacher edit-labels|dictionary|facts [--fake] [--max-usd X]")
     args = ap.parse_args(argv)
     if args.cmd == "index":

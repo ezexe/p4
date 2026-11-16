@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""Tests for `p4.py query` and `p4.py index` (fresh-marketplace.md 4.4, 4.5, 8.1's query bullets).
+"""Tests for `p4.py query`, `p4.py index` and `p4.py check`.
 
 Run: python3 test_query.py
 
-On a small fixture: deterministic output; 0 lines for "hi" and for a message sharing no rare term; at most 5
-lines, 2 per file, 160 characters of text; the line shape; no jargon-list word printed; the history line for a
-token seen twice and none for once; the repeat line for a resembling completed row and none for an open one;
-dictionary expansion; the trained-ranker road. On AudioPlugin-p4 (when the clone is present): under 300 ms.
+On a small fixture store: the same lines for the same message; no line for "hi", for an ordinary message or for one
+that shares a single word with the entries; at most MAX_LINES lines, PER_FILE of them from one file, each with at
+most TEXT_CHARS characters of text; the line's shape; no jargon-list word printed; the history line for a short
+message sent twice before and none for one sent once; the repeat line for a resembling completed row and none for an
+open row or another session's; dictionary expansion; the trained ranker's road. repo.build, which
+`p4.py index --repo` runs, on a small git repository and on this checkout. On a store migrated from the
+AudioPlugin-p4 fixture, when it is on this machine: how long one `p4.py query` process takes, silence for ordinary
+messages and the same bounds. On a copy of the store P4_MAC_STORE names, when it is there: the no-ranker road's
+regression cases.
 """
 
 import json
@@ -159,6 +164,7 @@ class RankerRoad(Fixture):
         self.assertLessEqual(len(a["lines"]), 5)
 
     def test_old_ranker_json_is_ignored(self):
+        """A ranker.json of another kind is no ranker: the query takes the no-ranker road."""
         write(p4conf.sub(self.p4, "models", "ranker.json"), json.dumps({"kind": "phi_serve", "port": 1}))
         self.assertNotIn("ranker", q(self.p4, "does the quokka harness run the zebrafish plotter")["road"])
 
@@ -181,6 +187,8 @@ class Cli(Fixture):
 
 @unittest.skipUnless(fixture("AudioPlugin-p4"), "the AudioPlugin-p4 clone is not on this machine")
 class RealAudioPlugin(unittest.TestCase):
+    """A store migrated from the AudioPlugin-p4 fixture under P4_FIXTURES, when it is on this machine."""
+
     @classmethod
     def setUpClass(cls):
         import migrate
@@ -195,6 +203,9 @@ class RealAudioPlugin(unittest.TestCase):
         cls.tmp.cleanup()
 
     def test_latency_under_300ms(self):
+        """The fastest of five `p4.py query` processes on this store, each timed from its start to its exit: the
+        interpreter's start, the imports, the index's load and the query, as the prompt hook's own process pays them.
+        The prompt hook's budget is stated at `h_recall` in hook.py."""
         text = "the CEF build keeps failing on the proprietary codecs patch, how do I rebuild incrementally?"
         times = []
         for _ in range(5):            # the best of 5: another process's burst on a loaded machine does not fail it
@@ -225,9 +236,9 @@ class RealAudioPlugin(unittest.TestCase):
 
 
 class RepoIndex(unittest.TestCase):
-    """`p4.py index --repo` (4.1a): paths, headings, symbols, build targets and commits from git, incremental, with
-    the exclusions and the cap; a generated file, an LFS pointer, node_modules/, a binary, a file over 512 KB and a
-    `.p4ignore`d directory never appear."""
+    """repo.build, which `p4.py index --repo` runs: paths, headings, symbols, build targets and commits from git, read
+    again only where a commit changed them, with the exclusions and the cap; a generated file, an LFS pointer,
+    node_modules/, a binary, a file over repo.MAX_BYTES and a `.p4ignore`d directory never appear."""
 
     def setUp(self):
         from test_hooks import git
@@ -292,8 +303,8 @@ class RepoIndex(unittest.TestCase):
         self.assertIn("src/axolotl.py", commit["show"])
         # into the index and out of a query as a file line, never a file's contents
         st.build_index(self.p4)
-        # (the no-ranker gate wants three quarters of a message's words in a line, so the message names the symbol
-        # alone: "mixer" and "defined" would be words no one entry holds with it)
+        # The no-ranker road wants most of a message's words in one entry, so the message names the symbol alone:
+        # with "mixer" or "defined" beside it, no one entry would hold enough of them.
         r = cli.query(self.p4, "where is the axolotl gain", None, NOW, model={})
         self.assertTrue(any(l.startswith("- file: src/axolotl.py") for l in r["lines"]), r)
         self.assertFalse(any("return x" in l for l in r["lines"]))
@@ -337,14 +348,14 @@ class RepoIndex(unittest.TestCase):
                                                                                  self.repo.entries(p4)))
 
 
+# a real store in the flat layout: P4_MAC_STORE names it, and the default is a path on another machine
 MAC_STORE = os.environ.get("P4_MAC_STORE", "/Users/ez/gritz/p4-repos/ap-p4_mac")
 
 
 class Regressions(unittest.TestCase):
-    """The no-ranker road on a fresh store (the coordinator's defect, 2026-11-01): on ap-p4_mac (two pool labels, no
-    ranker) "which branch do mac commits go on" and "where does the p4 repo live" printed nothing. They must recall
-    the matching ruling in the top 5; ordinary messages must stay at 0 lines. The gate was chosen on a held-out
-    split, with these cases as a constraint."""
+    """The no-ranker road on a copy of a real store, taken without its ranker: "which branch do mac commits go on"
+    and "where does the p4 repo live" must each recall the ruling that answers it in the top 5, and ordinary
+    messages and the suite's general prompts must print nothing. fallback_order's gates are held to these cases."""
 
     @classmethod
     def setUpClass(cls):
@@ -353,7 +364,10 @@ class Regressions(unittest.TestCase):
         if os.path.isdir(os.path.join(MAC_STORE, "store")):
             import shutil
             cls.p4 = os.path.join(cls.tmp.name, "p4")
-            for sub in ("store", "memory", "src", "models"):     # what the index reads; never the scratchpad
+            # A flat store's folders of the index's sources, without its scratchpad, built index, ranker or served
+            # folder. build_index reads those sources at their places in the layout, under phi/ and temportal/, and
+            # nothing here moves the copy there.
+            for sub in ("store", "memory", "src", "models"):
                 if os.path.isdir(os.path.join(MAC_STORE, sub)):
                     shutil.copytree(os.path.join(MAC_STORE, sub), os.path.join(cls.p4, sub),
                                     ignore=shutil.ignore_patterns("index.json", "ranker.json", "served"))
@@ -385,8 +399,7 @@ class Regressions(unittest.TestCase):
 
 
     def test_suite_prompts_silent(self):
-        """Section 0, gate 3: the suite's general prompts (every category but lessons) print nothing on at least 95%
-        of them; measured 84% before the gate of 2026-11-01, 100% after."""
+        """At least 95% of the suite's general prompts, those of every category but lessons, print nothing."""
         suite = os.path.join(HERE, "..", "..", "..", "..", "scripts", "session", "overrides_tasks.jsonl")
         if not os.path.exists(suite):
             self.skipTest("the suite's tasks are not beside this checkout")
