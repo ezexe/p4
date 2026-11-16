@@ -52,6 +52,17 @@ class Notices(unittest.TestCase):
         self.assertEqual([notices.notice_family(c) for c in ("json ranker", "pt ranker", "ranker server", "hook close", "train")],
                          ["json", "ranker", "ranker", "hook", "train"])
 
+    def test_an_answer_closes_only_the_notice_of_its_kind(self):
+        """Two notices of one minute and one component, each with a plain-string error and so an empty error field,
+        differ only in kind: a resolved row answers the one of its kind and leaves the other open."""
+        self.assertTrue(notices.notify(self.p4, "hook stop", "timeout", "abcd1234", now="2026-11-09 10:00"))
+        self.assertTrue(notices.notify(self.p4, "hook stop", "missing store", "abcd1234", now="2026-11-09 10:00"))
+        first = notices.open_notices(self.p4)[0]
+        with open(notices.path(self.p4, notices.RESOLVED), "a", encoding="utf-8", newline="\n") as f:
+            f.write("\t".join([first["time"], f"{first['epoch']:.6f}", first["session"], first["component"],
+                               first["kind"], first["error"], "retrained 2026-11-09 11:00"]) + "\n")
+        self.assertEqual([r["kind"] for r in notices.open_notices(self.p4)], ["missing store"])
+
     def test_a_hook_that_raises_leaves_a_notice_and_still_exits_clean(self):
         payload = json.dumps({"cwd": self.root, "session_id": "deadbeefcafe", "prompt": "hello"})
         with mock.patch.dict(hook.HANDLERS, {"recall": mock.Mock(side_effect=RuntimeError("boom"))}), \

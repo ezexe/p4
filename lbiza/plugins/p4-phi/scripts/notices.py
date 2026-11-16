@@ -77,10 +77,11 @@ def notify(p4, component, error, session="", now=None):
 
 
 def open_notices(p4):
-    """The notices no row of retrain-resolved.tsv answers: a row answers the notice of its time, component and
-    error."""
-    done = {(r["time"], r["component"], r["error"]) for r in _rows(path(p4, RESOLVED))}
-    return [r for r in _rows(path(p4)) if (r["time"], r["component"], r["error"]) not in done]
+    """The notices no row of retrain-resolved.tsv answers: a row answers the notice of its time, component, kind and
+    error, the kind telling apart two notices of one minute whose plain-string errors leave the error field empty."""
+    key = lambda r: (r["time"], r["component"], r["kind"], r["error"])  # noqa: E731
+    done = {key(r) for r in _rows(path(p4, RESOLVED))}
+    return [r for r in _rows(path(p4)) if key(r) not in done]
 
 
 def notice_family(component):
