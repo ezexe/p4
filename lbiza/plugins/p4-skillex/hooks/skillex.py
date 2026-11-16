@@ -635,9 +635,22 @@ def link_similar(skill_dir, similar):
 
 # --------------------------------------------------------------------------------------------------------- copying
 
+def copied(p4):
+    """The skills this machine has copied into `.claude/skills/`, kept in `.state/copied.json`, which git ignores."""
+    try:
+        with open(os.path.join(skillex_dir(p4), STATE, "copied.json"), encoding="utf-8") as f:
+            names = json.load(f)
+        return set(names) if isinstance(names, list) else set()
+    except (OSError, ValueError):
+        return set()
+
+
 def mirror(p4, names=None, remove=False):
     """Copy store skills into the project's `.claude/skills/`, and with `remove` set aside each copy whose store skill
-    is gone. Returns the names copied or removed."""
+    is gone. A copy is removed only when this machine made it: an empty store folder, as in a clone whose store is
+    missing, says nothing about which skills are gone. Returns the names copied or removed."""
+    made_here = copied(p4)
+    before = set(made_here)
     src = skillex_dir(p4)
     dst = project_skills(p4)
     os.makedirs(dst, exist_ok=True)
@@ -681,12 +694,16 @@ def mirror(p4, names=None, remove=False):
             if old and not os.path.exists(target):       # not another session's copy: the old one goes back
                 os.replace(old, target)
             continue
+        made_here.add(n)
         changed.append(n)
     if remove and names is None and os.path.isdir(dst):
         for n in sorted(os.listdir(dst)):
-            if n not in store and os.path.isfile(os.path.join(dst, n, MARKER)):
+            if n not in store and n in made_here and os.path.isfile(os.path.join(dst, n, MARKER)):
                 set_aside(p4, os.path.join(dst, n))    # its store skill is gone
+                made_here.discard(n)
                 changed.append(n)
+    if made_here != before:
+        write_json(p4, "copied.json", sorted(made_here))
     clear_aside(p4)
     return changed
 
@@ -827,13 +844,12 @@ def cmd_start(p4, payload):
     if not active(p4):
         return None
     prune_sessions(p4)
-    had_store = os.path.isdir(skillex_dir(p4))         # a missing store says nothing about which skills are gone
     os.makedirs(skillex_dir(p4), exist_ok=True)
     sid = payload.get("session_id")
     if sid and read_session(p4, sid) is None:          # first, so a failed copy never costs the session its looks
         write_session(p4, sid, {"since": time.time(), "looked": {}})
     made = not os.path.isdir(project_skills(p4))
-    changed = mirror(p4, remove=had_store)
+    changed = mirror(p4, remove=True)
     if changed or made:
         return {"hookSpecificOutput": {"hookEventName": "SessionStart", "reloadSkills": True}}
     return None
