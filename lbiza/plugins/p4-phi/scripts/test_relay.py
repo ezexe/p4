@@ -140,6 +140,45 @@ class Paths(unittest.TestCase):
         got = relay.paths_in("deprecates: `lib/x.py` and docs/old.md, see https://example.com/a", "E:/w")
         self.assertEqual(got, [relay.norm("E:/w/lib/x.py"), relay.norm("E:/w/docs/old.md")])
 
+    def test_a_repository_is_found_without_starting_git(self):
+        """2026-11-16: one message's rebase check asked git for a path's repository 100 times, 2 s of the hook."""
+        if not shutil.which("git"):
+            self.skipTest("no git")
+        tmp = os.path.realpath(tempfile.mkdtemp())
+        real, asked = relay._git, []
+        try:
+            repo = os.path.join(tmp, "r")
+            os.makedirs(os.path.join(repo, "lib", "deep"))
+            subprocess.run(["git", "init", "-q", repo], check=True)
+            says = subprocess.run(["git", "-C", repo, "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+            relay._git = lambda *a: asked.append(a) or real(*a)
+            relay._ABOVE.clear()
+            for p in (repo, os.path.join(repo, "lib"), os.path.join(repo, "lib", "deep", "x.py"),
+                      os.path.join(repo, "lib", "not", "made", "y.py")):
+                self.assertEqual(relay.repo_of(p), relay.norm(says.stdout.strip()), p)
+            self.assertTrue(relay.too_broad(relay.norm(repo), os.path.join(tmp, "p4")), "a repository's top folder")
+            self.assertFalse(relay.too_broad(relay.norm(os.path.join(repo, "lib")), os.path.join(tmp, "p4")))
+            self.assertEqual(asked, [], "no git process for a path under a .git")
+        finally:
+            relay._git = real
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_sessions_are_read_again_only_when_they_change(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            home = os.path.join(tmp, "p4")
+            path = os.path.join(home, "phi", "sessions", "a", "session.json")
+            write(path, json.dumps({"sessionId": "a", "task": "one"}))
+            first = relay._sessions(home)
+            first["a"]["title"] = "a caller's own change"
+            self.assertNotIn("title", relay._sessions(home)["a"], "each caller has its own copy")
+            write(path, json.dumps({"sessionId": "a", "task": "one, changed on disk"}))
+            self.assertEqual(relay._sessions(home)["a"]["task"], "one, changed on disk")
+            shutil.rmtree(os.path.dirname(path))
+            self.assertEqual(relay._sessions(home), {})
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_a_path_on_a_missing_drive_has_no_repository(self):
         # H1: dirname("s:/") is "s:/", and the walk up once never ended, hanging every prompt hook
         for p in ("s:/replaces", "q:/no/such/dir/file.txt", "/no/such/place"):

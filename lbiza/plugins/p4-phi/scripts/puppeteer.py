@@ -207,23 +207,82 @@ def app_roots(home, top):
     return [root] if root and os.path.isdir(root) else _phi().app_roots()
 
 
-def app_files(roots):
+LOOK_S = 1.0                     # how long one look at the app's folder is believed: a hook's whole run, a fifth of a tick
+_LOOKS = {}                      # the roots -> (when, [(record path, mtime_ns, size)])
+
+
+def app_look(roots):
+    """[(path, mtime_ns, size)] of the app's session records, sorted by path. A message's hook built four ledgers
+    and signed five, each listing and stat-ing every record again (449 of them, 2026-11-16); one look now serves
+    all of them for LOOK_S."""
+    key = tuple(roots)
+    held = _LOOKS.get(key)
+    at = time.time()
+    if held and 0 <= at - held[0] < LOOK_S:
+        return held[1]
     out = []
     for root in roots:
-        out += glob.glob(os.path.join(root, "*", "*", "local_*.json"))
-    return sorted(out)
-
-
-def app_index(roots):
-    """{sessionId: {parent, archived, title, name}} of the app's session records, each file read once a change."""
-    out = {}
-    for p in app_files(roots):
         try:
-            m = os.stat(p).st_mtime_ns
+            accounts = sorted(os.scandir(root), key=lambda e: e.name)
         except OSError:
             continue
+        for a in accounts:
+            try:
+                orgs = sorted(os.scandir(a.path), key=lambda e: e.name) if a.is_dir() else []
+            except OSError:
+                continue
+            for o in orgs:
+                try:
+                    files = list(os.scandir(o.path)) if o.is_dir() else []
+                except OSError:
+                    continue
+                for f in files:
+                    if f.name.startswith("local_") and f.name.endswith(".json"):
+                        try:
+                            st = f.stat()
+                        except OSError:
+                            continue
+                        out.append((f.path, st.st_mtime_ns, st.st_size))
+    out.sort()
+    _LOOKS[key] = (at, out)
+    return out
+
+
+def app_files(roots):
+    return [p for p, _, _ in app_look(roots)]
+
+
+def app_cache_path(home):
+    return os.path.join(home, "phi", ".cache", "app-index.json")
+
+
+def app_cached(home):
+    """What the last hook or watcher read from the app's records, kept in the store so the next process reads one
+    file, not every record: {path: [mtime_ns, row]}. Only a record whose time changed is opened again."""
+    if home and home not in _APP_LOADED:
+        _APP_LOADED.add(home)
+        try:
+            with open(app_cache_path(home), encoding="utf-8") as f:
+                d = json.load(f)
+            for p, v in (d.items() if isinstance(d, dict) else ()):
+                if isinstance(v, list) and len(v) == 2 and p not in _APP:
+                    _APP[p] = (v[0], v[1])
+        except (OSError, ValueError):
+            pass
+
+
+_APP_LOADED = set()
+
+
+def app_index(roots, home=""):
+    """{sessionId: {parent, archived, title, name}} of the app's session records, each file read once a change."""
+    out = {}
+    app_cached(home)
+    read = 0
+    for p, m, _ in app_look(roots):
         held = _APP.get(p)
         if not held or held[0] != m:
+            read += 1
             d = relay._read_json(p)
             sp = d.get("spawnedFrom") if isinstance(d.get("spawnedFrom"), dict) else {}
             held = _APP[p] = (m, {"sessionId": str(d.get("sessionId") or ""), "parent": str(sp.get("sessionId") or ""),
@@ -231,6 +290,13 @@ def app_index(roots):
                                   "name": str(sp.get("name") or "")} if d.get("sessionId") else None)
         if held[1]:
             out[held[1]["sessionId"]] = held[1]
+    if read and home:
+        try:
+            keep = {p for p, _, _ in app_look(roots)}
+            _write(app_cache_path(home), json.dumps({p: [v[0], v[1]] for p, v in _APP.items() if p in keep},
+                                                    ensure_ascii=False))
+        except OSError:
+            pass
     return out
 
 
@@ -313,8 +379,8 @@ def signature(home, top, roots):
         parts += [_stat(p) for p in sorted(glob.glob(os.path.join(d, "readings", "*.json")))]
     # of the app's records: those of the subtree's sessions as they change, and the others by name, so a new one
     # counts once and another tree's activity leaves this ledger alone
-    for p in app_files(roots):
-        parts.append(_stat(p) if os.path.basename(p)[:-5] in ids else p)
+    for p, m, size in app_look(roots):
+        parts.append(f"{p}|{m}|{size}" if os.path.basename(p)[:-5] in ids else p)
     return hashlib.sha1("\n".join(parts).encode("utf-8", "replace")).hexdigest()
 
 
@@ -332,7 +398,7 @@ def build(home, top, net=False):
     every = relay._sessions(home)
     tree = subtree(home, top, every)
     roots = app_roots(home, top)
-    app = app_index(roots)
+    app = app_index(roots, home)
     ids = {sid for sid, _, _ in tree}
     rows, shut, tasks, tied, reconcile = [], [], [], {}, []
     for sid, depth, s in tree:

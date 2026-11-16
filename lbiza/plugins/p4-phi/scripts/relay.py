@@ -89,8 +89,13 @@ def _parent(s):
     return str(sp.get("sessionId") or "") if isinstance(sp, dict) else ""
 
 
+_SESSION_FILES = {}              # a session.json's path -> (mtime_ns, size, what it held), kept for one process
+
+
 def _sessions(home):
-    """{sessionId: session.json} of every session in the store."""
+    """{sessionId: session.json} of every session in the store. One message's hook asked for this eleven times, 75
+    files each (2026-11-16), so a file is read again only when its time or size changed; each caller gets its own
+    copy of a session's top level."""
     out = {}
     base = os.path.join(home, "phi", "sessions")
     try:
@@ -98,9 +103,18 @@ def _sessions(home):
     except OSError:
         return out
     for n in names:
-        d = _read_json(os.path.join(base, n, "session.json"))
+        path = os.path.join(base, n, "session.json")
+        try:
+            st = os.stat(path)
+        except OSError:
+            _SESSION_FILES.pop(path, None)
+            continue
+        held = _SESSION_FILES.get(path)
+        if not held or held[0] != st.st_mtime_ns or held[1] != st.st_size:
+            held = _SESSION_FILES[path] = (st.st_mtime_ns, st.st_size, _read_json(path))
+        d = held[2]
         if d.get("sessionId"):
-            out[d["sessionId"]] = d
+            out[d["sessionId"]] = dict(d)
     return out
 
 
@@ -304,8 +318,43 @@ def repo_of(path):
         if up == d:                                     # a drive or root that does not exist: no repository
             return ""
         d = up
-    r = _git(d, "rev-parse", "--show-toplevel") if d else None
-    return norm(r.stdout.strip()) if r and r.returncode == 0 and r.stdout.strip() else ""
+    if not d:
+        return ""
+    # One message's rebase check asked git `rev-parse --show-toplevel` once a path, 100 times and 2 s on a top
+    # session (2026-11-16). A repository's top folder is the nearest one at or above that holds a `.git`, a folder
+    # or a worktree's file, which lstat finds with no process started. Inside a `.git` folder git is still asked.
+    top = _dot_git_above(d)
+    if top is None:
+        r = _git(d, "rev-parse", "--show-toplevel")
+        return norm(r.stdout.strip()) if r and r.returncode == 0 and r.stdout.strip() else ""
+    return norm(top) if top else ""
+
+
+_ABOVE = {}                      # a folder -> the nearest folder at or above it that holds a `.git`
+
+
+def _dot_git_above(d):
+    """The nearest folder at or above `d` that holds a `.git`, '' when none does, None when `d` lies inside a `.git`
+    folder (where git answers differently)."""
+    d = os.path.abspath(d)
+    if re.search(r"[\\/]\.git(?:[\\/]|$)", d):
+        return None
+    walked, cur, found = [], d, ""
+    while True:
+        if cur in _ABOVE:
+            found = _ABOVE[cur]
+            break
+        walked.append(cur)
+        if os.path.lexists(os.path.join(cur, ".git")):
+            found = cur
+            break
+        up = os.path.dirname(cur)
+        if up == cur:
+            break
+        cur = up
+    for w in walked:
+        _ABOVE[w] = found
+    return found
 
 
 def heads(repos):
@@ -416,13 +465,30 @@ def uncommitted(files):
         r = repo_of(f)
         if r:
             by_repo.setdefault(r, []).append(f)
+    # every repository's status is asked at once, not one after another, and of what git lists only the entries
+    # whose file name is one asked about are put in one form: a work tree with thousands of untracked files cost a
+    # message 60 ms of that alone (2026-11-16)
+    runs = []
     for repo, fs in by_repo.items():
-        st = _git(repo, "status", "--porcelain", "-z", "--untracked-files=all")
-        if not st or st.returncode != 0:
+        try:
+            runs.append((repo, fs, subprocess.Popen(
+                ["git", "-C", repo, "status", "--porcelain", "-z", "--untracked-files=all"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, text=True,
+                encoding="utf-8", errors="replace")))
+        except OSError:
             continue
+    for repo, fs, proc in runs:
+        try:
+            listed, _ = proc.communicate(timeout=GIT_S)
+        except (OSError, subprocess.SubprocessError):
+            proc.kill()
+            continue
+        if proc.returncode != 0:
+            continue
+        names = {f.rsplit("/", 1)[-1] for f in fs}
         dirty = set()
-        for item in st.stdout.split("\0"):
-            if len(item) > 3:
+        for item in listed.split("\0"):
+            if len(item) > 3 and norm(item[3:].replace("\\", "/").rsplit("/", 1)[-1]) in names:
                 dirty.add(norm(item[3:], repo))
         out += [f for f in fs if f in dirty]
     return sorted(set(out))
@@ -585,7 +651,13 @@ def rebase(home, sid, room, fair_cut, touches=None):
             marks = [x for x in marks if any(overlap(p, o) for p in x[2].get("paths") or [] for o in own)]
             others = [line for line in others if any(show(o, base) in line for o in own)]
     # the direct warnings: uncommitted files and shard paths against what is deprecated, and against other shards
-    mine = [f for f in uncommitted(edited_files(home, sid)) if not scratch(home, sid, f)]
+    # asked of git only when a mark or a shard is there to hold it against: two `git status` runs a message otherwise
+    held = []
+
+    def mine_now():
+        if not held:
+            held.append([f for f in uncommitted(edited_files(home, sid)) if not scratch(home, sid, f)])
+        return held[0]
     shard = shard_of(s)
     every_mark = [(nid, n.get("title") or nid, m) for nid, n in (anchor.get("nodes") or {}).items() if nid != sid
                   for m in n.get("marks") or []]
@@ -593,10 +665,10 @@ def rebase(home, sid, room, fair_cut, touches=None):
                    for m in (anchor.get("parent") or {}).get("marks") or []]
     for nid, title, m in every_mark:
         for p in m.get("paths") or []:
-            if too_broad(p, home):
-                continue
-            hit = sorted({f for f in mine if covers(p, f) or covers(f, p)} | {x for x in shard if overlap(x, p)})
             key = f"mark:{nid}:{m.get('time')}:{p}"
+            if key in told or too_broad(p, home):
+                continue
+            hit = sorted({f for f in mine_now() if covers(p, f) or covers(f, p)} | {x for x in shard if overlap(x, p)})
             if hit and key not in told:
                 told.append(key)
                 warnings.append(f"\"{title}\" wrote \"{_short(m.get('claim'), 300)}\", which names {show(p, base)}; "
@@ -606,7 +678,7 @@ def rebase(home, sid, room, fair_cut, touches=None):
         if nid == sid:
             continue
         for pat in n.get("shard") or []:
-            hit = sorted({f for f in mine if covers(pat, f)})
+            hit = sorted({f for f in mine_now() if covers(pat, f)})
             key = f"shard-edit:{nid}:{pat}:{','.join(hit)}"
             if hit and key not in told:
                 told.append(key)
@@ -932,7 +1004,9 @@ IGNORED = ("phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/session
            # #43: what did not fit beside a prompt, and the standing instructions in full: pages of this machine
            "phi/sessions/*/held.md", "phi/sessions/*/standing.md",
            # #49: the sessions waiting for ezexe's archive, made again from the records
-           "phi/ready-to-archive.md")
+           "phi/ready-to-archive.md",
+           # what one hook read from the app's records, kept so the next reads one file: this machine's alone
+           "phi/.cache/")
 TRACKED_MARK = "p4-phi-tracked"
 
 

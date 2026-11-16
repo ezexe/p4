@@ -453,6 +453,59 @@ class TreeOfPlans(unittest.TestCase):
                                          "tool_response": "Plan updated.", "tool_use_id": "toolu_rp1"})
         self.assertEqual(plans.load(t.p4, A)["current"], "2.2", "a replayed call is not applied again by a hook")
 
+    def test_the_transcript_is_read_on_from_where_the_last_replay_stopped(self):
+        """2026-11-16: each message and each Stop parsed the whole transcript again for the few lines written since.
+        The place kept is the first call still without a result, so no call is passed before its result is in."""
+        t = self.t
+        path = os.path.join(self._tmp.name, "b-transcript.jsonl")
+        rows = [{"type": "user", "message": {"role": "user", "content": "Move the store layout into phi, in steps"}}]
+        kept = os.path.join(t.dir(A), ".calls", "replay.json")
+
+        def put():
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write("".join(json.dumps(r) + chr(10) for r in rows))
+
+        def call(k, inp, name="mcp__ccd_turn__update_plan"):
+            rows.append({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": f"toolu_ro{k}", "name": name, "input": inp}]}})
+            put()
+
+        def result(k, text="Plan updated."):
+            rows.append({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": f"toolu_ro{k}", "content": text}]}})
+            put()
+
+        def message(text):
+            return context(t.hook("user-prompt-submit", A, {"hook_event_name": "UserPromptSubmit", "prompt": text,
+                                                           "transcript_path": path}))
+
+        def offset():
+            with open(kept, encoding="utf-8") as f:
+                return json.load(f)["offset"]
+        call(0, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/"))
+        result(0)
+        message("go on")
+        self.assertEqual([x["addr"] for x in plans.load(t.p4, A)["steps"]], ["2.1", "2.2"])
+        self.assertEqual(offset(), os.path.getsize(path), "everything read: the next replay starts at the end")
+        before = os.path.getsize(path)
+        call(1, {"advance": True})
+        message("next")
+        self.assertEqual(plans.load(t.p4, A)["current"], "2.1", "a call with no result yet is not applied")
+        self.assertEqual(offset(), before, "and holds the place, so it is read again")
+        result(1)
+        call(2, {"command": "python build.py", "run_in_background": True}, name="Bash")
+        result(2, "Command running in background with ID: bg7offset1. Output is being written to: x")
+        message("and now")
+        p = plans.load(t.p4, A)
+        self.assertEqual(p["current"], "2.2", "applied once its result is in")
+        self.assertEqual([x["id"] for _, x in plans._tasks(p)], ["bg7offset1"], "a launch after the place is read too")
+        self.assertEqual(offset(), os.path.getsize(path))
+        call(3, {"advance": True})
+        rows.append({"type": "user", "message": {"role": "user", "content": "stop, something else"}})
+        put()
+        message("stop, something else")
+        self.assertEqual(offset(), os.path.getsize(path), "a call cut off by a new message holds no place")
+
     def task(self, host, command, task_id):
         r = self.t.hook("task", host, {"hook_event_name": "PostToolUse", "tool_name": "Bash",
                                        "tool_input": {"command": command, "run_in_background": True},

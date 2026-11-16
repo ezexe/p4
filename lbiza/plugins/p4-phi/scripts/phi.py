@@ -599,16 +599,60 @@ def result_text(block):
     return ""
 
 
-def read_transcript(path):
-    """A transcript's lines as objects; of a very long one, its last TRANSCRIPT_BYTES."""
-    return read_rows(path, TRANSCRIPT_BYTES) if path and os.path.exists(path) else []
+def read_transcript(path, tail=None):
+    """A transcript's lines as objects; of a very long one, its last TRANSCRIPT_BYTES, or its last `tail` bytes."""
+    return read_rows(path, tail or TRANSCRIPT_BYTES) if path and os.path.exists(path) else []
+
+
+def read_from(path, start, partial=False):
+    """([(the byte a line starts at, the line as an object)], the byte past the last whole line) of a .jsonl file
+    from byte `start`. A last line with no newline yet is still being written and is left for the next read; with
+    `partial`, `start` may fall inside a line, which is skipped."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(start)
+            data = f.read()
+    except OSError:
+        return [], start
+    out, pos = [], start
+    pieces = data.split(b"\n")[:-1]
+    for k, raw in enumerate(pieces):
+        at, pos = pos, pos + len(raw) + 1
+        if partial and k == 0:
+            continue
+        try:
+            d = json.loads(raw.decode("utf-8", "replace"))
+        except ValueError:
+            continue
+        if isinstance(d, dict):
+            out.append((at, d))
+    return out, pos
+
+
+TURN_WINDOWS = (512 * 1024, 2 * 1024 * 1024)     # a turn is looked for in the transcript's end first, then further back
 
 
 def last_turn(path):
     """The transcript's last turn whoever asked for it: the last message that carries a request, and every tool
-    call after it. A message of the harness (a session's report relayed, a notification) opens no turn."""
+    call after it. A message of the harness (a session's report relayed, a notification) opens no turn. The last
+    request is nearly always near the end, so the end is parsed first and the megabytes before it only when no
+    request lies there: the turn found is the same, since it starts at the last line that carries one."""
+    try:
+        size = os.path.getsize(path) if path else 0
+    except OSError:
+        size = 0
+    for window in TURN_WINDOWS:
+        if window < min(size, TRANSCRIPT_BYTES):
+            cur = turn_in(read_transcript(path, window))
+            if cur is not None:
+                return cur
+    return turn_in(read_transcript(path))
+
+
+def turn_in(rows):
+    """The last turn among a transcript's lines, None when no line carries a request."""
     cur, calls = None, {}
-    for d in read_transcript(path):
+    for d in rows:
         if d.get("isSidechain") or d.get("isMeta"):
             continue
         c = (d.get("message") or {}).get("content")
@@ -2245,11 +2289,28 @@ def replay(me, s, transcript):
     own entries, so its calls are read back here, at each message and each Stop, each once by its tool_use_id."""
     if not transcript or not os.path.exists(transcript):
         return ""
-    calls, results, notices, when, stops = [], {}, [], {}, []
-    for d in read_transcript(transcript):
+    # Read from where the last replay stopped, kept beside the per-call markers: a message and a Stop each parsed
+    # megabytes of transcript to find the few lines written since (2026-11-16). The place kept is the first call
+    # still without a result, so a call is never passed before its result is in.
+    state_path = os.path.join(session_dir(me.home, me.id), ".calls", "replay.json")
+    state = read_json(state_path)
+    try:
+        size = os.path.getsize(transcript)
+    except OSError:
+        return ""
+    start = state.get("offset") if state.get("path") == transcript else None
+    known = isinstance(start, int) and 0 < start <= size
+    if not known:
+        start = max(0, size - TRANSCRIPT_BYTES)
+    rows, end = read_from(transcript, start, partial=not known and start > 0)
+    calls, results, notices, when, stops, where, spoke = [], {}, [], {}, [], {}, -1
+    for at, d in rows:
         c = (d.get("message") or {}).get("content")
         if d.get("type") == "user" and "<task-notification>" in json.dumps(c, default=str):
             notices.append(json.dumps(c, default=str))
+        if d.get("type") == "user" and not (isinstance(c, list) and any(
+                isinstance(b, dict) and b.get("type") == "tool_result" for b in c)):
+            spoke = at                              # a new message: a call before it with no result was cut off
         for b in c if isinstance(c, list) else []:
             if not isinstance(b, dict):
                 continue
@@ -2260,8 +2321,16 @@ def replay(me, s, transcript):
                     "mcp__ccd_turn__update_plan", "Bash", "PowerShell", "Monitor", "Agent", "Workflow"):
                 calls.append(b)
                 when[b.get("id")] = str(d.get("timestamp") or "")
+                where[b.get("id")] = at
             elif d.get("type") == "user" and b.get("type") == "tool_result":
                 results[b.get("tool_use_id")] = result_text(b)
+    waiting = [where[b.get("id")] for b in calls if b.get("id") not in results and where[b.get("id")] > spoke]
+    resume = min(waiting) if waiting else end
+    if state.get("path") != transcript or state.get("offset") != resume:
+        try:
+            write_atomic(state_path, json.dumps({"path": transcript, "offset": resume}) + "\n")
+        except OSError:
+            pass
     text = ""
     last_list = max((k for k, b in enumerate(calls) if b["name"] == "mcp__ccd_turn__update_plan"
                      and isinstance((b.get("input") or {}).get("items"), list)), default=0)

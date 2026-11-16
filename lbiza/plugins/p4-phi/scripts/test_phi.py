@@ -201,6 +201,34 @@ class Requests(unittest.TestCase):
             self.assertIn("quotes", row["failed"][0])
             self.assertEqual(row["report"], "fixed")
 
+    def test_the_last_turn_is_found_from_the_transcripts_end(self):
+        """2026-11-16: a Stop parsed megabytes of transcript for a turn that began in its last lines."""
+        held = phi.TURN_WINDOWS
+        with tempfile.TemporaryDirectory() as tmp:
+            p = transcript(os.path.join(tmp, "t.jsonl"), BRIEF,
+                           [("Edit", {"file_path": f"a/b{k}.py"}, "x" * 3000) for k in range(6)], "one")
+            whole = phi.last_turn(p)
+            self.assertEqual(len(whole["calls"]), 6)
+            try:
+                phi.TURN_WINDOWS = (2000, 6000)
+                self.assertEqual(phi.last_turn(p), whole, "its request lies before both windows: the same turn")
+                with open(p, "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"type": "user", "uuid": "u2", "message": {"content": "and the docs"}}) + "\n")
+                    f.write(json.dumps({"type": "assistant", "message": {"content": [
+                        {"type": "tool_use", "id": "z", "name": "Write", "input": {"file_path": "a/docs.md"}}]}}) + "\n")
+                near = phi.last_turn(p)
+                self.assertEqual((near["prompt"], near["uuid"], len(near["calls"])), ("and the docs", "u2", 1))
+                phi.TURN_WINDOWS = ()
+                self.assertEqual(phi.last_turn(p), near, "the whole file gives the same turn")
+            finally:
+                phi.TURN_WINDOWS = held
+            rows, end = phi.read_from(p, 0)
+            self.assertEqual((len(rows), end), (16, os.path.getsize(p)))
+            with open(p, "a", encoding="utf-8") as f:
+                f.write('{"type": "user", "message": {"content": "a line still being wri')
+            again, stop = phi.read_from(p, end)
+            self.assertEqual((again, stop), ([], end), "a line with no newline yet waits for the next read")
+
     def test_a_harness_message_does_not_open_a_turn(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = transcript(os.path.join(tmp, "t.jsonl"), BRIEF, [("Edit", {"file_path": "a/b.py"}, "ok")], "one")
