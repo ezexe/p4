@@ -1,31 +1,23 @@
 #!/usr/bin/env python3
 """near.py: candidates from what earlier, similar tasks used.
 
-A task's labelled entries (the files a turn opened, cited or edited) rarely share words with its prompt, so BM25
-over the prompt draws few of them: on one store (2026-11-10, the newest 400 tasks) 8% of 4,986 labelled positives,
-and of the 1,339 that were new to their session, 12%. Prompts are more like each other than like file paths: the
-entries the 20 earlier tasks most like a prompt used, taken from other sessions only, held 22% of those new
-positives, and with BM25's, 31%.
+A task's labelled entries are the files a turn opened, cited or edited. They rarely share words with its prompt, so
+BM25 over the prompt draws few of them, while prompts are more like each other than like file paths. near.py adds
+to a task's candidates the entries that the NEIGHBOURS earlier tasks most like its prompt used, at most MAX of them.
+Three features tell the ranker that an entry came this way: `near`, `near-rank` and `near-hit`. Without them the
+added candidates do harm. Two more say how like the prompt the task that used an entry was: `near-like` and
+`near-strong`.
 
-So a task's candidates are BM25's and these, with features that say an entry came this way (`near`, `near-rank`,
-`near-hit`) and how like the prompt the task that used it really was (`near-like`, `near-strong`). Measured on that
-store with `p4.py eval`, held out; "loud" is the share of ordinary prompts the fitted model would print for:
+It is on while p4.json `recall.near.on` is true, as it is by default. A training round then adds these entries to
+the candidates of each task whose candidates BM25 draws from the whole index and of each silence task, and the
+model it writes lists `near` among its features. A query adds them only for a served model that lists `near`, and
+only after a round has written the memory. Only other sessions' tasks count unless `recall.near.same_session` is
+true: what a session opened a turn ago is already in its context, so retrieving it scores well and tells the
+session nothing.
 
-                                      usable tasks  r-precision  recall@20  precision  top-5 hit  loud
-  BM25 candidates alone                     89         0.023       0.140      0.093      0.30     0.22
-  with these, and no feature (prototype)   150         0.016       0.133      0.080      0.27
-  with these, near/rank/hit only           146         0.035       0.217      0.107      0.42     0.70
-  with these and the likeness features     147         0.036       0.225      0.129      0.37     0.00
-  the same, own session included           158         0.115       0.299      0.242      0.56     0.00
-
-The candidates alone do harm: the ranker has to be told where an entry came from. Without the likeness features the
-twenty nearest tasks count the same however far they are, and the model prints for most ordinary prompts. The last
-row is not used. What a session opened a turn ago is already in its context: recalling it scores well and
-tells the session nothing, so only other sessions' tasks count (`recall.near.same_session` turns that on).
-
-The memory is `models/near.json` (a cache, ignored by git): every labelled task's time, session, prompt tokens and
-positive entries, written by a training round and read by a query, which never builds it (a message's hook has a
-300 ms budget). A task only ever sees tasks dated before it.
+The memory is `phi/models/near.json`, a cache git ignores. It holds every labelled task's time, session, prompt
+words and positive entries. A training round writes it, and a query only reads it: building it would not fit the
+time budget stated at `h_recall` in hook.py. A task only ever sees tasks dated before it.
 """
 
 import json
@@ -44,7 +36,7 @@ VERSION = 1
 ON = True
 NEIGHBOURS = 20               # earlier tasks whose entries are taken
 MAX = 100                     # entries added to a task's candidates, the highest scored first
-SAME_SESSION = False          # the session's own earlier tasks too (module docstring: off)
+SAME_SESSION = False          # the session's own earlier tasks too; the module docstring says why not
 
 
 def configure(p4):
@@ -58,8 +50,9 @@ def path(p4):
 
 
 def build(p4, idx, labels=None, write=True):
-    """The memory from the store's tasks and training labels: {"tasks": [[time, session, tokens, [entry ids]]]},
-    oldest first, each task's positives that the index holds. Written to models/near.json when `write`."""
+    """The memory from the store's tasks and its training labels, or from `labels` in their place:
+    {"version": VERSION, "tasks": [[time, session, tokens, [entry ids]]]}, oldest first, each task with its positives
+    that the index holds. Written to phi/models/near.json when `write`, and returned as prepare() leaves it."""
     import labels as lb
     ids = {d["id"] for d in idx["docs"]}
     tasks = lb.read_tasks(p4)
@@ -91,7 +84,7 @@ def prepare(mem):
 
 
 def load(p4):
-    """The memory a training round left, or None (no round yet, or another version)."""
+    """The memory a training round left; None when no round has written it or it is of another version."""
     try:
         with open(path(p4), encoding="utf-8") as f:
             mem = json.load(f)
@@ -103,7 +96,8 @@ def load(p4):
 def entries(mem, text, when="", session="", same_session=None):
     """{entry id: score} from the NEIGHBOURS tasks dated before `when` whose prompts are most like `text`: a task's
     likeness is the idf of the words it shares with the prompt over the root of its own length, and an entry's
-    score the sum over the tasks that used it. Empty `when` means now (every task counts)."""
+    score the sum over the tasks that used it. An empty `when` means now, when every task counts. The session's own
+    tasks are left out unless `same_session`, which defaults to SAME_SESSION. The result is a `Scores`."""
     if not mem or not mem["rows"]:
         return {}
     same_session = SAME_SESSION if same_session is None else same_session
@@ -122,8 +116,8 @@ def entries(mem, text, when="", session="", same_session=None):
             scored.append((sum(idf.get(w, 0.0) for w in shared) / math.sqrt(1 + len(toks)), k))
     scored.sort(key=lambda x: (-x[0], x[1]))
     # what a task identical to the prompt would score: the measure of how like it a neighbour really is. The
-    # NEIGHBOURS nearest are taken however far they are, and without this a faint likeness looks like a strong one
-    # (a word no task ever used is as rare as a word can be: a prompt made of such words is like nothing)
+    # NEIGHBOURS nearest are taken however far they are, and without this a faint likeness looks like a strong one.
+    # A word no task ever used counts as rare as a word can be, so a prompt made of such words is like nothing.
     whole = sum(idf.get(w, mem["rarest"]) for w in mine) / math.sqrt(1 + len(mine)) or 1.0
     out = Scores()
     for sc, k in scored[:NEIGHBOURS]:
@@ -151,9 +145,12 @@ def id_index(docs):
 
 
 def extend(docs, id_at, cand, got, allowed):
-    """(candidates with the near entries BM25 did not draw appended, {candidate position: (score over the best,
-    1 / (1 + rank))} for every candidate that is a near entry). `got` is entries()'s result, `id_at` {entry id: doc
-    index}, `allowed(doc index)` says an entry may be a candidate at all (not superseded, dated before the task)."""
+    """The candidates with at most MAX near entries that BM25 did not draw appended, and {candidate position:
+    features} for every candidate that is a near entry. A near entry's features are its score over the best and
+    `1 / (1 + rank)`, then its likeness when `got` is a `Scores`. `got` is entries()'s result and `id_at` is
+    {entry id: doc index}.
+    `allowed(doc index)` says whether an entry may be a candidate at all: a query refuses a superseded one, and
+    training one the task could not have been shown."""
     if not got:
         return list(cand), {}
     have = set(cand)

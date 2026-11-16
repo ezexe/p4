@@ -92,7 +92,7 @@ class Near(unittest.TestCase):
         self.assertEqual(set(near.entries(self.mem, TASKS[1][3], TASKS[1][2], "aaaaaaaa", same_session=True)),
                          {"repo:src/kelp/anchor.py"})
         self.assertEqual(near.entries(self.mem, TASKS[0][3], TASKS[0][2], "zzzzzzzz"), {}, "nothing is dated before the first task")
-        self.assertEqual(len(near.entries(self.mem, text)), 2, "with no time given, every task counts (a live query)")
+        self.assertEqual(len(near.entries(self.mem, text)), 2, "a live query gives no time, and every task counts")
 
     def test_training_draws_them_and_marks_them(self):
         task = lb.read_tasks(self.p4)["t4"]
@@ -112,7 +112,7 @@ class Near(unittest.TestCase):
         self.assertFalse(by["t4"]["missed"])
         self.assertTrue(by["t1"]["missed"], "the first task has nothing earlier to draw on")
         near.ON = False
-        self.assertTrue({s["task"]: s for s in train.build_sets(self.p4, self.idx)}["t4"]["missed"], "off: as before")
+        self.assertTrue({s["task"]: s for s in train.build_sets(self.p4, self.idx)}["t4"]["missed"], "off: BM25 alone")
 
     def test_a_query_uses_it_only_with_a_model_trained_on_it(self):
         docs = self.idx["docs"]
