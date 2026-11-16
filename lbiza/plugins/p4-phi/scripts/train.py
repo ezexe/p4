@@ -8,13 +8,14 @@ With `--if-owed`, `train` returns at once unless `owed` says a round is owed, an
 calls it that way, as an async command hook. `eval` runs the same round, writes none of those files, and prints
 what the round would decide.
 
-How a task becomes examples. A task of phi/models/tasks.tsv has a text and a time. An entry is eligible for it when
-undated or dated no later than the task, and not a row of the task's own session's messages. Its candidates are
-the top CANDIDATES of the eligible entries that share a term with it, by BM25 on its terms, joined by near.py's
-entries when p4.json's `recall.near.on` is set and by the entries labelled for the sessions above the task's
-session when `recall.node.on` is. A pool task takes every eligible entry of the corpus's rules, corrections,
-retractions and facts instead, held ones included. `ranker.candidate_features` featurizes the candidates, and a
-candidate is positive when a label names it. A label's weight is the one `labels.as_label` reads from its row.
+How a task becomes examples. A task of phi/models/tasks.tsv has a text and a time. A document is eligible for it
+when undated or dated no later than the task, and not a row of the task's own session's messages. Its candidates
+are the top CANDIDATES of the eligible documents that share a term with it, by BM25 on its terms, joined by
+near.py's documents when p4.json's `recall.near.on` is set and by the documents labelled for the sessions above the
+task's session when `recall.node.on` is. A pool task takes every eligible document of the corpus's rules,
+corrections, retractions and facts instead, held ones included. `ranker.candidate_features` featurizes the
+candidates, and a candidate is positive when a label names it. A label's weight is the one `labels.as_label` reads
+from its row.
 
 Evaluation holds out one task at a time for up to LOO_MAX tasks. Above that, `folds` sorts the tasks by time and
 deals them into FOLDS folds in turn, grouping by nothing, so two tasks of one session can fall on both sides of a
@@ -53,7 +54,7 @@ SILENT_WEIGHT = 1.0
 SILENT = "silent.jsonl"                                   # phi/models/silent.jsonl: {"prompt": ...} per line
 SILENT_DEFAULT = os.path.join(HERE, "silent-prompts.jsonl")
 CANDIDATES = 200
-POOL_CANDIDATES = 0           # 0: a pool task's candidates are every eligible entry, and it fits on every one
+POOL_CANDIDATES = 0           # 0: a pool task's candidates are every eligible document, and it fits on every one
 TRAIN_NEG = 60                # negatives a task keeps when fitting, drawn at random by trim, so a round takes seconds
 LOO_MAX = 40
 FOLDS = 5
@@ -70,8 +71,8 @@ EVAL_HEAD = "round\ttime\tlabels\ttasks\tper_source\tr_precision\trecall20\tprec
 # --- examples ----------------------------------------------------------------------------------------------
 
 def eligible(doc, task):
-    """An entry a task could have been shown: undated or dated no later than the task to the minute, and not a row
-    of the task's own session's messages."""
+    """A document a task could have been shown: undated or dated no later than the task to the minute, and not a
+    row of the task's own session's messages."""
     t = doc.get("time") or ""
     if t and task["time"] and t[:16] > task["time"][:16]:
         return False
@@ -81,8 +82,8 @@ def eligible(doc, task):
 
 
 def task_examples(idx, task, positives, limit=None, files=None, docs_by=None):
-    """`(xs, ys, cand, sc)` for one task: the features of its candidates, their labels of 0 or 1, their doc indices
-    and their BM25 scores."""
+    """`(xs, ys, cand, sc)` for one task: the features of its candidates, their labels of 0 or 1, their positions
+    in the index's documents and their BM25 scores."""
     import p4 as cli
     limit = CANDIDATES if limit is None else limit
     terms = list(dict.fromkeys(ranker.tokens(task["text"])))
@@ -93,7 +94,7 @@ def task_examples(idx, task, positives, limit=None, files=None, docs_by=None):
         scores = cli.bm25_scores(idx, terms, {})
         idf, avgdl = cli.idf_map(idx, terms), idx["avgdl"]
     else:
-        # a pool task's candidates are the entries of `files` alone, scored with those files' own statistics: the
+        # a pool task's candidates are the documents of `files` alone, scored with those files' own statistics: the
         # idf of a term among the rulings, corrections and facts, not among every message and file
         sub = sub_corpus(idx, files)
         idf = {t: sub["idf"][t] for t in terms if t in sub["idf"]}
@@ -111,15 +112,15 @@ def task_examples(idx, task, positives, limit=None, files=None, docs_by=None):
     cand = pool[:limit] if limit else pool
     mem, feats = (docs_by or {}).get("near") if files is None else None, None
     if mem:
-        # near.py: the entries used by similar tasks of other sessions, dated before this one, join BM25's, with a
-        # feature saying so
+        # near.py: the documents used by similar tasks of other sessions, dated before this one, join BM25's, with
+        # a feature saying so
         import near
         got = near.entries(mem, task["text"], task.get("time") or "", task.get("session") or "")
         cand, feats = near.extend(docs, docs_by["id_at"], cand, got, lambda i: eligible(docs[i], task))
     node_hit = None
     node_of = (docs_by or {}).get("node") if files is None else None
     if node_of:
-        # node.py: the entries labelled for the sessions above this task's session join the candidates, with a
+        # node.py: the documents labelled for the sessions above this task's session join the candidates, with a
         # feature saying so
         got = node_of(task)
         if got:
@@ -168,9 +169,9 @@ def silent_prompts(p4):
 
 def silent_sets(idx, prompts, now, mem=None, id_at=None):
     """One all-negative set per ordinary message, its candidates and features built as p4.query builds them for the
-    ranker, less the dictionary's expansion: BM25 over the whole index, the superseded entries out, the top
-    CANDIDATES, then near.py's entries when the round uses them, since a near entry on an ordinary message has to
-    learn silence too."""
+    ranker, less the dictionary's expansion: BM25 over the whole index, the superseded documents out, the top
+    CANDIDATES, then near.py's documents when the round uses them, since a near document on an ordinary message has
+    to learn silence too."""
     import p4 as cli
     docs = idx["docs"]
     gone = cli.superseded_ids(idx, now)
@@ -215,8 +216,9 @@ def head_tokens(p4):
 
 
 def sub_corpus(idx, files):
-    """`{ids, idf, avgdl, tf}` over the docs of `files`, cached on the index. A doc's term frequencies come back
-    from the postings, since the index keeps only a doc's distinct terms, and a held doc's from `_held`."""
+    """`{ids, idf, avgdl, tf}` over the documents of `files`, cached on the index. A document's term frequencies come
+    back from the postings, since the index keeps only a document's distinct terms, and a held document's from
+    `_held`."""
     key = "_sub:" + ",".join(sorted(files))
     if key in idx:
         return idx[key]
@@ -244,9 +246,10 @@ def sub_corpus(idx, files):
 
 
 def with_held(idx, p4):
-    """A copy of the index with the held entries `store.held_docs` returns, the FREED, SPENT and EXPIRED ones,
-    appended after its docs for the pool tasks: they carry no postings, so BM25 over the index never draws them,
-    and sub_corpus takes their term frequencies from `_held`. The caller's index is left as it was."""
+    """A copy of the index with the held documents `store.held_docs` returns, those of the FREED, SPENT and EXPIRED
+    entries, appended after its own documents for the pool tasks: they carry no postings, so BM25 over the index
+    never draws them, and sub_corpus takes their term frequencies from `_held`. The caller's index is left as it
+    was."""
     held = st.held_docs(p4)
     if not held:
         return idx
@@ -345,7 +348,7 @@ def build_sets(p4, idx=None, sources=None, max_tasks=None, rows=None, now=None, 
 
 
 def node_lookup(p4, tasks, rows):
-    """A function from a task to the entries labelled positive for the tasks of the sessions above its session in
+    """A function from a task to the documents labelled positive for the tasks of the sessions above its session in
     the session tree, at most CHAIN_MAX sessions up, dated no later than the task. The tree joins node.py's
     record_tree, from the app's session records, and its phi_tree, from p4-phi's session files; tasks.tsv names
     each task's session."""
@@ -441,7 +444,7 @@ def evaluate(sets, per_file=ranker.PER_FILE, quiet=True):
             base = ranker.metrics(s["ys"], bm, sorted(range(len(bm)), key=lambda i: (-bm[i], i))[:n])
             m["threshold"] = t
             m["top5"] = sum(s["ys"][i] for i in sorted(range(len(sc)), key=lambda i: (-sc[i], i))[:5]) > 0
-            # R-precision counts the labelled entries never drawn as misses; the BM25 baseline ranks the same
+            # R-precision counts the labelled documents never drawn as misses; the BM25 baseline ranks the same
             # candidates, so it counts them the same way, or it would read up to n_pos / n too high
             drawn = n / max(n, s["n_pos"])
             m["r-precision"] = m["r-precision"] * drawn
@@ -533,7 +536,7 @@ def last_promoted(p4):
 def owed(p4, now_s=None):
     """`(owed, why)`: whether `train --if-owed` runs a round. With no round in phi/models/eval.tsv, one label is
     enough. Otherwise a round is owed when a dependency was installed or updated after eval.tsv was last written,
-    whatever its age, since that dependency's entries are candidates no round has seen; or when the label files
+    whatever its age, since that dependency's documents are candidates no round has seen; or when the label files
     hold at least OWED_LABELS rows more than the last round counted and eval.tsv is at least OWED_AGE_S seconds
     old. The two numbers are this module's constants: `cmd_train` asks before `run_round` applies p4.json's
     `recall.train` to them."""
@@ -563,8 +566,8 @@ def owed(p4, now_s=None):
 
 
 def node_on(p4):
-    """p4.json's `recall.node.on`: whether a round adds the entries labelled for the sessions above a task's session
-    to its candidates, with a feature saying so. It is off by default."""
+    """p4.json's `recall.node.on`: whether a round adds the documents labelled for the sessions above a task's
+    session to its candidates, with a feature saying so. It is off by default."""
     import p4conf
     return bool(p4conf.section(p4, "recall", write=False).get("node", {}).get("on"))
 
@@ -818,9 +821,9 @@ def is_owner_entry(v):
 
 def dictionary_check(p4, idx=None, write=True, harm_max=0.05):
     """Two tests of each `on` entry that is not pending. First, a query on the misread message its `because:` quotes,
-    with that entry as the whole vocabulary, ranks one of its `points-at:` entries in the top 5. Second, over the
-    working messages, the top 5 with that entry alone differs from the top 5 with no vocabulary for at most a
-    `harm_max` share of them. A failing entry is set `status: off` in vocabulary.md when `write`, unless ezexe
+    with that entry as the whole vocabulary, ranks one of the documents its `points-at:` names in the top 5. Second,
+    over the working messages, the top 5 with that entry alone differs from the top 5 with no vocabulary for at most
+    a `harm_max` share of them. A failing entry is set `status: off` in vocabulary.md when `write`, unless ezexe
     wrote it: ezexe's entry is listed and left as it is."""
     if idx is None:
         idx, _ = st.ensure_index(p4)
@@ -899,7 +902,7 @@ def fmt(ev):
         return "no held-out numbers: fewer than 3 labelled tasks"
     s = (f"r-precision {ev['r-precision']:.3f}, BM25 baseline {ev['baseline']:.3f}, recall@20 {ev['recall@20']:.3f}, "
          f"precision at threshold {ev['precision']:.3f}, over {ev['n']} tasks" +
-         (f" and {ev['missed']} with no labelled entry drawn" if ev["missed"] else ""))
+         (f" and {ev['missed']} with no labelled document drawn" if ev["missed"] else ""))
     for k in ("pool", "history", "repo"):
         if k in ev:
             s += (f"; {k} subset r-precision {ev[k]['r-precision']:.3f}, top-5 hit {ev[k]['top5']:.2f} over "

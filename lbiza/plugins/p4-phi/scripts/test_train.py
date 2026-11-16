@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Tests for train.py: a round's promotion against its floors, `owed`, a round that writes nothing, the held entries
-among a pool task's candidates, the BM25 baseline's count of undrawn positives, and the dictionary check.
+"""Tests for train.py: a round's promotion against its floors, `owed`, a round that writes nothing, the held
+documents among a pool task's candidates, the BM25 baseline's count of undrawn positives, and the dictionary check.
 
 Run: python3 test_train.py
 
@@ -134,7 +134,7 @@ class Rounds(unittest.TestCase):
 
     def test_pool_candidates_keep_held_entries(self):
         """A pool label can name an entry picked while it was FREED or SPENT, and migrate.import_pools keeps the label
-        on that entry: the entry is among the pool task's candidates, though the index never holds it."""
+        on that entry: its document is among the pool task's candidates, though the index never holds it."""
         path = p4conf.sub(self.p4, "store", "rules.md")
         rules = [list(e.pairs) for e in st.load_file(self.p4, "rules.md")]
         rules.append([("ruling", "the axolotl relay once kept the bandicoot gauge by hand"), ("status", "FREED"),
