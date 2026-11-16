@@ -1,8 +1,10 @@
 #!/bin/sh
-# p4-phi hook runner: find a working python, run scripts/phi.py hook <name> isolated (-I) with the harness's stdin
-# passed through, and exit 0 whatever happens, so a broken hook never blocks a call. On Windows a `python3` on PATH
-# can be the Store stub, so there a candidate is proven with a trivial run once and remembered in the plugin's
-# data folder, ${CLAUDE_PLUGIN_DATA}/.python, which recall-hook.sh shares. -X utf8 runs the hook in UTF-8 mode, not the Windows code page.
+# p4-phi's runner for scripts/phi.py: it finds a working python, runs `phi.py hook <name>` with the hook's input on
+# stdin, and exits 0 whatever happens, so a broken hook never blocks a call. Python runs isolated with -I, so
+# Python's per-user site-packages folder stays out, and in UTF-8 mode with -X utf8, so the Windows code page is
+# never used.
+# On Windows a `python3` on PATH can be the Store stub, so there a candidate is proven with a trivial run once and
+# remembered in the plugin's data folder, ${CLAUDE_PLUGIN_DATA}/.python, which recall-hook.sh shares.
 set -u
 
 [ "${P4_PHI:-1}" = 0 ] && exit 0
@@ -18,9 +20,10 @@ case "${OS:-}${OSTYPE:-}" in
   *) probe=0 ;;
 esac
 
-# The interpreter proven once is remembered in the plugin's data folder: plugins-reference.md, "Environment
+# The proven interpreter is remembered in the plugin's data folder: plugins/manifest-reference.md, "Environment
 # variables": "`${CLAUDE_PLUGIN_ROOT}` changes when the plugin updates, so don't write state there", and
-# `${CLAUDE_PLUGIN_DATA}` is "kept across plugin updates". A harness that sets no data folder keeps the old place.
+# `${CLAUDE_PLUGIN_DATA}` is "kept across plugin updates". Where no data folder is set, the file is kept in the
+# plugin's own folder.
 known="${CLAUDE_PLUGIN_ROOT}/.python"
 if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
   [ -d "$CLAUDE_PLUGIN_DATA" ] || mkdir -p "$CLAUDE_PLUGIN_DATA" 2>/dev/null
@@ -28,7 +31,7 @@ if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
 fi
 if [ "$probe" = 1 ] && [ -r "$known" ]; then
   read -r c < "$known" || c=""
-  case "$c" in */*) ;; *) c="" ;; esac       # a bare name cached before T2 may be the alias: probe again
+  case "$c" in */*) ;; *) c="" ;; esac       # a bare name may be the WindowsApps alias: prove it again
   if [ -n "$c" ] && command -v "$c" >/dev/null 2>&1; then
     run "$c" "$@"
     exit 0
@@ -36,7 +39,7 @@ if [ "$probe" = 1 ] && [ -r "$known" ]; then
 fi
 
 order="python3 python py"
-[ "$probe" = 1 ] && order="py python python3"   # Windows: the launcher first, the WindowsApps alias last (T2)
+[ "$probe" = 1 ] && order="py python python3"   # on Windows the launcher first, the WindowsApps alias last
 for c in $order; do
   p=$(command -v "$c" 2>/dev/null) || continue
   case "$p" in *WindowsApps*) probe=1 ;; esac

@@ -1,18 +1,17 @@
 #!/bin/sh
-# p4-phi's recall hook runner (recall was the p4-recall plugin until p4-phi 0.7.0): find a working python, run scripts/hook.py <name> isolated (-I) with the harness's stdin
-# passed through, and exit 0 whatever happens, so a broken hook never blocks a call. On Windows a `python3` on PATH
-# can be the Store stub, so there a candidate is proven with a trivial run first; elsewhere that second interpreter
-# start (about 70 ms) is skipped, since the recall hook has a 300 ms budget (fresh-marketplace.md 4.5).
-# -X utf8 runs the hook in UTF-8 mode: stdin, stdout and open() are UTF-8, not the Windows code page (cp1252),
-# so a prompt's UTF-8 punctuation never decodes into lone surrogates that a later UTF-8 write refuses.
+# p4-phi's runner for scripts/hook.py, which holds retrieval and hands phi.py its checks around a tool call: it finds
+# a working python, runs `hook.py <name>` with the hook's input on stdin, and exits 0 whatever happens, so a broken
+# hook never blocks a call. Python runs isolated with -I and in UTF-8 mode with -X utf8, so stdin, stdout and every
+# file opened are UTF-8 rather than the Windows code page, and a prompt's UTF-8 punctuation never decodes into lone
+# surrogates that a later UTF-8 write refuses.
+# On Windows a `python3` on PATH can be the Store stub, so there a candidate is proven with a trivial run once and
+# remembered in the plugin's data folder, ${CLAUDE_PLUGIN_DATA}/.python, which run-hook.sh shares; elsewhere the
+# first python on PATH runs without that proof.
 #
-# The lookup hooks run before and after every tool call (0.8.9), so every process this script starts is paid twice a
-# call. Measured on Windows, 2026-11-11 (median of 7): 415 to 490 ms a call before, of which 144 ms was hook.py.
-# Since then: the platform is read from the environment (no `uname`), the interpreter proven once is remembered in
-# the plugin's data folder, ${CLAUDE_PLUGIN_DATA}/.python (no second interpreter start), and a call lookups.py has nothing to check
-# (lookup-check on a tool that is neither a web call nor a shell command, or on a command while the store has no
-# failure model) ends here, with no python at all. After: 49 ms for such a check, about 250 ms for a record that
-# has to answer, and a clean call's record costs the call only this script (the python runs on behind it).
+# The lookup hooks run before and after every tool call, so every process this script starts is paid twice a call.
+# The platform is read from the environment, so no `uname` runs. The gate below ends in this script, with no python
+# at all, every check whose tool and payload it does not list, and a clean call's record is written by a python
+# left running behind, so the call waits only for this script.
 set -u
 
 name="${1:-}"
@@ -23,11 +22,11 @@ if [ "$name" = lookup-check ]; then
   piped=1
   sub=0
   case "$payload" in
-    *'"agent_id"'*)                               # a sub-agent's call: phi warns it while an open one is recorded
+    *'"agent_id"'*)                               # a subagent's call: phi.py warns it while one is open
       a="${CLAUDE_PROJECT_DIR:-.}/.claude/p4/phi/.agents"
       [ -d "$a" ] && [ -n "$(ls -A "$a" 2>/dev/null)" ] && sub=1 ;;
   esac
-  nudge=0                                         # a top session owes a nudge: its CLI id names a marker
+  nudge=0                                         # a top-level session owes a nudge: its CLI id names a marker
   for f in "${CLAUDE_PROJECT_DIR:-.}/.claude/p4/phi/.nudge"/*; do
     [ -e "$f" ] || break
     case "$payload" in *"${f##*/}"*) nudge=1; break ;; esac
@@ -37,13 +36,14 @@ if [ "$name" = lookup-check ]; then
       [ "$nudge" = 1 ] || exit 0 ;;
     *'"tool_name":"WebFetch"'*|*'"tool_name": "WebFetch"'*|*'"tool_name":"WebSearch"'*|*'"tool_name": "WebSearch"'*) ;;
     *'"tool_name":"Bash"'*|*'"tool_name": "Bash"'*|*'"tool_name":"PowerShell"'*|*'"tool_name": "PowerShell"'*) ;;
-    *mcp__ccd_session_mgmt__archive_session*) ;;  # a child archiving itself: phi keeps its report first
+    *mcp__ccd_session_mgmt__archive_session*) ;;  # a child archiving itself: phi.py keeps its report first
     *mcp__ccd_session__start_session*|*'"tool_name":"EnterWorktree"'*|*'"tool_name": "EnterWorktree"'*) ;;
     *) exit 0 ;;
   esac
   [ "$sub" = 1 ] || [ "$nudge" = 1 ] || case "$payload" in
-    *git*) ;;                                     # a git command: phi's branch guard reads it (hook.py routes)
-    # a command that may run long: phi's levels check reads it (#57). Every other shell call still ends here.
+    *git*) ;;                                     # a git command: phi.py's branch guard reads it
+    # a command that may run long: phi.py's check that a long command runs in the background reads it. Every other
+    # shell call ends here.
     # At least as wide as phi.long_kind, which reads words whatever the space between them: a call the gate
     # passes and python declines costs one interpreter start, and one the gate stops is never read at all.
     *test_*.py*|*pytest*|*py.test*|*unittest*|*npm*test*|*npm*build*|*cargo*test*|*cargo*build*) ;;
@@ -51,7 +51,7 @@ if [ "$name" = lookup-check ]; then
     *'"tool_name":"Bash"'*|*'"tool_name": "Bash"'*|*'"tool_name":"PowerShell"'*|*'"tool_name": "PowerShell"'*)
       # a command is checked only by the failure model, which a store has only once a training round passed one
       m="${CLAUDE_PROJECT_DIR:-.}/.claude/p4/phi/models/lookups-model.json"
-      [ -r "$m" ] || m="${CLAUDE_PROJECT_DIR:-.}/.claude/p4/recall/models/lookups-model.json"   # a store not moved yet
+      [ -r "$m" ] || m="${CLAUDE_PROJECT_DIR:-.}/.claude/p4/recall/models/lookups-model.json"   # an older layout
       [ -r "$m" ] || m="${CLAUDE_PROJECT_DIR:-.}/.claude/p4/models/lookups-model.json"
       [ -r "$m" ] || exit 0
       read -r line < "$m" || true
@@ -59,15 +59,15 @@ if [ "$name" = lookup-check ]; then
   esac
 fi
 # A call that worked and printed nothing like an error has nothing to be told: its row is written by a python left
-# running behind, and the call does not wait for it. P4_RECALL_SYNC=1 (the tests) waits.
+# running behind, and the call does not wait for it. P4_RECALL_SYNC=1, which the tests set, waits for it.
 detach=0
 if [ "$name" = lookup-record ]; then
   payload=$(cat)
   piped=1
   if [ "${P4_RECALL_SYNC:-0}" != 1 ]; then
     case "$payload" in
-      *mcp__ccd_turn__update_plan*) ;;            # phi's plan check answers beside the result: never detached
-      *temportal*memory*) ;;                      # a memory written: phi's plugin-gap check answers beside it
+      *mcp__ccd_turn__update_plan*) ;;            # phi.py's plan check answers beside the result
+      *temportal*memory*) ;;                      # a memory written: phi.py's plugin-gap check answers
       *PostToolUseFailure*|*Traceback*|*Error*|*Exception*|*"not found"*|*"not recognized"*|*"No such file"*) ;;
       *fatal:*|*denied*|*ENAMETOOLONG*|*"unexpected EOF"*|*"cannot access"*|*unterminated*) ;;
       *) detach=1 ;;
@@ -92,9 +92,10 @@ case "${OS:-}${OSTYPE:-}" in
   *) probe=0 ;;
 esac
 
-# The interpreter proven once is remembered in the plugin's data folder: plugins-reference.md, "Environment
+# The proven interpreter is remembered in the plugin's data folder: plugins/manifest-reference.md, "Environment
 # variables": "`${CLAUDE_PLUGIN_ROOT}` changes when the plugin updates, so don't write state there", and
-# `${CLAUDE_PLUGIN_DATA}` is "kept across plugin updates". A harness that sets no data folder keeps the old place.
+# `${CLAUDE_PLUGIN_DATA}` is "kept across plugin updates". Where no data folder is set, the file is kept in the
+# plugin's own folder.
 known="${CLAUDE_PLUGIN_ROOT}/.python"
 if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
   [ -d "$CLAUDE_PLUGIN_DATA" ] || mkdir -p "$CLAUDE_PLUGIN_DATA" 2>/dev/null
@@ -102,7 +103,7 @@ if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
 fi
 if [ "$probe" = 1 ] && [ -r "$known" ]; then
   read -r c < "$known" || c=""
-  case "$c" in */*) ;; *) c="" ;; esac       # a bare name cached before T2 may be the alias: probe again
+  case "$c" in */*) ;; *) c="" ;; esac       # a bare name may be the WindowsApps alias: prove it again
   if [ -n "$c" ] && command -v "$c" >/dev/null 2>&1; then
     shift 2>/dev/null || true
     run "$c" "$name" "$@"
@@ -112,7 +113,7 @@ fi
 
 shift 2>/dev/null || true
 order="python3 python py"
-[ "$probe" = 1 ] && order="py python python3"   # Windows: the launcher first, the WindowsApps alias last (T2)
+[ "$probe" = 1 ] && order="py python python3"   # on Windows the launcher first, the WindowsApps alias last
 for c in $order; do
   p=$(command -v "$c" 2>/dev/null) || continue
   case "$p" in *WindowsApps*) probe=1 ;; esac
@@ -129,5 +130,5 @@ for c in $order; do
   exit 0
 done
 
-echo "{\"systemMessage\": \"p4-recall (${name:-?}): no working python found; nothing was done\"}"
+echo "{\"systemMessage\": \"phi (p4-phi) ${name:-?} hook: no working python found; nothing was done\"}"
 exit 0
