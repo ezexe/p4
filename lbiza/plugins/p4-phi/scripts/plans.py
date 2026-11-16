@@ -1246,10 +1246,11 @@ def keep_going(home, s, report, calls, turn_id, active=False, waits=()):
     others = len(steps) - 1
     return (f"phi (p4-phi): step {nxt.get('addr')} \"{relay._short(nxt.get('content'), 120)}\" is still "
             f"{nxt.get('status') or 'pending'}" + (f", with {others} more open after it" if others else "") +
-            ", and nothing in this turn's end waits on ezexe's authority. Carry on with it now. If it truly waits "
+            ", and this turn's end names no matter of ezexe's authority. Carry on with it now. If it truly waits "
             "on a matter of ezexe's authority, permissions or security settings, credentials, spending, or an action "
-            "that cannot be undone or publishes outward, say which in one line and end the turn; if the step is done "
-            "or dropped, update the task list.")
+            "that cannot be undone or publishes outward, end the turn with `mcp__ccd_turn__wrap_up` whose question "
+            "names it in one line and whose first button is ezexe's go; if the step is done or dropped, update the "
+            "task list.")
 
 
 # --- background tasks under a step -------------------------------------------------------------------------------------

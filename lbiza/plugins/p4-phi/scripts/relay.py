@@ -1631,7 +1631,8 @@ def push_text(child_title, child, commits, owes=()):
             f"Green work that closes an issue is pushed at once: "
             f"once its suites pass, push that repository's main and sync each store it touches with "
             f"`p4.py sync --push`, without asking ezexe, and say in one line what was pushed.{first} A force-push, a "
-            f"history rewrite or a deletion still waits on ezexe.")
+            f"history rewrite or a deletion still waits on ezexe's go, asked as a `mcp__ccd_turn__wrap_up` question "
+            f"whose first button is that go.")
 
 
 FINDINGS_CHARS = 3000          # of the final report of a child counted as archived, kept in its replaces: note

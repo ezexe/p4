@@ -5,11 +5,16 @@ ezexe files a top-level session in the sidebar section "puppeteers", which makes
 the top-level sessions of other trees, in any store: p4-phi reads the filing from the app's own file, keeps the
 record of the sessions it controls, tells each controlled session, writes the supervisor session's board, leaves its
 waiting steps with it, lets it archive only what ezexe picks, names a boundary once as a question with two buttons,
-and carries a controlled session's request for a new top-level session to it.
+and carries a controlled session's request for a new top-level session to it. A start request stays with the session
+that filed it, which waits on ezexe by a button, and its supervisor session names that session as a link and is
+handed no start call for it; a start the supervisor session makes on another session's behalf is held under that
+session and named for detaching to top level; and every ask of ezexe in the lines a session is handed offers a click.
 """
 
+import ast
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -658,6 +663,147 @@ class Supervisor(unittest.TestCase):
         self.assertIn("do not do it here and start no child for it", ctx)
         self.assertIn("send that session one message with SendMessage", ctx)
         self.assertNotIn("orchestrates. If so", context(t.say(PUP, "How is the weather on the moon today?")))
+
+
+class TreeAndClicks(unittest.TestCase):
+    """The tree in the app is the true tree, and ezexe acts by click where one exists. A child's start request is
+    started by the child itself, which waits on ezexe by a blocked wrap-up whose first button starts it; its
+    supervisor session names the child as a link with the count it holds and is handed no start call for it; a start
+    the supervisor session makes on the child's behalf anyway is held under the child in p4-phi, named for detaching
+    to top level and kept on the board as an exception; and every ask of ezexe in the lines the session modules hand
+    a session offers a click."""
+
+    FLUSH = "Port the exporter's flush to the new writer and run its suite. Report when done.\nFiles: src/flush.py"
+    CROSS = (f"<cross-session-message from=\"{TOP}\">Carry on with the port, and split the flush off into a session of "
+             f"its own.</cross-session-message>")
+    MODULES = ("starts.py", "puppeteer.py", "controls.py", "phi.py", "relay.py", "plans.py")
+    ASKS = re.compile(r"(?<!without )\bask(?:s|ing)? ezexe\b|\bputs? (?!no\b)(?:[\w\"'`-]+ ){0,4}?to ezexe\b"
+                      r"|\bgo(?:es)? to ezexe\b|\boffer(?:s|ed)? (?:\w+ ){0,3}?to ezexe\b"
+                      r"|\bwait(?:s|ing)? (?:on|for) (?:a matter of )?ezexe\b"
+                      r"|\bezexe's (?:own )?(?:go|approval|answer|pick|choice|say-so|next message)\b"
+                      r"|\bezexe (?:has to|must|needs to)\b|\bturn ezexe begins\b|\bto ezexe as ready\b", re.I)
+    CLICKS = re.compile(r"mcp__ccd_turn__wrap_up|AskUserQuestion|multiple-choice question|\bbuttons?\b"
+                        r"|\bpress(?:es|ed)?\b|\bclicks?\b|\bcards?\b|\]\(#|\blinks?\b|`archive`|`new_session`", re.I)
+    TYPED = re.compile(r"\bfor ezexe to type\b|\bezexe types\b", re.I)
+    NO_CLICK = re.compile(r"\bno (?:click|button)\b", re.I)
+    SENTENCE = re.compile(r"(?<=[.!?:;])\s+(?=[A-Z`\"(])")
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = t = Tree(self._tmp.name)
+        t.record(PUP, title="Control the exporter tree")
+        t.record(TOP, title="Build the narwhal exporter")
+        t.record(KID, started_by=TOP, title="the flush child")
+        write(os.path.join(t.tmp, "claude_desktop_config.json"), json.dumps({"preferences": {"epitaxyPrefs": {
+            "dframe-group-scopes": {"acct/org": {"groups": [{"id": "cg-1", "name": "puppeteers"}],
+                                                 "assignments": {"code:" + PUP: "cg-1"}}}}}}))
+        t.say(PUP, "Control the exporter tree")
+        t.say(TOP, "Build the narwhal exporter")
+        t.cli(PUP, "controls", TOP)
+        t.say(KID, "Port the exporter in pieces")
+        t.say(KID, self.CROSS)                     # its parent session's message began this turn: no user_asked start
+        self.filed = t.cli(KID, "request", "the flush port", "--brief", self.FLUSH)
+        self.assertEqual(self.filed.returncode, 0, self.filed.stderr)
+        self.row = starts.pending(t.p4)[0]
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_a_childs_start_request_waits_on_a_button_there_and_its_supervisor_session_gets_a_link_and_no_call(self):
+        t = self.t
+        with self.subTest("the child ends its turn on a blocked wrap-up whose first button starts the request"):
+            self.assertIn("No other session is handed it", self.filed.stdout)
+            self.assertIn("`mcp__ccd_turn__wrap_up` with `blocked` true", self.filed.stdout)
+            self.assertIn("the question \"Start \"the flush port\" here?\"", self.filed.stdout)
+            self.assertIn("the reply button \"Start it\" first", self.filed.stdout)
+            again = context(t.say(KID, self.CROSS))
+            self.assertIn("`mcp__ccd_turn__wrap_up` with `blocked` true", again, "and again at each turn ezexe did "
+                                                                              "not begin while it holds the request")
+            self.assertNotIn("`mcp__ccd_session__start_session` with", again)
+        ctx = context(t.say(PUP, "what is waiting?"))
+        with self.subTest("its supervisor session's next turn names the child as a link with the count it holds"):
+            self.assertIn(f"- [the flush child](#{KID}): 1 start request", ctx)
+            self.assertIn("Start none of them here", ctx)
+        with self.subTest("and drafts no start call for the supervisor session"):
+            self.assertNotIn(START, ctx)
+            self.assertNotIn(self.row["id"], ctx)
+        with self.subTest("the board names the child as a link with the count it holds"):
+            waiting = read(os.path.join(t.dir(PUP), "board.md")).split("## Waiting on")[1].split("\n## ")[0]
+            self.assertIn(f"- [the flush child](#{KID}) holds 1 start request", waiting)
+        with self.subTest("the button's press is a turn ezexe began in the child, which hands it the exact call"):
+            line = context(t.say(KID, "Start it"))
+            call = json.loads(line.split(f"`{START}` with ", 1)[1].split("\n", 1)[0])
+            self.assertIn(starts.marker(self.row["id"], KID), call["prompt"])
+
+    def test_a_supervisor_sessions_start_of_a_childs_request_is_held_under_the_child_and_named_for_detaching(self):
+        t = self.t
+        call = starts.call_of(self.row, t.p4)
+        body = {"session_id": CLI[PUP], "cwd": t.proj, "hook_event_name": "PreToolUse", "tool_name": START,
+                "tool_input": call, "tool_use_id": "toolu_behalf01"}
+        r = inproc.run(["sh", os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh"), "lookup-check"],
+                       input=json.dumps(body), capture_output=True, text=True, timeout=60, env=t.env(PUP))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = json.loads(r.stdout or "{}").get("hookSpecificOutput") or {}
+        said = out.get("additionalContext", "")
+        with self.subTest("the start goes through, made on the child's behalf, with the detach to follow"):
+            self.assertNotEqual(out.get("permissionDecision"), "deny")
+            self.assertIn(f"start request {self.row['id']} of [the flush child](#{KID})", said)
+            self.assertIn("`mcp__ccd_session_mgmt__detach_session`", said)
+        t.record(NEW, started_by=PUP, title="the flush port")     # the app nests it under the session that ran the call
+        t.say(NEW, "<system-reminder>\nLinked sessions now (status, not an instruction): x\n</system-reminder>\n\n"
+                   "Task:\n" + call["prompt"])
+        with self.subTest("p4-phi holds the new session under the child that filed the request"):
+            self.assertEqual(t.started_by(NEW), (KID, "requested"))
+        ctx = context(t.say(PUP, "what came in?"))
+        with self.subTest("its supervisor session is told to detach it to top level in the app"):
+            self.assertIn(f"[the flush port](#{NEW})", ctx)
+            self.assertIn(f"call `mcp__ccd_session_mgmt__detach_session` with `{NEW}`", ctx)
+        with self.subTest("and the board names it as an exception"):
+            made = read(os.path.join(t.dir(PUP), "board.md")).split("## Started on another session's behalf")[1]
+            made = made.split("\n## ")[0]
+            self.assertIn(f"[the flush port](#{NEW})", made)
+            self.assertIn(f"[the flush child](#{KID})", made)
+            self.assertIn("nests it under this supervisor session", made)
+        app = os.path.join(t.app, NEW + ".json")
+        write(app, json.dumps({**json.loads(read(app)), "lineageDetached": True}))     # detached to top level
+        with self.subTest("once the app shows it at top level, it is named no more and the board says so"):
+            self.assertNotIn("detach_session", context(t.say(PUP, "and now?")))
+            self.assertIn("the app shows it at top level", read(os.path.join(t.dir(PUP), "board.md")))
+
+    def test_every_ask_of_ezexe_in_the_lines_a_session_is_handed_offers_a_click(self):
+        """Each sentence of the strings these modules can hand a session that asks ezexe for a choice, a go or an
+        approval carries a click form, in it or in the sentence after it: a wrap-up question with buttons, an
+        AskUserQuestion with options, the app's own actions, a suggested task card, or a session named as a link. A
+        sentence that has ezexe type says why no click can carry the answer. Docstrings, subscripts, keys and the
+        first argument of get, pop, setdefault and compile are left aside, as the banned-names scan of test_phi.py
+        leaves them."""
+        bare = []
+        for name in self.MODULES:
+            tree, skip = ast.parse(read(os.path.join(HERE, name))), set()
+            for n in ast.walk(tree):
+                if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n.body \
+                        and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant):
+                    skip.add(id(n.body[0].value))
+                elif isinstance(n, ast.Subscript):
+                    skip.add(id(n.slice))
+                elif isinstance(n, ast.Dict):
+                    skip.update(id(k) for k in n.keys if k is not None)
+                elif isinstance(n, ast.Call) and n.args and getattr(n.func, "attr", "") in ("get", "pop", "setdefault",
+                                                                                            "compile"):
+                    skip.add(id(n.args[0]))
+            for st in ast.walk(tree):
+                if not isinstance(st, ast.stmt) or hasattr(st, "body"):
+                    continue                       # a statement that holds statements is read through them
+                parts = sorted((n.lineno, n.col_offset, n.value) for n in ast.walk(st) if isinstance(n, ast.Constant)
+                               and isinstance(n.value, str) and id(n) not in skip)
+                said = self.SENTENCE.split(" ".join("".join(p[2] for p in parts).split()))
+                for k, s in enumerate(said):
+                    if self.ASKS.search(s) and not (self.NO_CLICK.search(s) or any(
+                            self.CLICKS.search(x) for x in said[k:k + 2])):
+                        bare.append(f"{name}:{st.lineno}: {s[:240]}")
+                    elif self.TYPED.search(s) and not self.NO_CLICK.search(s):
+                        bare.append(f"{name}:{st.lineno}, typed text with no reason: {s[:240]}")
+        self.assertEqual(bare, [], "asks of ezexe with no click form beside them:\n" + "\n".join(bare))
 
 
 class Waits(unittest.TestCase):

@@ -39,6 +39,12 @@ The watcher every orchestrator has is puppeteer.py's and is another thing.
   requests     a controlled session that would start a new top-level session writes `request ... --to-puppeteer`
                into its own store; the supervisor session's hooks read it there, and what became of it is kept on
                the supervisor session's record, where the hook of the session that filed it reads it.
+  the tree     the app nests a session under the session that calls the start tool, and no tool moves it after, so a
+               supervisor session starts only new top-level sessions. A start request belongs under the session that
+               filed it: each session of the controlled trees that holds some is named to the supervisor session as
+               a link with how many it holds, beside its messages and on its board, for ezexe to open and press the
+               button that session waits on. A start it makes on such a session's behalf anyway is held under that
+               session in p4-phi, named to it for detaching to top level, and kept on its board as an exception.
 """
 
 import hashlib
@@ -129,6 +135,11 @@ def full_title(sid, s=None):
     return PHI.clean(PHI.app_record(sid).get("title")) or PHI.title_of(s or {"sessionId": sid})
 
 
+def link(sid, s=None):
+    """A session as the link ezexe opens it by: [its full title](#its sessionId)."""
+    return relay.link_of({"id": sid, "title": full_title(sid, s)})
+
+
 def out_of_tree(s):
     """True for a session p4-phi holds as stale, counted as archived or archived, or that the app has archived, read
     without writing to its store."""
@@ -193,7 +204,8 @@ def standing(store, sid):
     asked = waiting_requests(store, sid)
     if asked:
         against.append(f"{len(asked)} start request{'s' if len(asked) != 1 else ''} of its own waiting, the first "
-                       f"\"{asked[0].get('title')}\": ezexe has to speak in that session, or press its card")
+                       f"\"{asked[0].get('title')}\", which it starts at a turn ezexe begins there: ezexe opens "
+                       f"{link(sid)} and presses the button its turn ended on")
     try:
         for path, sha, _, closes in relay.closing_commits(store, sid, s):
             if not issues._pushed(path, sha):
@@ -228,16 +240,19 @@ RULE = (
     "and what done looks like, and that session briefs and starts a child session of its own for it; this session "
     "neither does that work nor starts a child for it. A topic none covers gets a new top-level session that this "
     "supervisor session starts and then files in its environment's section with `mcp__ccd_sidebar__move_sessions`, "
-    "never in \"{section}\". Waiting on their reports, and the few read-only checks of their results against git and "
+    "never in \"{section}\". It starts only new top-level sessions: the app nests a session under the session that "
+    "calls the start tool and no tool moves it after, so a start request belongs under the session that filed it, "
+    "and this session never starts one for another session but names that session to ezexe as a link to open. "
+    "Waiting on their reports, and the few read-only checks of their results against git and "
     "GitHub, are its own work and never a child's; its turn may end while it waits, with a line naming whom it "
     "waits on. The `Finding:` lines the reports of their trees carry are listed on its board under Findings, and it "
     "publishes the issues they need and places the session that resolves each, as the board says. It archives a "
-    "session only on ezexe's pick, as the offer p4-phi hands it says.")
+    "session only on ezexe's pick, by the button or the multiple-choice question p4-phi hands it.")
 PAIR = (
     "This session is controlled by a supervisor session: \"{title}\" `{pid}`, which ezexe filed in the sidebar "
     "section \"{section}\", lists this one among the sessions it controls. This session stays at the top of its own "
     "tree, in its own section, and orchestrates that tree itself. Its tree is archived only on ezexe's pick, "
-    "as the offer p4-phi hands it at its end says.")
+    "by the button or the multiple-choice question p4-phi hands it at its end.")
 PAIR_OVER = ("This session has left the control of its supervisor session: \"{title}\" `{pid}` dropped it from the "
              "sessions it controls, or left the sidebar section. This session starts its own new top-level sessions.")
 ASK = ("phi (p4-phi): this session is controlled by a supervisor session, so where a line here says to start a new "
@@ -485,7 +500,6 @@ def board(home, s):
              f"What is not here is kept with `phi.py note`: `--kind decision` or `--kind waiting` puts it under Waiting "
              f"on, `--kind parked` under Parked, and any other kind under Notes.", "",
              "## Controlled sessions", ""]
-    waits = []
     for e in controlled(s):
         k, store = e["sessionId"], e.get("store") or ""
         state, against = standing(store, k)
@@ -494,12 +508,10 @@ def board(home, s):
                      + (": " + "; ".join(against) if against else "") + "."
                      + (f" Last report {when}: {first}" if when else "")
                      + (f" Page: {page_of(store, k)}" if store else ""))
-        asked = waiting_requests(store, k)
-        if asked:
-            waits.append(f"- ezexe has to speak in \"{full_title(k)}\" `{k}`, or press its card: it has "
-                         f"{len(asked)} child session{'s' if len(asked) != 1 else ''} waiting to be started.")
     if not controlled(s):
         lines.append("None yet.")
+    waits = [f"- {link(k)} holds {n} start request{'s' if n != 1 else ''} only it can start: ezexe opens it and "
+             f"presses the button its turn ended on, or sends it one message." for k, n in holders(s)]
 
     def of_kind(kind):
         return [f"- {PHI.clean(n.get('claim'))} Source: {PHI.clean(n.get('source'))}. Kept {n.get('time', '')}."
@@ -513,6 +525,8 @@ def board(home, s):
               for rid, a in sorted(answers.items()) if isinstance(a, dict)]
     if not asked and not answers:
         lines.append("None.")
+    lines += ["", "## Started on another session's behalf", ""]
+    lines += [behalf_row(r) for r, _ in behalf_rows(home, s)] or ["None."]
     found = findings(s)
     lines += ["", "## Findings", ""]
     if found:
@@ -597,8 +611,8 @@ def control_store(home, s, target):
     return None
 
 
-NOT_PICKED = ("Not picked by ezexe in this turn: a supervisor session archives only what ezexe picks, as the offer "
-              "p4-phi hands it says")
+NOT_PICKED = ("Not picked by ezexe in this turn: a supervisor session archives only what ezexe picks, by the button "
+              "or the multiple-choice question p4-phi hands it")
 PICKED = "ezexe picked it in this turn"
 BUTTON_YES, BUTTON_NO = "Archive it", "Not now"
 OFFER_MAX = 4                    # options one question of an AskUserQuestion holds
@@ -701,7 +715,7 @@ def offer_text(home, s, button=True):
                 + f". Archiving it is ezexe's own pick, never this session's judgement. {lead} Then end the turn "
                 f"with `mcp__ccd_turn__wrap_up` whose question is \"Archive \"{title}\"?\", cut to fit, and whose "
                 f"buttons are the replies \"{BUTTON_YES}\" and \"{BUTTON_NO}\". Archive nothing in this turn. "
-                f"When ezexe's next message is \"{BUTTON_YES}\", archive exactly "
+                f"When ezexe presses \"{BUTTON_YES}\", which comes as ezexe's next message, archive exactly "
                 + ("that session and those of its tree" if kids else "that session")
                 + f" in that turn, and p4-phi lets it through; on anything else leave it and say so.{out}")
     asks = -(-len(opts) // OFFER_MAX)              # questions, each of two to OFFER_MAX options when there are several
@@ -803,7 +817,8 @@ def boundary(home, s, store=""):
             f"`mcp__ccd_session_mgmt__get_usage` on `\"self\"` and end the turn with `mcp__ccd_turn__wrap_up` whose "
             f"question is one short sentence with that usage, such as \"Context is at 71%, auto-compact starts at "
             f"85%. Compact now?\", and whose buttons are \"Compact now\" and {second}. On \"Compact now\" answer "
-            f"with one line only: `/compact keep the path of the board, {path}, and read it first`. On "
+            f"with one line only, for ezexe to type, since a session cannot compact itself and no button sends a "
+            f"command: `/compact keep the path of the board, {path}, and read it first`. On "
             f"\"Later\" say nothing more.")
 
 
@@ -827,7 +842,8 @@ def hand(home, s, new):
     PHI.save_session(home, s)
     return (f"handed over to \"{full_title(new)}\" `{new}`: it runs `controls --from {s['sessionId']}`, then keeps "
             f"this session's outcome with `note` and offers it to ezexe to archive, as any complete session it "
-            f"controls: it archives this session only on ezexe's pick")
+            f"controls: it archives this session only on ezexe's pick, by the button or the multiple-choice question "
+            f"p4-phi hands it")
 
 
 def take(home, s, old):
@@ -856,6 +872,117 @@ def take(home, s, old):
             pass
     return (f"took over {len(rows)} controlled session{'s' if len(rows) != 1 else ''} and {n} note"
             f"{'s' if n != 1 else ''} from \"{full_title(old, o)}\" `{old}`")
+
+
+# --- start requests stay with the session that filed them ----------------------------------------------------------------
+
+def stores(home, s):
+    """This supervisor session's own store and those of the sessions it controls, each once."""
+    out = {}
+    for where in [home] + [e.get("store") or "" for e in controlled(s)]:
+        if where:
+            out.setdefault(os.path.normcase(os.path.abspath(where)), where)
+    return list(out.values())
+
+
+def holders(s):
+    """Each live session of the trees a supervisor session controls that holds start requests a turn ezexe begins
+    in it would start, as its sessionId and how many, tree by tree."""
+    out, held = [], {}
+    for e in controlled(s):
+        top, store = e["sessionId"], e.get("store") or ""
+        if store not in held:
+            held[store] = [r.get("requester") for r in starts.pending(store)] if store else []
+        for sid in dict.fromkeys(held[store]):
+            if sid and (sid == top or top in PHI.chain_of(store, sid)) \
+                    and not out_of_tree(PHI.load_session(store, sid)):
+                out.append((sid, held[store].count(sid)))
+    return out
+
+
+def holders_text(s, req=""):
+    """The line a supervisor session is handed while sessions of the trees it controls hold start requests: each as
+    a link with how many it holds, and no start call. Handed at each turn ezexe begins, and at another turn when what
+    is held has changed; the caller saves what was told."""
+    rows = holders(s)
+    if not rows:
+        s.pop("holdersTold", None)
+        return ""
+    key = [[k, n] for k, n in rows]
+    if not req and s.get("holdersTold") == key:
+        return ""
+    s["holdersTold"] = key
+    return ("phi (p4-phi): sessions of the trees this supervisor session controls hold start requests that only they "
+            "can start, each at a turn ezexe begins in it by the button its turn ended on, so the app nests each child "
+            "under the session that asked for it. Start none of them here: a start request belongs under the session "
+            "that filed it, and a start made here nests the child under this supervisor session, where no tool moves "
+            "it from. End this turn with these lines as they are, each a link ezexe opens:\n"
+            + "\n".join(f"- {link(k)}: {n} start request{'s' if n != 1 else ''}" for k, n in rows))
+
+
+def behalf(home, s, prompt, store=""):
+    """The start request another session filed for a child of its own and the store it lies in, when a start call of
+    this supervisor session carries its marker; None for any other call or session."""
+    m = starts.MARK_RE.search(str(prompt or ""))
+    if not m or not s.get("sessionId") or m.group(2) == s["sessionId"] or not is_puppeteer(s, store):
+        return None
+    for where in stores(home, s):
+        r = starts.state(where).get(m.group(1))
+        if r and r.get("requester") == m.group(2) and not r.get("to"):
+            return r, where
+    return None
+
+
+def behalf_line(r):
+    """What a supervisor session is told as its start of another session's start request goes through."""
+    return (f"phi (p4-phi): this start carries start request {r['id']} of {link(r['requester'])}, which belongs under "
+            f"that session, while the app nests the new session under this supervisor session. p4-phi records it as "
+            f"started on that session's behalf, holds the new session under that session and names it on the board "
+            f"as an exception. Once the start returns, call `mcp__ccd_session_mgmt__detach_session` with the new "
+            f"session's id, so the app shows it at top level and not under this supervisor session. Start no other "
+            f"session's request here: name the session that holds it to ezexe as a link to open.")
+
+
+def behalf_rows(home, s):
+    """The start requests of other sessions that this supervisor session started, each with the store it lies in."""
+    return [(r, where) for where in stores(home, s) for r in starts.state(where).values()
+            if (r.get("claimed") or {}).get("by") == s["sessionId"] and r.get("requester") != s["sessionId"]
+            and not r.get("to")]
+
+
+def behalf_row(r):
+    """A start made on another session's behalf as the board names it: what the app shows of the new session."""
+    kid = str(r.get("started") or "")
+    head = (f"- start request {r['id']} \"{r.get('title')}\" of {link(r['requester'])}, which this supervisor "
+            f"session started")
+    if kid == "withdrawn" or not kid:
+        return head + (", withdrawn since." if kid else ": its session has not reached p4-phi's records yet.")
+    return (head + f" as {link(kid)}: p4-phi holds it under that session, and the app "
+            + ("shows it at top level." if PHI.app_record(kid).get("lineageDetached") else
+               "nests it under this supervisor session until it is detached to top level with "
+               "`mcp__ccd_session_mgmt__detach_session`."))
+
+
+def behalf_text(home, s):
+    """The line naming each session this supervisor session started on another session's behalf that the app still
+    nests under it, once each, with the call that detaches it to top level; the caller saves what was told."""
+    told = [x for x in s.get("behalfTold") or [] if isinstance(x, str)]
+    named = []
+    for r, _ in behalf_rows(home, s):
+        kid = str(r.get("started") or "")
+        rec = PHI.app_record(kid) if kid.startswith("local_") else {}
+        if not rec or kid in told or rec.get("lineageDetached") or rec.get("isArchived"):
+            continue
+        told.append(kid)
+        named.append(f"- {link(kid)}, started for start request {r['id']} of {link(r['requester'])}: call "
+                     f"`mcp__ccd_session_mgmt__detach_session` with `{kid}`")
+    if not named:
+        return ""
+    s["behalfTold"] = told[-50:]
+    return ("phi (p4-phi): this supervisor session started these sessions on another session's behalf, so the app "
+            "nests each under it while p4-phi holds each under the session that filed its start request. Detach to "
+            "top level each one now, so the app never shows it under this supervisor session; the board names each "
+            "as an exception:\n" + "\n".join(named))
 
 
 # --- requests through the supervisor session ------------------------------------------------------------------------------

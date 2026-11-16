@@ -11,6 +11,11 @@ session that makes the start call, so the app's parent and p4-phi's agree. The b
 child's first message whose child it is: p4-phi records the session that filed the request as the child's parent, so
 the child's reports and its archive line go there. A request not started within EXPIRE_S is dropped.
 
+Until then the session waits on ezexe by a click: each turn ezexe did not begin ends on a blocked wrap-up whose
+question names the requests it holds and whose first button starts them, so the app marks it as needing ezexe and
+the press of that button is the turn ezexe begins there. A supervisor session names such a session as a link and
+starts none of its requests, as controls.py says.
+
 A request filed with `to`, a supervisor session's id, asks that supervisor session for a new top-level session: it is
 never handed to the session that filed it, and the supervisor session's hooks read it here.
 
@@ -321,20 +326,56 @@ def hand_text(home, sid, at=None):
             "Each is this session's own child, in the app's nesting and in p4-phi's.")
 
 
-def requested_text(rid, new):
+BUTTONS = ("Start it", "Start them")   # the first reply button of the wrap-up a session holding requests ends on
+
+
+def wait_text(titles):
+    """How a session that holds start requests ends a turn ezexe did not begin: on a blocked wrap-up whose question
+    names them and whose first button starts them, so the app marks it as needing ezexe and one click in it is the
+    turn ezexe begins there."""
+    one = len(titles) == 1
+    ask = (f"Start \"{titles[0]}\" here?" if one else f"Start {len(titles)} sessions here: "
+           + ", ".join(f"\"{t}\"" for t in titles[:3]) + (" and more?" if len(titles) > 3 else "?"))
+    return (f"End this turn with `mcp__ccd_turn__wrap_up` with `blocked` true, the question \"{ask}\", cut to fit, "
+            f"and the reply button \"{BUTTONS[0] if one else BUTTONS[1]}\" first: the app marks this session as "
+            f"needing ezexe, and that one click is a turn ezexe began here, which starts {'it' if one else 'them'} "
+            f"with the exact call{'' if one else 's'} p4-phi hands then.")
+
+
+def requested_text(rid, new, home=""):
+    """What a session is told when it kept a start request: no other session is handed it, and it waits on ezexe by
+    the click wait_text names, its question naming every start request the session holds."""
+    asker = state(home).get(rid, {}).get("requester") if home else ""
+    titles = [r["title"] for r in open_rows(home) if asker and r.get("requester") == asker and not r.get("to")] \
+        if home else []
     return ((f"kept as start request {rid}" if new else f"start request {rid} was already kept") +
-            ": the next turn ezexe begins in this session starts it as this session's own child. No other session "
-            "is handed it. Carry on with the rest of the task, and say in this turn's "
-            "report that a child waits on ezexe's next message here.")
+            ". No other session is handed it: it waits on ezexe's click in this session, since the app refuses this "
+            "start in a turn ezexe did not begin, and the next turn ezexe begins here starts it as this session's own "
+            "child. Carry on with the rest of the task. " + wait_text(titles or [rid]))
 
 
-def asked_text(rid, new, title):
-    """What a session is told when it asked its supervisor session for a new top-level session."""
+def waiting_text(home, sid, at=None):
+    """The line a session is handed at a turn ezexe did not begin while it holds start requests that a turn of
+    ezexe's would start: it ends this turn on the click wait_text names too. '' when it holds none."""
+    titles = [r["title"] for r in pending(home, at) if r.get("requester") == sid]
+    if not titles:
+        return ""
+    n = len(titles)
+    return (f"phi (p4-phi): this session holds {n} start request{'s' if n != 1 else ''} that "
+            f"{'waits' if n == 1 else 'wait'} on ezexe's click here, since the app refuses a start in a turn ezexe "
+            f"did not begin. " + wait_text(titles))
+
+
+def asked_text(rid, new, title, pid, ptitle):
+    """What a session is told when it asked its supervisor session for a new top-level session: the supervisor
+    session as the link ezexe opens to begin the turn that starts it."""
     return ((f"kept as request {rid} to this session's supervisor session" if new
              else f"request {rid} was already kept") +
-            f": \"{title}\" is handed to it at the next turn ezexe begins there, and it starts the session, files "
-            "it in this environment's section and takes it under control, or declines it. Start nothing for it "
-            "here, and carry on with the rest of the task.")
+            f": \"{title}\" is handed to it at the next turn ezexe begins there, by the link "
+            f"{relay.link_of({'id': pid, 'title': ptitle or pid})} ezexe opens to send it one message, and it starts "
+            "the session, files it in this environment's section and takes it under control, or declines it. Start "
+            "nothing for it here: name that link to ezexe in this turn's report, and carry on with the rest of the "
+            "task.")
 
 
 def claim(home, prompt, by, at=None):

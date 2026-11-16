@@ -962,10 +962,12 @@ BUILT_IN = ("built-in, act-don't-wait: a next step that the task, the parent's t
             "and the project's rules can settle is decided and done, with one line saying what was chosen and why. "
             "Only a matter of ezexe's authority goes to ezexe: permissions or security settings, credentials, "
             "spending, and actions that cannot be undone or publish outward, but for the push of green issue-closing "
-            "commits, which p4-phi orders at once. A child asks its parent session with SendMessage, and never ends "
-            "its turn waiting on a question the session tree can settle. Where the project's rules ask for ezexe's "
-            "go before a kind of step, such as a plan's edits, that go is ezexe's to give: wait for it on those "
-            "steps, and act on the rest.")
+            "commits, which p4-phi orders at once. It goes as a click, never as a paragraph to answer: a "
+            "`mcp__ccd_turn__wrap_up` question whose buttons are the answers, the go first, or an `AskUserQuestion` "
+            "with options; typed text only where no click can carry the answer, saying why. A child asks its parent "
+            "session with SendMessage, and never ends its turn waiting on a question the session tree can settle. "
+            "Where the project's rules ask for ezexe's go before a kind of step, such as a plan's edits, that go is "
+            "ezexe's to give, by a button: wait for it on those steps, and act on the rest.")
 ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves this built-in rule out of a project
 # The delegation rule. Each mechanism it names is Claude Code's own, as the docs say:
 # - sub-agents.md, "Run subagents in foreground or background": "Foreground subagents block the main conversation
@@ -2317,10 +2319,11 @@ def h_user_prompt_submit(payload):
             wt = relay.worktrees_text(me.home, s["sessionId"], relay.repo_of(s.get("cwd") or ""))
             if wt:
                 parts.insert(1, wt)
-    asked = starts.hand_text(me.home, s["sessionId"]) if req and not handed_over(payload.get("prompt")) else ""
-    if asked:                                      # ezexe began this turn: it carries the sessions' start requests
-        parts.insert(0, asked)
-        RAN["start_requests"] = asked.count("\n- ")
+    began = bool(req) and not handed_over(payload.get("prompt"))     # ezexe began this turn
+    asked = starts.hand_text(me.home, s["sessionId"]) if began else starts.waiting_text(me.home, s["sessionId"])
+    if asked:                                      # ezexe's turn carries the session's start requests, and any other
+        parts.insert(0, asked)                     # turn says they wait on ezexe's click here
+        RAN.update({"start_requests": asked.count("\n- ")} if began else {"start_waiting": True})
     if issue_line:
         parts.insert(0, issue_line)
     if FILE_SETS and s.get("fileSet") and load_turns(me.home, s["sessionId"]):
@@ -2375,9 +2378,10 @@ def h_user_prompt_submit(payload):
 def pair_parts(me, s, req, changed=""):
     """Beside a top-level session's message. A supervisor session gets what it is, once; its child sessions, now
     controlled; a top-level session ezexe started beside them; the controlled sessions' reports by reference; at a
-    turn ezexe began, the requests addressed to it and where ezexe's message belongs; a boundary; and its board
-    rewritten. Any other top-level session gets its supervisor session, once, and what became of the requests it
-    sent it."""
+    turn ezexe began, the requests addressed to it and where ezexe's message belongs; the sessions of the controlled
+    trees that hold start requests, as links; the sessions it started on another session's behalf, to detach to top
+    level; a boundary; and its board rewritten. Any other top-level session gets its supervisor session, once, and
+    what became of the requests it sent it."""
     out = []
     if not controls.is_puppeteer(s, me.store):
         told = controls.pair_text(s, me.store)
@@ -2401,6 +2405,7 @@ def pair_parts(me, s, req, changed=""):
                    "needed:\n" + "\n".join(seen))
     if req:
         out += [p for p in (controls.requests_text(me.home, s), controls.route_down(s, req)) if p]
+    out += [p for p in (controls.holders_text(s, req), controls.behalf_text(me.home, s)) if p]
     edge = controls.boundary(me.home, s, me.store)
     if edge:
         RAN["boundary"] = True
@@ -2621,13 +2626,19 @@ def h_start_advice(payload):
     the reason, so ezexe sees it and decides. A PreToolUse `permissionDecision` is `allow`, `deny`, `ask` or `defer`;
     where `permissions.denyInsteadOfPrompting` is set, a call that would wait on a prompt is denied. The input is
     never rewritten with `updatedInput`, since a fresh start needs a brief and background only the caller can
-    write."""
+    write. A supervisor session's start of another session's start request goes through, claimed as made on that
+    session's behalf, with the line that has the new session detached to top level."""
     me = Me(payload)
     if not me.home or not me.id:
         return None
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     if inp.get("proposal_id") and not inp.get("prompt"):
         return None                                 # starting a card already made: nothing to decide
+    made = controls.behalf(me.home, load_session(me.home, me.id), inp.get("prompt"), me.store)
+    if made:                                        # a supervisor session starting another session's start request
+        starts.claim(made[1], inp.get("prompt"), me.id)
+        RAN["behalf"] = made[0]["id"]
+        return controls.behalf_line(made[0])
     if starts.claim(me.home, inp.get("prompt"), me.id):
         RAN["claimed"] = True                       # a start request's call, given exactly: the asker decided it
         return None
@@ -3300,11 +3311,11 @@ def main(argv=None):
                                      "section lists it under `controls`")
                 rid, new = starts.add(me.home, s["sessionId"], a.title, brief, "fresh", background=a.background,
                                       declared=True, to=pid)
-                print(starts.asked_text(rid, new, clean(a.title)))
+                print(starts.asked_text(rid, new, clean(a.title), pid, controls.full_title(pid)))
                 return 0
             rid, new = starts.add(me.home, s["sessionId"], a.title, brief, a.context, background=a.background,
                                   declared=True)
-            print(starts.requested_text(rid, new))
+            print(starts.requested_text(rid, new, me.home))
             row = starts.state(me.home).get(rid) or {}
             who, hit = starts.held_by(me.home, s["sessionId"], row.get("files") or [])
             if who:                                # one writer per file

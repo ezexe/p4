@@ -1148,7 +1148,7 @@ def verdict_text(home, s, d):
     if d["verdict"] == "queue":
         return (head + f"Queue it behind that writer: `{phi.commands()} pioneer {d['id']}` keeps it as a start request "
                 f"that is handed out, with its exact call, at the first turn ezexe begins once the writer is not "
-                f"busy." + tail)
+                f"busy, and this session waits on that turn by the start button p4-phi then names." + tail)
     if d["verdict"] == "here":
         return head + "No session is started for it." + tail
     return (head + "Start it now: `mcp__ccd_session__start_session` with "
@@ -1209,7 +1209,7 @@ def explore_text(home, s, g, drafts):
     return (f"phi (p4-phi): this message of ezexe's is under-determined, with {len(drafts)} distinct "
             f"readings, and one draft would have to guess between them. Start one child for each reading, siblings "
             f"under this session, each with exactly the call given; this session then merges their `Result:` lines "
-            f"as group {g['id']}, and only a fork that survives the merge goes to ezexe:\n"
+            f"as group {g['id']}, and only a fork that survives the merge goes to ezexe, as one `AskUserQuestion`:\n"
             + "\n".join(lines))
 
 
@@ -1343,7 +1343,7 @@ def group_line(g):
         return (f"{len(have)} reading{'s' if len(have) != 1 else ''} converged on "
                 f"\"{_short(g.get('result'), 160)}\"; their rows are closed{gone}")
     if g.get("state") == "forked":
-        return (f"the readings fork, so one question goes to ezexe, default reading {g.get('default')}: "
+        return (f"the readings fork, so one `AskUserQuestion` goes to ezexe, default reading {g.get('default')}: "
                 + "; ".join(f"reading {r['k']} \"{_short(r['text'], 60)}\" came to \"{_short(r.get('result'), 80)}\""
                             for r in have) + gone)
     started = sum(1 for r in g["readings"] if r.get("child"))
@@ -1366,8 +1366,8 @@ def merge_text(g):
                      for r in have) + ("." + gone if gone else "")
     return (f"phi (p4-phi): the readings of \"{_short(g['words'], 120)}\" fork after the merge. If the session "
             f"tree can settle it, settle it and say why in one line, then `{_phi().commands()} merge {g['id']} "
-            f"--result \"<the result>\"`. Otherwise put one question to ezexe, \"{g.get('question')}\", with these "
-            f"options and reading {g.get('default')} as the default: {opts}.")
+            f"--result \"<the result>\"`. Otherwise put one question to ezexe, \"{g.get('question')}\", in one "
+            f"`AskUserQuestion` with these options and reading {g.get('default')} as the default: {opts}.")
 
 
 def merge_all(home, sid):
@@ -1635,13 +1635,16 @@ def meta_pass(home, at=None):
                                                     for r in rows):
                 seeds.append(f"{k} is open and no session under {name[t]} is at work on it.")
     for r in starts.pending(home, at):
-        seeds.append(f"start request {r['id']} \"{r.get('title')}\" for {r.get('requester')} waits for a turn ezexe "
-                     f"begins.")
+        who = relay.link_of({"id": r.get("requester"), "title": phi.title_of(
+            every.get(r.get("requester")) or {"sessionId": r.get("requester")})})
+        seeds.append(f"start request {r['id']} \"{r.get('title')}\" waits on a turn ezexe begins in {who}, by the "
+                     f"button its turn ended on.")
     out = ["# Meta-ledger", "",
            "Written by p4-phi's meta pass, which the top-level session that receives ezexe's message runs over every "
            "top-level session's ledger before it reads the message.",
            "Rewritten only when what it finds changes. A top-level session told of a finding settles it with the other "
-           "top-level session through SendMessage, and puts to ezexe only a conflict the two cannot settle.", "",
+           "top-level session through SendMessage, and puts to ezexe, as one `AskUserQuestion` with an option for each "
+           "side, only a conflict the two cannot settle.", "",
            "## Top-level sessions", ""]
     out += [f"- {name[t]}: live sessions {len(led[t].get('rows') or [])}, open steps "
             f"{sum(len(r.get('open') or []) for r in led[t].get('rows') or [])}, ledger "
@@ -1670,8 +1673,9 @@ def meta_text(home, s, found):
     return ("phi (p4-phi): the meta pass over every top-level session's ledger, written to "
             f"{meta_path(home)}, found for this session: " + " ".join(mine[:4])
             + " Settle what can be settled without ezexe: a duplicate or a conflict with another top-level session "
-              "goes to that session with SendMessage, and a session whose work is over is named to ezexe as ready "
-              "to archive; only a conflict the two sessions cannot settle goes to ezexe.")
+              "goes to that session with SendMessage, and a session whose work is over is named to ezexe as a link to "
+              "open and archive; only a conflict the two sessions cannot settle goes to ezexe, as one "
+              "`AskUserQuestion` with an option for each side.")
 
 
 # --- the prompt hook ----------------------------------------------------------------------------------------------------
@@ -1769,10 +1773,11 @@ def command(a, me):
             rid, new = queue(home, d)
             print((f"queued as start request {rid}" if new else f"start request {rid} was already kept")
                   + f" behind {(d.get('busy') or {}).get('sessionId')}: it is handed out at the first turn ezexe "
-                    f"begins once that writer is not busy.")
+                    f"begins once that writer is not busy, and this session waits on that turn by the start button "
+                    f"p4-phi then names.")
         elif a.request and d.get("verdict") == "start":
             rid, new = queue(home, d)               # a turn ezexe did not begin: the app refuses the start itself
-            print(starts.requested_text(rid, new))
+            print(starts.requested_text(rid, new, home))
         else:
             print(verdict_text(home, s, d))
         return 0
