@@ -907,20 +907,84 @@ OWN_WORDS = ("phi (p4-phi)", "words bear on your open step", "check whether thos
              "stop before any tool runs")
 
 
-# #33: a session link names a session, not a step: the link and its label are never matched against step words
-SESSION_LINK = re.compile(r"\[[^\]\n]*\]\(\s*claude://[^)\s]*\s*\)|<?claude://[^\s)>]+>?", re.I)
+# #33: a session link names a session, not a step: the link and its label are never matched against step words.
+# #54: the app tells sessions to write a session link as `[title](#local_<id>)`, so that form goes with its label
+# too, and so do bare session ids and the paths of sessions' pages under phi/sessions/.
+SESSION_LINK = re.compile(r"\[[^\]\n]*\]\(\s*(?:claude://[^)\s]*|#?local_[0-9A-Za-z][\w-]*"
+                          r"|#?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f-]{4,})\s*\)|<?claude://[^\s)>]+>?", re.I)
+SESSION_PAGE = re.compile(r"`?[^\s`]*phi[\\/]+sessions[\\/][^\s`]*`?", re.I)
+SESSION_ID = re.compile(r"\b(?:local_)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"
+                        r"|\blocal_[0-9a-f][0-9a-f-]{5,}\b", re.I)
+# A session reciting the rules it was given at its start says nothing about another session's step.
+STARTUP = re.compile(r"\b(?:standing rules?|start-?up rules?|rules? from (?:the )?memor(?:y|ies)|memory index|"
+                     r"at (?:its|their|session|the session's) start(?:-?up)?\b|session start)", re.I)
+RULE_LINE = re.compile(r"^\s*[-*]\s*(?:built-in,\s*)?([a-z0-9][a-z0-9']*(?:-[a-z0-9']+)*):\s")
+BUILT_IN_LINE = re.compile(r"^\s*[-*]\s*built-in,\s*[a-z0-9'-]+:\s")
+BUILT_INS = ()                # phi.py sets it to the names of the rules it carries itself
+_RULES = {}                   # a store -> (its rules page's mtime, the rule names on it)
+
+
+def rule_names(home=""):
+    """The names of the rules phi hands out at a session's start: its built-in ones, and the store's, read from
+    the page phi writes them on, <home>/phi/rules.md, so the list stays true as memories change."""
+    names = set(BUILT_INS)
+    if home:
+        path = os.path.join(home, "phi", "rules.md")
+        try:
+            at = os.path.getmtime(path)
+            if _RULES.get(home, (None, ()))[0] != at:
+                with open(path, encoding="utf-8") as f:
+                    _RULES[home] = (at, tuple(re.findall(r"(?m)^## +(\S.*?)\s*$", f.read())))
+            names.update(_RULES[home][1])
+        except OSError:
+            pass
+    return {n.lower() for n in names if n}
+
+
+def recites(sentence, names):
+    """True for a sentence that recites the startup rules: it says so, or it names one by its slug."""
+    if STARTUP.search(sentence):
+        return True
+    low = sentence.lower()
+    return any("-" in n and re.search(r"(?<![\w-])" + re.escape(n) + r"(?![\w-])", low) for n in names)
+
+
+def rule_bullet(line, names):
+    """True for a bullet that is one of the rules: `- built-in, <name>: ...` or `- <a rule's name>: ...`."""
+    if BUILT_IN_LINE.match(line):
+        return True
+    m = RULE_LINE.match(line)
+    return bool(m and m.group(1).lower() in names)
 
 
 def links_removed(text):
-    """`text` without claude:// session links, a markdown link's label with it."""
-    return SESSION_LINK.sub(" ", str(text or ""))
+    """`text` without session links, a markdown link's label with it, sessions' pages and bare session ids."""
+    return SESSION_ID.sub(" ", SESSION_PAGE.sub(" ", SESSION_LINK.sub(" ", str(text or ""))))
 
 
-def own_removed(text):
-    """`text` without phi's own relay lines, the sentences that quote them, and session links with their labels."""
-    keep = [ln for ln in links_removed(text).splitlines() if not OWN_LINE.match(ln)]
+def own_removed(text, home=""):
+    """`text` without phi's own relay lines, the sentences that quote them, session links with their labels,
+    session ids and pages, the bullets that are startup rules and the sentences that recite them (#54)."""
+    names = rule_names(home)
+    keep = [ln for ln in links_removed(text).splitlines() if not OWN_LINE.match(ln) and not rule_bullet(ln, names)]
     sents = [x for x in SENTENCE.split("\n".join(keep)) if x.strip()]
-    return "\n".join(x for x in sents if not any(w in x.lower() for w in OWN_WORDS))
+    return "\n".join(x for x in sents if not any(w in x.lower() for w in OWN_WORDS) and not recites(x, names))
+
+
+# #54: the words every report uses about the tree never count toward a relayed turn's match, in either direction
+RELAY_COMMON = frozenset("""phi p4 session sessions local top tops parent parents child children sibling siblings rule
+rules memory memories page pages link links archive archived archives report reports reported done turn
+turns""".split())
+
+
+def relay_bears(a, b):
+    """bears() for a turn relayed down to a child: the tree's own vocabulary never counts."""
+    return len((words(a) & words(b)) - RELAY_COMMON) >= SHARE
+
+
+def relay_bears_sibling(a, b):
+    """bears_sibling() for a turn relayed across: past SIBLING_STOP and the tree's own vocabulary."""
+    return len((words(a) & words(b)) - SIBLING_STOP - RELAY_COMMON) > 2
 ADDR_RE = re.compile(r"\b(?:step\s+)?(\d+(?:\.\d+)+|(?<=step )\d+)\b", re.I)
 
 
@@ -934,19 +998,21 @@ FENCE = re.compile(r"```.*?(?:```|$)", re.S)
 DRAWN = re.compile(r"[\u2500-\u257f]")             # box-drawing characters: a tree or table drawn in a report
 
 
-def prose(text):
-    """`text` without fenced code blocks, drawn lines and session links, whose addresses and words are no claim
-    about a step."""
+def prose(text, home=""):
+    """`text` without fenced code blocks, drawn lines, session links, ids and pages, and the bullets that are
+    startup rules: their addresses and words are no claim about a step."""
     text = links_removed(FENCE.sub("\n", str(text or "")))
-    return "\n".join(ln for ln in text.splitlines() if not DRAWN.search(ln))
+    names = rule_names(home)
+    return "\n".join(ln for ln in text.splitlines() if not DRAWN.search(ln) and not rule_bullet(ln, names))
 
 
-def matches(text, steps, shard, base, loose=True, bear=None):
+def matches(text, steps, shard, base, loose=True, bear=None, home=""):
     """[(step, the sentences of `text` that bear on it)]: a step is matched by its address, by a path in the
     session's shard, or by sharing SHARE content words with a sentence. Code blocks and drawn trees are left out."""
-    text = prose(text)
+    text = prose(text, home)
     bear = bear or bears
-    sents = [x.strip() for x in SENTENCE.split(str(text or "")) if x.strip()]
+    names = rule_names(home)
+    sents = [x.strip() for x in SENTENCE.split(str(text or "")) if x.strip() and not recites(x, names)]
     named = set(ADDR_RE.findall(str(text or "")))
     out = []
     for st in steps:
@@ -977,7 +1043,7 @@ def turn_relay(home, s, row, calls):
     its siblings (across). Each match is relayed with the turn's own words quoted. Returns the children a match
     reached that the turn sent no SendMessage to, as [(child id, addresses)], for the parent's next message."""
     sid, title = s["sessionId"], relay._title(s)
-    report = own_removed(row.get("report"))
+    report = own_removed(row.get("report"), home)
     mine = load(home, sid)
     step = "\n".join(f"{x['addr']} {x.get('content', '')}" for x in mine.get("steps") or []
                      if x.get("status") == "in_progress")
@@ -1007,7 +1073,7 @@ def turn_relay(home, s, row, calls):
         if os_.get("stale"):
             continue
         got = matches(text, open_steps(home, oid), relay.shard_of(os_), os_.get("cwd") or s.get("cwd") or "",
-                      bear=bears if way == "down" else bears_sibling)
+                      bear=relay_bears if way == "down" else relay_bears_sibling, home=home)
         if not got:
             continue
         lines = [f"{st['addr']} \"{relay._short(st.get('content'), 100)}\": " +
@@ -1017,7 +1083,7 @@ def turn_relay(home, s, row, calls):
                    f"\"{title}\", {who}, ended a turn whose words bear on your open step(s): " + "; ".join(lines)
                    + ". Check whether those steps still hold.")
         strict = {st["addr"] for st, _ in matches(text, open_steps(home, oid), relay.shard_of(os_),
-                                                  os_.get("cwd") or s.get("cwd") or "", loose=False)}
+                                                  os_.get("cwd") or s.get("cwd") or "", loose=False, home=home)}
         named = [st["addr"] for st, quotes in got
                  if st["addr"] in strict or any(CHANGES.search(q) for q in quotes)]
         if way == "down" and named and oid not in sent and ("local_" + oid.removeprefix("local_")) not in sent:

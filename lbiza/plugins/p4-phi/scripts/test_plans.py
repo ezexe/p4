@@ -1259,6 +1259,52 @@ class OwnLines(unittest.TestCase):
         for gone in ("phi (p4-phi)", "across:", "bear on your open step", "nodetest/a1.txt"):
             self.assertNotIn(gone, got)
 
+    def test_startup_rules_and_session_links_bear_on_no_step(self):
+        report = ("At session start, the project's standing rules from memory: act-don't-wait, never-ship-unfinished, "
+                  "temp-files-in-p4-tmp, keep-working-through-open-tasks, children-on-parent-branch and "
+                  "archive-superseded-children.\n"
+                  "- built-in, act-don't-wait: a next step the chain can settle is decided and done.\n"
+                  "- [Check 6: phi session lines check](#local_abdc4c95-fe9b-4d58-b3ff-942b8338b3de)\n"
+                  "- [Check 5: phi session tree check](#local_c47e02af-87f7-4522-96a7-86113f5d3c14)\n"
+                  "Its page is at `.claude/p4/phi/sessions/local_edc121d1-f746/session.md` for this session.")
+        steps = [{"addr": "6.2", "content": "Read top session's phi-lines.md and startup rules",
+                  "status": "in_progress"},
+                 {"addr": "6.4", "content": "Read phi session records for this session tree check", "status": "pending"}]
+        self.assertEqual(plans.matches(plans.own_removed(report), steps, [], ""), [])
+        real = "The relay drops the anchor tree records before it reads them."
+        self.assertEqual([st["addr"] for st, _ in plans.matches(real, steps, [], "")], ["6.4"],
+                         "words that are about the step still bear on it")
+
+    def test_the_rule_names_are_read_from_the_rules_phi_hands_out(self):
+        """#54: a hand list of memory slugs would go stale as memories change."""
+        home = tempfile.mkdtemp(prefix="p4-phi-rules-")
+        try:
+            os.makedirs(os.path.join(home, "phi"))
+            with open(os.path.join(home, "phi", "rules.md"), "w", encoding="utf-8") as f:
+                f.write("# The store's rules, in full\n\n## tree-records-stay\n\nKeep them.\n\n## records\n\nOne.\n")
+            self.assertEqual(plans.rule_names(home) - set(plans.BUILT_INS), {"tree-records-stay", "records"})
+            self.assertIn("act-don't-wait", plans.rule_names(), "the built-in ones are phi's own")
+            steps = [{"addr": "6.4", "content": "Read phi session records for this session tree check",
+                      "status": "pending"}]
+            recited = ("I hold tree-records-stay, so the tree records are kept.\n"
+                       "- tree-records-stay: the tree records of a session are kept after its check.")
+            self.assertEqual(plans.matches(plans.own_removed(recited, home), steps, [], "", home=home), [])
+            self.assertEqual(len(plans.matches(recited, steps, [], "")), 1, "another store has no such rule")
+            plain = "- records: the tree records moved to another folder."
+            self.assertEqual(len(plans.matches(plain, steps, [], "", home=home)), 0, "a bullet that is a rule")
+            self.assertEqual(len(plans.matches("The tree records moved; records are few.", steps, [], "", home=home)),
+                             1, "a one-word rule name in a sentence recites nothing")
+        finally:
+            shutil.rmtree(home, ignore_errors=True)
+
+    def test_a_relayed_turn_ignores_the_trees_own_words(self):
+        step = "Archive the done child session and report"
+        said = "Each child session ended its turn with a report, and none is done."
+        self.assertTrue(plans.bears(said, step))
+        self.assertFalse(plans.relay_bears(said, step), "down: session, child, report and done never count")
+        self.assertFalse(plans.relay_bears_sibling(said + " The parent page links the archive.", step))
+        self.assertTrue(plans.relay_bears("The exporter flush drops rows.", "Fix the exporter flush"))
+
     def test_only_the_newest_turn_reports_wait(self):
         home = tempfile.mkdtemp(prefix="p4-phi-own-")
         try:

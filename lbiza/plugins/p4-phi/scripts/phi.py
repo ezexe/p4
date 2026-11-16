@@ -987,6 +987,7 @@ LEVELS = ("built-in, levels: work runs at the level Claude Code gives it, so thi
           "or medium effort; a build that changes behaviour inherits this session's model at high effort; a "
           "design or review step at high or above. phi names both in every start call it hands out, the brief "
           "says them in one line, and the session that starts the child may choose otherwise in that line.")
+plans.BUILT_INS = tuple(x.split(": ", 1)[0].replace("built-in, ", "") for x in (BUILT_IN, LEVELS))   # #54
 LEVELS_ON = True              # p4.json phi.levels: false leaves the levels rule and its checks out; nothing turns it on
 TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps a top session's work in it (#24)
 FILE_SETS = True              # p4.json phi.file_sets: false starts sessions whose briefs declare no file set (#48)
