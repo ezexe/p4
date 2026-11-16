@@ -1,23 +1,32 @@
 #!/usr/bin/env python3
-"""labels.py: the label set (fresh-marketplace.md 5.1, 5.1a, 5.2).
+"""labels.py: the labels the retrieval ranker trains on, and the tasks they label.
 
-Two files under models/:
-  labels-raw.tsv  the store's own labels, before any teacher edit: `pool` (old pools, imported), `store` (the history
-                  labels of a task without a pool), `short` (a short turn's earlier reading), `miss` (an entry a
-                  later correction shows would have prevented a misreading)
+A label says whether an index entry bears on a task, 1 when it does and 0 when it does not. It names the source
+that wrote it and carries a weight, which scales how much a round counts it; as_label gives each source's weight.
+Three files under the store's phi/models/ hold the labels and their tasks:
+
+  labels-raw.tsv  the labels drawn from the store's own records, before any teacher edit
                   columns: task, entry, label, source, weight, time, note
-  labels.tsv      the training set: the teacher's `store+edited` rows (step 9, paid, not built here) and the labels
-                  the hooks write every turn: `usage` (served lines used or not; the note says whether they were
-                  shown to the model or logged in shadow: `used; shown`, `unused; shadow`) and `repo` (the files
-                  a turn edited, cited, dropped or never opened)
+                  pool          a pick a reader made in a `recall-pool.md` or an audit file of the layout that
+                                `p4.py migrate` converts, which that command imports
+                  store         `p4.py labels --from-history`: the entries that share rare terms with a completed
+                                message's reply, for a message whose session has no pool
+                  short         the same command: a short message's prior reading
+  labels.tsv      the training set
                   columns: task, entry, label, source, weight, time, teacher, edited, note
-`training_labels` joins them: every labels.tsv row, and the labels-raw.tsv rows of every task the teacher has not
-edited; then the recency rule (1a, 5.2) drops a label resting on a fact a newer fact supersedes and adds the newer
-one in its place.
+                  store+edited  `p4.py teacher edit-labels`: 1 on a pick the teacher kept or added, 0 on one it
+                                dropped; `teacher` names the model that answered and `edited` the date
+                  usage         hook.py at turn end and when a subagent finishes: whether the turn used a served
+                                line; the note says whether the lines were shown or only logged in shadow
+                  repo          the same hooks and `p4.py labels --from-transcripts`: what a turn did with a file of
+                                the repository
+                  said          said.py: 1 on a line a session states it applied, 0 on one it set aside
+  tasks.tsv       the tasks
+                  columns: id, session, time, text, kind
+                  kind: `short` for a message of at most SHORT_WORDS words, else `first` for a session's first
+                  message from ezexe and `new` for any other; `agent` for a subagent's task
 
-tasks.tsv holds the tasks: id, session, time, text, kind (first | new | short | agent: the close hook writes
-`first` for a session's first ezexe message, `short` for one of at most SHORT_WORDS words, `new` otherwise;
-`agent` is a subagent's task).
+training_labels joins labels-raw.tsv and labels.tsv into what a round trains on.
 """
 
 import json
@@ -38,10 +47,10 @@ TASKS = "tasks.tsv"
 RAW_HEAD = ["task", "entry", "label", "source", "weight", "time", "note"]
 TRAIN_HEAD = ["task", "entry", "label", "source", "weight", "time", "teacher", "edited", "note"]
 TASK_HEAD = ["id", "session", "time", "text", "kind"]
-USAGE_WEIGHT = 0.3            # until 8.1's agreement test raises it
-HISTORY_WEIGHT = 0.5
+USAGE_WEIGHT = 0.3            # low: no test measures how often the usage rule agrees with a teacher
+HISTORY_WEIGHT = 0.5          # history labels agree with a teacher's at an F1 of 0.50 to 0.53
 HISTORY_MAX = 5               # positives per history task
-HISTORY_POOL = 120            # BM25 candidates a history task's reply is checked against
+HISTORY_POOL = 120            # matches gathered per history task, from BM25's top 3 * HISTORY_POOL
 
 
 # --- files -----------------------------------------------------------------------------------------------
@@ -88,7 +97,7 @@ def read_tasks(p4):
 
 
 def add_tasks(p4, rows):
-    """Append the tasks not already in tasks.tsv."""
+    """Append the tasks not already in tasks.tsv, no id twice; returns how many were appended."""
     have = read_tasks(p4)
     new = [r for r in rows if r["id"] not in have]
     seen = set()
@@ -98,7 +107,8 @@ def add_tasks(p4, rows):
 
 
 def replace_source(p4, name, head, source, rows, tasks=None):
-    """Rewrite one labels file with every row of `source` (limited to `tasks` when given) replaced by `rows`."""
+    """Rewrite one labels file with the rows of `source` replaced by `rows`: every such row, or with `tasks` given
+    only those of the tasks it names."""
     path = mpath(p4, name)
     kept = [r for r in read_tsv(path) if not (r.get("source") == source and (tasks is None or r.get("task") in tasks))]
     write_tsv(path, head, kept + rows)
@@ -109,6 +119,11 @@ def count_labels(p4):
 
 
 def as_label(r):
+    """A labels row as a round reads it: label 1 or 0, and its weight. Each source's weight is 0.7 for `pool`,
+    HISTORY_WEIGHT for `store`, USAGE_WEIGHT for `usage` and 1.0 for `short`, `store+edited` and `said`: each
+    writer puts it on its rows, and a row whose weight is empty, zero or not a number reads at it. A `repo` row
+    carries the weight transcript.WEIGHTS sets for what the turn did with the file, halved on the commit that last
+    touched it, and reads at 1.0 without one, as a row of any source not named here does."""
     try:
         w = float(r.get("weight") or 0) or None
     except ValueError:
@@ -125,13 +140,14 @@ BATCH_RE = re.compile(r"(?:^|;\s*)batch:([^\s;]+)")
 
 
 def batch_of(note):
-    """The teacher batch a `store+edited` row came from (its note's `batch:<id>`), or ''."""
+    """The teacher batch a `store+edited` row came from, the `<id>` of its note's `batch:<id>`, or ''."""
     m = BATCH_RE.search(note or "")
     return m.group(1) if m else ""
 
 
 def read_batches(p4):
-    """{batch id: {teacher, time, tasks, status: ok | held, why, ...}} from models/teacher-batches.json."""
+    """`{batch id: {teacher, time, tasks, status: ok | held, why, ...}}` from phi/models/teacher-batches.json, or {}
+    when the file is missing, unreadable or holds no object."""
     try:
         with open(mpath(p4, BATCHES), encoding="utf-8") as f:
             got = json.load(f)
@@ -141,15 +157,16 @@ def read_batches(p4):
 
 
 def held_batches(p4):
-    """The teacher batches held for ezexe (5.6: a second opinion below 0.65, or edited below raw): their rows
-    are not trained on, and the raw labels of their tasks stand in."""
+    """The ids of the teacher batches held for ezexe: teacher.py holds a batch whose second opinion agrees with it
+    below teacher.AGREE_MIN, and a round of train.py holds every batch when the edited labels score below the raw
+    ones."""
     return {k for k, v in read_batches(p4).items() if isinstance(v, dict) and v.get("status") == "held"}
 
 
 def follow(entry, ids, renames):
-    """A repo label's entry as the index holds it today: itself when it is there; else the same entry under the
-    path git renamed its file to; else that file's own entry, when only the symbol is gone. Unchanged when none is
-    there (the file was deleted, or never on this machine)."""
+    """A repo label's entry as the index holds it: itself when it is there; else the same entry under the path git
+    renamed its file to; else that file's own entry, when only the symbol is gone. Unchanged when the index holds
+    none of them, as for a deleted file or one never indexed on this machine."""
     if entry in ids or not entry.startswith("repo:"):
         return entry
     path, _, sym = entry[5:].partition("#")
@@ -161,7 +178,8 @@ def follow(entry, ids, renames):
 
 
 def followed(p4, rows, idx):
-    """The rows with every repo entry moved to where the index holds it (follow); (rows, how many moved)."""
+    """`(rows, moved)`: the rows with each repo entry moved by follow to where the index holds it, the renames
+    read from repo.rename_map, and how many of them moved."""
     import repo
     ids = {d["id"] for d in idx["docs"]}
     ren = repo.rename_map(p4)
@@ -174,13 +192,12 @@ def followed(p4, rows, idx):
 
 
 def training_labels(p4, idx=None):
-    """Every label a round trains on (module docstring), the recency rule applied. A held teacher batch's rows are
-    left out (its tasks keep their raw labels). With the index given, a label on a file that was renamed since, or
-    on a symbol that is gone from a file still there, is moved to where the index holds it (follow). Measured on
-    one store (2026-11-10, 6,988 positive file labels): 52% named an entry the index no longer had, and 2,010 of
-    those were a rename or a vanished symbol. Following them gave the newest 400 tasks 270 more positives and 7
-    more usable tasks (91 to 98) and left the held-out scores where they were (r-precision 0.021 to 0.020,
-    recall@20 0.125 to 0.126): the limit there is the candidate stage, which drew 339 of 3,420 labelled positives."""
+    """Every label a round trains on, each as as_label reads it: the labels.tsv rows, less the `store+edited` rows
+    of a held teacher batch and, unless p4.json's `recall.said.mode` is `on`, the `said` rows; and the
+    labels-raw.tsv rows of every task with no `store+edited` row left, so the tasks of a held batch keep their raw
+    labels. The recency rule then applies. Given the index, a label on a file renamed after the label was written,
+    or on a symbol gone from a file still there, moves by follow to the entry the index holds: a round skips a
+    label whose entry the index lacks."""
     if idx is not None:
         got = recency(p4, _training_rows(p4))
         return followed(p4, got, idx)[0]
@@ -190,7 +207,7 @@ def training_labels(p4, idx=None):
 def _training_rows(p4):
     held = held_batches(p4)
     import said
-    stated = said.mode(p4) == "on"          # what sessions state trains only once the store says so (said.py)
+    stated = said.mode(p4) == "on"          # p4.json's recall.said.mode, read by said.py
     train = [as_label(r) for r in read_tsv(mpath(p4, TRAIN))
              if not (held and r.get("source") == "store+edited" and batch_of(r.get("note", "")) in held)
              and (stated or r.get("source") != "said")]
@@ -200,7 +217,7 @@ def _training_rows(p4):
 
 
 def superseding(p4):
-    """{older fact id: (newer fact id, newer time)} from facts.md's `supersedes:` fields."""
+    """`{older fact id: (newer fact id, newer time)}` from the `supersedes:` fields of facts.md."""
     out = {}
     for e in st.load_file(p4, "facts.md"):
         old = e.fields.get("supersedes", "").strip()
@@ -210,8 +227,10 @@ def superseding(p4):
 
 
 def recency(p4, labels, report=None):
-    """5.2's recency rule: a label on a superseded fact, for a task dated after the newer fact, is dropped (listed
-    in `report` as `dropped: superseded by <id>`), and the newer fact takes its place as the positive."""
+    """The recency rule: a positive label on a fact that a newer fact supersedes is dropped when its task is dated
+    at or after the newer fact, or either is undated, and the newer fact takes its place as the positive, unless
+    the task already has a label on it. A task's date is its time in tasks.tsv, else the label's own. A `report`
+    list, when given, gets a line `<task>: <entry> dropped: superseded by <id>` for each label dropped."""
     sup = superseding(p4)
     if not sup:
         return labels
@@ -263,8 +282,10 @@ def paths_named(text):
 
 
 def used(doc, rare_doc, hay_toks, hay_text, prompt_text):
-    """5.1's usage rule: the reply or the turn's Edit/Write/Bash inputs contain two of the entry's rare terms, or a
-    path it names that the prompt did not."""
+    """The usage rule: an entry was used when `hay_toks`, the tokens of `hay_text`, hold two of its rare terms
+    `rare_doc`, or `hay_text` holds a path the entry names that `prompt_text` does not. For a usage label
+    `hay_text` is the turn's reply and what the turn wrote. A repository entry's own path is among the paths it
+    names."""
     if len(rare_doc & hay_toks) >= 2:
         return True
     for p in paths_named(doc.get("show", "")) | ({doc["path"]} if doc.get("file") == "repo" else set()):
@@ -273,10 +294,11 @@ def used(doc, rare_doc, hay_toks, hay_text, prompt_text):
     return False
 
 
-# --- the history labels: tasks without a pool (5.2 step 1) -----------------------------------------------
+# --- the history labels of `p4.py labels --from-history` -------------------------------------------------
 
 def message_rows(files):
-    """[(s8, rows)] in session order; rows ezexe's own (notifications and harness injections out)."""
+    """`[(s8, rows)]` sorted by session, each session's rows cut to ezexe's own messages by migrate.turn_rows, which
+    drops task notifications, agent messages, hook injections and any message that opens with `<`."""
     import migrate
     out = []
     for rel in sorted(k for k in files if k.startswith(st.MESSAGES + "/")):
@@ -291,8 +313,16 @@ def task_of_row(s8, e, first):
 
 
 def from_history(p4, idx=None, files=None):
-    """The `store` labels of every completed row whose session has no pool task, and the `short` labels of every
-    completed short row (5.1, 5.4). Rewrites those two sources in labels-raw.tsv; adds the tasks."""
+    """`p4.py labels --from-history`: writes the history labels of the completed message rows, the `store` and
+    `short` sources of labels-raw.tsv, rewritten whole, and adds the tasks they label to tasks.tsv. Returns the
+    counts.
+
+    A row of at most SHORT_WORDS words takes a `short` label on a prior completed row of the same words when the
+    two replies resemble each other. Any other row, in a session with no pool or audit task, takes a `store` label
+    on up to HISTORY_MAX entries from BM25's top candidates for its reply, the best by shared rare terms. Such an
+    entry is not dated after the row and is no message row, and either two of its rare terms are in the reply, one
+    of them not in the message, or it is a repository entry whose path the reply names and the message does not.
+    A row's reply is its `addressed:` paragraph and the `meant:` of the corrections of the same hour."""
     import p4 as cli
     if idx is None:
         idx, _ = st.ensure_index(p4)
@@ -367,7 +397,7 @@ def from_history(p4, idx=None, files=None):
     return stats
 
 
-# --- usage labels (5.1), the close hooks -----------------------------------------------------------------
+# --- usage labels, written by the Stop and SubagentStop hooks --------------------------------------------
 
 def served_path(p4, key):
     return p4conf.sub(p4, "models", "served", re.sub(r"[^\w.-]", "_", key) + ".json")
@@ -386,7 +416,8 @@ def read_served(p4, key):
 
 
 def tool_inputs(turn):
-    """The text of the turn's Edit/Write/Bash inputs."""
+    """What the turn wrote: the `file_path`, `new_string`, `content` and `edits` of each edit tool's input, and the
+    `command` of each Bash and PowerShell call."""
     out = []
     for c in (turn or {}).get("calls", []):
         inp = c.get("input") if isinstance(c.get("input"), dict) else {}
@@ -398,8 +429,9 @@ def tool_inputs(turn):
 
 
 def served_mode(served):
-    """"shown" when the served lines reached the model, "shadow" when they were only logged (the record's `shown`
-    count or `shadow` flag, hook.py h_recall / h_agent), "" for a record from before the fields."""
+    """"shown" when the served lines reached the model, "shadow" when they were only logged, by the record's
+    `shadow` flag or else its count of lines `shown`, and "" when it has no flag and no lines shown. hook.py's
+    h_recall writes both fields and h_agent the flag alone."""
     if served.get("shadow") is True:
         return "shadow"
     if served.get("shadow") is False or served.get("shown"):
@@ -408,9 +440,11 @@ def served_mode(served):
 
 
 def usage_labels(p4, idx, served, reply, turn=None, task_id="", now=""):
-    """[label row] for each entry served: used (1) or unused (0), source `usage`, weight USAGE_WEIGHT. The note
-    keeps whether the lines were shown or shadow (`used; shown`, `unused; shadow`): the served record is deleted
-    at Stop, and a label on a line the model never saw measures recall's ranking, not the model's uptake."""
+    """[label row] for each served entry the index holds: 1 when the turn used it by the usage rule and 0 when it
+    did not, source `usage`, weight USAGE_WEIGHT. Rare terms the prompt holds do not count toward a use. The note
+    keeps whether the lines were shown or only logged in shadow, as `used; shown` or `unused; shadow`: the hook
+    deletes the served record after it writes the labels, and a label on a line the model never saw measures
+    retrieval's ranking, not the model's uptake."""
     by = {d["id"]: d for d in idx["docs"]}
     hay = (reply or "") + "\n" + tool_inputs(turn)
     hay_toks = set(ranker.tokens(hay))
@@ -431,8 +465,8 @@ def usage_labels(p4, idx, served, reply, turn=None, task_id="", now=""):
 
 
 def working_texts(p4, limit=200):
-    """Prompts whose served lines were used (a `usage` label 1) and whose next prompt was no follow-up: the
-    dictionary check's working set."""
+    """The dictionary check's working set: the texts of the tasks whose served lines were used, a `usage` label 1,
+    and whose next message was no follow-up, at most `limit` of them, the last in labels.tsv."""
     tasks = read_tasks(p4)
     good = []
     for r in read_tsv(mpath(p4, TRAIN)):
@@ -454,8 +488,8 @@ def followed_up(p4, task):
 
 
 def is_follow_up(prev, cur):
-    """5.3's follow-up detector: the next message starts with a correction marker, or resembles the prior one at
-    Jaccard >= 0.5 within 10 minutes. **Untested** as a detector (its precision is judged by hand, 8.1)."""
+    """The follow-up detector: `cur` starts with one of the correction markers migrate.MARKERS, or it resembles
+    `prev` by st.resembles and was sent no more than 10 minutes after it. No test measures its precision."""
     import migrate
     text = st.norm_token(migrate.fp(cur))
     if any(text == m or text.startswith(m + " ") for m in migrate.MARKERS):
@@ -465,10 +499,11 @@ def is_follow_up(prev, cur):
                                                                set(st.norm_token(migrate.fp(prev)).split()))
 
 
-# --- repo labels from transcripts (5.1a) -----------------------------------------------------------------
+# --- repo labels: what a turn did with the repository's files --------------------------------------------
 
 def repo_index(idx):
-    """(known paths, {path: [symbols]}, {path: entry id}, {path: [symbol entry ids]}, {path: newest commit id})."""
+    """The index's repository entries as five lookups: the known paths, `{path: [symbol]}`, `{path: entry id}`,
+    `{path: [(symbol, entry id)]}` and `{path: id of the newest commit entry that names it}`."""
     known, syms, path_id, sym_ids, commit_of = set(), {}, {}, {}, {}
     for d in idx["docs"]:
         if d["file"] == "repo":
@@ -489,8 +524,12 @@ def repo_index(idx):
 
 
 def turn_repo_labels(turn, project, ri, task_id, reply="", now="", p4=""):
-    """[label row] for one turn: each file the turn touched, by 5.1a's table, on its path entry; an edited or cited
-    file's label also lands on the symbols its edits name and on the newest commit that touched it."""
+    """`(rows, events)` for one turn: a label row on the path entry of each repository file the turn touched, by
+    transcript.file_events, with the label and weight transcript.WEIGHTS sets for its event. A positive label also
+    lands on each of the file's symbols whose name, its last `::` part, is four characters or more and appears as
+    a word in what the turn wrote or in its reply, and at half the weight on the newest commit that touched the
+    file. Given `p4`, transcript.EXTERNAL is set from deps.externals, so a file of a dependency outside the project
+    counts too."""
     import transcript as tr
     known, syms, path_id, sym_ids, commit_of = ri
     if p4:
@@ -526,7 +565,9 @@ def transcript_files(slug_dir, s8):
 
 
 def match_row(rows, turn):
-    """The message row a transcript turn is: the same fingerprint (resembling), timed within a few minutes."""
+    """The message row a transcript turn is: the first row whose fingerprint resembles the turn's prompt by
+    st.resembles, or whose three or more words all appear in it, each side read to 300 characters; None when no
+    row does."""
     tt = set(st.norm_token(turn["prompt"][:300]).split())
     for e in rows:
         fp = set(st.norm_token(st.unquote(e.fields.get("fingerprint", e.value))[:300]).split())
@@ -539,7 +580,8 @@ _DEP_PATHS = {}
 
 
 def is_dep_entry(p4, entry):
-    """True when a label's entry is a dependency's (deps.py): its path sits in a package the dependency index holds."""
+    """True when a label's entry is a dependency's: a `repo:` entry whose path sits in a package that deps.py's
+    state holds. A store's package paths are read on its first call and kept in _DEP_PATHS."""
     import deps
     if p4 not in _DEP_PATHS:
         s = deps.load_state(p4)
@@ -549,11 +591,13 @@ def is_dep_entry(p4, entry):
 
 
 def from_transcripts(p4, project, slug_dirs, idx=None, write=True, all_sessions=False):
-    """`labels --from-transcripts`: the repo labels of every turn of every transcript a message row names (by its
-    session's first 8 characters), under the given ~/.claude/projects/<slug>/ directories. Rewrites the `repo`
-    source in labels.tsv; adds the tasks (a turn no row matches becomes a task of its own). The dependency files
-    those turns opened that the index does not hold are remembered (deps.note_opened; `dep_opened` counts the new
-    ones), so the next `index --deps` reads them and a second pass labels them."""
+    """`p4.py labels --from-transcripts`: the repo labels of every turn of the transcripts in `slug_dirs`, the
+    ~/.claude/projects/<slug>/ directories: those of the sessions that have a message file in the corpus, or all
+    of them with `all_sessions`. A turn's task is the message row match_row finds, else a task of its own,
+    `turn:<s8>:<time>`. With `write`, it rewrites every `repo` row of labels.tsv, those of the hooks among them,
+    and adds the tasks. The dependency files the turns opened that the index lacks go to deps.note_opened, so the
+    next build of the dependency index reads them and a second pass can label them. Returns the counts, with
+    `dep_opened` the number of those files that were not noted before."""
     import deps
     import transcript as tr
     if idx is None:
@@ -603,12 +647,15 @@ def from_transcripts(p4, project, slug_dirs, idx=None, write=True, all_sessions=
     return stats
 
 
-# --- the free half of the re-exploration measure (8.5) ---------------------------------------------------
+# --- the re-exploration measure: what a turn spent before it opened the file it needed -------------------
 
 def reexploration(p4, project, slug_dirs, idx=None, k=5):
-    """For every transcript turn that opened a file it later edited or cited: the tool calls and input tokens
-    spent before that first open, and whether recall's top k for the prompt named the file (then the
-    counterfactual cost is one Read: one call, the tokens of the turn's first API call). Returns the totals."""
+    """The re-exploration measure over every transcript in `slug_dirs`: for each turn that opened a file which it,
+    or a later turn of its transcript, edited, invoked or cited, the tool calls and input tokens spent before that
+    first open, and whether the top k that p4.rank gives the prompt named the file. When it did, the turn could
+    have read the file straight away: the counterfactual cost is one call and the input tokens before the turn's
+    first call. Returns the means per turn, `hit_rate` for the share of turns whose top k named the file, and the
+    rows."""
     import p4 as cli
     import transcript as tr
     if idx is None:
@@ -624,7 +671,7 @@ def reexploration(p4, project, slug_dirs, idx=None, k=5):
             continue
         for n in names:
             ts = tr.turns(os.path.join(d, n))
-            # relevant: edited or cited by this turn or a later one of the session
+            # relevant: edited, invoked or cited by this turn or a later one of the transcript
             evs = [tr.file_events(t, project, known, syms, tr.reply_of(t)) for t in ts]
             for i, t in enumerate(ts):
                 later = set()

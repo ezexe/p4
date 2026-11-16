@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Tests for the label sources (fresh-marketplace.md 5.1, 5.1a, 5.2, 8.1, 8.4's free half, 8.5's free half).
+"""Tests for labels.py: the two labels files and their join, the recency rule, the history, usage and repo labels
+with the transcript reading they rest on, the follow-up detector and the re-exploration measure.
 
-Run: python3 test_labels.py   (stdlib unittest, offline, seconds)
+Run: python3 test_labels.py
 
-Fixtures are built in temp directories. The real-transcript checks run only when those paths exist: the migrated
-ap-p4_mac store (P4_MAC_STORE) and the project
-transcripts under ~/.claude/projects/-Users-ez-code-AudioPlugin/ (read-only; nothing is written beside them).
+The tests need the standard library and git, and no network. Fixtures are built in temporary directories.
+RealTranscripts needs three paths: the store MAC_STORE names, which P4_MAC_STORE sets when it is given, the
+repository AP_PROJECT and its transcripts under AP_SLUG. Where one is missing the test is skipped. It reads them
+and writes only into a temporary copy of the store.
 """
 
 import os
@@ -69,8 +71,8 @@ class Files(Base):
 
 
 class Recency(Base):
-    """8.4's free half: a fact with supersedes: outranks (here: replaces) the fact it supersedes for a message dated
-    after it, and a label resting on the superseded fact is dropped for the newer one."""
+    """A fact with `supersedes:` replaces the fact it supersedes for a message dated at or after it: the query
+    prints the newer fact alone, and a label on the superseded fact moves to the newer one."""
 
     def setUp(self):
         super().setUp()
@@ -147,7 +149,8 @@ class Usage(Base):
         self.assertEqual({r["entry"]: r["label"] for r in got}[rule["id"]], "1", "two rare terms in the reply")
 
     def test_note_keeps_whether_the_lines_were_shown(self):
-        """The served record is deleted at Stop; its shown / shadow fields survive in each usage label's note."""
+        """The hook deletes the served record after it writes the labels, so each usage label's note keeps what
+        the record's `shown` and `shadow` fields said."""
         idx, _ = st.ensure_index(self.p4)
         rule = next(d for d in idx["docs"] if d["file"] == "rules.md" and "keychain" in d["show"])
         reply = "the sweeper keeps the keychain flag in the tombstone"
@@ -161,7 +164,7 @@ class Usage(Base):
                          "an agent record carries shadow alone")
         old = {"ids": [rule["id"]], "text": "probe it", "task": "t"}
         self.assertEqual(lb.usage_labels(self.p4, idx, old, "done", None, "t", NOW)[0]["note"], "unused",
-                         "a record from before the fields says nothing")
+                         "a record with neither field says nothing")
 
 
 class Transcripts(unittest.TestCase):
@@ -213,8 +216,8 @@ class Transcripts(unittest.TestCase):
         ev = tr.file_events(tr.turns(tp)[0], self.proj, known, {}, "done")
         self.assertEqual(ev[".claude/skills/narwhal-style/SKILL.md"]["label"], "invoked", "no Read, still a use")
         self.assertEqual(tr.WEIGHTS["invoked"], (1, 0.7))
-        # a slash command is a harness line, not a prompt, yet ezexe's: a turn of its own, and what it runs
-        # lands there, not on the turn before
+        # a slash command comes in Claude Code's tags, so it is no prompt, yet it is ezexe's: a turn of its own,
+        # and what it runs lands there, not on the turn before
         f = os.path.join(self.proj, "README.md")
         lines = tr.read_lines(tp) + [
             {"type": "user", "origin": {"kind": "human"}, "message": {"content":
@@ -230,10 +233,11 @@ class Transcripts(unittest.TestCase):
         ev = tr.file_events(ts[1], self.proj, known, {}, "")
         self.assertEqual(ev[".claude/commands/zebra.md"]["label"], "invoked")
         self.assertEqual(ev["README.md"]["label"], "edited", "the command's run is the command's turn")
-        self.assertNotIn("tools/.claude/skills/probe/SKILL.md", ev, "a meta line is the harness's, not ezexe's")
+        self.assertNotIn("tools/.claude/skills/probe/SKILL.md", ev, "a meta line is Claude Code's, not ezexe's")
         first = tr.turns(lines[-3:])
         self.assertEqual([t["prompt"] for t in first], ["/zebra the plotter"], "a session may open with one")
-        # tags quoted in a prompt's prose are not a command; a local command (after its caveat) is not a skill
+        # tags quoted in a prompt's prose are not a command, and a local command, the line after its caveat, opens
+        # no turn
         quoted = tr.turns([{"type": "user", "origin": {"kind": "human"}, "message": {"content":
                             "why did this fail?\n<command-name>/tools:probe</command-name>"}}])
         self.assertEqual(quoted[0]["calls"], [])
