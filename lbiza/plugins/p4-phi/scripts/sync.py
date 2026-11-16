@@ -13,9 +13,9 @@ on every push; a machine catches up with `p4.py sync` (fetch, merge `origin/main
     sync.py catch-up                       # a machine: move the current branch up to its remote, when that is ahead
 
 `all` works in a temporary worktree, so it never moves the checkout it is run from. When the remote moved while it
-merged (the workflow and a machine can run at once), it fetches and merges once more. Measured 2026-11-10 on a
-private three-branch store: the first push of a branch carrying the seeded workflow ran it, and its own token's
-push of main, with the workflow file in it, went through. GitHub documents that a workflow's token cannot change
+merged, as when the workflow and a machine run at once, it fetches and merges once more. On a private store the
+first push of a branch carrying the seeded workflow runs it, and the workflow token's push of main, with the
+workflow file in it, goes through. GitHub documents that a workflow's token cannot change
 files under .github/workflows; should a repository refuse that push, the error says so and `p4.py sync --all
 --push` on a machine does the same merge with ezexe's credentials.
 
@@ -23,20 +23,19 @@ Two machines write the same files, so a plain merge conflicts. Each conflicted f
   the store's entries (store/**/*.md)   entry by entry, field by field, against the common ancestor: an entry only
                     one machine has is kept, a field only one machine changed takes its value, and when both changed
                     a `status:` the one that is no longer LIVE wins, so a merge never brings back what ezexe
-                    freed (measured: a union of lines kept both status lines and the rule read LIVE again)
+                    freed, since a union of lines keeps both status lines and the rule reads LIVE again
   other text (*.md), tables (*.tsv, *.jsonl), .gitignore   both sides' lines (git merge-file --union); a
                     table's repeated rows and an index's repeated link lines (memory/MEMORY.md) are dropped
   settings (*.json)  key by key against the common ancestor; a list is both sides' items, so p4.json's
                     recall.deps.roots holds every machine's paths (a root that is not on a machine is skipped there)
   a trained model (models/ranker*, *.pt, *.phid)   one side whole, the one whose last training round is the
                     later: two machines' weights are never mixed
-  the training log (models/eval.tsv)   both machines' rounds, in time order. It was once taken whole with the
-                    model, and each sync swapped one machine's log for the other's (measured 2026-11-10: a
-                    64-round log replaced by a 39-round one)
+  the training log (models/eval.tsv)   both machines' rounds, in time order, never one side whole, which
+                    would drop the other machine's rounds
   anything else     the side that changed it last, whole: a script, a workflow or anything under .github/ is never
                     stitched from two versions
 Settings and store entries are merged this way whenever both machines changed the file, conflict or not: git merges
-two machines' p4.json line by line without complaint and leaves a key twice (measured 2026-11-10).
+two machines' p4.json line by line without complaint and can leave a key twice.
 A file one side deleted and the other changed is kept. Stdlib and git only: the workflow needs no install.
 """
 
@@ -72,10 +71,10 @@ def show(spec):
     return r.stdout if r.returncode == 0 else None
 
 
-# A store moved into each plugin's own directory (p4conf.LAYOUT): recall's files are under phi/, where p4-phi keeps
-# them since recall is part of it, and were under recall/ before; the memory is under temportal/. A branch from a
-# machine not yet updated may still have them under recall/ or at the top, so every rule here reads a path by its
-# name inside the plugin's directory, and all three layouts merge alike.
+# Each plugin keeps its part of a store in its own directory, as p4conf.LAYOUT says: retrieval's files under phi/
+# and the memory under temportal/. A branch from a machine not yet updated may still hold them under recall/ or at
+# the top, so every rule here reads a path by its name inside the plugin's directory, and all three layouts merge
+# alike.
 PLUGIN_DIRS = ("phi/", "recall/", "temportal/")
 
 
@@ -206,8 +205,8 @@ def merge_entries(base, ours, theirs):
 
 def merge_json(base, ours, theirs, dflt=None):
     """`dflt` is the plugin's default at this place (settings only): when a key is new on both sides, a value that
-    is just the default a settings load wrote loses to one a person set (measured 2026-11-10: a machine's freshly
-    written "off" overrode the other machine's "shadow")."""
+    is just the default a settings load wrote loses to one a person set, so a machine's freshly written default
+    never overrides the other machine's setting."""
     if isinstance(ours, dict) and isinstance(theirs, dict):
         b = base if isinstance(base, dict) else {}
         d = dflt if isinstance(dflt, dict) else {}
@@ -292,7 +291,7 @@ def merge_plan(ours, theirs, base=None):
     """A session's plan from two machines. The side of the higher version gives the order and the rest. A step is
     matched by its words, else by its address while the other side left that step's words as the base had them;
     the later status wins and both sides' tasks are kept by id. A step only the lower side added since the base is
-    kept after the others, never lost (MP1)."""
+    kept after the others, never lost."""
     a, b = json.loads(ours), json.loads(theirs)
     hi, lo = (a, b) if int(a.get("version") or 0) >= int(b.get("version") or 0) else (b, a)
     try:
@@ -338,8 +337,8 @@ def merge_anchor(ours, theirs):
 
 
 def structured(path):
-    """A file whose lines git must never merge by itself: settings (a clean textual merge of two machines' p4.json
-    left `recall` holding its keys twice, measured 2026-11-10) and the store's entries."""
+    """A file whose lines git must never merge by itself: settings, since a clean textual merge of two machines'
+    p4.json can leave a key twice, and the store's entries."""
     low = logical(path).lower()
     return low.endswith(".json") or (low.startswith("store/") and low.endswith(".md")) or bool(PHI_JSONL.match(path))
 
@@ -437,8 +436,8 @@ def merge(ref, into):
 
 
 def store_branches(main):
-    """The remote's branches that hold a store (a recall/ directory, or store/ in the flat layout), the main one left
-    out."""
+    """The remote's branches that hold a store, with a phi/ directory, a recall/ one or store/ at the top, the main
+    one left out."""
     out = []
     for b in git("for-each-ref", "--format=%(refname:short)", "refs/remotes/origin").stdout.split():
         name = b.removeprefix("origin/")
@@ -513,8 +512,8 @@ def snapshot(branch):
 
 def entry_changes(old, new):
     """Every store entry whose fields a move from `old` to `new` changed, a line each, its `status:` first: a clean
-    merge is no proof that an entry still reads as it should (#21: a line-union kept both `status:` lines of a rule
-    and it read LIVE again after ezexe had freed it)."""
+    merge is no proof that an entry still reads as it should: a line-union can keep both `status:` lines of a rule,
+    and it reads LIVE again after ezexe freed it."""
     if not old or not new or old == new:
         return []
     out = []
