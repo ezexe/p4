@@ -51,6 +51,29 @@ Run these with `python -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/phi.py"`.
 - **Detach a session:** `detach <sessionId>` makes it a top session.
 - **Reparent a session:** `reparent <sessionId> <under sessionId>` puts it, with every session it started, under another. The app's sidebar does not follow either command.
 
+## Levels
+
+Work runs at the level Claude Code gives it, so a session's own turn is never held by it.
+Each line names the Claude Code docs page it rests on.
+
+- **A search or a read across files** goes to the background subagent `p4-phi:sweep`: the Agent tool with that `subagent_type`. It is read-only and runs on Haiku. The page is `sub-agents.md`, which says a background subagent runs concurrently while the conversation continues.
+- **A long command**, such as a test file, a suite or a build, is started with `run_in_background: true` on its Bash or PowerShell call, or handed to `p4-phi:runner`, which reports pass or fail with the failing output. The page is `tools-reference.md`, under "Background commands".
+- **A read of a diff or a result** that should not lean on this session's own view goes to `p4-phi:check`, which is read-only and runs on this session's model.
+- **After starting one**, go on with other work or end the turn. Its completion notification brings the result in a later turn, so never wait in the foreground, sleep or poll. The page is `sub-agents.md`, which says a background subagent's report arrives inside a completion notification.
+- **In a top session** a foreground `test_*.py` run, `pytest`, `unittest`, or an `npm`, `pnpm`, `cargo`, `go` or `make` `test` or `build` is started in the background by the plugin's PreToolUse hook, which says so in one line. The page is `hooks.md`, under "PreToolUse decision control": `updatedInput` replaces the whole input before the tool runs.
+- **In a session another one started** the same call runs as sent, and the line is given once per step.
+- **A plan step is named for its level:** a step that only reads or searches for `p4-phi:sweep`, a step that only runs a command for `p4-phi:runner`, and the rest for a child session.
+- **To turn it off** in one project, set `phi.levels` to `false` in `.claude/p4/p4.json`. Nothing has to turn it on.
+
+## No setup
+
+The plugin works in any project it is enabled in, with no settings file, no environment variable and no existing store.
+
+- **The store** `.claude/p4/` is made by the plugin's own SessionStart hook at the first session, and `p4.json` is written there with the working defaults.
+- **Before the store exists** a session is still given the built-in rules, and a top session's long command is still moved to the background.
+- **Every key** of `p4.json` and `phi/phi.json`, and every `P4_*` variable, is optional. The README lists each with its default.
+- **What the plugin remembers outside a project** is kept in its data folder, `${CLAUDE_PLUGIN_DATA}`, which `plugins-reference.md` says is kept across plugin updates.
+
 ## What it does not do
 
 - It does not find an earlier turn by the words of a request. A session is given what the sessions linked to it kept. Only a registered route, a landed topic whose records back it, is scored against a message.
