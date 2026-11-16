@@ -73,6 +73,9 @@ def run_claude(project, prompt, *extra, wait_s=60):
 class Live(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="p4-skillex-live-")
+        self.git = shutil.which("git")
+        if self.git:                                     # a repository, so each copy's .gitignore takes effect
+            subprocess.run([self.git, "init", "-q", self.root], check=True)
         self.p4 = os.path.join(self.root, ".claude", "p4")
         os.makedirs(os.path.join(self.p4, "temportal"))     # the watcher acts only beside p4-temportal's folder
         d = os.path.join(self.p4, "skillex", NAME)
@@ -100,9 +103,13 @@ class Live(unittest.TestCase):
 
     def test_a_store_skill_copied_before_the_start_is_offered_and_loads(self):
         skillex.cmd_start(self.p4, {})
+        if self.git:
+            ignored = subprocess.run([self.git, "-C", self.root, "check-ignore", "-q",
+                                      f".claude/skills/{NAME}/SKILL.md"])
+            self.assertEqual(ignored.returncode, 0, "git ignores the copy")
         init, kinds = run_claude(self.root, f"/{NAME}", "--setting-sources", "project")
         self.assertIsNotNone(init, kinds)
-        self.assertIn(NAME, init["skills"])
+        self.assertIn(NAME, init["skills"], "an ignored copy is still offered")
         got = self.expansion()
         self.assertIsNotNone(got, "the typed /name never expanded")
         self.assertEqual((got["command_name"], got["command_source"], got["expansion_type"]),
@@ -132,6 +139,7 @@ class Live(unittest.TestCase):
             with open(os.path.join(self.root, ".claude", "settings.json"), "w", encoding="utf-8") as f:
                 json.dump({"hooks": {"SessionStart": [{"hooks": [hook]}]}}, f)
             init, kinds = run_claude(self.root, "x", "--setting-sources", "project")
+            self.assertIsNotNone(init, kinds)
             listed[reload] = "demo-late" in init["skills"]
         self.assertEqual(listed, {False: False, True: True})
 
@@ -139,6 +147,7 @@ class Live(unittest.TestCase):
         """A platform gap, kept as a test so a fix shows: the skill is in the init listing after reloadSkills, yet
         the first prompt typed as /name under -p is not expanded. The next session finds the copy at its start."""
         init, kinds = run_claude(self.root, f"/{NAME}", "--setting-sources", "project", "--plugin-dir", PLUGIN)
+        self.assertIsNotNone(init, kinds)
         self.assertIn(NAME, init["skills"])
         self.assertIsNone(self.expansion(), "fixed upstream: drop this gap from the report")
 

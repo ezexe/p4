@@ -26,8 +26,8 @@ from it and never edited by hand. A folder in `.claude/skills/` without a `.skil
   start                        SessionStart: make the store folder and `.claude/skills/`, copy every store skill
                                there.
   write                        PostToolUse on Write: look at the written file when it lies in temportal.
-  stop                         Stop: look at the session folder's scripts changed since the last look, so a script
-                               written by a shell command is seen too.
+  stop                         Stop: look at the scripts of the session's tmp folder and of the notebook changed
+                               since the last look, so a script written by a shell command is seen too.
   scan [--p4 <store>]          print what is brewing in a store now, writing nothing.
   brew <file> [--p4 <store>]   look at one file by hand, as the write hook does.
 
