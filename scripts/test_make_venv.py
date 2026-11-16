@@ -1,9 +1,11 @@
 """Offline tests for make_venv.py: where it looks for ezexe/phi, which interpreter it names, --check without a .venv,
-and a build on a machine with no torch.
+a build on a machine with no torch, and the oldest Python ezexe/phi installs on.
 
     python3 scripts/test_make_venv.py
 """
 
+import contextlib
+import io
 import os
 import sys
 import tempfile
@@ -76,6 +78,105 @@ class Venv(unittest.TestCase):
         self.assertIn("--no-deps", phi[0])
         self.assertTrue(any(c[-1] == "numpy" for c in calls))
         self.assertTrue(any(str(v.REQUIREMENTS) in c for c in calls))
+
+    def requires(self, spec):
+        """An ezexe/phi checkout beside the p4 checkout whose pyproject.toml has the given requires-python line."""
+        phi = self.phi(self.tmp / "phi")
+        (phi / "pyproject.toml").write_text(f'[project]\nname = "phi-prune"\n{spec}\n', encoding="utf-8")
+        return phi
+
+    def faked(self, version, venv=None):
+        """main runs on Python `version` with every process faked; with `venv`, .venv exists and its interpreter
+        reports that version. Returns the commands main would have run."""
+        calls, real = [], (v.run, v.missing, v.subprocess, v.sys)
+
+        def restore():
+            v.run, v.missing, v.subprocess, v.sys = real
+        self.addCleanup(restore)
+        v.run, v.missing = (lambda *cmd: calls.append(cmd) or 0), (lambda py: [])
+        answer = " ".join(map(str, venv)) if venv else ""
+        v.subprocess = types.SimpleNamespace(run=lambda *a, **k: types.SimpleNamespace(stdout=answer))
+        v.sys = types.SimpleNamespace(version_info=version, version=".".join(map(str, version)),
+                                      executable=sys.executable)
+        if venv:
+            v.python_of(v.VENV).parent.mkdir(parents=True)
+            v.python_of(v.VENV).write_text("")
+        return calls
+
+    def test_a_python_older_than_ezexe_phi_needs_stops_before_the_venv(self):
+        self.requires('requires-python = ">=3.11"')
+        calls = self.faked((3, 10, 14))
+        with self.assertRaises(SystemExit) as stop:
+            v.main([])
+        self.assertIn("ezexe/phi needs Python 3.11 or newer, and this is Python 3.10.14", str(stop.exception))
+        self.assertEqual(calls, [], "nothing ran, so no .venv was made")
+
+    def test_the_oldest_python_ezexe_phi_accepts_makes_the_venv(self):
+        self.requires('requires-python = ">=3.11"')
+        calls = self.faked((3, 11, 0))
+        self.assertEqual(v.main([]), 0)
+        self.assertIn("venv", [str(c) for c in calls[0]], "the venv was made")
+
+    def test_ezexe_phi_from_github_is_held_to_its_known_floor(self):
+        calls = self.faked((3, 9, 18))
+        with self.assertRaises(SystemExit) as stop:
+            v.main([])
+        self.assertIn("ezexe/phi needs Python 3.10 or newer", str(stop.exception))
+        self.assertEqual(calls, [])
+
+    def test_a_checkout_that_sets_no_floor_takes_any_python(self):
+        self.phi(self.tmp / "phi")
+        self.faked((3, 8, 18))
+        self.assertEqual(v.main([]), 0)
+
+    def test_the_floor_is_held_against_the_venvs_own_python(self):
+        """The Python that runs ezexe/phi is .venv's own once it exists: a 3.9 tops up a 3.12 .venv, and a 3.12
+        stops at a 3.9 .venv."""
+        self.requires('requires-python = ">=3.10"')
+        self.faked((3, 9, 6), venv=(3, 12, 4))
+        self.assertEqual(v.main([]), 0)
+        calls = self.faked((3, 12, 4), venv=None)
+        v.subprocess = types.SimpleNamespace(run=lambda *a, **k: types.SimpleNamespace(stdout="3 9 18"))
+        with self.assertRaises(SystemExit) as stop:
+            v.main([])
+        self.assertIn("and .venv runs Python 3.9.18; remove .venv", str(stop.exception))
+        self.assertEqual(calls, [])
+
+    def test_a_python_older_than_this_script_needs_stops_before_anything_runs(self):
+        self.phi(self.tmp / "phi")
+        calls = self.faked((3, 6, 15))
+        for argv in ([], ["--check"]):
+            with self.assertRaises(SystemExit) as stop:
+                v.main(argv)
+            self.assertIn("this script needs Python 3.7 or newer, and this is Python 3.6.15", str(stop.exception))
+        self.assertEqual(calls, [])
+
+    def test_the_no_torch_line_names_the_venvs_python(self):
+        self.requires('requires-python = ">=3.10"')
+        self.faked((3, 9, 6), venv=(3, 13, 1))
+        v.run, v.missing = (lambda *cmd: 1 if "torch" in map(str, cmd) else 0), (lambda py: ["torch"])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(v.main([]), 0)
+        self.assertIn("on Python 3.13, so .venv is finished without it", out.getvalue())
+
+    def test_requires_python_forms(self):
+        forms = {'requires-python = ">=3.10,<4"': (3, 10, 0), 'requires-python = ">= 3.10"': (3, 10, 0),
+                 'requires-python = "~=3.11"': (3, 11, 0), 'requires-python = "==3.11.*"': (3, 11, 0),
+                 'requires-python = ">3.10"': (3, 10, 1), 'requires-python = ">=3.10.2"': (3, 10, 2),
+                 "requires-python = '>=3.11'": (3, 11, 0), 'requires-python = "<4"': None,
+                 '# requires-python = ">=3.12"\nrequires-python = ">=3.10"': (3, 10, 0), "": None}
+        for line, floor in forms.items():
+            self.assertEqual(v.python_floor(self.requires(line), True), floor, line)
+            (self.tmp / "phi" / "pyproject.toml").unlink()
+            (self.tmp / "phi").rmdir()
+        self.assertEqual(v.python_floor(v.PHI_GIT, False), v.PHI_PYTHON)
+
+    def test_the_known_floor_is_that_of_the_ezexe_phi_beside_this_checkout(self):
+        phi = self._root.parent / "phi"
+        if not (phi / "pyproject.toml").is_file():
+            self.skipTest(f"no ezexe/phi checkout at {phi}")
+        self.assertEqual(v.python_floor(phi, True), v.PHI_PYTHON)
 
 
 if __name__ == "__main__":
