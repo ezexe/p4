@@ -1,6 +1,6 @@
 ---
 name: phi
-description: What linked sessions hand each other. Use when a message from ezexe is about something other than this session's task, when starting a session for part of the task, when a worker or soldier you started has finished a turn, when a finding should outlast this session, when something showed the task done, or when asked what the sessions hold, to print the tree, to detach to top level or reparent a session, or when this session is a puppeteer filed in the sidebar section "puppeteers" or is controlled by one.
+description: What linked sessions hand each other. Use when a message from ezexe is about something other than this session's task, when starting a session for part of the task, when a worker or coworker you started has finished a turn, when a finding should outlast this session, when something showed the task done, or when asked what the sessions hold, to print the tree, to detach to top level or reparent a session, or when this session is a puppeteer filed in the sidebar section "puppeteers" or is controlled by one.
 ---
 
 # p4-phi: what linked sessions hand each other
@@ -13,7 +13,7 @@ p4-phi keeps each session's files in `<project>/.claude/p4/phi/sessions/<session
 
 - At its start: the store's feedback and user memories, a line each. A line cut with ... is whole on `<project>/.claude/p4/phi/rules.md`.
 - Beside its first message, when the sessions linked to it left any: its start background, whose first and last lines say what it holds and how to keep a finding or say the task is done.
-- Beside its next message: the reports of the workers or soldiers it started that finished a turn since.
+- Beside its next message: the reports of the workers or coworkers it started that finished a turn since.
 - In a subagent it starts: the step the subagent serves and retrieval's lines, appended to the Agent call's prompt, and before a tool call of the subagent a warning of what changed beside its parent session since its launch, when anything did.
 - At the moment each applies: ezexe's standing instruction for a message about something else, in full at the first message and kept on the session's `standing.md`; the advice on where each work step of an orchestrator's task list goes; a writing child's issue line, which says its loop; the push line, which says who pushes; the refusal of a start whose brief declares no write set; and the line `done` prints, which says what follows.
 

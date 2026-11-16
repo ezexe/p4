@@ -1115,8 +1115,9 @@ RESEARCHES = re.compile(r"\b(?:find|research|look\s+up|read|survey)\b[^.;]*\b(?:
 
 
 def research_text(home, s):
-    """A writing worker's or soldier's first message: the line to find the documented terms and an implementation
-    guide before it creates anything. '' for an orchestrator, a later message, and a session that writes nothing."""
+    """A writing worker's or coworker's first message: the line to find the documented terms and an
+    implementation guide before it creates anything. '' for an orchestrator, a later message, and a session that
+    writes nothing."""
     if not spawned_from(s) or not clean(s.get("task")) or load_turns(home, s["sessionId"]):
         return ""
     files = s.get("fileSet")
@@ -1147,7 +1148,7 @@ def research_step_text(home, s, plan):
 
 
 def first_split_text(home, s):
-    """A worker's or a soldier's first message: the line to plan its split while the app still lets it start
+    """A worker's or a coworker's first message: the line to plan its split while the app still lets it start
     sessions. '' for an orchestrator, a later message, a session with no task, and one a cap holds."""
     if not LEVELS_ON or not spawned_from(s) or not clean(s.get("task")) or load_turns(home, s["sessionId"]):
         return ""
