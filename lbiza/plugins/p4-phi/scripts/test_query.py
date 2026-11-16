@@ -8,10 +8,9 @@ that shares a single word with the documents; at most MAX_LINES lines, PER_FILE 
 most TEXT_CHARS characters of text; the line's shape; no jargon-list word printed; the history line for a short
 message sent twice before and none for one sent once; the repeat line for a resembling completed row and none for an
 open row or another session's; dictionary expansion; the trained ranker's road. repo.build, which
-`p4.py index --repo` runs, on a small git repository and on this checkout. On a store migrated from the
-AudioPlugin-p4 fixture, when it is on this machine: how long one `p4.py query` process takes, silence for ordinary
-messages and the same bounds. On a copy of the store P4_MAC_STORE names, when it is there: the no-ranker road's
-regression cases.
+`p4.py index --repo` runs, on a small git repository and on this checkout. The cases on real stores, a store
+migrated from the AudioPlugin-p4 fixture and a copy of the store P4_MAC_STORE names, are measurements of one store and
+live in the experiments repository ezexe/p4-phi, at experiments/p4-suite/test_query.py.
 """
 
 import json
@@ -20,7 +19,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -29,7 +27,7 @@ import p4conf  # noqa: E402
 import p4 as cli  # noqa: E402
 import ranker  # noqa: E402
 import store as st  # noqa: E402
-from test_store import NOW, fixture, make_store, write  # noqa: E402
+from test_store import NOW, make_store, write  # noqa: E402
 
 LINE_RE = re.compile(r"^- (\d{4}-\d\d-\d\d|undated) (rule|correction|missed detail|retracted|fact|memory|"
                      r"earlier message|saved code): (.+) \(((?:phi/store|temportal/memory|temportal/src)/[^:]+):(\d+)\)$")
@@ -185,56 +183,6 @@ class Cli(Fixture):
         self.assertIn("you have said", r.stdout)
 
 
-@unittest.skipUnless(fixture("AudioPlugin-p4"), "the AudioPlugin-p4 clone is not on this machine")
-class RealAudioPlugin(unittest.TestCase):
-    """A store migrated from the AudioPlugin-p4 fixture under P4_FIXTURES, when it is on this machine."""
-
-    @classmethod
-    def setUpClass(cls):
-        import migrate
-        cls.tmp = tempfile.TemporaryDirectory()
-        cls.p4 = os.path.join(cls.tmp.name, "p4")
-        migrate.run(fixture("AudioPlugin-p4"), cls.p4, apply=True, now=NOW,
-                    report_path=os.path.join(cls.tmp.name, "report.md"))
-        st.build_index(cls.p4)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.tmp.cleanup()
-
-    def test_latency_under_300ms(self):
-        """The fastest of five `p4.py query` processes on this store, each timed from its start to its exit: the
-        interpreter's start, the imports, the index's load and the query, as the prompt hook's own process pays them.
-        The prompt hook's budget is stated at `h_recall` in hook.py."""
-        text = "the CEF build keeps failing on the proprietary codecs patch, how do I rebuild incrementally?"
-        times = []
-        for _ in range(5):            # the best of 5: another process's burst on a loaded machine does not fail it
-            t = time.perf_counter()
-            r = run_cli("query", "--p4", self.p4, "--text", text, "--now", NOW)
-            times.append(time.perf_counter() - t)
-            self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertLess(min(times), 0.300, f"query took {min(times) * 1000:.0f} ms")
-
-    def test_hi_and_ordinary(self):
-        self.assertEqual(run_cli("query", "--p4", self.p4, "--text", "hi").stdout, "")
-        self.assertEqual(run_cli("query", "--p4", self.p4, "--text", "what is the weather like today").stdout, "")
-
-    def test_deterministic_and_bounded(self):
-        for text in ("the CEF build keeps failing on the proprietary codecs patch", "push it",
-                     "move the ring writer comment lines and the playhead inject mapping into the plan"):
-            a = cli.query(self.p4, text, None, NOW)
-            b = cli.query(self.p4, text, None, NOW)
-            self.assertEqual(a["lines"], b["lines"])
-            self.assertLessEqual(len(a["lines"]), 5)
-            for line in a["lines"]:
-                self.assertNotRegex(line, st.JARGON)
-                m = LINE_RE.match(line)
-                if m:
-                    self.assertLessEqual(len(m.group(3)), 160)
-                else:
-                    self.assertTrue(line.startswith(("- you have said", "- an earlier message like this one")), line)
-
-
 class RepoIndex(unittest.TestCase):
     """repo.build, which `p4.py index --repo` runs: paths, headings, symbols, build targets and commits from git, read
     again only where a commit changed them, with the exclusions and the cap; a generated file, an LFS pointer,
@@ -346,68 +294,6 @@ class RepoIndex(unittest.TestCase):
         self.assertGreater(s["files"], 10)
         self.assertIn("lbiza/plugins/p4-phi/scripts/store.py — build_index", "\n".join(d["show"] for d in
                                                                                  self.repo.entries(p4)))
-
-
-# a real store in the flat layout: P4_MAC_STORE names it, and the default is a path on another machine
-MAC_STORE = os.environ.get("P4_MAC_STORE", "/Users/ez/gritz/p4-repos/ap-p4_mac")
-
-
-class Regressions(unittest.TestCase):
-    """The no-ranker road on a copy of a real store, taken without its ranker: "which branch do mac commits go on"
-    and "where does the p4 repo live" must each recall the ruling that answers it in the top 5, and ordinary
-    messages and the suite's general prompts must print nothing. fallback_order's gates are held to these cases."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls.tmp = tempfile.TemporaryDirectory()
-        cls.p4 = None
-        if os.path.isdir(os.path.join(MAC_STORE, "store")):
-            import shutil
-            cls.p4 = os.path.join(cls.tmp.name, "p4")
-            # A flat store's folders of the index's sources, without its scratchpad, built index, ranker or served
-            # folder. build_index reads those sources at their places in the layout, under phi/ and temportal/, and
-            # nothing here moves the copy there.
-            for sub in ("store", "memory", "src", "models"):
-                if os.path.isdir(os.path.join(MAC_STORE, sub)):
-                    shutil.copytree(os.path.join(MAC_STORE, sub), os.path.join(cls.p4, sub),
-                                    ignore=shutil.ignore_patterns("index.json", "ranker.json", "served"))
-            st.build_index(cls.p4)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.tmp.cleanup()
-
-    def setUp(self):
-        if not self.p4:
-            self.skipTest("ap-p4_mac store not present")
-
-    def top5(self, text):
-        return cli.query(self.p4, text, None, NOW, model={})["lines"][:5]
-
-    def test_mac_branch(self):
-        got = self.top5("which branch do mac commits go on")
-        self.assertTrue(any("on this Mac the work is committed on _mac" in l or
-                            "the Mac's branch is 0.0.1-apple&win&mac_mac" in l for l in got), got)
-
-    def test_p4_repo(self):
-        got = self.top5("where does the p4 repo live")
-        self.assertTrue(any("the p4 repo is nested in the project" in l for l in got), got)
-
-    def test_ordinary_messages_silent(self):
-        for text in ("hi", "keep going", "thanks", "ok", "what is the weather like today"):
-            self.assertEqual(self.top5(text), [], text)
-
-
-    def test_suite_prompts_silent(self):
-        """At least 95% of the suite's general prompts, those of every category but lessons, print nothing."""
-        suite = os.path.join(HERE, "..", "..", "..", "..", "scripts", "session", "overrides_tasks.jsonl")
-        if not os.path.exists(suite):
-            self.skipTest("the suite's tasks are not beside this checkout")
-        with open(suite, encoding="utf-8") as f:
-            prompts = [json.loads(l) for l in f if l.strip()]
-        prompts = [p for p in prompts if p.get("category") != "lessons"]
-        loud = [p["id"] for p in prompts if self.top5(p["prompt"])]
-        self.assertGreaterEqual(1 - len(loud) / len(prompts), 0.95, loud)
 
 
 class Tokens(unittest.TestCase):
