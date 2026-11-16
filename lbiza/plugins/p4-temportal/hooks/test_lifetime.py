@@ -180,6 +180,14 @@ class Lifetime(unittest.TestCase):
         with self.assertRaises(ValueError):
             lifetime.set_cookie(self.p4, os.path.join(self.p4, "p4.json"), "1d")
 
+    def test_the_start_hook_prints_the_layout_move_it_made(self):
+        """When the retention sweep's hook is the first at a start to take the layout lock, it prints the lines of
+        the move, as the memory and scratchpad hooks print them."""
+        put(os.path.join(self.p4, "memory", "a.md"))
+        r = run("sweep", stdin="{}", CLAUDE_PROJECT_DIR=self.root)
+        self.assertEqual((r.stdout, os.path.isfile(os.path.join(self.t, "memory", "a.md"))),
+                         ("p4-temportal: moved memory/ to temportal/memory/.\n", True))
+
     def test_the_cli(self):
         f = put(os.path.join(self.t, "scratchpad", "n.md"))
         r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "lifetime.py"), "--p4", self.p4, "set", f, "3d"],

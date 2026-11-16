@@ -14,7 +14,8 @@ A file the store's git tracks is removed with its removal staged, so its last ve
 ignored or untracked file is deleted.
 
   sweep                    the retention sweep at SessionStart: clears what has expired and prints one line when it
-                           cleared something.
+                           cleared something. Before it, as every hook of a start does, it moves files left in an
+                           earlier place of the store's layout, and prints that move's line when this hook made it.
   session-end              the retention sweep at SessionEnd, which also clears the cookies of the session that ends,
                            silently.
   set <path> <lifetime>    gives a file or folder under temportal/ a cookie. The path must exist, and a relative
@@ -343,11 +344,14 @@ def main():
         payload = payload_from_stdin()
         try:
             p4 = store_of(project_root(payload))
-            p4conf.migrate_layout(p4)
+            moved = p4conf.migrate_layout(p4)
             ended = str(payload.get("session_id") or "") if sub == "session-end" else ""
             line = sweep(p4, ended_session=ended)
-            if line and sub == "sweep":
-                print(line)
+            if sub == "sweep":
+                if moved:
+                    print("p4-temportal: " + "; ".join(moved) + ".")
+                if line:
+                    print(line)
         except Exception as e:  # noqa: BLE001 — a hook degrades, never raises
             print(f"p4-temportal lifetime {sub} degraded: {type(e).__name__}: {e}")
         return 0
