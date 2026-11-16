@@ -561,8 +561,8 @@ class Background(unittest.TestCase):
     def test_the_tree_is_printed(self):
         self.t.stop(KID, HANDED, [], "Half done.")
         out = self.t.cli(TOP, "tree").stdout
-        self.assertIn("- Narwhal exporter", out)
-        self.assertIn("  - Fix the dropped row", out)
+        self.assertIn("- \"Narwhal exporter\" `", out)
+        self.assertIn("  - \"Fix the dropped row\" `", out)
         self.assertIn("not shown done, 1 turn", out)
 
     def test_show_prints_a_sessions_page(self):
@@ -675,7 +675,7 @@ class NewTask(unittest.TestCase):
         self.assertEqual(plans.root_of(self.t.p4, s), "")
         self.assertFalse(phi.load_notes(self.t.p4, TOP), "no replaces: note on the former parent session")
         self.assertNotIn(KID, json.dumps(phi.load_session(self.t.p4, TOP).get("staleChildren") or []))
-        self.assertNotIn("ready to archive", self.say(TOP, "carry on"))
+        self.assertNotIn("counts them as archived", self.say(TOP, "carry on"))
 
     def test_a_childs_new_topic_is_handed_up(self):
         self.say(TOP, TASK)

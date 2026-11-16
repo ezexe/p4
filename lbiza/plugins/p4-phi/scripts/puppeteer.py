@@ -423,13 +423,13 @@ def build(home, top, net=False):
         root = str(s.get("appRoot") or "")
         if sid.startswith("local_") and root and os.path.isdir(root) and root in roots:
             if rec is None:
-                reconcile.append(f"p4-phi lists \"{title}\" ({sid}) as live, and the app holds no record of it.")
+                reconcile.append(f"p4-phi lists \"{title}\" `{sid}` as live, and the app holds no record of it.")
             elif rec["archived"]:
-                reconcile.append(f"p4-phi lists \"{title}\" ({sid}) as live, and the app has archived it.")
+                reconcile.append(f"p4-phi lists \"{title}\" `{sid}` as live, and the app has archived it.")
         held = s.get("spawnedFrom") if isinstance(s.get("spawnedFrom"), dict) else {}
         if rec and depth and rec["parent"] and rec["parent"] != parent \
                 and held.get("source") not in ("detached", "reparented", "requested"):
-            reconcile.append(f"the app shows \"{title}\" ({sid}) started by {rec['parent']}, and p4-phi holds it under "
+            reconcile.append(f"the app shows \"{title}\" `{sid}` started by {rec['parent']}, and p4-phi holds it under "
                              f"{parent}.")
         plan = plans.load(home, sid)
         steps = plan.get("steps") or []
@@ -459,7 +459,7 @@ def build(home, top, net=False):
     live = {r["sessionId"] for r in rows}
     for aid, rec in sorted(app.items()):
         if rec["parent"] in live and not rec["archived"] and aid not in every:
-            reconcile.append(f"the app shows \"{rec['title'] or aid}\" ({aid}) started by {rec['parent']}, and p4-phi "
+            reconcile.append(f"the app shows \"{rec['title'] or aid}\" `{aid}` started by {rec['parent']}, and p4-phi "
                              f"holds no session for it.")
     asked = []
     at = time.time()
@@ -467,7 +467,7 @@ def build(home, top, net=False):
         if r.get("requester") not in ids or r.get("started") or at - float(r.get("at") or 0) > starts.EXPIRE_S:
             continue
         behind = str(r.get("after") or "")
-        how = (f"waits behind \"{phi.title_of(every.get(behind, {}))}\" ({behind})" if behind and busy(home, behind)
+        how = (f"waits behind \"{phi.title_of(every.get(behind, {}))}\" `{behind}`" if behind and busy(home, behind)
                else "claimed" if r.get("claimed") else "pending")
         asked.append({"id": r["id"], "title": r.get("title", ""), "requester": r.get("requester"), "state": how})
     groups = [g for sid in sorted(live) for g in load_groups(home, sid)]
@@ -491,7 +491,7 @@ def render(m):
     if m.get("unfinished"):
         out += ["## Unfinished at archive", ""]
         for u in m["unfinished"]:
-            out.append(f"- \"{u['title']}\" ({u['sessionId']}), checked {u['time']}:")
+            out.append(f"- \"{u['title']}\" `{u['sessionId']}`, checked {u['time']}:")
             out += [f"  - {x}" for x in u["items"]]
         out.append("")
     out += ["## Reconcile", ""]
@@ -517,10 +517,10 @@ def render(m):
         if r["report"]:
             bits.append(f"reported \"{r['report']}\"")
         name = f", {r['name']}" if r["name"] else ""
-        out.append(f"{'  ' * r['depth']}- \"{r['title']}\" ({r['sessionId']}{name}): " + "; ".join(bits))
+        out.append(f"{'  ' * r['depth']}- \"{r['title']}\" `{r['sessionId']}`{name}: " + "; ".join(bits))
     if m["closed"]:
         out += ["", "## Closed", ""]
-        out += [f"- \"{c['title']}\" ({c['sessionId']}): {c['how']}, its outcome "
+        out += [f"- \"{c['title']}\" `{c['sessionId']}`: {c['how']}, its outcome "
                 + ("kept as a replaces: note" if c["kept"] else "not kept") + f" on {c['parent']}" for c in m["closed"]]
     if m["tasks"]:
         out += ["", "## Background tasks", ""]
@@ -1061,7 +1061,7 @@ def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
     if reading:
         lines += [f"phi reading {reading['group']} {reading['k']} of {reading['n']} for {sid}."]
     task = _short(" ".join(str(s.get("task") or "").split()), 500)
-    background = (f"A start draft p4-phi made in the session \"{phi.title_of(s)}\" ({sid}) from ezexe's message; "
+    background = (f"A start draft p4-phi made in the session \"{phi.title_of(s)}\" `{sid}` from ezexe's message; "
                   f"that session's ledger is {ledger_path(home, sid)}."
                   + (f" That session's task: {task}" if task else ""))
     return {"id": did, "time": now(), "words": req, "title": title, "brief": "\n".join(lines), "parent": parent,
@@ -1101,13 +1101,13 @@ def pioneer(home, s, d, read, net=True):
     owner, held = read.get("owner"), read.get("busy")
     if owner and not d.get("reading"):
         verdict = "route"
-        gate.append(f"its area has a live code owner, \"{owner['title']}\" ({owner['sessionId']}): {owner['why']}")
+        gate.append(f"its area has a live code owner, \"{owner['title']}\" `{owner['sessionId']}`: {owner['why']}")
     elif cap:
         verdict = "here"
         gate.append(cap)
     elif held:
         verdict = "queue"
-        gate.append(f"\"{held['title']}\" ({held['sessionId']}) holds its files: {held['why']}")
+        gate.append(f"\"{held['title']}\" `{held['sessionId']}` holds its files: {held['why']}")
     else:
         verdict = "start"
         gate.append("no running writer holds its files")
@@ -1506,7 +1506,7 @@ def archive_check(home, sid, procs=True):
 
 
 def unfinished_text(s, items):
-    return (f"\"{_phi().title_of(s)}\" ({s.get('sessionId')}) was archived with {len(items)} thing"
+    return (f"\"{_phi().title_of(s)}\" `{s.get('sessionId')}` was archived with {len(items)} thing"
             f"{'s' if len(items) != 1 else ''} unfinished. " + " ".join(f"{x[0].upper()}{x[1:]}." for x in items)
             + f" Take each up here or hand it to a successor, then `{_phi().commands()} settle {s.get('sessionId')} "
               f"\"<what took it up>\"` clears its row from the ledger.")
@@ -1591,7 +1591,7 @@ def meta_pass(home, at=None):
                    and not relay.gone(home, s) and str(s.get("task") or "").strip()),
                   key=lambda k: (str(every[k].get("createdAt") or ""), k))
     led = {t: model(home, t) for t in tops}
-    name = {t: f"\"{phi.title_of(every[t])}\" ({t})" for t in tops}
+    name = {t: f"\"{phi.title_of(every[t])}\" `{t}`" for t in tops}
     dup, clash, stale, seeds, findings = [], [], [], [], []
     for i, a in enumerate(tops):
         for b in tops[i + 1:]:
@@ -1666,9 +1666,9 @@ def meta_text(home, s, found):
     mine = [x for x in found["duplicates"] + found["conflicts"] + found["stale"] if s["sessionId"] in x]
     return ("phi (p4-phi): the meta pass over every top-level session's ledger, written to "
             f"{meta_path(home)}, found for this session: " + " ".join(mine[:4])
-            + " Settle what the chain can: send the other top-level session a message with SendMessage, or tell "
-              "ezexe that a session whose work is over is ready to archive; only a conflict the chain cannot settle "
-              "goes to ezexe.")
+            + " Settle what the two session trees can: send the other top-level session a message with SendMessage, "
+              "or tell ezexe that a session whose work is over is ready to archive; only a conflict they cannot "
+              "settle goes to ezexe.")
 
 
 # --- the prompt hook ----------------------------------------------------------------------------------------------------

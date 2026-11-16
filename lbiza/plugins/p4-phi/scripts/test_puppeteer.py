@@ -86,8 +86,8 @@ class Linear(Base):
         self.assertIn("Nothing diverges", text)
         rows = [x for x in text.split("## Sessions")[1].split("\n## ")[0].splitlines() if x.strip().startswith("- ")]
         self.assertEqual(len(rows), 2, "the top-level session and the one child p4-phi holds: a row each")
-        self.assertIn(f"({TOP}): working", rows[0])
-        self.assertTrue(rows[1].startswith(f"  - \"the flush port\" ({KID}): working; no turn yet"), rows[1])
+        self.assertIn(f"`{TOP}`: working", rows[0])
+        self.assertTrue(rows[1].startswith(f"  - \"the flush port\" `{KID}`: working; no turn yet"), rows[1])
         before = os.stat(self.path(TOP, "ledger.md")).st_mtime_ns
         text2, said2 = self.ledger()
         self.assertIn("unchanged", said2)
@@ -95,7 +95,7 @@ class Linear(Base):
         t.stop(KID, "Port the flush", report="Ported; the suite passes.")
         text3, said3 = self.ledger()
         self.assertIn("rewritten", said3)
-        self.assertIn(f"({KID}): idle; 1 turn", text3)
+        self.assertIn(f"`{KID}`: idle; 1 turn", text3)
         self.assertIn("reported \"Ported; the suite passes.\"", text3)
         self.assertTrue(os.path.exists(self.path(TOP, "ledger.json")))
 
@@ -109,8 +109,8 @@ class Linear(Base):
         t.record(GRAND, TOP, title="a child only the app knows")
         text, _ = self.ledger()
         head = text.split("## Sessions")[0]
-        self.assertIn(f"p4-phi lists \"the flush port\" ({KID}) as live, and the app has archived it.", head)
-        self.assertIn(f"the app shows \"a child only the app knows\" ({GRAND}) started by {TOP}, and p4-phi holds no "
+        self.assertIn(f"p4-phi lists \"the flush port\" `{KID}` as live, and the app has archived it.", head)
+        self.assertIn(f"the app shows \"a child only the app knows\" `{GRAND}` started by {TOP}, and p4-phi holds no "
                       f"session for it.", head)
         self.assertEqual(len([x for x in head.splitlines() if x.startswith("- ")]), 2, "a line a divergence")
         self.assertLess(text.index("## Reconcile"), text.index("## Sessions"))
@@ -125,7 +125,7 @@ class Linear(Base):
                                          and jload(self.path(TOP, "watcher.json")).get("pid", -1) > 0):
             time.sleep(0.2)
         self.assertGreater(jload(self.path(TOP, "watcher.json"))["pid"], 0, "the watcher runs")
-        self.assertIn(f"({TOP})", read(self.path(TOP, "ledger.md")))
+        self.assertIn(f"\" `{TOP}`", read(self.path(TOP, "ledger.md")))
         beat = jload(self.path(TOP, "watcher.json"))
         self.assertLess(time.time() - beat["beat"], 20, "it says it is alive at every look, before the look")
         self.assertIn("slowestTickMs", beat)
@@ -133,9 +133,9 @@ class Linear(Base):
         self.assertEqual(len([x for x in t.log(TOP) if x.get("watcher")]), 1, "one watcher, not one a message")
         t.say(KID, handed("Port the flush to the new writer."))       # the watcher writes it in, no command run
         end = time.time() + 30
-        while time.time() < end and f"({KID}): working" not in read(self.path(TOP, "ledger.md")):
+        while time.time() < end and f"`{KID}`: working" not in read(self.path(TOP, "ledger.md")):
             time.sleep(0.2)
-        self.assertIn(f"({KID}): working", read(self.path(TOP, "ledger.md")))
+        self.assertIn(f"`{KID}`: working", read(self.path(TOP, "ledger.md")))
         s = t.session(TOP)
         s["archived"] = True
         write(self.path(TOP, "session.json"), json.dumps(s))
@@ -193,7 +193,7 @@ class Linear(Base):
         self.assertEqual(t.cli(KID, "shard", "src/export/**").returncode, 0)
         t.stop(KID, "Port the flush", report="half way")
         ctx = context(t.say(TOP, "Fix the off-by-one in `src/export/flush.py` that drops the last row"))
-        self.assertIn(f"its area has a live code owner, \"the flush port\" ({KID})", ctx)
+        self.assertIn(f"its area has a live code owner, \"the flush port\" `{KID}`", ctx)
         self.assertIn(f"Route it: SendMessage with `to` {KID}", ctx)
         self.assertNotIn("`mcp__ccd_session__start_session` with {", ctx, "no session is started for it")
 
@@ -204,7 +204,7 @@ class Linear(Base):
         t.say(TOP2, "Write the docs for the billing dashboard")
         t.say(KID, handed("Port `src/export/flush.py` to the new writer."))     # in a turn: a running writer
         ctx = context(t.say(TOP, "Rename the retry helper in `src/export/flush.py` and update its callers"))
-        self.assertIn(f"\"the flush port\" ({KID}) holds its files", ctx)
+        self.assertIn(f"\"the flush port\" `{KID}` holds its files", ctx)
         did = puppeteer.DRAFT_RE.search(ctx.replace("draft drf-", "phi draft drf-").replace(";", " for x.")).group(1)
         self.assertIn(f"pioneer {did}`", ctx)
         r = t.cli(TOP, "pioneer", did)
@@ -213,7 +213,7 @@ class Linear(Base):
         self.assertNotIn("start requests", context(t.say(TOP, "How is the exporter coming along?")),
                          "not handed out while the writer is busy")
         text, _ = self.ledger()
-        self.assertIn(f"waits behind \"the flush port\" ({KID})", text)
+        self.assertIn(f"waits behind \"the flush port\" `{KID}`", text)
         t.stop(KID, "Port the flush", report="Ported.")
         self.assertNotIn("start requests", context(t.say(TOP2, "And how are the docs now?")),
                          "never handed to a session that did not file it")
@@ -275,7 +275,7 @@ class Recursive(unittest.TestCase):
         s["archived"] = True
         write(os.path.join(t.dir(KID), "session.json"), json.dumps(s))
         self.assertIn("its outcome is not kept", self.why())
-        self.assertEqual(t.cli(TOP, "note", f"replaces: \"the x fix\" ({KID}) as a live node: it fixed the "
+        self.assertEqual(t.cli(TOP, "note", f"replaces: \"the x fix\" ({KID}) as a live session: it fixed the "
                                f"off-by-one.", "--source", "its report").returncode, 0)
         self.assertIn("ezexe/demo#7 is open, not closed", self.why())
         self.state(**{"7": "CLOSED"})
@@ -696,7 +696,7 @@ class Meta(Base):
         page = read(os.path.join(t.p4, "phi", "meta-ledger.md"))
         self.assertIn("the meta pass over every top-level session's ledger", ctx)
         self.assertIn("carry one topic", ctx)
-        self.assertIn(f"\"the exporter top\" ({TOP}) and \"the other exporter top\" ({TOP2}) carry one topic", page)
+        self.assertIn(f"\"the exporter top\" `{TOP}` and \"the other exporter top\" `{TOP2}` carry one topic", page)
         self.assertIn("both changed or hold", page)
         self.assertIn("flush.py", page.split("## Conflicts between top sessions")[1].split("##")[0])
         self.assertNotIn("the meta pass over every top-level session's ledger", context(t.say(TOP2, ASK)),
@@ -710,7 +710,7 @@ class Meta(Base):
         finally:
             os.environ.pop("P4_PHI_APP_SESSIONS", None)
         self.assertEqual(len(found["stale"]), 1, "the top-level session inside a turn is at work, not stale")
-        self.assertIn(f"({TOP}) has not moved for 3.0 days", text)
+        self.assertIn(f"`{TOP}` has not moved for 3.0 days", text)
 
 
 class Writes(unittest.TestCase):

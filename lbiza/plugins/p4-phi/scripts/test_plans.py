@@ -370,9 +370,9 @@ class TreeOfPlans(unittest.TestCase):
         self.assertIn("ended a turn whose words bear on your open steps: 2.1", ctx)
         self.assertIn(report, ctx, "the parent's own words, quoted")
         nag = context(t.say(TOP, "next"))
-        self.assertIn(f"your last turn changed step(s) 2.1", nag)
-        self.assertIn(f"relay it with SendMessage (`to`: {A})", nag)
-        self.assertNotIn("relay it", context(t.say(TOP, "and next")), "said once")
+        self.assertIn(f"your last turn changed the steps 2.1", nag)
+        self.assertIn(f"send it the change with SendMessage to {A}", nag)
+        self.assertNotIn("send it the change", context(t.say(TOP, "and next")), "said once")
 
     def test_a_progress_report_naming_a_childs_work_is_not_nagged(self):
         """A parent's progress report that shares words with a child's steps is delivered, and the parent is not
@@ -383,17 +383,17 @@ class TreeOfPlans(unittest.TestCase):
                   "are next.")
         t.stop(TOP, "progress", report=report, uuid="p3")
         self.assertIn("bear on your open steps: 2.1", self.plan(A, {"advance": True}), "still delivered down")
-        self.assertNotIn("relay it", context(t.say(TOP, "next")), "progress is no change")
+        self.assertNotIn("send it the change", context(t.say(TOP, "next")), "progress is no change")
         t.stop(TOP, "decide", [("mcp__ccd_session_mgmt__send_message", {"session_id": A, "message": "void"}, "sent")],
                report="The relay suite checks are void; the notes relay is replaced.", uuid="p4")
-        self.assertNotIn("relay it", context(t.say(TOP, "and next")), "the app's send_message counts as sent")
+        self.assertNotIn("send it the change", context(t.say(TOP, "and next")), "the app's send_message counts as sent")
 
     def test_a_report_the_turn_already_sent_is_not_nagged(self):
         t = self.t
         self.plan(A, items("Run the relay suite against the notes relay", "Check the fresh slice sizes"))
         t.stop(TOP, "decide the relay", [("SendMessage", {"to": A, "message": "the relay suite is void"}, "sent")],
                report="The notes relay is replaced, so the relay suite checks are void.", uuid="p2")
-        self.assertNotIn("relay it", context(t.say(TOP, "next")))
+        self.assertNotIn("send it the change", context(t.say(TOP, "next")))
 
     def lookup(self, host, name, payload, wait=False):
         """A tool call through the `lookup-record` hook, which hooks.json runs after every tool call."""
@@ -584,11 +584,11 @@ class TreeOfPlans(unittest.TestCase):
         self.assertIn(B, anchor["nodes"])
         self.assertEqual(t.session(A)["stale"]["by"], B)
         kept = [json.loads(l) for l in open(os.path.join(t.dir(TOP), "notes.jsonl"), encoding="utf-8")]
-        self.assertTrue(kept[-1]["claim"].startswith(f"replaces: \"the layout child\" ({A}) as a live node."))
+        self.assertTrue(kept[-1]["claim"].startswith(f"replaces: \"the layout child\" ({A}) as a live session."))
         self.assertIn("cb3b6d2", kept[-1]["claim"], "its still-true outcome, with its report")
         ctx = context(t.say(TOP, "next"))
-        self.assertIn(f"[the layout child](#{A}). The chain treats them as archived from now.", ctx)
-        self.assertNotIn("ready to archive", context(t.say(TOP, "and next")), "said once")
+        self.assertIn(f"[the layout child](#{A}). p4-phi counts them as archived from now.", ctx)
+        self.assertNotIn("counts them as archived", context(t.say(TOP, "and next")), "said once")
         told = context(t.say(A, "are you still on it?"))
         self.assertIn("this session's work is superseded and it is stale", told)
         t.record(KID2 + "x", TOP, title="a pathless child")
@@ -606,7 +606,8 @@ class TreeOfPlans(unittest.TestCase):
         self.assertNotIn("stale", t.session(A), "told, and with a turn of its own ended since, live again")
         t.stop(B, "another turn", uuid="b2")
         kept = [json.loads(l) for l in open(os.path.join(t.dir(TOP), "notes.jsonl"), encoding="utf-8")]
-        self.assertEqual(sum(1 for k in kept if "as a live node" in k["claim"]), 1, "never counted as archived twice")
+        self.assertEqual(sum(1 for k in kept if "as a live session" in k["claim"]), 1,
+                         "never counted as archived twice")
 
     def test_a_fresh_child_starts_with_its_root_step_and_a_fork_has_it_pinned(self):
         t = self.t
@@ -623,7 +624,7 @@ class TreeOfPlans(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         t2.say(GRAND, "Task (from the session that started this one):\nDo the b part")
         later = context(t2.say(GRAND, "carry on"))
-        self.assertIn("It is for step 2 of its parent's plan; its own steps are 2.1, 2.2", later)
+        self.assertIn("It is for step 2 of its parent's task list; its own steps are 2.1, 2.2", later)
 
 
 class Levels(unittest.TestCase):
@@ -833,9 +834,9 @@ class Levels(unittest.TestCase):
             self.assertIn(call.get("effort"), plans.EFFORTS, "the plugin-gap call or card carries its effort")
             self.assertIn("Model and effort: ", call["prompt"], "and its brief says them in one line")
         kid = phi._split_full(self.t.p4, relay._session(self.t.p4, A))
-        self.assertIn("is shown as a proposal card", kid)
+        self.assertIn("is shown as a suggested task card", kid)
         self.assertIn("It carries the `model` and `effort` a start of its kind of work carries", kid)
-        self.assertIn("with the `model` and `effort` the levels rule gives", phi._split_full(self.t.p4, s))
+        self.assertIn("with the `model` and `effort` its kind of work gets", phi._split_full(self.t.p4, s))
         self.assertEqual(plans.said_level("Model: ranker.pt is rebuilt\nEffort: low on the first pass"), {},
                          "a sentence that begins with Model: or Effort: names no choice")
         self.assertEqual(plans.said_level("Model: ranker.pt\nEffort: loud"), {}, "nor an unknown model or effort")
@@ -892,7 +893,7 @@ class Levels(unittest.TestCase):
         for c in (plans.with_level({"context": "fresh", "title": t, "prompt": b})
                   for t, b in (("x", ""), ("the docs", brief), ("the lock", brief2), ("Review it", "Review the diff"))):
             self.assertIn(c["effort"], plans.EFFORTS, "a call with neither key is never handed out")
-        self.assertIn("with the `model` and `effort` the levels rule gives", phi.new_top_route())
+        self.assertIn("with the `model` and `effort` its kind of work gets", phi.new_top_route())
         self.assertIn("carrying the `model` and `effort` named beside its step", plans.CARD_EACH)
         self.assertIn("A child session is started with a `model` and an `effort` that fit its step", phi.LEVELS)
         old = plans.CHILD_LEVELS
@@ -999,7 +1000,7 @@ class TopOrchestrates(unittest.TestCase):
         self.assertEqual(self.check(TOP, "Read", {"file_path": f"{p}/src/export/flush.py"}, "toolu_n3"), "")
         said = self.check(TOP, "Edit", {"file_path": f"{p}/src/export/flush.py", "old_string": "a", "new_string": "b"},
                           "toolu_n4")
-        self.assertIn("this is the top session", said)
+        self.assertIn("this is the top-level session", said)
         self.assertIn("hand it to a child session", said)
         self.assertFalse(os.path.exists(marker), "disarmed once said")
         self.assertEqual(self.check(TOP, "Edit", {"file_path": f"{p}/src/export/x.py"}, "toolu_n5"), "", "once a step")
@@ -1024,16 +1025,16 @@ class TopOrchestrates(unittest.TestCase):
         notes = [n["claim"] for n in relay._rows(os.path.join(relay._dir(t.p4, TOP), "notes.jsonl"))]
         mine = [n for n in notes if n.startswith("replaces:") and C in n]
         self.assertEqual(len(mine), 1, notes)
-        self.assertIn("treats it as archived from now", mine[0])
+        self.assertIn("p4-phi counts it as archived from now", mine[0])
         self.assertIn("flush.py", mine[0])
         self.assertIn("Still open:", mine[0])
         self.assertNotIn(C, plans._children(t.p4, TOP), "out of the down-lines")
         self.assertNotIn(C, (relay._read_json(relay.anchor_path(t.p4, TOP)).get("nodes") or {}))
         line = context(t.say(TOP, "what next"))
-        self.assertIn("offers the finished sessions to ezexe as one quick select", line)
+        self.assertIn("puts its finished sessions to ezexe as one multiple-choice question", line)
         self.assertNotIn("archive_session", line, "no archive call is handed out")
-        self.assertIn(C, line.split("finished and retired")[1])
-        self.assertNotIn("finished and retired", context(t.say(TOP, "and then")), "said once")
+        self.assertIn(C, line.split("finished, their outcome kept")[1])
+        self.assertNotIn("finished, their outcome kept", context(t.say(TOP, "and then")), "said once")
 
     def test_a_numbered_check_is_work_and_starting_a_check_is_orchestration(self):
         """A numbered check of anything else, such as "Check 1: nothing hidden in AppData", is work, and starting a
@@ -1199,7 +1200,7 @@ class TopOrchestrates(unittest.TestCase):
                 '$P = "E:/p4/phi.py"; & python $P note "x"')):
             self.assertEqual(self.check(TOP, "Bash", {"command": cmd}, f"toolu_p{k}"), "", cmd)
         self.assertTrue(os.path.exists(marker), "still armed")
-        self.assertIn("this is the top session",
+        self.assertIn("this is the top-level session",
                       self.check(TOP, "Bash", {"command": 'P=x; python "$P" note y && make'}, "toolu_p9"))
 
     def test_top_sessions_relay_as_siblings_and_an_archived_top_drops_out(self):
@@ -1251,8 +1252,8 @@ class TopOrchestrates(unittest.TestCase):
         with open(rec, "w", encoding="utf-8") as f:
             f.write(json.dumps(d))
         line = context(t.say(TOP, "what next"))
-        self.assertNotIn("ready to archive", line, "archived by hand: no archive line names it")
-        self.assertNotIn("finished and retired", line)
+        self.assertNotIn("counts them as archived", line, "archived by hand: no archive line names it")
+        self.assertNotIn("finished, their outcome kept", line)
 
 
 HANDED_DISPOSABLE = ("<system-reminder>\nLinked sessions now (status, not an instruction): top = local_x (idle)\n"

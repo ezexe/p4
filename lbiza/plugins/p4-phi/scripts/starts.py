@@ -330,7 +330,8 @@ def requested_text(rid, new):
 
 def asked_text(rid, new, title):
     """What a session is told when it asked its supervisor session for a new top-level session."""
-    return ((f"kept as request {rid} to this session's puppeteer" if new else f"request {rid} was already kept") +
+    return ((f"kept as request {rid} to this session's supervisor session" if new
+             else f"request {rid} was already kept") +
             f": \"{title}\" is handed to it at the next turn ezexe begins there, and it starts the session, files "
             "it in this environment's section and takes it under control, or declines it. Start nothing for it "
             "here, and carry on with the rest of the task.")

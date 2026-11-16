@@ -229,11 +229,11 @@ RULE = (
     "GitHub, are its own work and never a child's; its turn may end while it waits, with a line naming whom it "
     "waits on. It archives a session only on ezexe's pick, as the offer p4-phi hands it says.")
 PAIR = (
-    "This session is controlled by a supervisor session: \"{title}\" ({pid}), which ezexe filed in the sidebar "
+    "This session is controlled by a supervisor session: \"{title}\" `{pid}`, which ezexe filed in the sidebar "
     "section \"{section}\", lists this one among the sessions it controls. This session stays at the top of its own "
     "tree, in its own section, and orchestrates that tree itself. Its tree is archived only on ezexe's pick, "
     "as the offer p4-phi hands it at its end says.")
-PAIR_OVER = ("This session has left the control of its supervisor session: \"{title}\" ({pid}) dropped it from the "
+PAIR_OVER = ("This session has left the control of its supervisor session: \"{title}\" `{pid}` dropped it from the "
              "sessions it controls, or left the sidebar section. This session starts its own new top-level sessions.")
 ASK = ("phi (p4-phi): this session is controlled by a supervisor session, so where a line here says to start a new "
        "top-level session, start none: write `{cmd} request \"<title>\" --brief \"<the whole brief>\" --to-puppeteer`, "
@@ -270,7 +270,7 @@ def control(home, s, add=(), drop=()):
                              f"sessions, and a child is reached through its top-level session")
         if not any(e["sessionId"] == sid for e in rows):
             rows.append({"sessionId": sid, "store": store, "time": PHI.now()})
-            out.append(f"controlled: \"{full_title(sid)}\" ({sid})" + (f", store {store}" if store else ""))
+            out.append(f"controlled: \"{full_title(sid)}\" `{sid}`" + (f", store {store}" if store else ""))
     _set(s, rows)
     PHI.save_session(home, s)
     return out
@@ -369,7 +369,7 @@ def take_started(home, s):
         where = filing(store, s)
         rows.append({"sessionId": sid, "store": store, "time": PHI.now(), "started": True})
         have.add(sid)
-        lines.append(f"\"{full_title(sid, k)}\" ({sid}) is a top-level session this supervisor session started, so it "
+        lines.append(f"\"{full_title(sid, k)}\" `{sid}` is a top-level session this supervisor session started, so it "
                      f"is controlled. File it in {where} with `mcp__ccd_sidebar__move_sessions`, never in "
                      f"\"{section_of(s['sessionId'])}\".")
     if lines:
@@ -393,7 +393,7 @@ def announce(home, s):
                     or str(k.get("createdAt") or "") < since or is_puppeteer(k, store):
                 continue
             told.append(sid)
-            lines.append(f"\"{full_title(sid, k)}\" ({sid}) is a new top-level session in {store} that this supervisor "
+            lines.append(f"\"{full_title(sid, k)}\" `{sid}` is a new top-level session in {store} that this supervisor "
                          f"session does not control: `{PHI.commands()} controls {sid}` takes it under control.")
     if lines:
         s["announced"] = told[-200:]
@@ -414,7 +414,7 @@ def reports(s):
             continue
         seen[sid] = when
         state, _ = standing(store, sid)
-        lines.append(f"- \"{full_title(sid)}\" ({sid}) ended a turn at {when}, {state}: {first} Its page: "
+        lines.append(f"- \"{full_title(sid)}\" `{sid}` ended a turn at {when}, {state}: {first} Its page: "
                      f"{page_of(store, sid)}")
     if lines:
         s["controlSeen"] = seen
@@ -442,7 +442,7 @@ def board(home, s):
     """Rewrites board.md when what it holds changed, and returns its path."""
     sid = s["sessionId"]
     notes = PHI.load_notes(home, sid)
-    lines = [f"# Supervisor session board: {full_title(sid, s)} ({sid})", "",
+    lines = [f"# Supervisor session board: \"{full_title(sid, s)}\" `{sid}`", "",
              "Rewritten by p4-phi's hooks and its `controls` command, never by hand.",
              f"What is not here is kept with `phi.py note`: `--kind decision` or `--kind waiting` puts it under Waiting "
              f"on, `--kind parked` under Parked, and any other kind under Notes.", "",
@@ -516,7 +516,7 @@ def controls_text(home, s):
     lines = []
     for e in controlled(s):
         state, against = standing(e.get("store") or "", e["sessionId"])
-        lines.append(f"- \"{full_title(e['sessionId'])}\" ({e['sessionId']}), store {e.get('store') or 'unknown'}: "
+        lines.append(f"- \"{full_title(e['sessionId'])}\" `{e['sessionId']}`, store {e.get('store') or 'unknown'}: "
                      f"{state}" + (": " + "; ".join(against) if against else ""))
     if not lines:
         lines.append("no session is controlled yet: `controls <sessionId> ...` records the top-level sessions ezexe "
@@ -525,7 +525,7 @@ def controls_text(home, s):
         lines.append(f"p4-phi first saw this session in the section at {s['puppeteerSeen']}.")
     for a in [a for a in s.get("puppeteerArchives") or [] if isinstance(a, dict)]:
         lines.append(f"- {'archived' if a.get('let') else 'left'} {a.get('time', '')}: \"{a.get('title', '')}\" "
-                     f"({a.get('sessionId', '')}): {a.get('why', '')}")
+                     f"`{a.get('sessionId', '')}`: {a.get('why', '')}")
     lines.append(f"The board: {board_path(home, s['sessionId'])}")
     return "\n".join(lines)
 
@@ -651,7 +651,7 @@ def offer_text(home, s, button=True):
            + "; ".join(f"\"{t}\" because {why}" for t, why in left[:6]) + ".")
     if len(ready) == 1 and button:
         sid, title, kids = ready[0]
-        return (f"phi (p4-phi): \"{title}\" ({sid}), a session this supervisor session controls, is complete"
+        return (f"phi (p4-phi): \"{title}\" `{sid}`, a session this supervisor session controls, is complete"
                 + (f", with {len(kids)} finished session{'s' if len(kids) != 1 else ''} in its tree" if kids else "")
                 + f". Archiving it is ezexe's own pick, never this session's judgement. {lead} Then end the turn "
                 f"with `mcp__ccd_turn__wrap_up` whose question is \"Archive \"{title}\"?\", cut to fit, and whose "
@@ -773,7 +773,7 @@ def hand(home, s, new):
         raise ValueError(f"the app holds no record of a successor {new}")
     s["handedTo"] = {"sessionId": new, "time": PHI.now()}
     PHI.save_session(home, s)
-    return (f"handed over to \"{full_title(new)}\" ({new}): it runs `controls --from {s['sessionId']}`, then keeps "
+    return (f"handed over to \"{full_title(new)}\" `{new}`: it runs `controls --from {s['sessionId']}`, then keeps "
             f"this session's outcome with `note` and offers it to ezexe to archive, as any complete session it "
             f"controls: it archives this session only on ezexe's pick")
 
@@ -803,7 +803,7 @@ def take(home, s, old):
         except ValueError:
             pass
     return (f"took over {len(rows)} controlled session{'s' if len(rows) != 1 else ''} and {n} note"
-            f"{'s' if n != 1 else ''} from \"{full_title(old, o)}\" ({old})")
+            f"{'s' if n != 1 else ''} from \"{full_title(old, o)}\" `{old}`")
 
 
 # --- requests through the supervisor session ------------------------------------------------------------------------------
@@ -829,7 +829,7 @@ def requests_text(home, s):
     rows = requests_for(s)
     if not rows:
         return ""
-    lines = [f"- {r['id']} \"{r['title']}\" from \"{full_title(r['requester'])}\" ({r['requester']}), to be filed in "
+    lines = [f"- {r['id']} \"{r['title']}\" from \"{full_title(r['requester'])}\" `{r['requester']}`, to be filed in "
              f"{filing(r['store'], s)}: `mcp__ccd_session__start_session` with "
              f"{json.dumps(request_call(r), ensure_ascii=False)}" for r in rows]
     return ("phi (p4-phi): controlled sessions ask this supervisor session for new top-level sessions. This turn ezexe "
@@ -905,7 +905,7 @@ def go_text(home, s, target, message=""):
     if key in told:
         return ""
     s["goWarned"] = (told + [key])[-40:]
-    names = "; ".join(f"\"{title}\" ({sid}) holds {', '.join(hit[:4])}" for sid, title, hit in held[:4])
+    names = "; ".join(f"\"{title}\" `{sid}` holds {', '.join(hit[:4])}" for sid, title, hit in held[:4])
     return (f"phi (p4-phi): this go to \"{full_title(target)}\" is early: {names}. Hold the go until that session "
             f"reports done, or have it release what "
             f"it has landed with `{PHI.commands()} files --release` or `{PHI.commands()} files <the paths it still "
@@ -930,7 +930,7 @@ def route_down(s, words_):
     if not best:
         return ""
     sid = best["sessionId"]
-    return (f"phi (p4-phi): this message reads as work on the topic \"{full_title(sid)}\" ({sid}) orchestrates. If so, "
+    return (f"phi (p4-phi): this message reads as work on the topic \"{full_title(sid)}\" `{sid}` orchestrates. If so, "
             f"do not do it here and start no child for it: send that session one message with SendMessage, holding "
             f"ezexe's words, a line `Files: <paths>` and what done looks like, and telling it to brief and start a "
             f"child session of its own for it. Keep it on the board with `{PHI.commands()} note \"<what was sent "

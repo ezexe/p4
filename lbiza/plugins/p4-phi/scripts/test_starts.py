@@ -99,9 +99,11 @@ class StartRequests(unittest.TestCase):
         notes = [n["claim"] for n in relay._rows(os.path.join(t.dir(KID), "notes.jsonl"))]
         self.assertTrue(any(n.startswith("replaces:") and NEW in n for n in notes), notes)
         archive = context(t.say(KID, CROSS))
-        self.assertIn("ready to archive", archive)
-        self.assertIn(NEW, archive.split("finished and retired")[1], "the archive line goes to the filing session")
-        self.assertNotIn("ready to archive", context(t.say(TOP2, "and now?")), "not to another top-level session")
+        self.assertIn("counts them as archived", archive)
+        self.assertIn(NEW, archive.split("finished, their outcome kept")[1],
+                      "the archive line goes to the filing session")
+        self.assertNotIn("counts them as archived", context(t.say(TOP2, "and now?")),
+                         "not to another top-level session")
 
     def arrive(self, sid, row, starter=TOP2):
         """The child of a handed-out request arrives: the app nests it under the session that ran the call, and

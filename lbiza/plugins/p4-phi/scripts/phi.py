@@ -1006,8 +1006,8 @@ def new_top_route(owner_turn=True):
            f"card, `mcp__ccd_session__start_session` with `initiation` `own_initiative`, which ezexe presses in "
            f"this session; only where the card is refused too, write it as a start request, {request_cmd()}, "
            f"which the next turn ezexe begins in this session starts")
-    return (f"{how}, `context` `fresh`, `use_worktree: false`, with the `model` and `effort` the levels rule gives "
-            f"its kind of work, said in one line of the brief; its brief: the topic, ezexe's words quoted, and "
+    return (f"{how}, `context` `fresh`, `use_worktree: false`, with the `model` and `effort` its kind of work gets, "
+            f"said in one line of the brief; its brief: the topic, ezexe's words quoted, and "
             f"the lines \"{NEW_TOP_BRIEF} {new_top_first_act()}\" Both moves are needed: the app's detach to top "
             f"level, else it stays nested under this session and reports here, and p4-phi's, which p4-phi also makes "
             f"at the new session's first hook on that line. If it is still nested under this session at its first "
@@ -1095,7 +1095,7 @@ def _split_full(home, s):
                 "task gets a new top-level session of its own. " + new_top_route(False) + " Do the rest here.")
     return ("phi (p4-phi): this turn was started by another session, not ezexe, so the app refuses "
             "`mcp__ccd_session__start_session` with `user_asked`. Work in it that is a task of its own, outside "
-            "this session's task, is shown as a proposal card, `mcp__ccd_session__start_session` with "
+            "this session's task, is shown as a suggested task card, `mcp__ccd_session__start_session` with "
             "`initiation` `own_initiative`, which ezexe presses in this session, so the app's parent session and "
             f"p4-phi's agree. {plans.LEVEL_CARD} Only where the card is refused too, write it as a start request, "
             f"{request_cmd()}: the next "
@@ -1472,8 +1472,8 @@ def pin_of(home, s):
         return ""
     line = relay.pin_text(s)
     root = plans.root_of(home, s)
-    return (line + f" It is for step {root} of its parent's plan; its own steps are {root}.1, {root}.2, and so on.") \
-        if line and root else line
+    return (line + f" It is for step {root} of its parent's task list; its own steps are {root}.1, {root}.2, "
+                   f"and so on.") if line and root else line
 
 
 def h_plan(payload):
@@ -1704,7 +1704,7 @@ def h_nudge(payload):
                 f"{st.get('addr')}, \"{cut(clean(st.get('content')), 120)}\", {plans.LEVEL_WHAT[level]}: hand it to "
                 f"the background subagent `p4-phi:{level}`. "
                 f"Said once for this step.")
-    return (f"phi (p4-phi): this is the top session, kept free for orchestration, and step {st.get('addr')}, "
+    return (f"phi (p4-phi): this is the top-level session, kept free for orchestration, and step {st.get('addr')}, "
             f"\"{cut(clean(st.get('content')), 120)}\", is work: hand it to a child session with "
             f"`mcp__ccd_session__start_session`, `context` `fresh`, `use_worktree: false`, "
             f"{plans.level_words(st.get('content'))}, its brief that step, a "
@@ -2108,9 +2108,9 @@ def h_session_start(payload):
                        fork=bool(s.get("forked")), brief=source == "compact") if source != "resume" else ""
     relay.remember_store(me.store)
     if me.home_missing:
-        rule = "\n\n".join(p for p in (rule, f"phi (p4-phi): this project's p4.json names the home store "
-                                               f"{me.home_missing}, which this machine has not seen; the session "
-                                               f"tree stays in this project's store.") if p)
+        rule = "\n\n".join(p for p in (rule, f"phi (p4-phi): this project's p4.json names the shared store "
+                                               f"{me.home_missing} for the session tree, and this machine has not "
+                                               f"seen it; the tree stays in this project's store.") if p)
     first = ""
     if source == "compact" and controls.is_puppeteer(s, me.store):
         first = controls.compacted(me.home, s)     # a supervisor session's board path before anything else
@@ -2307,8 +2307,9 @@ def h_user_prompt_submit(payload):
     unsent = [u for u in s.pop("unsentRelay", None) or [] if isinstance(u, dict)]
     if unsent:
         parts.insert(0, "phi (p4-phi): " + " ".join(
-            f"your last turn changed step(s) {', '.join(u.get('steps') or [])} of \"{relay._title(load_session(me.home, u['child']))}\" "
-            f"and sent it nothing; relay it with SendMessage (`to`: {u['child']})." for u in unsent))
+            f"your last turn changed the steps {', '.join(u.get('steps') or [])} of "
+            f"\"{relay._title(load_session(me.home, u['child']))}\" "
+            f"and sent it nothing; send it the change with SendMessage to {u['child']}." for u in unsent))
     pup = verdict = ""
     if req and not handed_over(payload.get("prompt")):
         try:                                       # meta pass and ledger, then routing, start draft and gate
@@ -3077,7 +3078,7 @@ def tree_text(home):
                 walk(s["sessionId"], depth)          # no record and no turns: an empty entry, its children kept
                 continue
             state = ("done" if turns[-1].get("done") else "not shown done") if turns else "no turn yet"
-            out.append(f"{'  ' * depth}- {title_of(s)} ({s['sessionId']}): {state}, "
+            out.append(f"{'  ' * depth}- \"{title_of(s)}\" `{s['sessionId']}`: {state}, "
                        f"{len(turns)} turn{'s' * (len(turns) != 1)}")
             if depth < 30:
                 walk(s["sessionId"], depth + 1)
@@ -3188,7 +3189,8 @@ def main(argv=None):
                 print("\n".join(relay.shard_of(s)) or "this session declared no owned paths")
                 return 0
             lines = relay.set_shard(me.home, s["sessionId"], a.paths, os.getcwd())
-            print("kept as this session's shard: " + ", ".join(relay.shard_of(load_session(me.home, s["sessionId"]))))
+            print("kept as this session's owned paths: "
+                  + ", ".join(relay.shard_of(load_session(me.home, s["sessionId"]))))
             for line in lines:
                 print("phi: " + line)
             return 0
@@ -3210,9 +3212,9 @@ def main(argv=None):
         if a.cmd == "controls":
             if not controls.is_puppeteer(s, me.store):
                 held = controls.section_of(s["sessionId"])
-                raise ValueError(f"this session is not a puppeteer: that is a top session ezexe filed in the sidebar "
-                                 f"section \"{controls.section_name(me.store) or controls.SECTION}\", and the app's "
-                                 f"file shows this one in " + (f"\"{held}\"" if held else "no section")
+                raise ValueError(f"this session is not a supervisor session: that is a top-level session ezexe filed "
+                                 f"in the sidebar section \"{controls.section_name(me.store) or controls.SECTION}\", "
+                                 f"and the app's file shows this one in " + (f"\"{held}\"" if held else "no section")
                                  + (", started by another session" if spawned_from(s) else ""))
             if a.hand:
                 print(controls.hand(me.home, s, a.hand))
@@ -3240,8 +3242,8 @@ def main(argv=None):
             if a.to_puppeteer:                     # a new top-level session is asked of the supervisor session
                 pid, _ = controls.puppeteer_of(s, me.store)
                 if not pid:
-                    raise ValueError("this session has no puppeteer: no session filed in the sidebar section lists "
-                                     "it under `controls`")
+                    raise ValueError("this session has no supervisor session: no session filed in the sidebar "
+                                     "section lists it under `controls`")
                 rid, new = starts.add(me.home, s["sessionId"], a.title, brief, "fresh", background=a.background,
                                       declared=True, to=pid)
                 print(starts.asked_text(rid, new, clean(a.title)))

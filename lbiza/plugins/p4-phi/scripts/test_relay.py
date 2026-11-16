@@ -91,7 +91,7 @@ class Paths(unittest.TestCase):
             self.assertNotIn("old news", text, "what was there at the first look is taken as seen")
             write(os.path.join(home, "phi", "sessions", "top", "session.json"), json.dumps({"sessionId": "top"}))
             for k in range(5):
-                relay.warn(home, "top", f"plan:kid:{k:04d}:up", f"\"kid\", started for a step you have no plan for, "
+                relay.warn(home, "top", f"plan:kid:{k:04d}:up", f"\"kid\", started for a step not in your task list, "
                                                                  f"revised its plan: {k}.1 changed.")
             pend = relay._session(home, "top")["relayPending"]
             self.assertEqual(len(pend), 1)
@@ -514,7 +514,7 @@ class ThreeSessions(unittest.TestCase):
     def test_overlapping_shards_are_told_on_both_sides(self):
         t = self.t
         r = t.cli(A, "shard", self.x("lib"))
-        self.assertIn("kept as this session's shard", r.stdout)
+        self.assertIn("kept as this session's owned paths", r.stdout)
         r = t.cli(B, "shard", self.x("lib", "x.py"), self.x("docs"))
         self.assertIn("overlaps the owned paths of \"the layout work\"", r.stdout)
         ctx = context(t.say(A, "next"))
@@ -835,7 +835,8 @@ class SharedHome(unittest.TestCase):
         a = self.a
         write(os.path.join(a.p4, "p4.json"), json.dumps({"phi": {"home": "git@example.com:team/elsewhere.git"}}))
         ctx = context(a.hook("session-start", A, {"source": "startup"}, P4_PHI_STORES=self.stores))
-        self.assertIn("names the home store git@example.com:team/elsewhere.git, which this machine has not seen", ctx)
+        self.assertIn("names the shared store git@example.com:team/elsewhere.git for the session tree, and this "
+                      "machine has not seen it", ctx)
         a.say(A, "Rework the exporter", P4_PHI_STORES=self.stores)
         self.assertTrue(os.path.isdir(os.path.join(a.p4, "phi", "sessions", A)), "the tree stays in its own store")
 

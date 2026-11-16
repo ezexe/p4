@@ -1388,7 +1388,7 @@ def retire(home, parent, sid, s, by, version, now):
     base = s.get("cwd") or ""
     left = ", ".join(show(f, base) for f in (d.get("files") or [])[:8]) or "no file changes"
     heads = ", ".join(show_head(h, base) for h in d.get("heads") or []) or "no heads"
-    claim = (f"replaces: \"{_title(s)}\" ({sid}) as a live node. What it left in place stays true: {left}, at "
+    claim = (f"replaces: \"{_title(s)}\" ({sid}) as a live session. What it left in place stays true: {left}, at "
              f"{heads}. " + findings_of(last) + " Its picture of the tree is "
              f"superseded by \"{title}\": \"{_short(m.get('claim'), 300)}\".")
     row = {"time": now, "claim": claim[:FINDINGS_CHARS + 1600], "source": f"p4-phi, a stale session, anchor v{version}",
@@ -1672,18 +1672,18 @@ def retire_done(home, parent, sid, now, extra="", archived=False):
     turns = _rows(os.path.join(_dir(home, sid), "turns.jsonl"))
     last = turns[-1] if turns else {}
     steps = [x for x in still if x.startswith("step ")]
-    how = "it finished, and the chain treats it as archived from now; ezexe archives it in the app."
+    how = "it finished, and p4-phi counts it as archived from now."
     if archived:
         how = ("it archived itself before its work was shown done, with "
                + (f"{len(steps)} plan step{'s' if len(steps) != 1 else ''} still open: " + "; ".join(steps) + "."
                   if steps else "no plan step left open."))
-    claim = (f"replaces: \"{_title(disk)}\" ({sid}) as a live node: {how} "
+    claim = (f"replaces: \"{_title(disk)}\" ({sid}) as a live session: {how} "
              + (extra.strip() + " " if extra else "") + "Changed: " + (", ".join(show(f, base) for f in files[:10]) or "no files")
              + (" ..." if len(files) > 10 else "") + ". Heads: " + (", ".join(heads_) or "none") + ". Commits: "
              + ("; ".join(commits) or "none") + ". Still open: " + ("; ".join(still) or "nothing") + ". "
              + findings_of(last))
     row = {"time": now, "claim": claim[:FINDINGS_CHARS + 2000],
-           "source": "phi self-archive retirement" if archived else "p4-phi, a report-when-done child",
+           "source": "p4-phi, a child that archived itself" if archived else "p4-phi, a report-when-done child",
            "kind": "decision", "cliSessionId": ""}
     npath = os.path.join(_dir(home, parent), "notes.jsonl")
     os.makedirs(os.path.dirname(npath), exist_ok=True)
@@ -1811,7 +1811,7 @@ def stale_text(pend):
                    f"note on this session: {names}. {READY}")
     if done:
         names = ", ".join(link_of(x) for x in done)
-        out.append(f"phi (p4-phi): finished and retired, their outcome kept as a replaces: "
+        out.append(f"phi (p4-phi): finished, their outcome kept as a replaces: "
                    f"note on this session: {names}. {READY}")
     return "\n".join(out)
 
@@ -1824,10 +1824,10 @@ def stale_text(pend):
 # listed on <home>/phi/ready-to-archive.md. A done top-level session offers its tree's finished ones to ezexe, and
 # phi.py's archive hook, h_self_archive, says which session may call the archive tool.
 
-READY = ("The chain treats them as archived from now. They are ready to archive, but call no archive tool for them "
-         "now: when the top session of this tree is done, it offers the finished sessions to ezexe as one quick "
-         "select and archives exactly the ones ezexe picks.")
-NO_ARCHIVE = ("phi (p4-phi): no session archives a session, itself included.")
+READY = ("p4-phi counts them as archived from now. Call no archive tool for them: when the top-level session of this "
+         "tree is done, it puts its finished sessions to ezexe as one multiple-choice question and archives exactly "
+         "the ones ezexe picks.")
+NO_ARCHIVE = ("phi (p4-phi): this archive call is refused: a session is archived by ezexe's own press or pick.")
 BUTTON = ("This session is at the top level of its tree and it is done, so end this turn with `mcp__ccd_turn__wrap_up` "
           "whose first action is the app's `archive`, and a recap of one sentence naming what was done: that puts the "
           "button in this session's next-step box, and ezexe archives it with one press. Write no paragraph asking "

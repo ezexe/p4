@@ -90,7 +90,7 @@ class Tree_(unittest.TestCase):
         self.t.stop(KID, "Fix the row, archive when done", report=long)
         self.assertEqual(len(phi.load_turns(self.t.p4, KID)), 1, "a Stop after it keeps no second copy")
         ctx = context(self.t.say(TOP, "what next?"))
-        self.assertIn("ready to archive", ctx)
+        self.assertIn("counts them as archived", ctx)
         self.assertGreater(ctx.count("dropped by flush_rows"), 5, "the note shown whole, not cut at 300")
 
 
@@ -118,7 +118,7 @@ class Tree_(unittest.TestCase):
         self.assertIn("\"Run the exporter suite\" pending", claim)
         self.assertNotIn("Read flush_rows\"", claim, "a completed step is not named")
         self.assertIn("dropped by an off-by-one", claim, "its last report is kept")
-        self.assertEqual(notes[-1]["source"], "phi self-archive retirement")
+        self.assertEqual(notes[-1]["source"], "p4-phi, a child that archived itself")
         self.assertEqual(self.t.log(KID)[-1].get("retired"), "archived")
 
 
@@ -130,7 +130,7 @@ class Tree_(unittest.TestCase):
         return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else {}
 
     def test_a_finished_child_is_archived_by_no_session_and_ezexe_is_told_once(self):
-        """No session archives a session; the session tree counts a finished one as archived at once."""
+        """No session archives a session ezexe did not pick; p4-phi counts a finished one as archived at once."""
         self.t.say(KID, "Fix the row in the exporter, report when done")
         self.assertTrue(relay._session(self.t.p4, KID).get("disposable"), "report when done marks it")
         said = self.t.cli(KID, "done", "test_flush.py: 3 tests OK").stdout
@@ -144,20 +144,20 @@ class Tree_(unittest.TestCase):
         self.assertTrue(relay.gone(self.t.p4, kid), "the session tree counts it as archived from that moment")
         notes = phi.load_notes(self.t.p4, TOP)
         self.assertTrue(notes and notes[-1]["claim"].startswith("replaces:") and KID in notes[-1]["claim"])
-        self.assertIn("ezexe archives it in the app", notes[-1]["claim"])
+        self.assertIn("p4-phi counts it as archived from now", notes[-1]["claim"])
         page = open(relay.ready_path(self.t.p4), encoding="utf-8").read()
         self.assertIn(KID, page, "listed as ready to archive")
         ctx = context(self.t.say(TOP, "what next?"))
         self.assertNotIn("archive_session", ctx, "no archive call is handed out to any session")
-        self.assertIn("offers the finished sessions to ezexe as one quick select", ctx)
+        self.assertIn("puts its finished sessions to ezexe as one multiple-choice question", ctx)
         self.assertEqual(ctx.count(f"](#{KID})"), 1, "the notice names it once, as a link ezexe opens")
         again = context(self.t.say(TOP, "and then?"))
-        self.assertNotIn("ready to archive", again, "and only once")
+        self.assertNotIn("counts them as archived", again, "and only once")
         self.assertNotIn("archive_session", again)
         # a session that calls the archive tool is refused, for itself and for another
         mine = self.archive_call(KID, "self")
         self.assertEqual(mine.get("permissionDecision"), "deny")
-        self.assertIn("no session archives a session", mine.get("permissionDecisionReason", ""))
+        self.assertIn("this archive call is refused", mine.get("permissionDecisionReason", ""))
         self.assertNotIn("wrap_up", mine.get("permissionDecisionReason", ""), "refused, and no button for a child")
         other = self.archive_call(TOP, KID)
         self.assertEqual(other.get("permissionDecision"), "deny")
