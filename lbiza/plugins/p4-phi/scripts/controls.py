@@ -850,7 +850,6 @@ def decline(home, s, rid, why):
 def answers_text(home, s):
     """What became of a session's requests to its puppeteer, read from the puppeteer's record: a declined one is
     closed in this session's own store and named once."""
-    held = s.get("puppeteer") if isinstance(s.get("puppeteer"), dict) else {}
     mine = [r for r in starts.open_rows(home) if r.get("requester") == s["sessionId"] and r.get("to")]
     lines = []
     for r in mine:
@@ -861,7 +860,6 @@ def answers_text(home, s):
             starts.started(home, r["id"], "withdrawn")
             lines.append(f"its puppeteer \"{full_title(r['to'])}\" declined the request {r['id']} "
                          f"\"{r.get('title')}\": {a.get('why', '')}")
-    _ = held
     return ("phi (p4-phi): " + "; ".join(lines) + ". Start no session for it.") if lines else ""
 
 
