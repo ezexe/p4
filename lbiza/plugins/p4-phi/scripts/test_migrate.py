@@ -11,7 +11,6 @@ The clones are read only; nothing is written into them.
 
 import importlib.util
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
