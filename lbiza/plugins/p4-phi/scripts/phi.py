@@ -2602,7 +2602,8 @@ def h_start_advice(payload):
             RAN["asked_of_puppeteer"] = True       # asked of its supervisor session, never started here
             return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                            "permissionDecisionReason": (
-                                               "phi (p4-phi): this start is refused. " + controls.ask_text(mine)[15:])}}
+                                               "phi (p4-phi): this start is refused: "
+                                               + PHI_LEAD.sub("", controls.ask_text(mine)))}}
     if brief and not NEW_TOP.search(brief) and FILE_SETS:
         s = load_session(me.home, me.id)
         files = starts.files_of(brief, s.get("cwd") or payload.get("cwd") or "")

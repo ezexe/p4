@@ -16,6 +16,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import inproc  # noqa: E402
 import phi  # noqa: E402
 import relay  # noqa: E402
 import starts  # noqa: E402
@@ -509,6 +510,22 @@ class Supervisor(unittest.TestCase):
         self.assertIn(NEW, [e["sessionId"] for e in t.session(PUP)["controls"]])
         self.assertIn("This session is controlled by a supervisor session", context(t.say(NEW, "carry on",
                                                                                           proj=self.other)))
+
+    def test_a_controlled_sessions_refused_start_says_this_session_is_controlled_by_a_supervisor_session(self):
+        """Run through `recall-hook.sh lookup-check`, the entry hooks.json runs before every tool call."""
+        t = self.t
+        t.say(TOP, "Build the exporter")
+        t.cli(PUP, "controls", TOP)
+        t.say(TOP, "carry on")
+        body = {"session_id": CLI[TOP], "cwd": t.proj, "hook_event_name": "PreToolUse", "tool_name": START,
+                "tool_input": {"initiation": "user_asked", "title": "the retry",
+                               "prompt": BRIEF + "\n" + phi.NEW_TOP_BRIEF}, "tool_use_id": "toolu_start01"}
+        r = inproc.run(["sh", os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh"), "lookup-check"],
+                       input=json.dumps(body), capture_output=True, text=True, timeout=60, env=t.env(TOP))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = json.loads(r.stdout)["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("this session is controlled by a supervisor session", out["permissionDecisionReason"])
 
     def test_a_declined_request_is_closed_and_the_session_that_filed_it_is_told(self):
         t = self.t
