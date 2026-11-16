@@ -411,7 +411,8 @@ def take_started(home, s):
 
 def announce(home, s):
     """An orchestrator ezexe started directly in a store where this puppeteer controls a session,
-    named once."""
+    named once. The app's own record decides it: a session whose record names the session that started it is a
+    worker, even when its session.json was written before that record was read."""
     told, lines = [x for x in s.get("announced") or [] if isinstance(x, str)], []
     have = {e["sessionId"] for e in controlled(s)} | {s["sessionId"]}
     first = {}
@@ -421,8 +422,11 @@ def announce(home, s):
     for store, since in first.items():
         for sid, k in sorted(relay._sessions(store).items()):
             if sid in have or sid in told or PHI.spawned_from(k) or out_of_tree(k) \
-                    or not sid.startswith("local_") or not PHI.app_record(sid) \
-                    or str(k.get("createdAt") or "") < since or is_puppeteer(k, store):
+                    or not sid.startswith("local_") or str(k.get("createdAt") or "") < since \
+                    or is_puppeteer(k, store):
+                continue
+            rec = PHI.app_record(sid)
+            if not rec or PHI.spawned_from(rec):   # no record yet, or one that names the session that started it
                 continue
             told.append(sid)
             lines.append(f"\"{full_title(sid, k)}\" `{sid}` is a new orchestrator in {store} that this puppeteer "

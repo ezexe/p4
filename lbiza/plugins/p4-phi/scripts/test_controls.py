@@ -26,6 +26,7 @@ import phi  # noqa: E402
 import relay  # noqa: E402
 import starts  # noqa: E402
 from test_phi import CLI, KID, TOP, Tree, context, memory, read, transcript, write  # noqa: E402
+from test_phi import START as SESSION_START  # noqa: E402
 
 PUP, PUP2, TOP2, TOP3, NEW = ("local_pup00001", "local_pup00002", "local_top00002", "local_top00003",
                               "local_new00001")
@@ -626,6 +627,23 @@ class Supervisor(unittest.TestCase):
         self.assertIn(f"\"An orchestrator nobody put under the puppeteer\" `{TOP3}` is a new orchestrator", ctx)
         self.assertIn(f"controls {TOP3}` takes it under control", ctx)
         self.assertNotIn("does not control", context(t.say(PUP, "and now?")), "named once")
+
+    def test_a_worker_whose_app_record_lands_after_its_session_start_is_never_named_a_new_orchestrator(self):
+        """A worker a controlled orchestrator started, whose SessionStart ran before the app wrote its record, is
+        read by that record as the worker it is, and never named to the puppeteer as a new orchestrator."""
+        t = self.t
+        t.say(PUP, "Control the trees")
+        t.say(TOP, "Build the exporter")
+        t.cli(PUP, "controls", TOP)
+        r = t.hook(SESSION_START, NEW, {"hook_event_name": "SessionStart", "source": "startup"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(phi.spawned_from(t.session(NEW)), "its SessionStart ran before the app wrote its record")
+        t.record(NEW, started_by=TOP, title="the retry worker")
+        ctx = context(t.say(PUP, "anything new?"))
+        self.assertNotIn(NEW, ctx, "a worker is no new orchestrator")
+        t.say(NEW, "Task:\nBuild the retry.\nFiles: src/retry.py")
+        self.assertEqual(t.started_by(NEW)[0], TOP)
+        self.assertNotIn(NEW, context(t.say(PUP, "and now?")))
 
     def test_a_go_to_a_waiting_writer_is_warned_about_while_another_controlled_session_holds_its_files(self):
         """A go to a writer whose files another controlled session still holds is warned about once for that go and
