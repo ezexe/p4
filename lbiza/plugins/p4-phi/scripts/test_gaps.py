@@ -139,6 +139,25 @@ class Hook(unittest.TestCase):
         self.assertIn("patches over a gap", self.wrote(memory(self.t.p4, "children-on-parent-branch", CHILD_RULE)),
                       "a memory that records a new gap is still told")
 
+    def test_a_negated_form_is_a_real_gap(self):
+        """#50, from the read of its commit: "p4-phi does not carry this yet" was read as carried."""
+        for gap in ("p4-phi does not carry this yet: a child session never pushes, and only the parent merges.",
+                    "p4-phi doesn't carry this, so sessions keep the rule by hand.",
+                    "The plugin should carry this: a store moves only by p4.py sync.",
+                    "p4-phi never carried this rule for sub-agents.",
+                    "No plugin carries it. p4-phi will carry this once #70 lands.",
+                    "The hooks cannot carry this now, so each session asks first."):
+            self.assertFalse(gaps.carried(gap), gap)
+        for done in ("p4-phi carries this now: the act-don't-wait line is given to every session.",
+                     "p4-temportal and p4-phi carry this now, so don't write temporary files elsewhere.",
+                     "It was not built in at first. p4-phi carries this now.",
+                     "The archiving of a child session is built into p4-phi since 0.8."):
+            self.assertTrue(gaps.carried(done), done)
+        self.t.say(TOP, "Build the exporter")
+        got = self.wrote(memory(self.t.p4, "child-never-pushes", "p4-phi does not carry this yet: a child session "
+                                "never pushes a branch, and only the parent session merges and pushes."))
+        self.assertIn("patches over a gap in the plugin", got, "a negated form still gets the advice")
+
     def test_a_write_that_only_shortens_or_removes_text_is_no_new_gap(self):
         self.t.say(TOP, "Build the exporter")
         long = CHILD_RULE + "\n\nA child session never pushes a branch, and its report names every merge it wants."

@@ -39,9 +39,23 @@ CARRIED = re.compile(r"\b(?:p4-[\w-]+|phi|the plugins?)\b[^.\n]{0,80}?\bcarr(?:y
 WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_'-]{2,}")
 
 
+NEGATED = re.compile(r"\b(?:not|never|no longer|cannot|yet to|fails? to|should|must|ought to|needs? to|has to|"
+                     r"have to|will|would|could|might|may)\b|n['’]t\b", re.I)
+NOT_YET = re.compile(r"^\W*(?:yet|either|at all)\b", re.I)
+
+
 def carried(body):
-    """True when a memory's body says the plugin carries its rule now."""
-    return bool(CARRIED.search(str(body or "")))
+    """True when a memory's body says the plugin carries its rule now. A negated or wished-for form, such as
+    "p4-phi does not carry this yet" or "p4-phi should carry this", says the opposite: a real gap."""
+    text = str(body or "")
+    for m in CARRIED.finditer(text):
+        said = m.group(0)
+        before = "" if re.match(r"(?i)p4-|phi\b|the plugin", said) else text[max(0, m.start() - 40):m.start()]
+        before = re.split(r"[.!?\n]", before)[-1]
+        if NEGATED.search(before + " " + said) or NOT_YET.match(text[m.end():m.end() + 12]):
+            continue
+        return True
+    return False
 
 
 def body_of(text):
