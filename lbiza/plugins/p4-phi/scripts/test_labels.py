@@ -5,13 +5,11 @@ with the transcript reading they rest on, the follow-up detector and the re-expl
 Run: python3 test_labels.py
 
 The tests need the standard library and git, and no network. Fixtures are built in temporary directories.
-RealTranscripts needs three paths: the store MAC_STORE names, which P4_MAC_STORE sets when it is given, the
-repository AP_PROJECT and its transcripts under AP_SLUG. Where one is missing the test is skipped. It reads them
-and writes only into a temporary copy of the store.
+The case on the AudioPlugin repository's own transcripts, which measures one store, lives in the experiments
+repository ezexe/p4-phi, at experiments/p4-suite/test_labels.py.
 """
 
 import os
-import shutil
 import sys
 import tempfile
 import unittest
@@ -26,19 +24,6 @@ import store as st  # noqa: E402
 import transcript as tr  # noqa: E402
 from test_hooks import make_project, transcript  # noqa: E402
 from test_store import NOW, make_store, write  # noqa: E402
-
-MAC_STORE = os.environ.get("P4_MAC_STORE", "/Users/ez/gritz/p4-repos/ap-p4_mac")
-AP_PROJECT = "/Users/ez/code/AudioPlugin"
-AP_SLUG = os.path.expanduser("~/.claude/projects/-Users-ez-code-AudioPlugin")
-
-
-def copy_store(src, dst):
-    for sub in ("store", "memory", "src", "models"):
-        if os.path.isdir(os.path.join(src, sub)):
-            shutil.copytree(os.path.join(src, sub), os.path.join(dst, sub),
-                            ignore=shutil.ignore_patterns("index.json", "repo.json", "served"))
-    return dst
-
 
 class Base(unittest.TestCase):
     def setUp(self):
@@ -307,24 +292,6 @@ class FollowUp(unittest.TestCase):
         self.assertTrue(lb.is_follow_up(a, b))
         self.assertTrue(lb.is_follow_up(a, c))
         self.assertFalse(lb.is_follow_up(a, d))
-
-
-class RealTranscripts(unittest.TestCase):
-    def test_repo_labels_from_the_audioplugin_transcripts(self):
-        if not (os.path.isdir(os.path.join(MAC_STORE, "store")) and os.path.isdir(AP_SLUG)
-                and repo.is_repo(AP_PROJECT)):
-            self.skipTest("the ap-p4_mac store, the AudioPlugin repo or its transcripts are not present")
-        with tempfile.TemporaryDirectory() as t:
-            p4 = copy_store(MAC_STORE, os.path.join(t, "p4"))
-            repo.build(p4, AP_PROJECT)
-            st.build_index(p4)
-            s = lb.from_transcripts(p4, AP_PROJECT, [AP_SLUG])
-            self.assertGreater(s["transcripts"], 0)
-            self.assertGreater(s["labels"].get("edited", 0), 0, s)
-            self.assertGreater(s["labels"].get("cited", 0), 0, s)
-            r = lb.reexploration(p4, AP_PROJECT, [AP_SLUG])
-            self.assertGreater(r["turns"], 0)
-            self.assertLessEqual(r["cf_calls"], r["calls"])
 
 
 if __name__ == "__main__":
