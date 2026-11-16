@@ -18,6 +18,11 @@ A file the store's git tracks is removed with its removal staged, so its last ve
 ignored or untracked file is deleted. The retention sweep stages those removals and no other change, so an edit
 pending elsewhere in the store stays unstaged.
 
+A session scratchpad path Claude Code gives is a link into temportal/tmp/<session>/, and a delete of that path, by
+this sweep or by Claude Code's own cleanup of old sessions, removes the link and leaves the store's folder and its
+files: Node's recursive fs.rmSync, which Claude Code runs on, and Python's shutil.rmtree were both seen to do so on a
+Windows junction (Node 26.13, 2026-11-16), and `remove` here unlinks a link without entering it.
+
   sweep                    the retention sweep at SessionStart: clears what has expired and prints one line when it
                            cleared something. Before it, as every hook of a start does, it moves files left in an
                            earlier place of the store's layout, and prints that move's line when this hook made it.

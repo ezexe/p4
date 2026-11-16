@@ -153,6 +153,20 @@ class Lifetime(unittest.TestCase):
         self.assertIn("refused", line)
         self.assertNotIn("past due", line)
 
+    def test_removing_a_link_into_the_store_keeps_the_store(self):
+        """A scratchpad path is a link into temportal/tmp/<session>/: removing the link leaves the files there."""
+        target = os.path.join(self.t, "tmp", "sid")
+        kept = put(os.path.join(target, "kept.md"))
+        link = os.path.join(self.root, "scratchpad", "sid")
+        os.makedirs(os.path.dirname(link))
+        if os.name == "nt":
+            subprocess.run(["cmd", "/c", "mklink", "/J", link, target], capture_output=True, check=True)
+        else:
+            os.symlink(target, link, target_is_directory=True)
+        self.assertEqual(lifetime.remove(link), 1)
+        self.assertFalse(os.path.lexists(link))
+        self.assertTrue(os.path.isfile(kept))
+
     def test_memory_is_never_cleared(self):
         mem = put(os.path.join(self.t, "memory", "a.md"), age_days=400)
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
