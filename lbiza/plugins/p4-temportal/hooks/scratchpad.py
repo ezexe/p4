@@ -18,13 +18,17 @@ The session's temp directory, ON unless p4.json's scratchpad.tmp is false or P4_
                                name gets the time as a suffix). One line names the link when it is made. A link
                                left by an older layout or location, one whose target is gone or is
                                `.claude/p4/tmp/<session>`, is repaired: what the old target holds moves in first.
-  scratch-sweep (SessionStart) the project's other scratchpads under the same temp folder, quiet for
-                               scratchpad.scratch_sweep_minutes: a real one is linked like this session's, or removed
-                               when it is empty (sessions that ran no hooks, such as the app's helpers, leave these);
-                               a stale link is repaired as above, or removed when its target is gone and nothing in
-                               p4 is left to point it at.
-  tmp-sweep (Stop)             the same, silent: a scratchpad the start could not link, or that appeared after it, is
-                               moved and linked at the turn's close. Then the session's tmp is staged in the p4 repo
+  scratch-sweep (SessionStart) the project's other scratchpads, in the same temp folder and in the folder an older
+                               harness named after the project's path (`E--projects-x`): a real one is linked like
+                               this session's, at once, so none stays a plain folder past a start or a turn's close.
+                               The harness makes one for an id that never runs a hook (the id a session holds before
+                               it takes up the one it resumes, the app's helpers), so no start of its own links it.
+                               An empty one quiet for scratchpad.scratch_sweep_minutes is removed instead. A stale
+                               link is repaired as above, or removed when its target is gone and nothing in p4 is
+                               left to point it at.
+  tmp-sweep (Stop)             the same, silent: a scratchpad the start could not link, or that appeared after it,
+                               this session's or another's, is moved and linked at the turn's close. Then the
+                               session's tmp is staged in the p4 repo
                                (`git add`), every turn: never a file the repo ignores, one over
                                scratchpad.tmp_max_file_mb, the contents of a clone, a work tree, a bare repository,
                                a folder holding .claude/p4 or a store (p4.json beside phi/), or a directory named in
@@ -123,7 +127,7 @@ TMP_MAX_FILE_MB = 20        # a larger file is never staged, so never deleted
 TMP_MAX_FILES = 5000        # a tmp with more files is left alone: not staged, not deleted
 TMP_IDLE_CLOSES = 5         # idle tmps closed at one start, at most
 TMP_EMPTY_IDLE_HOURS = 1    # another session's empty tmp quiet this long is removed at a start
-SCRATCH_SWEEP_MINUTES = 60  # another session's scratchpad quiet this long is linked, repaired or removed at a start
+SCRATCH_SWEEP_MINUTES = 60  # another session's empty scratchpad quiet this long is removed, not linked
 TMP_SKIP_DIRS = [".pytest_cache", "node_modules", ".venv", "venv", ".tox", ".mypy_cache", "pytest-of-*"]
 SID_RE = re.compile(r"[A-Za-z0-9_-]+")
 
@@ -399,15 +403,21 @@ def link_tmp(harness, target, stamp):
         try:
             os.rmdir(harness)
         except OSError:
-            return "failed", moved
+            return ("kept" if linked_to(harness, target) else "failed"), moved
     else:
         os.makedirs(os.path.dirname(harness), exist_ok=True)
     try:
         make_link(harness, target)
     except OSError:
+        if linked_to(harness, target):                   # another session's sweep linked it in the same moment
+            return "kept", moved
         os.makedirs(harness, exist_ok=True)              # the harness still finds a directory to write to
         return "failed", moved
     return "linked", moved
+
+
+def linked_to(harness, target):
+    return is_link(harness) and same_dir(harness, target)
 
 
 def git_p4(p4, *args, stdin=None, timeout=20):
@@ -622,22 +632,39 @@ def mtime(path):
         return 0.0
 
 
-def links_to(hashdir, target):
-    """The scratchpad links under the project's temp folder that point at `target`, whether it exists or not."""
-    if not hashdir or not os.path.isdir(hashdir):
-        return []
+def links_to(hashdirs, target):
+    """The scratchpad links under the project's temp folders that point at `target`, whether it exists or not."""
     want, out = os.path.normcase(os.path.normpath(target)), []
-    for name in os.listdir(hashdir):
-        sp = os.path.join(hashdir, name, "scratchpad")
-        if is_link(sp) and os.path.normcase(link_target(sp)) == want:
-            out.append(sp)
+    for hashdir in ([hashdirs] if isinstance(hashdirs, str) else hashdirs or []):
+        if not os.path.isdir(hashdir):
+            continue
+        for name in os.listdir(hashdir):
+            sp = os.path.join(hashdir, name, "scratchpad")
+            if is_link(sp) and os.path.normcase(link_target(sp)) == want:
+                out.append(sp)
+    return out
+
+
+def temp_dirs(harness, own, root):
+    """The project's folders of session folders under the temp directory: the one this session's scratchpad is in
+    (`<temp>/claude/<hash>`), and beside it the one an older harness named after the project's path, every character
+    but letters and digits a dash (`E--projects-x`). Empty when `harness` is not the harness's own layout,
+    `<hash>/<session>/scratchpad`."""
+    if not harness or not own or os.path.basename(os.path.dirname(os.path.normpath(harness))) != own:
+        return []
+    hashdir = os.path.dirname(os.path.dirname(os.path.normpath(harness)))
+    out = [hashdir]
+    if root:
+        legacy = os.path.join(os.path.dirname(hashdir), re.sub(r"[^A-Za-z0-9]", "-", os.path.normpath(root)))
+        if os.path.isdir(legacy) and not same_dir(legacy, hashdir):
+            out.append(legacy)
     return out
 
 
 def close_idle(p4, own, hashdir=None):
     """Other sessions' tmps nothing has written to for TMP_IDLE_DAYS: sessions that ended without a SessionEnd.
     At most TMP_IDLE_CLOSES a start. An empty one, quiet for TMP_EMPTY_IDLE_HOURS with its session's transcript, is
-    removed with the scratchpad links under `hashdir` that point at it."""
+    removed with the scratchpad links under `hashdir` (one folder or several) that point at it."""
     base = p4conf.sub(p4, "tmp")
     if TMP_IDLE_DAYS is None or TMP_IDLE_DAYS < 0 or not os.path.isdir(base):
         return 0
@@ -673,56 +700,60 @@ def close_idle(p4, own, hashdir=None):
     return done
 
 
-def sweep_scratchpads(harness, own, p4dir, stamp):
-    """The project's other scratchpads, beside this session's under the temp folder, quiet for SCRATCH_SWEEP_MINUTES
-    by the folder and the session's transcript -> {"linked": n, "removed": n, "repaired": n}. A real empty one is
-    removed, with its session folder when that is left empty; a real one with files is linked into p4's tmp; a stale
-    link is repaired, or removed when its target is gone and p4 holds no tmp for that session."""
+def sweep_scratchpads(harness, own, p4dir, stamp, root=None):
+    """The project's other scratchpads, beside this session's under the temp folder and in the folder an older
+    harness named after the project (see temp_dirs) -> {"linked": n, "removed": n, "repaired": n}. A real one is
+    linked into p4's tmp at once, its files moved in, so none stays a plain folder: the harness makes one for an id
+    that never runs a hook, and no start of its own would link it. An empty one quiet for SCRATCH_SWEEP_MINUTES by
+    the folder and the session's transcript is removed instead, with its session folder when that is left empty. A
+    stale link is repaired, or removed when its target is gone and p4 holds no tmp for that session."""
     out = {"linked": 0, "removed": 0, "repaired": 0}
-    if not harness or os.path.basename(os.path.dirname(os.path.normpath(harness))) != own:
-        return out                                     # only the harness's own layout: <hash>/<session>/scratchpad
-    hashdir = os.path.dirname(os.path.dirname(os.path.normpath(harness)))
-    if SCRATCH_SWEEP_MINUTES is None or SCRATCH_SWEEP_MINUTES < 0 or not os.path.isdir(hashdir):
+    if SCRATCH_SWEEP_MINUTES is None or SCRATCH_SWEEP_MINUTES < 0:
         return out
     quiet = time.time() - SCRATCH_SWEEP_MINUTES * 60
-    for sid in sorted(os.listdir(hashdir)):
-        sdir = os.path.join(hashdir, sid)
-        sp = os.path.join(sdir, "scratchpad")
-        if sid == own or not SID_RE.fullmatch(sid) or not os.path.lexists(sp):
-            continue
-        target = p4conf.sub(p4dir, "tmp", sid)
-        if is_link(sp):
-            if same_dir(sp, target) or not stale_link(sp, target):
-                continue
-            old = link_target(sp)
-            if os.path.isdir(target) or (os.path.isdir(old) and os.listdir(old)):
-                if link_tmp(sp, target, stamp)[0] == "repaired":
-                    out["repaired"] += 1
-            elif not os.path.exists(sp):
-                try:
-                    remove_link(sp)
-                    out["removed"] += 1
-                except OSError:
-                    pass
-            continue
-        if not os.path.isdir(sp) or max(mtime(sp), mtime(sdir), transcript_time(sid)) > quiet:
-            continue
+    for hashdir in temp_dirs(harness, own, root):
         try:
-            empty = not os.listdir(sp)
+            sids = sorted(os.listdir(hashdir))
         except OSError:
             continue
-        if empty:
-            try:
-                os.rmdir(sp)
-                out["removed"] += 1
-            except OSError:
+        for sid in sids:
+            sdir = os.path.join(hashdir, sid)
+            sp = os.path.join(sdir, "scratchpad")
+            if sid == own or not SID_RE.fullmatch(sid) or not os.path.lexists(sp):
+                continue
+            target = p4conf.sub(p4dir, "tmp", sid)
+            if is_link(sp):
+                if same_dir(sp, target) or not stale_link(sp, target):
+                    continue
+                old = link_target(sp)
+                if os.path.isdir(target) or (os.path.isdir(old) and os.listdir(old)):
+                    if link_tmp(sp, target, stamp)[0] == "repaired":
+                        out["repaired"] += 1
+                elif not os.path.exists(sp):
+                    try:
+                        remove_link(sp)
+                        out["removed"] += 1
+                    except OSError:
+                        pass
+                continue
+            if not os.path.isdir(sp):
                 continue
             try:
-                os.rmdir(sdir)                         # only when the scratchpad was all it held
+                empty = not os.listdir(sp)
             except OSError:
-                pass
-        elif link_tmp(sp, target, stamp)[0] == "linked":
-            out["linked"] += 1
+                continue
+            if empty and max(mtime(sp), mtime(sdir), transcript_time(sid)) <= quiet:
+                try:
+                    os.rmdir(sp)
+                    out["removed"] += 1
+                except OSError:
+                    continue
+                try:
+                    os.rmdir(sdir)                     # only when the scratchpad was all it held
+                except OSError:
+                    pass
+            elif link_tmp(sp, target, stamp)[0] == "linked":
+                out["linked"] += 1
     return out
 
 
@@ -745,7 +776,7 @@ def cmd_tmp_link(payload):
         line += ("; " if line else "") + f"moved {len(moved)} file(s) it held into {there}"
     p4, sid = p4_repo(root), session_id(payload)
     if sid:
-        swept = sweep_scratchpads(harness, sid, os.path.join(root, ".claude", "p4"), stamp)
+        swept = sweep_scratchpads(harness, sid, os.path.join(root, ".claude", "p4"), stamp, root)
         if any(swept.values()):
             line += ("; " if line else "") + "other sessions' scratchpads: " + ", ".join(
                 f"{n} {k}" for k, n in swept.items() if n)
@@ -753,22 +784,25 @@ def cmd_tmp_link(payload):
         back = restore_tmp(p4, sid)
         if back:
             line += ("; " if line else "") + f"this session's tmp files were restored from commit {back[:8]} into {there}"
-        close_idle(p4, sid, os.path.dirname(os.path.dirname(os.path.normpath(harness))))
+        close_idle(p4, sid, temp_dirs(harness, sid, root))
     if line:
         print("p4-temportal: " + line + ".")
     return 0
 
 
 def cmd_tmp_sweep(payload):
-    """Stop: a scratchpad that is not the link yet is moved and linked, and the session's tmp is staged in the p4
-    repo. Prints nothing."""
+    """Stop: a scratchpad that is not the link yet, this session's or another's in the project, is moved and linked,
+    and the session's tmp is staged in the p4 repo. Prints nothing."""
     if not tmp_on():
         return 0
     root = project_root(payload)
     harness = harness_scratchpad(payload)
-    if harness:          # links a late scratchpad, repairs a stale link, brings back a tmp removed while idle
-        link_tmp(harness, p4_tmp(root, payload), time.strftime("%Y%m%d-%H%M%S"))
     p4, sid = p4_repo(root), session_id(payload)
+    if harness:          # links a late scratchpad, repairs a stale link, brings back a tmp removed while idle
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        link_tmp(harness, p4_tmp(root, payload), stamp)
+        if sid:
+            sweep_scratchpads(harness, sid, os.path.join(root, ".claude", "p4"), stamp, root)
     if p4 and sid:
         restore_tmp(p4, sid)
         stage_tmp(p4, sid)

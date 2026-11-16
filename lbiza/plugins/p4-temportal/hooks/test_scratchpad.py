@@ -8,6 +8,7 @@ python3 hooks/test_scratchpad.py — exit 0 = green (git cases skip, saying so, 
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -410,6 +411,10 @@ def unlink(path):
     os.rmdir(path) if os.name == "nt" else os.unlink(path)
 
 
+def is_link(path):
+    return os.path.islink(path) or getattr(os.path, "isjunction", lambda p: False)(path)
+
+
 def points_at(path):
     t = os.readlink(path)
     return os.path.normcase(os.path.normpath(t[4:] if t.startswith("\\\\?\\") else t))
@@ -423,10 +428,12 @@ def age(*paths, hours=2):
 
 def sweep_cases():
     """tmp-link sweeps the project's other scratchpads under the same temp folder: a real empty one quiet past the
-    limit is removed with a session folder it leaves empty, a fresh one or one whose transcript is fresh is left, a
-    real one with files is linked into p4 with its files moved, a dangling link to the old `.claude/p4/tmp/<session>`
-    is re-pointed at that session's tmp, one with nothing in p4 to point at is removed, a foreign link is left;
-    this session's own stale link is repaired and named."""
+    limit is removed with a session folder it leaves empty, a fresh one or one whose transcript is fresh is linked
+    though it is empty, a real one with files is linked into p4 with its files moved, a dangling link to the old
+    `.claude/p4/tmp/<session>` is re-pointed at that session's tmp, one with nothing in p4 to point at is removed, a
+    foreign link is left; this session's own stale link is repaired and named. The folder an older harness named
+    after the project's path is swept the same way. After the start no scratchpad of the project is a plain folder,
+    and one made after it, for an id that runs no hook, is linked at the turn's close, silently."""
     root = tempfile.mkdtemp(prefix="p4-scratchpad-sweep-")
     temp = tempfile.mkdtemp(prefix="p4-scratchpad-temp-")
     cfg = tempfile.mkdtemp(prefix="p4-scratchpad-cfg-")
@@ -435,7 +442,10 @@ def sweep_cases():
     tmp_env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp, "CLAUDE_CONFIG_DIR": cfg}
     hashdir = os.path.join(temp, "claude", "ffccc31c49e17720")
     p4 = os.path.join(root, ".claude", "p4")
-    pad = {k: os.path.join(hashdir, s, "scratchpad") for k, s in sids.items()}
+    legacy = os.path.join(temp, "claude", re.sub(r"[^A-Za-z0-9]", "-", os.path.normpath(root)))
+    sids.update(i="iiiiiiii-0000-4000-8000-000000000011", j="jjjjjjjj-0000-4000-8000-000000000012",
+                k="kkkkkkkk-0000-4000-8000-000000000013")
+    pad = {k: os.path.join(legacy if k in "ij" else hashdir, s, "scratchpad") for k, s in sids.items()}
     new = {k: os.path.join(p4, "temportal", "tmp", s) for k, s in sids.items()}
     old = {k: os.path.join(p4, "tmp", s) for k, s in sids.items()}
     links = []
@@ -464,13 +474,27 @@ def sweep_cases():
         # h: an empty real scratchpad beside the harness's tasks folder, quiet two hours
         os.makedirs(pad["h"]); os.makedirs(os.path.join(os.path.dirname(pad["h"]), "tasks"))
         age(pad["h"], os.path.dirname(pad["h"]))
+        # i, j: in the folder an older harness named after the project's path: one with a note written now, one
+        # empty and quiet two hours
+        put(pad["i"], "old.md", "old harness\n")
+        os.makedirs(pad["j"]); age(pad["j"], os.path.dirname(pad["j"]))
 
+        def real_folders():
+            return sorted(k for k in sids if os.path.isdir(pad[k]) and not is_link(pad[k]))
+
+        assert real_folders() == ["a", "b", "c", "g", "h", "i", "j"], real_folders()
         out = run_sub("tmp-link", {"cwd": root, "session_id": sids["s"]}, tmp_env, CLAUDE_PROJECT_DIR=root)
         assert "was a stale link and now reaches" in out, out
-        assert "other sessions' scratchpads: 1 linked, 3 removed, 1 repaired" in out, out
+        assert "other sessions' scratchpads: 4 linked, 4 removed, 1 repaired" in out, out
+        assert real_folders() == [], f"plain scratchpad folders left after a start: {real_folders()}"
         assert points_at(pad["s"]) == os.path.normcase(new["s"]), "this session's stale link was not repaired"
         assert not os.path.exists(os.path.dirname(pad["a"])), "a quiet empty scratchpad was not removed"
-        assert os.path.isdir(pad["b"]) and os.path.isdir(pad["g"]), "a fresh scratchpad was removed"
+        for k in "bg":
+            assert points_at(pad[k]) == os.path.normcase(new[k]), "a fresh empty scratchpad was not linked"
+        with open(os.path.join(new["i"], "old.md"), encoding="utf-8") as f:
+            assert f.read() == "old harness\n", "a note in the path-named folder did not move into p4"
+        assert points_at(pad["i"]) == os.path.normcase(new["i"]), "a scratchpad in the path-named folder was not linked"
+        assert not os.path.exists(os.path.dirname(pad["j"])), "a quiet empty one in the path-named folder was left"
         with open(os.path.join(new["c"], "note.md"), encoding="utf-8") as f:
             assert f.read() == "kept\n", "a quiet scratchpad's note did not move into p4"
         assert points_at(pad["c"]) == os.path.normcase(new["c"]), "a quiet scratchpad with files was not linked"
@@ -482,6 +506,12 @@ def sweep_cases():
             "the empty scratchpad beside tasks/ was not removed alone"
         assert run_sub("tmp-link", {"cwd": root, "session_id": sids["s"]}, tmp_env, CLAUDE_PROJECT_DIR=root) == "", \
             "a second start spoke"
+        # k: made after the start for an id that runs no hook, with a file: linked at this session's turn close
+        put(pad["k"], "late.md", "late\n")
+        assert run_sub("tmp-sweep", {"cwd": root, "session_id": sids["s"]}, tmp_env, CLAUDE_PROJECT_DIR=root) == "",             "the turn's close spoke"
+        assert points_at(pad["k"]) == os.path.normcase(new["k"]), "a scratchpad made after the start was not linked"
+        assert os.path.isfile(os.path.join(new["k"], "late.md")), "its file did not move into p4"
+        assert real_folders() == [], f"plain scratchpad folders left after a turn's close: {real_folders()}"
         # the switch off leaves the folder alone
         os.makedirs(pad["a"]); age(pad["a"], os.path.dirname(pad["a"]))
         run_sub("tmp-link", {"cwd": root, "session_id": sids["s"]}, dict(tmp_env, P4_SCRATCHPAD_TMP="0"),
@@ -489,7 +519,7 @@ def sweep_cases():
         assert os.path.isdir(pad["a"]), "the switch off still swept"
     finally:
         for k in sids:
-            if os.path.lexists(pad[k]) and (os.path.islink(pad[k]) or getattr(os.path, "isjunction", lambda p: False)(pad[k])):
+            if os.path.lexists(pad[k]) and is_link(pad[k]):
                 unlink(pad[k])
         for d in (root, temp, cfg, other):
             shutil.rmtree(d, ignore_errors=True)
