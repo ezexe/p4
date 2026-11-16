@@ -207,6 +207,21 @@ class Synthetic(unittest.TestCase):
         self.assertTrue(all(ok for _n, ok, _d in r["checks"]), [c for c in r["checks"] if not c[1]])
         self.assertEqual(r["plan"].unplaced, [])
 
+    def test_only_a_check_that_can_fail_is_counted(self):
+        """The lines that pass whatever the data, and a dry run's byte comparison it never makes, are reported apart
+        from the checks, so `checks N/N pass` counts only checks the data could fail."""
+        r = self.run_dry()
+        names = [n for n, _ok, _d in r["checks"]]
+        always = ["retractions: owner-words present or listed", "index rules: archived",
+                  "pools: labelled pools imported", "pools: picks resolved or listed", "src: file count",
+                  "archives byte-identical"]
+        for n in always:
+            self.assertNotIn(n, names)
+        self.assertEqual([n for n, _d in r["told"]], always)
+        with open(r["report_path"], encoding="utf-8") as f:
+            self.assertIn("## Reported without a check", f.read())
+        self.assertIn(f"checks {len(names)}/{len(names)} pass", migrate.summary(r))
+
     def test_counts_and_statuses(self):
         r = self.run_dry()
         self.assertEqual(r["counts"]["correction"], 1)

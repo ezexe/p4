@@ -1058,8 +1058,12 @@ def run(p4, out=None, apply=False, now=None, project=None, report_path=None):
     def check(name, ok, detail):
         checks.append((name, bool(ok), detail))
 
-    # a check given True passes whatever the data and only reports its detail, as does "pools: labelled pools
-    # imported", which import_pools makes true; the summary's `checks N/N pass` counts them with the rest
+    told = []
+
+    def tell(name, detail):
+        """A line no data could fail, reported apart from the checks, which `checks N/N pass` counts alone."""
+        told.append((name, detail))
+
     oc, ol = old["counts"], old["labels"]
     multi_rows = sum(k - 1 for _, k, kind in plan.multi if kind == "row")
     check("rulings: live rules", len(old["live_rules"]) == len(live_new) + len(live_lost),
@@ -1088,9 +1092,9 @@ def run(p4, out=None, apply=False, now=None, project=None, report_path=None):
     for e in files["retractions.md"]:
         if not e.fields.get("owner-words", "").strip():
             ow_missing.append(e.fields.get("from", e.id))
-    check("retractions: owner-words present or listed", True,
-          f"{counts['retraction'] - len(ow_missing)} with owner-words"
-          + (f"; {len(ow_missing)} had none in the tree either: " + ", ".join(ow_missing) if ow_missing else ""))
+    tell("retractions: owner-words present or listed",
+         f"{counts['retraction'] - len(ow_missing)} with owner-words"
+         + (f"; {len(ow_missing)} had none in the tree either: " + ", ".join(ow_missing) if ow_missing else ""))
     check("missed details: count of omitted:", oc["missed"] == counts["missed"],
           f"found {oc['missed']}, written {counts['missed']}")
     claims_old = 0
@@ -1100,8 +1104,8 @@ def run(p4, out=None, apply=False, now=None, project=None, report_path=None):
             claims_old += sum(1 for b in old_blocks_text(st.read_text(f))
                               if re.search(r"(?m)^\s*-?\s*claim:", b) and not TEMPLATE.search(b))
     check("facts: count of claim:", claims_old == counts["claim"], f"found {claims_old}, written {counts['claim']}")
-    check("index rules: archived", True, f"{len(plan.index_rules)} archived; "
-          f"{sum(1 for p in plan.index_rules if any(k == 'owner-words' for k, _ in p))} owner-rooted also in rules.md")
+    tell("index rules: archived", f"{len(plan.index_rules)} archived; "
+         f"{sum(1 for p in plan.index_rules if any(k == 'owner-words' for k, _ in p))} owner-rooted also in rules.md")
     check("dispatch: rows", ol["rows"] + multi_rows == lab["rows"],
           f"found {ol['rows']}, written {lab['rows']}"
           + (f", {multi_rows} more where a vlds block held rows with no blank line between, which the vlds count "
@@ -1118,13 +1122,12 @@ def run(p4, out=None, apply=False, now=None, project=None, report_path=None):
           lab["judged"] - ol["judged"] <= joined + multi_rows, f"found {ol['judged']}, written {lab['judged']}")
     check("dispatch: ECHO/SUPERSEDED rows still so", oc["repeat"] == counts["repeat"],
           f"found {oc['repeat']}, written {counts['repeat']}")
-    check("pools: labelled pools imported", pstats["labelled"] == len([t for t in tasks if t[0].startswith("pool:")]),
-          f"{pstats['pools']} pools, {pstats['labelled']} labelled, "
-          f"{pstats['taught_out']} left out for a teacher's audit; {pstats['audits']} audits")
-    check("pools: picks resolved or listed", True,
-          f"{pstats['resolved']} of {pstats['picks']} picks resolved by file, time and head: {pstats['to_archive']} "
-          f"to archived entries, {pstats['to_freed']} picked while freed or spent and kept on that entry; "
-          f"{len(pstats['unresolved'])} unresolved, listed")
+    tell("pools: labelled pools imported", f"{pstats['pools']} pools, {pstats['labelled']} labelled, "
+         f"{pstats['taught_out']} left out for a teacher's audit; {pstats['audits']} audits")
+    tell("pools: picks resolved or listed",
+         f"{pstats['resolved']} of {pstats['picks']} picks resolved by file, time and head: {pstats['to_archive']} "
+         f"to archived entries, {pstats['to_freed']} picked while freed or spent and kept on that entry; "
+         f"{len(pstats['unresolved'])} unresolved, listed")
     sig_total = sum(vstats["signals"][k] for k in ("correction", "retraction", "missed", "repeat"))
     old_sig = oc["correction"] + oc["retraction"] + oc["missed"] + oc["repeat"]
     check("dictionary: every signal an entry or listed", sig_total == old_sig,
@@ -1132,8 +1135,8 @@ def run(p4, out=None, apply=False, now=None, project=None, report_path=None):
           f"yielded terms, the rest listed; {vstats['terms']} pending entries; the follow-up detector flagged "
           f"{vstats['signals']['follow-up']}, {vstats['yielded']['follow-up']} of them with terms")
     n_src = len(plan.src)
-    check("src: file count", True, f"{n_src} files into src/<s8>-<task>/; "
-          f"{sum(1 for o, _ in plan.src if src_head(plan, o))} get a head comment from the register")
+    tell("src: file count", f"{n_src} files into src/<s8>-<task>/; "
+         f"{sum(1 for o, _ in plan.src if src_head(plan, o))} get a head comment from the register")
     check("rulings: LIVE after a retraction with the same owner-words", all(s == "LIVE" for _, _, s in f17),
           f"{len(f17)} rulings dated at or after a retraction with the same owner-words; "
           f"{sum(1 for _, _, s in f17 if s == 'LIVE')} read LIVE")
@@ -1141,7 +1144,7 @@ def run(p4, out=None, apply=False, now=None, project=None, report_path=None):
     archived_ok = []
     report = {"apply": apply, "p4": p4, "now": now, "plan": plan, "texts": texts, "files": files, "old": old, "counts": counts,
               "labels": lab, "live_new": live_new, "live_lost": live_lost, "finding17": f17, "tasks": tasks,
-              "label_rows": labels, "pools": pstats, "vocab": vstats, "checks": checks, "out": out}
+              "label_rows": labels, "pools": pstats, "vocab": vstats, "checks": checks, "told": told, "out": out}
 
     if apply:
         # a store of the flat layout or of the current one, under phi/, is a migrated store: nothing to migrate
@@ -1158,7 +1161,7 @@ def run(p4, out=None, apply=False, now=None, project=None, report_path=None):
                 if k.rstrip("/") in ("memory", "scratchpad", *KEEP_TOP):
                     check(f"{k} tree identical", same_tree(os.path.join(p4, k), os.path.join(out, k)), "copied as is")
     else:
-        check("archives byte-identical", True, f"{len(plan.archive)} files to copy verbatim, compared only on --apply")
+        tell("archives byte-identical", f"{len(plan.archive)} files to copy verbatim, compared only on --apply")
 
     users = repo_users(project, [os.path.basename(o) for o, _ in plan.src])
     report["repo_users"] = users
@@ -1273,6 +1276,9 @@ def render_report(r):
          "## Checks", "", "| check | result | detail |", "|---|---|---|"]
     for name, ok, detail in r["checks"]:
         L.append(f"| {name} | {'pass' if ok else 'FAIL'} | {detail.replace('|', '/')} |")
+    L += ["", "## Reported without a check", "", "| what | detail |", "|---|---|"]
+    for name, detail in r["told"]:
+        L.append(f"| {name} | {detail.replace('|', '/')} |")
     L += ["", "## Per kind", "", "| kind | found | written |", "|---|---|---|"]
     c, lab = r["counts"], r["labels"]
     oc, ol = old["counts"], old["labels"]
