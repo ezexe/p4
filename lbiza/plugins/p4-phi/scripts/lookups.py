@@ -15,8 +15,9 @@ the PostToolUse and PostToolUseFailure hooks, and checks a call before it runs, 
   after    a call that fails with a signature other sessions already met is told so beside its result, with the
            command that worked next there, as the additionalContext of its PostToolUse or PostToolUseFailure hook.
            This is exact: the error has happened.
-  check    before a WebFetch, the earlier findings for the same page are scored against the new question, and
-           before a WebSearch those of every earlier search, leaving out a finding older than `max_age_days`; the
+  check    before a WebFetch, the earlier findings for the same page read from the same `offset` are scored against
+           the new question, and before a WebSearch those of every earlier search with the same `mode`,
+           `allowed_domains` and `blocked_domains`, leaving out a finding older than `max_age_days`; the
            findings that reach the threshold, the best first and at most `SHOWN_ROWS`, are the answer. Before a
            shell command, the failure model scores it, and for a command it expects to fail the answer is the
            nearest earlier failure of the same program and its fix, if any. A call of any other tool that reaches
@@ -167,14 +168,36 @@ def ask_of(tool, inp):
 
 
 def target_of(tool, inp):
-    """What a call is about, exactly: a page, a file, a program. Calls about the same target are the candidates."""
+    """What a call is about, exactly: a page and the character a fetch starts reading it at, a search's domains and
+    mode, a file, a program. Calls about the same target are the candidates."""
     if tool == "WebFetch":
-        return norm_url(inp.get("url"))
+        try:
+            at = int(inp.get("offset") or 0)
+        except (TypeError, ValueError):
+            at = 0
+        return norm_url(inp.get("url")) + (f"#offset={at}" if at > 0 else "")
     if tool == "WebSearch":
-        return "search"
+        return "search" + search_scope(inp)
     if tool in SHELL_TOOLS:
         return program(str(inp.get("command") or ""))
     return norm_path(str(inp.get("file_path") or inp.get("notebook_path") or inp.get("path") or ""))
+
+
+def search_scope(inp):
+    """A search's mode and domains as the end of its target: '' for a standard search of every domain, else
+    `?mode=extended&allowed=a.org,b.org&blocked=c.org` with the parts it has, each domain list lower-cased and
+    sorted."""
+    parts = []
+    mode = str(inp.get("mode") or "").strip().lower()
+    if mode and mode != "standard":
+        parts.append("mode=" + mode)
+    for k in ("allowed", "blocked"):
+        v = inp.get(k + "_domains")
+        v = [v] if isinstance(v, str) else v if isinstance(v, list) else []
+        doms = sorted({str(d).strip().lower() for d in v if str(d).strip()})
+        if doms:
+            parts.append(k + "=" + ",".join(doms))
+    return "?" + "&".join(parts) if parts else ""
 
 
 def key_of(tool, inp):
@@ -451,7 +474,9 @@ def lin(w, x):
 
 
 def web_candidates(rows, tool, target):
-    return [r for r in rows if r["tool"] == tool and (tool == "WebSearch" or r["target"] == target)]
+    """The earlier calls a web call is scored against: those of the same tool and target, which is for a fetch the
+    page and the character it starts reading at, and for a search its mode and domains."""
+    return [r for r in rows if r["tool"] == tool and r["target"] == target]
 
 
 def web_match(con, p4, tool, inp, when):
@@ -483,9 +508,8 @@ def web_match(con, p4, tool, inp, when):
             passed.append((s, r))
         if s >= best:                          # the newest of equals
             best, best_row = s, r
-    # a page asked the same thing more than once, as a long page read in parts or a first answer that fell short:
-    # the runners-up are shown too, up to SHOWN_ROWS findings, since the best match by the question is not always
-    # the fullest answer
+    # a page asked the same thing more than once, as when a first answer fell short: the runners-up are shown too,
+    # up to SHOWN_ROWS findings, since the best match by the question is not always the fullest answer
     web_match.also = [r for _, r in sorted(passed, key=lambda t: -t[0]) if r is not best_row][:SHOWN_ROWS - 1]
     return best, best_row, thr
 
@@ -708,9 +732,9 @@ def fit_named(examples, epochs=None, lr=0.5, l2=1e-4):
 
 
 def web_pairs(rows):
-    """For every web call whose question has words: its session, and for each earlier call of the same tool and, for
-    a WebFetch, of the same page, the matcher's score, the pair's features and its label. The label is free: the
-    later call ran, so its own result says whether the earlier finding would have answered it."""
+    """For every web call whose question has words: its session, and for each earlier call of the same tool and
+    target, as `web_candidates` takes them, the matcher's score, the pair's features and its label. The label is
+    free: the later call ran, so its own result says whether the earlier finding would have answered it."""
     toks = [ranker.tokens(r["ask"]) for r in rows]
     finds = [ranker.tokens(r["finding"]) for r in rows]
     idf, fidf = idf_from(toks), idf_from(finds)
@@ -721,7 +745,7 @@ def web_pairs(rows):
         cands = []
         for j in range(i):
             o = rows[j]
-            if o["tool"] != r["tool"] or (r["tool"] == "WebFetch" and o["target"] != r["target"]):
+            if o["tool"] != r["tool"] or o["target"] != r["target"]:
                 continue
             days = ranker.days_between(o["time"], r["time"])
             x = pair_features(toks[i], r["tool"], toks[j], finds[j], days, idf)

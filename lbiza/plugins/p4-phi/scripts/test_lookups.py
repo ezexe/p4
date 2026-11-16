@@ -5,8 +5,9 @@
 
 Checked: a call's key, kind and error signature; one row per tool_use id; a clean call's row written behind the call;
 the calls recall-hook.sh ends before python starts; a web finding handed back in place of the same question as a
-PreToolUse deny, once, so the same call made again runs; a different question about the same page left alone; an
-old finding left alone; a failed command's signature recognised when it fails again in another session, with the
+PreToolUse deny, once, so the same call made again runs; a different question about the same page left alone, and so
+the same question about another part of the page or a search of other domains or in another mode; an old finding
+left alone; a failed command's signature recognised when it fails again in another session, with the
 command that worked after it; the modes "answer", "note" and "shadow", and `on` false, which logs nothing; a corrupt
 database never failing a call; the backfill from transcripts taking each tool_use id once; a training round
 promoting the fitted model when it answers more held-out calls than the matcher; another session's message kept as
@@ -252,6 +253,49 @@ class Check(Base):
         o = self.out(run_hook("lookup-check", pre("WebSearch", {"query": "NARWHAL_TIMEOUT narwhal port default timeout"},
                                                   proj=self.proj), self.proj))
         self.assertEqual(o["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_a_fetch_of_another_part_of_the_page_runs(self):
+        self.record_fetch()
+        far = {"url": URL, "prompt": ASK, "offset": 100000}
+        self.assertIsNone(self.out(run_hook("lookup-check", pre("WebFetch", far, proj=self.proj), self.proj)),
+                          "the first part's finding says nothing of the part from character 100000")
+        part = ("From character 100000 the page lists the narwhal port's retry budget: five retries, then the port "
+                "closes until NARWHAL_RETRY_RESET seconds have passed.")
+        self.out(run_hook("lookup-record", post("WebFetch", far, {"result": part, "url": URL, "code": 200}, S1,
+                                                self.proj, "t2"), self.proj))
+        why = self.out(run_hook("lookup-check", pre("WebFetch", far, proj=self.proj, tid="t-far"), self.proj)
+                       )["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("five retries", why)
+        self.assertNotIn("30 seconds", why)
+        start = {"url": URL, "prompt": ASK, "offset": 0}
+        why = self.out(run_hook("lookup-check", pre("WebFetch", start, proj=self.proj, tid="t-start"), self.proj)
+                       )["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("30 seconds", why, "offset 0 reads from the page's start, as a fetch without one")
+        self.assertNotIn("five retries", why)
+
+    def test_a_search_of_other_domains_or_in_another_mode_runs(self):
+        q, again = "narwhal port timeout default NARWHAL_TIMEOUT", "NARWHAL_TIMEOUT narwhal port default timeout"
+
+        def search(inp, tid, found):
+            self.out(run_hook("lookup-record", post("WebSearch", inp, {"query": inp["query"], "results": [
+                {"content": [{"title": "Narwhal ports", "url": URL}]}, found]}, S1, self.proj, tid), self.proj))
+
+        def check(**scope):
+            return self.out(run_hook("lookup-check", pre("WebSearch", {"query": again, **scope}, proj=self.proj),
+                                     self.proj))
+
+        search({"query": q, "mode": "standard"}, "t1", FOUND)
+        self.assertIsNone(check(mode="extended"), "an extended search is asked for when a standard one fell short")
+        self.assertIsNone(check(mode="standard", allowed_domains=["docs.example.org"]))
+        self.assertIsNone(check(mode="standard", blocked_domains=["example.org"]))
+        self.assertEqual(check(mode="standard")["hookSpecificOutput"]["permissionDecision"], "deny")
+        narrow = ("Only docs.example.org and b.example.org were searched: the narwhal port page there gives 45 seconds "
+                  "for the port timeout on the managed service.")
+        search({"query": q, "mode": "extended", "allowed_domains": ["Docs.Example.org", "b.example.org"]}, "t2", narrow)
+        why = check(mode="extended", allowed_domains=["b.example.org", "docs.example.org"]
+                    )["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("45 seconds", why, "the same domains in another order and case, in the same mode")
+        self.assertNotIn("30 seconds", why)
 
     def test_other_tools_are_never_stopped(self):
         self.record_fetch()
