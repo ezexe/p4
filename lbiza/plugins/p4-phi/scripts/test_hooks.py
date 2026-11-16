@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Tests for the p4-recall hooks (fresh-marketplace.md 3.3, 4.7, 8.1's hooks, row and usage bullets).
+"""Tests for scripts/hook.py, the p4-phi hooks that hooks/recall-hook.sh runs.
 
-Run: python3 test_hooks.py   (stdlib unittest, offline, a few seconds)
+Run: python3 test_hooks.py
 
-Each hook runs as the harness runs it: `sh hooks/recall-hook.sh <name>` with the JSON payload on stdin,
-CLAUDE_PLUGIN_ROOT and CLAUDE_PROJECT_DIR set, on a small git project holding the fixture store. Checked: the
-hooks.json events, matchers, timeouts and async flag; each output's JSON shape against the docs; silence where 3.3
-says nothing; `updatedInput` carrying every original Agent field; the row opened and completed from
-`last_assistant_message`; a notification complete on arrival; usage labels (used when the served entry's path
-appears in an Edit input, unused otherwise); the repo labels of a turn; exit 0 and one notice on a corrupt store;
-the pinned block cut at 1,500 characters; the `.git/info/exclude` line added once.
+It needs only the standard library's unittest and no network. Each hook runs as Claude Code runs it,
+`sh hooks/recall-hook.sh <name>` with the JSON payload on stdin and CLAUDE_PLUGIN_ROOT and CLAUDE_PROJECT_DIR set, on
+a small git project holding the fixture store. Checked: the hooks.json events, matchers, timeouts and async flag;
+each output's JSON shape against the hooks reference; silence where a hook has nothing to add; `updatedInput`
+carrying every original Agent field; the row opened and completed from `last_assistant_message`; a notification
+complete on arrival; usage labels, used when the served entry's path appears in an Edit input and unused otherwise;
+the repo labels of a turn; exit 0 and one notice on a corrupt store; the pinned block cut at 1,500 characters; the
+`.git/info/exclude` line never added twice; the store's .gitignore seeded under its marker; every handler in a
+project with no store.
 """
 
 import json
@@ -19,7 +21,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-os.environ["P4_PHI"] = "0"          # phi's routed checks stay out of these tests: they touch no live store
+os.environ["P4_PHI"] = "0"          # phi.py's routed checks stay out of these tests: they touch no live store
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -34,8 +36,8 @@ HOOKS_JSON = os.path.join(ROOT, "hooks", "hooks.json")
 
 
 def own_hooks(path, runner):
-    """The plugin's hooks.json events and groups whose commands run `runner`: p4-phi carries phi's hooks
-    (run-hook.sh) and recall's (recall-hook.sh) side by side."""
+    """The plugin's hooks.json events and groups whose commands all run `runner`: in p4-phi's one hooks.json,
+    run-hook.sh runs phi.py's hooks and recall-hook.sh runs hook.py's."""
     with open(path, encoding="utf-8") as f:
         h = json.load(f)["hooks"]
     out = {}
@@ -70,8 +72,8 @@ def make_project(root):
 
 def run_hook(name, payload, proj, extra_env=None):
     env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
-    # injection is off by default (the measured config); these tests check what is injected, so they turn it on,
-    # and DefaultOff checks the default with P4_RECALL_INJECT=0
+    # P4_RECALL_INJECT=1 lets every retrieval line through, since these tests check what is shown; the default is
+    # checked by test_default_is_rules_and_facts. P4_RECALL_SYNC=1 makes recall-hook.sh wait for every lookup-record.
     env.update({"CLAUDE_PLUGIN_ROOT": ROOT, "CLAUDE_PROJECT_DIR": proj, "P4_RECALL_INJECT": "1", "P4_RECALL_SYNC": "1",
                 **(extra_env or {})})
     r = subprocess.run(["sh", RUN, name], input=json.dumps(payload), capture_output=True, text=True, env=env,
@@ -249,8 +251,8 @@ class Recall(Base):
         self.assertEqual(served["task"], rows[0].id)
 
     def test_default_off_prints_nothing_but_logs_shadow(self):
-        """The measured default: no line reaches the model; what recall would have shown is logged as shadow, so the
-        close hook's usage labels still learn from it. The same holds for a subagent's prompt."""
+        """With P4_RECALL_INJECT=0 no line reaches the model; what retrieval would have shown is logged as shadow, so
+        the close hook's usage labels still learn from it. The same holds for a subagent's prompt."""
         text = "does the quokka harness run the zebrafish plotter golden images on every push?"
         r = run_hook("recall", {"hook_event_name": "UserPromptSubmit", "session_id": SESSION, "prompt": text,
                                 "cwd": self.proj}, self.proj, {"P4_RECALL_INJECT": "0"})
@@ -263,8 +265,8 @@ class Recall(Base):
         self.assertEqual((r.returncode, r.stdout), (0, ""))
 
     def test_default_is_rules_and_facts(self):
-        """With no override the repo's mode is the measured default: only rule and fact lines reach the model, and the
-        rest of what recall found is logged."""
+        """With no override the mode is the default, rules-facts: only rule and fact lines reach the model, and the
+        rest of what retrieval found is logged."""
         import hook
         text = "does the quokka harness run the zebrafish plotter golden images on every push?"
         r = run_hook("recall", {"hook_event_name": "UserPromptSubmit", "session_id": SESSION, "prompt": text,
@@ -288,7 +290,7 @@ class Recall(Base):
     def test_notification_complete_on_arrival(self):
         r = run_hook("recall", {"session_id": SESSION, "prompt": "<task-notification>the quokka harness zebrafish "
                                 "plotter golden images</task-notification>", "cwd": self.proj}, self.proj)
-        self.assertEqual(r.stdout, "", "a harness message gets no recall")
+        self.assertEqual(r.stdout, "", "a notification gets no retrieval")
         self.assertIsNone(lb.read_served(self.p4, f"turn-{SESSION}"))
         rows = st.load_file(self.p4, f"messages/{SESSION[:8]}.md")
         self.assertEqual(rows[0].fields["arrival"], "notification")
@@ -310,10 +312,10 @@ class Recall(Base):
 
 @unittest.skipUnless(__import__("test_store").fixture("AudioPlugin-p4"), "the AudioPlugin-p4 clone is not here")
 class RecallLatency(unittest.TestCase):
-    """4.5's budget: the recall hook, as the harness runs it (sh run-hook.sh, a new interpreter), answers within
-    300 ms on AudioPlugin-p4 (5,000 entries) when the index is fresh, as it is after the Stop hook's rebuild. Measured
-    2026-11-01 under a load average near 50: 0.41 s before (min of 9), 0.27 s after; the best of 5 is asserted, so
-    another process's burst does not fail it."""
+    """The `recall` hook, run as Claude Code runs it by `sh hooks/recall-hook.sh` in a fresh interpreter, answers
+    within the budget h_recall in hook.py states on the AudioPlugin-p4 fixture, about 5,000 entries, when the index
+    is fresh, as it is after the Stop hook's rebuild. The best of 5 runs is asserted, so another process's burst does
+    not fail it."""
 
     @classmethod
     def setUpClass(cls):
@@ -451,7 +453,7 @@ class Close(Base):
         edit = [("Edit", {"file_path": f, "old_string": "return 1", "new_string": "return 2"}, "ok")]
         self.turn("probe the narwhal port and open it", edit, "Changed open_narwhal_port to return 2.")
         row_id = st.load_file(self.p4, f"messages/{SESSION[:8]}.md")[-1].id
-        self.assertEqual(lb.read_tasks(self.p4)[row_id]["kind"], "first", "the session's first owner message")
+        self.assertEqual(lb.read_tasks(self.p4)[row_id]["kind"], "first", "ezexe's first message in the session")
         self.turn("does the quokka harness run the zebrafish plotter golden images on every push", edit,
                   "I will look later.")
         self.turn("ship it", edit, "Pushed.")
@@ -571,9 +573,9 @@ class SubagentStop(Base):
 
 
 class ZeroConfiguration(unittest.TestCase):
-    """#57: the plugin works in a project nobody set up. An empty folder with no `.claude`, no P4_* variable and no
-    settings file: every handler runs clean, the levels rule is given, a top session's long command is moved to the
-    background, and the store is made by the plugin's own SessionStart hook, with no step from the person."""
+    """The plugin works in a project nobody set up. An empty folder with no `.claude`, no P4_* variable and no
+    settings file: every handler runs clean, the delegation rule is given, a top session's long command is moved to a
+    background task, and the store is made by the plugin's own SessionStart hook, with no step from ezexe."""
 
     LONG = {"command": "python -m pytest -q", "description": "Run the tests"}
 
@@ -623,7 +625,7 @@ class ZeroConfiguration(unittest.TestCase):
         self.assertIn("act-don't-wait", start["additionalContext"])
         self.assertEqual(pre["updatedInput"], {**self.LONG, "run_in_background": True})
         self.assertEqual((said, plain, stop), ({}, {}, {}))
-        self.assertFalse(os.path.exists(os.path.join(self.proj, ".claude")), "phi's own handlers write nothing")
+        self.assertFalse(os.path.exists(os.path.join(self.proj, ".claude")), "phi.py's own handlers write nothing")
 
     def test_the_first_session_start_makes_the_store_and_the_rest_follows(self):
         self.run_hook("recall-hook.sh", "layout", hook_event_name="SessionStart", source="startup")

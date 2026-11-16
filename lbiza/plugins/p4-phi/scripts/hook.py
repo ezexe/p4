@@ -1,47 +1,58 @@
 #!/usr/bin/env python3
-"""hook.py <name>: p4-phi's recall hooks, once the p4-recall plugin (fresh-marketplace.md 3.3), run by hooks/recall-hook.sh with the harness's JSON
-payload on stdin. Every hook resolves `.claude/p4/` from CLAUDE_PROJECT_DIR or the payload's `cwd`, prints only what
-its row of 3.3 allows, and on any failure exits 0 with one notice for ezexe (`systemMessage`), never for the model.
+"""hook.py <name>: the p4-phi hooks that hooks/recall-hook.sh runs with Claude Code's JSON payload on stdin: the
+store's layout and catch-up, retrieval, the lookups around every tool call, and training. Every handler resolves
+`.claude/p4/` from CLAUDE_PROJECT_DIR or the payload's `cwd`, prints only what its row below names, and on any failure
+exits 0 with one `systemMessage` for ezexe, never context for the model. Each row gives the handler's name, the
+event and matcher hooks/hooks.json runs it on, and what it does.
 
-  layout         SessionStart startup|resume|clear|compact  silent; .claude/p4/ and its git repository once, the
-                 `.git/info/exclude` line, the index when owed; only when ezexe pinned rules, the block
-                 `Standing rules from ezexe:` (<= 1,500 characters). The store's .gitignore is seeded whole
-                 when there is none; later, any seeded line the file lacks is appended under its own marker line
-                 (`# seeded by p4-recall <date>`), nothing else touched or reordered. A line ezexe deleted on
-                 purpose is indistinguishable from one a newer plugin added, so the marker decides: with no seed
-                 marker in the file (ezexe deleted the marker block) and some seeded line present, nothing is
-                 added; with no marker and no seeded line (ezexe's own file), the whole block is appended.
-  recall         UserPromptSubmit   additionalContext: 0-5 lines; opens the message row; logs what it served
-  agent          PreToolUse Agent   updatedInput: the Agent call's input as received, its `prompt` with the lines
-                 appended under "Notes from this repo's memory:"; nothing when no line clears the threshold
-  close          Stop               nothing; completes the row, writes the turn's usage and repo labels and the
-                 dictionary's signals, rebuilds the index when owed
-  subagent-stop  SubagentStop       nothing; usage and repo labels for what was served to that subagent
-  train          Stop, async        nothing; `train --if-owed`, never a paid step
-  catch-up       SessionStart startup  one systemMessage when the store, its branch or the p4 plugins fell behind
-                 (catchup.py), nothing otherwise
+  catch-up       SessionStart, matcher `startup`. One `systemMessage` from catchup.py when something fell behind on
+                 this machine, such as the store's layout, its branch or the marketplace's plugins; nothing otherwise.
+  layout         SessionStart, matcher `startup|resume|clear|compact`. Moves a store of an older layout through
+                 p4conf.migrate_layout; makes `.claude/p4/` with its folders, its .gitignore, p4.json and its git
+                 repository where they are missing; adds the `.git/info/exclude` line; seeds the store's sync
+                 workflow; and brings the repository's entries, the dependencies' entries and the index up to date.
+                 It prints nothing unless ezexe pinned rules, and then the block `Standing rules from ezexe:` of
+                 at most PINNED_CHARS characters as `additionalContext`.
+  recall         UserPromptSubmit. The retrieval lines that `injected` lets through as `additionalContext`, with
+                 said.py's handles and instruction unless `recall.said.mode` is off, and nothing when it lets none
+                 through. It opens the message's row and logs what retrieval found, shown or held back.
+  agent          PreToolUse, matcher `Agent`. `updatedInput`: the Agent call's input with its `prompt` extended by
+                 phi.py's text for the subagent and by the retrieval lines under "Notes from this repo's memory:";
+                 nothing when neither adds a line.
+  lookup-check   PreToolUse, matcher `.*`. For a subagent's call, phi.py's word of what changed since its launch,
+                 when there is one. Otherwise the first answer of phi.py's checks that PHI_CHECK names for the tool,
+                 or else lookups.py's check: an earlier finding in place of a web call, an earlier failure before a
+                 command expected to fail.
+  lookup-record  PostToolUse and PostToolUseFailure, matcher `.*`. For a subagent's call, its id bound to phi.py's
+                 entry of it. Then phi.py's records that PHI_RECORD names for the tool, whose answer is returned for
+                 the plan tool, Write and Edit; otherwise lookups.py writes the call's row and tells a failure what
+                 other sessions did about it.
+  close          Stop. Nothing printed. It completes the message's row from the reply, writes the turn's usage and
+                 repo labels and its task, notes the dependency files the turn opened, brings view.py's record of
+                 the session up to date, and then the repository's entries, the dependencies' and the index.
+  subagent-stop  SubagentStop, matcher `.*`. Nothing printed. It closes phi.py's entry of the subagent, then writes
+                 the usage and repo labels of what the agent hook served it, and its task.
+  train          Stop, async. Nothing printed. `train --if-owed`, a round of the ranker when train.py's `owed` says
+                 one is due, which calls no paid model; nothing when p4.json's `recall.learn` is false.
 
-The output shapes, from https://code.claude.com/docs/en/hooks (read 2026-11-01):
-- UserPromptSubmit: `{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "..."}}`,
-  "String added to Claude's context alongside the submitted prompt"; it "can't replace the prompt".
-- SessionStart: `hookSpecificOutput.additionalContext` "adds context for Claude"; plain stdout is added as context
-  too, so a silent hook prints nothing at all.
-- PreToolUse: `updatedInput` "Modifies the tool's input parameters before execution. Replaces the entire input
-  object, so include unchanged fields alongside modified ones." and "Combine with "allow" to auto-approve, or "ask"
-  to show the modified input to the user." The Agent tool's input: `prompt`, `description`, `subagent_type`,
-  `model`. Whether the rewritten `prompt` reaches the subagent is not stated in words; hooks/test_live_subagent.py
-  measured it on 2026-11-01 (CLI 2.1.309, haiku): with `updatedInput` alone, no `permissionDecision`, the subagent's
-  first user message carried the appended lines, so the hook sets no permission decision (P4_AGENT_ALLOW=1 adds
-  "allow" for a harness that would want one) and the SubagentStart fallback stays unregistered.
-- SubagentStart: input `agent_id`, `agent_type`; output `additionalContext`, "String added to the subagent's context
-  at the start of its conversation, before its first prompt."
-- Stop: input `stop_hook_active`, `last_assistant_message` ("use this field rather than reading transcript_path: the
-  transcript file isn't guaranteed to include the final message at Stop time"); stdout without `decision` blocks
-  nothing; `transcript_path` "may lag the in-memory conversation".
-- SubagentStop: input `agent_id`, `agent_type`, `agent_transcript_path`, `last_assistant_message`.
-- async: "Async hooks can't block or control Claude's behavior" and their output "is delivered on the next
-  conversation turn", so the train hook prints nothing; with `-p` an async hook still running at teardown is killed.
-- `systemMessage` (a common JSON field) is shown to ezexe; the 10,000-character cap applies per string.
+What the hooks reference, https://code.claude.com/docs/en/hooks, says of the events these handlers answer:
+- UserPromptSubmit: `{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "..."}}`
+  adds context beside the submitted prompt and cannot replace the prompt.
+- SessionStart: `hookSpecificOutput.additionalContext` adds context for Claude, and so does plain stdout, so a
+  silent hook prints nothing at all.
+- PreToolUse: `updatedInput` replaces the whole input object, so the agent hook carries every field of the Agent
+  call unchanged beside the `prompt`; that input is `prompt`, `description`, `subagent_type` and `model`. The hook
+  sets no `permissionDecision` unless P4_AGENT_ALLOW=1 adds "allow", and in auto mode an `updatedInput` without a
+  `permissionDecision` can be denied. The opt-in live test hooks/test_live_subagent.py checks that the subagent's
+  first user message carries the appended lines. SubagentStart can add context to a subagent before its first
+  prompt without rewriting the Agent call, and hooks.json registers no handler of this file on it.
+- PostToolUse and PostToolUseFailure: `additionalContext` adds context beside the call's result.
+- Stop: the close hook reads the reply from `last_assistant_message`, since `transcript_path` can lag the
+  conversation, and prints nothing, since a `decision` to block or an `additionalContext` would continue the turn.
+- SubagentStop: the input adds `agent_id`, `agent_type`, `agent_transcript_path` and `last_assistant_message`.
+- async: an async hook can't block or control Claude's behaviour, and its output is delivered on the next turn, so
+  the train hook prints nothing. With `-p`, Claude Code kills an async hook still running at teardown.
+- `systemMessage` is a warning shown to ezexe.
 """
 
 import json
@@ -50,8 +61,8 @@ import re
 import sys
 import time
 
-# subprocess, hashlib, contextlib and io are imported where they are used: the recall hook runs on every message
-# and its whole budget is 300 ms (fresh-marketplace.md 4.5)
+# subprocess, hashlib, contextlib and io are imported where they are used, so the `recall` hook, which runs on every
+# message, does not pay for them: h_recall states its budget
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -63,7 +74,8 @@ NOTES_HEAD = "Notes from this repo's memory:"
 REPO_DEADLINE_S = 8.0
 HOOK_BUDGET_S = 11.0             # the layout hook's 15 s, less the index build: what the two reads share
 SEED_MARKER = "# seeded by p4-recall"
-# a seed marker of this plugin (either header) or of the vlds plugin's layout hook, whose stores this one inherits
+# a seed marker: the GITIGNORE header, SEED_MARKER, or the header that the vlds plugin's layout hook wrote in the
+# stores this plugin inherits
 SEED_MARKER_RE = re.compile(r"(?i)^#\s*seeded (once )?by (p4-recall|the vlds plugin)\b")
 GITIGNORE = """# seeded once by p4-recall; your edits win
 temportal/scratchpad/.out/
@@ -94,17 +106,17 @@ __pycache__/
 *.gz
 phi/models/ranker.pt
 """
-# phi/models/ranker.pt is each machine's own build of the .pt ranker's chain (phi_rank): never tracked. The chain itself,
-# phi/models/ranker-anchor.pt and phi/models/ranker.rNNN.phid, and the pretrained base are tracked, in git LFS (the store's
-# .gitattributes), so a blanket *.pt or *.phid here would hide the very files the other machines pull.
-# inject: "rules-facts" is the measured default. The paid validation of 2026-11-01 (Opus 5.5, two seeds, Haiku judge):
-# - every line (inject: true): never better than the built-in on the general tasks, the same lesson task worse on
-#   both seeds, and held-out short turns 0.373/0.360 against 0.393/0.373; it gains on newer-than-the-model tasks
-#   (0.75 against 0.50), but section 0's rule keeps it off
-# - only the rule and fact lines: silent wherever every line cost (identical to the built-in there), and on the
-#   newer-than-the-model tasks 0.667 against 0.50 on both seeds with nothing lost
-# With the other lines held back, the query still runs and what it would have shown is logged, so usage labels keep
-# teaching the model. inject: false turns it off entirely.
+# phi/models/ranker.pt is each machine's own build of the .pt ranker's chain, the format of ezexe/phi's phi_rank, and
+# is never tracked. The chain itself, phi/models/ranker-anchor.pt and phi/models/ranker.rNNN.phid, and the pretrained
+# base are tracked in git LFS through the store's .gitattributes, so a blanket *.pt or *.phid here would hide the very
+# files the other machines pull.
+# inject is "rules-facts" by default: only the rule and fact lines reach the model. A paid validation over two seeds
+# with a Haiku judge decides it. Every line shown, inject: true, is never better than Claude Code with no line on the
+# general tasks, is worse on one lesson task on both seeds and on held-out short turns, 0.373 and 0.360 against 0.393
+# and 0.373, and is better only on tasks newer than the model, 0.75 against 0.50; a mode worse anywhere stays off.
+# The rule and fact lines alone change nothing where every line costs, and score 0.667 against 0.50 on the newer
+# tasks on both seeds. The other lines are held back while the query still runs and logs what it would have shown,
+# so usage labels keep teaching the model. inject: false shows no line at all.
 CONFIG = {"inject": "rules-facts"}
 
 
@@ -112,8 +124,8 @@ RULES_FACTS = re.compile(r"^- \S+ (rule|fact): ")
 
 
 def inject_mode(p4):
-    """"off", "rules-facts" or "all": what reaches the main agent or a subagent. P4_RECALL_INJECT (0, 1 or
-    rules-facts) overrides p4.json's recall.inject (false, "rules-facts" or true)."""
+    """"off", "rules-facts" or "all": which retrieval lines reach the main agent or a subagent. P4_RECALL_INJECT set
+    to 0, 1 or rules-facts overrides p4.json's recall.inject, which is false, "rules-facts" or true."""
     env = os.environ.get("P4_RECALL_INJECT")
     if env in ("0", "1", "rules-facts"):
         return {"0": "off", "1": "all"}.get(env, env)
@@ -122,8 +134,7 @@ def inject_mode(p4):
 
 
 def injected(p4, lines):
-    """The lines that may reach the model under the repo's mode: all of them, only the rule and fact lines (the
-    kind that read right on the newer-than-the-model tasks), or none."""
+    """The lines that may reach the model under inject_mode: all of them, only the rule and fact lines, or none."""
     mode = inject_mode(p4)
     if mode == "all":
         return list(lines)
@@ -141,9 +152,10 @@ def p4_of(payload):
 
 
 def ready(payload):
-    """The .claude/p4 directory when it holds a store (the layout hook made it); None otherwise."""
+    """The .claude/p4 directory, with PINNED_CHARS and REPO_DEADLINE_S set from its p4.json, when the layout hook has
+    made its corpus or models folder; None otherwise."""
     p4 = p4_of(payload)
-    p4conf.migrate_layout(p4)             # a store written flat by an older plugin: six lstat calls when there is none
+    p4conf.migrate_layout(p4)             # a store in an older layout is moved first
     if not (os.path.isdir(p4conf.sub(p4, "store")) or os.path.isdir(p4conf.sub(p4, "models"))):
         return None
     p4conf.configure(globals(), p4, "recall", {"pinned_chars": "PINNED_CHARS",
@@ -165,15 +177,15 @@ def git(*args, cwd, timeout=10):
     return subprocess.run(["git"] + list(args), cwd=cwd, capture_output=True, text=True, timeout=timeout)
 
 
-# --- layout (SessionStart) -------------------------------------------------------------------------------
+# --- `layout`, on SessionStart ---------------------------------------------------------------------------
 
 def init_layout(project):
-    """Create .claude/p4/ with its folders, .gitignore, config and git repository once; add its line to the
-    project's .git/info/exclude. Returns the p4 path."""
+    """Make .claude/p4/ with its folders, its .gitignore, p4.json and its git repository where they are missing, add
+    its line to the project's .git/info/exclude, and seed the store's sync workflow. Returns the p4 path."""
     import subprocess
     p4 = os.path.join(project, ".claude", "p4")
     os.makedirs(p4, exist_ok=True)
-    p4conf.migrate_layout(p4)             # a store an older plugin wrote flat in .claude/p4 moves into recall/ first
+    p4conf.migrate_layout(p4)             # a store in an older layout is moved first
     for sub in (p4conf.sub(p4, "store"), p4conf.sub(p4, "store", "messages"), p4conf.sub(p4, "models")):
         os.makedirs(sub, exist_ok=True)
     seed_gitignore(os.path.join(p4, ".gitignore"))
@@ -184,7 +196,7 @@ def init_layout(project):
         except (OSError, subprocess.SubprocessError):
             pass
     exclude_line(project)
-    try:                                  # the store's sync workflow and its script (sync.py), unless turned off
+    try:                                  # the store's sync workflow and its script, unless recall.sync.seed is false
         conf = p4conf.section(p4, "recall", write=False).get("sync", {})
         if conf.get("seed", True):
             import sync
@@ -199,9 +211,12 @@ def seeded_lines():
 
 
 def seed_gitignore(gi, today=None):
-    """The store's .gitignore: written whole when absent; otherwise the seeded lines it lacks are appended under
-    `# seeded by p4-recall <date>`, when the file carries a seed marker or none of the seeded lines (module
-    docstring, layout). Returns the lines added."""
+    """The store's .gitignore: written whole when there is none. Otherwise each seeded line the file lacks is appended
+    under a marker line, `# seeded by p4-recall <date>`, and nothing else is touched or reordered. A line ezexe
+    deleted on purpose cannot be told from one a newer plugin added, so the marker decides. A file with a seed marker
+    gets the lines it lacks. A file with no marker and some seeded line is one where ezexe deleted the marker block,
+    and gets nothing. A file with no marker and no seeded line is ezexe's own, and gets the whole block. Returns the
+    lines added."""
     if not os.path.exists(gi):
         with open(gi, "w", encoding="utf-8", newline="\n") as f:
             f.write(GITIGNORE)
@@ -225,7 +240,8 @@ def seed_gitignore(gi, today=None):
 
 
 def exclude_line(project):
-    """The one line `.claude/p4/` in the project's info/exclude (a worktree's common git dir), added once."""
+    """Add the line `.claude/p4/` to the project's info/exclude unless a line there already names `.claude/p4`. In a
+    worktree, `git rev-parse --git-path` names the common git dir's file. Returns whether the line was added."""
     import subprocess
     try:
         r = git("rev-parse", "--git-path", "info/exclude", cwd=project)
@@ -248,9 +264,8 @@ def exclude_line(project):
 
 
 def refresh_index(p4, project, deadline_s=None):
-    """The repository's entries, then the dependencies' (a package installed or updated since the last look is read
-    again), brought up to date incrementally within their deadlines; then the index rebuilt when any source is
-    newer."""
+    """Bring the repository's entries, then the dependencies', up to date incrementally within their deadlines, and
+    then rebuild the index when a source is newer than it."""
     deadline_s = REPO_DEADLINE_S if deadline_s is None else deadline_s
     import subprocess
     import deps
@@ -299,9 +314,12 @@ def h_layout(payload):
     return None
 
 
-# --- recall (UserPromptSubmit) ---------------------------------------------------------------------------
+# --- `recall`, on UserPromptSubmit -----------------------------------------------------------------------
 
 def h_recall(payload):
+    """The retrieval lines for the submitted message, beside it. The hook runs on every message, so its budget is
+    300 ms from the start of `sh hooks/recall-hook.sh recall` to its answer, on a corpus of about 5,000 entries whose
+    index is fresh; RecallLatency in test_hooks.py asserts it."""
     import labels as lb
     import p4 as cli
     import rows
@@ -311,7 +329,7 @@ def h_recall(payload):
     prompt = payload.get("prompt") or ""
     session = payload.get("session_id") or ""
     if rows.HARNESS_RE.match(prompt):
-        rows.row_open(p4, session, prompt, now())     # a notification: its row, complete on arrival, and no recall
+        rows.row_open(p4, session, prompt, now())     # a notification: its row, complete on arrival, no retrieval
         return None
     node, node_ids = cli.live_node(p4, session)
     r = cli.query(p4, prompt, session[:8] if session else None, now(), node=node, node_ids=node_ids)
@@ -323,7 +341,7 @@ def h_recall(payload):
     if shown:
         import said
         if said.mode(p4) != "off":
-            # said.py: the store's lines get handles and the session is asked to state what it did with them
+            # said.py: the corpus's lines get handles, and the session is asked to state what it did with them
             keep = set(shown)
             shown, handles = said.tag([(l, i) for l, i in zip(r["lines"], r["ids"]) if l in keep])
             if handles:
@@ -337,7 +355,7 @@ def h_recall(payload):
     return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "\n".join(shown)}}
 
 
-# --- subagent recall (PreToolUse Agent) ----------------------------------------------------------------
+# --- `agent`, on PreToolUse for the Agent tool ---------------------------------------------------------
 
 def agent_lines(p4, prompt):
     import p4 as cli
@@ -353,7 +371,7 @@ def agent_input(inp):
 
 
 def phi_text(name, payload):
-    """phi's routed handler's text, '' when it has none or fails."""
+    """The text of phi.py's routed handler `name`, '' when it has none or fails."""
     try:
         import phi
         out = phi.routed(name, payload)
@@ -367,7 +385,8 @@ def h_agent(payload):
     inp = payload.get("tool_input")
     if not isinstance(inp, dict) or not isinstance(inp.get("prompt"), str):
         return None
-    node = phi_text("agent-launch", payload)    # phi: the sub-agent's node under the step, and that step's slice
+    # phi.py's text for the subagent: the plan step it serves, and what this session's parent holds for its paths
+    node = phi_text("agent-launch", payload)
     if node and node not in inp["prompt"]:
         inp = dict(inp, prompt=inp["prompt"].rstrip() + "\n\n" + node)
     else:
@@ -377,7 +396,7 @@ def h_agent(payload):
         return agent_input(inp) if node else None
     prompt = inp["prompt"]
     if NOTES_HEAD in prompt:
-        return agent_input(inp) if node else None   # already carries notes (a retried call)
+        return agent_input(inp) if node else None   # a retried call that already carries the notes
     r = agent_lines(p4, prompt)
     if not r["lines"]:
         return agent_input(inp) if node else None
@@ -388,7 +407,7 @@ def h_agent(payload):
                                                   "tool_use_id": payload.get("tool_use_id", ""), "shadow": shadow})
     if shadow:
         return agent_input(inp) if node else None
-    updated = dict(inp)                   # every original field, unchanged, as updatedInput requires
+    updated = dict(inp)                   # every original field unchanged: updatedInput replaces the whole input
     updated["prompt"] = prompt.rstrip() + "\n\n" + NOTES_HEAD + "\n" + "\n".join(shown)
     out = {"hookEventName": "PreToolUse", "updatedInput": updated}
     if os.environ.get("P4_AGENT_ALLOW") == "1":
@@ -396,10 +415,10 @@ def h_agent(payload):
     return {"hookSpecificOutput": out}
 
 
-# --- close (Stop, SubagentStop) --------------------------------------------------------------------------
+# --- `close` and `subagent-stop`, on Stop and SubagentStop -----------------------------------------------
 
 def turn_for(transcript_path, prompt, sidechain=False):
-    """The transcript's turn for this prompt (the last one whose prompt starts like it), or the last turn."""
+    """The transcript's last turn whose prompt starts like this one, or else its last turn."""
     import transcript as tr
     if not transcript_path or not os.path.exists(transcript_path):
         return None
@@ -429,7 +448,7 @@ def labels_for_turn(p4, project, idx, task_id, served, reply, turn, when):
         if ri[0]:
             got, _ = lb.turn_repo_labels(turn, project, ri, task_id, reply, when, p4=p4)
             rows_out += got
-        try:                    # a dependency file the turn opened that the index lacks: read with its package next time
+        try:                    # a dependency's file the turn opened and the index lacks: read at the next build
             import deps
             deps.note_opened(p4, [p for p in deps.opened_in_turn(turn, project) if p not in ri[0]])
         except (ImportError, OSError, ValueError, KeyError):
@@ -464,10 +483,6 @@ def h_close(payload):
             os.remove(lb.served_path(p4, f"turn-{session}"))
         except OSError:
             pass
-    # The term dictionary is no longer grown (0.8.0): ezexe ruled it the wrong conception on 2026-11-10. A message
-    # is understood whole, with what was in view when it came (view.py), not word by word: a judge could show a
-    # meaning for 1 of 18 pending terms, and most were how ezexe writes, not terms at all. The
-    # reading side stays for stores that still hold a vocabulary.md.
     try:                        # view.py: what this session has in view, brought up to date with its transcript
         import view
         view.refresh(p4, project, session, payload.get("transcript_path") or "",
@@ -479,7 +494,7 @@ def h_close(payload):
 
 
 def h_subagent_stop(payload):
-    phi_text("agent-stop", payload)               # phi: the sub-agent's node closed with its result
+    phi_text("agent-stop", payload)               # phi.py: the subagent's entry closed with its last message
     import labels as lb
     import store as st
     import transcript as tr
@@ -517,7 +532,7 @@ def h_subagent_stop(payload):
     return None
 
 
-# --- lookups (PreToolUse and PostToolUse on every tool) --------------------------------------------------
+# --- `lookup-check` and `lookup-record`, before and after every tool call -------------------------------
 
 PHI_CHECK = {"mcp__ccd_session__start_session": "start-advice", "EnterWorktree": "branch-guard",
              "mcp__ccd_session_mgmt__archive_session": "self-archive",
@@ -532,9 +547,10 @@ PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "Bash": "task", "PowerShell"
 
 
 def phi_route(payload, table):
-    """phi's handler for this tool, run in this process: the hooks.json entries every open session froze at its
-    start are recall's, so new phi checks ride on them and hooks.json never needs a new entry (L3 of the
-    marketplace test session). None when phi has nothing to say; a failure in phi never touches recall."""
+    """phi.py's handlers that `table` names for this tool, run in this process in their order until one answers:
+    that answer, or None. A failure in phi.py is swallowed and never touches the lookup hooks. A session registers a
+    plugin's hooks when it loads the plugin, at its start or at `/reload-plugins`, and the lookup hooks already run
+    on every tool, so a check added to phi.py needs no entry of its own in hooks.json."""
     names = table.get(str(payload.get("tool_name") or ""))
     for name in (names,) if isinstance(names, str) else names or ():
         try:
@@ -548,9 +564,10 @@ def phi_route(payload, table):
 
 
 def h_lookup_check(payload):
-    """lookups.py: an earlier finding in place of a web call, an earlier failure before a command expected to fail.
-    First phi's checks before a tool runs: start-advice, branch-guard, store-guard, and the nudge of a top session doing a work step itself."""
-    if payload.get("agent_id"):                   # a sub-agent's call: phi warns it of what changed since its launch
+    """Before a tool runs. A subagent's call gets phi.py's word of what changed since its launch, when there is one.
+    Otherwise the first answer of phi.py's checks that PHI_CHECK names for the tool, or else lookups.py's check: an
+    earlier finding in place of a web call, an earlier failure before a command expected to fail."""
+    if payload.get("agent_id"):                   # a subagent's call: phi.py warns it of what changed since its launch
         text = phi_text("agent-pre", payload)
         if text:
             return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": text}}
@@ -565,10 +582,12 @@ def h_lookup_check(payload):
 
 
 def h_lookup_record(payload):
-    """lookups.py: the call's row; a failure other sessions already met is told what they did about it. First phi's
-    records after a tool ran: the plan and its step boundary, a background task under its step."""
+    """After a tool ran or failed. A subagent's call binds its id to phi.py's entry of it. Then phi.py's records
+    that PHI_RECORD names for the tool run, such as the plan with its step boundary and a background task under its
+    step; their answer is returned for the plan tool, Write and Edit. Otherwise lookups.py writes the call's row,
+    and a failure other sessions already met is told what they did about it."""
     if payload.get("agent_id"):
-        phi_text("agent-post", payload)            # phi: the sub-agent's id bound to its node
+        phi_text("agent-post", payload)            # phi.py: the subagent's id bound to its entry
     out = phi_route(payload, PHI_RECORD)
     if out and str(payload.get("tool_name") or "") in ("mcp__ccd_turn__update_plan", "Write", "Edit", "MultiEdit"):
         return out
@@ -591,7 +610,7 @@ def h_train(payload):
     if not p4:
         return None
     if not p4conf.section(p4, "recall", write=False).get("learn", True):
-        return None             # mode off (phi_model mode off): the models stay on disk, untouched
+        return None             # recall.learn false, set by the p4-model skill's mode off: the models stay untouched
 
     class A:
         pass
@@ -613,8 +632,8 @@ HANDLERS = {"catch-up": h_catch_up, "layout": h_layout, "recall": h_recall, "age
 
 
 def parse_payload(raw: str):
-    """The hook's stdin as JSON; a payload written by hand with bare Windows paths ({"cwd":"E:\\projects"}) is read
-    with every backslash that does not escape a quote or a backslash taken literally, rather than failing the hook."""
+    """The hook's stdin as JSON. A payload written by hand with bare Windows paths, such as `{"cwd":"E:\\projects"}`,
+    is read with every backslash that does not escape a quote or a backslash taken literally, rather than failing."""
     if not raw.strip():
         return {}
     try:
@@ -636,8 +655,9 @@ def main(argv=None):
             payload = {}
         out = HANDLERS[name](payload)
     except Exception as e:  # noqa: BLE001 — a broken hook never blocks a call
-        out = {"systemMessage": f"p4-recall ({name or '?'}): {type(e).__name__}: {str(e)[:200]}; nothing was added"}
-        try:                # one retrain notice for the p4-model skill (notices.py), never a second failure here
+        out = {"systemMessage": f"phi (p4-phi): the {name or '?'} hook failed with {type(e).__name__}: {str(e)[:200]};"
+                                " nothing was added"}
+        try:                # one retrain notice in notices.py's file for the p4-model skill, never a second failure
             import notices
             p4 = p4_of(payload if isinstance(payload, dict) else {})
             if os.path.isdir(p4conf.sub(p4, "store")) or os.path.isdir(p4conf.sub(p4, "models")):
