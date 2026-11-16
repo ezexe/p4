@@ -2479,7 +2479,7 @@ def h_stop(payload):
     # it retires to its parent as it goes, its open steps named; one held by an unproven issue is not archiving
     left = bool(payload.get("_atArchive")) and not finished
     if above and proved and ((s.get("disposable") and finished) or left):
-        if relay.retire_done(me.home, above, s["sessionId"], s, row["time"], extra=note, archived=left):
+        if relay.retire_done(me.home, above, s["sessionId"], row["time"], extra=note, archived=left):
             RAN["retired"] = "archived" if left else "done"
             try:                                   # #47: what it started and did not finish, checked as it closes
                 RAN["unfinished"] = len(puppeteer.archive_check(me.home, s["sessionId"]))

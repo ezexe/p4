@@ -1641,7 +1641,7 @@ def findings_of(last):
     return out + "Its final turn left no report text with findings: read its transcript before relying on it."
 
 
-def retire_done(home, parent, sid, s, now, extra="", archived=False):
+def retire_done(home, parent, sid, now, extra="", archived=False):
     """A disposable child whose work is over: its outcome kept as one replaces: note on its parent, it left out of
     the relay, the anchors and the down-lines, and the parent told at its next message to archive it. Returns True
     when it was retired now. With `archived`, a child that archived itself before its work was shown done (#46):
