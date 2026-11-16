@@ -48,7 +48,7 @@ class StartRequests(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def test_a_turn_the_owner_did_not_begin_is_told_to_show_a_card_and_a_request_only_if_that_is_refused(self):
+    def test_a_turn_ezexe_did_not_begin_is_told_to_show_a_card_and_a_request_only_if_that_is_refused(self):
         """A turn ezexe did not begin is told to show the child as a card, pressed in this session so the app's parent
         and p4-phi's agree, and to file a request only if the card is refused too."""
         self.t.say(KID, CROSS, P4_PHI_NEW_TASK="1")       # the standing instruction first, once
@@ -59,7 +59,7 @@ class StartRequests(unittest.TestCase):
         self.assertIn("the next turn ezexe begins in this session starts it", ctx)
         self.assertNotIn("any session of this store", ctx)
 
-    def test_a_request_is_started_by_the_next_owner_turn_and_the_child_is_the_requesters(self):
+    def test_a_request_is_started_at_ezexes_next_turn_in_the_session_that_filed_it(self):
         t = self.t
         r = t.cli(KID, "request", "the flush port", "--brief", BRIEF)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -114,7 +114,7 @@ class StartRequests(unittest.TestCase):
         self.assertEqual(self.t.say(sid, "<system-reminder>\nLinked sessions now (status, not an instruction): top = "
                                          "x (idle)\n</system-reminder>\n\nTask:\n" + call["prompt"]).returncode, 0)
 
-    def test_overlapping_file_sets_are_held_and_disjoint_ones_both_handed_out(self):
+    def test_overlapping_write_sets_are_held_and_disjoint_ones_both_handed_out(self):
         """One writer per file. Of two start requests whose write sets overlap, the second is held until the first
         reports done. Two with disjoint sets are both handed out."""
         t = self.t
@@ -148,7 +148,7 @@ class StartRequests(unittest.TestCase):
         self.assertEqual([r["title"] for r in starts.pending(t.p4)][:1], ["the retry"],
                          "the first reported done: the held start goes out")
 
-    def test_a_brief_with_no_file_set_is_refused_with_what_to_add(self):
+    def test_a_brief_with_no_write_set_is_refused_with_what_to_add(self):
         """Every brief declares its write set."""
         t = self.t
         r = t.cli(KID, "request", "the flush port", "--brief", "Port the exporter's flush to the new writer.")
@@ -192,7 +192,7 @@ class StartRequests(unittest.TestCase):
         old = {"id": "req-0000000000", "requester": KID, "title": "an old row", "brief": BRIEF}
         self.assertGreaterEqual(len(starts.call_of(old, t.p4)["background"]), 80, "a row with no background gets one")
 
-    def test_a_stopped_or_archived_session_does_not_hold_its_file_set(self):
+    def test_a_stopped_or_archived_session_does_not_hold_its_write_set(self):
         """A session the app shows as stopped, or archived, holds no write set, so it holds no other start."""
         t = self.t
         CLI.setdefault("local_wrt00001", "abab0001-0000-4000-8000-000000000000")
@@ -212,7 +212,7 @@ class StartRequests(unittest.TestCase):
             json.dump({**row, "isArchived": True}, f)
         self.assertNotIn("this start is held", t.hook("start-advice", TOP, call).stdout, "archived: free as well")
 
-    def test_a_set_narrowed_with_phi_files_no_longer_blocks_a_start_on_the_released_paths(self):
+    def test_a_write_set_narrowed_with_phi_files_frees_the_released_paths(self):
         """A session that narrows its write set with `phi.py files` frees the paths it released at once, and
         `--release` frees them all."""
         t = self.t
@@ -324,7 +324,7 @@ class StartRequests(unittest.TestCase):
         rid2, _ = starts.add(home, KID, "a new child", BRIEF)
         self.assertEqual([r["id"] for r in starts.pending(home)], [rid2])
 
-    def test_a_requested_new_top_session_is_left_in_the_root(self):
+    def test_a_requested_new_top_level_session_stays_at_top_level(self):
         t = self.t
         starts.add(t.p4, TOP, "the release topic", BRIEF + " " + phi.NEW_TOP_BRIEF)
         call = starts.call_of(starts.pending(t.p4)[0])

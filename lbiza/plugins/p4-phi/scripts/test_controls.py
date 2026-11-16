@@ -31,7 +31,7 @@ WHY = "its issue is closed by a pushed commit, its suite ran green, and no sessi
 BRIEF = "Build the importer's retry and run its suite. Report when done.\nFiles: src/retry.py"
 
 
-class Pair(unittest.TestCase):
+class Supervisor(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.t = t = Tree(self._tmp.name)
@@ -118,7 +118,7 @@ class Pair(unittest.TestCase):
         relay._write_json(os.path.join(t.p4, "p4.json"), {"phi": {"puppeteer_section": ""}})
         self.assertEqual(t.cli(PUP, "controls").returncode, 2)
 
-    def test_a_puppeteer_is_told_once_what_it_is_and_the_sighting_is_kept(self):
+    def test_a_supervisor_session_is_told_once_what_it_is_and_the_sighting_is_kept(self):
         t = self.t
         ctx = context(t.say(PUP, "Control the two trees"))
         self.assertIn("This session is a supervisor session: ezexe filed it in the sidebar section \"puppeteers\"", ctx)
@@ -153,7 +153,7 @@ class Pair(unittest.TestCase):
         t.cli(PUP, "controls", "--drop", TOP2)
         self.assertEqual([e["sessionId"] for e in t.session(PUP)["controls"]], [TOP])
 
-    def test_a_controlled_session_is_told_of_its_puppeteer_once_and_once_more_when_the_pair_ends(self):
+    def test_a_controlled_session_is_told_of_its_supervisor_session_once_and_once_more_when_control_ends(self):
         t = self.t
         t.say(TOP, "Build the exporter")
         t.say(TOP2, "Build the importer", proj=self.other)
@@ -196,7 +196,7 @@ class Pair(unittest.TestCase):
         t.cli(PUP, "controls", TOP)
         return context(t.say(PUP, "a report came in"))
 
-    def test_a_puppeteers_archive_call_with_no_pick_this_turn_is_refused(self):
+    def test_a_supervisor_sessions_archive_call_with_no_pick_this_turn_is_refused(self):
         self.complete_top()
         out = self.archive(PUP, TOP)
         self.assertEqual(out.get("permissionDecision"), "deny", "complete, controlled and reasoned, but not picked")
@@ -210,7 +210,7 @@ class Pair(unittest.TestCase):
         self.assertEqual(out.get("permissionDecision"), "deny")
         self.assertEqual([a["let"] for a in self.t.session(PUP)["puppeteerArchives"]], [False, False, False])
 
-    def test_the_same_call_after_a_quick_select_that_picked_the_target_is_allowed(self):
+    def test_the_same_call_after_a_multiple_choice_answer_that_picked_the_target_is_allowed(self):
         self.complete_top()
         self.assertEqual(self.archive(PUP, TOP).get("permissionDecision"), "deny")
         self.assertEqual(self.archive(PUP, TOP, picks=[self.TITLE]), {}, "ezexe's pick lets it through")
@@ -221,7 +221,7 @@ class Pair(unittest.TestCase):
         self.assertEqual(self.t.session(PUP)["puppeteerArchives"][-1]["why"],
                          "ezexe picked it in this turn")
 
-    def test_a_boundary_line_for_a_complete_tree_names_the_quick_select_and_not_the_archive_call(self):
+    def test_a_boundary_line_for_a_complete_tree_names_the_multiple_choice_question_and_not_the_archive_call(self):
         ctx = self.complete_top()
         self.assertIn("1 session this supervisor session controls is complete", ctx)
         self.assertIn("one `AskUserQuestion` with `multiSelect` true", ctx)
@@ -253,7 +253,7 @@ class Pair(unittest.TestCase):
         self.assertEqual(self.archive(PUP, TOP2, prompt="Archive it").get("permissionDecision"), "deny")
         self.assertNotIn("is complete", context(t.say(PUP, "and now?")), "offered once")
 
-    def test_a_puppeteer_is_refused_what_it_does_not_control_and_what_is_not_complete(self):
+    def test_a_supervisor_session_is_refused_what_it_does_not_control_and_what_is_not_complete(self):
         t = self.t
         self.finish(TOP3)
         t.say(KID, "Fix the row")
@@ -309,7 +309,7 @@ class Pair(unittest.TestCase):
 
     # --- its own steps ------------------------------------------------------------------------------------------------
 
-    def test_a_puppeteers_plan_gets_no_hand_off_advice_and_its_wait_does_not_send_the_turn_back(self):
+    def test_a_supervisor_sessions_task_list_gets_no_delegation_advice_and_its_wait_does_not_send_the_turn_back(self):
         t = self.t
         steps = ("Await reports from the exporter, the importer and the acceptance check",
                  "Check the trees' results against GitHub", "Rewrite flush_rows in src/exporter.py")
@@ -336,7 +336,7 @@ class Pair(unittest.TestCase):
 
     # --- the board ------------------------------------------------------------------------------------------------------
 
-    def test_the_board_is_rewritten_by_hook_and_a_report_reaches_the_puppeteer_by_reference(self):
+    def test_the_board_is_rewritten_by_hook_and_a_report_reaches_the_supervisor_session_by_reference(self):
         t = self.t
         t.say(PUP, "Control the two trees")
         t.say(TOP2, "Build the importer", proj=self.other)
@@ -410,7 +410,7 @@ class Pair(unittest.TestCase):
         self.assertIn("the app's `new_session` action, which starts the successor supervisor session from the board",
                       ctx)
 
-    def test_a_successor_takes_over_the_controlled_sessions_and_archives_the_old_puppeteer(self):
+    def test_a_successor_takes_over_the_controlled_sessions_and_archives_the_old_supervisor_session(self):
         t = self.t
         t.record(PUP2, title="The second puppeteer")
         self.finish(TOP)
@@ -446,7 +446,7 @@ class Pair(unittest.TestCase):
 
     # --- a new top-level session goes through the supervisor session ----------------------------------------------------
 
-    def test_a_controlled_top_session_asks_its_puppeteer_and_its_own_start_is_refused(self):
+    def test_a_controlled_top_session_asks_its_supervisor_session_and_its_own_start_is_refused(self):
         t = self.t
         t.say(PUP, "Control the two trees")
         t.say(TOP2, "Build the importer", proj=self.other, P4_PHI_NEW_TASK="1")
@@ -510,7 +510,7 @@ class Pair(unittest.TestCase):
         self.assertIn("This session is controlled by a supervisor session", context(t.say(NEW, "carry on",
                                                                                           proj=self.other)))
 
-    def test_a_declined_request_is_closed_and_its_requester_told(self):
+    def test_a_declined_request_is_closed_and_the_session_that_filed_it_is_told(self):
         t = self.t
         t.say(PUP, "Control the two trees")
         t.say(TOP2, "Build the importer", proj=self.other)
@@ -529,7 +529,7 @@ class Pair(unittest.TestCase):
                                                             "that session's own hook")
         self.assertNotIn("declined the request", context(t.say(TOP2, "and now?", proj=self.other)), "said once")
 
-    def test_a_top_session_ezexe_started_directly_is_named_to_the_puppeteer_once(self):
+    def test_a_top_session_ezexe_started_directly_is_named_to_the_supervisor_session_once(self):
         t = self.t
         t.say(PUP, "Control the trees")
         t.say(TOP, "Build the exporter")
@@ -570,7 +570,7 @@ class Pair(unittest.TestCase):
         self.assertEqual(go(TOP3), "", "released: the go is free")
         self.assertIn("flush.py", go(TOP3, "Go.\nFiles: src/flush.py"), "the write set the message declares is read")
 
-    def test_work_on_a_controlled_sessions_topic_is_sent_down_and_not_done_by_the_puppeteer(self):
+    def test_work_on_a_controlled_sessions_topic_is_sent_down_and_not_done_by_the_supervisor_session(self):
         t = self.t
         t.say(PUP, "Control the trees")
         t.say(TOP, "Build the narwhal exporter and its ports table")

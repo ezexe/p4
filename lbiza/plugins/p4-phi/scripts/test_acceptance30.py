@@ -75,7 +75,7 @@ class Tree_(unittest.TestCase):
         self.assertNotIn("4c8fb0ad", text)
         self.assertIn("the child", text)
 
-    def test_a_child_archiving_itself_keeps_its_report_and_is_retired(self):
+    def test_a_child_archiving_itself_keeps_its_report_and_is_counted_as_archived(self):
         self.t.say(KID, "Fix the row, archive when done")
         long = "The last row was dropped by flush_rows. " * 20
         path = transcript(os.path.join(self._tmp.name, "kid.jsonl"), "Fix the row, archive when done", [], long)
@@ -94,7 +94,7 @@ class Tree_(unittest.TestCase):
         self.assertGreater(ctx.count("dropped by flush_rows"), 5, "the note shown whole, not cut at 300")
 
 
-    def test_a_child_archiving_itself_with_open_steps_still_retires_with_them_named(self):
+    def test_a_child_archiving_itself_with_open_steps_is_counted_as_archived_with_them_named(self):
         """A child that archives itself with steps still open counts as archived, and its parent's note names them."""
         self.t.say(KID, "Fix the row in the exporter")
         r = self.t.hook("plan", KID, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
@@ -163,7 +163,7 @@ class Tree_(unittest.TestCase):
         self.assertEqual(other.get("permissionDecision"), "deny")
         self.assertIn(f"{KID} was not picked in this turn", other.get("permissionDecisionReason", ""))
 
-    def test_a_done_top_session_gets_the_button_and_a_quick_select_of_its_finished_tree(self):
+    def test_a_done_top_level_session_gets_the_button_and_one_question_on_its_finished_tree(self):
         """The button is for a top-level session, which offers the finished sessions of its tree as one
         multiple-choice question and archives exactly the ones picked."""
         kids = {KID: "the row fix", KID2: "the header fix", "local_kid00003": "the footer fix"}
@@ -217,7 +217,7 @@ class Tree_(unittest.TestCase):
         self.assertEqual(relay.picked(home, TOP, [{"name": "AskUserQuestion", "result": "=\"Under the middle\""}]),
                          ["local_f2", "local_f3", "local_f4", "local_f5"])
 
-    def test_a_retired_session_messaged_again_is_named_as_reopened(self):
+    def test_a_session_counted_as_archived_and_messaged_again_is_named_as_reopened(self):
         """The mark of a finished session does not hide live work."""
         self.t.say(KID, "Fix the row in the exporter, report when done")
         self.t.cli(KID, "done", "test_flush.py: 3 tests OK")
@@ -233,7 +233,7 @@ class Tree_(unittest.TestCase):
         self.assertNotIn(KID, open(relay.ready_path(self.t.p4), encoding="utf-8").read())
         self.assertNotIn("is reopened", context(self.t.say(TOP, "and after?")), "said once")
 
-    def test_a_project_can_let_sessions_archive_again(self):
+    def test_a_project_can_let_sessions_archive_sessions(self):
         relay._write_json(os.path.join(self.t.p4, "p4.json"), {"phi": {"session_archives": True}})
         self.t.say(KID, "Fix the row")
         self.assertEqual(self.archive_call(TOP, KID), {})

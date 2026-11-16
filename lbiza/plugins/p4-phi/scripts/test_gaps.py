@@ -106,7 +106,7 @@ class Hook(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         return context(r)
 
-    def test_an_owner_turn_is_told_to_start_the_new_top_in_the_plugins_project(self):
+    def test_a_turn_ezexe_began_is_told_to_start_the_new_top_level_session_in_the_plugins_project(self):
         self.t.say(TOP, "Build the exporter")
         got = self.wrote(memory(self.t.p4, "children-on-parent-branch", CHILD_RULE))
         self.assertIn("patches over a gap in the plugin, whose repository is team/plug", got)
@@ -183,7 +183,7 @@ class Hook(unittest.TestCase):
         self.assertIn("patches over a gap", wrote("Write", {}, {"type": "update", "originalFile": whole}),
                       "a write that says something new is a gap")
 
-    def test_the_advice_rides_on_recalls_record_entry(self):
+    def test_the_advice_rides_on_the_lookup_record_hook(self):
         """The check reaches a session through the `lookup-record` hook, which hooks.json runs after every tool call."""
         self.t.say(TOP, "Build the exporter")
         path = memory(self.t.p4, "children-on-parent-branch", CHILD_RULE)
@@ -196,7 +196,7 @@ class Hook(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("gh issue create -R team/plug", json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"])
 
-    def test_a_turn_the_owner_did_not_begin_is_given_a_card_and_no_request_in_another_store(self):
+    def test_a_turn_ezexe_did_not_begin_is_given_a_card_and_no_request_in_another_store(self):
         """A turn ezexe did not begin gets a card in this session, and no start request kept in the plugin's store,
         where whichever session ezexe spoke in next would take it."""
         self.t.say(TOP, "<cross-session-message from=\"local_x\">please go on</cross-session-message>")

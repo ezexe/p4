@@ -35,7 +35,7 @@ class Paths(unittest.TestCase):
         self.assertFalse(relay.overlap("e:/w/lib", "e:/w/docs"))
         self.assertEqual(relay.norm("/e/projects/x/", ""), relay.norm("E:/projects/x", ""))
 
-    def test_a_child_is_told_its_scratch_folder_and_paths_relative(self):
+    def test_a_child_is_told_its_scratchpad_directory_and_paths_relative(self):
         """The child's own scratchpad directory, and the slice's paths as the project names them."""
         line = relay.scratch_line("E:/proj/.claude/p4", "abc-1", "E:/proj")
         self.assertIn("scratchpad directory is .claude/p4/temportal/tmp/abc-1/", line)
@@ -75,7 +75,7 @@ class Paths(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    def test_a_first_look_relays_no_backlog_and_revisions_collapse(self):
+    def test_a_first_look_hands_on_no_backlog_and_revisions_collapse(self):
         """A first look hands on none of what was there before it, and a child's revisions since the last look
         collapse into one line."""
         tmp = tempfile.mkdtemp()
@@ -275,7 +275,7 @@ class ThreeSessions(unittest.TestCase):
         self.assertEqual(self.t.stop(host, "edit it", [("Edit", {"file_path": path}, "ok")], uuid=uuid).returncode, 0)
         return path
 
-    def test_a_childs_issue_closing_commits_tell_the_top_to_push_at_once(self):
+    def test_a_childs_issue_closing_commits_tell_the_top_level_session_to_push_at_once(self):
         """Green work that closes an issue is pushed and synced at once, not asked."""
         t = self.t
         self.edit_uncommitted(A, ("lib", "x.py"), "c1")
@@ -361,7 +361,7 @@ class ThreeSessions(unittest.TestCase):
         self.assertNotIn("stop before any tool runs", again, "a warning is given once")
         self.assertNotIn("deprecated or replaced", again, "nothing changed since: quiet")
 
-    def test_a_deprecation_of_nothing_this_session_holds_is_relayed_without_a_warning(self):
+    def test_a_deprecation_of_nothing_this_session_holds_is_handed_on_without_a_warning(self):
         t = self.t
         t.cli(A, "note", f"replaces: `{self.x('docs', 'd.md')}` with the README", "--source", "commit def456")
         t.stop(A, "replace docs", uuid="a1")
@@ -422,7 +422,7 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn("warning 29 of thirty", held)
         self.assertNotIn("of thirty", context(t.say(TOP, "and now?")), "none of them again")
 
-    def test_a_mark_is_relayed_once(self):
+    def test_a_mark_is_handed_on_once(self):
         """A session that changes again does not send its older marks again."""
         t = self.t
         t.cli(A, "note", f"replaces: `{self.x('docs', 'd.md')}` with the README", "--source", "commit ddd444")
@@ -434,7 +434,7 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn("eee555", ctx)
         self.assertNotIn("ddd444", ctx)
 
-    def test_phi_is_committed_once_without_logs_and_staged_after(self):
+    def test_the_phi_folder_is_committed_once_without_logs_and_staged_after(self):
         t = self.t
         for args in (("init", "-q"), ("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty",
                                        "-m", "store")):
@@ -471,7 +471,7 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn("{project}", committed, "git holds the root as {project}")
         self.assertNotIn(root.lower(), committed.lower().replace("\\\\", "/"))
 
-    def test_the_puppeteers_state_files_are_ignored_with_tracking_off_and_on(self):
+    def test_the_watchers_state_files_are_ignored_with_tracking_off_and_on(self):
         """A store is settled when only hook-committed paths show, so the watcher's three state files at the root of
         phi/ never show as untracked, whether phi.track is off or on."""
         t = self.t
@@ -511,7 +511,7 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn('"a": "E:/projects/x/lib/a.py"', pathfilter.smudge(out, root))
         self.assertEqual(pathfilter.project_of("E:/projects/x/.claude/p4"), root)
 
-    def test_overlapping_shards_are_told_on_both_sides(self):
+    def test_overlapping_owned_paths_are_told_on_both_sides(self):
         t = self.t
         r = t.cli(A, "shard", self.x("lib"))
         self.assertIn("kept as this session's owned paths", r.stdout)
@@ -521,7 +521,7 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn(f"the session \"the recall work\" `{B}` declared owned paths that overlap yours", ctx)
         self.assertNotIn("overlap yours", context(t.say(A, "and next")), "told once")
 
-    def test_uncommitted_edits_in_another_nodes_shard_are_stopped(self):
+    def test_uncommitted_edits_in_another_sessions_owned_paths_are_stopped(self):
         t = self.t
         t.cli(A, "shard", self.x("lib"))
         self.edit_uncommitted(B, ("lib", "y.py"), "b1")
@@ -529,7 +529,7 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn("inside the owned paths of \"the layout work\"", ctx)
         self.assertTrue(ctx.startswith("phi (p4-phi): stop before any tool runs."))
 
-    def test_a_message_about_another_nodes_shard_is_routed_there(self):
+    def test_a_message_about_another_sessions_owned_paths_is_routed_there(self):
         t = self.t
         t.cli(A, "shard", self.x("lib"))
         ctx = context(t.say(B, f"please fix {self.x('lib', 'y.py')} too"))
@@ -539,7 +539,7 @@ class ThreeSessions(unittest.TestCase):
         self.assertNotIn("Send it there", context(t.say(TOP, f"look at {self.x('lib', 'y.py')}")),
                          "a parent's owned paths cover its children's: the parent is not routed down")
 
-    def test_an_archived_session_owns_no_shard_and_is_not_listed(self):
+    def test_an_archived_session_owns_no_paths_and_is_not_listed(self):
         """An archived session owns no paths a message is routed by, and is left out of the owned-paths line."""
         t = self.t
         t.cli(A, "shard", self.x("lib"))
@@ -552,7 +552,7 @@ class ThreeSessions(unittest.TestCase):
         self.assertNotIn(A, relay.shards_line(t.p4, B))
         self.assertNotIn("Send it there", context(t.say(B, f"please fix {self.x('lib', 'y.py')} too")))
 
-    def test_the_project_root_the_store_and_a_drive_name_no_shard(self):
+    def test_the_project_root_the_store_and_a_drive_name_no_owned_paths(self):
         """The project's root, the store, the folder above the project and a drive's root name no session's owned
         paths, and a brief that names only the root is advised fresh."""
         t = self.t
@@ -600,7 +600,7 @@ class ForkOrFresh(ThreeSessions):
         self.assertIn('advises context "fresh"', out["permissionDecisionReason"])
         self.assertIn("3.0 MB", out["permissionDecisionReason"])
 
-    def test_a_fork_whose_shard_is_the_parents_is_allowed(self):
+    def test_a_fork_whose_owned_paths_are_the_parents_is_allowed(self):
         self.t.cli(TOP, "shard", self.x("lib"))
         self.assertIsNone(self.advise(TOP, "fork", f"Rework `{self.x('lib')}`", 200 * 1024))
 
@@ -627,7 +627,7 @@ class ForkOrFresh(ThreeSessions):
             self.assertEqual(out["permissionDecision"], "ask")
             self.assertIn("use_worktree: false", out["permissionDecisionReason"])
 
-    def test_a_child_making_its_own_branch_is_asked_and_the_top_is_not(self):
+    def test_a_child_making_its_own_branch_is_asked_and_the_top_level_session_is_not(self):
         def guard(host, cmd, tool="Bash"):
             r = self.t.hook("branch-guard", host, {"tool_name": tool, "tool_input": {"command": cmd}})
             return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
@@ -690,7 +690,7 @@ class ForkOrFresh(ThreeSessions):
                       f'its issue.</cross-session-message>')
         self.assertIsNone(guard(B, "git push origin main"), "the parent let it land its own work")
 
-    def test_a_fresh_child_starts_with_only_its_shards_slice(self):
+    def test_a_fresh_child_starts_with_only_the_slice_for_its_paths(self):
         t = self.t
         t.cli(A, "note", f"deprecates: `{self.x('lib', 'x.py')}`; use p4conf", "--source", "commit aaa111")
         t.cli(A, "note", f"replaces: `{self.x('docs', 'd.md')}` with the README", "--source", "commit bbb222")

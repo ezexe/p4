@@ -331,7 +331,7 @@ class Sessions(unittest.TestCase):
         self.t.say("local_plain001", TASK, P4_PHI_WAIT="5")
         self.assertNotIn("waited_ms", self.t.log("local_plain001")[-1])
 
-    def test_a_session_with_no_store_lives_in_that_of_the_session_that_started_it(self):
+    def test_a_session_with_no_store_lives_in_its_parent_sessions_store(self):
         work = os.path.join(self.t.tmp, "worktree")
         os.makedirs(work)
         self.t.record(KID, TOP, "Fix the dropped row", cwd=work)
@@ -339,7 +339,7 @@ class Sessions(unittest.TestCase):
         self.assertTrue(self.t.session(KID)["task"].startswith(BRIEF))
         self.assertFalse(os.path.exists(os.path.join(work, ".claude")))
 
-    def test_no_store_anywhere_is_silence_and_nothing_written(self):
+    def test_no_store_anywhere_gives_the_built_in_rules_and_writes_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
             t = Tree(tmp, store=False)
             t.record(TOP)
@@ -349,7 +349,7 @@ class Sessions(unittest.TestCase):
             self.assertEqual((r.returncode, r.stdout.strip()), (0, ""))
             self.assertFalse(os.path.exists(os.path.join(t.proj, ".claude")), "nothing written")
 
-    def test_the_first_session_of_a_store_hears_nothing(self):
+    def test_the_first_session_of_a_store_hears_the_built_in_rules_alone(self):
         r = self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"})
         self.assertEqual((r.returncode, context(r)), (0, phi.builtin_text()), "no memories: the built-in rules")
         self.assertEqual(self.t.say(TOP, TASK).stdout.strip(), "")
@@ -405,7 +405,7 @@ class Turns(unittest.TestCase):
         self.assertEqual(self.t.turns(KID)[-1]["done"], "")
         self.assertNotEqual(self.t.cli(KID, "done", "ok").returncode, 0)
 
-    def test_the_report_reaches_the_session_that_started_it_in_full_and_once(self):
+    def test_the_report_reaches_the_parent_session_once(self):
         self.kid_stops()
         text = context(self.t.say(TOP, "<side-sessions-event>Fix the dropped row finished a turn</side-sessions-event>"))
         self.assertIn("reports of this session's child sessions", text)
@@ -423,7 +423,7 @@ class Turns(unittest.TestCase):
         self.assertIn("second try", text)
         self.assertNotIn("first try", text)
 
-    def test_a_sessions_own_turn_lists_the_sessions_it_started(self):
+    def test_a_sessions_own_turn_lists_its_child_sessions(self):
         self.t.cli(KID, "done", "test_flush.py: 14 tests OK")
         self.kid_stops()
         self.t.stop(TOP, TASK, [], "The session I started fixed it.")
@@ -439,7 +439,7 @@ class Turns(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.t.p4, "phi", "reports.jsonl")))
         self.assertIn("Narwhal exporter", read(os.path.join(self.t.p4, "phi", "sessions.md")))
 
-    def test_a_report_goes_to_the_session_that_started_it_not_to_the_top(self):
+    def test_a_report_goes_to_the_parent_session_not_to_the_top_level_session(self):
         self.t.stop(GRAND, "bisect flush_rows", [], "It is commit abc.")
         self.assertEqual([r["sessionId"] for r in phi.load_reports(self.t.p4, KID)], [GRAND])
         self.assertEqual(phi.load_reports(self.t.p4, TOP), [])
@@ -491,7 +491,7 @@ class Background(unittest.TestCase):
     def test_background_missed_at_the_start_comes_with_the_first_message(self):
         self.assertIn(TASK, context(self.t.say(KID, HANDED)))
 
-    def test_a_session_is_given_the_last_turn_of_the_others_started_beside_it(self):
+    def test_a_session_is_given_the_last_turn_of_its_siblings(self):
         self.t.stop(KID, HANDED, [("Edit", {"file_path": "src/export/flush.py"}, "ok"),
                                   ("Bash", {"command": "python -c \"x\""}, "No module named 'numpy'", 1)],
                     "Stopped: the fix needs ezexe's word on the format.")
@@ -505,7 +505,7 @@ class Background(unittest.TestCase):
         self.assertIn("numpy", text)
         self.assertNotIn("- \"Check the ports table\", ", text)     # not its own turns: it has none
 
-    def test_the_next_top_session_is_given_the_one_before_whatever_its_words(self):
+    def test_the_next_top_level_session_is_given_the_one_before_whatever_its_words(self):
         self.t.stop(TOP, TASK, [("Edit", {"file_path": "src/export/flush.py"}, "ok")], "Half done.")
         other = "local_top00002"
         self.t.record(other, title="Something else entirely")
@@ -535,7 +535,7 @@ class Background(unittest.TestCase):
         self.assertIn("Half done.", text)
         self.assertIn("edited export/flush.py", text)
 
-    def test_a_session_is_detached_to_a_top_session(self):
+    def test_a_session_is_detached_to_top_level(self):
         self.t.stop(KID, HANDED, [], "Half done.")
         r = self.t.cli(TOP, "detach", KID)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -607,7 +607,7 @@ class NewTask(unittest.TestCase):
         self.assertNotIn("fence", second)                 # the task is the first request, not the newest words
         self.assertEqual([r.get("new_task") for r in self.t.log(TOP)], ["instruction", "line"])
 
-    def test_a_top_sessions_new_topic_is_a_new_top_session_detached_into_the_root(self):
+    def test_a_top_level_sessions_new_topic_is_a_new_top_level_session_detached_to_top_level(self):
         first = self.say(TOP, TASK)
         self.assertIn("A new topic gets a new top-level session of its own", first)
         self.assertIn("`initiation` `user_asked`", first)
@@ -657,7 +657,7 @@ class NewTask(unittest.TestCase):
         self.assertNotIn("something new", self.say(TOP, "add the issue loop's tests"),
                          "a message on an open step of the task list is that step's")
 
-    def test_a_detached_top_is_never_retired_onto_its_former_starter(self):
+    def test_a_detached_top_level_session_is_never_counted_as_archived_on_its_former_parent(self):
         """Counting as archived, the archive lines and parent steps read spawnedFrom.sessionId, never its `from`."""
         import plans
         self.say(TOP, TASK)
@@ -910,7 +910,7 @@ class Rules(unittest.TestCase):
         self.assertIn("background for this session", first)
         self.assertLessEqual(len(first), phi.HOOK_CHARS)
 
-    def test_off_is_silence_and_no_memories_is_the_built_in_rule_alone(self):
+    def test_off_is_silence_and_no_memories_is_the_built_in_rules_alone(self):
         write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"rules": False}))
         self.assertEqual(self.start(TOP), "")
         os.remove(os.path.join(self.t.p4, "phi", "phi.json"))
@@ -918,7 +918,7 @@ class Rules(unittest.TestCase):
             os.remove(os.path.join(self.t.p4, "temportal", "memory", f))
         self.assertEqual(self.start(TOP), phi.builtin_text(), "act-don't-wait holds in a project with no memories")
 
-    def test_a_fork_gets_the_built_in_rule_alone(self):
+    def test_a_fork_gets_the_built_in_rules_alone(self):
         """A fork's inherited conversation already holds the store's feedback and user memories."""
         self.assertEqual(phi.rules_text(self.t.p4, 9000, fork=True), phi.builtin_text())
         self.assertIn("act-don't-wait", phi.rules_text(self.t.p4, 9000))
@@ -1006,7 +1006,7 @@ class Wiring(unittest.TestCase):
         self.assertIn("p4-phi", [x["name"] for x in m["plugins"]])
         self.assertTrue(os.path.exists(os.path.join(ROOT, "skills", "phi", "SKILL.md")))
 
-    def test_the_words_given_to_a_session_are_the_apps(self):
+    def test_the_words_given_to_a_session_hold_no_banned_name(self):
         src = read(os.path.join(HERE, "phi.py"))
         given = "\n".join(line for line in src.splitlines() if "f\"" in line or line.strip().startswith(("\"", "f'")))
         for word in ("ghost", "memo", "rollup", "node", "play", "steer", "owner", "goal"):

@@ -99,7 +99,7 @@ class Linear(Base):
         self.assertIn("reported \"Ported; the suite passes.\"", text3)
         self.assertTrue(os.path.exists(self.path(TOP, "ledger.json")))
 
-    def test_a_divergence_between_phi_and_the_app_is_a_reconcile_line_at_the_top(self):
+    def test_a_divergence_between_p4_phi_and_the_app_is_a_reconcile_line_before_the_sessions(self):
         t = self.t
         t.say(TOP, TASK)
         t.say(KID, handed("Port the flush to the new writer."))
@@ -330,7 +330,7 @@ class AtArchive(Base):
         self.assertEqual(self.t.stop(host, "port it", report="Ported; the suite passes.").returncode, 0)
         self.assertTrue(self.t.session(host).get("doneRetired"))
 
-    def test_a_session_archived_with_a_task_running_leaves_a_row_and_its_puppeteer_is_told_once(self):
+    def test_a_session_archived_with_a_background_task_running_leaves_a_row_and_its_parent_is_told_once(self):
         self.background(KID, "sh run-suites.sh", "bg12345678")
         self.finish()
         left = self.t.session(KID)["unfinishedAtArchive"]["items"]
@@ -383,7 +383,7 @@ class AtArchive(Base):
         self.assertFalse(any("process 7 " in x for x in left))
         self.assertTrue(any("that it queued was never started" in x for x in left), left)
 
-    def test_a_self_archive_names_the_live_task_that_holds_it(self):
+    def test_a_self_archive_names_the_live_background_task_that_holds_it(self):
         self.background(KID, "sh run-suites.sh", "bg33333333")
         r = self.t.hook("self-archive", KID, {"hook_event_name": "PreToolUse",
                                               "tool_name": "mcp__ccd_session_mgmt__archive_session",
@@ -437,7 +437,7 @@ class Scorers(Base):
     MESSAGE = ("Run the exporter flush suite on the store after the ports table writer moves, then quarantine the "
                "narwhal ledger")
 
-    def test_a_trained_route_model_picks_the_route_word_overlap_gets_wrong(self):
+    def test_a_trained_route_model_picks_the_route_shared_content_words_get_wrong(self):
         import prompty_eval
         t = self.t
         t.say(TOP, TASK)
@@ -452,7 +452,7 @@ class Scorers(Base):
         self.assertEqual([r["id"] for _, _, r in by_model][:1], ["rt-right"],
                          "the trained scorer picks the route that shares the message's rare words")
 
-    def test_with_no_model_word_overlap_is_the_fallback_at_the_measured_threshold(self):
+    def test_with_no_model_shared_content_words_are_the_fallback_at_the_measured_threshold(self):
         t = self.t
         t.say(TOP, TASK)
         self.routes()

@@ -137,7 +137,7 @@ class TreeOfPlans(unittest.TestCase):
         self.assertEqual(out["hookEventName"], "PostToolUse")
         return out["additionalContext"]
 
-    def test_a_child_gets_its_parents_step_as_its_root(self):
+    def test_a_child_gets_its_parents_step_as_its_parent_step(self):
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
         self.assertEqual([x["addr"] for x in plans.load(self.t.p4, A)["steps"]], ["2.1", "2.2", "2.3"])
         anchor = json.load(open(relay.anchor_path(self.t.p4, TOP), encoding="utf-8"))
@@ -154,7 +154,7 @@ class TreeOfPlans(unittest.TestCase):
         s["task"] = "something else entirely"
         self.assertEqual(plans.root_of(home, s), "2", "no match: the step in progress")
 
-    def test_a_sub_agent_is_a_child_node_of_the_step_that_launched_it(self):
+    def test_a_subagent_is_a_task_of_the_step_that_launched_it(self):
         t, home = self.t, self.t.p4
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
         sa = relay._session(home, A)
@@ -182,7 +182,7 @@ class TreeOfPlans(unittest.TestCase):
                       " ".join(w["text"] for w in relay._session(home, TOP).get("relayPending") or []),
                       "the parent is told the subagent's id")
 
-    def test_a_sub_agents_step_revised_and_its_stop(self):
+    def test_a_subagents_step_revised_and_its_stop(self):
         home = self.t.p4
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
         sa = relay._session(home, A)
@@ -242,7 +242,7 @@ class TreeOfPlans(unittest.TestCase):
                   "```\nstep 2 plan: 2.1 run every suite\n```\nNothing else.")
         self.assertEqual(plans.matches(report, steps, [], ""), [])
 
-    def test_a_plan_of_waits_and_relays_is_serial(self):
+    def test_a_task_list_of_waits_and_messages_is_serial(self):
         """A task list made mostly of waits and messages is serial, so none of its steps is advised to split."""
         plan = {"steps": [{"addr": "1", "content": "Wait for SA1 and SA2 on main", "status": "in_progress"},
                           {"addr": "2", "content": "Tester confirms nodes_test 14/14 on both lists", "status": "pending"},
@@ -285,7 +285,7 @@ class TreeOfPlans(unittest.TestCase):
         self.assertIn("Every step stays here as a sub-step", ctx)
         self.assertNotIn("user_asked", ctx)
 
-    def test_in_a_turn_another_session_began_the_advice_is_cards_then_start_requests(self):
+    def test_in_a_turn_another_session_began_the_advice_is_suggested_task_cards(self):
         """A turn another session began gets suggested task cards, never a `user_asked` start."""
         self.t.say(B, "Do the three parts")
         self.t.say(B, '<cross-session-message from="local_x">go on</cross-session-message>')
@@ -315,7 +315,7 @@ class TreeOfPlans(unittest.TestCase):
         again = self.plan(A, {"advance": True})
         self.assertNotIn("moved past", again)
 
-    def test_the_parent_revising_the_childs_root_reaches_it_at_its_next_advance(self):
+    def test_the_parent_revising_the_childs_parent_step_reaches_it_at_its_next_advance(self):
         t = self.t
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
         self.assertEqual(self.plan(A, {"advance": True}), "", "nothing bears on 2.2: quiet")
@@ -332,7 +332,7 @@ class TreeOfPlans(unittest.TestCase):
                                                  {"content": "Tell the docs child", "status": "in_progress"}]}).count(
             "was revised"), 0, "a warning is given once")
 
-    def test_a_removed_root_step_tells_the_child_before_its_next_tool(self):
+    def test_a_removed_parent_step_tells_the_child_before_its_next_tool(self):
         t = self.t
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/"))
         self.plan(TOP, items("Port the hooks", "Write the layout docs", at=1))
@@ -406,7 +406,7 @@ class TreeOfPlans(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
 
-    def test_the_plan_check_runs_through_recalls_lookup_entry_once(self):
+    def test_the_task_list_check_runs_through_the_lookup_record_hook_once(self):
         """The task-list check rides on the `lookup-record` hook, which hooks.json registers for every tool call; a
         call that also reaches phi.py's own `plan` entry is applied once."""
         t = self.t
@@ -567,7 +567,7 @@ class TreeOfPlans(unittest.TestCase):
         self.assertEqual(r.stdout.strip(), "")
         self.assertFalse(any(st.get("tasks") for st in plans.load(self.t.p4, B).get("steps") or []))
 
-    def test_a_finished_child_a_newer_note_supersedes_is_retired(self):
+    def test_a_finished_child_a_newer_note_supersedes_is_counted_as_archived(self):
         t = self.t
         self.plan(TOP, items("Move the store layout into recall", "Write the exporter docs", at=0))
         t.say(A, "Move the store layout into recall")
@@ -609,7 +609,7 @@ class TreeOfPlans(unittest.TestCase):
         self.assertEqual(sum(1 for k in kept if "as a live session" in k["claim"]), 1,
                          "never counted as archived twice")
 
-    def test_a_fresh_child_starts_with_its_root_step_and_a_fork_has_it_pinned(self):
+    def test_a_fresh_child_starts_with_its_parent_step_and_a_fork_has_it_pinned(self):
         t = self.t
         t.record(GRAND, TOP, title="the step child")
         ctx = context(t.say(GRAND, "Write the docs for step 3"))
@@ -1012,7 +1012,7 @@ class TopOrchestrates(unittest.TestCase):
         self.assertEqual(self.check(A, "Edit", {"file_path": f"{p}/src/export/flush.py"}, "toolu_n7"), "",
                          "a child is never nudged")
 
-    def test_a_child_archived_when_done_leaves_a_replaces_note_and_the_parents_archive_line(self):
+    def test_a_child_marked_report_when_done_leaves_a_replaces_note_and_is_offered_to_ezexe(self):
         t, C = self.t, self.C
         t.record(C, TOP, title="the port child")
         t.say(C, HANDED_DISPOSABLE)
@@ -1087,7 +1087,7 @@ class TopOrchestrates(unittest.TestCase):
         self.assertEqual([[st["addr"] for st in g] for g in groups], [["4"]])
         self.assertEqual([a for a, _ in kept], ["1", "2", "3"])
 
-    def test_two_children_retired_at_once_are_both_named_for_archiving(self):
+    def test_children_counted_as_archived_at_once_are_all_kept(self):
         """Children counted as archived at once are all kept, since each write of the parent's session.json takes its
         lock."""
         import threading
@@ -1103,7 +1103,7 @@ class TopOrchestrates(unittest.TestCase):
         self.assertEqual(sorted(x["id"] for x in pend), ids)
         self.assertFalse(os.path.exists(os.path.join(relay._dir(home, TOP), "session.json.lock")))
 
-    def test_a_retired_childs_note_keeps_the_findings_of_its_final_report(self):
+    def test_an_archived_childs_note_keeps_the_findings_of_its_final_report(self):
         """An archived child's replaces: note keeps the findings of its final report, even when they stand in the
         message before its last one."""
         t, C = self.t, self.C
@@ -1135,7 +1135,7 @@ class TopOrchestrates(unittest.TestCase):
         self.assertIn("left no report text", bare)
         self.assertNotIn('"Done."', bare)
 
-    def test_phi_disposable_marks_a_child_and_done_retires_it(self):
+    def test_phi_disposable_marks_a_child_and_done_counts_it_as_archived(self):
         t, C = self.t, self.C
         t.record(C, TOP, title="the cli child")
         t.say(C, "Check the exporter's ports table")
@@ -1203,7 +1203,7 @@ class TopOrchestrates(unittest.TestCase):
         self.assertIn("this is the top-level session",
                       self.check(TOP, "Bash", {"command": 'P=x; python "$P" note y && make'}, "toolu_p9"))
 
-    def test_top_sessions_relay_as_siblings_and_an_archived_top_drops_out(self):
+    def test_top_level_sessions_hear_each_other_as_siblings_and_an_archived_one_drops_out(self):
         t, T2 = self.t, "local_top00002"
         t.record(T2, title="the second top")
         t.say(T2, "Rework the fence exporter")
@@ -1355,7 +1355,7 @@ class WaitsOnReports(unittest.TestCase):
         t.say(TOP, "what came in?")                 # the report is handed to the top-level session
         self.assertEqual(self.stop("A reported.", uuid="u4").get("decision"), "block", "nothing is waited on now")
 
-    def test_other_steps_are_read_as_before(self):
+    def test_other_steps_stay_or_go_by_the_same_rules(self):
         for stays in self.STEPS + ("Collect the children's reports", "Wait until every tree reports",
                                    "Check the acceptance session's results", "Read the reports from the fixers"):
             self.assertEqual(plans.top_stays(stays), plans.AWAITS_WHY, stays)

@@ -114,7 +114,7 @@ class Loop(unittest.TestCase):
         write(os.path.join(self.work, "lib", "x.py"), text)
         self.git(self.work, "commit", "-qam", msg)
 
-    def proving_test(self, ok):
+    def regression_test(self, ok):
         write(os.path.join(self.work, "test_x.py"), "import sys\nsys.exit(%d)\n" % (0 if ok else 1))
         self.git(self.work, "add", "test_x.py")
         exe = sys.executable.replace("\\", "/")
@@ -204,7 +204,7 @@ class Loop(unittest.TestCase):
         self.assertIn("a commit that says `Closes #7`", r.stdout)
         self.assertIn("phi.py proof", r.stdout)
         self.commit("lib: fix x\n\nCloses #7")
-        self.finish(self.proving_test(True))
+        self.finish(self.regression_test(True))
         r = self.t.cli(A, "done", "ran test_x.py and it passed", proj=self.work)
         self.assertIn("says `Closes #7`", r.stdout)
         self.assertIn("Still owed before it closes: the push of", r.stdout)
@@ -249,9 +249,9 @@ class Loop(unittest.TestCase):
         self.commit("lib: the queue's other fix\n\nCloses #9", "x = 4\n")
         self.assertNotIn("does not say", self.plan(A, {"advance": True}), "another issue's commit is its work")
 
-    def test_a_child_whose_named_test_fails_is_not_retired(self):
+    def test_a_child_whose_named_test_fails_is_not_counted_as_archived(self):
         self.start_writer()
-        step = self.proving_test(False)
+        step = self.regression_test(False)
         self.commit("lib: fix x\n\nCloses #7")
         self.finish(step)
         out = self.stop("f1")
@@ -269,9 +269,9 @@ class Loop(unittest.TestCase):
                         "transcript_path": os.path.join(self.t.tmp, A + "f1.jsonl"), "cwd": self.work})
         self.assertEqual(json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
 
-    def test_a_green_child_is_pushed_its_issue_closes_and_it_is_retired_with_the_link(self):
+    def test_a_green_child_is_pushed_its_issue_closes_and_it_is_counted_as_archived_with_the_link(self):
         self.start_writer()
-        step = self.proving_test(True)
+        step = self.regression_test(True)
         self.commit("lib: fix x\n\nCloses #7")
         self.finish(step)
         out = self.stop("g1")
