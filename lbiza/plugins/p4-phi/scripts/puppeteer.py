@@ -254,10 +254,6 @@ def app_look(roots):
     return out
 
 
-def app_files(roots):
-    return [p for p, _, _ in app_look(roots)]
-
-
 def app_cache_path(home):
     return os.path.join(home, "phi", ".cache", "app-index.json")
 
