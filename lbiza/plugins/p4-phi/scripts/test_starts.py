@@ -66,7 +66,7 @@ class StartRequests(unittest.TestCase):
         self.assertIn("kept as start request req-", r.stdout)
         self.assertIn("No other session is handed it", r.stdout)
         self.assertIn("was already kept", t.cli(KID, "request", "the flush port", "--brief", BRIEF).stdout)
-        self.assertEqual(context(t.say(KID, CROSS)).count("start requests from sessions"), 0,
+        self.assertEqual(context(t.say(KID, CROSS)).count("start requests this session filed"), 0,
                          "a turn another session began carries no request")
         self.assertNotIn("start requests", context(t.say(TOP2, "How are the docs coming?")),
                          "a request filed by one session is not handed to another on ezexe's next turn there")

@@ -1028,10 +1028,28 @@ class Wiring(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(ROOT, "skills", "phi", "SKILL.md")))
 
     def test_the_words_given_to_a_session_hold_no_banned_name(self):
-        src = read(os.path.join(HERE, "phi.py"))
-        given = "\n".join(line for line in src.splitlines() if "f\"" in line or line.strip().startswith(("\"", "f'")))
-        for word in ("ghost", "memo", "rollup", "node", "play", "steer", "owner", "goal"):
-            self.assertNotRegex(given.lower(), rf"\b{word}s?\b", word)
+        """Every string the session modules can hand a session: each literal and f-string part, docstrings, keys and
+        regex sources aside; owner is banned outside puppeteer.py, whose code owner is that word's programming sense."""
+        import ast
+        for name in ("phi.py", "relay.py", "plans.py", "controls.py", "starts.py", "puppeteer.py", "issues.py",
+                     "gaps.py"):
+            tree, skip = ast.parse(read(os.path.join(HERE, name))), set()
+            for n in ast.walk(tree):
+                if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n.body \
+                        and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant):
+                    skip.add(id(n.body[0].value))
+                elif isinstance(n, ast.Subscript):
+                    skip.add(id(n.slice))
+                elif isinstance(n, ast.Dict):
+                    skip.update(id(k) for k in n.keys if k is not None)
+                elif isinstance(n, ast.Call) and n.args and getattr(n.func, "attr", "") in ("get", "pop", "setdefault",
+                                                                                            "compile"):
+                    skip.add(id(n.args[0]))
+            given = "\n".join(n.value for n in ast.walk(tree) if isinstance(n, ast.Constant)
+                              and isinstance(n.value, str) and id(n) not in skip).lower()
+            for word in ("ghost", "memo", "rollup", "node", "play", "steer", "goal") + (
+                    ("owner",) if name != "puppeteer.py" else ()):
+                self.assertNotRegex(given, rf"\b{word}s?\b", f"{word} in {name}")
 
 
 if __name__ == "__main__":
