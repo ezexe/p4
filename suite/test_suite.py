@@ -186,10 +186,10 @@ class Verdict(unittest.TestCase):
     def test_a_run_within_its_budget_passes_and_one_past_it_fails_with_its_own_status(self):
         lines, status = run.report(self.rows("ok", "skip"), [], 2, 4.0, 0.1, 10)
         self.assertEqual(status, run.OK)
-        self.assertEqual(lines[-1], "budget 10 s from suite/suite.json: within it by 6.0 s")
+        self.assertEqual(lines[-1], "budget 10 s from suite/suite.json: the run took 4.0 s, under it by 6.0 s")
         lines, status = run.report(self.rows("ok"), [], 2, 12.5, 0.1, 10)
         self.assertEqual(status, run.OVER_BUDGET)
-        self.assertEqual(lines[-1], "budget 10 s from suite/suite.json: passed by 2.5 s")
+        self.assertEqual(lines[-1], "budget 10 s from suite/suite.json: the run took 12.5 s, over it by 2.5 s")
 
     def test_a_failed_test_outranks_the_budget_and_a_subset_has_none(self):
         self.assertEqual(run.report(self.rows("ok", "FAIL"), [], 2, 12.5, 0.1, 10)[1], run.FAILED)
@@ -331,7 +331,7 @@ class Command(Repo):
         tsv = os.path.join(self.root, "timings.tsv")
         code, out, err = command(self.root, "--budget", "0.05", "--tsv", tsv, "--label", "L", "--workers", "1")
         self.assertEqual(code, run.OVER_BUDGET, out + err)
-        self.assertRegex(out, r"budget 0.05 s from the command line: passed by [\d.]+ s")
+        self.assertRegex(out, r"budget 0.05 s from the command line: the run took [\d.]+ s, over it by [\d.]+ s")
         with open(tsv, encoding="utf-8") as f:
             rows = [line.rstrip("\n").split("\t") for line in f]
         self.assertEqual(rows[0], ["label", "file", "test", "seconds", "result"])

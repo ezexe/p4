@@ -889,11 +889,11 @@ def report(rows, leaks, workers, wall, import_s, budget, source="suite/suite.jso
     status = FAILED if bad or not rows else OK
     if budget is None:
         lines.append("budget: not checked, since only some tests ran")
-    elif wall <= budget:
-        lines.append(f"budget {budget:g} s from {source}: within it by {budget - wall:.1f} s")
     else:
-        lines.append(f"budget {budget:g} s from {source}: passed by {wall - budget:.1f} s")
-        status = status or OVER_BUDGET
+        side = f"under it by {budget - wall:.1f} s" if wall <= budget else f"over it by {wall - budget:.1f} s"
+        lines.append(f"budget {budget:g} s from {source}: the run took {wall:.1f} s, {side}")
+        if wall > budget:
+            status = status or OVER_BUDGET
     return lines, status
 
 
