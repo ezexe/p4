@@ -389,16 +389,6 @@ class Agent(Base):
                      self.proj)
         self.assertEqual(r.stdout, "")
 
-    def test_subagent_start_fallback_reads_the_parent(self):
-        parent = os.path.join(self.tmp.name, "parent.jsonl")
-        write(parent, json.dumps({"type": "assistant", "message": {"content": [
-            {"type": "tool_use", "name": "Agent", "id": "t1", "input": dict(self.INPUT)}]}}) + "\n")
-        o = self.out(run_hook("subagent-start", {"hook_event_name": "SubagentStart", "agent_id": "a1",
-                                                 "agent_type": "Explore", "transcript_path": parent,
-                                                 "cwd": self.proj}, self.proj))
-        self.assertEqual(o["hookSpecificOutput"]["hookEventName"], "SubagentStart")
-        self.assertTrue(o["hookSpecificOutput"]["additionalContext"].startswith("Notes from this repo's memory:"))
-
 
 class Close(Base):
     def turn(self, prompt, calls, reply):

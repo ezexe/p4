@@ -14,7 +14,6 @@ its row of 3.3 allows, and on any failure exits 0 with one notice for ezexe (`sy
   recall         UserPromptSubmit   additionalContext: 0-5 lines; opens the message row; logs what it served
   agent          PreToolUse Agent   updatedInput: the Agent call's input as received, its `prompt` with the lines
                  appended under "Notes from this repo's memory:"; nothing when no line clears the threshold
-  subagent-start SubagentStart      (the fallback of 4.7; registered only if the PreToolUse road fails its test)
   close          Stop               nothing; completes the row, writes the turn's usage and repo labels and the
                  dictionary's signals, rebuilds the index when owed
   subagent-stop  SubagentStop       nothing; usage and repo labels for what was served to that subagent
@@ -338,7 +337,7 @@ def h_recall(payload):
     return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "\n".join(shown)}}
 
 
-# --- subagent recall (PreToolUse Agent; SubagentStart fallback) ------------------------------------------
+# --- subagent recall (PreToolUse Agent) ----------------------------------------------------------------
 
 def agent_lines(p4, prompt):
     import p4 as cli
@@ -395,38 +394,6 @@ def h_agent(payload):
     if os.environ.get("P4_AGENT_ALLOW") == "1":
         out["permissionDecision"] = "allow"
     return {"hookSpecificOutput": out}
-
-
-def last_agent_prompt(transcript_path, agent_type):
-    """The prompt of the last Agent tool_use in the parent transcript whose subagent_type is agent_type (4.7's
-    fallback: a guess when several agents of one type launch at once)."""
-    import transcript as tr
-    for d in reversed(tr.read_lines(transcript_path)):
-        if d.get("type") != "assistant":
-            continue
-        for b in reversed((d.get("message") or {}).get("content") or []):
-            if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") in ("Agent", "Task"):
-                inp = b.get("input") or {}
-                if (inp.get("subagent_type") or "general-purpose") == (agent_type or "general-purpose"):
-                    return inp.get("prompt") or ""
-    return ""
-
-
-def h_subagent_start(payload):
-    import labels as lb
-    p4 = ready(payload)
-    if not p4:
-        return None
-    prompt = last_agent_prompt(payload.get("transcript_path") or "", payload.get("agent_type") or "")
-    if not prompt or NOTES_HEAD in prompt:
-        return None
-    r = agent_lines(p4, prompt)
-    if not r["lines"]:
-        return None
-    lb.write_served(p4, f"agent-{sha8(prompt)}", {"ids": [i for i in r["ids"] if ":" in i], "text": prompt[:2000],
-                                                  "task": f"agent:{sha8(prompt)}", "time": now()})
-    return {"hookSpecificOutput": {"hookEventName": "SubagentStart",
-                                   "additionalContext": NOTES_HEAD + "\n" + "\n".join(r["lines"])}}
 
 
 # --- close (Stop, SubagentStop) --------------------------------------------------------------------------
@@ -640,7 +607,7 @@ def h_catch_up(payload):
     return catchup.hook(payload)
 
 
-HANDLERS = {"catch-up": h_catch_up, "layout": h_layout, "recall": h_recall, "agent": h_agent, "subagent-start": h_subagent_start,
+HANDLERS = {"catch-up": h_catch_up, "layout": h_layout, "recall": h_recall, "agent": h_agent,
             "close": h_close, "subagent-stop": h_subagent_stop, "train": h_train,
             "lookup-check": h_lookup_check, "lookup-record": h_lookup_record}
 
