@@ -10,6 +10,7 @@ import os
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -472,13 +473,29 @@ class Facts(Base):
                         "retrieval indexes the new facts")
 
     def test_unsettled_and_unsourced_write_nothing(self):
+        class NoSource(te.FakeClient):
+            """A search that returned no result: the answer names a URL in its prose alone, which is no source."""
+            def fake_search(self, prompt, answered, n_in):
+                out = te.FakeClient.fake_search(prompt, answered, n_in)
+                if "FAKE-NO-SOURCE" in prompt:
+                    text = ("The current documentation says: use the -O2 default (version 4.4, 2026-01). "
+                            "See https://docs.example.org/release-flags")
+                    out.content = [SimpleNamespace(type="server_tool_use", name="web_search"),
+                                   SimpleNamespace(type="web_search_tool_result", content=[]),
+                                   SimpleNamespace(type="text", text=text, citations=[])]
+                return out
+
         self.messages(self.ROWS[:1] + [
             [("fingerprint", '"FAKE-UNSETTLED which linker should the mac build use?"'), ("time", "2026-11-02 09:00"),
-             ("arrival", "turn"), ("state", "FRESH"), ("addressed", "lld.")]])
-        s = te.facts(self.p4, fargs(), client=te.FakeClient(), out=quiet)
-        self.assertEqual((s["tasks"], s["written"], s["unsettled"]), (2, 1, 1), s)
+             ("arrival", "turn"), ("state", "FRESH"), ("addressed", "lld.")],
+            [("fingerprint", '"FAKE-NO-SOURCE which optimizer flags should the release build take?"'),
+             ("time", "2026-11-02 10:00"), ("arrival", "turn"), ("state", "FRESH"), ("addressed", "-O2.")]])
+        s = te.facts(self.p4, fargs(), client=NoSource(), out=quiet)
+        self.assertEqual((s["tasks"], s["written"], s["unsettled"], s["unsourced"]), (3, 1, 1, 1), s)
         self.assertEqual(len(self.facts_entries()), 1)
-        self.assertNotIn("linker", open(p4conf.sub(self.p4, "store", "facts.md"), encoding="utf-8").read())
+        text = open(p4conf.sub(self.p4, "store", "facts.md"), encoding="utf-8").read()
+        self.assertNotIn("linker", text)
+        self.assertNotIn("release-flags", text, "a URL the answer only named is never a fact's source")
 
     def test_estimate_and_budget(self):
         s = te.facts(self.p4, fargs("--estimate"), client=te.FakeClient(), out=quiet)
