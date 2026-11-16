@@ -554,7 +554,7 @@ def gate(home, s, cwd=""):
     closing = [(repo, sha, subj) for repo, sha, subj, body in mine if closes(body, slug, n)]
     st = issue_state(slug, n)
     pushed = bool(closing) and all(_pushed(repo, sha) for repo, sha, _ in closing)
-    if st == "CLOSED" or (not st and pushed):
+    if st == "CLOSED":
         sha, subj = (closing[-1][1], closing[-1][2]) if closing else ("", "")
         iss["closed"] = now()
         note = (f"Issue: {iss['url']}, closed. Closing commit: "
@@ -572,10 +572,11 @@ def gate(home, s, cwd=""):
                f"`p4.py sync --push`; the push closes {ref}. Anything that cannot be undone, such as a force-push, a "
                f"history rewrite or a deletion, still asks.")
         return False, ("" if _told(iss, f"push:{head}") else why), ""
-    why = (f"phi (p4-phi): the `Closes #{n}` commit {closing[-1][1]} is pushed, but {ref} is still open: GitHub closes "
-           f"it when that commit reaches the default branch. Land it there, or close it with `gh issue close {n} -R "
-           f"{slug} --comment \"<the commit and the test>\"`.")
-    return False, ("" if _told(iss, f"open:{head}") else why), ""
+    why = (f"phi (p4-phi): the `Closes #{n}` commit {closing[-1][1]} is pushed, but "
+           + (f"{ref} is still open" if st else f"gh could not say whether {ref} is closed")
+           + f": GitHub closes it when that commit reaches the default branch. Land it there, or close it with "
+             f"`gh issue close {n} -R {slug} --comment \"<the commit and the test>\"`.")
+    return False, ("" if _told(iss, f"{st.lower() or 'unknown'}:{head}") else why), ""
 
 
 def _pushed(repo, sha):

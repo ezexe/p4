@@ -4,9 +4,10 @@ phi.py's own hooks with a stand-in for `gh`.
 
     python3 -I lbiza/plugins/p4-phi/scripts/test_issues.py
 
-The stand-in files issue #7 on create, answers `issue view` from a state file the test writes, as GitHub closes the
-issue once the `Closes #7` commit is pushed, and logs every call. The work repository's `origin` reads as GitHub
-and pushes to a bare repository beside it.
+The stand-in files issue #7 on create and answers `issue view` from a state file the test writes, as GitHub closes the
+issue once the `Closes #7` commit is pushed; a state of UNREACHABLE makes `issue view` fail, as gh fails when it
+cannot reach GitHub. It logs every call. The work repository's `origin` reads as GitHub and pushes to a bare
+repository beside it.
 """
 
 import json
@@ -35,6 +36,8 @@ if args[:2] == ["issue", "create"]:
 elif args[:2] == ["issue", "view"]:
     p = os.path.join(d, "state.json")
     states = json.load(open(p, encoding="utf-8")) if os.path.exists(p) else {}
+    if states.get(args[2]) == "UNREACHABLE":
+        sys.exit("error connecting to api.github.com")
     print(states.get(args[2], "OPEN"))
 elif args[:2] == ["issue", "comment"]:
     print("https://github.com/ezexe/demo/issues/7#issuecomment-1")
@@ -294,6 +297,31 @@ class Loop(unittest.TestCase):
         self.assertIn("lib: fix x", notes)
         self.assertIn("test_x.py", notes)
         self.assertIn(A, context(self.t.say(TOP, "what next?")), "the parent gets its archive line")
+
+    def test_a_pushed_child_is_counted_as_archived_only_once_gh_shows_its_issue_closed(self):
+        """With the `Closes #7` commit pushed and `gh issue view` failing, nothing shows the issue closed: the child's
+        turn is sent back saying gh could not say, it is not counted as archived, and no note on its parent calls the
+        issue closed. Once gh shows the issue closed, the next Stop counts it as archived."""
+        self.start_writer()
+        step = self.regression_test(True)
+        self.commit("lib: fix x\n\nCloses #7")
+        self.git(self.work, "push", "-q", "-u", "origin", "main")
+        write(os.path.join(self.ghdir, "state.json"), json.dumps({"7": "UNREACHABLE"}))
+        self.finish(step)
+        out = self.stop("u1")
+        self.assertFalse(self.t.session(A).get("doneRetired"), "nothing showed the issue closed")
+        notes = os.path.join(self.t.dir(TOP), "notes.jsonl")
+        if os.path.exists(notes):
+            with open(notes, encoding="utf-8") as f:
+                self.assertNotIn("replaces:", f.read(), "no note on the parent calls the issue closed")
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("gh could not say whether ezexe/demo#7 is closed", out.get("reason", ""))
+        self.assertNotIn("still open", out.get("reason", ""), "nothing showed the issue open either")
+        write(os.path.join(self.ghdir, "state.json"), json.dumps({"7": "CLOSED"}))
+        self.assertEqual(self.stop("u2").get("decision"), None)
+        self.assertTrue(self.t.session(A).get("doneRetired"), "counted as archived once gh shows the issue closed")
+        with open(notes, encoding="utf-8") as f:
+            self.assertIn("https://github.com/ezexe/demo/issues/7, closed", f.read())
 
 
 CONSOLE = """import ctypes, json, os, subprocess, sys
