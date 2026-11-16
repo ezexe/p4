@@ -278,7 +278,7 @@ class Synthetic(unittest.TestCase):
             self.assertTrue(e.fields["because"].strip())
             self.assertRegex(e.fields["because"], r'you wrote ".+"')
 
-    def test_pool_picks_resolve_as_pick_model_did(self):
+    def test_pool_picks_resolve_by_file_time_and_head(self):
         """A pick of a freed ruling, which the pool listed with its state, stays on that ruling, and a pick whose
         head is the reader's own words is unresolved, never guessed from its file and time: a pick resolves by its
         file, its time and its head's prefix alone."""
