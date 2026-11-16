@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""test_p4_memory.py — acceptance tests for p4-temportal's memory part: every AppData memory source (the memory/ directory, a link
-an earlier version left, a memory.pre-p4-* directory) is merged into .claude/p4/temportal/memory/ and deleted, a differing
+"""test_p4_memory.py — acceptance tests for p4-temportal's memory part: the AppData memory/ directory, or a link an
+earlier version left in its place, is merged into .claude/p4/temportal/memory/ and deleted, a differing
 file kept in .conflicts/ and never overwriting p4; AppData keeps only the pointer MEMORY.md; a write into AppData
 is moved into p4; a busy directory is left to the turn's close; .claude/p4/ is created when absent (not as a git
 repository). Then the gate-2 checks of the design (.docs/p4/fresh-marketplace.md 8.1): (a) the SessionStart output
@@ -102,17 +102,11 @@ def behavior():
     put(os.path.join(app, "b.md"), "fact b\n")
     put(os.path.join(p4mem, "a.md"), "fact a, edited elsewhere\n")
     put(os.path.join(p4mem, "b.md"), "fact b\n")
-    backup = app + ".pre-p4-20260101-000000"
-    put(os.path.join(backup, "b.md"), "fact b\n")
-    put(os.path.join(backup, "z.md"), "fact z, retired in p4\n")
     out = run("migrate", root, app, {})
     # moved, kept aside, dropped, deleted
     assert read(os.path.join(p4mem, "MEMORY.md")) == "- [a](a.md) — a\n", "an absent file was not moved in"
     assert read(os.path.join(p4mem, "a.md")) == "fact a, edited elsewhere\n", "the p4 file was overwritten"
     assert read(os.path.join(p4mem, ".conflicts", "memory", "a.md")) == "fact a\n", "differing copy not kept"
-    assert read(os.path.join(p4mem, ".conflicts", os.path.basename(backup), "z.md")) == "fact z, retired in p4\n"
-    assert not os.path.exists(os.path.join(p4mem, "z.md")), "a retired file was resurrected into p4"
-    assert not os.path.exists(backup), "the renamed-aside directory was not deleted"
     assert only_pointer(app), os.listdir(app)
     assert os.path.normpath(p4mem) in read(os.path.join(app, "MEMORY.md")), "the pointer does not name p4"
     assert os.path.isfile(transcript), "the harness's own files were touched"
@@ -153,20 +147,21 @@ def behavior():
     out = run("migrate", root, app2, {})
     assert "removed the link" in out and sorted(os.listdir(p4mem)) == before, out
     assert only_pointer(app2) and not os.path.samefile(app2, p4mem), "the link was not replaced by the pointer"
-    # a busy renamed-aside directory: its content reaches p4, the deletion waits for the close
-    backup3 = app + ".pre-p4-20260202-000000"
-    put(os.path.join(backup3, "y.md"), "fact y\n")
+    # a busy folder in AppData: its content reaches p4, the deletion waits for the close
+    held = os.path.join(app, "held")
+    put(os.path.join(held, "y.md"), "fact y\n")
     if os.name == "nt":
-        busy = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(15)"], cwd=backup3)
+        busy = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(15)"], cwd=held)
         try:
             out = run("migrate", root, app, {})
-            assert "busy" in out and os.path.isdir(backup3), out
+            assert "busy" in out and os.path.isdir(held), out
         finally:
             busy.kill()
             busy.wait()
     assert run("sweep", root, app, {}) == "", "the close printed"
-    assert not os.path.exists(backup3), "the close did not sweep the renamed-aside directory"
-    assert read(os.path.join(p4mem, ".conflicts", os.path.basename(backup3), "y.md")) == "fact y\n"
+    assert not os.path.exists(held), "the close did not delete the busy folder"
+    assert read(os.path.join(p4mem, "held", "y.md")) == "fact y\n"
+    assert only_pointer(app), os.listdir(app)
     assert run("sweep", root, app, {}) == "", "a clean close spoke"
     # a project dir with forward slashes, as a hook payload's cwd carries it
     root3 = os.path.join(base, "proj3")

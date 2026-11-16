@@ -7,8 +7,8 @@ that directory into p4 and leaves one file there, a pointer `MEMORY.md` that say
 there. The rest of `~/.claude/projects/<project-slug>/` (transcripts, per-session directories) is never touched.
 `.claude/p4/` is created when absent (a plain directory; p4-phi's recall layout hook makes it a git repository).
 
-  migrate (SessionStart)  every AppData memory source (the `memory/` directory, a junction or symlink an earlier
-                          version left, every `memory.pre-p4-<time>` directory) is merged into `.claude/p4/temportal/memory/`
+  migrate (SessionStart)  the AppData `memory/` directory, or a junction or symlink an earlier version left in its
+                          place, is merged into `.claude/p4/temportal/memory/`
                           and deleted: identical in p4 -> dropped; a live file absent in p4 -> moved in; any other ->
                           kept at `.conflicts/<source>/<path>`, never overwriting the p4 file. A link to p4 is removed
                           as a link. Then the pointer is written and the p4 `MEMORY.md` is printed as the built-in
@@ -23,7 +23,6 @@ Every failure prints a one-line notice and exits 0.
 """
 
 import filecmp
-import glob
 import json
 import os
 import re
@@ -210,30 +209,24 @@ def migrate(app, p4, stamp):
         if not retry(remove_link, app):
             return [f"{app} is a link to .claude/p4/temportal/memory/ and is busy, retried at the turn's close"], False
         lines.append(f"removed the link {app} -> .claude/p4/temportal/memory/ (its target untouched)")
-    sources = [app] if os.path.isdir(app) else []
-    sources += sorted(d for d in glob.glob(glob.escape(app) + ".pre-p4-*") if os.path.isdir(d) and not is_link(d))
     moved, aside, left = [], [], []
-    for src_dir in sources:
-        live = src_dir == app
-        name = os.path.basename(src_dir)
-        if live and all(n == "MEMORY.md" and is_pointer(os.path.join(app, n)) for n in os.listdir(app)):
-            continue                                    # only the pointer: nothing to move
-        for rel in files_in(src_dir, skip_conflicts=False):
-            src, dst = os.path.join(src_dir, rel), os.path.join(p4, rel)
-            if live and rel == "MEMORY.md" and is_pointer(src):
+    name = os.path.basename(app)
+    if os.path.isdir(app) and not all(n == "MEMORY.md" and is_pointer(os.path.join(app, n)) for n in os.listdir(app)):
+        for rel in files_in(app, skip_conflicts=False):
+            src, dst = os.path.join(app, rel), os.path.join(p4, rel)
+            if rel == "MEMORY.md" and is_pointer(src):
                 continue
             if os.path.isfile(dst) and filecmp.cmp(src, dst, shallow=False):
                 pass                                    # identical in p4: dropped
-            elif live and not os.path.exists(dst) and rel.split(os.sep)[0] != CONFLICTS:
+            elif not os.path.exists(dst) and rel.split(os.sep)[0] != CONFLICTS:
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copy2(src, dst)
                 moved.append(rel)
             else:
                 keep_aside(p4, name, rel, src, stamp)
                 aside.append(f"{name}/{rel}")
-        ok = empty_live_dir(src_dir) if live else retry(shutil.rmtree, src_dir)
-        if not ok:
-            left.append(src_dir)
+        if not empty_live_dir(app):
+            left.append(app)
     try:
         write_pointer(app, p4)
     except OSError as e:
@@ -342,7 +335,7 @@ def cmd_sweep(payload):
     """Stop: whatever the start could not move or delete is tried again at the turn's close. Prints nothing."""
     root = project_root(payload)
     app, p4 = appdata_memory(payload, root), p4_memory(root)
-    pending = is_link(app) or glob.glob(glob.escape(app) + ".pre-p4-*") or (
+    pending = is_link(app) or (
         os.path.isdir(app) and any(n != "MEMORY.md" or not is_pointer(os.path.join(app, n)) for n in os.listdir(app)))
     if pending or not os.path.isdir(app):
         migrate(app, p4, time.strftime("%Y%m%d-%H%M%S"))
