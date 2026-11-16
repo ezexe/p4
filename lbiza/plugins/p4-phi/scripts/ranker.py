@@ -87,8 +87,8 @@ def idf_of(df, n):
 
 
 def is_rare(df, n):
-    """A rare term: its idf is above RARE_IDF, so it is in under about one doc in twenty, or it is in at most two
-    docs. The second keeps rare terms in a small corpus: below 30 docs no idf passes RARE_IDF."""
+    """A rare term: its idf is above RARE_IDF, so it is in under about one document in twenty, or it is in at most
+    two documents. The second keeps rare terms among few documents: below 30 documents no idf passes RARE_IDF."""
     return df <= 2 or idf_of(df, n) > RARE_IDF
 
 
@@ -135,12 +135,12 @@ def candidate_features(task_terms, cands, idf, avgdl, now, scores=None, weights=
     """`(features, scores, shared terms)`: one sparse feature dict {index: value} per candidate, the candidates'
     BM25 and the four rarest terms each shares with the task.
 
-    `cands` are dicts with `file`, `kind`, `toks`, the entry's tokens, and `head`, the tokens of its head line;
+    `cands` are dicts with `file`, `kind`, `toks`, the document's tokens, and `head`, the tokens of its head line;
     `state`, `time`, `dl` and `fkind` are read when present. `scores` are the candidates' BM25 when the caller has
     them. `extra` turns on the added features: `{"dict-hit": set of candidate indices, "near": {candidate index:
     (score, 1 / (1 + rank), likeness)}, "node": set of candidate indices}`, the likeness optional. near.extend gives
-    "near", the entries earlier, similar tasks used; "node" holds the entries the tasks above the session used, and
-    "dict-hit" those a dictionary hit points at."""
+    "near", the documents earlier, similar tasks used; "node" holds the documents the tasks above the session used,
+    and "dict-hit" those a dictionary hit points at."""
     terms = list(dict.fromkeys(task_terms))
     if scores is None:
         scores = [bm25(terms, c["toks"], idf, avgdl, weights=weights) for c in cands]
@@ -184,9 +184,9 @@ def candidate_features(task_terms, cands, idf, avgdl, now, scores=None, weights=
             x[h("recent")] = 1.0 if age <= 2 else 0.0
         if "dict-hit" in extra and i in extra["dict-hit"]:
             x[h("dict-hit")] = 1.0
-        if "node" in extra and i in extra["node"]:        # node.py: an entry the tasks above this session used
+        if "node" in extra and i in extra["node"]:        # node.py: a document the tasks above this session used
             x[h("node")] = 1.0
-        if "near" in extra and i in extra["near"]:        # near.py: an entry earlier, similar tasks used
+        if "near" in extra and i in extra["near"]:        # near.py: a document earlier, similar tasks used
             nf = extra["near"][i]
             x[h("near")], x[h("near-rank")], x[h("near-hit")] = nf[0], nf[1], 1.0
             if len(nf) > 2:                               # how like the prompt that task really was
