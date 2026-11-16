@@ -1,49 +1,63 @@
 #!/usr/bin/env python3
-"""deps.py: the project's frameworks, library packages and external modules as recall entries, `p4.py index --deps`.
+"""deps.py: the project's frameworks, library packages and external modules as retrieval entries.
 
-repo.py indexes what the project tracks and leaves vendored trees out. This indexes what the project is built on:
-each dependency root is read as packages, each package by its manifest, its documents and the surface a session
-would open, and a package is read again only when it was installed or updated. The state lives in `models/deps.json`
-(a cache, ignored by git: it holds this machine's paths); the entries join `models/index.json` beside the
-repository's, so recall can serve them, the hooks label them from what a turn opened, and the ranker trains on them.
+`p4.py index --deps` builds them, and so do the layout and close hooks, within a deadline. repo.py indexes what
+the project tracks and leaves vendored trees out; this indexes what the project is built on. Each dependency root
+is read as packages, each package by its manifest, its documents and the surface a session would open, and a
+package is read again only when its signature moves. The record lives in `phi/models/deps.json`, a cache of this
+machine's paths that hook.py's GITIGNORE keeps untracked. Its entries join `phi/models/index.json` beside the
+repository's, so retrieval can serve them, the hooks label them from what a turn opened, and the ranker trains on
+them.
 
-Roots (`recall.deps` of p4.json):
+Roots, from `recall.deps` of p4.json:
   auto    true: every directory named node_modules, vendor, third_party, _deps, vcpkg_installed or site-packages
-          found within AUTO_DEPTH levels of the project root (dot directories are not entered, .venv and venv are)
-  roots   more of them, each a path (relative to the project, or absolute: a tree outside the project, such as a
-          framework's own checkout). A path inside another root names the part of it that matters: it is kept
-          as a root of its own and read by its directories, each one a package, whatever manifest it carries
+          in the project root or in a directory at most AUTO_DEPTH levels below it. A found one is not entered,
+          and of the directories whose names start with a dot only .venv is.
+  roots   more of them, each a path relative to the project or absolute, such as a framework's own checkout
+          outside the project. A path inside a root named before it names the part of that root that matters: it
+          is a root of its own, split whatever manifest it carries into one package for each of its directories
+          and one for its own files, which are read within the caps and the rest entered by path alone.
 
 Packages of a root, by its name:
   node_modules     each <name>/package.json and @scope/<name>/package.json
-  site-packages    each *.dist-info (name and version from the directory's name)
-  _deps            each <name>-src (CMake FetchContent); -build, -subbuild and -tmp are build output
-  anything else    the root itself when it carries a manifest (.git, package.json, CMakeLists.txt, DEPS, ...);
-                   otherwise each directory in it, a directory with one of the names above read as that kind
+  site-packages    each *.dist-info, whose name gives the package's name and version; the package's files are the
+                   directory of that name with its dashes made underscores, and a package without one is its
+                   record alone
+  _deps            each <name>-src, as CMake's FetchContent makes them; -build, -subbuild and -tmp are build output
+  anything else    the root itself when it holds one of MANIFESTS, such as .git, package.json, CMakeLists.txt or
+                   DEPS; otherwise each directory in it, a directory with one of the names above read as that kind
 
-A package's version is what it declares (package.json, dist-info, CMake's project(VERSION), a VERSION file,
-pyproject/Cargo), then its git HEAD (in it or in its src/), then a *.sha256 beside or in it. Its signature is that
-version and the names, sizes and times of its top-level files: when the signature moves, the package was installed
-or updated, so it is read again, the change is recorded as an update entry (`<date> <name> <old> -> <new>`), and
-train.py owes a round.
+A package's version is what it declares: its dist-info's name, package.json, CMake's `project(VERSION)`,
+pyproject.toml, Cargo.toml or vcpkg.json, or a VERSION file. The commit its git checkout is at, in it or in its
+src/, is added as `@<sha12>`, and a package with neither takes `sha256:` and the first 12 characters of a
+*.sha256 file beside it or in it. Its signature is that version, the caps, the files read past the caps, and the
+names, sizes and times of its top-level files: when the signature moves, the package is read again and train.py
+owes a round. A changed version is recorded as an update entry, and so is a package that came into or left a root
+read before.
 
-Entries of a package (ids in the repository's form, so the hooks' repo labels land on them):
-  the package   repo:<path>                 `<path> <name> <version> <description>`
-  its files     repo:<path>/<file>[#sym]    documents by heading, manifests by target, sources by top-level symbol
-                (repo.file_entries), for FILES files at most, the shallowest and the public ones first (include/,
-                public/, modules/, src/, lib/; an entry point package.json names), never tests, builds or binaries
-  an update     dep-update:<sha8>           shown as a commit dated the day it was seen
+Entries of a package, with ids in the repository's form so that the hooks' repo labels land on them:
+  repo:<path>                    the package: `<path> (<name> <version>, a dependency)`, its text adding the
+                                 description
+  repo:<path>/<file>[#<sha8>]    its files, as repo.file_entries makes them: documents by heading, manifests by
+                                 target, sources by top-level symbol
+  dep-update:<sha8>              an update, shown as a commit dated the day the build saw it:
+                                 `<name> updated <old> -> <new> (<path>)`, `<name> <version> installed (<path>)`
+                                 or `<name> <version> removed (<path>)`
 A path inside the project is relative to it; a root outside it is shown as `@<root's name>/...`, and
-`externals()` gives transcript.py the map back, so a file a turn opened there is labelled too.
+`externals()` gives transcript.rel the map back, so a file a turn opened there is labelled too.
 
-A file a session opened in a package that the index does not hold is remembered (`note_opened`, from the close
-hook) and read first, past the caps, at the next build: the entries follow what the sessions actually use.
-
-Bounds: a package's files are read one directory at a time in turn, FILES at most (3 by default: the measured
-setting, see FILES; a changed cap has every package read again); a package's walk stops after
-SCAN entries or DEPTH levels; a transitive node or Python package (one the
-project's own manifest does not name) gets its package entry and its README only; the whole stops at MAX_ENTRIES,
-the most recently updated packages first; `build` stops at its deadline and goes on from there next time.
+Reading order and bounds: a package's files are read in `spread()`'s order, its top-level documents and manifests
+and the entry points its package.json names first, then one file from each directory in turn, the headers and the
+files under a public folder of PUBLIC_DIRS, such as include/, src/ or api/, ranked first; never tests, build
+output or binaries. A direct package gives FILES files and ENTRIES entries at most, PER_FILE of one file. A
+transitive package, an npm or Python package that the project's own manifests do not name, gets its package entry
+and at most LIGHT_FILES of its documents, manifests and entry points, LIGHT_ENTRIES entries in all. The files a
+session opened in a package, which the close and subagent-stop hooks and `p4.py labels --from-transcripts`
+remember through `note_opened`, and the files of it the project's own sources include are read first, past the
+caps: the entries follow what the sessions and the project use. A change of FILES, ENTRIES, DEPTH or SCAN has
+every package read again. A package's walk stops after SCAN entries or DEPTH levels; the whole stops at
+MAX_ENTRIES, the most recently read packages first and a package that would pass it left out whole; `build` stops
+at its deadline and goes on from there next time.
 """
 
 import hashlib
@@ -69,15 +83,14 @@ MAX_ENTRIES = 20000
 AUTO_NAMES = ("node_modules", "vendor", "third_party", "_deps", "vcpkg_installed", "site-packages")
 AUTO_DEPTH = 3
 ENTER_DOT = (".venv", "venv")
-FILES, ENTRIES = 3, 40               # of a direct package: files read, entries kept. Measured on a store of 712
-                                     # tasks (2026-11-10, p4.py eval on copies): with no dependency entries the
-                                     # ranker printed for 9% of ordinary prompts and scored r-precision 0.044; with
-                                     # these caps (409 entries) 13% and 0.038; with 400 files and 1,500 entries a
-                                     # package (9,070 entries) 30% and 0.035. Only 39 of 2,222 repo labels fell on a
-                                     # dependency file. So a package is its entry, its documents and what a session
-                                     # opened in it; recall.deps.package_files raises it for a store that gains.
+FILES, ENTRIES = 3, 40               # of a direct package: files read, entries kept. Few, since more dependency
+                                     # entries make the ranker print for more ordinary prompts at a lower
+                                     # R-precision, while few repo labels fall on a dependency file: a package is
+                                     # its entry, its documents and what a session opened in it. A store whose
+                                     # labels gain from more raises them with recall.deps.package_files and
+                                     # recall.deps.package_entries.
 PER_FILE = 12                        # entries of one file: its path and its first symbols
-LIGHT_FILES, LIGHT_ENTRIES = 2, 30   # of a transitive one
+LIGHT_FILES, LIGHT_ENTRIES = 2, 30   # of a transitive package: files read, entries kept
 SCAN, DEPTH = 20000, 6
 OPENED = 200                         # files a session opened in one package, remembered and always read
 LISTED = 600                         # entries of a named folder's own files: read within the caps, the rest by name
@@ -98,7 +111,7 @@ SIG_FILES = 64
 
 
 def configure(p4):
-    """recall.deps of the store's p4.json over the constants (read, never written, here)."""
+    """recall.deps of the store's p4.json over the constants, read and never written here."""
     import p4conf
     p4conf.configure(globals(), p4, "recall.deps", {
         "auto": "AUTO", "roots": "ROOTS", "deadline_s": "DEADLINE_S", "max_entries": "MAX_ENTRIES",
@@ -116,7 +129,8 @@ def posix(p):
 # --- roots -----------------------------------------------------------------------------------------------
 
 def auto_roots(project):
-    """Directories named in AUTO_NAMES within AUTO_DEPTH levels of the project; a found one is not entered."""
+    """Directories named in AUTO_NAMES in the project or at most AUTO_DEPTH levels below it. A found one is not
+    entered, nor a directory whose name starts with a dot unless ENTER_DOT holds it."""
     out, level = [], [project]
     for _ in range(AUTO_DEPTH + 1):
         nxt = []
@@ -141,9 +155,10 @@ def auto_roots(project):
 
 
 def roots(project):
-    """[(absolute root, the prefix its entries' paths carry, split)], the configured ones first. A found root inside
-    another is dropped; a configured one inside another is kept, ezexe's word that the part matters: it carries
-    the outer root's prefix and its path below it, and is split (each of its directories a package of its own)."""
+    """`[(root, prefix, split)]`, the configured roots first: each absolute root, the prefix its entries' paths
+    carry, and whether it is split. A found root inside another is dropped; a configured one inside a root named
+    before it is kept, ezexe's word that the part matters: it carries the outer root's prefix and its path below
+    it, and is split, each of its directories a package of its own."""
     found = []
     for r in ROOTS:
         r = os.path.expanduser(str(r))
@@ -186,9 +201,10 @@ def kind_of(root):
 
 
 def packages(root, prefix, split=False):
-    """[{name, dir (absolute, '' when the package is only a record), path (shown), kind, meta}] of one root. A split
-    root is its directories, each a package, and itself for the files directly in it (`flat`: read within the caps,
-    the rest listed by name), whatever manifest it has."""
+    """[{name, dir, path, kind, meta}] of one root: `dir` is absolute, or '' when the package is only a record,
+    `path` is the one its entries show, and `meta` is a site package's dist-info. A split root is its directories,
+    each a package, and itself for the files directly in it, marked `flat`: those are read within the caps and the
+    rest listed by name, whatever manifest the root has."""
     kind = kind_of(root)
     out = []
 
@@ -240,8 +256,10 @@ def packages(root, prefix, split=False):
 
 
 def direct_names(project, root):
-    """The package names the project's own manifests ask for (the manifest beside a node_modules; requirements and
-    pyproject at the project root): those are read in full. None when no manifest says, so every package is."""
+    """The package names the project's own manifests ask for: for a node_modules the package.json beside it, for a
+    site-packages the requirements.txt, requirements.lock and pyproject.toml at the project root. Those packages
+    are read in full and the others lightly. None for another kind of root, or when no manifest says, so every
+    package is read in full."""
     names = set()
     if kind_of(root) == "node":
         try:
@@ -276,7 +294,8 @@ def read_head(path, n=65536):
 
 
 def git_head(d):
-    """The commit a checkout is at (12 characters), read from its .git without running git; '' when there is none."""
+    """The first 12 characters of the commit a checkout is at, read from its .git without running git; '' when
+    there is none."""
     g = os.path.join(d, ".git")
     if os.path.isfile(g):                                   # a worktree's or a submodule's pointer
         m = re.match(r"gitdir:\s*(.+)", read_head(g, 500))
@@ -299,7 +318,7 @@ def git_head(d):
 
 
 def describe(pkg):
-    """(version, description) of a package, from the cheapest sources that say."""
+    """`(version, description)` of a package, from the cheapest sources that say."""
     d, ver, desc = pkg["dir"], "", ""
     if pkg["kind"] == "site":
         m = re.match(r"^.+?-(\d[^-]*)\.dist-info$", os.path.basename(pkg["meta"]))
@@ -352,8 +371,9 @@ def describe(pkg):
 
 
 def signature(pkg, version, opened=()):
-    """The version and the top-level files' names, sizes and times: it moves when the package is put there again.
-    The files a session opened in it are part of it, so a newly opened one has the package read again."""
+    """The version, the caps, the files read past the caps, and the names, sizes and times of the package's first
+    SIG_FILES top-level files: it moves when the package is put there again, when a cap changes, and when the
+    files read past the caps change, as when a session opens a file of it that the index lacks."""
     asked, rows = sorted("opened:" + f for f in opened) + [f"caps:{FILES}:{ENTRIES}:{DEPTH}:{SCAN}" + (f":flat:{LISTED}" if pkg.get("flat") else "")], []
     for d in (pkg["dir"], pkg["meta"]):
         if not d:
@@ -375,8 +395,8 @@ def signature(pkg, version, opened=()):
 # --- entries of one package ------------------------------------------------------------------------------
 
 def rank_file(rel, entry_points):
-    """Lower is read first: documents and manifests, the entry points a manifest names, then public directories,
-    then by depth."""
+    """Lower is read first: the top-level documents and manifests, the entry points package.json names, a header
+    under a public folder, then any other file under one or a header elsewhere, then the rest, each by depth."""
     parts = rel.split("/")
     base = parts[-1].lower()
     stem = base.rsplit(".", 1)[0]
@@ -439,8 +459,9 @@ def entry_points(d):
 
 def spread(files, eps):
     """The files in reading order: documents, manifests and entry points first; then one from each directory in
-    turn (a directory is a path's first two parts), each directory's own files by rank, so a cap leaves out the
-    depths of every directory and not the directories late in the alphabet."""
+    turn, a file's directory being at most the first two folders of its path, the directories in the order of
+    their best file and each one's own files by rank, so a cap leaves out the depths of every directory and not
+    the directories late in the alphabet."""
     ranked = sorted(files, key=lambda r: rank_file(r, eps))
     first = [r for r in ranked if rank_file(r, eps)[0] <= 1]
     buckets = {}
@@ -456,8 +477,9 @@ def spread(files, eps):
 
 
 def package_entries(pkg, version, desc, light=False, opened=()):
-    """[{id, line, sym, text, path}] of one package: its own entry, the files a session opened in it, then its
-    files' in spread()'s order, within the caps."""
+    """[{id, line, sym, text, path}] of one package: its own entry, the files of `opened` past the caps, then its
+    files in `spread()`'s order within the caps, a light package's only its documents, manifests and entry points;
+    a flat package then lists each of its own files left by path, LISTED entries in all."""
     p = pkg["path"]
     out = [{"id": f"repo:{p}", "path": p, "line": 1, "sym": "",
             "text": f"{p} {pkg['name']} {version} {desc} dependency package".strip()}]
@@ -472,7 +494,7 @@ def package_entries(pkg, version, desc, light=False, opened=()):
     mine = [r for r in opened if os.path.isfile(os.path.join(d, r.replace("/", os.sep)))]
     read = 0
     for rel in list(dict.fromkeys(mine + files)):
-        asked = rel in mine                              # what a session opened is read past the caps
+        asked = rel in mine                              # opened or included: read past the caps
         if not asked and (read >= max_files or len(out) >= max_entries):
             break
         text, why = repo.read_file(d, rel.replace("/", os.sep))
@@ -492,9 +514,9 @@ def package_entries(pkg, version, desc, light=False, opened=()):
 
 
 def note_opened(p4, paths):
-    """Remember the dependency files a turn opened that the index does not hold (`paths` in the entries' form, e.g.
-    `@framework/include/api.h`): each is filed under the longest package path it sits in, and that package is read
-    again at the next build with those files first. Returns how many were new."""
+    """Remember the dependency files a turn opened that the index does not hold, `paths` in the entries' form such
+    as `@framework/include/api.h`: each is filed under the longest package path it sits in, and that package is
+    read again at the next build with those files first. Returns how many were new."""
     s = load_state(p4)
     pkgs = sorted(((v["path"], v) for rs in s.get("roots", {}).values() for v in rs["packages"].values()),
                   key=lambda x: len(x[0]), reverse=True)
@@ -517,7 +539,8 @@ def note_opened(p4, paths):
 
 
 def opened_in_turn(turn, project):
-    """The paths (entries' form) of the files a turn's Read and Edit calls name."""
+    """The paths, in the entries' form, of the files a turn's calls of transcript.py's READ_TOOLS and EDIT_TOOLS
+    name."""
     import transcript as tr
     cwd = turn.get("cwd") or project
     out = []
@@ -533,10 +556,10 @@ def opened_in_turn(turn, project):
 # --- what the project itself uses ------------------------------------------------------------------------
 
 def project_includes(project, named=()):
-    """The paths the project's own sources include or import (`#include "a/b.h"`, `import "a/b.mojom";`), most
-    included first. Its own are the files git tracks outside the roots the settings name (`named`, absolute): a
-    patch the project keeps over a vendored tree is its own, a package checked in whole under a named root is not.
-    [] when it is not a repository."""
+    """The paths the project's own sources include or import, as `#include "a/b.h"` and `import "a/b.mojom";` do,
+    most included first; only a path with a folder in it counts. Its own sources are the files git tracks outside
+    `named`, the absolute roots the settings name: a patch the project keeps over a vendored tree is its own, a
+    package checked in whole under a named root is not. [] when it is not a repository."""
     try:
         if not repo.is_repo(project):
             return []
@@ -563,8 +586,8 @@ def project_includes(project, named=()):
 
 def used_in(pkg, includes, others=()):
     """The files of one package the project includes, as paths in the package, most included first. An include is
-    relative to the package, to its src/, or to a directory above it (`media/audio/x.h` names a file of the package
-    at .../src/media/audio); a file under one of `others` (a root or package inside this one) is theirs."""
+    relative to the package, to its src/, or to a directory above it: `media/audio/x.h` names a file of the
+    package at `.../src/media/audio`. A file under one of `others`, a root or package inside this one, is theirs."""
     d = pkg["dir"]
     if not d or not includes:
         return []
@@ -612,9 +635,9 @@ def load_state(p4):
 
 
 def build(p4, project=None, deadline_s=None, now=None, now_s=None):
-    """Bring models/deps.json up to date with the dependency roots. Returns stats: {roots, packages, read (packages
-    read again), installed, updated, removed, entries, cut, complete}. The file is written only when something
-    moved, so an unchanged tree never makes the index stale."""
+    """Bring phi/models/deps.json up to date with the dependency roots. Returns stats {roots, packages, read,
+    installed, updated, removed, entries, cut, complete}, `read` counting the packages read again. The file is
+    written only when something moved or there is none, so an unchanged tree never makes the index stale."""
     project = os.path.abspath(project or repo.project_of(p4) or "")
     if not project or not os.path.isdir(project):
         raise RuntimeError(f"no project directory: {project or '(none)'}")
@@ -697,7 +720,8 @@ def build(p4, project=None, deadline_s=None, now=None, now_s=None):
 
 
 def entries(p4):
-    """The docs the index adds for the dependencies, in repo.entries' form: file entries, then the updates."""
+    """The docs the index adds for the dependencies, in repo.entries' form: the file entries of every package the
+    cap left in, then the updates."""
     s = load_state(p4)
     out, known, seen = [], set(), set()
     for r in sorted(s.get("roots", {})):
@@ -729,7 +753,7 @@ def entries(p4):
 
 
 def changed_at(p4):
-    """When a package was last installed, updated or removed (epoch seconds); 0 when never."""
+    """When a build last read a package or found one gone, in epoch seconds; 0 when never."""
     return float(load_state(p4).get("changed_at") or 0)
 
 
@@ -739,6 +763,7 @@ def stats_line(p4):
         return ""
     n = sum(len(r["packages"]) for r in s["roots"].values())
     light = sum(1 for r in s["roots"].values() for v in r["packages"].values() if v.get("light"))
-    return (f"deps: {n} packages in {len(s['roots'])} roots ({light} transitive, read lightly), {s.get('entries', 0)} "
-            f"entries, {len(s.get('updates', []))} updates recorded"
-            + (f"; cut at {MAX_ENTRIES} entries: {s['cut']} packages left out (oldest-read)" if s.get("cut") else ""))
+    return (f"deps: {n} packages in {len(s['roots'])} roots, {light} read lightly as transitive, "
+            f"{s.get('entries', 0)} entries, {len(s.get('updates', []))} updates recorded"
+            + (f"; cut at {MAX_ENTRIES} entries: {s['cut']} packages left out, the least recently read"
+               if s.get("cut") else ""))

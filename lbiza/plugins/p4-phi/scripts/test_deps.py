@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""deps.py: dependency roots as recall entries, read again when a package is installed or updated.
+"""deps.py: dependency roots as retrieval entries, read again when a package is installed or updated.
 
     python3 -I lbiza/plugins/p4-phi/scripts/test_deps.py
 """
@@ -164,7 +164,7 @@ class Deps(unittest.TestCase):
         r = lb.from_transcripts(self.p4, self.proj, [slug], all_sessions=True)
         self.assertEqual(r["dep_opened"], 1, "deep.h: opened, not indexed")
         first = r["dep_rows"]
-        self.assertGreaterEqual(first, 1, "api.h: indexed, labelled (its path, and the symbol the reply names)")
+        self.assertGreaterEqual(first, 1, "api.h: indexed, labelled by its path and by the symbol the reply names")
         deps.build(self.p4, self.proj)
         lb._DEP_PATHS.clear()
         r = lb.from_transcripts(self.p4, self.proj, [slug], idx=st.build_index(self.p4), all_sessions=True)
