@@ -429,8 +429,8 @@ def build(home, top, net=False):
         held = s.get("spawnedFrom") if isinstance(s.get("spawnedFrom"), dict) else {}
         if rec and depth and rec["parent"] and rec["parent"] != parent \
                 and held.get("source") not in ("detached", "reparented", "requested"):
-            reconcile.append(f"the app shows \"{title}\" `{sid}` started by {rec['parent']}, and p4-phi holds it under "
-                             f"{parent}.")
+            reconcile.append(f"the app shows \"{title}\" `{sid}` started by `{rec['parent']}`, and p4-phi holds it "
+                             f"under `{parent}`.")
         plan = plans.load(home, sid)
         steps = plan.get("steps") or []
         cur = next((x for x in steps if x.get("status") == "in_progress"), None)
@@ -459,7 +459,7 @@ def build(home, top, net=False):
     live = {r["sessionId"] for r in rows}
     for aid, rec in sorted(app.items()):
         if rec["parent"] in live and not rec["archived"] and aid not in every:
-            reconcile.append(f"the app shows \"{rec['title'] or aid}\" `{aid}` started by {rec['parent']}, and p4-phi "
+            reconcile.append(f"the app shows \"{rec['title'] or aid}\" `{aid}` started by `{rec['parent']}`, and p4-phi "
                              f"holds no session for it.")
     asked = []
     at = time.time()
@@ -521,7 +521,7 @@ def render(m):
     if m["closed"]:
         out += ["", "## Closed", ""]
         out += [f"- \"{c['title']}\" `{c['sessionId']}`: {c['how']}, its outcome "
-                + ("kept as a replaces: note" if c["kept"] else "not kept") + f" on {c['parent']}" for c in m["closed"]]
+                + ("kept as a replaces: note" if c["kept"] else "not kept") + f" on `{c['parent']}`" for c in m["closed"]]
     if m["tasks"]:
         out += ["", "## Background tasks", ""]
         out += [f"- {t['id']}, {t['tool'] or 'a task'} of \"{t['title']}\""
@@ -1666,9 +1666,9 @@ def meta_text(home, s, found):
     mine = [x for x in found["duplicates"] + found["conflicts"] + found["stale"] if s["sessionId"] in x]
     return ("phi (p4-phi): the meta pass over every top-level session's ledger, written to "
             f"{meta_path(home)}, found for this session: " + " ".join(mine[:4])
-            + " Settle what the two session trees can: send the other top-level session a message with SendMessage, "
-              "or tell ezexe that a session whose work is over is ready to archive; only a conflict they cannot "
-              "settle goes to ezexe.")
+            + " Settle what can be settled without ezexe: a duplicate or a conflict with another top-level session "
+              "goes to that session with SendMessage, and a session whose work is over is named to ezexe as ready "
+              "to archive; only a conflict the two sessions cannot settle goes to ezexe.")
 
 
 # --- the prompt hook ----------------------------------------------------------------------------------------------------

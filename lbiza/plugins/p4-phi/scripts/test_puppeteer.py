@@ -110,7 +110,7 @@ class Linear(Base):
         text, _ = self.ledger()
         head = text.split("## Sessions")[0]
         self.assertIn(f"p4-phi lists \"the flush port\" `{KID}` as live, and the app has archived it.", head)
-        self.assertIn(f"the app shows \"a child only the app knows\" `{GRAND}` started by {TOP}, and p4-phi holds no "
+        self.assertIn(f"the app shows \"a child only the app knows\" `{GRAND}` started by `{TOP}`, and p4-phi holds no "
                       f"session for it.", head)
         self.assertEqual(len([x for x in head.splitlines() if x.startswith("- ")]), 2, "a line a divergence")
         self.assertLess(text.index("## Reconcile"), text.index("## Sessions"))

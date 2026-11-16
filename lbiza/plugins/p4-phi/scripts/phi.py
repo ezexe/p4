@@ -2307,9 +2307,9 @@ def h_user_prompt_submit(payload):
     unsent = [u for u in s.pop("unsentRelay", None) or [] if isinstance(u, dict)]
     if unsent:
         parts.insert(0, "phi (p4-phi): " + " ".join(
-            f"your last turn changed the steps {', '.join(u.get('steps') or [])} of "
+            f"your last turn changed {', '.join(u.get('steps') or [])} in the work of "
             f"\"{relay._title(load_session(me.home, u['child']))}\" "
-            f"and sent it nothing; send it the change with SendMessage to {u['child']}." for u in unsent))
+            f"and sent it nothing; send it the change with SendMessage to `{u['child']}`." for u in unsent))
     pup = verdict = ""
     if req and not handed_over(payload.get("prompt")):
         try:                                       # meta pass and ledger, then routing, start draft and gate

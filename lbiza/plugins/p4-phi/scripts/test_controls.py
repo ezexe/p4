@@ -230,7 +230,7 @@ class Supervisor(unittest.TestCase):
         self.assertIn("Archive none of them before ezexe has answered", ctx)
         self.assertIn("never this session's judgement", ctx)
         self.assertNotIn("archive_session", ctx, "the archive call follows ezexe's pick and is not named here")
-        self.assertNotIn("quick select", ctx)
+        self.assertNotIn("puts its finished sessions to ezexe", ctx)
         self.assertNotIn("session_archives", ctx, "no text tells a session to set it")
         self.assertIn("a boundary: every controlled session is idle", ctx, "the compaction question comes with it")
         self.assertEqual(self.t.session(PUP)["archiveOffer"], [{"label": self.TITLE, "ids": [TOP]}])

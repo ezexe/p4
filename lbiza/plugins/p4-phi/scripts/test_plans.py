@@ -370,8 +370,8 @@ class TreeOfPlans(unittest.TestCase):
         self.assertIn("ended a turn whose words bear on your open steps: 2.1", ctx)
         self.assertIn(report, ctx, "the parent's own words, quoted")
         nag = context(t.say(TOP, "next"))
-        self.assertIn(f"your last turn changed the steps 2.1", nag)
-        self.assertIn(f"send it the change with SendMessage to {A}", nag)
+        self.assertIn(f"your last turn changed 2.1 in the work of", nag)
+        self.assertIn(f"send it the change with SendMessage to `{A}`", nag)
         self.assertNotIn("send it the change", context(t.say(TOP, "and next")), "said once")
 
     def test_a_progress_report_naming_a_childs_work_is_not_nagged(self):
