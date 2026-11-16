@@ -36,7 +36,17 @@ def put(path, text="x", age_days=0):
     return path
 
 
+def run(*args, stdin="", cwd=None, **env):
+    """lifetime.py as a process, with every CLAUDE* name of this environment removed and the names given set."""
+    e = {k: v for k, v in os.environ.items() if not k.upper().startswith("CLAUDE")}
+    e.update(env)
+    return subprocess.run([sys.executable, "-I", os.path.join(HERE, "lifetime.py"), *args], input=stdin,
+                          capture_output=True, text=True, encoding="utf-8", cwd=cwd, env=e)
+
+
 class Lifetime(unittest.TestCase):
+    maxDiff = None
+
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="p4-temportal-life-")
         self.p4 = os.path.join(self.root, ".claude", "p4")
@@ -115,6 +125,19 @@ class Lifetime(unittest.TestCase):
         self.assertFalse(os.path.exists(probe), "a directory cookie clears the whole directory")
         self.assertTrue(os.path.exists(keep))
         self.assertFalse(os.path.exists(os.path.join(self.t, lifetime.EXPIRES)), "an empty registry is removed")
+
+    def test_an_unreadable_cookie_holds_back_no_other(self):
+        """An entry of expires.json that cannot be read stays as it is, the retention sweep at a start still clears
+        every other due cookie, and `list` prints each entry."""
+        due = put(os.path.join(self.t, "scratchpad", "due.md"))
+        put(os.path.join(self.t, lifetime.EXPIRES), json.dumps(
+            {"scratchpad/bad.md": {"expires": "soon"}, "scratchpad/due.md": {"expires": 1.0}, "scratchpad/odd.md": 7}))
+        swept = run("sweep", stdin="{}", CLAUDE_PROJECT_DIR=self.root)
+        listed = run("--p4", self.p4, "list")
+        self.assertEqual((swept.stdout, os.path.exists(due), listed.returncode, listed.stderr),
+                         ("p4-temportal: cleared expired files: 1, scratchpad/due.md.\n", False, 0, ""))
+        self.assertIn("cookie  scratchpad/bad.md  unreadable", listed.stdout)
+        self.assertIn("cookie  scratchpad/odd.md  unreadable", listed.stdout)
 
     def test_a_session_cookie_ends_with_its_session(self):
         f = put(os.path.join(self.t, "scratchpad", "state.md"))

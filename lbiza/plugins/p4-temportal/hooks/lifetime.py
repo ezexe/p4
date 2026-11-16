@@ -16,7 +16,8 @@ ignored or untracked file is deleted.
   session-end              the retention sweep at SessionEnd, which also clears the cookies of the session that ends,
                            silently.
   set <path> <lifetime>    gives a file or folder under temportal/ a cookie.
-  list                     every cookie with its expiry, then every cache rule.
+  list                     every cookie with its expiry, then every cache rule. An entry of expires.json that cannot
+                           be read is listed as unreadable, and the retention sweep leaves it as it is.
   clear <path>             removes a cookie and keeps the file.
   now                      the retention sweep, run by hand.
 
@@ -257,13 +258,17 @@ def sweep_cache(p4, now=None):
 
 
 def sweep_cookies(p4, now=None, ended_session=""):
-    """Clear every cookie whose time is up, and the session cookies of `ended_session` -> [rel cleared]."""
+    """Clear every cookie whose time is up, and the session cookies of `ended_session` -> [rel cleared]. An entry
+    whose expiry cannot be read is left as it is."""
     now = time.time() if now is None else now
     d = read_expires(p4)
     cleared, changed = [], False
     for rel, v in sorted(d.items()):
-        due = (isinstance(v, dict) and (("expires" in v and float(v["expires"]) <= now)
-                                         or (ended_session and v.get("session") == ended_session)))
+        try:
+            due = (isinstance(v, dict) and (("expires" in v and float(v["expires"]) <= now)
+                                             or (ended_session and v.get("session") == ended_session)))
+        except (TypeError, ValueError):
+            due = False
         if not due:
             continue
         p = os.path.join(home(p4), *rel.split("/"))
@@ -300,12 +305,17 @@ def listing(p4, now=None):
     now = time.time() if now is None else now
     lines = []
     for rel, v in sorted(read_expires(p4).items()):
-        if "expires" in v:
-            left = float(v["expires"]) - now
-            when = datetime.fromtimestamp(float(v["expires"]), timezone.utc).astimezone().isoformat(timespec="minutes")
-            lines.append(f"cookie  {rel}  expires {when}" + ("  past due" if left <= 0 else ""))
-        elif "session" in v:
-            lines.append(f"cookie  {rel}  until session {v['session'][:8]} ends")
+        line = ""
+        try:
+            if "expires" in v:
+                t = float(v["expires"])
+                when = datetime.fromtimestamp(t, timezone.utc).astimezone().isoformat(timespec="minutes")
+                line = f"cookie  {rel}  expires {when}" + ("  past due" if t <= now else "")
+            elif "session" in v:
+                line = f"cookie  {rel}  until session {v['session'][:8]} ends"
+        except (TypeError, ValueError, OverflowError, OSError):
+            pass
+        lines.append(line or f"cookie  {rel}  unreadable, so never cleared: {json.dumps(v)}")
     for rel, rule in sorted(rules(p4).items()):
         lines.append(f"cache   {rel}/  " + ", ".join(f"{k}={v}" for k, v in rule.items()))
     return lines
