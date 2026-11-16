@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""repo.py: the repository itself as retrieval entries.
+"""repo.py: the repository itself as retrieval documents.
 
 `p4.py index --repo` builds them, and so do the layout and close hooks, within hook.py's REPO_DEADLINE_S; `build`
-stops at its deadline and goes on from there at the next run. The entries are read mechanically from
+stops at its deadline and goes on from there at the next run. The documents are read mechanically from
 `git ls-files -s` and `git log`, incrementally: a file is read again only when its blob sha changed since the last
 run, and the history reads only `git log <last indexed commit>..HEAD`, so a rebuild after one commit reads that
 commit's files alone. The state lives in `phi/models/repo.json`, a cache that hook.py's GITIGNORE keeps
-untracked, and the entries join `phi/models/index.json` at the next index build. repo.json also keeps the renames
-git detects, so labels.follow takes a label on a file's old path to its new one.
+untracked, and the documents join `phi/models/index.json` at the next index build. repo.json also keeps the
+renames git detects, so labels.follow takes a label on a file's old path to its new one.
 
-Entries, by id, and the line that shows each:
+Documents, by id, and the line that shows each:
   file      repo:<path>                  every tracked file that is not excluded: its path
   heading   repo:<path>#<sha8 heading>   each Markdown heading outside a code fence: `<path> — <heading>`, its
                                          text adding the first line under it
@@ -27,8 +27,8 @@ Excluded: anything ignored, since ls-files lists tracked files only and a tracke
 dropped too; submodules; LFS pointers; binaries, by BINARY_EXT or a NUL in the first 8 KB; vendored and generated
 code, which is node_modules/, third_party/ and vendor/, *.min.* and *.generated.*, a first line that says
 `generated` or an `@generated` in the first 400 characters, and any directory a `.p4ignore` names; and files over
-512 KB. File entries stop at MAX_FILE_ENTRIES, the most recently touched files first, and a file whose entries
-would pass the cap is left out whole; `p4.py check` reports the cut.
+512 KB. File documents stop at MAX_FILE_ENTRIES, the most recently touched files first, and a file whose
+documents would pass the cap is left out whole; `p4.py check` reports the cut.
 """
 
 import json
@@ -49,7 +49,7 @@ VERSION = 1
 MAX_BYTES = 512 * 1024
 MAX_FILE_ENTRIES = 50000
 MAX_COMMITS = 2000
-MAX_TOUCHED = 12               # paths a commit entry shows; its text holds them all
+MAX_TOUCHED = 12               # paths a commit document shows; its text holds them all
 VENDORED_DIRS = ("node_modules", "third_party", "vendor")
 BINARY_EXT = frozenset("""png jpg jpeg gif bmp ico icns webp tif tiff psd svgz pdf zip gz tgz bz2 xz 7z rar tar jar war
 dmg iso exe dll so dylib a lib o obj class pyc pyo whl egg wasm bin dat db sqlite sqlite3 mp3 mp4 m4a wav flac ogg
@@ -236,7 +236,7 @@ def read_file(project, path):
     return text, ""
 
 
-# --- entries of one file ---------------------------------------------------------------------------------
+# --- documents of one file -------------------------------------------------------------------------------
 
 def sha8(s):
     import hashlib
@@ -424,7 +424,7 @@ def build(p4, project=None, deadline_s=None, now=None):
     stats["excluded"] = excluded
     s["head"] = hd if stats["complete"] else s.get("head", "")
     s["touched"] = touched
-    # the cap: newest-touched files first; a file whose entries would pass the cap is left out whole
+    # the cap: newest-touched files first; a file whose documents would pass the cap is left out whole
     order = sorted((p for p in old if not old[p].get("out")), key=lambda p: (touched.get(p, ""), p), reverse=True)
     n, cut = 0, 0
     for p in order:
@@ -444,9 +444,9 @@ def build(p4, project=None, deadline_s=None, now=None):
 
 
 def entries(p4):
-    """The docs the index adds for the repository, its file entries and then its commits, as dicts with id, path,
-    line, kind, time, show, head and the text to tokenize, a commit's with its paths too. [] when repo.json holds
-    no files."""
+    """The documents the index adds for the repository, its file documents and then its commit documents, as dicts
+    with id, path, line, kind, time, show, head and the text to tokenize, a commit's with its paths too. [] when
+    repo.json holds no files."""
     s = load_state(p4)
     if not s.get("files"):
         return []
@@ -480,7 +480,7 @@ def stats_line(p4):
     if not s.get("files"):
         return ""
     kept = sum(1 for r in s["files"].values() if not r.get("out") and not r.get("cut"))
-    return (f"repo: {kept} files, {s.get('entries', 0)} file entries, {len(s.get('commits', []))} commits; excluded "
+    return (f"repo: {kept} files, {s.get('entries', 0)} file documents, {len(s.get('commits', []))} commits; excluded "
             + ", ".join(f"{k} {v}" for k, v in sorted(s.get("excluded", {}).items()))
-            + (f"; cut at {MAX_FILE_ENTRIES} file entries: {s['cut']} files left out, the least recently touched"
+            + (f"; cut at {MAX_FILE_ENTRIES} file documents: {s['cut']} files left out, the least recently touched"
                if s.get("cut") else "") + f"; {len(s.get('renames', {}))} renamed paths followed")

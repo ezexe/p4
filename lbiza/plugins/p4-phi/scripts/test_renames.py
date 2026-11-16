@@ -81,7 +81,7 @@ class Renames(unittest.TestCase):
         self.assertEqual(lb.follow(old_sym, ids, ren), new_sym, "the same symbol, under the file's new path")
         self.assertEqual(lb.follow("repo:src/port.py", ids, ren), "repo:lib/narwhal.py")
         self.assertEqual(lb.follow(f"repo:src/narwhal.py#{repo.sha8('close_narwhal_port')}", ids, ren), "repo:lib/narwhal.py",
-                         "the symbol is gone, its file is there: the file's own entry")
+                         "the symbol is gone, its file is there: the file's own document")
         self.assertEqual(lb.follow("repo:src/gone.py", ids, ren), "repo:src/gone.py", "a deleted file's label is left as it is")
         self.assertEqual(lb.follow("rules.md:2026-11-01 10:00:abcdef12", ids, ren), "rules.md:2026-11-01 10:00:abcdef12")
         self.assertIn("2 renamed paths followed", repo.stats_line(self.p4))
