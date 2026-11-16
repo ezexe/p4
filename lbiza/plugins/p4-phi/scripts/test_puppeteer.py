@@ -390,6 +390,124 @@ class AtArchive(Base):
         self.assertIn("bg33333333", out["permissionDecisionReason"])
 
 
+class Scorers(Base):
+    """#41: prompty's route and owner picks go through the trained ranker when the store keeps a model, and through
+    word overlap, at the measured threshold, when it keeps none."""
+
+    COMMON = ("exporter table rows store writer flush ports check suite build layout index cache hook plan step "
+              "report branch commit").split()
+
+    def cases(self):
+        """A labelled history where the right candidate shares the message's two rare words and the wrong ones
+        share many of its common words: what word overlap cannot tell apart."""
+        import random
+        rng = random.Random(41)
+        out = []
+        for k in range(40):
+            rare = [f"zeta{k}a", f"zeta{k}b"]
+            said = rng.sample(self.COMMON, 9)
+            right = " ".join(rng.sample([w for w in self.COMMON if w not in said], 6) + rare)
+            wrong = [" ".join(rng.sample(said, 7) + [f"omega{k}{j}"]) for j in range(3)]
+            cands = [(f"wrong{j}", w) for j, w in enumerate(wrong)] + [("right", right)]
+            rng.shuffle(cands)
+            out.append({"message": " ".join(said + rare), "time": "", "session": f"s{k % 8}", "label": "right",
+                        "kind": "doer", "case": "doer", "cands": cands})
+            out.append({"message": " ".join(said + [f"lone{k}"]), "time": "", "session": f"s{k % 8}", "label": "",
+                        "kind": "here", "case": "others", "cands": [c for c in cands if c[0] != "right"]})
+        return out
+
+    def routes(self):
+        rows = [{"kind": "route", "id": "rt-right", "session": KID, "issue": "ezexe/demo#7", "context": "fresh",
+                 "topic": "Quarantine the narwhal ledger",
+                 "words": "quarantine the narwhal ledger when its checksum drifts"},
+                {"kind": "route", "id": "rt-wrong", "session": KID2, "issue": "ezexe/demo#8", "context": "fresh",
+                 "topic": "Port the exporter flush",
+                 "words": "port the exporter flush to the new writer and run the ports table suite on the store"}]
+        for k, (topic, words_) in enumerate(self.OTHERS):   # a store's other routes: its common words are common
+            rows.append({"kind": "route", "id": f"rt-other{k}", "session": f"local_other{k}", "issue": "",
+                         "context": "fresh", "topic": topic, "words": words_})
+        write(self.path(TOP, "routes.jsonl"), "".join(json.dumps(r) + "\n" for r in rows))
+
+    OTHERS = (("Move the table writer", "move the exporter table writer onto the store index and build the ports cache"),
+              ("Check the flush hook", "check the exporter flush hook and the ports table layout in the store"),
+              ("Run the suite", "run the exporter suite on every branch commit and report the ports table rows"))
+    MESSAGE = ("Run the exporter flush suite on the store after the ports table writer moves, then quarantine the "
+               "narwhal ledger")
+
+    def test_a_trained_route_model_picks_the_route_word_overlap_gets_wrong(self):
+        import prompty_eval
+        t = self.t
+        t.say(TOP, TASK)
+        self.routes()
+        by_words = puppeteer.score_routes(t.p4, self.MESSAGE)
+        self.assertEqual([r["id"] for _, _, r in by_words][:1], ["rt-wrong"],
+                         "word overlap picks the route that shares the most words")
+        model = prompty_eval.train(self.cases())
+        self.assertTrue(model and model["w"])
+        prompty_eval.keep(t.p4, "routes", model, {"cases": 80})
+        by_model = puppeteer.score_routes(t.p4, self.MESSAGE)
+        self.assertEqual([r["id"] for _, _, r in by_model][:1], ["rt-right"],
+                         "the trained scorer picks the route that shares the message's rare words")
+
+    def test_with_no_model_word_overlap_is_the_fallback_at_the_measured_threshold(self):
+        t = self.t
+        t.say(TOP, TASK)
+        self.routes()
+        self.assertEqual(puppeteer.prompty_model(t.p4), {})
+        self.assertIsNone(puppeteer.rank_texts(t.p4, "owners", self.MESSAGE, ["a task", "another task"]))
+        self.assertIsNone(puppeteer.rank_texts(t.p4, "routes", self.MESSAGE, ["a route"]))
+        got = puppeteer.score_routes(t.p4, self.MESSAGE)
+        n, part = puppeteer.share(self.MESSAGE, "port the exporter flush to the new writer and run the ports table "
+                                                "suite on the store Port the exporter flush")
+        self.assertEqual((got[0][2]["id"], got[0][1], got[0][0]), ("rt-wrong", n, round(part, 2)), "overlap's own score")
+        self.assertEqual(puppeteer.OWNER_WORDS, 8, "the measured threshold of .docs/p4/phi-prompty-scores.md")
+        self.assertEqual((puppeteer.ROUTE_MIN, puppeteer.ROUTE_CLOSE), (4, 0.6), "routes stay as they were: one "
+                         "registered route is too few to measure")
+        write(puppeteer.scorer_path(t.p4), "not json")
+        self.assertEqual(puppeteer.prompty_model(t.p4), {}, "an unreadable model is no model")
+        self.assertEqual(puppeteer.score_routes(t.p4, self.MESSAGE)[0][2]["id"], "rt-wrong")
+
+    def test_an_owner_is_named_by_the_trained_model_and_not_by_four_shared_words(self):
+        import prompty_eval
+        t = self.t
+        t.say(TOP, TASK)
+        t.record(KID2, TOP, title="the ledger keeper")
+        t.say(KID, handed("Port the exporter flush to the new writer and run the ports table suite on the store."))
+        t.say(KID2, handed("Quarantine the narwhal ledger when its checksum drifts."))
+        for kid in (KID, KID2):
+            t.stop(kid, "work", report="half way")
+        for k, (topic, words_) in enumerate(self.OTHERS):   # the other live sessions of the tree
+            write(os.path.join(t.dir(f"local_other{k}"), "session.json"), json.dumps({
+                "sessionId": f"local_other{k}", "title": topic, "task": words_, "spawnedFrom": {"sessionId": TOP},
+                "createdAt": "2026-11-16 08:00"}))
+        s = t.session(TOP)
+        read = puppeteer.prompty(t.p4, s, self.MESSAGE, t.proj)
+        self.assertIsNone(read["owner"], "six shared words name no owner now: at four they named the flush port")
+        self.assertGreaterEqual(puppeteer.share(self.MESSAGE, t.session(KID)["task"])[0], 4)
+        prompty_eval.keep(t.p4, "owners", prompty_eval.train(self.cases()), {"cases": 80})
+        read = puppeteer.prompty(t.p4, s, self.MESSAGE, t.proj)
+        self.assertEqual((read["owner"] or {}).get("sessionId"), KID2)
+        self.assertIn("the trained owner model scores its task", read["owner"]["why"])
+
+    def test_the_measurement_reads_a_stores_history_and_writes_nothing(self):
+        import prompty_eval
+        t = self.t
+        t.say(TOP, TASK)
+        t.stop(TOP, TASK, report="planned")
+        t.say(TOP, "Add a retry to the narwhal exporter for when the ports table write fails in the store")
+        t.stop(TOP, "Add a retry to the narwhal exporter for when the ports table write fails in the store",
+               report="done", uuid="u1")
+        t.say(KID, handed("Port the flush to the new writer."))
+        t.stop(KID, "Port the flush", report="half way")
+        before = sorted(os.listdir(os.path.join(t.p4, "phi")))
+        exs = prompty_eval.examples(t.p4)
+        self.assertTrue(any(e["case"] == "others" and e["session"] == TOP for e in exs), exs)
+        res = prompty_eval.measure(exs)
+        self.assertIn("ranker", res)
+        self.assertEqual(sorted(os.listdir(os.path.join(t.p4, "phi"))), before)
+        self.assertFalse(os.path.exists(puppeteer.scorer_path(t.p4)))
+
+
 class Parallel(Base):
     EITHER = ("Fix the narwhal exporter's flush: either buffer the rows in memory until the table closes or write "
               "each row straight to the store")

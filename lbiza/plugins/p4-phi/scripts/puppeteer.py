@@ -46,7 +46,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import relay  # noqa: E402
+import p4conf  # noqa: E402
 import plans  # noqa: E402
+import ranker  # noqa: E402
 import starts  # noqa: E402
 import issues  # noqa: E402
 
@@ -62,7 +64,10 @@ GH_S = 6                         # one gh call of the puppeteer's, which a promp
 ROUTE_CHECK_S = 600.0            # how often registered routes are checked for a reopen or a revert
 ROUTE_MIN = 4                    # content words a message shares with a route before it can match
 ROUTE_CLOSE = 0.6                # of the smaller side's content words
-OWNER_WORDS = 4                  # content words a message shares with a live session's task before that session owns it
+OWNER_WORDS = 8                  # content words a message shares with a live session's task before that session owns
+#                                  it. Measured (#41, .docs/p4/phi-prompty-scores.md): at 4 the rule named a wrong owner
+#                                  on 25 of 43 cases of this store's history, at 8 on 6
+MODEL_FILE = "prompty.json"      # <store>/phi/models/prompty.json: the trained owner and route scorers, when there are any
 TOPIC_WORDS = 3                  # content words a message shares with this session's task to be part of its topic
 QUICK_WORDS = 6                  # a message of fewer content words is a quick thing, never drafted
 STALE_S = 24 * 3600.0            # a top session with open work and no turn this long is stale
@@ -762,12 +767,80 @@ def check_routes(home, net=False, force=False):
     return out
 
 
+# --- the trained scorers (#41) -----------------------------------------------------------------------------------------
+#
+# prompty picked a route and an owner by shared content words alone. Measured on this store's own history
+# (prompty_eval.py, .docs/p4/phi-prompty-scores.md), that rule named a wrong owner far more often than a right one.
+# So both picks go through the ranker when a model trained for them is in the store: ranker.candidate_features over
+# the candidates' words, scored by the weights `prompty_eval.py --train` keeps in phi/models/prompty.json. It keeps
+# a model only when it beats word overlap and naming none on held-out sessions. With no model, as on a store with
+# too little history or a machine that never trained one, word overlap is the fallback, at the measured threshold.
+
+MODEL_KIND = "p4 prompty model"
+_MODEL = {}                      # model path -> (mtime_ns, model)
+
+
+def scorer_path(home):
+    return p4conf.sub(home, "models", MODEL_FILE)
+
+
+def prompty_model(home):
+    """{"owners": {"w", "threshold"}, "routes": {...}} as trained for this store, {} when none is kept."""
+    path = scorer_path(home)
+    try:
+        stamp = os.stat(path).st_mtime_ns
+    except OSError:
+        return {}
+    if _MODEL.get(path, (None,))[0] != stamp:
+        m = relay._read_json(path)
+        out = {}
+        if isinstance(m, dict) and m.get("kind") == MODEL_KIND:
+            for k in ("owners", "routes"):
+                d = m.get(k)
+                if isinstance(d, dict) and isinstance(d.get("w"), dict):
+                    try:
+                        out[k] = {"w": {int(i): float(v) for i, v in d["w"].items()},
+                                  "threshold": float(d.get("threshold", 0.5))}
+                    except (TypeError, ValueError):
+                        continue
+        _MODEL[path] = (stamp, out)
+    return _MODEL[path][1]
+
+
+def pair_features(req, texts, when=""):
+    """One ranker feature dict a candidate text for a message, and the candidates' BM25: the ranker's own reading
+    of a candidate, with the candidates as the collection the idf is taken over."""
+    docs = [ranker.tokens(t) for t in texts]
+    idf, _ = ranker.idf_table(docs)
+    avgdl = sum(len(d) for d in docs) / max(1, len(docs))
+    cds = [{"file": "session", "kind": "task", "state": "LIVE", "time": "", "toks": d, "head": d[:24]} for d in docs]
+    xs, bm, _ = ranker.candidate_features(ranker.tokens(req), cds, idf, avgdl, when)
+    return xs, bm
+
+
+def rank_texts(home, kind, req, texts, when=""):
+    """(a score a text, the threshold) by the store's trained model of `kind`, "owners" or "routes"; None when no
+    such model is kept, and the caller falls back to word overlap."""
+    m = prompty_model(home).get(kind)
+    if not m or not texts:
+        return None
+    xs, _ = pair_features(req, texts, when)
+    return [ranker.score(m["w"], x) for x in xs], m["threshold"]
+
+
 def score_routes(home, req):
-    """[(score, shared words, route)] of the registered routes a message matches closely, the best first."""
+    """[(score, shared words, route)] of the registered routes a message matches closely, the best first: by the
+    trained route model when the store keeps one, else by shared content words."""
     out = []
-    for r in all_routes(home).values():
-        n, part = share(req, f"{r.get('words', '')} {r.get('topic', '')}")
-        if n >= ROUTE_MIN and part >= ROUTE_CLOSE:
+    rows = list(all_routes(home).values())
+    texts = [f"{r.get('words', '')} {r.get('topic', '')}" for r in rows]
+    ranked = rank_texts(home, "routes", req, texts)
+    for k, r in enumerate(rows):
+        n, part = share(req, texts[k])
+        if ranked is not None:
+            if ranked[0][k] >= ranked[1]:
+                out.append((round(ranked[0][k], 2), n, r))
+        elif n >= ROUTE_MIN and part >= ROUTE_CLOSE:
             out.append((round(part, 2), n, r))
     return sorted(out, key=lambda x: (-x[0], -x[1], str(x[2].get("id"))))
 
@@ -802,15 +875,20 @@ def prompty(home, s, req, base):
         relay.overlap(p, q) for p in named for q in relay.scope_of(home, sid) if not relay.names_nothing(q, home, base))
     above = set(phi.chain_of(home, sid))
     best = None
-    for oid, o in every.items():
-        if oid == sid or oid in above or closed(o) or relay.gone(home, o):
-            continue
+    others = [(oid, o, f"{o.get('task', '')} " + " ".join(str(x.get("content") or "")
+                                                         for x in plans.open_steps(home, oid)))
+              for oid, o in every.items()
+              if not (oid == sid or oid in above or closed(o) or relay.gone(home, o))]
+    ranked = rank_texts(home, "owners", req, [text for _, _, text in others])       # None: word overlap decides
+    for k, (oid, o, text) in enumerate(others):
         shard = [p for p in relay.shard_of(o) if not relay.names_nothing(p, home, base)]
         hit = next((p for p in shard if any(relay.covers(p, n) or relay.covers(n, p) for n in named)), "")
-        n, _ = share(req, f"{o.get('task', '')} " + " ".join(str(x.get("content") or "")
-                                                             for x in plans.open_steps(home, oid)))
+        n, _ = share(req, text)
         if hit:
             cand = (2, len(relay._root(hit)), oid, f"its shard holds {hit}")
+        elif ranked is not None:
+            cand = (1, ranked[0][k], oid, f"the trained owner model scores its task {ranked[0][k]:.2f} for the "
+                                         f"message") if ranked[0][k] >= ranked[1] else None
         elif n >= OWNER_WORDS:
             cand = (1, n, oid, f"its task shares {n} content words with the message")
         else:
