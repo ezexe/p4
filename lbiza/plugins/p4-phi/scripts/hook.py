@@ -43,9 +43,10 @@ What the hooks reference, https://code.claude.com/docs/en/hooks, says of the eve
 - PreToolUse: `updatedInput` replaces the whole input object, so the agent hook carries every field of the Agent
   call unchanged beside the `prompt`; that input is `prompt`, `description`, `subagent_type` and `model`. The hook
   sets no `permissionDecision` unless P4_AGENT_ALLOW=1 adds "allow", and in auto mode an `updatedInput` without a
-  `permissionDecision` can be denied. The opt-in live test hooks/test_live_subagent.py checks that the subagent's
-  first user message carries the appended lines. SubagentStart can add context to a subagent before its first
-  prompt without rewriting the Agent call, and hooks.json registers no handler of this file on it.
+  `permissionDecision` can be denied. The live test experiments/p4-suite/test_live_subagent.py of ezexe/p4-phi, which
+  runs `claude -p`, checks that the subagent's first user message carries the appended lines. SubagentStart can add
+  context to a subagent before its first prompt without rewriting the Agent call, and hooks.json registers no handler
+  of this file on it.
 - PostToolUse and PostToolUseFailure: `additionalContext` adds context beside the call's result.
 - Stop: the close hook reads the reply from `last_assistant_message`, since `transcript_path` can lag the
   conversation, and prints nothing, since a `decision` to block or an `additionalContext` would continue the turn.
