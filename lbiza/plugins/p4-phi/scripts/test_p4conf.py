@@ -49,7 +49,7 @@ class P4Conf(unittest.TestCase):
         s = p4conf.load(self.p4)
         self.assertEqual(s, p4conf.DEFAULTS)
         self.assertEqual(self.read(), p4conf.DEFAULTS)
-        self.assertEqual(set(s), {"version", "memory", "scratchpad", "phi", "temportal", "recall"})
+        self.assertEqual(set(s), {"memory", "scratchpad", "phi", "temportal", "recall"})
 
     def test_the_retired_config_json_seeds_it(self):
         os.makedirs(p4conf.sub(self.p4, "models"))
@@ -75,11 +75,18 @@ class P4Conf(unittest.TestCase):
         """No plugin reads `plans` any more (the two skills went back to their repositories): a p4.json that still
         holds the section loses it at the next load, and nothing writes it again."""
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({**p4conf.DEFAULTS, "plans": {"plans_dir": ".claude/plans", "owner_title": "the boss"}}, f)
-        s = p4conf.load(self.p4, warn=False)
-        self.assertNotIn("plans", s)
-        self.assertNotIn("plans", self.read())
-        self.assertNotIn("plans", p4conf.DEFAULTS)
+            json.dump({**p4conf.DEFAULTS, "plans": {"plans_dir": ".claude/plans", "owner_title": "the boss"},
+                       "version": 1}, f)
+        import contextlib
+        import io
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            s = p4conf.load(self.p4)
+        self.assertEqual(err.getvalue(), "", "a retired key is dropped without an unknown-key line")
+        for key in ("plans", "version"):
+            self.assertNotIn(key, s)
+            self.assertNotIn(key, self.read())
+            self.assertNotIn(key, p4conf.DEFAULTS)
         self.assertEqual(self.read(), p4conf.DEFAULTS)
 
     def test_a_broken_file_is_never_overwritten(self):

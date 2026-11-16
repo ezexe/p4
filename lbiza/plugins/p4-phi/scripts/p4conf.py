@@ -24,10 +24,8 @@ import tempfile
 import time
 
 FILE = "p4.json"
-VERSION = 1
 
 DEFAULTS = {
-    "version": VERSION,
     "memory": {
         "retries": 5,                    # attempts at a move AppData holds open
         "retry_wait_s": 1.0,
@@ -131,8 +129,8 @@ OPEN = ("temportal.cache",)
 
 # Sections no plugin reads any more: dropped from a p4.json that still holds one. `plans` was the p4-plans
 # plugin's; its two skills went back to the repositories that wrote them (2026-11-11), which state their own
-# values, so no settings file holds any.
-RETIRED = ("plans",)
+# values, so no settings file holds any. `version` was written into every p4.json and read by nothing.
+RETIRED = ("plans", "version")
 
 LEGACY = {"teacher-model": ("recall", "teacher", "model"), "teacher-cutoff": ("recall", "teacher", "cutoff"),
           "inject": ("recall", "inject")}
