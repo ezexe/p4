@@ -658,7 +658,7 @@ def build(p4, project=None, deadline_s=None, now=None, now_s=None):
             old = rs["packages"].get(pkg["name"])
             if old and old.get("sig") == sig:
                 continue
-            light = pkg.get("light", False) or direct is not None and pkg["name"].lower().replace("_", "-") not in {n.lower() for n in direct}
+            light = direct is not None and pkg["name"].lower().replace("_", "-") not in {n.lower() for n in direct}
             rs["packages"][pkg["name"]] = {"sig": sig, "version": version, "path": pkg["path"], "at": now,
                                            "light": light,
                                            "entries": package_entries(pkg, version, desc, light, opened)}
