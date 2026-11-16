@@ -549,6 +549,38 @@ class Recommended(unittest.TestCase):
         self.assertTrue(got.endswith("…"))
 
 
+class AgentPre(unittest.TestCase):
+    """A subagent's call that phi.py has news for still meets the guards and the web lookup: the news goes beside
+    their answer, never in its place."""
+    NEWS = "phi (p4-phi): the brief's file moved since this subagent's launch"
+
+    def setUp(self):
+        import hook
+        self.hook = hook
+        self._kept = (hook.phi_text, hook.phi_route)
+        hook.phi_text = lambda name, payload: self.NEWS if name == "agent-pre" else ""
+
+    def tearDown(self):
+        self.hook.phi_text, self.hook.phi_route = self._kept
+
+    def call(self, tool, inp):
+        return self.hook.h_lookup_check({"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": inp,
+                                         "agent_id": "a1", "session_id": SESSION, "cwd": tempfile.gettempdir()})
+
+    def test_a_guard_still_denies(self):
+        deny = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                       "permissionDecisionReason": "a guard's reason"}}
+        self.hook.phi_route = lambda payload, table: deny
+        hso = self.call("Bash", {"command": "git checkout -b side"})["hookSpecificOutput"]
+        self.assertEqual((hso["permissionDecision"], hso["permissionDecisionReason"]), ("deny", "a guard's reason"))
+        self.assertEqual(hso["additionalContext"], self.NEWS)
+
+    def test_the_news_alone_when_nothing_else_answers(self):
+        self.hook.phi_route = lambda payload, table: None
+        out = self.call("Read", {"file_path": "README.md"})
+        self.assertEqual(out, {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": self.NEWS}})
+
+
 class SubagentStop(Base):
     def test_usage_for_the_subagent(self):
         inp = dict(Agent.INPUT, prompt="look at the quokka harness")

@@ -19,10 +19,10 @@ event and matcher hooks/hooks.json runs it on, and what it does.
   agent          PreToolUse, matcher `Agent`. `updatedInput`: the Agent call's input with its `prompt` extended by
                  phi.py's text for the subagent and by the retrieval lines under "Notes from this repo's memory:";
                  nothing when neither adds a line.
-  lookup-check   PreToolUse, matcher `.*`. For a subagent's call, phi.py's word of what changed since its launch,
-                 when there is one. Otherwise the first answer of phi.py's checks that PHI_CHECK names for the tool,
+  lookup-check   PreToolUse, matcher `.*`. The first answer of phi.py's checks that PHI_CHECK names for the tool,
                  or else lookups.py's check: an earlier finding in place of a web call, an earlier failure before a
-                 command expected to fail.
+                 command expected to fail. A subagent's call also gets phi.py's word of what changed since its
+                 launch beside that answer, when there is one.
   lookup-record  PostToolUse and PostToolUseFailure, matcher `.*`. For a subagent's call, its id bound to phi.py's
                  record of the subagent. Then phi.py's records that PHI_RECORD names for the tool, whose answer is
                  returned for `update_plan`, Write and Edit; otherwise lookups.py writes the call's row and tells a
@@ -567,21 +567,23 @@ def phi_route(payload, table):
 
 
 def h_lookup_check(payload):
-    """Before a tool runs. A subagent's call gets phi.py's word of what changed since its launch, when there is one.
-    Otherwise the first answer of phi.py's checks that PHI_CHECK names for the tool, or else lookups.py's check: an
-    earlier finding in place of a web call, an earlier failure before a command expected to fail."""
-    if payload.get("agent_id"):                   # a subagent's call: phi.py warns it of what changed since its launch
-        text = phi_text("agent-pre", payload)
-        if text:
-            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": text}}
+    """Before a tool runs. The first answer of phi.py's checks that PHI_CHECK names for the tool, or else
+    lookups.py's check: an earlier finding in place of a web call, an earlier failure before a command expected to
+    fail. A subagent's call also gets phi.py's word of what changed since its launch, when there is one, as
+    additionalContext beside that answer."""
     out = phi_route(payload, PHI_CHECK)
-    if out:
+    if not out:
+        import lookups
+        p4 = ready(payload)
+        out = lookups.check(p4, payload, now()) if p4 else None
+    news = phi_text("agent-pre", payload) if payload.get("agent_id") else ""
+    if not news:
         return out
-    import lookups
-    p4 = ready(payload)
-    if not p4:
-        return None
-    return lookups.check(p4, payload, now())
+    out = dict(out or {})
+    hso = dict(out.get("hookSpecificOutput") or {"hookEventName": "PreToolUse"})
+    hso["additionalContext"] = "\n\n".join(x for x in (hso.get("additionalContext"), news) if x)
+    out["hookSpecificOutput"] = hso
+    return out
 
 
 def h_lookup_record(payload):
