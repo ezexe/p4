@@ -866,6 +866,49 @@ def tmp_close_bare_store_cases():
     print("test_scratchpad.py: bare store cases green")
 
 
+def tmp_close_no_gc_cases():
+    """tmp-close's two commits run no automatic git maintenance and no hook of the store, so a store over gc.auto's
+    loose-object threshold does not run `gc --auto`, nor Git LFS its `post-commit`, inside the 1.5-second SessionEnd
+    budget. The fixture sets gc.auto to 1 and keeps
+    maintenance in the foreground, so any automatic gc packs the store's loose objects before the hook returns."""
+    if not shutil.which("git"):
+        print("test_scratchpad.py: no gc close cases skipped, no git on PATH")
+        return
+    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-nogc-")
+    sid = "abab1212-0000-4000-8000-0000000000ab"
+    p4 = os.path.join(root, ".claude", "p4")
+    mine = os.path.join(p4, "temportal", "tmp", sid)
+    try:
+        os.makedirs(p4)
+        for args in (["init", "-q"], ["config", "user.name", "t"], ["config", "user.email", "t@t"],
+                     ["config", "gc.auto", "1"], ["config", "gc.autoDetach", "false"],
+                     ["config", "maintenance.autoDetach", "false"]):
+            subprocess.run(["git", "-C", p4] + args, check=True, capture_output=True)
+        put(p4, "first.md", "first\n")
+        subprocess.run(["git", "-C", p4, "add", "first.md"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", p4, "-c", "gc.auto=0", "commit", "-q", "-m", "first"], check=True,
+                       capture_output=True)
+        # gc --auto counts loose objects in objects/17 alone, so these 2,000 blobs, the same every run, put enough there
+        blobs = os.path.join(root, "blobs")
+        names = [put(blobs, f"b{i}.txt", f"loose blob {i}\n") or os.path.join(blobs, f"b{i}.txt") for i in range(2000)]
+        subprocess.run(["git", "-C", p4, "hash-object", "-w", "--stdin-paths"], input="\n".join(names).encode(),
+                       check=True, capture_output=True)
+        assert len(os.listdir(os.path.join(p4, ".git", "objects", "17"))) >= 2, "the fixture is under gc.auto"
+        ran = os.path.join(root, "post-commit-ran")
+        put(os.path.join(p4, ".git", "hooks"), "post-commit", f"#!/bin/sh\necho ran > '{ran.replace(os.sep, '/')}'\n")
+        os.chmod(os.path.join(p4, ".git", "hooks", "post-commit"), 0o755)
+        put(mine, "plan.md", "- a plan\n")
+        assert run_sub("tmp-close", {"cwd": root, "session_id": sid}, CLAUDE_PROJECT_DIR=root) == ""
+        log = subprocess.run(["git", "-C", p4, "log", "--format=%s"], capture_output=True, text=True).stdout
+        assert "kept before its removal" in log and not os.path.exists(os.path.join(mine, "plan.md")), log
+        assert not os.path.exists(ran), "the close ran the store's post-commit hook"
+        packs = [n for n in os.listdir(os.path.join(p4, ".git", "objects", "pack")) if n.endswith(".pack")]
+        assert packs == [], f"the close ran an automatic gc, which packed the store: {packs}"
+    finally:
+        wipe(root)
+    print("test_scratchpad.py: no gc close cases green")
+
+
 def tmp_close_rename_cases():
     """A committed file renamed inside the session folder is closed whole: no staged deletion of its old path is
     left in the index for a later commit."""
@@ -1358,6 +1401,9 @@ class Cases(unittest.TestCase):
 
     def test_tmp_close_bare_store_cases(self):
         tmp_close_bare_store_cases()
+
+    def test_tmp_close_no_gc_cases(self):
+        tmp_close_no_gc_cases()
 
     def test_tmp_close_cut_cases(self):
         tmp_close_cut_cases()

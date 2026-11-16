@@ -582,11 +582,17 @@ def stage_tmp(p4, sid):
 
 
 def commit_flags(p4):
-    """`git commit` as close_tmp runs it: literal pathspecs, past a failing pre-commit hook, and under the identity
-    p4conf's own commits use when the store has none, so a close never fails on either."""
+    """`git commit` as close_tmp runs it: literal pathspecs, no hook of the store, and under the identity p4conf's own
+    commits use when the store has none, so a close never fails on either. These commits also run no automatic
+    maintenance, and both cuts keep a close inside the 1.5-second budget of SessionEnd. A store over gc.auto's
+    loose-object count otherwise runs `gc --auto` and its prune after each commit, which blocks the commit on Windows
+    and took 1.5 to 2 seconds a commit on a copy of the live store. Git LFS's `post-commit` only sets lockable files
+    read-only, and a close commits scratchpad files, which no LFS pattern names. Any other commit to the store still
+    runs both. core.hooksPath names a folder that is never made, so git finds no hook there."""
     known = all((git_out(p4, "config", key) or "").strip() for key in ("user.name", "user.email"))
     ident = [] if known else ["-c", "user.name=p4", "-c", "user.email=p4@localhost"]
-    return ["--literal-pathspecs", *ident, "commit", "--no-verify"]
+    return ["--literal-pathspecs", "-c", "maintenance.auto=false", "-c", "gc.auto=0",
+            "-c", "core.hooksPath=.git/p4-close-runs-no-hooks", *ident, "commit", "--no-verify"]
 
 
 def closed_mark(p4, sid):
