@@ -791,6 +791,64 @@ class MergedWorktrees(unittest.TestCase):
             self.assertIn("Kept:", text)
             self.assertEqual(relay.worktrees_text(home, "local_top", relay.repo_of(repo)), "", "said once per set")
 
+    def test_a_worktree_is_kept_for_a_stash_unpushed_commits_no_branch_or_pull_requests_gh_could_not_read(self):
+        """At a top-level session's step boundary, with no gh on PATH and with a gh that fails, a merged worktree
+        whose branch has an upstream is kept as one whose pull requests could not be read, never named for removal
+        as one with none. One with a stash, one with commits its upstream lacks and a detached checkout are kept with
+        theirs, and a merged one that holds nothing else is named."""
+        git = shutil.which("git")
+        if not git:
+            self.skipTest("no git")
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, origin = os.path.join(tmp, "repo"), os.path.join(tmp, "origin.git").replace("\\", "/")
+            g = lambda cwd, *a: subprocess.run(["git", "-C", cwd, "-c", "user.name=t", "-c", "user.email=t@t", *a],
+                                               check=True, capture_output=True, text=True)
+            write(os.path.join(repo, "a.txt"), "a\n")
+            write(os.path.join(repo, "s.txt"), "s\n")
+            subprocess.run(["git", "init", "-q", "-b", "main", repo], check=True, capture_output=True)
+            subprocess.run(["git", "init", "-q", "--bare", origin], check=True, capture_output=True)
+            g(repo, "add", "-A")
+            g(repo, "commit", "-qm", "one")
+            g(repo, "remote", "add", "origin", origin)
+            wts = {n: os.path.join(tmp, ".claude", "worktrees", n) for n in ("done", "pr", "stashed", "ahead", "loose")}
+            for n in ("done", "pr", "stashed", "ahead"):     # each branch starts at main's commit, so it is merged
+                g(repo, "worktree", "add", "-q", "-b", n, wts[n])
+            g(repo, "worktree", "add", "-q", "--detach", wts["loose"])
+            g(repo, "push", "-q", "-u", "origin", "pr", "ahead")
+            write(os.path.join(wts["ahead"], "a.txt"), "a, then more\n")
+            g(wts["ahead"], "commit", "-qam", "more")
+            g(repo, "merge", "-q", "--ff-only", "ahead")      # merged, and a commit ahead of its upstream
+            write(os.path.join(wts["stashed"], "s.txt"), "s, put aside\n")
+            g(wts["stashed"], "stash", "-q")
+            fails = os.path.join(tmp, "gh-fails")
+            if os.name == "nt":                               # found on PATH, and `gh` cannot start a .cmd
+                write(os.path.join(fails, "gh.cmd"), "@exit /b 1\n")
+            else:
+                write(os.path.join(fails, "gh"), "#!/bin/sh\nexit 1\n")
+                os.chmod(os.path.join(fails, "gh"), 0o755)
+            git_dir = os.path.dirname(git)
+            for label, path in (("no gh", git_dir), ("a gh that fails", os.pathsep.join([fails, git_dir]))):
+                with self.subTest(label):
+                    if label == "no gh" and shutil.which("gh", path=git_dir):
+                        self.skipTest("gh sits beside git, so no PATH holds git without it")
+                    t = Tree(os.path.join(tmp, label.replace(" ", "-")))
+                    t.record(TOP, title="top", cwd=repo)
+                    r = t.hook("plan", TOP, {"hook_event_name": "PostToolUse",
+                                             "tool_name": "mcp__ccd_turn__update_plan",
+                                             "tool_input": {"advance": True}, "tool_response": "Plan updated."},
+                               PATH=path)
+                    self.assertEqual(r.returncode, 0, r.stderr)
+                    line = next((x for x in context(r).split("\n") if "worktrees whose branch is merged" in x), "")
+                    self.assertIn("`git branch -d done`, merged into main", line)
+                    self.assertNotIn("git branch -d pr", line, "pull requests gh could not read are not none")
+                    self.assertIn(" Kept: ", line)
+                    kept = dict(x.split(": ", 1) for x in line.split(" Kept: ", 1)[1].rstrip(".").split("; "))
+                    self.assertEqual({os.path.basename(p.rstrip("/\\")): why for p, why in kept.items()},
+                                     {"pr": "its pull requests could not be read",
+                                      "stashed": "a stash on its branch",
+                                      "ahead": "commits its upstream lacks",
+                                      "loose": "a detached checkout, no branch to judge"})
+
 
 class SharedHome(unittest.TestCase):
     """Two projects naming one store as `phi.home`: a session in one hears a session in the other."""

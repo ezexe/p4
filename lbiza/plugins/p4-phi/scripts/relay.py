@@ -1720,21 +1720,25 @@ def worktrees(repo):
 
 
 def _open_pr(repo, branch):
+    """True when gh lists an open pull request for the branch, False when it lists none, and None when gh is
+    missing, fails or takes longer than GIT_S, so whether there is one could not be read."""
     import shutil
     if not shutil.which("gh"):
-        return False
+        return None
     try:
         r = subprocess.run(["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "number", "-q", "length"],
                            cwd=repo, capture_output=True, text=True, timeout=GIT_S)
     except (OSError, subprocess.SubprocessError):
-        return False
-    return r.returncode == 0 and r.stdout.strip() not in ("", "0")
+        return None
+    n = r.stdout.strip()
+    return n != "0" if r.returncode == 0 and n.isdigit() else None
 
 
 def merged_worktrees(repo):
     """A repository's worktrees to remove, each as its path, branch and base, and those kept, each as its path and
     reason. One is removed when its branch is an ancestor of the main checkout's branch or of the default branch,
-    and it holds no uncommitted, untracked or stashed work, no commit its upstream lacks and no open pull request."""
+    and it holds no uncommitted, untracked or stashed work, no commit its upstream lacks and no open pull request. A
+    branch with an upstream whose pull requests gh could not read is kept."""
     if not repo:
         return [], []
     head = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
@@ -1769,8 +1773,9 @@ def merged_worktrees(repo):
         if up and up.returncode == 0 and up.stdout.strip() not in ("", "0"):
             kept.append((path, "commits its upstream lacks"))
             continue
-        if up and up.returncode == 0 and _open_pr(repo, branch):
-            kept.append((path, "an open pull request"))
+        pr = _open_pr(repo, branch) if up and up.returncode == 0 else False
+        if pr is not False:
+            kept.append((path, "an open pull request" if pr else "its pull requests could not be read"))
             continue
         gone.append((path, branch, base))
     return gone, kept
