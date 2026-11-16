@@ -438,7 +438,16 @@ def build(p4, project=None, deadline_s=None, now=None):
     s["cut"] = cut
     s["entries"] = n
     s["built"] = now or time.strftime("%Y-%m-%d %H:%M")
-    ranker.write_atomic(state_path(p4), json.dumps(s, separators=(",", ":"), ensure_ascii=False))
+    # written only when something besides the build's time changed: the index counts repo.json's mtime among its
+    # sources, so a rewrite of the same documents would owe a full index build at every session start and Stop
+    try:
+        with open(state_path(p4), encoding="utf-8") as f:
+            on_disk = json.load(f)
+    except (OSError, ValueError):
+        on_disk = None
+    if not isinstance(on_disk, dict) or {k: v for k, v in on_disk.items() if k != "built"} != \
+            {k: v for k, v in s.items() if k != "built"}:
+        ranker.write_atomic(state_path(p4), json.dumps(s, separators=(",", ":"), ensure_ascii=False))
     stats.update({"files": len(order) - cut, "entries": n, "commits": len(s["commits"]), "cut": cut})
     return stats
 

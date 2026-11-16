@@ -19,6 +19,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -268,6 +269,18 @@ class RepoIndex(unittest.TestCase):
         self.assertNotIn("AxolotlMixer", "\n".join(self.shows()))
         s = self.repo.build(self.p4, self.proj)
         self.assertEqual((s["changed"], s["new_commits"]), (0, 0))
+
+    def test_a_build_that_changes_nothing_leaves_the_index_fresh(self):
+        """repo.json is written only when the repository's documents changed: a second build of an unchanged tree,
+        at another time, leaves the file as it was, so the index built after the first stays fresh."""
+        self.repo.build(self.p4, self.proj, now="2026-11-01 10:00")
+        st.build_index(self.p4)
+        path = self.repo.state_path(self.p4)
+        before = (os.stat(path).st_mtime_ns, open(path, "rb").read())
+        time.sleep(0.05)
+        self.repo.build(self.p4, self.proj, now="2026-11-01 11:00")
+        self.assertEqual((os.stat(path).st_mtime_ns, open(path, "rb").read()), before, "repo.json untouched")
+        self.assertFalse(st.index_stale(self.p4), "no index rebuild owed")
 
     def test_cap_keeps_the_newest_touched(self):
         cap = self.repo.MAX_FILE_ENTRIES
