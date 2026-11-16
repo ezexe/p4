@@ -73,7 +73,7 @@ class Said(unittest.TestCase):
         out = hook.h_recall({"prompt": PROMPT, "session_id": SESSION, "cwd": self.proj})
         return (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
 
-    def test_off_is_recall_as_it_was(self):
+    def test_off_leaves_retrieval_unchanged(self):
         text = self.recall()
         self.assertIn("rule: keep the narwhal port open", text)
         self.assertNotIn("[r1]", text)
@@ -121,7 +121,7 @@ class Said(unittest.TestCase):
         got = [x for x in lb.training_labels(self.p4) if x["source"] == "said"]
         self.assertEqual([(x["entry"], x["label"], x["weight"]) for x in got], [(rule_id, 1, 1.0)], "on: it is a label")
 
-    def test_set_aside_is_a_negative_and_needs_no_reason(self):
+    def test_set_aside_is_a_negative_that_keeps_its_reason(self):
         self.set_mode("shadow")
         self.recall()
         lines, code = said.state(self.p4, SESSION, "set-aside", ["r1"], "the port is already shut")
