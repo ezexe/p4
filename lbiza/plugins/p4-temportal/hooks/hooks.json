@@ -2,8 +2,13 @@
   "hooks": {
     "SessionStart": [
       {
+        "matcher": "startup|clear|compact",
         "hooks": [
-          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" memory migrate", "timeout": 30},
+          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" memory migrate", "timeout": 30}
+        ]
+      },
+      {
+        "hooks": [
           {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad notebook-out", "timeout": 20},
           {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad repo-uses", "timeout": 20},
           {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad tmp-link", "timeout": 30},
