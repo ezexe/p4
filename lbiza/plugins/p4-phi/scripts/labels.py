@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""labels.py: the label set (fresh-marketplace.md 5.1, 5.1a, 5.2) and the dictionary's signals (5.3).
+"""labels.py: the label set (fresh-marketplace.md 5.1, 5.1a, 5.2).
 
 Two files under models/:
   labels-raw.tsv  the store's own labels, before any teacher edit: `pool` (old pools, imported), `store` (the history
@@ -618,94 +618,6 @@ def from_transcripts(p4, project, slug_dirs, idx=None, write=True, all_sessions=
         replace_source(p4, TRAIN, TRAIN_HEAD, "repo", rows_out)
         add_tasks(p4, tasks_out)
     return stats
-
-
-# --- the dictionary's signals (5.3), the close hook ------------------------------------------------------
-
-SEEN = "signals-seen.json"
-
-
-def signals(p4, session=None, now=None, write=True):
-    """The turn's dictionary signals: every correction and retraction not seen before, every ECHO/SUPERSEDED row
-    and follow-up of `session` (every session when None), each a pending entry in vocabulary.md with `because:`
-    filled. A term already there gets the new `because:` appended, never a second entry; an entry's other lines
-    are never touched. Returns {signals, yielded, new_terms, appended, no_term}."""
-    import migrate
-    now = now or datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    files = st.load_store(p4)
-    seen_path = mpath(p4, SEEN)
-    try:
-        with open(seen_path, encoding="utf-8") as f:
-            seen = set(json.load(f))
-    except (OSError, ValueError):
-        seen = set()
-    scoped = dict(files)
-    if session:
-        s8 = session[:8]
-        scoped = {k: v for k, v in files.items() if not k.startswith(st.MESSAGES + "/") or k == f"{st.MESSAGES}/{s8}.md"}
-        # the session's earlier rows are context; only its new rows are signals: the seen set filters them below
-    for f in ("corrections.md", "retractions.md"):
-        scoped[f] = [e for e in files.get(f, []) if e.id not in seen]
-    df, n = migrate.df_table(files, p4)
-    pairs, stats = migrate.seed_dictionary(scoped, df, n, now)
-    new_seen = seen | {e.id for f in ("corrections.md", "retractions.md") for e in files.get(f, [])}
-    # rows: a follow-up or repeat already turned into a because: line is found again next time; the merge below
-    # appends only because lines not already present, so a rerun adds nothing
-    res = merge_vocabulary(p4, pairs, write=write)
-    if write:
-        ranker.write_atomic(seen_path, json.dumps(sorted(new_seen)))
-    res.update({"signals": stats["signals"], "yielded": stats["yielded"], "no_term": len(stats["no_term"])})
-    return res
-
-
-def merge_vocabulary(p4, pairs, write=True):
-    """Add the new terms' entries at the end of vocabulary.md and each known term's new `because:` lines after its
-    last `because:`, editing nothing else."""
-    path = os.path.join(st.store_dir(p4), st.VOCABULARY)
-    text = st.read_text(path) if os.path.exists(path) else st.render(st.VOCABULARY, [])
-    lines = text.split("\n")
-    have = {}
-    for e in st.parse(text, st.VOCABULARY):
-        if e.head == "term":
-            have[e.value.strip().lower()] = e
-    new_terms, appended = [], 0
-    inserts = {}
-    for p in pairs:
-        term = p[0][1]
-        becauses = [v for k, v in p if k == "because"]
-        e = have.get(term.strip().lower())
-        if e is None:
-            new_terms.append(p)
-            have[term.strip().lower()] = None
-            continue
-        if e is None:
-            continue
-        old = set(e.all("because"))
-        add = [b for b in becauses if b not in old]
-        if add:
-            # the line after the entry's last because: (its continuation lines included)
-            end = e.line - 1
-            last_b = None
-            j = e.line
-            while j < len(lines) and (lines[j].startswith("  ")):
-                if lines[j].startswith("  because:"):
-                    last_b = j
-                j += 1
-            at = (last_b + 1) if last_b is not None else j
-            while last_b is not None and at < len(lines) and lines[at].startswith(st.CONT_PREFIX):
-                at += 1
-            inserts.setdefault(at, []).extend(f"  because: {b}" for b in add)
-            appended += len(add)
-            _ = end
-    for at in sorted(inserts, reverse=True):
-        lines[at:at] = inserts[at]
-    out = "\n".join(lines).rstrip("\n")
-    if new_terms:
-        out += "\n\n" + "\n\n".join(st.format_entry(p) for p in new_terms)
-    out += "\n"
-    if write and (new_terms or appended):
-        ranker.write_atomic(path, out)
-    return {"new_terms": len(new_terms), "appended": appended, "terms": [p[0][1] for p in new_terms]}
 
 
 # --- the free half of the re-exploration measure (8.5) ---------------------------------------------------

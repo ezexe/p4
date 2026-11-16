@@ -7,7 +7,6 @@
                                        external modules; a package installed or updated is read again)
   query --text T [--session S]         the recall lines for one message: 0 lines for an ordinary message,
                                        otherwise at most 5, each `- <date> <kind>: <text> (<file>:<line>)`
-  signals [--session S]                the dictionary's signals into vocabulary.md (pending entries)
   labels [--from-pools OLD] [--from-history] [--from-transcripts --project D --slug DIR ...] [--reexploration]
                                        list the label set with counts per source; import or derive labels
   train [--if-owed], eval              fit, evaluate held out, promote past the floor (train.py)
@@ -633,16 +632,6 @@ def cmd_check(args):
     return 0
 
 
-def cmd_signals(args):
-    import labels as lb
-    p4 = p4_dir(args)
-    r = lb.signals(p4, session=args.session or None, write=not args.dry)
-    print(f"signals: {sum(r['signals'].values())} signals ({', '.join(f'{k} {v}' for k, v in r['signals'].items())}), "
-          f"{sum(r['yielded'].values())} with a term; {r['new_terms']} new pending entries, {r['appended']} "
-          f"because: lines added, {r['no_term']} without a rare term")
-    return 0
-
-
 def cmd_labels(args):
     import labels as lb
     p4 = p4_dir(args)
@@ -740,10 +729,6 @@ def main(argv=None):
     p.add_argument("--all", action="store_true", help="merge every machine's branch into main and move them up to it")
     p.add_argument("--push", action="store_true")
     p.add_argument("--main", default="")
-    p = sub.add_parser("signals")
-    p.add_argument("--p4")
-    p.add_argument("--session", default="")
-    p.add_argument("--dry", action="store_true")
     p = sub.add_parser("labels")
     p.add_argument("--p4")
     p.add_argument("--from-pools", default="")
@@ -802,8 +787,6 @@ def main(argv=None):
         return cmd_query(args)
     if args.cmd == "check":
         return cmd_check(args)
-    if args.cmd == "signals":
-        return cmd_signals(args)
     if args.cmd == "labels":
         return cmd_labels(args)
     if args.cmd in ("train", "eval"):

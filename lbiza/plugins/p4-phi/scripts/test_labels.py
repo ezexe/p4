@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
-"""Tests for the label sources and the dictionary's signals (fresh-marketplace.md 5.1, 5.1a, 5.2, 5.3, 8.1, 8.4's
-free half, 8.5's free half).
+"""Tests for the label sources (fresh-marketplace.md 5.1, 5.1a, 5.2, 8.1, 8.4's free half, 8.5's free half).
 
 Run: python3 test_labels.py   (stdlib unittest, offline, seconds)
 
-Fixtures are built in temp directories. The real-store and real-transcript checks run only when those paths exist:
-the migrated clones (P4_FIXTURES, as test_store), the migrated ap-p4_mac store (P4_MAC_STORE) and the project
+Fixtures are built in temp directories. The real-transcript checks run only when those paths exist: the migrated
+ap-p4_mac store (P4_MAC_STORE) and the project
 transcripts under ~/.claude/projects/-Users-ez-code-AudioPlugin/ (read-only; nothing is written beside them).
 """
 
 import json
 import os
-import re
 import shutil
 import sys
 import tempfile
@@ -26,7 +24,7 @@ import repo  # noqa: E402
 import store as st  # noqa: E402
 import transcript as tr  # noqa: E402
 from test_hooks import make_project, transcript  # noqa: E402
-from test_store import NOW, fixture, make_store, write  # noqa: E402
+from test_store import NOW, make_store, write  # noqa: E402
 
 MAC_STORE = os.environ.get("P4_MAC_STORE", "/Users/ez/gritz/p4-repos/ap-p4_mac")
 AP_PROJECT = "/Users/ez/code/AudioPlugin"
@@ -287,39 +285,7 @@ class Transcripts(unittest.TestCase):
         self.assertLessEqual(r["cf_calls"], r["calls"])
 
 
-class Signals(Base):
-    def correction(self):
-        rows = [[("fingerprint", '"rename it to the walrus branch"'), ("time", "2026-10-30 10:00"), ("arrival", "turn"),
-                 ("state", "FRESH"), ("addressed", "renamed it to walrus-1")],
-                [("fingerprint", '"no, the walrus branch is walrus-mac"'), ("time", "2026-10-30 10:03"),
-                 ("arrival", "turn"), ("state", "FRESH"), ("addressed", "renamed it to walrus-mac")]]
-        write(p4conf.sub(self.p4, "store", "messages", "eeee5555.md"), st.render("messages/eeee5555.md", rows))
-        text = st.read_text(p4conf.sub(self.p4, "store", "corrections.md")).rstrip("\n")
-        text += "\n\n" + st.format_entry([("key", "walrus-branch"), ("time", "2026-10-30 10:03"),
-                                          ("match", "walrus-1"), ("meant", "walrus-mac"),
-                                          ("from", "sessions/eeee5555/vlds/ledger.md:1")]) + "\n"
-        write(p4conf.sub(self.p4, "store", "corrections.md"), text)
-
-    def test_correction_yields_pending_entry_quoting_before_and_after(self):
-        self.correction()
-        r = lb.signals(self.p4, session="eeee5555", now=NOW)
-        self.assertGreaterEqual(r["new_terms"], 1)
-        v = [x for x in st.read_vocabulary(self.p4) if "walrus-branch" in x["source"]]
-        self.assertEqual(len(v), 1, "one pending entry for the correction's rarest word of the misread message")
-        self.assertTrue(v[0]["pending"])
-        because = v[0]["because"][0]
-        self.assertIn('"rename it to the walrus branch"', because)
-        self.assertIn('"no, the walrus branch is walrus-mac"', because)
-        self.assertEqual(lb.signals(self.p4, session="eeee5555", now=NOW)["new_terms"], 0, "never a second entry")
-
-    def test_owner_edit_untouched(self):
-        path = p4conf.sub(self.p4, "store", "vocabulary.md")
-        before = st.read_text(path)
-        self.correction()
-        lb.signals(self.p4, session="eeee5555", now=NOW)
-        after = st.read_text(path)
-        self.assertTrue(after.startswith(before.rstrip("\n")), "existing entries are byte-identical")
-
+class FollowUp(unittest.TestCase):
     def test_follow_up_detector(self):
         a = st.Entry("m", 1, [("fingerprint", '"ship the build"'), ("time", "2026-10-30 10:00")])
         b = st.Entry("m", 5, [("fingerprint", '"no, the nightly one"'), ("time", "2026-10-30 11:00")])
@@ -328,39 +294,6 @@ class Signals(Base):
         self.assertTrue(lb.is_follow_up(a, b))
         self.assertTrue(lb.is_follow_up(a, c))
         self.assertFalse(lb.is_follow_up(a, d))
-
-
-class RealStores(unittest.TestCase):
-    """On the migrated clones: every correction yields a pending entry whose because: quotes ezexe's words before
-    and after, or is listed as yielding no rare term; a rerun adds nothing."""
-
-    def check(self, name, expect):
-        src = fixture(name)
-        if not src:
-            self.skipTest(f"{name} clone not present")
-        import migrate
-        with tempfile.TemporaryDirectory() as t:
-            out = os.path.join(t, "p4")
-            migrate.run(src, out=out, apply=True, now=NOW)
-            p4conf.migrate_layout(out, commit=False)          # what the next hook does to a flat store
-            os.remove(p4conf.sub(out, "store", "vocabulary.md"))
-            r = lb.signals(out, now=NOW)
-            self.assertEqual(r["signals"]["correction"], expect)
-            vocab = st.read_vocabulary(out)
-            cited = [v for v in vocab if v["source"].startswith("correction")]
-            for v in cited:
-                for b in v["because"]:
-                    if "it was read as" in b:
-                        self.assertGreaterEqual(len(re.findall(r'"[^"]+"', b)), 2, b)
-            self.assertEqual(r["yielded"]["correction"] + sum(1 for _ in range(0)), r["yielded"]["correction"])
-            self.assertLessEqual(r["yielded"]["correction"], expect)
-            self.assertEqual(lb.signals(out, now=NOW)["new_terms"], 0)
-
-    def test_p4p4_19_corrections(self):
-        self.check("p4-p4", 19)
-
-    def test_ap_mac_5_corrections(self):
-        self.check("ap-p4_mac", 5)
 
 
 class RealTranscripts(unittest.TestCase):

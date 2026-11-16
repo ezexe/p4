@@ -466,8 +466,8 @@ def h_close(payload):
             pass
     # The term dictionary is no longer grown (0.8.0): ezexe ruled it the wrong conception on 2026-11-10. A message
     # is understood whole, with what was in view when it came (view.py), not word by word: a judge could show a
-    # meaning for 1 of 18 pending terms, and most were how ezexe writes, not terms at all. labels.signals and
-    # the reading side stay for stores that still hold a vocabulary.md; nothing calls them here.
+    # meaning for 1 of 18 pending terms, and most were how ezexe writes, not terms at all. The
+    # reading side stays for stores that still hold a vocabulary.md.
     try:                        # view.py: what this session has in view, brought up to date with its transcript
         import view
         view.refresh(p4, project, session, payload.get("transcript_path") or "",
