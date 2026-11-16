@@ -1682,16 +1682,15 @@ def h_self_archive(payload):
     refuse = None
     if not session_archives(me.store):             # #49: the archive is ezexe's own action in the app
         RAN["archive_refused"] = "self" if own else target[:40]
-        if not own and not spawned_from(s):       # a top session archiving what ezexe picked in its quick select
-            turn = last_turn(payload.get("transcript_path") or "")
-            if target in relay.picked(me.home, me.id, (turn or {}).get("calls")):
-                RAN["archive_refused"] = ""
-                RAN["archive_picked"] = target[:40]
-                return None
-        if not own and controls.is_puppeteer(s, me.store):   # #58: a puppeteer archives a complete session it controls
-            left = controls.archive(me.home, s, target, str(inp.get("reason") or ""))
-            RAN["archive_refused"] = ""
+        turn = last_turn(payload.get("transcript_path") or "") if not own and not spawned_from(s) else None
+        if not own and controls.is_puppeteer(s, me.store):
+            # #63: a puppeteer archives only what ezexe picked this turn, and only a session phi holds complete
+            was = target in controls.picked(me.home, s, turn)
+            left = controls.archive(me.home, s, target, str(inp.get("reason") or ""), picked=was)
+            RAN["archive_refused"] = "" if not left else target[:40]
             RAN["puppeteer_archive"] = ("left " if left else "let ") + target[:40]
+            if was:
+                RAN["archive_picked"] = target[:40]
             controls.board(me.home, load_session(me.home, me.id) or s)
             if not left:
                 return None
@@ -1699,6 +1698,11 @@ def h_self_archive(payload):
                                            "permissionDecisionReason": (
                                                f"phi (p4-phi): this puppeteer's archive of {target} is refused: "
                                                f"{left}. Name it to ezexe as left, with that reason.")}}
+        if not own and not spawned_from(s):       # a top session archiving what ezexe picked in its quick select
+            if target in relay.picked(me.home, me.id, (turn or {}).get("calls")):
+                RAN["archive_refused"] = ""
+                RAN["archive_picked"] = target[:40]
+                return None
         why = relay.NO_ARCHIVE + (
             " This session's turn is kept. " + relay.CHILD_DONE if own and spawned_from(s) else
             " " + relay.BUTTON if own else
@@ -2297,7 +2301,7 @@ def pair_parts(me, s, req, changed=""):
     edge = controls.boundary(me.home, s, me.store)
     if edge:
         RAN["boundary"] = True
-        out.append(edge)
+        out += edge.split("\n\n")                 # #63: the archive offer and the boundary each fit or are held whole
     controls.board(me.home, s)
     return out
 

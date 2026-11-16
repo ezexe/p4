@@ -3,7 +3,7 @@
 
 ezexe files a top session in the sidebar section "puppeteers". It controls the top sessions of other trees, in any
 store: phi reads the filing from the app's own file, keeps the pair, tells the controlled session, writes the
-puppeteer's board, leaves its waiting steps with it, lets it archive a complete session, names a boundary once as a
+puppeteer's board, leaves its waiting steps with it, lets it archive only what ezexe picks, names a boundary once as a
 question with two buttons, and carries a controlled session's request for a new top session to it.
 """
 
@@ -64,10 +64,16 @@ class Pair(unittest.TestCase):
         self.t.cli(host, "done", "its suite ran green and its commit is pushed", proj=proj)
         self.t.stop(host, "Build it", report=report, proj=proj, uuid=uuid)
 
-    def archive(self, by, target, reason=WHY):
+    def archive(self, by, target, reason=WHY, picks=None, prompt="what is ready?"):
+        """The archive hook for `by`'s call on `target`. With `picks`, the turn holds an answered quick select
+        carrying those labels; `prompt` is the message that began the turn."""
         inp = {"session_id": target, **({"reason": reason} if reason else {})}
+        calls = [] if picks is None else [("AskUserQuestion", {"questions": []},
+                                           "User has answered your questions: " + ", ".join(f'"{p}"' for p in picks))]
+        self._n = getattr(self, "_n", 0) + 1
+        path = transcript(os.path.join(self.t.tmp, f"{by}arch{self._n}.jsonl"), prompt, calls, "", f"arch{self._n}")
         r = self.t.hook("self-archive", by, {"hook_event_name": "PreToolUse", "tool_name": ARCHIVE,
-                                             "tool_input": inp})
+                                             "tool_input": inp, "transcript_path": path})
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else {}
 
@@ -176,41 +182,103 @@ class Pair(unittest.TestCase):
 
     # --- the archive guard --------------------------------------------------------------------------------------------
 
-    def test_a_puppeteer_archives_a_complete_controlled_top_session_and_is_refused_the_others(self):
+    TITLE = "Build the narwhal exporter"
+
+    def complete_top(self):
+        """TOP finished and controlled, and the puppeteer handed the line that offers it."""
         t = self.t
         self.finish(TOP)
+        t.say(PUP, "Control the tree")
+        t.cli(PUP, "controls", TOP)
+        return context(t.say(PUP, "a report came in"))
+
+    def test_a_puppeteers_archive_call_with_no_pick_this_turn_is_refused(self):
+        self.complete_top()
+        out = self.archive(PUP, TOP)
+        self.assertEqual(out.get("permissionDecision"), "deny", "complete, controlled and reasoned, but not picked")
+        why = out["permissionDecisionReason"]
+        self.assertIn("ezexe did not pick it in this turn", why)
+        self.assertIn("a puppeteer archives only what ezexe picks", why)
+        self.assertIn("phi's records hold it complete, so it can be offered", why)
+        out = self.archive(PUP, TOP, picks=["Some other session"])
+        self.assertEqual(out.get("permissionDecision"), "deny", "a quick select that picked another")
+        out = self.archive(PUP, TOP, picks=["None of them"])
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertEqual([a["let"] for a in self.t.session(PUP)["puppeteerArchives"]], [False, False, False])
+
+    def test_the_same_call_after_a_quick_select_that_picked_the_target_is_allowed(self):
+        self.complete_top()
+        self.assertEqual(self.archive(PUP, TOP).get("permissionDecision"), "deny")
+        self.assertEqual(self.archive(PUP, TOP, picks=[self.TITLE]), {}, "ezexe's pick is the user action")
+        kept = self.t.session(PUP)["puppeteerArchives"]
+        self.assertEqual([(a["sessionId"], a["let"]) for a in kept], [(TOP, False), (TOP, True)])
+        self.assertEqual(kept[1]["why"], WHY, "the reason it gave is kept beside what it archived")
+        self.assertEqual(self.archive(PUP, TOP, reason="", picks=[self.TITLE]), {}, "the pick needs no reason")
+        self.assertEqual(self.t.session(PUP)["puppeteerArchives"][-1]["why"],
+                         "ezexe picked it in this turn's quick select")
+
+    def test_a_boundary_line_for_a_complete_tree_names_the_quick_select_and_not_the_archive_call(self):
+        ctx = self.complete_top()
+        self.assertIn("1 session this puppeteer controls is complete", ctx)
+        self.assertIn("one `AskUserQuestion` with `multiSelect` true", ctx)
+        self.assertIn(f"- label \"{self.TITLE}\", description \"Archive {TOP}.\"", ctx)
+        self.assertIn("with a last option \"None of them\"", ctx)
+        self.assertIn("Archive none of them before ezexe has answered", ctx)
+        self.assertIn("never this session's judgement", ctx)
+        self.assertNotIn("archive_session", ctx, "the archive call follows ezexe's pick and is not named here")
+        self.assertNotIn("without a quick select", ctx)
+        self.assertNotIn("session_archives", ctx, "no text tells a session to set it")
+        self.assertIn("a boundary: every controlled session is idle", ctx, "the compaction question comes with it")
+        self.assertEqual(self.t.session(PUP)["archiveOffer"], [{"label": self.TITLE, "ids": [TOP]}])
+
+    def test_one_complete_session_beside_a_working_one_is_a_button_and_its_press_is_the_pick(self):
+        t = self.t
+        self.finish(TOP)
+        t.say(TOP2, "Build it", proj=self.other)       # mid-turn, so no boundary and no compaction question
+        t.say(PUP, "Control the trees")
+        t.cli(PUP, "controls", TOP, TOP2)
+        ctx = context(t.say(PUP, "a report came in"))
+        self.assertIn(f"\"{self.TITLE}\" ({TOP}), a session this puppeteer controls, is complete", ctx)
+        self.assertIn("buttons are the replies \"Archive it\" and \"Not now\"", ctx)
+        self.assertIn("Not offered, and named to ezexe as left with the reason: \"Build the importer\"", ctx)
+        self.assertNotIn("a boundary", ctx)
+        self.assertNotIn("archive_session", ctx)
+        self.assertEqual(self.archive(PUP, TOP).get("permissionDecision"), "deny", "not in the turn it was offered")
+        self.assertEqual(self.archive(PUP, TOP, prompt="Not now").get("permissionDecision"), "deny")
+        self.assertEqual(self.archive(PUP, TOP, prompt="Archive it"), {}, "ezexe pressed the button")
+        self.assertEqual(self.archive(PUP, TOP2, prompt="Archive it").get("permissionDecision"), "deny")
+        self.assertNotIn("is complete", context(t.say(PUP, "and now?")), "offered once")
+
+    def test_a_puppeteer_is_refused_what_it_does_not_control_and_what_is_not_complete(self):
+        t = self.t
         self.finish(TOP3)
         t.say(KID, "Fix the row")
         t.stop(KID, "Fix the row", report="Fixed.")
-        t.cli(PUP, "controls", TOP)
+        self.complete_top()
         out = self.archive(TOP, KID)
         self.assertEqual(out.get("permissionDecision"), "deny", "a top session outside the section: as before")
         self.assertIn("no session archives a session", out["permissionDecisionReason"])
-        out = self.archive(PUP, TOP3)
+        out = self.archive(PUP, TOP3, picks=[self.TITLE])
         self.assertEqual(out.get("permissionDecision"), "deny")
         self.assertIn("is not a session this puppeteer controls", out["permissionDecisionReason"])
-        out = self.archive(PUP, TOP, reason="")
-        self.assertEqual(out.get("permissionDecision"), "deny")
-        self.assertIn("carries no `reason`", out["permissionDecisionReason"])
-        self.assertEqual(self.archive(PUP, TOP), {}, "complete, controlled and reasoned: let through, no quick select")
-        self.assertEqual(self.archive(PUP, KID), {}, "and so is a session in a controlled tree")
+        self.assertEqual(self.archive(PUP, TOP, picks=[self.TITLE]), {})
         t.say(TOP, "one more thing")
-        out = self.archive(PUP, TOP)
-        self.assertEqual(out.get("permissionDecision"), "deny")
+        out = self.archive(PUP, TOP, picks=[self.TITLE])
+        self.assertEqual(out.get("permissionDecision"), "deny", "picked, but no longer complete")
         self.assertIn("so it is mid-turn", out["permissionDecisionReason"])
         self.assertIn("Name it to ezexe as left", out["permissionDecisionReason"])
         self.plan(TOP, "Fix the header row in exporter.py", "Run the exporter suite")
         t.stop(TOP, "one more thing", calls=[("mcp__ccd_turn__wrap_up", {"recap": "half done"}, "ok")],
                report="Half done.", uuid="u1")
-        out = self.archive(PUP, TOP)
+        out = self.archive(PUP, TOP, picks=[self.TITLE])
         self.assertEqual(out.get("permissionDecision"), "deny")
         self.assertNotIn("mid-turn", out["permissionDecisionReason"])
         self.assertIn("2 open plan steps, the next \"Fix the header row in exporter.py\"",
                       out["permissionDecisionReason"])
         kept = t.session(PUP)["puppeteerArchives"]
         self.assertEqual([(a["sessionId"], a["let"]) for a in kept],
-                         [(TOP3, False), (TOP, False), (TOP, True), (KID, True), (TOP, False), (TOP, False)])
-        self.assertEqual(kept[2]["why"], WHY, "the reason it gave is kept beside what it archived")
+                         [(TOP3, False), (TOP, True), (TOP, False), (TOP, False)])
+        self.assertEqual(kept[1]["why"], WHY, "the reason it gave is kept beside what it archived")
         said = t.cli(PUP, "controls").stdout
         self.assertIn("- archived ", said)
         self.assertIn("- left ", said)
@@ -226,8 +294,10 @@ class Pair(unittest.TestCase):
         def snap():
             return {os.path.join(d, f): read(os.path.join(d, f)) for d, _, fs in os.walk(self.store2) for f in fs}
         before = snap()
+        t.say(PUP, "Control the tree")
         t.cli(PUP, "controls", TOP2)
-        self.assertEqual(self.archive(PUP, TOP2), {})
+        self.assertIn("- label \"Build the importer\"", context(t.say(PUP, "a report came in")))
+        self.assertEqual(self.archive(PUP, TOP2, picks=["Build the importer"]), {})
         t.say(PUP, "where does each stand?")
         t.cli(PUP, "controls")
         self.assertEqual(snap(), before, "the puppeteer writes nothing into a controlled store")
@@ -356,8 +426,13 @@ class Pair(unittest.TestCase):
         self.assertIn("ezexe froze the retry work", read(os.path.join(t.dir(PUP2), "board.md")))
         ctx = context(t.say(TOP, "carry on"))
         self.assertIn(f"\"The second puppeteer\" ({PUP2})", ctx, "the pair is with the successor now")
-        self.assertEqual(self.archive(PUP2, PUP), {}, "the old puppeteer, noted, is archived by the new one")
-        self.assertEqual(self.archive(PUP2, TOP3).get("permissionDecision"), "deny")
+        self.assertEqual(self.archive(PUP2, PUP).get("permissionDecision"), "deny", "not on its own judgement")
+        t.say(PUP2, "what is ready?")
+        old = "Control the exporter and the importer trees, and tell ezexe where each stands"
+        self.assertIn(old, [o["label"] for o in t.session(PUP2)["archiveOffer"]],
+                      "the old puppeteer, handed over and done, is offered")
+        self.assertEqual(self.archive(PUP2, PUP, picks=[old]), {}, "and archived by the new one on ezexe's pick")
+        self.assertEqual(self.archive(PUP2, TOP3, picks=[old]).get("permissionDecision"), "deny")
 
     # --- a new top session goes through the puppeteer -------------------------------------------------------------------
 

@@ -25,6 +25,9 @@ section.
              puppeteer is told once to end its turn on a question with two buttons, as a done top session ends
              on the archive button. phi speaks only when a hook fires, so a boundary reached while the puppeteer
              is idle is told beside its next message.
+  archiving  a puppeteer never archives on its own judgement (#63). A complete controlled session is offered to
+             ezexe, one as a button and several as one quick select by full title, and the archive hook lets
+             through only what ezexe picked in that turn. The completeness checks decide what is offered.
   requests   a controlled top session that would start a new top session writes `request ... --to-puppeteer`
              into its own store; the puppeteer's hooks read it there, and what became of it is kept on the
              puppeteer's record, where the requester's hook reads it.
@@ -214,20 +217,22 @@ RULE = (
     "starts its own child; a topic none covers gets a new top session that this puppeteer starts and then files in "
     "its environment's section with `mcp__ccd_sidebar__move_sessions`, never in \"{section}\". Waiting on their "
     "reports, and the few read-only checks of their results against git and GitHub, are its own work and never a "
-    "child's; its turn may end while it waits, with a line naming whom it waits on. It may archive a complete "
-    "session it controls, or one in such a session's tree, a top session included, without a quick select: first "
-    "keep its outcome with `{cmd} note`, then `mcp__ccd_session_mgmt__archive_session` with a `reason` saying what "
-    "showed the task done, the work landed and pushed, and no other session needing its scratch clone. phi refuses "
-    "one that is mid-turn, has open steps, a running background task or a start request waiting, or has an "
-    "issue-closing commit on no remote branch. It names each session it archived and each it left, with the "
-    "reason. Deleting data, force pushes and publishing still need ezexe's yes in the session that acts: being a "
+    "child's; its turn may end while it waits, with a line naming whom it waits on. It never archives a session "
+    "on its own judgement: a session is archived by ezexe's own pick. When a session it controls is complete, it "
+    "first keeps the outcome with `{cmd} note`, then puts the choice to ezexe: one session as a button on "
+    "`mcp__ccd_turn__wrap_up`, several as one `AskUserQuestion` with `multiSelect` listing each by its full "
+    "title, with the options phi hands it. It archives exactly what ezexe picked in that turn, and phi refuses "
+    "every other archive call. phi offers no session that is mid-turn, has open steps, a running background task "
+    "or a start request waiting, or has an issue-closing commit on no remote branch, and says which reason keeps "
+    "each one off the list. It names each session it archived and each it left, with the reason. Deleting data, "
+    "force pushes and publishing still need ezexe's yes in the session that acts: being a "
     "puppeteer widens nothing there.")
 PAIR = (
     "This session has a puppeteer: \"{title}\" ({pid}), a session ezexe filed in the sidebar section \"{section}\", "
     "lists this one among the sessions it controls. This session stays the top of its own tree, in its own "
     "section, with its own steerer and lander, and still pushes its own work. Its puppeteer reads its state, "
-    "relays ezexe's rule changes, may decline a request this session sends it, and may archive this session and "
-    "the sessions of its tree once they are complete. A new top session is asked of the puppeteer and never "
+    "relays ezexe's rule changes, may decline a request this session sends it, and, once this session and the "
+    "sessions of its tree are complete, offers them to ezexe to archive and archives only the ones ezexe picks. A new top session is asked of the puppeteer and never "
     "started here: `{cmd} request \"<title>\" --brief \"<the whole brief>\" --to-puppeteer`. Anything irreversible "
     "or outward still needs ezexe's yes in this session, whoever relays the request.")
 PAIR_OVER = ("This session no longer has a puppeteer: \"{title}\" ({pid}) dropped it from the sessions it controls, "
@@ -540,9 +545,19 @@ def control_store(home, s, target):
     return None
 
 
-def archive(home, s, target, reason):
-    """A puppeteer's archive of another session -> '' to let it through, else why it is refused. Kept either way
-    on the puppeteer's record, so what was archived and what was left is read from one place."""
+NOT_PICKED = ("ezexe did not pick it in this turn, and a puppeteer archives only what ezexe picks (ezexe/p4#63): "
+              "keep its outcome with `{cmd} note`, then put the choice to ezexe, one session as a button on "
+              "`mcp__ccd_turn__wrap_up`, several as one `AskUserQuestion` with `multiSelect` listing each by its "
+              "full title, and archive exactly what ezexe picks")
+PICKED = "ezexe picked it in this turn's quick select"
+BUTTON_YES, BUTTON_NO = "Archive it", "Not now"
+OFFER_MAX = 4                    # options one AskUserQuestion holds
+
+
+def archive(home, s, target, reason, picked=False):
+    """A puppeteer's archive of another session -> '' to let it through, else why it is refused. It is let through
+    only when ezexe picked the session in this turn (#63) and phi's records hold it complete. Kept either way on
+    the puppeteer's record, so what was archived and what was left is read from one place."""
     target = PHI.safe_id(target)
     store = control_store(home, s, target)
     if store is None:
@@ -553,15 +568,115 @@ def archive(home, s, target, reason):
         why = ""
         if against:
             why = "phi's records do not hold it complete: " + "; ".join(against)
-        elif len(PHI.clean(reason)) < REASON_MIN:
-            why = ("the call carries no `reason`: say there what showed its task done, its work landed and pushed, "
-                   "and that no other session needs its scratch clone, since phi's records cannot show those")
+        elif not picked:
+            why = NOT_PICKED.format(cmd=PHI.commands()) + ". phi's records hold it complete, so it can be offered"
+        if against and not picked:
+            why += ". " + NOT_PICKED.format(cmd=PHI.commands())[0].upper() + NOT_PICKED.format(cmd=PHI.commands())[1:]
+        reason = PHI.clean(reason) if len(PHI.clean(reason)) >= REASON_MIN else PICKED
     kept = [a for a in s.get("puppeteerArchives") or [] if isinstance(a, dict)]
     kept.append({"sessionId": target, "title": full_title(target), "time": PHI.now(), "let": not why,
                  "why": PHI.cut(PHI.clean(why or reason), 300)})
     s["puppeteerArchives"] = kept[-KEPT:]
     PHI.save_session(home, s)
     return why
+
+
+def complete(home, s):
+    """The sessions a puppeteer can offer ezexe to archive, and the ones it cannot ->
+    ([(sessionId, full title, [the finished sessions of its tree])], [(full title, why it is not offered)]). A
+    controlled session, or the puppeteer that handed over to this one, is offered when the app has not archived it
+    and phi's records hold nothing against it."""
+    ready, left = [], []
+    rows = [(e["sessionId"], e.get("store") or "") for e in controlled(s)]
+    old = PHI.safe_id((s.get("handedFrom") or {}).get("sessionId") or "") if isinstance(s.get("handedFrom"), dict) else ""
+    if old and old not in [k for k, _ in rows]:
+        rows.append((old, control_store(home, s, old) or ""))
+    for sid, store in rows:
+        state, against = standing(store, sid)
+        if state == "archived":
+            continue
+        if state == "shown done" and not against:
+            kids = [k for k, _, _ in relay.ready_in_tree(store, sid)] if store else []
+            ready.append((sid, full_title(sid), kids))
+        else:
+            left.append((full_title(sid), "; ".join(against) or "phi's records do not show its task done"))
+    return ready, left
+
+
+def offer(home, s, button=True):
+    """The quick select a puppeteer puts to ezexe -> [{"label", "description", "ids"}], one option a complete
+    controlled session by its full title, each with the finished sessions of its tree. The labels are what the
+    archive hook reads ezexe's picks by, so they are kept on the puppeteer's record; the caller saves it."""
+    ready, _ = complete(home, s)
+    if not ready:
+        s.pop("archiveOffer", None)
+        return []
+
+    def about(sid, kids):
+        return f"Archive {sid}" + (f" and the {len(kids)} finished session{'s' if len(kids) != 1 else ''} of its "
+                                   f"tree" if kids else "") + "."
+    opts = [{"label": title, "description": about(sid, kids), "ids": [sid] + kids} for sid, title, kids in ready]
+    if len(opts) > OFFER_MAX:
+        opts = [{"label": f"All {len(ready)} complete sessions", "description": "Archive every one of them: "
+                 + "; ".join(f"\"{t}\"" for _, t, _ in ready) + ".",
+                 "ids": [i for o in opts for i in o["ids"]]}] + opts[:OFFER_MAX - 1]
+    seen = {}
+    for o in opts:                                 # a label is the key a pick is read by: each one once
+        seen[o["label"]] = seen.get(o["label"], 0) + 1
+        if seen[o["label"]] > 1:
+            o["label"] += f" ({seen[o['label']]})"
+    kept = [{"label": o["label"], "ids": o["ids"]} for o in opts]
+    if len(ready) == 1 and button:                 # one session: a button, whose press is ezexe's next message
+        kept.append({"label": BUTTON_YES, "ids": opts[0]["ids"], "button": True})
+    s["archiveOffer"] = kept
+    return opts
+
+
+def offer_text(home, s, button=True):
+    """The line that puts a puppeteer's complete sessions to ezexe, '' when none is complete. It names the button
+    or the quick select and never the archive call: that follows ezexe's pick. One session is a button on the
+    turn's wrap-up when `button`; where the wrap-up already holds a question, it is a quick select of one."""
+    opts = offer(home, s, button)
+    ready, left = complete(home, s)
+    if not opts:
+        return ""
+    lead = f"First keep each outcome that is not on the board yet with `{PHI.commands()} note`."
+    out = ("" if not left else " Not offered, and named to ezexe as left with the reason: "
+           + "; ".join(f"\"{t}\" ({why})" for t, why in left[:6]) + ".")
+    if len(ready) == 1 and button:
+        sid, title, kids = ready[0]
+        return (f"phi (p4-phi): \"{title}\" ({sid}), a session this puppeteer controls, is complete"
+                + (f", with {len(kids)} finished session{'s' if len(kids) != 1 else ''} in its tree" if kids else "")
+                + f". Archiving it is ezexe's own pick, never this session's judgement. {lead} Then end the turn "
+                f"with `mcp__ccd_turn__wrap_up` whose question is \"Archive \"{title}\"?\", cut to fit, and whose "
+                f"buttons are the replies \"{BUTTON_YES}\" and \"{BUTTON_NO}\". Archive nothing in this turn. "
+                f"When ezexe's next message is \"{BUTTON_YES}\", archive exactly "
+                + ("that session and those of its tree" if kids else "that session")
+                + f" in that turn, and phi lets it through; on anything else leave it and say so.{out}")
+    lines = "\n".join(f"- label \"{o['label']}\", description \"{o['description']}\"" for o in opts)
+    n = len(ready)
+    return (f"phi (p4-phi): {n} session{'s' if n != 1 else ''} this puppeteer controls {'are' if n != 1 else 'is'} "
+            f"complete. Archiving {'them' if n != 1 else 'it'} is ezexe's "
+            f"own pick, never this session's judgement. {lead} Then, before `mcp__ccd_turn__wrap_up`, put them to "
+            f"ezexe as one quick select: one `AskUserQuestion` with `multiSelect` true, each option a session by "
+            f"its full title, exactly these options"
+            + (", with a last option \"None of them\"" if len(opts) == 1 else "") + f":\n{lines}\n"
+            f"Archive none of them before ezexe has answered. Then archive exactly the sessions under the options "
+            f"ezexe picked, and no other: ezexe's selection is the user action, and phi lets those through. Name "
+            f"each one archived and each one left.{out}")
+
+
+def picked(home, s, turn):
+    """The session ids ezexe picked in this turn: the ids under each offered option whose label an answered
+    AskUserQuestion of the turn carries, and the ids under the offered button when the turn's own message is that
+    button's label."""
+    turn = turn or {}
+    out = list(relay.picked(home, s["sessionId"], turn.get("calls")))
+    said = PHI.clean(turn.get("prompt")).strip(" .!\"'").lower()
+    for o in s.get("archiveOffer") or []:
+        if isinstance(o, dict) and o.get("button") and said == str(o.get("label") or "").lower():
+            out += [i for i in o.get("ids") or [] if i not in out]
+    return out
 
 
 def waited_on(s):
@@ -603,13 +718,18 @@ def boundary(home, s, store=""):
     newly = [k for k in closed if k not in (told.get("closed") or [])]
     idle = all(st != "working" for _, st, _ in states) and not any(
         waiting_requests(e.get("store") or "", e["sessionId"]) for e in rows)
-    if not newly and not idle:
+    ready = [sid for sid, _, _ in complete(home, s)[0]]
+    fresh = [k for k in ready if k not in (told.get("ready") or [])]
+    if not newly and not idle and not fresh:
         return ""
     chars, top = handed_chars(home, s), ceiling(store)
     key = hashlib.sha1(json.dumps([sorted(states), chars // top]).encode("utf-8")).hexdigest()[:12]
     if told.get("key") == key:
         return ""
-    s["boundary"] = {"key": key, "closed": closed, "time": PHI.now()}
+    s["boundary"] = {"key": key, "closed": closed, "ready": ready, "time": PHI.now()}
+    pick = offer_text(home, s, button=not (newly or idle)) if ready else ""    # #63: archived by ezexe's pick
+    if pick and not (newly or idle):
+        return pick                                # a tree is complete while another works: no boundary yet
     why = (f"the tree of \"{full_title(newly[0])}\" has closed" if newly else
            "every controlled session is idle and no request is waiting")
     path = board_path(home, s["sessionId"])
@@ -619,7 +739,8 @@ def boundary(home, s, store=""):
               f"the board's path and `{PHI.commands()} controls --from {s['sessionId']}`, and this session then runs "
               f"`{PHI.commands()} controls --hand <its sessionId>`"
               if int(s.get("compactions") or 0) >= COMPACTIONS else "\"Later\"")
-    return (f"phi (p4-phi): a boundary: {why}.{past} When this turn's relays are done, keep what is not yet on the "
+    return ((pick + "\n\n" if pick else "") +
+            f"phi (p4-phi): a boundary: {why}.{past} When this turn's relays are done, keep what is not yet on the "
             f"board, {path}, with `{PHI.commands()} note`. Then read the context level with "
             f"`mcp__ccd_session_mgmt__get_usage` on `\"self\"` and end the turn with `mcp__ccd_turn__wrap_up` whose "
             f"question is one short sentence with that level, such as \"Context is at 71%, auto-compact starts at "

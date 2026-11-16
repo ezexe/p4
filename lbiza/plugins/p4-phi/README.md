@@ -51,7 +51,7 @@ The sessions it controls stay tops of their own trees, in their own sections.
 | Keeps the board | `board.md` in the puppeteer's session folder, rewritten at its message and Stop hooks. After a compaction its path is handed first. |
 | Hands reports by reference | One line and the path of the session's page. |
 | Leaves a puppeteer's steps with it | No hand-off advice and no nudge, and at Stop a step that waits on sessions' reports ends the turn while a controlled session is not yet complete. |
-| Lets it archive a complete session | The archive hook lets the call through for a session it controls, or one in such a tree, when phi's records hold nothing against it and the call carries a `reason`. |
+| Archives only what ezexe picks | A puppeteer never archives on its own judgement. A complete session it controls is offered to ezexe, one as a button on the turn's wrap-up and several as one `AskUserQuestion` with `multiSelect` by full title. The archive hook lets the call through only for a session ezexe picked in that turn that phi's records still hold complete, and says why any other is refused or not offered. |
 | Names a boundary once | The notice tells it to end the turn with one question and the buttons "Compact now" and "Later". |
 | Routes a new top session through it | `phi.py request ... --to-puppeteer` in a controlled session, read by the puppeteer's hooks from the requester's own store. |
 | Hands a start request only to the session that filed it | At the next turn ezexe begins in that session, so the app nests the child where phi does. A session whose turn another session began shows a proposal card first. |
