@@ -1,80 +1,37 @@
 #!/usr/bin/env python3
 """phi.py: what linked sessions hand each other, kept on the app's own session tree.
 
-The words here are the Claude Code desktop app's, as it uses them: a session; the session that started it
-(`spawnedFrom.sessionId` in the app's record); the sessions it started; a top session, which nobody started; a
-session's task; a turn; the report a session gives when it finishes a turn; the background a started session is
-given; notes. Nothing is renamed.
+Each session has a folder <home>/phi/sessions/<sessionId>/ in the store its tree lives in: the store of its
+top-level session's project, or the shared store that p4.json's `phi.home` names. The folder holds session.json, the
+app's fields for the session with its task; turns.jsonl, a line for each finished turn; notes.jsonl; reports.jsonl,
+the reports of its child sessions; log.jsonl, a line for each hook call; and session.md, the session as one page.
+The reports of top-level sessions are in <home>/phi/reports.jsonl.
 
-  session  <home>/phi/sessions/<sessionId>/: session.json (the app's fields for it: sessionId, cliSessionIds,
-           title, cwd, spawnedFrom, startChain; and its task), turns.jsonl (a line a finished turn),
-           notes.jsonl, reports.jsonl (the reports of the sessions it started), log.jsonl (a line a hook call)
-           and session.md, the same as one page. The sessionId is the app's (CLAUDE_CODE_HOST_SESSION_ID, in a
-           hook's environment), or the CLI's session id where no app runs it. The reports of top sessions are
-           in <home>/phi/reports.jsonl.
-  started  a hook's payload does not say which session started this one. The app's record of a session,
-  by       claude-code-sessions/<account>/<organization>/<sessionId>.json, says it in `spawnedFrom.sessionId`.
-           For a session started "fresh" the app writes that field after the session exists: it was absent at
-           SessionStart in 3 of 3 live sessions and at the first message in 2 of 3. Such a session's first
-           message ends with the shared notes folder, which the app names after the session that started it
-           (3 of 3), so that is read first and the record corrects it when it comes. A forked session's record
-           has the field at its SessionStart. A handed-over message that names no folder waits for the record
-           (`wait_s`). session.json then holds it; `detach` and `reparent` rewrite it there, whatever the app
-           shows.
-  home     the store the linked sessions' files live in: the top session's <project>/.claude/p4. A session in a
-           worktree or another folder has no store of its own and uses that of the session that started it.
-  session- SessionStart: session.json is made if new. A forked session, a session after a compaction or a
-  start    clear, and a session no app runs are given their background here. Every session, except on a resume,
-           is given the store's rules: each feedback and user memory in <home>/memory without its **Why:**, a
-           line each, the long ones cut evenly so the hook stays under the 10,000 characters Claude Code keeps,
-           and <home>/phi/rules.md holds them all in full. Sessions had opened those memories one by one before
-           their work; the index alone did not say enough.
-  user-    UserPromptSubmit: the first request becomes the session's task. The session is given its background
-  prompt-  if the start did not give it: the tasks of the sessions above it, their notes, the last turn of each
-  submit   other session started by the same session (for a top session, of the top sessions before it), and
-           after a compaction its own turns. It is given, in full, the reports of the sessions it started that
-           finished a turn since it last looked (the app relays the first 400 characters). And ezexe's
-           standing instruction for a message about something else (`new_task`): start a forked session for it
-           and stay with the task; once in full, then a line beside each of ezexe's messages.
-  stop     Stop: the turn is kept in turns.jsonl whether or not the task is done: the prompt, the files edited,
-           the commands that worked, the sessions started, what failed, the report. It is appended to the
-           reports of the session that started this one.
+A hook's payload does not say which session started this one. The app's record says it in `spawnedFrom.sessionId`,
+but for a fresh child the app may write it only after the first message, so the notes folder that message names is
+read first and the record corrects it. `detach` and `reparent` rewrite it in session.json.
 
-Commands for a session: `note "<claim>" --source "<where checked>"`, `done "<what was run and what it showed>"`,
-`task "<the new task>"`, `shard <paths or globs>`, `show [sessionId]`, `tree`, `background`, `detach <sessionId>`,
-`reparent <sessionId> <under sessionId>`, `controls [sessionId ...] [--drop <sessionId>] [--hand <sessionId>]
-[--from <sessionId>] [--decline <request id> "<why>"]`.
+The hooks, each in its h_ function:
+- SessionStart gives the rules, as rules_text says, and the start background to a fork, after a compaction or a
+  clear, and to a session no app runs.
+- UserPromptSubmit keeps the first request as the task and gives the start background with the first message when
+  the start did not, then the reports of the child sessions that finished a turn since the last look, the standing
+  instruction and what the sessions beside it changed; what does not fit in the hook's room is held whole on held.md.
+- Stop keeps the turn and appends it to the parent session's reports, sends the turn back while steps the session
+  tree can settle are open, runs a writing child's issue gate, counts a child marked report when done as archived,
+  tells the top-level session to push issue-closing commits and makes the anchors.
+- The checks before and after a tool call ride on the retrieval hooks' entries, through `routed`.
 
-The issue loop (issues.py, #28): a child whose brief or plan names files in a GitHub repository gets an issue for its
-purpose; its commits say `Closes #N`; the test a plan step names, or `proof "<command>"`, is re-run at Stop and its
-result commented on the issue; it is pushed when green and archived only once the issue is closed.
+Commands: note, done, task, shard, files, show, tree, background, detach, reparent, disposable, request, proof and
+controls, with the watcher's commands from puppeteer.py; `--help` gives the arguments of each.
 
-The relay (relay.py), modelled on phi_rank/tree.py's node tree: a session's shard is what it alone may change; each
-turn keeps its delta, the heads, files and `deprecates:`/`replaces:` notes; a parent's anchor.json merges its
-children's latest deltas under a version; every message a session gets, side-session events too, carries what a
-newer anchor changed, deprecations first and in full, and a warning before any tool runs when its uncommitted files
-or shard meet a deprecated path or another node's shard; a message about another node's shard is routed there.
-
-The puppeteer (puppeteer.py, #38), p4's four P's on this tree: an orchestrator's background watcher writes its
-ledger.md from these files and the app's records; ezexe's message is read against it (prompty), drafted as the exact
-next session (prompter) and gate-checked into a start, a route or a queue (pioneer); a landed topic registers its
-route, which the next message is scored against; an under-determined message becomes one child a reading; a top
-session's meta pass reconciles every top's ledger into meta-ledger.md.
-
-The pair (controls.py, #58): a top session ezexe filed in the sidebar section "puppeteers" controls other top
-sessions, in any store. phi reads the filing from the app's own file, keeps the controlled sessions on the
-puppeteer's record (`controls`), tells each controlled session of its puppeteer, writes the puppeteer's board, gives
-it no hand-off advice, lets its turn end on a step that waits on them, and offers a complete one to ezexe, whose
-pick is the only thing that lets the puppeteer archive it (#63).
-
-Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `new_task` (false: off),
-`rules`, `background_chars`, `reports_chars`, `wait_s`. P4_PHI=0 turns the plugin off, P4_PHI_NEW_TASK=0 the
-standing instruction, P4_PHI_RULES=0 the rules.
-
-Nothing here matches a request to an earlier turn by its words: that was built in p4-recall 0.8.17 to 0.8.20,
-measured (the nearest earlier turn's files touched again 0.06 to 0.13 of the time) and removed. A registered route is
-not a turn: it is a whole topic whose issue closed, whose commit is pushed and whose sessions are archived, and a
-message is scored only against those.
+Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `new_task`, `rules`,
+`background_chars`, `reports_chars`, `prompt_chars` and `wait_s`, and `puppeteer`, which puppeteer.on reads. The `phi`
+section of p4.json: `act_dont_wait`, `levels`, `top_orchestrates`, `file_sets`, `child_levels` and
+`session_archives`, read from the session's own store, `home`, which names a shared store for the session tree, and
+`puppeteer_section` and `puppeteer_chars`, which controls.py reads. P4_PHI=0 turns the plugin off, P4_PHI_NEW_TASK=0 the
+standing instruction and P4_PHI_RULES=0 the rules. P4_PHI_WAIT sets how long a first message waits for the app's
+record, and P4_PHI_APP_SESSIONS the folder of the app's records.
 """
 
 import glob
@@ -88,16 +45,16 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
-import node as nd  # noqa: E402  (a session's place in the tree, which recall reads too)
-import p4conf  # noqa: E402  (the store's layout: each plugin's files in .claude/p4/<plugin>/)
-import plans  # noqa: E402  (each session's plan with step addresses; the parent's anchor is the plan tree)
-import relay  # noqa: E402  (shards, deltas, anchors: linked sessions kept in step while they work)
-import starts  # noqa: E402  (start requests: children a session wants but cannot start, carried by the store)
-import issues  # noqa: E402  (#28: a writing child's loop of issue, Closes #N, proving test, push, archive)
-import puppeteer  # noqa: E402  (#38: the watcher's ledger, prompty, prompter, pioneer, routes, readings, meta)
+import node as nd  # noqa: E402  a session's place in the tree, which retrieval reads too
+import p4conf  # noqa: E402  the store's layout, each plugin's files in .claude/p4/<plugin>/
+import plans  # noqa: E402  each session's task list with step addresses, which its parent's anchor holds
+import relay  # noqa: E402  owned paths, deltas and anchors, which keep linked sessions in step while they work
+import starts  # noqa: E402  start requests, the children a session wants but cannot start, carried by the store
+import issues  # noqa: E402  a writing child's issue, its Closes #N commit, regression test, push and archive
+import puppeteer  # noqa: E402  the watcher's ledger, routing, start drafts, the gate, routes, readings, meta pass
 
-puppeteer.PHI = sys.modules[__name__]   # phi runs as a script, so the puppeteer is handed this module, not a copy
-import controls  # noqa: E402  (#58: a puppeteer in the sidebar section, and the sessions it controls)
+puppeteer.PHI = sys.modules[__name__]   # phi.py runs as a script, so puppeteer.py is handed this module, not a copy
+import controls  # noqa: E402  a supervisor session filed in the sidebar section, and the sessions it controls
 
 controls.PHI = sys.modules[__name__]
 
@@ -106,10 +63,10 @@ REPORTS = True
 TURNS = True
 NEW_TASK = True
 RULES = True
-HOOK_CHARS = 9500                # Claude Code keeps 10,000 characters of a hook's context and files the rest away
+HOOK_CHARS = 9500                # Claude Code shows a hook's context up to 10,000 characters, else files it away
 HELD_HEAD = 90                   # of a piece that did not fit, shown beside the prompt so it is known for what it is
 PHI_LEAD = re.compile(r"^phi \(p4-phi\)[^:]*:\s*")
-PROMPT_CHARS = 4000              # #43: the ceiling on what phi adds beside one prompt; the rest is held on a page
+PROMPT_CHARS = 4000              # the ceiling on what p4-phi adds beside one prompt; the rest is held on a page
 BACKGROUND_CHARS = 3000
 REPORTS_CHARS = 6000
 REPORT_CHARS = 4000              # of one report, kept
@@ -120,7 +77,7 @@ TURN_STEPS = 12
 CHAIN_MAX = 8                    # sessions followed upward from a session
 OTHERS = 5
 OWN = 3
-TAIL_BYTES = 256 * 1024          # of a reports file, for a background
+TAIL_BYTES = 256 * 1024          # of a reports file, for a start background
 TRANSCRIPT_BYTES = 8 * 1024 * 1024
 WAIT_S = 2.0                     # how long a handed-over first message waits for the app's record
 SCAN_RECORDS = 60                # the newest records searched for a CLI session id, when the host id is missing
@@ -235,7 +192,7 @@ def session_dir(home, sid):
 
 
 def reports_path(home, sid):
-    """The reports of the sessions `sid` started; with no `sid`, of the top sessions."""
+    """The reports of the child sessions of `sid`; with no `sid`, of the top-level sessions."""
     return os.path.join(session_dir(home, sid), "reports.jsonl") if sid else os.path.join(home, "phi", "reports.jsonl")
 
 
@@ -258,7 +215,7 @@ def configure(home):
 # --- the app's records: which session started which ----------------------------------------------------------------
 
 def app_roots():
-    """The folders that may hold the app's session records (claude-code-sessions), likeliest first."""
+    """The folders that may hold the app's session records, each named claude-code-sessions, likeliest first."""
     given = os.environ.get("P4_PHI_APP_SESSIONS")
     if given:
         return [given]
@@ -318,8 +275,8 @@ def read_record(name):
 
 
 def record_in(root, sid):
-    """The app's record of a session in one app folder, {} when it is not there (archived sessions keep theirs, with
-    `isArchived`; a deleted session's is gone)."""
+    """The app's record of a session in one app folder, {} when it is not there. A session archived in the app keeps
+    its record, with `isArchived`; a deleted session's is gone."""
     acct, org = os.environ.get("CLAUDE_CODE_ACCOUNT_UUID") or "", os.environ.get("CLAUDE_CODE_ORGANIZATION_UUID") or ""
     if acct and org:
         d = read_json(os.path.join(root, acct, org, safe_id(sid) + ".json"))
@@ -360,7 +317,7 @@ def record_of_cli(cli):
 
 
 def spawned_from(d):
-    """The sessionId in a record's or a session.json's `spawnedFrom`, '' for a top session."""
+    """The sessionId in a record's or a session.json's `spawnedFrom`, '' for a top-level session."""
     s = d.get("spawnedFrom") if isinstance(d, dict) else None
     return safe_id(s.get("sessionId")) if isinstance(s, dict) and s.get("sessionId") else ""
 
@@ -373,8 +330,8 @@ def store_at(folder):
 
 
 def home_of_record(rec, depth=0):
-    """The store a session's linked sessions live in: that of the session that started it, and its own folder's
-    for a top session."""
+    """The store a session's tree lives in: that of its parent session, and its own folder's for a top-level
+    session."""
     if not rec or depth > CHAIN_MAX:
         return ""
     above = spawned_from(rec)
@@ -386,8 +343,9 @@ def home_of_record(rec, depth=0):
 
 
 def own_store(rec, sid, project=""):
-    """#58: the store of a session's own folder when it holds the session as a top session, '' otherwise. A top
-    session a puppeteer started in another environment lives in that environment's store, not its starter's."""
+    """The store of a session's own folder when it holds the session as a top-level session, '' otherwise. A
+    top-level session that a supervisor session started in another environment lives in that environment's store,
+    not in the supervisor session's."""
     own = store_at(project) or store_at((rec or {}).get("cwd")) or store_at((rec or {}).get("originCwd"))
     if not own or not sid:
         return ""
@@ -407,13 +365,13 @@ class Me:
         self.hint = ""
         self.cli = str(payload.get("session_id") or os.environ.get("CLAUDE_CODE_SESSION_ID") or "")
         host = os.environ.get("CLAUDE_CODE_HOST_SESSION_ID") or ""
-        # FB1: a CLI id equal to the host id without "local_" is normal: the app gives many started sessions that pair
-        # (58 of 396 records, the newest children among them). Treating it as a stray id took their background away.
+        # A CLI id equal to the host id without "local_" is normal: the app gives many child sessions that pair of
+        # ids, so it is no stray id.
         self.rec = app_record(session or host) if (session or host) else record_of_cli(self.cli)
         self.id = session or host or str(self.rec.get("sessionId") or "") or self.cli
         project = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
         self.home = p4 or ""
-        self.store = store_at(project) or p4 or ""     # this project's own store: its memory, rules and recall
+        self.store = store_at(project) or p4 or ""     # this project's own store: its memory, rules and retrieval
         self.home_missing = ""
         if not self.home:
             above = spawned_from(self.rec)
@@ -423,7 +381,7 @@ class Me:
                 or home_of_record(self.rec)
             if above:
                 self.home = own_store(self.rec, self.id, project) or self.home
-            self.home, self.home_missing = relay.tree_home(self.home)   # a shared home store, when one is named
+            self.home, self.home_missing = relay.tree_home(self.home)   # a shared store, when p4.json names one
         self.store = self.store or self.home
         project_conf(self.store)
 
@@ -431,8 +389,8 @@ class Me:
 # --- sessions --------------------------------------------------------------------------------------------------------
 
 def archived_already(home, sid):
-    """True when a child named for archiving is archived already: by hand in the app (`isArchived` in its record,
-    or its record gone), or marked so in its session.json."""
+    """True when a child named for archiving is archived already: archived in the app, which sets `isArchived` in
+    its record, deleted in the app, which leaves no record, or counted as archived in its session.json."""
     c = load_session(home, sid) if sid else {}
     if not c:
         return False
@@ -442,15 +400,14 @@ def archived_already(home, sid):
 def load_session(home, sid):
     s = read_json(os.path.join(session_dir(home, sid), "session.json")) if sid else {}
     if isinstance(s.get("backgroundGivenFor"), dict):
-        s["backgroundGivenFor"].pop("", None)     # R8: an empty key stored before the fix
+        s["backgroundGivenFor"].pop("", None)     # an empty key names no CLI session
     return s
 
 
 def save_session(home, s):
     """session.json written from `s`, keeping what another hook wrote into it meanwhile: a sibling's Stop marks a
-    session stale or queues a warning while this hook holds the copy it read at its start (ST1, ST2). The read
-    and the write run under the session's lock, the one relay.warn holds, so a warning written between them is
-    never dropped (#53)."""
+    session stale or queues a warning while this hook holds the copy it read at its start. The read and the write
+    run under the session's lock, the one relay.warn holds, so a warning written between them is never dropped."""
     path = os.path.join(session_dir(home, s.get("sessionId")), "session.json")
     if relay._held(path):
         return _save_session(home, s)
@@ -482,27 +439,27 @@ def _save_session(home, s):
         if k in disk and k not in s:
             s[k] = disk[k]
     if not s.pop("_controlsSet", None) and isinstance(disk.get("controls"), list):
-        s["controls"] = disk["controls"]          # #58: only the controls command and a puppeteer's own start change it
+        s["controls"] = disk["controls"]          # only `controls` and a supervisor session's own start change it
     if int(disk.get("anchorSeen") or 0) > int(s.get("anchorSeen") or 0):
         s["anchorSeen"] = disk["anchorSeen"]
     if str(disk.get("fileSetAt") or "") > str(s.get("fileSetAt") or ""):
-        for k in ("fileSet", "fileSetAt", "fileSets"):    # #62: `phi.py files` ran while this hook held an older copy
+        for k in ("fileSet", "fileSetAt", "fileSets"):    # `phi.py files` ran while this hook held an older copy
             if k in disk:
                 s[k] = disk[k]
     moved = disk.get("spawnedFrom") if isinstance(disk.get("spawnedFrom"), dict) else {}
     mine = s.get("spawnedFrom") if isinstance(s.get("spawnedFrom"), dict) else {}
     if moved.get("source") in ("detached", "reparented", "requested") \
             and str(moved.get("time") or "") > str(mine.get("time") or ""):
-        s["spawnedFrom"] = moved                  # a detach or reparent made while this hook held an older copy
+        s["spawnedFrom"] = moved                  # a detach to top level or a reparent made while this hook ran
     write_atomic(os.path.join(session_dir(home, s["sessionId"]), "session.json"),
                  json.dumps(s, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
 
 
 def ensure_session(home, sid, rec=None, cli="", depth=0, hint=""):
-    """session.json, made if new, with those of the sessions above it made too (a session this plugin never ran
-    in gets its file from the app's record). `spawnedFrom` there is what the tree is read from: the record sets
-    it for a new session, for one that looked like a top session before its record said otherwise, and for one
-    read from the notes folder. One that was detached or reparented is left as set."""
+    """session.json, made if new, with those of the sessions above it made too: a session this plugin never ran in
+    gets its file from the app's record. `spawnedFrom` there is what the tree is read from: the record sets it for
+    a new session, for one that looked like a top-level session before its record said otherwise, and for one read
+    from the notes folder. One detached to top level or reparented is left as set."""
     sid = safe_id(sid)
     s = load_session(home, sid)
     changed = False
@@ -533,7 +490,7 @@ def ensure_session(home, sid, rec=None, cli="", depth=0, hint=""):
             changed = True
     if rec:
         root = FOUND_IN.get(sid, "")
-        if root and root != s.get("appRoot"):        # where an archive or a deletion is looked for later (relay.gone)
+        if root and root != s.get("appRoot"):        # where relay.gone looks for an archive or a deletion later
             s["appRoot"] = root
             changed = True
         title = clean(rec.get("title"))[:120]
@@ -559,7 +516,7 @@ def title_of(s):
 
 
 def chain_of(home, sid):
-    """The sessionIds above a session, nearest first: the session that started it, the one that started that."""
+    """The sessionIds above a session, nearest first: its parent session, that session's parent, and so on."""
     out, cur = [], spawned_from(load_session(home, sid))
     while cur and cur not in out and len(out) < CHAIN_MAX:
         out.append(cur)
@@ -568,7 +525,7 @@ def chain_of(home, sid):
 
 
 def load_turns(home, sid):
-    """A session's turns, oldest first, each turn once (as it last finished)."""
+    """A session's turns, oldest first, each turn once, as it last finished."""
     by = {}
     for r in read_rows(os.path.join(session_dir(home, sid), "turns.jsonl")):
         if r.get("id"):
@@ -600,11 +557,11 @@ def latest_reports(rows, skip=""):
 # --- requests and turns ----------------------------------------------------------------------------------------------
 
 def request_of(prompt):
-    """The request inside a message. A session started by another session gets its task under leading
-    <system-reminder> blocks and a `Background ... Task:` wrapper, and a forked one under the line `Task (from the
-    session that started this one):`; this takes those off. A `<pasted_content id="..">` block is what a person
-    pasted, so its inner text is the request, also when the message is nothing but the block. '' when nothing is
-    left or what is left is the harness speaking."""
+    """The request inside a message. A child session gets its task under leading <system-reminder> blocks and a
+    `Background ... Task:` wrapper, and a forked one under the app's line `Task (from the session that started this
+    one):`; this takes those off. A `<pasted_content id="..">` block is what a person pasted, so its inner text is
+    the request, also when the message is nothing but the block. '' when nothing is left or what is left is Claude
+    Code speaking."""
     text = prompt if isinstance(prompt, str) else ""
     while REMINDER.match(text):
         text = REMINDER.sub("", text, count=1)
@@ -614,15 +571,15 @@ def request_of(prompt):
     text = FORK_HEAD.sub("", text, count=1)
     text = NOTES_TAIL.sub("", text).strip()
     if text.startswith("<") and not PASTED.match(text):
-        return ""                                  # the harness speaking, whatever its body quotes
+        return ""                                  # Claude Code speaking, whatever its body quotes
     # A paste is the person's message whatever it holds, but only where the message itself begins with the block or
-    # with their own words: a notification or another session's message that quotes a pasted block stays the harness's.
+    # with their own words: a notification or another session's message that quotes a pasted block stays Claude Code's.
     return PASTED.sub(lambda m: m.group(1), text).strip()
 
 
 def handed_over(prompt):
     """Does a message look like a task another session handed over: the wrapper, the linked-sessions reminder, or
-    the shared notes folder. Such a session was started by one, whether or not the app has recorded it yet."""
+    the shared notes folder. Such a session is a child session, whether or not the app has recorded it yet."""
     text = prompt if isinstance(prompt, str) else ""
     body = text
     while REMINDER.match(body):
@@ -646,9 +603,9 @@ def read_transcript(path, tail=None):
 
 
 def read_from(path, start, partial=False):
-    """([(the byte a line starts at, the line as an object)], the byte past the last whole line) of a .jsonl file
-    from byte `start`. A last line with no newline yet is still being written and is left for the next read; with
-    `partial`, `start` may fall inside a line, which is skipped."""
+    """The lines of a .jsonl file from byte `start`. Returns each line as the byte it starts at and the line as an
+    object, and the byte past the last whole line. A last line with no newline yet is still being written and is
+    left for the next read; with `partial`, `start` may fall inside a line, which is skipped."""
     try:
         with open(path, "rb") as f:
             f.seek(start)
@@ -675,9 +632,9 @@ TURN_WINDOWS = (512 * 1024, 2 * 1024 * 1024)     # a turn is looked for in the t
 
 def last_turn(path):
     """The transcript's last turn whoever asked for it: the last message that carries a request, and every tool
-    call after it. A message of the harness (a session's report relayed, a notification) opens no turn. The last
-    request is nearly always near the end, so the end is parsed first and the megabytes before it only when no
-    request lies there: the turn found is the same, since it starts at the last line that carries one."""
+    call after it. A message from Claude Code, such as a session's report delivered or a notification, opens no turn.
+    The last request is nearly always near the end, so the end is parsed first and the megabytes before it only when
+    no request lies there: the turn found is the same, since it starts at the last line that carries one."""
     try:
         size = os.path.getsize(path) if path else 0
     except OSError:
@@ -786,9 +743,9 @@ def turn_of(turn, report):
 
 
 def said_of(turn, report):
-    """Every message the turn wrote, joined and cut from the front to REPORT_CHARS, for when its findings came in a
-    message before its last. Check 2's kept report was only "Check 2 is done and reported", and its findings were in
-    the message before. '' when the last message is all the turn wrote."""
+    """Every message the turn wrote, joined and cut from the front to REPORT_CHARS, for a turn whose findings came in
+    a message before its last, which may say no more than that the work is done. '' when the last message is all
+    the turn wrote."""
     texts = [t for t in turn.get("texts") or [] if isinstance(t, str) and t.strip()]
     if not texts or (len(texts) == 1 and texts[0].strip() == (report or "").strip()):
         return ""
@@ -802,11 +759,11 @@ def said_of(turn, report):
 
 def turn_lines(title, t, report=300, prompt=200):
     how = "done: " + cut(clean(t["done"]), 160) if t.get("done") else "not shown done"
-    out = [f"- \"{title}\" ({how}; {t.get('time', '')}): {cut(clean(t.get('prompt')), prompt)}"]
+    out = [f"- \"{title}\", {how}, {t.get('time', '')}: {cut(clean(t.get('prompt')), prompt)}"]
     if t.get("steps"):
         out.append("  steps: " + cut("; ".join(t["steps"]), 400))
     if t.get("sessions"):
-        out.append("  sessions it started: " + cut("; ".join(t["sessions"]), 300))
+        out.append("  child sessions: " + cut("; ".join(t["sessions"]), 300))
     if t.get("failed"):
         out.append("  failed: " + cut("; ".join(t["failed"]), 300))
     if t.get("report"):
@@ -821,16 +778,17 @@ def commands():
 
 
 def background_text(home, s, own=False, slim=False):
-    """The background a session is given: the tasks of the sessions above it, their notes, the last turn of each
-    other session the same session started (for a top session, of the top sessions before it), and with `own`
-    its own turns. '' when none of that exists."""
+    """The start background a session is given: the tasks of the sessions above it, their notes, the last turn of
+    each of its siblings, which for a top-level session are the top-level sessions before it, and with `own` its own
+    turns. With `slim` the notes and the siblings' turns are left out, for a fresh child whose slice of its parent's
+    anchor holds what bears on its paths, and after a compaction. '' when none of that exists."""
     sid, above = s["sessionId"], spawned_from(s)
     chain = [load_session(home, x) for x in chain_of(home, sid)]
     body = []
     tasks = [f"- \"{title_of(n)}\": {cut(clean(n.get('task')), 500 if k == 0 else 200)}"
              for k, n in enumerate(chain) if n.get("task")]
     if tasks:
-        body += ["Tasks of the sessions above this one, nearest first (this session's task is part of the first):"]
+        body += ["Tasks of the sessions above this one, nearest first; this session's task is part of the first:"]
         body += tasks
     own_task = clean(s.get("task"))
     notes = []
@@ -838,18 +796,18 @@ def background_text(home, s, own=False, slim=False):
         for r in load_notes(home, n["sessionId"]):
             kind = f"{r['kind']}; " if r.get("kind") else ""
             room = relay.FINDINGS_CHARS + 2000 if clean(r.get("claim")).startswith("replaces:") else 300
-            notes.append(f"- {cut(clean(r.get('claim')), room)} ({kind}source: {cut(clean(r.get('source')), 120)})")
+            notes.append(f"- {cut(clean(r.get('claim')), room)}; {kind}source: {cut(clean(r.get('source')), 120)}")
     notes = [] if slim else nd.by_overlap(notes, own_task)   # nearest the task first; a fresh child gets its slice
     if notes:
-        body += ["Notes of the sessions above (already checked; do not work these out again):"] + notes[:12]
+        body += ["Notes of the sessions above, already checked, so do not work these out again:"] + notes[:12]
     others = [r for r in latest_reports(load_reports(home, above, TAIL_BYTES), skip=sid)[:OTHERS * 3]
               if spawned_from(load_session(home, r["sessionId"])) == above
               and not relay.gone(home, load_session(home, r["sessionId"]))][:OTHERS]
     others = [] if slim else nd.by_overlap(others, own_task,
                                            key=lambda r: f"{r.get('title', '')} {r.get('turn', {}).get('prompt', '')}")
     if others:
-        who = f"the other sessions \"{title_of(chain[0])}\" started" if chain else \
-            "the top sessions in this project before this one"
+        who = f"the other child sessions of \"{title_of(chain[0])}\"" if chain else \
+            "the top-level sessions in this project before this one"
         body += [f"The last turn of {who}:"]
         for r in others:
             body += turn_lines(r.get("title") or r["sessionId"][:14], r["turn"])
@@ -862,7 +820,7 @@ def background_text(home, s, own=False, slim=False):
     if not body:
         return ""
     if chain:
-        head = (f"phi (p4-phi): background for this session, \"{title_of(s)}\", from the session that started it, "
+        head = (f"phi (p4-phi): background for this session, \"{title_of(s)}\", from its parent session, "
                 f"\"{title_of(chain[0])}\", and the sessions linked to it. Use what is here where it fits; do not "
                 f"work it out again.")
     else:
@@ -871,7 +829,7 @@ def background_text(home, s, own=False, slim=False):
     tail = (f"The page this comes from: {page_path(home, above)}. Keep a finding the next session would have to "
             f"work out again: `{commands()} note \"<claim>\" --source \"<where it was checked>\"`. When something "
             f"shows the task done: `{commands()} done \"<what was run and what it showed>\"`. Each turn's report "
-            f"is kept either way" + (" and reaches the session that started this one in full." if chain else "."))
+            f"is kept either way" + (" and reaches the parent session beside its next message." if chain else "."))
     room = BACKGROUND_CHARS - len(head) - len(tail) - 2
     text = "\n".join(body)
     if len(text) > room:
@@ -880,18 +838,17 @@ def background_text(home, s, own=False, slim=False):
 
 
 def reports_text(home, s, room=None):
-    """The reports of the sessions this session started that finished a turn since it last looked, and how many
-    rows that covers. In full where they fit in `room`; a report past it is cut and whole on its page, and the
-    ones there is no room for at all are named by count with their pages (#43)."""
+    """The reports of this session's child sessions that finished a turn since it last looked, and how many rows
+    that covers. Each report is shown as kept, up to REPORT_CHARS, where it fits in `room`, and cut with ... where
+    it does not; the ones there is no room for at all are named by count with their pages."""
     rows = load_reports(home, s["sessionId"])
     seen = s.get("reportsSeen") if isinstance(s.get("reportsSeen"), int) else 0
     new = latest_reports(rows[seen:])
     if not new:
         return "", len(rows)
     room = REPORTS_CHARS if room is None else min(REPORTS_CHARS, room)
-    out = ["phi (p4-phi): reports of the sessions this session started that finished a turn since it last looked. "
-           "The app relays the first 400 characters of a report; these are in full, or cut with ... and whole on "
-           "the page named under each."]
+    out = ["phi (p4-phi): reports of this session's child sessions that finished a turn since it last looked, each "
+           "as kept or cut with ... where room runs short, with its page named under it."]
     shown = list(reversed(new))[:max(1, (room - len(out[0])) // 700)]
     rest = [r for r in reversed(new) if r not in shown]
     each = max(500, (room - len(out[0]) - 110 * len(rest)) // len(shown) - 140)
@@ -899,18 +856,18 @@ def reports_text(home, s, room=None):
         lines = turn_lines(r.get("title") or r["sessionId"][:14], r["turn"], report=REPORT_CHARS, prompt=300)
         out += [cut("\n".join(lines), each), f"  its page: {page_path(home, r['sessionId'])}"]
     if rest:
-        out.append(f"{len(rest)} more report(s) are not shown here and are on their pages: " + ", ".join(
+        out.append(f"Not shown here for want of room, {len(rest)} more, each on its page: " + ", ".join(
             f"\"{cut(r.get('title') or r['sessionId'][:14], 40)}\" {page_path(home, r['sessionId'])}"
-            for r in rest[:6]) + (f", and {len(rest) - 6} more on {page_path(home, s['sessionId'])}"
+            for r in rest[:6]) + (f", and {len(rest) - 6} more listed on {page_path(home, s['sessionId'])}"
                                   if len(rest) > 6 else "") + ".")
     return "\n".join(out), len(rows)
 
 
-# --- a session's file set, narrowed or released (#62) ----------------------------------------------------------------
+# --- a session's write set, narrowed or released ---------------------------------------------------------------------
 
 def set_files(home, s, paths, base):
-    """Replace a session's declared file set -> (the new set, what it released). The set before it is kept on the
-    record, and the start guard reads the new one at once, since it reads each record as it runs."""
+    """Replace a session's declared write set. Returns the new set and what it released. The set before it is kept
+    on the record, and the start guard reads the new one at once, since it reads each record as it runs."""
     new = []
     for p in paths:
         name = str(p or "").strip().strip("`'\"").rstrip(".")
@@ -962,15 +919,16 @@ def files_held_text(home, s, closing=None, pushed=None):
 
 MAX_DEPTH = 3                 # a session this deep in the tree starts no session of its own
 MAX_CHILDREN = 8              # nor one that has this many live children already
-BUILT_IN = ("built-in, act-don't-wait: a next step the chain can settle (the task, the parent's plan and notes, "
-            "siblings' work, the project's rules) is decided and done, with one line saying what was chosen and why. "
+BUILT_IN = ("built-in, act-don't-wait: a next step that the task, the parent's task list and notes, siblings' work "
+            "and the project's rules can settle is decided and done, with one line saying what was chosen and why. "
             "Only a matter of ezexe's authority goes to ezexe: permissions or security settings, credentials, "
-            "spending, and actions that cannot be undone or publish outward. A child asks the session that started it "
-            "with SendMessage, and never ends its turn waiting on a question the chain can settle. Where the project's "
-            "rules ask for ezexe's go before a kind of step, such as a plan's edits, that go is ezexe's to give: "
-            "wait for it on those steps, and act on the rest.")
-ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves the built-in rule out in a project (#23)
-# The levels rule (#57). Each mechanism it names is Claude Code's own, read from the docs on 2026-11-16:
+            "spending, and actions that cannot be undone or publish outward, but for the push of green issue-closing "
+            "commits, which p4-phi orders at once. A child asks its parent session with SendMessage, and never ends "
+            "its turn waiting on a question the session tree can settle. Where the project's rules ask for ezexe's "
+            "go before a kind of step, such as a plan's edits, that go is ezexe's to give: wait for it on those "
+            "steps, and act on the rest.")
+ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves this built-in rule out of a project
+# The delegation rule. Each mechanism it names is Claude Code's own, as the docs say:
 # - sub-agents.md, "Run subagents in foreground or background": "Foreground subagents block the main conversation
 #   until complete." and "Background subagents run concurrently while you continue working."; in its frontmatter
 #   table, `background`: "Set to `true` to keep this subagent in the background even when Claude asks to wait for it."
@@ -982,28 +940,24 @@ ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves the buil
 # - tools-reference.md, "Foreground commands that move to the background": "When a foreground command reaches its
 #   timeout without finishing, Claude Code moves it to the background instead of stopping it, unless the command
 #   starts with `sleep`." The default is `BASH_DEFAULT_TIMEOUT_MS`, "two minutes out of the box".
-# That a top session keeps to orchestration is phi's own TOP_RULE (#24), which the docs neither give nor deny.
-LEVELS = ("built-in, levels: work runs at the level Claude Code gives it, so this session's own turn is never held "
-          "by it. A search or a read across more than a couple of files goes to a background subagent: the Agent "
-          "tool with `subagent_type` `p4-phi:sweep`. A command expected to run long, such as a test file, a test "
-          "suite or a build, is started with `run_in_background: true` on its Bash or PowerShell call, or handed to "
-          "`p4-phi:runner`, which reports pass or fail with the failing output. A read of a diff or a result that "
-          "should not lean on this session's own view goes to `p4-phi:check`. Once one is started, go on with "
-          "other work or end the turn: its completion notification brings the result in a later turn, so never "
-          "wait for it in the foreground, sleep or poll. A top session keeps to orchestration. A child session "
-          "is started with a `model` and an `effort` that fit its step, in the terms the agents' files use: "
-          "mechanical or static work, such as docs pages, a rename or a version bump, on a cheaper model at low "
-          "or medium effort; a build that changes behaviour inherits this session's model at high effort; a "
-          "design or review step at high or above. phi names both in every start call it hands out, the brief "
-          "says them in one line, and the session that starts the child may choose otherwise in that line.")
-plans.BUILT_INS = tuple(x.split(": ", 1)[0].replace("built-in, ", "") for x in (BUILT_IN, LEVELS))   # #54
-LEVELS_ON = True              # p4.json phi.levels: false leaves the levels rule and its checks out; nothing turns it on
-TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps a top session's work in it (#24)
-FILE_SETS = True              # p4.json phi.file_sets: false starts sessions whose briefs declare no file set (#48)
+LEVELS = ("built-in, levels: work is delegated to where Claude Code runs it best, so this session's own turn is "
+          "never held by it. A search or a read across more than a couple of files goes to the background subagent "
+          "`p4-phi:sweep`; a command expected to run long, such as a test file, a test suite or a build, goes to "
+          "`p4-phi:runner` or to a Bash or PowerShell call of its own with `run_in_background: true`; a read of a "
+          "diff or a result that should not lean on this session's own view goes to `p4-phi:check`. Once one is "
+          "started, go on with other work or end the turn: its completion notification brings the result in a "
+          "later turn, so never wait for it in the foreground, sleep or poll. A child session is started with a "
+          "`model` and an `effort` that fit its step, as the advice that hands out each start call names them; an "
+          "effort above this session's own is not accepted.")
+plans.BUILT_INS = tuple(x.split(": ", 1)[0].replace("built-in, ", "") for x in (BUILT_IN, LEVELS))   # plans.py's names
+LEVELS_ON = True              # p4.json phi.levels: false leaves the delegation rule and its checks out
+TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps a top-level session's work in it
+FILE_SETS = True              # p4.json phi.file_sets: false starts sessions whose briefs declare no write set
 
 
 def project_conf(store):
-    """The project's own phi keys in p4.json, read where the session runs, not from a shared home store."""
+    """The project's own keys of p4.json's `phi` section, read from the store where the session runs, not from a
+    shared store."""
     global ACT_DONT_WAIT, TOP_ORCHESTRATES, FILE_SETS, LEVELS_ON
     try:
         d = p4conf.section(store, "phi", write=False) if store else {}
@@ -1014,13 +968,13 @@ def project_conf(store):
     FILE_SETS = d.get("file_sets") is not False
     LEVELS_ON = d.get("levels") is not False
     plans.LEVELS = LEVELS_ON
-    plans.CHILD_LEVELS = plans.child_levels(d.get("child_levels"))   # #61: one key sets each kind's defaults
+    plans.CHILD_LEVELS = plans.child_levels(d.get("child_levels"))   # one key sets each kind's model and effort
 
 
-TOP_RULE = ("This is the top session of its tree, so it keeps itself free for orchestration: planning, relaying "
-            "between sessions, decisions with ezexe, and landing the work, meaning merge and push. Its work "
-            "steps go to fresh child sessions, a run of serial ones to one child, each brief saying \"report when "
-            "done\"; the steps that test-and-commit, merge, push or release stay here.")
+TOP_RULE = ("This is the top-level session of its tree, so it keeps itself free for orchestration: planning, "
+            "messaging between sessions, decisions with ezexe, and landing the work, meaning merge and push. "
+            "Its work steps go to fresh child sessions, a serial run to one child, each brief saying \"report "
+            "when done\"; the steps that test-and-commit, merge, push or release stay here.")
 
 
 NEW_TOP = re.compile(r"\b(?:this|it) (?:session )?is a new top session\b", re.I)
@@ -1028,45 +982,47 @@ NEW_TOP_BRIEF = "This session is a new top session, orchestrating its own topic.
 
 
 def new_top_first_act():
-    """What a new top session does first: leave the starter in the app, then in phi."""
+    """What a new top-level session does first: detach to top level from its parent session in the app, then in
+    p4-phi."""
     return (f"Its first act: `mcp__ccd_session_mgmt__detach_session` with `\"self\"`, so the app stops nesting it and "
-            f"its reports stop going to the starter, then `{commands()} detach`.")
+            f"its reports stop going to its parent session, then `{commands()} detach`.")
 
 
-ASK_ROUTE = ""                # #58: set for a session that has a puppeteer, which starts no new top session itself
+ASK_ROUTE = ""                # set for a controlled session, which starts no new top-level session itself
 
 
 def asks(s):
-    """Kept for this hook's run: how a session that has a puppeteer gets a new top session."""
+    """Kept for this hook's run: how a controlled session gets a new top-level session from its supervisor
+    session."""
     globals()["ASK_ROUTE"] = controls.ask_route(s) if isinstance(s, dict) and not spawned_from(s) else ""
 
 
 def new_top_route(owner_turn=True):
-    """How a top session starts a new top session for a topic outside its task."""
+    """How a top-level session starts a new top-level session for a topic outside its task."""
     if ASK_ROUTE:
         return ASK_ROUTE
     how = ("Start it with `mcp__ccd_session__start_session`, `initiation` `user_asked`" if owner_turn else
-           f"This turn was started by another session, so the app refuses `user_asked`: show it as a proposal "
+           f"This turn was started by another session, so the app refuses `user_asked`: show it as a suggested task "
            f"card, `mcp__ccd_session__start_session` with `initiation` `own_initiative`, which ezexe presses in "
            f"this session; only where the card is refused too, write it as a start request, {request_cmd()}, "
            f"which the next turn ezexe begins in this session starts")
     return (f"{how}, `context` `fresh`, `use_worktree: false`, with the `model` and `effort` the levels rule gives "
             f"its kind of work, said in one line of the brief; its brief: the topic, ezexe's words quoted, and "
-            f"the lines \"{NEW_TOP_BRIEF} {new_top_first_act()}\" Both moves are needed: the app's detach, else it "
-            f"stays nested under this session and reports here, and phi's, which phi also makes at its first hook "
-            f"on that line. If it has not left this session's family by its first report, call "
-            f"`mcp__ccd_session_mgmt__detach_session` with its id yourself. In the root every top session relays to "
-            f"the others as siblings.")
+            f"the lines \"{NEW_TOP_BRIEF} {new_top_first_act()}\" Both moves are needed: the app's detach to top "
+            f"level, else it stays nested under this session and reports here, and p4-phi's, which p4-phi also makes "
+            f"at the new session's first hook on that line. If it is still nested under this session at its first "
+            f"report, call `mcp__ccd_session_mgmt__detach_session` with its id yourself. Top-level sessions are "
+            f"siblings, so each is told what the others change.")
 
 
 def request_cmd():
     """The command that keeps a start request, as the lines that advise it give it."""
-    return (f'`{commands()} request "<title>" --brief "<the whole brief>"`, the brief declaring its file set on a '
+    return (f'`{commands()} request "<title>" --brief "<the whole brief>"`, the brief declaring its write set on a '
             f'line `Files: <paths>`')
 
 
 def depth_of(home, s):
-    """How many sessions lie above this one: 0 for a top session."""
+    """How many sessions lie above this one: 0 for a top-level session."""
     n, seen, cur = 0, set(), s
     while spawned_from(cur) and spawned_from(cur) not in seen and n < 20:
         seen.add(spawned_from(cur))
@@ -1079,18 +1035,18 @@ def caps_text(home, s):
     """'' while this session may start sessions; else the one line saying where the work goes instead."""
     depth = depth_of(home, s)
     if depth >= MAX_DEPTH:
-        return (f"This session is {depth} deep in the session tree, the most phi allows: start no session; do the "
-                f"work here, or send it to the session that started you with SendMessage.")
+        return (f"This session is {depth} deep in the session tree, the most p4-phi allows: start no session; do the "
+                f"work here, or send it to your parent session with SendMessage.")
     kids = len(plans._children(home, s["sessionId"]))
     if kids >= MAX_CHILDREN:
-        return (f"This session has {kids} live sessions of its own, the most phi allows: start no session; send the "
-                f"work to the one whose task it fits with SendMessage, or ask ezexe to archive a finished one first.")
+        return (f"This session has {kids} live sessions of its own, the most p4-phi allows: start no session; send "
+                f"the work to the one whose task it fits with SendMessage.")
     return ""
 
 
 def split_text(home, s, prompt, cli=""):
-    """A turn another session's message started: the app refuses `user_asked` there, so a split is a card ezexe
-    starts. '' for ezexe's own turns, the app's events and a session with no task."""
+    """A turn another session's message started: the app refuses `user_asked` there, so a split is a suggested task
+    card ezexe starts. '' for ezexe's own turns, the app's events and a session with no task."""
     if not clean(s.get("task")) or not re.search(r"<cross-session-message\b", str(prompt or "")):
         return ""
     cap = caps_text(home, s)
@@ -1100,11 +1056,11 @@ def split_text(home, s, prompt, cli=""):
     told = s.setdefault("splitTold", {})
     if not isinstance(told, dict):
         told = s["splitTold"] = {}
-    if cli and told.get(cli):                      # #43: said once in full, then a line
+    if cli and told.get(cli):                      # said once in full, then a line
         RAN["split"] = "line"
-        return ("phi (p4-phi): another session started this turn, so a task of its own in it is shown as a proposal "
-                "card, and written as a start request with `phi.py request` only where the card is refused, as said "
-                f"before and kept on {standing_path(home, s['sessionId'])}; do the rest here.")
+        return ("phi (p4-phi): another session started this turn, so a task of its own in it is shown as a suggested "
+                "task card, and written as a start request only where the card is refused, as said "
+                f"before and kept whole on {standing_path(home, s['sessionId'])}; do the rest here.")
     if cli:
         told[cli] = now()
     text = _split_full(home, s)
@@ -1118,7 +1074,7 @@ def standing_path(home, sid):
 
 def keep_standing(home, sid, name, text):
     """A standing instruction kept whole on the session's standing.md, so a later prompt or a compaction names the
-    page and does not say it again (#43)."""
+    page and does not say it again."""
     path = standing_path(home, sid)
     try:
         with open(path, encoding="utf-8") as f:
@@ -1135,17 +1091,15 @@ def keep_standing(home, sid, name, text):
 def _split_full(home, s):
     if not spawned_from(s):
         return ("phi (p4-phi): this turn was started by another session, not ezexe, so the app refuses "
-                "`mcp__ccd_session__start_session` with `user_asked`. A topic in it outside this top session's task "
-                "gets a new top session of its own. " + new_top_route(False) + " Do the rest here; a question the "
-                "chain can settle is answered, not waited on.")
+                "`mcp__ccd_session__start_session` with `user_asked`. A topic in it outside this top-level session's "
+                "task gets a new top-level session of its own. " + new_top_route(False) + " Do the rest here.")
     return ("phi (p4-phi): this turn was started by another session, not ezexe, so the app refuses "
             "`mcp__ccd_session__start_session` with `user_asked`. Work in it that is a task of its own, outside "
             "this session's task, is shown as a proposal card, `mcp__ccd_session__start_session` with "
-            "`initiation` `own_initiative`, which ezexe presses in this session, so the app's parent and phi's "
-            f"agree. {plans.LEVEL_CARD} Only where the card is refused too, write it as a start request, "
+            "`initiation` `own_initiative`, which ezexe presses in this session, so the app's parent session and "
+            f"p4-phi's agree. {plans.LEVEL_CARD} Only where the card is refused too, write it as a start request, "
             f"{request_cmd()}: the next "
-            "turn ezexe begins in this session starts it as this session's child. Do the rest here; a question "
-            "the chain can settle is answered, not waited on.")
+            "turn ezexe begins in this session starts it as this session's child. Do the rest here.")
 
 
 FEATURE = re.compile(r"^\W*(?:please\s+|now\s+|also\s+|and\s+|can you\s+|could you\s+)*(?:build|add|make|implement|"
@@ -1155,8 +1109,8 @@ FEATURE_STEP = re.compile(r"\bnew feature\b|^\W*(?:build|implement|design|introd
 
 
 def feature_request(home, s, req):
-    """True when a message asks for something new that is not yet in the session's plan: a feature is a new topic
-    even within a broad task (#29). A message that bears on an open step of the plan is that step's."""
+    """True when a message asks for something new that is not yet in the session's task list: a feature is a new
+    topic even within a broad task. A message that bears on an open step of the task list is that step's."""
     text = clean(req)
     if not text or not FEATURE.search(text):
         return False
@@ -1165,7 +1119,7 @@ def feature_request(home, s, req):
 
 
 def feature_steps_text(home, s, plan, owner_turn):
-    """A top session's own plan steps that are new features: each gets a new top session, once per step."""
+    """A top-level session's own steps that are new features: each gets a new top-level session, once per step."""
     if spawned_from(s):
         return ""
     path = os.path.join(session_dir(home, s["sessionId"]), "session.json")
@@ -1180,13 +1134,14 @@ def feature_steps_text(home, s, plan, owner_turn):
         write_atomic(path, json.dumps(disk, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
     named = "; ".join(f"step {st.get('addr')} \"{cut(clean(st.get('content')), 90)}\"" for st in new)
     return (f"phi (p4-phi): {named} is a new feature, and a feature is a new topic even within this task: it gets a "
-            f"new top session of its own, not a child or a step here. {new_top_route(owner_turn)}")
+            f"new top-level session of its own, not a child or a step here. {new_top_route(owner_turn)}")
 
 
 def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
-    """ezexe's standing instruction for a message about something else: once in full for a CLI session that
-    has a task (and again after a compaction), then a line with the task beside each of ezexe's messages.
-    '' with no task, and beside the harness's messages."""
+    """The standing instruction for a message about something else: once in full for a CLI session that has a task,
+    then a line with the task beside each of ezexe's messages. After a compaction a session told before gets one
+    line that names standing.md, where the instruction is whole; after a clear it gets the instruction in full again.
+    '' with no task, and beside Claude Code's messages."""
     task = clean(s.get("task"))
     if not NEW_TASK or not task:
         return ""
@@ -1194,40 +1149,40 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
     if not isinstance(told, dict):
         told = s["newTaskToldAt"] = {}
     if brief and told.get(me.cli) and os.path.isfile(standing_path(home, s["sessionId"])):
-        RAN["new_task"] = "page"                   # #43: after a compaction, a line with its page, not in full
+        RAN["new_task"] = "page"                   # after a compaction, a line with its page, not in full
         up = spawned_from(s)
         where = (f"hand it up to {up} with SendMessage, ezexe's words quoted" if up else
-                 f"start a new top session for it (`context` `fresh`, its brief ending \"{NEW_TOP_BRIEF}\")")
+                 f"start a new top-level session for it, its brief ending \"{NEW_TOP_BRIEF}\"")
         return (f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" When a message from ezexe is about "
-                f"something else, {where}, and stay with the task. ezexe's standing instruction, handed in full "
+                f"something else, {where}, and stay with the task. The standing instruction, handed in full "
                 f"before the compaction, is whole on {standing_path(home, s['sessionId'])}.")
     if again or not told.get(me.cli):
         told[me.cli] = now()
         listed = relay.shards_line(home, s["sessionId"])
-        shards = f" (shards now: {listed})" if listed else ""
+        shards = f"; the owned paths now: {listed}" if listed else ""
         RAN["new_task"] = "instruction"
         parent = spawned_from(s)
         if parent:
-            elsewhere = (f"do not turn this session to it, and start no session for it: hand it up to the session "
-                         f"that started this one with SendMessage (`to`: {parent}), ezexe's words quoted, tell "
-                         f"ezexe in one line that it went up, and stay with the task. Only a top session starts "
-                         f"a session for a new topic. A message about a path inside another session's shard is that "
-                         f"session's: send it there with SendMessage instead{shards}. This is ezexe's standing "
-                         f"instruction for this project. A quick thing (a ")
+            elsewhere = (f"do not turn this session to it, and start no session for it: hand it up to your parent "
+                         f"session, {parent}, with SendMessage, ezexe's words quoted, tell "
+                         f"ezexe in one line that it went up, and stay with the task. Only a top-level session starts "
+                         f"a session for a new topic. A message about a path among another session's owned paths is "
+                         f"that session's: send it there with SendMessage instead{shards}. "
+                         f"A quick thing, such as a ")
         else:
-            elsewhere = (f"do not turn this session to it. A new topic gets a new top session of its own, a sibling "
-                         f"of this one, so this session stays orchestrating its topic. {new_top_route(True)} Tell "
-                         f"ezexe in one line which session has it, and stay with the task. A message about a path "
-                         f"inside another session's shard is that session's: send it there with SendMessage instead, "
-                         f"and start a new session only for what no shard covers{shards}. This is ezexe's standing "
-                         f"instruction for this project, so the session is started, not offered as a card. Its "
-                         f"report comes back here in full. "
-                         + (f"This session's ledger is written for it by phi's watcher, "
-                            f"{puppeteer.ledger_path(home, s['sessionId'])}: read that, and keep none by hand. "
-                            if puppeteer.on(home) else "") + "A quick thing (a ")
+            elsewhere = (f"do not turn this session to it. A new topic gets a new top-level session of its own, a "
+                         f"sibling of this one, so this session stays orchestrating its topic. {new_top_route(True)} "
+                         f"Tell ezexe in one line which session has it, and stay with the task. A message about a path "
+                         f"among another session's owned paths is that session's: send it there with SendMessage "
+                         f"instead, and start a new session only for what no owned paths cover{shards}. This "
+                         f"instruction holds in this project, so the session is started, not offered as a suggested "
+                         f"task card. "
+                         + (f"This session's ledger is "
+                            f"{puppeteer.ledger_path(home, s['sessionId'])}. "
+                            if puppeteer.on(home) else "") + "A quick thing, such as a ")
         full = (f"phi (p4-phi): this session's task: \"{cut(task, RULE_TASK)}\" When a message from ezexe is "
                 f"about something else, " + elsewhere +
-                f"question, a few tool calls) stays here. When ezexe says the task itself has changed: "
+                f"question or a few tool calls, stays here. When ezexe says the task itself has changed: "
                 f"`{commands()} task \"<the new task>\"`. This session's page: {page_path(home, s['sessionId'])}."
                 + (" " + TOP_RULE if not spawned_from(s) and TOP_ORCHESTRATES
                    and not controls.is_puppeteer(s, me.store) else "")
@@ -1241,25 +1196,26 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
     if req and feature_request(home, s, req):
         RAN["new_task"] = "feature"
         if parent:
-            return (f"phi (p4-phi): this message asks for something new that is not in this session's plan, and a "
-                    f"feature is a new topic even within a broad task: hand it up to {parent} with SendMessage, "
-                    f"ezexe's words quoted, as a new topic for a new top session, and stay with the task.")
-        return (f"phi (p4-phi): this message asks for something new that is not in this session's plan. A feature is "
-                f"a new topic even within a broad task like \"{cut(task, LINE_TASK)}\", so it gets a new top session "
-                f"of its own, a sibling of this one. {new_top_route(s.get('turnBy', 'user') == 'user')} Tell ezexe in "
-                f"one line which session has it, and stay with the task.")
+            return (f"phi (p4-phi): this message asks for something new that is not in this session's task list, and "
+                    f"a feature is a new topic even within a broad task: hand it up to {parent} with SendMessage, "
+                    f"ezexe's words quoted, as a new topic for a new top-level session, and stay with the task.")
+        return (f"phi (p4-phi): this message asks for something new that is not in this session's task list. A "
+                f"feature is a new topic even within a broad task like \"{cut(task, LINE_TASK)}\", so it gets a new "
+                f"top-level session of its own, a sibling of this one. "
+                f"{new_top_route(s.get('turnBy', 'user') == 'user')} Tell ezexe in one line which session has it, and "
+                f"stay with the task.")
     if parent:
         return (f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" If this message is about something "
                 f"else, hand it up to {parent} with SendMessage, ezexe's words quoted, and stay with the task; "
                 f"otherwise carry on.")
     return (f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" If this message is about something "
-            f"else, start a new top session for it (`context` `fresh`, its brief ending \"{NEW_TOP_BRIEF}\") and stay "
-            f"with the task; otherwise carry on.")
+            f"else, start a new top-level session for it as the standing instruction says, its brief ending "
+            f"\"{NEW_TOP_BRIEF}\", and stay with the task; otherwise carry on.")
 
 
 def render_page(home, sid):
-    """session.md: a session as one page (its task, notes, turns and the sessions it started), rewritten from its
-    files. With no `sid`, sessions.md: the top sessions of the project."""
+    """session.md: a session as one page, with its task, notes, turns and child sessions, rewritten from its files.
+    With no `sid`, sessions.md: the top-level sessions of the project."""
     out = []
     if sid:
         s = load_session(home, sid)
@@ -1267,16 +1223,16 @@ def render_page(home, sid):
             return
         above = spawned_from(s)
         out = [f"# {title_of(s)}", "",
-               f"Session `{sid}`, started by `{above}`." if above else f"Session `{sid}`, a top session.", ""]
+               f"Session `{sid}`, started by `{above}`." if above else f"Session `{sid}`, a top-level session.", ""]
         if s.get("task"):
             out += ["## Task", "", s["task"].strip(), ""]
         if isinstance(s.get("fileSet"), list):
-            out += ["## Files", "", "The file set its brief declares: this session alone writes these while it is "
-                    "live.", ""] + ([f"- `{f}`" for f in s["fileSet"]] or ["- none: it writes no file"]) + [""]
+            out += ["## Files", "", "The write set its brief declares:",
+                    ""] + ([f"- `{f}`" for f in s["fileSet"]] or ["- none: it writes no file"]) + [""]
         notes = load_notes(home, sid)
         if notes:
             out += ["## Notes", ""]
-            out += [f"- {clean(r.get('claim'))} (source: {clean(r.get('source'))}; {r.get('time', '')})" for r in notes]
+            out += [f"- {clean(r.get('claim'))}; source: {clean(r.get('source'))}; {r.get('time', '')}" for r in notes]
             out.append("")
         turns = load_turns(home, sid)
         if turns:
@@ -1285,11 +1241,11 @@ def render_page(home, sid):
                 out += turn_lines(title_of(s), t, report=1200, prompt=400)
             out.append("")
     else:
-        out = ["# Top sessions of this project", ""]
+        out = ["# Top-level sessions of this project", ""]
     rows = latest_reports(load_reports(home, sid, TAIL_BYTES))[:40]
     if rows:
         if sid:
-            out += ["## Sessions this session started, newest first", ""]
+            out += ["## Child sessions, newest first", ""]
         for r in rows:
             out += turn_lines(r.get("title") or r["sessionId"][:14], r["turn"], report=600, prompt=300)
             out.append(f"  session: `{r['sessionId']}`")
@@ -1305,7 +1261,7 @@ WHY = re.compile(r"\A\s*\*\*Why")
 
 
 def memory_rules(home):
-    """The store's rules: (name, body) for each memory of type feedback or user in <home>/temportal/memory, in the order
+    """The store's feedback and user memories in <home>/temportal/memory, each as its name and body, in the order
     MEMORY.md lists them, then the ones it does not list."""
     mem = p4conf.sub(home, "memory")
     try:
@@ -1349,7 +1305,8 @@ def fair_cut(texts, room):
 
 
 def rules_page(home, rules):
-    """<home>/phi/rules.md: every rule in full on one page, written only when a memory changed."""
+    """<home>/phi/rules.md: every feedback and user memory in full on one page, written only when a memory
+    changed."""
     path = os.path.join(home, "phi", "rules.md")
     mem = p4conf.sub(home, "memory").replace("\\", "/")
     text = "\n".join([f"# The store's rules, in full", "",
@@ -1381,9 +1338,10 @@ def built_in():
 
 
 def rules_text(home, room, fork=False, brief=False):
-    """The store's rules for a session's start, a line each, in at most `room` characters, led by the built-in
-    rule. The built-in rule alone in a project with no rules, and for a fork, whose inherited conversation already
-    holds the store's rules."""
+    """The rules for a session's start, a line each, in at most `room` characters: the rules built into p4-phi, then
+    the store's feedback and user memories. The built-in rules alone in a project with no such memories, and for a
+    fork, whose inherited conversation already holds the memories. After a compaction, one line that names them
+    and the page that holds the memories."""
     if not RULES:
         return ""
     rules = memory_rules(home) if home and not fork else []
@@ -1392,21 +1350,22 @@ def rules_text(home, room, fork=False, brief=False):
         return builtin_text() if room >= len(builtin_text()) else ""     # '' when the project turned it off
     page = rules_page(home, rules)
     mem = p4conf.sub(home, "memory").replace("\\", "/")
-    if brief:                                      # #43: handed in full at the start; after a compaction, its page
+    if brief:                                      # handed in full at the start; after a compaction, its page
         RAN["rules"] = "page"
-        return (f"phi (p4-phi): this project's standing rules were handed to this session in full at its start and "
-                f"still hold: " + ", ".join([x.split(": ", 1)[0].replace("built-in, ", "") for x in built_in()]
-                                            + [n for n, _ in rules])
-                + f". Each is whole, with its Why, on one page: {page}. Read that page when one of them bears on "
-                  f"the next step.")
-    head = (f"phi (p4-phi): this project's standing rules, from the feedback and user memories in {mem}. They are "
-            f"in your context now, as are CLAUDE.md and the memory index, so do not open the memory files or "
-            f"CLAUDE.md to learn the rules before the work. A rule cut short with ... is whole, with its Why, on "
-            f"one page: {page}. Read that page, not the files, when a rule's reason matters. A session you start "
-            f"with `mcp__ccd_session__start_session` is given these same rules, CLAUDE.md and the memory index at "
-            f"its start, and your task and notes beside its first message, so its brief does not tell it to read "
-            f"CLAUDE.md, MEMORY.md or any memory file: the brief names only what this task needs, such as a skill, "
-            f"a plan or source files.")
+        return (f"phi (p4-phi): the rules built into p4-phi and this project's feedback and user memories were handed "
+                f"to this session in full at its start and still hold: "
+                + ", ".join([x.split(": ", 1)[0].replace("built-in, ", "") for x in built_in()]
+                            + [n for n, _ in rules])
+                + f". The memories are whole, with their Why, on one page: {page}. Read that page when one of them "
+                  f"bears on the next step.")
+    head = (f"phi (p4-phi): the rules built into p4-phi, then this project's feedback and user memories from {mem}, "
+            f"a line each. They are in your context now, as are CLAUDE.md and the memory index, so do not open the "
+            f"memory files or CLAUDE.md to learn the rules before the work. A memory cut short with ... is whole, "
+            f"with its Why, on one page: {page}. Read that page, not the files, when a memory's reason matters. A "
+            f"session you start with `mcp__ccd_session__start_session` is given these same rules, CLAUDE.md and the "
+            f"memory index at its start, so its brief does not "
+            f"tell it to read CLAUDE.md, MEMORY.md or any memory file: the brief names only what this task needs, "
+            f"such as a skill, a plan or source files.")
     rules = [tuple(x.split(": ", 1)) for x in built_in()] + list(rules)
     names = [f"- {name}: " for name, _ in rules]
     room -= len(head) + sum(len(x) + 1 for x in names) + 2
@@ -1414,19 +1373,20 @@ def rules_text(home, room, fork=False, brief=False):
     return "\n".join([head] + [a + b for a, b in zip(names, fair_cut([rule_of(b) for _, b in rules], room))])
 
 
-# --- rules that change mid-session (#26) ----------------------------------------------------------------------------
+# --- rules that change mid-session ----------------------------------------------------------------------------------
 #
-# The store's rules reach a session at its start, and the global and project CLAUDE.md through the harness at its
-# start too. A rule ezexe changes during the day must reach the sessions already working, or they keep writing the
-# old wording into notes, issues and code. So each message compares what the session last saw with what is on disk
-# now, and gives the changed or added lines once and the removed ones as a list.
+# The store's feedback and user memories reach a session at its start, and the global and project CLAUDE.md through
+# Claude Code at its start too. A rule ezexe changes during the day must reach the sessions already working, or they
+# keep writing the old wording into notes, issues and code. So each message compares what the session last saw with
+# what is on disk now, and gives the changed or added lines once and the removed ones as a list.
 
 LIVE_RULES_CHARS = 3000          # of the changes given at one message
 LIVE_RULES_LINES = 400           # kept of what a session last saw
 
 
 def rule_sources(store, project):
-    """[(source, line)] of the store's rules, a line each, the global CLAUDE.md and the project's CLAUDE.md."""
+    """The lines of the store's feedback and user memories, a line each, of the global CLAUDE.md and of the project's
+    CLAUDE.md, each with its source."""
     out = [(f"memory {name}", f"{name}: {rule_of(body)}") for name, body in (memory_rules(store) if store else [])]
     conf = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
     for label, path in (("global CLAUDE.md", os.path.join(conf, "CLAUDE.md")),
@@ -1473,25 +1433,25 @@ def live_rules(s, store, project):
 # --- the hooks -------------------------------------------------------------------------------------------------------
 
 def given(s, me, home, own=False, brief=False):
-    """The background, when this CLI session has not been given it under the session that started it; marks it
+    """The start background, when this CLI session has not been given it under its parent session; marks it
     given."""
     if not BACKGROUND or not me.cli:
-        return ""                                  # R8: a call with no session id is no new CLI session
+        return ""                                  # a call with no session id is no new CLI session
     told = s.setdefault("backgroundGivenFor", {})
     if not isinstance(told, dict):
         told = s["backgroundGivenFor"] = {}
-    told.pop("", None)                             # an empty key stored before R8
+    told.pop("", None)                             # an empty key names no CLI session
     above = spawned_from(s)
     if not own and told.get(me.cli) == above:
         return ""
     fresh = bool(above) and not s.get("forked") and not own
     if fresh and not clean(s.get("task")):
-        return ""                                  # its brief comes with its first message: built then (F1)
+        return ""                                  # its brief comes with its first message: built then
     told[me.cli] = above
-    # a fresh child starts with exactly what the parent has for it (F2): the tasks above it, its root step and the
-    # parent's plan around it, and the parent's anchor cut to its paths, never the parent's whole background
+    # a fresh child starts with exactly what the parent has for it: the tasks above it, its parent step and the
+    # parent's task list around it, and the parent's anchor cut to its paths, never the parent's whole background
     cut_to = relay.child_paths(home, s) if fresh else []
-    text = background_text(home, s, own=own, slim=bool(cut_to) or brief)   # brief: after a compaction (#43)
+    text = background_text(home, s, own=own, slim=bool(cut_to) or brief)   # brief: after a compaction
     if fresh:
         step = plans.slice_for(home, s)
         piece = relay.slice_text(home, s) if cut_to else ""
@@ -1507,7 +1467,7 @@ def given(s, me, home, own=False, brief=False):
 
 
 def pin_of(home, s):
-    """A forked child's own task, shard and root step, above the conversation it inherited; '' for others."""
+    """A forked child's own task, owned paths and parent step, above the conversation it inherited; '' for others."""
     if not s.get("forked"):
         return ""
     line = relay.pin_text(s)
@@ -1517,8 +1477,8 @@ def pin_of(home, s):
 
 
 def h_plan(payload):
-    """PostToolUse on mcp__ccd_turn__update_plan: the session's plan.json, the parent's plan tree, a revision
-    relayed, and at a step boundary what bears on the step starting now (plans.py)."""
+    """PostToolUse on mcp__ccd_turn__update_plan: the session's plan.json, the parent's anchor, a revision warned to
+    the sessions it bears on, and at a step boundary what bears on the step starting now, all in plans.py."""
     me = Me(payload)
     if not me.home or not me.id:
         return None
@@ -1527,19 +1487,19 @@ def h_plan(payload):
     save_session(me.home, s)
     asks(s)
     text = plans.record(me.home, s, inp, payload.get("transcript_path") or "")
-    if isinstance(inp.get("items"), list):        # a plan's first whole list, or a revision of it
+    if isinstance(inp.get("items"), list):        # the task list's first whole list, or a revision of it
         s = load_session(me.home, me.id) or s
         cap = caps_text(me.home, s)
         advise = plans.split_advice if spawned_from(s) else plans.top_advice if TOP_ORCHESTRATES else None
         if advise is plans.top_advice and controls.is_puppeteer(s, me.store):
-            advise = None                          # #58: a puppeteer's steps are its own; it hands none to a child
+            advise = None                          # a supervisor session's steps are its own; it hands none out
             RAN["pair"] = "puppeteer"
-        advice = advise(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user", cap)             if advise else ""                      # #24: a project whose top session lands its plan itself
+        advice = advise(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user", cap)             if advise else ""                      # none where the top-level session does its own steps
         RAN["split"] = "advised" if advice else ""
         feat = feature_steps_text(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user")
         text = "\n\n".join(p for p in (feat, advice, text) if p)
     if spawned_from(s) and any(k in inp for k in ("advance", "start", "done", "items")):
-        s = load_session(me.home, me.id) or s      # #28: the issue at the first plan, then the commits' check
+        s = load_session(me.home, me.id) or s      # the issue at the first task list, then the commits' check
         cwd = payload.get("cwd") or s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or ""
         line = issues.ensure(me.home, s, issues.plan_lines(me.home, me.id), cwd, "plan", me.rec) \
             if isinstance(inp.get("items"), list) and not load_turns(me.home, me.id) else ""
@@ -1552,7 +1512,7 @@ def h_plan(payload):
     if not spawned_from(s) and any(k in inp for k in ("advance", "start", "done", "items")):
         wt = relay.worktrees_text(me.home, me.id, relay.repo_of(s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR")
                                                                 or ""))
-        if wt:                                     # #22: at the top's step boundary, merged worktrees to remove
+        if wt:                                     # at a top-level session's step boundary, worktrees to remove
             RAN["worktrees"] = wt.count("git worktree remove")
             text = "\n\n".join(p for p in (text, wt) if p)
     nudge_arm(me, load_session(me.home, me.id) or s)
@@ -1560,10 +1520,10 @@ def h_plan(payload):
     return text or None
 
 
-# --- the nudge: a top session doing a work step itself ------------------------------------------------------------
+# --- the nudge: a top-level session doing a work step itself ------------------------------------------------------
 #
-# The marker <store>/phi/.nudge/<CLI session id> exists while a top session's step in progress is a work step it has
-# not been nudged on; recall-hook.sh lets an Edit, Write or shell call through to python only while a marker names
+# The marker <store>/phi/.nudge/<CLI session id> exists while a top-level session's step in progress is a work step it
+# has not been nudged on; recall-hook.sh lets an Edit, Write or shell call through to python only while a marker names
 # the call's session, so every other call pays nothing.
 
 NUDGE_LOOKING = (LOOKING | frozenset("""uniq basename dirname realpath stat du df env type command jq less more nl
@@ -1586,13 +1546,13 @@ def nudge_key(step):
 
 
 def nudge_step(home, s):
-    """The top session's step in progress when it is a work step not nudged on yet, else None."""
+    """The top-level session's step in progress when it is a work step not nudged on yet, else None."""
     if not s or spawned_from(s) or not TOP_ORCHESTRATES or controls.is_puppeteer(s, store_at(s.get("cwd"))):
         return None
     plan = plans.load(home, s["sessionId"])
     st = plans.step_of(plan, plan.get("current") or "") if plan.get("steps") else None
     text = str((st or {}).get("content") or "")
-    if not st or st.get("status") == "completed" or plans.top_stays(text):    # #52: one answer for both
+    if not st or st.get("status") == "completed" or plans.top_stays(text):    # the advice's own answer
         return None
     return None if nudge_key(st) in (s.get("nudged") or []) else st
 
@@ -1633,7 +1593,7 @@ def runs_phi(part, phi_vars):
 
 def work_command(cmd):
     """True when a shell command builds, tests or changes files: anything past reading, git's reading and landing
-    commands, and phi's own commands: any that runs phi.py, directly or through a variable bound to it."""
+    commands, and p4-phi's own commands: any that runs phi.py, directly or through a variable bound to it."""
     raw = str(cmd or "")
     quoted = []
 
@@ -1664,7 +1624,7 @@ def work_command(cmd):
                 return True
             continue
         if prog == "git":
-            # #55: `git -C <path> log` read the path as the subcommand, so a read-only check was nudged as work
+            # the subcommand is the first word past the options, so `git -C <path> log` is a read
             words = [w for w in re.sub(r"\s(?:-C|-c|--git-dir|--work-tree)\s+\S+", " ", part).split()[1:]
                      if not w.startswith("-")]
             sub = words[0] if words else ""
@@ -1690,16 +1650,16 @@ def work_call(s, name, inp):
     return False
 
 
-TREE_CHECKS = 6               # read-only checks of its trees a top session runs in one work step as orchestration
+TREE_CHECKS = 6               # read-only checks of its trees a top-level session runs in one work step as orchestration
 TREE_CHECK = re.compile(r"(?:^|[\s;&|(])(?:git\s+(?:-C\s+\S+\s+)?(?:log|status|diff|show|branch|fetch|rev-parse|"
                         r"ls-files)\b|gh\s+(?:issue|pr|run|api|repo)\b|\S*phi\.py[\"']?\s+(?:tree|show|controls|"
                         r"background)\b)", re.I)
 
 
 def tree_checked(me, s, st):
-    """A top session's read-only check of its trees in a work step, such as a session list, `git log`,
+    """A top-level session's read-only check of its trees in a work step, such as a session list, `git log`,
     `gh issue list` or `gh issue view`: counted, and never handed off while they are few. Past TREE_CHECKS in one
-    step it is told once that the rest is a sweep's read. None while they are few."""
+    step it is told once that the rest is a read for `p4-phi:sweep`. None while they are few."""
     key = nudge_key(st)
     held = s.get("treeChecks") if isinstance(s.get("treeChecks"), dict) else {}
     n = (int(held.get("n") or 0) if held.get("key") == key else 0) + 1
@@ -1709,14 +1669,15 @@ def tree_checked(me, s, st):
         return None
     RAN["tree_checks"] = n
     return (f"phi (p4-phi): step {st.get('addr')} has now run {n} read-only checks of its trees here. A few, such as "
-            f"a session list, `git log`, `gh issue list` or `gh issue view`, are this top session's own "
-            f"orchestration; past {TREE_CHECKS} the rest is a read across the trees: hand it to a background "
-            f"subagent, the Agent tool with `subagent_type` `p4-phi:sweep`. Said once for this step.")
+            f"a session list, `git log`, `gh issue list` or `gh issue view`, are this top-level session's own "
+            f"orchestration; past {TREE_CHECKS} the rest is a read across the trees: hand it to the background "
+            f"subagent `p4-phi:sweep`. Said once for this step.")
 
 
 def h_nudge(payload):
-    """PreToolUse on Edit, Write and shell commands in a top session with a plan: one line, once per step, that the
-    work goes to a child session. Never a block; reading, git's reading and landing commands are never nudged."""
+    """PreToolUse on Edit, Write and shell commands in a top-level session with a task list: one line, once per
+    step, that the work goes to a child session. Never a block; reading, git's reading and landing commands are never
+    nudged."""
     me = Me(payload)
     if not me.home or not me.id or not me.cli or not os.path.exists(nudge_marker(me)):
         return None
@@ -1731,30 +1692,30 @@ def h_nudge(payload):
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     if not work_call(s, str(payload.get("tool_name") or ""), inp):
         if str(payload.get("tool_name") or "") in SHELL_TOOLS and TREE_CHECK.search(str(inp.get("command") or "")):
-            return tree_checked(me, s, st)         # #55: a few read-only checks of its trees are orchestration
+            return tree_checked(me, s, st)         # a few read-only checks of its trees are orchestration
         return None
     s["nudged"] = (list(s.get("nudged") or []) + [nudge_key(st)])[-50:]
     save_session(me.home, s)
     nudge_arm(me, s)
     RAN["nudge"] = st.get("addr")
     level = plans.level_of(st.get("content")) if LEVELS_ON else "session"
-    if level != "session":                         # #57: a step a subagent does needs no session
-        return (f"phi (p4-phi): this is the top session, kept free for orchestration, and step {st.get('addr')}, "
-                f"\"{cut(clean(st.get('content')), 120)}\", {plans.LEVEL_WHAT[level]}: hand it to a background "
-                f"subagent, the Agent tool with `subagent_type` `p4-phi:{level}`, and go on or end the turn until its "
-                f"completion notification. Said once for this step.")
+    if level != "session":                         # a step a subagent does needs no session
+        return (f"phi (p4-phi): this is the top-level session, kept free for orchestration, and step "
+                f"{st.get('addr')}, \"{cut(clean(st.get('content')), 120)}\", {plans.LEVEL_WHAT[level]}: hand it to "
+                f"the background subagent `p4-phi:{level}`. "
+                f"Said once for this step.")
     return (f"phi (p4-phi): this is the top session, kept free for orchestration, and step {st.get('addr')}, "
             f"\"{cut(clean(st.get('content')), 120)}\", is work: hand it to a child session with "
             f"`mcp__ccd_session__start_session`, `context` `fresh`, `use_worktree: false`, "
             f"{plans.level_words(st.get('content'))}, its brief that step, a "
             f"line `Files: <the paths it may write>`, the line `{plans.level_line(plans.child_level(st.get('content')))}` "
-            f"and \"report when done\", and keep this session for planning, relaying and landing. Said once for this "
+            f"and \"report when done\", and keep this session for planning, messaging and landing. Said once for this "
             f"step.")
 
 
 def h_memory_gap(payload):
     """PostToolUse on Write and Edit: a feedback memory written into the project's store whose rule describes
-    session or plugin behaviour gets the advice to start a new top session for that plugin gap (gaps.py)."""
+    session or plugin behaviour gets the advice of gaps.py to start a new top-level session for that plugin gap."""
     me = Me(payload)
     if not me.home or not me.id or not me.store:
         return None
@@ -1766,17 +1727,21 @@ def h_memory_gap(payload):
     s = load_session(me.home, me.id) or ensure_session(me.home, me.id, me.rec, me.cli)
     text = gaps.advice(me.home, me.store, s, path, s.get("turnBy", "user") == "user", commands(),
                        NEW_TOP_BRIEF + " " + new_top_first_act(),
-                       before=gaps.before_write(path, inp, payload.get("tool_response")))   # #50
+                       before=gaps.before_write(path, inp, payload.get("tool_response")))   # what the file held
     RAN["memory_gap"] = bool(text)
-    if text and controls.ask_text(s):              # #58: a controlled session asks its puppeteer, and starts none
+    if text and controls.ask_text(s):              # a controlled session asks its supervisor session, starts none
         text += "\n\n" + controls.ask_text(s)
     return text or None
 
 
 def h_self_archive(payload):
-    """PreToolUse on mcp__ccd_session_mgmt__archive_session: a child archiving itself may never reach its Stop
-    hook, so its turn and its last report are kept now, read from the transcript, and it is retired onto its parent
-    as at Stop (#30: such a child's report was lost)."""
+    """PreToolUse on mcp__ccd_session_mgmt__archive_session. Unless p4.json sets phi.session_archives, the call is
+    denied, since archiving is ezexe's own action in the app: a top-level session may archive only what ezexe picked
+    this turn in its multiple-choice question, and a supervisor session only a complete controlled session ezexe
+    picked. Where sessions may archive, a child's own archive is held while a background task it started has no end
+    recorded; where they may not, the refusal names those tasks. A child that
+    archives itself may never reach its Stop hook, so its turn and its last report are kept now, read from the
+    transcript, and it is counted as archived as at Stop."""
     me = Me(payload)
     if not me.home or not me.id:
         return None
@@ -1785,11 +1750,11 @@ def h_self_archive(payload):
     target = str(inp.get("session_id") or inp.get("sessionId") or inp.get("id") or "self")
     own = target in ("self", me.id, me.cli, me.id.removeprefix("local_"))
     refuse = None
-    if not session_archives(me.store):             # #49: the archive is ezexe's own action in the app
+    if not session_archives(me.store):             # archiving is ezexe's own action in the app
         RAN["archive_refused"] = "self" if own else target[:40]
         turn = last_turn(payload.get("transcript_path") or "") if not own and not spawned_from(s) else None
         if not own and controls.is_puppeteer(s, me.store):
-            # #63: a puppeteer archives only what ezexe picked this turn, and only a session phi holds complete
+            # a supervisor session archives only what ezexe picked this turn, and only a session p4-phi holds complete
             was = target in controls.picked(me.home, s, turn)
             left = controls.archive(me.home, s, target, str(inp.get("reason") or ""), picked=was)
             RAN["archive_refused"] = "" if not left else target[:40]
@@ -1801,9 +1766,9 @@ def h_self_archive(payload):
                 return None
             return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                            "permissionDecisionReason": (
-                                               f"phi (p4-phi): this puppeteer's archive of {target} is refused: "
-                                               f"{left}. Name it to ezexe as left, with that reason.")}}
-        if not own and not spawned_from(s):       # a top session archiving what ezexe picked in its quick select
+                                               f"phi (p4-phi): this supervisor session's archive of {target} is "
+                                               f"refused: {left}. Name it to ezexe as left, with that reason.")}}
+        if not own and not spawned_from(s):       # a top-level session archiving what ezexe picked this turn
             if target in relay.picked(me.home, me.id, (turn or {}).get("calls")):
                 RAN["archive_refused"] = ""
                 RAN["archive_picked"] = target[:40]
@@ -1811,14 +1776,14 @@ def h_self_archive(payload):
         why = relay.NO_ARCHIVE + (
             " This session's turn is kept. " + relay.CHILD_DONE if own and spawned_from(s) else
             " " + relay.BUTTON if own else
-            f" phi already treats a finished or superseded session as archived. A top session that is done offers "
-            f"its tree's finished sessions to ezexe as one quick select, an `AskUserQuestion` with `multiSelect`, "
-            f"and archives only the ones ezexe picked there: {target} was not picked in this turn.")
+            f" p4-phi already counts a finished or superseded session as archived. A top-level session that is done "
+            f"offers its tree's finished sessions to ezexe as one multiple-choice question, `AskUserQuestion` with "
+            f"`multiSelect`, and archives only the ones ezexe picked there: {target} was not picked in this turn.")
         running = puppeteer.held_tasks(me.home, me.id) if own else []
-        if running:                                # #47: a live background task holds a session's own archive
+        if running:                                # a live background task holds a session's own archive
             why += (f" It also has {len(running)} background task{'s' if len(running) != 1 else ''} with no end "
-                    f"recorded: {'; '.join(running[:6])}. Wait for each one's completion notice or stop it before "
-                    f"this session ends.")
+                    f"recorded: {'; '.join(running[:6])}. Wait for each one's completion notification or stop it "
+                    f"before this session ends.")
         refuse = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                          "permissionDecisionReason": why}}
     if not spawned_from(s) or not own:
@@ -1832,14 +1797,14 @@ def h_self_archive(payload):
                                                f"phi (p4-phi): this session has {len(running)} background task"
                                                f"{'s' if len(running) != 1 else ''} with no end recorded: "
                                                f"{'; '.join(running[:6])}. Its archive is held until each one ends "
-                                               f"or is stopped (#47).")}}
+                                               f"or is stopped.")}}
     turn = last_turn(payload.get("transcript_path") or "")
     texts = [t for t in (turn or {}).get("texts") or [] if isinstance(t, str) and t.strip()]
     h_stop({**payload, "hook_event_name": "Stop", "last_assistant_message": texts[-1] if texts else "",
             "_atArchive": True})
     RAN["self_archive"] = True
     held = RAN.get("issue_open")
-    if held:                                       # #28: an unproven or open issue keeps the child from archiving
+    if held:                                       # an unproven or open issue keeps the child from archiving
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                        "permissionDecisionReason": held}}
     return refuse
@@ -1847,7 +1812,7 @@ def h_self_archive(payload):
 
 def h_restart_check(payload):
     """PreToolUse on a shell command run in the background: one this session's own records show as still running
-    is not started a second time; the session is told the id to wait on, once for that copy (#47)."""
+    is not started a second time; the session is told the id to wait on, once for that copy."""
     me = Me(payload)
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     if not me.home or not me.id or not inp.get("run_in_background") or not inp.get("command"):
@@ -1860,19 +1825,19 @@ def h_restart_check(payload):
                                    "permissionDecisionReason": why}}
 
 
-# --- levels: a long command never holds a top session's turn (#57) -------------------------------------------------
+# --- delegation: a long command never holds a top-level session's turn ----------------------------------------------
 #
 # hooks.md, "PreToolUse decision control": `updatedInput` "Modifies the tool's input parameters before execution.
 # Replaces the entire input object, so include unchanged fields alongside modified ones. Claude Code evaluates
 # permission rules and a Bash command's auto-background eligibility against the input your hook returns, not the input
-# Claude sent." and `additionalContext` is a "String added to Claude's context alongside the tool result." The Bash
-# input's `run_in_background` is a "boolean ... Whether to run the command in background" (hooks.md, "PreToolUse
-# input"). The page does not say in words that a hook may add that field, so it was measured on 2026-11-16 (CLI
-# 2.1.322, `claude -p` on haiku, a plugin's command hook, no `permissionDecision`): the call's PostToolUse carried
-# `"run_in_background": true` and a `backgroundTaskId`, and its result read "Command running in background with
-# ID". The transcript keeps the input as it was sent, without the field, so a launch is also known by that result.
-# With no `permissionDecision`, "auto mode can deny the changed call", but "a `command` hook in settings or a plugin's
-# hooks file can change Bash, PowerShell, Monitor, Edit, Write, and NotebookEdit calls without this denial."
+# Claude sent." and `additionalContext` is a "String added to Claude's context alongside the tool result." Its section
+# "PreToolUse input" gives the Bash input's `run_in_background` as a "boolean ... Whether to run the command in
+# background". The page does not say in words that a hook may add that field. A plugin's command hook that adds it with
+# no `permissionDecision` gets a PostToolUse that carries `"run_in_background": true` and a `backgroundTaskId`, with a
+# result that reads "Command running in background with ID". The transcript keeps the input as it was sent, without
+# the field, so a launch is also known by that result. With no `permissionDecision`, "auto mode can deny the changed
+# call", but "a `command` hook in settings or a plugin's hooks file can change Bash, PowerShell, Monitor, Edit, Write,
+# and NotebookEdit calls without this denial."
 
 TEST_FILE = re.compile(r"^test_\w+\.py$", re.I)
 LONG_RUN = re.compile(r"^(?:(?:npm|pnpm)\s+(?:run\s+)?(?:test|build)\b|(?:cargo|go)\s+(?:test|build)\b|"
@@ -1926,7 +1891,7 @@ def long_kind(words):
 
 
 def long_read(cmd):
-    """(the kind of long command a shell call runs, True when the call is that command and nothing else). A
+    """Returns the kind of long command a shell call runs, and True when the call is that command and nothing else. A
     `test_*.py` run, pytest, unittest, or an npm, pnpm, cargo, go or make `test` or `build`, read where a program
     stands: never inside a quoted string, and never in the body of a heredoc. The call is that command alone when
     every other part of it only goes to a folder or sets a variable before it, and its output is piped through
@@ -1972,9 +1937,10 @@ LEVEL_KEEP_S = 7 * 86400         # how long a session's once-per-step memory out
 
 def level_data():
     """Where the once-per-step memory is kept in a project with no store: the plugin's own data folder.
-    plugins-reference.md, "Environment variables": `${CLAUDE_PLUGIN_DATA}` is "`~/.claude/plugins/data/<id>/`,
-    created on first reference and kept across plugin updates", and it is exported to hook commands. A harness that
-    sets none gets the system's temp folder: no folder under the person's home is guessed at."""
+    plugins/manifest-reference.md, "Environment variables": `${CLAUDE_PLUGIN_DATA}` is
+    "`~/.claude/plugins/data/<id>/`, created on first reference and kept across plugin updates", and it is exported
+    to hook commands. Where it is unset, the system's temp folder is used: no folder under the home directory is
+    guessed at."""
     base = os.environ.get("CLAUDE_PLUGIN_DATA")
     if not base:
         import tempfile
@@ -2020,13 +1986,13 @@ def level_told(me, s, key):
 
 
 def h_level(payload):
-    """PreToolUse on a shell call that runs a known long command in the foreground (#57). In a top session a call
+    """PreToolUse on a shell call that runs a known long command in the foreground. In a top-level session a call
     that is that command and nothing else is returned with `updatedInput`: the same input plus
     `run_in_background: true`, and one line saying so. Every other such call runs as sent, with the line once per
-    step: in a session another one started; where the command is one part of a longer call, whose later parts need
-    it finished; and where the call carries a `timeout` of its own, since the caller chose to wait. A sub-agent's
-    call is left alone: a runner's whole work is to wait on its command. Works with no store: top or child is read
-    from the session's own file where there is one, else from the app's record."""
+    step: in a child session; where the command is one part of a longer call, whose later parts need it finished;
+    and where the call carries a `timeout` of its own, since the caller chose to wait. A subagent's call is left
+    alone: a runner's whole work is to wait on its command. Works with no store: top-level or child is read from the
+    session's own file where there is one, else from the app's record."""
     if not LEVELS_ON or payload.get("agent_id") or str(payload.get("tool_name") or "") not in SHELL_TOOLS:
         return None
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
@@ -2048,9 +2014,10 @@ def h_level(payload):
         RAN["level"] = "told"
         return (f"phi (p4-phi): this call runs {kind} in this session's foreground, and a command like it runs long. "
                 f"Start such a command on a call of its own with `run_in_background: true`, or hand it to the "
-                f"`p4-phi:runner` subagent, and go on with other work or end the turn until its completion "
-                f"notification; do not wait, sleep or poll for it. Said once for this step.")
-    if me.home and me.id:                          # #47: the copy this session already runs is not started again
+                f"`p4-phi:runner` subagent, then go on with other work or end the turn: its completion "
+                f"notification brings the result, so never wait for it in the foreground, sleep or poll. Said once "
+                f"for this step.")
+    if me.home and me.id:                          # the copy this session already runs is not started again
         why = puppeteer.restart_text(me.home, me.id, str(inp.get("command")))
         if why:
             RAN["restart"] = "held"
@@ -2059,15 +2026,15 @@ def h_level(payload):
     RAN["level"] = "background"
     return {"hookSpecificOutput": {
         "hookEventName": "PreToolUse", "updatedInput": {**inp, "run_in_background": True},
-        "additionalContext": (f"phi (p4-phi): this call runs {kind}, which runs long, and this is the top session, so "
-                              f"p4-phi started it in the background by adding `run_in_background: true`. Go on with "
-                              f"other work or end the turn, and read its result when its completion notification "
-                              f"comes; do not wait, sleep or poll for it.")}}
+        "additionalContext": (f"phi (p4-phi): this call runs {kind}, which runs long, and this is the top-level "
+                              f"session, so p4-phi started it in the background by adding `run_in_background: true`. "
+                              f"Go on with other work or end the turn: its completion notification brings the result, "
+                              f"so never wait for it, sleep or poll.")}}
 
 
 def session_archives(store):
-    """True only where the project's p4.json sets phi.session_archives: sessions may then archive sessions as they
-    did before #49."""
+    """True only where the project's p4.json sets phi.session_archives: sessions may then archive sessions with the
+    app's archive tool."""
     try:
         return p4conf.section(store, "phi", write=False).get("session_archives") is True if store else False
     except Exception:  # noqa: BLE001
@@ -2075,8 +2042,9 @@ def session_archives(store):
 
 
 def h_task(payload):
-    """PostToolUse on Bash, Monitor, Agent and Workflow: a background task recorded under the step in progress,
-    with the heads, paths and words it runs against (plans.register). Prints nothing."""
+    """PostToolUse on Bash, PowerShell, Monitor, Agent and Workflow: a background task recorded under the step in
+    progress by plans.register, with the heads, paths and words it runs against. On TaskStop, or KillShell in an older
+    transcript, the stopped task is closed. Prints nothing."""
     me = Me(payload)
     if not me.home or not me.id:
         return None
@@ -2111,7 +2079,7 @@ def ran_for(s, me):
 def h_session_start(payload):
     me = Me(payload)
     if not me.home or not me.id:
-        # AW1: a project with no .claude/p4 yet still gets the rule phi carries itself; the SessionStart hooks run
+        # a project with no .claude/p4 yet still gets the rules p4-phi carries itself; the SessionStart hooks run
         # side by side, so p4-temportal making the folder first is not to be counted on
         RAN["start"] = "no store"
         return (builtin_text() or None) if RULES and payload.get("source") != "resume" else None
@@ -2129,13 +2097,13 @@ def h_session_start(payload):
     text = rule = ""
     if not (source == "startup" and not spawned_from(s) and not s.get("task")
             and os.environ.get("CLAUDE_CODE_HOST_SESSION_ID")):
-        # with a host id and nothing recorded, the app has not yet written which session started this one, and
-        # the first message tells
+        # with a host id and nothing recorded, the app has not yet written this session's parent session, and the
+        # first message tells
         text = given(s, me, me.home, own=lost or len(s.get("cliSessionIds") or []) > 1, brief=source == "compact")
         rule = new_task_text(me.home, s, me, user=False, again=lost, brief=source == "compact") if lost else ""
     pin = pin_of(me.home, s)
     text = "\n\n".join(p for p in (pin, text) if p)
-    live_rules(s, me.store, os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or "")   # #26: the baseline
+    live_rules(s, me.store, os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or "")   # what it starts with
     rules = rules_text(me.store, HOOK_CHARS - len(text) - len(rule) - 4,
                        fork=bool(s.get("forked")), brief=source == "compact") if source != "resume" else ""
     relay.remember_store(me.store)
@@ -2145,14 +2113,14 @@ def h_session_start(payload):
                                                f"tree stays in this project's store.") if p)
     first = ""
     if source == "compact" and controls.is_puppeteer(s, me.store):
-        first = controls.compacted(me.home, s)     # #58: the board's path before anything else
+        first = controls.compacted(me.home, s)     # a supervisor session's board path before anything else
         RAN["pair"] = "compacted"
     save_session(me.home, s)
     return "\n\n".join(p for p in (first, rules, text, rule) if p) or None
 
 
 def watch_over(home, s):
-    """#38: an orchestrator's one background watcher, started when none is alive. Never fails the hook."""
+    """An orchestrator's one watcher, started when none is alive. Never fails the hook."""
     try:
         if puppeteer.ensure_watcher(home, s):
             RAN["watcher"] = "started"
@@ -2191,8 +2159,8 @@ def started_by(me, payload):
 
 def fit(parts, room, home, sid):
     """The parts that fit in `room`, in their order, each whole; what does not fit is kept whole on the session's
-    held.md and named by count, by that page and by how each begins (#43). No piece is shown cut: on the first
-    live prompts a cut piece was a list of start requests, whose calls are of no use in part."""
+    held.md and named by count, by that page and by how each begins. No piece is shown cut, since a cut piece, such
+    as a list of start requests, is of no use in part."""
     parts = [p for p in parts if p]
     if sum(len(p) + 2 for p in parts) - 2 <= room:
         return "\n\n".join(parts)
@@ -2207,7 +2175,7 @@ def fit(parts, room, home, sid):
     page = relay.hold(home, sid, over, now())
     RAN["held"] = len(over)
     heads = ['"' + cut(clean(PHI_LEAD.sub("", p)), HELD_HEAD) + '"' for p in over[:3]]
-    line = (f"phi (p4-phi): {len(over)} piece(s) of what phi had for this prompt, {sum(len(p) for p in over)} "
+    line = (f"phi (p4-phi): {len(over)} of the pieces p4-phi had for this prompt, {sum(len(p) for p in over)} "
             f"characters, did not fit in its {room} beside one prompt and are whole on {page}. Read that page "
             f"before going on when one of them asks something of this session. They begin: " + "; ".join(heads)
             + (f"; and {len(over) - 3} more" if len(over) > 3 else "") + ".")
@@ -2232,20 +2200,20 @@ def h_user_prompt_submit(payload):
         return None
     if me.store and not same_store(me.store, me.home) and NEW_TOP.search(str(payload.get("prompt") or "")) \
             and not load_session(me.home, me.id).get("sessionId"):
-        me.home = me.store                         # #58: a new top session started from another environment's session
+        me.home = me.store                         # a new top-level session from another environment's session
         RAN["own_store"] = True
     configure(me.home)
     s = ensure_session(me.home, me.id, me.rec, me.cli, hint=me.hint)
     ran_for(s, me)
     detached_now = False
     if spawned_from(s) and NEW_TOP.search(str(payload.get("prompt") or "")) and not load_turns(me.home, s["sessionId"]):
-        reparent(me.home, s["sessionId"], "", "detached")     # its brief marks it a new top: into the root
+        reparent(me.home, s["sessionId"], "", "detached")     # its brief marks it a new top-level session
         s = load_session(me.home, s["sessionId"])
         RAN["new_top"] = True
         detached_now = True
     rid, asker = starts.requester_of(me.home, payload.get("prompt")) if not load_turns(me.home, s["sessionId"]) \
         else ("", "")
-    if rid:                                        # a start request's child: the requester's, not the starter's
+    if rid:                                        # a start request's child: the asking session's, not the caller's
         if not detached_now and asker != s["sessionId"] and spawned_from(s) != asker:
             try:
                 reparent(me.home, s["sessionId"], asker, "requested")
@@ -2255,12 +2223,12 @@ def h_user_prompt_submit(payload):
             s = load_session(me.home, s["sessionId"])
         starts.started(me.home, rid, s["sessionId"])
     if not load_turns(me.home, s["sessionId"]) and puppeteer.arrived(me.home, s, payload.get("prompt")):
-        RAN["drafted"] = s.get("draft") or (s.get("reading") or {}).get("group", "")   # #38: its draft, its reading
+        RAN["drafted"] = s.get("draft") or (s.get("reading") or {}).get("group", "")   # its start draft or reading
     req = request_of(payload.get("prompt"))
     said = str(payload.get("prompt") or "")
     if spawned_from(s) and not s.get("landingGiven") and LANDING_GIVEN.search(said) \
             and f'<cross-session-message from="{spawned_from(s)}"' in said:
-        s["landingGiven"] = True                   # #19: the parent let this child land its own work
+        s["landingGiven"] = True                   # the parent session let this child land its own work
     s["turnBy"] ="user" if req else (
         "session" if re.search(r"<cross-session-message\b", str(payload.get("prompt") or "")) else "event")
     plans.pickup(me.home, s["sessionId"], payload.get("prompt") or "")
@@ -2271,27 +2239,27 @@ def h_user_prompt_submit(payload):
         RAN["disposable"] = True
     if "fileSet" not in s and not load_turns(me.home, s["sessionId"]):
         declared = starts.files_of(payload.get("prompt"), s.get("cwd") or payload.get("cwd") or "")
-        if declared is not None:                   # #48: the file set its brief declares, kept and shown on its page
+        if declared is not None:                   # the write set its brief declares, kept and shown on its page
             s["fileSet"] = declared
             RAN["files"] = len(declared)
     if s.get("doneRetired") or s.get("archived"):
-        s["doneRetired"] = s["archived"] = False   # messaged again: a live node once more
+        s["doneRetired"] = s["archived"] = False   # messaged again: a live session once more
         s["reopened"] = now()
-        s.pop("archiveChecked", None)              # #47: checked again when it next closes
+        s.pop("archiveChecked", None)              # checked again at its next archive
         s.pop("unfinishedAtArchive", None)
         RAN["reopened"] = True
         save_session(me.home, s)
-        relay.reopened(me.home, s, s["reopened"])   # #49: named as reopened, so the mark hides no live work
+        relay.reopened(me.home, s, s["reopened"])   # named as reopened, so the mark hides no live work
     if req and not s.get("task"):
         s["task"] = cut(req, TASK_CHARS)
         s["taskAt"] = now()
     issue_line = ""
     if spawned_from(s) and not load_turns(me.home, s["sessionId"]) and not s.get("issue"):
         issue_line = issues.ensure(me.home, s, req or str(payload.get("prompt") or ""),
-                                   s.get("cwd") or payload.get("cwd") or "", "brief", me.rec)   # #28
+                                   s.get("cwd") or payload.get("cwd") or "", "brief", me.rec)   # from its brief
         RAN["issue"] = (s.get("issue") or {}).get("number", "")
     handed = given(s, me, me.home)
-    room = HOOK_CHARS if handed else min(PROMPT_CHARS, HOOK_CHARS)   # the background comes once, with its first message
+    room = HOOK_CHARS if handed else min(PROMPT_CHARS, HOOK_CHARS)   # the start background comes once, first message
     parts = [live_rules(s, me.store, os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or ""),
              pin_of(me.home, s), handed]
     if REPORTS:
@@ -2305,11 +2273,11 @@ def h_user_prompt_submit(payload):
         parts.append(step)
     pend = (s.pop("staleChildren", None) or []) + relay.drain_archive(me.home, s["sessionId"])
     pend = [x for x in pend if isinstance(x, dict) and not archived_already(me.home, x.get("id"))]
-    stale = relay.stale_text(pend)                # children to archive, said once; one archived by hand is not named
+    stale = relay.stale_text(pend)                # children to archive, said once; one archived in the app is not named
     s["staleTold"] = (list(s.get("staleTold") or []) + [x.get("id") for x in pend if isinstance(x, dict)])[-50:]
     if stale:
         parts.insert(0, stale)
-        if not spawned_from(s):                    # #22: a child retired or archived: merged worktrees to remove
+        if not spawned_from(s):                    # a child counted as archived: merged worktrees to remove
             wt = relay.worktrees_text(me.home, s["sessionId"], relay.repo_of(s.get("cwd") or ""))
             if wt:
                 parts.insert(1, wt)
@@ -2320,19 +2288,19 @@ def h_user_prompt_submit(payload):
     if issue_line:
         parts.insert(0, issue_line)
     if FILE_SETS and s.get("fileSet") and load_turns(me.home, s["sessionId"]):
-        held_line = files_held_text(me.home, s)    # #62: its closing commit is pushed and it still holds files
+        held_line = files_held_text(me.home, s)    # its closing commit is pushed and it still holds files
         if held_line:
             parts.insert(0, held_line)
             RAN["files_held"] = len(s["fileSet"])
             save_session(me.home, s)
     if detached_now:
-        parts.insert(0, "phi (p4-phi): this session's brief marks it a new top session, so phi detached it into the "
-                        "root at this first message. Now call `mcp__ccd_session_mgmt__detach_session` with `\"self\"` "
-                        "before anything else, so the app stops nesting it under its starter and its reports stop "
-                        "going there; it orchestrates its own topic, and the other top sessions relay to it as "
-                        "siblings.")
+        parts.insert(0, "phi (p4-phi): this session's brief marks it a new top-level session, so p4-phi detached it "
+                        "to top level at this first message. Now call `mcp__ccd_session_mgmt__detach_session` with "
+                        "`\"self\"` before anything else, so the app stops nesting it under its parent session and its "
+                        "reports stop going there; it orchestrates its own topic, and the other top-level sessions are "
+                        "its siblings.")
     if not spawned_from(s):
-        try:                                       # #58: the puppeteer and the sessions it controls
+        try:                                       # a supervisor session and the sessions it controls
             parts[0:0] = pair_parts(me, s, req if req and not handed_over(payload.get("prompt")) else "", parts[0])
         except Exception:  # noqa: BLE001
             pass
@@ -2343,7 +2311,7 @@ def h_user_prompt_submit(payload):
             f"and sent it nothing; relay it with SendMessage (`to`: {u['child']})." for u in unsent))
     pup = verdict = ""
     if req and not handed_over(payload.get("prompt")):
-        try:                                       # #38: meta pass, ledger, then prompty, prompter and pioneer
+        try:                                       # meta pass and ledger, then routing, start draft and gate
             size = os.path.getsize(payload.get("transcript_path") or "")
         except OSError:
             size = 0
@@ -2356,11 +2324,11 @@ def h_user_prompt_submit(payload):
     route = relay.route_text(me.home, s["sessionId"], req, s.get("cwd") or "") if req and not verdict else ""
     rule = "" if route else new_task_text(me.home, s, me, user=bool(req), req=req)
     if verdict and RAN.get("new_task") in ("line", "feature"):
-        rule = ""                                  # pioneer's verdict says where the message goes
+        rule = ""                                  # the gate's verdict says where the message goes
     parts.append(pup)
     last = route or rule or split_text(me.home, s, payload.get("prompt"), me.cli)
     save_session(me.home, s)
-    # the rebase check, on every message: what the nodes beside this one changed, and the warnings, first
+    # the rebase check, on every message: what the sessions beside this one changed, and the warnings, first
     used = sum(len(p) + 2 for p in parts + [last] if p)
     text, _ = relay.rebase(me.home, s["sessionId"], max(room // 3, room - used), fair_cut, touches_of(me.home, s))
     RAN["relay"] = len(text)
@@ -2368,10 +2336,11 @@ def h_user_prompt_submit(payload):
 
 
 def pair_parts(me, s, req, changed=""):
-    """#58, beside a top session's message. A puppeteer: what it is, once; the sessions it started, now controlled;
-    a top session ezexe started beside them; the controlled sessions' reports by reference; the requests addressed
-    to it and where ezexe's message belongs, at a turn ezexe began; a boundary; and its board rewritten. Any other
-    top session: its puppeteer, once, and what became of the requests it sent it."""
+    """Beside a top-level session's message. A supervisor session gets what it is, once; its child sessions, now
+    controlled; a top-level session ezexe started beside them; the controlled sessions' reports by reference; at a
+    turn ezexe began, the requests addressed to it and where ezexe's message belongs; a boundary; and its board
+    rewritten. Any other top-level session gets its supervisor session, once, and what became of the requests it
+    sent it."""
     out = []
     if not controls.is_puppeteer(s, me.store):
         told = controls.pair_text(s, me.store)
@@ -2390,14 +2359,15 @@ def pair_parts(me, s, req, changed=""):
         out.append("phi (p4-phi): " + " ".join(lines))
     seen = controls.reports(s)
     if seen:
-        out.append("phi (p4-phi): the sessions this puppeteer controls ended turns. Each is one line and its page; "
-                   "read a page only when its detail is needed:\n" + "\n".join(seen))
+        out.append("phi (p4-phi): the sessions this supervisor session controls ended turns. Each is one line and its "
+                   "page, which holds up to 1,200 characters of the report; read a page only when its detail is "
+                   "needed:\n" + "\n".join(seen))
     if req:
         out += [p for p in (controls.requests_text(me.home, s), controls.route_down(s, req)) if p]
     edge = controls.boundary(me.home, s, me.store)
     if edge:
         RAN["boundary"] = True
-        out += edge.split("\n\n")                 # #63: the archive offer and the boundary each fit or are held whole
+        out += edge.split("\n\n")                 # the archive offer and the boundary each fit or are held whole
     controls.board(me.home, s)
     return out
 
@@ -2421,7 +2391,7 @@ def h_stop(payload):
     row.update({"time": now(), "sessionId": s["sessionId"], "cliSessionId": me.cli})
     earlier_ = load_turns(me.home, s["sessionId"])
     if earlier_ and earlier_[-1].get("atArchive") and earlier_[-1].get("id") == row["id"]:
-        return None                                # #30: kept already when this session archived itself
+        return None                                # kept already when this session archived itself
     if payload.get("_atArchive"):
         row["atArchive"] = True
     said = said_of(turn, row["report"])
@@ -2448,7 +2418,7 @@ def h_stop(payload):
         s["task"], s["taskAt"] = row["prompt"], row["time"]
     save_session(me.home, s)
     if above and isinstance(s.get("reading"), dict):
-        try:                                       # #38: a reading reported: the puppeteer above merges
+        try:                                       # a reading reported: the orchestrator above merges its group
             RAN["merged"] = len(puppeteer.merge_all(me.home, above))
         except Exception:  # noqa: BLE001
             pass
@@ -2467,21 +2437,21 @@ def h_stop(payload):
     finished = bool(row.get("done") or (steps and all(x.get("status") == "completed" for x in steps)))
     proved, held, note = True, "", ""
     if above and finished and isinstance(s.get("issue"), dict):
-        cur = load_session(me.home, s["sessionId"]) or s     # #28: the test re-run on the final head, the issue closed
+        cur = load_session(me.home, s["sessionId"]) or s     # the regression test re-run on the final head
         proved, held, note = issues.gate(me.home, cur, payload.get("cwd") or cur.get("cwd") or "")
         save_session(me.home, cur)
         s = cur
         RAN["issue_gate"] = "ok" if proved else (held[:60] or "held")
         if not proved:
             RAN["issue_open"] = held or (f"phi (p4-phi): {cur['issue']['repo']}#{cur['issue']['number']} is not "
-                                         f"yet proven and closed, so this session is not retired.")
-    # #46: a child that archives itself is over whether or not its turn was shown done or its plan completed, so
-    # it retires to its parent as it goes, its open steps named; one held by an unproven issue is not archiving
+                                         f"yet proven and closed, so this session is not counted as archived.")
+    # a child that archives itself is over whether or not its turn was shown done or its task list completed, so
+    # it is counted as archived on its parent as it goes, its open steps named; one held by an unproven issue is not
     left = bool(payload.get("_atArchive")) and not finished
     if above and proved and ((s.get("disposable") and finished) or left):
         if relay.retire_done(me.home, above, s["sessionId"], row["time"], extra=note, archived=left):
             RAN["retired"] = "archived" if left else "done"
-            try:                                   # #47: what it started and did not finish, checked as it closes
+            try:                                   # what it started and did not finish, checked as it is archived
                 RAN["unfinished"] = len(puppeteer.archive_check(me.home, s["sessionId"]))
             except Exception:  # noqa: BLE001
                 pass
@@ -2489,16 +2459,16 @@ def h_stop(payload):
         cur = load_session(me.home, s["sessionId"]) or s
         told = list(cur.get("closesTold") or [])
         new = [c for c in relay.closing_commits(me.home, s["sessionId"], cur) if c[1] not in told]
-        if new:                                    # #27: the top session pushes issue-closing work at once
+        if new:                                    # the top-level session pushes issue-closing work at once
             top = (chain_of(me.home, s["sessionId"]) or [above])[-1]
             relay.warn(me.home, top, "push:" + s["sessionId"] + ":" + ",".join(c[1] for c in new),
                        relay.push_text(title_of(cur), s["sessionId"], new,
-                                       relay.owed(list(dict.fromkeys(c[0] for c in new)))))   # #51
+                                       relay.owed(list(dict.fromkeys(c[0] for c in new)))))   # what each still owes
             RAN["push_owes"] = True
             cur["closesTold"] = (told + [c[1] for c in new])[-100:]
             save_session(me.home, cur)
             RAN["push_told"] = len(new)
-    for node in (above, s["sessionId"]):           # the anchor of the node above, and this node's own for its children
+    for node in (above, s["sessionId"]):           # the parent's anchor, and this session's own for its children
         a = relay.make_anchor(me.home, node, row["time"])
         if a and node == above:
             RAN["anchor"] = a.get("version")
@@ -2511,11 +2481,11 @@ def h_stop(payload):
         return None
     waits = []
     if not spawned_from(now_s) and controls.is_puppeteer(now_s, me.store):
-        waits = controls.waited_on(now_s)          # #58: its turn may end on a step that waits on them
+        waits = controls.waited_on(now_s)          # its turn may end on a step that waits on its controlled sessions
         RAN["waits_on"] = len(waits)
         controls.board(me.home, now_s)
     named = ""
-    if not waits and not spawned_from(now_s):      # #55: a plain top session waiting on the sessions of its tree
+    if not waits and not spawned_from(now_s):      # a plain top-level session waiting on the sessions of its tree
         step = plans.waiting_step(me.home, now_s["sessionId"])
         waits = waited_on(me.home, now_s, turn.get("calls") or []) if step else []
         if waits:
@@ -2527,8 +2497,8 @@ def h_stop(payload):
                      + ": the turn is not sent back, and a report's arrival starts the next one.")
     why = plans.keep_going(me.home, now_s, row["report"], turn.get("calls") or [], row["id"],
                            bool(payload.get("stop_hook_active")), waits=waits)
-    why = "\n\n".join(p for p in (held, why) if p)   # #28: the proving test's verdict, then the open steps
-    if why:                                        # #20: open steps the chain can settle send the turn back
+    why = "\n\n".join(p for p in (held, why) if p)   # the regression test's verdict, then the open steps
+    if why:                                        # open steps the session tree can settle send the turn back
         RAN["kept_going"] = True
         return {"decision": "block", "reason": why}
     if named:
@@ -2550,9 +2520,9 @@ def messaged(calls):
 
 
 def waited_on(home, s, calls=()):
-    """The titles of the sessions a top session's waiting step still waits on: each session it started or messaged
-    that is inside a turn, or whose report it has not been handed yet. The sessions it messaged are kept on its
-    record."""
+    """The titles of the sessions a top-level session's waiting step still waits on: each child session or session it
+    messaged that is inside a turn, or whose report it has not been handed yet. The sessions it messaged are kept on
+    its record."""
     sid = s["sessionId"]
     sent = [x for x in s.get("messaged") or [] if isinstance(x, str)]
     new = [safe_id(x) for x in messaged(calls) if safe_id(x) not in sent]
@@ -2588,8 +2558,8 @@ def log_run(name, text, started):
 
 
 def h_go_guard(payload):
-    """PreToolUse on a message one session sends another: a puppeteer's go to a waiting writer is warned about
-    while another session it controls still holds a file in that writer's set (#62). Never a block."""
+    """PreToolUse on a message one session sends another: a supervisor session's go to a waiting writer is warned
+    about while another session it controls still holds a file in that writer's write set. Never a block."""
     me = Me(payload)
     if not me.home or not me.id:
         return None
@@ -2606,27 +2576,29 @@ def h_go_guard(payload):
 
 
 def h_start_advice(payload):
-    """PreToolUse on mcp__ccd_session__start_session: fork or fresh, advised from the parent's transcript size and
-    how much of the parent's scope the brief's paths cover (relay.advise_start). Silent when the call already does
-    what is advised; otherwise a permission "ask" with the reason, so the person sees it and decides, never a
-    block. The hooks documentation read for p4-recall (2026-11-01) gives PreToolUse `permissionDecision` allow,
-    deny or ask with a reason, and `updatedInput`; the input is never rewritten here, since a fresh start needs a
-    brief and background only the caller can write. How an ask shows in a mode that asks for no permission was
-    not measured."""
+    """PreToolUse on mcp__ccd_session__start_session. It denies three starts: a controlled session's new top-level
+    session, which its supervisor session starts instead; a start whose brief declares no write set; and a start
+    whose write set a live session holds. For the rest it advises fork or fresh by relay.advise_start, from the
+    parent's transcript size and how much of the parent's scope the brief's paths cover, and asks before a worktree
+    or a branch of the child's own: silent when the call already does what is advised, else a permission `ask` with
+    the reason, so ezexe sees it and decides. A PreToolUse `permissionDecision` is `allow`, `deny`, `ask` or `defer`;
+    where `permissions.denyInsteadOfPrompting` is set, a call that would wait on a prompt is denied. The input is
+    never rewritten with `updatedInput`, since a fresh start needs a brief and background only the caller can
+    write."""
     me = Me(payload)
     if not me.home or not me.id:
         return None
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     if inp.get("proposal_id") and not inp.get("prompt"):
-        return None                                 # starting a proposal already made: nothing to decide
+        return None                                 # starting a card already made: nothing to decide
     if starts.claim(me.home, inp.get("prompt"), me.id):
-        RAN["claimed"] = True                       # a start request's call, given exactly: the requester decided
+        RAN["claimed"] = True                       # a start request's call, given exactly: the asker decided it
         return None
     brief = str(inp.get("prompt") or "")
     if brief and NEW_TOP.search(brief):
         mine = load_session(me.home, me.id)
         if not spawned_from(mine) and controls.ask_text(mine) and controls.puppeteer_of(mine, me.store)[0]:
-            RAN["asked_of_puppeteer"] = True       # #58: asked of its puppeteer, never started here
+            RAN["asked_of_puppeteer"] = True       # asked of its supervisor session, never started here
             return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                            "permissionDecisionReason": (
                                                "phi (p4-phi): this start is refused. " + controls.ask_text(mine)[15:])}}
@@ -2634,14 +2606,14 @@ def h_start_advice(payload):
         s = load_session(me.home, me.id)
         files = starts.files_of(brief, s.get("cwd") or payload.get("cwd") or "")
         why = ""
-        if files is None:                           # #48: every brief declares its file set
+        if files is None:                           # every brief declares its write set
             why = "phi (p4-phi): this start is refused: " + starts.FILES_WANTED
         else:
             who, hit = starts.held_by(me.home, me.id, files)
             if who:
-                why = (f"phi (p4-phi): this start is held: its file set shares {', '.join(hit[:5])} with {who}, "
-                       f"which is live and has not reported done, and no two sessions write the same file at once "
-                       f"(ezexe/p4#48). Send this work to that session as the next task of its serial run, or "
+                why = (f"phi (p4-phi): this start is held: its write set shares {', '.join(hit[:5])} with {who}, "
+                       f"which is live and has not reported done. "
+                       f"Send this work to that session as the next task of its serial run, or "
                        f"start it once that session reports done.")
         if why:
             RAN["files"] = "none" if files is None else "held"
@@ -2656,12 +2628,11 @@ def h_start_advice(payload):
     RAN.update(advice=advised, wanted=wanted, transcript=size)
     reasons = []
     if advised != wanted:
-        reasons.append(f"p4-phi advises context \"{advised}\" here, not \"{wanted}\": {why}.")
+        reasons.append(f"phi (p4-phi) advises context \"{advised}\" here, not \"{wanted}\": {why}.")
     if inp.get("use_worktree") is True or inp.get("branch_name") or inp.get("source_branch"):
-        # ezexe's rule: a child works on the parent's branch in the parent's checkout
-        reasons.append("p4-phi: ezexe's rule is no worktrees and no branches of a child's own; pass "
-                       "`use_worktree: false`, leave out branch_name and source_branch, and let the child work on "
-                       "this session's branch in this checkout.")
+        reasons.append("phi (p4-phi): a child works on this session's branch in this checkout, with no worktree or "
+                       "branch of its own: pass `use_worktree: false` and leave out branch_name and "
+                       "source_branch.")
     if not reasons:
         return None
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
@@ -2676,15 +2647,15 @@ LANDING = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b[^\n|;&]*?\b(push|merge|reba
 # a brief that hands the child the landing itself: "then push main yourself", "you merge and push"
 LANDING_GIVEN = re.compile(r"\b(?:push|merg|land)\w*\b[^.\n]{0,60}\byourself\b|\byou (?:may |can |then )?"
                            r"(?:merge|push|land)\b"
-                           # a fixer closing issues lands its own green issue commits, by ezexe's push-at-once rule
+                           # a fixer closing issues lands its own green issue commits, which are pushed at once
                            r"|\b(?:clos|fix|resolv)\w*\b[^.\n]{0,40}\bissues?\b|\bCloses #\d+|\bissues? #\d+", re.I)
 
 
 def h_branch_guard(payload):
-    """PreToolUse on EnterWorktree and Bash in a session another one started: making a worktree or a branch of its
-    own is asked first, ezexe's rule being that a child works on its parent's branch. So is landing work, a git
-    push, merge, rebase or pull, which the parent does, unless the child's brief handed it the landing. Silent
-    otherwise."""
+    """PreToolUse on EnterWorktree and shell calls in a child session: making a worktree or a branch of its own is
+    asked first, since a child works on its parent's branch. So is landing work, a git push, merge, rebase or pull,
+    which the parent session does, unless the child's brief handed it the landing or it works on an issue of its
+    own. Silent otherwise."""
     me = Me(payload)
     if not me.home or not me.id:
         return None
@@ -2706,10 +2677,10 @@ def h_branch_guard(payload):
         verb = LANDING.search(QUOTED.sub("''", str(inp.get("command") or ""))).group(1)
         RAN["branch_guard"] = f"git {verb}"
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
-                                       "permissionDecisionReason": f"p4-phi: this session is a child, and `git {verb}` "
-                                                                   f"lands work, which its parent does: a child commits "
-                                                                   f"on its parent's branch and reports, and the "
-                                                                   f"session that started it ({spawned_from(s)}) "
+                                       "permissionDecisionReason": f"phi (p4-phi): this session is a child, and `git "
+                                                                   f"{verb}` lands work, which its parent does: a "
+                                                                   f"child commits on its parent's branch and reports, "
+                                                                   f"and its parent session, {spawned_from(s)}, "
                                                                    f"merges and pushes. Ask it with SendMessage "
                                                                    f"instead, unless its brief gave this session the "
                                                                    f"landing."}}
@@ -2717,8 +2688,8 @@ def h_branch_guard(payload):
         return None
     RAN["branch_guard"] = what
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
-                                   "permissionDecisionReason": f"p4-phi: this session is a child, and {what} goes "
-                                                               f"against ezexe's rule: a child works on its "
+                                   "permissionDecisionReason": f"phi (p4-phi): this session is a child, and {what} is "
+                                                               f"asked first: a child works on its "
                                                                f"parent's branch in the parent's checkout, so its work "
                                                                f"needs no merge."}}
 
@@ -2729,8 +2700,8 @@ CD = re.compile(r"(?:^|&&|;|\n)\s*(?:cd|pushd|Set-Location)\s+(\S+)\s*(?=&&|;|\n
 
 
 def store_root(path):
-    """The p4 store a folder is in: its `.claude/p4`, when the folder's git checkout is the store itself; '' for
-    any other folder, a clone kept under the store's temportal/tmp among them."""
+    """The store a folder is in: its `.claude/p4`, when the folder's git checkout is the store itself; '' for any
+    other folder, among them a clone kept under the store's temportal/tmp."""
     p = relay.norm(path)
     m = re.search(r"^(.*?/\.claude/p4)(?=/|$)", p, re.I)
     if not m:
@@ -2745,7 +2716,7 @@ def store_root(path):
 
 
 def h_store_guard(payload):
-    """PreToolUse on a shell call (#21): a hand `git pull`, `git push` or force-push in a p4 store is asked first, and
+    """PreToolUse on a shell call: a hand `git pull`, `git push` or force-push in a store is asked first, and
     `p4.py sync --push --p4 <store>` named as the way, since two machines write the same files and a plain merge or
     a line-union damages them."""
     if str(payload.get("tool_name") or "") not in SHELL_TOOLS:
@@ -2773,11 +2744,11 @@ def h_store_guard(payload):
     RAN["store_guard"] = what
     sync = f"python -I -X utf8 \"{os.path.join(HERE, 'p4.py')}\" sync --push --p4 \"{store}\"".replace("\\", "/")
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
-                                   "permissionDecisionReason": f"p4-phi: this is {what} in the p4 store {store}. A "
-                                                               f"store moves only by `{sync}`: two machines write the "
-                                                               f"same files, and a plain merge or a line-union damages "
-                                                               f"them. Then check each entry the sync names as "
-                                                               f"changed."}}
+                                   "permissionDecisionReason": f"phi (p4-phi): this is {what} in the store {store}. "
+                                                               f"A store moves only by `{sync}`, since two machines "
+                                                               f"write the same files and a plain merge or a "
+                                                               f"line-union damages them. Then check each entry the "
+                                                               f"sync names as changed."}}
 
 
 def once(home, sid, kind, payload):
@@ -2825,23 +2796,24 @@ REPLAY_HOLD = 2 * 1024 * 1024    # how far behind the transcript's end a call wi
 
 def resume_at(waiting, end, hold=None):
     """Where the next replay starts: at the first call still without a result, so no call is passed before its
-    result is in, whatever lines lie between the two (a sub-agent's rows, a notification, a message that arrived
-    while the call ran). A call that far behind the end was cut off and will get none, so it holds nothing."""
+    result is in, whatever lines lie between the two, such as a subagent's rows, a notification or a message that
+    arrived while the call ran. A call that far behind the end was cut off and will get none, so it holds nothing."""
     hold = REPLAY_HOLD if hold is None else hold
     live = [w for w in waiting if end - w <= hold]
     return min(live) if live else end
 
 
 def replay(me, s, transcript):
-    """The plan calls and background launches of the transcript that no hook handled, applied in order -> the step
-    boundary text of the last one, '' for none. A session whose hook list was frozen before recall's lookup entries
-    reached it (one started before 13:30 on 2026-11-12 holds a p4-recall entry whose folder is gone) has only phi's
-    own entries, so its calls are read back here, at each message and each Stop, each once by its tool_use_id."""
+    """The task-list calls and background task launches of the transcript that no hook handled, applied in order,
+    at each message and each Stop, each once by its tool_use_id. Returns the step boundary text of the last one, ''
+    for none. A session takes a plugin's hooks when it loads the plugin, and `/reload-plugins` applies later edits,
+    so a session whose hook list lacks the retrieval hooks' entries has only phi.py's own, and its calls are read
+    back here."""
     if not transcript or not os.path.exists(transcript):
         return ""
-    # Read from where the last replay stopped, kept beside the per-call markers: a message and a Stop each parsed
-    # megabytes of transcript to find the few lines written since (2026-11-16). The place kept is the first call
-    # still without a result, so a call is never passed before its result is in.
+    # Read from where the last replay stopped, kept beside the per-call markers, so a message or a Stop parses only
+    # the lines written since, not megabytes of transcript. The place kept is the first call still without a result,
+    # so a call is never passed before its result is in.
     state_path = os.path.join(session_dir(me.home, me.id), ".calls", "replay.json")
     state = read_json(state_path)
     try:
@@ -2880,7 +2852,7 @@ def replay(me, s, transcript):
     text = ""
     last_list = max((k for k, b in enumerate(calls) if b["name"] == "mcp__ccd_turn__update_plan"
                      and isinstance((b.get("input") or {}).get("items"), list)), default=0)
-    for b in calls[last_list:][-200:]:            # an earlier plan is replaced whole by the latest list (RB1)
+    for b in calls[last_list:][-200:]:            # an earlier task list is replaced whole by the latest list
         tid = b.get("id")
         if tid not in results:
             continue                                # still running, or its result not written yet
@@ -2898,23 +2870,23 @@ def replay(me, s, transcript):
             plans.register(me.home, load_session(me.home, me.id) or s, b["name"], payload["tool_input"],
                            payload["tool_response"], s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or "",
                            at_epoch=epoch_of(when.get(tid)))
-    notices += stops                               # RB1: a stop sends no notice; its call closes the task
-    if notices:                                    # every completion notice of the transcript, not only its tail
+    notices += stops                               # a stop sends no notice; its call closes the background task
+    if notices:                                    # every completion notification of the transcript, not its tail only
         plans.pickup(me.home, me.id, "\n".join(notices))
     RAN["replayed"] = len(calls)
     return text
 
 
 def routed(name, payload):
-    """A phi handler run from another hook's entry (recall's lookup hooks), with the hook output phi would give and
-    its log line."""
+    """A phi.py handler run from a retrieval hook's entry, with the hook output phi.py would give and its log
+    line."""
     if os.environ.get("P4_PHI") == "0":
         return None
     event, fn = ROUTED[name]
     started = time.time()
     RAN.clear()
     me = Me(payload)
-    if not me.home and name in LEVEL_STORELESS:   # #57: the levels check needs no store
+    if not me.home and name in LEVEL_STORELESS:   # the delegation check needs no store
         out = fn(payload)
         if isinstance(out, dict) or not out:
             return out or None
@@ -2934,7 +2906,8 @@ def agent_marker(me, agent_id):
 
 
 def h_agent_launch(payload):
-    """PreToolUse on Agent (recall's entry): a pending entry under the step in progress -> its slice, for its prompt."""
+    """PreToolUse on Agent, from the retrieval hook's entry: a pending entry under the step in progress. Returns its
+    slice, for its prompt."""
     me = Me(payload)
     if not me.home or not me.id:
         return ""
@@ -2948,8 +2921,8 @@ def h_agent_launch(payload):
 
 
 def h_agent_call(payload):
-    """A sub-agent's tool call, routed from recall's lookup hooks: bound to its entry after the call, warned before
-    it. The shell lets a sub-agent's check through only while phi/.agents/ names an open sub-agent."""
+    """A subagent's tool call, routed from the retrieval hooks: bound to its entry after the call, warned before it.
+    recall-hook.sh lets a subagent's check through only while phi/.agents/ names an open subagent."""
     agent_id = str(payload.get("agent_id") or "")
     me = Me(payload)
     if not agent_id or not me.home or not me.id:
@@ -2973,7 +2946,7 @@ def h_agent_call(payload):
 
 
 def h_agent_stop(payload):
-    """SubagentStop (recall's entry): the sub-agent's entry closed with its last message."""
+    """SubagentStop, from the retrieval hook's entry: the subagent's entry closed with its last message."""
     agent_id = str(payload.get("agent_id") or "")
     me = Me(payload)
     if not agent_id or not me.home or not me.id:
@@ -3019,13 +2992,13 @@ def hook_main(name):
             return 0
         event, fn = HOOKS[name]
         started = time.time()
-        if name in ROUTED:                          # a dedicated entry a newer hook list holds: once, as routed
+        if name in ROUTED:                          # a dedicated entry for a routed check: once, as routed
             me = Me(payload)
             if me.home and me.id and not once(me.home, me.id, name, payload):
                 return 0
             RAN.update(home=me.home, session=me.id)
         text = fn(payload)
-        if isinstance(text, dict):                  # a hook that answers with its own JSON (start-advice)
+        if isinstance(text, dict):                  # a hook that answers with its own JSON, such as start-advice
             log_run(name, json.dumps(text), started)
             sys.stdout.write(json.dumps(text))
             return 0
@@ -3055,9 +3028,9 @@ def note_add(home, sid, claim, source, kind="", cli=""):
 
 
 def reparent(home, sid, under, source="reparented"):
-    """Put a session under another one, or with no `under` detach it to a top session: session.json's
-    `spawnedFrom` is rewritten, its latest turn is handed to where it now belongs, and the reports it left behind
-    note that it left. The app's own nesting does not follow, and the app's record does not move it back."""
+    """Put a session under another one, or with no `under` detach it to top level: session.json's `spawnedFrom` is
+    rewritten, its latest turn is handed to where it now belongs, and the reports it left behind note that it left.
+    The app's own nesting does not follow, and the app's record does not move it back."""
     sid, under = safe_id(sid), safe_id(under)
     s = load_session(home, sid)
     if not s.get("sessionId"):
@@ -3065,7 +3038,7 @@ def reparent(home, sid, under, source="reparented"):
     if under:
         ensure_session(home, under)
         if under == sid or sid in chain_of(home, under):
-            raise ValueError("a session cannot be put under itself or under a session it started")
+            raise ValueError("a session cannot be put under itself or under a session below it")
     old = spawned_from(s)
     if old == under:
         return False
@@ -3101,7 +3074,7 @@ def tree_text(home):
         for s in started.get(above, []):
             turns = load_turns(home, s["sessionId"])
             if not turns and not clean(s.get("title")) and not clean(s.get("task")):
-                walk(s["sessionId"], depth)          # no record and no turns: an empty node, its children kept
+                walk(s["sessionId"], depth)          # no record and no turns: an empty entry, its children kept
                 continue
             state = ("done" if turns[-1].get("done") else "not shown done") if turns else "no turn yet"
             out.append(f"{'  ' * depth}- {title_of(s)} ({s['sessionId']}): {state}, "
@@ -3117,34 +3090,36 @@ def main(argv=None):
     if argv[:1] == ["hook"]:
         return hook_main(argv[1] if len(argv) > 1 else "")
     import argparse
-    ap = argparse.ArgumentParser(description="phi: what linked sessions hand each other")
+    ap = argparse.ArgumentParser(description="phi.py: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
                  "request", "proof", "controls", "files"):
         p = sub.add_parser(name)
-        p.add_argument("--p4", default="", help="the store the sessions' files live in (default: this session's)")
-        p.add_argument("--session", default="", help="the sessionId (default: this session's)")
+        p.add_argument("--p4", default="", help="the store the sessions' files live in, this session's when left out")
+        p.add_argument("--session", default="", help="the sessionId, this session's when left out")
         if name == "note":
             p.add_argument("claim")
             p.add_argument("--source", default="")
-            p.add_argument("--kind", default="", help="ruled-out, decision, machine, code")
+            p.add_argument("--kind", default="", help="free text, such as ruled-out, decision, machine or code")
         if name in ("done", "task"):
             p.add_argument("text")
         if name == "proof":
-            p.add_argument("command", help="the test that proves this session's issue fixed, run from here")
+            p.add_argument("command", help="the regression test that proves this session's issue fixed, run from here")
         if name == "show":
             p.add_argument("which", nargs="?", default="")
         if name == "detach":
-            p.add_argument("moved", nargs="?", default="", help="the session to detach (default: this one)")
+            p.add_argument("moved", nargs="?", default="", help="the session to detach to top level, this one when "
+                                                                "left out")
         if name == "reparent":
             p.add_argument("moved")
         if name == "shard":
-            p.add_argument("paths", nargs="*", help="paths or globs this session alone may change; none shows it")
+            p.add_argument("paths", nargs="*", help="the owned paths, paths or globs this session alone may change; "
+                                                    "none shows them")
         if name == "reparent":
             p.add_argument("under")
         if name == "files":
             p.add_argument("paths", nargs="*", help="the paths this session still writes, replacing its declared "
-                                                    "file set; none shows it")
+                                                    "write set; none shows it")
             p.add_argument("--release", action="store_true", help="hold no file any more")
         if name == "request":
             p.add_argument("title", nargs="?", default="", help="the child's title")
@@ -3153,20 +3128,22 @@ def main(argv=None):
             p.add_argument("--brief", default="", help="the child's whole brief")
             p.add_argument("--brief-file", default="", help="a file holding the brief")
             p.add_argument("--context", default="fresh", choices=("fresh", "fork"))
-            p.add_argument("--background", default="", help="the child's background (default: one built from this "
-                                                              "session's task and the project)")
+            p.add_argument("--background", default="", help="the child's start background, one built from this "
+                                                              "session's task and the project when left out")
             p.add_argument("--to-puppeteer", action="store_true",
-                           help="ask this session's puppeteer for a new top session, and start none here")
+                           help="ask this session's supervisor session for a new top-level session, and start none")
         if name == "controls":
-            p.add_argument("ids", nargs="*", help="top sessions this puppeteer controls; none prints where each stands")
+            p.add_argument("ids", nargs="*", help="top-level sessions this supervisor session controls; none prints "
+                                                  "where each stands")
             p.add_argument("--drop", action="append", default=[], help="a session it no longer controls")
-            p.add_argument("--hand", default="", help="the fresh puppeteer this one hands over to")
-            p.add_argument("--from", dest="take", default="", help="the puppeteer that handed over to this one")
+            p.add_argument("--hand", default="", help="the fresh supervisor session this one hands over to")
+            p.add_argument("--from", dest="take", default="", help="the supervisor session that handed over to "
+                                                                   "this one")
             p.add_argument("--decline", nargs=2, metavar=("REQUEST", "WHY"), help="a request addressed to it")
 
     def common(p):
-        p.add_argument("--p4", default="", help="the store the sessions' files live in (default: this session's)")
-        p.add_argument("--session", default="", help="the sessionId (default: this session's)")
+        p.add_argument("--p4", default="", help="the store the sessions' files live in, this session's when left out")
+        p.add_argument("--session", default="", help="the sessionId, this session's when left out")
     puppeteer.add_parsers(sub, common)
     a = ap.parse_args(argv)
     me = Me(session=a.session, p4=a.p4)
@@ -3182,11 +3159,11 @@ def main(argv=None):
             return 0
         if a.cmd == "detach":
             if not a.moved and not me.id:
-                print("phi: name the session to detach, or run this from inside it", file=sys.stderr)
+                print("phi: name the session to detach to top level, or run this from inside it", file=sys.stderr)
                 return 2
             a.moved = a.moved or me.id
-            print("detached: it is a top session now" if reparent(me.home, a.moved, "", "detached")
-                  else "already a top session")
+            print("detached to top level: it is a top-level session now" if reparent(me.home, a.moved, "", "detached")
+                  else "already a top-level session")
             return 0
         if a.cmd == "reparent":
             print("reparented" if reparent(me.home, a.moved, a.under) else "already there")
@@ -3201,13 +3178,14 @@ def main(argv=None):
                 sys.stdout.write(f.read())
             return 0
         if not me.id:
-            print("phi: this is not a session (no session id in the environment); pass --session", file=sys.stderr)
+            print("phi: this is not a session, since the environment holds no session id; pass --session",
+                  file=sys.stderr)
             return 2
         s = ensure_session(me.home, me.id, me.rec, me.cli)
         if a.cmd == "shard":
             save_session(me.home, s)
             if not a.paths:
-                print("\n".join(relay.shard_of(s)) or "this session declared no shard")
+                print("\n".join(relay.shard_of(s)) or "this session declared no owned paths")
                 return 0
             lines = relay.set_shard(me.home, s["sessionId"], a.paths, os.getcwd())
             print("kept as this session's shard: " + ", ".join(relay.shard_of(load_session(me.home, s["sessionId"]))))
@@ -3219,12 +3197,13 @@ def main(argv=None):
                 raise ValueError("pass the paths this session still writes, or --release for none, not both")
             if not a.paths and not a.release:
                 held = s.get("fileSet") if isinstance(s.get("fileSet"), list) else None
-                print("this session declared no file set" if held is None else
+                print("this session declared no write set" if held is None else
                       "this session holds no file" if not held else "\n".join(held))
                 return 0
             new, freed = set_files(me.home, s, a.paths, os.getcwd())
             render_page(me.home, s["sessionId"])
-            print("this session holds no file now" if not new else "kept as this session's file set: " + ", ".join(new))
+            print("this session holds no file now" if not new else "kept as this session's write set: "
+                  + ", ".join(new))
             if freed:
                 print("released: " + ", ".join(freed) + ". A start on them is no longer held by this session.")
             return 0
@@ -3247,7 +3226,7 @@ def main(argv=None):
             controls.board(me.home, s)
             print(controls.controls_text(me.home, s))
             return 0
-        if a.cmd == "request" and a.withdraw:      # #50: a request nobody should start any more
+        if a.cmd == "request" and a.withdraw:      # a request nobody should start any more
             if a.title or a.brief or a.brief_file:
                 raise ValueError("--withdraw takes a request's id and nothing else")
             print(starts.withdraw(me.home, a.withdraw.strip(), s["sessionId"]))
@@ -3258,7 +3237,7 @@ def main(argv=None):
                 with open(a.brief_file, encoding="utf-8") as f:
                     brief = f.read()
             save_session(me.home, s)
-            if a.to_puppeteer:                     # #58: a new top session is asked of the puppeteer
+            if a.to_puppeteer:                     # a new top-level session is asked of the supervisor session
                 pid, _ = controls.puppeteer_of(s, me.store)
                 if not pid:
                     raise ValueError("this session has no puppeteer: no session filed in the sidebar section lists "
@@ -3272,26 +3251,26 @@ def main(argv=None):
             print(starts.requested_text(rid, new))
             row = starts.state(me.home).get(rid) or {}
             who, hit = starts.held_by(me.home, s["sessionId"], row.get("files") or [])
-            if who:                                # #48: one writer per file
+            if who:                                # one writer per file
                 print(f"phi: it is held until {who} reports done, since both would write {', '.join(hit[:5])}.")
             if a.context == "fork":
-                print("phi: a start request is always fresh: a fork would carry the starter's conversation, not "
-                      "this session's, so the brief must say all the child needs.")
+                print("phi: a start request is always fresh: a fork would copy the conversation of the session that "
+                      "makes the start call, not this session's, so the brief must say all the child needs.")
             return 0
         if a.cmd == "proof":
             if not isinstance(s.get("issue"), dict):
-                raise ValueError("this session has no issue to prove (#28: a writing child's issue is taken at its "
-                                 "first message or plan)")
+                raise ValueError("this session has no issue to prove: a writing child's issue is taken at its "
+                                 "first message or its first task list")
             s["issue"]["test"] = {"cmd": a.command.strip(), "cwd": os.getcwd(), "step": "phi.py proof"}
             save_session(me.home, s)
-            print(f"kept: phi re-runs `{a.command.strip()}` here at Stop on the final head, before "
-                  f"{s['issue']['repo']}#{s['issue']['number']} lets this session be retired")
+            print(f"kept: p4-phi re-runs `{a.command.strip()}` here at Stop on the final head, before "
+                  f"{s['issue']['repo']}#{s['issue']['number']} lets this session be counted as archived")
             return 0
         if a.cmd == "disposable":
             s["disposable"] = True
             save_session(me.home, s)
-            print("this session is retired when its work is done: its outcome kept as a replaces: note on the "
-                  "session that started it, which treats it as archived and tells ezexe it is ready to archive")
+            print("this session is counted as archived when its work is done: its outcome is kept as a replaces: "
+                  "note on its parent session")
             return 0
         if a.cmd == "note":
             print("kept" if note_add(me.home, s["sessionId"], a.claim, a.source, a.kind, me.cli) else "already kept")
@@ -3301,14 +3280,14 @@ def main(argv=None):
             s["done"] = {"text": clean(a.text)[:400], "time": now()}
             save_session(me.home, s)
             print("this turn will be kept as done")
-            if spawned_from(s):                    # #49: the button is for a topmost session only
+            if spawned_from(s):                    # the button is for a top-level session only
                 print(relay.CHILD_DONE)
             else:
                 print(relay.BUTTON)
                 listed = relay.offer_text(me.home, s["sessionId"])
                 if listed:
                     print(listed)
-            try:                                   # #45: the issue it closes, and what that still owes
+            try:                                   # the issue it closes, and what that still owes
                 line = issues.done_text(me.home, s, os.getcwd()) if spawned_from(s) else ""
             except Exception:  # noqa: BLE001
                 line = ""
