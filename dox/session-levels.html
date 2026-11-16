@@ -1,0 +1,659 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session levels · p4-phi dox</title>
+<meta name="description" content="An interactive diagram of the levels p4-phi runs work at: a top session, child sessions, background subagents and background commands, and the path each result takes back.">
+<style>
+:root{
+  --bg:#f5f3ec; --panel:#fffdf7; --sunk:#efece2; --ink:#1d1c19; --soft:#5d5a52; --line:#d9d4c6; --link:#a9a392;
+  --phi:#0b6b66; --phi-bg:#dcefec; --app:#a85507; --app-bg:#f8e7d2; --you:#6a4bb0; --you-bg:#ebe4f7;
+  --ok:#2c7a3f; --bad:#b3261e; --bad-bg:#fbe5e2;
+  --mono:ui-monospace,"Cascadia Code","SF Mono",Menlo,Consolas,monospace;
+  --sans:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#131418; --panel:#1b1d23; --sunk:#16171c; --ink:#e9e6dd; --soft:#a29e93; --line:#33363f; --link:#5b5f6b;
+    --phi:#62d2c6; --phi-bg:#16312f; --app:#f1ab52; --app-bg:#3a2a14; --you:#b9a2f2; --you-bg:#2a2340;
+    --ok:#7fd494; --bad:#ff8a80; --bad-bg:#3d1c1a;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#131418; --panel:#1b1d23; --sunk:#16171c; --ink:#e9e6dd; --soft:#a29e93; --line:#33363f; --link:#5b5f6b;
+  --phi:#62d2c6; --phi-bg:#16312f; --app:#f1ab52; --app-bg:#3a2a14; --you:#b9a2f2; --you-bg:#2a2340;
+  --ok:#7fd494; --bad:#ff8a80; --bad-bg:#3d1c1a;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 var(--sans)}
+.wrap{max-width:1240px;margin:0 auto;padding:24px 16px 64px}
+a{color:var(--phi)}
+code,pre,kbd{font-family:var(--mono)}
+code{font-size:.88em;background:var(--sunk);border-radius:4px;padding:1px 4px;overflow-wrap:anywhere}
+:focus-visible{outline:2px solid var(--phi);outline-offset:2px}
+button,select,input{font:inherit;color:inherit}
+
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.mark{font:600 13px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--phi);text-decoration:none}
+.mark:hover{text-decoration:underline}
+.pill{font:600 12px/1 var(--mono);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:9px 13px;cursor:pointer;white-space:nowrap}
+.pill:hover{border-color:var(--phi)}
+h1{font-size:clamp(30px,5.4vw,46px);line-height:1.08;letter-spacing:-.02em;margin:16px 0 10px;text-wrap:balance}
+.lede{color:var(--soft);max-width:68ch;margin:0 0 8px}
+.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0 22px;padding:0;list-style:none}
+.facts li{border-left:3px solid var(--line);padding:2px 0 2px 12px;font-size:14.5px;color:var(--soft)}
+.facts li b{display:block;color:var(--ink);font-size:15px}
+.facts li.f-app{border-color:var(--app)} .facts li.f-phi{border-color:var(--phi)} .facts li.f-you{border-color:var(--you)}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 0}
+.tabs a{font:600 13px/1 var(--sans);text-decoration:none;color:var(--soft);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:8px 13px}
+.tabs a:hover{border-color:var(--phi)}
+.tabs a[aria-current="page"]{background:var(--phi);border-color:var(--phi);color:var(--panel)}
+
+.stage{display:grid;grid-template-columns:minmax(0,1.08fr) minmax(0,1fr);gap:18px;align-items:start}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px}
+.treecard{position:sticky;top:12px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px;border-bottom:1px solid var(--line)}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--line);border-radius:999px;padding:2px;background:var(--sunk)}
+.seg button{border:0;background:none;border-radius:999px;padding:7px 12px;font:600 12.5px/1 var(--sans);cursor:pointer;color:var(--soft)}
+.seg button[aria-pressed="true"]{background:var(--phi);color:var(--panel)}
+.bar .ghostbtn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:7px 11px;font-size:13.5px;font-weight:600;cursor:pointer}
+.bar .ghostbtn:hover:not(:disabled){border-color:var(--ink)}
+.bar .ghostbtn:disabled{opacity:.42;cursor:not-allowed}
+.bar .spacer{flex:1}
+.bar .count{font:600 12px/1 var(--mono);color:var(--soft)}
+.svgwrap{padding:6px 8px 4px;overflow:hidden}
+svg#levels{display:block;width:100%;user-select:none;-webkit-user-select:none}
+.hint{font-size:12.5px;color:var(--soft);padding:0 14px 10px;margin:0;display:flex;flex-wrap:wrap;gap:4px 14px}
+.hint i{font-style:normal;display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:baseline;margin-right:5px;background:var(--link)}
+.hint i.k-session{background:var(--phi)} .hint i.k-agent{background:var(--you)} .hint i.k-cmd{background:var(--app)}
+.hint i.l{width:22px;height:0;border-radius:0;background:none;border-top:2px dashed var(--phi);vertical-align:middle}
+.hint i.l.up{border-color:var(--app)}
+
+/* svg */
+.node{cursor:pointer}
+.node .box{fill:var(--panel);stroke:var(--line);stroke-width:1.4;transition:fill .15s,stroke .15s}
+.node:hover .box{stroke:var(--soft)}
+.node .t{font:600 14px var(--sans);fill:var(--ink)}
+.node .m{font:11.5px var(--mono);fill:var(--soft)}
+.node .dot{fill:var(--link)}
+.node.k-session .dot{fill:var(--phi)} .node.k-agent .dot{fill:var(--you)} .node.k-cmd .dot{fill:var(--app)}
+.node.ask .box{stroke:var(--ink);stroke-width:2.2}
+.node.dest.k-session .box{stroke:var(--phi);stroke-width:2.4;fill:var(--phi-bg)}
+.node.dest.k-agent .box{stroke:var(--you);stroke-width:2.4;fill:var(--you-bg)}
+.node.dest.k-cmd .box{stroke:var(--app);stroke-width:2.4;fill:var(--app-bg)}
+.node.busy .dot{animation:blink 1s ease-in-out infinite}
+.node .badge{font:600 10.5px var(--mono);fill:var(--soft);letter-spacing:.04em}
+.link{fill:none;stroke:var(--link);stroke-width:1.6}
+.route{fill:none;stroke-width:2.6;stroke-linecap:round}
+.route.down{stroke:var(--phi);stroke-dasharray:7 6;animation:march .7s linear infinite}
+.route.up{stroke:var(--app);stroke-dasharray:7 6;animation:march .7s linear infinite}
+.route.hold{stroke:var(--link);stroke-dasharray:2 5}
+.fly{stroke:var(--panel);stroke-width:2}
+.fly.down{fill:var(--phi)} .fly.up{fill:var(--app)}
+@keyframes march{to{stroke-dashoffset:-13}}
+@keyframes blink{50%{opacity:.25}}
+
+.console{margin:0 12px 12px;background:var(--sunk);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:12.5px/1.5 var(--mono);min-height:62px;overflow-wrap:anywhere}
+.console .cmd{color:var(--ink)}
+.console .out{color:var(--phi)} .console .back{color:var(--app)}
+.console .say{font:13.5px/1.45 var(--sans);color:var(--soft);margin-top:4px}
+
+/* panel */
+.panel{display:grid;grid-template-columns:minmax(0,1fr);gap:14px}
+.sec{padding:14px}
+.sec h2{font:600 12px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--soft);margin:0 0 10px}
+.field{display:flex;gap:8px;align-items:center;margin:12px 0 0}
+.field label{font-size:13px;color:var(--soft);white-space:nowrap}
+.field input{flex:1;min-width:0;border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:8px 9px;font-size:14px}
+.named{font-size:13.5px;color:var(--soft);margin:8px 0 0;min-height:1.5em}
+.acts{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin-top:12px}
+.act{min-width:0;display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:10px 11px;font-size:14px;font-weight:600;cursor:pointer;min-height:44px}
+.act small{display:block;font-weight:400;font-size:13px;color:var(--soft)}
+.act:hover{border-color:var(--ink)}
+.act[aria-pressed="true"]{border-color:var(--phi);background:var(--phi-bg)}
+.tag{font:600 10.5px/1 var(--mono);letter-spacing:.04em;border-radius:999px;padding:4px 7px;white-space:nowrap}
+.tag.app{background:var(--app-bg);color:var(--app)} .tag.phi{background:var(--phi-bg);color:var(--phi)}
+.tag.you{background:var(--you-bg);color:var(--you)} .tag.both{background:var(--sunk);color:var(--soft);border:1px solid var(--line)}
+.ex h3{font-size:18px;margin:0 0 4px;letter-spacing:-.01em}
+.ex .why{color:var(--soft);font-size:14.5px;margin:0 0 10px}
+.spec{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;margin:0 0 12px;font-size:13.5px}
+.spec dt{color:var(--soft)} .spec dd{margin:0;font-family:var(--mono);font-size:12.5px;overflow-wrap:anywhere}
+.step{border:1px solid var(--line);border-radius:10px;margin:0 0 10px;overflow:hidden;cursor:pointer}
+.step.on{border-color:var(--phi);box-shadow:0 0 0 1px var(--phi)}
+.step .who{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:8px 10px;font-size:13.5px;font-weight:600;background:var(--sunk)}
+.step .who span.by{min-width:0}
+.step .who .right{display:flex;gap:6px;align-items:center}
+.step pre{margin:0;padding:10px;font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;border-top:1px solid var(--line)}
+.step p{margin:0;padding:9px 10px;font-size:14px;border-top:1px solid var(--line)}
+.copy{font:600 11px/1 var(--mono);border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:6px 8px;cursor:pointer;white-space:nowrap}
+.copy:hover{border-color:var(--phi)}
+
+/* below the stage */
+.block{margin-top:26px}
+.block>h2{font-size:22px;margin:0 0 6px;letter-spacing:-.01em}
+.block>p.intro{color:var(--soft);margin:0 0 14px;max-width:72ch}
+.rw{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:14px;align-items:start}
+.rwopts{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin:0 0 12px}
+.rwopts label{font-size:13.5px;display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+.cmds{display:grid;gap:6px}
+.cmds button{text-align:left;border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:8px 10px;font:12.5px/1.4 var(--mono);cursor:pointer;overflow-wrap:anywhere}
+.cmds button:hover{border-color:var(--ink)}
+.cmds button[aria-pressed="true"]{border-color:var(--phi);background:var(--phi-bg)}
+.verdict{font-weight:650;font-size:17px;margin:0 0 4px}
+.verdict.moved{color:var(--phi)} .verdict.sent{color:var(--app)} .verdict.none{color:var(--soft)}
+.rwwhy{font-size:14.5px;color:var(--soft);margin:0 0 10px}
+.rwout{margin:0;background:var(--sunk);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:12px/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
+.rules{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+.rule{border:1px solid var(--line);border-left:3px solid var(--phi);border-radius:14px;padding:14px 16px;background:var(--panel)}
+.rule h3{margin:0 0 6px;font-size:16.5px}
+.rule ul{margin:0;padding-left:18px;font-size:14.5px;color:var(--soft)}
+.rule li{margin:3px 0}
+.rule pre{margin:10px 0 0;background:var(--sunk);border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.5;overflow-x:auto}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:620px}
+th,td{text-align:left;vertical-align:top;padding:10px 14px;border-bottom:1px solid var(--line)}
+th{font:600 12px/1.2 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--soft);background:var(--sunk)}
+tr:last-child td{border-bottom:0}
+td.pg{white-space:nowrap}
+td small{display:block;color:var(--soft);font-size:13px;white-space:normal}
+.after{color:var(--soft);font-size:14.5px;max-width:78ch;margin:12px 0 0}
+footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-size:14px;color:var(--soft)}
+
+@media (max-width:980px){
+  .stage{grid-template-columns:minmax(0,1fr)}
+  .treecard{position:static}
+  .facts{grid-template-columns:minmax(0,1fr)}
+  .rules,.rw{grid-template-columns:minmax(0,1fr)}
+}
+@media (prefers-reduced-motion:reduce){
+  .node .box{transition:none}
+  .route.down,.route.up,.node.busy .dot{animation:none}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <a class="mark" href="index.html">← p4-phi · dox</a>
+    <button class="pill" id="theme" type="button" aria-label="Switch between light and dark">theme</button>
+  </div>
+  <nav class="tabs" aria-label="Pages about sessions">
+    <a href="session-levels.html" aria-current="page">Session levels</a>
+    <a href="session-tree.html">The session tree</a>
+  </nav>
+  <h1>Session levels</h1>
+  <p class="lede">Since version 0.9.0, p4-phi runs each piece of work at the level Claude Code gives it, so a session's own turn is never held by it. Choose a kind of task below, see the level it goes to, and step through the path its result takes back.</p>
+  <ul class="facts">
+    <li class="f-phi"><b>Sessions do the writing.</b>A top session orchestrates and lands. Each work step of its plan goes to a child session, which the <a href="session-tree.html">session tree</a> page shows.</li>
+    <li class="f-you"><b>Subagents run in the background.</b>The plugin ships three: <code>p4-phi:sweep</code>, <code>p4-phi:runner</code> and <code>p4-phi:check</code>. Any session can start one.</li>
+    <li class="f-app"><b>Nobody waits in the foreground.</b>The session that asked goes on or ends its turn. A completion notification brings the result in a later turn.</li>
+  </ul>
+
+  <div class="stage">
+    <section class="card treecard" aria-label="The levels">
+      <div class="bar">
+        <div class="seg" role="group" aria-label="The session that asks">
+          <button type="button" data-ask="top" aria-pressed="true">asked by the top session</button>
+          <button type="button" data-ask="child" aria-pressed="false">asked by a child session</button>
+        </div>
+        <span class="spacer"></span>
+        <span class="count" id="count"></span>
+        <button type="button" class="ghostbtn" id="back">Back</button>
+        <button type="button" class="ghostbtn" id="next">Next</button>
+      </div>
+      <div class="svgwrap"><svg id="levels" role="group" aria-label="The levels and the path of the chosen task"></svg></div>
+      <p class="hint"><span><i class="k-session"></i>session</span><span><i class="k-agent"></i>background subagent</span><span><i class="k-cmd"></i>background command</span><span><i class="l"></i>going down</span><span><i class="l up"></i>coming back</span></p>
+      <div class="console" id="console" aria-live="polite"></div>
+    </section>
+
+    <div class="panel">
+      <section class="card sec" aria-label="The kind of task">
+        <h2>The task</h2>
+        <div class="acts" id="kinds"></div>
+        <div class="field">
+          <label for="plan">Or a plan step</label>
+          <input id="plan" type="text" maxlength="90" autocomplete="off" placeholder="Find where p4.json is read">
+        </div>
+        <p class="named" id="named">phi names each step of a top session's plan for its level. Write one to see which.</p>
+      </section>
+      <section class="card sec ex" id="example" aria-label="Where the task goes and how its result comes back"></section>
+    </div>
+  </div>
+
+  <section class="block" aria-label="The rewrite of a long foreground command">
+    <h2>The rewrite</h2>
+    <p class="intro">A long command is a <code>test_*.py</code> run, <code>pytest</code>, <code>unittest</code>, or an <code>npm</code>, <code>pnpm</code>, <code>cargo</code>, <code>go</code> or <code>make</code> <code>test</code> or <code>build</code>. The plugin's PreToolUse hook reads every Bash and PowerShell call for one. Pick a call and a caller to see what the hook does with it.</p>
+    <div class="rw">
+      <div class="card sec">
+        <h2>The call</h2>
+        <div class="rwopts">
+          <div class="seg" role="group" aria-label="Who makes the call" id="rwwho">
+            <button type="button" data-who="top" aria-pressed="true">a top session</button>
+            <button type="button" data-who="child">a child session</button>
+            <button type="button" data-who="agent">a subagent</button>
+          </div>
+          <label><input type="checkbox" id="rwtimeout"> with its own <code>timeout</code></label>
+        </div>
+        <div class="cmds" id="cmds"></div>
+      </div>
+      <div class="card sec" aria-live="polite">
+        <h2>What the hook does</h2>
+        <p class="verdict" id="verdict"></p>
+        <p class="rwwhy" id="rwwhy"></p>
+        <pre class="rwout" id="rwout"></pre>
+      </div>
+    </div>
+    <p class="after">A top session's call is moved only when it is the long command and nothing else. Parts before the command may go to a folder or set a variable, and its output may pass through filters such as <code>tail</code> or <code>grep</code>. A call with a later part runs as sent, since the later part needs the command finished. So does a call that carries a <code>timeout</code> of its own, since the caller chose to wait. A child session's call is never changed: it gets the line once per plan step. A call that already has <code>run_in_background: true</code> is passed over, and a command the session's own records show as still running is not started a second time.</p>
+  </section>
+
+  <section class="block" aria-label="On by default">
+    <h2>On by default</h2>
+    <p class="intro">Nothing has to be configured. The levels rule, the three agents and the rewrite work in any project the plugin is enabled in.</p>
+    <div class="rules">
+      <div class="rule">
+        <h3>Nothing to set up</h3>
+        <ul>
+          <li>Every session is given the levels rule at its start, beside the project's other standing rules.</li>
+          <li>The agents are files in the plugin's <code>agents/</code> folder, so they load with the plugin under the names <code>p4-phi:sweep</code>, <code>p4-phi:runner</code> and <code>p4-phi:check</code>.</li>
+          <li>The rewrite works in a project with no <code>.claude/p4</code> store. Top or child is then read from the app's record of the session.</li>
+          <li>Without a store, what a session was already told is kept in the plugin's data folder and removed after seven days unused.</li>
+        </ul>
+      </div>
+      <div class="rule">
+        <h3>One key turns it off</h3>
+        <ul>
+          <li>Set <code>phi.levels</code> to <code>false</code> in the project's <code>.claude/p4/p4.json</code>.</li>
+          <li>The levels rule is then left out, no long command is moved or remarked on, and plan steps are no longer named for a subagent.</li>
+          <li>No key turns it on. Any value but <code>false</code>, or no key at all, leaves it on.</li>
+        </ul>
+        <pre>{
+ "phi": {
+  "levels": false
+ }
+}</pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" aria-label="The Claude Code docs each behaviour rests on">
+    <h2>What each behaviour rests on</h2>
+    <p class="intro">Each mechanism is Claude Code's own. The plugin only says when to use it. Every page below is part of the Claude Code docs.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>What the plugin does</th><th>The page</th><th>What the page gives</th></tr></thead>
+        <tbody id="docs"></tbody>
+      </table>
+    </div>
+    <p class="after">Two things the pages do not say in words were measured with CLI 2.1.322. A plugin hook's <code>updatedInput</code> that adds <code>run_in_background: true</code> reached the Bash tool, and the command ran as a background task. The agent <code>p4-phi:sweep</code> loaded under that name, ran on Haiku, and stayed in the background though the call asked for the foreground.</p>
+  </section>
+
+  <footer>
+    Every rule, call and line here is read from the plugin's source: <code>phi.py</code>, <code>plans.py</code>, the three files in <code>agents/</code> and the <code>phi</code> skill, in <a href="https://github.com/ezexe/p4">ezexe/p4</a> under <code>lbiza/plugins/p4-phi</code>. The diagram is a model in your browser. Nothing on this page reaches a real session.
+  </footer>
+</div>
+
+<script>
+(function(){
+"use strict";
+/* ---------- theme ---------- */
+var root=document.documentElement,TKEY="dox-theme",tbtn=document.getElementById("theme");
+function tcur(){return root.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")}
+function tlabel(){tbtn.textContent=tcur()==="dark"?"light theme":"dark theme"}
+try{var ts=localStorage.getItem(TKEY);if(ts==="dark"||ts==="light")root.setAttribute("data-theme",ts)}catch(e){}
+tlabel();
+try{matchMedia("(prefers-color-scheme: dark)").addEventListener("change",tlabel)}catch(e){}
+tbtn.addEventListener("click",function(){var n=tcur()==="dark"?"light":"dark";root.setAttribute("data-theme",n);try{localStorage.setItem(TKEY,n)}catch(e){}tlabel()});
+
+/* ---------- helpers ---------- */
+var NS="http://www.w3.org/2000/svg";
+var REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+function $(id){return document.getElementById(id)}
+function h(tag,attrs,kids){var e=document.createElement(tag);if(attrs)for(var k in attrs){if(k==="text")e.textContent=attrs[k];else if(k==="html")e.innerHTML=attrs[k];else e.setAttribute(k,attrs[k])}(kids||[]).forEach(function(c){e.appendChild(typeof c==="string"?document.createTextNode(c):c)});return e}
+function s(tag,attrs){var e=document.createElementNS(NS,tag);if(attrs)for(var k in attrs)e.setAttribute(k,attrs[k]);return e}
+function call(tool,obj){return tool+"\n"+JSON.stringify(obj,null,2)}
+function copy(text,btn){
+  function ok(){btn.textContent="copied";setTimeout(function(){btn.textContent="copy"},1200)}
+  function old(){var t=h("textarea");t.value=text;t.style.position="fixed";t.style.opacity="0";document.body.appendChild(t);t.select();try{document.execCommand("copy");ok()}catch(e){}t.remove()}
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(text).then(ok,old);else old();
+}
+
+/* ---------- what the plugin's files state ---------- */
+var NODES={
+  top:{kind:"session",title:"Top session",meta:"orchestrates, lands"},
+  child:{kind:"session",title:"Child session",meta:"one work step"},
+  sweep:{kind:"agent",title:"p4-phi:sweep",meta:"haiku · low"},
+  runner:{kind:"agent",title:"p4-phi:runner",meta:"sonnet · low"},
+  check:{kind:"agent",title:"p4-phi:check",meta:"inherit · high"},
+  cmd:{kind:"cmd",title:"Command",meta:"run_in_background"},
+  rcmd:{kind:"cmd",title:"Its command",meta:"the runner waits"}
+};
+var KINDS=[
+  {id:"work",label:"A work step",sub:"It writes, fixes or commits something.",dest:"child",tag:["phi","child session"]},
+  {id:"sweep",label:"A sweep across files",sub:"A search or a read across more than a couple of files.",dest:"sweep",tag:["you","p4-phi:sweep"]},
+  {id:"bg",label:"A long command, started in the background",sub:"A test file, a test suite or a build.",dest:"cmd",tag:["app","run_in_background"]},
+  {id:"runner",label:"A long command, handed to the runner",sub:"The same command, when a verdict is what is wanted.",dest:"runner",tag:["you","p4-phi:runner"]},
+  {id:"check",label:"An unanchored read",sub:"A diff or a result, read without this session's own view.",dest:"check",tag:["you","p4-phi:check"]}
+];
+var DEST={
+  child:{name:"A child session",why:"A work step goes to a fresh child session. The child works on the same branch in the same checkout, and writes only the files its brief names.",
+    spec:[["started by","mcp__ccd_session__start_session"],["context","fresh"],["use_worktree","false"],["brief","the step, a Files: line, what done means, \"report when done\""]]},
+  sweep:{name:"p4-phi:sweep",why:"A read-only sweep across files. It has nothing that changes a file or runs a command.",
+    spec:[["model","haiku"],["effort","low"],["tools","Read, Grep, Glob"],["maxTurns","25"],["background","true"]]},
+  runner:{name:"p4-phi:runner",why:"It runs one long command exactly as given, changes no file, and reports pass or fail.",
+    spec:[["model","sonnet"],["effort","low"],["tools","Bash, PowerShell, Read"],["maxTurns","15"],["background","true"]]},
+  check:{name:"p4-phi:check",why:"A second reader of work another session made. It is read-only and takes no claim in its brief as true until the files show it.",
+    spec:[["model","inherit"],["effort","high"],["tools","Read, Grep, Glob"],["maxTurns","30"],["background","true"]]},
+  cmd:{name:"A background command",why:"The Bash or PowerShell tool's own background task. The command runs under the session that started it, and the session keeps its turn.",
+    spec:[["started by","Bash or PowerShell"],["field","run_in_background: true"]]}
+};
+var HOLD="It goes on with other work or ends its turn. It does not wait in the foreground, sleep or poll.";
+function who(ask){return ask==="top"?"The top session":"The child session"}
+
+function steps(kind,ask){
+  var W=who(ask);
+  if(kind==="work"){
+    if(ask==="child")return [
+      {dir:"none",by:"The child session does the step",say:"The step is done at this level.",
+       html:"A child session is the level a work step runs at, so the step is done here, in the files the child's brief names. Its sweeps, long commands and checks go down from here. Switch the asking session to the top session to see how the step arrived."}
+    ];
+    return [
+      {dir:"down",legs:["tc"],by:"The top session starts a child",say:"The start call carries the brief down.",
+       html:"The brief is the step's words, a line <code>Files:</code> with the paths the child may write, what it must leave done, and “report when done”. Steps that share a file go to one child as a serial run. Steps with disjoint files each get a child.",
+       code:call("mcp__ccd_session__start_session",{initiation:"user_asked",context:"fresh",use_worktree:false,title:"Fix the review findings in relay.py",
+         prompt:"Fix the ten review findings in relay.py.\nFiles: lbiza/plugins/p4-phi/scripts/relay.py\nDone means: test_relay.py passes and one commit is on main.\nReport when done."})},
+      {dir:"down",legs:["tc"],by:"Or it writes a start request",say:"A start request carries the same brief down.",
+       html:"On a turn that another session began, the app refuses <code>user_asked</code>. The top session writes the brief as a start request instead. The next turn ezexe begins, in any session of the store, starts it as this session's child.",
+       code:"phi.py request \"Fix the review findings in relay.py\" --brief \"<the whole brief, with its Files: line>\""},
+      {dir:"hold",legs:["tc"],by:"The top session ends its turn",say:"The child works. The top session is free.",
+       html:"The top session keeps itself free for planning, relaying between sessions, decisions with ezexe, and landing. It does not do the step itself and it does not wait on the child."},
+      {dir:"up",legs:["tc"],by:"The child reports",say:"The report comes back up.",
+       html:"When the child ends its turn, its report reaches the session that started it. The child leaves its outcome there as a <code>replaces:</code> note and is treated as archived from then on. The top session lands the work, meaning merge and push."}
+    ];
+  }
+  if(kind==="sweep")return [
+    {dir:"down",legs:["ask"],by:W+" starts the sweep",say:"The Agent call carries the question down.",
+     html:"The call names the agent by <code>subagent_type</code>. The prompt is the question, and it is all the sweep knows.",
+     code:call("Agent",{subagent_type:"p4-phi:sweep",description:"Find readers of phi.levels",prompt:"Find every place that reads phi.levels from p4.json. Return each as path:line."})},
+    {dir:"hold",legs:["ask"],by:W+" goes on or ends its turn",say:"The sweep reads. The session keeps its turn.",
+     html:HOLD+" The agent's file sets <code>background: true</code>, which keeps it in the background even when a call asks to wait for it."},
+    {dir:"up",legs:["ask"],by:"A completion notification brings the result",say:"The completion notification comes back up.",
+     html:"It arrives in a later turn as an automated event. The sweep returns the answer first in one or two sentences, then each finding as <code>path:line</code>, then what it looked for and did not find, so the session does not search there again."}
+  ];
+  if(kind==="bg")return [
+    {dir:"down",legs:["ask"],by:W+" starts the command",say:"The shell call starts a background task.",
+     html:"The command goes on a call of its own with <code>run_in_background: true</code>. "+(ask==="top"?"When a top session sends such a command without the field, the plugin's hook adds it. The rewrite below shows which calls.":"A child session's foreground call is not changed. It runs as sent, and the session is told once per plan step to start such a command this way."),
+     code:call("Bash",{command:"python test_phi.py",run_in_background:true})},
+    {dir:"hold",legs:["ask"],by:W+" goes on or ends its turn",say:"The command runs. The session keeps its turn.",
+     html:HOLD},
+    {dir:"up",legs:["ask"],by:"A completion notification brings the result",say:"The completion notification comes back up.",
+     html:"When the command ends, the notification arrives in a later turn, and the session reads the command's result then."}
+  ];
+  if(kind==="runner")return [
+    {dir:"down",legs:["ask"],by:W+" hands the command to the runner",say:"The Agent call carries the command down.",
+     html:"The prompt gives the command and the folder to run it in.",
+     code:call("Agent",{subagent_type:"p4-phi:runner",description:"Run test_relay.py",prompt:"In lbiza/plugins/p4-phi/scripts, run: python test_relay.py"})},
+    {dir:"down",legs:["r2"],by:"The runner runs the command",say:"The runner starts the command and waits on it.",
+     html:"It runs the command exactly as given, with a <code>timeout</code> long enough for it. The plugin's hook leaves a subagent's call alone, since a runner's whole work is to wait on its command. When the command reaches its timeout, Claude Code moves it to the background, and the runner waits for its completion notification and reads its output file. It never reports before the command has ended."},
+    {dir:"hold",legs:["ask","r2"],by:W+" goes on or ends its turn",say:"The runner waits. The session keeps its turn.",
+     html:HOLD},
+    {dir:"up",legs:["ask","r2"],by:"The verdict comes back",say:"The verdict comes back up in a completion notification.",
+     html:"The first line is <code>PASS</code> or <code>FAIL</code>, the exit code, and how long the command ran. Then come the counts the command printed. On a failure the failing output follows word for word, and output that passed is left out."}
+  ];
+  return [
+    {dir:"down",legs:["ask"],by:W+" asks for a check",say:"The Agent call carries the diff down.",
+     html:"The prompt names the files or the diff to read and what the change is meant to do. A check is asked for before work is landed or reported as done.",
+     code:call("Agent",{subagent_type:"p4-phi:check",description:"Check the long_read change",prompt:"Read the diff of commit b094e48 in lbiza/plugins/p4-phi/scripts. It is meant to move only a long command that stands alone. Say what is wrong or missing."})},
+    {dir:"hold",legs:["ask"],by:W+" goes on or ends its turn",say:"The check reads. The session keeps its turn.",
+     html:HOLD+" The check runs on the asking session's model at high effort, and reads around each change: who calls it, what it calls, and what the tests beside it cover."},
+    {dir:"up",legs:["ask"],by:"A completion notification brings the findings",say:"The findings come back up.",
+     html:"The verdict comes first in one sentence. Then each finding, most serious first, as <code>path:line</code> with the input or state that shows it. Each is marked as confirmed from the files or as a suspicion."}
+  ];
+}
+
+/* ---------- plan steps, as plans.level_of reads them ---------- */
+var READS=/^\W*(?:find|search|look\s+(?:for|up|at|into|through)|read|grep|list|locate|survey|scan|map|inventory|explore|trace|identify|count|collect|gather|sweep)\b/i;
+var RUNS=/^\W*(?:run|re-?run|execute)\b/i;
+var WRITES=/\b(?:fix\w*|writ\w*|add\w*|chang\w*|edit\w*|implement\w*|updat\w*|remov\w*|renam\w*|creat\w*|mak\w+|mov\w+|commit\w*|refactor\w*|port\w*|delet\w*|migrat\w*|rewrit\w*|replac\w*|patch\w*|push\w*|merg\w*|land\w*|releas\w*|ship\w*|install\w*)\b/i;
+function levelOf(t){if(WRITES.test(t))return "session";if(READS.test(t))return "sweep";if(RUNS.test(t))return "runner";return "session"}
+
+/* ---------- state ---------- */
+var S={kind:"sweep",ask:"top",step:0};
+var svg=$("levels"),wrap=svg.parentNode,raf=0;
+function kindOf(id){for(var i=0;i<KINDS.length;i++)if(KINDS[i].id===id)return KINDS[i]}
+function cur(){return steps(S.kind,S.ask)}
+
+/* ---------- layout ---------- */
+function layout(){
+  var narrow=wrap.clientWidth<600,L={narrow:narrow,n:{}};
+  if(narrow){
+    L.W=360;L.H=436;
+    L.n.top={x:12,y:20,w:160,h:56};L.n.child={x:188,y:96,w:160,h:56};
+    L.n.sweep={x:12,y:188,w:160,h:60};L.n.check={x:188,y:188,w:160,h:60};
+    L.n.runner={x:12,y:276,w:160,h:60};L.n.cmd={x:188,y:276,w:160,h:60};
+    L.n.rcmd={x:12,y:366,w:160,h:56};
+    L.bus=172;L.bus2=262;L.trunk=180;L.row2=["runner","cmd"];
+  }else{
+    L.W=700;L.H=436;
+    L.n.top={x:30,y:30,w:200,h:56};L.n.child={x:300,y:126,w:200,h:56};
+    L.n.sweep={x:20,y:244,w:150,h:60};L.n.runner={x:190,y:244,w:150,h:60};
+    L.n.check={x:360,y:244,w:150,h:60};L.n.cmd={x:530,y:244,w:150,h:60};
+    L.n.rcmd={x:190,y:360,w:150,h:56};
+    L.bus=220;L.row2=[];
+  }
+  return L;
+}
+function cx(b){return b.x+b.w/2}
+function leg(L,name,ask,dest){
+  var n=L.n;
+  if(name==="tc")return [[n.top.x+n.top.w,n.top.y+n.top.h/2],[cx(n.child),n.top.y+n.top.h/2],[cx(n.child),n.child.y]];
+  if(name==="r2")return [[cx(n.runner),n.runner.y+n.runner.h],[cx(n.rcmd),n.rcmd.y]];
+  var a=n[ask],d=n[dest],ax=ask==="top"&&!L.narrow?130:cx(a),pts=[[ax,a.y+a.h],[ax,L.bus]];
+  if(L.row2.indexOf(dest)>=0){pts.push([L.trunk,L.bus],[L.trunk,L.bus2],[cx(d),L.bus2])}
+  else pts.push([cx(d),L.bus]);
+  pts.push([cx(d),d.y]);
+  return pts;
+}
+function tidy(pts){var out=[];pts.forEach(function(p){var q=out[out.length-1];if(!q||q[0]!==p[0]||q[1]!==p[1])out.push(p)});return out}
+function pathOf(pts){
+  pts=tidy(pts);var r=9,d="M"+pts[0][0]+" "+pts[0][1];
+  for(var i=1;i<pts.length;i++){
+    var p=pts[i],a=pts[i-1],b=pts[i+1];
+    if(!b){d+=" L"+p[0]+" "+p[1];break}
+    var l1=Math.hypot(p[0]-a[0],p[1]-a[1]),l2=Math.hypot(b[0]-p[0],b[1]-p[1]),k=Math.min(r,l1/2,l2/2);
+    if(!k){continue}
+    d+=" L"+(p[0]-(p[0]-a[0])/l1*k)+" "+(p[1]-(p[1]-a[1])/l1*k)+" Q"+p[0]+" "+p[1]+" "+(p[0]+(b[0]-p[0])/l2*k)+" "+(p[1]+(b[1]-p[1])/l2*k);
+  }
+  return d;
+}
+function along(pts,t){
+  var len=[],total=0,i;for(i=1;i<pts.length;i++){var l=Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]);len.push(l);total+=l}
+  var want=total*t;for(i=0;i<len.length;i++){if(want<=len[i]||i===len.length-1){var k=len[i]?Math.min(1,want/len[i]):1;return [pts[i][0]+(pts[i+1][0]-pts[i][0])*k,pts[i][1]+(pts[i+1][1]-pts[i][1])*k]}want-=len[i]}
+  return pts[0];
+}
+
+/* ---------- drawing ---------- */
+function draw(animate){
+  cancelAnimationFrame(raf);
+  var L=layout(),K=kindOf(S.kind),list=cur(),st=list[S.step],dest=K.dest;
+  while(svg.firstChild)svg.removeChild(svg.firstChild);
+  svg.setAttribute("viewBox","0 0 "+L.W+" "+L.H);
+  svg.appendChild(s("path",{class:"link",d:pathOf(leg(L,"tc"))}));
+  ["sweep","runner","check","cmd"].forEach(function(id){svg.appendChild(s("path",{class:"link",d:pathOf(leg(L,"ask",S.ask,id))}))});
+  svg.appendChild(s("path",{class:"link",d:pathOf(leg(L,"r2"))}));
+
+  var pts=null;
+  if(st.legs){
+    st.legs.forEach(function(name){
+      var p=leg(L,name,S.ask,dest);
+      svg.appendChild(s("path",{class:"route "+st.dir,d:pathOf(st.dir==="up"?p.slice().reverse():p)}));
+    });
+    if(st.dir!=="hold"){pts=[];st.legs.forEach(function(name){pts=pts.concat(leg(L,name,S.ask,dest))});pts=tidy(pts);if(st.dir==="up")pts.reverse()}
+  }
+  var asker=S.kind==="work"?"top":S.ask;
+  var lit={};lit[dest]=1;if(S.kind==="runner"&&S.step>0)lit.rcmd=1;
+  var busy={};if(st.dir==="hold"){busy[dest]=1;if(S.kind==="runner")busy.rcmd=1}
+  if(S.kind==="runner"&&S.step===1)busy.rcmd=1;
+  Object.keys(NODES).forEach(function(id){
+    var n=NODES[id],b=L.n[id],cls="node k-"+n.kind+(lit[id]?" dest":"")+(id===asker&&st.dir!=="none"?" ask":"")+(busy[id]?" busy":"");
+    var g=s("g",{class:cls,"data-id":id,tabindex:"0",role:"button","aria-label":n.title+", "+n.meta,transform:"translate("+b.x+","+b.y+")"});
+    g.appendChild(s("rect",{class:"box",width:b.w,height:b.h,rx:10}));
+    g.appendChild(s("circle",{class:"dot",cx:15,cy:21,r:4.5}));
+    var t=s("text",{class:"t",x:27,y:26});t.textContent=n.title;g.appendChild(t);
+    var m=s("text",{class:"m",x:14,y:b.h-13});m.textContent=n.meta;g.appendChild(m);
+    if(st.dir==="hold"&&id===asker){var bd=s("text",{class:"badge",x:b.w-10,y:b.h-13,"text-anchor":"end"});bd.textContent="FREE";g.appendChild(bd)}
+    svg.appendChild(g);
+  });
+  if(pts){
+    var end=along(pts,1),dot=s("circle",{class:"fly "+st.dir,r:7,cx:end[0],cy:end[1]});svg.appendChild(dot);
+    if(animate&&!REDUCED){
+      var t0=null;dot.setAttribute("cx",pts[0][0]);dot.setAttribute("cy",pts[0][1]);
+      var tick=function(t){if(t0===null)t0=t;var k=Math.min(1,(t-t0)/900),e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2,p=along(pts,e);
+        dot.setAttribute("cx",p[0]);dot.setAttribute("cy",p[1]);if(k<1)raf=requestAnimationFrame(tick)};
+      raf=requestAnimationFrame(tick);
+    }
+  }
+}
+
+function panel(){
+  var K=kindOf(S.kind),D=DEST[K.dest],list=cur(),box=$("example");
+  box.innerHTML="";
+  box.appendChild(h("h2",{text:"Where it goes"}));
+  box.appendChild(h("h3",{text:D.name}));
+  box.appendChild(h("p",{class:"why",text:D.why}));
+  var dl=h("dl",{class:"spec"});D.spec.forEach(function(r){dl.appendChild(h("dt",{text:r[0]}));dl.appendChild(h("dd",{text:r[1]}))});box.appendChild(dl);
+  list.forEach(function(st,i){
+    var el=h("div",{class:"step"+(i===S.step?" on":""),"data-step":String(i)});
+    var right=h("span",{class:"right"});
+    var tag=st.dir==="down"?["phi","down"]:st.dir==="up"?["app","back up"]:st.dir==="hold"?["both","meanwhile"]:["both","here"];
+    right.appendChild(h("span",{class:"tag "+tag[0],text:tag[1]}));
+    if(st.code){var b=h("button",{class:"copy",type:"button",text:"copy"});b.addEventListener("click",function(e){e.stopPropagation();copy(st.code,b)});right.appendChild(b)}
+    el.appendChild(h("div",{class:"who"},[h("span",{class:"by",text:(i+1)+". "+st.by}),right]));
+    if(st.code)el.appendChild(h("pre",{text:st.code}));
+    el.appendChild(h("p",{html:st.html}));
+    el.addEventListener("click",function(){if(S.step!==i){S.step=i;render(true)}});
+    box.appendChild(el);
+  });
+}
+
+function render(animate){
+  var list=cur();if(S.step>=list.length)S.step=list.length-1;
+  var st=list[S.step],K=kindOf(S.kind);
+  document.querySelectorAll("[data-ask]").forEach(function(b){b.setAttribute("aria-pressed",String(b.getAttribute("data-ask")===S.ask))});
+  document.querySelectorAll("#kinds .act").forEach(function(b){b.setAttribute("aria-pressed",String(b.getAttribute("data-kind")===S.kind))});
+  $("count").textContent="step "+(S.step+1)+" of "+list.length;
+  $("back").disabled=S.step===0;$("next").disabled=S.step===list.length-1;
+  var con=$("console");con.innerHTML="";
+  con.appendChild(h("div",{class:"cmd",text:K.label}));
+  con.appendChild(h("div",{class:st.dir==="up"?"back":"out",text:(st.dir==="up"?"← ":st.dir==="down"?"→ ":"· ")+st.by}));
+  con.appendChild(h("div",{class:"say",text:st.say}));
+  draw(animate);panel();
+}
+
+/* ---------- controls ---------- */
+KINDS.forEach(function(k){
+  var b=h("button",{class:"act",type:"button","data-kind":k.id,"aria-pressed":"false"},[h("span",null,[k.label,h("small",{text:k.sub})]),h("span",{class:"tag "+k.tag[0],text:k.tag[1]})]);
+  b.addEventListener("click",function(){pick(k.id)});$("kinds").appendChild(b);
+});
+function pick(kind){S.kind=kind;S.step=0;render(true)}
+document.querySelectorAll("[data-ask]").forEach(function(b){b.addEventListener("click",function(){S.ask=b.getAttribute("data-ask");S.step=0;render(true)})});
+$("back").addEventListener("click",function(){if(S.step>0){S.step--;render(true)}});
+$("next").addEventListener("click",function(){if(S.step<cur().length-1){S.step++;render(true)}});
+var NODEKIND={child:"work",sweep:"sweep",runner:"runner",check:"check",cmd:"bg",rcmd:"runner"};
+function nodeHit(e){
+  var g=e.target.closest&&e.target.closest("[data-id]");if(!g)return;var id=g.getAttribute("data-id");
+  if(id==="top"){S.ask="top";S.step=0;render(true)}
+  else{if(id==="child")S.ask="top";pick(NODEKIND[id])}
+  var again=svg.querySelector('[data-id="'+id+'"]');if(again&&e.type==="keydown")again.focus();
+}
+svg.addEventListener("click",nodeHit);
+svg.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();nodeHit(e)}});
+$("plan").addEventListener("input",function(){
+  var t=$("plan").value.trim(),out=$("named");
+  if(!t){out.textContent="phi names each step of a top session's plan for its level. Write one to see which.";return}
+  var lv=levelOf(t);
+  if(lv==="sweep"){out.innerHTML="This step only reads or searches, so phi names it for <code>p4-phi:sweep</code>, not a session.";pick("sweep")}
+  else if(lv==="runner"){out.innerHTML="This step only runs a command, so phi names it for <code>p4-phi:runner</code>, not a session.";pick("runner")}
+  else{out.innerHTML="This step is work, so phi names it for a child session.";S.ask="top";pick("work")}
+});
+
+/* ---------- the rewrite: each row is phi.long_read's own answer for that call ---------- */
+var CALLS=[
+  {c:"python test_phi.py",kind:"a test file",alone:true},
+  {c:"cd scripts && python -m pytest -q",kind:"pytest",alone:true},
+  {c:"npm run build | tail -20",kind:"npm run build",alone:true},
+  {c:"PYTHONPATH=. python -X utf8 scripts/test_plans.py 2>&1 | tail -5",kind:"a test file",alone:true},
+  {c:"cargo test",kind:"cargo test",alone:true},
+  {c:"python test_x.py && git commit -m done",kind:"a test file",alone:false},
+  {c:"python test_x.py > out.txt; grep FAIL out.txt",kind:"a test file",alone:false},
+  {c:"sleep 5 && pytest",kind:"pytest",alone:false},
+  {c:"pytest --collect-only",kind:"",alone:false},
+  {c:"python -m py_compile test_x.py",kind:"",alone:false},
+  {c:"git status",kind:"",alone:false}
+];
+var R={i:0,who:"top",timeout:false};
+function rewrite(){
+  var x=CALLS[R.i],v=$("verdict"),why=$("rwwhy"),out=$("rwout"),inp={command:x.c};
+  if(R.timeout)inp.timeout=600000;
+  document.querySelectorAll("#cmds button").forEach(function(b,i){b.setAttribute("aria-pressed",String(i===R.i))});
+  document.querySelectorAll("#rwwho button").forEach(function(b){b.setAttribute("aria-pressed",String(b.getAttribute("data-who")===R.who))});
+  out.hidden=false;
+  if(!x.kind){
+    v.className="verdict none";v.textContent="Nothing. This is not a long command.";
+    why.textContent=/test_x\.py|pytest/.test(x.c)?"A long command counts only where it is the program being run. A test file named to another program, or a call that only asks for --version, --help or --collect-only, runs no test.":"The call runs none of the commands the hook knows as long.";
+    out.hidden=true;return;
+  }
+  if(R.who==="agent"){
+    v.className="verdict none";v.textContent="Nothing. A subagent's call is left alone.";
+    why.textContent="A runner's whole work is to wait on its command, so the hook passes over every call a subagent makes.";
+    out.hidden=true;return;
+  }
+  if(R.who==="top"&&x.alone&&!R.timeout){
+    var moved={};for(var k in inp)moved[k]=inp[k];moved.run_in_background=true;
+    v.className="verdict moved";v.textContent="Moved to the background.";
+    why.textContent="The call is the long command and nothing else, and this is the top session. The hook returns the same input with one field added, and one line beside the result.";
+    out.textContent=JSON.stringify({hookSpecificOutput:{hookEventName:"PreToolUse",updatedInput:moved,
+      additionalContext:"phi (p4-phi): this call runs "+x.kind+", which runs long, and this is the top session, so p4-phi started it in the background by adding `run_in_background: true`. Go on with other work or end the turn, and read its result when its completion notification comes; do not wait, sleep or poll for it."}},null,2);
+    return;
+  }
+  var reasons=[];
+  if(R.who==="child")reasons.push("Another session started this one, and only a top session's call is moved.");
+  if(!x.alone)reasons.push("The command is one part of a longer call, and nothing may be changed about how the other parts run.");
+  if(R.timeout)reasons.push("The call carries a timeout of its own, so the caller chose to wait.");
+  v.className="verdict sent";v.textContent="Runs as sent, with one line.";
+  why.textContent=reasons.join(" ")+" The line is said once per plan step.";
+  out.textContent="phi (p4-phi): this call runs "+x.kind+" in this session's foreground, and a command like it runs long. Start such a command on a call of its own with `run_in_background: true`, or hand it to the `p4-phi:runner` subagent, and go on with other work or end the turn until its completion notification; do not wait, sleep or poll for it. Said once for this step.";
+}
+CALLS.forEach(function(x,i){var b=h("button",{type:"button",text:x.c,"aria-pressed":"false"});b.addEventListener("click",function(){R.i=i;rewrite()});$("cmds").appendChild(b)});
+document.querySelectorAll("#rwwho button").forEach(function(b){b.addEventListener("click",function(){R.who=b.getAttribute("data-who");rewrite()})});
+$("rwtimeout").addEventListener("change",function(){R.timeout=$("rwtimeout").checked;rewrite()});
+
+/* ---------- the docs ---------- */
+var DOCS="https://code.claude.com/docs/en/";
+var PAGES=[
+  ["Ships three agents in <code>agents/</code>, named <code>p4-phi:sweep</code>, <code>p4-phi:runner</code> and <code>p4-phi:check</code>","plugins/components","Add components to a plugin","Each Markdown file under a plugin's <code>agents/</code> folder defines one agent, named by the plugin and the file."],
+  ["Sets <code>model</code>, <code>effort</code>, <code>maxTurns</code>, <code>tools</code> and <code>background</code> on each, and none of <code>hooks</code>, <code>mcpServers</code> or <code>permissionMode</code>","plugins/components","Add components to a plugin","The frontmatter fields a plugin's agent supports, and the ones it ignores."],
+  ["Keeps each agent in the background","sub-agents","Create custom subagents","The <code>background</code> field keeps a subagent in the background even when a call asks to wait for it."],
+  ["Tells a session to go on or end its turn, and never to wait, sleep or poll","sub-agents","Create custom subagents","A foreground subagent blocks the conversation and a background one runs beside it. A background subagent's report arrives inside a completion notification, marked as an automated event."],
+  ["Tells a session to start a long command with <code>run_in_background: true</code>","tools-reference","Tools reference","The field starts the command as a background task, and the session continues while it runs."],
+  ["Has the runner wait when its command moves to the background","tools-reference","Tools reference","A foreground command that reaches its timeout unfinished is moved to the background, not stopped."],
+  ["In a top session, returns a long foreground command with <code>updatedInput</code>: the same input plus one field","hooks","Hooks reference","A PreToolUse hook's <code>updatedInput</code> replaces the whole input before the tool runs, so unchanged fields are sent with the changed one."],
+  ["Says so in one line beside the result","hooks","Hooks reference","A PreToolUse hook's <code>additionalContext</code> is added to the context alongside the tool's result."],
+  ["Gives the sweep and the runner low effort","model-config","Model configuration","The effort levels, and the default level of each current model."],
+  ["Keeps what a session was told in the plugin's data folder when a project has no store","plugins-reference","Plugin manifest reference","The plugin's root folder changes at each update, and its data folder is kept across updates."]
+];
+PAGES.forEach(function(r){
+  var tr=h("tr");tr.appendChild(h("td",{html:r[0]}));
+  tr.appendChild(h("td",{class:"pg"},[h("a",{href:DOCS+r[1],text:r[2]}),h("small",{text:r[1]})]));
+  tr.appendChild(h("td",{html:r[3]}));$("docs").appendChild(tr);
+});
+
+var rw=0;
+if(window.ResizeObserver)new ResizeObserver(function(){var w=wrap.clientWidth;if(w!==rw){rw=w;draw(false)}}).observe(wrap);
+else window.addEventListener("resize",function(){draw(false)});
+render(false);rewrite();
+})();
+</script>
+</body>
+</html>
