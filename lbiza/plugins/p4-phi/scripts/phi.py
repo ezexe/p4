@@ -2279,17 +2279,22 @@ def started_by(me, payload):
     return me
 
 
-def fit(parts, room, home, sid):
+def fit(parts, room, home, sid, keep=()):
     """The parts that fit in `room`, in their order, each whole; what does not fit is kept whole on the session's
     held.md and named by count, by that page and by how each begins. No piece is shown cut, since a cut piece, such
-    as a list of start requests, is of no use in part."""
+    as a list of start requests, is of no use in part. A piece in `keep` asks the session to act at this message, so
+    it is never held: the room goes to those first, and the other pieces fit in what is left."""
     parts = [p for p in parts if p]
     if sum(len(p) + 2 for p in parts) - 2 <= room:
         return "\n\n".join(parts)
+    kept = {id(p) for p in keep if p}
     tail = 260 + len(relay.held_path(home, sid)) + 3 * (HELD_HEAD + 8)    # the lines that name what is held
+    free = room - tail - sum(len(p) + 2 for p in parts if id(p) in kept)
     out, over, used = [], [], 0
     for p in parts:
-        if used + len(p) + 2 <= room - tail:
+        if id(p) in kept:
+            out.append(p)
+        elif used + len(p) + 2 <= free:
             out.append(p)
             used += len(p) + 2
         else:
@@ -2393,41 +2398,46 @@ def h_user_prompt_submit(payload):
     s = load_session(me.home, s["sessionId"]) or s
     if step:
         parts.append(step)
+    keep = []                                      # the notices that ask the session to act now: never held
+
+    def notice(text):
+        keep.append(text)
+        return text
     pend = (s.pop("staleChildren", None) or []) + relay.drain_archive(me.home, s["sessionId"])
     pend = [x for x in pend if isinstance(x, dict) and not archived_already(me.home, x.get("id"))]
     stale = relay.stale_text(pend)                # children to archive, said once; one archived in the app is not named
     s["staleTold"] = (list(s.get("staleTold") or []) + [x.get("id") for x in pend if isinstance(x, dict)])[-50:]
     if stale:
-        parts.insert(0, stale)
+        parts.insert(0, notice(stale))
         if not spawned_from(s):                    # a child counted as archived: merged worktrees to remove
             wt = relay.worktrees_text(me.home, s["sessionId"], relay.repo_of(s.get("cwd") or ""))
             if wt:
-                parts.insert(1, wt)
+                parts.insert(1, notice(wt))
     began = bool(req) and not handed_over(payload.get("prompt"))     # ezexe began this turn
     asked = starts.hand_text(me.home, s["sessionId"]) if began else starts.waiting_text(me.home, s["sessionId"])
     if asked:                                      # ezexe's turn carries the session's start requests, and any other
-        parts.insert(0, asked)                     # turn says they wait on ezexe's click here
+        parts.insert(0, notice(asked))             # turn says they wait on ezexe's click here
         RAN.update({"start_requests": asked.count("\n- ")} if began else {"start_waiting": True})
     if issue_line:
-        parts.insert(0, issue_line)
+        parts.insert(0, notice(issue_line))
     first_split = first_split_text(me.home, s)
     if first_split:
-        parts.insert(0, first_split)
+        parts.insert(0, notice(first_split))
     research = research_text(me.home, s)
     if research:
-        parts.insert(0, research)
+        parts.insert(0, notice(research))
     if FILE_SETS and s.get("fileSet") and load_turns(me.home, s["sessionId"]):
         held_line = files_held_text(me.home, s)    # its closing commit is pushed and it still holds files
         if held_line:
-            parts.insert(0, held_line)
+            parts.insert(0, notice(held_line))
             RAN["files_held"] = len(s["fileSet"])
             save_session(me.home, s)
     if detached_now:
-        parts.insert(0, "phi (p4-phi): this session's brief marks it a new orchestrator, so p4-phi detached it "
+        parts.insert(0, notice("phi (p4-phi): this session's brief marks it a new orchestrator, so p4-phi detached it "
                         "to top level at this first message. Now call `mcp__ccd_session_mgmt__detach_session` with "
                         "`\"self\"` before anything else, so the app stops nesting it under its parent session and its "
                         "reports stop going there; it orchestrates its own topic, and the other orchestrators are "
-                        "its siblings.")
+                        "its siblings."))
     if not spawned_from(s):
         try:                                       # a puppeteer and the sessions it controls
             parts[0:0] = pair_parts(me, s, req if req and not handed_over(payload.get("prompt")) else "", parts[0])
@@ -2435,10 +2445,10 @@ def h_user_prompt_submit(payload):
             pass
     unsent = [u for u in s.pop("unsentRelay", None) or [] if isinstance(u, dict)]
     if unsent:
-        parts.insert(0, "phi (p4-phi): " + " ".join(
+        parts.insert(0, notice("phi (p4-phi): " + " ".join(
             f"your last turn changed {', '.join(u.get('steps') or [])} in the work of "
             f"\"{relay._title(load_session(me.home, u['child']))}\" "
-            f"and sent it nothing; send it the change with SendMessage to `{u['child']}`." for u in unsent))
+            f"and sent it nothing; send it the change with SendMessage to `{u['child']}`." for u in unsent)))
     pup = verdict = ""
     if req and not handed_over(payload.get("prompt")):
         try:                                       # meta pass and ledger, then routing, start draft and gate
@@ -2462,7 +2472,7 @@ def h_user_prompt_submit(payload):
     used = sum(len(p) + 2 for p in parts + [last] if p)
     text, _ = relay.rebase(me.home, s["sessionId"], max(room // 3, room - used), fair_cut, touches_of(me.home, s))
     RAN["relay"] = len(text)
-    return fit([text, last] + parts, room, me.home, s["sessionId"])
+    return fit([text, last] + parts, room, me.home, s["sessionId"], keep)
 
 
 def pair_parts(me, s, req, changed=""):

@@ -690,6 +690,23 @@ class NewTask(unittest.TestCase):
         self.assertNotIn(KID, json.dumps(phi.load_session(self.t.p4, TOP).get("staleChildren") or []))
         self.assertNotIn("counts them as archived", self.say(TOP, "carry on"))
 
+    def test_the_detach_notice_reaches_a_new_orchestrator_whose_brief_names_the_plugin_at_a_long_path(self):
+        """The lines beside a prompt repeat the plugin's path, and a notice that asks the session to act now is never
+        the piece held for want of room. A new orchestrator's brief names phi.py where a landing clone keeps the
+        plugin, 106 characters deep, so its first message gets the new-task instruction and a start draft that fill
+        the room, and the detach notice still reaches it whole."""
+        land = "E:/projects/p4-phi/.claude/p4/temportal/tmp/83e32f0d-9d33-427a-93fc-f0c8db9acc23/land/lbiza/plugins/p4-phi"
+        script = os.path.join(HERE, "phi.py").replace("\\", "/")
+        brief = phi.NEW_TOP_BRIEF + " " + phi.new_top_first_act().replace(script, land + "/scripts/phi.py")
+        self.assertIn(land, brief)
+        self.say(TOP, TASK)
+        self.say(TOP, "also, the fence colour?")
+        told = self.say(KID, "Task:\nPick the fence colour. ezexe's words: \"the fence colour?\" " + brief)
+        self.assertIn("did not fit", told, "the room is full, so pieces are held")
+        self.assertIn("p4-phi detached it to top level at this first message. Now call "
+                      "`mcp__ccd_session_mgmt__detach_session` with `\"self\"` before anything else", told)
+        self.assertLessEqual(len(told), phi.PROMPT_CHARS)
+
     def test_a_childs_new_topic_is_handed_up(self):
         self.say(TOP, TASK)
         first = self.say(KID, HANDED)
