@@ -55,6 +55,16 @@ SEARCH_MAX_FILES = 5000
 SEARCH_KEEP = 3
 SEARCH_MIN_SCORE = 0.18                # measured: the true matches scored 0.195 to 0.198, the best false one 0.143
 MARKER = ".skillex"                   # in a copy under .claude/skills/: the store folder it was copied from
+COPY_IGNORE = ".gitignore"            # in a copy under .claude/skills/: `*`, so git never tracks the copy
+# What a secret looks like in a script: a private key, a known token's shape, or a quoted value given to a name that
+# says key, token, secret or password. A script that holds one brews no skill, so it is never copied anywhere.
+SECRETS = [re.compile(p) for p in (
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+    r"\b(?:sk-(?:ant-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}"
+    r"|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|glpat-[A-Za-z0-9_-]{20,})",
+    r"(?i)\b[\w-]*(?:password|passwd|secret|token|api[_-]?key|access[_-]?key)[\w-]*\b[\"']?\s*[:=]\s*"
+    r"[\"'][^\"'\s]{8,}[\"']",
+)]
 STATE = ".state"                      # in the store folder: the index of compared scripts and each session's last look
 NOTEBOOK = "scratchpad"               # temportal's notebook, compared as one more session
 BREWED = " Brewed by p4-skillex from scripts written in "   # how a written skill's description ends
@@ -188,6 +198,15 @@ def identifiers(path):
     except OSError:
         return None
     return ids if len(ids) >= MIN_IDENTIFIERS else None
+
+
+def holds_secret(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            text = f.read(MAX_BYTES)
+    except OSError:
+        return True
+    return any(rx.search(text) for rx in SECRETS)
 
 
 def jaccard(a, b):
@@ -564,20 +583,22 @@ def search_similar(p4, skill_dir):
         shared = sum(weight(w) ** 2 for w in mine & theirs)
         score = shared / (norm_mine * sum(weight(w) ** 2 for w in theirs) ** 0.5)
         if score >= SEARCH_MIN_SCORE:
-            found.append({"name": label, "path": shown(p), "score": round(score, 3), "description": their_desc[:200]})
+            found.append({"name": label, "path": shown(p, p4), "score": round(score, 3), "description": their_desc[:200]})
     found.sort(key=lambda m: -m["score"])
     return found[:SEARCH_KEEP]
 
 
-def shown(path):
-    """A path as a store file records it: under the home folder as `~/...`, so no user name is written."""
-    home = os.path.expanduser("~")
-    try:
-        if os.path.normcase(os.path.commonpath([os.path.abspath(path), home])) == os.path.normcase(home):
-            return "~/" + os.path.relpath(path, home).replace(os.sep, "/")
-    except ValueError:
-        pass
-    return path.replace(os.sep, "/")
+def shown(path, p4):
+    """A path as a store file records it: relative to the project inside it, `~/...` under the home folder, and
+    otherwise none, so no absolute path and no user name is written."""
+    project = os.path.dirname(os.path.dirname(os.path.abspath(p4)))
+    for base, prefix in ((project, ""), (os.path.expanduser("~"), "~/")):
+        try:
+            if os.path.normcase(os.path.commonpath([os.path.abspath(path), base])) == os.path.normcase(base):
+                return prefix + os.path.relpath(path, base).replace(os.sep, "/")
+        except ValueError:
+            continue
+    return None
 
 
 def link_similar(skill_dir, similar):
@@ -595,7 +616,8 @@ def link_similar(skill_dir, similar):
     lines = ["## Similar existing skills", "",
              "These existing skills do work like this one. Read the one that fits before running this skill's script, and use it where it already does the task.", ""]
     for m in similar:
-        lines.append(f"- `{m['name']}`, at `{m['path']}`: {m['description']}")
+        at = f", at `{m['path']}`" if m["path"] else ""
+        lines.append(f"- `{m['name']}`{at}: {m['description']}")
     with open(me, "w", encoding="utf-8", newline="\n") as f:
         f.write(text.rstrip("\n") + "\n\n" + "\n".join(lines) + "\n")
 
@@ -622,7 +644,7 @@ def mirror(p4, names=None):
                 files[os.path.relpath(p, os.path.join(src, n))] = p
         there = set()
         for r, ds, fs in os.walk(target):
-            there |= {os.path.relpath(os.path.join(r, f), target) for f in fs if f != MARKER}
+            there |= {os.path.relpath(os.path.join(r, f), target) for f in fs if f not in (MARKER, COPY_IGNORE)}
         same = os.path.isdir(target) and there == set(files) and all(
             _same_bytes(p, os.path.join(target, rel)) for rel, p in files.items())
         if same:
@@ -634,6 +656,8 @@ def mirror(p4, names=None):
             shutil.copyfile(p, os.path.join(target, rel))
         with open(os.path.join(target, MARKER), "w", encoding="utf-8", newline="\n") as f:
             f.write(f".claude/p4/skillex/{n}\n")
+        with open(os.path.join(target, COPY_IGNORE), "w", encoding="utf-8", newline="\n") as f:
+            f.write("*\n")
         changed.append(n)
     if names is None and os.path.isdir(dst):
         for n in sorted(os.listdir(dst)):
@@ -660,7 +684,7 @@ def brew(p4, path):
         return None
     session, base = where
     path = real(path)
-    if not comparable(base, path):
+    if not comparable(base, path) or holds_secret(path):
         return None
     found = cluster(p4, path, session)
     if len({session} | {s for s, _ in found}) < MIN_SESSIONS:

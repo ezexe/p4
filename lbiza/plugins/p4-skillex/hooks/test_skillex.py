@@ -199,6 +199,18 @@ class Watcher(Store):
         self.assertIsNone(self.write(self.script("s2", "astcheck.py", "astcheck", "b=2")))
         self.assertEqual(self.skills(), [])
 
+    def test_a_script_holding_a_secret_brews_no_skill(self):
+        self.script("s1", "astcheck.py", "astcheck", "a=1")
+        self.script("s2", "astcheck.py", "astcheck", "b=2")
+        for secret in ('API_KEY = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123"',
+                       'headers = {"token": "f00dfeedcafe1234beef"}',
+                       "-----BEGIN OPENSSH PRIVATE KEY-----"):
+            p = self.script("s3", "astcheck.py", "astcheck", "c=3")
+            put(p, read(p) + secret + "\n")
+            self.assertIsNone(self.write(p), secret)
+        self.assertEqual(self.skills(), [])
+        self.assertFalse(skillex.holds_secret(self.script("s3", "astcheck.py", "astcheck", 'tokens=None, mode="fast"')))
+
     def test_a_file_outside_temportal_is_never_looked_at(self):
         self.script("s1", "astcheck.py", "astcheck", "a=1")
         self.script("s2", "astcheck.py", "astcheck", "b=2")
@@ -232,6 +244,9 @@ class Watcher(Store):
         self.assertIn("tmp/s4/astcheck.py", read(os.path.join(d, "sources.txt")))
         similar = json.loads(read(os.path.join(d, "similar.json")))
         self.assertEqual([m["name"] for m in similar], ["syntax-tree-check"])
+        self.assertEqual(similar[0]["path"], "found/skills/syntax-tree-check/SKILL.md", "a path inside the project")
+        other = "Z:/elsewhere/x" if os.name == "nt" else "/elsewhere/x"
+        self.assertIsNone(skillex.shown(other, self.p4), "no absolute path outside the project and the home folder")
         text = read(os.path.join(d, "SKILL.md"))
         self.assertIn("## Similar existing skills", text, "the refresh keeps the link")
         self.assertNotIn("deploy-site", text)
@@ -398,6 +413,7 @@ class Loading(Store):
         self.assertEqual(read(os.path.join(copy, "SKILL.md")), read(src))
         self.assertEqual(read(os.path.join(copy, "scripts", "demo.py")), "print('demo')\n")
         self.assertTrue(os.path.isfile(os.path.join(copy, skillex.MARKER)))
+        self.assertEqual(read(os.path.join(copy, ".gitignore")), "*\n", "git never tracks a copy")
         name, desc = skillex.front(read(os.path.join(copy, "SKILL.md")))
         self.assertEqual(name, os.path.basename(copy))
         self.assertRegex(name, r"^[a-z0-9-]{1,64}$")
