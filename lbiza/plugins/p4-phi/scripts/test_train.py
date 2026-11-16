@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Tests for train.py: rounds, the floor of 5.6, `train --if-owed`, `eval` writing nothing, and `dictionary check`
-(fresh-marketplace.md 5.3, 5.5, 5.6, 8.1's train/eval and dictionary bullets).
+"""Tests for train.py: a round's promotion against its floors, `owed`, a round that writes nothing, the held entries
+among a pool task's candidates, the BM25 baseline's count of undrawn positives, and the dictionary check.
 
-Run: python3 test_train.py   (stdlib unittest, offline, a few seconds)
+Run: python3 test_train.py
 
-The AudioPlugin-p4 reproduction (imported pools >= 0.36 R-precision held out) takes about a minute and a half, so
-it runs only with P4_SLOW=1 and when the colab clone is present: it migrates the clone into a temp directory first.
+The tests need only the standard library's unittest and no network, and take a few seconds. The reproduction on
+the AudioPlugin-p4 store, whose imported pools must reach FIRST_FLOOR held out, takes about a minute and a half, so
+it runs only with P4_SLOW=1 and the AudioPlugin-p4 fixture that test_store.fixture finds: it migrates the fixture
+into a temp directory first.
 """
 
 import os
@@ -28,8 +30,9 @@ TOPICS = ("axolotl", "bandicoot", "capybara", "dugong", "echidna", "fossa", "gha
 
 
 def synthetic(root, n_tasks=12, noisy=False):
-    """A store of rules, each naming two topic words, and pool tasks naming two topics whose positives are the rules
-    naming both: learnable, so a round passes its floors; `noisy` labels the rules naming neither instead."""
+    """A store whose corpus holds rules naming two topic words and a few naming one, with pool tasks that name two
+    topics and whose positives are the rules naming both: learnable, so a round passes its floors. `noisy` labels
+    about a quarter of the rules naming neither topic instead."""
     p4 = os.path.join(root, ".claude", "p4")
     rules = []
     for i, a in enumerate(TOPICS):
@@ -130,8 +133,8 @@ class Rounds(unittest.TestCase):
         self.assertTrue(train.owed(self.p4)[0])
 
     def test_pool_candidates_keep_held_entries(self):
-        """A pool's reader saw freed and spent entries on the old barrier and could pick one; the label stays on it
-        (migrate.import_pools) and the entry is among the pool task's candidates, though the index never holds it."""
+        """A pool label can name an entry picked while it was FREED or SPENT, and migrate.import_pools keeps the label
+        on that entry: the entry is among the pool task's candidates, though the index never holds it."""
         path = p4conf.sub(self.p4, "store", "rules.md")
         rules = [list(e.pairs) for e in st.load_file(self.p4, "rules.md")]
         rules.append([("ruling", "the axolotl relay once kept the bandicoot gauge by hand"), ("status", "FREED"),
@@ -220,7 +223,7 @@ class DictionaryCheck(unittest.TestCase):
 
 class AudioPluginFloor(unittest.TestCase):
     @unittest.skipUnless(os.environ.get("P4_SLOW") == "1" and fixture("AudioPlugin-p4"),
-                         "slow: P4_SLOW=1 and the AudioPlugin-p4 clone")
+                         "slow: P4_SLOW=1 and the AudioPlugin-p4 fixture")
     def test_imported_pools_reproduce_the_floor(self):
         import migrate
         with tempfile.TemporaryDirectory() as t:
@@ -231,9 +234,9 @@ class AudioPluginFloor(unittest.TestCase):
             print(f"\nAudioPlugin-p4 imported pools: {train.fmt(ev)}")
             self.assertEqual(ev["n"], 24)
             labs = [r for r in lb.read_tsv(lb.mpath(out, lb.RAW)) if r["source"] == "pool"]
-            self.assertEqual(len(labs), 274, "pick_model.py pairs: 274 of 280 steering lines matched")
-            self.assertEqual(sum(1 for r in labs if r["task"] == "pool:a3ac5de6"), 1, "1/4 picks, as pick_model")
-            self.assertGreater(ev["r-precision"], ev["baseline"], "above word overlap")
+            self.assertEqual(len(labs), 274, "274 of the 280 steering lines match an entry")
+            self.assertEqual(sum(1 for r in labs if r["task"] == "pool:a3ac5de6"), 1, "1 of its 4 picks matches")
+            self.assertGreater(ev["r-precision"], ev["baseline"], "above the BM25 baseline")
             self.assertGreaterEqual(ev["r-precision"], train.FIRST_FLOOR)
 
 

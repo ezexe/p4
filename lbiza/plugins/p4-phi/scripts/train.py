@@ -1,31 +1,35 @@
 #!/usr/bin/env python3
-"""train.py: the ranker's rounds (fresh-marketplace.md 5.5, 5.6) and the dictionary's check (5.3).
+"""train.py: the retrieval ranker's training rounds, and the check of the dictionary's entries each round runs.
 
-  train [--if-owed]   fit on every label weighted by its source, evaluate held out, promote past the floor, append
-                      models/eval.tsv; --if-owed returns at once unless >= 10 labels landed since the last round and
-                      the last round is older than an hour (the async Stop hook's road)
-  eval                the same numbers, nothing written
-  dictionary check    every vocabulary entry's two tests; a failing entry is set `status: off` (ezexe's entry is
-                      listed, never changed)
+`p4.py train` and `p4.py eval` run a round through `cmd_train` and `cmd_eval`. A `train` round builds the sets,
+evaluates them held out, fits on them all, writes phi/models/ranker.json only when `run_round` promotes it, and
+appends its row to phi/models/eval.tsv; it also runs the dictionary check, which can turn entries `status: off`.
+With `--if-owed`, `train` returns at once unless `owed` says a round is owed, and the Stop hook `train` of hook.py
+calls it that way, as an async command hook. `eval` runs the same round, writes none of those files, and prints
+what the round would decide.
 
-How a task becomes examples. A task (models/tasks.tsv) has a text and a time; its candidates are the indexed entries
-dated no later than the task (or undated), never its own session's message rows, scored by BM25 on the task's
-terms; the top CANDIDATES of them (every one for a pool task, as `pick_model.py` read every barrier row) are
-featurized by `ranker.candidate_features`, and a candidate is positive when a label names it. Evaluation is
-leave-one-task-out for up to LOO_MAX tasks and grouped k-fold above it, `pick_model.py eval`'s numbers:
-R-precision, recall@20 and the precision of the threshold's picks, so the 0.379 baseline is comparable.
+How a task becomes examples. A task of phi/models/tasks.tsv has a text and a time. An entry is eligible for it when
+undated or dated no later than the task, and not a row of the task's own session's messages. Its candidates are
+the top CANDIDATES of the eligible entries that share a term with it, by BM25 on its terms, joined by near.py's
+entries when p4.json's `recall.near.on` is set and by the entries labelled for the sessions above the task's
+session when `recall.node.on` is. A pool task takes every eligible entry of the corpus's rules, corrections,
+retractions and facts instead, held ones included. `ranker.candidate_features` featurizes the candidates, and a
+candidate is positive when a label names it. A label's weight is the one `labels.as_label` reads from its row.
 
-Weights per source (5.5): store+edited 1.0, pool 0.7, short 1.0, usage 0.3 (until 8.1's agreement test raises
-it), miss 1.0, store 0.5 (the raw history labels, which agree with teachers at 0.50-0.53), repo as the row says.
+Evaluation holds out one task at a time for up to LOO_MAX tasks. Above that, `folds` sorts the tasks by time and
+deals them into FOLDS folds in turn, grouping by nothing, so two tasks of one session can fall on both sides of a
+fold. A round reports R-precision, recall@20 and the precision of the threshold's picks, beside the BM25 baseline,
+the R-precision of BM25's own order of the same candidates.
 
-The silence tasks. Every labelled task has an answer in the store, so a ranker fit on them alone never learns what
-no match looks like: its features are relative (BM25 over the top candidate's, the rank), so the top candidate of
-an ordinary message scores like the top candidate of a real one, and the trained road printed lines for 88% of the
-suite's general prompts (the no-ranker road: 0%). A silence task is an ordinary message with no positive: its
-candidates are what `p4.py query` would hand the ranker (the top CANDIDATES of BM25 over the whole index), every one
-a negative. They come from models/silent.jsonl when the store has one, else from the plugin's silent-prompts.jsonl
-(the suite's general prompts of its train split; its test split stays held out). They are always in the training
-half, never a held-out fold, and the threshold is still chosen on the labelled tasks alone.
+The silence tasks. Every task a round fits on has a positive among its candidates, and the ranker's features are
+relative, such as BM25 over the top candidate's and the rank, so the top candidate of an ordinary message scores
+like the top candidate of a message that has an answer: fit on those tasks alone, the ranker never learns what no
+match looks like and prints lines for ordinary messages. A silence task is an ordinary message with no positive,
+its candidates the ones `p4.query` hands the ranker, every one a negative weighing SILENT_WEIGHT. The messages come
+from phi/models/silent.jsonl when the store has one, else from the plugin's silent-prompts.jsonl, a copy of the
+train split of ezexe/p4's scripts/session/overrides_tasks.jsonl; that file's test split stays out of training.
+Silence tasks train in every fold and are held out of none, and the threshold is chosen on the labelled tasks
+alone.
 """
 
 import datetime
@@ -46,19 +50,19 @@ import ranker  # noqa: E402
 import store as st  # noqa: E402
 
 SILENT_WEIGHT = 1.0
-SILENT = "silent.jsonl"                                   # models/silent.jsonl: {"prompt": ...} per line
+SILENT = "silent.jsonl"                                   # phi/models/silent.jsonl: {"prompt": ...} per line
 SILENT_DEFAULT = os.path.join(HERE, "silent-prompts.jsonl")
 CANDIDATES = 200
-POOL_CANDIDATES = 0           # 0: every eligible entry, as the old pools' barrier rows
-TRAIN_NEG = 60                # negatives kept per task when fitting (the top of BM25), so a round stays in seconds
+POOL_CANDIDATES = 0           # 0: a pool task's candidates are every eligible entry, and it fits on every one
+TRAIN_NEG = 60                # negatives a task keeps when fitting, drawn at random by trim, so a round takes seconds
 LOO_MAX = 40
 FOLDS = 5
 FLOOR_DROP = 0.02
 MIN_PRECISION = 0.6
-FIRST_FLOOR = 0.36            # 5.6: the first round after migration, from pool labels alone, on AudioPlugin-p4
+FIRST_FLOOR = 0.36            # until a round is promoted, the R-precision the pool-labelled tasks must reach
 OWED_LABELS = 10
 OWED_AGE_S = 3600
-MAX_TASKS = 400               # newest tasks a round fits on, beyond the pool and edited ones (every one kept)
+MAX_TASKS = 400               # newest tasks a round fits on beyond the pool and edited ones, which it always keeps
 EVAL_HEAD = "round\ttime\tlabels\ttasks\tper_source\tr_precision\trecall20\tprecision\tthreshold\tbaseline\t" \
             "short\trepo\tdictionary\tpromoted\twhy\n"
 
@@ -66,8 +70,8 @@ EVAL_HEAD = "round\ttime\tlabels\ttasks\tper_source\tr_precision\trecall20\tprec
 # --- examples ----------------------------------------------------------------------------------------------
 
 def eligible(doc, task):
-    """An entry a task could have been shown: dated no later than the task (or undated), not a row of its own
-    session's messages."""
+    """An entry a task could have been shown: undated or dated no later than the task to the minute, and not a row
+    of the task's own session's messages."""
     t = doc.get("time") or ""
     if t and task["time"] and t[:16] > task["time"][:16]:
         return False
@@ -77,7 +81,8 @@ def eligible(doc, task):
 
 
 def task_examples(idx, task, positives, limit=None, files=None, docs_by=None):
-    """(xs, ys, cand doc indices, bm25 scores) for one task: features of its candidates and their 0/1 labels."""
+    """`(xs, ys, cand, sc)` for one task: the features of its candidates, their labels of 0 or 1, their doc indices
+    and their BM25 scores."""
     import p4 as cli
     limit = CANDIDATES if limit is None else limit
     terms = list(dict.fromkeys(ranker.tokens(task["text"])))
@@ -88,8 +93,8 @@ def task_examples(idx, task, positives, limit=None, files=None, docs_by=None):
         scores = cli.bm25_scores(idx, terms, {})
         idf, avgdl = cli.idf_map(idx, terms), idx["avgdl"]
     else:
-        # a pool's candidates are the store's entries alone, scored with the store's own statistics, as the old
-        # barrier was: the idf of a term among the rulings, corrections and facts, not among every message and file
+        # a pool task's candidates are the entries of `files` alone, scored with those files' own statistics: the
+        # idf of a term among the rulings, corrections and facts, not among every message and file
         sub = sub_corpus(idx, files)
         idf = {t: sub["idf"][t] for t in terms if t in sub["idf"]}
         avgdl = sub["avgdl"]
@@ -106,14 +111,16 @@ def task_examples(idx, task, positives, limit=None, files=None, docs_by=None):
     cand = pool[:limit] if limit else pool
     mem, feats = (docs_by or {}).get("near") if files is None else None, None
     if mem:
-        # near.py: the entries earlier, similar tasks of other sessions used join BM25's, with a feature saying so
+        # near.py: the entries used by similar tasks of other sessions, dated before this one, join BM25's, with a
+        # feature saying so
         import near
         got = near.entries(mem, task["text"], task.get("time") or "", task.get("session") or "")
         cand, feats = near.extend(docs, docs_by["id_at"], cand, got, lambda i: eligible(docs[i], task))
     node_hit = None
     node_of = (docs_by or {}).get("node") if files is None else None
     if node_of:
-        # node.py: the entries the tasks above this task's session used join the candidates, with a feature saying so
+        # node.py: the entries labelled for the sessions above this task's session join the candidates, with a
+        # feature saying so
         got = node_of(task)
         if got:
             at, have = docs_by["id_at"], set(cand)
@@ -135,7 +142,8 @@ def task_examples(idx, task, positives, limit=None, files=None, docs_by=None):
 
 
 def silent_prompts(p4):
-    """The ordinary messages a round trains silence on: models/silent.jsonl, else the plugin's default list."""
+    """The ordinary messages a round trains silence on: phi/models/silent.jsonl when the store has one, else
+    SILENT_DEFAULT. A line holds a `{"prompt": ...}` object or a JSON string, and any other line is skipped."""
     path = p4conf.sub(p4, "models", SILENT)
     if not os.path.exists(path):
         path = SILENT_DEFAULT
@@ -159,9 +167,10 @@ def silent_prompts(p4):
 
 
 def silent_sets(idx, prompts, now, mem=None, id_at=None):
-    """One all-negative set per ordinary message, its candidates and features exactly as p4.query builds them for
-    the ranker road (BM25 over the whole index, the superseded out, the top CANDIDATES, then near.py's entries when
-    the round uses them: a near entry on an ordinary message has to learn silence too)."""
+    """One all-negative set per ordinary message, its candidates and features built as p4.query builds them for the
+    ranker, less the dictionary's expansion: BM25 over the whole index, the superseded entries out, the top
+    CANDIDATES, then near.py's entries when the round uses them, since a near entry on an ordinary message has to
+    learn silence too."""
     import p4 as cli
     docs = idx["docs"]
     gone = cli.superseded_ids(idx, now)
@@ -194,8 +203,8 @@ def silent_sets(idx, prompts, now, mem=None, id_at=None):
 
 
 def head_tokens(p4):
-    """{entry id: tokens of its head value cut at 140 characters, with repeats}: what an old pool child read of an
-    entry, the `head-bm25` feature's text as pick_model.py computed it."""
+    """`{entry id: tokens}` for every entry outside the message files: its value collapsed, cut at 140 characters
+    and tokenized with repeats, the text task_examples gives the `head-bm25` feature in place of the index's head."""
     out = {}
     for f, ents in st.load_store(p4).items():
         if f.startswith(st.MESSAGES + "/"):
@@ -206,8 +215,8 @@ def head_tokens(p4):
 
 
 def sub_corpus(idx, files):
-    """{ids, idf, avgdl, tf} over the docs of `files`, cached on the index. A doc's term frequencies come back from
-    the postings (the index keeps only the distinct terms on a doc)."""
+    """`{ids, idf, avgdl, tf}` over the docs of `files`, cached on the index. A doc's term frequencies come back
+    from the postings, since the index keeps only a doc's distinct terms, and a held doc's from `_held`."""
     key = "_sub:" + ",".join(sorted(files))
     if key in idx:
         return idx[key]
@@ -235,9 +244,9 @@ def sub_corpus(idx, files):
 
 
 def with_held(idx, p4):
-    """The index with the store's held entries (store.held_docs: freed, spent, expired) appended after its docs, for
-    pool tasks alone: they carry no postings, so BM25 over the index never draws them, and sub_corpus takes their
-    term frequencies from `_held`. The caller's index is left as it was."""
+    """A copy of the index with the held entries `store.held_docs` returns, the FREED, SPENT and EXPIRED ones,
+    appended after its docs for the pool tasks: they carry no postings, so BM25 over the index never draws them,
+    and sub_corpus takes their term frequencies from `_held`. The caller's index is left as it was."""
     held = st.held_docs(p4)
     if not held:
         return idx
@@ -249,18 +258,20 @@ def with_held(idx, p4):
 
 
 def pool_like(r):
-    """A pool label, or a teacher's edit of a pool task (its note says `from:pool`): drawn from the store's entries
-    alone, as the old barrier was, so a task's edited set and its raw set share their candidates."""
+    """A pool label, or a teacher's edit of a pool task, whose note says `from:pool`. A task with only such labels
+    draws its candidates from STORE_FILES alone, so its edited set and its raw set share their candidates."""
     return r["source"] == "pool" or (r["source"] == "store+edited" and "from:pool" in (r.get("note") or ""))
 
 
 def build_sets(p4, idx=None, sources=None, max_tasks=None, rows=None, now=None, keep_near=False, node=False):
-    """[{task, xs, ys, w, files, bm25, n_pos, source}] for every task with at least one positive that is indexed,
-    then the silence tasks (source `silent`, no positive) unless `sources` leaves them out.
+    """The training sets, newest task first: `{task, xs, ys, w, files, bm25, n_pos, source, ...}` for every task
+    with a positive the index holds, up to MAX_TASKS of them beyond the pool and edited tasks, then the silence
+    tasks, of source `silent` and with no positive, unless `sources` leaves them out. A task with no positive among
+    its candidates is a set marked `missed`, with no examples.
 
-    Each task's positives are its labels with label 1 (weighted by source); a label 0 is a hard negative: kept in
-    the candidates at its weight even when BM25 would not have drawn it. `rows` stands in for the training labels
-    (raw_vs_edited's two label sets)."""
+    A task's positives are its labels of 1, each weighing its row's weight. A label of 0 is a stated negative: among
+    the candidates it weighs twice its row's weight, or the task's when that is more, and it adds nothing when it is
+    not among them. `rows` stands in for the training labels, as raw_vs_edited's two label sets do."""
     if idx is None:
         idx, _ = st.ensure_index(p4)
     tasks = lb.read_tasks(p4)
@@ -279,8 +290,9 @@ def build_sets(p4, idx=None, sources=None, max_tasks=None, rows=None, now=None, 
     import near
     near.configure(p4)
     if near.ON:
-        # the memory of what earlier tasks used: built from this round's own labels, and kept for the queries only
-        # when a writing round built it from the store's whole training set (not an eval, one source, or stand-ins)
+        # near.py's memory of what tasks used, built from this round's own labels: only a writing round over the
+        # store's whole training set keeps it for the queries, never an eval, a round of some sources, or a round
+        # on stand-in rows
         extra["near"] = near.build(p4, idx, labels=rows, write=keep_near and given is None and not sources)
         extra["id_at"] = near.id_index(idx["docs"])
     if node:
@@ -313,8 +325,8 @@ def build_sets(p4, idx=None, sources=None, max_tasks=None, rows=None, now=None, 
             out.append({"task": tid, "xs": [], "ys": [], "n_pos": len(pos), "source": labs[0]["source"],
                         "missed": True, "kind": task.get("kind", "")})
             continue
-        # a task's drawn negatives weigh what its labels weigh, so a source's weight scales the task, never the
-        # balance of positives against negatives within it (ranker.fit balances those)
+        # a task's drawn negatives weigh what its heaviest positive weighs, so a source's weight scales the task and
+        # never the balance of positives against negatives within it, which ranker.fit balances
         tw = max(pos.values())
         ws = [pos[idx["docs"][i]["id"]] if y else tw for i, y in zip(cand, ys)]
         neg_w = {r["entry"]: r["weight"] for r in labs if not r["label"]}
@@ -333,8 +345,10 @@ def build_sets(p4, idx=None, sources=None, max_tasks=None, rows=None, now=None, 
 
 
 def node_lookup(p4, tasks, rows):
-    """task -> the entries labelled positive for the tasks of the sessions above its session, dated no later than
-    it (node.py: the app's records and phi's files make the tree; tasks.tsv names each task's session)."""
+    """A function from a task to the entries labelled positive for the tasks of the sessions above its session in
+    the session tree, at most CHAIN_MAX sessions up, dated no later than the task. The tree joins node.py's
+    record_tree, from the app's session records, and its phi_tree, from p4-phi's session files; tasks.tsv names
+    each task's session."""
     import node as nd
     tree = nd.record_tree(None)
     for sid, s_ in nd.phi_tree(p4).sessions.items():
@@ -375,11 +389,11 @@ def fit_sets(sets, seed=0):
 
 
 def trim(s):
-    """The examples of one task a round fits on: every positive, and TRAIN_NEG of its negatives drawn at random
-    (seeded by the task, so a round is deterministic); a pool task keeps every candidate, as pick_model.py fit on
-    every barrier row. The negatives were once the TRAIN_NEG BM25 ranked highest: with the positives kept wherever
-    BM25 put them, that taught the ranker a high BM25 is a negative (on a 97-pool store its bm25 weight fit at -1.05,
-    against +0.28 with every candidate) and halved its held-out R-precision."""
+    """The examples of one task a round fits on: every positive, and at most TRAIN_NEG of its negatives drawn at
+    random, seeded by the task so a round is deterministic. A silence task keeps every candidate, and so does a pool
+    task while POOL_CANDIDATES is 0. The negatives are drawn at random rather than taken from the top of BM25: the
+    positives stay wherever BM25 put them, so negatives from its top alone would teach the ranker that a high BM25
+    marks a negative."""
     if s.get("source") == "silent" or ((s.get("source") == "pool" or s.get("pool_like")) and POOL_CANDIDATES == 0):
         return range(len(s["ys"]))
     negs = [k for k in range(len(s["ys"])) if not s["ys"][k]]
@@ -403,7 +417,10 @@ def folds(sets):
 
 
 def evaluate(sets, per_file=ranker.PER_FILE, quiet=True):
-    """Held-out numbers over the sets: {r-precision, recall@20, precision, f1, baseline, n, per-subset, rows}."""
+    """Held-out numbers over the sets: `{r-precision, recall@20, precision, f1, baseline, top5, threshold, n,
+    missed}`, the same for each of the `pool`, `repo` and `history` subsets that has tasks, each task's numbers
+    under `rows`, and the count of silence tasks under `silent`. None when fewer than 3 tasks have a positive among
+    their candidates."""
     silent = [s for s in sets if s.get("source") == "silent"]
     live = [s for s in sets if not s["missed"] and s.get("source") != "silent"]
     missed = [s for s in sets if s["missed"]]
@@ -424,8 +441,8 @@ def evaluate(sets, per_file=ranker.PER_FILE, quiet=True):
             base = ranker.metrics(s["ys"], bm, sorted(range(len(bm)), key=lambda i: (-bm[i], i))[:n])
             m["threshold"] = t
             m["top5"] = sum(s["ys"][i] for i in sorted(range(len(sc)), key=lambda i: (-sc[i], i))[:5]) > 0
-            # R-precision counts the labelled entries BM25 never drew as misses, as the old pools did; the baseline
-            # ranks the same drawn candidates, so it counts them the same way, or it reads up to n_pos / n too high
+            # R-precision counts the labelled entries never drawn as misses; the BM25 baseline ranks the same
+            # candidates, so it counts them the same way, or it would read up to n_pos / n too high
             drawn = n / max(n, s["n_pos"])
             m["r-precision"] = m["r-precision"] * drawn
             m["baseline"] = base["r-precision"] * drawn
@@ -453,12 +470,13 @@ def summarize(ms, missed):
             "threshold": ranker.mean(ms, "threshold") if ms else 0.0}
 
 
-# --- the short-turn subset (5.4), free -------------------------------------------------------------------
+# --- the short-turn subset -------------------------------------------------------------------------------
 
 def short_subset(p4, idx=None, held_sessions=3):
-    """On the newest `held_sessions` sessions' completed short rows: whether the history line's reading (the last
-    completed `addressed:` of that token in an earlier row) matches the held-out row's `addressed:` by the
-    resemblance rule. {n, shown, right, rate}."""
+    """Over the completed short rows of the newest `held_sessions` sessions: whether the reading the history line
+    would show, the `addressed:` of the last completed row of the same token before it, matches the held-out row's
+    own `addressed:` by the resemblance rule or by a Jaccard similarity of their words of at least 0.3. Returns
+    `{n, shown, right, rate}`."""
     files = st.load_store(p4)
     sessions = []
     for rel, ents in files.items():
@@ -513,8 +531,12 @@ def last_promoted(p4):
 
 
 def owed(p4, now_s=None):
-    """(owed?, why): >= OWED_LABELS labels landed since the last round, and the last round older than an hour; or a
-    dependency was installed or updated since the last round (its entries are new candidates), whatever the age."""
+    """`(owed, why)`: whether `train --if-owed` runs a round. With no round in phi/models/eval.tsv, one label is
+    enough. Otherwise a round is owed when a dependency was installed or updated after eval.tsv was last written,
+    whatever its age, since that dependency's entries are candidates no round has seen; or when the label files
+    hold at least OWED_LABELS rows more than the last round counted and eval.tsv is at least OWED_AGE_S seconds
+    old. The two numbers are this module's constants: `cmd_train` asks before `run_round` applies p4.json's
+    `recall.train` to them."""
     now_s = now_s or time.time()
     rows = eval_rows(p4)
     n = lb.count_labels(p4)
@@ -534,20 +556,21 @@ def owed(p4, now_s=None):
     except (ImportError, OSError, ValueError):
         pass
     if n - before < OWED_LABELS:
-        return False, f"{n - before} labels since the last round (need {OWED_LABELS})"
+        return False, f"{n - before} labels since the last round, of the {OWED_LABELS} a round needs"
     if age < OWED_AGE_S:
-        return False, f"the last round is {int(age)} s old (need {OWED_AGE_S})"
+        return False, f"the last round is {int(age)} s old, under the {OWED_AGE_S} s a round waits"
     return True, f"{n - before} new labels, last round {int(age)} s old"
 
 
 def node_on(p4):
-    """recall.node.on of p4.json: the session tree's entries in training (off until measured above today)."""
+    """p4.json's `recall.node.on`: whether a round adds the entries labelled for the sessions above a task's session
+    to its candidates, with a feature saying so. It is off by default."""
     import p4conf
     return bool(p4conf.section(p4, "recall", write=False).get("node", {}).get("on"))
 
 
 def configure(p4):
-    """recall.train of the store's p4.json over the training constants (read, never written, here)."""
+    """Apply the store's p4.json `recall.train` to the training constants, reading the file and never writing it."""
     import p4conf
     p4conf.configure(globals(), p4, "recall.train", {
         "candidates": "CANDIDATES", "train_neg": "TRAIN_NEG", "folds": "FOLDS", "floor_drop": "FLOOR_DROP",
@@ -556,15 +579,23 @@ def configure(p4):
 
 
 def run_round(p4, write=True, now=None, idx=None, sources=None, quiet=False, dictionary=True):
-    """One round: build the sets, evaluate held out, fit on all, decide promotion by the floor. Returns the
-    eval row as a dict; writes models/ranker.json (only when promoted) and appends models/eval.tsv when `write`."""
+    """One round: build the sets, evaluate them held out, fit on them all and decide promotion. A round is promoted
+    when it has at least 3 tasks to evaluate, its R-precision is at most FLOOR_DROP below the last promoted round's,
+    its short-turn rate is at or above that round's, its precision at the threshold is at least MIN_PRECISION, no
+    dictionary entry it leaves on harms the working messages, and, until a round is promoted, the tasks labelled by
+    pools alone reach FIRST_FLOOR when there are at least 3 of them.
+
+    Returns the eval row as a dict, with the held-out numbers under `eval` and the comparison of raw and edited
+    labels under `compare`. With `write`, it appends the row to phi/models/eval.tsv, writes phi/models/ranker.json
+    when the round is promoted, holds the teacher's batches when its edits score below the raw labels, keeps
+    near.py's memory when no `sources` limit the round, and lets the dictionary check turn failing entries off."""
     now = now or datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     configure(p4)
     if idx is None:
         idx, _ = st.ensure_index(p4)
     t0 = time.time()
-    # 5.2 step 3: when the teacher's edits exist, they must score at or above the raw labels on held-out raw labels;
-    # a round that finds them below holds their batches (written only by `train`), so the sets below leave them out
+    # when the teacher's edits exist, they must score at or above the raw labels on held-out raw labels; a writing
+    # round that finds them below holds their batches, and the sets below then leave them out
     cmp = raw_vs_edited(p4, idx) if has_edited(p4) else None
     if cmp and cmp.get("ok") is False and write:
         hold_batches(p4, cmp["batches"], f"edited {cmp['edited']:.3f} below raw {cmp['raw']:.3f} on held-out raw "
@@ -602,7 +633,7 @@ def run_round(p4, write=True, now=None, idx=None, sources=None, quiet=False, dic
                 promote = False
                 why.append(f"short-turn subset {short['rate']:.3f} below the last round's {ps:.3f}")
         if prev is None:
-            # 5.6: the first round after migration must reach FIRST_FLOOR from the imported pool labels alone
+            # until a round is promoted, the tasks labelled by pools alone, if 3 or more, must reach FIRST_FLOOR
             pool_sets = [x for x in sets if x["source"] == "pool" and set(x.get("sources", ["pool"])) == {"pool"}]
             if len(pool_sets) >= 3:
                 pev = evaluate(pool_sets) if sources != {"pool"} else ev
@@ -661,24 +692,26 @@ def run_round(p4, write=True, now=None, idx=None, sources=None, quiet=False, dic
     return row
 
 
-# --- raw against edited (5.2 step 3, 5.6) ----------------------------------------------------------------
+# --- raw labels against the teacher's edits --------------------------------------------------------------
 
 def has_edited(p4):
     return any(r.get("source") == "store+edited" for r in lb.read_tsv(lb.mpath(p4, lb.TRAIN)))
 
 
 def raw_vs_edited(p4, idx=None):
-    """The Colab method: fit once on the raw labels and once on the edited ones (the teacher's rows in place of
-    their tasks' raw labels), and score both on held-out raw labels, the same folds for both. Every teacher row
-    counts here, held or not, so a held batch can be judged again. {n, edited_tasks, held_edited, raw, edited,
-    raw_on_edited, edited_on_edited, ok, batches}; ok is None when fewer than 3 tasks have raw labels."""
+    """Fit once on the raw labels and once on the edited ones, where the teacher's rows replace their tasks' raw
+    labels, and score both on held-out raw labels over the same folds. Every teacher row counts here, held or not,
+    so a held batch can be judged again. Returns `{n, edited_tasks, held_edited, raw, edited, raw_on_edited,
+    edited_on_edited, ok, batches}`; `ok` is None when fewer than 3 tasks have a raw positive among their
+    candidates."""
     if idx is None:
         idx, _ = st.ensure_index(p4)
     edited = [lb.as_label(r) for r in lb.read_tsv(lb.mpath(p4, lb.TRAIN)) if r.get("source") == "store+edited"]
     batches = sorted({lb.batch_of(r.get("note", "")) for r in edited} - {""})
     raw = [lb.as_label(r) for r in lb.read_tsv(lb.mpath(p4, lb.RAW))]
     etasks = {r["task"] for r in edited}
-    # two label sets compared on the same tasks: the silence tasks (no positive, the same on both sides) stay out
+    # two label sets compared on the same tasks: the silence tasks, with no positive and the same on both sides,
+    # stay out
     raw_sets = {s["task"]: s for s in build_sets(p4, idx, rows=lb.recency(p4, raw))
                 if not s["missed"] and s.get("source") != "silent"}
     ed_sets = {s["task"]: s for s in build_sets(p4, idx, rows=lb.recency(p4, [r for r in raw if r["task"] not in
@@ -721,7 +754,8 @@ def fmt_compare(c):
 
 
 def hold_batches(p4, batches, why):
-    """Mark teacher batches held in models/teacher-batches.json (ezexe sets `status` back to ok to release)."""
+    """Mark teacher batches held in phi/models/teacher-batches.json, each with its `why`; ezexe releases a batch by
+    setting its `status` back to ok."""
     cur = lb.read_batches(p4)
     for b in batches:
         e = cur.setdefault(b, {})
@@ -731,7 +765,7 @@ def hold_batches(p4, batches, why):
     ranker.write_atomic(lb.mpath(p4, lb.BATCHES), json.dumps(cur, indent=1, ensure_ascii=False) + "\n")
 
 
-# --- the dictionary check (5.3) --------------------------------------------------------------------------
+# --- the dictionary check --------------------------------------------------------------------------------
 
 QUOTE_RE = re.compile(r"\"([^\"]{2,400})\"")
 
@@ -745,7 +779,7 @@ def first_quote(because):
 
 
 def top5(p4, idx, text, vocab_override=None):
-    """The ids of the top 5 candidates the query would rank for `text` (threshold aside), with the vocabulary
+    """The ids of the top 5 candidates `p4.rank` gives `text`, whatever the threshold, with the vocabulary
     `vocab_override` in place of the index's."""
     import p4 as cli
     saved = idx.get("vocab")
@@ -759,8 +793,9 @@ def top5(p4, idx, text, vocab_override=None):
 
 
 def working_messages(p4, idx, limit=200):
-    """The held-out set of messages that already worked: served lines that were used with no follow-up (from
-    labels.tsv's usage rows); failing those, the newest completed rows longer than a short turn."""
+    """The messages that already worked, the dictionary check's working set: the prompts whose served lines were
+    used and whose next message was no follow-up, from labels.tsv's usage rows; when there are none, the newest
+    completed message rows longer than a short turn."""
     msgs = lb.working_texts(p4, limit)
     if msgs:
         return msgs
@@ -782,9 +817,11 @@ def is_owner_entry(v):
 
 
 def dictionary_check(p4, idx=None, write=True, harm_max=0.05):
-    """Each `on` entry with a meaning: (1) a query on the misread message ranks a `points-at:` entry in the top 5
-    with the entry on; (2) over the working messages the top 5 is unchanged for >= 95% with it on. A failing entry
-    is set `status: off` in vocabulary.md, unless ezexe wrote it (listed, left as it is)."""
+    """Two tests of each `on` entry that is not pending. First, a query on the misread message its `because:` quotes,
+    with that entry as the whole vocabulary, ranks one of its `points-at:` entries in the top 5. Second, over the
+    working messages, the top 5 with that entry alone differs from the top 5 with no vocabulary for at most a
+    `harm_max` share of them. A failing entry is set `status: off` in vocabulary.md when `write`, unless ezexe
+    wrote it: ezexe's entry is listed and left as it is."""
     if idx is None:
         idx, _ = st.ensure_index(p4)
     vocab = list(idx.get("vocab", []))
@@ -834,8 +871,8 @@ def dictionary_check(p4, idx=None, write=True, harm_max=0.05):
 
 
 def set_status_off(p4, lines):
-    """Turn the entries opening at these lines `status: off`, editing only their status line: every other byte of
-    vocabulary.md (ezexe's edits) stays as it was."""
+    """Turn the entries opening at these lines `status: off`, editing only their status line, or adding one where an
+    entry has none: every other byte of vocabulary.md stays as it was, ezexe's edits among them."""
     path = os.path.join(st.store_dir(p4), st.VOCABULARY)
     text = st.read_text(path)
     ls = text.split("\n")
@@ -855,19 +892,20 @@ def set_status_off(p4, lines):
     ranker.write_atomic(path, "\n".join(ls))
 
 
-# --- the command line ------------------------------------------------------------------------------------
+# --- p4.py train and eval --------------------------------------------------------------------------------
 
 def fmt(ev):
     if not ev:
-        return "no held-out numbers (fewer than 3 labelled tasks)"
-    s = (f"r-precision {ev['r-precision']:.3f} (word overlap {ev['baseline']:.3f}), recall@20 {ev['recall@20']:.3f}, "
+        return "no held-out numbers: fewer than 3 labelled tasks"
+    s = (f"r-precision {ev['r-precision']:.3f}, BM25 baseline {ev['baseline']:.3f}, recall@20 {ev['recall@20']:.3f}, "
          f"precision at threshold {ev['precision']:.3f}, over {ev['n']} tasks" +
-         (f" ({ev['missed']} with no labelled entry drawn)" if ev["missed"] else ""))
+         (f" and {ev['missed']} with no labelled entry drawn" if ev["missed"] else ""))
     for k in ("pool", "history", "repo"):
         if k in ev:
-            s += f"; {k} subset r-precision {ev[k]['r-precision']:.3f}, top-5 hit {ev[k]['top5']:.2f} (n {ev[k]['n']})"
+            s += (f"; {k} subset r-precision {ev[k]['r-precision']:.3f}, top-5 hit {ev[k]['top5']:.2f} over "
+                  f"{ev[k]['n']} tasks")
     if ev.get("silent"):
-        s += f"; {ev['silent']['n']} silence tasks" + (f", {ev['silent']['loud']:.0%} printed for (fitted)"
+        s += f"; {ev['silent']['n']} silence tasks" + (f", the fitted model printing for {ev['silent']['loud']:.0%}"
                                                        if "loud" in ev["silent"] else "")
     return s
 
@@ -877,11 +915,11 @@ def cmd_train(args):
     if getattr(args, "if_owed", False):
         ok, why = owed(p4)
         if not ok:
-            print(f"train: not owed ({why})")
+            print(f"train: not owed: {why}")
             return 0
     row = run_round(p4, write=True, now=args.now or None,
                     sources=set(args.sources.split(",")) if args.sources else None)
-    print(f"train: round {row['round']} {row['promoted']} ({row['why']}); {fmt(row['eval'])}; "
+    print(f"train: round {row['round']} {row['promoted']}: {row['why']}; {fmt(row['eval'])}; "
           f"short {row['short']}; dictionary {row['dictionary']}; {row['seconds']} s")
     return 0
 
@@ -889,7 +927,7 @@ def cmd_train(args):
 def cmd_eval(args):
     row = run_round(args.p4, write=False, now=args.now or None,
                     sources=set(args.sources.split(",")) if args.sources else None, dictionary=not args.no_dictionary)
-    print(f"eval: {fmt(row['eval'])}; short {row['short']}; would be {row['promoted']} ({row['why']})")
+    print(f"eval: {fmt(row['eval'])}; short {row['short']}; would be {row['promoted']}: {row['why']}")
     if row.get("compare"):
         print(f"eval: {fmt_compare(row['compare'])}")
     if args.json:
