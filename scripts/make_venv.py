@@ -18,8 +18,9 @@ is not checked. To get torch on such a Mac, build .venv from a Python 3.12: remo
 `python3.12 scripts/make_venv.py`.
 
 It stops before it makes or tops up .venv when the Python that runs ezexe/phi there, .venv's own or else the one
-running this script, is older than the requires-python of the ezexe/phi checkout it installs, and an ezexe/phi from
-GitHub, whose pyproject.toml is not at hand, is held to PHI_PYTHON.
+running this script, is older than the requires-python in the pyproject.toml of the ezexe/phi it installs: the
+checkout's own, or for an ezexe/phi from GitHub the one on GitHub, read before the install, with PHI_PYTHON in its
+place when GitHub cannot be reached.
 
 The plugins' hooks never need .venv: they run on the system python3, standard library only. This script uses the
 standard library only too, so it runs before .venv exists.
@@ -31,6 +32,7 @@ import platform
 import re
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,7 +42,8 @@ PHI_GIT = "git+https://github.com/ezexe/phi"
 TORCH_CPU = "https://download.pytorch.org/whl/cpu"
 CHECK = ("torch", "numpy", "phi_prune", "phi_rank", "phi_store", "phi_model", "anthropic")
 NEED_TORCH = ("torch", "phi_prune", "phi_rank")     # what cannot import on a machine with no torch build
-PHI_PYTHON = (3, 10, 0)     # ezexe/phi's requires-python, for an ezexe/phi from GitHub
+PHI_PYPROJECT = "https://raw.githubusercontent.com/ezexe/phi/HEAD/pyproject.toml"     # of what PHI_GIT installs
+PHI_PYTHON = (3, 11, 0)     # ezexe/phi's requires-python, in its place when GitHub cannot be reached
 LOWER = re.compile(r"(>=|~=|==|>)\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?")     # a version specifier that sets a lower bound
 
 
@@ -75,13 +78,23 @@ def phi_source(given):
     return PHI_GIT, False
 
 
+def github_pyproject():
+    """The pyproject.toml of the ezexe/phi on GitHub, which PHI_GIT installs, or None when it cannot be read."""
+    try:
+        with urllib.request.urlopen(PHI_PYPROJECT, timeout=10) as r:
+            return r.read().decode("utf-8")
+    except (OSError, ValueError):
+        return None
+
+
 def python_floor(src, editable):
     """The oldest Python ezexe/phi installs on, as major, minor and micro: the highest lower bound in the
-    requires-python of a checkout's pyproject.toml, None when the checkout sets none, and PHI_PYTHON for GitHub."""
-    if not editable:
+    requires-python of its pyproject.toml, the checkout's or else the one on GitHub, None when that file sets none,
+    and PHI_PYTHON when GitHub cannot be read."""
+    text = (Path(src) / "pyproject.toml").read_text(encoding="utf-8") if editable else github_pyproject()
+    if text is None:
         return PHI_PYTHON
-    m = re.search(r"""(?m)^\s*requires-python\s*=\s*(["'])(.*?)\1""",
-                  (Path(src) / "pyproject.toml").read_text(encoding="utf-8"))
+    m = re.search(r"""(?m)^\s*requires-python\s*=\s*(["'])(.*?)\1""", text)
     bounds = []
     for op, *parts in LOWER.findall(m.group(2) if m else ""):
         v = tuple(int(x or 0) for x in parts)

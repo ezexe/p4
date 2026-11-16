@@ -99,12 +99,13 @@ class Venv(unittest.TestCase):
     def faked(self, version, venv=None):
         """main runs on Python `version` with every process faked; with `venv`, .venv exists and its interpreter
         reports that version. Returns the commands main would have run."""
-        calls, real = [], (v.run, v.missing, v.subprocess, v.sys)
+        calls, real = [], (v.run, v.missing, v.subprocess, v.sys, getattr(v, "github_pyproject", None))
 
         def restore():
-            v.run, v.missing, v.subprocess, v.sys = real
+            v.run, v.missing, v.subprocess, v.sys, v.github_pyproject = real
         self.addCleanup(restore)
         v.run, v.missing = (lambda *cmd: calls.append(cmd) or 0), (lambda py: [])
+        v.github_pyproject = lambda: None
         answer = " ".join(map(str, venv)) if venv else ""
         v.subprocess = types.SimpleNamespace(run=lambda *a, **k: types.SimpleNamespace(stdout=answer))
         v.sys = types.SimpleNamespace(version_info=version, version=".".join(map(str, version)),
@@ -128,11 +129,19 @@ class Venv(unittest.TestCase):
         self.assertEqual(v.main([]), 0)
         self.assertIn("venv", [str(c) for c in calls[0]], "the venv was made")
 
-    def test_ezexe_phi_from_github_is_held_to_its_known_floor(self):
-        calls = self.faked((3, 9, 18))
+    def test_ezexe_phi_from_github_is_held_to_the_floor_on_github(self):
+        calls = self.faked((3, 11, 9))
+        v.github_pyproject = lambda: '[project]\nname = "phi-prune"\nrequires-python = ">=3.12"\n'
         with self.assertRaises(SystemExit) as stop:
             v.main([])
-        self.assertIn("ezexe/phi needs Python 3.10 or newer", str(stop.exception))
+        self.assertIn("ezexe/phi needs Python 3.12 or newer, and this is Python 3.11.9", str(stop.exception))
+        self.assertEqual(calls, [])
+
+    def test_ezexe_phi_from_github_out_of_reach_is_held_to_its_known_floor(self):
+        calls = self.faked((3, 10, 14))
+        with self.assertRaises(SystemExit) as stop:
+            v.main([])
+        self.assertIn("ezexe/phi needs Python 3.11 or newer, and this is Python 3.10.14", str(stop.exception))
         self.assertEqual(calls, [])
 
     def test_a_checkout_that_sets_no_floor_takes_any_python(self):
@@ -181,7 +190,12 @@ class Venv(unittest.TestCase):
             self.assertEqual(v.python_floor(self.requires(line), True), floor, line)
             (self.tmp / "phi" / "pyproject.toml").unlink()
             (self.tmp / "phi").rmdir()
+        real = getattr(v, "github_pyproject", None)
+        self.addCleanup(setattr, v, "github_pyproject", real)
+        v.github_pyproject = lambda: None
         self.assertEqual(v.python_floor(v.PHI_GIT, False), v.PHI_PYTHON)
+        v.github_pyproject = lambda: 'requires-python = ">=3.12"'
+        self.assertEqual(v.python_floor(v.PHI_GIT, False), (3, 12, 0))
 
     def test_a_named_path_that_is_not_phi_stops_with_a_checkout_beside(self):
         """--phi names the checkout to install, so a named folder that is no ezexe/phi checkout stops before anything
