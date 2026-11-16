@@ -7,6 +7,7 @@ is given: the SessionStart output equals what Claude Code loads from a memory fo
 most one notice line, and the pointer has no imperative sentence but the one that says where to write. Run from
 anywhere: python3 hooks/test_p4_memory.py, and exit 0 is green."""
 
+import atexit
 import json
 import os
 import re
@@ -24,8 +25,22 @@ BUILTIN_BYTES = 25_000      # that a change there fails here
 STDOUT_CHARS = 10_000       # a hook's plain stdout past this reaches the session as a 2,000-character preview
 
 
+SWITCHES = ("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "CLAUDE_CODE_DISABLE_CLAUDE_MDS", "CLAUDE_CODE_PROJECT_DIR_NAME")
+CONFIG = tempfile.mkdtemp(prefix="p4-temportal-memory-config-")
+atexit.register(shutil.rmtree, CONFIG, True)
+
+
+def clean_env(**kw):
+    """The environment without ezexe's auto memory switches, and with a config dir of the test's own, so neither the
+    real settings nor the real environment decide a result."""
+    env = {k: v for k, v in os.environ.items() if k not in SWITCHES}
+    env["CLAUDE_CONFIG_DIR"] = CONFIG
+    env.update(kw)
+    return env
+
+
 def run(sub, root, app, payload):
-    env = dict(os.environ, CLAUDE_PROJECT_DIR=root, P4_MEMORY_APPDATA=app)
+    env = clean_env(CLAUDE_PROJECT_DIR=root, P4_MEMORY_APPDATA=app)
     r = subprocess.run([sys.executable, "-I", HOOK, sub], input=json.dumps(payload).encode("utf-8"), env=env,
                        capture_output=True, timeout=90)
     assert r.returncode == 0, r
@@ -34,7 +49,7 @@ def run(sub, root, app, payload):
 
 def run_raw(sub, root, app):
     """The SessionStart output unstripped, as Claude Code receives it."""
-    env = dict(os.environ, CLAUDE_PROJECT_DIR=root, P4_MEMORY_APPDATA=app)
+    env = clean_env(CLAUDE_PROJECT_DIR=root, P4_MEMORY_APPDATA=app)
     r = subprocess.run([sys.executable, "-I", HOOK, sub], input=b"{}", env=env, capture_output=True, timeout=90)
     return r.stdout.decode("utf-8", "replace")
 
@@ -173,7 +188,7 @@ def behavior():
     # the runner exits 0 on an unknown subcommand and on a missing script
     sh = shutil.which("sh")
     if sh:
-        env = dict(os.environ, CLAUDE_PLUGIN_ROOT=os.path.dirname(HERE), CLAUDE_PROJECT_DIR=root3,
+        env = clean_env(CLAUDE_PLUGIN_ROOT=os.path.dirname(HERE), CLAUDE_PROJECT_DIR=root3,
                    P4_MEMORY_APPDATA=app3)
         assert subprocess.run([sh, RUNNER, "memory", "nope"], input=b"{}", env=env, capture_output=True).returncode == 0
         env["CLAUDE_PLUGIN_ROOT"] = base
@@ -321,6 +336,10 @@ def repo_key():
         os.environ["CLAUDE_CODE_PROJECT_DIR_NAME"] = "named"
         got = p4_memory.appdata_memory({}, wt)
         assert os.path.normpath(got) == os.path.join(config, "projects", "named", "memory"), got
+        del os.environ["CLAUDE_CONFIG_DIR"]             # without it Claude Code ignores the name
+        got = p4_memory.appdata_memory({}, wt)
+        assert os.path.basename(os.path.dirname(got)) == p4_memory.project_slug(main_), f"the name was used: {got}"
+        os.environ["CLAUDE_CONFIG_DIR"] = config
         del os.environ["CLAUDE_CODE_PROJECT_DIR_NAME"]
         put(os.path.join(wt, ".claude", "settings.local.json"), json.dumps({"autoMemoryDirectory": "~/moved"}))
         got = p4_memory.appdata_memory({}, wt)
@@ -357,7 +376,45 @@ def repo_key():
     print("test_p4_memory.py: repository key green")
 
 
+def switched_off():
+    """With autoMemoryEnabled false, CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 or CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 the memory
+    part writes no pointer, moves nothing and prints no index; CLAUDE_CODE_DISABLE_AUTO_MEMORY=0 turns it on over
+    the setting."""
+    base = tempfile.mkdtemp(prefix="p4-temportal-memory-off-")
+    try:
+        for how in ("env", "mds", "settings", "forced on"):
+            root, app = os.path.join(base, how, "proj"), os.path.join(base, how, "appdata", "memory")
+            put(os.path.join(app, "a.md"), "fact a\n")
+            put(os.path.join(root, ".claude", "p4", "temportal", "memory", "MEMORY.md"), "- [a](a.md) — a\n")
+            env = clean_env(CLAUDE_PROJECT_DIR=root, P4_MEMORY_APPDATA=app)
+            if how == "env":
+                env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "True"
+            elif how == "mds":
+                env["CLAUDE_CODE_DISABLE_CLAUDE_MDS"] = "YES"
+            else:
+                put(os.path.join(root, ".claude", "settings.local.json"), json.dumps({"autoMemoryEnabled": False}))
+            if how == "forced on":
+                env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "off"
+            for sub in ("migrate", "sweep"):
+                r = subprocess.run([sys.executable, "-I", HOOK, sub], input=b"{}", env=env, capture_output=True,
+                                   timeout=90)
+                out = r.stdout.decode("utf-8", "replace")
+                assert r.returncode == 0, r
+                if how == "forced on" and sub == "migrate":
+                    assert "- [a]" in out, f"{how}: the index was not printed\n{out}"
+                elif how != "forced on":
+                    assert "- [a]" not in out, f"{how} {sub}: the index was printed\n{out}"
+            if how == "forced on":
+                assert only_pointer(app), f"{how}: the auto memory directory was not migrated: {os.listdir(app)}"
+            else:
+                assert os.listdir(app) == ["a.md"], f"{how}: the auto memory directory was touched: {os.listdir(app)}"
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+    print("test_p4_memory.py: switched off green")
+
+
 def main():
+    switched_off()
     repo_key()
     crlf_cut()
     behavior()

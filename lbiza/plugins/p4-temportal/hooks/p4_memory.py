@@ -62,10 +62,10 @@ def configure(payload):
 
 
 def layout(payload):
-    """Files in an earlier place of the store's layout are moved into each plugin's folder first."""
+    """Files in an earlier place of the store's layout are moved into each plugin's folder first. -> the line saying
+    so, which cmd_migrate prints first and counts in its STDOUT_CHARS."""
     lines = p4conf.migrate_layout(os.path.join(project_root(payload), ".claude", "p4"))
-    if lines:
-        print("p4-temportal: " + "; ".join(lines) + ".")
+    return ("p4-temportal: " + "; ".join(lines) + ".\n") if lines else ""
 
 
 def project_root(payload):
@@ -122,6 +122,25 @@ def not_main_checkout(root, app, mem):
     return norm(repo_root(root)) != norm(root) and norm(app) != norm(mem)
 
 
+def auto_memory_off(root):
+    """Auto memory is off by CLAUDE_CODE_DISABLE_AUTO_MEMORY=1, CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 or
+    `autoMemoryEnabled: false`, and CLAUDE_CODE_DISABLE_AUTO_MEMORY=0 forces it on over the setting, as the env-vars
+    page and the settings reference, key autoMemoryEnabled, of https://code.claude.com/docs say."""
+    if switch("CLAUDE_CODE_DISABLE_CLAUDE_MDS") is True:
+        return True
+    env = switch("CLAUDE_CODE_DISABLE_AUTO_MEMORY")
+    if env is not None:
+        return env
+    return setting(root, "autoMemoryEnabled") is False
+
+
+def switch(name):
+    """An on/off variable as the env-vars page reads it: 1, true, yes or on, and 0, false, no or off, in any casing;
+    None when unset or anything else."""
+    v = os.environ.get(name, "").strip().lower()
+    return True if v in ("1", "true", "yes", "on") else False if v in ("0", "false", "no", "off") else None
+
+
 def appdata_memory(payload, root):
     """The auto memory directory as https://code.claude.com/docs/en/memory sets it: `autoMemoryDirectory` when it is
     an absolute or `~/` path, else `<config>/projects/<project>/memory`, where <project> is
@@ -133,7 +152,8 @@ def appdata_memory(payload, root):
     if isinstance(moved, str) and (moved.startswith("~/") or os.path.isabs(moved)):
         return os.path.normpath(os.path.expanduser(moved))
     home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-    name = os.environ.get("CLAUDE_CODE_PROJECT_DIR_NAME") or project_slug(repo_root(root))
+    named = os.environ.get("CLAUDE_CODE_PROJECT_DIR_NAME") if os.environ.get("CLAUDE_CONFIG_DIR") else None
+    name = named or project_slug(repo_root(root))      # the env-vars page: ignored without CLAUDE_CONFIG_DIR
     return os.path.join(home, "projects", name, MEMORY)
 
 
@@ -320,12 +340,12 @@ def notice(parts):
     return ("p4-temportal: " + "; ".join(parts) + ".") if parts else ""
 
 
-def cmd_migrate(payload):
+def cmd_migrate(payload, first=""):
     root = project_root(payload)
     app, mem = appdata_memory(payload, root), p4_memory(root)
     parts = [] if not_main_checkout(root, app, mem) else migrate(app, mem, time.strftime("%Y%m%d-%H%M%S"))[0]
     out = notice(parts)
-    head = out + "\n" if out else ""
+    head = first + (out + "\n" if out else "")
     kept, total = builtin_index(mem)    # Claude Code loaded only the pointer: print what it would have loaded
     path = os.path.normpath(os.path.join(mem, "MEMORY.md"))
 
@@ -423,9 +443,10 @@ def main():
     payload = payload_from_stdin()
     try:
         configure(payload)
+        if sub in ("migrate", "mirror", "sweep") and auto_memory_off(project_root(payload)):
+            return 0                    # auto memory is off: no pointer, no move, no index
         if sub == "migrate":
-            layout(payload)
-            return cmd_migrate(payload)
+            return cmd_migrate(payload, layout(payload))
         if sub == "mirror":
             return cmd_mirror(payload)
         if sub == "sweep":
