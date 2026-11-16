@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 os.environ["P4_PHI"] = "0"          # phi.py's routed checks stay out of these tests: they touch no live store
 
@@ -188,6 +189,18 @@ class Layout(Base):
         run_hook("layout", {"source": "startup", "cwd": self.proj}, self.proj)
         for f in ("p4_sync.py", "p4_defaults.json", os.path.join("workflows", "p4-sync.yml")):
             self.assertTrue(os.path.exists(os.path.join(self.p4, ".github", f)), f)
+
+    def test_a_served_record_older_than_a_day_is_swept(self):
+        """A served record is removed at the Stop or SubagentStop that reads it, and one whose session never got
+        there, as a session ended by a crash, is swept by the next layout hook once it is a day old."""
+        old, fresh = lb.served_path(self.p4, "turn-dead0000"), lb.served_path(self.p4, "turn-live0000")
+        for p in (old, fresh):
+            write(p, '{"ids": []}')
+        t = time.time() - 2 * 86400
+        os.utime(old, (t, t))
+        run_hook("layout", {"source": "startup", "cwd": self.proj}, self.proj)
+        self.assertFalse(os.path.exists(old), "two days old: swept")
+        self.assertTrue(os.path.exists(fresh), "fresh: a live session's record stays")
 
     def gitignore(self, text=None):
         gi = os.path.join(self.p4, ".gitignore")

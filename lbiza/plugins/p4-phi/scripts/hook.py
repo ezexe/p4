@@ -308,9 +308,34 @@ def pinned_block(p4):
     return out if out.count("\n") else ""
 
 
+SERVED_MAX_S = 86400            # a served record no Stop or SubagentStop took: swept at a layout hook once this old
+
+
+def sweep_served(p4, now_s=None):
+    """Remove the served records older than SERVED_MAX_S: a Stop or a SubagentStop removes the one it reads, and one
+    whose session never got there, as one a crash ended, is left; returns how many went."""
+    d = p4conf.sub(p4, "models", "served")
+    cut = (now_s or time.time()) - SERVED_MAX_S
+    n = 0
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return 0
+    for name in names:
+        p = os.path.join(d, name)
+        try:
+            if name.endswith(".json") and os.path.getmtime(p) < cut:
+                os.remove(p)
+                n += 1
+        except OSError:
+            pass
+    return n
+
+
 def h_layout(payload):
     project = project_of(payload)
     p4 = init_layout(project)
+    sweep_served(p4)
     if payload.get("source") == "compact" and payload.get("session_id"):
         try:                    # view.py: the compaction marked where it happened, not guessed from the transcript
             import view
