@@ -148,16 +148,19 @@ class Newer(Base):
         self.assertNotIn("firmware is 3.9", sec, "a fact older than the cutoff is not in the newer section")
         self.assertNotIn("firmware is 5.0", item["user"], "a fact dated after the task is not sent")
         self.assertTrue(any(h.startswith("n") for h in item["handles"]))
-        # a later cutoff leaves it out. The cutoff comes from --cutoff, p4.json's recall.teacher.cutoff or the
-        # table; this store has no p4.json, so p4conf.load reads the retired models/config.json in its place.
+        # a later cutoff leaves it out. The cutoff comes from --cutoff, p4.json's recall.teacher.cutoff for the
+        # teacher p4.json names, or the table
         item2 = te.build_item(ctx, tid, "2026-10")
         sec2 = item2["user"].split("Entries newer than your training cutoff")[1].split("Candidates")[0]
         self.assertNotIn("firmware is 4.2", sec2)
         self.assertEqual(te.cutoff_of("claude-opus-5-5"), "2026-06")
         self.assertEqual(te.cutoff_of("claude-fable-5-1"), "2026-06", "an unknown cutoff is the oldest known one")
-        write(lb.mpath(self.p4, "config.json"), json.dumps({"teacher-model": "claude-fable-5-1",
-                                                            "teacher-cutoff": "2026-08"}))
-        self.assertEqual(te.cutoff_of("claude-fable-5-1", self.p4), "2026-08")
+        conf = p4conf.load(self.p4)
+        conf["recall"]["teacher"].update({"model": "claude-opus-5-5", "cutoff": "2026-08"})
+        p4conf._write(self.p4, conf)
+        self.assertEqual(te.teacher_of(self.p4), "claude-opus-5-5", "p4.json's teacher, not the default")
+        self.assertEqual(te.cutoff_of("claude-opus-5-5", self.p4), "2026-08", "p4.json's cutoff, not the table's")
+        self.assertEqual(te.cutoff_of("claude-fable-5-1", self.p4), "2026-06", "another model keeps its own cutoff")
         self.assertEqual(te.cutoff_of("claude-fable-5-1", self.p4, "2026-03"), "2026-03")
         self.assertIn("around 2026-08", te.edit_system(te.cutoff_of(te.teacher_of(self.p4), self.p4)))
 
