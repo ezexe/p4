@@ -5,9 +5,9 @@ Run: python3 test_store.py
 
 It is a stdlib unittest file, and pytest collects it too.
 
-FIXTURES is the folder P4_FIXTURES names, or a default path without it. The real-store test runs only when FIXTURES
-holds a clone of the store ap-p4_mac with its `sessions` folder, and is skipped wherever that clone is missing.
-Every other test builds its own small store in a temp directory. fixture, make_store and write serve the tests of
+FIXTURES is the folder P4_FIXTURES names, or a default path without it. Every test builds its own small store in a
+temp directory; the case on the ap-p4_mac store's six rulings lives in the experiments repository ezexe/p4-phi, at
+experiments/p4-suite/test_store.py. fixture, make_store and write serve the tests of
 test_query.py, test_labels.py, test_train.py, test_hooks.py, test_migrate.py and test_teacher.py too.
 """
 
@@ -280,21 +280,6 @@ class IndexStaleness(unittest.TestCase):
             after = {x["id"] for x in st.build_index(p4)["docs"]}
             self.assertEqual(before - after, set())
             self.assertEqual(len(after - before), 1)
-
-
-@unittest.skipUnless(fixture("ap-p4_mac"), "the ap-p4_mac clone is not on this machine")
-class RealFinding17(unittest.TestCase):
-    def test_six_rulings_live_after_migration(self):
-        import migrate
-        with tempfile.TemporaryDirectory() as d:
-            out = os.path.join(d, "p4")
-            migrate.run(fixture("ap-p4_mac"), out, apply=True, now=NOW, report_path=os.path.join(d, "r.md"))
-            files = st.load_store(out)
-            ms = st.masks(files["retractions.md"])
-            masked = [e for e in files["rules.md"]
-                      if st.status_of("rules.md", e.value, e.fields, ms, rule="old")[0] == "FREED"]
-            self.assertEqual(len(masked), 6)
-            self.assertEqual([e.state for e in masked], ["LIVE"] * 6)
 
 
 if __name__ == "__main__":
