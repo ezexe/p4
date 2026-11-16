@@ -57,15 +57,26 @@ SEARCH_KEEP = 3
 SEARCH_MIN_SCORE = 0.18                # measured: the true matches scored 0.195 to 0.198, the best false one 0.143
 MARKER = ".skillex"                   # in a copy under .claude/skills/: the store folder it was copied from
 COPY_IGNORE = ".gitignore"            # in a copy under .claude/skills/: `*`, so git never tracks the copy
-# What a secret looks like in a script: a private key, a known token's shape, or a quoted value given to a name that
-# says key, token, secret or password. A script that holds one brews no skill, so it is never copied anywhere.
+# What a secret looks like in a script: a private key, a known token's shape, a bearer token, a password in a URL,
+# or a value given to a name that says key, token, secret or password. A script that holds one brews no skill, so it
+# is never copied anywhere.
 SECRETS = [re.compile(p) for p in (
     r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
-    r"\b(?:sk-(?:ant-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}"
-    r"|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|glpat-[A-Za-z0-9_-]{20,})",
-    r"(?i)\b[\w-]*(?:password|passwd|secret|token|api[_-]?key|access[_-]?key)[\w-]*\b[\"']?\s*[:=]\s*"
-    r"[\"'][^\"'\s]{8,}[\"']",
+    r"\b(?:sk-(?:ant-)?[A-Za-z0-9_-]{20,}|[sr]k_(?:live|test)_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{30,}"
+    r"|github_pat_[A-Za-z0-9_]{30,}|xox[abprs]-[A-Za-z0-9-]{10,}|(?:AKIA|ASIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}"
+    r"|glpat-[A-Za-z0-9_-]{20,}|hf_[A-Za-z0-9]{30,}|npm_[A-Za-z0-9]{36}|ya29\.[\w-]{20,}"
+    r"|eyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]{10,})",
+    r"hooks\.slack\.com/services/[\w/]+|discord(?:app)?\.com/api/webhooks/\d+/[\w-]+",
+    r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{20,}",
+    r"://[^/\s:@'\"]+:[^/\s@'\"]{3,}@",
 )]
+# A value given to such a name: quoted, or bare as a shell script writes it, after `=` or `:`, a `]` allowed before.
+SECRET_NAME = re.compile(r"(?i)\b[\w-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key)[\w-]*"
+                         r"\b[\"']?\]?\s*[:=]\s*(?:\"([^\"\n]{8,})\"|'([^'\n]{8,})'|([^\s\"'#;,)]{8,}))")
+# A quoted value that is no secret: an address, a reference to a variable, a plain word or a constant's name. A bare
+# value counts only when it looks random, letters and digits both, with no dot, bracket or call that code would hold.
+NOT_SECRET = re.compile(r"^(?:https?://\S*|\$\{?\w+\}?|[A-Za-z_-]+|[A-Z0-9_]+)$")
+BARE_SECRET = re.compile(r"(?=[^\s]*\d)(?=[^\s]*[A-Za-z])[A-Za-z0-9+/=_-]{8,}")
 STATE = ".state"                      # in the store folder: the index of compared scripts and each session's last look
 NOTEBOOK = "scratchpad"               # temportal's notebook, compared as one more session
 BREWED = " Brewed by p4-skillex from scripts written in "   # how a written skill's description ends
@@ -207,7 +218,13 @@ def holds_secret(path):
             text = f.read(MAX_BYTES)
     except OSError:
         return True
-    return any(rx.search(text) for rx in SECRETS)
+    if any(rx.search(text) for rx in SECRETS):
+        return True
+    for m in SECRET_NAME.finditer(text):
+        quoted = m.group(1) or m.group(2)
+        if quoted and not NOT_SECRET.match(quoted) or not quoted and BARE_SECRET.fullmatch(m.group(3)):
+            return True
+    return False
 
 
 def jaccard(a, b):

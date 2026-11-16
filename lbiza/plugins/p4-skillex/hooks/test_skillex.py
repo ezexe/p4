@@ -212,6 +212,20 @@ class Watcher(Store):
         self.assertEqual(self.skills(), [])
         self.assertFalse(skillex.holds_secret(self.script("s3", "astcheck.py", "astcheck", 'tokens=None, mode="fast"')))
 
+    def test_the_shapes_of_a_secret_and_the_code_that_only_names_one(self):
+        flagged = ["export API_KEY=abc123def456ghi", 'curl -H "Authorization: Bearer abcdefghij0123456789klmn" x',
+                   'cfg["password"] = "hunter2hunter2"', "STRIPE = 'sk_live_abcdefgh12345678'",
+                   "t = 'eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.SflKxwRJSMeKKF2QT4'",
+                   "url = 'postgres://admin:s3cretpw@db.local/x'", "HF = 'hf_abcdefghijklmnopqrstuvwxyz0123'",
+                   "hook = 'https://hooks.slack.com/services/T000/B000/XXXX'", "aws = 'ASIAABCDEFGHIJKLMNOP'"]
+        spared = ['token_url = "https://x/oauth/token"', 'password_field = "password"', 'SECRET_NAME = "prod-db-creds"',
+                  "token = parts[0]", "tokens = list(tokenize.generate_tokens(io.StringIO(src).readline))",
+                  'author = "someone12"', "api_key = os.environ['API_KEY']", 'TOKEN_ENV = "GITHUB_TOKEN"',
+                  'secret = "${SECRET}"', "password_hash = hashlib.sha256(pw).hexdigest()"]
+        for i, line in enumerate(flagged + spared):
+            p = put(os.path.join(self.root, f"probe{i}.py"), line + "\n")
+            self.assertEqual(skillex.holds_secret(p), line in flagged, line)
+
     def test_a_file_outside_temportal_is_never_looked_at(self):
         self.script("s1", "astcheck.py", "astcheck", "a=1")
         self.script("s2", "astcheck.py", "astcheck", "b=2")
