@@ -154,7 +154,7 @@ class Query(unittest.TestCase):
         self.assertIn(target, used["ids"])
         hidden = cli.query(self.p4, q, None, "2026-11-01 10:00", idx=self.idx, model={}, node_ids={target},
                            hide={target})
-        self.assertNotIn(target, hidden["ids"], "a hidden entry never prints")
+        self.assertNotIn(target, hidden["ids"], "a hidden document never prints")
 
 
 if __name__ == "__main__":
