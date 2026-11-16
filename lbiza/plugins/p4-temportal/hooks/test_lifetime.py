@@ -123,6 +123,34 @@ class Lifetime(unittest.TestCase):
         if git:
             self.assertIn("D\tphi/.layout-conflicts/store/facts.md", g("diff", "--cached", "--name-status"))
 
+    def test_the_sweep_stages_only_the_removals_it_made(self):
+        """After a retention sweep in a store that is its own git repository, the deletion of each file it cleared is
+        staged, and a pending change to a memory file or to a session scratchpad directory stays unstaged."""
+        git = shutil.which("git")
+        if not git:
+            self.skipTest("no git")
+        g = lambda *a: subprocess.run([git, "-C", self.p4, *a], capture_output=True, text=True, check=True).stdout
+        mem = put(os.path.join(self.t, "memory", "a.md"), "a\n")
+        pad = put(os.path.join(self.t, "tmp", "s1", "n.md"), "n\n")
+        page = put(os.path.join(self.t, "scratchpad", "page.html"))
+        probe = put(os.path.join(self.t, "scratchpad", "probe", "out.txt"))
+        put(os.path.join(self.p4, "phi", ".layout-conflicts", "store", "facts.md"), age_days=31)
+        g("init", "-q")
+        g("add", "-A")
+        g("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "store")
+        put(mem, "a\nan edit not yet committed\n")
+        put(pad, "n\nanother session's line\n")
+        now = time.time()
+        lifetime.set_cookie(self.p4, page, "1h", now=now)
+        lifetime.set_cookie(self.p4, os.path.dirname(probe), "1h", now=now)
+        lifetime.sweep(self.p4, now=now + 2 * 3600)
+        staged = g("diff", "--cached", "--name-status").splitlines()
+        print(f"staged after the sweep: {len(staged)}, of them changes it did not make: "
+              f"{sum(not s.startswith('D') for s in staged)}")
+        self.assertEqual(staged, ["D\tphi/.layout-conflicts/store/facts.md", "D\ttemportal/scratchpad/page.html",
+                                  "D\ttemportal/scratchpad/probe/out.txt"])
+        self.assertEqual(g("diff", "--name-only").split(), ["temportal/memory/a.md", "temportal/tmp/s1/n.md"])
+
     def test_a_cookie_expires(self):
         page = put(os.path.join(self.t, "scratchpad", "page.html"))
         keep = put(os.path.join(self.t, "scratchpad", "keep.md"))

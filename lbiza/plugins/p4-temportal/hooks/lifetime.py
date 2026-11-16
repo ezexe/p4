@@ -12,7 +12,8 @@ in it, and on scratchpad/, src/ or expires.json themselves: a session scratchpad
 it is removed, and the others are never cleared whole.
 
 A file the store's git tracks is removed with its removal staged, so its last version stays in the history, and an
-ignored or untracked file is deleted.
+ignored or untracked file is deleted. The retention sweep stages those removals and no other change, so an edit
+pending elsewhere in the store stays unstaged.
 
   sweep                    the retention sweep at SessionStart: clears what has expired and prints one line when it
                            cleared something. Before it, as every hook of a start does, it moves files left in an
@@ -237,9 +238,10 @@ def _prune_empty(d, keep):
             pass
 
 
-def sweep_cache(p4, now=None):
+def sweep_cache(p4, now=None, removed=None):
     """Clear by each cache rule in the folder its key resolves to under temportal/, and by the rule of
-    .layout-conflicts in each other plugin's folder of that name too -> [(folder from temportal/, files cleared)]."""
+    .layout-conflicts in each other plugin's folder of that name too -> [(folder from temportal/, files cleared)].
+    Each file removed is added to `removed` when it is a list."""
     now = time.time() if now is None else now
     out = []
     for key, rule in sorted(rules(p4).items()):
@@ -249,24 +251,26 @@ def sweep_cache(p4, now=None):
         names = [rel] + ([f"../{plugin}/{rel}" for plugin in ASIDE] if rel == p4conf.LAYOUT_CONFLICTS else [])
         for name in names:
             gone = _clear(os.path.normpath(os.path.join(home(p4), *name.split("/"))), rule, now)
+            if removed is not None:
+                removed.extend(gone)
             if gone:
-                out.append((name, gone))
+                out.append((name, len(gone)))
     return out
 
 
 def _clear(d, rule, now):
-    """Clear the folder `d` by one cache rule -> the count of files cleared."""
+    """Clear the folder `d` by one cache rule -> the paths of the files it removed."""
     if not os.path.isdir(d):
-        return 0
+        return []
     files = sorted(_files(d))                           # oldest first
-    gone = 0
+    gone = []
     age = rule.get("max_age_days")
     if age is not None:
         cutoff = now - float(age) * 86400
         keep = []
         for mt, size, p in files:
             if mt < cutoff and not os.path.basename(p) == ".gitignore" and remove(p):
-                gone += 1
+                gone.append(p)
             else:
                 keep.append((mt, size, p))
         files = keep
@@ -278,7 +282,7 @@ def _clear(d, rule, now):
                 break
             if os.path.basename(p) != ".gitignore" and remove(p):
                 total -= size
-                gone += 1
+                gone.append(p)
     _prune_empty(d, d)
     return gone
 
@@ -309,20 +313,36 @@ def sweep_cookies(p4, now=None, ended_session=""):
     return cleared
 
 
+def _stage_removals(p4, paths):
+    """Stage the deletion of each file the store's git tracks that is gone at or under one of `paths`, and nothing
+    else, so a pending change to any other file stays unstaged."""
+    under = [os.path.relpath(p, p4).replace("\\", "/") for p in paths]
+    r = _git(p4, "ls-files", "-z", "--deleted")
+    if not (r and r.returncode == 0):
+        return
+    gone = [f for f in r.stdout.decode("utf-8", "surrogateescape").split("\0")
+            if f and any(f == u or f.startswith(u + "/") for u in under)]
+    if gone:
+        try:
+            subprocess.run(["git", "-C", p4, "--literal-pathspecs", "add", "-u", "--pathspec-from-file=-",
+                            "--pathspec-file-nul"], input="\0".join(gone).encode("utf-8", "surrogateescape"),
+                           capture_output=True, timeout=20)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+
 def sweep(p4, now=None, ended_session=""):
-    """The retention sweep: the cache rules, then the cookies, with a tracked removal staged -> the line to print,
-    or ''."""
+    """The retention sweep: the cache rules, then the cookies, with the removal of each tracked file it cleared
+    staged and no other change -> the line to print, or ''."""
     if not os.path.isdir(home(p4)):
         return ""
-    cache = sweep_cache(p4, now)
+    removed = []
+    cache = sweep_cache(p4, now, removed)
     cookies = sweep_cookies(p4, now, ended_session)
     if not cache and not cookies:
         return ""
     if _own_repo(p4):
-        _git(p4, "add", "-u", "--", "temportal")
-        for rel, _ in cache:
-            if rel.startswith("../"):                   # a command of its own: git refuses a path it never tracked
-                _git(p4, "add", "-u", "--", rel[3:])
+        _stage_removals(p4, removed + [os.path.join(home(p4), *rel.split("/")) for rel in cookies])
     parts = [f"files past the cache rule: {n}, in {rel}/" for rel, n in cache]
     if cookies:
         shown = ", ".join(cookies[:5]) + (f" and {len(cookies) - 5} more" if len(cookies) > 5 else "")
