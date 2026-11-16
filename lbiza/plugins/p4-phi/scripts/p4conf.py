@@ -134,6 +134,10 @@ DEFAULTS = {
 # Sections whose keys are ezexe's to choose: merged over the defaults, never called unknown.
 OPEN = ("temportal.cache",)
 
+# Keys read when a project sets them and never written by default, so a later change to the code's own value reaches
+# every store: kept as set, never called unknown.
+READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.puppeteer_chars")
+
 # Top-level keys no plugin reads: never returned or called unknown, and dropped from p4.json when it is rewritten for
 # another reason.
 RETIRED = ("plans", "version")
@@ -532,7 +536,8 @@ def _merge(base, over, unknown, prefix=""):
     out = copy.deepcopy(base)
     for k, v in over.items():
         if k not in base:
-            unknown.append(prefix + k)
+            if prefix + k not in READ_WHEN_SET:
+                unknown.append(prefix + k)
             out[k] = v                   # kept, so a key a newer plugin copy wrote survives an older copy's rewrite
         elif prefix + k in OPEN and isinstance(base[k], dict) and isinstance(v, dict):
             out[k] = {**base[k], **v}    # keys of ezexe's choosing, such as a cache rule per folder
