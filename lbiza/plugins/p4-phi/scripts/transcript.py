@@ -32,7 +32,6 @@ READ_TOOLS = ("Read", "NotebookRead")
 SHELL_TOOLS = ("Bash", "PowerShell")     # a command's paths are read the same way, whichever shell ran it
 SEARCH_TOOLS = ("Grep", "Glob")
 SKILL_TOOLS = ("Skill",)
-BASH_READ = ("cat", "head", "tail", "less", "more", "wc", "grep", "rg", "sed", "awk", "diff", "bat", "nl", "file")
 WEIGHTS = {"edited": (1, 1.0), "invoked": (1, 0.7), "cited": (1, 0.7), "dropped": (0, 0.3), "unopened": (0, 0.2)}
 COMMAND_RE = re.compile(r"<command-name>\s*/?([\w.:/-]+)\s*</command-name>")
 ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
