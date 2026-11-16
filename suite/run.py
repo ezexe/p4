@@ -19,23 +19,24 @@ What a test file must be for the command to load it:
      no other test file has, and a module that two folders of tests both hold, as p4conf.py, is the same file in
      each, since a worker imports each name once. A worker that holds a module of another folder by the name of one
      in this file's folder, with other contents, fails this file.
-  2. Its tests are unittest.TestCase classes it defines, or functions named test_* that take no argument. A file with
-     neither and an `if __name__ == "__main__":` block runs whole as one test in a process of its own and passes when
-     it exits 0, which costs a process and shares nothing out. Any other file named test_*.py fails the run.
+  2. Its tests are unittest.TestCase classes it defines, or functions named test_* that take no argument, and its
+     `if __name__ == "__main__":` block, when it has one, calls unittest.main. A file whose block runs anything else
+     runs whole as one test in a process of its own and passes when it exits 0, which costs a process and shares
+     nothing out. A file with neither tests nor such a block fails the run.
   3. It needs only the standard library and this repository, on the python that runs the command.
   4. It runs beside any other test file in one worker and in any order. What it sets in os.environ, the working folder
      or sys.path when the command imports it stays for that worker. What a test or a class leaves changed in them, in
      tempfile.tempdir or in the temp folder, the command puts back and names in its report, an import a test makes
      itself included.
-  5. It needs nothing of the caller's: each worker has a temp folder, a home folder and app data folders of its own
-     and empty, the temp folder has no repository above it and is the working folder, and every variable whose name
-     starts with a prefix suite.json lists is removed, so a live test behind a P4_ switch skips and a run spends
-     nothing.
-  6. Each test ends within the timeout suite.json names, or its worker is stopped, the test fails, and another worker
-     takes the tests left.
+  5. It needs nothing of the caller's: each worker has a temp folder, a home folder and app data folders of its own,
+     git reads only the settings the command writes in that home, the temp folder has no repository above it and is
+     the working folder, and every variable whose name starts with a prefix suite.json strips is removed, but for
+     those it keeps, which point a test at fixtures. So a live test behind a P4_ switch skips and a run spends nothing.
+  6. Each test, and the teardowns a worker runs when it ends, end within the timeout suite.json names, or the worker
+     is stopped, the run fails, and another worker takes the tests left. A worker lost in any job fails the run.
 
 Exit status: 0 when every test passed and the run ended within the budget, 1 when a test failed, raised an error or
-timed out or a file could not be loaded, 3 when every test passed and the run took longer than the budget, and 2 for a
+timed out, a file could not be loaded or a worker was lost, 3 when every test passed and the run took longer than the budget, and 2 for a
 bad command line. With a file, folder or test named, the budget is not checked.
 """
 import argparse
@@ -60,25 +61,24 @@ T0 = time.perf_counter()
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFINITION = os.path.join(HERE, "suite.json")
 OK, FAILED, USAGE, OVER_BUDGET = 0, 1, 2, 3
-UNIT = re.compile(r"^(?:import[ \t][^\n]*\bunittest\b|from[ \t]+unittest\b|def[ \t]+test_\w*[ \t]*\()", re.M)
-MAIN = re.compile(r"""^if[ \t]+__name__[ \t]*==[ \t]*["']__main__["'][ \t]*:""", re.M)
 PASSING = ("ok", "skip")
 WORST = {"ok": 0, "skip": 1, "FAIL": 2, "ERROR": 3, "TIMEOUT": 4}
 TSV_RESULT = {"ok": "PASSED", "skip": "SKIPPED", "FAIL": "FAILED", "ERROR": "ERROR", "TIMEOUT": "TIMEOUT"}
 START_S = 60.0          # a worker that has not connected by then is taken as failed to start
-END_S = 60.0            # a worker that has not answered "end" by then is stopped
+GIT_SETTINGS = "[core]\n\tautocrlf = false\n\tlongpaths = true\n[user]\n\tname = suite\n\temail = suite@localhost\n"
 
 
 # --- the suite's definition and its files --------------------------------------------------------------------------
 
 def definition(path=DEFINITION):
-    """The settings the command reads from suite.json: the budget, the workers, the timeout, the file pattern and the
-    prefixes of the variables removed from each worker's environment."""
+    """The settings the command reads from suite.json: the budget, the workers, the timeout, the file pattern, the
+    prefixes of the variables removed from each worker's environment and the variables kept though they match one."""
     with open(path, encoding="utf-8") as f:
         d = json.load(f)
     return {"budget": float(d["budget"]["seconds"]), "workers": int(d["workers"]["count"]),
             "timeout": float(d["timeout"]["seconds"]), "pattern": d["files"]["pattern"],
-            "strip": [str(p) for p in d["environment"]["strip"]]}
+            "strip": [str(p) for p in d["environment"]["strip"]],
+            "keep": [str(k) for k in d["environment"]["keep"]]}
 
 
 def test_files(root, pattern="test_*.py"):
@@ -102,14 +102,22 @@ def test_files(root, pattern="test_*.py"):
 
 
 def kind_of(path):
-    """How the command loads a test file: "unit" for unittest classes or test_ functions, run test by test; "script"
-    for a file with neither and a __main__ block, run whole in a process of its own; "none" for any other file."""
+    """How the command loads a test file, by what it runs as a script. When its `if __name__ == "__main__":` block
+    calls unittest.main, or it has no such block and defines a test, it is "unit", run test by test; when the block runs
+    anything else it is "script", run whole in a process of its own, as it runs by hand; any other file is "none"."""
+    import ast
     with open(path, encoding="utf-8", errors="replace") as f:
-        src = f.read()
-    if UNIT.search(src):
-        return "unit"
-    if MAIN.search(src):
-        return "script"
+        tree = ast.parse(f.read(), path)
+    for node in tree.body:
+        if isinstance(node, ast.If) and ast.unparse(node.test).replace("'", '"') in (
+                '__name__ == "__main__"', '"__main__" == __name__'):
+            calls = {ast.unparse(c.func) for n in node.body for c in ast.walk(n) if isinstance(c, ast.Call)}
+            return "unit" if "unittest.main" in calls else "script"
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("test_"):
+            return "unit"
+        if isinstance(node, ast.ClassDef) and any("TestCase" in ast.unparse(b) for b in node.bases):
+            return "unit"
     return "none"
 
 
@@ -131,30 +139,25 @@ def repository_above(path):
         p = q
 
 
-def worker_env(base, folder, strip, ceiling, real_home, windows=(os.name == "nt")):
-    """The environment of one worker: `base` without the variables whose names start with a prefix in `strip`, with a
-    temp folder and a home folder of its own under `folder`, and git kept from looking for a repository above
-    `ceiling`. On Windows python finds the home folder through USERPROFILE and git through HOME, so HOME stays the
-    real one and git keeps its global settings; elsewhere both read HOME, so git is pointed at the real global file."""
+def worker_env(base, folder, strip, keep, ceiling, windows=(os.name == "nt")):
+    """The environment of one worker: `base` without the variables whose names start with a prefix in `strip`, but for
+    those named in `keep`, with a temp folder and a home folder of its own under `folder`, and git reading only the
+    settings of that home and kept from looking for a repository above `ceiling`."""
     prefixes = tuple(p.upper() for p in strip)
-    env = {k: v for k, v in base.items() if not k.upper().startswith(prefixes)}
+    kept = {k.upper() for k in keep}
+    env = {k: v for k, v in base.items() if k.upper() in kept or not k.upper().startswith(prefixes)}
     tmp, home = os.path.join(folder, "t"), os.path.join(folder, "h")
-    env.update(TEMP=tmp, TMP=tmp, TMPDIR=tmp, GIT_CEILING_DIRECTORIES=ceiling)
+    env.update(TEMP=tmp, TMP=tmp, TMPDIR=tmp, HOME=home, GIT_CEILING_DIRECTORIES=ceiling,
+               GIT_CONFIG_GLOBAL=os.path.join(home, ".gitconfig"), GIT_CONFIG_NOSYSTEM="1")
     made = [tmp, home]
     if windows:
         env.update(USERPROFILE=home, APPDATA=os.path.join(home, "AppData", "Roaming"),
                    LOCALAPPDATA=os.path.join(home, "AppData", "Local"))
-        env.setdefault("HOME", real_home)
         made += [env["APPDATA"], env["LOCALAPPDATA"]]
-    else:
-        env["HOME"] = home
-        xdg = base.get("XDG_CONFIG_HOME") or os.path.join(real_home, ".config")
-        for cfg in (os.path.join(real_home, ".gitconfig"), os.path.join(xdg, "git", "config")):
-            if os.path.isfile(cfg):
-                env.setdefault("GIT_CONFIG_GLOBAL", cfg)
-                break
     for d in made:
         os.makedirs(d, exist_ok=True)
+    with open(env["GIT_CONFIG_GLOBAL"], "w", encoding="utf-8", newline="\n") as f:
+        f.write(GIT_SETTINGS)
     return env
 
 
@@ -633,7 +636,7 @@ class Run:
         k = self.spawned
         self.spawned += 1
         folder = os.path.join(self.base, str(k))
-        env = worker_env(os.environ, folder, self.d["strip"], self.base, self.real_home)
+        env = worker_env(os.environ, folder, self.d["strip"], self.d["keep"], self.base)
         log = open(os.path.join(folder, "log"), "wb")
         cmd = [sys.executable, "-X", "utf8", "-u", os.path.abspath(__file__), "--worker", str(k), "--connect",
                self.listener.address, "--key", self.key.hex(), "--root", self.root, "--timeout", str(self.timeout)]
@@ -697,13 +700,17 @@ class Run:
         text = f"worker {w.k} {why}\n--- its log ---\n{self.log_of(w)}"
         kind, name = w.job or (None, None)
         seconds = time.perf_counter() - w.since
+        # every worker lost before it ended leaves a failing row: its job, or the teardowns its end runs, or the
+        # class whose tearDownClass it would still have run
         if kind == "run" or kind == "script":
             self.row(name, outcome, seconds, text, w)
         elif kind == "collect":
             self.collecting.discard(name)
             self.row(name + "::<import>", outcome, seconds, text, w)
-        elif kind is None and w.conn is None:
-            self.row(f"<worker {w.k}>", "ERROR", seconds, text, w)
+        elif kind == "end":
+            self.row(f"<worker-{w.k}>::<end>", "ERROR", seconds, text, w)
+        else:
+            self.row(f"<worker-{w.k}>", "ERROR", seconds, text, w)
         w.job = None
         if self.work_left() and self.spawned < 2 * self.n + 2:
             self.spawn()
@@ -765,7 +772,11 @@ class Run:
                 try:
                     msg = c.recv()
                 except (EOFError, OSError):
-                    self.lost(w, "closed its connection")
+                    try:
+                        rc = w.proc.wait(2)
+                    except subprocess.TimeoutExpired:
+                        rc = None
+                    self.lost(w, "closed its connection" if rc is None else f"exited with code {rc}")
                     continue
                 self.handle(w, msg)
             now = time.perf_counter()
@@ -783,8 +794,8 @@ class Run:
                         self.lost(w, f"exited with code {rc}")
                 elif w.conn is None and now - w.started > START_S:
                     self.lost(w, f"did not connect within {START_S:.0f} s")
-                elif w.job and w.job[0] == "end" and now - w.since > END_S:
-                    self.lost(w, f"did not end within {END_S:.0f} s")
+                elif w.job and w.job[0] == "end" and now - w.since > self.timeout:
+                    self.lost(w, f"did not end within {self.timeout:.0f} s")
                 elif w.job and w.job[0] != "end" and now - w.since > self.timeout:
                     self.lost(w, f"was stopped after {self.timeout:.0f} s on this test", "TIMEOUT")
             for w in self.workers:
@@ -937,7 +948,6 @@ def main(argv=None):
     if only and all("::" in s for s in only):
         workers = min(workers, len(only))
     run = Run(root, d, workers, only)
-    run.real_home = os.path.expanduser("~")
     run.base = tempfile.mkdtemp(prefix="p4s-")
     above = repository_above(os.path.dirname(run.base))
     if above:

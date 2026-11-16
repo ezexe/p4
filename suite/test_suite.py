@@ -59,6 +59,25 @@ class Files(Repo):
         self.assertEqual(files, ["a/test_unit.py", "b/test_functions.py", "c/test_script.py", "d/test_nothing.py"])
         self.assertEqual([run.kind_of(os.path.join(self.root, f)) for f in files], ["unit", "unit", "script", "none"])
 
+    def test_what_a_files_main_block_runs_decides_how_the_command_loads_it(self):
+        main = 'if __name__ == "__main__":\n'
+        cases = {
+            "test_script_with_a_class.py": ("import sys, unittest\n\nclass T(unittest.TestCase):\n"
+                                            "    def test_x(self):\n        pass\n\ndef main():\n    assert True\n\n"
+                                            + main + "    sys.exit(main())\n", "script"),
+            "test_script_with_mock.py": ("from unittest import mock\n\ndef main():\n    assert mock\n\n"
+                                         + main + "    main()\n", "script"),
+            "test_script_with_a_test_function.py": ("def test_a():\n    pass\n\ndef main():\n    test_a()\n\n"
+                                                    + main + "    main()\n", "script"),
+            "test_unit_main.py": ("import unittest\n\nclass T(unittest.TestCase):\n    def test_x(self):\n"
+                                  "        pass\n\n" + main + "    unittest.main(verbosity=2)\n", "unit"),
+            "test_functions_only.py": ("def test_a():\n    pass\n", "unit"),
+            "test_nothing.py": ("X = 1\n", "none"),
+        }
+        for name, (src, kind) in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual(run.kind_of(put(self.root, name, src)), kind)
+
     def test_in_a_checkout_the_files_are_what_git_holds_and_not_what_it_ignores(self):
         for args in (["init", "-q"], ["config", "core.autocrlf", "false"]):
             subprocess.run(["git", "-C", self.root, *args], check=True, capture_output=True)
@@ -115,30 +134,45 @@ class Definition(unittest.TestCase):
 
 
 class Environment(Repo):
-    BASE = {"PATH": "/bin", "CLAUDE_CODE_SESSION_ID": "s", "claude_x": "1", "ANTHROPIC_API_KEY": "k",
-            "P4_LIVE": "1", "HOME": "/real/home", "OTHER": "kept"}
+    BASE = {"PATH": "/bin", "CLAUDE_CODE_SESSION_ID": "s", "claude_x": "1", "ANTHROPIC_API_KEY": "k", "P4_LIVE": "1",
+            "P4_FIXTURES": "/fixtures", "GH_TOKEN": "g", "GITHUB_TOKEN": "g", "HOME": "/real/home", "OTHER": "kept"}
+    STRIP = ["CLAUDE", "ANTHROPIC", "P4_", "GH_TOKEN", "GITHUB_TOKEN"]
 
-    def test_a_worker_on_windows_has_its_own_temp_and_home_and_none_of_the_callers_switches(self):
-        env = run.worker_env(self.BASE, os.path.join(self.root, "0"), ["CLAUDE", "ANTHROPIC", "P4_"], self.root,
-                             "/real/home", windows=True)
-        self.assertEqual(sorted(k for k in env if k.upper().startswith(("CLAUDE", "ANTHROPIC", "P4_"))), [])
+    def env(self, windows):
+        return run.worker_env(self.BASE, os.path.join(self.root, "0"), self.STRIP, ["P4_FIXTURES"], self.root,
+                              windows=windows)
+
+    def test_a_worker_has_its_own_temp_home_and_git_settings_and_none_of_the_callers_switches_or_tokens(self):
         tmp, home = os.path.join(self.root, "0", "t"), os.path.join(self.root, "0", "h")
-        self.assertEqual((env["TEMP"], env["TMP"], env["TMPDIR"]), (tmp, tmp, tmp))
-        self.assertEqual(env["USERPROFILE"], home)
-        self.assertTrue(env["APPDATA"].startswith(home) and env["LOCALAPPDATA"].startswith(home))
-        self.assertEqual(env["HOME"], "/real/home", "git keeps the caller's global settings")
-        self.assertEqual((env["GIT_CEILING_DIRECTORIES"], env["OTHER"]), (self.root, "kept"))
-        for d in (tmp, env["APPDATA"], env["LOCALAPPDATA"]):
-            self.assertTrue(os.path.isdir(d))
+        for windows in (True, False):
+            with self.subTest(windows=windows):
+                env = self.env(windows)
+                self.assertEqual(sorted(k for k in env if k.upper().startswith(tuple(self.STRIP))), ["P4_FIXTURES"])
+                self.assertEqual((env["TEMP"], env["TMP"], env["TMPDIR"]), (tmp, tmp, tmp))
+                self.assertEqual(env["HOME"], home, "git reads no settings of the caller's home")
+                self.assertEqual((env["GIT_CONFIG_GLOBAL"], env["GIT_CONFIG_NOSYSTEM"]),
+                                 (os.path.join(home, ".gitconfig"), "1"))
+                self.assertEqual((env["GIT_CEILING_DIRECTORIES"], env["OTHER"]), (self.root, "kept"))
+                self.assertTrue(os.path.isdir(tmp))
+                if windows:
+                    self.assertEqual(env["USERPROFILE"], home)
+                    self.assertTrue(env["APPDATA"].startswith(home) and env["LOCALAPPDATA"].startswith(home))
+                    self.assertTrue(os.path.isdir(env["APPDATA"]) and os.path.isdir(env["LOCALAPPDATA"]))
+                else:
+                    self.assertNotIn("USERPROFILE", env)
 
-    def test_elsewhere_home_is_the_workers_own_and_git_still_reads_the_real_global_file(self):
-        real = os.path.join(self.root, "real")
-        put(real, ".gitconfig", "[user]\n\tname = t\n")
-        env = run.worker_env({**self.BASE, "HOME": real}, os.path.join(self.root, "1"), ["P4_"], self.root, real,
-                             windows=False)
-        self.assertEqual(env["HOME"], os.path.join(self.root, "1", "h"))
-        self.assertEqual(env["GIT_CONFIG_GLOBAL"], os.path.join(real, ".gitconfig"))
-        self.assertNotIn("USERPROFILE", env)
+    def test_git_in_a_worker_reads_its_own_settings_alone(self):
+        env = self.env(os.name == "nt")
+        env["PATH"] = os.environ["PATH"]
+        r = subprocess.run(["git", "config", "--show-origin", "--list"], capture_output=True, text=True, env=env,
+                           cwd=env["TEMP"])
+        rows = [line.split("\t", 1) for line in r.stdout.splitlines()]
+        # git prints a Windows path quoted, with its backslashes doubled
+        origins = {os.path.normcase(os.path.normpath(o[len("file:"):].strip('"').replace("\\\\", "\\")))
+                   for o, _ in rows}
+        self.assertEqual(origins, {os.path.normcase(os.path.normpath(env["GIT_CONFIG_GLOBAL"]))}, r.stdout + r.stderr)
+        got = dict(kv.split("=", 1) for _, kv in rows)
+        self.assertEqual((got["core.autocrlf"], got["user.name"]), ("false", "suite"))
 
 
 Row = run.Row
@@ -337,6 +371,47 @@ class Command(Repo):
                                "d/test_d.py::<import>": "ERROR"}, out)
         self.assertRegex(out, r"holds a module of this file's folder from another folder, with other contents: "
                               r"helper is \S+[\\/]c[\\/]helper\.py")
+
+    def test_a_worker_that_dies_mid_test_and_a_script_that_exits_nonzero_fail_the_run(self):
+        self.make({"a/test_dies.py": '''
+            import os, unittest
+
+            class Dies(unittest.TestCase):
+                def test_dies(self):
+                    os._exit(7)
+        ''', "b/test_after.py": "def test_after():\n    pass\n",
+            "c/test_script.py": 'import sys\n\nif __name__ == "__main__":\n    sys.exit(4)\n'})
+        code, out, err = command(self.root, "--workers", "1")
+        self.assertEqual(code, run.FAILED, out + err)
+        got = {k: v[0] for k, v in lines_of(out).items()}
+        self.assertEqual(got, {"a/test_dies.py::Dies::test_dies": "ERROR", "b/test_after.py::test_after": "ok",
+                               "c/test_script.py": "FAIL"}, out)
+        self.assertIn("exited with code 7", out)
+        self.assertIn("exit code 4", out)
+
+    def test_a_worker_lost_in_its_last_teardown_fails_the_run(self):
+        for how, args, said in (("os._exit(5)", [], "exited with code 5"),
+                                ("time.sleep(60)", ["--timeout", "1"], "did not end within 1 s")):
+            with self.subTest(how=how):
+                root = tempfile.mkdtemp(prefix="suite-repo-")
+                self.addCleanup(run.remove, root)
+                put(root, "a/test_last.py", f'''
+                    import os, time, unittest
+
+                    class Last(unittest.TestCase):
+                        @classmethod
+                        def tearDownClass(cls):
+                            {how}
+
+                        def test_passes(self):
+                            pass
+                ''')
+                code, out, err = command(root, "--workers", "1", *args)
+                self.assertEqual(code, run.FAILED, out + err)
+                got = {k: v[0] for k, v in lines_of(out).items()}
+                self.assertEqual(got.get("a/test_last.py::Last::test_passes"), "ok", out)
+                self.assertEqual(got.get("<worker-0>::<end>"), "ERROR", out)
+                self.assertIn(said, out)
 
     def test_a_hung_test_is_stopped_with_its_stack_and_another_worker_runs_the_rest(self):
         self.make({"a/test_hangs.py": '''

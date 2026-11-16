@@ -1,22 +1,23 @@
 {
   "budget": {
     "seconds": 10,
-    "why": "ezexe's target: the whole suite runs in under ten seconds on ezexe's machine, a Windows 11 PC with 16 logical processors. A run of every test whose wall time passes it ends with exit status 3, even when every test passed."
+    "why": "The target for the whole suite: under ten seconds on ezexe's machine, a Windows 11 PC with 16 logical processors. A run of every test whose wall time passes it ends with exit status 3, even when every test passed."
   },
   "workers": {
     "count": 8,
-    "why": "Worker processes that share the tests out. On ezexe's machine 8 workers passed every test in each of three measured rounds, and 16 failed three tests that wait on timing in each round. The command never starts more workers than the machine has logical processors."
+    "why": "Worker processes that share the tests out: half the logical processors of ezexe's machine, so a second run on the machine at the same time still has the other half. The command never starts more workers than the machine has logical processors."
   },
   "timeout": {
     "seconds": 300,
-    "why": "A test still running after this is taken as hung: its worker and every process it started are stopped, the test fails and another worker takes the tests left. It sits well above the longest test of the suite, so the load of a second suite on the machine does not reach it."
+    "why": "A test, or the teardowns a worker runs when it ends, still running after this is taken as hung: the worker and every process it started are stopped, the run fails and another worker takes the tests left. It sits well above the longest test of the suite, so the load of a second suite on the machine does not reach it."
   },
   "files": {
     "pattern": "test_*.py",
     "why": "A test file is every file of the repository with this name that git tracks, or holds untracked and not ignored, wherever it sits."
   },
   "environment": {
-    "strip": ["CLAUDE", "ANTHROPIC", "P4_"],
-    "why": "Each worker starts without every variable whose name starts with one of these: a test run from a session sees none of that session's ids, the app's records or an API key, and every P4_ switch is off, so a live test skips and a run spends nothing."
+    "strip": ["CLAUDE", "ANTHROPIC", "P4_", "GH_TOKEN", "GITHUB_TOKEN"],
+    "keep": ["P4_FIXTURES", "P4_MAC_STORE"],
+    "why": "Each worker starts without every variable whose name starts with one of strip: a test run from a session sees none of that session's ids, the app's records, an API key or a GitHub token, and every P4_ switch is off, so a live test skips and a run spends nothing. The variables of keep only point a test at fixtures on the machine, so they pass through."
   }
 }
