@@ -57,8 +57,9 @@ SEARCH_KEEP = 3
 SEARCH_MIN_SCORE = 0.18                # measured: the true matches scored 0.195 to 0.198, the best false one 0.143
 MARKER = ".skillex"                   # in a copy under .claude/skills/: the store folder it was copied from
 COPY_IGNORE = ".gitignore"            # in a copy under .claude/skills/: `*`, so git never tracks the copy
-# What a secret looks like in a script: a private key, a known token's shape, a bearer token, a password in a URL or
-# after curl's -u, a flag such as --token given a value, or a value given to a name that says key, token, secret or
+# What a secret looks like in a script: a private key, a known token's shape, a bearer or basic credential, a
+# password in a URL or after curl's -u, a secret in an address's query, a flag such as --token given a value, a
+# default given to a secret's environment variable, or a value given to a name that says key, token, secret or
 # password. A script that holds one brews no skill, so it is never copied anywhere.
 SECRETS = [re.compile(p) for p in (
     r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
@@ -68,19 +69,27 @@ SECRETS = [re.compile(p) for p in (
     r"|npm_[A-Za-z0-9]{36}|ya29\.[\w-]{20,}|SG\.[\w-]{16,}\.[\w-]{16,}|eyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]{10,})",
     r"\b\d{8,10}:AA[\w-]{33}\b",
     r"hooks\.slack\.com/services/[\w/]+|discord(?:app)?\.com/api/webhooks/\d+/[\w-]+",
-    r"(?i)\bBearer\s+(?![{$%<])[A-Za-z0-9._~+/=-]{20,}",
+    r"(?i)\b(?:Bearer|Basic)\s+(?![{$%<])[A-Za-z0-9._~+/=-]{16,}",
     r"://[^/\s:@'\"{}$%<]+:(?![{$%<])[^/\s@'\"{}]{3,}@",
-    r"(?i)--[\w-]*(?:token|password|passwd|secret|api-?key)[\w-]*[ =]+['\"]?(?![$%{<-])[^\s'\"]{8,}",
-    r"\bcurl\b[^\n]*\s-u\s+['\"]?[^\s:'\"$%]+:(?![$%{])[^\s'\"]{3,}",
+    r"(?i)[?&][\w-]*(?:token|secret|password|passwd|api[_-]?key)[\w-]*=(?![{$%<])[^&\s#'\"]{8,}",
+    r"(?i)--(?![\w-]*-(?:stdin|file|id|name|arn|env|path)\b)[\w-]*(?:token|password|passwd|secret|api-?key)[\w-]*"
+    r"[ =]+['\"]?(?![$%{<-]|[A-Z_]{4,}\b)[^\s'\"]{8,}",
+    r"\bcurl\b[^\n]*\s(?:-u\s*|--user[ =])['\"]?[^\s:'\"$%-][^\s:'\"$%]*:(?![$%{])[^\s'\"]{3,}",
+    r"(?i)(?:getenv|environ\.get)\(\s*['\"][\w-]*(?:token|secret|password|passwd|api[_-]?key)[\w-]*['\"]\s*,"
+    r"\s*['\"](?![$%{<])[^'\"\s]{8,}['\"]",
 )]
 # A value given to such a name: quoted, or bare as a shell script writes it, after `=` or `:`, a `]` allowed before.
-SECRET_NAME = re.compile(r"(?i)\b([\w-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key)[\w-]*)"
+SECRET_NAME = re.compile(r"(?i)\b([\w-]*(?:password|passwd|pwd|passphrase|_pass|secret|token|api[_-]?key"
+                         r"|access[_-]?key|private[_-]?key|encryption[_-]?key|credentials?)[\w-]*)"
                          r"\b[\"']?\]?\s*[:=]\s*(?:\"([^\"\n]{8,})\"|'([^'\n]{8,})'|([^\s\"'#;,)]{8,}))")
-# A quoted value that is no secret: a reference to a variable, a constant's name, a path or a file's name.
-NOT_SECRET = re.compile(r"^(?:\$\{?\w+\}?|%\w+%|[A-Z][A-Z_]*(?:_[A-Z0-9]+)*|[\w.-]*[/\\][\w./\\-]*"
-                        r"|[\w-]+\.(?:json|ya?ml|toml|txt|env|ini|cfg|conf|pem|key|crt|db|sqlite))$")
+# A value that is no secret: a reference to a variable, a constant's name, a path by its start, a file's name, a
+# placeholder in angle brackets, or a name made of lower-case words and digits such as prod-db-creds or cl100k_base.
+NOT_SECRET = re.compile(r"^(?:\$\{?\w+\}?|%\w+%|[A-Z][A-Z_]*(?:_[A-Z0-9]+)*|(?:[/~\\]|\.{1,2}[/\\]|[A-Za-z]:[/\\])\S*"
+                        r"|[\w.-]+\.(?:json|ya?ml|toml|txt|env|ini|cfg|conf|pem|key|crt|db|sqlite|py|sh|js)"
+                        r"|<\|?[^<>]*\|?>|[a-z0-9]+(?:[-_][a-z0-9]+)+)$")
 SECRET_PARAM = re.compile(r"(?i)[?&][\w-]*(?:token|secret|password|passwd|api[_-]?key|key)[\w-]*=([^&\s#]{8,})")
 SHELL_EXT = (".sh", ".bat", ".cmd", ".ps1")
+CODE_EXT = (".py", ".js", ".mjs", ".cjs", ".ts")
 STATE = ".state"                      # in the store folder: the index of compared scripts and each session's last look
 NOTEBOOK = "scratchpad"               # temportal's notebook, compared as one more session
 BREWED = " Brewed by p4-skillex from scripts written in "   # how a written skill's description ends
@@ -216,15 +225,19 @@ def identifiers(path):
     return ids if len(ids) >= MIN_IDENTIFIERS else None
 
 
-def secret_value(name, value):
-    """True for a quoted value given to a secret's name that is a secret, not code naming one."""
+def secret_value(name, value, shell=False):
+    """True for a value given to a secret's name that is a secret, not code naming one. A single word counts from
+    eight letters when a shell script sets it bare, since a shell setting a secret's name is setting the secret, and
+    from sixteen in code, where a word is more often a setting such as unlimited."""
     if value.startswith(("http://", "https://")):
         return bool(SECRET_PARAM.search(value))          # an address, unless its query carries a secret
-    if value != value.strip() or " " in value or "\t" in value or NOT_SECRET.match(value):
-        return False                                     # a sentence, a piece of code between two strings, a path
-    if re.fullmatch(r"[A-Za-z]+(?:[-_][A-Za-z]+)+", value) or value.lower() in name.lower():
-        return False                                     # a name such as prod-db-creds, or the field's own word
-    return True
+    if value[:1] in "+,()" or value[-1:] in "+,()" or NOT_SECRET.match(value):
+        return False                                     # code between two strings, a path, a placeholder, a name
+    if re.search(r"\s", value):                          # a sentence or a prompt, unless three or more plain words
+        return bool(re.fullmatch(r"[a-z]+(?: [a-z]+){2,}", value))
+    if re.fullmatch(r"[A-Za-z]+", value):                # one word: a passphrase run together, not a short word
+        return len(value) >= (8 if shell else 16) and value.lower() not in name.lower()
+    return value.lower() not in name.lower()
 
 
 def holds_secret(path):
@@ -235,7 +248,8 @@ def holds_secret(path):
         return True
     if any(rx.search(text) for rx in SECRETS):
         return True
-    shell = path.lower().endswith(SHELL_EXT)
+    low = path.lower()
+    shell, code = low.endswith(SHELL_EXT), low.endswith(CODE_EXT)
     for m in SECRET_NAME.finditer(text):
         name, quoted, bare = m.group(1), m.group(2) or m.group(3), m.group(4)
         if quoted is not None:
@@ -243,8 +257,11 @@ def holds_secret(path):
                 return True
             continue
         line = text[text.rfind("\n", 0, m.start()) + 1:m.start()]
-        if (shell or re.match(r"\s*(?:export|set)\s", line, re.I)) and not re.match(r"[$%]|.*[/\\]", bare) \
-                and not re.fullmatch(r"[A-Z][A-Z_]*(?:_[A-Z0-9]+)*", bare):
+        if code or not (shell or re.match(r"\s*(?:export|set)\s", line, re.I)):
+            continue                                     # in Python or JavaScript a bare value is code
+        if low.endswith(".ps1") and re.match(r"[A-Z][a-z]+-[A-Z]\w*$|\(", bare):
+            continue                                     # a PowerShell cmdlet such as Read-Host
+        if not re.match(r"[$%(`]", bare) and secret_value(name, bare, shell=True):
             return True                                  # a value a shell script sets bare
     return False
 

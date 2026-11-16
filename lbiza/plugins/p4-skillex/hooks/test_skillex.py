@@ -223,7 +223,14 @@ class Watcher(Store):
                    ("t = 'eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.SflKxwRJSMeKKF2QT4'", ".py"),
                    ("url = 'postgres://admin:s3cretpw@db.local/x'", ".py"), ("HF = 'hf_abcdefghijklmnopqrstuvwxyz0123'", ".py"),
                    ("hook = 'https://hooks.slack.com/services/T000/B000/XXXX'", ".py"), ("aws = 'ASIAABCDEFGHIJKLMNOP'", ".py"),
-                   ('token_url = "https://x/oauth?client_secret=9f8e7d6c5b4a3210"', ".py")]
+                   ('token_url = "https://x/oauth?client_secret=9f8e7d6c5b4a3210"', ".py"),
+                   ('aws_secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"', ".py"),
+                   ("export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", ".sh"),
+                   ('requests.get("https://api.x.com/v1?api_key=9f8e7d6c5b4a3210")', ".py"),
+                   ('password = "correct horse battery staple"', ".py"), ("curl --user admin:s3cretpw x", ".sh"),
+                   ("curl -uadmin:s3cretpw x", ".sh"), ('h = "Authorization: Basic YWRtaW46czNjcmV0cHc="', ".py"),
+                   ('DB_PASS = "s3cretpw99"', ".py"), ('passphrase = "tr0ub4dor&3x"', ".py"),
+                   ('pw = os.getenv("DB_PASSWORD", "s3cretpw123")', ".py")]
         spared = [('token_url = "https://x/oauth/token"', ".py"), ('password_field = "password"', ".py"),
                   ('SECRET_NAME = "prod-db-creds"', ".py"), ("token = parts[0]", ".py"),
                   ("tokens = list(tokenize.generate_tokens(io.StringIO(src).readline))", ".py"),
@@ -235,7 +242,16 @@ class Watcher(Store):
                   ('remote = f"https://x-access-token:{token}@github.com/{repo}.git"', ".py"),
                   ("git clone https://oauth2:${GITLAB_TOKEN}@gitlab.com/x.git", ".sh"),
                   ("secret = s3_secret", ".py"), ("f(api_key=api_key_v2)", ".py"), ("export TOKEN=$GITHUB_TOKEN", ".sh"),
-                  ('token_url = "https://x/oauth/token?grant_type=client_credentials"', ".py")]
+                  ('token_url = "https://x/oauth/token?grant_type=client_credentials"', ".py"),
+                  ("export const tokenStore = createStore();", ".ts"),
+                  ("export const tokenMap: Map<string, Token> = new Map();", ".ts"),
+                  ("$password = Read-Host -AsSecureString", ".ps1"), ("$token = Get-Content tok.txt", ".ps1"),
+                  ("SECRET_NAME=prod-db-creds", ".sh"), ("TOKEN_FILE=token.json", ".sh"),
+                  ("secret_name=my_app_secret", ".sh"), ("docker login --password-stdin ghcr.io", ".sh"),
+                  ("aws secretsmanager get-secret-value --secret-id prod/db/creds", ".sh"),
+                  ("tool --token-file ~/.token", ".sh"), ("usage: tool --token YOUR_TOKEN", ".sh"),
+                  ('q = "password="+password_value+"&user="', ".py"), ('token_budget = "unlimited"', ".py"),
+                  ('token_encoding = "cl100k_base"', ".py"), ('tokenizer.eos_token = "<|endoftext|>"', ".py")]
         for i, (line, ext) in enumerate(flagged + spared):
             p = put(os.path.join(self.root, f"probe{i}{ext}"), line + "\n")
             self.assertEqual(skillex.holds_secret(p), (line, ext) in flagged, line)
