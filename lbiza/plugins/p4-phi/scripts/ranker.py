@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""ranker.py: the tokenizer, BM25, the logistic ranker's features and its fitter, ported from the old
-vlds `pick_model.py` (the one model that beat word overlap: 0.379 R-precision held-out on AudioPlugin-p4 against
-0.313). Standard library only, deterministic.
+"""ranker.py: the tokenizer, BM25, the logistic ranker's features and its fitter, its picks, their metrics and the
+choice of its threshold, and its model file. Standard library only, deterministic.
 
-The model file is `models/ranker.json`:
+The model file is `phi/models/ranker.json`. train.py writes it with `save` after a round it promotes, and its
+readers take it with `load`:
   {"kind": "p4 recall ranker", "version": 1, "round": n, "trained": "<YYYY-MM-DD HH:MM>", "dim": 262144,
-   "threshold": t, "per_file": 2, "floor": {...}, "features": ["base", ...], "w": {"<index>": weight}}
-A file of any other kind (the old .pt server's `ranker.json`) is not a ranker: `load` returns None.
+   "threshold": t, "per_file": 2, "floor": {...}, "features": ["base", ...], "tasks": n, "w": {"<index>": weight}}
+`kind` is KIND, and `load` returns None for a file of any other kind, so no other file at that path is taken for a
+ranker.
 """
 
 import json
@@ -16,10 +17,10 @@ import re
 import zlib
 
 DIM = 1 << 18                 # hashed feature space
-PER_FILE = 6                  # the old child's cap per file, kept as a feature boundary (file-top6)
+PER_FILE = 6                  # file-top6's bound, and the default per-file cap of select and best_threshold
 TOP_EVAL = 20
 EPOCHS, LR, L2 = 25, 0.1, 1e-4
-RARE_IDF = 3.0                # a term rarer than this idf is a rare term
+RARE_IDF = 3.0                # a term whose idf is above this is a rare term
 KIND = "p4 recall ranker"
 
 TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|\d+(?:\.\d+)+")
@@ -34,9 +35,8 @@ during without within upon across whose those these ever never always still yet 
 # --- text ------------------------------------------------------------------------------------------------
 
 def tokens(text):
-    """Lower-cased words of three letters or more (and dotted numbers like 3.15, and a letter with a digit like p4),
-    stop words out; a camelCase or
-    snake_case name also yields its parts, so kServiceLeadMs meets 'service lead'."""
+    """Lower-cased words of three letters or more, dotted numbers such as 3.15 and a letter with a digit such as p4,
+    stop words out. A camelCase or snake_case name also yields its parts, so kServiceLeadMs meets 'service lead'."""
     out = []
     for t in TOKEN_RE.findall(text or ""):
         parts = [t] + [p for p in PART_RE.findall(t) if p != t] if not t[0].isdigit() else [t]
@@ -48,7 +48,7 @@ def tokens(text):
 
 
 def idf_table(docs):
-    """({term: idf}, n) over token lists, BM25's idf."""
+    """`({term: idf}, n)` over token lists, with BM25's idf."""
     n = len(docs)
     df = {}
     for d in docs:
@@ -74,7 +74,7 @@ def stem(t):
 
 
 def stem_table(words):
-    """{stem: [words]} for the stems more than one word shares (a word alone has no other form to offer)."""
+    """{stem: [words]} for the stems more than one word shares: a word alone has no other form to offer."""
     m = {}
     for w in words:
         if w.isalpha():
@@ -87,13 +87,14 @@ def idf_of(df, n):
 
 
 def is_rare(df, n):
-    """A rare term: in under one doc in twenty (idf above RARE_IDF), or in at most two docs (a small store)."""
+    """A rare term: its idf is above RARE_IDF, so it is in under about one doc in twenty, or it is in at most two
+    docs. The second keeps rare terms in a small corpus: below 30 docs no idf passes RARE_IDF."""
     return df <= 2 or idf_of(df, n) > RARE_IDF
 
 
 def bm25(task_terms, doc, idf, avgdl, k1=1.2, b=0.75, weights=None):
-    """BM25 of one token list against the task's terms; `weights` {term: w} scales a term (the dictionary's
-    expansions count 0.5)."""
+    """BM25 of one token list against the task's terms. `weights` {term: w} scales a term's share, as p4.py scales
+    the dictionary's expansions by EXPAND_WEIGHT."""
     tf = {}
     for t in doc:
         tf[t] = tf.get(t, 0) + 1
@@ -131,12 +132,15 @@ def days_between(earlier, later):
 
 
 def candidate_features(task_terms, cands, idf, avgdl, now, scores=None, weights=None, extra=None):
-    """One sparse feature dict {index: value} per candidate, and the shared terms of each.
+    """`(features, scores, shared terms)`: one sparse feature dict {index: value} per candidate, the candidates'
+    BM25 and the four rarest terms each shares with the task.
 
-    `cands` are dicts with `file`, `kind`, `state`, `time`, `toks` (the entry's tokens) and `head` (the tokens of its
-    head line, the part an old child read). `scores` are the candidates' BM25 when the caller has them.
-    `extra` turns on the added features: {"dict-hit": set of candidate indices, "near": {candidate index: (score,
-    1 / (1 + rank))} (near.extend), "node": set of candidate indices the tasks above the session used (node.py)}."""
+    `cands` are dicts with `file`, `kind`, `toks`, the entry's tokens, and `head`, the tokens of its head line;
+    `state`, `time`, `dl` and `fkind` are read when present. `scores` are the candidates' BM25 when the caller has
+    them. `extra` turns on the added features: `{"dict-hit": set of candidate indices, "near": {candidate index:
+    (score, 1 / (1 + rank), likeness)}, "node": set of candidate indices}`, the likeness optional. near.extend gives
+    "near", the entries earlier, similar tasks used; "node" holds the entries the tasks above the session used, and
+    "dict-hit" those a dictionary hit points at."""
     terms = list(dict.fromkeys(task_terms))
     if scores is None:
         scores = [bm25(terms, c["toks"], idf, avgdl, weights=weights) for c in cands]
@@ -202,8 +206,9 @@ def score(w, x):
 
 
 def fit(examples, epochs=EPOCHS, lr=LR, l2=L2, seed=0, weights=None):
-    """Logistic regression by AdaGrad SGD over (x, y) pairs; positives weighed up to balance the classes.
-    `weights` (one per example) scale an example's gradient: the label sources' weights of 5.5."""
+    """Logistic regression by AdaGrad SGD over `(x, y)` pairs; positives weighed up to balance the classes.
+    `weights`, one per example, scale that example's gradient: train.fit_sets passes each label's weight, which
+    labels.as_label sets by its source."""
     pos = sum(y for _, y in examples) or 1
     neg = len(examples) - pos or 1
     wpos = math.sqrt(neg / pos)
@@ -242,6 +247,8 @@ def select(files, scores, threshold, per_file=PER_FILE, limit=None):
 
 
 def metrics(labels, scores, picked):
+    """The numbers of one ranked task: R-precision and recall@20 of the order `scores` give, and the precision,
+    recall and F1 of the `picked` indices. train.py also scores BM25's own order with it, for the BM25 baseline."""
     n = sum(labels)
     order = sorted(range(len(scores)), key=lambda i: (-scores[i], i))
     rprec = sum(labels[i] for i in order[:n]) / n if n else 0.0
@@ -254,9 +261,9 @@ def metrics(labels, scores, picked):
 
 
 def best_threshold(scored, per_file=PER_FILE, min_precision=0.6):
-    """The threshold, from 0.30 to 0.95, with the best mean F1 over [(files, labels, scores)] among those whose mean
-    precision is at least min_precision (4.3: a wrong line costs accuracy, so the threshold leans toward silence);
-    when none reaches it, the highest-precision threshold."""
+    """The threshold, from 0.30 to 0.95 in steps of 0.05, with the best mean F1 over `[(files, labels, scores)]` among
+    those whose mean precision is at least min_precision; when none reaches it, the highest-precision threshold. A
+    wrong line costs the session accuracy, so the choice leans toward silence."""
     best, best_f1, fallback, fallback_p = None, -1.0, 0.95, -1.0
     for k in range(30, 96, 5):
         t = k / 100
@@ -293,7 +300,8 @@ def load(path):
 
 
 def write_atomic(path, text):
-    """Write whole or not at all: a temp file beside it, then os.replace (retried while a reader holds it)."""
+    """Write whole or not at all: a temp file beside it, then os.replace, tried up to 50 times while a reader holds
+    the file."""
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
