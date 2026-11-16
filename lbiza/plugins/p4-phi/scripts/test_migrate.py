@@ -203,9 +203,18 @@ class Synthetic(unittest.TestCase):
         r = self.run_dry()
         files = [os.path.relpath(os.path.join(a, f), self.out).replace(os.sep, "/")
                  for a, _d, fs in os.walk(self.out) for f in fs]
-        self.assertEqual(files, ["archive/migration-2026-11-01.md"])
+        self.assertEqual(files, ["phi/archive/migration-2026-11-01.md"])
         self.assertTrue(all(ok for _n, ok, _d in r["checks"]), [c for c in r["checks"] if not c[1]])
         self.assertEqual(r["plan"].unplaced, [])
+
+    def test_a_dry_run_then_an_apply_in_place_leave_one_report(self):
+        """The report a dry run in place writes under phi/archive/ is not taken for a file of the old tree by the
+        apply that follows."""
+        migrate.run(self.old, None, apply=False, now=NOW)
+        migrate.run(self.old, None, apply=True, now=NOW)
+        reports = [os.path.relpath(os.path.join(a, f), self.old).replace(os.sep, "/")
+                   for a, _d, fs in os.walk(self.old) for f in fs if f.startswith("migration-")]
+        self.assertEqual(reports, ["phi/archive/migration-2026-11-01.md"])
 
     def test_only_a_check_that_can_fail_is_counted(self):
         """The lines that pass whatever the data, and a dry run's byte comparison it never makes, are reported apart
@@ -318,15 +327,15 @@ class Synthetic(unittest.TestCase):
         self.assertTrue(all(ok for _n, ok, _d in r["checks"]), [c for c in r["checks"] if not c[1]])
         for f in ("store/rules.md", "store/corrections.md", "store/retractions.md", "store/facts.md",
                   "store/vocabulary.md", "store/messages/150e7eb7.md", "store/messages/a3ac5de6.md",
-                  "models/labels-raw.tsv", "models/tasks.tsv", "archive/index-rules.md",
-                  "archive/models/pick-model.json", "archive/sessions/mac-setup--150e7eb7/vlds/logger.md",
-                  "archive/ledger-events.md", "src/a3ac5de6-probe/probe.py", "memory/a.md", "scratchpad/notes.md",
+                  "models/labels-raw.tsv", "models/tasks.tsv", "phi/archive/index-rules.md",
+                  "phi/archive/models/pick-model.json", "phi/archive/sessions/mac-setup--150e7eb7/vlds/logger.md",
+                  "phi/archive/ledger-events.md", "src/a3ac5de6-probe/probe.py", "memory/a.md", "scratchpad/notes.md",
                   "flights/20261102-0445-s1/plan.md", "flights/board.tsv"):
             self.assertTrue(os.path.exists(os.path.join(self.out, f)), f)
-        self.assertFalse(os.path.exists(os.path.join(self.out, "archive", "models", "ranker-base.pt")))
+        self.assertFalse(os.path.exists(os.path.join(self.out, "phi", "archive", "models", "ranker-base.pt")))
         with open(os.path.join(self.out, "src/a3ac5de6-probe/probe.py"), encoding="utf-8") as f:
             self.assertEqual(f.read().split("\n")[:2], ["#!/usr/bin/env python3", "# probe the narwhal port"])
-        with open(os.path.join(self.out, "archive", "migration-2026-11-01.md"), encoding="utf-8") as f:
+        with open(os.path.join(self.out, "phi", "archive", "migration-2026-11-01.md"), encoding="utf-8") as f:
             report = f.read()
         self.assertIn("pool-road: model", report, "the ## recall section of vindex/phi-index.md is copied into the "
                                                   "report")
@@ -346,7 +355,7 @@ class Synthetic(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.old, "memory", "a.md")))
         self.assertTrue(os.path.exists(os.path.join(self.old, "flights", "20261102-0445-s1", "plan.md")),
                         "flights/ stays in place at migration: the repository's plan-planner says where planned work lives")
-        self.assertFalse(os.path.exists(os.path.join(self.old, "archive", "flights")))
+        self.assertFalse(os.path.exists(p4conf.sub(self.old, "archive", "flights")))
         with self.assertRaises(SystemExit):
             migrate.run(self.old, None, apply=True, now=NOW)
 
@@ -401,7 +410,7 @@ class FlatLayout(unittest.TestCase):
                         migrate.run(p4, None, apply=apply, now=NOW)
                     self.assertIn(os.path.normpath(flat), str(cm.exception))
                     self.assertIn("outside sessions/*/vlds/", str(cm.exception))
-                self.assertFalse(os.path.exists(os.path.join(p4, "archive")), "nothing written, not even a report")
+                self.assertFalse(os.path.exists(os.path.join(p4, "phi")), "nothing written, not even a report")
 
 
 class RealRepos(unittest.TestCase):

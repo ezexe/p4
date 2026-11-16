@@ -148,10 +148,10 @@ LEGACY = {"teacher-model": ("recall", "teacher", "model"), "teacher-cutoff": ("r
           "inject": ("recall", "inject")}
 
 
-# Where each kind of file lives in the store, by plugin. p4-temportal keeps the auto memory, the notebook, the
-# session scratchpad directories and saved code in temportal/, and p4-phi keeps its session tree and the retrieval
-# corpus and models in phi/. p4.json and the store's own git files stay at the top: .git, .github, .gitignore and
-# .gitattributes.
+# Where each kind of file lives in the store, by plugin. p4-temportal keeps the auto memory, the notebook, the session
+# scratchpad directories and saved code in temportal/, and p4-phi keeps its session tree, the retrieval corpus and
+# models, and the archive a migration from the per-session layout keeps verbatim in phi/. p4.json and the store's own
+# git files stay at the top: .git, .github, .gitignore and .gitattributes.
 LAYOUT = {
     "memory": "temportal/memory",
     "scratchpad": "temportal/scratchpad",
@@ -159,6 +159,7 @@ LAYOUT = {
     "src": "temportal/src",
     "store": "phi/store",
     "models": "phi/models",
+    "archive": "phi/archive",      # what migrate.py keeps verbatim from a per-session tree, and its report
 }
 # Each kind's earlier places in a store, oldest first: at the top of the store, and under recall/ for the corpus
 # and the models. migrate_layout moves files from any of them.
@@ -403,9 +404,10 @@ def _own_repo(p4):
 
 def migrate_layout(p4, commit=True):
     """Move what lies in an earlier place of the layout into its plugin's folder: memory/, scratchpad/, tmp/ and src/
-    into temportal/, and store/ and models/, at the top or under recall/, into phi/. .gitignore and .gitattributes are
-    rewritten to match, and when `p4` is a git repository of its own the move is committed alone. Returns the lines
-    to print, none when there was nothing to move. Cheap when there is nothing: eight lstat calls."""
+    into temportal/, and store/ and models/, at the top or under recall/, and archive/ into phi/. .gitignore and
+    .gitattributes are rewritten to match, and when `p4` is a git repository of its own the move is committed alone.
+    Returns the lines to print, none when there was nothing to move. Cheap when there is nothing: one lstat call per
+    earlier place in OLDER."""
     if not _olds(p4):
         return []
     lock = os.path.join(p4, LAYOUT_LOCK)

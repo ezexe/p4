@@ -3,12 +3,12 @@
 
 The per-session layout keeps each session's entries in `sessions/<session>/vlds/*.md`, beside `vindex/`, `sindex/`,
 `mrindex/` and a flat `models/`. The flat layout keeps the corpus in `store/`, the training files in `models/`,
-saved code in `src/` and what is kept verbatim in `archive/`, all at the top of `.claude/p4`. The plugins write
-neither: p4conf.migrate_layout, which the next hook runs, moves the flat layout into the plugins' directories, all
-but `archive/`, which stays at the top.
+saved code in `src/` at the top of `.claude/p4`, and what is kept verbatim in `phi/archive/`, by p4conf's LAYOUT key
+`archive`. The plugins write neither: p4conf.migrate_layout, which the next hook runs, moves the flat layout into
+the plugins' directories.
 
 A run is dry by default: it reads the per-session tree, builds the flat layout in memory, runs its checks and writes the
-report `archive/migration-<date>.md`. `--apply` also writes the flat layout into `--out`, or in place when there is
+report `phi/archive/migration-<date>.md`. `--apply` also writes the flat layout into `--out`, or in place when there is
 no `--out`, where the vlds paths are removed only when nothing is unplaced. An old store anywhere else, `vlds/` at the
 top of `.claude/p4`, `.claude/vlds/` or the project's `.vlds/`, is refused by name before anything is written, dry or
 applied, since none of its entries would be read. Every file of the tree is placed:
@@ -276,6 +276,10 @@ def build_plan(p4, now):
         if parts[:1] in (["memory"], ["scratchpad"], [".git"], ["store"], ["archive"], ["src"], *([k] for k in KEEP_TOP)):
             if root == os.path.join(p4, parts[0]):
                 plan.kept.append(parts[0] + "/")
+            dirs[:] = []
+            continue
+        if rel_root == p4conf.rel("archive"):              # the report of a dry run in place, at the layout key
+            plan.kept.append(rel_root + "/")
             dirs[:] = []
             continue
         if parts[:1] in ([k] for k in DROP_TOP):
@@ -1153,7 +1157,7 @@ def run(p4, out=None, apply=False, now=None, project=None, report_path=None):
                 raise SystemExit(f"migrate: {done} exists; already migrated")
         write_new(plan, texts, tasks, labels, out, in_place)
         for o, nrel in plan.archive:
-            a, b = os.path.join(p4, o), os.path.join(out, nrel)
+            a, b = os.path.join(p4, o), placed(out, nrel)
             archived_ok.append(same_bytes(a, b))
         check("archives byte-identical", all(archived_ok), f"{sum(archived_ok)} of {len(archived_ok)} identical")
         if not in_place:
@@ -1171,7 +1175,7 @@ def run(p4, out=None, apply=False, now=None, project=None, report_path=None):
             plan.notes.append("the project dir is a git worktree: a worktree hook outside the p4 plugins may block "
                               "writes under .claude/p4/**; such a block comes from that hook, not from the plugins")
     text = render_report(report)
-    rp = report_path or os.path.join(out, "archive", f"migration-{date}.md")
+    rp = report_path or p4conf.sub(out, "archive", f"migration-{date}.md")
     os.makedirs(os.path.dirname(rp), exist_ok=True)
     with open(rp, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
@@ -1198,11 +1202,20 @@ def same_tree(a, b):
     return True
 
 
+def placed(out, rel):
+    """Where a file the plan names lands under `out`: archive/ by its LAYOUT key, so it is never flat at the top of
+    .claude/p4, and the rest of the flat layout at `rel`, which the next hook's layout move places."""
+    head, _, rest = rel.partition("/")
+    if head == "archive":
+        return p4conf.sub(out, "archive", *(rest.split("/") if rest else ()))
+    return os.path.join(out, rel)
+
+
 def write_new(plan, texts, tasks, labels, out, in_place):
     p4 = plan.p4
 
     def w(rel, text):
-        path = os.path.join(out, rel)
+        path = placed(out, rel)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
@@ -1216,7 +1229,7 @@ def write_new(plan, texts, tasks, labels, out, in_place):
     w("models/labels-raw.tsv", "task\tentry\tlabel\tsource\tweight\ttime\tnote\n"
       + "".join("\t".join(r) + "\n" for r in labels))
     for o, nrel in plan.archive:
-        dst = os.path.join(out, nrel)
+        dst = placed(out, nrel)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copyfile(os.path.join(p4, o), dst)
     for o, nrel in plan.src:
@@ -1240,7 +1253,7 @@ def write_new(plan, texts, tasks, labels, out, in_place):
             src = os.path.join(p4, k.rstrip("/"))
             if k.rstrip("/") == ".git":
                 continue
-            dst = os.path.join(out, k.rstrip("/"))
+            dst = placed(out, k.rstrip("/"))              # an archive/ by its layout key, never flat
             if os.path.isdir(src):
                 shutil.copytree(src, dst, dirs_exist_ok=True)
             elif os.path.isfile(src):
@@ -1370,7 +1383,8 @@ def main(argv=None):
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--now", default="")
     ap.add_argument("--project", default=None, help="the project repo, to list the frags it uses")
-    ap.add_argument("--report", default="", help="the report's path; <out>/archive/migration-<date>.md when not given")
+    ap.add_argument("--report", default="",
+                    help="the report's path; <out>/phi/archive/migration-<date>.md when not given")
     args = ap.parse_args(argv)
     r = run(args.p4, args.out or None, args.apply, args.now or None, args.project, args.report or None)
     print(summary(r))
