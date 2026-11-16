@@ -364,7 +364,7 @@ class Sync(unittest.TestCase):
         import hashlib
         with open(os.path.join(HERE, "sync.py"), "rb") as f:
             text = f.read().replace(b"\r\n", b"\n")
-        self.assertEqual({sync.SEED: hashlib.sha1(text).hexdigest()[:12]}, {14: "b12f0599b2ed"},
+        self.assertEqual({sync.SEED: hashlib.sha1(text).hexdigest()[:12]}, {15: "d4bc8570f9ec"},
                          "sync.py changed: raise SEED and pin the new text")
         p4 = os.path.join(os.path.dirname(self.origin), "p4")
         os.makedirs(p4)

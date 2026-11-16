@@ -2,7 +2,7 @@
 # seeded by p4-recall; remove this line to keep your own edits (a copy with it is replaced when the plugin's changes)
 """sync.py: keep every machine's branch of a p4 store in step, `p4.py sync` and the store's own GitHub workflow.
 
-A store is pushed one branch per machine (win, mac, ...). This merges them: every machine branch into `main`, then
+A store is pushed one branch per machine, such as win and mac. This merges them: every machine branch into `main`, then
 each machine branch fast-forwarded to `main`, so after a push to any branch all of them hold the same commit. The
 layout hook seeds this file as `.github/p4_sync.py` beside `.github/workflows/p4-sync.yml`, which runs `all --push`
 on every push; a machine catches up with `p4.py sync` (fetch, merge `origin/main` here, the same way).
@@ -20,17 +20,18 @@ files under .github/workflows; should a repository refuse that push, the error s
 --push` on a machine does the same merge with ezexe's credentials.
 
 Two machines write the same files, so a plain merge conflicts. Each conflicted file is settled by its kind:
-  the store's entries (store/**/*.md)   entry by entry, field by field, against the common ancestor: an entry only
+  the store's entries, store/**/*.md   entry by entry, field by field, against the common ancestor: an entry only
                     one machine has is kept, a field only one machine changed takes its value, and when both changed
                     a `status:` the one that is no longer LIVE wins, so a merge never brings back what ezexe
                     freed, since a union of lines keeps both status lines and the rule reads LIVE again
-  other text (*.md), tables (*.tsv, *.jsonl), .gitignore   both sides' lines (git merge-file --union); a
-                    table's repeated rows and an index's repeated link lines (memory/MEMORY.md) are dropped
+  other text, *.md, tables, *.tsv and *.jsonl, and .gitignore   both sides' lines, as git merge-file --union
+                    gives them; a table's repeated rows and the repeated link lines of an index such as
+                    memory/MEMORY.md are dropped
   settings (*.json)  key by key against the common ancestor; a list is both sides' items, so p4.json's
                     recall.deps.roots holds every machine's paths (a root that is not on a machine is skipped there)
-  a trained model (models/ranker*, *.pt, *.phid)   one side whole, the one whose last training round is the
+  a trained model, models/ranker*, *.pt or *.phid   one side whole, the one whose last training round is the
                     later: two machines' weights are never mixed
-  the training log (models/eval.tsv)   both machines' rounds, in time order, never one side whole, which
+  the training log, models/eval.tsv   both machines' rounds, in time order, never one side whole, which
                     would drop the other machine's rounds
   anything else     the side that changed it last, whole: a script, a workflow or anything under .github/ is never
                     stitched from two versions
@@ -54,7 +55,7 @@ MODEL_PREFIX = ("models/ranker",)
 MODEL_EXT = (".pt", ".phid")
 INDEX_LINE = re.compile(rb"^- \[[^\]]+\]\([^)]+\)")        # `- [Title](file.md) ...`, as memory/MEMORY.md lists
 NAME, EMAIL = "p4-sync", "p4-sync@users.noreply.github.com"
-SEED = 14    # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
+SEED = 15    # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
 
 
 def git(*args, check=True, cwd=None):
@@ -101,7 +102,7 @@ def eval_log(spec_prefix):
 
 
 def last_round(data):
-    """The time of the last row of an eval.tsv (its second column), '' when there is none."""
+    """The time of the last row of an eval.tsv, its second column, or '' when there is none."""
     rows = [l for l in (data or b"").decode("utf-8", "replace").splitlines()[1:] if l.strip()]
     return rows[-1].split("\t")[1] if rows and "\t" in rows[-1] else ""
 
@@ -131,7 +132,7 @@ FIELD = re.compile(r"^\s+([A-Za-z][\w-]*):(\s|$)")
 
 def parse_entries(text):
     """(the lines before the first entry, [(key, head line, [(field name, [its lines])])]) of a store file. An entry
-    starts at a `- ` in column 0; its key is that line and its `time:` value (a correction's key can repeat)."""
+    starts at a `- ` in column 0; its key is that line and its `time:` value, since a correction's key can repeat."""
     header, entries, cur = [], [], None
     for line in text.splitlines():
         if ENTRY_HEAD.match(line):
@@ -166,7 +167,8 @@ def three_way(base, ours, theirs, status=False):
 
 
 def merge_entries(base, ours, theirs):
-    """The store file both sides' entries make, or None when it holds no entries (the caller falls back to lines)."""
+    """The store file both sides' entries make, or None when it holds no entries, and the caller falls back to
+    lines."""
     (hb, eb), (ho, eo), (ht, et) = (parse_entries((x or b"").decode("utf-8", "replace")) for x in (base, ours, theirs))
     if not eo and not et:
         return None
@@ -203,7 +205,7 @@ def merge_entries(base, ours, theirs):
 
 
 def merge_json(base, ours, theirs, dflt=None):
-    """`dflt` is the plugin's default at this place (settings only): when a key is new on both sides, a value that
+    """`dflt` is the plugin's default at this place, for settings only: when a key is new on both sides, a value that
     is just the default a settings load wrote loses to one a person set, so a machine's freshly written default
     never overrides the other machine's setting."""
     if isinstance(ours, dict) and isinstance(theirs, dict):
@@ -377,7 +379,7 @@ def settle(path, ref, model_side, sides=None):
     prose = low.endswith(TEXT_EXT) or name in (".gitignore", ".gitattributes") or "." not in name.lstrip(".")
     if prose and not low.startswith(".github/") and b"\0" not in (ours + theirs)[:8192]:
         return union(base, ours, theirs, low.endswith((".tsv", ".jsonl"))), "both sides' lines"
-    # code and configuration (a script, a workflow, anything under .github/) is never stitched from two versions
+    # code and configuration, a script, a workflow or anything under .github/, is never stitched from two versions
     t_ours = git("log", "-1", "--format=%ct", "HEAD", "--", path, check=False).stdout.strip() or "0"
     t_theirs = git("log", "-1", "--format=%ct", ref, "--", path, check=False).stdout.strip() or "0"
     side = "theirs" if int(t_theirs) > int(t_ours) else "ours"
@@ -465,7 +467,7 @@ def cmd_all(main, push):
         except RuntimeError as e:
             if "rejected" not in str(e) and "fetch first" not in str(e):
                 raise
-            # the remote moved while this merged (the workflow, or another machine): take it in and merge once more
+            # the remote moved while this merged, by the workflow or another machine: take it in and merge once more
             print("p4 sync: the remote moved meanwhile; merging once more")
             git("fetch", "-q", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*")
             git("checkout", "-q", "--detach", f"origin/{main}")
@@ -501,7 +503,8 @@ def _all_in_worktree(main, branches, push):
 
 
 def snapshot(branch):
-    """Commit the tracked files that changed (a live store's hooks rewrite its tables all day); True when it did."""
+    """Commit the tracked files that changed, since a live store's hooks rewrite its tables all day; True when it
+    did."""
     if not git("status", "--porcelain", "--untracked-files=no").stdout.strip():
         return False
     git("-c", f"user.name={NAME}", "-c", f"user.email={EMAIL}", "commit", "-q", "--no-verify", "-a", "-m",
@@ -614,8 +617,8 @@ jobs:
 
 def seed(p4, main="main"):
     """Write the workflow and this script into the store's .github/ when they are absent, or carry the seed line and
-    differ from the plugin's (ezexe, having removed the line, keeps that copy). A copy seeded by a newer plugin (a higher
-    SEED, which another machine's sync brought in) is left alone. Returns the paths written."""
+    differ from the plugin's: ezexe, having removed the line, keeps that copy. A copy seeded by a newer plugin, with
+    a higher SEED another machine's sync brought in, is left alone. Returns the paths written."""
     here = os.path.abspath(__file__)
     with open(here, encoding="utf-8") as f:
         script = f.read()
