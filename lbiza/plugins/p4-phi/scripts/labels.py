@@ -20,7 +20,6 @@ tasks.tsv holds the tasks: id, session, time, text, kind (first | new | short | 
 `agent` is a subagent's task).
 """
 
-import datetime
 import json
 import os
 import re
@@ -239,22 +238,6 @@ def per_source(p4):
     for r in read_tsv(mpath(p4, TRAIN)):
         got.setdefault(("labels.tsv", r.get("source", "")), [0, 0])[0 if r.get("label") == "1" else 1] += 1
     return got
-
-
-# --- old pools (5.1's last row) --------------------------------------------------------------------------
-
-def from_pools(p4, old):
-    """Import the labelled pools and audits of an old-layout tree `old` into this store's labels-raw.tsv (source
-    `pool`) and tasks.tsv, each pick resolved to an entry id by migrate.py's rule. Returns the stats."""
-    import migrate
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    plan = migrate.build_plan(os.path.abspath(old), now)
-    _texts, files = migrate.new_files(plan)
-    tasks, labels, stats = migrate.import_pools(plan, files)
-    rows = [dict(zip(RAW_HEAD, r)) for r in labels]
-    replace_source(p4, RAW, RAW_HEAD, "pool", rows)
-    add_tasks(p4, [dict(zip(TASK_HEAD, t)) for t in tasks])
-    return {"tasks": len(tasks), "labels": len(rows), "unresolved": len(stats["unresolved"])}
 
 
 # --- rare terms, shared by history and usage labels ------------------------------------------------------

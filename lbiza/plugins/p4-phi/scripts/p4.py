@@ -7,7 +7,7 @@
                                        external modules; a package installed or updated is read again)
   query --text T [--session S]         the recall lines for one message: 0 lines for an ordinary message,
                                        otherwise at most 5, each `- <date> <kind>: <text> (<file>:<line>)`
-  labels [--from-pools OLD] [--from-history] [--from-transcripts --project D --slug DIR ...] [--reexploration]
+  labels [--from-history] [--from-transcripts --project D --slug DIR ...] [--reexploration]
                                        list the label set with counts per source; import or derive labels
   train [--if-owed], eval              fit, evaluate held out, promote past the floor (train.py)
   dictionary check [--dry]             every vocabulary entry's two tests; a failing entry set off
@@ -635,9 +635,6 @@ def cmd_check(args):
 def cmd_labels(args):
     import labels as lb
     p4 = p4_dir(args)
-    if args.from_pools:
-        r = lb.from_pools(p4, args.from_pools)
-        print(f"labels --from-pools: {r['tasks']} tasks, {r['labels']} labels, {r['unresolved']} picks unresolved")
     if args.from_history:
         r = lb.from_history(p4)
         print(f"labels --from-history: {r['rows']} completed rows; {r['history_tasks']} tasks with "
@@ -731,7 +728,6 @@ def main(argv=None):
     p.add_argument("--main", default="")
     p = sub.add_parser("labels")
     p.add_argument("--p4")
-    p.add_argument("--from-pools", default="")
     p.add_argument("--from-history", action="store_true")
     p.add_argument("--from-transcripts", action="store_true")
     p.add_argument("--reexploration", action="store_true")
