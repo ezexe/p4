@@ -1119,8 +1119,8 @@ class Hook(unittest.TestCase):
 
     def test_the_hooks_file_wires_each_command_the_script_has(self):
         with open(os.path.join(HERE, "hooks.json"), encoding="utf-8") as f:
-            wired = re.findall(r"run-hook\.sh\\?\" ([\w-]+)", f.read())
-        self.assertEqual(sorted(wired), ["ask", "repo-uses", "start", "stop", "write"])
+            wired = re.findall(r"run-hook\.sh\\?\" (\w+)", f.read())
+        self.assertEqual(sorted(wired), ["start", "stop", "write"])
 
 
 if __name__ == "__main__":

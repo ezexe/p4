@@ -34,15 +34,6 @@ A skill brewed during a session is copied at once, and Claude Code's watch of `.
 Edit a store skill in `.claude/p4/skillex/`, never its copy, since the copy is rewritten from the store.
 A project's own skill in `.claude/skills/` without a `.skillex` file is never touched, and a skill brewed later takes a name it does not hold.
 
-## Saved code
-
-`.claude/p4/skillex/src/` holds code kept for reuse that the project's repository does not use; it is no skill and is never copied.
-A store that kept it in `.claude/p4/temportal/src/` has it moved here at the next session start, with its git history kept as a rename.
-Two asks about where code belongs are off unless `.claude/p4/p4.json` sets `skillex.asks` to true or `P4_SKILLEX_ASKS=1` is set for a run:
-
-- `repo-uses`, at SessionStart, prints one line for each file under `skillex/src/` that the project repository's tracked code, build, docs or CI names, since that file belongs in the repository.
-- `ask`, at PreToolUse on Write, Edit and Bash, asks before a code file goes to a temp location, the session's scratchpad path or the notebook, naming where it belongs: the repository if it will use the file, else `skillex/src/`. It never denies and is silent inside a subagent.
-
 ## Commands
 
 Run from the project, with the plugin's root in `CLAUDE_PLUGIN_ROOT`:

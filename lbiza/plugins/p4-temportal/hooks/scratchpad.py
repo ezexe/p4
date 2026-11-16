@@ -2,7 +2,7 @@
 """scratchpad.py: p4-temportal's scratchpad part, which keeps each session's scratchpad directory in
 `<project>/.claude/p4/temportal/tmp/<session>/` and the notebook in `<project>/.claude/p4/temportal/scratchpad/`, with
 the notebook's logs, build output and binaries in its `.out/`, which ignores itself. It moves files, and it tells the
-model only where a session's temporary files go and what it did.
+model only where a session's temporary files go and what it did, unless ezexe turns the two asks on.
 
   notebook-out   at SessionStart, seeds `.claude/p4/temportal/scratchpad/.out/.gitignore` with `*`, seeds it again
                  when it is missing or changed, and moves every log, build output and binary found elsewhere in the
@@ -53,6 +53,19 @@ at a start with its file count and size, and removing it is ezexe's to choose.
                  `--dry-run` changes nothing, not the index and not p4.json, and lists what would be committed and
                  removed: the counts and the top folders of each.
 
+The two asks are off unless p4.json's scratchpad.asks is true or P4_SCRATCHPAD_ASKS=1:
+
+  repo-uses      at SessionStart, prints one line for each file under `.claude/p4/temportal/src/` that the project
+                 repository's tracked code, build, docs or CI names: that file is code the repository uses, so it
+                 belongs there. It only reads, with one `git grep`, and is silent outside a git repository or without
+                 git.
+  ask            at PreToolUse, reads the paths a call writes: a Write's or Edit's file_path, and for a Bash command
+                 every path in a write position, a redirect, tee, python's open() in a write mode, or the destination
+                 of cp or mv. A code file, by extension or by name, headed for a temp location, the session's
+                 scratchpad path or the notebook gets an ask naming where it belongs: the repository if it will use
+                 the file, else `.claude/p4/temportal/src/`. It never denies, and it is silent inside a subagent,
+                 whose writer ezexe cannot redirect from the prompt.
+
 Every failure prints a one-line notice and exits 0."""
 
 import json
@@ -71,8 +84,26 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import p4conf  # noqa: E402 - the settings file, .claude/p4/p4.json
 
+ASKS_ENV = "P4_SCRATCHPAD_ASKS"
 TMP_ENV = "P4_SCRATCHPAD_TMP"
 TEMP_ROOTS = ("/tmp", "/private/tmp")   # beside tempfile.gettempdir(): where Claude Code makes its claude* folders
+
+CODE_EXT = {"py", "pyw", "sh", "bash", "zsh", "ps1", "psm1", "bat", "cmd", "js", "mjs", "cjs", "ts", "rb", "pl",
+            "lua", "php", "go", "rs", "c", "cc", "cpp", "h", "hpp", "cs", "java", "kt", "swift", "sql", "awk",
+            "r", "jl", "scala", "groovy", "tcl", "vbs", "cmake", "gn", "gni", "html", "htm"}
+# Code by name rather than by extension: by extension alone CMakeLists.txt is a `.txt` note.
+CODE_NAMES = {"cmakelists.txt", "makefile", "gnumakefile", "dockerfile", "justfile", "rakefile"}
+SCRATCHPAD_MARKERS = ("/temp/claude/", "/tmp/claude/")          # the scratchpad paths Claude Code gives
+TEMP_MARKERS = ("/tmp/", "/appdata/local/temp/", "/var/folders/", "/private/tmp/", "%temp%", "%tmp%",
+                "$tmpdir", "${tmpdir}", "$env:temp", "$env:tmp")
+_PATH = r"(?:\"([^\"\n]+)\"|'([^'\n]+)'|([^\s\"'<>|;&()`]+))"
+WRITE_RES = [
+    re.compile(r">{1,2}[ \t]*" + _PATH),
+    re.compile(r"\btee\b(?:[ \t]+-[A-Za-z]+)*[ \t]+" + _PATH),
+    re.compile(r"\bopen\(\s*(?:\"([^\"\n]+)\"|'([^'\n]+)')\s*,\s*[\"'][aw]"),
+]
+ARGS_RES = [re.compile(r"\b(?:cp|mv)\b([^\n|;&]*)")]
+TOKEN_RE = re.compile(r"\"[^\"\n]*\"|'[^'\n]*'|\S+")
 
 OUT_NAME = ".out"
 OUT_IGNORE = "*\n"
@@ -80,6 +111,11 @@ IGNORABLE_EXT = {"log", "out", "tmp", "dump", "pid", "o", "obj", "pdb", "ilk", "
                  "a", "class", "pyc", "pyo", "tlog", "binlog", "etl", "trace", "lastbuildstate"}
 IGNORABLE_DIRS = {"bin", "build", "obj", "logs", "out", "dist", "target", "node_modules", "__pycache__", ".cache",
                   "cmake-build-debug", "cmake-build-release", "x64", "debug", "release"}
+
+REPO_USES_MIN_NAME = 6     # a basename shorter than this, such as `a.py`, matches too much to call it a use
+REPO_USES_MAX = 200        # candidate names one git grep carries
+REPO_USES_LINES = 10       # lines printed at most; the rest counted on one more
+
 
 def payload_from_stdin():
     try:
@@ -92,6 +128,7 @@ def project_root(payload):
     return os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
 
 
+ASKS = False                # p4.json scratchpad.asks; P4_SCRATCHPAD_ASKS=1 or 0 wins for one run
 TMP = True                  # p4.json scratchpad.tmp; P4_SCRATCHPAD_TMP=1 or 0 wins for one run
 TMP_IDLE_DAYS = 7           # another session's quiet scratchpad directory is committed and removed at a start
 TMP_MAX_FILE_MB = 20        # a larger file is never staged, so never deleted
@@ -110,10 +147,11 @@ def configure(payload, write=True, root=None):
     missing unless `write` is False."""
     p4 = os.path.join(root or project_root(payload), ".claude", "p4")
     p4conf.configure(globals(), p4, "scratchpad", {
-        "tmp": "TMP", "tmp_idle_days": "TMP_IDLE_DAYS", "tmp_max_file_mb": "TMP_MAX_FILE_MB",
+        "asks": "ASKS", "tmp": "TMP", "tmp_idle_days": "TMP_IDLE_DAYS", "tmp_max_file_mb": "TMP_MAX_FILE_MB",
         "tmp_max_files": "TMP_MAX_FILES", "tmp_empty_idle_hours": "TMP_EMPTY_IDLE_HOURS",
-        "scratch_sweep_minutes": "SCRATCH_SWEEP_MINUTES", "tmp_skip_dirs": "TMP_SKIP_DIRS", "ignorable_ext": "IGNORABLE_EXT", "ignorable_dirs": "IGNORABLE_DIRS"},
-        write=write)
+        "scratch_sweep_minutes": "SCRATCH_SWEEP_MINUTES", "tmp_skip_dirs": "TMP_SKIP_DIRS", "ignorable_ext": "IGNORABLE_EXT", "ignorable_dirs": "IGNORABLE_DIRS",
+        "repo_uses_min_name": "REPO_USES_MIN_NAME", "repo_uses_max": "REPO_USES_MAX",
+        "repo_uses_lines": "REPO_USES_LINES"}, write=write)
 
 
 def layout(payload):
@@ -121,6 +159,16 @@ def layout(payload):
     lines = p4conf.migrate_layout(os.path.join(project_root(payload), ".claude", "p4"))
     if lines:
         print("p4-temportal: " + "; ".join(lines) + ".")
+
+
+def asks_on():
+    env = os.environ.get(ASKS_ENV, "").strip()
+    return env == "1" if env in ("0", "1") else bool(ASKS)
+
+
+def is_code(path):
+    return (os.path.splitext(path)[1].lower().lstrip(".") in CODE_EXT
+            or os.path.basename(path).lower() in CODE_NAMES)
 
 
 # ---- notebook-out ---------------------------------------------------------------------------------------------
@@ -1069,6 +1117,147 @@ def cmd_tmp_close(payload):
     return 0
 
 
+# ---- repo-uses, one of the two asks ---------------------------------------------------------------------------
+
+def repo_use_candidates(root):
+    """{basename: [project-relative paths]} of every code file under `.claude/p4/temportal/src/`, skipping dot
+    folders, whose name is distinctive enough to look for."""
+    src = p4conf.sub(os.path.join(root, ".claude", "p4"), "src")
+    found = {}
+    for d, dirs, files in os.walk(src):
+        dirs[:] = sorted(x for x in dirs if not x.startswith("."))
+        for name in sorted(files):
+            path = os.path.join(d, name)
+            if not is_code(path) or len(name) < REPO_USES_MIN_NAME:
+                continue
+            found.setdefault(name, []).append(os.path.relpath(path, root).replace("\\", "/"))
+    return dict(sorted(found.items())[:REPO_USES_MAX])
+
+
+def repo_uses(root):
+    """[(project-relative path, [repository files that name it])] by one `git grep` over the project repository's
+    tracked files; `.claude/p4` is its own repository and is excluded, so a file's own notes never count as a use."""
+    cands = repo_use_candidates(root)
+    if not cands:
+        return []
+    args = ["git", "-C", root, "grep", "-I", "-F", "-l", "-z"]
+    for name in cands:
+        args += ["-e", name]
+    try:
+        r = subprocess.run(args + ["--", ".", ":(exclude).claude/p4"], capture_output=True, timeout=15)
+    except Exception:
+        return []
+    if r.returncode not in (0, 1):
+        return []
+    files = sorted(f.decode("utf-8", "replace") for f in r.stdout.split(b"\0") if f)
+    out = []
+    for name, paths in cands.items():
+        users = []
+        rx = re.compile(r"(?<![\w.-])" + re.escape(name) + r"(?![\w-])")
+        for f in files:
+            try:
+                with open(os.path.join(root, f), encoding="utf-8", errors="replace") as fh:
+                    if rx.search(fh.read()):
+                        users.append(f)
+            except OSError:
+                continue
+        if users:
+            out += [(p, users) for p in paths]
+    return sorted(out)
+
+
+def cmd_repo_uses(payload):
+    if not asks_on():
+        return 0
+    root = project_root(payload)
+    used = repo_uses(root)
+    lines = []
+    for path, users in used[:REPO_USES_LINES]:
+        named = ", ".join(f"`{u}`" for u in users[:2]) + (" …" if len(users) > 2 else "")
+        lines.append(f"`{path}` is used by {named}; it belongs in the repo.")
+    if len(used) > REPO_USES_LINES:
+        lines.append(f"{len(used) - REPO_USES_LINES} more files under .claude/p4/temportal/src/ are named by the repo.")
+    if lines:
+        print("\n".join(lines))
+    return 0
+
+
+# ---- ask, one of the two asks ---------------------------------------------------------------------------------
+
+def _norm(path):
+    return path.replace("\\", "/").lower()
+
+
+def in_harness_scratchpad(path):
+    p = _norm(path)
+    return any(m in p for m in SCRATCHPAD_MARKERS) and "/scratchpad" in p
+
+
+def in_temp(path):
+    p = _norm(path)
+    return any(m in p for m in TEMP_MARKERS)
+
+
+def in_notebook(path):
+    p = _norm(path)
+    return "/.claude/p4/temportal/scratchpad/" in p or p.startswith(".claude/p4/temportal/scratchpad/")
+
+
+def _first(m):
+    return next((g for g in m.groups() if g), "")
+
+
+def written_paths(payload):
+    tool = str(payload.get("tool_name") or "")
+    inp = payload.get("tool_input") or {}
+    if not isinstance(inp, dict):
+        return []
+    if tool in ("Write", "Edit"):
+        fp = str(inp.get("file_path") or "")
+        return [fp] if fp else []
+    if tool != "Bash":
+        return []
+    cmd = str(inp.get("command") or "")
+    out = []
+    for rx in WRITE_RES:
+        out += [_first(m) for m in rx.finditer(cmd)]
+    for rx in ARGS_RES:
+        for m in rx.finditer(cmd):
+            toks = [t.strip("\"'") for t in TOKEN_RE.findall(m.group(1)) if not t.startswith("-")]
+            out += toks[-1:]                            # the destination: cp / mv write only their last argument
+    return [p for p in out if p]
+
+
+def cmd_ask(payload):
+    if not asks_on() or payload.get("agent_id"):
+        return 0
+    root = project_root(payload)
+    src = p4conf.sub(os.path.join(root, ".claude", "p4"), "src")
+    reasons, seen = [], set()
+    for p in written_paths(payload):
+        if p in seen or not is_code(p):
+            continue
+        seen.add(p)
+        if in_harness_scratchpad(p):
+            where = ("the session's scratchpad, kept in .claude/p4/temportal/tmp/ for notes and output"
+                     if tmp_on() else "the session's scratchpad, which Claude Code deletes with its transcript")
+        elif in_notebook(p):
+            where = "the notebook .claude/p4/temportal/scratchpad/, which is for notes, logs and output"
+        elif in_temp(p):
+            where = "a temp location"
+        else:
+            continue
+        name = os.path.basename(p.replace("\\", "/"))
+        reasons.append(f"{name} is code headed for {where}, at {p}; if the repo will use it, it belongs in the repo "
+                       f"where the repo keeps that kind of code, otherwise in {os.path.join(src, name)}")
+    if not reasons:
+        return 0
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
+                                             "permissionDecisionReason": "p4-temportal: " + "; ".join(reasons[:3])
+                                             + "."}}))
+    return 0
+
+
 def main():
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
@@ -1083,10 +1272,14 @@ def main():
     payload = payload_from_stdin()
     try:
         configure(payload)
-        if sub in ("notebook-out", "tmp-link"):
+        if sub in ("notebook-out", "repo-uses", "tmp-link"):
             layout(payload)
         if sub == "notebook-out":
             return cmd_notebook_out(payload)
+        if sub == "repo-uses":
+            return cmd_repo_uses(payload)
+        if sub == "ask":
+            return cmd_ask(payload)
         if sub == "tmp-link":
             return cmd_tmp_link(payload)
         if sub == "tmp-sweep":

@@ -474,7 +474,7 @@ def memory_entries(p4):
 
 
 def src_entries(p4):
-    """One document for each file of saved code under `skillex/src/`, an Entry holding its path and its first
+    """One document for each file of saved code under `temportal/src/`, an Entry holding its path and its first
     non-empty line that is no `#!` line, comment marks off. A file over 1 MiB, or one that does not read as UTF-8,
     is skipped."""
     d = p4conf.sub(p4, "src")
@@ -513,7 +513,7 @@ def index_path(p4):
 
 
 def sources_signature(p4):
-    """(count, newest mtime_ns): the number of files under the corpus, `temportal/memory/` and `skillex/src/` plus
+    """(count, newest mtime_ns): the number of files under the corpus, `temportal/memory/` and `temportal/src/` plus
     repo.json and deps.json of `phi/models/`, and the newest mtime among those files and folders. It walks with
     os.scandir, one stat for each file or folder and no path joins, since every message's staleness check runs it."""
     count, newest = 0, 0

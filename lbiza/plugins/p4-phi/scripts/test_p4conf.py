@@ -17,8 +17,7 @@ sys.path.insert(0, str(HERE))
 import p4conf  # noqa: E402
 
 PLUGINS = HERE.parents[1]
-COPIES = [PLUGINS / "p4-temportal" / "hooks" / "p4conf.py", PLUGINS / "p4-phi" / "scripts" / "p4conf.py",
-          PLUGINS / "p4-skillex" / "hooks" / "p4conf.py"]
+COPIES = [PLUGINS / "p4-temportal" / "hooks" / "p4conf.py", PLUGINS / "p4-phi" / "scripts" / "p4conf.py"]
 
 
 class P4Conf(unittest.TestCase):
@@ -67,25 +66,7 @@ class P4Conf(unittest.TestCase):
         s = p4conf.load(self.p4)
         self.assertEqual(s, p4conf.DEFAULTS)
         self.assertEqual(self.read(), p4conf.DEFAULTS)
-        self.assertEqual(set(s), {"memory", "scratchpad", "phi", "temportal", "skillex", "recall"})
-
-    def test_a_moved_key_goes_to_its_place_now_and_the_file_is_rewritten(self):
-        old = p4conf.load(self.p4)                       # a complete file, as an earlier plugin wrote it
-        old.pop("skillex")
-        old["scratchpad"].update(asks=True, repo_uses_min_name=6, repo_uses_max=200, repo_uses_lines=3)
-        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump(old, f)
-        s = p4conf.load(self.p4)
-        self.assertEqual((s["skillex"]["asks"], s["skillex"]["repo_uses_lines"]), (True, 3))
-        on_disk = self.read()
-        self.assertNotIn("asks", on_disk["scratchpad"])
-        self.assertEqual(on_disk["skillex"]["asks"], True, "the file is rewritten with the key at its place now")
-        for (sec, key), (new_sec, new_key) in p4conf.MOVED.items():
-            self.assertIn(key, old[sec])
-            self.assertIn(new_key, p4conf.DEFAULTS[new_sec])
-            self.assertNotIn(key, p4conf.DEFAULTS[sec])
-        self.assertEqual(p4conf._moved({"scratchpad": {"asks": True}, "skillex": {"asks": False}}),
-                         {"scratchpad": {}, "skillex": {"asks": False}}, "a value at the new place wins")
+        self.assertEqual(set(s), {"memory", "scratchpad", "phi", "temportal", "recall"})
 
     def test_the_retired_config_json_seeds_it(self):
         os.makedirs(p4conf.sub(self.p4, "models"))
