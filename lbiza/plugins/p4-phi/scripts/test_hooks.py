@@ -209,7 +209,7 @@ class Layout(Base):
         for line in ("phi/models/index.json", "phi/models/repo.json"):
             self.assertEqual(got.count(line + "\n"), 1, f"{line}: a line the file already holds is never appended again")
 
-    def test_gitignore_without_marker_is_the_owners(self):
+    def test_gitignore_without_marker_is_ezexes(self):
         theirs = "*.wav\nphi/models/index.json\nbuild/\n"
         self.assertEqual(self.gitignore(theirs), theirs, "a seeded line present and no marker: ezexe's edits win")
         own = "# my rules\nbuild/\n*.log\n"
@@ -251,7 +251,7 @@ class Recall(Base):
         self.assertTrue(served["ids"])
         self.assertEqual(served["task"], rows[0].id)
 
-    def test_default_off_prints_nothing_but_logs_shadow(self):
+    def test_off_prints_nothing_but_logs_shadow(self):
         """With P4_RECALL_INJECT=0 no line reaches the model; what retrieval would have shown is logged as shadow, so
         the close hook's usage labels still learn from it. The same holds for a subagent's prompt."""
         text = "does the quokka harness run the zebrafish plotter golden images on every push?"
