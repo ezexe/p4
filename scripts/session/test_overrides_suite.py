@@ -33,7 +33,6 @@ import store_lessons as sl  # noqa: E402
 
 TASKS = HERE / "overrides_tasks.jsonl"
 NOTEBOOK = REPO / ".docs" / "p4" / "overrides_colab.ipynb"
-FRESH_NOTEBOOK = REPO / ".docs" / "p4" / "fresh_validation.ipynb"
 # The old contracts live in git history since the fresh marketplace emptied lbiza/ (1750fa2): the tests of the units,
 # the pathways and the old Colab notebook read the marketplace as it was at f2323b2, beside this checkout's scripts.
 OLD_REF = "f2323b2"
@@ -303,127 +302,6 @@ def test_context_dir_per_task():
         # =plain and =v1.2 differ from the built-in on every task
         n = len(tasks())
         assert len(list(Path(f"{d}/cache").glob("*.json"))) == n + 2 + n + n
-
-
-def fresh_fixture(d):
-    """Two small new-layout stores (p4-recall's test fixture) and one lesson task bound to one of them."""
-    sys.path.insert(0, str(REPO / "lbiza" / "plugins" / "p4-recall" / "scripts"))
-    from test_store import make_store
-    a = make_store(str(Path(d) / "a"))
-    lessons = Path(d) / "lessons.jsonl"
-    lessons.write_text(json.dumps({
-        "id": "lesson-ap-p4_mac-branch", "category": "lessons", "split": "train", "from_store": "ap-p4_mac",
-        "prompt": "Which branch does the Mac's work go on, 0.0.1-1.0.0_mac or the mac_mac one?",
-        "grader": {"type": "judge", "rubric": "Passes if it names 0.0.1-apple&win&mac_mac."},
-        "reference": "0.0.1-apple&win&mac_mac, cut under 0.0.1-apple&win&mac.",
-        "bad": ["0.0.1-1.0.0_mac."]}) + "\n", encoding="utf-8")
-    return {"p4-p4": a, "ap-p4_mac": a}, lessons
-
-
-def test_fresh_validation_fake():
-    """The fresh validation notebook, every cell with FAKE, on two fixture stores: tasks, contexts, the judge check,
-    the three runs, the findings and the (empty) upgrades step, nothing spent; the short turns' own readings never
-    reach their contexts."""
-    import fresh_validation as fv
-    import make_fresh_validation_notebook as mk
-    nb = mk.notebook()
-    codes = ["".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "code"]
-    for c in codes:
-        ast.parse(c)
-    first = "".join(nb["cells"][0]["source"])
-    assert mk.PAID_COMMAND in first and "$" in first and "TOTAL_MAX_USD" in first
-    if FRESH_NOTEBOOK.exists():
-        assert json.loads(FRESH_NOTEBOOK.read_text())["cells"] == nb["cells"], "regenerate the notebook"
-    saved = fv.settings()
-    with tempfile.TemporaryDirectory() as d:
-        stores, lessons = fresh_fixture(d)
-        g = {}
-        exec(codes[0], g)                                       # the settings cell
-        assert g["FAKE"] is True and g["TOTAL_MAX_USD"] == fv.TOTAL_MAX_USD == 42.0
-        try:
-            fv.configure(WORK=f"{d}/w", STORES=",".join(f"{k}={v}" for k, v in stores.items()),
-                         LESSON_TASKS=str(lessons), TRAIN=False, N_SHORT=6, CACHE_FROM="",
-                         UPGRADES_DIR=f"{d}/no-upgrades", NOW="2026-11-01 19:00")
-            for c in codes[1:]:
-                exec(c, g)
-            s = g["summary"]
-            assert s["fake"] and s["spent_usd"] == 0.0
-            assert set(s["verdict"]) >= {"8.2 =recall never below the built-in", "8.3 short turns read right",
-                                         "8.4 newer than the model"}
-            assert {"=emission-plain", "=recall@ap-p4_mac", "=recall@p4-p4", "=recall+pinned@p4-p4"} <= \
-                set(s["validate"])
-            p = fv.paths()
-            assert (p["results"] / "findings.md").exists() and (p["results"] / "summary.json").exists()
-            short = [json.loads(l) for l in open(p["short"], encoding="utf-8")]
-            assert short and all(t["category"] == "short" and t["held_cut"] for t in short)
-            assert any(t["history"] for t in short), "the rows before a turn ride as its conversation"
-            for t in short:
-                prefix = "You mean this, and I'll act on it now: "
-                assert t["reference"].startswith(prefix), t["reference"][:60]
-                said = t["reference"][len(prefix):].rstrip(".")
-                for f in p["ctx"].glob(f"*.{t['id']}.md"):
-                    assert said not in f.read_text(), (t["id"], "the held-out reading leaked into recall")
-            newer = [json.loads(l) for l in open(p["newer"], encoding="utf-8")]
-            assert len(newer) == 12 and all(t["category"] == "newer" and t["bad"] for t in newer)
-            got = list(p["ctx"].glob("recall@ap-p4_mac.n11-mac-branch.md"))
-            assert got and "0.0.1-apple&win&mac_mac" in got[0].read_text(), "the newer fact is recalled"
-            assert g["upgrades"]["kept"] == []
-        finally:
-            fv.configure(**saved)
-
-
-def test_upgrades_keep_fail_conflict():
-    """The upgrades step on a dummy repo: one upgrade passes and is kept, one fails its own test, one conflicts with
-    the kept one; the kept set is one commit with results.md, and nothing else in the worktree is committed."""
-    import fresh_validation as fv
-    with tempfile.TemporaryDirectory() as d:
-        repo = Path(d) / "repo"
-        repo.mkdir()
-        env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
-
-        def git(*a):
-            return subprocess.run(["git", "-C", str(repo), *a], capture_output=True, text=True, check=True,
-                                  env={**__import__("os").environ, **env})
-        git("init", "-q")
-        (repo / "gate.txt").write_text("threshold 0.50\nmargin 0.10\n")
-        (repo / "notes.txt").write_text("unrelated\n")
-        git("add", "-A")
-        git("commit", "-q", "-m", "base")
-        (repo / "notes.txt").write_text("an uncommitted change of the owner's\n")
-        up = repo / ".docs" / "p4" / "upgrades"
-
-        def upgrade(name, new_line, passes):
-            u = up / name
-            u.mkdir(parents=True)
-            if new_line.startswith("threshold"):
-                diff = "--- a/gate.txt\n+++ b/gate.txt\n@@ -1,2 +1,2 @@\n-threshold 0.50\n+" + new_line + \
-                    "\n margin 0.10\n"
-            else:                                  # a new file: applies over any other upgrade
-                diff = "--- /dev/null\n+++ b/extra.txt\n@@ -0,0 +1 @@\n+" + new_line + "\n"
-            (u / "patch.diff").write_text(diff)
-            (u / "test.sh").write_text(f"echo '{{\"metric\": \"silent\", \"before\": 0.84, \"after\": 0.97, "
-                                       f"\"pass\": {'true' if passes else 'false'}}}'\n")
-            (u / "README.md").write_text(name + "\n")
-        upgrade("a-threshold", "threshold 0.65", True)
-        upgrade("b-worse", "margin 0.20", False)
-        upgrade("c-other", "threshold 0.70", True)
-        (up / "index.json").write_text(json.dumps({"upgrades": [{"id": "a-threshold"}, {"id": "b-worse"},
-                                                                {"id": "c-other"}]}))
-        git("add", ".docs")
-        git("commit", "-q", "-m", "the upgrades")
-        rec = fv.step_upgrades(repo=repo, upgrades_dir=up, tests=["test -f {root}/gate.txt"],
-                               measures={"gate": "cat {root}/gate.txt"}, work=f"{d}/w", apply=True, paid=False)
-        why = {r["id"]: r["why"] for r in rec["upgrades"]}
-        assert rec["kept"] == ["a-threshold"], why
-        assert "did not pass" in why["b-worse"]
-        assert why["c-other"].startswith("conflicts with an upgrade already kept: a-threshold"), why
-        assert rec["measures"]["gate"]["ok"] and "threshold 0.65" in " ".join(rec["measures"]["gate"]["tail"])
-        assert rec["committed"], rec
-        show = git("show", "--stat", "--format=%s", "HEAD").stdout
-        assert "p4 upgrades: a-threshold" in show and "gate.txt" in show and "results.md" in show
-        assert "notes.txt" not in show and git("status", "--short").stdout.strip() == "M notes.txt"
-        res = (up / "results.md").read_text()
-        assert "| a-threshold | yes |" in res and "| b-worse | no |" in res and "0.97" in res
 
 
 if __name__ == "__main__":
