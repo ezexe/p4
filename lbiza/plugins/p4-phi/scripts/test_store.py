@@ -8,7 +8,6 @@ everything else builds its own small fixture in a temp directory.
 """
 
 import os
-import shutil
 import sys
 import tempfile
 import time
@@ -20,7 +19,6 @@ import p4conf  # noqa: E402
 import store as st  # noqa: E402
 
 FIXTURES = os.environ.get("P4_FIXTURES", "/Users/ez/gritz/p4/.claude/p4/scratchpad/.out/p4-colab/overrides-1-work/stores")
-REPOS = ("AudioPlugin-p4", "ap-p4_mac", "p4-p4", "phi-p4")
 NOW = "2026-11-01 18:00"
 
 

@@ -22,7 +22,7 @@ sys.path.insert(0, HERE)
 import migrate  # noqa: E402
 import p4conf  # noqa: E402
 import store as st  # noqa: E402
-from test_store import NOW, REPOS, fixture, write  # noqa: E402
+from test_store import NOW, fixture, write  # noqa: E402
 
 LESSONS = os.path.normpath(os.path.join(HERE, "..", "..", "..", "..", "scripts", "session", "store_lessons.py"))
 
