@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """make_make_venv.py: give this p4 checkout its one Python environment, .venv/ at its root, with everything p4's scripts and
-the p4-model skill run: phi (phi_prune, phi_rank, phi_store, phi_serve, phi_model) and torch for the .pt ranker and
+the p4-model skill run: phi (phi_prune, phi_rank, phi_store, phi_model) and torch for the .pt ranker and
 the node tree, the anthropic SDK for the teacher and the paid experiments, ipykernel for the notebooks.
 
     python3 scripts/make_venv.py                  # create or update .venv; phi from a sibling ../phi checkout, else GitHub
@@ -32,8 +32,8 @@ VENV = ROOT / ".venv"
 REQUIREMENTS = ROOT / "requirements.txt"
 PHI_GIT = "git+https://github.com/ezexe/phi"
 TORCH_CPU = "https://download.pytorch.org/whl/cpu"
-CHECK = ("torch", "numpy", "phi_prune", "phi_rank", "phi_store", "phi_serve", "phi_model", "anthropic")
-NEED_TORCH = ("torch", "phi_prune", "phi_rank", "phi_serve")     # what cannot import on a machine with no torch build
+CHECK = ("torch", "numpy", "phi_prune", "phi_rank", "phi_store", "phi_model", "anthropic")
+NEED_TORCH = ("torch", "phi_prune", "phi_rank")     # what cannot import on a machine with no torch build
 
 
 def python_of(venv: Path) -> Path:

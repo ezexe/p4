@@ -62,7 +62,7 @@ class Venv(unittest.TestCase):
             calls.append([str(c) for c in cmd])
             return 1 if "torch" in [str(c) for c in cmd] else 0
         real_run, real_missing, real_sub = v.run, v.missing, v.subprocess
-        v.run, v.missing = fake_run, lambda py: ["torch", "phi_prune", "phi_rank", "phi_serve"]
+        v.run, v.missing = fake_run, lambda py: ["torch", "phi_prune", "phi_rank"]
         v.subprocess = types.SimpleNamespace(run=lambda *a, **k: types.SimpleNamespace(stdout="3.14.10"))
         try:
             self.assertEqual(v.main([]), 0)
