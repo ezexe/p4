@@ -289,6 +289,26 @@ class Watcher(Store):
         self.assertIn("refreshed the skill `astcheck`", out["hookSpecificOutput"]["additionalContext"])
         self.assertIn("tmp/s6/check.py", read(os.path.join(self.p4, "skillex", "astcheck", "sources.txt")))
 
+    def test_the_best_matching_brewed_skill_is_refreshed_and_never_one_written_by_hand(self):
+        def ids(first, last):
+            return "\n".join(f"ident_{n:02d} = {n}" for n in range(first, last)) + "\n"
+
+        for name, body, sources in (("a-lint", ids(6, 26), "tmp/old/lint.py\n"),        # links at 0.6
+                                    ("aaa-hand", ids(1, 21), None),                       # the same, by hand
+                                    ("astcheck", ids(1, 20), "tmp/old/astcheck.py\n")):  # links at 0.95
+            d = os.path.join(self.p4, "skillex", name)
+            put(os.path.join(d, "SKILL.md"), f"---\nname: {name}\ndescription: kept.\n---\n\n## Where it was written\n")
+            put(os.path.join(d, "scripts", "kept.py"), body)
+            if sources:
+                put(os.path.join(d, "sources.txt"), sources)
+        for s in ("s1", "s2"):
+            put(os.path.join(self.tmp, s, "check.py"), ids(1, 21))
+        self.write(put(os.path.join(self.tmp, "s3", "check.py"), ids(1, 21)))
+        self.assertIn("tmp/s3/check.py", read(os.path.join(self.p4, "skillex", "astcheck", "sources.txt")))
+        self.assertEqual(read(os.path.join(self.p4, "skillex", "a-lint", "scripts", "kept.py")), ids(6, 26))
+        self.assertEqual(read(os.path.join(self.p4, "skillex", "aaa-hand", "scripts", "kept.py")), ids(1, 21))
+        self.assertEqual(self.skills(), ["a-lint", "aaa-hand", "astcheck"])
+
     def test_a_script_written_by_a_shell_command_is_seen_at_stop(self):
         self.started_a_minute_ago("s3")
         self.script("s1", "astcheck.py", "astcheck", "a=1")
