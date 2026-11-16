@@ -22,6 +22,7 @@ sys.path.insert(0, HERE)
 import pathfilter  # noqa: E402
 import relay  # noqa: E402
 from test_phi import GRAND, KID, KID2, TOP, Tree, context, write  # noqa: E402
+import inproc  # noqa: E402
 
 A, B = KID, KID2
 
@@ -813,9 +814,9 @@ class SharedHome(unittest.TestCase):
         b.say(B, "Port the exporter docs", P4_PHI_STORES=self.stores)
         self.assertTrue(os.path.isdir(os.path.join(self.home.p4, "phi", "sessions", A)), "a's tree is in the home")
         self.assertFalse(os.path.isdir(os.path.join(a.p4, "phi", "sessions", A)))
-        r = subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(HERE, "phi.py"), "note",
-                            "deprecates: the exporter's v1 table, for both repositories", "--source", "commit iii999"],
-                           capture_output=True, text=True, env={**a.env(A), "P4_PHI_STORES": self.stores}, cwd=a.proj)
+        r = inproc.run([sys.executable, "-I", "-X", "utf8", os.path.join(HERE, "phi.py"), "note",
+                        "deprecates: the exporter's v1 table, for both repositories", "--source", "commit iii999"],
+                       capture_output=True, text=True, env={**a.env(A), "P4_PHI_STORES": self.stores}, cwd=a.proj)
         self.assertEqual(r.returncode, 0, r.stderr)
         a.stop(A, "deprecate v1", uuid="a1", P4_PHI_STORES=self.stores)
         ctx = context(b.say(B, "next", P4_PHI_STORES=self.stores))

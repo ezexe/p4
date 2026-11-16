@@ -18,6 +18,7 @@ import gaps  # noqa: E402
 import relay  # noqa: E402
 import starts  # noqa: E402
 from test_phi import TOP, Tree, context, write  # noqa: E402
+import inproc  # noqa: E402
 
 CHILD_RULE = ("A session started from another works on the parent's branch, in the parent's checkout, and only the "
               "parent merges and pushes.\n\n**Why:** worktrees bounced.\n\n**How to apply:** start children fresh.")
@@ -190,9 +191,9 @@ class Hook(unittest.TestCase):
         body = {"session_id": "aaaa1111-0000-4000-8000-000000000000", "cwd": self.t.proj,
                 "hook_event_name": "PostToolUse", "tool_name": "Write", "tool_input": {"file_path": path},
                 "tool_response": "ok", "tool_use_id": "tw1"}
-        r = subprocess.run(["sh", os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh"), "lookup-record"],
-                           input=json.dumps(body), capture_output=True, text=True, timeout=60,
-                           env=self.t.env(TOP, P4_PHI_PLUGIN_ROOT=self.plug))
+        r = inproc.run(["sh", os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh"), "lookup-record"],
+                       input=json.dumps(body), capture_output=True, text=True, timeout=60,
+                       env=self.t.env(TOP, P4_PHI_PLUGIN_ROOT=self.plug))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("gh issue create -R team/plug", json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"])
 

@@ -31,7 +31,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import phi  # noqa: E402
 import relay  # noqa: E402
+import inproc  # noqa: E402
 
+inproc.prepare(HERE)              # a hook or a command runs in this process, as its own process would run it
 ROOT = os.path.dirname(HERE)
 RUN = os.path.join(ROOT, "hooks", "run-hook.sh").replace("\\", "/")
 HOOKS_JSON = os.path.join(ROOT, "hooks", "hooks.json")
@@ -90,18 +92,18 @@ class Tree:
             env["CLAUDE_CODE_SESSION_ID"] = CLI.get(host, host)
         return env
 
-    def hook(self, name, host, payload=None, proj=None, cli=None, **more):
+    def hook(self, name, host, payload=None, proj=None, cli=None, clock=None, **more):
         payload = {"session_id": cli or CLI.get(host, host), "cwd": proj or self.proj, **(payload or {})}
-        return subprocess.run(["sh", RUN, name], input=json.dumps(payload), capture_output=True, text=True,
-                              env=self.env(host, proj, **more), timeout=60)
+        return inproc.run(["sh", RUN, name], input=json.dumps(payload), capture_output=True, text=True,
+                          env=self.env(host, proj, **more), timeout=60, clock=clock)
 
     def say(self, host, prompt, **more):
         return self.hook(PROMPT, host, {"hook_event_name": "UserPromptSubmit", "prompt": prompt}, **more)
 
-    def cli(self, host, *args, proj=None):
-        return subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(HERE, "phi.py"), *args],
-                              capture_output=True, text=True, env=self.env(host, proj), cwd=proj or self.proj,
-                              timeout=60)
+    def cli(self, host, *args, proj=None, clock=None):
+        return inproc.run([sys.executable, "-I", "-X", "utf8", os.path.join(HERE, "phi.py"), *args],
+                          capture_output=True, text=True, env=self.env(host, proj), cwd=proj or self.proj,
+                          timeout=60, clock=clock)
 
     def stop(self, host, prompt, calls=(), report="done", uuid="u0", **kw):
         t = transcript(os.path.join(self.tmp, host + uuid + ".jsonl"), prompt, calls, report, uuid)
@@ -293,9 +295,9 @@ class Sessions(unittest.TestCase):
         self.assertEqual(s["task"], TASK)
 
     def test_the_host_id_missing_from_the_environment_is_found_by_the_cli_id(self):
-        r = subprocess.run(["sh", RUN, PROMPT], input=json.dumps({"session_id": CLI[KID], "cwd": self.t.proj,
-                                                                  "prompt": BRIEF}),
-                           capture_output=True, text=True, env=self.t.env(""), timeout=60)
+        r = inproc.run(["sh", RUN, PROMPT], input=json.dumps({"session_id": CLI[KID], "cwd": self.t.proj,
+                                                              "prompt": BRIEF}),
+                       capture_output=True, text=True, env=self.t.env(""), timeout=60)
         self.assertEqual(r.returncode, 0)
         self.assertEqual(self.t.started_by(KID), (TOP, "record"))
 
@@ -765,9 +767,9 @@ class NewTask(unittest.TestCase):
         write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"new_task": False}))
         env = {k: v for k, v in self.t.env(TOP).items() if k != "P4_PHI_NEW_TASK"}
         for prompt in (TASK, "and the next part"):
-            r = subprocess.run(["sh", RUN, PROMPT], input=json.dumps({"session_id": CLI[TOP], "cwd": self.t.proj,
-                                                                      "prompt": prompt}),
-                               capture_output=True, text=True, env=env, timeout=60)
+            r = inproc.run(["sh", RUN, PROMPT], input=json.dumps({"session_id": CLI[TOP], "cwd": self.t.proj,
+                                                                  "prompt": prompt}),
+                           capture_output=True, text=True, env=env, timeout=60)
             self.assertEqual(r.stdout.strip(), "")
 
 
@@ -778,8 +780,8 @@ class NeverFails(unittest.TestCase):
             t.record(TOP)
             t.record(KID, TOP)
             for name in (START, PROMPT, STOP, "nonsense"):
-                r = subprocess.run(["sh", RUN, name], input="{not json", capture_output=True, text=True,
-                                   env=t.env(KID), timeout=60)
+                r = inproc.run(["sh", RUN, name], input="{not json", capture_output=True, text=True,
+                               env=t.env(KID), timeout=60)
                 self.assertEqual((r.returncode, r.stdout.strip()), (0, ""), name)
             t.say(TOP, TASK)
             write(os.path.join(t.dir(TOP), "session.json"), "{broken")

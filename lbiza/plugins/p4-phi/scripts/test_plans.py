@@ -20,6 +20,7 @@ import phi  # noqa: E402
 import plans  # noqa: E402
 import relay  # noqa: E402
 from test_phi import CLI, GRAND, KID, KID2, TOP, Tree, context  # noqa: E402
+import inproc  # noqa: E402
 
 A, B = KID, KID2
 
@@ -400,9 +401,9 @@ class TreeOfPlans(unittest.TestCase):
         t = self.t
         root = os.path.dirname(HERE)
         body = {"session_id": host, "cwd": t.proj, "hook_event_name": "PostToolUse", **payload}
-        r = subprocess.run(["sh", os.path.join(root, "hooks", "recall-hook.sh"), name], input=json.dumps(body),
-                           capture_output=True, text=True, timeout=60,
-                           env={**t.env(host), **({"P4_RECALL_SYNC": "1"} if wait else {})})
+        r = inproc.run(["sh", os.path.join(root, "hooks", "recall-hook.sh"), name], input=json.dumps(body),
+                       capture_output=True, text=True, timeout=60,
+                       env={**t.env(host), **({"P4_RECALL_SYNC": "1"} if wait else {})})
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
 
@@ -653,9 +654,9 @@ class Levels(unittest.TestCase):
         self.n += 1
         body = {"session_id": CLI[host], "cwd": t.proj, "hook_event_name": "PreToolUse", "tool_name": tool,
                 "tool_input": inp, "tool_use_id": f"toolu_lv{self.n}", **more}
-        r = subprocess.run(["sh", os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh"), "lookup-check"],
-                           input=json.dumps(body), capture_output=True, text=True, timeout=60,
-                           env=t.env(host, CLAUDE_PLUGIN_DATA=os.path.join(self._tmp.name, "data")))
+        r = inproc.run(["sh", os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh"), "lookup-check"],
+                       input=json.dumps(body), capture_output=True, text=True, timeout=60,
+                       env=t.env(host, CLAUDE_PLUGIN_DATA=os.path.join(self._tmp.name, "data")))
         self.assertEqual((r.returncode, r.stderr.strip()), (0, ""))
         return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else {}
 
@@ -932,8 +933,8 @@ class TopOrchestrates(unittest.TestCase):
         root = os.path.dirname(HERE)
         body = {"session_id": CLI[host], "cwd": self.t.proj, "hook_event_name": "PreToolUse", "tool_name": tool,
                 "tool_input": inp, "tool_use_id": tid}
-        r = subprocess.run(["sh", os.path.join(root, "hooks", "recall-hook.sh"), "lookup-check"],
-                           input=json.dumps(body), capture_output=True, text=True, timeout=60, env=self.t.env(host))
+        r = inproc.run(["sh", os.path.join(root, "hooks", "recall-hook.sh"), "lookup-check"],
+                       input=json.dumps(body), capture_output=True, text=True, timeout=60, env=self.t.env(host))
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)["hookSpecificOutput"].get("additionalContext", "") if r.stdout.strip() else ""
 
