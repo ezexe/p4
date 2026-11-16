@@ -357,6 +357,15 @@ class Sync(unittest.TestCase):
         r = subprocess.run([sys.executable, "-I", os.path.join(p4, ".github", "p4_sync.py"), "--help"], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
 
+    def test_the_training_log_keeps_one_header_with_the_machine_column(self):
+        """A log from a plugin that writes the `machine` column merged with one from a plugin that does not keeps the
+        wider header once, and every round of both, in time order."""
+        old = "round\ttime\twhy\n"
+        new = "round\ttime\twhy\tmachine\n"
+        got = sync.merge_log(old.encode(), (new + "1\t2026-11-02 10:00\tx\twin\n").encode(),
+                             (old + "1\t2026-11-01 10:00\ty\n").encode()).decode()
+        self.assertEqual(got, new + "1\t2026-11-01 10:00\ty\n1\t2026-11-02 10:00\tx\twin\n")
+
     def test_the_seeded_text_is_pinned_to_its_seed(self):
         """seed replaces a store's copy of sync.py that differs and holds no higher SEED, so two plugin versions with
         one SEED and two texts would rewrite each other's copies at every seed. Each SEED's text is pinned here: a
@@ -364,7 +373,7 @@ class Sync(unittest.TestCase):
         import hashlib
         with open(os.path.join(HERE, "sync.py"), "rb") as f:
             text = f.read().replace(b"\r\n", b"\n")
-        self.assertEqual({sync.SEED: hashlib.sha1(text).hexdigest()[:12]}, {15: "d4bc8570f9ec"},
+        self.assertEqual({sync.SEED: hashlib.sha1(text).hexdigest()[:12]}, {16: "cdb8a6fc4c5e"},
                          "sync.py changed: raise SEED and pin the new text")
         p4 = os.path.join(os.path.dirname(self.origin), "p4")
         os.makedirs(p4)

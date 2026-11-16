@@ -68,7 +68,7 @@ OWED_LABELS = 10
 OWED_AGE_S = 3600
 MAX_TASKS = 400               # newest tasks a round fits on beyond the pool and edited ones, which it always keeps
 EVAL_HEAD = "round\ttime\tlabels\ttasks\tper_source\tr_precision\trecall20\tprecision\tthreshold\tbaseline\t" \
-            "short\trepo\tdictionary\tpromoted\twhy\n"
+            "short\trepo\tdictionary\tpromoted\twhy\tmachine\n"
 
 
 # --- examples ----------------------------------------------------------------------------------------------
@@ -518,6 +518,20 @@ def eval_rows(p4):
     return [dict(zip(head, l.split("\t"))) for l in lines[1:] if l.strip()]
 
 
+def machine(p4):
+    """The name of this machine in eval.tsv's `machine` column: the store's git branch, one per machine as sync.py
+    keeps them, else the host name when the store has no branch. ezexe/phi's phi_model calls this one too."""
+    import socket
+    import subprocess
+    try:
+        r = subprocess.run(["git", "-C", p4, "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True,
+                           timeout=10)
+        branch = r.stdout.strip() if r.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        branch = ""
+    return branch if branch and branch != "HEAD" else socket.gethostname()
+
+
 def last_promoted(p4):
     for r in reversed(eval_rows(p4)):
         if r.get("promoted") == "promoted":
@@ -537,7 +551,11 @@ def owed(p4, now_s=None):
     n = lb.count_labels(p4)
     if not rows:
         return (n >= 1, f"no round yet, {n} labels")
-    last = rows[-1]
+    # a synced log holds every machine's rounds: count from this machine's last one, a row with no `machine` counting
+    # as any machine's
+    me = machine(p4)
+    mine = [r for r in rows if r.get("machine", "") in ("", me)]
+    last = mine[-1] if mine else {}
     try:
         before = int(last.get("labels", "0"))
     except ValueError:
@@ -687,6 +705,14 @@ def run_round(p4, write=True, now=None, idx=None, sources=None, quiet=False, dic
         path = p4conf.sub(p4, "models", "eval.tsv")
         head = EVAL_HEAD if not os.path.exists(path) else ""
         cols = EVAL_HEAD.rstrip("\n").split("\t")
+        row["machine"] = machine(p4)
+        if not head:
+            # a log begun under a header without the last columns takes the whole header, its rows as they are
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+            first, _, rest = text.partition("\n")
+            if first != EVAL_HEAD.rstrip("\n") and EVAL_HEAD.startswith(first + "\t"):
+                ranker.write_atomic(path, EVAL_HEAD + rest)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "a", encoding="utf-8", newline="\n") as f:
             f.write(head + "\t".join(row.get(c, "").replace("\t", " ") for c in cols) + "\n")

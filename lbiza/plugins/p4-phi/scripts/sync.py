@@ -55,7 +55,7 @@ MODEL_PREFIX = ("models/ranker",)
 MODEL_EXT = (".pt", ".phid")
 INDEX_LINE = re.compile(rb"^- \[[^\]]+\]\([^)]+\)")        # `- [Title](file.md) ...`, as memory/MEMORY.md lists
 NAME, EMAIL = "p4-sync", "p4-sync@users.noreply.github.com"
-SEED = 15    # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
+SEED = 16    # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
 
 
 def git(*args, check=True, cwd=None):
@@ -233,12 +233,14 @@ def merge_json(base, ours, theirs, dflt=None):
 
 
 def merge_log(base, ours, theirs):
-    """A training log both machines appended to: every round of either, once, ordered by its time (the second
-    column), under the one header."""
+    """A training log both machines appended to: every round of either, once, ordered by its time, the second
+    column, under one header, the widest when a plugin that writes more columns met one that writes fewer."""
     lines = union(base, ours, theirs, True).decode("utf-8", "replace").splitlines()
     if not lines:
         return b""
-    head, rows = lines[0], [l for l in lines[1:] if l.strip()]
+    heads = [l for l in lines if l.startswith("round" + chr(9))] or lines[:1]
+    head = max(heads, key=len)
+    rows = [l for l in lines if l.strip() and l not in heads]
     rows.sort(key=lambda l: (l.split(chr(9)) + [""])[1])
     return (chr(10).join([head] + rows) + chr(10)).encode("utf-8")
 

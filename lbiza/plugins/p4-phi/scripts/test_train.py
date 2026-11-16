@@ -137,6 +137,26 @@ class Rounds(unittest.TestCase):
         self.assertTrue(row["eval"])
         self.assertEqual(sorted(os.listdir(p4conf.sub(self.p4, "models"))), before)
 
+    def test_owed_counts_from_this_machines_last_round(self):
+        """ezexe/p4#183: a synced eval.tsv holds every machine's rounds, so `owed` counts the labels since this
+        machine's own last round, by the `machine` column, and never from another machine's row."""
+        train.run_round(self.p4, now=NOW)
+        conf = p4conf.load(self.p4)
+        conf["recall"]["train"].update({"owed_labels": 3, "owed_age_s": 0})
+        p4conf._write(self.p4, conf)
+        path = p4conf.sub(self.p4, "models", "eval.tsv")
+        mine = train.eval_rows(self.p4)[-1]
+        other = dict(mine, round="1", labels=str(int(mine["labels"]) + 100), machine="another-machine")
+        cols = [c for c in train.EVAL_HEAD.rstrip("\n").split("\t") if c != "machine"] + ["machine"]
+        with open(path, "a", encoding="utf-8", newline="\n") as f:
+            f.write("\t".join(other.get(c, "") for c in cols) + "\n")
+        lb.append_tsv(lb.mpath(self.p4, lb.TRAIN), lb.TRAIN_HEAD,
+                      [{"task": "pool:t00", "entry": f"x{k}", "label": "0", "source": "usage", "weight": "0.3"}
+                       for k in range(5)])
+        ok, why = train.owed(self.p4)
+        self.assertTrue(ok, why)
+        self.assertEqual(train.eval_rows(self.p4)[0]["machine"], train.machine(self.p4))
+
     def test_if_owed(self):
         ok, why = train.owed(self.p4)
         self.assertTrue(ok, why)
