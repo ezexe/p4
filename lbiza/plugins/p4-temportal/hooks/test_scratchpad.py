@@ -898,6 +898,37 @@ def tmp_close_cut_cases():
     print("test_scratchpad.py: cut close cases green")
 
 
+def archived_by_phi_cases():
+    """A session p4-phi records as archived through its own code, phi.ensure_session and relay.gone, is read as
+    archived by archived_ids, its app id and its CLI id both, so a change of p4-phi's record format fails here."""
+    scripts = os.path.join(os.path.dirname(os.path.dirname(HERE)), "p4-phi", "scripts")
+    if not os.path.isfile(os.path.join(scripts, "phi.py")):
+        print("test_scratchpad.py: archived by phi cases skipped, no p4-phi beside this plugin")
+        return
+    home = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-phi-")
+    saved = list(sys.path)
+    try:
+        sys.path[:0] = [scripts, HERE]
+        import phi
+        import relay
+        import scratchpad
+        sid, cli = "local_9999cccc-0000-4000-8000-000000000009", "9999cccc-0000-4000-8000-000000000009"
+        s = phi.ensure_session(home, sid, rec={}, cli=cli)
+        assert scratchpad.archived_ids(home) == set(), "a live session was read as archived"
+        real = relay.archived_in_app
+        relay.archived_in_app = lambda _s: True        # the app shows it archived
+        try:
+            assert relay.gone(home, s)
+        finally:
+            relay.archived_in_app = real
+        got = scratchpad.archived_ids(home)
+        assert {sid, cli} <= got, f"archived_ids read {got} from p4-phi's own record"
+    finally:
+        sys.path[:] = saved
+        shutil.rmtree(home, ignore_errors=True)
+    print("test_scratchpad.py: archived by phi cases green")
+
+
 def snapshot(root):
     """Every file under a folder with its size, time and bytes, the git index and refs included."""
     out = {}
@@ -1123,6 +1154,7 @@ def main():
     tmp_staged_copy_cases()
     tmp_close_bare_store_cases()
     tmp_close_cut_cases()
+    archived_by_phi_cases()
     ended_cases()
     gate2_d()
     print("test_scratchpad.py: all green")
