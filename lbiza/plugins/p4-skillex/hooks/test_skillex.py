@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -521,6 +522,47 @@ class Loading(Store):
         copy = os.path.join(self.root, ".claude", "skills", "astcheck")
         self.assertEqual(read(os.path.join(copy, "SKILL.md")), read(os.path.join(self.p4, "skillex", "astcheck", "SKILL.md")))
         self.assertFalse(os.path.exists(os.path.join(copy, "sources.txt")))
+
+
+class Bounds(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="p4-skillex-bounds-")
+        self.p4 = os.path.join(self.root, ".claude", "p4")
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def run_all(self):
+        skillex.cmd_start(self.p4, {"session_id": "s1"})
+        skillex.cmd_write(self.p4, {"session_id": "s1", "tool_input": {"file_path": os.path.join(self.root, "x.py")}})
+        skillex.cmd_stop(self.p4, {"session_id": "s1"})
+
+    def test_a_project_without_temportal_gets_nothing(self):
+        os.makedirs(self.p4)
+        self.run_all()
+        self.assertEqual(os.listdir(self.p4), [])
+        self.assertFalse(os.path.exists(os.path.join(self.root, ".claude", "skills")))
+
+    def test_the_home_folder_gets_nothing(self):
+        os.makedirs(os.path.join(self.p4, "temportal", "tmp", "s1"))
+        with Env(USERPROFILE=self.root, HOME=self.root):
+            self.run_all()
+        self.assertFalse(os.path.exists(os.path.join(self.p4, "skillex")))
+        self.assertFalse(os.path.exists(os.path.join(self.root, ".claude", "skills")), "the personal skills folder")
+
+    def test_a_session_state_goes_with_its_tmp_folder(self):
+        os.makedirs(os.path.join(self.p4, "temportal", "tmp", "s1"))
+        skillex.cmd_start(self.p4, {"session_id": "s1"})
+        skillex.cmd_stop(self.p4, {"session_id": "s2"})
+        sessions = os.path.join(self.p4, "skillex", ".state", "sessions")
+        self.assertEqual(os.listdir(sessions), ["s1.json"], "a Stop with no tmp folder writes no state")
+        shutil.rmtree(os.path.join(self.p4, "temportal", "tmp", "s1"))
+        skillex.cmd_start(self.p4, {})
+        self.assertEqual(os.listdir(sessions), ["s1.json"], "a state still fresh stays")
+        old = time.time() - 2 * skillex.STATE_QUIET_S
+        os.utime(os.path.join(sessions, "s1.json"), (old, old))
+        skillex.cmd_start(self.p4, {})
+        self.assertEqual(os.listdir(sessions), [], "a quiet state whose tmp folder is gone leaves")
 
 
 class Hook(unittest.TestCase):

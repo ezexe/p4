@@ -10,7 +10,7 @@ p4-phi keeps what linked sessions hand each other and retrieval, and p4-temporta
 
 ## Where a skill comes from
 
-Every skill here was brewed in temportal.
+Every skill here was brewed in temportal, so the plugin does nothing in a project whose store has no `.claude/p4/temportal/`, nor in the home folder, whose `.claude/skills/` is the personal skills folder.
 The watcher looks at each script a session creates in `.claude/p4/temportal/tmp/<session>/` or in the notebook `.claude/p4/temportal/scratchpad/`, at the session folder's top or one folder down.
 A script is brewing when it is linked to scripts of two other sessions, directly or through other scripts, where two scripts are linked when the identifiers they share are at least half of all the identifiers the two hold between them.
 Markdown is never compared, since a brief handed from one session to the next recurs without being repeated work, and a folder below the session folder that holds a `.git`, a `README.md`, a `LICENSE` or another project root file is a copy of a repository and is skipped.

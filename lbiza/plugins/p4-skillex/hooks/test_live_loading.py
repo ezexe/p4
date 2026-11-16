@@ -65,6 +65,7 @@ class Live(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="p4-skillex-live-")
         self.p4 = os.path.join(self.root, ".claude", "p4")
+        os.makedirs(os.path.join(self.p4, "temportal"))     # the watcher acts only beside p4-temportal's folder
         d = os.path.join(self.p4, "skillex", NAME)
         os.makedirs(d)
         with open(os.path.join(d, "SKILL.md"), "w", encoding="utf-8") as f:

@@ -751,13 +751,43 @@ def notice(results):
     return "\n".join(out)
 
 
+STATE_QUIET_S = 3600                  # a session's state whose tmp folder is gone is deleted once this quiet
+
+
+def active(p4):
+    """True where the watcher has work: the store holds p4-temportal's folder, which every brew starts from, and the
+    project is not the home folder, whose `.claude/skills/` is the personal skills folder of every project."""
+    project = os.path.dirname(os.path.dirname(os.path.abspath(p4)))
+    return os.path.isdir(os.path.join(p4, "temportal")) and key(project) != key(os.path.expanduser("~"))
+
+
+def safe_sid(sid):
+    return sid if isinstance(sid, str) and re.fullmatch(r"[A-Za-z0-9_-]+", sid) else None
+
+
 def session_file(p4, sid):
-    return os.path.join(skillex_dir(p4), STATE, "sessions", f"{kebab(sid)}.json")
+    return os.path.join(skillex_dir(p4), STATE, "sessions", f"{sid}.json")
+
+
+def prune_sessions(p4):
+    """Delete the state of each session whose tmp folder temportal has cleared, once it is quiet."""
+    d = os.path.join(skillex_dir(p4), STATE, "sessions")
+    now = time.time()
+    for f in os.listdir(d) if os.path.isdir(d) else []:
+        sid, p = f[:-len(".json")], os.path.join(d, f)
+        try:
+            if (f.endswith(".json") and not os.path.isdir(os.path.join(p4, "temportal", "tmp", sid))
+                    and now - os.path.getmtime(p) > STATE_QUIET_S):
+                os.remove(p)
+        except OSError:
+            continue
 
 
 def read_session(p4, sid):
     """A session's own watcher state: `since`, the time of its last look, and `looked`, the scripts the Write hook
     already looked at since then with their modification times. Each session has its own file, so no two write one."""
+    if not safe_sid(sid):
+        return None
     try:
         with open(session_file(p4, sid), encoding="utf-8") as f:
             st = json.load(f)
@@ -767,11 +797,16 @@ def read_session(p4, sid):
 
 
 def write_session(p4, sid, st):
+    if not safe_sid(sid):
+        return
     os.makedirs(os.path.join(state_dir(p4), "sessions"), exist_ok=True)
-    write_json(p4, os.path.join("sessions", f"{kebab(sid)}.json"), st)
+    write_json(p4, os.path.join("sessions", f"{sid}.json"), st)
 
 
 def cmd_start(p4, payload):
+    if not active(p4):
+        return None
+    prune_sessions(p4)
     had_store = os.path.isdir(skillex_dir(p4))         # a missing store says nothing about which skills are gone
     os.makedirs(skillex_dir(p4), exist_ok=True)
     made = not os.path.isdir(project_skills(p4))
@@ -786,7 +821,7 @@ def cmd_start(p4, payload):
 
 def cmd_write(p4, payload):
     path = (payload.get("tool_input") or {}).get("file_path")
-    if not path:
+    if not path or not active(p4):
         return None
     r = brew(p4, path)
     sid = payload.get("session_id")
@@ -806,14 +841,14 @@ def cmd_stop(p4, payload):
     """Look at the session's scripts changed since its last look that the Write hook has not seen, oldest first,
     so the newest version is the one a skill keeps. The new time of the look is saved before any script is read, so
     a Stop cut short by its timeout never makes the next one start over."""
-    sid = payload.get("session_id")
-    if not sid:
+    sid = safe_sid(payload.get("session_id"))
+    base = os.path.join(p4, "temportal", "tmp", sid or "")
+    if not sid or not active(p4) or not os.path.isdir(base):
         return None
     st = read_session(p4, sid)
     write_session(p4, sid, {"since": time.time(), "looked": {}})
     if st is None:                                       # no start was recorded: nothing to compare against
         return None
-    base = os.path.join(p4, "temportal", "tmp", sid)
     changed = []
     if os.path.isdir(base):
         for p in scripts_of(base):
