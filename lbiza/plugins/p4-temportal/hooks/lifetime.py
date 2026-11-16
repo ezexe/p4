@@ -5,7 +5,8 @@ Two kinds of lifetime clear files, as a browser clears its cache and its cookies
 p4.json section `temportal.cache` with paths relative to temportal/, clears the files older than `max_age_days`, and
 then the oldest files while the folder holds more than `max_mb`. A cookie is one file or folder with its own expiry,
 set by `lifetime.py set <path> <lifetime>` and kept in temportal/expires.json, and the lifetime `session` clears it
-when the session that set it ends. memory/ is never cleared by a cache rule, and a cookie inside it is refused.
+when the session that set it ends. A cache rule whose path resolves to memory/, in any letter case, or to a folder
+outside temportal/ clears nothing, and a cookie inside memory/ is refused.
 
 A file the store's git tracks is removed with its removal staged, so its last version stays in the history, and an
 ignored or untracked file is deleted.
@@ -84,7 +85,8 @@ def parse_lifetime(text, now=None):
 
 
 def rel_in(p4, path):
-    """`path` relative to temportal/ with forward slashes, or None when it is outside it."""
+    """`path`, absolute or relative to temportal/, as a path relative to temportal/ with forward slashes once links
+    and `..` are resolved, or None when it is temportal/ itself or outside it."""
     h = os.path.realpath(home(p4))
     a = os.path.realpath(path if os.path.isabs(path) else os.path.join(h, path))
     try:
@@ -97,7 +99,7 @@ def rel_in(p4, path):
 
 
 def never(rel):
-    return rel.split("/")[0] in NEVER
+    return rel.split("/")[0].lower() in NEVER
 
 
 def read_expires(p4):
@@ -217,11 +219,11 @@ def _prune_empty(d, keep):
 
 
 def sweep_cache(p4, now=None):
-    """Clear by the cache rules -> [(rule, files cleared)]."""
+    """Clear by each cache rule in the folder its key resolves to under temportal/ -> [(folder, files cleared)]."""
     now = time.time() if now is None else now
     out = []
-    for rel, rule in sorted(rules(p4).items()):
-        rel = rel.strip("/")
+    for key, rule in sorted(rules(p4).items()):
+        rel = rel_in(p4, key.strip("/"))
         if not rel or never(rel) or not isinstance(rule, dict):
             continue
         d = os.path.join(home(p4), *rel.split("/"))

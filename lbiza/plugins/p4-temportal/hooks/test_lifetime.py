@@ -82,6 +82,20 @@ class Lifetime(unittest.TestCase):
         with self.assertRaises(ValueError):
             lifetime.set_cookie(self.p4, mem, "1m")
 
+    def test_a_cache_rule_clears_only_its_own_folder_under_temportal(self):
+        """A rule keyed memory/ another way, or keyed a folder outside temportal/, clears no file."""
+        cleared = {}
+        for key in ("Memory", "./memory", "scratchpad/../memory", "../phi/store"):
+            mem = put(os.path.join(self.t, "memory", "a.md"), age_days=400)
+            outside = put(os.path.join(self.p4, "phi", "store", "facts.md"), age_days=400)
+            with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+                json.dump({"temportal": {"cache": {key: {"max_age_days": 1}}}}, f)
+            line = lifetime.sweep(self.p4)
+            gone = [os.path.relpath(p, self.p4).replace("\\", "/") for p in (mem, outside) if not os.path.exists(p)]
+            if gone or line:
+                cleared[key] = gone + [line]
+        self.assertEqual(cleared, {}, "a cache rule cleared files outside its own folder under temportal/")
+
     def test_a_cookie_expires(self):
         page = put(os.path.join(self.t, "scratchpad", "page.html"))
         keep = put(os.path.join(self.t, "scratchpad", "keep.md"))
