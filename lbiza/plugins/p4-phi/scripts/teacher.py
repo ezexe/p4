@@ -4,14 +4,14 @@ vocabulary's meanings and writes sourced facts. Never run by a hook.
 
   p4.py teacher edit-labels [--limit N] [--re-edit] [--second-opinion N] [--max-usd X] [--estimate] [--fake]
       The tasks of models/tasks.tsv not yet edited go to the teacher model one call each, newest first and those
-      of kind `short` left out, each with the task and its date; its stored picks, the entries its labels-raw.tsv
+      of kind `short` left out, each with the task and its date; its stored picks, the documents its labels-raw.tsv
       rows label 1; up to NEWER_MAX rulings, corrections, retractions and facts newer than the teacher's training
       cutoff and not after the task that share words with it; and the candidates, the union of BM25's top CAND_K
-      and, when there is a ranker, its top CAND_K. Each entry goes as one line, its date, kind and text cut to
+      and, when there is a ranker, its top CAND_K. Each document goes as one line, its date, kind and text cut to
       CAND_CHARS characters. The teacher answers keep or drop for each stored pick and add for any candidate or
-      newer entry that bears on the task, each with a reason. The run writes models/label-edits.md by task, every
+      newer document that bears on the task, each with a reason. The run writes models/label-edits.md by task, every
       decision with its reason, the teacher's model id and the date, and models/labels.tsv rows of source
-      `store+edited`: a kept or added entry is labelled 1 and a dropped pick 0, and the `teacher` column holds the
+      `store+edited`: a kept or added document is labelled 1 and a dropped pick 0, and the `teacher` column holds the
       model that answered, `response.model`. With --re-edit only the tasks whose edits came from a different
       teacher are redone, newest first, as many as --max-usd allows.
       --second-opinion N sends the batch's newest N tasks, or the last batch's when the run edits nothing new, to
@@ -21,8 +21,8 @@ vocabulary's meanings and writes sourced facts. Never run by a hook.
       Writes `means:` for the pending entries of store/vocabulary.md, DICT_BATCH to a call, from their `because:`
       quotes alone. An entry is filled only while its meaning is still the one its batch was built with, so an
       edit ezexe makes meanwhile stands, and an entry of source `owner` is never written. `means-by:` records the
-      model, the date and a hash of the meaning it wrote, so an edit made later no longer matches its hash, and
-      --re-edit redoes only the meanings another teacher wrote that nobody has edited since.
+      model, the date and a hash of the meaning it wrote, so a meaning edited afterwards fails to match its hash,
+      and --re-edit redoes only the meanings another teacher wrote that nobody has edited since.
   p4.py teacher facts [--limit N] [--max-usd X] [--estimate] [--fake]
       Appends to store/facts.md, the file retrieval serves under `inject: rules-facts`. Every message of ezexe's
       own that was addressed, that asks_recommendation reads as asking for a recommendation and that no facts.md
@@ -75,12 +75,12 @@ SECOND_OPINION = "claude-opus-5-5"
 PRICES = {"claude-fable-5-1": (10.0, 50.0), "claude-opus-5-5": (4.0, 20.0), "claude-sonnet-5-5": (2.0, 10.0),
           "claude-haiku-5-5": (0.10, 0.50)}
 # Training cutoffs as YYYY-MM, by model id. cutoff_of gives a model whose cutoff is None, or that the table lacks,
-# the table's oldest known cutoff, which errs toward marking more entries as newer than the teacher's training.
+# the table's oldest known cutoff, which errs toward marking more documents as newer than the teacher's training.
 CUTOFFS = {"claude-opus-5-5": "2026-06", "claude-fable-5-1": None, "claude-sonnet-5-5": None,
            "claude-haiku-5-5": None}
 CAND_K = 60                   # BM25's top and the ranker's top, each
-CAND_CHARS = 140              # an entry's date, kind and text are cut to this length
-NEWER_MAX = 12                # entries newer than the cutoff sent with a task
+CAND_CHARS = 140              # a document's date, kind and text are cut to this length
+NEWER_MAX = 12                # documents newer than the cutoff sent with a task
 DICT_BATCH = 20               # vocabulary entries sent in one dictionary call
 MAX_TOKENS = 16000
 EFFORT = "high"
@@ -96,7 +96,7 @@ AGREE_MIN = 0.65              # second-opinion F1 below which a batch is held; t
 EDITS_MD = "label-edits.md"
 SPEND = "spend.json"
 EDITS_HEAD = ("# Label edits\n\nEvery keep, drop and add the teacher made to the store's labels, by task: the "
-              "reason, the teacher's model id (the model that answered) and the date. Written by `p4.py teacher "
+              "reason, the id of the teacher model that answered and the date. Written by `p4.py teacher "
               "edit-labels`; the newest batch last. A dropped pick stays in labels-raw.tsv.\n")
 
 
@@ -196,7 +196,7 @@ def fake_words(s):
 
 class FakeClient:
     """Offline and deterministic. edit-labels: a stored pick is kept when it shares a word with the task and
-    dropped otherwise; a candidate or newer entry is added when it shares two, or three for an Opus model, so that
+    dropped otherwise; a candidate or newer document is added when it shares two, or three for an Opus model, so that
     a second opinion can disagree. dictionary: a meaning made from the first quote. facts: fake_search's answer,
     and fake_fact's fields read back from it. A prompt that holds FAKE-REFUSE is refused. It counts a token per
     four characters; `answer_as` is the model id it reports as `response.model`."""
@@ -420,9 +420,9 @@ def newer_than(d, cutoff, facts):
 
 
 class Context:
-    """What every task of a batch shares: the index; the index with the held entries beside it, which a pool task
-    may have picked; the ranker; the facts' fields by id; each entry's head tokens for the `head-bm25` feature;
-    the tasks; and the raw labels by task."""
+    """What every task of a batch shares: the index; the index with the documents of the held entries beside it,
+    which a pool task may have picked; the ranker; the facts' fields by id; the head tokens train.head_tokens gives
+    the `head-bm25` feature; the tasks; and the raw labels by task."""
 
     def __init__(self, p4):
         import train
@@ -441,7 +441,7 @@ class Context:
 
 
 def candidates(ctx, task, pool):
-    """`[doc]`: the union of BM25's top CAND_K and, when there is a ranker, its top CAND_K, among the entries the
+    """`[doc]`: the union of BM25's top CAND_K and, when there is a ranker, its top CAND_K, among the documents the
     task could have been shown, as train.eligible decides. A pool task's come from the rulings, corrections,
     retractions and facts alone, held ones included, as its training candidates do."""
     files = set(st.STORE_FILES) if pool else None
@@ -486,7 +486,7 @@ def newer_entries(ctx, task, cutoff, exclude):
 
 
 def build_item(ctx, tid, cutoff):
-    """One task's `{task, time, text, handles: {handle: entry id}, picks: [handle], pool: bool, user: prompt}`."""
+    """One task's `{task, time, text, handles: {handle: document id}, picks: [handle], pool: bool, user: prompt}`."""
     task = ctx.tasks[tid]
     raw = ctx.raw.get(tid, [])
     pick_ids = list(dict.fromkeys(r["entry"] for r in raw if str(r.get("label")) == "1"))
@@ -537,8 +537,8 @@ def build_item(ctx, tid, cutoff):
 
 
 def parse_edit(item, data):
-    """`([(decision, handle, entry id, reason)], bad)`: every stored pick decided, a pick the answer left out kept
-    with a reason that says so, then the adds that name a candidate or newer entry. `bad` counts a decision on a
+    """`([(decision, handle, document id, reason)], bad)`: every stored pick decided, a pick the answer left out kept
+    with a reason that says so, then the adds that name a candidate or newer document. `bad` counts a decision on a
     handle that is no stored pick and an add of a handle not sent or already added."""
     out, bad = [], 0
     got = {}
@@ -549,7 +549,7 @@ def parse_edit(item, data):
         elif h not in item["picks"]:
             bad += 1
     for h in item["picks"]:
-        d, why = got.get(h, ("keep", "(no decision returned: kept as stored)"))
+        d, why = got.get(h, ("keep", "kept as stored: the answer returned no decision"))
         out.append((d, h, item["handles"][h], why))
     added = set()
     for a in data.get("adds", []) or []:
@@ -617,7 +617,8 @@ def replace_task_rows(p4, rows, tasks):
 
 
 def f1_agreement(a, b):
-    """Micro F1 over `(task, entry)` positives, `{task: set}` against `{task: set}`, on the tasks both answered."""
+    """Micro F1 over `(task, document id)` positives, `{task: set}` against `{task: set}`, on the tasks both
+    answered."""
     common = set(a) & set(b)
     pa = {(t, e) for t in common for e in a[t]}
     pb = {(t, e) for t in common for e in b[t]}
@@ -784,7 +785,7 @@ def edit_labels(p4, args, client=None, out=print):
             save_batch(p4, target, rec)
             with open(lb.mpath(p4, EDITS_MD), "a", encoding="utf-8", newline="\n") as f:
                 f.write(f"\nbatch {target}: second opinion from {SECOND_OPINION} on {len(theirs)} tasks, agreement F1 "
-                        f"{f1:.3f}" + (f" (below {AGREE_MIN}: the batch is held for ezexe)\n" if held else "\n"))
+                        f"{f1:.3f}" + (f", below {AGREE_MIN}: the batch is held for ezexe\n" if held else "\n"))
             summary["f1"], summary["held"] = f1, held
             out(f"teacher: second opinion F1 {f1:.3f} over {len(theirs)} tasks"
                 + (f": below {AGREE_MIN}, batch {target} held" if held else f", at or above {AGREE_MIN}"))

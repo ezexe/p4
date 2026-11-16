@@ -145,8 +145,8 @@ class Newer(Base):
         self.assertIn("[newer than your training]", sec)
         self.assertIn("checked: 2026-10-20", sec)
         self.assertIn("prior: version", sec)
-        self.assertNotIn("firmware is 3.9", sec, "an entry older than the cutoff is not in the newer section")
-        self.assertNotIn("firmware is 5.0", item["user"], "an entry dated after the task is not sent")
+        self.assertNotIn("firmware is 3.9", sec, "a fact older than the cutoff is not in the newer section")
+        self.assertNotIn("firmware is 5.0", item["user"], "a fact dated after the task is not sent")
         self.assertTrue(any(h.startswith("n") for h in item["handles"]))
         # a later cutoff leaves it out. The cutoff comes from --cutoff, p4.json's recall.teacher.cutoff or the
         # table; this store has no p4.json, so p4conf.load reads the retired models/config.json in its place.
