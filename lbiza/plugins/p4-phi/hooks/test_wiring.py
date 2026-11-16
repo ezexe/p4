@@ -262,6 +262,15 @@ class Gate(unittest.TestCase):
         self.assertEqual(self.check("Read", {"file_path": "a.py"}), "")
         self.assertTrue(self.check("WebFetch", {"url": "https://example.com"}).startswith("RAN "))
 
+    def test_git_opens_the_gate_only_as_a_word_of_the_command(self):
+        """A path holding `github` starts no python for a plain shell call; a git command still reaches hook.py."""
+        where = {"transcript_path": "C:/Users/x/github/proj/s.jsonl"}
+        for cmd in ("ls", "ls github", "cat .gitignore", "ls ~/git/x", "digit"):
+            self.assertEqual(self.check("Bash", {"command": cmd, "description": "list github"}, **where), "", cmd)
+        for cmd in ("git status", "cd a && git log", "ls; git diff", "cd repo\ngit push", "cd repo\tgit push",
+                    "cd repo\r\ngit push", "git\npush", "git.exe push", "cd a && C:/Git/bin/git.exe push"):
+            self.assertTrue(self.check("Bash", {"command": cmd}, **where).startswith("RAN "), cmd)
+
 
 class SharedProbe(unittest.TestCase):
     """Both runners find their python through hooks/find-python.sh and repeat none of its search."""
