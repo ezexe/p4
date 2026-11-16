@@ -284,6 +284,23 @@ def connect(p4):
     path = db_path(p4)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     new = not os.path.exists(path)
+    if new:
+        # made under another name with its tables, then moved in whole: another process never finds the file
+        # without them; when two make it at once, the first move wins and the other's copy is dropped
+        tmp = f"{path}.new-{os.getpid()}"
+        try:
+            made = sqlite3.connect(tmp)
+            made.executescript(SCHEMA)
+            made.close()
+            if not os.path.exists(path):
+                os.replace(tmp, path)
+        except (OSError, sqlite3.DatabaseError):
+            pass
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
     for attempt in (0, 1):
         con = sqlite3.connect(path, timeout=3.0)
         try:

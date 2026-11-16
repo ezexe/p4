@@ -193,6 +193,40 @@ class Record(Base):
         self.assertIn(".venv/Scripts/python tools/probe.py", ctx)
 
 
+class NewDatabase(Base):
+    def test_the_file_never_exists_without_its_table(self):
+        """L-1: another process reading lookups.db while the first call makes it never finds the file without the
+        `calls` table: at the moment the schema is applied, a second connection reads the real path."""
+        import types
+        failed = []
+        real = sqlite3
+
+        class Probe(real.Connection):
+            def executescript(self, script):
+                path = lk.db_path(self.p4)
+                if os.path.exists(path):
+                    other = real.connect(path)
+                    try:
+                        other.execute("SELECT count(*) FROM calls").fetchone()
+                    except real.OperationalError as e:
+                        failed.append(str(e))
+                    finally:
+                        other.close()
+                return super().executescript(script)
+
+        Probe.p4 = self.p4
+        shim = types.SimpleNamespace(**{k: getattr(real, k) for k in dir(real) if not k.startswith("__")})
+        shim.connect = lambda *a, **k: real.connect(*a, factory=Probe, **k)
+        kept = lk.sqlite3
+        lk.sqlite3 = shim
+        try:
+            lk.connect(self.p4).close()
+        finally:
+            lk.sqlite3 = kept
+        self.assertEqual(failed, [], "the file was there before its table")
+        self.assertEqual(self.rows(), [], "and the table is there now")
+
+
 class AfterOnce(Base):
     def test_a_session_is_told_of_an_error_once(self):
         """B1-72: what earlier sessions did about an error is told to a session once; the same error met again in
