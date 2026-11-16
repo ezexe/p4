@@ -109,11 +109,11 @@ class Lifetime(unittest.TestCase):
     def test_a_cookie_expires(self):
         page = put(os.path.join(self.t, "scratchpad", "page.html"))
         keep = put(os.path.join(self.t, "scratchpad", "keep.md"))
-        probe = os.path.join(self.t, "tmp", "s1", "probe")
+        probe = os.path.join(self.t, "scratchpad", "probe")
         put(os.path.join(probe, "out.txt"))
         now = time.time()
         lifetime.set_cookie(self.p4, page, "1h", now=now)
-        lifetime.set_cookie(self.p4, "tmp/s1/probe", "2d", now=now)
+        lifetime.set_cookie(self.p4, "scratchpad/probe", "2d", now=now)
         lifetime.set_cookie(self.p4, keep, "1h", now=now)
         self.assertTrue(lifetime.clear_cookie(self.p4, keep))
         self.assertEqual(lifetime.sweep(self.p4, now=now + 60), "")
@@ -159,6 +159,22 @@ class Lifetime(unittest.TestCase):
         self.assertEqual((here.returncode, missing.returncode, kept, cleared.stdout),
                          (0, 2, ["scratchpad/notes.md"], "cleared\n"))
         self.assertIn("does not exist", missing.stderr)
+
+    def test_no_cookie_on_tmp_or_on_the_folders_and_file_of_temportal_itself(self):
+        """A cookie on tmp/ or anything in it, or on scratchpad/, src/ or expires.json themselves, is refused, since
+        a session scratchpad directory is committed before it is removed and those are never cleared whole."""
+        put(os.path.join(self.t, "tmp", "s1", "probe", "out.txt"))
+        put(os.path.join(self.t, "src", "kept.py"))
+        lifetime.set_cookie(self.p4, put(os.path.join(self.t, "scratchpad", "page.html")), "1d")
+        accepted = []
+        for rel in ("tmp", "tmp/s1", "tmp/s1/probe", "tmp/s1/probe/out.txt", "Tmp/s1", "scratchpad", "src",
+                    lifetime.EXPIRES):
+            try:
+                lifetime.set_cookie(self.p4, os.path.join(self.t, *rel.split("/")), "1d")
+                accepted.append(rel)
+            except ValueError:
+                pass
+        self.assertEqual((accepted, sorted(lifetime.read_expires(self.p4))), ([], ["scratchpad/page.html"]))
 
     def test_a_path_outside_temportal_is_refused(self):
         with self.assertRaises(ValueError):

@@ -6,7 +6,9 @@ p4.json section `temportal.cache` with paths relative to temportal/, clears the 
 then the oldest files while the folder holds more than `max_mb`. A cookie is one file or folder with its own expiry,
 set by `lifetime.py set <path> <lifetime>` and kept in temportal/expires.json, and the lifetime `session` clears it
 when the session that set it ends. A cache rule whose path resolves to memory/, in any letter case, or to a folder
-outside temportal/ clears nothing, and a cookie inside memory/ is refused.
+outside temportal/ clears nothing. A cookie is refused inside memory/, on tmp/ or anything in it, and on scratchpad/,
+src/ or expires.json themselves: a session scratchpad directory in tmp/ is committed before it is removed, and the
+others are never cleared whole.
 
 A file the store's git tracks is removed with its removal staged, so its last version stays in the history, and an
 ignored or untracked file is deleted.
@@ -41,6 +43,7 @@ import p4conf  # noqa: E402 - the settings file, .claude/p4/p4.json
 
 EXPIRES = "expires.json"
 NEVER = ("memory",)                     # folders no lifetime ever clears
+WHOLE = ("scratchpad", "src", EXPIRES)  # the notebook, the saved code and the cookies, which no cookie clears whole
 UNITS = {"m": 60, "h": 3600, "d": 86400, "w": 7 * 86400}
 SESSION = "session"
 
@@ -131,12 +134,17 @@ def write_expires(p4, d):
 def set_cookie(p4, path, lifetime, session_id="", now=None):
     """Give `path`, a file or folder under temportal/, an expiry -> (rel, expiry). A relative `path` is read from
     temportal/, and the command line makes it absolute from the working folder first. Raises ValueError for a path
-    outside temportal/, inside memory/ or that does not exist, and for a lifetime it cannot read."""
+    outside temportal/, inside memory/, on tmp/ or inside it, that is one of WHOLE or that does not exist, and for a
+    lifetime it cannot read."""
     rel = rel_in(p4, path)
     if rel is None:
         raise ValueError(f"{path} is not under {home(p4)}")
     if never(rel):
         raise ValueError(f"{rel} is in {rel.split('/')[0]}/, which is never cleared")
+    if rel.split("/")[0].lower() == "tmp":
+        raise ValueError(f"{rel} takes no cookie: a session scratchpad directory is committed before it is removed")
+    if rel.lower() in WHOLE:
+        raise ValueError(f"{rel} takes no cookie: scratchpad/, src/ and {EXPIRES} are never cleared whole")
     if not os.path.lexists(os.path.join(home(p4), *rel.split("/"))):
         raise ValueError(f"{path} does not exist")
     when = parse_lifetime(lifetime, now)
