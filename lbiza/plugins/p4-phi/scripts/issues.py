@@ -584,15 +584,19 @@ def _pushed(repo, sha):
 
 def landed(repo, sha, closes):
     """True when a commit that closes the issues `closes` names, each as `#N` or `owner/name#N`, has landed: it is on
-    a remote branch, a commit on a remote branch closes the same issue, or a patch-equivalent commit is on one, as
-    `git cherry` finds a commit an orchestrator landed by cherry-pick or rebase under a new hash."""
+    a remote branch, a commit on a remote branch closes the same issue of this repository, as a bare `#N` or as its
+    own `owner/name#N`, or a patch-equivalent commit is on one, as `git cherry` finds a commit an orchestrator
+    landed by cherry-pick or rebase under a new hash."""
     if _pushed(repo, sha):
         return True
+    here = github_of(repo)
     for c in closes:
-        n = str(c).rpartition("#")[2]
-        if n.isdigit() and git(repo, "log", "--remotes", "-E", "-i", "-n", "1", "--format=%h",
-                               rf"--grep=(close[sd]?|fix(e[sd])?|resolve[sd]?) +([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#{n}"
-                               r"([^0-9]|$)"):
+        slug, _, n = str(c).rpartition("#")
+        if not n.isdigit() or slug and slug.lower() != here.lower():
+            continue                               # another repository's issue: no commit here closes it
+        whose = f"({here.replace('.', '[.]')})?" if here else ""   # a bare #N, or this repository's own owner/name#N
+        if git(repo, "log", "--remotes", "-E", "-i", "-n", "1", "--format=%h",
+               rf"--grep=(close[sd]?|fix(e[sd])?|resolve[sd]?) +{whose}#{n}([^0-9]|$)"):
             return True
     for branch in git(repo, "branch", "-r", "--format=%(refname:short)").split():
         if "->" in branch or branch.endswith("/HEAD"):

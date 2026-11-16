@@ -928,7 +928,9 @@ class LandedWorker(unittest.TestCase):
             f.write("more = 2\n")
         self.assertEqual(self.t.stop(KID, "edit it", [("Edit", {"file_path": path}, "ok")], uuid=uuid).returncode, 0)
 
-    def test_a_worker_landed_by_cherry_pick_with_its_issue_closed_passes_the_archive_gate(self):
+    def worker_closing_7(self):
+        """The worker's clone, with a commit of its own that closes #7 and is on no remote branch, its done turn
+        recorded, the store's bare origin, and a second clone to land work from. Returns work, bare, land, sha."""
         t = self.t
         work = os.path.join(t.proj, "work").replace("\\", "/")
         bare = os.path.join(t.tmp, "bare.git").replace("\\", "/")
@@ -955,6 +957,10 @@ class LandedWorker(unittest.TestCase):
         self.edit(os.path.join(work, "lib", "y.py"), "c2")
         self.git(work, "checkout", "-q", "--", "lib/y.py")
         subprocess.run(["git", "clone", "-q", bare, land], check=True, capture_output=True)
+        return work, bare, land, sha
+
+    def test_a_worker_landed_by_cherry_pick_with_its_issue_closed_passes_the_archive_gate(self):
+        work, bare, land, sha = self.worker_closing_7()
         write(os.path.join(land, "README.md"), "the exporter\n")
         self.git(land, "add", "-A")
         self.git(land, "commit", "-qm", "docs: a readme")
@@ -976,6 +982,23 @@ class LandedWorker(unittest.TestCase):
         self.git(land, "push", "-q", "origin", "main")
         self.git(work, "fetch", "-q", bare, "main:refs/remotes/origin/main")
         self.assertTrue(issues.landed(work, tidy, ["#8"]), "git cherry finds the same change under a new hash")
+
+    def test_a_remote_commit_closing_another_repositorys_issue_of_the_same_number_lands_nothing(self):
+        work, bare, land, sha = self.worker_closing_7()
+        write(os.path.join(land, "NOTES.md"), "the other repository's fix\n")
+        self.git(land, "add", "-A")
+        self.git(land, "commit", "-qm", "notes: the parser\n\nFixes ezexe/other#7")
+        self.git(land, "push", "-q", "origin", "main")
+        self.git(work, "fetch", "-q", bare, "main:refs/remotes/origin/main")
+        out = self.archive(PUP, KID, answers=[("Which finished sessions should be archived?", ["the flush child"])])
+        self.assertEqual(out.get("permissionDecision"), "deny", "#7 of ezexe/other is not this repository's #7")
+        self.assertIn(f"commit {sha}, which closes #7, is on no remote branch", out["permissionDecisionReason"])
+        import issues
+        self.assertFalse(issues.landed(work, sha, ["#7"]))
+        self.git(land, "commit", "-q", "--allow-empty", "-m", "notes: tidy\n\nFixes ezexe/demo#7")
+        self.git(land, "push", "-q", "origin", "main")
+        self.git(work, "fetch", "-q", bare, "main:refs/remotes/origin/main")
+        self.assertTrue(issues.landed(work, sha, ["#7"]), "this repository's own #7, named whole")
 
 
 if __name__ == "__main__":
