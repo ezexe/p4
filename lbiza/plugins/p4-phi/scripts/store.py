@@ -68,7 +68,7 @@ HEADERS = {
 
 # what each file prints as at the boundary (3.5): plain words, never the file's name
 KIND_NAMES = {"rules.md": "rule", "corrections.md": "correction", "retractions.md": "retracted", "facts.md": "fact",
-              "memory": "memory", "messages": "earlier message", VOCABULARY: "your word", "src": "saved code"}
+              "memory": "memory", "messages": "earlier message", "src": "saved code"}
 
 # the suite's jargon list (scripts/session/overrides_suite.py JARGON): a printed line must hold none of these
 JARGON = re.compile(r"(?i)\b(frags?|rulings?|pour(ed|s)?|tombstones?|derivations?|the operator|register entry|"

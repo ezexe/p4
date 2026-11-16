@@ -27,7 +27,7 @@ import store as st  # noqa: E402
 from test_store import NOW, fixture, make_store, write  # noqa: E402
 
 LINE_RE = re.compile(r"^- (\d{4}-\d\d-\d\d|undated) (rule|correction|missed detail|retracted|fact|memory|"
-                     r"earlier message|your word|saved code): (.+) \(((?:phi/store|temportal/memory|temportal/src)/[^:]+):(\d+)\)$")
+                     r"earlier message|saved code): (.+) \(((?:phi/store|temportal/memory|temportal/src)/[^:]+):(\d+)\)$")
 SCRIPT = os.path.join(HERE, "p4.py")
 
 
