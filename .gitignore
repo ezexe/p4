@@ -1,13 +1,7 @@
 # the local Python environment the notebook's kernel runs in
 .venv/
 
-experiment/data
-experiment/quick
-experiment/__pycache__
-
-.ai/
 .claude/
-.vlds/
 
 # Python
 __pycache__/
