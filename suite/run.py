@@ -104,10 +104,24 @@ def test_files(root, pattern="test_*.py"):
 def kind_of(path):
     """How the command loads a test file, by what it runs as a script. When its `if __name__ == "__main__":` block
     calls unittest.main, or it has no such block and defines a test, it is "unit", run test by test; when the block runs
-    anything else it is "script", run whole in a process of its own, as it runs by hand; any other file is "none"."""
+    anything else it is "script", run whole in a process of its own, as it runs by hand; a file that does not parse is
+    "broken"; any other file is "none"."""
+    return kind_and_error(path)[0]
+
+
+def kind_and_error(path):
+    """The kind of a test file, as kind_of gives it, and for a broken one the error that stopped its parse."""
     import ast
-    with open(path, encoding="utf-8", errors="replace") as f:
-        tree = ast.parse(f.read(), path)
+    try:
+        with open(path, encoding="utf-8") as f:
+            tree = ast.parse(f.read(), path)
+    except (SyntaxError, ValueError, UnicodeError, OSError) as e:
+        return "broken", "".join(traceback.format_exception_only(e)).strip()
+    return kind_of_tree(tree), ""
+
+
+def kind_of_tree(tree):
+    import ast
     for node in tree.body:
         if isinstance(node, ast.If) and ast.unparse(node.test).replace("'", '"') in (
                 '__name__ == "__main__"', '"__main__" == __name__'):
@@ -592,11 +606,13 @@ class Run:
         for rel in files:
             if not self.wanted(rel) and not any(s.split("::", 1)[0] == rel for s in self.only):
                 continue
-            kind = kind_of(os.path.join(self.root, rel))
+            kind, error = kind_and_error(os.path.join(self.root, rel))
             if kind == "script":
                 self.scripts.append(rel)
             elif kind == "unit":
                 units.append(rel)
+            elif kind == "broken":
+                self.row(rel, "ERROR", 0.0, error, None)
             else:
                 self.row(rel, "ERROR", 0.0, "a file named test_*.py with no unittest test, no test_ function and no "
                                             "__main__ block", None)
@@ -937,28 +953,27 @@ def main(argv=None):
         d["timeout"] = a.timeout
     files = test_files(root, d["pattern"])
     if a.files:
-        kinds = [(kind_of(os.path.join(root, f)), f) for f in files]
+        kinds = [(kind_and_error(os.path.join(root, f)), f) for f in files]
         how = {"unit": "its tests, one by one", "script": "run whole in a process of its own",
-               "none": "nothing the command can load"}
-        for k, f in kinds:
-            print(f"{k:<7} {f}  {how[k]}")
-        return FAILED if any(k == "none" for k, _ in kinds) else OK
+               "none": "nothing the command can load", "broken": "it does not parse: "}
+        for (k, error), f in kinds:
+            print(f"{k:<7} {f}  {how[k]}{error.splitlines()[-1] if error else ''}")
+        return FAILED if any(k in ("none", "broken") for (k, _), _ in kinds) else OK
     only = selectors(a.only, root)
     workers = a.workers or d["workers"]
     if only and all("::" in s for s in only):
         workers = min(workers, len(only))
     run = Run(root, d, workers, only)
-    run.base = tempfile.mkdtemp(prefix="p4s-")
-    above = repository_above(os.path.dirname(run.base))
-    if above:
-        remove(run.base)
-        print(f"suite/run.py: the temp folder {run.base} sits inside the repository {above}, where a test tree would "
-              f"find it; set TEMP to a folder outside every repository", file=sys.stderr)
-        return USAGE
     run.plan(files)
+    above = repository_above(tempfile.gettempdir())
+    if above:
+        print(f"suite/run.py: the temp folder {tempfile.gettempdir()} sits inside the repository {above}, where a test "
+              f"tree would find it; set TEMP to a folder outside every repository", file=sys.stderr)
+        return USAGE
     print(f"suite/run.py: {many(len(run.scripts) + len(run.uncollected), 'test file')} on {many(run.n, 'worker')}",
           file=sys.stderr, flush=True)
     status = OK
+    run.base = tempfile.mkdtemp(prefix="p4s-")
     try:
         run.start()
         run.loop()

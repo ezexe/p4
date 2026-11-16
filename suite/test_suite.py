@@ -372,6 +372,22 @@ class Command(Repo):
         self.assertRegex(out, r"holds a module of this file's folder from another folder, with other contents: "
                               r"helper is \S+[\\/]c[\\/]helper\.py")
 
+    def test_a_file_that_does_not_parse_is_a_failing_row_and_the_run_leaves_no_folder(self):
+        self.make({"a/test_broken.py": "def test_x(:\n    pass\n", "b/test_fine.py": "def test_fine():\n    pass\n"})
+        tmp = os.path.join(self.root, "tmp")
+        os.makedirs(tmp)
+        temp = {"TEMP": tmp, "TMP": tmp, "TMPDIR": tmp}
+        code, out, err = command(self.root, "--workers", "1", **temp)
+        self.assertEqual(code, run.FAILED, out + err)
+        self.assertEqual({k: v[0] for k, v in lines_of(out).items()},
+                         {"a/test_broken.py": "ERROR", "b/test_fine.py::test_fine": "ok"}, out + err)
+        self.assertIn("SyntaxError", out)
+        self.assertEqual(os.listdir(tmp), [], "the run's folder is removed")
+        code, out, err = command(self.root, "--files", **temp)
+        self.assertEqual(code, run.FAILED, out + err)
+        self.assertRegex(out, r"broken +a/test_broken\.py  it does not parse: SyntaxError")
+        self.assertEqual(os.listdir(tmp), [])
+
     def test_a_worker_that_dies_mid_test_and_a_script_that_exits_nonzero_fail_the_run(self):
         self.make({"a/test_dies.py": '''
             import os, unittest
