@@ -74,7 +74,7 @@ class Tree(unittest.TestCase):
         n = node.phi_tree(self.p4).at("a")
         self.assertEqual([s for s, _ in n.up], ["b"])
 
-    def test_the_app_records_and_tasks_tsv_make_the_same_tree(self):
+    def test_the_app_records_and_tasks_tsv_make_a_tree(self):
         rec = os.path.join(self.p4, "records", "acct", "org")
         write(os.path.join(rec, "local_p.json"), json.dumps({"sessionId": "local_p", "cliSessionId": "aaaa1111-x",
                                                              "createdAt": 1794470000000}))
@@ -132,7 +132,7 @@ class Query(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.p4, ignore_errors=True)
 
-    def test_the_node_words_join_the_query_below_the_message(self):
+    def test_the_tree_words_join_the_query_below_the_message(self):
         n = node.Node("kid", own="narwhal plotter presets", up=[("top", "port the narwhal plotter")])
         w = cli.node_weights(self.idx, n, ["golden", "images"])
         self.assertTrue(w and all(v == cli.NODE_WEIGHT for v in w.values()))
@@ -145,7 +145,7 @@ class Query(unittest.TestCase):
         r = cli.query(self.p4, "what time is it", None, "2026-11-01 10:00", idx=self.idx, model={}, node=n)
         self.assertEqual(r["lines"], [], "the session tree never makes an ordinary message print")
 
-    def test_an_entry_used_above_passes_on_one_shared_word(self):
+    def test_a_document_used_above_passes_on_one_shared_word(self):
         target = [d["id"] for d in self.idx["docs"] if "tests/golden" in d["show"]][0]
         q = "where do the golden files go"
         plain = cli.query(self.p4, q, None, "2026-11-01 10:00", idx=self.idx, model={})
