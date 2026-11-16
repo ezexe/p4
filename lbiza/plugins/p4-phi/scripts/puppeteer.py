@@ -1,36 +1,40 @@
 #!/usr/bin/env python3
-"""puppeteer.py: p4's four P's on the session tree (#38), built to the four diagrams of ezexe/p4's README.md.
+"""puppeteer.py: the four steps p4-phi takes for an orchestrator, after the four diagrams of ezexe/p4's README.md.
 
-p4 is named for prompty, prompter, pioneer and puppeteer. Here each is a step phi takes for an orchestrator, a top
-session or any session that started sessions:
+An orchestrator is a top-level session with a task, or any session that started sessions. Its steps are routing, the
+start draft, the gate and the watcher, which the functions `prompty`, `prompter`, `pioneer` and `watch` run:
 
-  linear     prompty reads ezexe's message against the ledger: the area it names, the live session that owns that
-             area, the writer that holds its files. prompter drafts the exact next session: its topic, a brief built
-             from ezexe's words, its parent, fork or fresh, the issue it closes. pioneer gate-checks the draft: the
-             issue exists or will be filed, no running writer holds the same files, the parent is the right
-             orchestrator. A clean draft is handed as the exact start_session call; one whose area has a live owner
-             is routed there with SendMessage; one whose writer is busy is queued as a start request behind it.
-             The puppeteer is the watcher: one background process an orchestrator, writing <session>/ledger.md from
-             phi's files and the app's session records, only when one of them changed, with a reconcile line at its
-             top for each divergence between the two.
+  linear     Routing reads ezexe's message against the records the ledger is built from: the area it names, the
+             live session that is that area's code owner, the running writer that holds its files. The start draft
+             is the exact next session: its topic, a brief built from ezexe's words, its parent session, fork or
+             fresh, the issue it closes. The gate checks the draft: the issue exists or will be filed, no running
+             writer holds the same files, the parent session is the right orchestrator. A clean draft is handed as
+             the exact start_session call; one whose area has a live code owner is routed there with SendMessage;
+             one whose writer is busy is queued as a start request behind it; one the depth or count cap holds
+             starts no session. The watcher is one background process for each orchestrator: it writes
+             <session>/ledger.md from p4-phi's records and the app's session records, only when one of them
+             changed, with a reconcile line for each divergence between the two.
   recursive  a landed topic registers its route in <session>/routes.jsonl beside the ledger, only when the records
              back what the reports claimed: the issue is closed, a commit that closes it is pushed, and the session
-             and its children are archived with their outcome kept. prompty scores a message against the registered
-             routes before prompter drafts anything new; a route whose issue was reopened or whose commit was
-             reverted is withdrawn.
-  parallel   an under-determined message becomes one child a distinct reading. Each ends its report with a
-             `Result:` line; the puppeteer merges them: readings that converge collapse to one result, and only a
-             fork that survives the merge goes to ezexe, as one question with options and a default.
-  meta       the top session that receives ezexe's message runs a meta pass over every top's ledger first and writes
-             <home>/phi/meta-ledger.md: duplicate topics, tops in conflict over the same files or issue, stale
-             topics, and what is left open for the next generation.
+             and its children are archived with their outcome kept. Routing scores a message against the registered
+             routes before a start draft is made; a route whose issue was reopened or whose commit was reverted is
+             withdrawn.
+  parallel   an under-determined message becomes one child for each distinct reading. Each ends its report with a
+             `Result:` line, and the orchestrator merges them: readings that converge collapse to one result, and
+             only a fork that survives the merge goes to ezexe, as one question with options and a default.
+  meta       the top-level session that receives ezexe's message first runs a meta pass over every top-level
+             session's ledger and writes <home>/phi/meta-ledger.md: duplicate topics, top-level sessions in conflict
+             over the same files or issue, stale topics, and what is left open for the next generation.
 
-A hook cannot start a session or send a message, so pioneer's verdict is the exact call for the session to make,
-and the session, which can tell a question from work, makes it or leaves it.
+p4-phi's hooks are command hooks, which start no session and send no message, so the gate's verdict is the exact call
+for the session to make, and the session, which can tell a question from work, makes it or leaves it.
 
 Commands, through phi.py: `ledger`, `watch`, `draft "<words>"`, `pioneer <draft id>`, `routes`, `readings "<a>"
-"<b>" ... --words "<the message>"`, `merge <group> --result "<text>"`, `meta`.
-Settings: phi.json `puppeteer` (false: off); P4_PHI_PUPPETEER=0 or 1 for one run; P4_PHI_WATCH=0 starts no watcher.
+"<b>" ... --words "<the message>"`, `merge <group> --result "<text>"`, `meta`, `settle <session> "<what took it up>"`.
+Settings: `puppeteer` set to false in phi/phi.json turns off the watcher and the prompt hook's steps, and
+P4_PHI_PUPPETEER=0 or 1 overrides it for one run. P4_PHI_WATCH=0 starts no watcher, P4_PHI_WATCH_S sets the
+watcher's tick in seconds, P4_PHI_WATCH_NET=0 keeps the watcher from reading GitHub, and P4_PHI_APP_SESSIONS names
+the folder of the app's session records.
 """
 
 import glob
@@ -52,24 +56,24 @@ import ranker  # noqa: E402
 import starts  # noqa: E402
 import issues  # noqa: E402
 
-PHI = None                       # the running phi module, set by phi.py at import
+PHI = None                       # phi.py's running module, which phi.py sets when it imports this one
 WATCH_S = 5.0                    # the watcher's tick
 WATCH_SLOW_S = 30.0              # its tick once nothing changed for WATCH_CALM_S
 WATCH_CALM_S = 600.0
 WATCH_QUIT_S = 24 * 3600.0       # a watcher whose sources stood still this long ends; the next hook starts another
 BEAT_DEAD_S = 300.0              # a watcher silent this long is taken as gone: far past its slowest look
 ISSUE_TTL_S = 120.0              # how long an issue's state read from GitHub is believed
-GH_S = 6                         # one gh call of the puppeteer's, which a prompt hook may be waiting on
+GH_S = 6                         # one gh call of this module's, which a prompt hook may be waiting on
 ROUTE_CHECK_S = 600.0            # how often registered routes are checked for a reopen or a revert
 ROUTE_MIN = 4                    # content words a message shares with a route before it can match
 ROUTE_CLOSE = 0.6                # of the smaller side's content words
-OWNER_WORDS = 8                  # content words a message shares with a live session's task before that session owns
-#                                  it. Measured (#41, .docs/p4/phi-prompty-scores.md): at 4 the rule named a wrong owner
-#                                  on 25 of 43 cases of this store's history, at 8 on 6
-MODEL_FILE = "prompty.json"      # <store>/phi/models/prompty.json: the trained owner and route scorers, when there are any
+OWNER_WORDS = 8                  # content words a message shares with a live session's task before that session is
+#                                  named the area's code owner; prompty_eval.py measures how often each count names
+#                                  a wrong one on a store's history
+MODEL_FILE = "prompty.json"      # <store>/phi/models/prompty.json: the trained code owner and route scorers, if any
 TOPIC_WORDS = 3                  # content words a message shares with this session's task to be part of its topic
 QUICK_WORDS = 6                  # a message of fewer content words is a quick thing, never drafted
-STALE_S = 24 * 3600.0            # a top session with open work and no turn this long is stale
+STALE_S = 24 * 3600.0            # a top-level session with open work and no turn this long is stale
 WORDS_CHARS = 1500               # of ezexe's words, quoted in a brief
 STOP = frozenset("""phi session sessions p4 plugin plugins please make sure also just now then when with that this
 there their them they have has should would could will want need like into from about your you our out get got use
@@ -139,7 +143,7 @@ def words(text):
 
 
 def share(a, b):
-    """(shared content words, their share of the smaller side) of two texts."""
+    """The count of content words two texts share, and that count's share of the smaller side's content words."""
     wa, wb = words(a), words(b)
     both = wa & wb
     return len(both), (len(both) / min(len(wa), len(wb)) if wa and wb else 0.0)
@@ -148,13 +152,13 @@ def share(a, b):
 # --- the tree ---------------------------------------------------------------------------------------------------------
 
 def closed(s):
-    """True when phi's own files hold a session as out of the live tree. Nothing is read from the app here, so a
-    divergence between the two stays visible until it is reconciled."""
+    """True when p4-phi's own records hold a session as closed: stale, counted as archived, or archived. Nothing is
+    read from the app here, so a divergence between the two stays visible until it is reconciled."""
     return not isinstance(s, dict) or bool(s.get("stale") or s.get("doneRetired") or s.get("archived"))
 
 
 def subtree(home, top, every=None):
-    """[(sessionId, depth, session.json)] of a session and every session under it, in tree order."""
+    """The sessionId, depth and session.json of a session and of every session under it, in tree order."""
     every = relay._sessions(home) if every is None else every
     kids = {}
     for sid, s in every.items():
@@ -173,7 +177,7 @@ def subtree(home, top, every=None):
 
 
 def orchestrator(home, s, every=None):
-    """True for a session that pulls strings: a top session with a task, or any session that started sessions."""
+    """True for an orchestrator: a top-level session with a task, or any session that started sessions."""
     if not isinstance(s, dict) or not s.get("sessionId"):
         return False
     if not relay._parent(s):
@@ -203,7 +207,7 @@ def busy(home, sid):
 
 # --- the app's records ------------------------------------------------------------------------------------------------
 
-_APP = {}                        # record path -> (mtime_ns, row), kept while a watcher runs
+_APP = {}                        # each record's path to its mtime_ns and row, kept while a watcher runs
 
 
 def app_roots(home, top):
@@ -214,13 +218,12 @@ def app_roots(home, top):
 
 
 LOOK_S = 1.0                     # how long one look at the app's folder is believed: a hook's whole run, a fifth of a tick
-_LOOKS = {}                      # the roots -> (when, [(record path, mtime_ns, size)])
+_LOOKS = {}                      # the roots to when they were looked at and each record's path, mtime_ns and size
 
 
 def app_look(roots):
-    """[(path, mtime_ns, size)] of the app's session records, sorted by path. A message's hook built four ledgers
-    and signed five, each listing and stat-ing every record again (449 of them, 2026-11-16); one look now serves
-    all of them for LOOK_S."""
+    """The path, mtime_ns and size of each of the app's session records, sorted by path. One look serves every
+    ledger a hook builds or signs for LOOK_S, so the app's folder is listed and its records stat-ed once."""
     key = tuple(roots)
     held = _LOOKS.get(key)
     at = time.time()
@@ -259,8 +262,9 @@ def app_cache_path(home):
 
 
 def app_cached(home):
-    """What the last hook or watcher read from the app's records, kept in the store so the next process reads one
-    file, not every record: {path: [mtime_ns, row]}. Only a record whose time changed is opened again."""
+    """Loads what the last hook or watcher read from the app's records, kept in the store as each record's path to
+    its mtime_ns and row, so the next process reads one file and not every record. Only a record whose time changed
+    is opened again."""
     if home and home not in _APP_LOADED:
         _APP_LOADED.add(home)
         try:
@@ -277,7 +281,8 @@ _APP_LOADED = set()
 
 
 def app_index(roots, home=""):
-    """{sessionId: {parent, archived, title, name}} of the app's session records, each file read once a change."""
+    """Each session of the app's records by its sessionId, with its parent, whether it is archived, its title and
+    its name; each record file is read once after each change."""
     out = {}
     app_cached(home)
     read = 0
@@ -305,10 +310,10 @@ def app_index(roots, home=""):
 # --- issues -----------------------------------------------------------------------------------------------------------
 
 def topic_issue(s, base=""):
-    """(slug, number, repo path) of the issue a session's work closes: the one phi took for it, else the first
-    `owner/name#N` its task names; ('', 0, '') for none. No git runs here: a ledger is built from this for every
-    session of a subtree on every change, and the repository is looked for only once a route's other records back
-    it (closing_pushed)."""
+    """The slug, number and repository path of the issue a session's work closes: the one p4-phi took for it, else
+    the first `owner/name#N` its task names, and an empty slug, 0 and an empty path for none. No git runs here: a
+    ledger is built from this for every session of a subtree on every change, and closing_pushed looks for the
+    repository only once a route's other records back it."""
     iss = s.get("issue") if isinstance(s.get("issue"), dict) else None
     if iss and iss.get("repo") and iss.get("number"):
         return str(iss["repo"]), int(iss["number"]), str(iss.get("path") or "")
@@ -320,7 +325,7 @@ def states_path(home):
     return os.path.join(home, "phi", ".issue-states.json")
 
 
-_CHECKED = {}                    # "slug#n" -> when this process last read it from GitHub
+_CHECKED = {}                    # each issue's slug#n to when this process last read it from GitHub
 
 
 def issue_state(home, slug, n, net=False):
@@ -387,15 +392,16 @@ def signature(home, top, roots):
 
 
 def outcome_kept(home, parent, sid):
-    """True when the session above holds a closed child's outcome as a `replaces:` note."""
+    """True when the parent session holds a closed child's outcome as a `replaces:` note."""
     mark = f"({sid})"
     return any(str(r.get("claim") or "").lstrip().startswith("replaces:") and mark in str(r.get("claim"))
                for r in relay._rows(os.path.join(relay._dir(home, parent), "notes.jsonl")))
 
 
 def build(home, top, net=False):
-    """The ledger of an orchestrator as data: its reconcile lines, a row a session of its subtree, their open
-    background tasks, the start requests waiting, the issues tied to them, and the readings being merged."""
+    """The ledger of an orchestrator as data: its reconcile lines, a row for each session of its subtree, their open
+    background tasks, the start requests waiting, the issues tied to them, the readings being merged, and the work
+    closed sessions left unfinished."""
     phi = _phi()
     every = relay._sessions(home)
     tree = subtree(home, top, every)
@@ -409,20 +415,21 @@ def build(home, top, net=False):
         rec = app.get(sid)
         if closed(s):
             if depth:
-                how = "stale" if s.get("stale") else "finished and retired" if s.get("doneRetired") else "archived"
+                how = ("stale" if s.get("stale") else "finished and counted as archived" if s.get("doneRetired")
+                       else "archived")
                 shut.append({"sessionId": sid, "title": title, "parent": parent, "how": how,
                              "kept": outcome_kept(home, parent, sid)})
             continue
         root = str(s.get("appRoot") or "")
         if sid.startswith("local_") and root and os.path.isdir(root) and root in roots:
             if rec is None:
-                reconcile.append(f"phi lists \"{title}\" ({sid}) as live, and the app holds no record of it.")
+                reconcile.append(f"p4-phi lists \"{title}\" ({sid}) as live, and the app holds no record of it.")
             elif rec["archived"]:
-                reconcile.append(f"phi lists \"{title}\" ({sid}) as live, and the app has archived it.")
+                reconcile.append(f"p4-phi lists \"{title}\" ({sid}) as live, and the app has archived it.")
         held = s.get("spawnedFrom") if isinstance(s.get("spawnedFrom"), dict) else {}
         if rec and depth and rec["parent"] and rec["parent"] != parent \
                 and held.get("source") not in ("detached", "reparented", "requested"):
-            reconcile.append(f"the app shows \"{title}\" ({sid}) started by {rec['parent']}, and phi holds it under "
+            reconcile.append(f"the app shows \"{title}\" ({sid}) started by {rec['parent']}, and p4-phi holds it under "
                              f"{parent}.")
         plan = plans.load(home, sid)
         steps = plan.get("steps") or []
@@ -452,7 +459,7 @@ def build(home, top, net=False):
     live = {r["sessionId"] for r in rows}
     for aid, rec in sorted(app.items()):
         if rec["parent"] in live and not rec["archived"] and aid not in every:
-            reconcile.append(f"the app shows \"{rec['title'] or aid}\" ({aid}) started by {rec['parent']}, and phi "
+            reconcile.append(f"the app shows \"{rec['title'] or aid}\" ({aid}) started by {rec['parent']}, and p4-phi "
                              f"holds no session for it.")
     asked = []
     at = time.time()
@@ -467,7 +474,7 @@ def build(home, top, net=False):
     left = [{"sessionId": sid, "title": phi.title_of(s), "time": s["unfinishedAtArchive"].get("time", ""),
              "items": list(s["unfinishedAtArchive"].get("items") or [])}
             for sid, depth, s in tree if depth and isinstance(s.get("unfinishedAtArchive"), dict)
-            and not s["unfinishedAtArchive"].get("settled")]            # #47: read from the records, no git here
+            and not s["unfinishedAtArchive"].get("settled")]            # read from the records, with no git here
     return {"top": top, "title": phi.title_of(every.get(top, {})), "parent": relay._parent(every.get(top, {})),
             "reconcile": reconcile, "rows": rows, "closed": shut, "tasks": tasks, "requests": asked,
             "issues": tied, "groups": groups, "unfinished": left}
@@ -475,11 +482,11 @@ def build(home, top, net=False):
 
 def render(m):
     """A ledger's data as ledger.md. It carries no clock, so the same records give the same page."""
-    where = f"started by `{m['parent']}`" if m["parent"] else "a top session"
+    where = f"started by `{m['parent']}`" if m["parent"] else "a top-level session"
     out = [f"# Ledger: {m['title']}", "",
-           f"Puppeteer `{m['top']}`, {where}.",
-           "Written by p4-phi's watcher from phi's files and the app's session records, and rewritten only when one "
-           "of them changes.",
+           f"Orchestrator `{m['top']}`, {where}.",
+           "Written by p4-phi from its own records and the app's session records, by its watcher, its prompt hook, its "
+           "meta pass and its `ledger` command alike, and rewritten only when what it shows changes.",
            "Edit nothing here: change the records.", ""]
     if m.get("unfinished"):
         out += ["## Unfinished at archive", ""]
@@ -488,7 +495,7 @@ def render(m):
             out += [f"  - {x}" for x in u["items"]]
         out.append("")
     out += ["## Reconcile", ""]
-    out += [f"- {x}" for x in m["reconcile"]] or ["- Nothing diverges: phi's files and the app's records agree."]
+    out += [f"- {x}" for x in m["reconcile"]] or ["- Nothing diverges: p4-phi's records and the app's records agree."]
     out += ["", "## Sessions", ""]
     for r in m["rows"]:
         bits = ["working" if r["working"] else "idle"]
@@ -504,7 +511,7 @@ def render(m):
         if r["issue"]:
             bits.append(f"issue {r['issue']} {r['issueState'] or 'state not read'}")
         if r["shard"]:
-            bits.append("shard " + ", ".join(r["shard"]))
+            bits.append("owned paths " + ", ".join(r["shard"]))
         if r["reading"]:
             bits.append(f"reading {r['reading'].get('k')} of {r['reading'].get('group')}")
         if r["report"]:
@@ -534,12 +541,13 @@ def render(m):
     return "\n".join(out) + "\n"
 
 
-_NET = {}                        # orchestrator -> when this process last rebuilt its ledger with GitHub read
+_NET = {}                        # each orchestrator to when this process last rebuilt its ledger with GitHub read
 
 
 def refresh(home, top, net=False, force=False):
     """ledger.md and ledger.json of an orchestrator, rebuilt only when a source changed, or when the issues' states
-    are due to be read again, and rewritten only when the page differs -> (the page, True when it was rewritten)."""
+    are due to be read again, and rewritten only when the page differs. Returns the page and True when it was
+    rewritten."""
     roots = app_roots(home, top)
     sig_path = os.path.join(relay._dir(home, top), "ledger.sig")
     sig = signature(home, top, roots)
@@ -580,7 +588,8 @@ def watcher_alive(home, top):
 
 
 def ensure_watcher(home, s):
-    """One background watcher an orchestrator: started when none has said it is alive lately -> True when started."""
+    """Starts the one background watcher of an orchestrator when none has said it is alive lately. Returns True when
+    it started one."""
     if os.environ.get("P4_PHI_WATCH") == "0" or not on(home) or not orchestrator(home, s) or closed(s):
         return False
     top = s["sessionId"]
@@ -601,7 +610,7 @@ def ensure_watcher(home, s):
     return True
 
 
-_ROUTES = {}                     # orchestrator -> when this process last looked for landed topics
+_ROUTES = {}                     # each orchestrator to when this process last looked for landed topics
 
 
 def code_stamp():
@@ -616,13 +625,14 @@ def code_stamp():
 
 
 def tick(home, top, net=True):
-    """One look of the watcher: the readings merged, the ledger, the landed topics registered as routes."""
+    """One look of the watcher: the readings merged, the closed sessions checked for unfinished work, the ledger,
+    and the landed topics registered as routes."""
     try:
         merge_all(home, top)
     except Exception:  # noqa: BLE001
         pass
     try:
-        archive_checks(home, top)                   # #47: once a session, when it closes
+        archive_checks(home, top)                   # once for each session, when it closes
     except Exception:  # noqa: BLE001
         pass
     _, changed = refresh(home, top, net=net)
@@ -638,11 +648,11 @@ def tick(home, top, net=True):
 
 
 def watch(home, top, once=False, max_s=None, interval=None):
-    """The puppeteer's watch over one orchestrator's subtree, until the orchestrator is closed, another watcher
-    took over, nothing changed for a day, or the plugin's own scripts changed under it: the marketplace runs from
-    its checkout, so a watcher on yesterday's code ends and the next hook starts one on today's. It says it is
-    alive before each look, never after, so a slow look is not taken for a dead watcher and a second one started;
-    and it yields to a newer watcher before it looks, not after."""
+    """The watcher's loop over one orchestrator's subtree, until the orchestrator is closed, another watcher took
+    over, nothing changed for a day, or the plugin's own scripts changed under it: the marketplace runs from its
+    checkout, so a watcher on yesterday's code ends and the next hook starts one on today's. It says it is alive
+    before each look, never after, so a slow look is not taken for a dead watcher and a second one started; and it
+    yields to a newer watcher before it looks, not after."""
     me = os.getpid()
     code = code_stamp()
     started = time.time()
@@ -709,8 +719,8 @@ def all_routes(home):
 
 
 def closing_pushed(home, s, slug, n, repo):
-    """(short sha, subject) of a pushed commit that closes the issue, made since the session began; ('', '') for
-    none."""
+    """The short sha, subject and repository of a pushed commit that closes the issue, made since the session began,
+    and three empty strings for none."""
     repos = [repo] if repo else []
     for r, sl in issues.repos_named(str(s.get("task") or ""), s.get("cwd") or ""):
         if sl.lower() == slug.lower() and r not in repos:
@@ -729,9 +739,9 @@ def closing_pushed(home, s, slug, n, repo):
 
 
 def backed(home, s, net=False):
-    """(True, the closing commit) when the records back a landed topic's reports: the session and the sessions it
-    started are archived with their outcome kept, its issue is closed, and a commit that closes it is pushed; else
-    (False, what is missing)."""
+    """Returns True and the closing commit when the records back a landed topic's reports: the session and its child
+    sessions are archived with their outcome kept, its issue is closed, and a commit that closes it is pushed.
+    Returns False and what is missing otherwise."""
     sid = s["sessionId"]
     slug, n, repo = topic_issue(s)
     if not n:
@@ -740,10 +750,10 @@ def backed(home, s, net=False):
     if not (closed(s) or relay.gone(home, s)):
         return False, "the session is not archived"
     if parent and not outcome_kept(home, parent, sid):
-        return False, "its outcome is not kept on the session that started it"
+        return False, "its outcome is not kept on its parent session"
     for kid, depth, k in subtree(home, sid)[1:]:
         if not (closed(k) or relay.gone(home, k)):
-            return False, f"a session it started, {kid}, is not archived"
+            return False, f"the session {kid} under it is not archived"
         if depth == 1 and not outcome_kept(home, sid, kid):
             return False, f"the outcome of {kid} is not kept"
     state = issue_state(home, slug, n, net)
@@ -768,8 +778,8 @@ def route_of(home, s, commit):
     base = s.get("cwd") or above.get("cwd") or ""
     return {"kind": "route", "id": "rt-" + hashlib.sha1(f"{sid}\n{slug}#{n}".encode()).hexdigest()[:10],
             "time": now(), "at": time.time(), "words": _short(said, WORDS_CHARS), "topic": phi.title_of(s),
-            "shape": {"parent": "a child of a top session" if parent and not relay._parent(above) else
-                      "a top session" if not parent else "a child of an orchestrator",
+            "shape": {"parent": "a child of a top-level session" if parent and not relay._parent(above) else
+                      "a top-level session" if not parent else "a child of an orchestrator",
                       "children": len(subtree(home, sid)) - 1, "archiveWhenDone": bool(s.get("disposable")),
                       "steps": [_short(x.get("content"), 100) for x in plan.get("steps") or []][:12]},
             "slice": {"brief": _short(s.get("task"), WORDS_CHARS),
@@ -779,8 +789,8 @@ def route_of(home, s, commit):
 
 
 def register_routes(home, top, net=False):
-    """Each landed topic under an orchestrator registered once, beside the ledger, when its records back it -> the
-    routes registered now."""
+    """Registers each landed topic under an orchestrator once, beside the ledger, when its records back it. Returns
+    the routes this call registered."""
     rows = [r for p in glob.glob(os.path.join(home, "phi", "sessions", "*", "routes.jsonl"))
             for r in relay._rows(p) if r.get("kind") == "route"]
     held, taken = {r.get("session") for r in rows}, {r.get("issue") for r in rows}
@@ -810,8 +820,8 @@ def reverted(repo, sha):
 
 
 def check_routes(home, net=False, force=False):
-    """Registered routes whose issue was reopened or whose commit was reverted are withdrawn -> those withdrawn
-    now. Looked at once every ROUTE_CHECK_S."""
+    """Withdraws the registered routes whose issue was reopened or whose commit was reverted, and returns those this
+    call withdrew. The routes are looked at once every ROUTE_CHECK_S."""
     mark = os.path.join(home, "phi", ".routes-checked")
     try:
         if not force and time.time() - os.path.getmtime(mark) < ROUTE_CHECK_S:
@@ -835,17 +845,17 @@ def check_routes(home, net=False, force=False):
     return out
 
 
-# --- the trained scorers (#41) -----------------------------------------------------------------------------------------
+# --- the trained scorers ----------------------------------------------------------------------------------------------
 #
-# prompty picked a route and an owner by shared content words alone. Measured on this store's own history
-# (prompty_eval.py, .docs/p4/phi-prompty-scores.md), that rule named a wrong owner far more often than a right one.
-# So both picks go through the ranker when a model trained for them is in the store: ranker.candidate_features over
-# the candidates' words, scored by the weights `prompty_eval.py --train` keeps in phi/models/prompty.json. It keeps
-# a model only when it beats word overlap and naming none on held-out sessions. With no model, as on a store with
-# too little history or a machine that never trained one, word overlap is the fallback, at the measured threshold.
+# Routing picks a route and a code owner through the ranker when a model trained for them is in the store:
+# ranker.candidate_features over the candidates' words, scored by the weights kept in phi/models/prompty.json.
+# `prompty_eval.py --train` keeps the code owner weights, and only when they beat shared content words and naming none
+# on held-out sessions; a route model is used when one is kept there. With no model, as on a store with too little
+# history or a machine that never trained one, shared content words decide, at OWNER_WORDS for a code owner and at
+# ROUTE_MIN and ROUTE_CLOSE for a route.
 
 MODEL_KIND = "p4 prompty model"
-_MODEL = {}                      # model path -> (mtime_ns, model)
+_MODEL = {}                      # each model path to its mtime_ns and model
 
 
 def scorer_path(home):
@@ -853,7 +863,8 @@ def scorer_path(home):
 
 
 def prompty_model(home):
-    """{"owners": {"w", "threshold"}, "routes": {...}} as trained for this store, {} when none is kept."""
+    """The code owner and route scorers trained for this store, under the keys owners and routes, each with its
+    weights `w` and its `threshold`; an empty dict when none is kept."""
     path = scorer_path(home)
     try:
         stamp = os.stat(path).st_mtime_ns
@@ -876,8 +887,8 @@ def prompty_model(home):
 
 
 def pair_features(req, texts, when=""):
-    """One ranker feature dict a candidate text for a message, and the candidates' BM25: the ranker's own reading
-    of a candidate, with the candidates as the collection the idf is taken over."""
+    """One ranker feature dict for each candidate text of a message, and the candidates' BM25: the ranker's own
+    reading of a candidate, with the candidates as the collection the idf is taken over."""
     docs = [ranker.tokens(t) for t in texts]
     idf, _ = ranker.idf_table(docs)
     avgdl = sum(len(d) for d in docs) / max(1, len(docs))
@@ -887,8 +898,8 @@ def pair_features(req, texts, when=""):
 
 
 def rank_texts(home, kind, req, texts, when=""):
-    """(a score a text, the threshold) by the store's trained model of `kind`, "owners" or "routes"; None when no
-    such model is kept, and the caller falls back to word overlap."""
+    """A score for each text and the threshold, by the store's trained model of `kind`, owners or routes. None when
+    no such model is kept, and the caller falls back to shared content words."""
     m = prompty_model(home).get(kind)
     if not m or not texts:
         return None
@@ -897,8 +908,8 @@ def rank_texts(home, kind, req, texts, when=""):
 
 
 def score_routes(home, req):
-    """[(score, shared words, route)] of the registered routes a message matches closely, the best first: by the
-    trained route model when the store keeps one, else by shared content words."""
+    """The score, the count of shared words and the route of each registered route a message matches closely, the
+    best first: by the trained route model when the store keeps one, else by shared content words."""
     out = []
     rows = list(all_routes(home).values())
     texts = [f"{r.get('words', '')} {r.get('topic', '')}" for r in rows]
@@ -913,10 +924,11 @@ def score_routes(home, req):
     return sorted(out, key=lambda x: (-x[0], -x[1], str(x[2].get("id"))))
 
 
-# --- prompty: the message read against the ledger ---------------------------------------------------------------------
+# --- routing: the message read against the tree's records -------------------------------------------------------------
 
 def readings_of(req):
-    """The distinct readings a message names itself: "either A or B", "A, or maybe B"; [] when it names one."""
+    """The distinct readings a message names itself, as in "either A or B" or "A, or maybe B", and an empty list
+    when it names one."""
     m = EITHER.search(req) or OR_MAYBE.search(req)
     if not m:
         return []
@@ -925,9 +937,9 @@ def readings_of(req):
 
 
 def prompty(home, s, req, base):
-    """ezexe's message read against the ledger: the paths and words it carries, whether it is work at all, the
-    live session that owns its area, the running writer that holds its files, the registered routes it matches, and
-    the readings it leaves open."""
+    """Routing: ezexe's message read against the records the ledger is built from. It returns the paths and words
+    the message carries, whether it is work at all, the live session that is its area's code owner, the running
+    writer that holds its files, the registered routes it matches, and the readings it leaves open."""
     phi = _phi()
     sid = s["sessionId"]
     every = relay._sessions(home)
@@ -947,13 +959,13 @@ def prompty(home, s, req, base):
                                                          for x in plans.open_steps(home, oid)))
               for oid, o in every.items()
               if not (oid == sid or oid in above or closed(o) or relay.gone(home, o))]
-    ranked = rank_texts(home, "owners", req, [text for _, _, text in others])       # None: word overlap decides
+    ranked = rank_texts(home, "owners", req, [text for _, _, text in others])       # None: shared words decide
     for k, (oid, o, text) in enumerate(others):
         shard = [p for p in relay.shard_of(o) if not relay.names_nothing(p, home, base)]
         hit = next((p for p in shard if any(relay.covers(p, n) or relay.covers(n, p) for n in named)), "")
         n, _ = share(req, text)
         if hit:
-            cand = (2, len(relay._root(hit)), oid, f"its shard holds {hit}")
+            cand = (2, len(relay._root(hit)), oid, f"its owned paths hold {hit}")
         elif ranked is not None:
             cand = (1, ranked[0][k], oid, f"the trained owner model scores its task {ranked[0][k]:.2f} for the "
                                          f"message") if ranked[0][k] >= ranked[1] else None
@@ -977,7 +989,7 @@ def prompty(home, s, req, base):
     return read
 
 
-# --- prompter: the exact next session ---------------------------------------------------------------------------------
+# --- the start draft: the exact next session --------------------------------------------------------------------------
 
 def drafts_dir(home, sid):
     return os.path.join(relay._dir(home, sid), "drafts")
@@ -994,8 +1006,9 @@ def topic_of(req):
 
 
 def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
-    """The exact next session for a message: its topic, a brief built from ezexe's words, its parent, fork or
-    fresh, and the issue it closes or the one to file. A close registered route gives the starting shape."""
+    """The start draft for a message, the exact next session: its topic, a brief built from ezexe's words, its parent
+    session, fork or fresh, and the issue it closes or the one to file. A close registered route gives the starting
+    shape."""
     phi = _phi()
     sid = s["sessionId"]
     parent = sid if read["within"] or relay._parent(s) else ""
@@ -1015,7 +1028,7 @@ def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
         lines += [f"This session takes one reading of those words, reading {reading['k']} of {reading['n']}: "
                   f"{reading['text']}",
                   "Work only that reading, and end your report with one line `Result: <what this reading comes to>`, "
-                  "which the session that started this one merges with the other readings.", ""]
+                  "which its parent session merges with the other readings.", ""]
     if route:
         lines += [f"A route that landed before fits these words: \"{route['topic']}\", {route['issue']}, a "
                   f"{route['context']} session, {(route.get('shape') or {}).get('parent', 'a child')}.",
@@ -1027,15 +1040,15 @@ def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
     lines += ["Files: " + (", ".join(f"`{p}`" for p in paths[:8]) if paths and not reading else "none"), ""]
     if reading:
         lines += ["A reading explores: change no tracked file and commit nothing, since the readings beside this one "
-                  "share the checkout. The session that started this one lands the reading that survives the merge.",
+                  "share the checkout. Its parent session lands the reading that survives the merge.",
                   "Done looks like: the reading worked through, and its `Result:` line reported.", "Report when done."]
     else:
         if named:
             lines += [f"This closes {slug}#{named}: every commit says `Closes #{named}`.", ""]
         elif slug:
-            lines += [f"phi files the issue for this in {slug} at your first message, and every commit closes it.", ""]
-        lines += ["Done looks like: the change made, its proving test passing, committed on the parent's branch with "
-                  "no worktree and no branch of your own, and reported.", "Report when done."]
+            lines += [f"p4-phi files the issue for this in {slug} at your first message.", ""]
+        lines += ["Done looks like: the change made, its regression test passing, committed and reported.",
+                  "Report when done."]
     if not parent:
         lines += ["", f"{phi.NEW_TOP_BRIEF} {phi.new_top_first_act()}"]
     context = "fresh"
@@ -1048,8 +1061,8 @@ def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
     if reading:
         lines += [f"phi reading {reading['group']} {reading['k']} of {reading['n']} for {sid}."]
     task = _short(" ".join(str(s.get("task") or "").split()), 500)
-    background = (f"Drafted by p4-phi's prompter in the session \"{phi.title_of(s)}\" ({sid}) from ezexe's message, "
-                  f"read against that session's ledger at {ledger_path(home, sid)}."
+    background = (f"A start draft p4-phi made in the session \"{phi.title_of(s)}\" ({sid}) from ezexe's message; "
+                  f"that session's ledger is {ledger_path(home, sid)}."
                   + (f" That session's task: {task}" if task else ""))
     return {"id": did, "time": now(), "words": req, "title": title, "brief": "\n".join(lines), "parent": parent,
             "context": context, "issue": f"{slug}#{named}" if named else "", "repo": slug, "paths": paths,
@@ -1062,14 +1075,15 @@ def call_of(d):
     call = {"initiation": "user_asked", "title": d["title"], "context": d["context"], "prompt": d["brief"]}
     if d["context"] == "fresh":
         call.update(use_worktree=False, background=d["background"])
-    return plans.with_level(call, d["title"] + "\n" + d["brief"])    # #61: a fresh draft names its model and effort
+    return plans.with_level(call, d["title"] + "\n" + d["brief"])    # a fresh draft names its model and effort
 
 
-# --- pioneer: the gate, then the dispatch ----------------------------------------------------------------------------
+# --- the gate, then the dispatch --------------------------------------------------------------------------------------
 
 def pioneer(home, s, d, read, net=True):
-    """A draft gate-checked: the issue exists or is to be filed, no running writer holds the same files, the parent
-    is the right orchestrator. The verdict is start, route or queue, with what the gate saw; the draft is kept."""
+    """The gate: a draft checked that its issue exists or is to be filed, that no running writer holds the same
+    files, and that its parent session is the right orchestrator. The verdict is start, route, queue, or here when
+    the depth or count cap holds, with what the gate saw; the draft is kept."""
     phi = _phi()
     sid = s["sessionId"]
     gate = []
@@ -1078,16 +1092,16 @@ def pioneer(home, s, d, read, net=True):
         state = issue_state(home, slug, int(n), net)
         gate.append(f"{d['issue']} is {state.lower()}" if state else f"gh could not read {d['issue']}")
         if state == "CLOSED":
-            gate[-1] += ", so the issue loop files a new one at the child's first message"
+            gate[-1] += ", so p4-phi files a new one at the child's first message"
     elif d["repo"]:
-        gate.append(f"it names no issue, so the issue loop files one in {d['repo']} at the child's first message")
+        gate.append(f"it names no issue, so p4-phi files one in {d['repo']} at the child's first message")
     else:
         gate.append("its files are in no GitHub repository, so it carries no issue")
     cap = phi.caps_text(home, s)
     owner, held = read.get("owner"), read.get("busy")
     if owner and not d.get("reading"):
         verdict = "route"
-        gate.append(f"its area has a live owner, \"{owner['title']}\" ({owner['sessionId']}): {owner['why']}")
+        gate.append(f"its area has a live code owner, \"{owner['title']}\" ({owner['sessionId']}): {owner['why']}")
     elif cap:
         verdict = "here"
         gate.append(cap)
@@ -1098,7 +1112,7 @@ def pioneer(home, s, d, read, net=True):
         verdict = "start"
         gate.append("no running writer holds its files")
     gate.append("its parent is this session, the orchestrator of its topic" if d["parent"] else
-                "it is outside this session's topic, so it is a new top session in the root")
+                "it is outside this session's topic, so it is a new top-level session")
     if d.get("reading") and verdict == "queue":
         verdict = "start"                           # a reading changes no file, so no writer is in its way
     d.update(verdict=verdict, gate=gate, owner=owner, busy=held)
@@ -1107,36 +1121,38 @@ def pioneer(home, s, d, read, net=True):
 
 
 def queue(home, d):
-    """A draft whose writer is busy, kept as a start request behind that writer -> (request id, True when new)."""
+    """Keeps a draft whose writer is busy as a start request behind that writer. Returns the request id and True
+    when the request is new."""
     behind = (d.get("busy") or {}).get("sessionId", "")
     return starts.add(home, d["parent"] or d["drafter"], d["title"], d["brief"], d["context"],
                       background=d["background"], after=behind)
 
 
 def verdict_text(home, s, d):
-    """What pioneer hands the session: the exact call, the exact message, or the exact command."""
+    """What the gate hands the session: the exact call, the exact message, the exact command, or that no session is
+    started."""
     phi = _phi()
-    head = (f"phi (p4-phi) puppeteer: prompty read this message of ezexe's as work for a session of its own"
+    head = (f"phi (p4-phi): routing read this message of ezexe's as work for a session of its own"
             + (f", and it closely matches the registered route \"{d['route']}\"" if d.get("route") else "")
-            + f"; prompter drafted it as \"{d['title']}\" (draft {d['id']}); pioneer's gate: "
+            + f"; its start draft is \"{d['title']}\", draft {d['id']}; the gate found: "
             + "; ".join(d["gate"]) + ". ")
-    tail = (" If the message is this session's own orchestration instead, a question, a decision or a relay, leave "
-            "the draft and answer it here.")
+    tail = (" If the message is this session's own orchestration instead, a question, a decision or a message to pass "
+            "to another session, leave the draft and answer it here.")
     if d["verdict"] == "route":
         o = d["owner"]
-        return (head + f"Route it: SendMessage (`to`: {o['sessionId']}) with ezexe's words quoted, and tell ezexe in "
+        return (head + f"Route it: SendMessage with `to` {o['sessionId']} and ezexe's words quoted, then tell ezexe in "
                 f"one line that \"{o['title']}\" has it. Start no session for it." + tail)
     if d["verdict"] == "queue":
         return (head + f"Queue it behind that writer: `{phi.commands()} pioneer {d['id']}` keeps it as a start request "
-                f"that is handed out, with its exact call, at the first turn ezexe begins once the writer is no "
-                f"longer busy." + tail)
+                f"that is handed out, with its exact call, at the first turn ezexe begins once the writer is not "
+                f"busy." + tail)
     if d["verdict"] == "here":
         return head + "No session is started for it." + tail
     return (head + "Start it now: `mcp__ccd_session__start_session` with "
             + json.dumps(call_of(d), ensure_ascii=False) + tail)
 
 
-# --- parallel: one child a reading, merged ----------------------------------------------------------------------------
+# --- parallel: one child for each reading, merged ---------------------------------------------------------------------
 
 def groups_dir(home, sid):
     return os.path.join(relay._dir(home, sid), "readings")
@@ -1152,8 +1168,8 @@ def save_group(home, g):
 
 
 def explore(home, s, req, texts, base, transcript_bytes=0):
-    """An under-determined message drafted as one sibling child a distinct reading -> (the group, its drafts). The
-    depth and count caps still hold: no more readings than this session may still start."""
+    """Drafts an under-determined message as one sibling child for each distinct reading, and returns the group and
+    its drafts. The depth and count caps hold: no more readings than this session may still start."""
     phi = _phi()
     sid = s["sessionId"]
     texts = list(dict.fromkeys(" ".join(str(t).split()) for t in texts if str(t).strip()))
@@ -1167,7 +1183,7 @@ def explore(home, s, req, texts, base, transcript_bytes=0):
     texts = texts[:room]
     gid = "grp-" + hashlib.sha1(f"{sid}\n{req}\n{'|'.join(texts)}".encode("utf-8", "replace")).hexdigest()[:10]
     read = prompty(home, s, req, base)
-    read["owner"] = None                            # the readings are this puppeteer's to merge: none is routed away
+    read["owner"] = None                            # the readings are this orchestrator's to merge: none is routed away
     drafts = []
     for k, t in enumerate(texts, 1):
         d = prompter(home, s, req, read, base, transcript_bytes,
@@ -1187,15 +1203,16 @@ def explore(home, s, req, texts, base, transcript_bytes=0):
 def explore_text(home, s, g, drafts):
     lines = [f"- reading {r['k']}, \"{_short(r['text'], 120)}\": `mcp__ccd_session__start_session` with "
              + json.dumps(call_of(d), ensure_ascii=False) for r, d in zip(g["readings"], drafts)]
-    return (f"phi (p4-phi) puppeteer: this message of ezexe's is under-determined, with {len(drafts)} distinct "
-            f"readings, and one draft would have to guess between them. Pioneer starts one child a reading, "
-            f"siblings under this session, each with exactly the call given; this session merges their `Result:` "
-            f"lines as the puppeteer (group {g['id']}), and only a fork that survives the merge goes to ezexe:\n"
+    return (f"phi (p4-phi): this message of ezexe's is under-determined, with {len(drafts)} distinct "
+            f"readings, and one draft would have to guess between them. Start one child for each reading, siblings "
+            f"under this session, each with exactly the call given; this session then merges their `Result:` lines "
+            f"as group {g['id']}, and only a fork that survives the merge goes to ezexe:\n"
             + "\n".join(lines))
 
 
 def arrived(home, s, prompt):
-    """A started session's first message: the draft and the reading its brief names are kept on it (s is changed)."""
+    """A started session's first message: the draft and the reading its brief names are kept on it, which changes
+    s."""
     text = str(prompt or "")
     m = DRAFT_RE.search(text)
     if m and not s.get("draft"):
@@ -1206,14 +1223,14 @@ def arrived(home, s, prompt):
         g = relay._read_json(os.path.join(groups_dir(home, m.group(4)), f"{m.group(1)}.json"))
         for r in g.get("readings") or []:
             if r.get("k") == int(m.group(2)) and r.get("child") != s["sessionId"]:
-                rebind(g, r, s["sessionId"])       # #44: a rerun's session replaces the earlier child
+                rebind(g, r, s["sessionId"])       # a rerun's session replaces the earlier child
                 save_group(home, g)
     return bool(s.get("draft") or s.get("reading"))
 
 
 def rebind(g, r, sid):
-    """A reading given to the session that carries its line now; the child before it is kept as `earlier`. A group
-    that closed with this reading lost is open again."""
+    """A reading given to the latest session that carries its line; the child before it is kept as `earlier`. A
+    group that closed with this reading lost is opened again."""
     if r.get("child"):
         r["earlier"] = (list(r.get("earlier") or []) + [r["child"]])[-8:]
     r["child"] = sid
@@ -1226,8 +1243,8 @@ def rebind(g, r, sid):
 
 
 def carriers(home, g, r):
-    """The sessions that carry a reading's line, newest last: a rerun started before #44 never reached its group
-    file, so the sessions' own `reading` is read as well as the group's child."""
+    """The sessions that carry a reading's line, newest last, read from each session's own `reading` as well as the
+    group's child, so a rerun its group file never recorded is found too."""
     out = []
     for sid, s in relay._sessions(home).items():
         rd = s.get("reading") if isinstance(s.get("reading"), dict) else {}
@@ -1237,9 +1254,8 @@ def carriers(home, g, r):
 
 
 def result_of(home, sid):
-    """A reading's result: the `Result:` line of its last finished turn that has one, or failing that what it showed
-    with `phi.py done` (#44: readings that answered through `done` never closed their group). '' while it has
-    neither."""
+    """A reading's result: the `Result:` line of its last finished turn that has one, else what it showed with
+    `phi.py done`, and an empty string while it has neither."""
     turns = _phi().load_turns(home, sid)
     for t in reversed(turns):
         got = RESULT_RE.findall(f"{t.get('said') or ''}\n{t.get('report') or ''}")
@@ -1269,7 +1285,7 @@ def same_result(a, b):
 
 def merge(home, g):
     """One group of readings merged once every reading has a result: readings that converge collapse to one
-    result; a fork becomes one question with options and a default -> True when its state changed."""
+    result, and a fork becomes one question with options and a default. Returns True when its state changed."""
     if g.get("state") != "open":
         return False
     got, gone, changed = [], [], False
@@ -1335,24 +1351,25 @@ def merge_text(g):
     gone = f" Of its {len(g['readings'])} readings, {lost_words(g)}." if g.get("lost") else ""
     have = [r for r in g["readings"] if not r.get("lost")]
     if g.get("state") == "lost":
-        return (f"phi (p4-phi) puppeteer: the readings of \"{_short(g['words'], 120)}\" gave no result:{gone} The "
+        return (f"phi (p4-phi): the readings of \"{_short(g['words'], 120)}\" gave no result:{gone} The "
                 f"group {g['id']} is closed. Start the readings again if the answer is still wanted; a new session "
                 f"carrying a reading's line takes that reading and opens the group again.")
     if g.get("state") == "collapsed":
-        return (f"phi (p4-phi) puppeteer: the {len(have)} reading{'s' if len(have) != 1 else ''} of "
+        return (f"phi (p4-phi): the {len(have)} reading{'s' if len(have) != 1 else ''} of "
                 f"\"{_short(g['words'], 120)}\" that gave a result "
                 f"converged on one result: \"{_short(g.get('result'), 300)}\".{gone} They collapse to it: carry it on "
-                f"as the answer and put no question to ezexe. The reading sessions are over: archive none of them.")
+                f"as the answer and put no question to ezexe.")
     opts = "; ".join(f"reading {r['k']} \"{_short(r['text'], 80)}\", which came to \"{_short(r.get('result'), 140)}\""
                      for r in have) + ("." + gone if gone else "")
-    return (f"phi (p4-phi) puppeteer: the readings of \"{_short(g['words'], 120)}\" fork after the merge. If the "
-            f"chain can settle it, settle it and say why in one line, then `{_phi().commands()} merge {g['id']} "
+    return (f"phi (p4-phi): the readings of \"{_short(g['words'], 120)}\" fork after the merge. If the session "
+            f"tree can settle it, settle it and say why in one line, then `{_phi().commands()} merge {g['id']} "
             f"--result \"<the result>\"`. Otherwise put one question to ezexe, \"{g.get('question')}\", with these "
             f"options and reading {g.get('default')} as the default: {opts}.")
 
 
 def merge_all(home, sid):
-    """Every open group of a puppeteer merged where it can be; the puppeteer is told once at its next message."""
+    """Merges every open group of an orchestrator where it can be. The orchestrator is told once, beside its next
+    message: p4-phi wires no `asyncRewake` hook, which could wake an idle session with it at once."""
     out = []
     for g in load_groups(home, sid):
         if merge(home, g):
@@ -1361,22 +1378,21 @@ def merge_all(home, sid):
     return out
 
 
-# --- at a session's archive: what it left unfinished (#47) -------------------------------------------------------------
+# --- at a session's archive: what it left unfinished ------------------------------------------------------------------
 #
-# A session can be archived, or retired as finished, while work it started is still unfinished: the #38 builder left
-# seven watchers for four top sessions and suite runs started more than once. So when a session under a puppeteer is
-# retired or archived, what it started is reconciled once against what finished, from its plan's background tasks,
-# its turns, the store's start requests and the machine's process list. A clean session leaves nothing. Otherwise
-# the items are kept on its session.json as `unfinishedAtArchive`, shown at the top of the puppeteer's ledger, and
-# the puppeteer's session is told once, one sentence an item.
+# A session can be archived, or counted as archived when it finishes, while work it started is still unfinished. So
+# when a session under an orchestrator closes, what it started is reconciled once against what finished, from the
+# background tasks of its task list, its turns, the store's start requests and the machine's process list. A clean
+# session leaves nothing. Otherwise the items are kept on its session.json as `unfinishedAtArchive`, shown at the head
+# of its orchestrator's ledger, and its parent session is told once, beside its next message, one sentence an item.
 
 ARCHIVE_LOOK_S = 24 * 3600.0     # a session closed longer ago than this is stamped as checked, not looked at
 PS_S = 6                         # the process listing, which a hook may be waiting on
-PROCESSES = None                 # a test's stand-in for the machine's process list: a callable -> [(pid, command)]
+PROCESSES = None                 # a test's stand-in for the process list: a callable that gives pid and command pairs
 
 
 def process_rows():
-    """[(pid, command line)] of the processes on this machine, [] when the listing fails."""
+    """The pid and command line of each process on this machine, and an empty list when the listing fails."""
     if PROCESSES is not None:
         return list(PROCESSES())
     try:
@@ -1400,7 +1416,7 @@ def process_rows():
 
 def left_processes(home, s):
     """The live processes a session started, told by its marks in their command lines: its id, as its watcher
-    carries it, and its own scratch folder under temportal/tmp, where its test runs live."""
+    carries it, and its session scratchpad directory under temportal/tmp/, where its test runs live."""
     sid = str(s.get("sessionId") or "")
     marks = [sid] if sid else []
     for cli in s.get("cliSessionIds") or []:
@@ -1417,7 +1433,7 @@ def left_processes(home, s):
 
 
 def unfinished(home, sid, procs=True):
-    """What a session started and did not finish, one sentence an item; [] for a clean session."""
+    """What a session started and did not finish, one sentence an item, and an empty list for a clean session."""
     phi = _phi()
     s = relay._session(home, sid)
     if not s:
@@ -1470,8 +1486,9 @@ def unfinished(home, sid, procs=True):
 
 
 def archive_check(home, sid, procs=True):
-    """A retired or archived session checked once -> its unfinished items, kept on its session.json and told to the
-    session above it once. [] for a clean session and for one checked before."""
+    """Checks once a session counted as archived or archived, and returns its unfinished items, which are kept on its
+    session.json and told once to its parent session. Returns an empty list for a clean session and for one checked
+    before."""
     path = os.path.join(relay._dir(home, sid), "session.json")
     s = relay._read_json(path)
     if not s or s.get("archiveChecked"):
@@ -1489,7 +1506,7 @@ def archive_check(home, sid, procs=True):
 
 
 def unfinished_text(s, items):
-    return (f"puppeteer: \"{_phi().title_of(s)}\" ({s.get('sessionId')}) was archived with {len(items)} thing"
+    return (f"\"{_phi().title_of(s)}\" ({s.get('sessionId')}) was archived with {len(items)} thing"
             f"{'s' if len(items) != 1 else ''} unfinished. " + " ".join(f"{x[0].upper()}{x[1:]}." for x in items)
             + f" Take each up here or hand it to a successor, then `{_phi().commands()} settle {s.get('sessionId')} "
               f"\"<what took it up>\"` clears its row from the ledger.")
@@ -1521,14 +1538,15 @@ def archive_checks(home, top):
 
 
 def held_tasks(home, sid):
-    """The open background tasks that hold a session's own archive: 'id "what"' each."""
+    """The open background tasks that hold a session's own archive, each as its id and its quoted words."""
     return [f"{t.get('id')} \"{_short(t.get('what'), 80)}\"" for _, t in plans._tasks(plans.load(home, sid))
             if t.get("status") == "open"]
 
 
 def restart_text(home, sid, command):
-    """The line for a session about to start a background command its own records show as still running, '' when
-    none runs or it was told of this copy already; a second try goes through and is flagged on the task."""
+    """The line for a session about to start a background command its own records show as still running, and an
+    empty string when none runs or it was told of this copy already; a second try goes through and is flagged on
+    the background task."""
     first = plans.running(plans.load(home, sid), command)
     if not first:
         return ""
@@ -1541,11 +1559,11 @@ def restart_text(home, sid, command):
     relay._write_json(path, s)
     return (f"phi (p4-phi): this command is still running in the background as {first['id']}, started "
             f"{first.get('at') or 'earlier'}, by this session's own records, so a second copy is not started. Wait for "
-            f"the completion notice of {first['id']}, or read its output. If it has ended and its notice was missed, "
-            f"start it again: phi lets the next start through and keeps it as a repeat of {first['id']}.")
+            f"the completion notification of {first['id']}, or read its output. If it has ended and its notification "
+            f"was missed, start it again: p4-phi lets the next start through and keeps it as a repeat of {first['id']}.")
 
 
-# --- meta: the puppeteers reconciled ----------------------------------------------------------------------------------
+# --- meta: the top-level sessions' ledgers reconciled -----------------------------------------------------------------
 
 def meta_path(home):
     return os.path.join(home, "phi", "meta-ledger.md").replace("\\", "/")
@@ -1563,9 +1581,9 @@ def last_moved(home, sid):
 
 
 def meta_pass(home, at=None):
-    """The meta-puppeteer's pass over every live top session's ledger -> (meta-ledger.md's text, its findings,
-    True when the page was rewritten). The findings: duplicate topics, tops in conflict over the same issue or the
-    same files, stale topics, and what is left open, which seeds the next generation of topics."""
+    """The meta pass over every live top-level session's ledger. Returns meta-ledger.md's text, its findings, and
+    True when the page was rewritten. The findings: duplicate topics, top-level sessions in conflict over the same
+    issue or the same files, stale topics, and what is left open, which seeds the next generation of topics."""
     phi = _phi()
     at = time.time() if at is None else at
     every = relay._sessions(home)
@@ -1617,16 +1635,18 @@ def meta_pass(home, at=None):
         seeds.append(f"start request {r['id']} \"{r.get('title')}\" for {r.get('requester')} waits for a turn ezexe "
                      f"begins.")
     out = ["# Meta-ledger", "",
-           "Written by p4-phi's meta pass: the top session that receives ezexe's message reconciles every top "
-           "session's ledger before it reads the message.",
-           "Rewritten only when what it finds changes.", "", "## Top sessions", ""]
+           "Written by p4-phi's meta pass, which the top-level session that receives ezexe's message runs over every "
+           "top-level session's ledger before it reads the message.",
+           "Rewritten only when what it finds changes. A top-level session told of a finding settles it with the other "
+           "top-level session through SendMessage, and puts to ezexe only a conflict the two cannot settle.", "",
+           "## Top-level sessions", ""]
     out += [f"- {name[t]}: live sessions {len(led[t].get('rows') or [])}, open steps "
             f"{sum(len(r.get('open') or []) for r in led[t].get('rows') or [])}, ledger "
             f"{ledger_path(home, t)}" for t in tops] or ["- None."]
-    for head, items, none in (("Duplicate topics", dup, "No two top sessions carry one topic."),
+    for head, items, none in (("Duplicate topics", dup, "No two top-level sessions carry one topic."),
                               ("Conflicts between top sessions", clash,
-                               "No two top sessions hold the same issue or the same files."),
-                              ("Stale or landed topics", stale, "No top session is stale."),
+                               "No two top-level sessions hold the same issue or the same files."),
+                              ("Stale or landed topics", stale, "No top-level session is stale."),
                               ("Next generation", seeds, "Nothing is left open without a session at work on it.")):
         out += ["", f"## {head}", ""] + ([f"- {x}" for x in items] or [f"- {none}"])
     text = "\n".join(out) + "\n"
@@ -1637,24 +1657,26 @@ def meta_pass(home, at=None):
 
 
 def meta_text(home, s, found):
-    """The findings of a meta pass this top session was not told yet, in a few lines (s is changed)."""
+    """The findings of a meta pass this top-level session was not told yet, in a few lines. It changes s."""
     told = [x for x in s.get("metaTold") or [] if isinstance(x, str)]
     new = [k for k in found["keys"] if k not in told and s["sessionId"] in k]
     if not new:
         return ""
     s["metaTold"] = (told + new)[-200:]
     mine = [x for x in found["duplicates"] + found["conflicts"] + found["stale"] if s["sessionId"] in x]
-    return ("phi (p4-phi) meta-puppeteer: the meta pass over every top session's ledger, written to "
+    return ("phi (p4-phi): the meta pass over every top-level session's ledger, written to "
             f"{meta_path(home)}, found for this session: " + " ".join(mine[:4])
-            + " Settle what the chain can: relay to the other top session with SendMessage, or tell ezexe the one that "
-              "is over is ready to archive; only a conflict the chain cannot settle goes to ezexe.")
+            + " Settle what the chain can: send the other top-level session a message with SendMessage, or tell "
+              "ezexe that a session whose work is over is ready to archive; only a conflict the chain cannot settle "
+              "goes to ezexe.")
 
 
 # --- the prompt hook ----------------------------------------------------------------------------------------------------
 
 def on_prompt(home, s, req, base, transcript_bytes=0):
-    """An ezexe message in an orchestrator: the meta pass when it is a top session, its ledger made current, then
-    prompty, prompter and pioneer -> (the text for the session, the verdict or ''). `s` is changed, never saved."""
+    """A message of ezexe's in an orchestrator: the meta pass when it is a top-level session, its ledger made
+    current, then routing, the start draft and the gate. Returns the text for the session and the verdict, which is
+    empty when no draft was made. It changes `s` and never saves it."""
     if not on(home) or not req or not orchestrator(home, s):
         return "", ""
     parts = []
@@ -1678,7 +1700,7 @@ def on_prompt(home, s, req, base, transcript_bytes=0):
     if d["verdict"] == "start":
         parts.append(f"If one draft would have to guess between distinct readings of the message, start none of it: "
                      f"`{_phi().commands()} readings \"<reading one>\" \"<reading two>\" --words \"<the message>\"` "
-                     f"drafts one child a reading for this session to merge.")
+                     f"drafts one child for each reading, for this session to merge.")
     return "\n\n".join(p for p in parts if p), d["verdict"]
 
 
@@ -1688,7 +1710,8 @@ COMMANDS = ("ledger", "watch", "draft", "pioneer", "routes", "readings", "merge"
 
 
 def command(a, me):
-    """A puppeteer command run through phi.py: `a` its parsed arguments, `me` the session it runs for."""
+    """One of this module's commands, run through phi.py: `a` holds its parsed arguments and `me` the session it runs
+    for."""
     phi = _phi()
     home = me.home
     if a.cmd == "meta":
@@ -1713,7 +1736,7 @@ def command(a, me):
             print(f"{r['id']} \"{r.get('topic')}\" {r.get('issue')} {r.get('context')}: {_short(r.get('words'), 160)}")
         return 0
     if not me.id:
-        print("phi: this is not a session (no session id in the environment); pass --session", file=sys.stderr)
+        print("phi: this is not a session, since the environment holds no session id; pass --session", file=sys.stderr)
         return 2
     s = phi.ensure_session(home, me.id, me.rec, "" if a.session else me.cli)
     sid = s["sessionId"]
@@ -1743,7 +1766,7 @@ def command(a, me):
             rid, new = queue(home, d)
             print((f"queued as start request {rid}" if new else f"start request {rid} was already kept")
                   + f" behind {(d.get('busy') or {}).get('sessionId')}: it is handed out at the first turn ezexe "
-                    f"begins once that writer is no longer busy.")
+                    f"begins once that writer is not busy.")
         elif a.request and d.get("verdict") == "start":
             rid, new = queue(home, d)               # a turn ezexe did not begin: the app refuses the start itself
             print(starts.requested_text(rid, new))
@@ -1780,7 +1803,7 @@ def command(a, me):
 
 
 def add_parsers(sub, common):
-    """The puppeteer's commands, added to phi.py's parser."""
+    """This module's commands, added to phi.py's parser."""
     for name in COMMANDS:
         p = sub.add_parser(name)
         common(p)
@@ -1791,7 +1814,7 @@ def add_parsers(sub, common):
         if name == "ledger":
             p.add_argument("--net", action="store_true", help="read the issues' states from GitHub now")
         if name == "draft":
-            p.add_argument("text", help="the words to run prompty, prompter and pioneer on")
+            p.add_argument("text", help="the words to run routing, the start draft and the gate on")
         if name == "pioneer":
             p.add_argument("draft", help="the draft's id")
             p.add_argument("--request", action="store_true",
@@ -1807,4 +1830,4 @@ def add_parsers(sub, common):
             p.add_argument("text", help="what took it up")
         if name == "merge":
             p.add_argument("group")
-            p.add_argument("--result", default="", help="the result the chain settled the fork on")
+            p.add_argument("--result", default="", help="the result the session tree settled the fork on")

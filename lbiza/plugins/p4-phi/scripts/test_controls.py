@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""controls.py: a puppeteer and the sessions it controls (ezexe/p4#58), run through phi's own hooks.
+"""controls.py: a supervisor session and the sessions it controls, run through p4-phi's own hooks.
 
-ezexe files a top session in the sidebar section "puppeteers". It controls the top sessions of other trees, in any
-store: phi reads the filing from the app's own file, keeps the pair, tells the controlled session, writes the
-puppeteer's board, leaves its waiting steps with it, lets it archive only what ezexe picks, names a boundary once as a
-question with two buttons, and carries a controlled session's request for a new top session to it.
+ezexe files a top-level session in the sidebar section "puppeteers", which makes it a supervisor session. It controls
+the top-level sessions of other trees, in any store: p4-phi reads the filing from the app's own file, keeps the
+record of the sessions it controls, tells each controlled session, writes the supervisor session's board, leaves its
+waiting steps with it, lets it archive only what ezexe picks, names a boundary once as a question with two buttons,
+and carries a controlled session's request for a new top-level session to it.
 """
 
 import json
@@ -48,7 +49,7 @@ class Pair(unittest.TestCase):
         self._tmp.cleanup()
 
     def file(self, section, *sids, shape=None, more=None):
-        """The app's own file: `sids` filed in one sidebar section, `more` as {sessionId: another section}."""
+        """The app's own file: `sids` filed in one sidebar section, and `more` mapping a sessionId to another section."""
         groups = [{"id": "cg-1", "name": section, "mode": "code"}]
         given = {"code:" + s: "cg-1" for s in sids}
         for k, (sid, name) in enumerate((more or {}).items()):
@@ -65,8 +66,8 @@ class Pair(unittest.TestCase):
         self.t.stop(host, "Build it", report=report, proj=proj, uuid=uuid)
 
     def archive(self, by, target, reason=WHY, picks=None, prompt="what is ready?"):
-        """The archive hook for `by`'s call on `target`. With `picks`, the turn holds an answered quick select
-        carrying those labels; `prompt` is the message that began the turn."""
+        """The archive hook for `by`'s call on `target`. With `picks`, the turn holds an answered multiple-choice
+        question carrying those labels; `prompt` is the message that began the turn."""
         inp = {"session_id": target, **({"reason": reason} if reason else {})}
         calls = [] if picks is None else [("AskUserQuestion", {"questions": []},
                                            "User has answered your questions: " + ", ".join(f'"{p}"' for p in picks))]
@@ -82,7 +83,7 @@ class Pair(unittest.TestCase):
         return self.t.hook("plan", host, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
                                           "tool_input": {"items": items}, "tool_response": "Plan shown."}, proj=proj)
 
-    # --- the mark ---------------------------------------------------------------------------------------------------
+    # --- the filing -------------------------------------------------------------------------------------------------
 
     def test_the_filing_is_read_from_the_apps_file_and_only_a_top_session_counts(self):
         t = self.t
@@ -97,14 +98,14 @@ class Pair(unittest.TestCase):
         t.say(KID, "Fix the row")
         self.file("puppeteers", PUP, KID)
         r = t.cli(KID, "controls")
-        self.assertEqual(r.returncode, 2, "a child filed there is not a puppeteer")
+        self.assertEqual(r.returncode, 2, "a child filed there is no supervisor session")
         self.assertIn("started by another session", r.stderr)
         self.file("Puppeteers", PUP)
         self.assertEqual(t.cli(PUP, "controls").returncode, 0, "the section's name is matched whatever its case")
         self.file("wrappin up", PUP)
         self.assertEqual(t.cli(PUP, "controls").returncode, 2, "another section marks nothing")
         self.file("puppeteers", PUP, shape=["reshaped"])
-        self.assertEqual(t.cli(PUP, "controls").returncode, 2, "a reshaped file makes nobody a puppeteer")
+        self.assertEqual(t.cli(PUP, "controls").returncode, 2, "a reshaped file makes nobody a supervisor session")
         os.remove(os.path.join(t.tmp, "claude_desktop_config.json"))
         self.assertEqual(t.cli(PUP, "controls").returncode, 2, "and so does a missing one")
 
@@ -120,15 +121,15 @@ class Pair(unittest.TestCase):
     def test_a_puppeteer_is_told_once_what_it_is_and_the_sighting_is_kept(self):
         t = self.t
         ctx = context(t.say(PUP, "Control the two trees"))
-        self.assertIn("This session is a puppeteer: ezexe filed it in the sidebar section \"puppeteers\"", ctx)
+        self.assertIn("This session is a supervisor session: ezexe filed it in the sidebar section \"puppeteers\"", ctx)
         self.assertIn("phi.py\" controls <sessionId>", ctx)
-        self.assertNotIn("versee", ctx, "the word is puppeteer, and it controls")
+        self.assertNotIn("multiSelect", ctx, "the rule points at the archive offer and does not restate it")
         self.assertTrue(t.session(PUP).get("puppeteerSeen"))
-        self.assertNotIn("This session is a puppeteer", context(t.say(PUP, "and now?")), "said once")
-        self.assertNotIn("This session is a puppeteer", context(t.say(TOP, "Build the exporter")))
-        self.assertIn("phi first saw this session in the section at", t.cli(PUP, "controls").stdout)
+        self.assertNotIn("This session is a supervisor session", context(t.say(PUP, "and now?")), "said once")
+        self.assertNotIn("This session is a supervisor session", context(t.say(TOP, "Build the exporter")))
+        self.assertIn("p4-phi first saw this session in the section at", t.cli(PUP, "controls").stdout)
 
-    # --- the pair ---------------------------------------------------------------------------------------------------
+    # --- the record of controlled sessions ----------------------------------------------------------------------------
 
     def test_controls_records_top_sessions_with_their_stores_and_prints_where_each_stands(self):
         t = self.t
@@ -144,8 +145,8 @@ class Pair(unittest.TestCase):
         self.assertIn(f"\"Build the importer\" ({TOP2})", r.stdout)
         self.assertIn("working: its last message has no turn's end recorded after it", r.stdout)
         r = t.cli(PUP, "controls", KID)
-        self.assertEqual(r.returncode, 2, "a child is reached through its top")
-        self.assertIn("a puppeteer controls top sessions", r.stderr)
+        self.assertEqual(r.returncode, 2, "a child is reached through its top-level session")
+        self.assertIn("a supervisor session controls top-level sessions", r.stderr)
         self.assertEqual(t.cli(PUP, "controls", PUP).returncode, 2, "nor itself")
         t.say(PUP, "where does each stand?")
         self.assertEqual(len(t.session(PUP)["controls"]), 2, "a hook's save keeps the list")
@@ -159,33 +160,36 @@ class Pair(unittest.TestCase):
         t.say(TOP3, "Something else")
         t.cli(PUP, "controls", TOP, TOP2)
         ctx = context(t.say(TOP, "carry on"))
-        self.assertIn("This session has a puppeteer: \"Control the exporter and the importer trees, and tell ezexe "
-                      f"where each stands\" ({PUP})", ctx)
-        self.assertIn("stays the top of its own tree, in its own section", ctx)
-        self.assertIn("Anything irreversible or outward still needs ezexe's yes in this session", ctx)
+        self.assertIn("This session is controlled by a supervisor session: \"Control the exporter and the importer "
+                      f"trees, and tell ezexe where each stands\" ({PUP})", ctx)
+        self.assertIn("stays at the top of its own tree, in its own section", ctx)
+        self.assertIn("Its tree is archived only on ezexe's pick", ctx)
         self.assertEqual(t.session(TOP)["puppeteer"]["sessionId"], PUP, "kept on its own record, in its own store")
-        self.assertNotIn("This session has a puppeteer", context(t.say(TOP, "and now?")), "said once")
+        self.assertNotIn("This session is controlled by a supervisor session", context(t.say(TOP, "and now?")),
+                         "said once")
         ctx = context(t.say(TOP2, "carry on", proj=self.other))
-        self.assertIn("This session has a puppeteer", ctx, "a session in another store is told by its own hook")
-        self.assertNotIn("has a puppeteer", context(t.say(TOP3, "carry on")), "an uncontrolled top session: nothing")
+        self.assertIn("This session is controlled by a supervisor session", ctx,
+                      "a session in another store is told by its own hook")
+        self.assertNotIn("controlled by a supervisor session", context(t.say(TOP3, "carry on")),
+                         "an uncontrolled top-level session: nothing")
         relay._write_json(os.path.join(t.dir(TOP3), "session.json"),
                           {**t.session(TOP3), "controls": [{"sessionId": KID, "store": t.p4}]})
         relay._write_json(os.path.join(t.dir(TOP), "session.json"),
                           {**t.session(TOP), "controls": [{"sessionId": TOP3, "store": t.p4}]})
-        self.assertNotIn("has a puppeteer", context(t.say(TOP3, "and now?")),
+        self.assertNotIn("controlled by a supervisor session", context(t.say(TOP3, "and now?")),
                          "listed by a session outside the section: told nothing")
         t.cli(PUP, "controls", "--drop", TOP)
         ctx = context(t.say(TOP, "and after?"))
-        self.assertIn("This session no longer has a puppeteer", ctx)
+        self.assertIn("This session has left the control of its supervisor session", ctx)
         self.assertNotIn("puppeteer", t.session(TOP))
-        self.assertNotIn("no longer has a puppeteer", context(t.say(TOP, "and then?")), "said once")
+        self.assertNotIn("left the control of its supervisor session", context(t.say(TOP, "and then?")), "said once")
 
     # --- the archive guard --------------------------------------------------------------------------------------------
 
     TITLE = "Build the narwhal exporter"
 
     def complete_top(self):
-        """TOP finished and controlled, and the puppeteer handed the line that offers it."""
+        """TOP finished and controlled, and the supervisor session handed the line that offers it."""
         t = self.t
         self.finish(TOP)
         t.say(PUP, "Control the tree")
@@ -197,11 +201,11 @@ class Pair(unittest.TestCase):
         out = self.archive(PUP, TOP)
         self.assertEqual(out.get("permissionDecision"), "deny", "complete, controlled and reasoned, but not picked")
         why = out["permissionDecisionReason"]
-        self.assertIn("ezexe did not pick it in this turn", why)
-        self.assertIn("a puppeteer archives only what ezexe picks", why)
-        self.assertIn("phi's records hold it complete, so it can be offered", why)
+        self.assertIn("Not picked by ezexe in this turn", why)
+        self.assertIn("a supervisor session archives only what ezexe picks", why)
+        self.assertIn("p4-phi's records hold it complete, so it can be offered", why)
         out = self.archive(PUP, TOP, picks=["Some other session"])
-        self.assertEqual(out.get("permissionDecision"), "deny", "a quick select that picked another")
+        self.assertEqual(out.get("permissionDecision"), "deny", "a multiple-choice answer that picked another")
         out = self.archive(PUP, TOP, picks=["None of them"])
         self.assertEqual(out.get("permissionDecision"), "deny")
         self.assertEqual([a["let"] for a in self.t.session(PUP)["puppeteerArchives"]], [False, False, False])
@@ -209,24 +213,24 @@ class Pair(unittest.TestCase):
     def test_the_same_call_after_a_quick_select_that_picked_the_target_is_allowed(self):
         self.complete_top()
         self.assertEqual(self.archive(PUP, TOP).get("permissionDecision"), "deny")
-        self.assertEqual(self.archive(PUP, TOP, picks=[self.TITLE]), {}, "ezexe's pick is the user action")
+        self.assertEqual(self.archive(PUP, TOP, picks=[self.TITLE]), {}, "ezexe's pick lets it through")
         kept = self.t.session(PUP)["puppeteerArchives"]
         self.assertEqual([(a["sessionId"], a["let"]) for a in kept], [(TOP, False), (TOP, True)])
         self.assertEqual(kept[1]["why"], WHY, "the reason it gave is kept beside what it archived")
         self.assertEqual(self.archive(PUP, TOP, reason="", picks=[self.TITLE]), {}, "the pick needs no reason")
         self.assertEqual(self.t.session(PUP)["puppeteerArchives"][-1]["why"],
-                         "ezexe picked it in this turn's quick select")
+                         "ezexe picked it in this turn")
 
     def test_a_boundary_line_for_a_complete_tree_names_the_quick_select_and_not_the_archive_call(self):
         ctx = self.complete_top()
-        self.assertIn("1 session this puppeteer controls is complete", ctx)
+        self.assertIn("1 session this supervisor session controls is complete", ctx)
         self.assertIn("one `AskUserQuestion` with `multiSelect` true", ctx)
         self.assertIn(f"- label \"{self.TITLE}\", description \"Archive {TOP}.\"", ctx)
         self.assertIn("with a last option \"None of them\"", ctx)
         self.assertIn("Archive none of them before ezexe has answered", ctx)
         self.assertIn("never this session's judgement", ctx)
         self.assertNotIn("archive_session", ctx, "the archive call follows ezexe's pick and is not named here")
-        self.assertNotIn("without a quick select", ctx)
+        self.assertNotIn("quick select", ctx)
         self.assertNotIn("session_archives", ctx, "no text tells a session to set it")
         self.assertIn("a boundary: every controlled session is idle", ctx, "the compaction question comes with it")
         self.assertEqual(self.t.session(PUP)["archiveOffer"], [{"label": self.TITLE, "ids": [TOP]}])
@@ -238,7 +242,7 @@ class Pair(unittest.TestCase):
         t.say(PUP, "Control the trees")
         t.cli(PUP, "controls", TOP, TOP2)
         ctx = context(t.say(PUP, "a report came in"))
-        self.assertIn(f"\"{self.TITLE}\" ({TOP}), a session this puppeteer controls, is complete", ctx)
+        self.assertIn(f"\"{self.TITLE}\" ({TOP}), a session this supervisor session controls, is complete", ctx)
         self.assertIn("buttons are the replies \"Archive it\" and \"Not now\"", ctx)
         self.assertIn("Not offered, and named to ezexe as left with the reason: \"Build the importer\"", ctx)
         self.assertNotIn("a boundary", ctx)
@@ -256,15 +260,15 @@ class Pair(unittest.TestCase):
         t.stop(KID, "Fix the row", report="Fixed.")
         self.complete_top()
         out = self.archive(TOP, KID)
-        self.assertEqual(out.get("permissionDecision"), "deny", "a top session outside the section: as before")
+        self.assertEqual(out.get("permissionDecision"), "deny", "a top-level session outside the section: refused")
         self.assertIn("no session archives a session", out["permissionDecisionReason"])
         out = self.archive(PUP, TOP3, picks=[self.TITLE])
         self.assertEqual(out.get("permissionDecision"), "deny")
-        self.assertIn("is not a session this puppeteer controls", out["permissionDecisionReason"])
+        self.assertIn("is not a session this supervisor session controls", out["permissionDecisionReason"])
         self.assertEqual(self.archive(PUP, TOP, picks=[self.TITLE]), {})
         t.say(TOP, "one more thing")
         out = self.archive(PUP, TOP, picks=[self.TITLE])
-        self.assertEqual(out.get("permissionDecision"), "deny", "picked, but no longer complete")
+        self.assertEqual(out.get("permissionDecision"), "deny", "picked, but not complete after its new turn")
         self.assertIn("so it is mid-turn", out["permissionDecisionReason"])
         self.assertIn("Name it to ezexe as left", out["permissionDecisionReason"])
         self.plan(TOP, "Fix the header row in exporter.py", "Run the exporter suite")
@@ -300,7 +304,7 @@ class Pair(unittest.TestCase):
         self.assertEqual(self.archive(PUP, TOP2, picks=["Build the importer"]), {})
         t.say(PUP, "where does each stand?")
         t.cli(PUP, "controls")
-        self.assertEqual(snap(), before, "the puppeteer writes nothing into a controlled store")
+        self.assertEqual(snap(), before, "the supervisor session writes nothing into a controlled store")
         self.assertTrue(t.session(PUP)["puppeteerArchives"][-1]["let"], "its record is in its own store")
 
     # --- its own steps ------------------------------------------------------------------------------------------------
@@ -311,7 +315,7 @@ class Pair(unittest.TestCase):
                  "Check the trees' results against GitHub", "Rewrite flush_rows in src/exporter.py")
         t.say(PUP, "Control the two trees")
         t.say(TOP3, "Control the two trees")
-        self.assertIn("child session", context(self.plan(TOP3, *steps)), "any other top session")
+        self.assertIn("child session", context(self.plan(TOP3, *steps)), "any other top-level session")
         ctx = context(self.plan(PUP, *steps))
         self.assertNotIn("child session", ctx)
         self.assertNotIn("start_session", ctx)
@@ -327,7 +331,8 @@ class Pair(unittest.TestCase):
         r = t.stop(PUP, "a report came in", report="Read it.", uuid="u1")
         self.assertEqual(json.loads(r.stdout).get("decision"), "block", "nobody left to wait on: back to the step")
         r = t.stop(TOP3, "Control the two trees", report="Waiting.")
-        self.assertEqual(json.loads(r.stdout).get("decision"), "block", "a top outside the section: as before, #55")
+        self.assertEqual(json.loads(r.stdout).get("decision"), "block",
+                         "a top-level session outside the section is sent back to its step")
 
     # --- the board ------------------------------------------------------------------------------------------------------
 
@@ -370,8 +375,8 @@ class Pair(unittest.TestCase):
         r = t.hook("session-start", PUP, {"hook_event_name": "SessionStart", "source": "compact"})
         ctx = context(r)
         board = os.path.join(t.dir(PUP), "board.md").replace("\\", "/")
-        self.assertTrue(ctx.startswith("phi (p4-phi): this session is a puppeteer and its context was compacted. "
-                                       "Read its board before anything else: " + board), ctx[:300])
+        self.assertTrue(ctx.startswith("phi (p4-phi): this session is a supervisor session and its context was "
+                                       "compacted. Read its board before anything else: " + board), ctx[:300])
         self.assertTrue(os.path.exists(board))
         self.assertEqual(t.session(PUP)["compactions"], 1)
         r = t.hook("session-start", TOP, {"hook_event_name": "SessionStart", "source": "compact"})
@@ -390,19 +395,20 @@ class Pair(unittest.TestCase):
         self.assertIn("`mcp__ccd_session_mgmt__get_usage` on `\"self\"`", ctx)
         self.assertIn("end the turn with `mcp__ccd_turn__wrap_up`", ctx)
         self.assertIn("\"Compact now\" and \"Later\"", ctx)
-        self.assertIn("/compact keep the path of the puppeteer board", ctx)
+        self.assertIn("/compact keep the path of the board", ctx)
         self.assertNotIn("tell ezexe in one line", ctx, "a button, never a paragraph to pass on")
         self.assertNotIn("past the ceiling", ctx)
         self.assertNotIn("a boundary", context(t.say(PUP, "and now?")), "a second hook at the same boundary: nothing")
         relay._write_json(os.path.join(t.p4, "p4.json"), {"phi": {"puppeteer_chars": 50}})
         ctx = context(t.say(PUP, "and now?"))
         self.assertIn("a boundary", ctx, "the count passed the ceiling")
-        self.assertRegex(ctx, r"phi has handed this session \d+ characters since its last compaction, past the "
+        self.assertRegex(ctx, r"p4-phi has handed this session \d+ characters since its last compaction, past the "
                               r"ceiling of 50")
         s = t.session(PUP)
         relay._write_json(os.path.join(t.dir(PUP), "session.json"), {**s, "compactions": 3, "boundary": {}})
         ctx = context(t.say(PUP, "and now?"))
-        self.assertIn("the app's `new_session` action, which starts the successor puppeteer from the board", ctx)
+        self.assertIn("the app's `new_session` action, which starts the successor supervisor session from the board",
+                      ctx)
 
     def test_a_successor_takes_over_the_controlled_sessions_and_archives_the_old_puppeteer(self):
         t = self.t
@@ -418,7 +424,7 @@ class Pair(unittest.TestCase):
         self.assertIn("has not handed over", r.stderr)
         r = t.cli(PUP, "controls", "--hand", PUP2)
         self.assertEqual(r.returncode, 0)
-        self.assertIn("offers it to ezexe to archive", r.stdout, "#63: the successor archives it only on a pick")
+        self.assertIn("offers it to ezexe to archive", r.stdout, "the successor archives it only on ezexe's pick")
         self.assertIn("only on ezexe's pick", r.stdout)
         self.assertNotIn("and archives it", r.stdout)
         t.cli(PUP, "done", "handed the board to the second puppeteer")
@@ -429,16 +435,16 @@ class Pair(unittest.TestCase):
         self.assertEqual([e["sessionId"] for e in t.session(PUP2)["controls"]], [TOP])
         self.assertIn("ezexe froze the retry work", read(os.path.join(t.dir(PUP2), "board.md")))
         ctx = context(t.say(TOP, "carry on"))
-        self.assertIn(f"\"The second puppeteer\" ({PUP2})", ctx, "the pair is with the successor now")
+        self.assertIn(f"\"The second puppeteer\" ({PUP2})", ctx, "the successor controls it now")
         self.assertEqual(self.archive(PUP2, PUP).get("permissionDecision"), "deny", "not on its own judgement")
         t.say(PUP2, "what is ready?")
         old = "Control the exporter and the importer trees, and tell ezexe where each stands"
         self.assertIn(old, [o["label"] for o in t.session(PUP2)["archiveOffer"]],
-                      "the old puppeteer, handed over and done, is offered")
+                      "the old supervisor session, handed over and done, is offered")
         self.assertEqual(self.archive(PUP2, PUP, picks=[old]), {}, "and archived by the new one on ezexe's pick")
         self.assertEqual(self.archive(PUP2, TOP3, picks=[old]).get("permissionDecision"), "deny")
 
-    # --- a new top session goes through the puppeteer -------------------------------------------------------------------
+    # --- a new top-level session goes through the supervisor session ----------------------------------------------------
 
     def test_a_controlled_top_session_asks_its_puppeteer_and_its_own_start_is_refused(self):
         t = self.t
@@ -452,7 +458,7 @@ class Pair(unittest.TestCase):
                            if k != "newTaskToldAt"})
         ctx = context(t.say(TOP2, "Also, what about a new exporter for the moon format?", proj=self.other,
                             P4_PHI_NEW_TASK="1"))
-        self.assertIn("This session has a puppeteer", ctx)
+        self.assertIn("This session is controlled by a supervisor session", ctx)
         self.assertIn("--to-puppeteer", ctx)
         self.assertNotIn("start_session", ctx, "handed a new-topic line, it is given no start call")
         new_top = BRIEF + "\n" + phi.NEW_TOP_BRIEF
@@ -460,12 +466,12 @@ class Pair(unittest.TestCase):
                                           "tool_input": {"initiation": "user_asked", "title": "the retry",
                                                          "prompt": new_top}}, proj=self.other)
         out = json.loads(r.stdout)["hookSpecificOutput"]
-        self.assertEqual(out["permissionDecision"], "deny", "its own start of a new top session is refused")
+        self.assertEqual(out["permissionDecision"], "deny", "its own start of a new top-level session is refused")
         self.assertIn("--to-puppeteer", out["permissionDecisionReason"])
         r = t.hook("start-advice", TOP3, {"hook_event_name": "PreToolUse", "tool_name": START,
                                           "tool_input": {"initiation": "user_asked", "title": "the retry",
                                                          "prompt": new_top}})
-        self.assertNotIn("\"deny\"", r.stdout, "a top session with no puppeteer starts its own")
+        self.assertNotIn("\"deny\"", r.stdout, "a top-level session with no supervisor session starts its own")
         r = t.cli(TOP3, "request", "the retry", "--brief", BRIEF, "--to-puppeteer")
         self.assertEqual(r.returncode, 2)
         self.assertIn("has no puppeteer", r.stderr)
@@ -474,32 +480,35 @@ class Pair(unittest.TestCase):
         self.assertIn("to this session's puppeteer", r.stdout)
         self.assertIn("Start nothing for it here", r.stdout)
         row = next(iter(starts.state(self.store2).values()))
-        self.assertEqual(row["to"], PUP, "kept in the requester's own store")
-        self.assertEqual(starts.state(t.p4), {}, "and nothing in the puppeteer's")
+        self.assertEqual(row["to"], PUP, "kept in the store of the session that filed it")
+        self.assertEqual(starts.state(t.p4), {}, "and nothing in the supervisor session's")
         self.assertNotIn("start requests", context(t.say(TOP2, "and now?", proj=self.other)),
-                         "never handed back to its requester")
-        # the puppeteer reads it where it lies, at a turn ezexe began
+                         "never handed back to the session that filed it")
+        # the supervisor session reads it where it lies, at a turn ezexe began
         ctx = context(t.say(PUP, "what is waiting?"))
-        self.assertIn("controlled sessions ask this puppeteer for new top sessions", ctx)
+        self.assertIn("controlled sessions ask this supervisor session for new top-level sessions", ctx)
         self.assertIn("to be filed in the ungrouped list under its project", ctx)
         call = json.loads(ctx.split("`mcp__ccd_session__start_session` with ", 1)[1].split("\n", 1)[0])
         self.assertEqual(os.path.normcase(os.path.normpath(call["cwd"])),
-                         os.path.normcase(os.path.normpath(self.other)), "in the requester's environment")
+                         os.path.normcase(os.path.normpath(self.other)), "in the environment of the session that filed it")
         self.assertIn(phi.NEW_TOP_BRIEF, call["prompt"])
         self.assertIn(f"for {TOP2}.", call["prompt"])
-        self.assertIn("## Requests to this puppeteer", read(os.path.join(t.dir(PUP), "board.md")))
-        self.assertNotIn("a boundary", ctx, "never while a controlled session waits on the puppeteer's answer")
-        # it starts it: the new session arrives in the requester's store, a top session, and is taken under control
+        self.assertIn("## Requests to this supervisor session", read(os.path.join(t.dir(PUP), "board.md")))
+        self.assertNotIn("a boundary", ctx, "never while a controlled session waits on the supervisor session's answer")
+        # it starts it: the new session arrives in the store of the session that filed the request, a top-level
+        # session, and is taken under control
         t.record(NEW, started_by=PUP, title="the retry", cwd=self.other)
         t.say(NEW, "Task:\n" + call["prompt"], proj=self.other)
         self.assertEqual(starts.open_rows(self.store2), [], "the request is started")
         self.file("puppeteers", PUP, more={TOP2: "importers"})
         ctx = context(t.say(PUP, "and now?"))
-        self.assertIn(f"\"the retry\" ({NEW}) is a top session this puppeteer started, so it is now controlled", ctx)
+        self.assertIn(f"\"the retry\" ({NEW}) is a top-level session this supervisor session started, so it is "
+                      f"controlled", ctx)
         self.assertIn("File it in the section \"importers\" with `mcp__ccd_sidebar__move_sessions`, never in "
                       "\"puppeteers\"", ctx)
         self.assertIn(NEW, [e["sessionId"] for e in t.session(PUP)["controls"]])
-        self.assertIn("This session has a puppeteer", context(t.say(NEW, "carry on", proj=self.other)))
+        self.assertIn("This session is controlled by a supervisor session", context(t.say(NEW, "carry on",
+                                                                                          proj=self.other)))
 
     def test_a_declined_request_is_closed_and_its_requester_told(self):
         t = self.t
@@ -512,11 +521,12 @@ class Pair(unittest.TestCase):
         r = t.cli(PUP, "controls", "--decline", rid, "ezexe froze the retry work, and it duplicates issue 50")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("declined", read(os.path.join(t.dir(PUP), "board.md")))
-        self.assertNotIn("ask this puppeteer", context(t.say(PUP, "what is waiting?")))
+        self.assertNotIn("ask this supervisor session", context(t.say(PUP, "what is waiting?")))
         ctx = context(t.say(TOP2, "and the retry?", proj=self.other))
         self.assertIn("declined the request", ctx)
         self.assertIn("ezexe froze the retry work", ctx)
-        self.assertEqual(starts.open_rows(self.store2), [], "closed in the requester's own store, by its own hook")
+        self.assertEqual(starts.open_rows(self.store2), [], "closed in the store of the session that filed it, by "
+                                                            "that session's own hook")
         self.assertNotIn("declined the request", context(t.say(TOP2, "and now?", proj=self.other)), "said once")
 
     def test_a_top_session_ezexe_started_directly_is_named_to_the_puppeteer_once(self):
@@ -529,12 +539,13 @@ class Pair(unittest.TestCase):
                           {"sessionId": TOP3, "title": "A top session nobody put under the puppeteer",
                            "createdAt": "2999-01-01 00:00", "cwd": t.proj})
         ctx = context(t.say(PUP, "anything new?"))
-        self.assertIn(f"\"A top session nobody put under the puppeteer\" ({TOP3}) is a new top session", ctx)
+        self.assertIn(f"\"A top session nobody put under the puppeteer\" ({TOP3}) is a new top-level session", ctx)
         self.assertIn(f"controls {TOP3}` takes it under control", ctx)
         self.assertNotIn("does not control", context(t.say(PUP, "and now?")), "named once")
 
     def test_a_go_to_a_waiting_writer_is_warned_about_while_another_controlled_session_holds_its_files(self):
-        """#62: the next writer's child was refused, because the session before it still held the files."""
+        """A go to a writer whose files another controlled session still holds is warned about once for that go and
+        its holders."""
         t = self.t
         t.say(TOP, "Task:\nBuild the exporter's flush.\nFiles: src/flush.py, src/writer.py")
         t.say(TOP3, "Task:\nBuild the retry on the same writer.\nFiles: src/writer.py")
@@ -551,13 +562,13 @@ class Pair(unittest.TestCase):
         self.assertIn(f"\"Build the narwhal exporter\" ({TOP}) holds ", said, "the holder by its full title")
         self.assertIn("writer.py", said)
         self.assertIn(" files --release`", said)
-        self.assertEqual(go(TOP3), "", "said once for the pair")
+        self.assertEqual(go(TOP3), "", "said once for this go and its holders")
         self.assertEqual(go(KID), "", "a session it does not control is not its go")
         self.assertEqual(t.cli(TOP, "files", "src/flush.py").returncode, 0)
         s = t.session(PUP)
         relay._write_json(os.path.join(t.dir(PUP), "session.json"), {**s, "goWarned": []})
         self.assertEqual(go(TOP3), "", "released: the go is free")
-        self.assertIn("flush.py", go(TOP3, "Go.\nFiles: src/flush.py"), "the set the message declares is read")
+        self.assertIn("flush.py", go(TOP3, "Go.\nFiles: src/flush.py"), "the write set the message declares is read")
 
     def test_work_on_a_controlled_sessions_topic_is_sent_down_and_not_done_by_the_puppeteer(self):
         t = self.t

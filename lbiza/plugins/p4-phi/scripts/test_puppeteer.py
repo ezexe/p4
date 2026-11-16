@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-"""puppeteer.py (#38): p4's four P's on the session tree, run through phi's own hooks and commands.
+"""puppeteer.py: routing, the start draft, the gate and the watcher, run through p4-phi's own hooks and commands.
 
     python3 -I lbiza/plugins/p4-phi/scripts/test_puppeteer.py
 
 Checked, one diagram of ezexe/p4's README.md a class:
-linear: the ledger an orchestrator's watcher writes holds a row a live session of its subtree, is rewritten only when
-a source changed, and leads with a reconcile line when the app archived a session phi lists or shows a child phi does
-not hold; the watcher is one background process, started by a hook and ended when its orchestrator is archived; an
-ezexe message that is work is drafted from ezexe's words and gate-checked into the exact start_session call, into a
-SendMessage to the session whose shard holds its area, or into a start request queued behind the running writer that
-holds its files, handed out only once that writer is idle; a question is left alone.
+linear: the ledger an orchestrator's watcher writes holds a row for each live session of its subtree, is rewritten
+only when a source changed, and leads with a reconcile line when the app archived a session p4-phi lists or shows a
+child p4-phi does not hold; the watcher is one background process, started by a hook and ended when its orchestrator
+is archived; a message of ezexe's that is work is drafted from ezexe's words and gate-checked into the exact
+start_session call, into a SendMessage to the session whose owned paths hold its area, or into a start request queued
+behind the running writer that holds its files, handed out only once that writer is idle; a question is left alone.
 recursive: a landed topic registers its route only once its issue is closed, a commit closing it is pushed and its
 session is archived with its outcome kept; a later message with matching words is drafted from that route; a route
 whose issue was reopened is withdrawn.
-parallel: an under-determined message becomes one child a reading; readings whose results agree collapse, and
-readings that fork become one question with options and a default, which the puppeteer can settle itself.
-meta: a top session's ezexe message runs the meta pass over every top's ledger into meta-ledger.md, with the
-duplicate topic, the conflict over one file and the stale topic it finds.
+parallel: an under-determined message becomes one child for each reading; readings whose results agree collapse, and
+readings that fork become one question with options and a default, which the orchestrator can settle itself.
+meta: a message of ezexe's to a top-level session runs the meta pass over every top-level session's ledger into
+meta-ledger.md, with the duplicate topic, the conflict over one file and the stale topic it finds.
 """
 
 import json
@@ -85,7 +85,7 @@ class Linear(Base):
         self.assertIn("# Ledger: the exporter top", text)
         self.assertIn("Nothing diverges", text)
         rows = [x for x in text.split("## Sessions")[1].split("\n## ")[0].splitlines() if x.strip().startswith("- ")]
-        self.assertEqual(len(rows), 2, "the top and the one child phi holds: a row each")
+        self.assertEqual(len(rows), 2, "the top-level session and the one child p4-phi holds: a row each")
         self.assertIn(f"({TOP}): working", rows[0])
         self.assertTrue(rows[1].startswith(f"  - \"the flush port\" ({KID}): working; no turn yet"), rows[1])
         before = os.stat(self.path(TOP, "ledger.md")).st_mtime_ns
@@ -109,8 +109,8 @@ class Linear(Base):
         t.record(GRAND, TOP, title="a child only the app knows")
         text, _ = self.ledger()
         head = text.split("## Sessions")[0]
-        self.assertIn(f"phi lists \"the flush port\" ({KID}) as live, and the app has archived it.", head)
-        self.assertIn(f"the app shows \"a child only the app knows\" ({GRAND}) started by {TOP}, and phi holds no "
+        self.assertIn(f"p4-phi lists \"the flush port\" ({KID}) as live, and the app has archived it.", head)
+        self.assertIn(f"the app shows \"a child only the app knows\" ({GRAND}) started by {TOP}, and p4-phi holds no "
                       f"session for it.", head)
         self.assertEqual(len([x for x in head.splitlines() if x.startswith("- ")]), 2, "a line a divergence")
         self.assertLess(text.index("## Reconcile"), text.index("## Sessions"))
@@ -145,8 +145,8 @@ class Linear(Base):
         self.assertFalse(os.path.exists(self.path(TOP, "watcher.json")), "it ends when its orchestrator is archived")
 
     def test_a_ledger_is_built_without_git(self):
-        # hook-started watchers on the real store spent their looks in git, one call a session a look, stopped
-        # saying they were alive and were started again beside themselves: seven processes for four orchestrators
+        # a ledger is built from the records alone: a git call for each session at each look would keep a watcher
+        # from saying it is alive in time, and a second watcher would be started beside it
         t = self.t
         t.say(TOP, TASK)
         t.say(KID, handed("Fix `src/export/flush.py` for ezexe/demo#7 and commit it."))
@@ -167,9 +167,9 @@ class Linear(Base):
         t = self.t
         t.say(TOP, TASK)
         t.stop(TOP, TASK, report="planned")
-        self.assertNotIn("puppeteer", context(t.say(TOP, ASK)), "a question is no draft")
+        self.assertNotIn("this message of ezexe's", context(t.say(TOP, ASK)), "a question is no draft")
         ctx = context(t.say(TOP, RETRY))
-        self.assertIn("prompty read this message", ctx)
+        self.assertIn("routing read this message", ctx)
         self.assertIn("no running writer holds its files", ctx)
         self.assertIn("its parent is this session", ctx)
         call = call_in(ctx)
@@ -183,7 +183,7 @@ class Linear(Base):
         t.say(KID, handed(call["prompt"]))
         self.assertEqual(t.session(KID)["draft"], did, "the child knows the draft it came from")
         other = context(t.say(TOP, "Write a changelog generator for the billing dashboard's release notes"))
-        self.assertIn("a new top session in the root", other)
+        self.assertIn("so it is a new top-level session", other)
         self.assertIn(phi.NEW_TOP_BRIEF, call_in(other)["prompt"])
 
     def test_a_draft_whose_area_has_a_live_owner_is_routed_there(self):
@@ -193,8 +193,8 @@ class Linear(Base):
         self.assertEqual(t.cli(KID, "shard", "src/export/**").returncode, 0)
         t.stop(KID, "Port the flush", report="half way")
         ctx = context(t.say(TOP, "Fix the off-by-one in `src/export/flush.py` that drops the last row"))
-        self.assertIn(f"its area has a live owner, \"the flush port\" ({KID})", ctx)
-        self.assertIn(f"Route it: SendMessage (`to`: {KID})", ctx)
+        self.assertIn(f"its area has a live code owner, \"the flush port\" ({KID})", ctx)
+        self.assertIn(f"Route it: SendMessage with `to` {KID}", ctx)
         self.assertNotIn("`mcp__ccd_session__start_session` with {", ctx, "no session is started for it")
 
     def test_a_draft_whose_writer_is_busy_is_queued_behind_it(self):
@@ -205,7 +205,7 @@ class Linear(Base):
         t.say(KID, handed("Port `src/export/flush.py` to the new writer."))     # in a turn: a running writer
         ctx = context(t.say(TOP, "Rename the retry helper in `src/export/flush.py` and update its callers"))
         self.assertIn(f"\"the flush port\" ({KID}) holds its files", ctx)
-        did = puppeteer.DRAFT_RE.search(ctx.replace("draft drf-", "phi draft drf-").replace(")", " for x.")).group(1)
+        did = puppeteer.DRAFT_RE.search(ctx.replace("draft drf-", "phi draft drf-").replace(";", " for x.")).group(1)
         self.assertIn(f"pioneer {did}`", ctx)
         r = t.cli(TOP, "pioneer", did)
         self.assertIn("queued as start request req-", r.stdout + r.stderr)
@@ -216,7 +216,7 @@ class Linear(Base):
         self.assertIn(f"waits behind \"the flush port\" ({KID})", text)
         t.stop(KID, "Port the flush", report="Ported.")
         self.assertNotIn("start requests", context(t.say(TOP2, "And how are the docs now?")),
-                         "#58: never handed to a session that did not file it")
+                         "never handed to a session that did not file it")
         line = context(t.say(TOP, "And how is the exporter now?"))
         self.assertIn("start requests this session filed", line)
         self.assertIn("Rename the retry helper", call_in(line)["prompt"])
@@ -288,11 +288,11 @@ class Recursive(unittest.TestCase):
         self.assertIn("backed, by commit", out)
         row = [json.loads(x) for x in read(routes).splitlines()][0]
         self.assertEqual((row["issue"], row["context"], row["session"]), ("ezexe/demo#7", "fresh", KID))
-        self.assertIn("narwhal exporter", row["words"], "the request's words are the top session's task")
+        self.assertIn("narwhal exporter", row["words"], "the request's words are the top-level session's task")
         self.assertIn("Fix the off-by-one", row["slice"]["brief"])
         self.assertEqual(self.why().count("registered rt-"), 0, "once")
         s = t.session(TOP)
-        s["archived"] = True                       # the topic landed, so its top session was archived too
+        s["archived"] = True                       # the topic landed, so its top-level session was archived too
         write(os.path.join(t.dir(TOP), "session.json"), json.dumps(s))
         t.say(TOP2, "Look after the billing dashboard")
         t.stop(TOP2, "Look after the billing dashboard", report="ok")
@@ -309,7 +309,8 @@ class Recursive(unittest.TestCase):
 
 
 class AtArchive(Base):
-    """#47: the puppeteer checks a session at its archive for what it started and did not finish."""
+    """The watcher, and the Stop hook of a session that archives itself, check a session at its archive for what it
+    started and did not finish."""
 
     def setUp(self):
         super().setUp()
@@ -336,7 +337,7 @@ class AtArchive(Base):
         self.assertTrue(any("background task bg12345678" in x and "no end recorded" in x for x in left), left)
         page = self.ledger()[0]
         self.assertIn("## Unfinished at archive", page)
-        self.assertLess(page.index("## Unfinished at archive"), page.index("## Reconcile"), "at the top")
+        self.assertLess(page.index("## Unfinished at archive"), page.index("## Reconcile"), "at the head of the page")
         self.assertIn("background task bg12345678", page)
         ctx = context(self.t.say(TOP, "And?"))
         self.assertIn("was archived with 1 thing unfinished", ctx)
@@ -393,15 +394,15 @@ class AtArchive(Base):
 
 
 class Scorers(Base):
-    """#41: prompty's route and owner picks go through the trained ranker when the store keeps a model, and through
-    word overlap, at the measured threshold, when it keeps none."""
+    """Routing's route and code owner picks go through the trained ranker when the store keeps a model, and through
+    shared content words, at the measured threshold, when it keeps none."""
 
     COMMON = ("exporter table rows store writer flush ports check suite build layout index cache hook plan step "
               "report branch commit").split()
 
     def cases(self):
         """A labelled history where the right candidate shares the message's two rare words and the wrong ones
-        share many of its common words: what word overlap cannot tell apart."""
+        share many of its common words: what shared content words cannot tell apart."""
         import random
         rng = random.Random(41)
         out = []
@@ -443,7 +444,7 @@ class Scorers(Base):
         self.routes()
         by_words = puppeteer.score_routes(t.p4, self.MESSAGE)
         self.assertEqual([r["id"] for _, _, r in by_words][:1], ["rt-wrong"],
-                         "word overlap picks the route that shares the most words")
+                         "shared content words pick the route that shares the most words")
         model = prompty_eval.train(self.cases())
         self.assertTrue(model and model["w"])
         prompty_eval.keep(t.p4, "routes", model, {"cases": 80})
@@ -461,10 +462,10 @@ class Scorers(Base):
         got = puppeteer.score_routes(t.p4, self.MESSAGE)
         n, part = puppeteer.share(self.MESSAGE, "port the exporter flush to the new writer and run the ports table "
                                                 "suite on the store Port the exporter flush")
-        self.assertEqual((got[0][2]["id"], got[0][1], got[0][0]), ("rt-wrong", n, round(part, 2)), "overlap's own score")
-        self.assertEqual(puppeteer.OWNER_WORDS, 8, "the measured threshold of .docs/p4/phi-prompty-scores.md")
-        self.assertEqual((puppeteer.ROUTE_MIN, puppeteer.ROUTE_CLOSE), (4, 0.6), "routes stay as they were: one "
-                         "registered route is too few to measure")
+        self.assertEqual((got[0][2]["id"], got[0][1], got[0][0]), ("rt-wrong", n, round(part, 2)), "its own score")
+        self.assertEqual(puppeteer.OWNER_WORDS, 8, "the code owner threshold with no trained model")
+        self.assertEqual((puppeteer.ROUTE_MIN, puppeteer.ROUTE_CLOSE), (4, 0.6), "the route thresholds with no "
+                         "trained model")
         write(puppeteer.scorer_path(t.p4), "not json")
         self.assertEqual(puppeteer.prompty_model(t.p4), {}, "an unreadable model is no model")
         self.assertEqual(puppeteer.score_routes(t.p4, self.MESSAGE)[0][2]["id"], "rt-wrong")
@@ -484,7 +485,7 @@ class Scorers(Base):
                 "createdAt": "2026-11-16 08:00"}))
         s = t.session(TOP)
         read = puppeteer.prompty(t.p4, s, self.MESSAGE, t.proj)
-        self.assertIsNone(read["owner"], "six shared words name no owner now: at four they named the flush port")
+        self.assertIsNone(read["owner"], "six shared words, fewer than OWNER_WORDS, name no code owner")
         self.assertGreaterEqual(puppeteer.share(self.MESSAGE, t.session(KID)["task"])[0], 4)
         prompty_eval.keep(t.p4, "owners", prompty_eval.train(self.cases()), {"cases": 80})
         read = puppeteer.prompty(t.p4, s, self.MESSAGE, t.proj)
@@ -529,7 +530,7 @@ class Parallel(Base):
             t.say(kid, handed(call["prompt"]))
         gid = t.session(KID)["reading"]["group"]
         g = jload(os.path.join(t.dir(TOP), "readings", gid + ".json"))
-        self.assertEqual([r["child"] for r in g["readings"]], [KID, KID2], "one child a reading, siblings")
+        self.assertEqual([r["child"] for r in g["readings"]], [KID, KID2], "one child for each reading, siblings")
         self.assertEqual({t.started_by(KID)[0], t.started_by(KID2)[0]}, {TOP})
         return gid
 
@@ -567,7 +568,7 @@ class Parallel(Base):
         self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_a_result_given_through_done_is_read(self):
-        """#44: both readings of the live proof answered with `phi.py done` and an empty report."""
+        """Both readings answer with `phi.py done` and an empty report, and the merge reads the done texts."""
         t, gid = self.t, self.start()
         self.assertEqual(t.cli(KID, "done", "buffering was tried and it loses rows on a crash").returncode, 0)
         t.stop(KID, "reading 1", report="")
@@ -589,7 +590,7 @@ class Parallel(Base):
         self.assertIn("straight to the store", g["result"])
 
     def test_a_reading_archived_with_no_result_is_lost_and_the_group_closes(self):
-        """#44: an archived reading with no result left its group open for ever."""
+        """An archived reading with no result is lost, and its group closes on what the other readings gave."""
         t, gid = self.t, self.start()
         self.archived_stop(KID)
         self.assertEqual(self.group(gid)["state"], "open", "the other reading is still awaited")
@@ -614,7 +615,7 @@ class Parallel(Base):
         self.assertIn("closed with no result: readings 1, 2 were archived with no result and are lost", self.ledger()[0])
 
     def test_a_rerun_session_replaces_the_earlier_child(self):
-        """#44: the second pair of sessions carried the same reading line and the group still named the first."""
+        """A second pair of sessions carrying the same reading lines takes the first pair's place in the group."""
         t, gid = self.t, self.start()
         self.archived_stop(KID)
         self.archived_stop(KID2)
@@ -634,7 +635,7 @@ class Parallel(Base):
         self.assertEqual(self.group(gid)["state"], "collapsed")
 
     def test_a_rerun_the_group_never_heard_of_is_found_at_the_merge(self):
-        """#44: grp-2e785dbf03 as it stands: the group names the first pair, the results are on the second."""
+        """The group names the first pair while the results are on a second pair it never recorded."""
         t, gid = self.t, self.start()
         self.archived_stop(KID)
         g = self.group(gid)
@@ -652,7 +653,7 @@ class Parallel(Base):
         self.assertEqual(g["readings"][0]["result"], "listed the folder: 61 sessions")
 
     def test_a_readings_title_ends_at_a_clause(self):
-        """#44: "Reading 2: count only the sessions that the command" was cut at a word count."""
+        """A reading's title ends at a clause, never in the middle of one at a word count."""
         t = self.t
         t.say(TOP, TASK)
         r = t.cli(TOP, "readings",
@@ -693,12 +694,13 @@ class Meta(Base):
                report="edited too", uuid="u1")
         ctx = context(t.say(TOP2, ASK))
         page = read(os.path.join(t.p4, "phi", "meta-ledger.md"))
-        self.assertIn("meta-puppeteer", ctx)
+        self.assertIn("the meta pass over every top-level session's ledger", ctx)
         self.assertIn("carry one topic", ctx)
         self.assertIn(f"\"the exporter top\" ({TOP}) and \"the other exporter top\" ({TOP2}) carry one topic", page)
         self.assertIn("both changed or hold", page)
         self.assertIn("flush.py", page.split("## Conflicts between top sessions")[1].split("##")[0])
-        self.assertNotIn("meta-puppeteer", context(t.say(TOP2, ASK)), "a finding is told once")
+        self.assertNotIn("the meta pass over every top-level session's ledger", context(t.say(TOP2, ASK)),
+                         "a finding is told once")
         before = os.stat(os.path.join(t.p4, "phi", "meta-ledger.md")).st_mtime_ns
         t.say(TOP2, ASK)
         self.assertEqual(os.stat(os.path.join(t.p4, "phi", "meta-ledger.md")).st_mtime_ns, before, "only on change")
@@ -707,13 +709,13 @@ class Meta(Base):
             text, found, _ = puppeteer.meta_pass(t.p4, at=time.time() + 3 * 86400)
         finally:
             os.environ.pop("P4_PHI_APP_SESSIONS", None)
-        self.assertEqual(len(found["stale"]), 1, "the top inside a turn is at work, not stale")
+        self.assertEqual(len(found["stale"]), 1, "the top-level session inside a turn is at work, not stale")
         self.assertIn(f"({TOP}) has not moved for 3.0 days", text)
 
 
 class Writes(unittest.TestCase):
     def test_a_refused_replace_leaves_no_temp_file(self):
-        """The review of #57, item 9: Windows refuses a replace while another process holds the file open."""
+        """Windows refuses a replace while another process holds the file open, and no temp file is left behind."""
         import tempfile
         real = os.replace
 
