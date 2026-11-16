@@ -135,13 +135,15 @@ class Hook(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("gh issue create -R team/plug", json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"])
 
-    def test_a_turn_the_owner_did_not_begin_keeps_a_start_request_in_that_store(self):
+    def test_a_turn_the_owner_did_not_begin_is_given_a_card_and_no_request_in_another_store(self):
+        """#58: a request kept in the plugin's store was handed to whichever session ezexe spoke in next there."""
         self.t.say(TOP, "<cross-session-message from=\"local_x\">please go on</cross-session-message>")
         got = self.wrote(memory(self.t.p4, "children-on-parent-branch", CHILD_RULE))
-        self.assertIn("kept it as start request req-", got)
-        rows = starts.pending(os.path.join(self.plug, ".claude", "p4"))
-        self.assertEqual([r["title"] for r in rows], ["Plugin gap: children-on-parent-branch"])
-        self.assertIn("This session is a new top session", rows[0]["brief"])
+        self.assertIn("show it as a proposal card", got)
+        self.assertIn("\"initiation\": \"own_initiative\"", got)
+        self.assertIn("which ezexe presses in this session", got)
+        self.assertIn("This session is a new top session", got)
+        self.assertEqual(starts.pending(os.path.join(self.plug, ".claude", "p4")), [])
 
 
 if __name__ == "__main__":

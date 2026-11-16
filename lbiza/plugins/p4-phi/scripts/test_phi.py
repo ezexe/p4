@@ -692,12 +692,14 @@ class NewTask(unittest.TestCase):
         self.assertEqual(self.say(TOP, "<side-sessions-event>a session finished a turn</side-sessions-event>"), "")
         self.assertEqual(self.say(TOP, "<task-notification>done</task-notification>"), "")
 
-    def test_a_turn_another_session_started_is_told_to_split_by_a_start_request(self):
-        """The app refuses user_asked in a turn ezexe's words did not start: a split is a start request in the store."""
+    def test_a_turn_another_session_started_is_told_to_split_by_a_card_then_a_start_request(self):
+        """The app refuses user_asked in a turn ezexe's words did not start: a split is a card ezexe presses in this
+        session, and a start request in the store only when the card is refused too (#58)."""
         self.say(TOP, TASK)
         text = self.say(TOP, '<cross-session-message from="local_x">please also look at Y</cross-session-message>')
-        self.assertIn(" request \"<title>\" --brief", text, "a start request, not a card")
-        self.assertNotIn("own_initiative", text)
+        self.assertIn("`initiation` `own_initiative`, which ezexe presses in this session", text)
+        self.assertIn(" request \"<title>\" --brief", text, "the request, where the card is refused too")
+        self.assertNotIn("any session of this store", text)
         self.assertIn(phi.NEW_TOP_BRIEF, text)
         again = self.say(TOP, '<cross-session-message from="local_x">and Z as well</cross-session-message>')
         self.assertNotIn(phi.NEW_TOP_BRIEF, again, "#43: said once in full, then a line with its page")
@@ -707,8 +709,8 @@ class NewTask(unittest.TestCase):
         self.assertEqual(self.say(TOP, "<side-sessions-event>a session finished</side-sessions-event>"), "")
         self.say(KID, HANDED)
         kid = self.say(KID, '<cross-session-message from="local_x">please also look at Y</cross-session-message>')
-        self.assertIn(" request \"<title>\" --brief", kid, "a child's split is a start request too")
-        self.assertIn("Do not ask ezexe to type anything", kid)
+        self.assertIn("`initiation` `own_initiative`", kid, "a child's split is a card too")
+        self.assertIn(" request \"<title>\" --brief", kid)
 
     def test_a_deep_or_full_session_starts_no_session(self):
         """The caps: three deep in the tree, or eight live children."""

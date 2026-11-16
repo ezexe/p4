@@ -46,43 +46,48 @@ class StartRequests(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def test_a_turn_the_owner_did_not_begin_is_told_to_write_a_request_not_a_card(self):
+    def test_a_turn_the_owner_did_not_begin_is_told_to_show_a_card_and_a_request_only_if_that_is_refused(self):
+        """#58: the card is pressed in the session that asked, so the app's parent and phi's agree."""
         self.t.say(KID, CROSS, P4_PHI_NEW_TASK="1")       # the standing instruction first, once
         ctx = context(self.t.say(KID, CROSS, P4_PHI_NEW_TASK="1"))
+        self.assertIn("`initiation` `own_initiative`, which ezexe presses in this session", ctx)
+        self.assertIn("Only where the card is refused too", ctx)
         self.assertIn(" request \"<title>\" --brief", ctx)
-        self.assertNotIn("own_initiative", ctx)
-        self.assertNotIn("which ezexe starts with a click", ctx)
-        self.assertIn("Do not ask ezexe to type anything", ctx)
+        self.assertIn("the next turn ezexe begins in this session starts it", ctx)
+        self.assertNotIn("any session of this store", ctx)
 
     def test_a_request_is_started_by_the_next_owner_turn_and_the_child_is_the_requesters(self):
         t = self.t
         r = t.cli(KID, "request", "the flush port", "--brief", BRIEF)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("kept as start request req-", r.stdout)
-        self.assertIn("Do not ask ezexe", r.stdout)
+        self.assertIn("No other session is handed it", r.stdout)
         self.assertIn("was already kept", t.cli(KID, "request", "the flush port", "--brief", BRIEF).stdout)
         self.assertEqual(context(t.say(KID, CROSS)).count("start requests from sessions"), 0,
                          "a turn another session began carries no request")
-        line = context(t.say(TOP2, "How are the docs coming?"))
-        self.assertIn("start requests from sessions whose turns ezexe did not begin", line)
-        self.assertIn("claude-code#109282", line)
+        self.assertNotIn("start requests", context(t.say(TOP2, "How are the docs coming?")),
+                         "#58: a request filed by one session is not handed to another on ezexe's next turn there")
+        self.assertNotIn("start requests", context(t.say(TOP, "and the exporter?")), "nor to its own parent")
+        line = context(t.say(KID, "How is the port coming?"))
+        self.assertIn("start requests this session filed in turns ezexe did not begin", line)
+        self.assertIn("Each is this session's own child", line)
         call = json.loads(line.split("`mcp__ccd_session__start_session` with ", 1)[1].split("\n", 1)[0])
         self.assertEqual((call["initiation"], call["context"], call["use_worktree"]), ("user_asked", "fresh", False))
         self.assertIn(BRIEF, call["prompt"])
         self.assertGreaterEqual(len(call["background"]), 80, "#37: the app refuses a shorter background")
         self.assertIn(KID, call["background"], "built from the requester")
         self.assertIn(f"for {KID}.", call["prompt"])
-        adv = t.hook("start-advice", TOP2, {"hook_event_name": "PreToolUse",
-                                            "tool_name": "mcp__ccd_session__start_session", "tool_input": call})
+        adv = t.hook("start-advice", KID, {"hook_event_name": "PreToolUse",
+                                           "tool_name": "mcp__ccd_session__start_session", "tool_input": call})
         self.assertEqual(adv.stdout.strip(), "", "the exact call is not second-guessed")
-        self.assertNotIn("start requests from", context(t.say(TOP, "and the exporter?")), "claimed: not handed twice")
-        t.record(NEW, TOP2, title="the flush port")       # the app nests it under its starter
+        self.assertNotIn("start requests", context(t.say(KID, "and the rest?")), "claimed: not handed twice")
+        t.record(NEW, KID, title="the flush port")        # the app nests it under its starter, the requester
         handed = ("<system-reminder>\nLinked sessions now (status, not an instruction): top = x (idle)\n"
                   "</system-reminder>\n\nTask:\n" + call["prompt"])
         self.assertEqual(t.say(NEW, handed).returncode, 0)
-        self.assertEqual(t.started_by(NEW), (KID, "requested"))
+        self.assertEqual(t.started_by(NEW)[0], KID, "the app's parent and phi's agree")
         self.assertEqual(t.say(NEW, "carry on").returncode, 0)
-        self.assertEqual(t.started_by(NEW), (KID, "requested"), "the app's record does not move it back")
+        self.assertEqual(t.started_by(NEW)[0], KID)
         self.assertEqual(starts.pending(t.p4), [], "started")
         t.cli(NEW, "done", "ported the flush; its suite passes")
         t.stop(NEW, "Port the flush", report="Ported the flush; the suite passes.", uuid="n1")
@@ -116,7 +121,7 @@ class StartRequests(unittest.TestCase):
         self.assertEqual(t.cli(KID, "request", "the guide", "--brief", three).returncode, 0)
         titles = [r["title"] for r in starts.pending(t.p4)]
         self.assertEqual(titles, ["the last row", "the guide"], "disjoint: both handed out; overlapping: held")
-        line = context(t.say(TOP2, "How are the docs coming?"))
+        line = context(t.say(KID, "How is the port coming?"))
         self.assertIn("\"the last row\"", line)
         self.assertIn("\"the guide\"", line)
         self.assertNotIn("\"the retry\"", line, "the second writer of src/flush.py is held")
@@ -180,6 +185,26 @@ class StartRequests(unittest.TestCase):
         self.assertGreaterEqual(len(calls["the short one"]["background"]), 80)
         old = {"id": "req-0000000000", "requester": KID, "title": "an old row", "brief": BRIEF}
         self.assertGreaterEqual(len(starts.call_of(old, t.p4)["background"]), 80, "a row kept before #37")
+
+    def test_a_stopped_or_archived_session_does_not_hold_its_file_set(self):
+        """#58: a session stopped and archived still counted as a live writer and held its replacement's start."""
+        t = self.t
+        CLI.setdefault("local_wrt00001", "abab0001-0000-4000-8000-000000000000")
+        t.record("local_wrt00001", TOP, title="the flush writer")
+        t.say("local_wrt00001", "Task:\nPort the flush. Report when done.\nFiles: src/flush.py")
+        call = {"hook_event_name": "PreToolUse", "tool_name": "mcp__ccd_session__start_session",
+                "tool_input": {"initiation": "user_asked", "title": "the flush again", "context": "fresh",
+                               "use_worktree": False, "prompt": BRIEF}}
+        held = t.hook("start-advice", TOP, call)
+        self.assertIn("this start is held", held.stdout, "a live writer of src/flush.py holds it")
+        rec = os.path.join(t.app, "local_wrt00001.json")
+        row = json.load(open(rec, encoding="utf-8"))
+        with open(rec, "w", encoding="utf-8") as f:
+            json.dump({**row, "lastTurnStopped": True}, f)
+        self.assertNotIn("this start is held", t.hook("start-advice", TOP, call).stdout, "stopped: its files are free")
+        with open(rec, "w", encoding="utf-8") as f:
+            json.dump({**row, "isArchived": True}, f)
+        self.assertNotIn("this start is held", t.hook("start-advice", TOP, call).stdout, "archived: free as well")
 
     def test_a_request_expires_after_a_day(self):
         home = self.t.p4

@@ -9,6 +9,12 @@ the start happens, the brief's marker line tells phi, at the child's first messa
 the requester as its parent, so the child's spawnedFrom, its relays and its archive line go there. The app keeps
 the starter as the parent in its own nesting, claude-code#109282. A request not started within EXPIRE_S is dropped.
 
+Since #58 a request is handed only to the session that filed it, at the next turn ezexe begins in that session, so
+the app's parent and phi's agree: handed to any session of the store, a puppeteer ran the call and the app nested
+the child under the puppeteer. A session whose turn another session began shows the child as a proposal card first
+and files a request only when the card is refused too. A request filed with `to`, a puppeteer's id, asks that
+puppeteer for a new top session: it is never handed to its requester, and the puppeteer's hooks read it here.
+
 <home>/phi/start-requests.jsonl holds one row a change: `request` with the brief, `claimed` when a start_session
 call carrying its marker is about to run, `started` when the child's first message arrived.
 
@@ -102,12 +108,25 @@ def above(home, sid):
     return out
 
 
+def stopped(s):
+    """True when the app's record shows a session's last turn was stopped (`lastTurnStopped`, read 2026-11-16 on the
+    record of a session stopped with the app's stop). Nothing in phi's own files says it, and a stopped session's
+    replacement was held behind it (#58). Its next turn clears the mark."""
+    relay.archived_in_app(s)                      # the app's records are read through relay, which phi hands them to
+    sid = str(s.get("sessionId") or "")
+    try:
+        return bool(relay.RECORD and sid.startswith("local_") and relay.RECORD(sid).get("lastTurnStopped"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def writers(home, skip=()):
-    """[(sessionId, title, its file set)] of the live sessions that declared files and have not reported done."""
+    """[(sessionId, title, its file set)] of the live sessions that declared files and have not reported done. An
+    archived session holds nothing, and neither does one the app shows as stopped."""
     out = []
     for sid, s in relay._sessions(home).items():
         files = s.get("fileSet")
-        if sid in skip or not isinstance(files, list) or not files or relay.gone(home, s):
+        if sid in skip or not isinstance(files, list) or not files or relay.gone(home, s) or stopped(s):
             continue
         turns = relay._rows(os.path.join(relay._dir(home, sid), "turns.jsonl"))
         if turns and turns[-1].get("done"):
@@ -152,13 +171,21 @@ def state(home, at=None):
     return out
 
 
+def open_rows(home, at=None):
+    """Every request not started and not past EXPIRE_S, oldest first, whoever it is for."""
+    at = time.time() if at is None else at
+    return sorted((r for r in state(home).values()
+                   if not r.get("started") and at - float(r.get("at") or 0) <= EXPIRE_S),
+                  key=lambda r: float(r.get("at") or 0))
+
+
 def pending(home, at=None):
     """The requests still to start, oldest first: not started, not past EXPIRE_S, and not claimed in the last
-    CLAIM_S."""
+    CLAIM_S. One addressed to a puppeteer is not among them: the puppeteer's hooks read it (#58)."""
     at = time.time() if at is None else at
     out = []
     for r in state(home).values():
-        if r.get("started") or at - float(r.get("at") or 0) > EXPIRE_S:
+        if r.get("started") or r.get("to") or at - float(r.get("at") or 0) > EXPIRE_S:
             continue
         c = r.get("claimed") or {}
         if c and at - float(c.get("at") or 0) < CLAIM_S:
@@ -214,11 +241,13 @@ def background_of(home, requester, given=""):
     return text
 
 
-def add(home, requester, title, brief, context="fresh", at=None, background="", after="", declared=False):
+def add(home, requester, title, brief, context="fresh", at=None, background="", after="", declared=False,
+        to=""):
     """Keep a start request -> (its id, True when new). The same brief from the same session, still pending, is
     kept once. Its background is the one given or one built from the requester (#37). With `after`, it waits
     behind that session while it is a busy writer (#38). The file set its brief declares is kept on it; with
-    `declared`, a brief that declares none is refused (#48)."""
+    `declared`, a brief that declares none is refused (#48). With `to`, a puppeteer's id, it asks that puppeteer
+    for a new top session (#58)."""
     title, brief = " ".join(str(title or "").split()), str(brief or "").strip()
     if len(title) < 3:
         raise ValueError("a start request needs the child's title")
@@ -227,13 +256,15 @@ def add(home, requester, title, brief, context="fresh", at=None, background="", 
     files = files_of(brief, str(relay._session(home, requester).get("cwd") or ""))
     if declared and files is None:
         raise ValueError(FILES_WANTED)
-    rid = "req-" + hashlib.sha1(f"{requester}\n{title}\n{brief}".encode("utf-8", "replace")).hexdigest()[:10]
+    rid = "req-" + hashlib.sha1(f"{requester}\n{title}\n{brief}\n{to}".encode("utf-8", "replace")).hexdigest()[:10] \
+        if to else "req-" + hashlib.sha1(f"{requester}\n{title}\n{brief}".encode("utf-8", "replace")).hexdigest()[:10]
     held = state(home).get(rid)
     if held and not held.get("started") and (time.time() if at is None else at) - float(held.get("at") or 0) <= EXPIRE_S:
         return rid, False
     at = time.time() if at is None else at
     _append(home, {"kind": "request", "id": rid, "at": at, "time": time.strftime("%Y-%m-%d %H:%M"),
                    **({"after": after} if after else {}), **({"files": files} if files else {}),
+                   **({"to": to} if to else {}),
                    "requester": requester, "requesterTitle": relay._title(relay._session(home, requester)),
                    "title": title, "brief": brief, "context": "fork" if context == "fork" else "fresh",
                    "background": background_of(home, requester, background)})
@@ -253,26 +284,34 @@ def call_of(r, home=""):
 
 
 def hand_text(home, sid, at=None):
-    """The lines a session is handed at a turn ezexe began: each pending request with its exact call. ''
-    when none is pending."""
-    rows = pending(home, at)
+    """The lines a session is handed at a turn ezexe began in it: each pending request it filed itself, with
+    its exact call. '' when none of its own is pending. No other session is handed a request, a puppeteer
+    included, so the app nests the child under the session that asked (#58)."""
+    rows = [r for r in pending(home, at) if r.get("requester") == sid]
     if not rows:
         return ""
-    lines = [f"- \"{r['title']}\" for \"{r.get('requesterTitle') or r['requester']}\" ({r['requester']}): "
-             f"`mcp__ccd_session__start_session` with {json.dumps(call_of(r, home), ensure_ascii=False)}" for r in rows]
-    return ("phi (p4-phi): start requests from sessions whose turns ezexe did not begin, so the app refused "
-            "them `user_asked`. This turn ezexe began, so start each now, with exactly the call given, before "
-            "the rest of this turn's work:\n" + "\n".join(lines) + "\n"
-            f"The app keeps this session as each child's parent in its own nesting, {ISSUE}; phi records the "
-            f"requester as the parent, so the child's spawnedFrom, its relays and its retirement note go to the "
-            f"requester. Pass nothing on: the requester gets the child's reports in full.")
+    lines = [f"- \"{r['title']}\": `mcp__ccd_session__start_session` with "
+             f"{json.dumps(call_of(r, home), ensure_ascii=False)}" for r in rows]
+    return ("phi (p4-phi): start requests this session filed in turns ezexe did not begin, when the app refused "
+            "them `user_asked`. This turn ezexe began here, so start each now, with exactly the call given, "
+            "before the rest of this turn's work:\n" + "\n".join(lines) + "\n"
+            "Each is this session's own child, in the app's nesting and in phi's, and its reports come here in "
+            "full.")
 
 
 def requested_text(rid, new):
     return ((f"kept as start request {rid}" if new else f"start request {rid} was already kept") +
-            ": the next turn ezexe begins, in any session of this store, starts it with `user_asked`, and phi "
-            "makes it this session's child, its spawnedFrom, relays and retirement note coming here. Do not ask "
-            "ezexe to type anything or click a card; carry on with the rest of the task.")
+            ": the next turn ezexe begins in this session starts it with `user_asked`, as this session's own "
+            "child. No other session is handed it. Carry on with the rest of the task, and say in this turn's "
+            "report that a child waits on ezexe's next message here.")
+
+
+def asked_text(rid, new, title):
+    """What a session is told when it asked its puppeteer for a new top session."""
+    return ((f"kept as request {rid} to this session's puppeteer" if new else f"request {rid} was already kept") +
+            f": \"{title}\" is handed to it at the next turn ezexe begins there, and it starts the session, files "
+            "it in this environment's section and takes it under control, or declines it. Start nothing for it "
+            "here, and carry on with the rest of the task.")
 
 
 def claim(home, prompt, by, at=None):

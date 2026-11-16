@@ -1,0 +1,487 @@
+#!/usr/bin/env python3
+"""controls.py: a puppeteer and the sessions it controls (ezexe/p4#58), run through phi's own hooks.
+
+ezexe files a top session in the sidebar section "puppeteers". It controls the top sessions of other trees, in any
+store: phi reads the filing from the app's own file, keeps the pair, tells the controlled session, writes the
+puppeteer's board, leaves its waiting steps with it, lets it archive a complete session, names a boundary once as a
+question with two buttons, and carries a controlled session's request for a new top session to it.
+"""
+
+import json
+import os
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import phi  # noqa: E402
+import relay  # noqa: E402
+import starts  # noqa: E402
+from test_phi import CLI, KID, TOP, Tree, context, read, transcript, write  # noqa: E402
+
+PUP, PUP2, TOP2, TOP3, NEW = ("local_pup00001", "local_pup00002", "local_top00002", "local_top00003",
+                              "local_new00001")
+for k, sid in enumerate((PUP, PUP2, TOP2, TOP3, NEW)):
+    CLI.setdefault(sid, f"9999{k}000-0000-4000-8000-000000000000")
+ARCHIVE = "mcp__ccd_session_mgmt__archive_session"
+START = "mcp__ccd_session__start_session"
+WHY = "its issue is closed by a pushed commit, its suite ran green, and no session reads its scratch clone"
+BRIEF = "Build the importer's retry and run its suite. Report when done.\nFiles: src/retry.py"
+
+
+class Pair(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = t = Tree(self._tmp.name)
+        self.other = os.path.join(t.tmp, "other")              # a second environment, with its own store
+        self.store2 = os.path.join(self.other, ".claude", "p4")
+        os.makedirs(self.store2)
+        t.record(PUP, title="Control the exporter and the importer trees, and tell ezexe where each stands")
+        t.record(TOP, title="Build the narwhal exporter")
+        t.record(TOP2, title="Build the importer", cwd=self.other)
+        t.record(TOP3, title="A top session nobody put under the puppeteer")
+        t.record(KID, started_by=TOP, title="the flush child")
+        self.file("puppeteers", PUP)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def file(self, section, *sids, shape=None, more=None):
+        """The app's own file: `sids` filed in one sidebar section, `more` as {sessionId: another section}."""
+        groups = [{"id": "cg-1", "name": section, "mode": "code"}]
+        given = {"code:" + s: "cg-1" for s in sids}
+        for k, (sid, name) in enumerate((more or {}).items()):
+            groups.append({"id": f"cg-m{k}", "name": name})
+            given["code:" + sid] = f"cg-m{k}"
+        write(os.path.join(self.t.tmp, "claude_desktop_config.json"), json.dumps(
+            {"preferences": {"epitaxyPrefs": {"dframe-group-scopes": shape if shape is not None
+                                              else {"acct/org": {"groups": groups, "assignments": given}}}}}))
+
+    def finish(self, host, proj=None, report="Built.", uuid="u0"):
+        """One whole turn of a session, shown done."""
+        self.t.say(host, "Build it", proj=proj)
+        self.t.cli(host, "done", "its suite ran green and its commit is pushed", proj=proj)
+        self.t.stop(host, "Build it", report=report, proj=proj, uuid=uuid)
+
+    def archive(self, by, target, reason=WHY):
+        inp = {"session_id": target, **({"reason": reason} if reason else {})}
+        r = self.t.hook("self-archive", by, {"hook_event_name": "PreToolUse", "tool_name": ARCHIVE,
+                                             "tool_input": inp})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else {}
+
+    def plan(self, host, *steps, proj=None):
+        items = [{"content": c, "status": "in_progress" if k == 0 else "pending"} for k, c in enumerate(steps)]
+        return self.t.hook("plan", host, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                                          "tool_input": {"items": items}, "tool_response": "Plan shown."}, proj=proj)
+
+    # --- the mark ---------------------------------------------------------------------------------------------------
+
+    def test_the_filing_is_read_from_the_apps_file_and_only_a_top_session_counts(self):
+        t = self.t
+        r = t.cli(PUP, "controls")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("no session is controlled yet", r.stdout)
+        r = t.cli(TOP, "controls", TOP3)
+        self.assertEqual(r.returncode, 2, "a session outside the section is refused")
+        self.assertIn("not a puppeteer", r.stderr)
+        self.assertIn("no section", r.stderr)
+        self.assertNotIn("controls", t.session(TOP), "and records nothing")
+        t.say(KID, "Fix the row")
+        self.file("puppeteers", PUP, KID)
+        r = t.cli(KID, "controls")
+        self.assertEqual(r.returncode, 2, "a child filed there is not a puppeteer")
+        self.assertIn("started by another session", r.stderr)
+        self.file("Puppeteers", PUP)
+        self.assertEqual(t.cli(PUP, "controls").returncode, 0, "the section's name is matched whatever its case")
+        self.file("wrappin up", PUP)
+        self.assertEqual(t.cli(PUP, "controls").returncode, 2, "another section marks nothing")
+        self.file("puppeteers", PUP, shape=["reshaped"])
+        self.assertEqual(t.cli(PUP, "controls").returncode, 2, "a reshaped file makes nobody a puppeteer")
+        os.remove(os.path.join(t.tmp, "claude_desktop_config.json"))
+        self.assertEqual(t.cli(PUP, "controls").returncode, 2, "and so does a missing one")
+
+    def test_a_project_can_rename_the_section_or_turn_the_rule_off(self):
+        t = self.t
+        relay._write_json(os.path.join(t.p4, "p4.json"), {"phi": {"puppeteer_section": "strings"}})
+        self.assertEqual(t.cli(PUP, "controls").returncode, 2)
+        self.file("strings", PUP)
+        self.assertEqual(t.cli(PUP, "controls").returncode, 0)
+        relay._write_json(os.path.join(t.p4, "p4.json"), {"phi": {"puppeteer_section": ""}})
+        self.assertEqual(t.cli(PUP, "controls").returncode, 2)
+
+    def test_a_puppeteer_is_told_once_what_it_is_and_the_sighting_is_kept(self):
+        t = self.t
+        ctx = context(t.say(PUP, "Control the two trees"))
+        self.assertIn("This session is a puppeteer: ezexe filed it in the sidebar section \"puppeteers\"", ctx)
+        self.assertIn("phi.py\" controls <sessionId>", ctx)
+        self.assertNotIn("versee", ctx, "the word is puppeteer, and it controls")
+        self.assertTrue(t.session(PUP).get("puppeteerSeen"))
+        self.assertNotIn("This session is a puppeteer", context(t.say(PUP, "and now?")), "said once")
+        self.assertNotIn("This session is a puppeteer", context(t.say(TOP, "Build the exporter")))
+        self.assertIn("phi first saw this session in the section at", t.cli(PUP, "controls").stdout)
+
+    # --- the pair ---------------------------------------------------------------------------------------------------
+
+    def test_controls_records_top_sessions_with_their_stores_and_prints_where_each_stands(self):
+        t = self.t
+        self.finish(TOP)
+        t.say(TOP2, "Build the importer", proj=self.other)
+        r = t.cli(PUP, "controls", TOP, TOP2)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rows = {e["sessionId"]: e["store"] for e in t.session(PUP)["controls"]}
+        self.assertTrue(os.path.samefile(rows[TOP], t.p4))
+        self.assertTrue(os.path.samefile(rows[TOP2], self.store2), "its own store")
+        self.assertIn(f"\"Build the narwhal exporter\" ({TOP})", r.stdout)
+        self.assertIn("shown done", r.stdout)
+        self.assertIn(f"\"Build the importer\" ({TOP2})", r.stdout)
+        self.assertIn("working: its last message has no turn's end recorded after it", r.stdout)
+        r = t.cli(PUP, "controls", KID)
+        self.assertEqual(r.returncode, 2, "a child is reached through its top")
+        self.assertIn("a puppeteer controls top sessions", r.stderr)
+        self.assertEqual(t.cli(PUP, "controls", PUP).returncode, 2, "nor itself")
+        t.say(PUP, "where does each stand?")
+        self.assertEqual(len(t.session(PUP)["controls"]), 2, "a hook's save keeps the list")
+        t.cli(PUP, "controls", "--drop", TOP2)
+        self.assertEqual([e["sessionId"] for e in t.session(PUP)["controls"]], [TOP])
+
+    def test_a_controlled_session_is_told_of_its_puppeteer_once_and_once_more_when_the_pair_ends(self):
+        t = self.t
+        t.say(TOP, "Build the exporter")
+        t.say(TOP2, "Build the importer", proj=self.other)
+        t.say(TOP3, "Something else")
+        t.cli(PUP, "controls", TOP, TOP2)
+        ctx = context(t.say(TOP, "carry on"))
+        self.assertIn("This session has a puppeteer: \"Control the exporter and the importer trees, and tell ezexe "
+                      f"where each stands\" ({PUP})", ctx)
+        self.assertIn("stays the top of its own tree, in its own section", ctx)
+        self.assertIn("Anything irreversible or outward still needs ezexe's yes in this session", ctx)
+        self.assertEqual(t.session(TOP)["puppeteer"]["sessionId"], PUP, "kept on its own record, in its own store")
+        self.assertNotIn("This session has a puppeteer", context(t.say(TOP, "and now?")), "said once")
+        ctx = context(t.say(TOP2, "carry on", proj=self.other))
+        self.assertIn("This session has a puppeteer", ctx, "a session in another store is told by its own hook")
+        self.assertNotIn("has a puppeteer", context(t.say(TOP3, "carry on")), "an uncontrolled top session: nothing")
+        relay._write_json(os.path.join(t.dir(TOP3), "session.json"),
+                          {**t.session(TOP3), "controls": [{"sessionId": KID, "store": t.p4}]})
+        relay._write_json(os.path.join(t.dir(TOP), "session.json"),
+                          {**t.session(TOP), "controls": [{"sessionId": TOP3, "store": t.p4}]})
+        self.assertNotIn("has a puppeteer", context(t.say(TOP3, "and now?")),
+                         "listed by a session outside the section: told nothing")
+        t.cli(PUP, "controls", "--drop", TOP)
+        ctx = context(t.say(TOP, "and after?"))
+        self.assertIn("This session no longer has a puppeteer", ctx)
+        self.assertNotIn("puppeteer", t.session(TOP))
+        self.assertNotIn("no longer has a puppeteer", context(t.say(TOP, "and then?")), "said once")
+
+    # --- the archive guard --------------------------------------------------------------------------------------------
+
+    def test_a_puppeteer_archives_a_complete_controlled_top_session_and_is_refused_the_others(self):
+        t = self.t
+        self.finish(TOP)
+        self.finish(TOP3)
+        t.say(KID, "Fix the row")
+        t.stop(KID, "Fix the row", report="Fixed.")
+        t.cli(PUP, "controls", TOP)
+        out = self.archive(TOP, KID)
+        self.assertEqual(out.get("permissionDecision"), "deny", "a top session outside the section: as before")
+        self.assertIn("no session archives a session", out["permissionDecisionReason"])
+        out = self.archive(PUP, TOP3)
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertIn("is not a session this puppeteer controls", out["permissionDecisionReason"])
+        out = self.archive(PUP, TOP, reason="")
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertIn("carries no `reason`", out["permissionDecisionReason"])
+        self.assertEqual(self.archive(PUP, TOP), {}, "complete, controlled and reasoned: let through, no quick select")
+        self.assertEqual(self.archive(PUP, KID), {}, "and so is a session in a controlled tree")
+        t.say(TOP, "one more thing")
+        out = self.archive(PUP, TOP)
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertIn("so it is mid-turn", out["permissionDecisionReason"])
+        self.assertIn("Name it to ezexe as left", out["permissionDecisionReason"])
+        self.plan(TOP, "Fix the header row in exporter.py", "Run the exporter suite")
+        t.stop(TOP, "one more thing", calls=[("mcp__ccd_turn__wrap_up", {"recap": "half done"}, "ok")],
+               report="Half done.", uuid="u1")
+        out = self.archive(PUP, TOP)
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertNotIn("mid-turn", out["permissionDecisionReason"])
+        self.assertIn("2 open plan steps, the next \"Fix the header row in exporter.py\"",
+                      out["permissionDecisionReason"])
+        kept = t.session(PUP)["puppeteerArchives"]
+        self.assertEqual([(a["sessionId"], a["let"]) for a in kept],
+                         [(TOP3, False), (TOP, False), (TOP, True), (KID, True), (TOP, False), (TOP, False)])
+        self.assertEqual(kept[2]["why"], WHY, "the reason it gave is kept beside what it archived")
+        said = t.cli(PUP, "controls").stdout
+        self.assertIn("- archived ", said)
+        self.assertIn("- left ", said)
+        self.assertIn("open: 2 open plan steps", said)
+        board = read(os.path.join(t.dir(PUP), "board.md"))
+        self.assertIn("## Archived and left", board)
+        self.assertIn(f"- archived", board)
+
+    def test_a_session_in_another_store_is_archived_and_that_store_is_only_read(self):
+        t = self.t
+        self.finish(TOP2, proj=self.other)
+
+        def snap():
+            return {os.path.join(d, f): read(os.path.join(d, f)) for d, _, fs in os.walk(self.store2) for f in fs}
+        before = snap()
+        t.cli(PUP, "controls", TOP2)
+        self.assertEqual(self.archive(PUP, TOP2), {})
+        t.say(PUP, "where does each stand?")
+        t.cli(PUP, "controls")
+        self.assertEqual(snap(), before, "the puppeteer writes nothing into a controlled store")
+        self.assertTrue(t.session(PUP)["puppeteerArchives"][-1]["let"], "its record is in its own store")
+
+    # --- its own steps ------------------------------------------------------------------------------------------------
+
+    def test_a_puppeteers_plan_gets_no_hand_off_advice_and_its_wait_does_not_send_the_turn_back(self):
+        t = self.t
+        steps = ("Await reports from the exporter, the importer and the acceptance check",
+                 "Check the trees' results against GitHub", "Rewrite flush_rows in src/exporter.py")
+        t.say(PUP, "Control the two trees")
+        t.say(TOP3, "Control the two trees")
+        self.assertIn("child session", context(self.plan(TOP3, *steps)), "any other top session")
+        ctx = context(self.plan(PUP, *steps))
+        self.assertNotIn("child session", ctx)
+        self.assertNotIn("start_session", ctx)
+        self.assertFalse(os.path.exists(os.path.join(t.p4, "phi", ".nudge", CLI[PUP])), "and no nudge")
+        t.say(TOP, "Build it")                      # a controlled session, mid-turn
+        t.cli(PUP, "controls", TOP)
+        r = t.stop(PUP, "Control the two trees", report="Waiting on \"Build the narwhal exporter\".")
+        self.assertEqual(r.stdout.strip(), "", "its turn may end while it waits")
+        self.assertEqual(t.log(PUP)[-1].get("waits_on"), 1)
+        t.cli(TOP, "done", "its suite ran green")
+        t.stop(TOP, "Build it", report="Built.")
+        t.say(PUP, "a report came in")
+        r = t.stop(PUP, "a report came in", report="Read it.", uuid="u1")
+        self.assertEqual(json.loads(r.stdout).get("decision"), "block", "nobody left to wait on: back to the step")
+        r = t.stop(TOP3, "Control the two trees", report="Waiting.")
+        self.assertEqual(json.loads(r.stdout).get("decision"), "block", "a top outside the section: as before, #55")
+
+    # --- the board ------------------------------------------------------------------------------------------------------
+
+    def test_the_board_is_rewritten_by_hook_and_a_report_reaches_the_puppeteer_by_reference(self):
+        t = self.t
+        t.say(PUP, "Control the two trees")
+        t.say(TOP2, "Build the importer", proj=self.other)
+        t.cli(PUP, "controls", TOP2)
+        report = ("The importer reads the new format.\nSECOND-LINE-DETAIL: the parser keeps a ring of 64 rows and "
+                  "the suite ran 41 tests.")
+        t.cli(TOP2, "done", "its suite ran green", proj=self.other)
+        t.stop(TOP2, "Build the importer", report=report, proj=self.other)
+        ctx = context(t.say(PUP, "what came in?"))
+        page = os.path.join(self.store2, "phi", "sessions", TOP2, "session.md").replace("\\", "/")
+        self.assertIn(f"\"Build the importer\" ({TOP2}) ended a turn", ctx)
+        self.assertIn("The importer reads the new format.", ctx, "one line")
+        self.assertIn(page, ctx, "and its page")
+        self.assertNotIn("SECOND-LINE-DETAIL", ctx, "never the report's text")
+        self.assertNotIn("ended a turn", context(t.say(PUP, "and now?")), "a report is named once")
+        t.cli(PUP, "note", "ezexe decides whether the importer ships before the exporter", "--source",
+              "ezexe's message of today", "--kind", "decision")
+        t.cli(PUP, "note", "The retry issue is parked until the importer lands", "--source", "the issue list",
+              "--kind", "parked")
+        t.say(PUP, "and the board?")
+        board = read(os.path.join(t.dir(PUP), "board.md"))
+        self.assertIn(f"- \"Build the importer\" `{TOP2}`", board)
+        self.assertIn("shown done", board)
+        self.assertIn("The importer reads the new format.", board)
+        self.assertIn(page, board)
+        self.assertNotIn("SECOND-LINE-DETAIL", board)
+        waiting = board.split("## Waiting on")[1].split("## ")[0]
+        self.assertIn("ezexe decides whether the importer ships", waiting)
+        self.assertIn("The retry issue is parked", board.split("## Parked")[1].split("## ")[0])
+
+    def test_after_a_compaction_the_board_comes_first(self):
+        t = self.t
+        t.say(PUP, "Control the two trees")
+        t.say(TOP, "Build it")
+        t.cli(PUP, "controls", TOP)
+        r = t.hook("session-start", PUP, {"hook_event_name": "SessionStart", "source": "compact"})
+        ctx = context(r)
+        board = os.path.join(t.dir(PUP), "board.md").replace("\\", "/")
+        self.assertTrue(ctx.startswith("phi (p4-phi): this session is a puppeteer and its context was compacted. "
+                                       "Read its board before anything else: " + board), ctx[:300])
+        self.assertTrue(os.path.exists(board))
+        self.assertEqual(t.session(PUP)["compactions"], 1)
+        r = t.hook("session-start", TOP, {"hook_event_name": "SessionStart", "source": "compact"})
+        self.assertNotIn("its board", context(r))
+
+    def test_a_boundary_is_named_once_as_a_question_with_two_buttons(self):
+        t = self.t
+        t.say(PUP, "Control the two trees")
+        t.say(TOP, "Build it")                      # mid-turn
+        t.cli(PUP, "controls", TOP)
+        self.assertNotIn("a boundary", context(t.say(PUP, "anything?")), "a controlled session is working")
+        t.cli(TOP, "done", "its suite ran green")
+        t.stop(TOP, "Build it", report="Built.")
+        ctx = context(t.say(PUP, "a report came in"))
+        self.assertIn("a boundary: every controlled session is idle and no request is waiting", ctx)
+        self.assertIn("`mcp__ccd_session_mgmt__get_usage` on `\"self\"`", ctx)
+        self.assertIn("end the turn with `mcp__ccd_turn__wrap_up`", ctx)
+        self.assertIn("\"Compact now\" and \"Later\"", ctx)
+        self.assertIn("/compact keep the path of the puppeteer board", ctx)
+        self.assertNotIn("tell ezexe in one line", ctx, "a button, never a paragraph to pass on")
+        self.assertNotIn("past the ceiling", ctx)
+        self.assertNotIn("a boundary", context(t.say(PUP, "and now?")), "a second hook at the same boundary: nothing")
+        relay._write_json(os.path.join(t.p4, "p4.json"), {"phi": {"puppeteer_chars": 50}})
+        ctx = context(t.say(PUP, "and now?"))
+        self.assertIn("a boundary", ctx, "the count passed the ceiling")
+        self.assertRegex(ctx, r"phi has handed this session \d+ characters since its last compaction, past the "
+                              r"ceiling of 50")
+        s = t.session(PUP)
+        relay._write_json(os.path.join(t.dir(PUP), "session.json"), {**s, "compactions": 3, "boundary": {}})
+        ctx = context(t.say(PUP, "and now?"))
+        self.assertIn("the app's `new_session` action, which starts the successor puppeteer from the board", ctx)
+
+    def test_a_successor_takes_over_the_controlled_sessions_and_archives_the_old_puppeteer(self):
+        t = self.t
+        t.record(PUP2, title="The second puppeteer")
+        self.finish(TOP)
+        t.say(PUP, "Control the tree")
+        t.cli(PUP, "controls", TOP)
+        t.cli(PUP, "note", "ezexe froze the retry work on 2026-11-16", "--source", "ezexe's message", "--kind",
+              "decision")
+        self.file("puppeteers", PUP, PUP2)
+        r = t.cli(PUP2, "controls", "--from", PUP)
+        self.assertEqual(r.returncode, 2, "not before the old one hands over")
+        self.assertIn("has not handed over", r.stderr)
+        self.assertEqual(t.cli(PUP, "controls", "--hand", PUP2).returncode, 0)
+        t.cli(PUP, "done", "handed the board to the second puppeteer")
+        t.stop(PUP, "Control the tree", report="Handed over.")
+        r = t.cli(PUP2, "controls", "--from", PUP)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("took over 1 controlled session and 1 note", r.stdout)
+        self.assertEqual([e["sessionId"] for e in t.session(PUP2)["controls"]], [TOP])
+        self.assertIn("ezexe froze the retry work", read(os.path.join(t.dir(PUP2), "board.md")))
+        ctx = context(t.say(TOP, "carry on"))
+        self.assertIn(f"\"The second puppeteer\" ({PUP2})", ctx, "the pair is with the successor now")
+        self.assertEqual(self.archive(PUP2, PUP), {}, "the old puppeteer, noted, is archived by the new one")
+        self.assertEqual(self.archive(PUP2, TOP3).get("permissionDecision"), "deny")
+
+    # --- a new top session goes through the puppeteer -------------------------------------------------------------------
+
+    def test_a_controlled_top_session_asks_its_puppeteer_and_its_own_start_is_refused(self):
+        t = self.t
+        t.say(PUP, "Control the two trees")
+        t.say(TOP2, "Build the importer", proj=self.other, P4_PHI_NEW_TASK="1")
+        t.cli(PUP, "controls", TOP2)
+        t.stop(TOP2, "Build the importer", report="Started.", proj=self.other)
+        relay._write_json(os.path.join(self.store2, "phi", "sessions", TOP2, "session.json"),
+                          {k: v for k, v in relay._read_json(os.path.join(
+                              self.store2, "phi", "sessions", TOP2, "session.json")).items()
+                           if k != "newTaskToldAt"})
+        ctx = context(t.say(TOP2, "Also, what about a new exporter for the moon format?", proj=self.other,
+                            P4_PHI_NEW_TASK="1"))
+        self.assertIn("This session has a puppeteer", ctx)
+        self.assertIn("--to-puppeteer", ctx)
+        self.assertNotIn("start_session", ctx, "handed a new-topic line, it is given no start call")
+        new_top = BRIEF + "\n" + phi.NEW_TOP_BRIEF
+        r = t.hook("start-advice", TOP2, {"hook_event_name": "PreToolUse", "tool_name": START,
+                                          "tool_input": {"initiation": "user_asked", "title": "the retry",
+                                                         "prompt": new_top}}, proj=self.other)
+        out = json.loads(r.stdout)["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "deny", "its own start of a new top session is refused")
+        self.assertIn("--to-puppeteer", out["permissionDecisionReason"])
+        r = t.hook("start-advice", TOP3, {"hook_event_name": "PreToolUse", "tool_name": START,
+                                          "tool_input": {"initiation": "user_asked", "title": "the retry",
+                                                         "prompt": new_top}})
+        self.assertNotIn("\"deny\"", r.stdout, "a top session with no puppeteer starts its own")
+        r = t.cli(TOP3, "request", "the retry", "--brief", BRIEF, "--to-puppeteer")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("has no puppeteer", r.stderr)
+        r = t.cli(TOP2, "request", "the retry", "--brief", BRIEF, "--to-puppeteer", proj=self.other)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("to this session's puppeteer", r.stdout)
+        self.assertIn("Start nothing for it here", r.stdout)
+        row = next(iter(starts.state(self.store2).values()))
+        self.assertEqual(row["to"], PUP, "kept in the requester's own store")
+        self.assertEqual(starts.state(t.p4), {}, "and nothing in the puppeteer's")
+        self.assertNotIn("start requests", context(t.say(TOP2, "and now?", proj=self.other)),
+                         "never handed back to its requester")
+        # the puppeteer reads it where it lies, at a turn ezexe began
+        ctx = context(t.say(PUP, "what is waiting?"))
+        self.assertIn("controlled sessions ask this puppeteer for new top sessions", ctx)
+        self.assertIn("to be filed in the ungrouped list under its project", ctx)
+        call = json.loads(ctx.split("`mcp__ccd_session__start_session` with ", 1)[1].split("\n", 1)[0])
+        self.assertEqual(os.path.normcase(os.path.normpath(call["cwd"])),
+                         os.path.normcase(os.path.normpath(self.other)), "in the requester's environment")
+        self.assertIn(phi.NEW_TOP_BRIEF, call["prompt"])
+        self.assertIn(f"for {TOP2}.", call["prompt"])
+        self.assertIn("## Requests to this puppeteer", read(os.path.join(t.dir(PUP), "board.md")))
+        self.assertNotIn("a boundary", ctx, "never while a controlled session waits on the puppeteer's answer")
+        # it starts it: the new session arrives in the requester's store, a top session, and is taken under control
+        t.record(NEW, started_by=PUP, title="the retry", cwd=self.other)
+        t.say(NEW, "Task:\n" + call["prompt"], proj=self.other)
+        self.assertEqual(starts.open_rows(self.store2), [], "the request is started")
+        self.file("puppeteers", PUP, more={TOP2: "importers"})
+        ctx = context(t.say(PUP, "and now?"))
+        self.assertIn(f"\"the retry\" ({NEW}) is a top session this puppeteer started, so it is now controlled", ctx)
+        self.assertIn("File it in the section \"importers\" with `mcp__ccd_sidebar__move_sessions`, never in "
+                      "\"puppeteers\"", ctx)
+        self.assertIn(NEW, [e["sessionId"] for e in t.session(PUP)["controls"]])
+        self.assertIn("This session has a puppeteer", context(t.say(NEW, "carry on", proj=self.other)))
+
+    def test_a_declined_request_is_closed_and_its_requester_told(self):
+        t = self.t
+        t.say(PUP, "Control the two trees")
+        t.say(TOP2, "Build the importer", proj=self.other)
+        t.cli(PUP, "controls", TOP2)
+        t.say(TOP2, "carry on", proj=self.other)
+        t.cli(TOP2, "request", "the retry", "--brief", BRIEF, "--to-puppeteer", proj=self.other)
+        rid = next(iter(starts.state(self.store2)))
+        r = t.cli(PUP, "controls", "--decline", rid, "ezexe froze the retry work, and it duplicates issue 50")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("declined", read(os.path.join(t.dir(PUP), "board.md")))
+        self.assertNotIn("ask this puppeteer", context(t.say(PUP, "what is waiting?")))
+        ctx = context(t.say(TOP2, "and the retry?", proj=self.other))
+        self.assertIn("declined the request", ctx)
+        self.assertIn("ezexe froze the retry work", ctx)
+        self.assertEqual(starts.open_rows(self.store2), [], "closed in the requester's own store, by its own hook")
+        self.assertNotIn("declined the request", context(t.say(TOP2, "and now?", proj=self.other)), "said once")
+
+    def test_a_top_session_ezexe_started_directly_is_named_to_the_puppeteer_once(self):
+        t = self.t
+        t.say(PUP, "Control the trees")
+        t.say(TOP, "Build the exporter")
+        t.cli(PUP, "controls", TOP)
+        self.assertNotIn("does not control", context(t.say(PUP, "anything new?")))
+        relay._write_json(os.path.join(t.dir(TOP3), "session.json"),
+                          {"sessionId": TOP3, "title": "A top session nobody put under the puppeteer",
+                           "createdAt": "2999-01-01 00:00", "cwd": t.proj})
+        ctx = context(t.say(PUP, "anything new?"))
+        self.assertIn(f"\"A top session nobody put under the puppeteer\" ({TOP3}) is a new top session", ctx)
+        self.assertIn(f"controls {TOP3}` takes it under control", ctx)
+        self.assertNotIn("does not control", context(t.say(PUP, "and now?")), "named once")
+
+    def test_work_on_a_controlled_sessions_topic_is_sent_down_and_not_done_by_the_puppeteer(self):
+        t = self.t
+        t.say(PUP, "Control the trees")
+        t.say(TOP, "Build the narwhal exporter and its ports table")
+        t.cli(PUP, "controls", TOP)
+        ctx = context(t.say(PUP, "Write a page about the narwhal exporter's ports table"))
+        self.assertIn(f"work on the topic \"Build the narwhal exporter\" ({TOP}) orchestrates", ctx)
+        self.assertIn("do not do it here and start no child for it", ctx)
+        self.assertIn("send that session one message with SendMessage", ctx)
+        self.assertNotIn("orchestrates. If so", context(t.say(PUP, "How is the weather on the moon today?")))
+
+
+class Waits(unittest.TestCase):
+    def test_keep_going_lets_a_waiting_step_end_the_turn_only_with_someone_to_wait_on(self):
+        import plans
+        with tempfile.TemporaryDirectory() as home:
+            s = {"sessionId": "local_p"}
+            relay._write_json(os.path.join(relay._dir(home, "local_p"), "session.json"), s)
+            relay._write_json(os.path.join(relay._dir(home, "local_p"), "plan.json"), {"steps": [
+                {"addr": "1", "content": "Await reports from A, B and C", "status": "in_progress"},
+                {"addr": "2", "content": "Check the trees' results against GitHub", "status": "pending"}]})
+            self.assertEqual(plans.keep_going(home, s, "Waiting on A.", [], "t1", waits=["A"]), "")
+            self.assertIn("is still in_progress", plans.keep_going(home, s, "Waiting on A.", [], "t1"))
+            relay._write_json(os.path.join(relay._dir(home, "local_p"), "plan.json"), {"steps": [
+                {"addr": "1", "content": "Rewrite the exporter", "status": "in_progress"}]})
+            self.assertIn("is still in_progress", plans.keep_going(home, s, "Not yet.", [], "t2", waits=["A"]),
+                          "a step that is work is not a wait")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=1)

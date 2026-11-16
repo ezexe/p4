@@ -2,7 +2,7 @@
 
 What linked Claude Code sessions hand each other, and recall from the repository's own history, in one plugin.
 The skill `skills/phi/SKILL.md` says what a session does with it.
-This page covers two things: the levels work runs at, and the fact that nothing has to be set up.
+This page covers three things: the levels work runs at, a puppeteer and the sessions it controls, and the fact that nothing has to be set up.
 
 ## Levels
 
@@ -36,6 +36,33 @@ A plan step that only reads or searches is named for `p4-phi:sweep`, one that on
 
 To turn the levels off in one project, set `phi.levels` to `false` in `.claude/p4/p4.json`.
 
+## A puppeteer and the sessions it controls
+
+A puppeteer is a top session ezexe filed in the sidebar section "puppeteers".
+It controls the topmost orchestrating sessions of one or more projects, each with its own store, and belongs to no project's tree.
+The sessions it controls stay tops of their own trees, in their own sections.
+`scripts/controls.py` holds it, and `scripts/test_controls.py` proves each line below.
+
+| What the plugin does | How |
+| :- | :- |
+| Knows a puppeteer | The app's own `claude_desktop_config.json`, beside its `claude-code-sessions` folder, assigns the session to a group named as `phi.puppeteer_section` says. Read on 2026-11-16: `preferences.epitaxyPrefs["dframe-group-scopes"]`, each scope with `groups` and `assignments`. A missing or reshaped file makes nobody a puppeteer. |
+| Knows the pair | `phi.py controls <sessionId>` writes `controls` on the puppeteer's record, each entry with the store that session's tree lives in. A controlled session's own hook finds the pair and keeps `puppeteer` on its own record. Neither side writes into the other's store. |
+| Tells the controlled session | Once when it comes to have a puppeteer, once when it no longer has one. |
+| Keeps the board | `board.md` in the puppeteer's session folder, rewritten at its message and Stop hooks. After a compaction its path is handed first. |
+| Hands reports by reference | One line and the path of the session's page. |
+| Leaves a puppeteer's steps with it | No hand-off advice and no nudge, and at Stop a step that waits on sessions' reports ends the turn while a controlled session is not yet complete. |
+| Lets it archive a complete session | The archive hook lets the call through for a session it controls, or one in such a tree, when phi's records hold nothing against it and the call carries a `reason`. |
+| Names a boundary once | The notice tells it to end the turn with one question and the buttons "Compact now" and "Later". |
+| Routes a new top session through it | `phi.py request ... --to-puppeteer` in a controlled session, read by the puppeteer's hooks from the requester's own store. |
+| Hands a start request only to the session that filed it | At the next turn ezexe begins in that session, so the app nests the child where phi does. A session whose turn another session began shows a proposal card first. |
+
+What phi does not do here.
+It does not stop a session from filing itself in the section, since the app asks nobody: the rule rests on ezexe's filing, and phi says once, in the session and on its record, that it saw the session there, and tells every session it lists who claims it.
+It does not compact a session, start a successor or move a session between sections: those are the app's tools, and the puppeteer makes the calls phi names.
+It speaks only when a hook fires, so a boundary reached while the puppeteer is idle is named beside its next message.
+The character count is of what phi's own hooks handed, so it is a floor under the context's real size.
+It does not block a puppeteer's edits, and it does not withdraw a tree's own start request.
+
 ## No setup
 
 The plugin works in any project it is enabled in.
@@ -58,6 +85,8 @@ Every key is optional.
 | `file_sets` | `true` | `false`: a session may be started by a brief that declares no file set |
 | `issues` | `true` | `false`: no GitHub issue is filed for a writing child's purpose |
 | `session_archives` | `false` | `true`: sessions may archive sessions |
+| `puppeteer_section` | `puppeteers` | another name for the sidebar section; an empty string turns the puppeteer rule off |
+| `puppeteer_chars` | 200000 | the characters phi may hand a puppeteer between compactions before the boundary notice says so |
 | `track` | `false` | `true`: the session tree is committed in the store's own repository |
 | `home` | none | a git remote: related repositories share one session tree |
 

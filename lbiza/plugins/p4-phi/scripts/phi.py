@@ -42,7 +42,8 @@ given; notes. Nothing is renamed.
 
 Commands for a session: `note "<claim>" --source "<where checked>"`, `done "<what was run and what it showed>"`,
 `task "<the new task>"`, `shard <paths or globs>`, `show [sessionId]`, `tree`, `background`, `detach <sessionId>`,
-`reparent <sessionId> <under sessionId>`.
+`reparent <sessionId> <under sessionId>`, `controls [sessionId ...] [--drop <sessionId>] [--hand <sessionId>]
+[--from <sessionId>] [--decline <request id> "<why>"]`.
 
 The issue loop (issues.py, #28): a child whose brief or plan names files in a GitHub repository gets an issue for its
 purpose; its commits say `Closes #N`; the test a plan step names, or `proof "<command>"`, is re-run at Stop and its
@@ -59,6 +60,11 @@ ledger.md from these files and the app's records; ezexe's message is read agains
 next session (prompter) and gate-checked into a start, a route or a queue (pioneer); a landed topic registers its
 route, which the next message is scored against; an under-determined message becomes one child a reading; a top
 session's meta pass reconciles every top's ledger into meta-ledger.md.
+
+The pair (controls.py, #58): a top session ezexe filed in the sidebar section "puppeteers" controls other top
+sessions, in any store. phi reads the filing from the app's own file, keeps the controlled sessions on the
+puppeteer's record (`controls`), tells each controlled session of its puppeteer, writes the puppeteer's board, gives
+it no hand-off advice, lets its turn end on a step that waits on them, and lets it archive a complete one.
 
 Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `new_task` (false: off),
 `rules`, `background_chars`, `reports_chars`, `wait_s`. P4_PHI=0 turns the plugin off, P4_PHI_NEW_TASK=0 the
@@ -90,6 +96,9 @@ import issues  # noqa: E402  (#28: a writing child's loop of issue, Closes #N, p
 import puppeteer  # noqa: E402  (#38: the watcher's ledger, prompty, prompter, pioneer, routes, readings, meta)
 
 puppeteer.PHI = sys.modules[__name__]   # phi runs as a script, so the puppeteer is handed this module, not a copy
+import controls  # noqa: E402  (#58: a puppeteer in the sidebar section, and the sessions it controls)
+
+controls.PHI = sys.modules[__name__]
 
 BACKGROUND = True
 REPORTS = True
@@ -377,6 +386,20 @@ def home_of_record(rec, depth=0):
     return store_at(rec.get("cwd")) or store_at(rec.get("originCwd"))
 
 
+def own_store(rec, sid, project=""):
+    """#58: the store of a session's own folder when it holds the session as a top session, '' otherwise. A top
+    session a puppeteer started in another environment lives in that environment's store, not its starter's."""
+    own = store_at(project) or store_at((rec or {}).get("cwd")) or store_at((rec or {}).get("originCwd"))
+    if not own or not sid:
+        return ""
+    s = load_session(own, sid)
+    return own if s.get("sessionId") and not spawned_from(s) else ""
+
+
+def same_store(a, b):
+    return bool(a and b) and os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
 class Me:
     """The session a hook or a command is running for: its sessionId, its CLI session, the app's record, its home."""
 
@@ -399,6 +422,8 @@ class Me:
                 above = self.hint = hint
             self.home = (home_of_record(app_record(above)) if above else "") or store_at(project) \
                 or home_of_record(self.rec)
+            if above:
+                self.home = own_store(self.rec, self.id, project) or self.home
             self.home, self.home_missing = relay.tree_home(self.home)   # a shared home store, when one is named
         self.store = self.store or self.home
         project_conf(self.store)
@@ -440,13 +465,15 @@ def save_session(home, s):
     for k in ("relayWarned", "marksGiven", "upTold", "splitAdvised"):
         if isinstance(disk.get(k), list):
             s[k] = list(s.get(k) or []) + [x for x in disk[k] if x not in (s.get(k) or [])]
-    for k in ("othersGiven", "plansSeen"):
+    for k in ("othersGiven", "plansSeen", "requestAnswers"):
         if isinstance(disk.get(k), dict):
             s[k] = {**disk[k], **(s.get(k) or {})}
     for k in ("rootStep", "shard", "disposable", "doneRetired", "archived", "appRoot", "nudged", "landingGiven",
-              "issue", "issueLooked"):
+              "issue", "issueLooked", "controls", "puppeteerArchives", "puppeteerSeen", "handedTo", "handedFrom"):
         if k in disk and k not in s:
             s[k] = disk[k]
+    if not s.pop("_controlsSet", None) and isinstance(disk.get("controls"), list):
+        s["controls"] = disk["controls"]          # #58: only the controls command and a puppeteer's own start change it
     if int(disk.get("anchorSeen") or 0) > int(s.get("anchorSeen") or 0):
         s["anchorSeen"] = disk["anchorSeen"]
     moved = disk.get("spawnedFrom") if isinstance(disk.get("spawnedFrom"), dict) else {}
@@ -932,12 +959,23 @@ def new_top_first_act():
             f"its reports stop going to the starter, then `{commands()} detach`.")
 
 
+ASK_ROUTE = ""                # #58: set for a session that has a puppeteer, which starts no new top session itself
+
+
+def asks(s):
+    """Kept for this hook's run: how a session that has a puppeteer gets a new top session."""
+    globals()["ASK_ROUTE"] = controls.ask_route(s) if isinstance(s, dict) and not spawned_from(s) else ""
+
+
 def new_top_route(owner_turn=True):
     """How a top session starts a new top session for a topic outside its task."""
+    if ASK_ROUTE:
+        return ASK_ROUTE
     how = ("Start it with `mcp__ccd_session__start_session`, `initiation` `user_asked`" if owner_turn else
-           f"This turn was started by another session, so the app refuses `user_asked`: write it as a start request, "
-           f"{request_cmd()}, which the next turn ezexe begins in any session of this store starts, without "
-           f"asking ezexe anything")
+           f"This turn was started by another session, so the app refuses `user_asked`: show it as a proposal "
+           f"card, `mcp__ccd_session__start_session` with `initiation` `own_initiative`, which ezexe presses in "
+           f"this session; only where the card is refused too, write it as a start request, {request_cmd()}, "
+           f"which the next turn ezexe begins in this session starts")
     return (f"{how}, `context` `fresh`, `use_worktree: false`; its brief: the topic, ezexe's words quoted, and "
             f"the lines \"{NEW_TOP_BRIEF} {new_top_first_act()}\" Both moves are needed: the app's detach, else it "
             f"stays nested under this session and reports here, and phi's, which phi also makes at its first hook "
@@ -989,9 +1027,9 @@ def split_text(home, s, prompt, cli=""):
         told = s["splitTold"] = {}
     if cli and told.get(cli):                      # #43: said once in full, then a line
         RAN["split"] = "line"
-        return ("phi (p4-phi): another session started this turn, so a task of its own in it is written as a start "
-                f"request with `phi.py request`, as said before and kept on {standing_path(home, s['sessionId'])}; "
-                "do the rest here.")
+        return ("phi (p4-phi): another session started this turn, so a task of its own in it is shown as a proposal "
+                "card, and written as a start request with `phi.py request` only where the card is refused, as said "
+                f"before and kept on {standing_path(home, s['sessionId'])}; do the rest here.")
     if cli:
         told[cli] = now()
     text = _split_full(home, s)
@@ -1027,9 +1065,11 @@ def _split_full(home, s):
                 "chain can settle is answered, not waited on.")
     return ("phi (p4-phi): this turn was started by another session, not ezexe, so the app refuses "
             "`mcp__ccd_session__start_session` with `user_asked`. Work in it that is a task of its own, outside "
-            f"this session's task, is written as a start request, {request_cmd()}: the next turn ezexe begins, "
-            "in any session of this store, starts it as this session's child. Do not ask ezexe to type anything "
-            "or click a card. Do the rest here; a question the chain can settle is answered, not waited on.")
+            "this session's task, is shown as a proposal card, `mcp__ccd_session__start_session` with "
+            "`initiation` `own_initiative`, which ezexe presses in this session, so the app's parent and phi's "
+            f"agree. Only where the card is refused too, write it as a start request, {request_cmd()}: the next "
+            "turn ezexe begins in this session starts it as this session's child. Do the rest here; a question "
+            "the chain can settle is answered, not waited on.")
 
 
 FEATURE = re.compile(r"^\W*(?:please\s+|now\s+|also\s+|and\s+|can you\s+|could you\s+)*(?:build|add|make|implement|"
@@ -1113,7 +1153,8 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
                 f"about something else, " + elsewhere +
                 f"question, a few tool calls) stays here. When ezexe says the task itself has changed: "
                 f"`{commands()} task \"<the new task>\"`. This session's page: {page_path(home, s['sessionId'])}."
-                + (" " + TOP_RULE if not spawned_from(s) and TOP_ORCHESTRATES else "")
+                + (" " + TOP_RULE if not spawned_from(s) and TOP_ORCHESTRATES
+                   and not controls.is_puppeteer(s, me.store) else "")
                 + (" " + caps_text(home, s) if caps_text(home, s) else ""))
         keep_standing(home, s["sessionId"], "A message about something else", full)
         return full
@@ -1408,11 +1449,15 @@ def h_plan(payload):
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     s = ensure_session(me.home, me.id, me.rec, me.cli)
     save_session(me.home, s)
+    asks(s)
     text = plans.record(me.home, s, inp, payload.get("transcript_path") or "")
     if isinstance(inp.get("items"), list):        # a plan's first whole list, or a revision of it
         s = load_session(me.home, me.id) or s
         cap = caps_text(me.home, s)
         advise = plans.split_advice if spawned_from(s) else plans.top_advice if TOP_ORCHESTRATES else None
+        if advise is plans.top_advice and controls.is_puppeteer(s, me.store):
+            advise = None                          # #58: a puppeteer's steps are its own; it hands none to a child
+            RAN["pair"] = "puppeteer"
         advice = advise(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user", cap)             if advise else ""                      # #24: a project whose top session lands its plan itself
         RAN["split"] = "advised" if advice else ""
         feat = feature_steps_text(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user")
@@ -1466,7 +1511,7 @@ def nudge_key(step):
 
 def nudge_step(home, s):
     """The top session's step in progress when it is a work step not nudged on yet, else None."""
-    if not s or spawned_from(s) or not TOP_ORCHESTRATES:
+    if not s or spawned_from(s) or not TOP_ORCHESTRATES or controls.is_puppeteer(s, store_at(s.get("cwd"))):
         return None
     plan = plans.load(home, s["sessionId"])
     st = plans.step_of(plan, plan.get("current") or "") if plan.get("steps") else None
@@ -1618,6 +1663,8 @@ def h_memory_gap(payload):
     text = gaps.advice(me.home, me.store, s, path, s.get("turnBy", "user") == "user", commands(),
                        NEW_TOP_BRIEF + " " + new_top_first_act())
     RAN["memory_gap"] = bool(text)
+    if text and controls.ask_text(s):              # #58: a controlled session asks its puppeteer, and starts none
+        text += "\n\n" + controls.ask_text(s)
     return text or None
 
 
@@ -1641,6 +1688,17 @@ def h_self_archive(payload):
                 RAN["archive_refused"] = ""
                 RAN["archive_picked"] = target[:40]
                 return None
+        if not own and controls.is_puppeteer(s, me.store):   # #58: a puppeteer archives a complete session it controls
+            left = controls.archive(me.home, s, target, str(inp.get("reason") or ""))
+            RAN["archive_refused"] = ""
+            RAN["puppeteer_archive"] = ("left " if left else "let ") + target[:40]
+            controls.board(me.home, load_session(me.home, me.id) or s)
+            if not left:
+                return None
+            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                           "permissionDecisionReason": (
+                                               f"phi (p4-phi): this puppeteer's archive of {target} is refused: "
+                                               f"{left}. Name it to ezexe as left, with that reason.")}}
         why = relay.NO_ARCHIVE + (
             " This session's turn is kept. " + relay.CHILD_DONE if own and spawned_from(s) else
             " " + relay.BUTTON if own else
@@ -1962,6 +2020,7 @@ def h_session_start(payload):
     watch_over(me.home, s)
     source = payload.get("source") or "startup"
     RAN["start"] = source
+    asks(s)
     lost = source in ("compact", "clear")
     text = rule = ""
     if not (source == "startup" and not spawned_from(s) and not s.get("task")
@@ -1980,8 +2039,12 @@ def h_session_start(payload):
         rule = "\n\n".join(p for p in (rule, f"phi (p4-phi): this project's p4.json names the home store "
                                                f"{me.home_missing}, which this machine has not seen; the session "
                                                f"tree stays in this project's store.") if p)
+    first = ""
+    if source == "compact" and controls.is_puppeteer(s, me.store):
+        first = controls.compacted(me.home, s)     # #58: the board's path before anything else
+        RAN["pair"] = "compacted"
     save_session(me.home, s)
-    return "\n\n".join(p for p in (rules, text, rule) if p) or None
+    return "\n\n".join(p for p in (first, rules, text, rule) if p) or None
 
 
 def watch_over(home, s):
@@ -2073,6 +2136,10 @@ def h_user_prompt_submit(payload):
     me = started_by(Me(payload), payload)
     if not me.home or not me.id:
         return None
+    if me.store and not same_store(me.store, me.home) and NEW_TOP.search(str(payload.get("prompt") or "")) \
+            and not load_session(me.home, me.id).get("sessionId"):
+        me.home = me.store                         # #58: a new top session started from another environment's session
+        RAN["own_store"] = True
     configure(me.home)
     s = ensure_session(me.home, me.id, me.rec, me.cli, hint=me.hint)
     ran_for(s, me)
@@ -2164,6 +2231,11 @@ def h_user_prompt_submit(payload):
                         "before anything else, so the app stops nesting it under its starter and its reports stop "
                         "going there; it orchestrates its own topic, and the other top sessions relay to it as "
                         "siblings.")
+    if not spawned_from(s):
+        try:                                       # #58: the puppeteer and the sessions it controls
+            parts[0:0] = pair_parts(me, s, req if req and not handed_over(payload.get("prompt")) else "", parts[0])
+        except Exception:  # noqa: BLE001
+            pass
     unsent = [u for u in s.pop("unsentRelay", None) or [] if isinstance(u, dict)]
     if unsent:
         parts.insert(0, "phi (p4-phi): " + " ".join(
@@ -2193,6 +2265,41 @@ def h_user_prompt_submit(payload):
     text, _ = relay.rebase(me.home, s["sessionId"], max(room // 3, room - used), fair_cut, touches_of(me.home, s))
     RAN["relay"] = len(text)
     return fit([text, last] + parts, room, me.home, s["sessionId"])
+
+
+def pair_parts(me, s, req, changed=""):
+    """#58, beside a top session's message. A puppeteer: what it is, once; the sessions it started, now controlled;
+    a top session ezexe started beside them; the controlled sessions' reports by reference; the requests addressed
+    to it and where ezexe's message belongs, at a turn ezexe began; a boundary; and its board rewritten. Any other
+    top session: its puppeteer, once, and what became of the requests it sent it."""
+    out = []
+    if not controls.is_puppeteer(s, me.store):
+        told = controls.pair_text(s, me.store)
+        if told:
+            RAN["pair"] = "controlled"
+        asks(s)
+        answers = controls.answers_text(me.home, s) if s.get("puppeteer") else ""
+        return [p for p in (told, answers) if p]
+    RAN["pair"] = "puppeteer"
+    if not s.get("puppeteerSeen"):
+        s["puppeteerSeen"] = now()                 # said once, and kept, so a filing is never silent
+        out.append("phi (p4-phi): " + controls.rule_text(me.home, s))
+    controls.rules_changed(s, changed)
+    lines = controls.take_started(me.home, s) + controls.announce(me.home, s)
+    if lines:
+        out.append("phi (p4-phi): " + " ".join(lines))
+    seen = controls.reports(s)
+    if seen:
+        out.append("phi (p4-phi): the sessions this puppeteer controls ended turns. Each is one line and its page; "
+                   "read a page only when its detail is needed:\n" + "\n".join(seen))
+    if req:
+        out += [p for p in (controls.requests_text(me.home, s), controls.route_down(s, req)) if p]
+    edge = controls.boundary(me.home, s, me.store)
+    if edge:
+        RAN["boundary"] = True
+        out.append(edge)
+    controls.board(me.home, s)
+    return out
 
 
 def h_stop(payload):
@@ -2300,8 +2407,13 @@ def h_stop(payload):
     now_s = load_session(me.home, s["sessionId"]) or s
     if now_s.get("doneRetired") or now_s.get("archived"):
         return None
+    waits = []
+    if not spawned_from(now_s) and controls.is_puppeteer(now_s, me.store):
+        waits = controls.waited_on(now_s)          # #58: its turn may end on a step that waits on them
+        RAN["waits_on"] = len(waits)
+        controls.board(me.home, now_s)
     why = plans.keep_going(me.home, now_s, row["report"], turn.get("calls") or [], row["id"],
-                           bool(payload.get("stop_hook_active")))
+                           bool(payload.get("stop_hook_active")), waits=waits)
     why = "\n\n".join(p for p in (held, why) if p)   # #28: the proving test's verdict, then the open steps
     if why:                                        # #20: open steps the chain can settle send the turn back
         RAN["kept_going"] = True
@@ -2341,6 +2453,13 @@ def h_start_advice(payload):
         RAN["claimed"] = True                       # a start request's call, given exactly: the requester decided
         return None
     brief = str(inp.get("prompt") or "")
+    if brief and NEW_TOP.search(brief):
+        mine = load_session(me.home, me.id)
+        if not spawned_from(mine) and controls.ask_text(mine) and controls.puppeteer_of(mine, me.store)[0]:
+            RAN["asked_of_puppeteer"] = True       # #58: asked of its puppeteer, never started here
+            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                           "permissionDecisionReason": (
+                                               "phi (p4-phi): this start is refused. " + controls.ask_text(mine)[15:])}}
     if brief and not NEW_TOP.search(brief) and FILE_SETS:
         s = load_session(me.home, me.id)
         files = starts.files_of(brief, s.get("cwd") or payload.get("cwd") or "")
@@ -2833,7 +2952,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="phi: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
-                 "request", "proof"):
+                 "request", "proof", "controls"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in (default: this session's)")
         p.add_argument("--session", default="", help="the sessionId (default: this session's)")
@@ -2862,6 +2981,14 @@ def main(argv=None):
             p.add_argument("--context", default="fresh", choices=("fresh", "fork"))
             p.add_argument("--background", default="", help="the child's background (default: one built from this "
                                                               "session's task and the project)")
+            p.add_argument("--to-puppeteer", action="store_true",
+                           help="ask this session's puppeteer for a new top session, and start none here")
+        if name == "controls":
+            p.add_argument("ids", nargs="*", help="top sessions this puppeteer controls; none prints where each stands")
+            p.add_argument("--drop", action="append", default=[], help="a session it no longer controls")
+            p.add_argument("--hand", default="", help="the fresh puppeteer this one hands over to")
+            p.add_argument("--from", dest="take", default="", help="the puppeteer that handed over to this one")
+            p.add_argument("--decline", nargs=2, metavar=("REQUEST", "WHY"), help="a request addressed to it")
 
     def common(p):
         p.add_argument("--p4", default="", help="the store the sessions' files live in (default: this session's)")
@@ -2913,12 +3040,40 @@ def main(argv=None):
             for line in lines:
                 print("phi: " + line)
             return 0
+        if a.cmd == "controls":
+            if not controls.is_puppeteer(s, me.store):
+                held = controls.section_of(s["sessionId"])
+                raise ValueError(f"this session is not a puppeteer: that is a top session ezexe filed in the sidebar "
+                                 f"section \"{controls.section_name(me.store) or controls.SECTION}\", and the app's "
+                                 f"file shows this one in " + (f"\"{held}\"" if held else "no section")
+                                 + (", started by another session" if spawned_from(s) else ""))
+            if a.hand:
+                print(controls.hand(me.home, s, a.hand))
+            if a.take:
+                print(controls.take(me.home, s, a.take))
+            if a.decline:
+                print(controls.decline(me.home, s, a.decline[0], a.decline[1]))
+            for line in controls.control(me.home, s, a.ids, a.drop):
+                print(line)
+            s = load_session(me.home, s["sessionId"])
+            controls.board(me.home, s)
+            print(controls.controls_text(me.home, s))
+            return 0
         if a.cmd == "request":
             brief = a.brief
             if a.brief_file:
                 with open(a.brief_file, encoding="utf-8") as f:
                     brief = f.read()
             save_session(me.home, s)
+            if a.to_puppeteer:                     # #58: a new top session is asked of the puppeteer
+                pid, _ = controls.puppeteer_of(s, me.store)
+                if not pid:
+                    raise ValueError("this session has no puppeteer: no session filed in the sidebar section lists "
+                                     "it under `controls`")
+                rid, new = starts.add(me.home, s["sessionId"], a.title, brief, "fresh", background=a.background,
+                                      declared=True, to=pid)
+                print(starts.asked_text(rid, new, clean(a.title)))
+                return 0
             rid, new = starts.add(me.home, s["sessionId"], a.title, brief, a.context, background=a.background,
                                   declared=True)
             print(starts.requested_text(rid, new))

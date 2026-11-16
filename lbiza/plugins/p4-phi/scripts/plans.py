@@ -390,6 +390,14 @@ TABULATES = re.compile(r"^\W*(?:final\s+)?(?:[\w/-]+\s+){0,3}?(?:pass/fail\s+)?(
                        r"findings|steps?|checks?)\b", re.I)
 
 
+# #58: a start the app refuses is shown as a card in the session that asked, so the app's parent and phi's agree
+CARD_EACH = ("This turn was started by another session, so the app refuses `user_asked`: show each as a proposal "
+             "card, `mcp__ccd_session__start_session` with `initiation` `own_initiative`, which ezexe presses in "
+             "this session, so the app's parent and phi's agree. Only where the card is refused too, write it as a "
+             "start request, `phi.py request \"<title>\" --brief \"<the whole brief>\"`, which the next turn "
+             "ezexe begins in this session starts as this session's child")
+
+
 def judge(plan, cwd):
     """The open steps -> (those that can each run on their own, [(address, why it stays)])."""
     steps = [st for st in plan.get("steps") or [] if st.get("status") != "completed"]
@@ -453,9 +461,7 @@ def split_advice(home, s, plan, owner_turn, cap):
                 f"Every step stays here as a sub-step. {judged}")
     route = ("Start each now with `mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, "
              "`use_worktree: false`, on this session's branch" if owner_turn else
-             "This turn was started by another session, so the app refuses `user_asked`: write each as a start "
-             "request, `phi.py request \"<title>\" --brief \"<the whole brief>\"`, which the next turn ezexe "
-             "begins, in any session of this store, starts as this session's child; ask ezexe nothing")
+             CARD_EACH)
     stay = ("; ".join(f"{a} ({why})" for a, why in kept)) or "none"
     return (f"phi (p4-phi): steps {named} can each run on their own: no path another step names, nothing leaning "
             f"on another step, more than a quick thing. {route}; one child per step, its brief that step's slice: "
@@ -577,9 +583,7 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
         return f"{head} Its work steps need no session: {named}.{agents} Staying here: {stay}."
     route = ("Start each now with `mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, "
              "`use_worktree: false`, on this session's branch" if owner_turn else
-             "This turn was started by another session, so the app refuses `user_asked`: write each as a start "
-             "request, `phi.py request \"<title>\" --brief \"<the whole brief>\"`, which the next turn ezexe "
-             "begins, in any session of this store, starts as this session's child; ask ezexe nothing")
+             CARD_EACH)
     return (f"{head} Hand its work steps to child sessions, split by file set: steps that share a file go to one "
             f"child as a serial run, and steps with disjoint files each get a child: {named}. {route}. Each brief is its "
             f"steps' words, a line `Files: <the paths it may write>`, what they must leave done, and says "
@@ -910,10 +914,17 @@ WAITS_ON_OWNER = re.compile(r"\b(?:wait\w*|blocked|need\w*|until)\b[^.\n]{0,80}\
                             r"\b(?:your|ezexe's|the (?:user|owner)'s?) (?:go|ok|okay|approval|answer|decision|sign-?off)\b", re.I)
 
 
-def keep_going(home, s, report, calls, turn_id, active=False):
+AWAITS = re.compile(r"\b(?:a?wait\w*|collect\w*|until|hold\w*\s+for)\b[^.;]*\b(?:reports?|sessions?|trees?|tops?|"
+                    r"results?|finish\w*|done|land\w*|answers?|repl(?:y|ies)|word)\b", re.I)
+# #58, the puppeteer's part of #55: a step that waits on other sessions' reports. Nothing can be done on it until
+# one arrives, and the arrival starts the next turn.
+
+
+def keep_going(home, s, report, calls, turn_id, active=False, waits=()):
     """The Stop hook's reason to send the session back to its next open step; '' when the turn may end: no open
     step, the turn wrapped up or asked ezexe a matter of authority, the next step is one, a background task is
-    still open (its notice starts the next turn), or this turn was sent back KEEP_GOING_MAX times already."""
+    still open (its notice starts the next turn), this turn was sent back KEEP_GOING_MAX times already, or the
+    session is a puppeteer whose next step waits on sessions it controls, `waits` naming those not yet complete."""
     p = load(home, s["sessionId"])
     steps = [x for x in p.get("steps") or [] if x.get("status") != "completed"]
     if not steps:
@@ -924,6 +935,8 @@ def keep_going(home, s, report, calls, turn_id, active=False):
     if any(t.get("status") == "open" for _, t in _tasks(p)):
         return ""
     nxt = next((x for x in steps if x.get("status") == "in_progress"), steps[0])
+    if waits and AWAITS.search(str(nxt.get("content") or "")):
+        return ""                                  # #58: a puppeteer waiting on the sessions it controls
     tail = str(report or "").strip()[-600:]
     asks = [q for q in re.findall(r"[^.!?\n]*\?", tail) if len(q.strip()) > 8]
     if AUTHORITY.search(str(nxt.get("content") or "")) or any(AUTHORITY.search(q) for q in asks) \

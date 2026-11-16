@@ -1,6 +1,6 @@
 ---
 name: phi
-description: What linked sessions hand each other. Use when a message from ezexe is about something other than this session's task, when starting a session for part of the task, when a session you started has finished a turn, when a finding should outlast this session, when something showed the task done, or when asked what the sessions hold, to print the tree, or to detach or reparent a session.
+description: What linked sessions hand each other. Use when a message from ezexe is about something other than this session's task, when starting a session for part of the task, when a session you started has finished a turn, when a finding should outlast this session, when something showed the task done, or when asked what the sessions hold, to print the tree, to detach or reparent a session, or when this session is a puppeteer filed in the sidebar section "puppeteers" or is controlled by one.
 ---
 
 # phi: what linked sessions hand each other
@@ -75,8 +75,29 @@ The plugin works in any project it is enabled in, with no settings file, no envi
 - **Every key** of `p4.json` and `phi/phi.json`, and every `P4_*` variable, is optional. The README lists each with its default.
 - **What the plugin remembers outside a project** is kept in its data folder, `${CLAUDE_PLUGIN_DATA}`, which `plugins-reference.md` says is kept across plugin updates.
 
+## A puppeteer and the sessions it controls
+
+This is the narrow sense of the word: not every orchestrator's watcher, but the one session ezexe filed in the sidebar section "puppeteers".
+It controls the topmost orchestrating sessions of one or more projects, each project with its own store.
+The mark is a pair: the puppeteer, and the session or sessions it controls.
+A controlled session stays the top of its own tree, in its own section, a sibling of the others and never the puppeteer's child.
+
+- **How a session gets a puppeteer:** ezexe files a top session in the section, and that session records each session it controls with `controls <sessionId> ...`. phi reads the filing from the app's own `claude_desktop_config.json` each time it matters and keeps no mark of its own. A top session the puppeteer starts is recorded as controlled at the puppeteer's next message, without a command.
+- **What the controlled session is told:** at its next message, once, it is told which session is its puppeteer and what that changes. It keeps its own steerer and lander and still pushes its own work. When the pair ends it is told once more.
+- **Where each stands:** `controls` alone prints every controlled session by its full title, with its store, its state and what phi's records hold against archiving it. `controls --drop <sessionId>` ends a pair.
+- **The board:** `board.md` in the puppeteer's session folder is rewritten by phi's hooks and never by hand. It holds each controlled session in one line with the path of its page, what is waited on, the requests addressed to the puppeteer, parked issues, the rules that changed during the run, and what was archived or left. What phi cannot see reaches it through `note`: `--kind decision` for what waits on ezexe, `--kind waiting` for what waits on a session, `--kind parked` for a parked issue.
+- **Reports by reference:** when a controlled session ends a turn, the puppeteer is handed one line and the path of that session's page, never the report's text. Read the page only when the detail is needed.
+- **Its own steps:** a puppeteer writes no plugin or project files. Its plan gets no hand-off advice and no nudge. Waiting on the controlled sessions' reports and the few read-only checks of their results are its own work, and its turn may end on a step that waits on them, with a line naming whom it waits on.
+- **Work goes down, not sideways:** work ezexe gives the puppeteer on a topic a controlled session orchestrates is sent to that session in one message, with ezexe's words, a `Files:` line and what done looks like. That session briefs and starts its own child. The puppeteer does not do the work and does not start that child.
+- **A new top session goes through the puppeteer:** a controlled session that would start a new top session writes `request "<title>" --brief "<the whole brief>" --to-puppeteer` and starts nothing, and its own start of one is refused. The puppeteer is handed the request at the next turn ezexe begins in it, starts the session in the requester's project, and files it in that project's section with `mcp__ccd_sidebar__move_sessions`, never in "puppeteers". `controls --decline <request id> "<why>"` declines it, and the requester is told. A top session ezexe starts directly beside a controlled one is named to the puppeteer once.
+- **Archiving:** a puppeteer may archive a complete session it controls, or one in such a session's tree, a top session included, with no quick select. It first keeps the outcome with `note`, then calls `mcp__ccd_session_mgmt__archive_session` with a `reason` saying what showed the task done, the work landed and pushed, and no other session needing its scratch clone. phi refuses the call for a session that is mid-turn, has open plan steps, a running background task, a live session under it, a start request waiting or an issue-closing commit on no remote branch, and for one it does not control. Each call is kept on the puppeteer's record with its reason, so it names each session it archived and each it left.
+- **Compacting at a boundary:** a boundary is a controlled tree closed, or every controlled session idle with no request waiting. phi names it once. The puppeteer then brings the board up to date, reads its context level with `mcp__ccd_session_mgmt__get_usage`, and ends the turn with `mcp__ccd_turn__wrap_up` whose question is one sentence with that level and whose buttons are "Compact now" and "Later". On "Compact now" it answers with one line: `/compact keep the path of the puppeteer board and read it first`. After a compaction the board's path is the first thing it is handed.
+- **A successor:** when compaction is no longer enough, the old puppeteer runs `controls --hand <new sessionId>` and the fresh one, filed in the section, runs `controls --from <old sessionId>`. It takes over the same controlled sessions and the old one's notes, then notes and archives the old puppeteer.
+- **What does not change:** deleting data, force pushes and publishing still need ezexe's yes in the session that acts.
+
 ## What it does not do
 
 - It does not find an earlier turn by the words of a request. A session is given what the sessions linked to it kept. Only a registered route, a landed topic whose records back it, is scored against a message.
 - It does not start, stop or message sessions itself: pioneer hands the exact call, and the session makes it.
 - It does not reach subagents started with the Agent tool.
+- It does not stop a session from filing itself in the section "puppeteers": the app asks nobody, so the rule rests on ezexe's filing, and phi makes the filing visible. It does not compact a session or move one between sections, and it does not block a puppeteer's edits.

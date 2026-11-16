@@ -284,13 +284,16 @@ class TreeOfPlans(unittest.TestCase):
         self.assertIn("Every step stays here as a sub-step", ctx)
         self.assertNotIn("user_asked", ctx)
 
-    def test_in_a_turn_another_session_began_the_advice_is_start_requests(self):
+    def test_in_a_turn_another_session_began_the_advice_is_cards_then_start_requests(self):
+        """#58: a card ezexe presses in this session, and a start request only where the card is refused too."""
         self.t.say(B, "Do the three parts")
         self.t.say(B, '<cross-session-message from="local_x">go on</cross-session-message>')
         ctx = self.plan(B, self.three())
-        self.assertIn("write each as a start request, `phi.py request", ctx)
+        self.assertIn("show each as a proposal card", ctx)
+        self.assertIn("`initiation` `own_initiative`, which ezexe presses in this session", ctx)
+        self.assertIn("write it as a start request, `phi.py request", ctx)
         self.assertNotIn("`initiation` `user_asked`", ctx)
-        self.assertNotIn("own_initiative", ctx)
+        self.assertNotIn("any session of this store", ctx)
 
     def test_a_child_waiting_on_a_question_the_chain_can_settle_is_flagged_up(self):
         """Act-don't-wait: the parent hears of a child's open question that is not ezexe's to answer."""

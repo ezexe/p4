@@ -210,13 +210,15 @@ class Linear(Base):
         r = t.cli(TOP, "pioneer", did)
         self.assertIn("queued as start request req-", r.stdout + r.stderr)
         self.assertEqual([x["after"] for x in starts.state(t.p4).values()], [KID])
-        self.assertNotIn("start requests from", context(t.say(TOP2, "How are the docs coming along?")),
+        self.assertNotIn("start requests", context(t.say(TOP, "How is the exporter coming along?")),
                          "not handed out while the writer is busy")
         text, _ = self.ledger()
         self.assertIn(f"waits behind \"the flush port\" ({KID})", text)
         t.stop(KID, "Port the flush", report="Ported.")
-        line = context(t.say(TOP2, "And how are the docs now?"))
-        self.assertIn("start requests from", line)
+        self.assertNotIn("start requests", context(t.say(TOP2, "And how are the docs now?")),
+                         "#58: never handed to a session that did not file it")
+        line = context(t.say(TOP, "And how is the exporter now?"))
+        self.assertIn("start requests this session filed", line)
         self.assertIn("Rename the retry helper", call_in(line)["prompt"])
 
 

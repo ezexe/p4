@@ -186,13 +186,11 @@ def advice(home, store, s, path, owner_turn, commands, new_top, root=None):
         call = {"initiation": "user_asked", "title": title, "context": "fresh", "use_worktree": False,
                 "cwd": proj["cwd"], "prompt": brief}
         where = f"in {proj['cwd']}"
-    if not owner_turn and not proj["cloud"] and proj["store"]:
-        import starts
-        rid, new = starts.add(proj["store"], s["sessionId"], title, brief)
-        return (head + f"this turn was started by another session, not ezexe, so the app refuses `user_asked`; "
-                f"phi kept it as start request {rid} in {relay.norm(proj['store'])}, {where}: the next turn ezexe "
-                f"begins in a session of that store starts it. Ask ezexe nothing about it, and carry on.")
-    if not owner_turn:
-        return (head + f"this turn was started by another session, so write it as a start request, `{commands} "
-                f"request \"{title}\" --brief \"<the brief below>\"`, and carry on. Its brief: {brief}")
+    if not owner_turn:                             # #58: a card in the session that asked, never another's turn
+        card = {**call, "initiation": "own_initiative"}
+        return (head + f"this turn was started by another session, not ezexe, so the app refuses `user_asked`: show "
+                f"it as a proposal card, {where}, with `mcp__ccd_session__start_session` and {json.dumps(card)}, "
+                f"which ezexe presses in this session. Only if the card is refused too, write it as a start "
+                f"request, `{commands} request \"{title}\" --brief \"<the brief above>\"`, which the next turn "
+                f"ezexe begins in this session starts. Carry on meanwhile.")
     return head + f"start it now, {where}, with `mcp__ccd_session__start_session` and {json.dumps(call)}."
