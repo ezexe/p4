@@ -20,13 +20,14 @@ is not checked. To get torch on such a Mac, build .venv from a Python 3.12: remo
 It stops before it makes or tops up .venv when the Python that runs ezexe/phi there, .venv's own or else the one
 running this script, is older than the requires-python in the pyproject.toml of the ezexe/phi it installs: the
 checkout's own, or for an ezexe/phi from GitHub the one on GitHub, read before the install, with PHI_PYTHON in its
-place when GitHub cannot be reached.
+place when that file cannot be read or sets no lower bound this script reads.
 
 The plugins' hooks never need .venv: they run on the system python3, standard library only. This script uses the
 standard library only too, so it runs before .venv exists.
 """
 
 import argparse
+import http.client
 import os
 import platform
 import re
@@ -43,7 +44,7 @@ TORCH_CPU = "https://download.pytorch.org/whl/cpu"
 CHECK = ("torch", "numpy", "phi_prune", "phi_rank", "phi_store", "phi_model", "anthropic")
 NEED_TORCH = ("torch", "phi_prune", "phi_rank")     # what cannot import on a machine with no torch build
 PHI_PYPROJECT = "https://raw.githubusercontent.com/ezexe/phi/HEAD/pyproject.toml"     # of what PHI_GIT installs
-PHI_PYTHON = (3, 11, 0)     # ezexe/phi's requires-python, in its place when GitHub cannot be reached
+PHI_PYTHON = (3, 11, 0)     # ezexe/phi's requires-python, in its place when GitHub's file gives none
 LOWER = re.compile(r"(>=|~=|==|>)\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?")     # a version specifier that sets a lower bound
 
 
@@ -83,17 +84,22 @@ def github_pyproject():
     try:
         with urllib.request.urlopen(PHI_PYPROJECT, timeout=10) as r:
             return r.read().decode("utf-8")
-    except (OSError, ValueError):
+    except (OSError, ValueError, http.client.HTTPException):
         return None
 
 
 def python_floor(src, editable):
-    """The oldest Python ezexe/phi installs on, as major, minor and micro: the highest lower bound in the
-    requires-python of its pyproject.toml, the checkout's or else the one on GitHub, None when that file sets none,
-    and PHI_PYTHON when GitHub cannot be read."""
-    text = (Path(src) / "pyproject.toml").read_text(encoding="utf-8") if editable else github_pyproject()
-    if text is None:
-        return PHI_PYTHON
+    """The oldest Python ezexe/phi installs on, as major, minor and micro. For a checkout, the lower bound its
+    pyproject.toml sets, or None when it sets none; for an ezexe/phi from GitHub, the lower bound of the
+    pyproject.toml there, or PHI_PYTHON when that file cannot be read or sets no lower bound this script reads."""
+    if editable:
+        return lower_bound((Path(src) / "pyproject.toml").read_text(encoding="utf-8"))
+    return lower_bound(github_pyproject() or "") or PHI_PYTHON
+
+
+def lower_bound(text):
+    """The highest lower bound in the requires-python line of a pyproject.toml's text, as major, minor and micro,
+    or None when the line is missing or sets no lower bound."""
     m = re.search(r"""(?m)^\s*requires-python\s*=\s*(["'])(.*?)\1""", text)
     bounds = []
     for op, *parts in LOWER.findall(m.group(2) if m else ""):

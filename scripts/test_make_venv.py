@@ -6,6 +6,7 @@ after it.
 """
 
 import contextlib
+import http.client
 import io
 import os
 import shutil
@@ -180,6 +181,51 @@ class Venv(unittest.TestCase):
             self.assertEqual(v.main([]), 0)
         self.assertIn("on Python 3.13, so .venv is finished without it", out.getvalue())
 
+    def test_ezexe_phi_from_github_with_no_floor_to_read_is_held_to_its_known_floor(self):
+        """A text from GitHub with no lower bound to read, such as a captive portal's page, an upper bound alone or
+        no requires-python at all, holds a 3.10 to PHI_PYTHON, as GitHub out of reach does."""
+        for text in ("<html><body>Sign in to the network</body></html>", 'requires-python = "<4"',
+                     'requires-python = "!=3.10.*"', '[project]\nname = "phi-prune"\n'):
+            calls = self.faked((3, 10, 14))
+            v.github_pyproject = lambda text=text: text
+            with self.assertRaises(SystemExit, msg=text) as stop:
+                v.main([])
+            self.assertIn("ezexe/phi needs Python 3.11 or newer", str(stop.exception))
+            self.assertEqual(calls, [])
+
+    def test_github_pyproject_reads_the_file_and_falls_back_when_the_read_breaks(self):
+        class Reply:
+            def __init__(self, body):
+                self.body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                if isinstance(self.body, BaseException):
+                    raise self.body
+                return self.body
+        urls = []
+
+        def answering(body):
+            def urlopen(url, timeout):
+                urls.append(url)
+                if isinstance(body, OSError):
+                    raise body
+                return Reply(body)
+            return types.SimpleNamespace(request=types.SimpleNamespace(urlopen=urlopen))
+        self.addCleanup(setattr, v, "urllib", v.urllib)
+        v.urllib = answering(b'requires-python = ">=3.12"\n')
+        self.assertEqual(v.github_pyproject(), 'requires-python = ">=3.12"\n')
+        for broken in (http.client.IncompleteRead(b"requires-py"), OSError("the network is unreachable"),
+                       b"\xff\xfe is no utf-8"):
+            v.urllib = answering(broken)
+            self.assertIsNone(v.github_pyproject(), broken)
+        self.assertEqual(set(urls), {v.PHI_PYPROJECT})
+
     def test_requires_python_forms(self):
         forms = {'requires-python = ">=3.10,<4"': (3, 10, 0), 'requires-python = ">= 3.10"': (3, 10, 0),
                  'requires-python = "~=3.11"': (3, 11, 0), 'requires-python = "==3.11.*"': (3, 11, 0),
@@ -196,6 +242,8 @@ class Venv(unittest.TestCase):
         self.assertEqual(v.python_floor(v.PHI_GIT, False), v.PHI_PYTHON)
         v.github_pyproject = lambda: 'requires-python = ">=3.12"'
         self.assertEqual(v.python_floor(v.PHI_GIT, False), (3, 12, 0))
+        v.github_pyproject = lambda: 'requires-python = "<4"'
+        self.assertEqual(v.python_floor(v.PHI_GIT, False), v.PHI_PYTHON)
 
     def test_a_named_path_that_is_not_phi_stops_with_a_checkout_beside(self):
         """--phi names the checkout to install, so a named folder that is no ezexe/phi checkout stops before anything
