@@ -162,6 +162,24 @@ class Requests(unittest.TestCase):
         self.assertEqual(phi.request_of("<system-reminder>x</system-reminder>"), "")
         self.assertEqual(phi.request_of(None), "")
 
+    def test_a_paste_only_message_is_the_persons_request(self):
+        said = "Fix the port table.\nIt drops the last row."
+        paste = '<pasted_content id="9b38">\n' + said + '\n</pasted_content id="9b38">\n'
+        self.assertEqual(phi.request_of(paste), said)
+        self.assertEqual(phi.request_of("<system-reminder>x</system-reminder>\n" + paste), said)
+        self.assertEqual(phi.request_of("see this:\n" + paste), "see this:\n" + said)
+        # a pasted page of markup is still the person's message
+        self.assertEqual(phi.request_of('<pasted_content id="a1"><b>bold</b></pasted_content id="a1">'), "<b>bold</b>")
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Tree(tmp)
+            tree.record(TOP)
+            tree.say(TOP, paste)
+            s = tree.session(TOP)
+            self.assertEqual(s["turnBy"], "user")
+            self.assertEqual(s["task"], said)
+            t = transcript(os.path.join(tmp, "t.jsonl"), paste, [], "ok")
+            self.assertEqual(phi.last_turn(t)["prompt"], said)
+
     def test_last_turn_of_a_session_no_human_spoke_to(self):
         with tempfile.TemporaryDirectory() as tmp:
             t = transcript(os.path.join(tmp, "t.jsonl"), HANDED, [

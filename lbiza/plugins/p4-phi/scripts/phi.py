@@ -144,6 +144,8 @@ TASK_MARK = re.compile(r"(?m)^Task:\s*$")
 FORK_HEAD = re.compile(r"\A\s*Task \(from the session that started this one\):\s*")
 NOTES_TAIL = re.compile(r"\n\s*Shared notes folder for this group of sessions.*\Z", re.S)
 NOTES_ID = re.compile(r"side-session-notes[\\/]+(local_[0-9A-Za-z-]+)")
+# what a person pasted into the message box: the app wraps it, and a message may be nothing but the block
+PASTED = re.compile(r"<pasted_content\b[^>]*>\n?(.*?)\n?</pasted_content\b[^>]*>", re.S)
 LEAD = re.compile(r"^(?:cd\s+\S+\s*(?:&&|;)\s*)+")
 WS = re.compile(r"\s+")
 SAFE = re.compile(r"[^A-Za-z0-9_.-]")
@@ -560,8 +562,9 @@ def latest_reports(rows, skip=""):
 def request_of(prompt):
     """The request inside a message. A session started by another session gets its task under leading
     <system-reminder> blocks and a `Background ... Task:` wrapper, and a forked one under the line `Task (from the
-    session that started this one):`; this takes those off. '' when nothing is left or what is left is the
-    harness speaking."""
+    session that started this one):`; this takes those off. A `<pasted_content id="..">` block is what a person
+    pasted, so its inner text is the request, also when the message is nothing but the block. '' when nothing is
+    left or what is left is the harness speaking."""
     text = prompt if isinstance(prompt, str) else ""
     while REMINDER.match(text):
         text = REMINDER.sub("", text, count=1)
@@ -570,6 +573,9 @@ def request_of(prompt):
         text = text[m.end():]
     text = FORK_HEAD.sub("", text, count=1)
     text = NOTES_TAIL.sub("", text).strip()
+    if PASTED.search(text):
+        # a paste is the person's message, whatever it begins with: the harness wraps none of its own in this tag
+        return PASTED.sub(lambda m: m.group(1), text).strip()
     return "" if text.startswith("<") else text
 
 
