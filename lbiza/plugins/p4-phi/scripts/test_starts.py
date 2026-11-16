@@ -278,6 +278,33 @@ class StartRequests(unittest.TestCase):
         s.pop("filesHeldTold")
         self.assertEqual(phi.files_held_text(t.p4, s, closing, pushed=lambda repo, sha: True), "", "holds nothing")
 
+    def test_a_withdrawn_request_is_not_handed_out(self):
+        """#50: three needless requests waited for ezexe's next turn, and no command withdrew them."""
+        t = self.t
+        t.say(KID, CROSS)
+        r = t.cli(KID, "request", "the port's flush", "--brief", BRIEF)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rid = starts.pending(t.p4)[0]["id"]
+        keep, _ = starts.add(t.p4, KID, "the port's docs", BRIEF.replace("src/flush.py", "docs/flush.md"))
+        r = t.cli(TOP, "request", "--withdraw", rid)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(f"withdrawn: start request {rid} \"the port's flush\"", r.stdout)
+        self.assertEqual([x["id"] for x in starts.pending(t.p4)], [keep], "pending leaves it out")
+        self.assertEqual([x["id"] for x in starts.open_rows(t.p4)], [keep])
+        rows = relay._rows(starts.path_of(t.p4))
+        self.assertEqual([(x["kind"], x.get("child"), x.get("by")) for x in rows if x["id"] == rid][-1],
+                         ("started", "withdrawn", TOP), "kept as a row, with who withdrew it")
+        ctx = context(t.say(KID, "anything waiting?"))
+        self.assertIn("the port's docs", ctx)
+        self.assertNotIn("the port's flush", ctx, "a withdrawn request is handed to nobody")
+        r = t.cli(TOP, "request", "--withdraw", rid)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("withdrawn already", r.stderr)
+        self.assertEqual(t.cli(TOP, "request", "--withdraw", "req-0000000000").returncode, 2, "an unknown id")
+        self.assertEqual(t.cli(TOP, "request", "x title", "--withdraw", keep).returncode, 2, "an id and nothing else")
+        again, new = starts.add(t.p4, KID, "the port's flush", BRIEF)
+        self.assertEqual((again, new), (rid, True), "the same request can be filed again")
+
     def test_a_request_expires_after_a_day(self):
         home = self.t.p4
         rid, new = starts.add(home, KID, "an old child", BRIEF, at=time.time() - 25 * 3600)

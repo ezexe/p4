@@ -31,6 +31,55 @@ STYLE = re.compile(r"\b(indent\w*|tabs?|spaces|naming|variable names?|braces?|se
 FRONT = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?(.*)\Z", re.S)
 
 
+# #50: a memory that says the plugin carries its rule now records a gap as closed, the opposite of a new one. Three
+# memories shortened to that form each got a start request for a needless top session.
+CARRIED = re.compile(r"\b(?:p4-[\w-]+|phi|the plugins?)\b[^.\n]{0,80}?\bcarr(?:y|ies|ied)\s+(?:this|it|that|the rule)\b"
+                     r"|\bcarr(?:y|ies|ied)\s+(?:this|it|that)\s+(?:now|already)\b"
+                     r"|\b(?:is|are)\s+(?:now\s+)?built into\s+(?:p4-[\w-]+|phi|the plugins?)\b", re.I)
+WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_'-]{2,}")
+
+
+def carried(body):
+    """True when a memory's body says the plugin carries its rule now."""
+    return bool(CARRIED.search(str(body or "")))
+
+
+def body_of(text):
+    """A memory file's body, without its front matter."""
+    m = FRONT.match(str(text or "").replace("\r\n", "\n"))
+    return (m.group(2) if m else str(text or "")).strip()
+
+
+def only_shortens(before, after):
+    """True when a write only shortens or removes text: the body it leaves is no longer than the one before it and
+    holds no word that body did not."""
+    old, new = body_of(before), body_of(after)
+    if not old.strip() or len(new) > len(old):
+        return False
+    return not ({w.lower() for w in WORD.findall(new)} - {w.lower() for w in WORD.findall(old)})
+
+
+def before_write(path, tool_input, tool_response):
+    """What a memory file held before a Write or an Edit, '' when it cannot be told: the tool's own
+    `originalFile` where its result carries one, else an Edit's `new_string` put back to its `old_string`."""
+    resp = tool_response if isinstance(tool_response, dict) else {}
+    if isinstance(resp.get("originalFile"), str):
+        return resp["originalFile"]
+    inp = tool_input if isinstance(tool_input, dict) else {}
+    old, new = inp.get("old_string"), inp.get("new_string")
+    if isinstance(old, str) and isinstance(new, str) and old != new:
+        try:
+            with open(path, encoding="utf-8") as f:
+                now = f.read()
+        except (OSError, UnicodeDecodeError):
+            return ""
+        if new and new in now:
+            return now.replace(new, old) if inp.get("replace_all") else now.replace(new, old, 1)
+        if not new:
+            return now + "\n" + old                # a removal: what was there held at least this more
+    return ""
+
+
 def memory_dir(store):
     import p4conf
     return relay.norm(p4conf.sub(store, "memory")) if store else ""
@@ -154,13 +203,24 @@ def brief_of(name, path, rule, repo, new_top):
             f"plugin does now and what it should do, then have a child fix it, report when done. {new_top}")
 
 
-def advice(home, store, s, path, owner_turn, commands, new_top, root=None):
+def advice(home, store, s, path, owner_turn, commands, new_top, root=None, before=""):
     """The line a session gets after writing a plugin-gap memory into its project's store, once per memory content;
-    '' for any other write. `home` holds the session tree, `store` the project's memory."""
+    '' for any other write, for a memory whose body says the plugin carries it now, and for a write that only
+    shortens or removes text, `before` being what the file held (#50). `home` holds the session tree, `store`
+    the project's memory."""
     got = memory_of(store, path)
     if not got or not about_behaviour(got[1]):
         return ""
     name, body = got
+    if carried(body):
+        return ""
+    if before:
+        try:
+            with open(path, encoding="utf-8") as f:
+                if only_shortens(before, f.read()):
+                    return ""
+        except (OSError, UnicodeDecodeError):
+            pass
     rule = rule_text(body)
     sig = hashlib.sha1((name + "\n" + rule).encode("utf-8", "replace")).hexdigest()[:12]
     spath = os.path.join(relay._dir(home, s["sessionId"]), "session.json")

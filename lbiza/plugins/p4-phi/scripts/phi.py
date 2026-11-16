@@ -1755,7 +1755,8 @@ def h_memory_gap(payload):
     import gaps
     s = load_session(me.home, me.id) or ensure_session(me.home, me.id, me.rec, me.cli)
     text = gaps.advice(me.home, me.store, s, path, s.get("turnBy", "user") == "user", commands(),
-                       NEW_TOP_BRIEF + " " + new_top_first_act())
+                       NEW_TOP_BRIEF + " " + new_top_first_act(),
+                       before=gaps.before_write(path, inp, payload.get("tool_response")))   # #50
     RAN["memory_gap"] = bool(text)
     if text and controls.ask_text(s):              # #58: a controlled session asks its puppeteer, and starts none
         text += "\n\n" + controls.ask_text(s)
@@ -3152,7 +3153,9 @@ def main(argv=None):
                                                     "file set; none shows it")
             p.add_argument("--release", action="store_true", help="hold no file any more")
         if name == "request":
-            p.add_argument("title", help="the child's title")
+            p.add_argument("title", nargs="?", default="", help="the child's title")
+            p.add_argument("--withdraw", default="", metavar="REQUEST",
+                           help="withdraw a pending start request by its id, so it is never handed out")
             p.add_argument("--brief", default="", help="the child's whole brief")
             p.add_argument("--brief-file", default="", help="a file holding the brief")
             p.add_argument("--context", default="fresh", choices=("fresh", "fork"))
@@ -3249,6 +3252,11 @@ def main(argv=None):
             s = load_session(me.home, s["sessionId"])
             controls.board(me.home, s)
             print(controls.controls_text(me.home, s))
+            return 0
+        if a.cmd == "request" and a.withdraw:      # #50: a request nobody should start any more
+            if a.title or a.brief or a.brief_file:
+                raise ValueError("--withdraw takes a request's id and nothing else")
+            print(starts.withdraw(me.home, a.withdraw.strip(), s["sessionId"]))
             return 0
         if a.cmd == "request":
             brief = a.brief

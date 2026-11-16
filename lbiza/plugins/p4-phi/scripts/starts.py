@@ -359,5 +359,23 @@ def requester_of(home, prompt):
     return m.group(1), r["requester"]
 
 
-def started(home, rid, child, at=None):
-    _append(home, {"kind": "started", "id": rid, "child": child, "at": time.time() if at is None else at})
+def started(home, rid, child, at=None, by=""):
+    _append(home, {"kind": "started", "id": rid, "child": child, "at": time.time() if at is None else at,
+                   **({"by": by} if by else {})})
+
+
+def withdraw(home, rid, by="", at=None):
+    """Withdraw a pending start request by its id -> the line to print. Kept as a row in start-requests.jsonl, so
+    `pending`, `open_rows` and `hand_text` leave it out and the record of it stays (#50). An unknown id, or a
+    request already started or withdrawn, is refused."""
+    r = state(home).get(rid)
+    if not r:
+        raise ValueError(f"no start request {rid} is on file in this store")
+    if r.get("started") == "withdrawn":
+        raise ValueError(f"start request {rid} was withdrawn already")
+    if r.get("started"):
+        raise ValueError(f"start request {rid} was started already, as {r['started']}: stop or message that "
+                         f"session instead")
+    started(home, rid, "withdrawn", at, by)
+    return (f"withdrawn: start request {rid} \"{r.get('title')}\", filed by \"{r.get('requesterTitle') or r.get('requester')}\", "
+            f"is handed to no session now. Its row stays in start-requests.jsonl.")

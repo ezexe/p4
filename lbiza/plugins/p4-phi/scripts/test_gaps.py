@@ -122,6 +122,48 @@ class Hook(unittest.TestCase):
         self.assertEqual(self.wrote(memory(self.t.p4, "me", CHILD_RULE, kind="user")), "", "only feedback memories")
         self.assertEqual(self.wrote(os.path.join(self.t.proj, "notes.md")), "", "a file outside the memory folder")
 
+    def test_a_memory_the_plugin_carries_now_keeps_no_start_request(self):
+        """#50: three memories shortened to "p4-phi carries this now" each got a request for a needless top session."""
+        carried = ("p4-phi carries this now: when a child finishes with commits carrying `Closes #N`, `relay.py` tells "
+                   "the top session to push main and sync each store at once, so follow that line.")
+        self.t.say(TOP, "<cross-session-message from=\"local_x\">tidy the memories</cross-session-message>")
+        self.assertEqual(self.wrote(memory(self.t.p4, "always-push-issue-work", carried)), "")
+        self.assertEqual(starts.pending(self.t.p4), [], "no start request is kept in this store")
+        self.assertEqual(starts.pending(os.path.join(self.plug, ".claude", "p4")), [], "nor in the plugin's")
+        self.assertNotIn("gapsTold", self.t.session(TOP), "and it is not counted as a gap told")
+        both = "p4-temportal and p4-phi carry this now: a session's scratchpad links to the store's tmp folder."
+        self.assertEqual(self.wrote(memory(self.t.p4, "temp-files-in-p4-tmp", both)), "")
+        self.assertTrue(gaps.carried("The archiving of a child session is built into p4-phi since 0.8."))
+        self.assertFalse(gaps.carried(CHILD_RULE))
+        self.t.say(TOP, "and the rest")
+        self.assertIn("patches over a gap", self.wrote(memory(self.t.p4, "children-on-parent-branch", CHILD_RULE)),
+                      "a memory that records a new gap is still told")
+
+    def test_a_write_that_only_shortens_or_removes_text_is_no_new_gap(self):
+        self.t.say(TOP, "Build the exporter")
+        long = CHILD_RULE + "\n\nA child session never pushes a branch, and its report names every merge it wants."
+        path = memory(self.t.p4, "children-on-parent-branch", long)
+        whole = open(path, encoding="utf-8").read()
+        memory(self.t.p4, "children-on-parent-branch", CHILD_RULE)
+
+        def wrote(tool, inp, resp):
+            r = self.t.hook("memory-gap", TOP, {"hook_event_name": "PostToolUse", "tool_name": tool,
+                                                "tool_input": {"file_path": path, **inp}, "tool_response": resp},
+                            P4_PHI_PLUGIN_ROOT=self.plug)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return context(r)
+        self.assertEqual(wrote("Write", {}, {"type": "update", "originalFile": whole}), "", "a Write that shortened it")
+        cut = "\n\nA child session never pushes a branch, and its report names every merge it wants."
+        self.assertEqual(wrote("Edit", {"old_string": CHILD_RULE + cut, "new_string": CHILD_RULE}, "ok"), "",
+                         "an Edit that removed a sentence")
+        self.assertTrue(gaps.only_shortens(whole, open(path, encoding="utf-8").read()))
+        self.assertFalse(gaps.only_shortens(open(path, encoding="utf-8").read(), whole), "text was added")
+        self.assertFalse(gaps.only_shortens("", whole), "a new file shortens nothing")
+        added = CHILD_RULE.replace("only the parent merges and pushes", "only the top session merges, pushes and syncs")
+        memory(self.t.p4, "children-on-parent-branch", added)
+        self.assertIn("patches over a gap", wrote("Write", {}, {"type": "update", "originalFile": whole}),
+                      "a write that says something new is a gap")
+
     def test_the_advice_rides_on_recalls_record_entry(self):
         """Open sessions froze their hook lists at start: the check reaches them through lookup-record."""
         self.t.say(TOP, "Build the exporter")
