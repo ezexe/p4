@@ -21,7 +21,9 @@ import store as st  # noqa: E402
 
 class Notices(unittest.TestCase):
     def setUp(self):
-        self.root = tempfile.mkdtemp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = tmp.name
         self.p4 = os.path.join(self.root, ".claude", "p4")
         os.makedirs(p4conf.sub(self.p4, "store"))
         os.makedirs(p4conf.sub(self.p4, "models"))
