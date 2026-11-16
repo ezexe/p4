@@ -780,7 +780,7 @@ def main(argv=None):
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("check")
     p.add_argument("--p4")
-    sub.add_parser("migrate", help="convert a vlds-layout store: p4.py migrate --p4 <tree> [--out DIR] [--apply]")
+    sub.add_parser("migrate", help="convert a store in the per-session layout: p4.py migrate --p4 <tree> [--out DIR] [--apply]")
     sub.add_parser("teacher", help="the paid batches: p4.py teacher edit-labels|dictionary|facts [--fake] [--max-usd X]")
     args = ap.parse_args(argv)
     if args.cmd == "index":

@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-"""migrate.py: a store in the vlds layout into the flat layout, every file placed and the result checked.
+"""migrate.py: a store in the per-session layout into the flat layout, every file placed and the result checked.
 
-The vlds layout keeps each session's entries in `sessions/<session>/vlds/*.md`, beside `vindex/`, `sindex/`,
+The per-session layout keeps each session's entries in `sessions/<session>/vlds/*.md`, beside `vindex/`, `sindex/`,
 `mrindex/` and a flat `models/`. The flat layout keeps the corpus in `store/`, the training files in `models/`,
 saved code in `src/` and what is kept verbatim in `archive/`, all at the top of `.claude/p4`. The plugins write
 neither: p4conf.migrate_layout, which the next hook runs, moves the flat layout into the plugins' directories, all
 but `archive/`, which stays at the top.
 
-A run is dry by default: it reads the vlds tree, builds the flat layout in memory, runs its checks and writes the
+A run is dry by default: it reads the per-session tree, builds the flat layout in memory, runs its checks and writes the
 report `archive/migration-<date>.md`. `--apply` also writes the flat layout into `--out`, or in place when there is
-no `--out`, where the vlds paths are removed only when nothing is unplaced. Every file of the vlds tree is placed:
+no `--out`, where the vlds paths are removed only when nothing is unplaced. Every file of the tree is placed:
 converted entry by entry, archived verbatim, copied into `src/`, left where it is, or dropped with its reason. An
-entry or file that fits none is listed as unplaced, by its path and line in the vlds tree.
+entry or file that fits none is listed as unplaced, by its path and line in the per-session tree.
 
 The module is also a library: labels.py imports `turn_rows`, `fp`, `MARKERS` and `minutes` for its history labels
 and its follow-up check. `seed_dictionary` and `df_table` serve the migration alone, to seed its dictionary.
 
-    python3 migrate.py --p4 <a .claude/p4 in the vlds layout> [--out <dir>] [--apply] [--now "YYYY-MM-DD HH:MM"]
+    python3 migrate.py --p4 <a .claude/p4 in the per-session layout> [--out <dir>] [--apply] [--now "YYYY-MM-DD HH:MM"]
                        [--project <repo>] [--report <path>]
 """
 
@@ -34,7 +34,7 @@ if HERE not in sys.path:
 import ranker  # noqa: E402
 import store as st  # noqa: E402
 
-# --- the vlds tree's counts, made as scripts/session/store_lessons.py makes them, for the checks ---------
+# --- the per-session tree's counts, made as scripts/session/store_lessons.py makes them, for the checks ---------
 
 OLD_KINDS = {"correction": ("ledger.md", re.compile(r"(?m)^\s*-?\s*meant:")),
              "retraction": ("tombstones.md", re.compile(r"(?m)^\s*-?\s*freed:")),
@@ -69,7 +69,7 @@ def glob(p4, pattern):
 
 
 def old_counts(p4):
-    """{counts, live_rules, labels} of the vlds tree: the entries of each kind and the LIVE rulings, each text once,
+    """{counts, live_rules, labels} of the tree it reads: the entries of each kind and the LIVE rulings, each text once,
     over every vlds folder old_stores finds, and the counts of the dispatch rows under sessions/*/vlds/."""
     counts = {k: 0 for k in OLD_KINDS}
     for s in old_stores(p4):
@@ -135,7 +135,7 @@ def old_entries(text):
     """[{line, pairs, block, template, text}] for every block that carries a field, split at its column-0
     `- key:` lines. A block with no field, such as header prose, comes back marked `prose`, and a schema template
     marked `template`, so the caller can count them. A block that opens on an indented field with no dash continues
-    the entry before it, since a dispatch row of the vlds layout can carry its `state:` and `addressed:` after a
+    the entry before it, since a dispatch row of the per-session layout can carry its `state:` and `addressed:` after a
     blank line; that entry's `joined` lists the first line of each such block."""
     out, last = [], None
     for start, lines in old_blocks(text):
@@ -197,20 +197,20 @@ def session_of(dirname):
     return dirname
 
 
-# --- the plan: every file of the vlds tree placed --------------------------------------------------------
+# --- the plan: every file of the per-session tree placed --------------------------------------------------------
 
 CONVERT = {"local-storage.md", "ledger.md", "tombstones.md", "briefs.md", "data-store.md", "dispatch.md", "index.md",
            "recall-pool.md"}
 ARCHIVE_SESSION_FILES = {"session-storage.md", "virtual.md", "logger.md", "mind-reader.md"}
 DROP_SESSION_FILES = {"phi-index.md": "the per-session φ register; derived", ".sessions": "derived session list",
-                      ".gc-heads": "the vlds layout's gc heads; derived", ".turn-close": "a turn-end stamp; derived",
+                      ".gc-heads": "the layout's gc heads; derived", ".turn-close": "a turn-end stamp; derived",
                       ".check-last": "a check stamp; derived",
-                      ".pre-ask": "the vlds layout's pre-ask gate state, which no plugin reads",
-                      ".pool-owed": "the vlds layout's pool flag, which no plugin reads"}
+                      ".pre-ask": "the per-session layout's pre-ask gate state, which no plugin reads",
+                      ".pool-owed": "the per-session layout's pool flag, which no plugin reads"}
 DROP_TOP = {"vindex": "the cumulative vlds index; derived, any ## recall section of it copied below",
             "sindex": "the cumulative frags index; derived, rebuilt from src/"}
 ARCHIVE_TOP = ("mrindex",)
-# flights/ stays where the vlds tree keeps it: where planned work lives is the repository's own plan-planner skill's
+# flights/ stays where the tree keeps it: where planned work lives is the repository's own plan-planner skill's
 # to say, and ezexe/phi's phi_store.work_folders finds a folder of planned work by the files it holds, wherever it is.
 KEEP_TOP = ("flights",)
 COMMENT = {".py": "#", ".sh": "#", ".ps1": "#", ".cmake": "#", ".rb": "#", ".pl": "#", ".r": "#", ".yml": "#",
@@ -305,7 +305,7 @@ def place_file(plan, rel, parts, name):
             plan.audits.append(rel)
             plan.archive.append((rel, f"archive/{rel}"))
         elif name.endswith(".pt"):
-            plan.dropped.append((rel, "a .pt ranker of the vlds layout, which no plugin loads"))
+            plan.dropped.append((rel, "a .pt ranker of the per-session layout, which no plugin loads"))
         elif name.endswith(".tmp"):
             plan.dropped.append((rel, "a temp file"))
         else:
@@ -531,7 +531,7 @@ def new_counts(files):
 
 def new_live_rules(files):
     """(live, lost) over the rulings of rules.md whose own status is LIVE, each text once, read as old_counts reads
-    the vlds tree's: `live` holds the text of each that the status rule keeps LIVE, `lost` a (text, id, reason) for
+    the tree's: `live` holds the text of each that the status rule keeps LIVE, `lost` a (text, id, reason) for
     each that a retraction frees."""
     seen, out, lost = set(), [], []
     for e in files.get("rules.md", []):
@@ -570,7 +570,7 @@ STAMP_RE = re.compile(r"\b(20\d\d-\d\d-\d\d(?: \d\d:\d\d)?)\b")
 
 
 def parse_pool(path):
-    """A recall-pool.md of the vlds layout as {path, task, pooled, session, id, picks, by_model, reader}: `picks`
+    """A recall-pool.md of the per-session layout as {path, task, pooled, session, id, picks, by_model, reader}: `picks`
     holds a (file, time, head) for each pick line of its steering section, and `by_model` is true when its `read:`
     line credits a model with the picks."""
     text = st.read_text(path)
@@ -1080,7 +1080,7 @@ def run(p4, out=None, apply=False, now=None, project=None, report_path=None):
             ow_missing.append(e.fields.get("from", e.id))
     check("retractions: owner-words present or listed", True,
           f"{counts['retraction'] - len(ow_missing)} with owner-words"
-          + (f"; {len(ow_missing)} had none in the vlds tree either: " + ", ".join(ow_missing) if ow_missing else ""))
+          + (f"; {len(ow_missing)} had none in the tree either: " + ", ".join(ow_missing) if ow_missing else ""))
     check("missed details: count of omitted:", oc["missed"] == counts["missed"],
           f"found {oc['missed']}, written {counts['missed']}")
     claims_old = 0
@@ -1256,7 +1256,7 @@ def remove_old(plan, p4):
 def render_report(r):
     plan, old = r["plan"], r["old"]
     L = [f"# Migration report, {r['now']}", "",
-         f"The vlds tree: `{r['p4']}`. The flat layout: `{r['out']}`. Written by "
+         f"The per-session tree: `{r['p4']}`. The flat layout: `{r['out']}`. Written by "
          f"{'an applied' if r['apply'] else 'a dry'} run of `p4.py migrate`.", "",
          "## Checks", "", "| check | result | detail |", "|---|---|---|"]
     for name, ok, detail in r["checks"]:
@@ -1293,7 +1293,7 @@ def render_report(r):
     for (where, why), ws in sorted(groups.items()):
         L.append(f"- {len(ws)} → `{where}`: {why}" + (f" — {', '.join(ws[:3])}{', …' if len(ws) > 3 else ''}"))
     if plan.multi:
-        L += ["", "Blocks of the vlds tree that held more than one entry, split here:", ""]
+        L += ["", "Blocks of the per-session tree that held more than one entry, split here:", ""]
         L += [f"- {w}: {k} {kind} entries" for w, k, kind in plan.multi]
     L += ["", "## Dropped", ""]
     dg = {}
@@ -1347,7 +1347,7 @@ def summary(r):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--p4", required=True, help="the .claude/p4 tree in the vlds layout")
+    ap.add_argument("--p4", required=True, help="the .claude/p4 tree in the per-session layout")
     ap.add_argument("--out", default="", help="where the flat layout goes; the --p4 tree itself when not given")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--now", default="")

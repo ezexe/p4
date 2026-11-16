@@ -314,7 +314,7 @@ class Recall(Base):
 @unittest.skipUnless(__import__("test_store").fixture("AudioPlugin-p4"), "the AudioPlugin-p4 clone is not here")
 class RecallLatency(unittest.TestCase):
     """The `recall` hook, run as Claude Code runs it by `sh hooks/recall-hook.sh` in a fresh interpreter, answers
-    within the budget h_recall in hook.py states on the AudioPlugin-p4 fixture, about 5,000 entries, when the index
+    within the budget h_recall in hook.py states on the AudioPlugin-p4 fixture, about 5,000 documents, when the index
     is fresh, as it is after the Stop hook's rebuild. The best of 5 runs is asserted, so another process's burst does
     not fail it."""
 

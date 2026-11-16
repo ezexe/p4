@@ -319,7 +319,7 @@ def h_layout(payload):
 
 def h_recall(payload):
     """The retrieval lines for the submitted message, beside it. The hook runs on every message, so its budget is
-    300 ms from the start of `sh hooks/recall-hook.sh recall` to its answer, on a corpus of about 5,000 entries whose
+    300 ms from the start of `sh hooks/recall-hook.sh recall` to its answer, on an index of about 5,000 documents whose
     index is fresh; RecallLatency in test_hooks.py asserts it."""
     import labels as lb
     import p4 as cli

@@ -147,7 +147,7 @@ def dropped(v):
 
 def describe(p4, session="", limit=12):
     """Lines saying what a session has in view, for another session to read: its newest files in view, the edited
-    ones marked, its commits, how many of the documents retrieval showed it are in view, and the size of its context.
+    ones marked, its commits, how many of the documents retrieval showed it with a handle are in view, and the size of its context.
     With no session, one line for each session the store has a record of."""
     d = p4conf.sub(p4, "models", "view")
     try:
@@ -173,7 +173,7 @@ def describe(p4, session="", limit=12):
         out.append(f"  ... and {len(files) - limit} more")
     out += [f"  commit turn {c['turn']:3}  {c['repo']} {c['sha']}  {c['subject']}" for c in v["commits"][-limit:]]
     if entries:
-        out.append(f"  documents shown by retrieval: {len(entries)}")
+        out.append(f"  documents shown with a handle: {len(entries)}")
     return out + size_lines(v.get("size"))
 
 

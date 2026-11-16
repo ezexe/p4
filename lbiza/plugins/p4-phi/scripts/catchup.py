@@ -7,11 +7,11 @@ prints nothing when nothing is behind. Otherwise one `systemMessage` for ezexe, 
   branch    when the store is a git repository of its own with an origin, and this machine's branch is behind
             origin's `<main>`, which p4.json's `recall.sync.main` names, `p4.py sync` runs detached, so the start
             never waits on a merge, and its output goes to `<git dir>/p4-sync.log`; when it cannot start, the line
-            gives the whole command to run instead. The fetch that finds out is given FETCH_S seconds. Nothing is
+            says to run `p4.py sync`. The fetch that finds out is given FETCH_S seconds. Nothing is
             forced, and nothing is pulled outside `p4.py sync`.
   plugins   a former plugin, enabled or only installed, and an installed p4-phi or p4-temportal older than the
-            marketplace's get the exact `claude plugin` commands that close them, in order. A former plugin is one
-            of RETIRED, p4-memory, p4-scratchpad or p4-recall, that the marketplace no longer offers. The commands
+            marketplace's get the exact `claude plugin` commands that close them, in order. A former plugin is a key
+            of RETIRED, p4-memory, p4-scratchpad or p4-recall, which the marketplace no longer offers. The commands
             are printed, never run: plugin settings are ezexe's.
   cache     the version folders under <config>/plugins/cache/p4-marketplace/ that no install uses: how many and
             their size, in one line, said again only when the count changes. Nothing is deleted here: Claude Code
