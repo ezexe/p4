@@ -434,6 +434,56 @@ class Loading(Store):
         skillex.cmd_start(self.p4, {})
         self.assertFalse(os.path.exists(copy))
 
+    def test_a_copy_cut_short_keeps_its_marker(self):
+        self.store_skill("demo-brew")
+        put(os.path.join(self.p4, "skillex", "demo-brew", "scripts", "demo.py"), "print('demo')\n")
+        skillex.cmd_start(self.p4, {})
+        copy = os.path.join(self.root, ".claude", "skills", "demo-brew")
+        self.store_skill("demo-brew", "Say it differently.\n")
+        real_copy, calls = skillex.shutil.copyfile, []
+
+        def fails_second(a, b):
+            calls.append(b)
+            if len(calls) == 2:
+                raise OSError("disk full")
+            return real_copy(a, b)
+
+        skillex.shutil.copyfile = fails_second
+        try:
+            with self.assertRaises(OSError):
+                skillex.cmd_start(self.p4, {})
+        finally:
+            skillex.shutil.copyfile = real_copy
+        self.assertTrue(os.path.isfile(os.path.join(copy, skillex.MARKER)), "a half copy never loses its marker")
+        self.assertIn("Say what the skill does.", read(os.path.join(copy, "SKILL.md")), "the old copy stands")
+        self.assertTrue(skillex.cmd_start(self.p4, {})["hookSpecificOutput"]["reloadSkills"])
+        self.assertIn("Say it differently.", read(os.path.join(copy, "SKILL.md")), "the next start finishes it")
+        self.assertEqual(os.listdir(os.path.join(self.p4, "skillex", ".state", "staging")), [])
+
+    def test_a_removal_cut_short_leaves_no_unmarked_copy(self):
+        self.store_skill("demo-brew")
+        skillex.cmd_start(self.p4, {})
+        copy = os.path.join(self.root, ".claude", "skills", "demo-brew")
+        shutil.rmtree(os.path.join(self.p4, "skillex", "demo-brew"))
+        real_rmtree = skillex.shutil.rmtree
+
+        def fails_after_the_marker(path, *a, **k):
+            if os.path.isfile(os.path.join(path, skillex.MARKER)):
+                os.remove(os.path.join(path, skillex.MARKER))
+                if not k.get("ignore_errors"):
+                    raise OSError("file in use")
+            return real_rmtree(path, *a, **k)
+
+        skillex.shutil.rmtree = fails_after_the_marker
+        try:
+            skillex.cmd_start(self.p4, {})
+        except OSError:
+            pass
+        finally:
+            skillex.shutil.rmtree = real_rmtree
+        self.assertFalse(os.path.isdir(copy) and not os.path.isfile(os.path.join(copy, skillex.MARKER)),
+                         "an unmarked copy would be taken for the project's own skill for ever")
+
     def test_the_project_own_skill_of_the_same_name_is_never_touched(self):
         own = put(os.path.join(self.root, ".claude", "skills", "demo-brew", "SKILL.md"), "---\nname: demo-brew\n---\nmine\n")
         self.store_skill("demo-brew")

@@ -649,22 +649,46 @@ def mirror(p4, names=None):
             _same_bytes(p, os.path.join(target, rel)) for rel, p in files.items())
         if same:
             continue
-        if os.path.isdir(target):
-            shutil.rmtree(target)
+        staging = os.path.join(state_dir(p4), "staging", f"{n}.{os.getpid()}")
+        if os.path.isdir(staging):
+            shutil.rmtree(staging)
         for rel, p in files.items():
-            os.makedirs(os.path.dirname(os.path.join(target, rel)), exist_ok=True)
-            shutil.copyfile(p, os.path.join(target, rel))
-        with open(os.path.join(target, MARKER), "w", encoding="utf-8", newline="\n") as f:
+            os.makedirs(os.path.dirname(os.path.join(staging, rel)), exist_ok=True)
+            shutil.copyfile(p, os.path.join(staging, rel))
+        with open(os.path.join(staging, MARKER), "w", encoding="utf-8", newline="\n") as f:
             f.write(f".claude/p4/skillex/{n}\n")
-        with open(os.path.join(target, COPY_IGNORE), "w", encoding="utf-8", newline="\n") as f:
+        with open(os.path.join(staging, COPY_IGNORE), "w", encoding="utf-8", newline="\n") as f:
             f.write("*\n")
+        if os.path.isdir(target):
+            set_aside(p4, target)
+        try:
+            os.replace(staging, target)
+        except OSError:                                  # another session placed its copy first
+            shutil.rmtree(staging, ignore_errors=True)
         changed.append(n)
     if names is None and os.path.isdir(dst):
         for n in sorted(os.listdir(dst)):
             if n not in store and os.path.isfile(os.path.join(dst, n, MARKER)):
-                shutil.rmtree(os.path.join(dst, n))   # its store skill is gone
+                set_aside(p4, os.path.join(dst, n))    # its store skill is gone
                 changed.append(n)
+    clear_aside(p4)
     return changed
+
+
+def set_aside(p4, target):
+    """Move a copy out of `.claude/skills/` whole, marker and all, into `.state/aside/`; clear_aside deletes it."""
+    aside = os.path.join(state_dir(p4), "aside")
+    os.makedirs(aside, exist_ok=True)
+    os.replace(target, os.path.join(aside, f"{os.path.basename(target)}.{os.getpid()}.{time.time_ns()}"))
+
+
+def clear_aside(p4):
+    """Delete what set_aside moved, and a staging folder an ended run left; a failure only waits for the next run."""
+    for sub in ("aside", "staging"):
+        d = os.path.join(skillex_dir(p4), STATE, sub)
+        for n in os.listdir(d) if os.path.isdir(d) else []:
+            if sub == "aside" or not n.endswith(f".{os.getpid()}"):
+                shutil.rmtree(os.path.join(d, n), ignore_errors=True)
 
 
 def _same_bytes(a, b):
