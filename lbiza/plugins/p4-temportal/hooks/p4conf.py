@@ -134,7 +134,8 @@ DEFAULTS = {
 # Sections whose keys are ezexe's to choose: merged over the defaults, never called unknown.
 OPEN = ("temportal.cache",)
 
-# Top-level keys no plugin reads: a p4.json that holds one loses it at its next load, with no unknown-key line.
+# Top-level keys no plugin reads: never returned or called unknown, and dropped from p4.json when it is rewritten for
+# another reason.
 RETIRED = ("plans", "version")
 
 # The keys of phi/models/config.json, a settings file nothing writes, and where p4.json keeps each value.
@@ -584,14 +585,15 @@ def load(p4, write=True, warn=True):
             return copy.deepcopy(DEFAULTS)
     else:
         over = _legacy(p4)
-    had = dict(over)
     over = {k: v for k, v in over.items() if k not in RETIRED}
     unknown = []
     merged = _merge(DEFAULTS, over, unknown)
     if warn and unknown:
         print(f"p4: {path(p4)} holds keys this plugin does not read, kept as they are: {', '.join(unknown)}",
               file=sys.stderr)
-    if write and os.path.isdir(p4) and (not existed or merged != had):
+    # a retired key alone never rewrites the file, since an older copy that still writes it would put it back at its
+    # own next load: it leaves the file at the next rewrite for a missing key
+    if write and os.path.isdir(p4) and (not existed or merged != over):
         try:
             _write(p4, merged)
         except OSError:

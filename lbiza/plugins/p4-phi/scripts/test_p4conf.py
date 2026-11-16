@@ -74,11 +74,11 @@ class P4Conf(unittest.TestCase):
         self.assertEqual(s["recall"]["pinned_chars"], 900)
 
     def test_a_retired_section_is_dropped_from_the_file(self):
-        """A key of RETIRED, such as `plans` or `version`, leaves a p4.json that holds it at the next load, with no
+        """A key of RETIRED, such as `plans` or `version`, leaves a p4.json that holds it at the next rewrite, with no
         unknown-key line, and nothing writes it again."""
+        old = {k: v for k, v in p4conf.DEFAULTS.items() if k != "memory"}
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({**p4conf.DEFAULTS, "plans": {"plans_dir": ".claude/plans", "owner_title": "ezexe"},
-                       "version": 1}, f)
+            json.dump({**old, "plans": {"plans_dir": ".claude/plans", "owner_title": "ezexe"}, "version": 1}, f)
         import contextlib
         import io
         err = io.StringIO()
@@ -99,6 +99,27 @@ class P4Conf(unittest.TestCase):
         p4conf.load(self.p4, warn=False)
         self.assertEqual(self.read(), p4conf.DEFAULTS)
         self.assertEqual(sorted(os.listdir(self.p4)), sorted(["p4.json", "p4.json.tmp"]), "no temp file is left")
+
+    def test_an_older_and_a_newer_copy_in_turn_rewrite_at_most_once(self):
+        """An installed copy from before `version` was retired adds it back, and this copy must not drop it again at
+        each load, or the two rewrite p4.json in turn."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("p4conf_older", HERE / "p4conf.py")
+        older = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(older)
+        older.DEFAULTS = {**older.DEFAULTS, "version": 1}
+        older.RETIRED = ("plans",)
+        writes = []
+        for copy in (p4conf, older):
+            real = copy._write
+            copy._write = lambda p4, data, real=real: (writes.append(1), real(p4, data))
+        try:
+            for copy in (older, p4conf, older, p4conf, older, p4conf):
+                copy.load(self.p4, warn=False)
+        finally:
+            p4conf._write = p4conf._write.__defaults__[0]
+        self.assertEqual(self.read()["version"], 1, "the older copy's key stays until a rewrite for a missing key")
+        self.assertLessEqual(len(writes), 1 + 1, "the first write creates the file, at most one more rewrites it")
 
     def test_a_broken_file_is_never_overwritten(self):
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
