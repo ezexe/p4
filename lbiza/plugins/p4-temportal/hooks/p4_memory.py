@@ -40,7 +40,8 @@ MEMORY = "memory"
 CONFLICTS = ".conflicts"
 POINTER_MARK = "<!-- p4-memory: pointer"    # a format the pointer files on disk carry, kept as it is
 BUILTIN_LINES = 200          # Claude Code loads the first 200 lines of MEMORY.md or its first 25KB, whichever comes
-BUILTIN_BYTES = 25_000       # first, by https://code.claude.com/docs/en/memory, and test_live_memory_limit.py
+BUILTIN_BYTES = 25_000       # first, by https://code.claude.com/docs/en/memory, and
+                             # experiments/p4-suite/test_live_memory_limit.py in ezexe/p4-phi-experiments
                              # measures 25KB as 25,000 bytes cut at a whole line
 STDOUT_CHARS = 10_000        # a hook's plain stdout past this reaches the session as a file path and a 2,000-character
                              # preview, by https://code.claude.com/docs/en/hooks, section JSON output
