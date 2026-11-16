@@ -213,18 +213,32 @@ class Watcher(Store):
         self.assertFalse(skillex.holds_secret(self.script("s3", "astcheck.py", "astcheck", 'tokens=None, mode="fast"')))
 
     def test_the_shapes_of_a_secret_and_the_code_that_only_names_one(self):
-        flagged = ["export API_KEY=abc123def456ghi", 'curl -H "Authorization: Bearer abcdefghij0123456789klmn" x',
-                   'cfg["password"] = "hunter2hunter2"', "STRIPE = 'sk_live_abcdefgh12345678'",
-                   "t = 'eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.SflKxwRJSMeKKF2QT4'",
-                   "url = 'postgres://admin:s3cretpw@db.local/x'", "HF = 'hf_abcdefghijklmnopqrstuvwxyz0123'",
-                   "hook = 'https://hooks.slack.com/services/T000/B000/XXXX'", "aws = 'ASIAABCDEFGHIJKLMNOP'"]
-        spared = ['token_url = "https://x/oauth/token"', 'password_field = "password"', 'SECRET_NAME = "prod-db-creds"',
-                  "token = parts[0]", "tokens = list(tokenize.generate_tokens(io.StringIO(src).readline))",
-                  'author = "someone12"', "api_key = os.environ['API_KEY']", 'TOKEN_ENV = "GITHUB_TOKEN"',
-                  'secret = "${SECRET}"', "password_hash = hashlib.sha256(pw).hexdigest()"]
-        for i, line in enumerate(flagged + spared):
-            p = put(os.path.join(self.root, f"probe{i}.py"), line + "\n")
-            self.assertEqual(skillex.holds_secret(p), line in flagged, line)
+        flagged = [("export API_KEY=abc123def456ghi", ".sh"), ("export DB_PASSWORD=correcthorse", ".sh"),
+                   ('curl -H "Authorization: Bearer abcdefghij0123456789klmn" x', ".sh"),
+                   ("curl -u admin:s3cretpw https://x", ".sh"), ("tool --token abc123def456ghi", ".sh"),
+                   ('cfg["password"] = "hunter2hunter2"', ".py"), ('password = "correcthorsebattery"', ".py"),
+                   ('TOTP_SECRET = "JBSWY3DPEHPK3PXP"', ".py"), ("STRIPE = 'sk_live_abcdefgh12345678'", ".py"),
+                   ("WEBHOOK = 'whsec_abcdefghijklmnopqrstuv'", ".py"), ("SG = 'SG.abcdefghijklmnop.qrstuvwxyz012345'", ".py"),
+                   ("BOT = '123456789:AAabcdefghijklmnopqrstuvwxyz0123456'", ".py"),
+                   ("t = 'eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.SflKxwRJSMeKKF2QT4'", ".py"),
+                   ("url = 'postgres://admin:s3cretpw@db.local/x'", ".py"), ("HF = 'hf_abcdefghijklmnopqrstuvwxyz0123'", ".py"),
+                   ("hook = 'https://hooks.slack.com/services/T000/B000/XXXX'", ".py"), ("aws = 'ASIAABCDEFGHIJKLMNOP'", ".py"),
+                   ('token_url = "https://x/oauth?client_secret=9f8e7d6c5b4a3210"', ".py")]
+        spared = [('token_url = "https://x/oauth/token"', ".py"), ('password_field = "password"', ".py"),
+                  ('SECRET_NAME = "prod-db-creds"', ".py"), ("token = parts[0]", ".py"),
+                  ("tokens = list(tokenize.generate_tokens(io.StringIO(src).readline))", ".py"),
+                  ("api_key = os.environ['API_KEY']", ".py"), ('TOKEN_ENV = "GITHUB_TOKEN"', ".py"),
+                  ('secret = "${SECRET}"', ".sh"), ("password_hash = hashlib.sha256(pw).hexdigest()", ".py"),
+                  ('url = base + "?api_key=" + key + "&q=" + q', ".py"), ('print("token: " + tok[:4] + "...")', ".py"),
+                  ('TOKEN_FILE = "token.json"', ".py"), ('SECRETS_DIR = "/run/secrets"', ".py"),
+                  ('password_prompt = "Password: "', ".py"),
+                  ('remote = f"https://x-access-token:{token}@github.com/{repo}.git"', ".py"),
+                  ("git clone https://oauth2:${GITLAB_TOKEN}@gitlab.com/x.git", ".sh"),
+                  ("secret = s3_secret", ".py"), ("f(api_key=api_key_v2)", ".py"), ("export TOKEN=$GITHUB_TOKEN", ".sh"),
+                  ('token_url = "https://x/oauth/token?grant_type=client_credentials"', ".py")]
+        for i, (line, ext) in enumerate(flagged + spared):
+            p = put(os.path.join(self.root, f"probe{i}{ext}"), line + "\n")
+            self.assertEqual(skillex.holds_secret(p), (line, ext) in flagged, line)
 
     def test_a_file_outside_temportal_is_never_looked_at(self):
         self.script("s1", "astcheck.py", "astcheck", "a=1")
