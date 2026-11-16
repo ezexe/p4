@@ -111,6 +111,27 @@ class Rounds(unittest.TestCase):
         self.assertIn("first round: pool labels alone", row["why"])
         self.assertFalse(os.path.exists(p4conf.sub(self.p4, "models", "ranker.json")))
 
+    def test_a_first_round_whose_pool_tasks_cannot_be_measured_is_kept_old(self):
+        """Before any promoted round, twelve tasks labelled by pools alone, of which only two have a positive among
+        their candidates, cannot be measured against FIRST_FLOOR: the round is kept old and says so."""
+        tasks = sorted(lb.read_tasks(self.p4).values(), key=lambda t: t["id"])
+        lb.write_tsv(lb.mpath(self.p4, lb.TASKS), lb.TASK_HEAD,
+                     [{**t, "time": t["time"] if k < 2 else "2026-09-01 12:00"} for k, t in enumerate(tasks)])
+        idx = st.build_index(self.p4)
+        rule = {d["show"]: d["id"] for d in idx["docs"]}
+        more, labs = [], []
+        for k, (a, b) in enumerate((("axolotl", "bandicoot"), ("capybara", "dugong"), ("echidna", "fossa"))):
+            more.append({"id": f"u{k}", "session": f"u{k:07d}", "time": "2026-10-30 12:00",
+                         "text": f"does the {a} relay keep the {b} gauge in step", "kind": "first"})
+            labs.append({"task": f"u{k}", "entry": rule[f"the {a} relay keeps the {b} gauge in step"], "label": "1",
+                         "source": "usage", "weight": "1.0", "time": "2026-10-30 12:00"})
+        lb.add_tasks(self.p4, more)
+        lb.append_tsv(lb.mpath(self.p4, lb.TRAIN), lb.TRAIN_HEAD, labs)
+        row = train.run_round(self.p4, now=NOW, dictionary=False)
+        self.assertEqual(row["promoted"], "kept old")
+        self.assertIn("first round: pool labels alone", row["why"])
+        self.assertFalse(os.path.exists(p4conf.sub(self.p4, "models", "ranker.json")))
+
     def test_eval_writes_nothing(self):
         before = sorted(os.listdir(p4conf.sub(self.p4, "models")))
         row = train.run_round(self.p4, write=False, now=NOW)

@@ -579,7 +579,8 @@ def run_round(p4, write=True, now=None, idx=None, sources=None, quiet=False, dic
     when it has at least 3 tasks to evaluate, its R-precision is at most FLOOR_DROP below the last promoted round's,
     its short-turn rate is at or above that round's, its precision at the threshold is at least MIN_PRECISION, no
     dictionary entry it leaves on harms the working messages, and, until a round is promoted, the tasks labelled by
-    pools alone reach FIRST_FLOOR when there are at least 3 of them.
+    pools alone, when there are at least 3 of them, have at least 3 with a positive among their candidates and reach
+    FIRST_FLOOR.
 
     Returns the eval row as a dict, with the held-out numbers under `eval` and the comparison of raw and edited
     labels under `compare`. With `write`, it appends the row to phi/models/eval.tsv, writes phi/models/ranker.json
@@ -633,10 +634,15 @@ def run_round(p4, write=True, now=None, idx=None, sources=None, quiet=False, dic
             pool_sets = [x for x in sets if x["source"] == "pool" and set(x.get("sources", ["pool"])) == {"pool"}]
             if len(pool_sets) >= 3:
                 pev = evaluate(pool_sets) if sources != {"pool"} else ev
-                first_pool = pev["r-precision"]
-                if first_pool < FIRST_FLOOR:
+                if pev is None:
+                    # fewer than 3 of them have a positive among their candidates: they cannot show the floor
                     promote = False
-                    why.append(f"first round: pool labels alone reach r-precision {first_pool:.3f}, below "
+                    drawn = sum(1 for x in pool_sets if not x["missed"])
+                    why.append(f"first round: pool labels alone have {drawn} of {len(pool_sets)} tasks with a "
+                               f"positive among their candidates, too few to measure against {FIRST_FLOOR}")
+                elif pev["r-precision"] < FIRST_FLOOR:
+                    promote = False
+                    why.append(f"first round: pool labels alone reach r-precision {pev['r-precision']:.3f}, below "
                                f"{FIRST_FLOOR}")
         if ev["precision"] < MIN_PRECISION:
             promote = False
