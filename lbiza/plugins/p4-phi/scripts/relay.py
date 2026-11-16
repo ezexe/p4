@@ -189,7 +189,6 @@ def gone(home, s):
         path = os.path.join(_dir(home, s["sessionId"]), "session.json")
         disk = _read_json(path)
         if disk and not disk.get("archived"):
-            import time
             disk["archived"] = time.strftime("%Y-%m-%d %H:%M")
             _write_json(path, disk)
         s["archived"] = True
@@ -269,7 +268,7 @@ def set_shard(home, sid, paths, base):
         raise ValueError("name the paths or globs this session alone may change")
     s["shard"] = shard
     _write_json(path, s)
-    import time                                   # the siblings see the new shard at their next message
+    # the siblings see the new shard at their next message
     make_anchor(home, _parent(s), time.strftime("%Y-%m-%d %H:%M"))
     lines = []
     for o, os_ in _siblings(home, s).items():
@@ -1398,7 +1397,6 @@ class locked:
         self.held = False
 
     def __enter__(self):
-        import time
         os.makedirs(os.path.dirname(self.lock), exist_ok=True)
         if time.time() - _GAVE_UP.get(self.lock, 0) < LOCK_STALE_S and os.path.exists(self.lock):
             return self                           # a lock this process already waited out, still there: not again
