@@ -163,7 +163,7 @@ class RankerRoad(Fixture):
         self.assertTrue(a["lines"])
         self.assertLessEqual(len(a["lines"]), 5)
 
-    def test_old_ranker_json_is_ignored(self):
+    def test_a_ranker_json_of_another_kind_is_ignored(self):
         """A ranker.json of another kind is no ranker: the query takes the no-ranker road."""
         write(p4conf.sub(self.p4, "models", "ranker.json"), json.dumps({"kind": "phi_serve", "port": 1}))
         self.assertNotIn("ranker", q(self.p4, "does the quokka harness run the zebrafish plotter")["road"])
@@ -282,7 +282,7 @@ class RepoIndex(unittest.TestCase):
     def shows(self):
         return [d["show"] for d in self.repo.entries(self.p4)]
 
-    def test_entries_and_exclusions(self):
+    def test_documents_and_exclusions(self):
         s = self.repo.build(self.p4, self.proj)
         shows = self.shows()
         joined = "\n".join(shows)
@@ -336,7 +336,7 @@ class RepoIndex(unittest.TestCase):
         finally:
             self.repo.MAX_FILE_ENTRIES = cap
 
-    def test_on_the_p4_repo_itself(self):
+    def test_on_this_checkout_itself(self):
         here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(HERE))))
         if not self.repo.is_repo(here):
             self.skipTest("not in a git checkout")
