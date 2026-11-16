@@ -795,8 +795,8 @@ def fp(e):
 
 
 def rare_terms(text, df, n, exclude=(), limit=1):
-    """The `limit` rarest words of `text` that ranker.is_rare calls rare by `df` over `n` docs, words the docs never
-    hold first, leaving out `exclude`, the common vocabulary, numbers and words under three letters."""
+    """The `limit` rarest words of `text` that ranker.is_rare calls rare by `df` over `n` documents, words no
+    document holds first, leaving out `exclude`, the common vocabulary, numbers and words under three letters."""
     ex = set(exclude)
     got = []
     for t in dict.fromkeys(ranker.tokens(text)):
