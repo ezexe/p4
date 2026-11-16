@@ -138,6 +138,14 @@ class P4Conf(unittest.TestCase):
         self.assertEqual(p4conf.load(gone), p4conf.DEFAULTS)
         self.assertFalse(os.path.exists(gone))
 
+    def test_a_held_layout_lock_is_given_up_within_a_hook_timeout(self):
+        import time
+        lock = os.path.join(self.p4, "lock")
+        open(lock, "w").close()
+        t = time.monotonic()
+        self.assertFalse(p4conf._take(lock))
+        self.assertLess(time.monotonic() - t, 10, "recall gives up the lock within its own 10-second hook timeout")
+
     def test_configure_sets_only_values_that_differ_from_the_default(self):
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
             json.dump({"recall": {"query": {"max_lines": 9}}, "scratchpad": {"ignorable_ext": ["log"]}}, f)

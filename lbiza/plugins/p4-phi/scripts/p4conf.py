@@ -415,8 +415,10 @@ def migrate_layout(p4, commit=True):
             pass
 
 
-def _take(lock, wait_s=15.0, stale_s=120.0):
-    """The layout lock, or False once another hook held it for `wait_s`, since the hooks of a start run at once."""
+def _take(lock, wait_s=5.0, stale_s=120.0):
+    """The layout lock, or False once another hook held it for `wait_s`, since the hooks of a start run at once.
+    The wait stays well under the 10-second timeout of the shortest hook that reaches it, recall's, so that hook
+    still has time for its own work."""
     end, waited = time.monotonic() + wait_s, False
     while True:
         try:
