@@ -21,7 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import pathfilter  # noqa: E402
 import relay  # noqa: E402
-from test_phi import GRAND, KID, KID2, TOP, Tree, context, write  # noqa: E402
+from test_phi import GRAND, KID, KID2, START, TOP, Tree, context, write  # noqa: E402
 import inproc  # noqa: E402
 
 A, B = KID, KID2
@@ -500,6 +500,37 @@ class ThreeSessions(unittest.TestCase):
         lines = open(os.path.join(t.p4, ".gitignore"), encoding="utf-8").read().splitlines()
         for line in state:
             self.assertEqual(lines.count(line), 1, line)
+
+    def test_an_archived_tmp_and_lock_file_reach_another_machine_whole(self):
+        """An older store's archive/ holds files named *.tmp and *.lock and one that names the project's root. The
+        layout moves it to phi/archive/ at a session start, the store is committed and pushed, and a second clone
+        of it holds every archived file as it was."""
+        t = self.t
+        g = ["-c", "user.name=t", "-c", "user.email=t@t"]
+        bare = os.path.join(t.tmp, "store.git").replace("\\", "/")
+        root = pathfilter.project_of(t.p4)
+        kept = {"x.tmp": "a temp file the old tree kept\n", "y.lock": "a lock file the old tree kept\n",
+                "z.json": json.dumps({"cwd": root}) + "\n"}
+        write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"track": True}}))
+        subprocess.run(["git", "-C", t.p4, "init", "-q", "-b", "main"], check=True, capture_output=True)
+        self.assertTrue(relay.track(t.p4), "a store p4-phi tracks, with its ignore lines and its path filter")
+        for name, text in kept.items():
+            write(os.path.join(t.p4, "archive", name), text)
+        for args in (("add", "-A", "--", "archive", "p4.json"), (*g, "commit", "-qm", "the old archive")):
+            subprocess.run(["git", "-C", t.p4, *args], check=True, capture_output=True)
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", bare], check=True, capture_output=True)
+        self.assertEqual(t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"}).returncode, 0)
+        for name in kept:
+            self.assertTrue(os.path.isfile(os.path.join(t.p4, "phi", "archive", name)), "moved under phi/")
+        for args in (("add", "-A"), (*g, "commit", "-q", "--allow-empty", "-m", "the rest"), ("push", "-q", bare, "main")):
+            subprocess.run(["git", "-C", t.p4, *args], check=True, capture_output=True)
+        other = os.path.join(t.tmp, "other-machine").replace("\\", "/")
+        subprocess.run(["git", "clone", "-q", bare, other], check=True, capture_output=True)
+        for name, text in kept.items():
+            path = os.path.join(other, "phi", "archive", name)
+            self.assertTrue(os.path.isfile(path), f"phi/archive/{name} reaches the other machine")
+            with open(path, encoding="utf-8") as f:
+                self.assertEqual(f.read(), text, f"phi/archive/{name} as it was, no path rewritten")
 
     def test_the_path_filter_round_trips_every_spelling(self):
         root = "E:/projects/x"

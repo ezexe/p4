@@ -1121,7 +1121,11 @@ def child_paths(home, s):
 # retrieval hook that seeds the rest of .gitignore runs beside this one at a start.
 
 IGNORED = ("phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/sessions.md", "phi/rules.md",
-           "phi/catchup.json", "phi/**/*.tmp", "phi/**/*.lock", "phi/sessions/*/.calls/", "phi/.agents/", "phi/.nudge/",
+           "phi/catchup.json", "phi/**/*.tmp", "phi/**/*.lock",
+           # the archive a layout move or a migration keeps verbatim is tracked whole, whatever its files are named;
+           # these come after the two lines above, which they except it from
+           "!phi/archive/**/*.tmp", "!phi/archive/**/*.lock",
+           "phi/sessions/*/.calls/", "phi/.agents/", "phi/.nudge/",
            # the watcher's pages are made again from the records; routes.jsonl is kept
            "phi/sessions/*/ledger.md", "phi/sessions/*/ledger.json", "phi/sessions/*/ledger.sig",
            "phi/sessions/*/watcher.json", "phi/meta-ledger.md", "phi/.issue-states.json", "phi/.routes-checked",
@@ -1135,11 +1139,13 @@ TRACKED_MARK = "p4-phi-tracked"
 
 
 FILTER_ATTR = "phi/** filter=p4path"
+ARCHIVE_ATTR = "phi/archive/** -filter"      # the archive is kept verbatim: no path in it is rewritten
 
 
 def _path_filter(home):
-    """The store's git runs pathfilter.py on phi/: set in this machine's git config, which names this machine's
-    python and plugin, and in .gitattributes, which every machine shares. True when .gitattributes changed."""
+    """The store's git runs pathfilter.py on phi/ but its archive: set in this machine's git config, which names
+    this machine's python and plugin, and in .gitattributes, which every machine shares, where the archive's line
+    follows the filter's, since the last line that matches a path decides it. True when .gitattributes changed."""
     py = sys.executable.replace("\\", "/")
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pathfilter.py").replace("\\", "/")
     for kind in ("clean", "smudge"):
@@ -1153,11 +1159,13 @@ def _path_filter(home):
             text = f.read()
     except OSError:
         text = ""
-    if FILTER_ATTR in {x.strip() for x in text.splitlines()}:
+    have = {x.strip() for x in text.splitlines()}
+    missing = [x for x in (FILTER_ATTR, ARCHIVE_ATTR) if x not in have]
+    if not missing:
         return False
     with open(ga, "a", encoding="utf-8", newline="\n") as f:
         f.write(("" if not text or text.endswith("\n") else "\n") + "# the project's root as {project} in git, "
-                "by p4-phi\n" + FILTER_ATTR + "\n")
+                "and the archive verbatim, by p4-phi\n" + "".join(x + "\n" for x in missing))
     return True
 
 
