@@ -314,11 +314,14 @@ class Sessions(unittest.TestCase):
         write(os.path.join(self.t.app, late + ".json"), json.dumps({"sessionId": late, "cwd": self.t.proj}))
         self.t.hook(START, late, {"hook_event_name": "SessionStart", "source": "startup"})
         self.assertEqual(self.t.started_by(late), ("", ""))
-        import threading
-        threading.Timer(0.4, lambda: self.t.record(late, TOP, "Late session")).start()
-        self.t.say(late, HANDED, P4_PHI_WAIT="5")
+        # the record is written on the call's own clock, at the hook's first wait past 0.4 s: only once the hook is
+        # waiting, however late a loaded machine starts the hook
+        c = inproc.Clock()
+        c.after(0.4, lambda: self.t.record(late, TOP, "Late session"))
+        self.t.say(late, HANDED, clock=c, P4_PHI_WAIT="5")
         self.assertEqual(self.t.started_by(late), (TOP, "record"))
         self.assertEqual(self.t.session(late)["title"], "Late session")
+        self.assertGreaterEqual(self.t.log(late)[-1]["waited_ms"], 400, "it waited for the record")
         self.assertLess(self.t.log(late)[-1]["waited_ms"], 3000)
 
     def test_a_record_that_says_nothing_yet_is_read_from_the_notes_folder(self):
