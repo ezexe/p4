@@ -13,6 +13,7 @@ into a temp directory first.
 
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -132,6 +133,21 @@ class Rounds(unittest.TestCase):
         old = time.time() - 7200
         os.utime(p4conf.sub(self.p4, "models", "eval.tsv"), (old, old))
         self.assertTrue(train.owed(self.p4)[0])
+
+    def test_if_owed_reads_the_store_settings(self):
+        """`p4.py train --if-owed` runs in a new process, as the Stop hook's call does: p4.json's
+        `recall.train.owed_labels` and `owed_age_s` decide whether a round is owed, not the module's defaults."""
+        train.run_round(self.p4, now=NOW)
+        conf = p4conf.load(self.p4)
+        conf["recall"]["train"].update({"owed_labels": 3, "owed_age_s": 0})
+        p4conf._write(self.p4, conf)
+        lb.append_tsv(lb.mpath(self.p4, lb.TRAIN), lb.TRAIN_HEAD,
+                      [{"task": "pool:t00", "entry": f"x{k}", "label": "0", "source": "usage", "weight": "0.3"}
+                       for k in range(5)])
+        r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "p4.py"), "train", "--if-owed", "--p4", self.p4,
+                            "--now", NOW], capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("train: round 1 ", r.stdout, "five new labels reach the store's three, and it waits no time")
 
     def test_pool_candidates_keep_held_entries(self):
         """A pool label can name an entry picked while it was FREED or SPENT, and migrate.import_pools keeps the label

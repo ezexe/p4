@@ -542,8 +542,8 @@ def owed(p4, now_s=None):
     enough. Otherwise a round is owed when a dependency was installed or updated after eval.tsv was last written,
     whatever its age, since that dependency's documents are candidates no round has seen; or when the label files
     hold at least OWED_LABELS rows more than the last round counted and eval.tsv is at least OWED_AGE_S seconds
-    old. The two numbers are this module's constants: `cmd_train` asks before `run_round` applies p4.json's
-    `recall.train` to them."""
+    old, the two numbers p4.json's `recall.train.owed_labels` and `owed_age_s`, which it reads first."""
+    configure(p4)
     now_s = now_s or time.time()
     rows = eval_rows(p4)
     n = lb.count_labels(p4)
