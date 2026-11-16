@@ -251,10 +251,8 @@ def configure(home):
             globals()[name] = d[key]
     if os.environ.get("P4_PHI_RULES") in ("0", "1"):
         globals()["RULES"] = os.environ["P4_PHI_RULES"] == "1"
-    for env in ("P4_PHI_NEW_TASK", "P4_PHI_STEER"):
-        if os.environ.get(env) in ("0", "1"):
-            globals()["NEW_TASK"] = os.environ[env] == "1"
-            break
+    if os.environ.get("P4_PHI_NEW_TASK") in ("0", "1"):
+        globals()["NEW_TASK"] = os.environ["P4_PHI_NEW_TASK"] == "1"
 
 
 # --- the app's records: which session started which ----------------------------------------------------------------
