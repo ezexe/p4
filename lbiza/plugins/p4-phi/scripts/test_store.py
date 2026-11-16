@@ -217,6 +217,24 @@ Fields: term.
             self.assertEqual(v[1]["status"], "off")
 
 
+class Memory(unittest.TestCase):
+    def test_a_cloned_memory_file_keeps_the_time_it_was_written(self):
+        """A memory file cloned onto another machine has the clone's mtime. The frontmatter's `modified`, which Claude
+        Code writes as an ISO 8601 time when Claude writes the file, is when the fact was written and dates its
+        entries; a file without the field keeps its mtime."""
+        import datetime
+        with tempfile.TemporaryDirectory() as t:
+            p4 = os.path.join(t, ".claude", "p4")
+            write(p4conf.sub(p4, "memory", "cef.md"), "---\nname: cef\ndescription: how the capybara build is watched\n"
+                  "modified: 2026-10-01T10:00:00Z\n---\n\n# Watching a capybara build\n\nThe ninja log names it.\n")
+            plain = p4conf.sub(p4, "memory", "plain.md")
+            write(plain, "# Plain\n\nNo frontmatter here.\n")
+            when = {e.file: e.time for e in st.memory_entries(p4)}
+            written = datetime.datetime(2026, 10, 1, 10, 0, tzinfo=datetime.timezone.utc).astimezone()
+            self.assertEqual(when["memory/cef.md"], written.strftime("%Y-%m-%d %H:%M"))
+            self.assertEqual(when["memory/plain.md"], st.stamp_of(plain))
+
+
 class IndexStaleness(unittest.TestCase):
     def test_rebuilt_only_when_newer(self):
         with tempfile.TemporaryDirectory() as d:

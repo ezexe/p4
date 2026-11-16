@@ -429,11 +429,23 @@ def stamp_of(path):
         return ""
 
 
+def iso_stamp(value):
+    """An ISO 8601 time as `YYYY-MM-DD HH:MM` in this machine's time, as stamp_of gives an mtime; '' when it does not
+    parse."""
+    import datetime as _d
+    try:
+        t = _d.datetime.fromisoformat(str(value).strip().strip("\"'").replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    return (t.astimezone() if t.tzinfo else t).strftime("%Y-%m-%d %H:%M")
+
+
 def memory_entries(p4):
     """The documents of the auto memory directory `temportal/memory/`, each an Entry: one per heading of every
     Markdown file but MEMORY.md, the index of links. The text before a file's first heading is one more document
     when it holds any, and a file without headings is that one document, headed by the frontmatter's description,
-    else its name, else the file's."""
+    else its name, else the file's. Each is dated by the frontmatter's `modified`, the ISO 8601 time Claude Code
+    writes when Claude writes the file, else by the file's mtime, which a clone sets to the clone's time."""
     d = p4conf.sub(p4, "memory")
     out = []
     if not os.path.isdir(d):
@@ -450,8 +462,10 @@ def memory_entries(p4):
                 if lines[i].strip() == "---":
                     body_start = i + 1
                     break
-                m = re.match(r"^(description|name):\s*(.*)$", lines[i])
-                if m and (m.group(1) == "description" or not desc):
+                m = re.match(r"^(description|name|modified):\s*(.*)$", lines[i])
+                if m and m.group(1) == "modified":
+                    when = iso_stamp(m.group(2)) or when
+                elif m and (m.group(1) == "description" or not desc):
                     desc = m.group(2).strip()
         pre = [body_start + 1, desc or name[:-3], []]
         sections, cur = [], pre
