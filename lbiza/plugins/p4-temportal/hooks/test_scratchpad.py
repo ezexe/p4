@@ -202,7 +202,8 @@ def session_start(root, extra):
     for c in cmds:
         r = subprocess.run([sh, "-c", c], input=json.dumps({"cwd": root, "source": "startup"}).encode(),
                            capture_output=True, timeout=60,
-                           env=env_with(extra, CLAUDE_PLUGIN_ROOT=os.path.dirname(HERE), CLAUDE_PROJECT_DIR=root))
+                           env=env_with(extra, CLAUDE_PLUGIN_ROOT=os.path.dirname(HERE), CLAUDE_PROJECT_DIR=root,
+                                        CLAUDE_CONFIG_DIR=os.path.join(root, ".config")))   # never the real profile
         assert r.returncode == 0, r
         out.append(r.stdout.decode("utf-8", "replace"))
     return "".join(out)
@@ -215,6 +216,16 @@ def gate2_d():
         print("test_scratchpad.py: clean start SKIPPED, no sh on PATH")
         return
     root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-clean-")
+    profile = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude"),
+                           "projects")
+    mine = os.path.basename(root).replace("_", "-")
+
+    def left_in_profile():
+        try:
+            return [n for n in os.listdir(profile) if n.endswith(mine)]
+        except OSError:
+            return []
+
     try:
         for extra in ({}, ON):
             assert session_start(root, extra) == "", f"a fresh tree printed (asks {extra or 'off'})"
@@ -233,6 +244,7 @@ def gate2_d():
         r = subprocess.run([shutil.which("sh"), os.path.join(HERE, "run-hook.sh"), "scratchpad", "notebook-out"], input=b"{}",
                            capture_output=True, env=env_with(CLAUDE_PLUGIN_ROOT=root, CLAUDE_PROJECT_DIR=root))
         assert r.returncode == 0, r
+        assert left_in_profile() == [], f"the run left folders under {profile}: {left_in_profile()}"
     finally:
         shutil.rmtree(root, ignore_errors=True)
     print("test_scratchpad.py: clean start green")
