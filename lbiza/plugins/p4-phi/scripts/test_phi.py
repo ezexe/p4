@@ -45,6 +45,14 @@ CLI = {TOP: "aaaa1111-0000-4000-8000-000000000000", KID: "bbbb2222-0000-4000-800
 TASK = "Make the narwhal exporter write its ports table to the store"
 BRIEF = "Find why the narwhal exporter drops the last row of the ports table and fix it"
 LONG = ("The last row was dropped by an off-by-one in flush_rows. " + "It is fixed and the suite passes. " * 30).strip()
+# P4_PHI_TEST_TMP names a folder the tests are given for their fixtures, in place of the system temp folder, so a
+# run's fixtures, and anything a test leaves running there, sit in a folder its caller chose and clears. It must lie
+# outside any git repository and any project with a store, since phi reads a fixture's repository and stores by
+# walking up from it.
+FIXTURES = os.environ.get("P4_PHI_TEST_TMP", "")
+if FIXTURES:
+    os.makedirs(FIXTURES, exist_ok=True)
+    tempfile.tempdir = FIXTURES
 
 
 def write(path, text):
@@ -1086,6 +1094,19 @@ class Wiring(unittest.TestCase):
             for word in ("ghost", "memo", "rollup", "node", "play", "steer", "goal") + (
                     ("owner",) if name != "puppeteer.py" else ()):
                 self.assertNotRegex(given, rf"\b{word}s?\b", f"{word} in {name}")
+
+
+class FixtureFolder(unittest.TestCase):
+    def test_a_tree_is_made_in_the_folder_the_tests_are_given(self):
+        with tempfile.TemporaryDirectory() as given:
+            folder = os.path.join(given, "fixtures")
+            code = ("import tempfile, test_phi\nwith tempfile.TemporaryDirectory() as d:\n"
+                    "    print(test_phi.Tree(d).p4)")
+            env = {**os.environ, "P4_PHI_TEST_TMP": folder}
+            r = subprocess.run([sys.executable, "-X", "utf8", "-c", code], cwd=HERE, env=env, capture_output=True,
+                               text=True, timeout=60)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertTrue(os.path.normcase(r.stdout.strip()).startswith(os.path.normcase(folder)), r.stdout)
 
 
 if __name__ == "__main__":

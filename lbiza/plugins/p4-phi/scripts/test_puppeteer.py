@@ -19,18 +19,22 @@ meta: a message of ezexe's to an orchestrator runs the meta pass over every orch
 meta-ledger.md, with the duplicate topic, the conflict over one file and the stale topic it finds.
 """
 
+import glob
 import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import issues  # noqa: E402
 import phi  # noqa: E402
 import puppeteer  # noqa: E402
 import starts  # noqa: E402
@@ -56,17 +60,39 @@ def call_in(ctx, k=0):
     return json.JSONDecoder().raw_decode(piece)[0]
 
 
+def stop_watchers(p4, wait=10.0):
+    """Ends every watcher started under the store `p4`, by the pid its watcher.json holds, and waits for each to
+    end. A claim whose watcher has not written its pid yet is waited on for it."""
+    end = time.time() + wait
+    for path in sorted(glob.glob(os.path.join(p4, "phi", "sessions", "*", "watcher.json"))):
+        pid = -1
+        while time.time() < end and os.path.exists(path):
+            try:
+                pid = int(jload(path).get("pid") or -1)
+            except (OSError, ValueError, TypeError):
+                pid = -1
+            if pid > 0:
+                break
+            time.sleep(0.1)
+        if pid > 0 and issues._alive(pid):
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
+            while time.time() < end and issues._alive(pid):
+                time.sleep(0.1)
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         if not shutil.which("sh"):
             self.skipTest("no sh")
         self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
         self.t = t = Tree(self._tmp.name)
+        self.addCleanup(stop_watchers, t.p4)          # runs first, pass or fail, before the folder goes
         t.record(TOP, title="the exporter top")
         t.record(KID, TOP, title="the flush port")
-
-    def tearDown(self):
-        self._tmp.cleanup()
 
     def ledger(self, host=TOP):
         r = self.t.cli(host, "ledger")
@@ -387,6 +413,40 @@ class TermsAndGuides(Base):
              "status": "in_progress"},
             {"content": "Create the retry module src/export/retry.py", "status": "pending"}], "scope": "first_task"})
         self.assertNotIn(phi.RESEARCH_STEP_HEAD, ok, "a plan that researches first is advised nothing")
+
+
+class WatcherLeft(unittest.TestCase):
+    """A test that starts a real watcher ends it, whether the test passes or fails midway."""
+
+    def test_a_watcher_test_made_to_fail_midway_leaves_no_watcher_running(self):
+        pids = []
+
+        def midway(case, *args, **kw):
+            pids.append(jload(case.path(TOP, "watcher.json")).get("pid", -1))
+            raise AssertionError("made to fail midway, once its watcher runs")
+
+        def kill_left():
+            for pid in pids:
+                if issues._alive(pid):
+                    os.kill(pid, signal.SIGTERM)
+        self.addCleanup(kill_left)
+        kept = []
+        case = Linear("test_one_background_watcher_an_orchestrator_started_by_a_hook_and_ended_with_it")
+        result = unittest.TestResult()
+        # the fixture folder outlives the test, as it does when Windows refuses to delete a folder a live process
+        # writes into, so only the test's own cleanup can end the watcher
+        with mock.patch.object(Linear, "assertIn", midway), \
+                mock.patch.object(tempfile.TemporaryDirectory, "cleanup", lambda d: kept.append(d)):
+            case.run(result)
+        self.addCleanup(lambda: [d.cleanup() for d in kept])
+        if result.skipped:
+            self.skipTest(result.skipped[0][1])
+        self.assertEqual((len(result.failures), result.errors), (1, []), result.failures)
+        self.assertGreater(pids[0], 0, "the watcher ran when the test failed")
+        end = time.time() + 5
+        while time.time() < end and issues._alive(pids[0]):
+            time.sleep(0.2)
+        self.assertFalse(issues._alive(pids[0]), "no `phi.py watch` outlives the test that started it")
 
 
 class Recursive(unittest.TestCase):
