@@ -1967,11 +1967,6 @@ def long_read(cmd):
     return kind, bool(kind) and alone
 
 
-def long_command(cmd):
-    """The kind of long command a shell call runs in its foreground, '' for none."""
-    return long_read(cmd)[0]
-
-
 LEVEL_KEEP_S = 7 * 86400         # how long a session's once-per-step memory outside a store is kept
 
 
