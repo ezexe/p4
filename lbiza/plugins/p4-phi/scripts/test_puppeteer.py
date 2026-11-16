@@ -306,6 +306,90 @@ class Recursive(unittest.TestCase):
         self.assertEqual(puppeteer.all_routes(t.p4), {})
 
 
+class AtArchive(Base):
+    """#47: the puppeteer checks a session at its archive for what it started and did not finish."""
+
+    def setUp(self):
+        super().setUp()
+        t = self.t
+        t.say(TOP, TASK)
+        t.stop(TOP, TASK, report="planned")
+        t.say(KID, handed("Port the flush to the new writer. Report when done."))
+
+    def background(self, host, command, task_id):
+        r = self.t.hook("task", host, {"hook_event_name": "PostToolUse", "tool_name": "Bash",
+                                       "tool_input": {"command": command, "run_in_background": True},
+                                       "tool_response": f"Command running in background with ID: {task_id}."})
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def finish(self, host=KID):
+        self.assertEqual(self.t.cli(host, "done", "the flush suite ran and passed").returncode, 0)
+        self.assertEqual(self.t.stop(host, "port it", report="Ported; the suite passes.").returncode, 0)
+        self.assertTrue(self.t.session(host).get("doneRetired"))
+
+    def test_a_session_archived_with_a_task_running_leaves_a_row_and_its_puppeteer_is_told_once(self):
+        self.background(KID, "sh run-suites.sh", "bg12345678")
+        self.finish()
+        left = self.t.session(KID)["unfinishedAtArchive"]["items"]
+        self.assertTrue(any("background task bg12345678" in x and "no end recorded" in x for x in left), left)
+        page = self.ledger()[0]
+        self.assertIn("## Unfinished at archive", page)
+        self.assertLess(page.index("## Unfinished at archive"), page.index("## Reconcile"), "at the top")
+        self.assertIn("background task bg12345678", page)
+        ctx = context(self.t.say(TOP, "And?"))
+        self.assertIn("was archived with 1 thing unfinished", ctx)
+        self.assertIn("bg12345678", ctx)
+        self.assertNotIn("bg12345678", context(self.t.say(TOP, "And then?")), "told once")
+        r = self.t.cli(TOP, "settle", KID, "the suite run was stopped by hand")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("Unfinished at archive", self.ledger()[0], "settled: its row leaves the ledger")
+
+    def test_a_session_archived_clean_leaves_no_row(self):
+        self.finish()
+        s = self.t.session(KID)
+        self.assertTrue(s.get("archiveChecked"))
+        self.assertNotIn("unfinishedAtArchive", s)
+        self.assertNotIn("Unfinished at archive", self.ledger()[0])
+        self.assertNotIn("unfinished", context(self.t.say(TOP, "And?")))
+
+    def test_a_second_start_of_a_running_command_is_held_then_flagged_with_the_first_copys_id(self):
+        self.background(KID, "sh run-suites.sh", "bg11111111")
+        call = {"hook_event_name": "PreToolUse", "tool_name": "Bash",
+                "tool_input": {"command": "sh  run-suites.sh", "run_in_background": True}}
+        out = json.loads(self.t.hook("restart-check", KID, dict(call, tool_use_id="tu1")).stdout)["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("still running in the background as bg11111111", out["permissionDecisionReason"])
+        self.assertEqual(self.t.hook("restart-check", KID, dict(call, tool_use_id="tu2")).stdout.strip(), "",
+                         "told once for that copy: the next start goes through")
+        other = dict(call, tool_input={"command": "sh other.sh", "run_in_background": True}, tool_use_id="tu3")
+        self.assertEqual(self.t.hook("restart-check", KID, other).stdout.strip(), "", "another command is no restart")
+        self.background(KID, "sh run-suites.sh", "bg22222222")
+        tasks = [t for _, t in puppeteer.plans._tasks(puppeteer.plans.load(self.t.p4, KID))]
+        self.assertEqual(tasks[-1].get("repeatOf"), "bg11111111")
+        left = puppeteer.unfinished(self.t.p4, KID, procs=False)
+        self.assertTrue(any("started 2 times" in x and "while bg11111111 was still running" in x for x in left), left)
+
+    def test_processes_it_left_and_requests_nobody_started_are_named(self):
+        puppeteer.PROCESSES = lambda: [(4242, f"python phi.py watch --p4 x --session {KID}"), (7, "python other.py")]
+        try:
+            starts.add(self.t.p4, KID, "A follow-up nobody starts", "Do the follow-up in the exporter.")
+            left = puppeteer.unfinished(self.t.p4, KID)
+        finally:
+            puppeteer.PROCESSES = None
+        self.assertTrue(any(x.startswith("process 4242 it started is still alive") for x in left), left)
+        self.assertFalse(any("process 7 " in x for x in left))
+        self.assertTrue(any("that it queued was never started" in x for x in left), left)
+
+    def test_a_self_archive_names_the_live_task_that_holds_it(self):
+        self.background(KID, "sh run-suites.sh", "bg33333333")
+        r = self.t.hook("self-archive", KID, {"hook_event_name": "PreToolUse",
+                                              "tool_name": "mcp__ccd_session_mgmt__archive_session",
+                                              "tool_input": {"session_id": "self"}})
+        out = json.loads(r.stdout)["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("bg33333333", out["permissionDecisionReason"])
+
+
 class Parallel(Base):
     EITHER = ("Fix the narwhal exporter's flush: either buffer the rows in memory until the table closes or write "
               "each row straight to the store")

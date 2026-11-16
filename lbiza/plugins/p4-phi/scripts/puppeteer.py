@@ -391,9 +391,13 @@ def build(home, top, net=False):
                else "claimed" if r.get("claimed") else "pending")
         asked.append({"id": r["id"], "title": r.get("title", ""), "requester": r.get("requester"), "state": how})
     groups = [g for sid in sorted(live) for g in load_groups(home, sid)]
+    left = [{"sessionId": sid, "title": phi.title_of(s), "time": s["unfinishedAtArchive"].get("time", ""),
+             "items": list(s["unfinishedAtArchive"].get("items") or [])}
+            for sid, depth, s in tree if depth and isinstance(s.get("unfinishedAtArchive"), dict)
+            and not s["unfinishedAtArchive"].get("settled")]            # #47: read from the records, no git here
     return {"top": top, "title": phi.title_of(every.get(top, {})), "parent": relay._parent(every.get(top, {})),
             "reconcile": reconcile, "rows": rows, "closed": shut, "tasks": tasks, "requests": asked,
-            "issues": tied, "groups": groups}
+            "issues": tied, "groups": groups, "unfinished": left}
 
 
 def render(m):
@@ -404,6 +408,12 @@ def render(m):
            "Written by p4-phi's watcher from phi's files and the app's session records, and rewritten only when one "
            "of them changes.",
            "Edit nothing here: change the records.", ""]
+    if m.get("unfinished"):
+        out += ["## Unfinished at archive", ""]
+        for u in m["unfinished"]:
+            out.append(f"- \"{u['title']}\" ({u['sessionId']}), checked {u['time']}:")
+            out += [f"  - {x}" for x in u["items"]]
+        out.append("")
     out += ["## Reconcile", ""]
     out += [f"- {x}" for x in m["reconcile"]] or ["- Nothing diverges: phi's files and the app's records agree."]
     out += ["", "## Sessions", ""]
@@ -536,6 +546,10 @@ def tick(home, top, net=True):
     """One look of the watcher: the readings merged, the ledger, the landed topics registered as routes."""
     try:
         merge_all(home, top)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        archive_checks(home, top)                   # #47: once a session, when it closes
     except Exception:  # noqa: BLE001
         pass
     _, changed = refresh(home, top, net=net)
@@ -1200,6 +1214,190 @@ def merge_all(home, sid):
     return out
 
 
+# --- at a session's archive: what it left unfinished (#47) -------------------------------------------------------------
+#
+# A session can be archived, or retired as finished, while work it started is still unfinished: the #38 builder left
+# seven watchers for four top sessions and suite runs started more than once. So when a session under a puppeteer is
+# retired or archived, what it started is reconciled once against what finished, from its plan's background tasks,
+# its turns, the store's start requests and the machine's process list. A clean session leaves nothing. Otherwise
+# the items are kept on its session.json as `unfinishedAtArchive`, shown at the top of the puppeteer's ledger, and
+# the puppeteer's session is told once, one sentence an item.
+
+ARCHIVE_LOOK_S = 24 * 3600.0     # a session closed longer ago than this is stamped as checked, not looked at
+PS_S = 6                         # the process listing, which a hook may be waiting on
+PROCESSES = None                 # a test's stand-in for the machine's process list: a callable -> [(pid, command)]
+
+
+def process_rows():
+    """[(pid, command line)] of the processes on this machine, [] when the listing fails."""
+    if PROCESSES is not None:
+        return list(PROCESSES())
+    try:
+        if os.name == "nt":
+            r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                                "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }"],
+                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=PS_S,
+                               stdin=subprocess.DEVNULL)
+        else:
+            r = subprocess.run(["ps", "-eo", "pid=,args="], capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=PS_S, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    out = []
+    for line in (r.stdout or "").splitlines():
+        pid, _, cmd = line.strip().replace("\t", " ", 1).partition(" ")
+        if pid.isdigit() and cmd.strip():
+            out.append((int(pid), cmd.strip()))
+    return out
+
+
+def left_processes(home, s):
+    """The live processes a session started, told by its marks in their command lines: its id, as its watcher
+    carries it, and its own scratch folder under temportal/tmp, where its test runs live."""
+    sid = str(s.get("sessionId") or "")
+    marks = [sid] if sid else []
+    for cli in s.get("cliSessionIds") or []:
+        if isinstance(cli, str) and len(cli) >= 8:
+            marks.append(f"temportal/tmp/{cli}".lower())
+    if not marks:
+        return []
+    out = []
+    for pid, cmd in process_rows():
+        low = cmd.replace("\\", "/").lower()
+        if pid != os.getpid() and any(m.lower() in low for m in marks) and "win32_process" not in low:
+            out.append((pid, _short(cmd, 140)))
+    return out[:12]
+
+
+def unfinished(home, sid, procs=True):
+    """What a session started and did not finish, one sentence an item; [] for a clean session."""
+    phi = _phi()
+    s = relay._session(home, sid)
+    if not s:
+        return []
+    items = []
+    plan = plans.load(home, sid)
+    tasks = list(plans._tasks(plan))
+    for _, t in tasks:
+        if t.get("status") == "open":
+            items.append(f"background task {t.get('id')}, {t.get('tool') or 'a task'} \"{_short(t.get('what'), 100)}\", "
+                         f"started {t.get('at') or 'earlier'}, has no end recorded and may still be running")
+        elif not str(t.get("result") or "").strip() and t.get("status") not in ("stopped",):
+            items.append(f"background task {t.get('id')} \"{_short(t.get('what'), 100)}\" ended as "
+                         f"{t.get('status')} and its result was never read")
+    again = {}
+    for _, t in tasks:
+        if t.get("repeatOf"):
+            again.setdefault(str(t["repeatOf"]), []).append(t)
+    for first, more in again.items():
+        items.append(f"the command \"{_short(more[0].get('what'), 100)}\" was started {len(more) + 1} times, "
+                     f"{', '.join(str(t.get('id')) for t in more)} while {first} was still running")
+    if procs:
+        for pid, cmd in left_processes(home, s):
+            items.append(f"process {pid} it started is still alive: {cmd}")
+    try:
+        files, _, commits, still = relay.outcome(home, sid, s)
+    except Exception:  # noqa: BLE001
+        files, commits, still = [], [], []
+    items += [f"plan {x}" for x in still if x.startswith("step ")]
+    items += [x for x in still if x.startswith("uncommitted:")]
+    repos = {relay.repo_of(f) for f in files} - {""}
+    for repo in sorted(repos):
+        ahead = issues.git(repo, "log", "--oneline", "@{u}..HEAD")
+        if ahead.strip():
+            n = len(ahead.strip().splitlines())
+            items.append(f"{n} commit{'s' if n != 1 else ''} in {relay.show(repo, s.get('cwd') or '')} not pushed: "
+                         + _short("; ".join(ahead.strip().splitlines()[:4]), 200))
+    iss = s.get("issue") if isinstance(s.get("issue"), dict) else None
+    if iss and not iss.get("closed"):
+        state = issue_state(home, iss.get("repo"), iss.get("number"))
+        if state != "CLOSED":
+            items.append(f"the issue it was to close, {iss.get('repo')}#{iss.get('number')}, is "
+                         + ("still open" if state == "OPEN" else "not known to be closed"))
+    at = time.time()
+    for r in starts.state(home).values():
+        if r.get("requester") == sid and not r.get("started") and at - float(r.get("at") or 0) <= starts.EXPIRE_S:
+            items.append(f"start request {r.get('id')} \"{_short(r.get('title'), 80)}\" that it queued was never "
+                         f"started")
+    return items
+
+
+def archive_check(home, sid, procs=True):
+    """A retired or archived session checked once -> its unfinished items, kept on its session.json and told to the
+    session above it once. [] for a clean session and for one checked before."""
+    path = os.path.join(relay._dir(home, sid), "session.json")
+    s = relay._read_json(path)
+    if not s or s.get("archiveChecked"):
+        return []
+    items = unfinished(home, sid, procs)
+    s = relay._read_json(path) or s
+    s["archiveChecked"] = now()
+    if items:
+        s["unfinishedAtArchive"] = {"time": now(), "items": items}
+    relay._write_json(path, s)
+    parent = relay._parent(s)
+    if items and parent:
+        relay.warn(home, parent, f"unfinished:{sid}", unfinished_text(s, items))
+    return items
+
+
+def unfinished_text(s, items):
+    return (f"puppeteer: \"{_phi().title_of(s)}\" ({s.get('sessionId')}) was archived with {len(items)} thing"
+            f"{'s' if len(items) != 1 else ''} unfinished. " + " ".join(f"{x[0].upper()}{x[1:]}." for x in items)
+            + f" Take each up here or hand it to a successor, then `{_phi().commands()} settle {s.get('sessionId')} "
+              f"\"<what took it up>\"` clears its row from the ledger.")
+
+
+def archive_checks(home, top):
+    """The watcher's look: each session of an orchestrator's subtree that closed since the last look is checked
+    once. One closed longer ago than ARCHIVE_LOOK_S is stamped as checked without a look."""
+    out = []
+    for sid, depth, s in subtree(home, top):
+        if not depth or not closed(s) or s.get("archiveChecked"):
+            continue
+        mark = s.get("doneRetired") or s.get("stale")
+        when = str((mark.get("time") if isinstance(mark, dict) else "") or (s.get("archived") if isinstance(
+            s.get("archived"), str) else "") or "")
+        try:
+            old = time.time() - time.mktime(time.strptime(when[:16], "%Y-%m-%d %H:%M")) > ARCHIVE_LOOK_S
+        except (ValueError, OverflowError):
+            old = True
+        if old:
+            d = relay._read_json(os.path.join(relay._dir(home, sid), "session.json"))
+            if d:
+                d["archiveChecked"] = "before #47"
+                relay._write_json(os.path.join(relay._dir(home, sid), "session.json"), d)
+            continue
+        if archive_check(home, sid):
+            out.append(sid)
+    return out
+
+
+def held_tasks(home, sid):
+    """The open background tasks that hold a session's own archive: 'id "what"' each."""
+    return [f"{t.get('id')} \"{_short(t.get('what'), 80)}\"" for _, t in plans._tasks(plans.load(home, sid))
+            if t.get("status") == "open"]
+
+
+def restart_text(home, sid, command):
+    """The line for a session about to start a background command its own records show as still running, '' when
+    none runs or it was told of this copy already; a second try goes through and is flagged on the task."""
+    first = plans.running(plans.load(home, sid), command)
+    if not first:
+        return ""
+    path = os.path.join(relay._dir(home, sid), "session.json")
+    s = relay._read_json(path)
+    told = [x for x in s.get("restartTold") or [] if isinstance(x, str)]
+    if not s or first["id"] in told:
+        return ""
+    s["restartTold"] = (told + [first["id"]])[-50:]
+    relay._write_json(path, s)
+    return (f"phi (p4-phi): this command is still running in the background as {first['id']}, started "
+            f"{first.get('at') or 'earlier'}, by this session's own records, so a second copy is not started. Wait for "
+            f"the completion notice of {first['id']}, or read its output. If it has ended and its notice was missed, "
+            f"start it again: phi lets the next start through and keeps it as a repeat of {first['id']}.")
+
+
 # --- meta: the puppeteers reconciled ----------------------------------------------------------------------------------
 
 def meta_path(home):
@@ -1339,7 +1537,7 @@ def on_prompt(home, s, req, base, transcript_bytes=0, owner_turn=True, net=True)
 
 # --- the commands -----------------------------------------------------------------------------------------------------
 
-COMMANDS = ("ledger", "watch", "draft", "pioneer", "routes", "readings", "merge", "meta")
+COMMANDS = ("ledger", "watch", "draft", "pioneer", "routes", "readings", "merge", "meta", "settle")
 
 
 def command(a, me):
@@ -1409,6 +1607,17 @@ def command(a, me):
         g, drafts = explore(home, s, a.words or " / ".join(a.texts), a.texts, base)
         print(explore_text(home, s, g, drafts))
         return 0
+    if a.cmd == "settle":
+        path = os.path.join(relay._dir(home, a.child), "session.json")
+        d = relay._read_json(path)
+        if not isinstance(d.get("unfinishedAtArchive"), dict):
+            raise ValueError(f"{a.child} left nothing unfinished at its archive")
+        if len(" ".join(a.text.split())) < 8:
+            raise ValueError("say what took the unfinished work up")
+        d["unfinishedAtArchive"].update(settled=" ".join(a.text.split())[:300], settledBy=sid, settledAt=now())
+        relay._write_json(path, d)
+        print(f"{a.child}: its unfinished work is settled, and its row leaves the ledger")
+        return 0
     if a.cmd == "merge":
         g = next((x for x in load_groups(home, sid) if x["id"] == a.group), None)
         if not g:
@@ -1446,6 +1655,9 @@ def add_parsers(sub, common):
         if name == "readings":
             p.add_argument("texts", nargs="+", help="each distinct reading")
             p.add_argument("--words", default="", help="ezexe's message")
+        if name == "settle":
+            p.add_argument("child", help="the session whose unfinished work was taken up")
+            p.add_argument("text", help="what took it up")
         if name == "merge":
             p.add_argument("group")
             p.add_argument("--result", default="", help="the result the chain settled the fork on")

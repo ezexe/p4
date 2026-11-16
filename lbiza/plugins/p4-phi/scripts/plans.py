@@ -949,6 +949,9 @@ def register(home, s, tool, inp, response, cwd, at_epoch=None):
         return None                               # the same launch read twice
     sid = s["sessionId"]
     p = load(home, sid)
+    first = running(p, task["what"])
+    if first:
+        task["repeatOf"] = first["id"]             # #47: started again while an earlier copy was still running
     st = step_of(p, p.get("current") or "") if p.get("steps") else None
     if st is None:
         p.setdefault("loose", []).append(task)
@@ -956,6 +959,17 @@ def register(home, s, tool, inp, response, cwd, at_epoch=None):
         st.setdefault("tasks", []).append(task)
     relay._write_json(_path(home, sid), p)
     return task
+
+
+def same_command(a, b):
+    return " ".join(str(a or "").split()) == " ".join(str(b or "").split())
+
+
+def running(p, what):
+    """The earliest open background task of a plan that runs the same command, None for none (#47)."""
+    what = relay._short(what, 200)
+    return next((t for _, t in _tasks(p) if t.get("status") == "open" and t.get("tool") != "Agent"
+                 and same_command(t.get("what"), what)), None)
 
 
 def _tasks(p):

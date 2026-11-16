@@ -1550,10 +1550,25 @@ def h_self_archive(payload):
             f" phi already treats a finished or superseded session as archived. A top session that is done offers "
             f"its tree's finished sessions to ezexe as one quick select, an `AskUserQuestion` with `multiSelect`, "
             f"and archives only the ones ezexe picked there: {target} was not picked in this turn.")
+        running = puppeteer.held_tasks(me.home, me.id) if own else []
+        if running:                                # #47: a live background task holds a session's own archive
+            why += (f" It also has {len(running)} background task{'s' if len(running) != 1 else ''} with no end "
+                    f"recorded: {'; '.join(running[:6])}. Wait for each one's completion notice or stop it before "
+                    f"this session ends.")
         refuse = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                          "permissionDecisionReason": why}}
     if not spawned_from(s) or not own:
         return refuse
+    if refuse is None:                             # a project that lets sessions archive: still held by a live task
+        running = puppeteer.held_tasks(me.home, me.id)
+        if running:
+            RAN["archive_held"] = len(running)
+            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                           "permissionDecisionReason": (
+                                               f"phi (p4-phi): this session has {len(running)} background task"
+                                               f"{'s' if len(running) != 1 else ''} with no end recorded: "
+                                               f"{'; '.join(running[:6])}. Its archive is held until each one ends "
+                                               f"or is stopped (#47).")}}
     turn = last_turn(payload.get("transcript_path") or "")
     texts = [t for t in (turn or {}).get("texts") or [] if isinstance(t, str) and t.strip()]
     h_stop({**payload, "hook_event_name": "Stop", "last_assistant_message": texts[-1] if texts else "",
@@ -1564,6 +1579,21 @@ def h_self_archive(payload):
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                        "permissionDecisionReason": held}}
     return refuse
+
+
+def h_restart_check(payload):
+    """PreToolUse on a shell command run in the background: one this session's own records show as still running
+    is not started a second time; the session is told the id to wait on, once for that copy (#47)."""
+    me = Me(payload)
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    if not me.home or not me.id or not inp.get("run_in_background") or not inp.get("command"):
+        return None
+    why = puppeteer.restart_text(me.home, me.id, str(inp.get("command")))
+    if not why:
+        return None
+    RAN["restart"] = "held"
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                   "permissionDecisionReason": why}}
 
 
 def session_archives(store):
@@ -1774,6 +1804,8 @@ def h_user_prompt_submit(payload):
     if s.get("doneRetired") or s.get("archived"):
         s["doneRetired"] = s["archived"] = False   # messaged again: a live node once more
         s["reopened"] = now()
+        s.pop("archiveChecked", None)              # #47: checked again when it next closes
+        s.pop("unfinishedAtArchive", None)
         RAN["reopened"] = True
         save_session(me.home, s)
         relay.reopened(me.home, s, s["reopened"])   # #49: named as reopened, so the mark hides no live work
@@ -1930,6 +1962,10 @@ def h_stop(payload):
     if above and proved and ((s.get("disposable") and finished) or left):
         if relay.retire_done(me.home, above, s["sessionId"], s, row["time"], extra=note, archived=left):
             RAN["retired"] = "archived" if left else "done"
+            try:                                   # #47: what it started and did not finish, checked as it closes
+                RAN["unfinished"] = len(puppeteer.archive_check(me.home, s["sessionId"]))
+            except Exception:  # noqa: BLE001
+                pass
     if above and finished and not isinstance(s.get("issue"), dict):
         cur = load_session(me.home, s["sessionId"]) or s
         told = list(cur.get("closesTold") or [])
@@ -2307,6 +2343,7 @@ HOOKS = {"session-start": ("SessionStart", h_session_start),
 ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "store-guard", "plan", "task", "memory-gap",
                                                      "self-archive")})
 ROUTED["nudge"] = ("PreToolUse", h_nudge)
+HOOKS["restart-check"] = ROUTED["restart-check"] = ("PreToolUse", h_restart_check)
 ROUTED.update({"agent-launch": ("PreToolUse", h_agent_launch), "agent-pre": ("PreToolUse", h_agent_call),
                "agent-post": ("PostToolUse", h_agent_call), "agent-stop": ("SubagentStop", h_agent_stop)})
 OLD_NAMES = {"arrive": "session-start", "prompt": "user-prompt-submit", "exit": "stop"}   # hooks.json of 0.1 and 0.2,
