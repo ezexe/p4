@@ -7,8 +7,8 @@ prints nothing when nothing is behind. Otherwise one `systemMessage` for ezexe, 
   branch    when the store is a git repository of its own with an origin, and this machine's branch is behind
             origin's `<main>`, which p4.json's `recall.sync.main` names, `p4.py sync` runs behind it, so the start
             never waits on a merge, and its output goes to `<git dir>/p4-sync.log`; when it cannot start, the line
-            says to run `p4.py sync`. The fetch that finds out is given FETCH_S seconds. Nothing is
-            forced, and nothing is pulled outside `p4.py sync`.
+            gives the whole command that syncs the store, as phi.py builds it. The fetch that finds out is given
+            FETCH_S seconds. Nothing is forced, and nothing is pulled outside `p4.py sync`.
   plugins   a former plugin, enabled or only installed, and an installed p4-phi or p4-temportal older than the
             marketplace's get the exact `claude plugin` commands that close them, in order. A former plugin is a key
             of RETIRED, p4-memory, p4-scratchpad or p4-recall, which the marketplace no longer offers. The commands
@@ -281,6 +281,11 @@ def start_sync(p4):
 
 # --- the hook ------------------------------------------------------------------------------------------------
 
+def sync_command(p4):
+    """The whole command that syncs the store, as phi.py builds it for the line that orders a push."""
+    return f"python -I -X utf8 \"{os.path.join(HERE, 'p4.py')}\" sync --push --p4 \"{p4}\"".replace("\\", "/")
+
+
 def run(project, p4, sync=True):
     """The line for ezexe, '' when nothing is behind. On the way it calls p4conf.migrate_layout and, when the
     store's branch is behind, starts `p4.py sync`."""
@@ -296,7 +301,7 @@ def run(project, p4, sync=True):
                 started = start_sync(p4)
                 parts.append(f"the store's branch {got[0]} is {got[1]} commit(s) behind origin/{main}; "
                              + ("`p4.py sync` is merging it in the background" if started
-                                else "run `p4.py sync` to merge it"))
+                                else f"run `{sync_command(p4)}` to merge it"))
     cmds = plugin_commands(project)
     n, size = old_cache()
     if cmds:

@@ -204,6 +204,15 @@ class Branch(Base):
         self.assertEqual(self.git(self.p4, "rev-list", "--count", "HEAD..origin/main").strip(), "1",
                          "the hook itself merges nothing")
 
+    def test_a_sync_that_cannot_start_is_given_as_the_whole_command(self):
+        """When the background sync cannot start, the line orders the sync with the whole command, as phi.py builds
+        it for the line that orders a push: the plugin's p4.py by its path and this store."""
+        self.advance_main()
+        catchup.start_sync = lambda p4: False
+        line = catchup.run(self.project, self.p4)
+        p4py = os.path.join(catchup.HERE, "p4.py").replace("\\", "/")
+        self.assertIn(f'`python -I -X utf8 "{p4py}" sync --push --p4 "{self.p4}"`'.replace("\\", "/"), line)
+
     def test_no_origin_means_no_branch_check(self):
         self.git(self.p4, "remote", "remove", "origin")
         self.assertIsNone(catchup.behind(self.p4))
