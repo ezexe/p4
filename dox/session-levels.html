@@ -178,7 +178,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
   <p class="lede">p4-phi delegates each piece of work to where Claude Code runs it best, so a session's own turn is never held by it. Choose a kind of task below, see where it goes, and step through the path its result takes back.</p>
   <ul class="facts">
     <li class="f-phi"><b>Workers do the writing.</b>An orchestrator plans and lands. Each work step of its task list goes to a worker, which the <a href="session-tree.html">session tree</a> page shows. A <a href="puppeteer.html">puppeteer</a> is the exception: its steps stay with it.</li>
-    <li class="f-you"><b>Subagents run in the background.</b>A read across files goes to Claude Code's built-in <code>Explore</code>, and the plugin ships one of its own, <code>p4-phi:check</code>. Any session can start either.</li>
+    <li class="f-you"><b>Subagents run in the background.</b>A read across files goes to Claude Code's built-in <code>Explore</code>, a review of a code change to its bundled skill <code>code-review</code>, and the plugin ships one agent of its own, <code>p4-phi:check</code>, for a result that is no code change.</li>
     <li class="f-app"><b>Nobody waits in the foreground.</b>The session that asked goes on or ends its turn. A completion notification brings the result in a later turn.</li>
   </ul>
 
@@ -195,7 +195,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
         <button type="button" class="ghostbtn" id="next">Next</button>
       </div>
       <div class="svgwrap"><svg id="levels" role="group" aria-label="Where work is delegated, and the path of the chosen task"></svg></div>
-      <p class="hint"><span><i class="k-session"></i>session</span><span><i class="k-agent"></i>background subagent</span><span><i class="k-cmd"></i>background command</span><span><i class="l"></i>going down</span><span><i class="l up"></i>coming back</span></p>
+      <p class="hint"><span><i class="k-session"></i>session</span><span><i class="k-agent"></i>background subagent or skill</span><span><i class="k-cmd"></i>background command</span><span><i class="l"></i>going down</span><span><i class="l up"></i>coming back</span></p>
       <div class="console" id="console" aria-live="polite"></div>
     </section>
 
@@ -221,7 +221,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
         <h3>Nothing to set up</h3>
         <ul>
           <li>Every session is given the delegation rule at its start, as one of p4-phi's built-in rules beside act-don't-wait.</li>
-          <li><code>Explore</code> and a background command are Claude Code's own, so the plugin ships no agent that searches and none that runs a command.</li>
+          <li><code>Explore</code>, a background command and the skill <code>code-review</code> are Claude Code's own, so the plugin ships no agent that searches, none that runs a command and none that reviews a code change.</li>
           <li>The plugin's agent is a file in its <code>agents/</code> folder, so it loads with the plugin under the name <code>p4-phi:check</code>.</li>
         </ul>
       </div>
@@ -229,7 +229,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
         <h3>One key turns it off</h3>
         <ul>
           <li>Set <code>phi.levels</code> to <code>false</code> in the project's <code>.claude/p4/p4.json</code>.</li>
-          <li>The delegation rule is then left out, no step of a task list is named for a background subagent, and a worker is not told at its first message how to split its own work.</li>
+          <li>The delegation rule is then left out, no step of a task list is named for <code>Explore</code> or a background command, and a worker is not told at its first message how to split its own work.</li>
           <li>No key turns it on. Any value but <code>false</code>, or no key at all, leaves it on.</li>
         </ul>
         <pre>{
@@ -297,6 +297,7 @@ var NODES={
   top:{kind:"session",title:"Orchestrator",meta:"plans, lands"},
   child:{kind:"session",title:"Worker",meta:"its work steps"},
   read:{kind:"agent",title:"Explore",meta:"built-in · haiku"},
+  review:{kind:"agent",title:"code-review",meta:"bundled skill"},
   check:{kind:"agent",title:"p4-phi:check",meta:"inherit · high"},
   cmd:{kind:"cmd",title:"Command",meta:"run_in_background"}
 };
@@ -304,14 +305,17 @@ var KINDS=[
   {id:"work",label:"A work step",sub:"It writes, fixes or commits something.",dest:"child",tag:["phi","worker"]},
   {id:"read",label:"A read across files",sub:"A search or a read across more than a couple of files.",dest:"read",tag:["you","Explore"]},
   {id:"bg",label:"A long command, started in the background",sub:"A test file, a test suite or a build.",dest:"cmd",tag:["app","run_in_background"]},
-  {id:"check",label:"An unanchored read",sub:"A diff or a result, read without this session's own view.",dest:"check",tag:["you","p4-phi:check"]}
+  {id:"review",label:"A review of a code change",sub:"Commits or paths, reviewed without this session's own view.",dest:"review",tag:["you","code-review"]},
+  {id:"check",label:"An unanchored read of a result",sub:"A finding, a plan or a page that is no code change.",dest:"check",tag:["you","p4-phi:check"]}
 ];
 var DEST={
   child:{name:"A worker",why:"A work step goes to a worker, a fresh session started under this one. The worker works on the same branch in the same checkout, and declares the files it writes on its brief's Files: line.",
     spec:[["started by","mcp__ccd_session__start_session"],["context","fresh"],["use_worktree","false"],["model, effort","by the step's kind, as the table below says"],["brief","the step, a Files: line, what it must leave done, \"report when done\" and its model and effort"]]},
   read:{name:"Explore",why:"Claude Code's built-in subagent for searching and analyzing codebases. It is read-only: Write and Edit are denied to it.",
     spec:[["built into","Claude Code"],["model","haiku, named on the Agent call"],["tools","read-only"],["runs","in the background"]]},
-  check:{name:"p4-phi:check",why:"A second reader of work another session made. It is read-only and takes no claim in its brief as true until the files show it.",
+  review:{name:"code-review",why:"Claude Code's bundled review skill. It looks for correctness bugs in a code change and, run without --fix, reports and changes no file.",
+    spec:[["built into","Claude Code"],["started by","the Skill tool"],["target","a pull request number, a branch name, a file path or a Git revision range"],["flags","none, so no --fix"]]},
+  check:{name:"p4-phi:check",why:"A second reader of a result another session made, for a result that is no code change. It is read-only and takes no claim in its brief as true until the files show it.",
     spec:[["model","inherit"],["effort","high"],["tools","Read, Grep, Glob"],["maxTurns","60"],["background","true"]]},
   cmd:{name:"A background command",why:"The Bash or PowerShell tool's own background task. The command runs under the session that called the tool, and that session keeps its turn.",
     spec:[["started by","Bash or PowerShell"],["field","run_in_background: true"],["output","a file the session reads with Read"]]}
@@ -359,12 +363,21 @@ function steps(kind,ask){
     {dir:"up",legs:["ask"],by:"A completion notification brings the result",say:"The completion notification comes back up.",
      html:"When the command ends, the notification arrives in a later turn, and the session reads the part of the command's output file it needs with Read. No agent stands between the session and its command."}
   ];
+  if(kind==="review")return [
+    {dir:"down",legs:["ask"],by:W+" runs the review",say:"The Skill call names the change.",
+     html:"The call names the bundled skill and the change as its target: a pull request number, a branch name, a file path or a Git revision range. It passes no <code>--fix</code>, so the review's instructions ask for a report only. A review is run before a code change is landed or reported as done.",
+     code:call("Skill",{skill:"code-review",args:"b094e48^..b094e48"})},
+    {dir:"hold",legs:["ask"],by:W+" goes on or ends its turn",say:"The review reads. The session keeps its turn.",
+     html:HOLD+" In a terminal session the review runs as a background subagent with its own context window."},
+    {dir:"up",legs:["ask"],by:"The findings come back",say:"The findings come back up.",
+     html:"The findings arrive in the conversation when the review completes. In the desktop app they show as a Code review card, grouped by file."}
+  ];
   return [
-    {dir:"down",legs:["ask"],by:W+" asks for a check",say:"The Agent call carries the diff down.",
-     html:"The prompt names the files or the diff to read and what the change is meant to do. A check is asked for before work is landed or reported as done.",
-     code:call("Agent",{subagent_type:"p4-phi:check",description:"Check the long_read change",prompt:"Read the diff of commit b094e48 in lbiza/plugins/p4-phi/scripts. It is meant to move only a long command that stands alone. Say what is wrong or missing."})},
+    {dir:"down",legs:["ask"],by:W+" asks for a check",say:"The Agent call carries the result down.",
+     html:"The prompt names the files to read and what the result is meant to show. A check is asked for before a result that is no code change is reported as done.",
+     code:call("Agent",{subagent_type:"p4-phi:check",description:"Check the settings page",prompt:"Read dox/claude-settings.html against lbiza/plugins/p4-phi/scripts/p4conf.py. The page is meant to list every P4_* variable with its default. Say what is wrong or missing."})},
     {dir:"hold",legs:["ask"],by:W+" goes on or ends its turn",say:"The check reads. The session keeps its turn.",
-     html:HOLD+" The check runs on the asking session's model at high effort, and reads around each change: who calls it, what it calls, and what the tests beside it cover."},
+     html:HOLD+" The check runs on the asking session's model at high effort, and reads around the result: the sources it rests on, what else states the same thing, and what it leaves out."},
     {dir:"up",legs:["ask"],by:"A completion notification brings the findings",say:"The findings come back up.",
      html:"The verdict comes first in one sentence. Then each finding, most serious first, as <code>path:line</code> with the input or state that shows it. Each is marked as confirmed from the files or as a suspicion."}
   ];
@@ -400,14 +413,14 @@ function layout(){
   if(narrow){
     L.W=360;L.H=356;
     L.n.top={x:12,y:20,w:160,h:56};L.n.child={x:188,y:96,w:160,h:56};
-    L.n.read={x:12,y:188,w:160,h:60};L.n.check={x:188,y:188,w:160,h:60};
-    L.n.cmd={x:100,y:276,w:160,h:60};
-    L.bus=172;L.bus2=262;L.trunk=180;L.row2=["cmd"];
+    L.n.read={x:12,y:188,w:160,h:60};L.n.cmd={x:188,y:188,w:160,h:60};
+    L.n.review={x:12,y:276,w:160,h:60};L.n.check={x:188,y:276,w:160,h:60};
+    L.bus=172;L.bus2=262;L.trunk=180;L.row2=["review","check"];
   }else{
     L.W=700;L.H=334;
     L.n.top={x:30,y:30,w:200,h:56};L.n.child={x:300,y:126,w:200,h:56};
-    L.n.read={x:50,y:244,w:180,h:60};L.n.check={x:260,y:244,w:180,h:60};
-    L.n.cmd={x:470,y:244,w:180,h:60};
+    L.n.read={x:20,y:244,w:150,h:60};L.n.cmd={x:190,y:244,w:150,h:60};
+    L.n.review={x:360,y:244,w:150,h:60};L.n.check={x:530,y:244,w:150,h:60};
     L.bus=220;L.row2=[];
   }
   return L;
@@ -447,7 +460,7 @@ function draw(animate){
   while(svg.firstChild)svg.removeChild(svg.firstChild);
   svg.setAttribute("viewBox","0 0 "+L.W+" "+L.H);
   svg.appendChild(s("path",{class:"link",d:pathOf(leg(L,"tc"))}));
-  ["read","check","cmd"].forEach(function(id){svg.appendChild(s("path",{class:"link",d:pathOf(leg(L,"ask",S.ask,id))}))});
+  ["read","cmd","review","check"].forEach(function(id){svg.appendChild(s("path",{class:"link",d:pathOf(leg(L,"ask",S.ask,id))}))});
 
   var pts=null;
   if(st.legs){
@@ -525,7 +538,7 @@ function pick(kind){S.kind=kind;S.step=0;render(true)}
 document.querySelectorAll("[data-ask]").forEach(function(b){b.addEventListener("click",function(){S.ask=b.getAttribute("data-ask");S.step=0;render(true)})});
 $("back").addEventListener("click",function(){if(S.step>0){S.step--;render(true)}});
 $("next").addEventListener("click",function(){if(S.step<cur().length-1){S.step++;render(true)}});
-var NODEKIND={child:"work",read:"read",check:"check",cmd:"bg"};
+var NODEKIND={child:"work",read:"read",review:"review",check:"check",cmd:"bg"};
 function nodeHit(e){
   var g=e.target.closest&&e.target.closest("[data-id]");if(!g)return;var id=g.getAttribute("data-id");
   if(id==="top"){S.ask="top";S.step=0;render(true)}

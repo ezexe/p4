@@ -1398,6 +1398,25 @@ class Rules(unittest.TestCase):
         self.assertNotIn("sweep", phi.LEVELS)
         self.assertNotIn("p4-phi:sweep", self.start(TOP))
 
+    def test_a_review_of_a_code_change_goes_to_the_bundled_code_review_skill_and_check_reads_the_rest(self):
+        """code-review-local.md: "Claude can start `/code-review` on its own, without you typing the command" and
+        "without `--fix`, the review's instructions ask Claude for a report only." Its target "can be a pull request
+        number, a branch name, a file path, or a Git revision range", so the plugin's own reviewer is kept for a
+        result that is no code change, and its description sends a code change to the skill."""
+        self.assertIn("a review of a code change that should not lean on this session's own view goes to the bundled "
+                      "skill `code-review`, run with the Skill tool on that change's commits or paths and without "
+                      "`--fix`, so it reports and changes no file", phi.LEVELS)
+        self.assertIn("such a read of a result that is no code change goes to the subagent `p4-phi:check`", phi.LEVELS)
+        self.assertNotIn("a read of a diff", phi.LEVELS, "a diff is the skill's")
+        with open(os.path.join(ROOT, "agents", "check.md"), encoding="utf-8") as f:
+            front = f.read().split("---")[1]
+        said = next(line for line in front.splitlines() if line.startswith("description:"))
+        self.assertIn("a result that is no code change", said)
+        self.assertIn("A code change goes to the bundled skill `code-review` instead.", said)
+        self.assertNotIn("diff", said)
+        self.assertIn("tools: Read, Grep, Glob", front, "it still holds no tool that writes or runs")
+        self.assertEqual(sorted(os.listdir(os.path.join(ROOT, "agents"))), ["check.md"], "the plugin's one agent")
+
 
 class Ids(unittest.TestCase):
     def test_the_hosts_id_without_its_prefix_is_a_real_cli_session(self):

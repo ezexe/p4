@@ -1081,6 +1081,14 @@ ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves this bui
 #   codebases." Its model is "the parent conversation's model", so the rule names a small one on the call: "The
 #   per-invocation `model` parameter" is first in the page's model order, and "On an Agent tool call, the parameter
 #   takes a model alias, not a full model ID or `inherit`."
+# - code-review-local.md: "`/code-review` is a bundled skill", "Claude can start `/code-review` on its own, without
+#   you typing the command", "In a terminal session, the review runs as a background subagent with its own context
+#   window", and "without `--fix`, the review's instructions ask Claude for a report only." The page calls that run
+#   "a forked subagent", of which skills.md, "Run skills in a subagent", says "The subagent doesn't see your
+#   conversation history". So a code change is reviewed by that skill. Its target "can be a pull request number, a
+#   branch name, a file path, or a Git revision range", so a result that is no code change has none, and the page's
+#   route past the skill is "Build your own reviewer: write a reviewer subagent or a review skill": that is
+#   agents/check.md.
 # - plugins/components.md, "Agents": "The name form is `<plugin>:<name>`", so agents/check.md is `p4-phi:check`.
 # - tools-reference.md, "Background commands": "Claude can set `run_in_background: true` to start the command as a
 #   background task and continue working while it runs." interactive-mode.md, "How backgrounding works": "Output is
@@ -1088,11 +1096,13 @@ ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves this bui
 # - tools-reference.md, "Foreground commands that move to the background": "When a foreground command reaches its
 #   timeout without finishing, Claude Code moves it to the background instead of stopping it, unless the command
 #   starts with `sleep`." The default is `BASH_DEFAULT_TIMEOUT_MS`, "two minutes out of the box".
+REVIEW = ("the bundled skill `code-review`, run with the Skill tool on that change's commits or paths and without "
+          "`--fix`, so it reports and changes no file")
 LEVELS = ("built-in, levels: work is delegated to where Claude Code runs it best, so this session's own turn is "
           "never held by it. A search or a read across more than a couple of files goes to " + plans.EXPLORE + "; "
           "a command expected to run long, such as a test file, a test suite or a build, goes to " + plans.BACKGROUND
-          + "; a read of a "
-          "diff or a result that should not lean on this session's own view goes to `p4-phi:check`. A worker is "
+          + "; a review of a code change that should not lean on this session's own view goes to " + REVIEW + "; "
+          "such a read of a result that is no code change goes to the subagent `p4-phi:check`. A worker is "
           "started with a `model` and an `effort` that fit its step, as the advice that hands out each start call "
           "names them; an effort above this session's own is not accepted.")
 plans.BUILT_INS = tuple(x.split(": ", 1)[0].replace("built-in, ", "") for x in (BUILT_IN, LEVELS))   # plans.py's names
