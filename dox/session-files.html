@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A session&#x27;s files · p4-phi dox</title>
+<meta name="description" content="What p4-phi keeps in each linked session&#x27;s folder and hands between sessions: the session&#x27;s record, its turns and their deltas, the anchor, the rebase check, task lists with step addresses, background tasks, the room beside one prompt, and the caps.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='1' width='14' height='14' rx='4' fill='%230b6b66'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#f5f3ec; --panel:#fffdf7; --sunk:#efece2; --ink:#1d1c19; --soft:#5d5a52; --line:#d9d4c6;
+  --phi:#0b6b66; --phi-bg:#dcefec;
+  --mono:ui-monospace,"Cascadia Code","SF Mono",Menlo,Consolas,monospace;
+  --sans:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#131418; --panel:#1b1d23; --sunk:#16171c; --ink:#e9e6dd; --soft:#a29e93; --line:#33363f;
+    --phi:#62d2c6; --phi-bg:#16312f;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#131418; --panel:#1b1d23; --sunk:#16171c; --ink:#e9e6dd; --soft:#a29e93; --line:#33363f;
+  --phi:#62d2c6; --phi-bg:#16312f;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 var(--sans)}
+.wrap{max-width:920px;margin:0 auto;padding:24px 16px 64px}
+a{color:var(--phi)}
+code{font:.88em var(--mono);background:var(--sunk);border-radius:4px;padding:1px 4px;overflow-wrap:anywhere}
+:focus-visible{outline:2px solid var(--phi);outline-offset:2px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.mark{font:600 13px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--phi);text-decoration:none}
+.mark:hover{text-decoration:underline}
+.pill{font:600 12px/1 var(--mono);color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:9px 13px;cursor:pointer;white-space:nowrap}
+.pill:hover{border-color:var(--phi)}
+h1{font-size:clamp(30px,5.4vw,44px);line-height:1.08;letter-spacing:-.02em;margin:16px 0 10px;text-wrap:balance}
+.lede{color:var(--soft);max-width:70ch;margin:0 0 18px}
+nav.toc{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}
+nav.toc a{font:600 13px/1 var(--sans);text-decoration:none;color:var(--soft);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:8px 12px}
+nav.toc a:hover{border-color:var(--phi);color:var(--ink)}
+section{margin:30px 0 0}
+h2{font-size:23px;letter-spacing:-.01em;margin:0 0 6px;scroll-margin-top:12px}
+p.intro{color:var(--soft);max-width:72ch;margin:0 0 12px}
+dl{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+dl>div{display:grid;grid-template-columns:minmax(0,220px) minmax(0,1fr);border-top:1px solid var(--line)}
+dl>div:first-child{border-top:0}
+dt{padding:11px 14px;font-weight:650;font-size:14.5px;background:var(--sunk);overflow-wrap:anywhere}
+dd{margin:0;padding:11px 14px;font-size:14.5px}
+dd p{margin:0 0 6px} dd p:last-child{margin:0}
+footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);font-size:14px;color:var(--soft)}
+@media (max-width:640px){dl>div{grid-template-columns:minmax(0,1fr)}dt{padding-bottom:4px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <a class="mark" href="index.html">← p4-phi · dox</a>
+    <button class="pill" id="theme" type="button" aria-label="Switch between light and dark">theme</button>
+  </div>
+  <h1>A session's files</h1>
+  <p class="lede">p4-phi keeps one folder for each linked session, <code>phi/sessions/&lt;sessionId&gt;/</code> in the store of the project its session tree lives in, under <code>.claude/p4/</code>. This page says what each file holds and how p4-phi hands it from session to session. The <a href="session-tree.html">session tree</a> page shows the moves that change them.</p>
+  <nav class="toc" aria-label="Sections">
+    <a href="#folder">The session's folder</a>
+    <a href="#room">What fits beside one prompt</a>
+    <a href="#between">What sessions hand each other</a>
+    <a href="#tasks">Task lists and background tasks</a>
+    <a href="#checks">Checks and limits</a>
+  </nav>
+  <section id="folder" aria-labelledby="folder-h">
+    <h2 id="folder-h">The session's folder</h2>
+    <dl>
+      <div><dt><code>session.json</code></dt><dd><p>The app's fields for the session with its task, its parent session in <code>spawnedFrom</code>, its write set in <code>fileSet</code>, its owned paths in <code>shard</code>, and the marks p4-phi sets, such as <code>forked</code>, <code>doneRetired</code>, <code>stale</code> and <code>anchorSeen</code>.</p></dd></div>
+      <div><dt><code>turns.jsonl</code></dt><dd><p>One row for each finished turn, written at Stop. Each row carries the turn's delta: <code>heads</code>, the branch heads of the repositories it edited in and of its folder as <code>&lt;repo&gt;@&lt;branch&gt; &lt;sha8&gt;</code>; <code>files</code>, the files its edit tools changed; and <code>marks</code>, its notes since the turn before that begin <code>deprecates:</code> or <code>replaces:</code>, each with the paths it names.</p></dd></div>
+      <div><dt><code>notes.jsonl</code> and <code>reports.jsonl</code></dt><dd><p>The session's notes, each a claim with its source, and the reports of its workers. The reports of orchestrators go to <code>phi/reports.jsonl</code>.</p></dd></div>
+      <div><dt><code>log.jsonl</code></dt><dd><p>One row for each hook call: <code>time</code>, <code>hook</code>, <code>said</code>, the length of the text the hook returned, <code>ms</code>, and what the hook did. A hook of <code>phi.py</code>'s that raised leaves a row with its <code>error</code> instead, while a check routed through the retrieval hooks that raises is passed over without a row.</p></dd></div>
+      <div><dt><code>session.md</code></dt><dd><p>The session as one page. <code>phi/sessions.md</code> is the same page for the orchestrators of the project, with their latest reports, and git ignores it.</p></dd></div>
+      <div><dt><code>held.md</code></dt><dd><p>What did not fit beside a prompt, whole, each piece under a <code>## &lt;time&gt;</code> heading, up to 256 KB, after which the older half goes.</p></dd></div>
+      <div><dt><code>standing.md</code></dt><dd><p>The standing instruction a session was handed in full, one <code>## &lt;name&gt;</code> section each, so that after a compaction one line can name it.</p></dd></div>
+      <div><dt><code>plan.json</code></dt><dd><p>The session's task list as the app's <code>update_plan</code> calls leave it, kept below.</p></dd></div>
+      <div><dt><code>.calls/</code></dt><dd><p>One empty file per check and tool call, <code>&lt;kind&gt;-&lt;tool_use_id&gt;</code>, so each check runs once for a call; files older than a day are removed. Git ignores the folder.</p></dd></div>
+    </dl>
+  </section>
+  <section id="room" aria-labelledby="room-h">
+    <h2 id="room-h">What fits beside one prompt</h2>
+    <dl>
+      <div><dt>The cap</dt><dd><p>Claude Code shows a hook's added context up to 10,000 characters, so p4-phi keeps its own to 9,500. At a session's start the rules take what the other lines leave. At a message the room is 4,000 characters, or the whole 9,500 when the session was just handed its start background.</p></dd></div>
+      <div><dt>What does not fit</dt><dd><p>Each part that fits is kept whole, and the rest goes whole to <code>held.md</code>, with one line saying how many pieces and characters it holds and naming the first three by their opening words.</p></dd></div>
+      <div><dt>After a compaction</dt><dd><p>A session that was told its standing instruction gets one line instead, <code>phi (p4-phi): this session's task is "…"</code>, ending with the path of <code>standing.md</code>; the rules come back the same way, as one line and the page <code>phi/rules.md</code>. After a clear the whole instruction comes again.</p></dd></div>
+    </dl>
+  </section>
+  <section id="between" aria-labelledby="between-h">
+    <h2 id="between-h">What sessions hand each other</h2>
+    <dl>
+      <div><dt>The anchor</dt><dd><p><code>anchor.json</code> in a parent session's folder, or <code>phi/anchor.json</code> for the orchestrators, holds for each live worker its latest delta, marks, owned paths, task list and parent step, and the parent's own marks, owned paths and task list. Its version goes up only when that content changes. It is made again at Stop, at each <code>update_plan</code> call, at <code>phi.py shard</code> and when a subagent is bound. The orchestrators' anchor holds no heads or files.</p></dd></div>
+      <div><dt>The rebase check</dt><dd><p>At every message, when the parent's anchor is newer than the version the session last saw, p4-phi hands it the other sessions' marks, each once, then their heads and files, in at least a third of the room. Notes that touch the session's task, open steps, owned paths or edited files come in full, and the rest by count with the pages that hold them. Before any tool runs it warns, under <code>phi (p4-phi): stop before any tool runs.</code>, of each uncommitted file or owned path a newer mark names and each uncommitted file inside another session's owned paths. A session's first look takes what is there as seen.</p></dd></div>
+      <div><dt>A fork</dt><dd><p>A session the app records as a fork, or whose first message opens <code>Task (from the session that started this one):</code>, is marked <code>forked</code>. It gets the whole start background, without the slice a fresh worker gets, and p4-phi pins its own task, owned paths and parent step above the conversation it holds, gives it the built-in rules without the memories, and cuts its rebase marks to its owned paths.</p></dd></div>
+      <div><dt>A fresh worker</dt><dd><p>A fresh worker gets the tasks of the sessions above it and its parent session's step with the steps around it. When its owned paths or its task name paths, it also gets what its parent's anchor holds on those paths, and the rebase then hands it only later changes. With no path named it gets the notes of the sessions above it and the last turn of each sibling instead.</p></dd></div>
+      <div><dt>A stale session</dt><dd><p>A finished worker whose work a newer <code>deprecates:</code> or <code>replaces:</code> note supersedes is marked <code>stale</code>. Its outcome is kept as a <code>replaces:</code> note on its parent session, it drops out of the anchor and the routing, and it is told once that its work is superseded. A turn that ends after that clears the mark.</p></dd></div>
+    </dl>
+  </section>
+  <section id="tasks" aria-labelledby="tasks-h">
+    <h2 id="tasks-h">Task lists and background tasks</h2>
+    <dl>
+      <div><dt>Step addresses</dt><dd><p>An orchestrator's steps are numbered <code>1</code>, <code>2</code>, <code>3</code>, and a worker's are <code>Y.1</code>, <code>Y.2</code> under its parent session's step <code>Y</code>: the <code>rootStep</code> set on it, else the step its task names, else the parent's open step whose words match best, else the parent's current step. A revision is read by the steps' words, not their numbers.</p></dd></div>
+      <div><dt>Background tasks</dt><dd><p>A Bash or PowerShell call run in the background, a background Agent call, a Monitor or a Workflow is kept as a task under the step in progress, with its heads, paths and words, or under <code>loose</code> when no step is. Its completion notice or <code>TaskStop</code> closes it. An open task under a step is flagged once when its head moved or a newer mark names its paths or shares its words.</p></dd></div>
+      <div><dt>The job gap</dt><dd><p>An open task older than its own timeout plus one hour is marked <code>unknown</code> and no longer flagged. One older than ten minutes is advised to finish rather than be stopped.</p></dd></div>
+    </dl>
+  </section>
+  <section id="checks" aria-labelledby="checks-h">
+    <h2 id="checks-h">Checks and limits</h2>
+    <dl>
+      <div><dt>Checks before a tool</dt><dd><p>p4-phi's checks ride on the retrieval hooks' entries: a start call passes the start advice, a worktree or a shell command the branch guard, an archive call the archive check, a message to another session the go guard, a shell command also the store guard, the restart check, the delegation check and the nudge, and an edit the nudge. The first check that answers decides, and one that raises is passed over.</p></dd></div>
+      <div><dt>The caps</dt><dd><p>A session three deep in the session tree, or one with eight live sessions of its own, is told to start no more. The caps are advice, said in the standing instruction and the task-list advice, and only the readings of an under-determined message refuse past them.</p></dd></div>
+      <div><dt><code>pathfilter.py</code></dt><dd><p>With <code>phi.track</code> on in <code>p4.json</code>, the session tree is committed to the store, and a git clean and smudge filter on <code>phi/**</code> writes this project's root as <code>{project}</code> in the committed files and back on checkout, in its slash, backslash, Git Bash and WSL forms.</p></dd></div>
+    </dl>
+  </section>
+  <footer>Each entry is read from <code>phi.py</code>, <code>relay.py</code>, <code>plans.py</code>, <code>hook.py</code> and <code>pathfilter.py</code> of p4-phi, in <a href="https://github.com/ezexe/p4">ezexe/p4</a> under <code>lbiza/plugins/p4-phi/scripts</code>.</footer>
+</div>
+<script>
+(function(){
+  var root=document.documentElement,key="dox-theme",btn=document.getElementById("theme");
+  function stored(){try{return localStorage.getItem(key)}catch(e){return null}}
+  function current(){return root.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")}
+  function label(){btn.textContent=current()==="dark"?"light theme":"dark theme"}
+  var s=stored(); if(s==="dark"||s==="light")root.setAttribute("data-theme",s);
+  label();
+  try{matchMedia("(prefers-color-scheme: dark)").addEventListener("change",label)}catch(e){}
+  btn.addEventListener("click",function(){var n=current()==="dark"?"light":"dark";root.setAttribute("data-theme",n);try{localStorage.setItem(key,n)}catch(e){}label()});
+})();
+</script>
+</body>
+</html>
