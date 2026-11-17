@@ -32,7 +32,7 @@ The two asks are off unless p4.json's scratchpad.asks is true or P4_SCRATCHPAD_A
                  every path in a write position, a redirect, tee, python's open() in a write mode, or the destination
                  of cp or mv. A code file, by extension or by name, headed for a temp location, the session's
                  scratchpad path or the notebook gets an ask naming where it belongs: the repository if it will use
-                 the file, else `.claude/p4/temportal/src/`. A `.ipynb` headed for the notebook gets none, since the
+                 the file, else the session's own scratchpad. A `.ipynb` headed for the notebook gets none, since the
                  notebook is where p4-temportal keeps notebooks. It never denies, and it is silent inside a subagent,
                  whose writer ezexe cannot redirect from the prompt.
 
@@ -448,14 +448,13 @@ def written_paths(payload):
 def cmd_ask(payload):
     if not asks_on() or payload.get("agent_id"):
         return 0
-    root = project_root(payload)
-    src = p4conf.sub(os.path.join(root, ".claude", "p4"), "src")
     reasons, seen = [], set()
     for p in written_paths(payload):
         if p in seen or not is_code(p):
             continue
         seen.add(p)
-        if in_harness_scratchpad(p):
+        own = in_harness_scratchpad(p)
+        if own:
             where = "the session's scratchpad, which Claude Code deletes with its transcript"
         elif in_notebook(p):
             if p.lower().endswith(".ipynb"):            # the notebook folder is where p4-temportal keeps notebooks
@@ -467,7 +466,8 @@ def cmd_ask(payload):
             continue
         name = os.path.basename(p.replace("\\", "/"))
         reasons.append(f"{name} is code headed for {where}, at {p}; if the repo will use it, it belongs in the repo "
-                       f"where the repo keeps that kind of code, otherwise in {os.path.join(src, name)}")
+                       "where the repo keeps that kind of code" + ("" if own else ", otherwise in the session's own "
+                                                                  "scratchpad"))
     if not reasons:
         return 0
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",

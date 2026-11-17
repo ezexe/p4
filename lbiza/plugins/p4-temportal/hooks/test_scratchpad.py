@@ -121,12 +121,14 @@ def asks():
         d = ask(p)
         assert d, f"did not ask: {p['tool_input']}"
         reason = d["permissionDecisionReason"]
-        assert "belongs in the repo" in reason and ".claude/p4/temportal/src" in reason.replace("\\", "/"), reason
+        advice = reason.split("; ", 1)[1]           # after the file and where it was headed: where it belongs
+        assert "belongs in the repo" in advice and ".claude" not in advice, reason
     for p in PASS_CASES:
         assert ask(p) is None, f"asked: {p['tool_input']}"
-    # the reason names the file's home under .claude/p4/temportal/src/
-    d = ask(write(f"{SCRATCH}/sweep.py"))
-    assert "E:/projects/x/.claude/p4/temportal/src/sweep.py" in d["permissionDecisionReason"].replace("\\", "/"), d
+    # ezexe/p4#131: the reason sends code to the repo or the session's own scratchpad, never to a folder under .claude/
+    d = ask(write("/tmp/sweep.py"))
+    assert "otherwise in the session's own scratchpad" in d["permissionDecisionReason"], d
+    assert "otherwise" not in ask(write(f"{SCRATCH}/sweep.py"))["permissionDecisionReason"], "a scratchpad sent to itself"
     # a subagent is never asked: ezexe, who answers the prompt, cannot redirect a running agent
     for p in ASK_CASES:
         assert ask(dict(p, agent_id="agent_01ABC", agent_type="Explore")) is None, f"subagent asked: {p['tool_input']}"

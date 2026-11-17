@@ -1,6 +1,6 @@
 ---
 name: temportal
-description: Where this project keeps its auto memory, its notebook and its saved code, and how to give a file a lifetime so it is cleared when it is no longer relevant. Use before writing a note, a probe, a log, a download or any file meant to outlast the session, and when asked what temportal holds or to clear it.
+description: Where this project keeps its auto memory, its notebook and its saved code, where a session's temporary files and lasting findings go, and how lifetimes clear what p4 keeps. Use before writing a temporary file, a probe, a log or a download, before keeping a finding past the session, and when asked what temportal holds or to clear it.
 ---
 
 # temportal
@@ -11,7 +11,9 @@ Transcripts, plans, file history and subagent memory stay where Claude Code puts
 
 - `temportal/memory/` is the project's auto memory directory once `autoMemoryDirectory` in `.claude/settings.local.json` names it: Claude Code writes memory files and their `MEMORY.md` index there and loads the index at each start itself, and nothing in it is ever cleared.
 - Until that key is there, Claude Code keeps the memory in its own folder under `~/.claude/projects/`, and p4-temportal moves nothing out of it.
-- `temportal/notebook/` is the notebook, kept across sessions: a file meant to outlast the session, such as a state page, is written there on purpose, with a lifetime when it should not stay for good.
+- A temporary file, a probe, a log or a download goes in this session's own scratchpad, the folder Claude Code names to hooks as `scratchpad_dir`, never under `.claude/`, where every write asks ezexe even in bypass mode.
+- A finding meant to outlast the session goes through p4-phi's `phi.py note "<claim>" --source "<where>"`, which p4 writes into the store.
+- `temportal/notebook/` is the notebook, kept across sessions and written by p4's scripts only, never by a session's own tools.
 - Logs, build output and binaries in the notebook are moved into its `.out/`, which git ignores.
 - `temportal/src/` holds code kept for reuse that the project's repository does not use.
 
@@ -20,7 +22,7 @@ Transcripts, plans, file history and subagent memory stay where Claude Code puts
 Two kinds of lifetime clear what is no longer relevant, the way a browser handles its cache and its cookies.
 
 - **Cache:** a rule per folder in `.claude/p4/p4.json` under `temportal.cache`, with `max_age_days` and `max_mb`, and by default `notebook/.out` keeps 14 days and at most 500 MB and `.layout-conflicts` keeps 30 days.
-- **Cookie:** one file or folder with its own expiry, set when you write it, for anything that should outlive the session but not stay for good, such as a downloaded page, a probe's output or a note about a short-lived state.
+- **Cookie:** one file or folder under `temportal/` with its own expiry, for something p4 keeps that should outlive the session but not stay for good, such as a downloaded page or a probe's output.
 
 The retention sweep clears what is past its lifetime at each session start and session end.
 

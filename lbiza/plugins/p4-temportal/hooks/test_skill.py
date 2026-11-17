@@ -45,6 +45,15 @@ class SkillCommands(unittest.TestCase):
         self.assertNotIn("temportal/tmp", text)
         self.assertNotIn("ended-sweep", text)
 
+    def test_a_session_writes_nothing_under_claude_with_its_own_tools(self):
+        # ezexe/p4#131: every write under .claude/ asks ezexe even in bypass mode, so temporary files go in the app's
+        # scratchpad, a lasting finding goes through phi.py note, and only p4's scripts write the notebook.
+        text = SKILL.read_text(encoding="utf-8")
+        self.assertIn("`scratchpad_dir`", text)
+        self.assertIn('phi.py note "<claim>" --source "<where>"', text)
+        self.assertIn("written by p4's scripts only", text)
+        self.assertNotIn("is written there on purpose", text)
+
 
 if __name__ == "__main__":
     unittest.main()
