@@ -2467,7 +2467,8 @@ def h_stop(payload):
             top = (chain_of(me.home, s["sessionId"]) or [above])[-1]
             relay.warn(me.home, top, "push:" + s["sessionId"] + ":" + ",".join(c[1] for c in new),
                        relay.push_text(title_of(cur), s["sessionId"], new,
-                                       relay.owed(list(dict.fromkeys(c[0] for c in new)))))   # what each still owes
+                                       relay.owed(list(dict.fromkeys(c[0] for c in new))),   # what each still owes
+                                       relay.worktree_branches(s["sessionId"], cur, new)))   # the branch to merge
             RAN["push_owes"] = True
             cur["closesTold"] = (told + [c[1] for c in new])[-100:]
             save_session(me.home, cur)
