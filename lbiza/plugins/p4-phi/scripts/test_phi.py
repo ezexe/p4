@@ -298,6 +298,17 @@ class Sessions(unittest.TestCase):
         self.t.hook(START, KID, {"hook_event_name": "SessionStart", "source": "startup"})
         self.assertFalse(self.t.session(KID).get("forked"))
 
+    def test_session_title_on_stdin_titles_a_session_with_no_app_record(self):
+        """ezexe/p4#146: hooks.md, SessionStart and UserPromptSubmit carry `session_title`, the session's custom
+        title; with no app record it is the session's title, and an app record's title still wins."""
+        lone = "local_named0001"
+        self.t.hook(START, lone, {"hook_event_name": "SessionStart", "source": "startup",
+                                  "session_title": "Port the flush"})
+        self.assertEqual(self.t.session(lone).get("title"), "Port the flush")
+        self.t.hook(PROMPT, KID, {"hook_event_name": "UserPromptSubmit", "prompt": "fix it",
+                                  "session_title": "Another name"})
+        self.assertEqual(self.t.session(KID).get("title"), "Fix the dropped row")
+
     def test_a_starters_process_never_adds_its_transcript_to_its_childs_record(self):
         """ezexe/p4#191: a hook of the starter's process that handles its child's record, as when it reads the
         child's report, reports the starter's transcript id; the child's cliSessionIds keep only the child's own."""

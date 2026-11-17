@@ -257,6 +257,9 @@ def app_record(sid):
 
 
 FOUND_IN = {}       # sessionId -> the app folder its record was read from, kept in session.json as appRoot
+# sessionId -> the custom title SessionStart and UserPromptSubmit carry as `session_title`, hooks.md: "present when
+# one is set, for example with `--name`, `/rename`"; it titles a session that has no app record to title it
+GIVEN_TITLES = {}
 
 
 def read_record(name):
@@ -365,6 +368,7 @@ class Me:
         payload = payload or {}
         self.hint = ""
         self.cli = str(payload.get("session_id") or os.environ.get("CLAUDE_CODE_SESSION_ID") or "")
+        self.title = clean(payload.get("session_title"))[:120]
         host = os.environ.get("CLAUDE_CODE_HOST_SESSION_ID") or ""
         # A CLI id equal to the host id without "local_" is normal: the app gives many workers that pair of
         # ids, so it is no stray id.
@@ -384,6 +388,8 @@ class Me:
                 self.home = own_store(self.rec, self.id, project) or self.home
             self.home, self.home_missing = relay.tree_home(self.home)   # a shared store, when p4.json names one
         self.store = self.store or self.home
+        if self.title and self.id:
+            GIVEN_TITLES[self.id] = self.title
         project_conf(self.store)
 
 
@@ -515,6 +521,9 @@ def ensure_session(home, sid, rec=None, cli="", depth=0, hint=""):
         if rec.get("cwd") and rec.get("cwd") != s.get("cwd"):
             s["cwd"] = rec["cwd"]
             changed = True
+    if GIVEN_TITLES.get(sid) and not s.get("title"):   # no app record titled it: the hook's session_title
+        s["title"] = GIVEN_TITLES[sid]
+        changed = True
     for c in own_clis(sid, rec, cli):
         if c not in s.setdefault("cliSessionIds", []):
             s["cliSessionIds"].append(c)
