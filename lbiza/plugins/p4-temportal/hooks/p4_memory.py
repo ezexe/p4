@@ -1,35 +1,26 @@
 #!/usr/bin/env python3
-"""p4_memory.py: p4-temportal's memory part, which keeps the project's auto memory in the store's
-`<project>/.claude/p4/temportal/memory/` and nowhere else. It moves files, and it tells the model only where to write.
+"""p4_memory.py: p4-temportal's memory part. Claude Code writes and loads the project's auto memory itself, in the
+store's `<project>/.claude/p4/temportal/memory/` once `autoMemoryDirectory` in the project's
+`.claude/settings.local.json` names that folder, by https://code.claude.com/docs/en/memory, section Storage location.
+p4-phi writes that key. Until it is there, Claude Code keeps the memory in its own folder,
+`~/.claude/projects/<project>/memory/`, and this part moves no file out of it and writes nothing into it.
 
-Claude Code loads auto memory from the auto memory directory, `~/.claude/projects/<project>/memory/` under the
-configuration directory. This part moves every file of that directory into the store's memory folder and leaves one
-file there, a pointer `MEMORY.md` that says where the memory is and to write there. The rest of
-`~/.claude/projects/<project>/`, transcripts and per-session folders, is never touched. `.claude/p4/` is made as a
-plain folder when absent, and p4-phi makes it a git repository.
+  migrate    at SessionStart, moves files left in an earlier place of the store's layout and prints that move's line
+             when this hook made it. In a worktree or a subdirectory whose autoMemoryDirectory names the main
+             checkout's store, it prints one line when blockWritesOutsideWorkingDirectories may keep Claude Code from
+             saving memory there: the store lies outside the working directory, no user or managed additionalDirectories
+             entry holds it, and a repository settings file chose the folder.
 
-  migrate    at SessionStart, merges the auto memory directory into `.claude/p4/temportal/memory/` and deletes what
-             it merged: a file identical in the store is dropped, a file the store lacks is moved in, and any other is
-             kept at `.conflicts/memory/<path>` without overwriting the store's file. A link left in place of the
-             directory is removed as a link when it reaches the store's memory folder, never followed, and left as it
-             is when it points elsewhere. Then it writes the pointer and prints the store's `MEMORY.md` as Claude Code
-             would load it, after one notice line when a file was moved or kept aside. When the store's layout moved
-             at this start, that line comes first.
-  mirror     at PostToolUse, moves a Write or Edit into the auto memory directory into the store at once: a store
-             file it replaces is kept in `.conflicts/replaced/`, index lines added to the pointer are appended to the
-             store's `MEMORY.md` and the pointer is restored, and one line says where the file went.
-  sweep      at Stop, tries again to delete what the start could not, and prints nothing.
-
-Every failure prints a one-line notice and exits 0.
+`mirror` and `sweep` were the PostToolUse and Stop commands that moved memory into the store. A session started
+before they were retired still runs them, so they exit 0 and print nothing. Every failure prints a one-line notice
+and exits 0.
 """
 
-import filecmp
 import json
 import os
 import re
-import shutil
+import subprocess
 import sys
-import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -38,30 +29,15 @@ import p4conf  # noqa: E402 - the settings file, .claude/p4/p4.json
 import hookio  # noqa: E402 - the hook input and link helpers p4-temportal's scripts share
 
 MEMORY = "memory"
-CONFLICTS = ".conflicts"
-POINTER_MARK = "<!-- p4-memory: pointer"    # a format the pointer files on disk carry, kept as it is
-BUILTIN_LINES = 200          # Claude Code loads the first 200 lines of MEMORY.md or its first 25KB, whichever comes
-BUILTIN_BYTES = 25_000       # first, by https://code.claude.com/docs/en/memory, and
-                             # experiments/p4-suite/test_live_memory_limit.py in ezexe/p4-phi-experiments
-                             # measures 25KB as 25,000 bytes cut at a whole line
-STDOUT_CHARS = 10_000        # a hook's plain stdout past this reaches the session as a file path and a 2,000-character
-                             # preview, by https://code.claude.com/docs/en/hooks, section JSON output
-RETRIES = 5
-RETRY_WAIT_S = 1.0
+RETIRED = ("mirror", "sweep")   # run by sessions started before Claude Code wrote the store's memory itself
 
 
 payload_from_stdin = hookio.payload_from_stdin
 
 
-def configure(payload):
-    """The memory section of <project>/.claude/p4/p4.json over the constants, writing the file when it is missing."""
-    p4 = os.path.join(project_root(payload), ".claude", "p4")
-    p4conf.configure(globals(), p4, "memory", {"retries": "RETRIES", "retry_wait_s": "RETRY_WAIT_S"})
-
-
 def layout(payload):
     """Files in an earlier place of the store's layout are moved into each plugin's folder first. -> the line saying
-    so, which cmd_migrate prints first and counts in its STDOUT_CHARS."""
+    so, which cmd_migrate prints first."""
     lines = p4conf.migrate_layout(os.path.join(project_root(payload), ".claude", "p4"))
     return ("p4-temportal: " + "; ".join(lines) + ".\n") if lines else ""
 
@@ -154,27 +130,41 @@ def write_block(root):
 
 
 def chosen_by_user(root):
-    """autoMemoryDirectory comes from user or managed settings and from no repository file: by the settings
-    reference, the write block leaves auto memory .md files writable, but not in a directory the repository chose."""
+    """autoMemoryDirectory takes effect from a file of the user's own: by the settings reference, the write block
+    leaves auto memory .md files writable, but not in a directory the repository chose. The file that sets it is the
+    first holding the key in Claude Code's order, managed, local, project, user. Managed and user settings are the
+    user's, the project file is the repository's, and the local file is the user's only while local_is_users."""
     home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-    found = {}
-    for kind, path in (("repo", os.path.join(root, ".claude", "settings.local.json")),
+    for kind, path in (("user", managed_settings()), ("local", os.path.join(root, ".claude", "settings.local.json")),
                        ("repo", os.path.join(root, ".claude", "settings.json")),
-                       ("user", os.path.join(home, "settings.json")), ("user", managed_settings())):
+                       ("user", os.path.join(home, "settings.json"))):
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, ValueError):
             continue
         if isinstance(data, dict) and isinstance(data.get("autoMemoryDirectory"), str):
-            found[kind] = True
-    return found.get("user", False) and not found.get("repo", False)
+            return kind == "user" or (kind == "local" and local_is_users(root))
+    return False
 
 
-def not_main_checkout(root, app, mem):
-    """A worktree or a subdirectory shares the main checkout's auto memory directory, whose pointer names the main
-    checkout's store, so only a session at the main checkout moves files into it or writes its pointer."""
-    return norm(repo_root(root)) != norm(root) and norm(app) != norm(mem)
+def local_is_users(root):
+    """By https://code.claude.com/docs/en/permissions, a `.claude/settings.local.json` git tracks, or one under a
+    `.claude` that is a link, is repository-supplied. So it is the user's own only inside a git work tree, untracked,
+    under a real `.claude`; when git cannot tell, it is the repository's."""
+    if is_link(os.path.join(root, ".claude")):
+        return False
+
+    def git(*args):
+        try:
+            return subprocess.run(["git", "-C", root, *args], capture_output=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return None
+    inside = git("rev-parse", "--is-inside-work-tree")
+    if inside is None or inside.returncode != 0 or inside.stdout.strip() != b"true":
+        return False
+    tracked = git("ls-files", "--error-unmatch", "--", os.path.join(".claude", "settings.local.json"))
+    return tracked is not None and tracked.returncode == 1
 
 
 def auto_memory_off(root):
@@ -216,212 +206,39 @@ def p4_memory(root):
     return p4conf.sub(os.path.join(root, ".claude", "p4"), "memory")
 
 
-def same_dir(a, b):
-    try:
-        return os.path.samefile(a, b)
-    except OSError:
-        return False
-
-
 is_link = p4conf.is_link
-
-
-remove_link = hookio.remove_link
-
-
-def pointer_text(mem):
-    p = os.path.normpath(mem)
-    return (f"{POINTER_MARK} -->\n"
-            f"# Memory location\n\n"
-            f"This project's memory is stored in `{p}`.\n"
-            f"Write memory files and their `MEMORY.md` index lines in `{p}`.\n")
-
-
-def is_pointer(path):
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            return f.read(len(POINTER_MARK)) == POINTER_MARK
-    except OSError:
-        return False
-
-
-def write_pointer(app, mem):
-    os.makedirs(app, exist_ok=True)
-    path = os.path.join(app, "MEMORY.md")
-    text = pointer_text(mem)
-    try:
-        with open(path, encoding="utf-8") as f:
-            if f.read() == text:
-                return
-    except OSError:
-        pass
-    with open(path, "w", encoding="utf-8", newline="\n") as f:
-        f.write(text)
-
-
-def files_in(base, skip_conflicts):
-    out = []
-    for d, dirs, files in os.walk(base):
-        if skip_conflicts:
-            dirs[:] = [x for x in dirs if x != CONFLICTS]
-        for name in files:
-            out.append(os.path.relpath(os.path.join(d, name), base))
-    return sorted(out)
-
-
-def keep_aside(mem, source, rel, src, stamp):
-    """Copy src into the memory folder's .conflicts/<source>/<rel>; an identical copy already there is enough, and
-    a different one gets the stamp appended so nothing kept earlier is overwritten."""
-    side = os.path.join(mem, CONFLICTS, source, rel)
-    if os.path.isfile(side):
-        if filecmp.cmp(src, side, shallow=False):
-            return side
-        side = f"{side}.{stamp}"
-    os.makedirs(os.path.dirname(side), exist_ok=True)
-    shutil.copy2(src, side)
-    return side
-
-
-def retry(fn, *args):
-    for attempt in range(RETRIES):
-        try:
-            fn(*args)
-            return True
-        except OSError:
-            if attempt == RETRIES - 1:
-                return False
-            time.sleep(RETRY_WAIT_S)
-    return False
-
-
-def empty_live_dir(app):
-    """Delete everything in the auto memory directory but the pointer. The directory itself stays, since Claude Code
-    may hold it open and loads MEMORY.md from it."""
-    ok = True
-    for name in os.listdir(app):
-        path = os.path.join(app, name)
-        if name == "MEMORY.md" and is_pointer(path):
-            continue
-        if os.path.isdir(path) and not is_link(path):
-            ok = retry(shutil.rmtree, path) and ok
-        elif is_link(path):
-            ok = retry(remove_link, path) and ok
-        else:
-            ok = retry(os.remove, path) and ok
-    return ok
-
-
-def migrate(app, mem, stamp):
-    """-> (lines to print, done), done when nothing but the pointer is left in the auto memory directory."""
-    lines = []
-    os.makedirs(mem, exist_ok=True)
-    if norm(app) == norm(mem) or (same_dir(app, mem) and not is_link(app)):   # autoMemoryDirectory is the store
-        return lines, True
-    if is_link(app):
-        if not same_dir(app, mem):                       # a link somewhere else: ezexe's arrangement
-            return [f"{app} is a link that does not reach .claude/p4/temportal/memory/; "
-                    "left as it is, nothing moved"], False
-        if not retry(remove_link, app):
-            return [f"{app} is a link to .claude/p4/temportal/memory/ and is busy, retried at turn end"], False
-        lines.append(f"removed the link {app} -> .claude/p4/temportal/memory/ and left its target untouched")
-    moved, aside, left = [], [], []
-    name = os.path.basename(app)
-    if os.path.isdir(app) and not all(n == "MEMORY.md" and is_pointer(os.path.join(app, n)) for n in os.listdir(app)):
-        for rel in files_in(app, skip_conflicts=False):
-            src, dst = os.path.join(app, rel), os.path.join(mem, rel)
-            if rel == "MEMORY.md" and is_pointer(src):
-                continue
-            if os.path.isfile(dst) and filecmp.cmp(src, dst, shallow=False):
-                pass                                    # identical in the store: dropped
-            elif not os.path.exists(dst) and rel.split(os.sep)[0] != CONFLICTS:
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                shutil.copy2(src, dst)
-                moved.append(rel)
-            else:
-                keep_aside(mem, name, rel, src, stamp)
-                aside.append(f"{name}/{rel}")
-        if not empty_live_dir(app):
-            left.append(app)
-    try:
-        write_pointer(app, mem)
-    except OSError as e:
-        lines.append(f"could not write the pointer MEMORY.md in {app}: {e}")
-    if moved:
-        lines.append(f"memory files moved from the auto memory directory into "
-                     f".claude/p4/temportal/memory/: {len(moved)}")
-    if aside:
-        lines.append(f"differing files kept: {len(aside)}, "
-                     + ", ".join(aside[:5]) + (", …" if len(aside) > 5 else "")
-                     + ", in .claude/p4/temportal/memory/.conflicts/")
-    if left:
-        lines.append(f"{', '.join(map(os.path.basename, left))} busy, retried at turn end")
-    return lines, not left
-
-
-def builtin_index(memdir):
-    """-> (kept lines, the index's line count): what Claude Code loads from a memory folder, the first BUILTIN_LINES
-    lines of its MEMORY.md or its first BUILTIN_BYTES bytes cut at a whole line, whichever comes first."""
-    index = os.path.join(memdir, "MEMORY.md")
-    if not os.path.isfile(index):
-        return [], 0
-    with open(index, "rb") as f:
-        lines = f.read().splitlines(keepends=True)
-    total = len(lines)
-    kept, size = [], 0
-    for line in lines[:BUILTIN_LINES]:
-        size += len(line)                               # bytes on disk, a CRLF line counted with its CR
-        if size > BUILTIN_BYTES:
-            break
-        kept.append(line.decode("utf-8", errors="replace").rstrip("\r\n") + "\n")
-    return kept, total
 
 
 def notice(parts):
     return ("p4-temportal: " + "; ".join(parts) + ".") if parts else ""
 
 
+def block_notice(root, app):
+    """-> the line saying that blockWritesOutsideWorkingDirectories keeps Claude Code from saving memory in the main
+    checkout's store, or nothing. Only a worktree or a subdirectory whose autoMemoryDirectory names that store can
+    meet it: Claude Code's own folder and the store seen from its own checkout are writable under the block."""
+    if norm(repo_root(root)) == norm(root):
+        return []
+    mem = p4_memory(repo_root(root))
+    n = norm(mem)
+    if norm(app) != n:
+        return []
+    blocked, extra = write_block(root)
+    if not blocked or chosen_by_user(root):
+        return []                       # .md files of auto memory stay writable unless the repository chose the folder
+    if any(n == norm(d) or n.startswith(norm(d).rstrip(os.sep) + os.sep) for d in [root] + extra):
+        return []
+    where = "this working directory" if norm(root).startswith(norm(repo_root(root)) + os.sep) else "this checkout"
+    return [f"memory is written to {os.path.normpath(mem)}, outside {where}, and "
+            "blockWritesOutsideWorkingDirectories may refuse those writes"]
+
+
 def cmd_migrate(payload, first=""):
+    """SessionStart: the line of a layout move made at this start, then the write block's line when it applies."""
     root = project_root(payload)
-    app, mem = appdata_memory(payload, root), p4_memory(root)
-    if not_main_checkout(root, app, mem):
-        # the shared pointer names the main checkout's store, so that is the store this session writes and is shown
-        mem = p4_memory(repo_root(root))
-        blocked, extra = write_block(root)
-        n = norm(mem)
-        outside = not any(n == norm(d) or n.startswith(norm(d).rstrip(os.sep) + os.sep) for d in [root] + extra)
-        if norm(app) == n and chosen_by_user(root):
-            outside = False             # .md files of auto memory stay writable unless the repository chose the folder
-        subdir = norm(root).startswith(norm(repo_root(root)) + os.sep)
-        where = "this working directory" if subdir else "this checkout"
-        parts = [f"memory is written to {os.path.normpath(mem)}, outside {where}, and "
-                 "blockWritesOutsideWorkingDirectories may refuse those writes"] if blocked and outside else []
-    else:
-        parts = migrate(app, mem, time.strftime("%Y%m%d-%H%M%S"))[0]
-    out = notice(parts)
-    head = first + (out + "\n" if out else "")
-    if norm(app) == norm(mem):
-        # autoMemoryDirectory names the store's folder, so Claude Code loaded its MEMORY.md natively: no copy
-        sys.stdout.flush()
-        sys.stdout.buffer.write(head.encode("utf-8", errors="replace"))
-        sys.stdout.buffer.flush()
-        return 0
-    kept, total = builtin_index(mem)    # Claude Code loaded only the pointer: print what it would have loaded
-    path = os.path.normpath(os.path.join(mem, "MEMORY.md"))
-
-    def cut_line(n):
-        return f"p4-temportal: MEMORY.md cut here, {total - n} of {total} lines left out; the whole index is {path}.\n"
-
-    room = STDOUT_CHARS - len(head)
-    if len(kept) < total or sum(map(len, kept)) > room:
-        room -= len(cut_line(0))        # the longest the cut line can be
-    shown, size = [], 0
-    for line in kept:
-        if size + len(line) > room:
-            break
-        shown.append(line)
-        size += len(line)
-    text = head + "".join(shown) + (cut_line(len(shown)) if len(shown) < total else "")
-    sys.stdout.flush()                  # LF as counted, never the CRLF Windows text mode would write
+    out = notice(block_notice(root, appdata_memory(payload, root)))
+    text = first + (out + "\n" if out else "")
+    sys.stdout.flush()                  # LF as written, never the CRLF Windows text mode would write
     sys.stdout.buffer.write(text.encode("utf-8", errors="replace"))
     sys.stdout.buffer.flush()
     return 0
@@ -431,69 +248,6 @@ def norm(path):
     return os.path.normcase(os.path.normpath(path.replace("/", os.sep)))
 
 
-def added_index_lines(text, mem):
-    """Lines a write put into the pointer that the pointer itself does not carry."""
-    stock = set(pointer_text(mem).splitlines())
-    return [ln for ln in text.splitlines() if ln.strip() and ln not in stock and not ln.startswith(POINTER_MARK)]
-
-
-def cmd_mirror(payload):
-    """PostToolUse: a memory written into the auto memory directory is moved into the store at once. The write
-    itself is never refused, and nothing written there stays."""
-    inp = payload.get("tool_input") or {}
-    fp = str(inp.get("file_path") or "") if isinstance(inp, dict) else ""
-    if not fp:
-        return 0
-    root = project_root(payload)
-    app, mem = appdata_memory(payload, root), p4_memory(root)
-    if is_link(app) or norm(app) == norm(mem) or not_main_checkout(root, app, mem):
-        return 0
-    n_app, n_fp = norm(app), norm(fp)
-    if not n_fp.startswith(n_app + os.sep) or not os.path.isfile(fp):
-        return 0
-    rel = os.path.relpath(n_fp, n_app)
-    dst = os.path.join(mem, rel)
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    if rel.lower() == "memory.md":
-        with open(fp, encoding="utf-8", errors="replace") as f:
-            new = added_index_lines(f.read(), mem)
-        old = ""
-        if os.path.isfile(dst):
-            with open(dst, encoding="utf-8", errors="replace") as f:
-                old = f.read()
-        have = set(old.splitlines())
-        add = [ln for ln in new if ln not in have]
-        if add:
-            os.makedirs(mem, exist_ok=True)
-            with open(dst, "a", encoding="utf-8", newline="\n") as f:
-                f.write(("\n" if old and not old.endswith("\n") else "") + "\n".join(add) + "\n")
-        write_pointer(app, mem)
-        note = (f"p4-temportal: index lines appended: {len(add)}, from the pointer MEMORY.md to "
-                f"{os.path.normpath(dst)}; the pointer is restored.")
-    else:
-        if os.path.isfile(dst) and not filecmp.cmp(fp, dst, shallow=False):
-            keep_aside(mem, "replaced", rel, dst, stamp)
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        shutil.copy2(fp, dst)
-        retry(os.remove, fp)
-        note = f"p4-temportal: {fp} was moved to {os.path.normpath(dst)}."
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": note}}))
-    return 0
-
-
-def cmd_sweep(payload):
-    """Stop: what the start could not move or delete is tried again at turn end. Prints nothing."""
-    root = project_root(payload)
-    app, mem = appdata_memory(payload, root), p4_memory(root)
-    if not_main_checkout(root, app, mem):
-        return 0
-    pending = is_link(app) or (
-        os.path.isdir(app) and any(n != "MEMORY.md" or not is_pointer(os.path.join(app, n)) for n in os.listdir(app)))
-    if pending or not os.path.isdir(app):
-        migrate(app, mem, time.strftime("%Y%m%d-%H%M%S"))
-    return 0
-
-
 def main():
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
@@ -501,19 +255,16 @@ def main():
     sub = sys.argv[1] if len(sys.argv) > 1 else ""
     payload = payload_from_stdin()
     try:
-        configure(payload)
-        if sub in ("migrate", "mirror", "sweep") and auto_memory_off(project_root(payload)):
-            return 0                    # auto memory is off: no pointer, no move, no index
+        if sub in RETIRED:
+            return 0
         if sub == "migrate":
+            if auto_memory_off(project_root(payload)):
+                return 0                # auto memory is off: Claude Code saves none, so no block keeps it from saving
             return cmd_migrate(payload, layout(payload))
-        if sub == "mirror":
-            return cmd_mirror(payload)
-        if sub == "sweep":
-            return cmd_sweep(payload)
         print(json.dumps({"systemMessage": f"p4_memory.py: unknown subcommand {sub!r}"}))
         return 0
     except Exception as e:  # noqa: BLE001 — a hook degrades, never raises
-        # a systemMessage reaches ezexe on Stop, PreToolUse and PostToolUse too, where plain stdout reaches nobody
+        # a systemMessage reaches ezexe whatever the event, and a start's plain stdout reaches only the model
         print(json.dumps({"systemMessage": f"p4-temportal memory {sub} degraded: {type(e).__name__}: {e}"}))
         return 0
 

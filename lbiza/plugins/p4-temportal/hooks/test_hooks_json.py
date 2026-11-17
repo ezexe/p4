@@ -16,15 +16,23 @@ def runs(event, source):
     return out
 
 
-def index_prints(source):
-    return sum("memory migrate" in c for c in runs("SessionStart", source))
+def every_command():
+    return [h["command"] for groups in HOOKS.values() for g in groups for h in g["hooks"]]
 
 
 class SessionStartTest(unittest.TestCase):
-    def test_index_printed_once_per_context(self):
-        counts = {s: index_prints(s) for s in ("startup", "clear", "compact", "resume", "fork")}
+    def test_the_memory_start_runs_once_per_context(self):
+        counts = {s: sum("memory migrate" in c for c in runs("SessionStart", s))
+                  for s in ("startup", "clear", "compact", "resume", "fork")}
         print("memory migrate runs per source:", counts)
         self.assertEqual(counts, {"startup": 1, "clear": 1, "compact": 1, "resume": 0, "fork": 0})
+
+
+class NativeMemoryTest(unittest.TestCase):
+    def test_no_event_moves_memory(self):
+        """ezexe/p4#92: Claude Code writes the auto memory itself, so no hook mirrors a write or sweeps at Stop."""
+        moves = [c for c in every_command() if "memory mirror" in c or "memory sweep" in c]
+        self.assertEqual(moves, [])
 
 
 if __name__ == "__main__":

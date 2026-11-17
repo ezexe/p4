@@ -9,7 +9,8 @@ p4-temportal keeps in the project's `.claude/p4/temportal/` the files Claude Cod
 Transcripts, plans, file history and subagent memory stay where Claude Code puts them.
 Until `.claude/p4` is a git repository of its own, which p4-phi makes it, no scratchpad directory is committed or removed.
 
-- `temportal/memory/` holds the project's auto memory, and nothing in it is ever cleared.
+- `temportal/memory/` is the project's auto memory directory once `autoMemoryDirectory` in `.claude/settings.local.json` names it: Claude Code writes memory files and their `MEMORY.md` index there and loads the index at each start itself, and nothing in it is ever cleared.
+- Until that key is there, Claude Code keeps the memory in its own folder under `~/.claude/projects/`, and p4-temportal moves nothing out of it.
 - `temportal/tmp/<session>/` is this session's scratchpad directory: write temporary files by this path, and the scratchpad path Claude Code gives is a link to it.
 - A scratchpad directory is staged at each turn end, and its files are committed and removed after its session ends, so a file meant to outlast the session goes in the notebook, with a lifetime when it should not stay for good.
 - `temportal/scratchpad/` is the notebook, kept across sessions, and logs, build output and binaries in it are moved into `scratchpad/.out/`, which git ignores.

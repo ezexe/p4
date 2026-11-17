@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""test_p4_memory.py: acceptance tests for p4-temportal's memory part. The auto memory directory, or a link left in
-its place, is merged into .claude/p4/temportal/memory/ and deleted, a differing file is kept in .conflicts/ and never
-overwrites the store's, the auto memory directory keeps only the pointer MEMORY.md, a write into it is moved into the
-store, a busy folder is left to turn end, and .claude/p4/ is made as a plain folder when absent. Then what a session
-is given: the SessionStart output equals what Claude Code loads from a memory folder holding the same files, after at
-most one notice line, and the pointer has no imperative sentence but the one that says where to write. Run from
-anywhere: python3 hooks/test_p4_memory.py, and exit 0 is green."""
+"""test_p4_memory.py: acceptance tests for p4-temportal's memory part. Claude Code writes and loads the project's
+auto memory itself, in the store's .claude/p4/temportal/memory/ once `autoMemoryDirectory` names it, so a start moves
+no file, writes no pointer and prints no index, with the key or without it. What is left is the line a start prints
+when a write block would keep Claude Code from saving memory in the store, and `chosen_by_user`, which tells a
+folder ezexe chose from one a repository chose. Run from anywhere: python3 hooks/test_p4_memory.py, and exit 0 is
+green."""
 
 import atexit
+import contextlib
+import io
 import json
 import os
-import re
 import shutil
 import stat
 import subprocess
@@ -19,18 +19,14 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-HOOK = os.path.join(HERE, "p4_memory.py")
 RUNNER = os.path.join(HERE, "run-hook.sh")
 sys.path.insert(0, HERE)
-MARK = "<!-- p4-memory: pointer"
-BUILTIN_LINES = 200         # the reference of what Claude Code loads, kept apart from p4_memory.py's constants so
-BUILTIN_BYTES = 25_000      # that a change there fails here
-STDOUT_CHARS = 10_000       # a hook's plain stdout past this reaches the session as a 2,000-character preview
-
+import p4_memory  # noqa: E402
 
 SWITCHES = ("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "CLAUDE_CODE_DISABLE_CLAUDE_MDS", "CLAUDE_CODE_PROJECT_DIR_NAME")
 CONFIG = tempfile.mkdtemp(prefix="p4-temportal-memory-config-")
 atexit.register(lambda: wipe(CONFIG))
+
 
 def wipe(path):
     """Remove a test's tree, a git repository's read-only objects included, which rmtree alone leaves on Windows."""
@@ -56,61 +52,36 @@ def clean_env(**kw):
     return env
 
 
-def inproc(module, args, stdin=b"", env=None, cwd=None):
-    """A hook script's main() run in this process, the way its own process would run it: its argv, its stdin, the
-    environment given in place of this one, and its cwd, with stdout and stderr captured. It saves a python start per
-    call."""
-    import contextlib
-    import importlib
-    import io
-    import types
-    mod = importlib.import_module(module)
-    saved = (dict(os.environ), os.getcwd(), sys.argv, sys.stdin)
-    out = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", newline="\n", write_through=True)   # a .buffer, as a process's stdout has
-    err = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", newline="\n", write_through=True)
-    code = 0
+@contextlib.contextmanager
+def environ(env):
+    saved = dict(os.environ)
+    os.environ.clear()
+    os.environ.update(env)
     try:
-        if env is not None:
-            os.environ.clear()
-            os.environ.update(env)
-        if cwd:
-            os.chdir(cwd)
-        sys.argv = [module + ".py", *args]
-        sys.stdin = io.TextIOWrapper(io.BytesIO(stdin if isinstance(stdin, bytes) else stdin.encode("utf-8")),
-                                     encoding="utf-8")
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            try:
-                code = mod.main() or 0
-            except SystemExit as e:
-                code = e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
+        yield
     finally:
         os.environ.clear()
-        os.environ.update(saved[0])
-        os.chdir(saved[1])
-        sys.argv, sys.stdin = saved[2], saved[3]
-    text = [f.buffer.getvalue().decode("utf-8", "replace") for f in (out, err)]
-    return types.SimpleNamespace(returncode=code, stdout=text[0], stderr=text[1])
+        os.environ.update(saved)
 
 
-def hook(sub, stdin, env):
-    """p4_memory.py with that subcommand, in process; stdout as bytes, as a process would give it."""
-    r = inproc("p4_memory", [sub], stdin, env)
-    r.stdout = r.stdout.encode("utf-8")
-    return r
+def hook(sub, payload, env):
+    """p4_memory.py's main() with that subcommand, run in this process as its own process would run it -> stdout."""
+    saved = (os.getcwd(), sys.argv, sys.stdin)
+    out = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", newline="\n", write_through=True)
+    try:
+        sys.argv = ["p4_memory.py", sub]
+        sys.stdin = io.TextIOWrapper(io.BytesIO(json.dumps(payload).encode("utf-8")), encoding="utf-8")
+        with environ(env), contextlib.redirect_stdout(out):
+            code = p4_memory.main()
+    finally:
+        os.chdir(saved[0])
+        sys.argv, sys.stdin = saved[1], saved[2]
+    assert code == 0, code
+    return out.buffer.getvalue().decode("utf-8", "replace")
 
 
-def run(sub, root, app, payload):
-    env = clean_env(CLAUDE_PROJECT_DIR=root, P4_MEMORY_APPDATA=app)
-    r = hook(sub, json.dumps(payload).encode("utf-8"), env)
-    assert r.returncode == 0, r
-    return r.stdout.decode("utf-8", "replace").strip()
-
-
-def run_raw(sub, root, app):
-    """The SessionStart output unstripped, as Claude Code receives it."""
-    env = clean_env(CLAUDE_PROJECT_DIR=root, P4_MEMORY_APPDATA=app)
-    r = hook(sub, b"{}", env)
-    return r.stdout.decode("utf-8", "replace")
+def run(sub, root, app, payload=None, **kw):
+    return hook(sub, payload or {}, clean_env(CLAUDE_PROJECT_DIR=root, P4_MEMORY_APPDATA=app, **kw))
 
 
 def put(path, text):
@@ -124,262 +95,180 @@ def read(path):
         return f.read()
 
 
-def only_pointer(app):
-    return os.listdir(app) == ["MEMORY.md"] and read(os.path.join(app, "MEMORY.md")).startswith(MARK)
+def tree(base):
+    """Every file under a folder with its text, so a test can say nothing in it changed."""
+    out = {}
+    for d, _dirs, names in os.walk(base):
+        for n in names:
+            p = os.path.join(d, n)
+            out[os.path.relpath(p, base)] = read(p)
+    return out
 
 
-def link(app, target):
-    os.makedirs(os.path.dirname(app), exist_ok=True)
-    if os.name == "nt":
-        subprocess.run(["cmd", "/c", "mklink", "/J", app, target], capture_output=True, check=True)
-    else:
-        os.symlink(target, app, target_is_directory=True)
+def git(root, *args):
+    subprocess.run(["git", "-C", root, *args], check=True, capture_output=True)
 
 
-def builtin_print(memdir):
-    """The reference: what Claude Code loads from a memory folder, cut at BUILTIN_LINES lines or BUILTIN_BYTES
-    bytes, whichever comes first."""
-    path = os.path.join(memdir, "MEMORY.md")
-    if not os.path.isfile(path):
-        return []
-    kept, size = [], 0
-    for line in read(path).splitlines(keepends=True)[:BUILTIN_LINES]:
-        size += len(line.encode("utf-8"))
-        if size > BUILTIN_BYTES:
-            break
-        kept.append(line)
-    return "".join(kept).splitlines()
+class NativeMemory(unittest.TestCase):
+    """ezexe/p4#92: the auto memory is Claude Code's to write and load, so a start, a write and a turn end move no
+    file, write no pointer and print no index."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="p4-temportal-memory-")
+        self.addCleanup(wipe, self.base)
+        self.root = os.path.join(self.base, "proj")
+        self.store = os.path.join(self.root, ".claude", "p4", "temportal", "memory")
+        self.app = os.path.join(self.base, "config", "projects", "slug", "memory")
+        put(os.path.join(self.store, "MEMORY.md"), "- [s](s.md) — s\n")
+        put(os.path.join(self.store, "s.md"), "fact s\n")
+
+    def test_a_start_without_the_key_moves_nothing_and_writes_no_pointer(self):
+        """Until autoMemoryDirectory names the store, Claude Code's own folder and the store are left as they are."""
+        put(os.path.join(self.app, "MEMORY.md"), "- [a](a.md) — a\n")
+        put(os.path.join(self.app, "a.md"), "fact a\n")
+        app_before, store_before = tree(self.app), tree(self.store)
+        out = run("migrate", self.root, self.app)
+        self.assertEqual(out, "", "a start printed the index or a notice")
+        self.assertEqual(tree(self.app), app_before, "the auto memory directory was changed")
+        self.assertEqual(tree(self.store), store_before, "the store's memory was changed")
+
+    def test_a_start_with_the_key_prints_nothing_and_leaves_the_store(self):
+        before = tree(self.store)
+        self.assertEqual(run("migrate", self.root, self.store), "", "a start printed what Claude Code loads natively")
+        self.assertEqual(tree(self.store), before)
+
+    def test_a_session_started_before_this_change_calls_mirror_and_sweep_in_silence(self):
+        """An open session keeps the hooks it started with, so the two retired commands still exit 0 and say
+        nothing, and change nothing."""
+        put(os.path.join(self.app, "b.md"), "fact b\n")
+        w = {"tool_name": "Write", "tool_input": {"file_path": os.path.join(self.app, "b.md")}}
+        app_before, store_before = tree(self.app), tree(self.store)
+        for sub, payload in (("mirror", w), ("sweep", {})):
+            self.assertEqual(run(sub, self.root, self.app, payload), "", sub)
+        self.assertEqual((tree(self.app), tree(self.store)), (app_before, store_before))
+
+    def test_the_runner_exits_0_on_an_unknown_subcommand_and_on_a_missing_script(self):
+        sh = shutil.which("sh")
+        if not sh:
+            self.skipTest("no sh on PATH")
+        env = clean_env(CLAUDE_PLUGIN_ROOT=os.path.dirname(HERE), CLAUDE_PROJECT_DIR=self.root, P4_MEMORY_APPDATA=self.app)
+        self.assertEqual(subprocess.run([sh, RUNNER, "memory", "nope"], input=b"{}", env=env,
+                                        capture_output=True).returncode, 0)
+        env["CLAUDE_PLUGIN_ROOT"] = self.base
+        self.assertEqual(subprocess.run([sh, RUNNER, "memory", "migrate"], input=b"{}", env=env,
+                                        capture_output=True).returncode, 0)
 
 
-def behavior():
-    base = tempfile.mkdtemp(prefix="p4-temportal-memory-")
-    root = os.path.join(base, "proj")
-    app = os.path.join(base, "appdata", "projects", "slug", "memory")
-    p4mem = os.path.join(root, ".claude", "p4", "temportal", "memory")
-    transcript = os.path.join(os.path.dirname(app), "session.jsonl")
-    put(transcript, "{}\n")
-    # no .claude/p4 yet: the hook makes it as a plain folder, not a git repository, and moves the memory in
-    root0 = os.path.join(base, "proj0")
-    app0 = os.path.join(base, "appdata0", "projects", "slug", "memory")
-    os.makedirs(root0)
-    put(os.path.join(app0, "MEMORY.md"), "- [a](a.md) — a\n")
-    out = run("migrate", root0, app0, {})
-    p4mem0 = os.path.join(root0, ".claude", "p4", "temportal", "memory")
-    assert read(os.path.join(p4mem0, "MEMORY.md")) == "- [a](a.md) — a\n", "the memory was not moved without .claude/p4"
-    assert not os.path.exists(os.path.join(root0, ".claude", "p4", ".git")), "p4-temportal initialized a git repository"
-    assert only_pointer(app0) and "temportal/memory/: 1" in out, out
-    # the main fixture
-    os.makedirs(os.path.join(root, ".claude", "p4"))
-    put(os.path.join(app, "MEMORY.md"), "- [a](a.md) — a\n")
-    put(os.path.join(app, "a.md"), "fact a\n")
-    put(os.path.join(app, "b.md"), "fact b\n")
-    put(os.path.join(p4mem, "a.md"), "fact a, edited elsewhere\n")
-    put(os.path.join(p4mem, "b.md"), "fact b\n")
-    out = run("migrate", root, app, {})
-    # moved, kept aside, dropped, deleted
-    assert read(os.path.join(p4mem, "MEMORY.md")) == "- [a](a.md) — a\n", "an absent file was not moved in"
-    assert read(os.path.join(p4mem, "a.md")) == "fact a, edited elsewhere\n", "the store file was overwritten"
-    assert read(os.path.join(p4mem, ".conflicts", "memory", "a.md")) == "fact a\n", "differing copy not kept"
-    assert only_pointer(app), os.listdir(app)
-    assert os.path.normpath(p4mem) in read(os.path.join(app, "MEMORY.md")), "the pointer names no memory folder"
-    assert os.path.isfile(transcript), "Claude Code's own files were touched"
-    lines = out.splitlines()
-    assert lines[0].startswith("p4-temportal: ") and "memory/: 1" in lines[0] and ".conflicts/" in lines[0], out
-    assert lines[1:] == ["- [a](a.md) — a"], out
-    # a second start moves nothing and prints the index alone
-    assert run("migrate", root, app, {}) == "- [a](a.md) — a", "an idle start printed more than the index"
-    # turn end has nothing to do: silent
-    assert run("sweep", root, app, {}) == "", "an idle turn end spoke"
-    # a write into the auto memory directory is moved into the store, and the session is told in one line
-    put(os.path.join(app, "c.md"), "fact c\n")
-    w = {"tool_name": "Write", "tool_input": {"file_path": os.path.join(app, "c.md"), "content": "fact c\n"}}
-    note = json.loads(run("mirror", root, app, w))["hookSpecificOutput"]["additionalContext"]
-    assert "moved to" in note and "\n" not in note and read(os.path.join(p4mem, "c.md")) == "fact c\n", note
-    assert only_pointer(app), "the written file stayed in the auto memory directory"
-    # a write that replaces a different store file: the write wins, and the file it replaced is kept aside
-    put(os.path.join(app, "b.md"), "fact b, rewritten\n")
-    w2 = {"tool_name": "Write", "tool_input": {"file_path": os.path.join(app, "b.md"), "content": ""}}
-    run("mirror", root, app, w2)
-    assert read(os.path.join(p4mem, "b.md")) == "fact b, rewritten\n"
-    assert read(os.path.join(p4mem, ".conflicts", "replaced", "b.md")) == "fact b\n", "the replaced file was lost"
-    # an index line written into the pointer goes to the store's MEMORY.md, and the pointer is restored
-    ptr = os.path.join(app, "MEMORY.md")
-    put(ptr, read(ptr) + "- [c](c.md) — c\n")
-    e = {"tool_name": "Edit", "tool_input": {"file_path": ptr}}
-    assert "appended" in run("mirror", root, app, e)
-    assert read(os.path.join(p4mem, "MEMORY.md")) == "- [a](a.md) — a\n- [c](c.md) — c\n"
-    assert only_pointer(app) and "- [c]" not in read(ptr), "the pointer was not restored"
-    # a write elsewhere is not the mirror's
-    put(os.path.join(root, "x.md"), "x\n")
-    other = {"tool_name": "Write", "tool_input": {"file_path": os.path.join(root, "x.md"), "content": "x"}}
-    assert run("mirror", root, app, other) == "" and not os.path.exists(os.path.join(p4mem, "x.md")), "mirrored x.md"
-    # a link an earlier version left: removed as a link, its target untouched, the pointer written
-    app2 = os.path.join(base, "appdata2", "projects", "slug", "memory")
-    link(app2, p4mem)
-    before = sorted(os.listdir(p4mem))
-    out = run("migrate", root, app2, {})
-    assert "removed the link" in out and sorted(os.listdir(p4mem)) == before, out
-    assert only_pointer(app2) and not os.path.samefile(app2, p4mem), "the link was not replaced by the pointer"
-    # a busy folder in the auto memory directory: its content reaches the store, its deletion waits for turn end
-    held = os.path.join(app, "held")
-    put(os.path.join(held, "y.md"), "fact y\n")
-    if os.name == "nt":
-        busy = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(15)"], cwd=held)
-        try:
-            out = run("migrate", root, app, {})
-            assert "busy" in out and os.path.isdir(held), out
-        finally:
-            busy.kill()
-            busy.wait()
-    assert run("sweep", root, app, {}) == "", "turn end printed"
-    assert not os.path.exists(held), "turn end did not delete the busy folder"
-    assert read(os.path.join(p4mem, "held", "y.md")) == "fact y\n"
-    assert only_pointer(app), os.listdir(app)
-    assert run("sweep", root, app, {}) == "", "a clean turn end spoke"
-    # a project dir with forward slashes, as a hook payload's cwd carries it
-    root3 = os.path.join(base, "proj3")
-    os.makedirs(os.path.join(root3, ".claude", "p4"))
-    app3 = os.path.join(base, "appdata3", "projects", "slug", "memory")
-    put(os.path.join(app3, "MEMORY.md"), "- [a](a.md) — a\n")
-    run("migrate", root3.replace("\\", "/"), app3.replace("\\", "/"), {})
-    assert read(os.path.join(root3, ".claude", "p4", "temportal", "memory", "MEMORY.md")) == "- [a](a.md) — a\n"
-    assert only_pointer(app3)
-    # the runner exits 0 on an unknown subcommand and on a missing script
-    sh = shutil.which("sh")
-    if sh:
-        env = clean_env(CLAUDE_PLUGIN_ROOT=os.path.dirname(HERE), CLAUDE_PROJECT_DIR=root3,
-                   P4_MEMORY_APPDATA=app3)
-        assert subprocess.run([sh, RUNNER, "memory", "nope"], input=b"{}", env=env, capture_output=True).returncode == 0
-        env["CLAUDE_PLUGIN_ROOT"] = base
-        assert subprocess.run([sh, RUNNER, "memory", "migrate"], input=b"{}", env=env, capture_output=True).returncode == 0
-    wipe(base)
-    print("test_p4_memory.py: behavior green")
+class ChosenByUser(unittest.TestCase):
+    """By permissions.md, a local settings file git does not track is the user's own, and a tracked one, one outside
+    a git repository or one under a `.claude` that is a link is the repository's."""
+
+    def setUp(self):
+        if not shutil.which("git"):
+            self.skipTest("no git on PATH")
+        self.root = tempfile.mkdtemp(prefix="p4-temportal-memory-chosen-")
+        self.addCleanup(wipe, self.root)
+        self.local = os.path.join(self.root, ".claude", "settings.local.json")
+        put(self.local, json.dumps({"autoMemoryDirectory": "~/elsewhere"}))
+        self.env = clean_env()
+
+    def chosen(self):
+        with environ(self.env):
+            return p4_memory.chosen_by_user(self.root)
+
+    def test_an_untracked_local_file_counts_as_the_users_choice(self):
+        git(self.root, "init", "-q")
+        self.assertTrue(self.chosen(), "an untracked local file was counted as the repository's")
+        git(self.root, "add", "-f", ".claude/settings.local.json")
+        self.assertFalse(self.chosen(), "a tracked local file was counted as the user's")
+
+    def test_a_local_file_outside_a_git_repository_is_the_repositorys(self):
+        self.env["GIT_CEILING_DIRECTORIES"] = os.path.dirname(self.root)
+        self.assertFalse(self.chosen())
+
+    def test_a_project_file_is_the_repositorys_and_a_user_file_the_users(self):
+        git(self.root, "init", "-q")
+        os.remove(self.local)
+        put(os.path.join(self.root, ".claude", "settings.json"), json.dumps({"autoMemoryDirectory": "~/elsewhere"}))
+        self.assertFalse(self.chosen(), "the project file was counted as the user's")
+        os.remove(os.path.join(self.root, ".claude", "settings.json"))
+        put(os.path.join(CONFIG, "settings.json"), json.dumps({"autoMemoryDirectory": "~/elsewhere"}))
+        self.addCleanup(os.remove, os.path.join(CONFIG, "settings.json"))
+        self.assertTrue(self.chosen(), "the user file was counted as the repository's")
+        put(os.path.join(self.root, ".claude", "settings.json"), json.dumps({"autoMemoryDirectory": "~/other"}))
+        self.assertFalse(self.chosen(), "the project file wins over the user file, and was not counted")
 
 
-def gate2_a():
-    """The SessionStart output equals what Claude Code loads from a memory folder holding the same files, after at
-    most one notice line: with nothing to move, with a move and a conflict, and with an index past the cut."""
-    base = tempfile.mkdtemp(prefix="p4-temportal-memory-start-")
-    try:
-        index = "".join(f"- [t{i}](t{i}.md) — topic {i}\n" for i in range(250))
-        cases = {
-            "quiet": ({}, {"MEMORY.md": "- [a](a.md) — a\n", "a.md": "fact a\n"}),
-            "moved": ({"MEMORY.md": "- [a](a.md) — a\n- [b](b.md) — b\n", "b.md": "fact b\n", "a.md": "other a\n"},
-                      {"a.md": "fact a\n"}),
-            "long": ({}, {"MEMORY.md": index}),
-            # under 200 lines but over 25KB: the byte cut decides
-            "wide": ({}, {"MEMORY.md": "".join(f"- [w{i}](w{i}.md) — {'x' * 300}\n" for i in range(150))}),
-            # under both of Claude Code's cuts but over the 10,000 characters a hook's stdout reaches the session with
-            "between": ({}, {"MEMORY.md": "".join(f"- [m{i}](m{i}.md) — {'y' * 100}\n" for i in range(120))}),
-            "empty": ({}, {}),
-        }
-        for name, (in_app, in_p4) in cases.items():
-            root = os.path.join(base, name, "proj")
-            app = os.path.join(base, name, "appdata", "memory")
-            os.makedirs(app)
-            os.makedirs(root, exist_ok=True)
-            for rel, text in in_app.items():
-                put(os.path.join(app, rel), text)
-            for rel, text in in_p4.items():
-                put(os.path.join(root, ".claude", "p4", "temportal", "memory", rel), text)
-            raw = run_raw("migrate", root, app)
-            assert len(raw) <= STDOUT_CHARS, f"{name}: {len(raw)} characters reach the session as a preview"
-            out = raw.splitlines()
-            cut = [ln for ln in out if ln.startswith("p4-temportal: MEMORY.md cut")]
-            if cut:                                     # the cut is said once, after the index
-                assert out[-1] == cut[0] and len(cut) == 1, f"{name}: the cut line is not last\n{out[-2:]}"
-                out = out[:-1]
-            # the same files in a plain memory folder, as Claude Code would load them after the move
-            ref_dir = os.path.join(base, name, "builtin")
-            shutil.copytree(os.path.join(root, ".claude", "p4", "temportal", "memory"), ref_dir,
-                            ignore=shutil.ignore_patterns(".conflicts"))
-            ref = builtin_print(ref_dir)
-            extra = 1 if out and out[0].startswith("p4-temportal: ") else 0
-            body = out[extra:]
-            total = len(read(os.path.join(ref_dir, "MEMORY.md")).splitlines()) if ref else 0
-            assert body == ref[:len(body)], f"{name}: output differs from what Claude Code loads\n{out[:3]}"
-            index = os.path.normpath(os.path.join(root, ".claude", "p4", "temportal", "memory", "MEMORY.md"))
-            if len(body) < total:
-                assert cut and f"{total - len(body)} of {total} lines left out" in cut[0] and index in cut[0], \
-                    f"{name}: {total - len(body)} lines left out without a word: {cut}"
-            else:
-                assert not cut, f"{name}: a whole index was said to be cut: {cut}"
-            if name == "quiet":
-                assert extra == 0, "a start with nothing to move printed a notice"
-            if name == "moved":
-                assert extra == 1 and "moved" in out[0] and "differing files kept: 1" in out[0], out[0]
-            if name == "long":
-                assert len(out) == BUILTIN_LINES, len(out)
-            if name == "wide":
-                assert len("\n".join(out).encode("utf-8")) <= BUILTIN_BYTES and len(out) < 150, len(out)
-            if name == "between":
-                assert len(body) < 120 and cut, len(body)
-            if name == "empty":
-                assert out == [], out
-    finally:
-        wipe(base)
-    print("test_p4_memory.py: start output green")
+class WriteBlock(unittest.TestCase):
+    """A worktree whose autoMemoryDirectory names the main checkout's store is told once at its start when
+    blockWritesOutsideWorkingDirectories would keep Claude Code from saving memory there."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="p4-temportal-memory-block-")
+        self.addCleanup(wipe, self.base)
+        self.main = os.path.join(self.base, "repo")
+        os.makedirs(os.path.join(self.main, ".git", "worktrees", "wt"))
+        put(os.path.join(self.main, ".git", "worktrees", "wt", "commondir"), "../..\n")
+        self.wt = os.path.join(self.base, "wt")
+        put(os.path.join(self.wt, ".git"), f"gitdir: {os.path.join(self.main, '.git', 'worktrees', 'wt')}\n")
+        self.sub = os.path.join(self.main, "src")
+        os.makedirs(self.sub)
+        self.store = os.path.normpath(os.path.join(self.main, ".claude", "p4", "temportal", "memory"))
+        put(os.path.join(self.store, "MEMORY.md"), "- [m](m.md) — m\n")
+        self.user = os.path.join(CONFIG, "settings.json")
+        self.addCleanup(lambda: os.path.exists(self.user) and os.remove(self.user))
+
+    def warned(self, out, where):
+        return any(ln.startswith("p4-temportal: ") and self.store in ln and f"outside {where}" in ln and
+                   "blockWritesOutsideWorkingDirectories" in ln for ln in out.splitlines())
+
+    def test_a_block_is_said_where_the_store_is_outside_the_working_directory(self):
+        put(self.user, json.dumps({"permissions": {"blockWritesOutsideWorkingDirectories": True}}))
+        for where in (self.wt, self.sub):
+            put(os.path.join(where, ".claude", "settings.local.json"), json.dumps({"autoMemoryDirectory": self.store}))
+        self.assertTrue(self.warned(run("migrate", self.wt, self.store), "this checkout"))
+        self.assertTrue(self.warned(run("migrate", self.sub, self.store), "this working directory"))
+        self.assertEqual(run("migrate", self.main, self.store), "", "the main checkout holds its store")
+
+    def test_no_block_no_word(self):
+        self.assertEqual(run("migrate", self.wt, self.store), "")
+
+    def test_a_folder_the_user_chose_or_added_stays_writable(self):
+        block = {"blockWritesOutsideWorkingDirectories": True}
+        put(self.user, json.dumps({"permissions": block, "autoMemoryDirectory": self.store}))
+        self.assertEqual(run("migrate", self.wt, self.store), "", "a user-chosen folder warned")
+        for added in (self.main, self.store):
+            put(self.user, json.dumps({"permissions": dict(block, additionalDirectories=[added])}))
+            self.assertEqual(run("migrate", self.wt, self.store), "", f"{added} was outside")
+
+    def test_claude_codes_own_folder_is_never_warned_about(self):
+        """Without the key Claude Code writes its own folder under the profile, which the block leaves writable."""
+        put(self.user, json.dumps({"permissions": {"blockWritesOutsideWorkingDirectories": True}}))
+        app = os.path.join(self.base, "config", "projects", "slug", "memory")
+        self.assertEqual(run("migrate", self.wt, app), "")
+
+    def test_an_unreadable_managed_file_fails_closed(self):
+        managed = os.path.join(self.base, "managed-settings.json")
+        put(managed, "{not json")
+        out = run("migrate", self.wt, self.store, P4_MANAGED_SETTINGS=managed)
+        self.assertTrue(self.warned(out, "this checkout"), out)
+
+    def test_memory_switched_off_says_nothing(self):
+        put(self.user, json.dumps({"permissions": {"blockWritesOutsideWorkingDirectories": True}}))
+        self.assertEqual(run("migrate", self.wt, self.store, CLAUDE_CODE_DISABLE_AUTO_MEMORY="1"), "")
 
 
-IMPERATIVE = re.compile(r"^(?:please\s+)?(?:do|don't|never|always|read|write|use|save|remember|keep|check|edit|"
-                        r"update|store|put|load|consult|follow|make|ask|avoid|add|delete|move|see|note|ensure)\b", re.I)
-MODAL = re.compile(r"\b(?:must|should|shall|have to|need to|never|always|do not|don't)\b", re.I)
-
-
-def gate2_b():
-    """The pointer says where the memory is and to write there, and has no other imperative sentence."""
-    base = tempfile.mkdtemp(prefix="p4-temportal-memory-pointer-")
-    try:
-        root, app = os.path.join(base, "proj"), os.path.join(base, "appdata", "memory")
-        os.makedirs(root)
-        run("migrate", root, app, {})
-        p4 = os.path.normpath(os.path.join(root, ".claude", "p4", "temportal", "memory"))
-        text = read(os.path.join(app, "MEMORY.md"))
-        body = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("<!--") and not ln.startswith("#")]
-        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", " ".join(body)) if s.strip()]
-        imperative = [s for s in sentences if IMPERATIVE.match(s) or MODAL.search(s)]
-        assert len(imperative) == 1, f"imperative sentences: {imperative}"
-        only = imperative[0]
-        assert only.lower().startswith("write ") and p4 in only, f"the one imperative is not where to write: {only}"
-        assert any(p4 in s and s not in imperative for s in sentences), "the pointer does not say where the memory is"
-        assert len(sentences) == 2, f"the pointer says more than where and to write there: {sentences}"
-    finally:
-        wipe(base)
-    print("test_p4_memory.py: pointer words green")
-
-
-def crlf_cut():
-    """An index saved with CRLF lines is cut where its bytes on disk pass BUILTIN_BYTES: 151-byte lines keep 165."""
-    base = tempfile.mkdtemp(prefix="p4-temportal-memory-crlf-")
-    try:
-        root, app = os.path.join(base, "proj"), os.path.join(base, "appdata", "memory")
-        os.makedirs(app)
-        line = "- [c](c.md) " + "x" * (149 - 12) + "\r\n"
-        assert len(line.encode("utf-8")) == 151
-        path = os.path.join(root, ".claude", "p4", "temportal", "memory", "MEMORY.md")
-        os.makedirs(os.path.dirname(path))
-        with open(path, "w", encoding="utf-8", newline="") as f:
-            f.write(line * 190)
-        sys.path.insert(0, HERE)
-        import p4_memory
-        out, _ = p4_memory.builtin_index(os.path.dirname(path))
-        assert len(out) == BUILTIN_BYTES // 151, f"{len(out)} CRLF lines kept, {len(out) * 151} bytes on disk"
-    finally:
-        wipe(base)
-    print("test_p4_memory.py: CRLF cut green")
-
-
-def repo_key():
+class AutoMemoryDirectory(unittest.TestCase):
     """The auto memory directory is keyed by the git repository, so a worktree and a subdirectory find the main
     checkout's; CLAUDE_CODE_PROJECT_DIR_NAME names it instead, and autoMemoryDirectory moves it."""
-    base = tempfile.mkdtemp(prefix="p4-temportal-memory-key-")
-    keys = ("P4_MEMORY_APPDATA", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PROJECT_DIR_NAME", "CLAUDE_PROJECT_DIR")
-    saved = {k: os.environ.pop(k, None) for k in keys}
-    try:
-        sys.path.insert(0, HERE)
-        import p4_memory
+
+    def test_the_folder_claude_code_writes(self):
+        base = tempfile.mkdtemp(prefix="p4-temportal-memory-key-")
+        self.addCleanup(wipe, base)
         config = os.path.join(base, "config")
-        os.environ["CLAUDE_CONFIG_DIR"] = config
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("P4_MEMORY_APPDATA", "CLAUDE_CODE_PROJECT_DIR_NAME", "CLAUDE_PROJECT_DIR")}
+        env["CLAUDE_CONFIG_DIR"] = config
         main_ = os.path.join(base, "repo")
         os.makedirs(os.path.join(main_, ".git", "worktrees", "wt"))
         put(os.path.join(main_, ".git", "worktrees", "wt", "commondir"), "../..\n")
@@ -388,193 +277,39 @@ def repo_key():
         sub = os.path.join(main_, "src")
         os.makedirs(sub)
         want = os.path.join(config, "projects", p4_memory.project_slug(main_), "memory")
-        wt_transcript = os.path.join(config, "projects", p4_memory.project_slug(wt), "s.jsonl")
-        for where, payload in ((main_, {}), (sub, {}), (wt, {}), (wt, {"transcript_path": wt_transcript})):
-            got = p4_memory.appdata_memory(payload, where)
-            assert os.path.normpath(got) == os.path.normpath(want), f"{where} {payload}: {got}, not {want}"
-        os.environ["CLAUDE_CODE_PROJECT_DIR_NAME"] = "named"
-        got = p4_memory.appdata_memory({}, wt)
-        assert os.path.normpath(got) == os.path.join(config, "projects", "named", "memory"), got
-        del os.environ["CLAUDE_CONFIG_DIR"]             # without it Claude Code ignores the name
-        got = p4_memory.appdata_memory({}, wt)
-        assert os.path.basename(os.path.dirname(got)) == p4_memory.project_slug(main_), f"the name was used: {got}"
-        os.environ["CLAUDE_CONFIG_DIR"] = config
-        del os.environ["CLAUDE_CODE_PROJECT_DIR_NAME"]
-        put(os.path.join(wt, ".claude", "settings.local.json"), json.dumps({"autoMemoryDirectory": "~/moved"}))
-        got = p4_memory.appdata_memory({}, wt)
-        assert os.path.normpath(got) == os.path.join(os.path.expanduser("~"), "moved"), got
-        # the main checkout writes the shared folder's pointer; a subdirectory and a worktree leave it and its files
-        shared = os.path.join(base, "shared", "memory")
-        put(os.path.join(main_, ".claude", "p4", "temportal", "memory", "MEMORY.md"), "- [m](m.md) — m\n")
-        run("migrate", main_, shared, {})
-        pointer = read(os.path.join(shared, "MEMORY.md"))
-        assert os.path.normpath(os.path.join(main_, ".claude", "p4", "temportal", "memory")) in pointer, pointer
-        put(os.path.join(shared, "n.md"), "fact n\n")
-        for other in (sub, wt):
-            run("migrate", other, shared, {})
-            w = {"tool_name": "Write", "tool_input": {"file_path": os.path.join(shared, "n.md")}}
-            run("mirror", other, shared, w)
-            run("sweep", other, shared, {})
-            assert read(os.path.join(shared, "MEMORY.md")) == pointer, f"{other} rewrote the main checkout's pointer"
-            assert os.path.isfile(os.path.join(shared, "n.md")), f"{other} moved a file into its own store"
-        os.remove(os.path.join(shared, "n.md"))
-        # a worktree start prints the store its pointer names, the main checkout's, not a store of its own
-        put(os.path.join(wt, ".claude", "p4", "temportal", "memory", "MEMORY.md"), "- [w](w.md) — w\n")
-        out = run("migrate", wt, shared, {})
-        assert "- [m](m.md) — m" in out and "- [w]" not in out, f"a worktree start printed another store\n{out}"
-        assert not out.startswith("p4-temportal: "), f"a warning with the block off\n{out}"
-        put(os.path.join(sub, ".claude", "p4", "temportal", "memory", "MEMORY.md"), "- [s](s.md) — s\n")
-        out = run("migrate", sub, shared, {})
-        assert out == "- [m](m.md) — m", f"a subdirectory start printed another store, or warned\n{out}"
-        main_store = os.path.normpath(os.path.join(main_, ".claude", "p4", "temportal", "memory"))
-
-        def warned(out, where):
-            return any(ln.startswith("p4-temportal: ") and main_store in ln and f"outside {where}" in ln and
-                       "blockWritesOutsideWorkingDirectories" in ln for ln in out.splitlines())
-
-        # the block set in the user file, under a local file holding only allow rules, is still said
-        user = os.path.join(CONFIG, "settings.json")
-        put(user, json.dumps({"permissions": {"blockWritesOutsideWorkingDirectories": True}}))
-        for where in (wt, sub):
-            put(os.path.join(where, ".claude", "settings.local.json"), json.dumps({"permissions": {"allow": ["Read"]}}))
-        try:
-            assert warned(run("migrate", wt, shared, {}), "this checkout"), "a user block under a local file was missed"
-            assert warned(run("migrate", sub, shared, {}), "this working directory"), "a subdirectory was not named"
-            # a store under, or exactly at, a user additional directory is inside
-            for added in (main_, main_store):
-                put(user, json.dumps({"permissions": {"blockWritesOutsideWorkingDirectories": True,
-                                                      "additionalDirectories": [added]}}))
-                assert not run("migrate", wt, shared, {}).startswith("p4-temportal: "), f"{added} was outside"
-            # autoMemoryDirectory naming the main store from user settings: its .md files stay writable, no warning;
-            # the same choice made by a repository file is refused, so it is said
-            block = {"blockWritesOutsideWorkingDirectories": True}
-            put(user, json.dumps({"permissions": block, "autoMemoryDirectory": main_store}))
-            assert not run("migrate", wt, main_store, {}).startswith("p4-temportal: "), "a user-chosen folder warned"
-            put(os.path.join(wt, ".claude", "settings.local.json"), json.dumps({"autoMemoryDirectory": main_store}))
-            assert warned(run("migrate", wt, main_store, {}), "this checkout"), "a repository-chosen folder was not said"
-            os.remove(user)
-            # a managed file that cannot be read fails closed
-            managed = os.path.join(base, "managed-settings.json")
-            put(managed, "{not json")
-            env = clean_env(CLAUDE_PROJECT_DIR=wt, P4_MEMORY_APPDATA=shared, P4_MANAGED_SETTINGS=managed)
-            r = hook("migrate", b"{}", env)
-            assert warned(r.stdout.decode("utf-8", "replace"), "this checkout"), "an unreadable managed file was missed"
-        finally:
-            if os.path.exists(user):
-                os.remove(user)
-            for where in (wt, sub):
-                os.remove(os.path.join(where, ".claude", "settings.local.json"))
-        # autoMemoryDirectory set to the store itself: Claude Code loads the index natively, so a start prints no copy
-        # of it; the index stays, and no pointer is written over it by a start, a write or a turn end
-        store = os.path.join(main_, ".claude", "p4", "temportal", "memory")
-        put(os.path.join(store, "MEMORY.md"), "- [a](a.md) — a\n")
-        out = run("migrate", main_, store, {})
-        assert "- [a](a.md)" not in out, f"a start printed the index Claude Code loads natively\n{out}"
-        assert read(os.path.join(store, "MEMORY.md")) == "- [a](a.md) — a\n", "the store's index was replaced"
-        put(os.path.join(store, "MEMORY.md"), "- [a](a.md) — a\n- [b](b.md) — b\n")
-        put(os.path.join(store, "b.md"), "fact b\n")
-        for written in ("MEMORY.md", "b.md"):
-            w = {"tool_name": "Write", "tool_input": {"file_path": os.path.join(store, written)}}
-            assert run("mirror", main_, store, w) == "", f"mirror acted on {written} in the store"
-        assert read(os.path.join(store, "MEMORY.md")) == "- [a](a.md) — a\n- [b](b.md) — b\n", \
-            "mirror wrote over the store's index"
-        assert read(os.path.join(store, "b.md")) == "fact b\n", "mirror moved a memory out of the store"
-        assert not [n for n in os.listdir(store) if n not in ("MEMORY.md", "b.md")], os.listdir(store)
-        run("sweep", main_, store, {})
-        assert read(os.path.join(store, "MEMORY.md")) == "- [a](a.md) — a\n- [b](b.md) — b\n", \
-            "turn end wrote over the store's index"
-    finally:
-        for k, v in saved.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
-        wipe(base)
-    print("test_p4_memory.py: repository key green")
-
-
-def switched_off():
-    """With autoMemoryEnabled false, CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 or CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 the memory
-    part writes no pointer, moves nothing and prints no index; CLAUDE_CODE_DISABLE_AUTO_MEMORY=0 turns it on over
-    the setting."""
-    base = tempfile.mkdtemp(prefix="p4-temportal-memory-off-")
-    try:
-        for how in ("env", "mds", "settings", "forced on"):
-            root, app = os.path.join(base, how, "proj"), os.path.join(base, how, "appdata", "memory")
-            put(os.path.join(app, "a.md"), "fact a\n")
-            put(os.path.join(root, ".claude", "p4", "temportal", "memory", "MEMORY.md"), "- [a](a.md) — a\n")
-            env = clean_env(CLAUDE_PROJECT_DIR=root, P4_MEMORY_APPDATA=app)
-            if how == "env":
-                env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "True"
-            elif how == "mds":
-                env["CLAUDE_CODE_DISABLE_CLAUDE_MDS"] = "YES"
-            else:
-                put(os.path.join(root, ".claude", "settings.local.json"), json.dumps({"autoMemoryEnabled": False}))
-            if how == "forced on":
-                env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "off"
-            for sub in ("migrate", "sweep"):
-                r = hook(sub, b"{}", env)
-                out = r.stdout.decode("utf-8", "replace")
-                assert r.returncode == 0, r
-                if how == "forced on" and sub == "migrate":
-                    assert "- [a]" in out, f"{how}: the index was not printed\n{out}"
-                elif how != "forced on":
-                    assert "- [a]" not in out, f"{how} {sub}: the index was printed\n{out}"
-            if how == "forced on":
-                assert only_pointer(app), f"{how}: the auto memory directory was not migrated: {os.listdir(app)}"
-            else:
-                assert os.listdir(app) == ["a.md"], f"{how}: the auto memory directory was touched: {os.listdir(app)}"
-    finally:
-        wipe(base)
-    print("test_p4_memory.py: switched off green")
+        with environ(env):
+            for where in (main_, sub, wt):
+                self.assertEqual(os.path.normpath(p4_memory.appdata_memory({}, where)), os.path.normpath(want), where)
+            os.environ["CLAUDE_CODE_PROJECT_DIR_NAME"] = "named"
+            self.assertEqual(os.path.normpath(p4_memory.appdata_memory({}, wt)),
+                             os.path.join(config, "projects", "named", "memory"))
+            del os.environ["CLAUDE_CONFIG_DIR"]             # without it Claude Code ignores the name
+            got = p4_memory.appdata_memory({}, wt)
+            self.assertEqual(os.path.basename(os.path.dirname(got)), p4_memory.project_slug(main_))
+            os.environ["CLAUDE_CONFIG_DIR"] = config
+            del os.environ["CLAUDE_CODE_PROJECT_DIR_NAME"]
+            put(os.path.join(wt, ".claude", "settings.local.json"), json.dumps({"autoMemoryDirectory": "~/moved"}))
+            self.assertEqual(os.path.normpath(p4_memory.appdata_memory({}, wt)),
+                             os.path.join(os.path.expanduser("~"), "moved"))
 
 
 class FailureNotice(unittest.TestCase):
-    """A failure on Stop, PreToolUse or PostToolUse, where plain stdout reaches nobody, is a systemMessage."""
+    """A failure, which a start would otherwise swallow, is a systemMessage."""
 
     def test_a_degraded_or_unknown_subcommand_prints_a_system_message(self):
-        import contextlib
-        import io
-        sys.path.insert(0, HERE)
-        import p4_memory
         root = tempfile.mkdtemp(prefix="p4-temportal-memory-fail-")
-        old = (p4_memory.cmd_sweep, p4_memory.auto_memory_off, sys.argv, sys.stdin)
+        self.addCleanup(wipe, root)
+        old = p4_memory.cmd_migrate
+
         def broken(*a, **k):
             raise OSError("disk gone")
         try:
-            p4_memory.cmd_sweep, p4_memory.auto_memory_off = broken, lambda *a: False
-            for sub, want in (("sweep", "memory sweep degraded: OSError: disk gone"), ("nope", "unknown subcommand")):
-                sys.argv = ["p4_memory.py", sub]
-                sys.stdin = io.TextIOWrapper(io.BytesIO(json.dumps({"cwd": root, "hook_event_name": "Stop"}).encode()))
-                out = io.StringIO()
-                with contextlib.redirect_stdout(out):
-                    self.assertEqual(p4_memory.main(), 0)
-                self.assertIn(want, json.loads(out.getvalue())["systemMessage"])
+            p4_memory.cmd_migrate = broken
+            for sub, want in (("migrate", "memory migrate degraded: OSError: disk gone"), ("nope", "unknown subcommand")):
+                out = hook(sub, {"cwd": root, "hook_event_name": "SessionStart"}, clean_env(CLAUDE_PROJECT_DIR=root))
+                self.assertIn(want, json.loads(out)["systemMessage"])
         finally:
-            p4_memory.cmd_sweep, p4_memory.auto_memory_off, sys.argv, sys.stdin = old
-            wipe(root)
-
-
-class Cases(unittest.TestCase):
-    """Each case group a test method, so unittest and pytest collect them."""
-
-    def test_switched_off(self):
-        switched_off()
-
-    def test_repo_key(self):
-        repo_key()
-
-    def test_crlf_cut(self):
-        crlf_cut()
-
-    def test_behavior(self):
-        behavior()
-
-    def test_gate2_a(self):
-        gate2_a()
-
-    def test_gate2_b(self):
-        gate2_b()
+            p4_memory.cmd_migrate = old
 
 
 if __name__ == "__main__":
