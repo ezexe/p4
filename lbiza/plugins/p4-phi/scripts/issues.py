@@ -14,9 +14,9 @@
            a backticked command or a test file in a step that speaks of a test, or `phi.py proof "<command>"`. p4-phi
            runs it again at Stop on the final head and comments the result on the issue; a failing test keeps the
            child open.
-  push     the proven work is pushed at once and each store it touched synced with `p4.py sync --push`; the
-           `Closes #N` commit closes the issue once it reaches the default branch. Anything that cannot be undone,
-           such as a force-push, a history rewrite or a deletion, still asks.
+  push     only the tree's orchestrator lands and pushes: the child commits on its parent's branch and is told its
+           proven work waits on that push, while the orchestrator gets relay.push_text with what the change still
+           owes; the `Closes #N` commit closes the issue once it reaches the default branch. A child's own push asks.
   archive  a finished child, marked `disposable` or archiving itself, is counted as archived only with the issue
            closed and the test passed, its outcome note on the parent carrying the issue link, the commit and the test.
            A child that archives itself before it is finished is counted as archived at once, its open steps named.
@@ -272,14 +272,15 @@ def ensure(home, s, text, base, where):
     return (f"phi (p4-phi): this session's purpose is {slug}#{n}, {url}, named in its brief. Its loop: each commit "
             f"says `Closes #{n}`; a step of its task list names the regression test that proves it fixed, as a "
             f"backticked command or a test file, or `phi.py proof \"<command>\"` names it; p4-phi re-runs that test "
-            f"at Stop on the final head, comments the result on the issue and says what is still owed; the `Closes` "
-            f"commit closes the issue once it reaches the default branch.")
+            f"at Stop on the final head, comments the result on the issue and says what is still owed; the tree's "
+            f"orchestrator, the one session that lands and pushes, pushes the `Closes` commit, and it closes the "
+            f"issue once it reaches the default branch. This session never pushes it.")
 
 
 def done_text(home, s, cwd=""):
     """What `phi.py done` says about the issue this session closes, so a child that reports done learns which issue
-    it closes and what it still owes before it closes: the commit, the regression test, the push. Nothing is read
-    from GitHub."""
+    it closes, what it still owes, the commit and the regression test, and that its orchestrator pushes. Nothing is
+    read from GitHub."""
     iss = s.get("issue") if isinstance(s.get("issue"), dict) else None
     if not on(home):
         return ""
@@ -301,18 +302,20 @@ def done_text(home, s, cwd=""):
     if not proof:
         owed.append("the regression test that proves it, named in a step of the task list or with "
                     "`phi.py proof \"<command>\"`")
-    if closing and not all(_pushed(repo, sha) for repo, sha in closing):
-        owed.append(f"the push of {closing[-1][1]}")
+    unpushed = bool(closing) and not all(_pushed(repo, sha) for repo, sha in closing)
     have = []
     if closing:
         have.append(f"commit {closing[-1][1]} says `Closes #{n}`")
     if proof:
         have.append(f"its regression test is `{proof['cmd']}`")
+    top_id, top_title = lander(home, s)
     return (f"this session closes {slug}#{n}, {iss.get('url')}"
             + (": " + "; ".join(have) if have else "") + ". "
             + ("Still owed before it closes: " + "; ".join(owed) + "." if owed else
                "Nothing is owed but the Stop check: p4-phi re-runs the test on the final head, and the commit closes "
-               "the issue once it reaches the default branch."))
+               "the issue once it reaches the default branch.")
+            + (f" The push of {closing[-1][1]} is its orchestrator's, \"{top_title}\" `{top_id}`, the one session "
+               f"that lands and pushes; this session does not push it." if unpushed else ""))
 
 
 def _commits(repo, rng, limit=40):
@@ -356,6 +359,20 @@ def own_commits(s, cwd=""):
             if sha not in seen:
                 seen.add(sha)
                 out.append((repo, sha, subj, body))
+    return out
+
+
+def closing_commits(home, s, cwd=""):
+    """relay.closing_commits for the push line its orchestrator gets, with the closing commits made in the
+    repository of the session's own issue since it was taken, which a turn that edited no file there leaves out."""
+    out = relay.closing_commits(home, s["sessionId"], s)
+    if isinstance(s.get("issue"), dict) and on(home):
+        seen = {sha for _, sha, _, _ in out}
+        for repo, sha, subj, body in own_commits(s, cwd):
+            refs = list(dict.fromkeys(relay.CLOSES.findall(body or "")))
+            if refs and sha not in seen:
+                seen.add(sha)
+                out.append((repo, sha, subj, refs))
     return out
 
 
@@ -540,6 +557,16 @@ def proven(home, s, proof):
     return d
 
 
+def lander(home, s):
+    """The sessionId and title of the top session of a child's tree, the one session that lands and pushes."""
+    seen, cur = [], relay._parent(s)
+    while cur and cur not in seen and len(seen) < 32:
+        seen.append(cur)
+        cur = relay._parent(relay._session(home, cur))
+    top = seen[-1] if seen else ""
+    return top, relay._title(relay._session(home, top)) if top else ""
+
+
 def _told(iss, key):
     if iss.get("gateTold") == key:
         return True
@@ -593,21 +620,24 @@ def gate(home, s, cwd=""):
                 + (f"{sha} \"{relay._short(subj, 80)}\"" if sha else "none found") + f". Proven by `{proof['cmd']}` "
                 f"on {head}: passed.")
         return True, "", note
+    top_id, top_title = lander(home, s)
+    top = f"\"{top_title}\" `{top_id}`" if top_id else "the top session of this tree"
     if not closing:
         why = (f"phi (p4-phi): the regression test passed on {head}, but no commit of this session says "
-               f"`Closes #{n}`. Commit the work with `Closes #{n}` in its message, then push it at once, without "
-               f"asking.")
+               f"`Closes #{n}`. Commit the work on its parent's branch with `Closes #{n}` in its message and report; "
+               f"this session does not push it, since only the tree's orchestrator, {top}, lands and pushes.")
         return False, ("" if _told(iss, f"no-close:{head}") else why), ""
     if not pushed:
-        why = (f"phi (p4-phi): the regression test passed on {head}, and green issue work is pushed at once: push "
-               f"the `Closes #{n}` commit {closing[-1][1]} now, without asking, and sync each store it touched with "
-               f"`p4.py sync --push`; the push closes {ref}. Anything that cannot be undone, such as a force-push, a "
-               f"history rewrite or a deletion, still asks.")
-        return False, ("" if _told(iss, f"push:{head}") else why), ""
+        why = (f"phi (p4-phi): the regression test passed on {head}, so this work is proven. Its orchestrator, {top}, "
+               f"the one session of this tree that lands and pushes, pushes the `Closes #{n}` commit "
+               f"{closing[-1][1]} with what the change still owes, and that push closes {ref}; this session does "
+               f"not push it. It is counted as archived once that commit is on the default branch and {ref} is "
+               f"closed.")
+        return False, ("" if _told(iss, f"lander:{head}") else why), ""
     why = (f"phi (p4-phi): the `Closes #{n}` commit {closing[-1][1]} is pushed, but "
            + (f"{ref} is still open" if st else f"gh could not say whether {ref} is closed")
-           + f": GitHub closes it when that commit reaches the default branch. Land it there, or close it with "
-             f"`gh issue close {n} -R {slug} --comment \"<the commit and the test>\"`.")
+           + f": GitHub closes it when that commit reaches the default branch, where its orchestrator, {top}, "
+             f"lands it.")
     return False, ("" if _told(iss, f"{st.lower() or 'unknown'}:{head}") else why), ""
 
 

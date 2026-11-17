@@ -217,7 +217,8 @@ class Loop(unittest.TestCase):
         self.finish(self.regression_test(True))
         r = self.t.cli(A, "done", "ran test_x.py and it passed", proj=self.work)
         self.assertIn("says `Closes #7`", r.stdout)
-        self.assertIn("Still owed before it closes: the push of", r.stdout)
+        self.assertIn("Nothing is owed but the Stop check", r.stdout)
+        self.assertIn(f"is its orchestrator's, \"top\" `{TOP}`", r.stdout, "the push is the orchestrator's")
         self.assertNotIn("a commit that says", r.stdout)
         self.t.say(B, f"Check what {self.work}/lib/x.py does for ezexe/demo#3 and ezexe/demo#4 and report it.")
         r = self.t.cli(B, "done", "read x.py and reported it", proj=self.work)
@@ -280,19 +281,33 @@ class Loop(unittest.TestCase):
                         "transcript_path": os.path.join(self.t.tmp, A + "f1.jsonl"), "cwd": self.work})
         self.assertEqual(json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
 
-    def test_a_green_child_is_pushed_its_issue_closes_and_it_is_counted_as_archived_with_the_link(self):
+    def test_a_green_childs_closing_commit_is_pushed_by_its_orchestrator_and_it_is_counted_as_archived(self):
+        """ezexe/p4#232: only the tree's orchestrator lands and pushes. A worker whose brief names issue 7, with its
+        regression test passed and its `Closes #7` commit unpushed, is told at Stop that its work is proven and that
+        its orchestrator pushes it, never to push; the top of its tree gets relay.push_text naming that commit; its
+        own `git push` is asked first; and once the orchestrator's push closes the issue it is counted as archived
+        with the link."""
         self.start_writer()
         step = self.regression_test(True)
         self.commit("lib: fix x\n\nCloses #7")
+        sha = self.git(self.work, "rev-parse", "--short", "HEAD").stdout.strip()
         self.finish(step)
         out = self.stop("g1")
         self.assertEqual(out.get("decision"), "block")
-        self.assertIn("push the `Closes #7` commit", out.get("reason", ""))
-        self.assertIn("p4.py sync --push", out.get("reason", ""))
+        reason = out.get("reason", "")
+        self.assertIn("so this work is proven", reason)
+        self.assertIn(f"Its orchestrator, \"top\" `{TOP}`", reason, "it names its orchestrator as the one that pushes")
+        self.assertIn("this session does not push it", reason)
+        self.assertNotIn("push the `Closes #7` commit", reason, "no order to push")
+        self.assertNotIn("without asking", reason)
         self.assertFalse(self.t.session(A).get("doneRetired"), "not counted as archived before the push closes it")
+        pending = json.dumps(self.t.session(TOP))
+        self.assertIn("finished with commits that close issues", pending, "the top of its tree has the push line")
+        self.assertIn(sha, pending, "naming the `Closes #7` commit")
         guard = self.t.hook("branch-guard", A, {"hook_event_name": "PreToolUse", "tool_name": "Bash",
                                                  "tool_input": {"command": "git push -u origin main"}})
-        self.assertEqual(guard.stdout.strip(), "", "a child with an issue lands its own work")
+        self.assertEqual(json.loads(guard.stdout)["hookSpecificOutput"]["permissionDecision"], "ask",
+                         "a child with an issue does not push its own closing commit")
         self.git(self.work, "push", "-q", "-u", "origin", "main")
         write(os.path.join(self.ghdir, "state.json"), json.dumps({"7": "CLOSED"}))
         self.assertEqual(self.stop("g2").get("decision"), None)
@@ -352,7 +367,7 @@ class Loop(unittest.TestCase):
         write(path, json.dumps(dict(left, state="running", pid=ended.pid)))
         out = self.stop("b2")
         self.assertEqual(issues.relay._read_json(path).get("state"), "passed", "the test ran again")
-        self.assertIn("push the `Closes #7` commit", out.get("reason", ""), "and its pass was taken")
+        self.assertIn("so this work is proven", out.get("reason", ""), "and its pass was taken")
 
 
 CONSOLE = """import ctypes, json, os, subprocess, sys

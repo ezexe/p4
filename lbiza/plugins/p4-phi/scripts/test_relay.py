@@ -947,8 +947,10 @@ class ForkOrFresh(ThreeSessions):
         self.assertIsNone(guard(TOP, f"cd {clone} && git push origin main"), "a clone kept in a scratchpad directory")
         self.assertIsNone(guard(TOP, f"git -C {p4} status"), "reading a store is never asked")
 
-    def test_a_child_landing_work_is_asked_unless_its_brief_gave_it_the_landing(self):
-        """Only the parent merges and pushes, unless the child's brief or its parent hands it the landing."""
+    def test_a_child_landing_work_is_always_asked(self):
+        """ezexe/p4#232: only the tree's orchestrator merges and pushes. Neither a brief that says "Closes #7" and
+        "push it yourself", a brief that names issues, an issue on the child's record, nor its parent's message lets
+        a child land its own work."""
         def guard(host, cmd):
             r = self.t.hook("branch-guard", host, {"tool_name": "Bash", "tool_input": {"command": cmd}})
             return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
@@ -960,20 +962,17 @@ class ForkOrFresh(ThreeSessions):
         self.assertIsNone(guard(B, "git log --grep 'push'"), "quoted words are not a command")
         self.assertIsNone(guard(TOP, "git push origin main"), "the orchestrator lands the work")
         s = relay._session(self.t.p4, B)
-        s["task"] = "Fix it, run the suites, then push main yourself."
+        for task in ("Fix x. Closes #7 on ezexe/demo; run the suites, then push it yourself.",
+                     "Build the queue: issues #19 to #24 on ezexe/p4, the fix for each in its body."):
+            s["task"] = task
+            relay._write_json(os.path.join(relay._dir(self.t.p4, B), "session.json"), s)
+            self.assertEqual(guard(B, "git push origin main")["permissionDecision"], "ask", task)
+        s["issue"] = {"repo": "ezexe/demo", "number": 7, "url": "https://github.com/ezexe/demo/issues/7"}
         relay._write_json(os.path.join(relay._dir(self.t.p4, B), "session.json"), s)
-        self.assertIsNone(guard(B, "git push origin main"), "a brief that hands over the landing")
-        s["task"] = "Fix the exporter."
-        relay._write_json(os.path.join(relay._dir(self.t.p4, B), "session.json"), s)
-        self.assertIsNotNone(guard(B, "git push origin main"))
-        s["task"] = "Build the queue: issues #19 to #24 on ezexe/p4, the fix for each in its body."
-        relay._write_json(os.path.join(relay._dir(self.t.p4, B), "session.json"), s)
-        self.assertIsNone(guard(B, "git push origin main"), "a fixer closing issues lands its own commits")
-        s["task"] = "Fix the exporter."
-        relay._write_json(os.path.join(relay._dir(self.t.p4, B), "session.json"), s)
+        self.assertEqual(guard(B, "git push origin main")["permissionDecision"], "ask", "an issue on its record")
         self.t.say(B, f'<cross-session-message from="{TOP}" from-name="top">Push each green commit as it closes '
                       f'its issue.</cross-session-message>')
-        self.assertIsNone(guard(B, "git push origin main"), "the parent let it land its own work")
+        self.assertEqual(guard(B, "git push origin main")["permissionDecision"], "ask", "its parent's message")
 
     def test_a_fresh_child_starts_with_only_the_slice_for_its_paths(self):
         t = self.t

@@ -455,8 +455,8 @@ def _save_session(home, s):
     for k in ("othersGiven", "plansSeen", "requestAnswers"):
         if isinstance(disk.get(k), dict):
             s[k] = {**disk[k], **(s.get(k) or {})}
-    for k in ("rootStep", "shard", "disposable", "doneRetired", "archived", "appRoot", "nudged", "landingGiven",
-              "issue", "issueLooked", "findingsTold", "controls", "puppeteerArchives", "puppeteerSeen", "handedTo",
+    for k in ("rootStep", "shard", "disposable", "doneRetired", "archived", "appRoot", "nudged", "issue",
+              "issueLooked", "findingsTold", "controls", "puppeteerArchives", "puppeteerSeen", "handedTo",
               "handedFrom"):
         if k in disk and k not in s:
             s[k] = disk[k]
@@ -2516,10 +2516,6 @@ def h_user_prompt_submit(payload):
     if not load_turns(me.home, s["sessionId"]) and puppeteer.arrived(me.home, s, payload.get("prompt")):
         RAN["drafted"] = s.get("draft") or (s.get("reading") or {}).get("group", "")   # its start draft or reading
     req = request_of(payload.get("prompt"))
-    said = str(payload.get("prompt") or "")
-    if spawned_from(s) and not s.get("landingGiven") and LANDING_GIVEN.search(said) \
-            and f'<cross-session-message from="{spawned_from(s)}"' in said:
-        s["landingGiven"] = True                   # the parent session let this child land its own work
     s["turnBy"] ="user" if req else (
         "session" if re.search(r"<cross-session-message\b", str(payload.get("prompt") or "")) else "event")
     plans.pickup(me.home, s["sessionId"], payload.get("prompt") or "")
@@ -2810,10 +2806,10 @@ def h_stop(payload):
                 RAN["unfinished"] = len(puppeteer.archive_check(me.home, s["sessionId"]))
             except Exception:  # noqa: BLE001
                 pass
-    if above and finished and not isinstance(s.get("issue"), dict):
+    if above and finished:                         # a child with an issue too: only the orchestrator pushes
         cur = load_session(me.home, s["sessionId"]) or s
         told = list(cur.get("closesTold") or [])
-        new = [c for c in relay.closing_commits(me.home, s["sessionId"], cur) if c[1] not in told]
+        new = [c for c in issues.closing_commits(me.home, cur, payload.get("cwd") or "") if c[1] not in told]
         if new:                                    # the orchestrator pushes issue-closing work at once
             top = (chain_of(me.home, s["sessionId"]) or [above])[-1]
             relay.warn(me.home, top, "push:" + s["sessionId"] + ":" + ",".join(c[1] for c in new),
@@ -3050,18 +3046,13 @@ BRANCH_MOVE = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b[^\n|;&]*?\b(switch\b|ch
 BRANCHING = re.compile(r"\bgit\b[^\n|;&]*?\b(worktree\s+add|switch\s+(-c|--create|-C)|checkout\s+(-b|-B)|"
                        r"branch\s+(?!-)[\w./-]+\s*$|branch\s+(?!-)[\w./-]+\s+[\w./-]+)")
 LANDING = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b[^\n|;&]*?\b(push|merge|rebase|pull)(?![\w-])")
-# a brief that hands the child the landing itself: "then push main yourself", "you merge and push"
-LANDING_GIVEN = re.compile(r"\b(?:push|merg|land)\w*\b[^.\n]{0,60}\byourself\b|\byou (?:may |can |then )?"
-                           r"(?:merge|push|land)\b"
-                           # a fixer closing issues lands its own green issue commits, which are pushed at once
-                           r"|\b(?:clos|fix|resolv)\w*\b[^.\n]{0,40}\bissues?\b|\bCloses #\d+|\bissues? #\d+", re.I)
 
 
 def h_branch_guard(payload):
     """PreToolUse on EnterWorktree and shell calls in a worker: making a worktree or a branch of its own is
     asked first, since a child works on its parent's branch. So is landing work, a git push, merge, rebase or pull,
-    which the parent session does, unless the child's brief handed it the landing or it works on an issue of its
-    own. Silent otherwise."""
+    whatever the child's record, brief or parent says: only the tree's orchestrator lands and pushes. Silent
+    otherwise."""
     me = Me(payload)
     if not me.home or not me.id:
         return None
@@ -3077,19 +3068,17 @@ def h_branch_guard(payload):
         what = "making a worktree or branch of its own"
     elif name in SHELL_TOOLS and BRANCH_MOVE.search(QUOTED.sub("''", str(inp.get("command") or ""))):
         what = "moving the checkout to another branch, which in a shared checkout moves the parent's too"
-    elif name in SHELL_TOOLS and LANDING.search(QUOTED.sub("''", str(inp.get("command") or ""))) \
-            and not LANDING_GIVEN.search(str(s.get("task") or "")) and not s.get("landingGiven") \
-            and not isinstance(s.get("issue"), dict):
+    elif name in SHELL_TOOLS and LANDING.search(QUOTED.sub("''", str(inp.get("command") or ""))):
         verb = LANDING.search(QUOTED.sub("''", str(inp.get("command") or ""))).group(1)
         RAN["branch_guard"] = f"git {verb}"
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
                                        "permissionDecisionReason": f"phi (p4-phi): this session is a child, and `git "
-                                                                   f"{verb}` lands work, which its parent does: a "
-                                                                   f"child commits on its parent's branch and reports, "
-                                                                   f"and its parent session, {spawned_from(s)}, "
-                                                                   f"merges and pushes. Ask it with SendMessage "
-                                                                   f"instead, unless its brief gave this session the "
-                                                                   f"landing."}}
+                                                                   f"{verb}` lands work, which only the tree's "
+                                                                   f"orchestrator does: a child commits on its "
+                                                                   f"parent's branch and reports, a `Closes #N` "
+                                                                   f"commit included, and the tree's orchestrator "
+                                                                   f"merges and pushes. Ask its parent session, "
+                                                                   f"{spawned_from(s)}, with SendMessage instead."}}
     else:
         return None
     RAN["branch_guard"] = what
