@@ -930,6 +930,26 @@ class OfferPastFour(unittest.TestCase):
             shutil.rmtree(home, ignore_errors=True)
 
 
+class PickedWholeLabel(unittest.TestCase):
+    """A stored offer label counts as picked only as a whole label of an answer, as names_answer reads it."""
+
+    def test_a_label_inside_a_longer_answer_is_no_pick(self):
+        home = tempfile.mkdtemp(prefix="p4-phi-picked-")
+        try:
+            d = relay._dir(home, "top")
+            os.makedirs(d)
+            with open(os.path.join(d, "session.json"), "w", encoding="utf-8") as f:
+                json.dump({"sessionId": "top", "archiveOffer": [{"label": "phi sweep", "ids": ["k1"]}]}, f)
+            ask = lambda answer: [{"name": "AskUserQuestion", "result": f'"Archive which?"="{answer}"'}]
+            self.assertEqual(relay.picked(home, "top", ask("phi sweep: the pruning core")), [])
+            self.assertEqual(relay.picked(home, "top", ask("phi sweep")), ["k1"])
+            self.assertEqual(relay.picked(home, "top", ask("other, phi sweep")), ["k1"])
+            echo = [{"name": "AskUserQuestion", "result": '"Archive phi sweep?"="None of them"'}]
+            self.assertEqual(relay.picked(home, "top", echo), [])   # the question's own text is no pick
+        finally:
+            shutil.rmtree(home, ignore_errors=True)
+
+
 class SharedHome(unittest.TestCase):
     """Two projects naming one store as `phi.home`: a session in one hears a session in the other."""
 

@@ -1954,9 +1954,10 @@ def picked(home, top, calls, named=None):
     asks = [c for c in calls or [] if c.get("name") == "AskUserQuestion" and not c.get("failed")]
     offer_ = [o for o in _session(home, top).get("archiveOffer") or [] if isinstance(o, dict)]
     said = " \n ".join(str(c.get("result") or "") for c in asks)
+    answers = answers_of(said)
     out = []
-    for o in offer_:
-        if o.get("label") and str(o["label"]) in said:
+    for o in offer_:                               # a whole label of an answer, never a label inside a longer one
+        if o.get("label") and any(names_answer(o["label"], a) for a in answers):
             out += [i for i in o.get("ids") or [] if i not in out]
     for c in asks if named else []:
         inp = c.get("input") if isinstance(c.get("input"), dict) else {}
