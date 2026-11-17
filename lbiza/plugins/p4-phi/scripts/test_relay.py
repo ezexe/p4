@@ -808,6 +808,21 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn(f"- label \"the layout work\", description \"Archive {A}.\"", said,
                       "an option of the question the done orchestrator puts to ezexe")
 
+    def test_a_superseded_child_messaged_again_leaves_the_page_and_the_offer(self):
+        """A superseded session that is messaged again is live: it leaves ready-to-archive.md and its orchestrator's
+        archive offer at that message, and the Stop that clears its mark leaves a page without it."""
+        t = self.t
+        t.cli(A, "shard", self.x("lib"))
+        self.assertEqual(t.cli(A, "done", "test_layout.py: 3 tests OK").returncode, 0)
+        self.assertEqual(t.stop(A, "move the layout", report="Moved the layout into lib.", uuid="s1").returncode, 0)
+        t.cli(B, "note", f"replaces: `{self.x('lib', 'x.py')}` with p4conf's layout", "--source", "commit abc123")
+        self.assertEqual(t.stop(B, "replace x", uuid="s2").returncode, 0)
+        self.assertIn(A, open(relay.ready_path(t.p4), encoding="utf-8").read(), "superseded: listed")
+        t.say(A, "go on with the layout")
+        self.assertNotIn(A, open(relay.ready_path(t.p4), encoding="utf-8").read(), "messaged again: off the page")
+        self.assertNotIn(A, [i for o in relay.offer(t.p4, TOP) for i in o["ids"]], "and out of the offer")
+        self.assertEqual(t.stop(A, "go on with the layout", report="Went on.", uuid="s3").returncode, 0)
+        self.assertNotIn(A, open(relay.ready_path(t.p4), encoding="utf-8").read(), "the Stop leaves it off")
 
 
 class ForkOrFresh(ThreeSessions):

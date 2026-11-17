@@ -727,6 +727,7 @@ def _rebase(home, sid, room, fair_cut, touches, path, held):
         st["told"] = True
         s["anchorSeen"] = max(int(s.get("anchorSeen") or 0), int(st.get("anchorVersion") or 0))
         _write_json(path, s)
+        ready_page(home)                          # messaged again, it is live: off the page and the offer
         return (f"phi (p4-phi): this session's work is superseded and it is stale in the session tree: "
                 f"\"{st.get('note')}\". Re-base onto that before going on; its outcome is kept as a note on its "
                 f"parent session."), True
@@ -2050,7 +2051,7 @@ def ready_in_tree(home, top):
     every = _sessions(home)
     out = []
     for sid, s in sorted(every.items(), key=lambda kv: str(kv[1].get("createdAt") or "")):
-        if not (s.get("doneRetired") or s.get("stale")) or s.get("archived") or archived_in_app(s):
+        if not _ready_mark(s) or s.get("archived") or archived_in_app(s):
             continue
         cur, seen = _parent(s), set()
         while cur and cur != top and cur not in seen:
@@ -2175,12 +2176,19 @@ def ready_path(home):
     return os.path.join(home, "phi", "ready-to-archive.md").replace("\\", "/")
 
 
+def _ready_mark(s):
+    """What makes a session ready to archive: its finished mark, or its superseded mark until it is messaged again,
+    which _rebase records as the mark's `told`, since a superseded session messaged again is live."""
+    st = s.get("stale")
+    return s.get("doneRetired") or (st if isinstance(st, dict) and not st.get("told") else None)
+
+
 def ready_page(home):
     """<home>/phi/ready-to-archive.md: the sessions p4-phi holds as finished or superseded that the app has not
     archived yet, each with what it was and when. Rewritten whenever one is counted as archived or reopened."""
     rows = []
     for sid, s in sorted(_sessions(home).items()):
-        mark = s.get("doneRetired") or s.get("stale")
+        mark = _ready_mark(s)
         if not mark or s.get("archived") or archived_in_app(s):
             continue
         when = mark.get("time", "") if isinstance(mark, dict) else ""
