@@ -21,6 +21,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, "p4_memory.py")
 RUNNER = os.path.join(HERE, "run-hook.sh")
+sys.path.insert(0, HERE)
 MARK = "<!-- p4-memory: pointer"
 BUILTIN_LINES = 200         # the reference of what Claude Code loads, kept apart from p4_memory.py's constants so
 BUILTIN_BYTES = 25_000      # that a change there fails here
@@ -55,10 +56,52 @@ def clean_env(**kw):
     return env
 
 
+def inproc(module, args, stdin=b"", env=None, cwd=None):
+    """A hook script's main() run in this process, the way its own process would run it: its argv, its stdin, the
+    environment given in place of this one, and its cwd, with stdout and stderr captured. It saves a python start per
+    call."""
+    import contextlib
+    import importlib
+    import io
+    import types
+    mod = importlib.import_module(module)
+    saved = (dict(os.environ), os.getcwd(), sys.argv, sys.stdin)
+    out = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", newline="\n", write_through=True)   # a .buffer, as a process's stdout has
+    err = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", newline="\n", write_through=True)
+    code = 0
+    try:
+        if env is not None:
+            os.environ.clear()
+            os.environ.update(env)
+        if cwd:
+            os.chdir(cwd)
+        sys.argv = [module + ".py", *args]
+        sys.stdin = io.TextIOWrapper(io.BytesIO(stdin if isinstance(stdin, bytes) else stdin.encode("utf-8")),
+                                     encoding="utf-8")
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                code = mod.main() or 0
+            except SystemExit as e:
+                code = e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
+    finally:
+        os.environ.clear()
+        os.environ.update(saved[0])
+        os.chdir(saved[1])
+        sys.argv, sys.stdin = saved[2], saved[3]
+    text = [f.buffer.getvalue().decode("utf-8", "replace") for f in (out, err)]
+    return types.SimpleNamespace(returncode=code, stdout=text[0], stderr=text[1])
+
+
+def hook(sub, stdin, env):
+    """p4_memory.py with that subcommand, in process; stdout as bytes, as a process would give it."""
+    r = inproc("p4_memory", [sub], stdin, env)
+    r.stdout = r.stdout.encode("utf-8")
+    return r
+
+
 def run(sub, root, app, payload):
     env = clean_env(CLAUDE_PROJECT_DIR=root, P4_MEMORY_APPDATA=app)
-    r = subprocess.run([sys.executable, "-I", HOOK, sub], input=json.dumps(payload).encode("utf-8"), env=env,
-                       capture_output=True, timeout=90)
+    r = hook(sub, json.dumps(payload).encode("utf-8"), env)
     assert r.returncode == 0, r
     return r.stdout.decode("utf-8", "replace").strip()
 
@@ -66,7 +109,7 @@ def run(sub, root, app, payload):
 def run_raw(sub, root, app):
     """The SessionStart output unstripped, as Claude Code receives it."""
     env = clean_env(CLAUDE_PROJECT_DIR=root, P4_MEMORY_APPDATA=app)
-    r = subprocess.run([sys.executable, "-I", HOOK, sub], input=b"{}", env=env, capture_output=True, timeout=90)
+    r = hook(sub, b"{}", env)
     return r.stdout.decode("utf-8", "replace")
 
 
@@ -414,7 +457,7 @@ def repo_key():
             managed = os.path.join(base, "managed-settings.json")
             put(managed, "{not json")
             env = clean_env(CLAUDE_PROJECT_DIR=wt, P4_MEMORY_APPDATA=shared, P4_MANAGED_SETTINGS=managed)
-            r = subprocess.run([sys.executable, "-I", HOOK, "migrate"], input=b"{}", env=env, capture_output=True)
+            r = hook("migrate", b"{}", env)
             assert warned(r.stdout.decode("utf-8", "replace"), "this checkout"), "an unreadable managed file was missed"
         finally:
             if os.path.exists(user):
@@ -458,8 +501,7 @@ def switched_off():
             if how == "forced on":
                 env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "off"
             for sub in ("migrate", "sweep"):
-                r = subprocess.run([sys.executable, "-I", HOOK, sub], input=b"{}", env=env, capture_output=True,
-                                   timeout=90)
+                r = hook(sub, b"{}", env)
                 out = r.stdout.decode("utf-8", "replace")
                 assert r.returncode == 0, r
                 if how == "forced on" and sub == "migrate":

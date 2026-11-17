@@ -58,12 +58,47 @@ def set_aside(path, age_days, text="x"):
     return path
 
 
+def inproc(module, args, stdin=b"", env=None, cwd=None):
+    """A hook script's main() run in this process, the way its own process would run it: its argv, its stdin, the
+    environment given in place of this one, and its cwd, with stdout and stderr captured. It saves a python start per
+    call."""
+    import contextlib
+    import importlib
+    import io
+    import types
+    mod = importlib.import_module(module)
+    saved = (dict(os.environ), os.getcwd(), sys.argv, sys.stdin)
+    out = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", newline="\n", write_through=True)   # a .buffer, as a process's stdout has
+    err = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", newline="\n", write_through=True)
+    code = 0
+    try:
+        if env is not None:
+            os.environ.clear()
+            os.environ.update(env)
+        if cwd:
+            os.chdir(cwd)
+        sys.argv = [module + ".py", *args]
+        sys.stdin = io.TextIOWrapper(io.BytesIO(stdin if isinstance(stdin, bytes) else stdin.encode("utf-8")),
+                                     encoding="utf-8")
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                code = mod.main() or 0
+            except SystemExit as e:
+                code = e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
+    finally:
+        os.environ.clear()
+        os.environ.update(saved[0])
+        os.chdir(saved[1])
+        sys.argv, sys.stdin = saved[2], saved[3]
+    text = [f.buffer.getvalue().decode("utf-8", "replace") for f in (out, err)]
+    return types.SimpleNamespace(returncode=code, stdout=text[0], stderr=text[1])
+
+
 def run(*args, stdin="", cwd=None, **env):
     """lifetime.py as a process, with every CLAUDE* name of this environment removed and the names given set."""
     e = {k: v for k, v in os.environ.items() if not k.upper().startswith("CLAUDE")}
     e.update(env)
-    return subprocess.run([sys.executable, "-I", os.path.join(HERE, "lifetime.py"), *args], input=stdin,
-                          capture_output=True, text=True, encoding="utf-8", cwd=cwd, env=e)
+    return inproc("lifetime", args, stdin, e, cwd)
 
 
 class FailureNotice(unittest.TestCase):
@@ -416,11 +451,9 @@ class Lifetime(unittest.TestCase):
 
     def test_the_cli(self):
         f = put(os.path.join(self.t, "scratchpad", "n.md"))
-        r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "lifetime.py"), "--p4", self.p4, "set", f, "3d"],
-                           capture_output=True, text=True)
+        r = run("--p4", self.p4, "set", f, "3d")
         self.assertEqual(r.returncode, 0, r.stderr)
-        r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "lifetime.py"), "--p4", self.p4, "list"],
-                           capture_output=True, text=True)
+        r = run("--p4", self.p4, "list")
         self.assertIn("cookie  scratchpad/n.md  expires", r.stdout)
         self.assertIn("cache   scratchpad/.out/", r.stdout)
 
