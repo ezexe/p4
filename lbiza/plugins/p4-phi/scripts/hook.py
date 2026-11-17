@@ -29,16 +29,16 @@ event and matcher hooks/hooks.json runs it on, and what it does.
                  message's row and logs what retrieval found, shown or held back.
   agent          PreToolUse, matcher `Agent`. Nothing: the call runs with its prompt as written. phi.py's text for
                  the subagent and the retrieval lines under "Notes from this repo's memory:" wait for its start.
-  subagent-start SubagentStart. Those lines as `additionalContext`, the oldest launch of the agent's type first,
-                 nothing when there are none.
+  subagent-start SubagentStart. phi.py binds the subagent, by the `agent_id` the input carries, to the launching
+                 session's step in progress. Then those lines as `additionalContext`, the oldest launch of the
+                 agent's type first, nothing when there are none.
   lookup-check   PreToolUse, matcher `.*`. The first answer of phi.py's checks that PHI_CHECK names for the tool,
                  or else lookups.py's check: an earlier finding beside a web call, an earlier failure before a
                  command expected to fail. A subagent's call also gets phi.py's word of what changed since its
                  launch beside that answer, when there is one.
-  lookup-record  PostToolUse and PostToolUseFailure, matcher `.*`. For a subagent's call, its id bound to phi.py's
-                 record of the subagent. Then phi.py's records that PHI_RECORD names for the tool, whose answer is
-                 returned for `update_plan`, Write and Edit; otherwise lookups.py writes the call's row and tells a
-                 failure what other sessions did about it.
+  lookup-record  PostToolUse and PostToolUseFailure, matcher `.*`. phi.py's records that PHI_RECORD names for the
+                 tool, whose answer is returned for `update_plan`, Write and Edit; otherwise lookups.py writes the
+                 call's row and tells a failure what other sessions did about it.
   close          Stop. Nothing printed. It completes the message's row from the reply, writes the turn's usage and
                  repo labels and its task, notes the dependency files the turn opened, brings view.py's record of
                  the session up to date, and then the repository's and the dependencies' documents and the index.
@@ -54,10 +54,12 @@ What the hooks reference, https://code.claude.com/docs/en/hooks, says of the eve
   silent hook prints nothing at all.
 - PreToolUse: the agent hook rewrites nothing, so the Agent call runs as written, and sets no `permissionDecision`
   unless P4_AGENT_ALLOW=1 adds "allow".
-- SubagentStart: the input adds `agent_id` and `agent_type`, and `additionalContext` is "added to the subagent's
-  context at the start of its conversation, before its first prompt", so the subagent-start hook gives the lines
-  there, ezexe/p4#243 row D2. The input carries no prompt, so a launch's lines are matched to a start by session and
-  agent type, oldest first.
+- SubagentStart: "SubagentStart hooks receive `agent_id` with the unique identifier for the subagent and
+  `agent_type` with the agent name that the matcher filters on", and `additionalContext` is "added to the subagent's
+  context at the start of its conversation, before its first prompt", so the subagent-start hook binds the id and
+  gives the lines there, ezexe/p4#243 row D2. The page gives the input no field of the Agent call that launched the
+  subagent, neither its `tool_use_id` nor its prompt, so a launch's lines are matched to a start by session and
+  agent type, oldest first: the one order rule kept.
 - PostToolUse and PostToolUseFailure: `additionalContext` adds context beside the call's result.
 - Stop: the close hook reads the reply from `last_assistant_message`, since `transcript_path` can lag the
   conversation, and prints nothing, since a `decision` to block or an `additionalContext` would continue the turn.
@@ -539,9 +541,11 @@ def pending_dir(payload):
 
 
 def hold_for_start(payload, kind, text, key):
-    """The launch's lines, kept for its SubagentStart under the Agent call's tool_use_id. hooks.md documents no field
-    both events carry, so a start takes the oldest launch of its type, and drop_launch takes away a launch whose call
-    ended without its start taking it, as a call that was denied or failed does."""
+    """The launch's lines, kept for its SubagentStart under the Agent call's tool_use_id. hooks.md, "SubagentStart
+    input", gives a start the subagent's `agent_id` and `agent_type` and no field of the Agent call that launched
+    it, so a start takes the oldest launch of its type, and drop_launch takes away a launch whose call ended without
+    its start taking it, as a call that was denied or failed does. Only these lines go by that order: phi.py binds
+    its record of the subagent by the `agent_id` alone."""
     d = pending_dir(payload)
     tid = re.sub(r"[^\w-]", "_", str(payload.get("tool_use_id") or ""))
     try:
@@ -603,9 +607,11 @@ def h_agent(payload):
 
 
 def h_subagent_start(payload):
-    """SubagentStart: the oldest launch of this agent type in this session that no start has taken gives its lines
-    as `additionalContext`, and its served record is bound to the subagent's id for its SubagentStop."""
+    """SubagentStart: phi.py binds the subagent by the `agent_id` the input carries. Then the oldest launch of this
+    agent type in this session that no start has taken gives its lines as `additionalContext`, and its served record
+    is bound to the subagent's id for its SubagentStop."""
     import labels as lb
+    phi_text("agent-start", payload)              # phi.py: the subagent's id bound to the step in progress
     d = pending_dir(payload)
     kind = str(payload.get("agent_type") or "general-purpose")
     try:
@@ -812,8 +818,6 @@ def h_lookup_phi(payload):
     """After a clean call the app does not wait on for its lookup row: phi.py's records alone, which must be in
     place before the next call, run here in the entry the call waits on. Its answer is returned for a Write or an
     Edit, as h_lookup_record returns it."""
-    if payload.get("agent_id"):
-        phi_text("agent-post", payload)            # phi.py: the subagent's id bound to its record
     drop_launch(payload)
     out = phi_route(payload, PHI_RECORD)
     if out and str(payload.get("tool_name") or "") in ("Write", "Edit", "MultiEdit"):
@@ -831,12 +835,10 @@ def h_lookup_row(payload):
 
 
 def h_lookup_record(payload):
-    """After a tool ran or failed. A subagent's call binds its id to phi.py's record of the subagent. Then phi.py's
+    """After a tool ran or failed, phi.py's
     records that PHI_RECORD names for the tool run, such as the task list with its step boundary and a background
     task under its step; their answer is returned for `update_plan`, `wrap_up`, Write and Edit. Otherwise lookups.py writes the
     call's row, and a failure other sessions already met is told what they did about it."""
-    if payload.get("agent_id"):
-        phi_text("agent-post", payload)            # phi.py: the subagent's id bound to its record
     drop_launch(payload)
     out = phi_route(payload, PHI_RECORD)
     if out and str(payload.get("tool_name") or "") in ("mcp__ccd_turn__update_plan", "mcp__ccd_turn__wrap_up", "Write", "Edit",

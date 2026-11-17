@@ -804,11 +804,14 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
 
 # --- subagents as tasks of the step that launched them -------------------------------------------------------------
 #
-# A subagent's hook input carries the launching session's `session_id` and its own `agent_id`, as the hooks reference
-# documents for every hook inside a subagent. At the Agent call it is a pending task under the step in progress,
-# given that step's slice in its prompt; its first tool call binds its id to the task; each later call is warned of
-# what changed beside the launching session since; its stop closes the task. As a task of the step, the anchor
-# carries it to the parent like any background task.
+# The hook inputs carry the subagent's id, so its task is bound by that id and nothing is guessed. hooks.md,
+# "SubagentStart input": "SubagentStart hooks receive `agent_id` with the unique identifier for the subagent and
+# `agent_type` with the agent name that the matcher filters on", beside the launching session's `session_id`. So at
+# its start the subagent is a task of the step in progress then, with the version the parent's anchor has then. Each
+# tool call of the subagent carries the same `agent_id` and is warned of what changed beside the launching session
+# since, and its SubagentStop, which carries it too, closes the task. As a task of the step, the anchor carries it
+# to the parent. The Agent call itself makes no record here: agent_launch only writes the text for the subagent's
+# start, which hook.py hands over by the one order rule it keeps.
 #
 # The task holds what no record of Claude Code's holds: the step the subagent serves, with its words at the launch,
 # and the version the parent's anchor had then. Claude Code keeps the rest, so the task holds no copy of it:
@@ -822,58 +825,45 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
 # made, with no hook input and no transcript at hand. `wrote` is the files a stopped subagent's transcript shows it
 # wrote, read once at its stop: the ledger reads it with no transcript path at hand.
 
-PENDING_S = 3600              # a launch no tool call bound within this long is dropped
-
 
 def _agent(p, agent_id):
     return next((t for _, t in _tasks(p) if t.get("id") == agent_id), None)
 
 
-def agent_launch(home, s, tool_use_id, inp):
-    """The Agent call, before it runs: a pending task under the step in progress -> the text for its prompt."""
-    import time as _t
-    sid = s["sessionId"]
-    p = load(home, sid)
+def agent_launch(home, s, inp):
+    """The Agent call, before it runs -> the text for the subagent's start: the step in progress it is launched for
+    and what the parent's anchor holds for its paths; '' with no step in progress. It writes nothing."""
+    p = load(home, s["sessionId"])
     st = step_of(p, p.get("current") or "") if p.get("steps") else None
-    parent = relay._parent(s)
-    seen = int(relay._read_json(relay.anchor_path(home, parent)).get("version") or 0)
-    prompt = str(inp.get("prompt") or "")
-    pend = {k: v for k, v in (p.get("agentsPending") or {}).items()
-            if _t.time() - int(v.get("epoch") or 0) < PENDING_S}
-    pend[str(tool_use_id or len(pend))] = {"step": (st or {}).get("addr", ""), "stepText": (st or {}).get("content", ""),
-                                           "anchorSeen": seen, "epoch": int(_t.time())}
-    p["agentsPending"] = pend
-    relay._write_json(_path(home, sid), p)
     if not st:
         return ""
+    parent = relay._parent(s)
     head = (f"phi (p4-phi): you are a subagent of \"{relay._title(s)}\", launched for its step {st['addr']}, "
             f"\"{relay._short(st.get('content'), 200)}\". Keep to that step; what you find goes back in your result.")
-    piece = relay.slice_text(home, {"sessionId": "agent", "spawnedFrom": {"sessionId": parent}, "task": prompt,
-                                    "cwd": s.get("cwd") or ""}) if parent else ""
+    piece = relay.slice_text(home, {"sessionId": "agent", "spawnedFrom": {"sessionId": parent},
+                                    "task": str(inp.get("prompt") or ""), "cwd": s.get("cwd") or ""}) if parent else ""
     return "\n".join(x for x in (head, piece) if x)
 
 
 def agent_bind(home, s, agent_id, kind=""):
-    """A subagent's tool call: its id bound to the oldest pending launch -> True when newly bound. `kind` is the
-    `agent_type` of the call's input, which the line for the parent names."""
+    """The subagent's start: the `agent_id` its SubagentStart input carries, made a task of the step in progress,
+    with the version the parent's anchor has -> True when the task is made. `kind` is the input's `agent_type`,
+    which the line for the parent names. An id that has its task already, as at a resume, makes none."""
     sid = s["sessionId"]
     p = load(home, sid)
     if not agent_id or _agent(p, agent_id):
         return False
-    pend = p.get("agentsPending") or {}
-    key = min(pend, key=lambda k: int(pend[k].get("epoch") or 0)) if pend else None
-    got = pend.pop(key) if key else {"step": p.get("current") or "", "anchorSeen": 0}
-    if not pend:
-        p.pop("agentsPending", None)
+    p.pop("agentsPending", None)                  # the launches an earlier copy kept until a tool call took one
+    parent = relay._parent(s)
+    st = step_of(p, p.get("current") or "") if p.get("steps") else None
     task = {"id": agent_id, "tool": "Agent", "agent": True, "status": "open",
-            "anchorSeen": int(got.get("anchorSeen") or 0), "stepText": got.get("stepText", "")}
-    st = step_of(p, got.get("step") or "")
+            "anchorSeen": int(relay._read_json(relay.anchor_path(home, parent)).get("version") or 0),
+            "stepText": (st or {}).get("content", "")}
     if st is None:
         p.setdefault("loose", []).append(task)
     else:
         st.setdefault("tasks", []).append(task)
-    relay._write_json(_path(home, sid), p)
-    parent = relay._parent(s)                     # the anchors carry it, and the parent is told its id
+    relay._write_json(_path(home, sid), p)        # the anchors carry it, and the parent is told its id
     relay.make_anchor(home, parent, _now())
     relay.make_anchor(home, sid, _now())
     if parent:
@@ -941,11 +931,11 @@ def agent_wrote(home, sid, agent_id, paths):
     return True
 
 
-def agent_stop(home, s, agent_id, kind=""):
+def agent_stop(home, s, agent_id):
     """The subagent stopped: its task closed -> True when a task was closed. Its result stays where Claude Code keeps
-    it, in the SubagentStop input's `last_assistant_message` and the subagent's transcript."""
+    it, in the SubagentStop input's `last_assistant_message` and the subagent's transcript. An id no start bound has
+    no task and gets none here."""
     sid = s["sessionId"]
-    agent_bind(home, s, agent_id, kind)           # one that made no tool call is bound now
     p = load(home, sid)
     t = _agent(p, agent_id)
     if not t or t.get("status") != "open":

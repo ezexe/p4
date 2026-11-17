@@ -386,9 +386,8 @@ class WorkerSplit(Base):
         self.plan(KID, {"items": [{"content": "Port the flush", "status": "in_progress"}], "scope": "first_task"})
         self.recall(KID, "agent", {"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_use_id": "toolu_l1",
                                    "tool_input": {"prompt": "port the flush", "description": "port"}})
-        self.recall(KID, "lookup-record", {"hook_event_name": "PostToolUse", "tool_name": "Read", "agent_id": "agw01",
-                                           "tool_input": {"file_path": "src/export/flush.py"},
-                                           "tool_use_id": "toolu_s1", "tool_response": "ok"})
+        self.recall(KID, "subagent-start", {"hook_event_name": "SubagentStart", "agent_id": "agw01",
+                                            "agent_type": "general-purpose"})
         path = os.path.join(t.tmp, "agent-agw01.jsonl")
         transcript(path, "port the flush", [("Write", {"file_path": "src/export/flush.py", "content": "x"}, "ok")],
                    "ported")

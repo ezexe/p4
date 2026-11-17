@@ -14,7 +14,7 @@ p4-phi keeps each session's files in `<project>/.claude/p4/phi/sessions/<session
 - At its start: the rules built into p4-phi, whole. The store's feedback and user memories reach it as their lines in the memory index the app loads, and a memory that changes later is handed once at the next message.
 - Beside its first message, when the sessions linked to it left any: its start background, whose first and last lines say what it holds and how to keep a finding or say the task is done.
 - Beside its next message: the reports of the workers or coworkers it started that finished a turn since.
-- In a subagent it starts: the step the subagent serves and retrieval's lines, appended to the Agent call's prompt, and before a tool call of the subagent a warning of what changed beside its parent session since its launch, when anything did.
+- In a subagent it starts: the step the subagent serves and retrieval's lines, added as context at the subagent's start, and before a tool call of the subagent a warning of what changed beside its parent session since its launch, when anything did.
 - At the moment each applies: the advice on where each work step of an orchestrator's task list goes; a writing child's issue line, which says its loop; the push line, which goes only to the tree's orchestrator, the one session that lands and pushes, a worker's `Closes #N` commit included; the refusal of a start whose brief declares no write set; and the line `done` prints, which says what follows.
 
 A feedback memory whose rule an open issue will build into the plugin is tied to that issue by one line in the memory's own front matter, `issue: owner/name#N`.

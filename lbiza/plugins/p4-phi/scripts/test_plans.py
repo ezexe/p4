@@ -149,14 +149,14 @@ class TreeOfPlans(unittest.TestCase):
         t, home = self.t, self.t.p4
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
         sa = relay._session(home, A)
-        text = plans.agent_launch(home, sa, "toolu_a1", {"prompt": "read the layout code", "description": "probe"})
+        text = plans.agent_launch(home, sa, {"prompt": "read the layout code", "description": "probe"})
         self.assertIn("subagent of", text)
         self.assertIn("step 2.1", text)
-        self.assertTrue(plans.agent_bind(home, sa, "agentx001", "Explore"), "its first tool call binds its id")
-        self.assertFalse(plans.agent_bind(home, sa, "agentx001", "Explore"))
+        self.assertFalse(any(st.get("tasks") for st in plans.load(home, A)["steps"]), "the Agent call makes no task")
+        self.assertTrue(plans.agent_bind(home, sa, "agentx001", "Explore"), "its start binds its id")
+        self.assertFalse(plans.agent_bind(home, sa, "agentx001", "Explore"), "a start of the same id makes no second")
         step = plans.load(home, A)["steps"][0]
         self.assertEqual([(x["id"], x["tool"]) for x in step["tasks"]], [("agentx001", "Agent")])
-        self.assertNotIn("agentsPending", plans.load(home, A))
         relay.make_anchor(home, TOP, "2026-11-12 18:00")
         node = json.load(open(relay.anchor_path(home, TOP), encoding="utf-8"))["nodes"][A]
         self.assertEqual(node["plan"]["steps"][0]["tasks"][0]["id"], "agentx001", "the delta carries it")
@@ -212,8 +212,7 @@ class TreeOfPlans(unittest.TestCase):
         home = self.t.p4
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
         sa = relay._session(home, A)
-        plans.agent_launch(home, sa, "toolu_a2", {"prompt": "move it"})
-        plans.agent_bind(home, sa, "agenty002")
+        plans.agent_bind(home, sa, "agenty002", "general-purpose")
         p = plans.load(home, A)
         p["steps"][0]["content"] = "Rewrite p4conf.LAYOUT for the temportal folder"
         relay._write_json(plans._path(home, A), p)
@@ -222,7 +221,69 @@ class TreeOfPlans(unittest.TestCase):
         task = plans.load(home, A)["steps"][0]["tasks"][0]
         self.assertEqual(task["status"], "completed")
         self.assertEqual(plans.agent_warn(home, sa, "agenty002"), "", "a stopped subagent is told nothing")
-        self.assertTrue(plans.agent_stop(home, sa, "agentz003"), "one that made no call is bound at stop")
+        self.assertFalse(plans.agent_stop(home, sa, "agentz003"), "a stop binds nothing: an id no start named has no task")
+        self.assertIsNone(plans._agent(plans.load(home, A), "agentz003"))
+
+    def test_a_subagent_is_bound_by_the_id_its_start_carries(self):
+        """Candidate 12: hooks.md gives a SubagentStart the subagent's `agent_id` beside the launching session's
+        `session_id`, so the task is made there, under the step in progress then. No launch waits for a subagent to
+        take it, no tool call and no stop of a subagent binds one, and the starts of two launches may come in either
+        order."""
+        t, home = self.t, self.t.p4
+        hook = os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh")
+
+        def run(name, body):
+            r = inproc.run(["sh", hook, name], input=json.dumps({"session_id": CLI[A], "cwd": t.proj, **body}),
+                           capture_output=True, text=True, timeout=60, env=t.env(A, P4_RECALL_SYNC="1"))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return r
+
+        def tasks():
+            return [[x["id"] for x in st.get("tasks") or []] for st in plans.load(home, A)["steps"]]
+
+        def start(agent_id, **more):
+            return run("subagent-start", {"hook_event_name": "SubagentStart", "agent_id": agent_id,
+                                          "agent_type": "Explore", **more})
+
+        self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
+        launch = {"hook_event_name": "PreToolUse", "tool_name": "Agent",
+                  "tool_input": {"prompt": "read the layout code", "description": "probe", "subagent_type": "Explore"}}
+        run("agent", {**launch, "tool_use_id": "toolu_b1"})
+        run("agent", {**launch, "tool_use_id": "toolu_b2"})
+        self.assertNotIn("agentsPending", plans.load(home, A), "an Agent call keeps no launch for a subagent to take")
+        self.assertEqual(tasks(), [[], [], []], "and makes no task")
+        stray = {"agent_id": "agentq000", "agent_type": "Explore", "tool_name": "Read",
+                 "tool_input": {"file_path": "README.md"}, "tool_use_id": "toolu_q1"}
+        run("lookup-check", {**stray, "hook_event_name": "PreToolUse"})
+        run("lookup-record", {**stray, "hook_event_name": "PostToolUse", "tool_response": "ok"})
+        run("subagent-stop", {"hook_event_name": "SubagentStop", "agent_id": "agentq000", "agent_type": "Explore",
+                              "last_assistant_message": "done"})
+        self.assertEqual(tasks(), [[], [], []], "a tool call and a stop of a subagent bind nothing")
+        start("agentb002")
+        marker = os.path.join(home, "phi", ".agents", "agentb002")
+        self.assertTrue(os.path.exists(marker), "its marker opens recall-hook.sh's gate from its first call")
+        self.plan(A, {"advance": True})
+        p = plans.load(home, A)                       # what an earlier copy of the plugin left behind decides nothing
+        p["agentsPending"] = {"toolu_old": {"step": "2.3", "stepText": "Commit the move", "anchorSeen": 0, "epoch": 1}}
+        relay._write_json(plans._path(home, A), p)
+        start("agentb001")
+        start("agentb001")
+        self.assertEqual(tasks(), [["agentb002"], ["agentb001"], []],
+                         "each under the step in progress at its own start, once, whichever call came first")
+        self.assertNotIn("agentsPending", plans.load(home, A))
+        task = plans._agent(plans.load(home, A), "agentb001")
+        self.assertEqual((task["status"], task["stepText"]), ("open", "Move recall/ into phi/"))
+        self.assertEqual(task["anchorSeen"] + 1, relay.anchor_version(home, TOP),
+                         "the version the parent's anchor had before the task itself changed it")
+        run("subagent-start", {"hook_event_name": "SubagentStart", "agent_id": "agentb003"})
+        self.assertIsNone(plans._agent(plans.load(home, A), "agentb003"), "no agent type: no subagent of the Agent tool")
+        run("subagent-stop", {"hook_event_name": "SubagentStop", "agent_id": "agentb002", "agent_type": "Explore",
+                              "last_assistant_message": "done"})
+        self.assertEqual(plans._agent(plans.load(home, A), "agentb002")["status"], "completed")
+        self.assertFalse(os.path.exists(marker), "its stop closes the marker")
+        self.assertNotIn("agent-post", phi.ROUTED, "no route binds a subagent at its tool call")
+        self.assertEqual(phi.ROUTED["agent-start"][0], "SubagentStart")
+        self.assertFalse(hasattr(plans, "PENDING_S"), "nothing pending, so nothing to time out")
 
     def test_a_subagents_task_holds_no_copy_of_what_claude_code_keeps(self):
         """Candidate 12: the description, the start, the result and the files a subagent wrote are in the Agent
@@ -242,8 +303,7 @@ class TreeOfPlans(unittest.TestCase):
                       "tool_input": {"prompt": "list every reader of the quagga table",
                                      "description": "Quagga table readers", "subagent_type": "Explore"}})
         sub = {"agent_id": "agentc005", "agent_type": "Explore"}
-        run("lookup-record", {**sub, "hook_event_name": "PostToolUse", "tool_name": "Read", "tool_use_id": "toolu_c1",
-                              "tool_input": {"file_path": "README.md"}, "tool_response": "ok"})
+        run("subagent-start", {**sub, "hook_event_name": "SubagentStart"})
         node = json.load(open(relay.anchor_path(home, TOP), encoding="utf-8"))["nodes"][A]
         self.assertEqual(node["plan"]["steps"][0]["tasks"],
                          [{"id": "agentc005", "tool": "Agent", "status": "open", "heads": []}],
@@ -304,7 +364,9 @@ class TreeOfPlans(unittest.TestCase):
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
         run("agent", {"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_use_id": "toolu_launch",
                       "tool_input": {"prompt": "read the layout code", "description": "probe"}})
-        self.assertEqual([call(), call()], ["", ""], "its first call binds it, and nothing changed since its launch")
+        run("subagent-start", {"hook_event_name": "SubagentStart", "agent_id": "agentn004",
+                               "agent_type": "general-purpose"})
+        self.assertEqual([call(), call()], ["", ""], "its start bound it, and nothing changed since its launch")
         t.cli(B, "note", "replaces: the old docs layout in docs/layout.md", "--source", "test")
         steps = ("Write the layout docs", "Check the docs build", "Commit the docs")
         told = []
