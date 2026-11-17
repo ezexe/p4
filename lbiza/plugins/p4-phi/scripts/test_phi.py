@@ -1458,5 +1458,82 @@ class StatePage(unittest.TestCase):
         self.assertIn("idle with an empty queue", said)
 
 
+ASKS_WRITE = re.compile(r"\b(?:write|writes|keep|keeps|save|saves|logs?|rewritten|puts?|go there|up to date at|"
+                        r"edit)\b", re.I)
+UNDER_CLAUDE = re.compile(r"(?:^|[\s`'\"(:])[^\s`'\"(]*\.claude/[^\s`'\")]*")
+
+
+def writes_under_claude(text, plugin=ROOT):
+    """Each sentence of `text` that asks for a write and names a path under a .claude folder; the plugin's own
+    folder, which the commands it hands name, is left out, since an install keeps it under ~/.claude."""
+    text = text.replace("\\", "/").replace(plugin.replace("\\", "/"), "<plugin>")
+    return [x for x in re.split(r"(?<=[.;:!?])\s+|\n", text) if UNDER_CLAUDE.search(x) and ASKS_WRITE.search(x)]
+
+
+class NoWriteUnderClaude(unittest.TestCase):
+    """Row B7 of the plugin defaults inventory: every write under .claude asks ezexe, even in bypass mode, so no line
+    p4-phi hands a session names a place under .claude to write. A state page is kept in the app's scratchpad."""
+
+    PUP, WORKER, CO = "local_pup00001", "local_wrk00001", "local_cow00001"
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = t = Tree(self._tmp.name)
+        t.record(TOP, title="Narwhal exporter")
+        t.record(KID, TOP, "Fix the dropped row")
+        t.record(self.PUP, title="Control the exporter tree")
+        t.record(self.WORKER, started_by=self.PUP, title="Puppeteer's standing worker")
+        t.record(self.CO, started_by=self.WORKER, title="a standing coworker")
+        write(os.path.join(t.tmp, "claude_desktop_config.json"), json.dumps({"preferences": {"epitaxyPrefs": {
+            "dframe-group-scopes": {"acct/org": {"groups": [{"id": "cg-1", "name": "puppeteers", "mode": "code"}],
+                                                 "assignments": {"code:" + self.PUP: "cg-1"}}}}}}))
+        write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"context_window": 200000}}))
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def pad(self, host):
+        return os.path.join(self.t.tmp, "temp", CLI.get(host, host), "scratchpad").replace("\\", "/")
+
+    def run_hook(self, name, host, payload):
+        return context(self.t.hook(name, host, {"scratchpad_dir": self.pad(host), **payload}))
+
+    def wrap_up(self, host):
+        t = self.t
+        path = transcript(os.path.join(t.tmp, f"wrap-{host}.jsonl"), "Check the archives", [], "Checked.")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "assistant", "message": {"content": [], "usage": {
+                "input_tokens": 2000, "cache_creation_input_tokens": 8000, "cache_read_input_tokens": 120000}}}) + "\n")
+        body = {"session_id": CLI.get(host, host), "cwd": t.proj, "hook_event_name": "PostToolUse",
+                "tool_name": "mcp__ccd_turn__wrap_up", "tool_input": {"recap": "Checked."},
+                "tool_response": "Nothing is pending.", "transcript_path": path, "tool_use_id": f"toolu_wrap{host}",
+                "scratchpad_dir": self.pad(host)}
+        r = inproc.run(["sh", os.path.join(ROOT, "hooks", "recall-hook.sh"), "lookup-record"],
+                       input=json.dumps(body), capture_output=True, text=True, timeout=60, env=t.env(host))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return context(r)
+
+    def test_no_line_handed_to_a_session_names_a_place_under_claude_to_write(self):
+        import controls
+        said = {}
+        for host, first in ((TOP, TASK), (KID, HANDED), (self.PUP, "Control the trees"),
+                            (self.WORKER, "Run the puppeteer's checks.\n" + controls.WORKER_BRIEF),
+                            (self.CO, "Check the archives.\nFiles: none")):
+            said[host, "start"] = self.run_hook(START, host, {"hook_event_name": "SessionStart", "source": "startup"})
+            said[host, "first"] = self.run_hook(PROMPT, host, {"hook_event_name": "UserPromptSubmit",
+                                                                "prompt": first})
+        for host in (TOP, KID, self.WORKER, self.CO):
+            for source in ("compact", "clear"):
+                said[host, source] = self.run_hook(START, host, {"hook_event_name": "SessionStart", "source": source})
+        said[self.WORKER, "wrap_up"] = self.wrap_up(self.WORKER)
+        for key, text in said.items():
+            self.assertEqual(writes_under_claude(text), [], key)
+        page = self.pad(self.WORKER) + "/state.md"
+        self.assertIn(page, said[self.WORKER, "first"], "a standing worker keeps its state page in its scratchpad")
+        self.assertIn(page, said[self.WORKER, "clear"].split("\n", 1)[0], "and is handed it first after a clear")
+        self.assertIn(page, said[self.WORKER, "wrap_up"], "and brings it up to date there before it clears")
+        self.assertIn("decisions.md in the scratchpad directory the app names", said[TOP, "start"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

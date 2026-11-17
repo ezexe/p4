@@ -74,12 +74,14 @@ Its rule is handed once, beside its first message after p4-phi sees the filing; 
 A controlled session is told once when it comes to have a puppeteer, and once when that ends.
 A puppeteer's turns hold messages only, and every other task goes to its one standing worker, which it starts under itself with the brief line `Standing worker of its puppeteer` and which splits its task groups into standing coworkers.
 A second such start is refused while the first is live, and a puppeteer's shell call or edit is answered with a line that sends the task to its worker.
-The worker's and each coworker's first message says what it is, that it hands up a page's path and its counts and never publishes a result as an Artifact or a file unless ezexe asks, and that it keeps a state page.
+The worker's and each coworker's first message says what it is, that it hands up a page's path and its counts and never publishes a result as an Artifact or a file unless ezexe asks, and that it keeps a state page, `state.md` in the scratchpad directory the app names for its first turn, the folder its hooks get as `scratchpad_dir`.
 At a message carrying reports, a puppeteer is handed a line naming each reporting session whose effort to raise, lower or set low with `set_session_effort`; a call to `set_session_model` is refused, since a model is passed only on the start call.
 
 ## State pages and clearing
 
 A session whose p4-phi task names a page by `State page: <path>`, and the standing worker and each coworker, is handed that page's path first after a compaction or a clear.
+No line p4-phi hands a session names a place under `.claude` to write, since every such write asks ezexe.
+A standing worker's or coworker's page stays where its first scratchpad put it, kept on its record, since a clear gives the session a new scratchpad.
 At its `wrap_up`, such a session whose last call's context passes `phi.clear_at` percent of `phi.context_window` tokens, 60 and 200,000 by default in `.claude/p4/p4.json`, is told to bring the page up to date and make `clear_session` on `"self"` its turn's last call, after clearing each of its coworkers that is idle with an empty queue.
 A puppeteer, at a message carrying its worker's report, is handed the ids of the worker and its coworkers, to read each one's `get_usage`.
 
