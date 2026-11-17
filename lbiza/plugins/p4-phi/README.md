@@ -15,6 +15,8 @@ claude plugin install p4-temportal@p4-marketplace
 ```
 
 `./p4` is the checkout, and each install is at user scope unless `--scope project` or `--scope local` says otherwise.
+Claude Code updates installed plugins only from a marketplace whose auto-update is on, and it is off by default for a marketplace like this one: ezexe turns it on in a session with `/plugin`, the **Marketplaces** tab, `p4-marketplace`, **Enable auto-update**, or updates by hand with `claude plugin update <plugin>@p4-marketplace`.
+Source: https://code.claude.com/docs/en/plugins/install.md, Keep plugins updated.
 
 ## Delegation
 
