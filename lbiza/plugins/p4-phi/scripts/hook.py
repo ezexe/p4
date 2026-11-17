@@ -363,6 +363,15 @@ def sweep_served(p4, now_s=None):
             if name.endswith(".json") and os.path.getmtime(p) < cut:
                 os.remove(p)
                 n += 1
+            elif name.startswith("start-") and os.path.isdir(p):
+                # a session's launches no SubagentStart took: gone once PENDING_S old, and the folder once empty
+                for f in os.listdir(p):
+                    q = os.path.join(p, f)
+                    if os.path.getmtime(q) < (now_s or time.time()) - PENDING_S:
+                        os.remove(q)
+                        n += 1
+                if not os.listdir(p):
+                    os.rmdir(p)
         except OSError:
             pass
     return n
@@ -531,13 +540,38 @@ def pending_dir(payload):
 
 
 def hold_for_start(payload, kind, text, key):
+    """The launch's lines, kept for its SubagentStart under the Agent call's tool_use_id. hooks.md documents no field
+    both events carry, so a start takes the oldest launch of its type, and drop_launch takes away a launch whose call
+    ended without its start taking it, as a call that was denied or failed does."""
     d = pending_dir(payload)
+    tid = re.sub(r"[^\w-]", "_", str(payload.get("tool_use_id") or ""))
     try:
         os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, f"{time.time_ns()}-{sha8(kind)}.json"), "w", encoding="utf-8") as f:
-            json.dump({"type": kind, "text": text, "key": key, "time": time.time()}, f, ensure_ascii=False)
+        with open(os.path.join(d, f"{time.time_ns()}-{sha8(kind)}-{tid}.json"), "w", encoding="utf-8") as f:
+            json.dump({"type": kind, "text": text, "key": key, "time": time.time(),
+                       "tool_use_id": payload.get("tool_use_id") or ""}, f, ensure_ascii=False)
     except OSError:
         pass
+
+
+def drop_launch(payload):
+    """After an Agent call ran or failed, its launch's lines if no start took them: a denied or failed call starts
+    no subagent, and a later start of the same type must not get them."""
+    tid = str(payload.get("tool_use_id") or "")
+    if str(payload.get("tool_name") or "") != "Agent" or not tid:
+        return
+    d = pending_dir(payload)
+    tail = "-" + re.sub(r"[^\w-]", "_", tid) + ".json"
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return
+    for n in names:
+        if n.endswith(tail):
+            try:
+                os.remove(os.path.join(d, n))
+            except OSError:
+                pass
 
 
 def h_agent(payload):
@@ -778,6 +812,28 @@ def h_lookup_check(payload):
     return out
 
 
+def h_lookup_phi(payload):
+    """After a clean call the app does not wait on for its lookup row: phi.py's records alone, which must be in
+    place before the next call, run here in the entry the call waits on. Its answer is returned for a Write or an
+    Edit, as h_lookup_record returns it."""
+    if payload.get("agent_id"):
+        phi_text("agent-post", payload)            # phi.py: the subagent's id bound to its record
+    drop_launch(payload)
+    out = phi_route(payload, PHI_RECORD)
+    if out and str(payload.get("tool_name") or "") in ("Write", "Edit", "MultiEdit"):
+        return out
+    return None
+
+
+def h_lookup_row(payload):
+    """A clean call's lookup row, written in the background by the async entry; nothing printed."""
+    import lookups
+    p4 = ready(payload)
+    if p4:
+        lookups.record(p4, payload, now())
+    return None
+
+
 def h_lookup_record(payload):
     """After a tool ran or failed. A subagent's call binds its id to phi.py's record of the subagent. Then phi.py's
     records that PHI_RECORD names for the tool run, such as the task list with its step boundary and a background
@@ -785,6 +841,7 @@ def h_lookup_record(payload):
     call's row, and a failure other sessions already met is told what they did about it."""
     if payload.get("agent_id"):
         phi_text("agent-post", payload)            # phi.py: the subagent's id bound to its record
+    drop_launch(payload)
     out = phi_route(payload, PHI_RECORD)
     if out and str(payload.get("tool_name") or "") in ("mcp__ccd_turn__update_plan", "mcp__ccd_turn__wrap_up", "Write", "Edit",
                                                              "MultiEdit"):
@@ -826,7 +883,7 @@ def h_catch_up(payload):
 
 HANDLERS = {"catch-up": h_catch_up, "settings": h_settings, "changelog": h_changelog, "layout": h_layout, "recall": h_recall, "agent": h_agent, "subagent-start": h_subagent_start,
             "close": h_close, "subagent-stop": h_subagent_stop, "train": h_train,
-            "lookup-check": h_lookup_check, "lookup-record": h_lookup_record}
+            "lookup-check": h_lookup_check, "lookup-record": h_lookup_record, "lookup-phi": h_lookup_phi, "lookup-row": h_lookup_row}
 
 
 def parse_payload(raw: str):

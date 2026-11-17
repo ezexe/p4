@@ -510,6 +510,40 @@ class HooksJson(unittest.TestCase):
         self.assertEqual([(x["command"].split()[-1], x.get("async")) for x in h["PostToolUse"][0]["hooks"]],
                          [("lookup-record", None), ("lookup-record-async", True)])
 
+    def test_only_the_lookup_row_goes_to_the_background(self):
+        """The entry the call waits on keeps phi.py's records of a clean call that a later check reads, and the async
+        entry writes only the lookup row: a stand-in hook.py names the handler each entry reaches."""
+        import shutil
+        import subprocess
+        import tempfile
+        real = os.path.dirname(os.path.dirname(os.path.abspath(HOOKS_JSON)))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = os.path.join(tmp, "p4-phi")
+            shutil.copytree(os.path.join(real, "hooks"), os.path.join(root, "hooks"))
+            os.makedirs(os.path.join(root, "scripts"))
+            log = os.path.join(tmp, "ran.txt")
+            with open(os.path.join(root, "scripts", "hook.py"), "w", encoding="utf-8") as f:
+                f.write("import sys\nopen(%r, 'a').write(sys.argv[1] + '\\n')\n" % log)
+            env = {k: v for k, v in os.environ.items() if not k.startswith(("P4_", "CLAUDE_"))}
+            env.update({"CLAUDE_PLUGIN_ROOT": root, "CLAUDE_PROJECT_DIR": tmp})
+            runner = os.path.join(root, "hooks", "recall-hook.sh")
+
+            def ran(name, tool, body):
+                if os.path.exists(log):
+                    os.remove(log)
+                subprocess.run(["sh", runner, name], input=json.dumps({"tool_name": tool, **body}), text=True,
+                               capture_output=True, env=env)
+                return __import__("pathlib").Path(log).read_text().split() if os.path.exists(log) else []
+            clean = {"hook_event_name": "PostToolUse", "tool_response": {"stdout": "a.txt"}}
+            self.assertEqual(ran("lookup-record", "Read", clean), [], "a clean read: nothing waits")
+            self.assertEqual(ran("lookup-record", "Bash", clean), ["lookup-phi"], "phi's task record waits")
+            self.assertEqual(ran("lookup-record", "Read", dict(clean, agent_id="a1")), ["lookup-phi"],
+                             "a subagent's binding waits")
+            self.assertEqual(ran("lookup-record-async", "Bash", clean), ["lookup-row"], "the row alone, behind")
+            failed = {"hook_event_name": "PostToolUseFailure", "error": "Exit code 1"}
+            self.assertEqual(ran("lookup-record", "Bash", failed), ["lookup-record"], "a failure is answered whole")
+            self.assertEqual(ran("lookup-record-async", "Bash", failed), [])
+
     def test_a_clean_call_waits_on_nothing_and_its_row_is_written_in_the_background(self):
         """ezexe/p4#150: the entry the call waits on ends at once for a clean call and writes no row; the async entry
         writes it, and a failure is still answered by the entry the call waits on."""

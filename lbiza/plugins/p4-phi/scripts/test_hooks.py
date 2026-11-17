@@ -385,6 +385,24 @@ class Agent(Base):
         self.assertEqual(o2, {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}},
                          "P4_AGENT_ALLOW=1 adds allow and nothing else")
 
+    def test_a_failed_agent_call_leaves_no_lines_for_a_later_start(self):
+        """A launch whose Agent call failed or was denied starts no subagent, so its lines go with the call, and a
+        later start of the same type gets none; a launch no start took is swept once old."""
+        import hook
+        launch = {"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": dict(self.INPUT),
+                  "tool_use_id": "toolu_gone", "session_id": SESSION, "cwd": self.proj}
+        run_hook("agent", launch, self.proj)
+        r = run_hook("lookup-record", dict(launch, hook_event_name="PostToolUseFailure", error="denied"), self.proj)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        start = {"hook_event_name": "SubagentStart", "agent_id": "a11", "agent_type": "Explore",
+                 "session_id": SESSION, "cwd": self.proj}
+        self.assertIsNone(self.out(run_hook("subagent-start", start, self.proj)), "the failed call's lines are gone")
+        run_hook("agent", dict(launch, tool_use_id="toolu_old"), self.proj)
+        d = hook.pending_dir({"session_id": SESSION, "cwd": self.proj})
+        self.assertTrue(os.listdir(d))
+        hook.sweep_served(self.p4, now_s=time.time() + hook.PENDING_S + 60)
+        self.assertFalse(os.path.exists(d), "an old launch and then its empty folder are swept")
+
     def test_unrelated_task_untouched(self):
         r = run_hook("agent", {"tool_name": "Agent", "tool_input": {"prompt": "what is the weather like today",
                                                                     "description": "x"}, "cwd": self.proj},

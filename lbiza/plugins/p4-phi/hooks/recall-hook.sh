@@ -71,10 +71,12 @@ if [ "$name" = lookup-check ]; then
       case "$line" in *'"shell":{"w":{}'*) exit 0 ;; esac ;;
   esac
 fi
-# A call that worked and printed nothing like an error has nothing to be told, so its row is written by the
-# `lookup-record-async` entry, which hooks.json marks `async`: the app runs it in the background and the call does
-# not wait for it, ezexe/p4#150. The `lookup-record` entry answers every other call at once and ends here for a
-# clean one. P4_RECALL_SYNC=1, which the tests set, has `lookup-record` write every row and the async entry none.
+# A call that worked and printed nothing like an error has nothing to be told, so only its lookup row is written by
+# the `lookup-record-async` entry, which hooks.json marks `async`: the app runs it in the background and the call
+# does not wait for it, ezexe/p4#150. phi.py's records of a clean call stay with the `lookup-record` entry the call
+# waits on: a subagent's call, bound to its record before its next call is checked, and the tools PHI_RECORD of
+# hook.py names, whose task and plan records a later check reads. That entry answers every other call whole.
+# P4_RECALL_SYNC=1, which the tests set, has `lookup-record` do all of it and the async entry nothing.
 clean=0
 if [ "$name" = lookup-record ] || [ "$name" = lookup-record-async ]; then
   payload=$(cat)
@@ -89,10 +91,21 @@ if [ "$name" = lookup-record ] || [ "$name" = lookup-record-async ]; then
       *) clean=1 ;;
     esac
   fi
-  if [ "$name" = lookup-record ] && [ "$clean" = 1 ]; then exit 0; fi
+  if [ "$name" = lookup-record ] && [ "$clean" = 1 ]; then
+    case "$payload" in
+      *'"agent_id"'*) ;;                          # a subagent's call: bound to its record now
+      *'"tool_name":"Bash"'*|*'"tool_name": "Bash"'*|*'"tool_name":"PowerShell"'*|*'"tool_name": "PowerShell"'*) ;;
+      *'"tool_name":"Monitor"'*|*'"tool_name": "Monitor"'*|*'"tool_name":"Agent"'*|*'"tool_name": "Agent"'*) ;;
+      *'"tool_name":"Workflow"'*|*'"tool_name": "Workflow"'*|*'"tool_name":"TaskStop"'*|*'"tool_name": "TaskStop"'*) ;;
+      *'"tool_name":"KillShell"'*|*'"tool_name": "KillShell"'*|*'"tool_name":"Write"'*|*'"tool_name": "Write"'*) ;;
+      *'"tool_name":"Edit"'*|*'"tool_name": "Edit"'*|*'"tool_name":"MultiEdit"'*|*'"tool_name": "MultiEdit"'*) ;;
+      *) exit 0 ;;
+    esac
+    name=lookup-phi                               # phi.py's records, and no lookup row
+  fi
   if [ "$name" = lookup-record-async ]; then
     [ "$clean" = 1 ] || exit 0
-    name=lookup-record                            # the same handler, in the background the app gives it
+    name=lookup-row                               # the lookup row alone, in the background the app gives it
   fi
 fi
 
