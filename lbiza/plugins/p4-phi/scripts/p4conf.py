@@ -58,6 +58,19 @@ DEFAULTS = {
         "session_archives": False,       # true: a session may archive itself or another session
         "issues": True,                  # false: the issue loop is off: no open issue a brief names, no commit line
                                          # for it, no regression test at Stop and no push line
+        # caps a project sets, ezexe/p4#125, read by phi.CAPS and apply_caps, which keep the default for a value of
+        # the wrong type or out of range
+        "max_depth": 3,                  # how deep the session tree goes before a session is told to start no more
+        "max_children": 8,               # live sessions of one session before it is told to start no more
+        "sibling_turns": 5,              # the last turns of the siblings a start background carries
+        "own_turns": 3,                  # a session's own last turns its start background carries
+        "chain_max": 8,                  # sessions above one whose tasks its background carries
+        "turn_steps": 12,                # the steps of one turn a report keeps
+        "tree_checks": 6,                # the sessions of the tree checked at once for a stall
+        "keep_going_max": 2,             # times the Stop hook sends a turn with open steps back
+        "compactions": 3,                # compactions of a puppeteer before it is asked to clear
+        "watch_s": 5.0,                  # seconds between two looks of an orchestrator's watcher
+        "stale_s": 86400.0,              # seconds a quiet session waits before it counts as stale
     },
     "temportal": {                       # lifetimes under .claude/p4/temportal/, read by p4-temportal's lifetime.py
         "cache": {                       # a rule per folder, relative to temportal/, and memory/ is never cleared
@@ -763,7 +776,7 @@ def _write(p4, data):
 WRITTEN = "_written"
 # The generation of DEFAULTS: raised by one whenever a default changes, with the value it had added to HISTORY, so a
 # store's written values follow the change. test_p4conf.py pins DEFAULTS to this number.
-GEN = 4
+GEN = 5
 # Past defaults by dotted path: a store from before the record whose value equals one of these, or today's default,
 # counts that value as written by load, so it follows today's default.
 HISTORY = {"recall.teacher.model": ["claude-fable-5-1"], "recall.lookups.web": ["answer"], "scratchpad.tmp": [True],
