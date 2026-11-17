@@ -943,6 +943,7 @@ class NewTask(unittest.TestCase):
     def test_act_dont_wait_rides_with_the_rules(self):
         self.assertIn("act-don't-wait", phi.BUILT_IN)
         self.assertIn("authority", phi.BUILT_IN)
+        self.assertIn("ends each turn with one SendMessage line to the starter", phi.BUILT_IN, "ezexe/p4#157")
 
     def test_a_started_sessions_task_is_its_brief(self):
         self.say(TOP, TASK)

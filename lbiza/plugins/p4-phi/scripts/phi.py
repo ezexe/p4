@@ -1054,6 +1054,8 @@ BUILT_IN = ("built-in, act-don't-wait: " + DECIDE + " A next step that the task,
             "`mcp__ccd_turn__wrap_up` question whose buttons are the answers, the go first, or an `AskUserQuestion` "
             "with options; typed text only where no click can carry the answer, saying why. A child asks its parent "
             "session with SendMessage, and never ends its turn waiting on a question the session tree can settle. "
+            "A worker whose starter waits on it ends each turn with one SendMessage line to the starter, since a "
+            "report reaches an idle session only beside its next message. "
             "Where the project's rules ask for ezexe's go before a kind of step, such as a plan's edits, that go is "
             "ezexe's to give, by a button: wait for it on those steps, and act on the rest.")
 ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves this built-in rule out of a project
