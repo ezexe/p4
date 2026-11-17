@@ -61,12 +61,8 @@ if [ "$name" = lookup-check ]; then
     # git after a path separator, as /usr/bin/git pull or C:\Git\bin\git, as inproc.gate passes it, and in quotes, where the
     # payload's escaped quote puts a backslash right after git
     */git[\\\ \"\'\;\).]*|*'\git'[\\\ \"\'\;\).]*) ;;
-    # a command that may run long: phi.py's check that a long command runs in the background reads it. Every other
-    # shell call ends here.
-    # At least as wide as phi.long_kind, which reads words whatever the space between them: a call the gate
-    # passes and python declines costs one interpreter start, and one the gate stops is never read at all.
-    *test_*.py*|*pytest*|*py.test*|*unittest*|*npm*test*|*npm*build*|*cargo*test*|*cargo*build*) ;;
-    *go*test*|*go*build*|*make*test*|*make*build*) ;;
+    # a command started in the background: phi.py's restart check reads it. Every other shell call ends here.
+    *'"run_in_background":true'*|*'"run_in_background": true'*) ;;
     *'"tool_name":"Bash"'*|*'"tool_name": "Bash"'*|*'"tool_name":"PowerShell"'*|*'"tool_name": "PowerShell"'*)
       # a command is checked only by the failure model, which a store has only once a training round passed one
       m="${CLAUDE_PROJECT_DIR:-.}/.claude/p4/phi/models/lookups-model.json"

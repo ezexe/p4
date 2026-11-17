@@ -135,17 +135,6 @@ svg#levels{display:block;width:100%;user-select:none;-webkit-user-select:none}
 .block{margin-top:26px}
 .block>h2{font-size:22px;margin:0 0 6px;letter-spacing:-.01em}
 .block>p.intro{color:var(--soft);margin:0 0 14px;max-width:72ch}
-.rw{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:14px;align-items:start}
-.rwopts{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin:0 0 12px}
-.rwopts label{font-size:13.5px;display:inline-flex;gap:6px;align-items:center;cursor:pointer}
-.cmds{display:grid;gap:6px}
-.cmds button{text-align:left;border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:8px 10px;font:12.5px/1.4 var(--mono);cursor:pointer;overflow-wrap:anywhere}
-.cmds button:hover{border-color:var(--ink)}
-.cmds button[aria-pressed="true"]{border-color:var(--phi);background:var(--phi-bg)}
-.verdict{font-weight:650;font-size:17px;margin:0 0 4px}
-.verdict.moved{color:var(--phi)} .verdict.sent{color:var(--app)} .verdict.none{color:var(--soft)}
-.rwwhy{font-size:14.5px;color:var(--soft);margin:0 0 10px}
-.rwout{margin:0;background:var(--sunk);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:12px/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
 .rules{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
 .rule{border:1px solid var(--line);border-left:3px solid var(--phi);border-radius:14px;padding:14px 16px;background:var(--panel)}
 .rule h3{margin:0 0 6px;font-size:16.5px}
@@ -166,7 +155,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
   .stage{grid-template-columns:minmax(0,1fr)}
   .treecard{position:static}
   .facts{grid-template-columns:minmax(0,1fr)}
-  .rules,.rw{grid-template-columns:minmax(0,1fr)}
+  .rules{grid-template-columns:minmax(0,1fr)}
 }
 @media (prefers-reduced-motion:reduce){
   .node .box{transition:none}
@@ -224,49 +213,22 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
     </div>
   </div>
 
-  <section class="block" aria-label="The line for a long foreground command">
-    <h2>The line</h2>
-    <p class="intro">A long command is a <code>test_*.py</code> run, <code>pytest</code>, <code>unittest</code>, or an <code>npm</code>, <code>pnpm</code>, <code>cargo</code>, <code>go</code> or <code>make</code> <code>test</code> or <code>build</code>. The plugin's PreToolUse hook reads every Bash and PowerShell call for one and changes none: the app moves a foreground command to the background itself once it reaches its timeout, two minutes by default, and its result then says so. Pick a call and a caller to see what the hook says beside it.</p>
-    <div class="rw">
-      <div class="card sec">
-        <h2>The call</h2>
-        <div class="rwopts">
-          <div class="seg" role="group" aria-label="Who makes the call" id="rwwho">
-            <button type="button" data-who="top" aria-pressed="true">an orchestrator</button>
-            <button type="button" data-who="child">a worker</button>
-            <button type="button" data-who="agent">a subagent</button>
-          </div>
-        </div>
-        <div class="cmds" id="cmds"></div>
-      </div>
-      <div class="card sec" aria-live="polite">
-        <h2>What the hook does</h2>
-        <p class="verdict" id="verdict"></p>
-        <p class="rwwhy" id="rwwhy"></p>
-        <pre class="rwout" id="rwout"></pre>
-      </div>
-    </div>
-    <p class="after">Every long call runs as sent, an orchestrator's and a worker's alike, and gets the line once per step of the session's task list, or once per kind of command while no step is in progress. A call that already has <code>run_in_background: true</code> is passed over. A command the app moved to the background at its timeout is recorded as a background task by its result. In a project with a store, an orchestrator's call that is the long command alone, when the session's own records show the same command still running, is refused once, with the id of the running copy, and a second try goes through as a repeat of it.</p>
-  </section>
-
   <section class="block" aria-label="On by default">
     <h2>On by default</h2>
-    <p class="intro">Nothing has to be configured. The delegation rule, the three agents and the line work in any project the plugin is enabled in.</p>
+    <p class="intro">Nothing has to be configured. The delegation rule and the three agents work in any project the plugin is enabled in.</p>
     <div class="rules">
       <div class="rule">
         <h3>Nothing to set up</h3>
         <ul>
           <li>Every session is given the delegation rule at its start, as one of p4-phi's built-in rules beside act-don't-wait.</li>
           <li>The agents are files in the plugin's <code>agents/</code> folder, so they load with the plugin under the names <code>p4-phi:sweep</code>, <code>p4-phi:runner</code> and <code>p4-phi:check</code>.</li>
-          <li>The line works in a project with no <code>.claude/p4</code> store. Whether the session has a parent session is then read from the app's record of it.</li>
-          <li>Without a store, what a session was already told is kept in the plugin's data folder and removed after seven days unused.</li>
         </ul>
       </div>
       <div class="rule">
         <h3>One key turns it off</h3>
         <ul>
           <li>Set <code>phi.levels</code> to <code>false</code> in the project's <code>.claude/p4/p4.json</code>.</li>
-          <li>The delegation rule is then left out, no long command is remarked on, no step of a task list is named for a background subagent, and a worker is not told at its first message how to split its own work.</li>
+          <li>The delegation rule is then left out, no step of a task list is named for a background subagent, and a worker is not told at its first message how to split its own work.</li>
           <li>No key turns it on. Any value but <code>false</code>, or no key at all, leaves it on.</li>
         </ul>
         <pre>{
@@ -297,7 +259,6 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
   <section class="block" aria-label="The Claude Code docs each behaviour rests on">
     <h2>What each behaviour rests on</h2>
     <p class="intro">Each mechanism is Claude Code's own, and the plugin only says when to use it. The sentence of the Claude Code docs that each behaviour rests on is in the Delegation table of <a href="https://github.com/ezexe/p4/blob/main/lbiza/plugins/p4-phi/README.md#delegation">p4-phi's README</a>.</p>
-    <p class="after">The docs do not say in words that a hook may add <code>run_in_background</code>. A plugin's command hook that adds it with no <code>permissionDecision</code> gets a PostToolUse whose result reads <code>Command running in background with ID</code>, as the comment above <code>long_kind</code> in <code>phi.py</code> records.</p>
   </section>
 
   <footer>
@@ -395,7 +356,7 @@ function steps(kind,ask){
   ];
   if(kind==="bg")return [
     {dir:"down",legs:["ask"],by:W+" starts the command",say:"The shell call starts a background task.",
-     html:"The command goes on a call of its own with <code>run_in_background: true</code>. "+"A foreground call is not changed. It runs as sent, the app moves it to the background at its timeout, and the session is told once per step of its task list, or once per kind of command while no step is in progress, to start such a command this way.",
+     html:"The command goes on a call of its own with <code>run_in_background: true</code>. "+"A foreground call is not changed. It runs as sent, and the app moves it to the background at its timeout.",
      code:call("Bash",{command:"python test_phi.py",run_in_background:true})},
     {dir:"hold",legs:["ask"],by:W+" goes on or ends its turn",say:"The command runs. The session keeps its turn.",
      html:HOLD},
@@ -604,47 +565,10 @@ $("plan").addEventListener("input",function(){
   else{out.innerHTML="This step is work, so p4-phi names it for a worker. It is "+KIND_WORDS[kindOfWork(t)]+".";S.ask="top";pick("work")}
 });
 
-/* ---------- the line: each row is phi.long_read's own answer for that call, and the line is h_level's ---------- */
-var CALLS=[
-  {c:"python test_phi.py",kind:"a test file",alone:true},
-  {c:"cd scripts && python -m pytest -q",kind:"pytest",alone:true},
-  {c:"npm run build | tail -20",kind:"npm run build",alone:true},
-  {c:"PYTHONPATH=. python -X utf8 scripts/test_plans.py 2>&1 | tail -5",kind:"a test file",alone:true},
-  {c:"cargo test",kind:"cargo test",alone:true},
-  {c:"python test_x.py && git commit -m done",kind:"a test file",alone:false},
-  {c:"python test_x.py > out.txt; grep FAIL out.txt",kind:"a test file",alone:false},
-  {c:"sleep 5 && pytest",kind:"pytest",alone:false},
-  {c:"pytest --collect-only",kind:"",alone:false},
-  {c:"python -m py_compile test_x.py",kind:"",alone:false},
-  {c:"git status",kind:"",alone:false}
-];
-var R={i:0,who:"top"};
-function rewrite(){
-  var x=CALLS[R.i],v=$("verdict"),why=$("rwwhy"),out=$("rwout"),inp={command:x.c};
-  document.querySelectorAll("#cmds button").forEach(function(b,i){b.setAttribute("aria-pressed",String(i===R.i))});
-  document.querySelectorAll("#rwwho button").forEach(function(b){b.setAttribute("aria-pressed",String(b.getAttribute("data-who")===R.who))});
-  out.hidden=false;
-  if(!x.kind){
-    v.className="verdict none";v.textContent="Nothing. This is not a long command.";
-    why.textContent=/test_x\.py|pytest/.test(x.c)?"A long command counts only where it is the program being run. A test file named to another program, or a call that only asks for --version, --help or --collect-only, runs no test.":"The call runs none of the commands the hook knows as long.";
-    out.hidden=true;return;
-  }
-  if(R.who==="agent"){
-    v.className="verdict none";v.textContent="Nothing. A subagent's call is left alone.";
-    why.textContent="A runner's whole work is to wait on its command, so the hook passes over every call a subagent makes.";
-    out.hidden=true;return;
-  }
-  v.className="verdict sent";v.textContent="Runs as sent, with one line.";
-  why.textContent="The hook changes no call: the app moves a foreground command to the background itself once it reaches its timeout. The line is said once per step of the session's task list, or once per kind of command while no step is in progress."+(R.who==="top"&&x.alone?" In an orchestrator this call, the long command alone, is refused once instead while the same command already runs in the background.":"");
-  out.textContent="phi (p4-phi): this call runs "+x.kind+" in this session's foreground, and a command like it runs long. Start such a command on a call of its own with `run_in_background: true`, or hand it to the `p4-phi:runner` subagent, then go on with other work or end the turn: its completion notification brings the result, so never wait for it in the foreground, sleep or poll. Said once for this step.";
-}
-CALLS.forEach(function(x,i){var b=h("button",{type:"button",text:x.c,"aria-pressed":"false"});b.addEventListener("click",function(){R.i=i;rewrite()});$("cmds").appendChild(b)});
-document.querySelectorAll("#rwwho button").forEach(function(b){b.addEventListener("click",function(){R.who=b.getAttribute("data-who");rewrite()})});
-
 var rw=0;
 if(window.ResizeObserver)new ResizeObserver(function(){var w=wrap.clientWidth;if(w!==rw){rw=w;draw(false)}}).observe(wrap);
 else window.addEventListener("resize",function(){draw(false)});
-render(false);rewrite();
+render(false);
 })();
 </script>
 </body>

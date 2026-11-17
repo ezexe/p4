@@ -1187,8 +1187,9 @@ class Rules(unittest.TestCase):
         self.assertLess(start.index("act-don't-wait"), start.index("background for this session"))
 
     def test_an_orchestrators_long_command_runs_as_sent(self):
-        """ezexe/p4#243 D4: the app moves a foreground command to the background at its timeout, so p4-phi returns
-        no `updatedInput` for an orchestrator's lone test command, only the line."""
+        """ezexe/p4#243 D4 and row S22: the app moves a foreground command to the background at its timeout,
+        tools-reference.md, "Foreground commands that move to the background", so p4-phi neither rewrites an
+        orchestrator's lone test command nor hands a line beside it."""
         t = self.t
         t.say(TOP, TASK)
         inp = {"command": "cd scripts && python -I -X utf8 test_flush.py 2>&1 | tail -3", "description": "Run tests"}
@@ -1197,11 +1198,7 @@ class Rules(unittest.TestCase):
         r = inproc.run(["sh", os.path.join(ROOT, "hooks", "recall-hook.sh"), "lookup-check"], input=json.dumps(body),
                        capture_output=True, text=True, timeout=60,
                        env=t.env(TOP, CLAUDE_PLUGIN_DATA=os.path.join(t.tmp, "data")))
-        self.assertEqual((r.returncode, r.stderr.strip()), (0, ""))
-        out = json.loads(r.stdout)["hookSpecificOutput"]
-        self.assertNotIn("updatedInput", out, "the call runs as sent")
-        self.assertNotIn("permissionDecision", out)
-        self.assertIn("on a call of its own with `run_in_background: true`", out["additionalContext"])
+        self.assertEqual((r.returncode, r.stderr.strip(), r.stdout.strip()), (0, "", ""), "the call runs as sent")
 
     def test_the_start_text_carries_every_line_with_any_background(self):
         """A puppeteer whose p4.json names a shared store this machine has not seen, started again after a

@@ -56,7 +56,7 @@ DEFAULTS = {
         "track": False,                  # true: the session tree in phi/ is committed; false: git ignores it
         "act_dont_wait": True,           # false: p4-phi's act-don't-wait rule is left out in this project
         "top_orchestrates": True,        # false: an orchestrator works its task list itself, no worker unless asked
-        "levels": True,                  # false: no delegation rule, and no line naming a long command's background
+        "levels": True,                  # false: no delegation rule
         "file_sets": True,               # false: a session may be started by a brief that declares no write set
         "issues": True,                  # false: the issue loop is off: no open issue a brief names, no commit line
                                          # for it, no regression test at Stop and no push line

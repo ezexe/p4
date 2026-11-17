@@ -745,9 +745,8 @@ class TreeOfPlans(unittest.TestCase):
 
 
 class Levels(unittest.TestCase):
-    """Delegation: a long foreground command runs as sent, and its session is told once per step to start such a
-    command in the background, since the app moves it there at its own timeout; a step is named for the subagent that
-    does it."""
+    """Delegation: a long foreground command runs as sent with no line, since the app moves it to the background at
+    its own timeout; a step is named for the subagent that does it."""
 
     LONG = {"command": "cd scripts && python -I -X utf8 test_flush.py 2>&1 | tail -3", "description": "Run the tests"}
 
@@ -777,134 +776,21 @@ class Levels(unittest.TestCase):
         self.assertEqual((r.returncode, r.stderr.strip()), (0, ""))
         return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else {}
 
-    def test_a_top_sessions_long_foreground_command_runs_as_sent_with_the_line(self):
-        """ezexe/p4#243 D4: the app moves a foreground command to the background at its timeout, so no call is
-        rewritten; the orchestrator is told once."""
-        out = self.pre(TOP, dict(self.LONG))
-        self.assertEqual(out["hookEventName"], "PreToolUse")
-        self.assertNotIn("updatedInput", out, "the call runs as sent")
-        self.assertNotIn("permissionDecision", out)
-        self.assertIn("on a call of its own with `run_in_background: true`", out["additionalContext"])
-        self.assertEqual(self.pre(TOP, dict(self.LONG)), {}, "once for this kind")
-        self.plan(TOP, items("Port the exporter", "Land it"))          # a new step: the line is owed again
-        shell = self.pre(TOP, dict(self.LONG), tool="PowerShell")
-        self.assertNotIn("updatedInput", shell, "a PowerShell call runs as sent too")
-        self.assertIn("on a call of its own with `run_in_background: true`", shell["additionalContext"])
-        again = self.pre(TOP, dict(self.LONG), tool="PowerShell").get("additionalContext", "")
-        self.assertNotIn("runs long", again, "once for this step")             # the step's nudge may come instead
-        for quiet in ({"command": "ls -la"}, {"command": "grep -n pytest notes.md"},
-                      {**self.LONG, "run_in_background": True}):
-            self.assertEqual(self.pre(TOP, quiet), {}, quiet)
-        self.assertEqual(self.pre(TOP, dict(self.LONG), agent_id="agent_runner1"), {},
-                         "a subagent's call is left alone: a runner waits on its command")
-
-    def test_only_the_command_itself_is_a_long_command(self):
-        """What phi.long_read returns for each command: the kind, and whether the call is that command alone."""
-        for cmd, want in (
-                ("cd scripts && python -I -X utf8 test_flush.py 2>&1 | tail -3", ("a test file", True)),
-                ("FOO=1 python tests/test_a.py", ("a test file", True)),
-                ('py -3 "E:/a b/test_q.py"', ("a test file", True)),
-                ("export A=1; cd x; pytest -q 2>&1 | tail -5", ("pytest", True)),
-                ("python -m unittest discover", ("unittest", True)),
-                ("py.test tests", ("pytest", True)), ("npm  test", ("npm test", True)),
-                ("cargo test --all", ("cargo test", True)), ("make -j8 test", ("make -j8 test", True)),
-                # a part after the command needs it finished, and a part before it does work of its own
-                ('python scripts/test_phi.py && git commit -m "x"', ("a test file", False)),
-                ("python test_x.py > out.txt; grep FAIL out.txt", ("a test file", False)),
-                ("sleep 5 && pytest", ("pytest", False)),
-                ("pytest -q | tee out.log", ("pytest", False)),
-                # a test file named to another program, and a call that only asks
-                ("python -m py_compile scripts/test_phi.py", ("", False)),
-                ("python scripts/phi.py show test_x.py", ("", False)),
-                ("git log | python tools/count.py test_phi.py", ("", False)),
-                ('python -c "import test_x.py"', ("", False)),
-                ("pytest --version", ("", False)), ("pytest --help", ("", False)),
-                ("python -m pytest --collect-only", ("", False)),
-                ("grep -n pytest notes.md", ("", False)), ('echo "python test_x.py"', ("", False)),
-                # a heredoc's body is text, not commands
-                ("cat > n.md <<EOF\npytest runs the suite\npython test_x.py\nEOF", ("", False)),
-                ("python - <<'PY'\nimport test_x\nPY", ("", False))):
-            self.assertEqual(phi.long_read(cmd), want, cmd)
-
-    def test_a_call_that_is_more_than_the_command_runs_as_sent(self):
-        """A call that is more than the command, or carries a timeout, runs as sent with the line too."""
-        for k, inp in enumerate(({"command": 'python scripts/test_phi.py && git commit -m "x"'},
-                                 {"command": "python test_x.py > out.txt; grep FAIL out.txt"},
-                                 {"command": "sleep 5 && pytest"},
-                                 {"command": "python test_flush.py", "timeout": 300000})):
-            self.plan(TOP, items(f"Port part {k} of the exporter", "Land it"))     # a new step: the line is owed again
-            out = self.pre(TOP, inp)
-            self.assertNotIn("updatedInput", out, inp)
-            self.assertIn("on a call of its own with `run_in_background: true`", out["additionalContext"], inp)
-
-    def test_the_shell_gate_is_as_wide_as_the_matcher(self):
-        """What phi.long_kind takes, recall-hook.sh lets through to it."""
-        for cmd in ("py.test tests", "npm  test", "pnpm run build", "go test ./...", "make -j8 test"):
-            out = self.pre(TOP, {"command": cmd})
-            self.assertNotIn("updatedInput", out, cmd)
-            self.assertIn("runs long", out.get("additionalContext", ""), cmd)
-        for cmd in ("python -m py_compile scripts/test_phi.py", "python scripts/phi.py show test_x.py",
-                    "git log | python tools/count.py test_phi.py", 'python -c "import test_x.py"', "pytest --version",
-                    "cat > n.md <<EOF\npytest runs the suite\nEOF"):
-            self.assertEqual(self.pre(TOP, {"command": cmd}), {}, cmd)
-
-    def test_the_memory_outside_a_store_is_bounded(self):
-        """With no data folder named, no folder under the person's home is guessed at, and old files go."""
-        held = os.environ.pop("CLAUDE_PLUGIN_DATA", None)
-        try:
-            self.assertTrue(phi.level_data().startswith(tempfile.gettempdir()))
-        finally:
-            if held is not None:
-                os.environ["CLAUDE_PLUGIN_DATA"] = held
-        folder = os.path.join(self._tmp.name, "levels")
-        os.makedirs(folder)
-        for name, age in (("old.json", phi.LEVEL_KEEP_S + 60), ("new.json", 60)):
-            with open(os.path.join(folder, name), "w", encoding="utf-8") as f:
-                f.write("{}")
-            at = time.time() - age
-            os.utime(os.path.join(folder, name), (at, at))
-        phi.level_sweep(folder)
-        self.assertEqual(os.listdir(folder), ["new.json"])
-
-    def test_a_child_is_told_once_per_step_and_its_call_runs_as_sent(self):
-        self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/"))
-        out = self.pre(A, dict(self.LONG))
-        self.assertNotIn("updatedInput", out)
-        self.assertIn("`run_in_background: true`", out["additionalContext"])
-        self.assertIn("`p4-phi:runner`", out["additionalContext"])
-        self.assertEqual(self.pre(A, {"command": "pytest -q"}), {}, "once for this step")
-        self.plan(A, {"advance": True})
-        self.assertIn("Said once for this step", self.pre(A, {"command": "pytest -q"})["additionalContext"])
-
-    def test_p4_json_turns_the_levels_off_and_nothing_turns_them_on(self):
-        self.assertTrue(self.pre(TOP, dict(self.LONG)), "on with no p4.json key")
-        with open(os.path.join(self.t.p4, "p4.json"), "w", encoding="utf-8") as f:
-            json.dump({"phi": {"levels": False}}, f)
-        self.assertEqual(self.pre(TOP, dict(self.LONG)), {})
-        self.assertEqual(self.pre(A, dict(self.LONG)), {})
-
-    def test_the_line_needs_no_store(self):
-        t2 = Tree(os.path.join(self._tmp.name, "bare"), store=False)
-        t2.record(TOP, title="top")
-        t2.record(A, TOP, title="a child")
-        out = self.pre(TOP, dict(self.LONG), tree=t2)
-        self.assertNotIn("updatedInput", out)
-        self.assertIn("Said once", out["additionalContext"])
-        told = self.pre(A, dict(self.LONG), tree=t2)
-        self.assertNotIn("updatedInput", told)
-        self.assertIn("Said once", told["additionalContext"])
-        self.assertEqual(self.pre(A, dict(self.LONG), tree=t2), {}, "remembered without a store")
-        self.assertTrue(os.listdir(os.path.join(self._tmp.name, "data", "levels")), "in the plugin's data folder")
-        self.assertFalse(os.path.exists(os.path.join(t2.proj, ".claude")), "nothing written into the project")
+    def test_a_long_foreground_command_runs_as_sent_with_no_line(self):
+        """tools-reference.md, "Foreground commands that move to the background": the app moves a foreground command
+        to the background at its timeout, so p4-phi rewrites no call and hands no line beside it."""
+        for host in (TOP, A):
+            for tool in ("Bash", "PowerShell"):
+                self.assertEqual(self.pre(host, dict(self.LONG), tool=tool), {}, (host, tool))
 
     def test_a_command_already_running_is_not_started_again(self):
-        """restart-check reads `run_in_background`, which a foreground call lacks, so the orchestrator's call of the
-        same command alone is refused here."""
+        """restart-check reads `run_in_background`: a second background start of the same command is refused once,
+        and the shell gate lets every background start through to it."""
         r = self.t.hook("task", TOP, {"hook_event_name": "PostToolUse", "tool_name": "Bash",
                                       "tool_input": {**self.LONG, "run_in_background": True},
                                       "tool_response": {"stdout": "", "backgroundTaskId": "bg7level01"}})
         self.assertEqual((r.returncode, r.stdout.strip()), (0, ""))
-        out = self.pre(TOP, dict(self.LONG))
+        out = self.pre(TOP, {**self.LONG, "run_in_background": True})
         self.assertEqual(out.get("permissionDecision"), "deny")
         self.assertIn("bg7level01", out["permissionDecisionReason"])
 

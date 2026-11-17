@@ -693,8 +693,7 @@ class ZeroConfiguration(unittest.TestCase):
         start, said, pre, plain, stop = self.handlers()
         self.assertIn("built-in, levels", start["additionalContext"])
         self.assertIn("act-don't-wait", start["additionalContext"])
-        self.assertNotIn("updatedInput", pre, "the call runs as sent: the app moves it at its own timeout")
-        self.assertIn("on a call of its own with `run_in_background: true`", pre["additionalContext"])
+        self.assertEqual(pre, {}, "the call runs as sent with no line: the app moves it at its own timeout")
         self.assertEqual((said, plain, stop), ({}, {}, {}))
         self.assertFalse(os.path.exists(os.path.join(self.proj, ".claude")), "phi.py's own handlers write nothing")
 
@@ -708,8 +707,7 @@ class ZeroConfiguration(unittest.TestCase):
         self.env["P4_PHI_WATCH"] = "0"       # only so this test leaves no watcher behind in its temporary folder
         start, said, pre, plain, stop = self.handlers()
         self.assertIn("built-in, levels", start["additionalContext"])
-        self.assertNotIn("updatedInput", pre, "the call runs as sent")
-        self.assertIn("runs long", pre["additionalContext"])
+        self.assertEqual(pre, {}, "the call runs as sent with no line")
         with open(os.path.join(p4, "phi", "sessions", self.sid, "session.json"), encoding="utf-8") as f:
             self.assertEqual(json.load(f)["task"], "Make the exporter write its ports table")
         self.assertTrue(os.path.exists(os.path.join(p4, "phi", "sessions", self.sid, "turns.jsonl")), "the turn kept")
