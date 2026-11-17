@@ -251,6 +251,14 @@ class Matchers(unittest.TestCase):
         for source in EVENTS["SessionStart"]:
             self.assertTrue(self.takes(m, source), source)
 
+    def test_the_session_start_entry_runs_after_every_compaction(self):
+        """ezexe/p4#155: Claude Code's own way to keep context through a compaction is a SessionStart hook on the
+        `compact` source, by https://code.claude.com/docs/en/hooks-guide#re-inject-context-after-compaction, and that
+        source comes after a typed /compact and an auto-compaction alike. phi.py's session-start entry hands a
+        puppeteer its board's path there, so no PreCompact entry and no typed instruction is needed."""
+        m = self.matcher_of("SessionStart", "session-start")
+        self.assertTrue(self.takes(m, "compact"), m)
+
     def test_subagent_stop_leaves_out_an_empty_agent_type(self):
         m = self.matcher_of("SubagentStop", "subagent-stop")
         self.assertFalse(self.takes(m, ""), m)
