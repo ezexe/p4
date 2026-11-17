@@ -55,6 +55,9 @@ if [ "$name" = lookup-check ]; then
     *[!A-Za-z0-9_./\\-]git[!A-Za-z0-9_/\\]*|*[\\][ntr]git[!A-Za-z0-9_/\\]*) ;;
     *[!A-Za-z0-9_./\\-]git[\\][ntr]*|*[\\][ntr]git[\\][ntr]*) ;;
     *[!A-Za-z0-9_.-]git[.-]*) ;;                  # C:/Git/bin/git.exe
+    # what may land work however git or gh is called, such as /usr/bin/git push, gh pr merge or a gh api ref update:
+    # phi.py's branch guard reads it, ezexe/p4#232
+    *push*|*merge*|*[!A-Za-z0-9_.-]gh[!A-Za-z0-9_-]*|*[\\][ntr]gh[!A-Za-z0-9_-]*) ;;
     # a command that may run long: phi.py's check that a long command runs in the background reads it. Every other
     # shell call ends here.
     # At least as wide as phi.long_kind, which reads words whatever the space between them: a call the gate

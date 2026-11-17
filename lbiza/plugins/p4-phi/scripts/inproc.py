@@ -213,6 +213,10 @@ KEEP = re.compile(rb"mcp__ccd_turn__update_plan|mcp__ccd_turn__wrap_up|temportal
                   rb"unterminated", re.S)
 
 
+# what may land work however git or gh is called: push, merge, or the program gh, ezexe/p4#232
+LANDS = re.compile(rb"push|merge|(?:[^A-Za-z0-9_.-]|\\[ntr])gh[^A-Za-z0-9_-]")
+
+
 def gate(payload, project):
     """recall-hook.sh's lookup-check gate: True when it lets python run, False when the script ends with exit 0.
     `payload` is the hook's input as bytes, `project` the folder CLAUDE_PROJECT_DIR names, '.' read from the call's
@@ -242,7 +246,8 @@ def gate(payload, project):
                 return False
         elif not _any(payload, WEB + SHELLS + OTHERS):
             return False
-    if not sub and not nudge and b"git" not in payload and not LONG.search(payload) and _any(payload, SHELLS):
+    if not sub and not nudge and b"git" not in payload and not LANDS.search(payload) and not LONG.search(payload) \
+            and _any(payload, SHELLS):
         line = None
         for m in (("phi", "models"), ("recall", "models"), ("models",)):
             path = os.path.join(project, ".claude", "p4", *m, "lookups-model.json")

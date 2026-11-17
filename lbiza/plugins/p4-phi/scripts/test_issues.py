@@ -328,6 +328,28 @@ class Loop(unittest.TestCase):
         self.assertIn("test_x.py", notes)
         self.assertIn(A, context(self.t.say(TOP, "what next?")), "the parent gets its archive line")
 
+    def test_the_push_line_names_only_commits_whose_own_message_closes_the_issue_in_its_own_repository(self):
+        """ezexe/p4#232: the orchestrator's push line for a worker with issue 7 names only a commit of the issue's own
+        repository whose own message closes #7: not one whose message says it does not close #7, and not a commit
+        that says `Closes #7` in another repository the turn edited in."""
+        self.start_writer()
+        step = self.regression_test(True)
+        self.commit("lib: tidy x\n\nThis does not close #7 yet.")
+        tidy = self.git(self.work, "rev-parse", "--short", "HEAD").stdout.strip()
+        self.git(self.plain, "commit", "-q", "--allow-empty", "-m", "a: other repo\n\nCloses #7")
+        other = self.git(self.plain, "rev-parse", "--short", "HEAD").stdout.strip()
+        self.commit("lib: fix x\n\nCloses #7", "x = 3\n")
+        sha = self.git(self.work, "rev-parse", "--short", "HEAD").stdout.strip()
+        self.finish(step)
+        r = self.t.stop(A, "finish", [("Edit", {"file_path": f"{self.work}/lib/x.py"}, "ok"),
+                                      ("Edit", {"file_path": f"{self.plain}/a.py"}, "ok")],
+                        report="Fixed x; the test passes.", uuid="o1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        pending = json.dumps(self.t.session(TOP))
+        self.assertIn(sha, pending, "the commit that closes #7 in the issue's repository")
+        self.assertNotIn(tidy, pending, "a message that says it does not close #7")
+        self.assertNotIn(other, pending, "a commit in another repository")
+
     def test_a_pushed_child_is_counted_as_archived_only_once_gh_shows_its_issue_closed(self):
         """With the `Closes #7` commit pushed and `gh issue view` failing, nothing shows the issue closed: the child's
         turn is sent back saying gh could not say, it is not counted as archived, and no note on its parent calls the
@@ -366,9 +388,9 @@ class Loop(unittest.TestCase):
         tied, other = os.path.join(mem, "one-lander.md"), os.path.join(mem, "other.md")
         write(tied, rule)
         write(other, rule.replace("#7", "#9"))
-        write(os.path.join(mem, "MEMORY.md"), "# Memory index\n\n- [One lander](one-lander.md) — only the orchestrator "
-                                              "pushes\n- [Other](other.md) — x\n- [A](a.md) — see "
-                                              "[One lander](one-lander.md)\n")
+        write(os.path.join(mem, "MEMORY.md"), "# Memory index\r\n\r\n- [One lander](one-lander.md) — only the "
+                                              "orchestrator pushes\r\n- [Other](other.md) — x\r\n- [A](a.md) — see "
+                                              "[One lander](one-lander.md)\r\n")
         self.commit("lib: fix x\n\nCloses #7")
         sha = self.git(self.work, "rev-parse", "--short", "HEAD").stdout.strip()
         self.land("m1", "git commit -qam fix")

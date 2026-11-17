@@ -22,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import pathfilter  # noqa: E402
 import relay  # noqa: E402
-from test_phi import GRAND, KID, KID2, START, TOP, Tree, context, write  # noqa: E402
+from test_phi import CLI, GRAND, KID, KID2, START, TOP, Tree, context, write  # noqa: E402
 import inproc  # noqa: E402
 
 A, B = KID, KID2
@@ -315,39 +315,30 @@ class ThreeSessions(unittest.TestCase):
         self.assertEqual(self.t.stop(host, "edit it", [("Edit", {"file_path": path}, "ok")], uuid=uuid).returncode, 0)
         return path
 
-    def test_a_childs_issue_closing_commits_tell_the_top_level_session_to_push_at_once(self):
-        """Green work that closes an issue is pushed and synced at once, not asked."""
+    def test_a_child_with_no_issue_record_gets_no_push_line_for_its_closing_commit(self):
+        """ezexe/p4#232: a worker with no issue record that commits `Closes #5` has run no regression test p4-phi
+        saw, so its orchestrator gets no push line for it: the worker reports the commit and its orchestrator
+        decides."""
         t = self.t
         self.edit_uncommitted(A, ("lib", "x.py"), "c1")
         g = ["git", "-C", self.work, "-c", "user.name=t", "-c", "user.email=t@t"]
         subprocess.run(g + ["commit", "-qam", "lib: fix x\n\nCloses #5"], check=True, capture_output=True)
         self.edit_uncommitted(A, ("lib", "y.py"), "c2")
         subprocess.run(g + ["commit", "-qam", "lib: tidy y"], check=True, capture_output=True)
+        self.assertEqual([c[3] for c in relay.closing_commits(t.p4, A, relay._session(t.p4, A))], [["#5"]],
+                         "the commit is there to be named")
         self.assertEqual(t.cli(A, "done", "test_x.py: 3 tests OK").returncode, 0)
         self.assertEqual(t.stop(A, "finish", report="Fixed x; suites green.", uuid="c3").returncode, 0)
-        ctx = context(t.say(TOP, "what next?"))
-        self.assertIn("finished with commits that close issues", ctx)
-        self.assertIn("closes #5", ctx)
-        self.assertNotIn("tidy y", ctx, "a commit closing nothing is not named")
-        self.assertIn("without asking ezexe", ctx)
-        t.stop(A, "again", report="Nothing more.", uuid="c4")
-        self.assertNotIn("close issues", context(t.say(TOP, "and now?")), "told once per commit")
+        self.assertNotIn("close issues", context(t.say(TOP, "what next?")))
 
-    def test_a_child_closing_an_issue_in_a_store_with_an_open_retrain_notice_gets_it_named_in_the_push_line(self):
+    def test_the_push_line_names_an_open_retrain_notice_of_a_store_the_change_touches(self):
         """The push line names, before the push, an open retrain notice of a store the change touches."""
         import notices
         t = self.t
         self.assertEqual(relay.stores_of(self.work), [relay.norm(t.p4)], "the store of the project it sits in")
         self.assertEqual(relay.owed([self.work]), [], "nothing open: nothing owed")
         notices.notify(t.p4, "json ranker", "the pool went stale", session=A)
-        self.edit_uncommitted(A, ("lib", "x.py"), "c1")
-        g = ["git", "-C", self.work, "-c", "user.name=t", "-c", "user.email=t@t"]
-        subprocess.run(g + ["commit", "-qam", "lib: fix x\n\nCloses #5"], check=True, capture_output=True)
-        self.edit_uncommitted(A, ("lib", "y.py"), "c2")
-        subprocess.run(g + ["commit", "-qam", "lib: tidy y"], check=True, capture_output=True)
-        self.assertEqual(t.cli(A, "done", "test_x.py: 3 tests OK").returncode, 0)
-        self.assertEqual(t.stop(A, "finish", report="Fixed x; suites green.", uuid="c3").returncode, 0)
-        ctx = context(t.say(TOP, "what next?"))
+        ctx = relay.push_text("the child", A, [(self.work, "abc1234", "lib: fix x", ["#5"])], relay.owed([self.work]))
         self.assertIn("finished with commits that close issues", ctx)
         self.assertIn("Before that push, this change owes: 1 open retrain notice in ", ctx)
         self.assertIn("retrain-needed.tsv, for json ranker", ctx)
@@ -960,7 +951,10 @@ class ForkOrFresh(ThreeSessions):
                     'bash -c "git push origin main"', 'pwsh -Command "git push"', "env GIT_TRACE=1 git push",
                     "git --git-dir=/x/.git push", "git -c core.x=y push", "echo $(git push)",
                     "gh pr merge 12 --squash", "gh api -X PATCH repos/o/r/git/refs/heads/main -f sha=abc",
-                    "gh api repos/o/r/merges -f base=main -f head=fix", "gh api -X PUT repos/o/r/pulls/3/merge"):
+                    "gh api repos/o/r/merges -f base=main -f head=fix", "gh api -X PUT repos/o/r/pulls/3/merge",
+                    'bash -lc "git push"', 'iex "git push"', "{ git push; }", "if x; then git push; fi",
+                    "sudo -u x git push", "gh api -XDELETE repos/o/r/git/refs/heads/x",
+                    "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"P\"}) { a } }'"):
             out = guard(B, cmd)
             self.assertIsNotNone(out, cmd)
             self.assertEqual(out["permissionDecision"], "ask", cmd)
@@ -968,10 +962,23 @@ class ForkOrFresh(ThreeSessions):
         r = self.t.hook("branch-guard", B, {"tool_name": "PowerShell", "tool_input": {
             "command": "Set-Location C:/x; & git.exe push origin main"}})
         self.assertEqual(json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"], "ask", "a PowerShell push")
+        gate = os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh")
+        for k, cmd in enumerate(("gh pr merge 12", "gh api -X PATCH repos/o/r/git/refs/heads/main -f sha=abc",
+                                 "/usr/bin/git push")):
+            body = {"session_id": CLI[B], "cwd": self.t.proj, "hook_event_name": "PreToolUse", "tool_name": "Bash",
+                    "tool_input": {"command": cmd}, "tool_use_id": f"toolu_gate000{k}"}
+            self.assertTrue(inproc.gate(json.dumps(body).encode(), self.t.proj), f"the in-process gate: {cmd}")
+            r = subprocess.run(["sh", gate, "lookup-check"], input=json.dumps(body), capture_output=True,
+                               text=True, encoding="utf-8", timeout=60, env=self.t.env(B))   # the script itself
+            out = json.loads(r.stdout).get("hookSpecificOutput", {}) if r.stdout.strip() else {}
+            self.assertEqual(out.get("permissionDecision"), "ask", f"through the hook gate: {cmd}")
         self.assertIsNone(guard(B, "git merge-base --is-ancestor a b"), "merge-base lands nothing")
         self.assertIsNone(guard(B, "git log --grep 'push'"), "quoted words are not a command")
+        self.assertIsNone(guard(B, "git log --grep push"), "a log reads")
+        self.assertIsNone(guard(B, "git status"), "a status reads")
+        self.assertIsNone(guard(B, "echo push"), "an echo lands nothing")
         self.assertIsNone(guard(B, 'git commit -qm "say git push to land it"'), "a message naming a push")
-        self.assertIsNone(guard(B, 'echo "git push"'), "an echo lands nothing")
+        self.assertIsNone(guard(B, "gh api graphql -f query='query { repository(name: \"x\") { id } }'"), "a query")
         self.assertIsNone(guard(B, "gh pr view 12"), "a view lands nothing")
         self.assertIsNone(guard(B, "gh api repos/o/r/git/refs/heads/main"), "reading a ref lands nothing")
         self.assertIsNone(guard(TOP, "git push origin main"), "the orchestrator lands the work")
