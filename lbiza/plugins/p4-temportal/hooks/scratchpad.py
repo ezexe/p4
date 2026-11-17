@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """scratchpad.py: p4-temportal's notebook part and its two asks. The notebook is the store's folder of notes kept
-across sessions, at the place p4conf.LAYOUT gives the key `scratchpad`, `<project>/.claude/p4/temportal/scratchpad/`,
+across sessions, at the place p4conf.LAYOUT gives the key `scratchpad`, `<project>/.claude/p4/temportal/notebook/`,
 with its logs, build output and binaries in its `.out/`, which ignores itself. Each session's scratchpad directory is
 Claude Code's own: it makes one under the system temp directory for each session and deletes it with the session's
 transcript, and no command here moves, links, stages, commits or removes one.

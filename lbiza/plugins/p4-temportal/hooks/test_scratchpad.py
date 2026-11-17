@@ -24,7 +24,7 @@ HOOKS_JSON = os.path.join(HERE, "hooks.json")
 SCRATCH = "C:/Users/someone/AppData/Local/Temp/claude/30ad6e18862a20e8/abc123/scratchpad"
 MAC_SCRATCH = "/private/tmp/claude-501/-Users-ez-x/f27bc042/scratchpad"
 P4_SRC = "E:/projects/x/.claude/p4/temportal/src"
-PAD = "E:/projects/x/.claude/p4/temportal/scratchpad"
+PAD = "E:/projects/x/.claude/p4/temportal/notebook"
 ON = {"P4_SCRATCHPAD_ASKS": "1"}
 
 def wipe(path):
@@ -95,8 +95,8 @@ def bash(cmd):
 
 ASK_CASES = [
     write(f"{SCRATCH}/sweep.py"), write(f"{MAC_SCRATCH}/probe.sh"),
-    write(f"{PAD}/probe.py"), write(".claude/p4/temportal/scratchpad/edit.py"),
-    bash("cat > .claude/p4/temportal/scratchpad/gen.py <<'EOF'\nprint(1)\nEOF\n"),
+    write(f"{PAD}/probe.py"), write(".claude/p4/temportal/notebook/edit.py"),
+    bash("cat > .claude/p4/temportal/notebook/gen.py <<'EOF'\nprint(1)\nEOF\n"),
     write(f"{PAD}/envtest.cmake"), write(f"{PAD}/probe/CMakeLists.txt"), write(f"{PAD}/probe/Makefile"),
     write(f"{PAD}/harness.html"), write(f"{PAD}/.out/kept.py"),
     bash("cat > /tmp/probe.sh <<'EOF'\necho hi\nEOF\n"),
@@ -146,7 +146,7 @@ def put(base, rel, text="x\n"):
 
 def notebook_out():
     root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-out-")
-    pad = os.path.join(root, ".claude", "p4", "temportal", "scratchpad")
+    pad = os.path.join(root, ".claude", "p4", "temportal", "notebook")
 
     def sweep():
         return run_sub("notebook-out", {}, CLAUDE_PROJECT_DIR=root)
@@ -165,10 +165,10 @@ def notebook_out():
         p4 = os.path.join(root, ".claude", "p4")
         if git:
             subprocess.run([git, "init", "-q", p4], check=True)
-            subprocess.run([git, "-C", p4, "add", "temportal/scratchpad/run.log"], check=True)
+            subprocess.run([git, "-C", p4, "add", "temportal/notebook/run.log"], check=True)
         out = sweep()
         assert out.startswith("p4-temportal: ") and "\n" not in out, f"not one line: {out}"
-        assert "re-seeded .claude/p4/temportal/scratchpad/.out/.gitignore" in out and "binaries moved: 3" in out, out
+        assert "re-seeded .claude/p4/temportal/notebook/.out/.gitignore" in out and "binaries moved: 3" in out, out
         with open(os.path.join(pad, ".out", ".gitignore"), encoding="utf-8") as f:
             assert f.read() == "*\n", "the .out/ ignore is not `*`"
         assert exists("notes.md") and exists("probe/main.txt"), "a note was moved"
@@ -180,11 +180,11 @@ def notebook_out():
         assert len(taken) == 1, os.listdir(os.path.join(pad, ".out"))
         if git:
             assert "1 of them were tracked by the store" in out, out
-            r = subprocess.run([git, "-C", p4, "check-ignore", "-q", "temportal/scratchpad/.out/x.log"])
+            r = subprocess.run([git, "-C", p4, "check-ignore", "-q", "temportal/notebook/.out/x.log"])
             assert r.returncode == 0, "the store does not ignore .out/"
             staged = subprocess.run([git, "-C", p4, "diff", "--cached", "--name-only"], capture_output=True,
                                     text=True).stdout
-            assert "temportal/scratchpad/run.log" in staged, "the hook touched the store's index"
+            assert "temportal/notebook/run.log" in staged, "the hook touched the store's index"
         # a clean notebook is silent; a changed ignore is re-seeded, a deleted one too
         assert sweep() == "", "a clean notebook spoke"
         put(pad, ".out/.gitignore", "!keep\n")
@@ -265,10 +265,10 @@ def gate2_d():
     try:
         for extra in ({}, ON):
             assert session_start(root, extra) == "", f"a fresh tree printed (asks {extra or 'off'})"
-            with open(os.path.join(root, ".claude", "p4", "temportal", "scratchpad", ".out", ".gitignore"), encoding="utf-8") as f:
+            with open(os.path.join(root, ".claude", "p4", "temportal", "notebook", ".out", ".gitignore"), encoding="utf-8") as f:
                 assert f.read() == "*\n", "the first seed did not happen"
             assert session_start(root, extra) == "", "a second start on a clean tree printed"
-        put(root, ".claude/p4/temportal/scratchpad/plan.md", "- a note\n")
+        put(root, ".claude/p4/temportal/notebook/plan.md", "- a note\n")
         put(root, ".claude/p4/temportal/src/oneoff_probe.py", "print(1)\n")
         put(root, "main.c", "int main(void) { return 0; }\n")
         if shutil.which("git"):
@@ -329,7 +329,9 @@ def parallel_hooks_cases():
         at_once("SessionStart")
         left = [rel for rel in old if os.path.exists(os.path.join(p4, *rel.split("/")))]
         assert left == [], f"files left in the older layout: {left}"
-        moved = [rel for rel in old if not os.path.isfile(os.path.join(p4, "temportal", *rel.split("/")))]
+        new = {"scratchpad": "notebook"}             # the notebook's old name at the store's top, and its folder now
+        moved = [rel for rel in old if not os.path.isfile(
+            os.path.join(p4, "temportal", new.get(rel.split("/")[0], rel.split("/")[0]), *rel.split("/")[1:]))]
         assert moved == [], f"files missing from the new layout: {moved}"
         assert not os.path.exists(os.path.join(p4, ".layout.lock")), "the layout lock was left"
         with open(os.path.join(p4, "p4.json"), encoding="utf-8") as f:
@@ -536,10 +538,10 @@ class AskPaths(unittest.TestCase):
 
     def test_a_notebook_in_the_notebook_folder_is_not_asked_about_or_listed(self):
         import scratchpad as sp
-        self.assertIsNone(ask(write("E:/projects/x/.claude/p4/temportal/scratchpad/analysis.ipynb")))
+        self.assertIsNone(ask(write("E:/projects/x/.claude/p4/temportal/notebook/analysis.ipynb")))
         self.assertIsNotNone(ask(write("C:/Users/u/AppData/Local/Temp/analysis.ipynb")))
         with tempfile.TemporaryDirectory() as root:
-            nb = os.path.join(root, ".claude", "p4", "temportal", "scratchpad")
+            nb = os.path.join(root, ".claude", "p4", "temportal", "notebook")
             os.makedirs(nb)
             open(os.path.join(nb, "analysis.ipynb"), "w").close()
             listed = [p for ps in sp.repo_use_candidates(root).values() for p in ps]

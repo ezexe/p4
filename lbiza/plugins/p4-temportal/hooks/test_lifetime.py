@@ -150,7 +150,7 @@ class Lifetime(unittest.TestCase):
             lifetime.parse_lifetime("soon")
 
     def test_the_cache_rule_clears_by_age_and_then_by_size(self):
-        out = os.path.join(self.t, "scratchpad", ".out")
+        out = os.path.join(self.t, "notebook", ".out")
         put(os.path.join(out, ".gitignore"), "*\n", age_days=100)
         old = put(os.path.join(out, "old.log"), age_days=20)
         new = put(os.path.join(out, "new.log"), age_days=1)
@@ -159,7 +159,7 @@ class Lifetime(unittest.TestCase):
         self.assertTrue(os.path.exists(new))
         self.assertTrue(os.path.exists(os.path.join(out, ".gitignore")), "the seed is never cleared")
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({"temportal": {"cache": {"scratchpad/.out": {"max_mb": 0.00001}}}}, f)
+            json.dump({"temportal": {"cache": {"notebook/.out": {"max_mb": 0.00001}}}}, f)
         big1 = put(os.path.join(out, "a.bin"), "a" * 100, age_days=3)
         big2 = put(os.path.join(out, "b.bin"), "b" * 100, age_days=2)
         lifetime.sweep(self.p4)
@@ -184,9 +184,9 @@ class Lifetime(unittest.TestCase):
         """An expires.json entry written by hand for a path `set` refuses is left with its file, and `list` prints a
         cache rule that is not an object."""
         files = [put(os.path.join(self.t, "memory", "MEMORY.md")), put(os.path.join(self.t, "tmp", "s1", "n.md")),
-                 put(os.path.join(self.p4, "phi", "store", "rules.md")), put(os.path.join(self.t, "scratchpad", "p.md"))]
+                 put(os.path.join(self.p4, "phi", "store", "rules.md")), put(os.path.join(self.t, "notebook", "p.md"))]
         entries = {"memory/MEMORY.md": {"expires": 0}, "tmp/s1": {"expires": 0}, "../phi/store": {"expires": 0},
-                   "scratchpad": {"expires": 0}}
+                   "notebook": {"expires": 0}}
         lifetime.write_expires(self.p4, entries)
         self.assertEqual(lifetime.sweep(self.p4), "")
         for f in files:
@@ -211,7 +211,7 @@ class Lifetime(unittest.TestCase):
     def test_a_cache_section_that_is_not_an_object_is_no_rules(self):
         import contextlib
         import io
-        old = put(os.path.join(self.t, "scratchpad", ".out", "old.log"), age_days=400)
+        old = put(os.path.join(self.t, "notebook", ".out", "old.log"), age_days=400)
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
             json.dump({"temportal": {"cache": 7}}, f)
         err = io.StringIO()
@@ -255,7 +255,7 @@ class Lifetime(unittest.TestCase):
     def test_a_cache_rule_clears_only_its_own_folder_under_temportal(self):
         """A rule keyed memory/ another way, or keyed a folder outside temportal/, clears no file."""
         cleared = {}
-        for key in ("Memory", "./memory", "scratchpad/../memory", "../phi/store"):
+        for key in ("Memory", "./memory", "notebook/../memory", "../phi/store"):
             mem = put(os.path.join(self.t, "memory", "a.md"), age_days=400)
             outside = put(os.path.join(self.p4, "phi", "store", "facts.md"), age_days=400)
             with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
@@ -316,7 +316,7 @@ class Lifetime(unittest.TestCase):
         outside = os.path.join(self.root, "outside")
         cases = [("phi", os.path.join(outside, "phi"), (".layout-conflicts", "store", "facts.md")),
                  ("phi/.layout-conflicts", os.path.join(outside, "conflicts"), ("store", "facts.md")),
-                 ("temportal/.layout-conflicts", os.path.join(self.t, "scratchpad"), ("plan.md",))]
+                 ("temportal/.layout-conflicts", os.path.join(self.t, "notebook"), ("plan.md",))]
         cleared = {}
         for place, target, inside in cases:
             reached = set_aside(os.path.join(target, *inside), 40)
@@ -340,8 +340,8 @@ class Lifetime(unittest.TestCase):
         g = lambda *a: subprocess.run([git, "-C", self.p4, *a], capture_output=True, text=True, check=True).stdout
         mem = put(os.path.join(self.t, "memory", "a.md"), "a\n")
         pad = put(os.path.join(self.t, "tmp", "s1", "n.md"), "n\n")
-        page = put(os.path.join(self.t, "scratchpad", "page.html"))
-        probe = put(os.path.join(self.t, "scratchpad", "probe", "out.txt"))
+        page = put(os.path.join(self.t, "notebook", "page.html"))
+        probe = put(os.path.join(self.t, "notebook", "probe", "out.txt"))
         set_aside(os.path.join(self.p4, "phi", ".layout-conflicts", "store", "facts.md"), 31)
         g("init", "-q")
         g("add", "-A")
@@ -355,23 +355,23 @@ class Lifetime(unittest.TestCase):
         staged = g("diff", "--cached", "--name-status").splitlines()
         print(f"staged after the sweep: {len(staged)}, of them changes it did not make: "
               f"{sum(not s.startswith('D') for s in staged)}")
-        self.assertEqual(staged, ["D\tphi/.layout-conflicts/store/facts.md", "D\ttemportal/scratchpad/page.html",
-                                  "D\ttemportal/scratchpad/probe/out.txt"])
+        self.assertEqual(staged, ["D\tphi/.layout-conflicts/store/facts.md", "D\ttemportal/notebook/page.html",
+                                  "D\ttemportal/notebook/probe/out.txt"])
         self.assertEqual(g("diff", "--name-only").split(), ["temportal/memory/a.md", "temportal/tmp/s1/n.md"])
 
     def test_a_cookie_expires(self):
-        page = put(os.path.join(self.t, "scratchpad", "page.html"))
-        keep = put(os.path.join(self.t, "scratchpad", "keep.md"))
-        probe = os.path.join(self.t, "scratchpad", "probe")
+        page = put(os.path.join(self.t, "notebook", "page.html"))
+        keep = put(os.path.join(self.t, "notebook", "keep.md"))
+        probe = os.path.join(self.t, "notebook", "probe")
         put(os.path.join(probe, "out.txt"))
         now = time.time()
         lifetime.set_cookie(self.p4, page, "1h", now=now)
-        lifetime.set_cookie(self.p4, "scratchpad/probe", "2d", now=now)
+        lifetime.set_cookie(self.p4, "notebook/probe", "2d", now=now)
         lifetime.set_cookie(self.p4, keep, "1h", now=now)
         self.assertTrue(lifetime.clear_cookie(self.p4, keep))
         self.assertEqual(lifetime.sweep(self.p4, now=now + 60), "")
         line = lifetime.sweep(self.p4, now=now + 2 * 3600)
-        self.assertIn("expired files: 1, scratchpad/page.html", line)
+        self.assertIn("expired files: 1, notebook/page.html", line)
         self.assertFalse(os.path.exists(page))
         self.assertTrue(os.path.isdir(probe))
         lifetime.sweep(self.p4, now=now + 3 * DAY)
@@ -382,18 +382,18 @@ class Lifetime(unittest.TestCase):
     def test_an_unreadable_cookie_holds_back_no_other(self):
         """An entry of expires.json that cannot be read stays as it is, the retention sweep at a start still clears
         every other due cookie, and `list` prints each entry."""
-        due = put(os.path.join(self.t, "scratchpad", "due.md"))
+        due = put(os.path.join(self.t, "notebook", "due.md"))
         put(os.path.join(self.t, lifetime.EXPIRES), json.dumps(
-            {"scratchpad/bad.md": {"expires": "soon"}, "scratchpad/due.md": {"expires": 1.0}, "scratchpad/odd.md": 7}))
+            {"notebook/bad.md": {"expires": "soon"}, "notebook/due.md": {"expires": 1.0}, "notebook/odd.md": 7}))
         swept = run("sweep", stdin="{}", CLAUDE_PROJECT_DIR=self.root)
         listed = run("--p4", self.p4, "list")
         self.assertEqual((swept.stdout, os.path.exists(due), listed.returncode, listed.stderr),
-                         ("p4-temportal: cleared expired files: 1, scratchpad/due.md.\n", False, 0, ""))
-        self.assertIn("cookie  scratchpad/bad.md  unreadable", listed.stdout)
-        self.assertIn("cookie  scratchpad/odd.md  unreadable", listed.stdout)
+                         ("p4-temportal: cleared expired files: 1, notebook/due.md.\n", False, 0, ""))
+        self.assertIn("cookie  notebook/bad.md  unreadable", listed.stdout)
+        self.assertIn("cookie  notebook/odd.md  unreadable", listed.stdout)
 
     def test_a_session_cookie_ends_with_its_session(self):
-        f = put(os.path.join(self.t, "scratchpad", "state.md"))
+        f = put(os.path.join(self.t, "notebook", "state.md"))
         lifetime.set_cookie(self.p4, f, "session", session_id="abc")
         lifetime.sweep(self.p4, ended_session="other")
         self.assertTrue(os.path.exists(f))
@@ -403,7 +403,7 @@ class Lifetime(unittest.TestCase):
     def test_a_session_cookie_takes_the_session_id_claude_code_sets(self):
         """With only CLAUDE_CODE_SESSION_ID in the environment, `set <path> session` succeeds, and the cookie clears
         when that session ends."""
-        f = put(os.path.join(self.t, "scratchpad", "state.md"))
+        f = put(os.path.join(self.t, "notebook", "state.md"))
         r = run("--p4", self.p4, "set", f, "session", CLAUDE_CODE_SESSION_ID="abc")
         run("session-end", stdin=json.dumps({"session_id": "abc"}), CLAUDE_PROJECT_DIR=self.root)
         self.assertEqual((r.returncode, r.stderr, os.path.exists(f)), (0, "", False))
@@ -411,14 +411,14 @@ class Lifetime(unittest.TestCase):
     def test_set_reads_a_relative_path_from_the_working_folder_and_refuses_a_missing_one(self):
         """`set notes.md 7d` run inside a folder gives that folder's file a cookie, `clear` reads its path the same
         way, and a path that does not exist is refused."""
-        pad = os.path.join(self.t, "scratchpad")
+        pad = os.path.join(self.t, "notebook")
         put(os.path.join(pad, "notes.md"))
         here = run("--p4", self.p4, "set", "notes.md", "7d", cwd=pad)
         missing = run("--p4", self.p4, "set", os.path.join(pad, "gone.md"), "7d")
         kept = sorted(lifetime.read_expires(self.p4))
         cleared = run("--p4", self.p4, "clear", "notes.md", cwd=pad)
         self.assertEqual((here.returncode, missing.returncode, kept, cleared.stdout),
-                         (0, 2, ["scratchpad/notes.md"], "cleared\n"))
+                         (0, 2, ["notebook/notes.md"], "cleared\n"))
         self.assertIn("does not exist", missing.stderr)
 
     def test_no_cookie_on_tmp_or_on_the_folders_and_file_of_temportal_itself(self):
@@ -426,16 +426,16 @@ class Lifetime(unittest.TestCase):
         tmp/ holds only what an earlier version kept for each session's scratchpad and those are never cleared whole."""
         put(os.path.join(self.t, "tmp", "s1", "probe", "out.txt"))
         put(os.path.join(self.t, "src", "kept.py"))
-        lifetime.set_cookie(self.p4, put(os.path.join(self.t, "scratchpad", "page.html")), "1d")
+        lifetime.set_cookie(self.p4, put(os.path.join(self.t, "notebook", "page.html")), "1d")
         accepted = []
-        for rel in ("tmp", "tmp/s1", "tmp/s1/probe", "tmp/s1/probe/out.txt", "Tmp/s1", "scratchpad", "src",
+        for rel in ("tmp", "tmp/s1", "tmp/s1/probe", "tmp/s1/probe/out.txt", "Tmp/s1", "notebook", "src",
                     lifetime.EXPIRES):
             try:
                 lifetime.set_cookie(self.p4, os.path.join(self.t, *rel.split("/")), "1d")
                 accepted.append(rel)
             except ValueError:
                 pass
-        self.assertEqual((accepted, sorted(lifetime.read_expires(self.p4))), ([], ["scratchpad/page.html"]))
+        self.assertEqual((accepted, sorted(lifetime.read_expires(self.p4))), ([], ["notebook/page.html"]))
 
     def test_a_path_outside_temportal_is_refused(self):
         with self.assertRaises(ValueError):
@@ -450,12 +450,12 @@ class Lifetime(unittest.TestCase):
                          ("p4-temportal: moved memory/ to temportal/memory/.\n", True))
 
     def test_the_cli(self):
-        f = put(os.path.join(self.t, "scratchpad", "n.md"))
+        f = put(os.path.join(self.t, "notebook", "n.md"))
         r = run("--p4", self.p4, "set", f, "3d")
         self.assertEqual(r.returncode, 0, r.stderr)
         r = run("--p4", self.p4, "list")
-        self.assertIn("cookie  scratchpad/n.md  expires", r.stdout)
-        self.assertIn("cache   scratchpad/.out/", r.stdout)
+        self.assertIn("cookie  notebook/n.md  expires", r.stdout)
+        self.assertIn("cache   notebook/.out/", r.stdout)
 
 
 class Layout(unittest.TestCase):
@@ -486,15 +486,16 @@ class Layout(unittest.TestCase):
             self.g("add", "-A")
             self.g("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "flat")
         lines = p4conf.migrate_layout(self.p4)
-        self.assertEqual(len(lines), 5, lines)
+        self.assertEqual(len(lines), 4, lines)
         for k in p4conf.LAYOUT:
             if k != "src":
                 self.assertFalse(os.path.exists(os.path.join(self.p4, k)), k)
         self.assertTrue(os.path.isfile(os.path.join(self.p4, "temportal", "memory", "MEMORY.md")))
         self.assertTrue(os.path.isfile(os.path.join(self.p4, "phi", "store", "facts.md")))
-        self.assertTrue(os.path.isfile(os.path.join(self.p4, "temportal", "tmp", "sid1", "a.md")))
+        self.assertTrue(os.path.isfile(os.path.join(self.p4, "temportal", "notebook", "note.md")))
+        self.assertTrue(os.path.isfile(os.path.join(self.p4, "tmp", "sid1", "a.md")), "an old tmp/ is left as it is")
         with open(os.path.join(self.p4, ".gitignore"), encoding="utf-8") as f:
-            self.assertEqual(f.read(), "temportal/scratchpad/.out/\nphi/models/served/\n/phi/models/*.tmp\n"
+            self.assertEqual(f.read(), "temportal/notebook/.out/\nphi/models/served/\n/phi/models/*.tmp\n"
                                        "__pycache__/\n")
         with open(os.path.join(self.p4, ".gitattributes"), encoding="utf-8") as f:
             self.assertEqual(f.read(), "phi/models/*.pt filter=lfs\n")
@@ -550,12 +551,13 @@ class Layout(unittest.TestCase):
         self.assertEqual(read(os.path.join(self.p4, ".gitignore")).splitlines().count("phi/models/index.json"), 1)
 
     def test_a_flat_line_for_a_folder_that_never_existed_is_rewritten_too(self):
-        """A store with no scratchpad/ at its top still has its `scratchpad/.out/` line rewritten."""
+        """A store with no scratchpad/ at its top still has its `scratchpad/.out/` line rewritten, and so does the
+        line of the notebook's place before it moved to temportal/notebook/."""
         put(os.path.join(self.p4, "store", "facts.md"), "f\n")
         put(os.path.join(self.p4, ".gitignore"), "scratchpad/.out/\nmodels/served/\ntemportal/scratchpad/.out/\n")
         p4conf.migrate_layout(self.p4, commit=False)
         self.assertEqual(read(os.path.join(self.p4, ".gitignore")),
-                         "phi/models/served/\ntemportal/scratchpad/.out/\n", "rewritten, and not left twice")
+                         "temportal/notebook/.out/\nphi/models/served/\n", "rewritten, and not left twice")
 
     def test_differing_ignored_caches_are_never_set_aside(self):
         """Two differing copies of a cache the store ignores are never set aside in .layout-conflicts/ and committed."""
@@ -588,26 +590,26 @@ class Layout(unittest.TestCase):
         self.assertEqual(read(aside), "old\n")
         self.assertFalse(os.path.exists(os.path.join(self.p4, "memory")))
 
-    def test_a_live_session_scratchpad_follows_its_tmp(self):
+    def test_a_layout_move_leaves_a_scratchpad_link_as_it_is(self):
+        """ezexe/p4#131 row B6: each session's scratchpad is the app's, so a layout move relinks none, and a link an
+        earlier version made into the store's older tmp/ still reaches the folder it reached."""
         temp = tempfile.mkdtemp(prefix="p4-temportal-harness-")
         sid = "c0ffee00-0000-4000-8000-000000000001"
         old = os.path.join(self.p4, "tmp", sid)
         put(os.path.join(old, "n.md"), "n\n")
+        put(os.path.join(self.p4, "store", "facts.md"), "f\n")
         harness = os.path.join(temp, "claude", "proj", sid, "scratchpad")
         os.makedirs(os.path.dirname(harness))
         p4conf._make_link(harness, old)
-        saved = p4conf.TEMP_ROOTS
-        p4conf.TEMP_ROOTS = (temp,)
         try:
             p4conf.migrate_layout(self.p4, commit=False)
+            self.assertTrue(p4conf.is_link(harness))
+            self.assertTrue(os.path.samefile(harness, old), "the scratchpad link was moved")
+            self.assertTrue(os.path.isfile(os.path.join(harness, "n.md")))
+            self.assertFalse(os.path.exists(os.path.join(self.p4, "temportal", "tmp")), "a tmp/ was moved")
         finally:
-            p4conf.TEMP_ROOTS = saved
-        new = os.path.join(self.p4, "temportal", "tmp", sid)
-        self.assertTrue(p4conf.is_link(harness))
-        self.assertTrue(os.path.samefile(harness, new), "the scratchpad link reaches its folder in temportal/tmp/")
-        self.assertTrue(os.path.isfile(os.path.join(harness, "n.md")))
-        p4conf._unlink(harness)
-        wipe(temp)
+            p4conf._unlink(harness)
+            wipe(temp)
 
 
 if __name__ == "__main__":
