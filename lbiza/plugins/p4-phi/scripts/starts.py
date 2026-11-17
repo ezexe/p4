@@ -74,8 +74,9 @@ def _is_root(entry, base):
 
 
 def files_of(brief, base=""):
-    """The write set a brief declares: [] for `Files: none`, None when it has no such line. A path with a folder is
-    normalized under `base`; a bare file name is kept as its lower-case name. Only the paths listed after `Files:`
+    """The write set a brief declares: [] for `Files: none`, None when it has no such line. A name or a relative path
+    is resolved in the repository `base` lies in, from its root; where no repository is known, a path with a folder is
+    normalized under `base` and a bare file name is kept as its lower-case name. Only the paths listed after `Files:`
     up to the end of that line are read, and only up to where the list ends and a sentence begins. A path that is
     an ancestor of another listed path, or a repository's root, is context and is not held, unless it is the only
     path on the line, so a checkout named beside the files in it never holds the whole repository."""
@@ -94,6 +95,20 @@ def files_of(brief, base=""):
     return out
 
 
+def repo_root(base):
+    """The root of the git repository `base` lies in, the nearest folder up from it with a .git, or '' when none
+    does, so a name on a Files line belongs to that repository and never to another one beside it."""
+    d = os.path.abspath(base) if base else ""
+    while d:
+        if os.path.exists(os.path.join(d, ".git")):
+            return d
+        up = os.path.dirname(d)
+        if up == d:
+            return ""
+        d = up
+    return ""
+
+
 def _listed(value, base):
     """The names of a `Files:` list: a piece is held only when it is one name, backticked or plain, with at most a
     trailing parenthetical such as `(new)`; a piece that is a clause of words, as `the tests only`, names no file."""
@@ -108,14 +123,19 @@ def _listed(value, base):
         name = piece.strip("`'\"").rstrip(".")
         if not name:
             continue
-        entry = relay.norm(name, base) if re.search(r"[\\/]", name) else name.lower()
+        root = repo_root(base)
+        if root:
+            entry = relay.norm(name, root)              # a name of the repository the session writes in
+        else:
+            entry = relay.norm(name, base) if re.search(r"[\\/]", name) else name.lower()
         if entry not in out:
             out.append(entry)
     return out
 
 
 def files_overlap(a, b):
-    """The entries two write sets share: equal or nested paths, or a bare name that is the other's file name."""
+    """The entries two write sets share: equal or nested paths, or a bare name that is the other's file name. A bare
+    name is left only where files_of knew no repository, so names in two known repositories never meet here."""
     hit = []
     for x in a or []:
         for y in b or []:

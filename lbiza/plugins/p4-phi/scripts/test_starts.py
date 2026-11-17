@@ -286,6 +286,22 @@ class StartRequests(unittest.TestCase):
         self.assertEqual(starts.files_of("Files: Makefile, `README`", base), ["makefile", "readme"])
         self.assertEqual(starts.files_of("Files: none, this session changes no file.", base), [])
 
+    def test_a_bare_name_belongs_to_the_session_s_own_repository(self):
+        """A bare name or relative path on a Files line is resolved in the repository the session writes in, so two
+        sessions that name README.md in two repositories do not hold one file; in one repository they do."""
+        base = self.t.proj
+        a, b = os.path.join(base, "p4"), os.path.join(base, "phi")
+        for r in (a, b):
+            os.makedirs(os.path.join(r, ".git"))
+        in_a, in_b = starts.files_of("Files: README.md", a), starts.files_of("Files: README.md", b)
+        self.assertEqual(in_a, [relay.norm("README.md", a)])
+        self.assertEqual(starts.files_overlap(in_a, in_b), [], "the same name in two repositories")
+        self.assertEqual(starts.files_overlap(in_a, starts.files_of("Files: `README.md`", a)), in_a)
+        sub = os.path.join(a, "docs")
+        os.makedirs(sub)
+        self.assertEqual(starts.files_of("Files: dox/x.html", sub), [relay.norm("dox/x.html", a)],
+                         "a relative path is read from the repository's root")
+
     def test_a_session_whose_closing_commit_is_pushed_is_told_what_it_still_holds(self):
         """Once its closing commit is on a remote branch, a session is told once what it still holds, with the
         command that releases it."""
