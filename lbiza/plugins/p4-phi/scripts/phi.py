@@ -548,6 +548,14 @@ def title_of(s):
     return s.get("title") or cut(clean(s.get("task")), 60) or str(s.get("sessionId") or "")[:14]
 
 
+def name_of(s, row=None):
+    """A session as another session is shown it: its title, else its id, never a cut of the prompt it was sent,
+    which title_of falls back to. `row`, a report row, gives the id where the session file is gone."""
+    s = s if isinstance(s, dict) else {}
+    sid = str(s.get("sessionId") or (row or {}).get("sessionId") or "")
+    return s.get("title") or (f"session {sid[:14]}" if sid else "a session")
+
+
 def chain_of(home, sid):
     """The sessionIds above a session, nearest first: its parent session, that session's parent, and so on."""
     out, cur = [], spawned_from(load_session(home, sid))
@@ -790,9 +798,13 @@ def said_of(turn, report):
 
 # --- what a session is given -----------------------------------------------------------------------------------------
 
-def turn_lines(title, t, report=300, prompt=200):
+def turn_lines(title, t, report=300, prompt=0):
+    """A turn as lines: its session's title, whether it was shown done, its steps, workers, failures and report. Its
+    prompt, cut to `prompt` characters, only where the reader is the session it was sent to or a page that keeps
+    it: no session is handed a run of the words of a prompt sent to another."""
     how = "done: " + cut(clean(t["done"]), 160) if t.get("done") else "not shown done"
-    out = [f"- \"{title}\", {how}, {t.get('time', '')}: {cut(clean(t.get('prompt')), prompt)}"]
+    said = f": {cut(clean(t.get('prompt')), prompt)}" if prompt and t.get("prompt") else ""
+    out = [f"- \"{title}\", {how}, {t.get('time', '')}{said}"]
     if t.get("steps"):
         out.append("  steps: " + cut("; ".join(t["steps"]), 400))
     if t.get("sessions"):
@@ -811,18 +823,18 @@ def commands():
 
 
 def background_text(home, s, own=False, slim=False):
-    """The start background a session is given: the tasks of the sessions above it, their notes, the last turn of
+    """The start background a session is given: the sessions above it by title, their notes, the last turn of
     each of its siblings, which for an orchestrator are the orchestrators before it, and with `own` its own
     turns. With `slim` the notes and the siblings' turns are left out, for a fresh child whose slice of its parent's
-    anchor holds what bears on its paths, and after a compaction. '' when none of that exists."""
+    anchor holds what bears on its paths, and after a compaction. '' when none of that exists. It quotes no prompt
+    of another session: a task above is named by its session's title, a sibling's turn by its steps and report, and
+    the brief this session was handed says what it is to do."""
     sid, above = s["sessionId"], spawned_from(s)
     chain = [load_session(home, x) for x in chain_of(home, sid)]
     body = []
-    tasks = [f"- \"{title_of(n)}\": {cut(clean(n.get('task')), 500 if k == 0 else 200)}"
-             for k, n in enumerate(chain) if n.get("task")]
-    if tasks:
-        body += ["Tasks of the sessions above this one, nearest first; this session's task is part of the first:"]
-        body += tasks
+    if chain:
+        body += ["The sessions above this one, nearest first, by title; this session's task is part of the "
+                 "first's: " + ", ".join(f"\"{name_of(n)}\"" for n in chain) + "."]
     own_task = clean(s.get("task"))
     notes = []
     for n in chain:
@@ -839,22 +851,22 @@ def background_text(home, s, own=False, slim=False):
     others = [] if slim else nd.by_overlap(others, own_task,
                                            key=lambda r: f"{r.get('title', '')} {r.get('turn', {}).get('prompt', '')}")
     if others:
-        who = f"the other workers of \"{title_of(chain[0])}\"" if chain else \
+        who = f"the other workers of \"{name_of(chain[0])}\"" if chain else \
             "the orchestrators in this project before this one"
         body += [f"The last turn of {who}:"]
         for r in others:
-            body += turn_lines(r.get("title") or r["sessionId"][:14], r["turn"])
+            body += turn_lines(name_of(load_session(home, r["sessionId"]), r), r["turn"])
     if own:
         mine = load_turns(home, sid)[-OWN:]
         if mine:
             body += ["This session's own turns so far:"]
             for t in reversed(mine):
-                body += turn_lines(title_of(s), t)
+                body += turn_lines(title_of(s), t, prompt=200)     # its own prompts, sent to it
     if not body:
         return ""
     if chain:
         head = (f"phi (p4-phi): background for this session, \"{title_of(s)}\", from its parent session, "
-                f"\"{title_of(chain[0])}\", and the sessions linked to it. Use what is here where it fits; do not "
+                f"\"{name_of(chain[0])}\", and the sessions linked to it. Use what is here where it fits; do not "
                 f"work it out again.")
     else:
         head = ("phi (p4-phi): background for this session from the sessions in this project before it. Use what "
@@ -921,7 +933,7 @@ def reports_text(home, s, room=None, store=""):
     rest = [r for r in reversed(new) if r not in shown]
     each = max(500, (room - len(out[0]) - 110 * len(rest)) // len(shown) - 140)
     for r in shown:
-        lines = turn_lines(r.get("title") or r["sessionId"][:14], r["turn"], report=REPORT_CHARS, prompt=300)
+        lines = turn_lines(name_of(load_session(home, r["sessionId"]), r), r["turn"], report=REPORT_CHARS)
         out += [cut("\n".join(lines), each), f"  its page: {page_path(home, r['sessionId'])}"]
     if rest:
         out.append(f"Not shown here for want of room, {len(rest)} more, each on its page: " + ", ".join(

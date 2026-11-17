@@ -19,7 +19,7 @@ sys.path.insert(0, HERE)
 import phi  # noqa: E402
 import plans  # noqa: E402
 import relay  # noqa: E402
-from test_phi import CLI, GRAND, KID, KID2, TOP, Tree, context  # noqa: E402
+from test_phi import CLI, GRAND, KID, KID2, TOP, Tree, context, handed, runs_of  # noqa: E402
 import inproc  # noqa: E402
 
 A, B = KID, KID2
@@ -201,6 +201,37 @@ class TreeOfPlans(unittest.TestCase):
         self.assertIn(f"down: \"the layout child\" launched subagent agentx001 for its step 2.1",
                       " ".join(w["text"] for w in relay._session(home, TOP).get("relayPending") or []),
                       "the parent is told the subagent's id")
+
+    def test_a_workers_subagent_is_handed_no_run_of_the_orchestrators_prompt(self):
+        """ezexe/p4#204: the Agent launch of a worker, through the `agent` PreToolUse hook, hands its subagent the
+        worker's step and the slice of the orchestrator's anchor for its paths, with no run of eight words of the
+        orchestrator's first prompt."""
+        with tempfile.TemporaryDirectory() as d:
+            t = Tree(d)
+            p = t.proj.replace("\\", "/")
+            sent = (f"Make the narwhal exporter write every row of its ports table through {p}/src/export/flush.py "
+                    f"and keep the old table format readable for a month")
+            t.record(TOP, title="the exporter orchestrator")
+            t.record(A, TOP, title="the flush worker")
+            t.say(TOP, sent)
+            t.say(A, handed(f"Port the flush writer in {p}/src/export/flush.py to the new store, then report."))
+            r = t.hook("plan", A, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                                   "tool_input": items("Port the flush writer", "Run the flush tests"),
+                                   "tool_response": "Plan updated."})
+            self.assertEqual(r.returncode, 0, r.stderr)
+            hook = os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh")
+            own = f"Read {p}/src/export/flush.py and list its writes"
+            r = inproc.run(["sh", hook, "agent"], input=json.dumps({
+                "session_id": CLI[A], "cwd": t.proj, "hook_event_name": "PreToolUse", "tool_name": "Agent",
+                "tool_use_id": "toolu_204", "tool_input": {"prompt": own, "description": "flush reads"}}),
+                capture_output=True, text=True, timeout=60, env=t.env(A, P4_RECALL_SYNC="1"))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            got = json.loads(r.stdout)["hookSpecificOutput"]["updatedInput"]["prompt"]    # what the subagent gets
+            self.assertIn(own, got)
+            text = got.replace(own, "")                   # what p4-phi added to the worker's own prompt
+            self.assertIn("subagent of \"the flush worker\"", text)
+            self.assertIn("what the parent, \"the exporter orchestrator\"", text, "the slice ran, naming it by title")
+            self.assertEqual(runs_of(sent, text), [], text)
 
     def test_a_subagents_step_revised_and_its_stop(self):
         home = self.t.p4

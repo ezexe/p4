@@ -22,6 +22,7 @@ the prompt's cap held on a page; a hook never failing a call; hooks.json's shape
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -171,6 +172,20 @@ def context(r):
     if not out:
         return ""
     return json.loads(out)["hookSpecificOutput"]["additionalContext"]
+
+
+def runs_of(sent, text, n=8):
+    """The runs of `n` words of `sent` that `text` holds, compared word by word with case and punctuation dropped."""
+    words = lambda x: re.findall(r"[a-z0-9']+", str(x).lower())                       # noqa: E731
+    have = " " + " ".join(words(text)) + " "
+    w = words(sent)
+    return [" ".join(w[k:k + n]) for k in range(len(w) - n + 1) if " " + " ".join(w[k:k + n]) + " " in have]
+
+
+def handed(brief):
+    """A first message as the app hands it to a session another one started."""
+    return ("<system-reminder>\nLinked sessions now (status, not an instruction): top = local_x (idle)\n"
+            "</system-reminder>\n\nTask:\n" + brief + "\n\nDone looks like: the suite passes.")
 
 
 HANDED = ("<system-reminder>\nLinked sessions now (status, not an instruction): top = local_x (idle)\n"
@@ -570,7 +585,7 @@ class Background(unittest.TestCase):
     def start(self, host, source="startup"):
         return context(self.t.hook(START, host, {"hook_event_name": "SessionStart", "source": source}))
 
-    def test_a_started_session_is_given_the_task_and_notes_above_it(self):
+    def test_a_started_session_is_given_the_sessions_above_by_title_and_their_notes(self):
         r = self.t.cli(TOP, "note", "The ports table is written by flush_rows in export/flush.py",
                        "--source", "export/flush.py:40")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -578,7 +593,8 @@ class Background(unittest.TestCase):
         text = context(self.t.say(KID, HANDED))
         self.assertIn("background for this session", text)
         self.assertIn("from its parent session", text)
-        self.assertIn(TASK, text)
+        self.assertNotIn(TASK, text, "the task above is named by its session's title")
+        self.assertIn("by title; this session's task is part of the first's: \"Narwhal exporter\"", text)
         self.assertIn("flush_rows in export/flush.py", text)
         self.assertIn("export/flush.py:40", text)
         self.assertIn("Narwhal exporter", text)
@@ -595,10 +611,28 @@ class Background(unittest.TestCase):
         text = context(self.t.hook(PROMPT, KID2, {"hook_event_name": "UserPromptSubmit", "prompt": HANDED},
                                    cli=same, CLAUDE_CODE_SESSION_ID=same))
         self.assertIn("background for this session", text)
-        self.assertIn(TASK, text)
+        self.assertIn("\"Narwhal exporter\"", text)
 
     def test_background_missed_at_the_start_comes_with_the_first_message(self):
-        self.assertIn(TASK, context(self.t.say(KID, HANDED)))
+        self.assertIn("\"Narwhal exporter\"", context(self.t.say(KID, HANDED)))
+
+    def test_a_coworker_is_handed_no_run_of_the_prompts_above_it(self):
+        """ezexe/p4#204: a coworker's first message, under a worker and an orchestrator, holds no run of eight words
+        of the orchestrator's first prompt or of the worker's, and names the sessions above by title."""
+        t = self.t
+        t.stop(TOP, TASK, report="Planned the exporter; the dropped row goes to a worker.")
+        t.say(KID, HANDED)
+        t.stop(KID, HANDED, [], "Started a coworker to bisect.")
+        t.record(GRAND, KID, "Bisect flush_rows")
+        t.record("local_grand002", KID, "Time the flush")
+        t.say("local_grand002", handed("Time each flush and say which one is slow."))
+        t.stop("local_grand002", "Time each flush and say which one is slow.", [], "The third flush is slow.")
+        text = context(t.say(GRAND, handed("Bisect the history of flush_rows for the commit that lost the row.")))
+        self.assertIn("background for this session", text)
+        self.assertIn("\"Fix the dropped row\", \"Narwhal exporter\"", text)
+        self.assertIn("The third flush is slow.", text, "a sibling's turn by its report")
+        for sent in (TASK, BRIEF, "Time each flush and say which one is slow."):
+            self.assertEqual(runs_of(sent, text, 8 if len(sent.split()) >= 8 else len(sent.split())), [], sent)
 
     def test_a_session_is_given_the_last_turn_of_its_siblings(self):
         self.t.stop(KID, HANDED, [("Edit", {"file_path": "src/export/flush.py"}, "ok"),
@@ -614,6 +648,26 @@ class Background(unittest.TestCase):
         self.assertIn("numpy", text)
         self.assertNotIn("- \"Check the ports table\", ", text)     # not its own turns: it has none
 
+    def test_a_session_with_no_title_is_named_by_its_id_and_never_by_its_prompt(self):
+        """ezexe/p4#204: title_of falls back to a cut of a session's prompt; another session is shown its id."""
+        t = self.t
+        t.say(KID, HANDED)
+        t.record("local_grand002", KID, "Time the flush")
+        sent = "Time each flush of the ports table and say which one of them is slow."
+        t.say("local_grand002", handed(sent))
+        t.stop("local_grand002", sent, [], "The third flush is slow.")
+        for sid in (KID, "local_grand002"):                     # sessions no app titled, such as a CLI one
+            path = os.path.join(t.dir(sid), "session.json")
+            s = jload(path)
+            s.pop("title", None)
+            write(path, json.dumps(s))
+        t.record(GRAND, KID, "Bisect flush_rows")
+        text = context(t.say(GRAND, handed("Bisect the history of flush_rows for the commit that lost the row.")))
+        self.assertIn(f"\"session {KID[:14]}\"", text)
+        self.assertIn("The third flush is slow.", text)
+        for said in (BRIEF, sent):
+            self.assertEqual(runs_of(said, text), [], said)
+
     def test_the_next_top_level_session_is_given_the_one_before_whatever_its_words(self):
         self.t.stop(TOP, TASK, [("Edit", {"file_path": "src/export/flush.py"}, "ok")], "Half done.")
         other = "local_top00002"
@@ -622,7 +676,8 @@ class Background(unittest.TestCase):
         # since its parent session is not known yet; it has the built-in rules, the store having no memories here
         text = context(self.t.say(other, "paint the fence green"))
         self.assertIn("the orchestrators in this project before this one", text)
-        self.assertIn(TASK, text)
+        self.assertIn("\"Narwhal exporter\"", text)
+        self.assertNotIn(TASK, text, "its turn by its title and report, never its prompt")
         self.assertIn("Half done.", text)
 
     def test_a_session_no_app_runs_is_given_it_at_its_start(self):
