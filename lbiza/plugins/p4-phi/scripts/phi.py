@@ -2696,7 +2696,9 @@ def store_root(path):
 def h_store_guard(payload):
     """PreToolUse on a shell call: a hand `git pull`, `git push` or force-push in a store is asked first, and
     `p4.py sync --push --p4 <store>` named as the way, since two machines write the same files and a plain merge or
-    a line-union damages them."""
+    a line-union damages them. A session another session started is also told which session runs that sync: its
+    tree's orchestrator, the one session that lands and pushes. hook.py runs this guard ahead of the branch guard,
+    so a started session's pull or push inside a store hears of the sync and not only of its parent's landing."""
     if str(payload.get("tool_name") or "") not in SHELL_TOOLS:
         return None
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
@@ -2721,12 +2723,18 @@ def h_store_guard(payload):
     what = "a force-push" if force and m.group(2) == "push" else f"a hand `git {m.group(2)}`"
     RAN["store_guard"] = what
     sync = f"python -I -X utf8 \"{os.path.join(HERE, 'p4.py')}\" sync --push --p4 \"{store}\"".replace("\\", "/")
+    me = Me(payload)
+    s = load_session(me.home, me.id) if me.home and me.id else {}
+    top, title = issues.lander(me.home, s) if spawned_from(s) else ("", "")
+    whose = (f" This session is a child, and the sync is its tree's orchestrator's to run, \"{title}\" `{top}`, the "
+             f"one session that lands and pushes: ask that session with SendMessage, and run neither here."
+             if top else "")
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
                                    "permissionDecisionReason": f"phi (p4-phi): this is {what} in the store {store}. "
                                                                f"A store moves only by `{sync}`, since two machines "
                                                                f"write the same files and a plain merge or a "
                                                                f"line-union damages them. Then check each entry the "
-                                                               f"sync names as changed."}}
+                                                               f"sync names as changed.{whose}"}}
 
 
 def once(home, sid, kind, payload):

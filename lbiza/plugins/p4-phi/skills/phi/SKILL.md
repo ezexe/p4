@@ -21,6 +21,7 @@ A feedback memory whose rule an open issue will build into the plugin is tied to
 Once a commit that closes that issue is on the remote default branch, the next Stop whose turn ran a push, pull, fetch or merge cuts the memory back to one pointer line naming the issue and the code that carries its rule, and rewrites the memory's own line in the memory index to match.
 
 A store moves only by `python -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/p4.py" sync --push --p4 "<store>"`.
+A hand `git pull` or `git push` inside a store is asked first with that command named, ahead of every other check on the call, and a session another session started is told that its tree's orchestrator runs the sync.
 
 ## Commands
 

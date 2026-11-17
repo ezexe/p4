@@ -982,6 +982,46 @@ class ForkOrFresh(ThreeSessions):
         self.assertIsNone(guard(TOP, f"cd {clone} && git push origin main"), "a clone kept in a scratchpad directory")
         self.assertIsNone(guard(TOP, f"git -C {p4} status"), "reading a store is never asked")
 
+    def test_a_started_sessions_hand_pull_in_a_store_through_lookup_check_names_p4_sync(self):
+        """ezexe/p4#240: through `recall-hook.sh lookup-check`, the entry hooks.json wires before every tool call, a
+        started session's hand pull or push inside a store is asked by the store guard, which runs ahead of the
+        branch guard: its reason names `p4.py sync --push --p4 <store>` and the tree's orchestrator as the session
+        that runs it. The same session's pull in the project's own checkout keeps the branch guard's ask."""
+        p4 = self.t.p4.replace("\\", "/")
+        subprocess.run(["git", "init", "-q", p4], check=True, capture_output=True)
+        gate = os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh")
+
+        def check(host, tool, cmd, k):
+            body = {"session_id": CLI[host], "cwd": self.t.proj, "hook_event_name": "PreToolUse", "tool_name": tool,
+                    "tool_input": {"command": cmd}, "tool_use_id": f"toolu_store00{k}"}
+            r = inproc.run(["sh", gate, "lookup-check"], input=json.dumps(body), capture_output=True, text=True,
+                           timeout=60, env=self.t.env(host))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return json.loads(r.stdout).get("hookSpecificOutput", {}) if r.stdout.strip() else {}
+        for k, (tool, cmd) in enumerate((("Bash", f"cd {p4} && git pull origin main"),
+                                         ("Bash", f"git -C {p4} push origin main"),
+                                         ("PowerShell", f"cd {p4}; git pull origin main"),
+                                         ("PowerShell", f"git -C {p4} push origin main"))):
+            out = check(B, tool, cmd, k)
+            self.assertEqual(out.get("permissionDecision"), "ask", f"{tool}: {cmd}")
+            reason = out.get("permissionDecisionReason", "")
+            self.assertIn("sync --push --p4", reason, f"{tool}: {cmd}")
+            self.assertIn(relay.norm(p4), relay.norm(reason), "the store by its path")
+            self.assertIn(f"its tree's orchestrator's to run, \"top\" `{TOP}`", reason, "and the session that runs it")
+            self.assertNotIn("Ask its parent session", reason, "not the branch guard's reason")
+        own = check(B, "Bash", "git pull", 7)
+        self.assertEqual(own.get("permissionDecision"), "ask")
+        self.assertIn("merges and pushes", own.get("permissionDecisionReason", ""), "outside a store: the branch guard")
+        self.assertNotIn("sync --push --p4", own.get("permissionDecisionReason", ""))
+        top = check(TOP, "Bash", f"cd {p4} && git pull origin main", 8)
+        self.assertIn("sync --push --p4", top.get("permissionDecisionReason", ""))
+        self.assertNotIn("orchestrator's to run", top.get("permissionDecisionReason", ""),
+                         "the orchestrator runs the sync itself")
+        import hook
+        for tool in ("Bash", "PowerShell"):
+            names = hook.PHI_CHECK[tool]
+            self.assertLess(names.index("store-guard"), names.index("branch-guard"), tool)
+
     def test_a_child_landing_work_is_always_asked(self):
         """ezexe/p4#232: only the tree's orchestrator merges and pushes. Neither a brief that says "Closes #7" and
         "push it yourself", a brief that names issues, an issue on the child's record, nor its parent's message lets
