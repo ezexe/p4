@@ -1,6 +1,6 @@
 {
   "name": "p4-phi",
-  "version": "0.11.29",
+  "version": "0.11.30",
   "description": "What linked Claude Code sessions hand each other, and retrieval from the project's own history: rule and fact lines beside a message or a subagent's task when the ranker is confident, an earlier answer in place of a repeated web lookup, and what worked after a failure an earlier session met.",
   "author": {
     "name": "ezexe"
