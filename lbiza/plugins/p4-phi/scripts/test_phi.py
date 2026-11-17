@@ -1501,16 +1501,25 @@ class StatePage(unittest.TestCase):
         self.assertIn("idle with an empty queue", said)
 
 
-ASKS_WRITE = re.compile(r"\b(?:write|writes|keep|keeps|save|saves|logs?|rewritten|puts?|go there|up to date at|"
-                        r"edit)\b", re.I)
-UNDER_CLAUDE = re.compile(r"(?:^|[\s`'\"(:])[^\s`'\"(]*\.claude/[^\s`'\")]*")
+ASKS_WRITE = re.compile(r"\b(?:writes?|written|keeps?|kept|saves?|saved|logs?|logged|rewrit\w*|puts?|records?|"
+                        r"recorded|append\w*|stores?|stored|edits?|go there|up to date at)\b", re.I)
+UNDER_CLAUDE = re.compile(r"(?:^|[\s`'\"(:])([^\s`'\"(]*\.claude/[^\s`'\")]*)")
+# The pages p4-phi's own scripts write in the store, which a session reads and never writes: a line may say they are
+# kept or rewritten there. A state page or a decisions file is not among them, since a session writes those.
+OWN_PAGES = ("book.md", "session.md", "sessions.md", "standing.md", "held.md", "board.md", "rules.md", "ledger.md")
 
 
 def writes_under_claude(text, plugin=ROOT):
     """Each sentence of `text` that asks for a write and names a path under a .claude folder; the plugin's own
-    folder, which the commands it hands name, is left out, since an install keeps it under ~/.claude."""
+    folder, which the commands it hands name, is left out, since an install keeps it under ~/.claude, and so are the
+    pages p4-phi itself writes."""
     text = text.replace("\\", "/").replace(plugin.replace("\\", "/"), "<plugin>")
-    return [x for x in re.split(r"(?<=[.;:!?])\s+|\n", text) if UNDER_CLAUDE.search(x) and ASKS_WRITE.search(x)]
+    out = []
+    for x in re.split(r"(?<=[.;:!?])\s+|\n", text):
+        paths = [p.rstrip(".,;:") for p in UNDER_CLAUDE.findall(x)]
+        if ASKS_WRITE.search(x) and any(p.rsplit("/", 1)[-1] not in OWN_PAGES for p in paths):
+            out.append(x)
+    return out
 
 
 class NoWriteUnderClaude(unittest.TestCase):
@@ -1539,7 +1548,7 @@ class NoWriteUnderClaude(unittest.TestCase):
         return os.path.join(self.t.tmp, "temp", CLI.get(host, host), "scratchpad").replace("\\", "/")
 
     def run_hook(self, name, host, payload):
-        return context(self.t.hook(name, host, {"scratchpad_dir": self.pad(host), **payload}))
+        return context(self.t.hook(name, host, {"scratchpad_dir": self.pad(host), **payload}, P4_PHI_NEW_TASK="1"))
 
     def wrap_up(self, host):
         t = self.t
