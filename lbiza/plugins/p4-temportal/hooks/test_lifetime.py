@@ -559,8 +559,9 @@ class Layout(unittest.TestCase):
         self.assertEqual(read(os.path.join(self.p4, ".gitignore")),
                          "temportal/notebook/.out/\nphi/models/served/\n", "rewritten, and not left twice")
 
-    def test_differing_ignored_caches_are_never_set_aside(self):
-        """Two differing copies of a cache the store ignores are never set aside in .layout-conflicts/ and committed."""
+    def test_the_older_of_two_differing_ignored_caches_is_set_aside_uncommitted(self):
+        """Of two differing copies of a cache the store ignores, the newer stays and the older is set aside in the
+        plugin's .layout-conflicts/, as a tracked file's is, and is never committed."""
         if not self.git:
             self.skipTest("no git")
         put(os.path.join(self.p4, ".gitignore"), "recall/models/index.json\n")
@@ -572,7 +573,8 @@ class Layout(unittest.TestCase):
         self.g("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "split")
         p4conf.migrate_layout(self.p4)
         self.assertEqual(read(os.path.join(self.p4, "phi", "models", "index.json")), "new", "the newer stays")
-        self.assertFalse(os.path.exists(os.path.join(self.p4, "phi", ".layout-conflicts")), "nothing set aside")
+        self.assertEqual(read(os.path.join(self.p4, "phi", ".layout-conflicts", "models", "index.json")), "old",
+                         "the older is set aside, not deleted")
         self.assertNotIn(".layout-conflicts", self.g("ls-files"))
 
     def test_an_old_plugin_writing_after_the_move_is_merged(self):
