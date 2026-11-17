@@ -61,7 +61,8 @@ DEFAULTS = {
         "levels": True,                  # false: no delegation rule, and no long command moved to the background
         "file_sets": True,               # false: a session may be started by a brief that declares no write set
         "session_archives": False,       # true: a session may archive itself or another session
-        "issues": True,                  # false: no issue is filed for the purpose of a child session that writes
+        "issues": True,                  # false: the issue loop is off: no open issue a brief names, no commit line
+                                         # for it, no regression test at Stop and no push line
     },
     "temportal": {                       # lifetimes under .claude/p4/temportal/, read by p4-temportal's lifetime.py
         "cache": {                       # a rule per folder, relative to temportal/, and memory/ is never cleared
