@@ -1105,6 +1105,21 @@ class Rules(unittest.TestCase):
         for word in ("code", "history", "issues", "documentation", "decisions file", "decisions.md", "source"):
             self.assertIn(word, line)
 
+    def test_the_rules_fit_their_room_however_many_memories_there_are(self):
+        """Names alone past the room: the start's context stays within HOOK_CHARS, and rules_text within its room."""
+        for k in range(400):
+            memory(self.t.p4, f"a-rather-long-memory-name-number-{k:03d}", "feedback", f"Rule {k} of the many.")
+        for source in ("startup", "clear", "compact"):
+            got = self.start(KID, source)
+            self.assertLessEqual(len(got), phi.HOOK_CHARS, source)
+            self.assertIn("rules.md", got, source)
+        for room in (600, 700, 2000, 5000, 9000):
+            for brief in (False, True):
+                got = phi.rules_text(self.t.p4, room, brief=brief)
+                self.assertLessEqual(len(got), room, (room, brief))
+                self.assertIn("more", got, (room, brief))
+        self.assertIn("act-don't-wait: ", phi.rules_text(self.t.p4, 9000), "the built-in rules still come whole")
+
     def test_a_fork_gets_the_built_in_rules_alone(self):
         """A fork's inherited conversation already holds the store's feedback and user memories."""
         self.assertEqual(phi.rules_text(self.t.p4, 9000, fork=True), phi.builtin_text())

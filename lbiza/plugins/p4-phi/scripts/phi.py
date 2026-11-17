@@ -1506,12 +1506,12 @@ def rules_text(home, room, fork=False, brief=False):
     mem = p4conf.sub(home, "memory").replace("\\", "/")
     if brief:                                      # handed in full at the start; after a compaction, its page
         RAN["rules"] = "page"
-        return (f"phi (p4-phi): the rules built into p4-phi and this project's feedback and user memories were handed "
-                f"to this session in full at its start and still hold: "
-                + ", ".join([x.split(": ", 1)[0].replace("built-in, ", "") for x in built_in()]
-                            + [n for n, _ in rules])
-                + f". The memories are whole, with their Why, on one page: {page}. Read that page when one of them "
-                  f"bears on the next step.")
+        head = (f"phi (p4-phi): the rules built into p4-phi and this project's feedback and user memories were "
+                f"handed to this session in full at its start and still hold: ")
+        tail = (f". The memories are whole, with their Why, on one page: {page}. Read that page when one of them "
+                f"bears on the next step.")
+        names = [x.split(": ", 1)[0].replace("built-in, ", "") for x in built_in()] + [n for n, _ in rules]
+        return cut(head + names_within(names, room - len(head) - len(tail)) + tail, room)
     head = (f"phi (p4-phi): the rules built into p4-phi, then this project's feedback and user memories from {mem}, "
             f"a line each. They are in your context now, as are CLAUDE.md and the memory index, so do not open the "
             f"memory files or CLAUDE.md to learn the rules before the work. A memory cut short with ... is whole, "
@@ -1522,9 +1522,38 @@ def rules_text(home, room, fork=False, brief=False):
             f"such as a skill, a plan or source files.")
     rules = [tuple(x.split(": ", 1)) for x in built_in()] + list(rules)
     names = [f"- {name}: " for name, _ in rules]
-    room -= len(head) + sum(len(x) + 1 for x in names) + 2
+    left = room - len(head) - sum(len(x) + 1 for x in names)
     RAN["rules"] = len(rules)
-    return "\n".join([head] + [a + b for a, b in zip(names, fair_cut([rule_of(b) for _, b in rules], room))])
+    if left >= RULE_MIN * len(rules):             # a line each fits
+        return "\n".join([head] + [a + b for a, b in zip(names, fair_cut([rule_of(b) for _, b in rules], left))])
+    # too many for a line each: the built-in rules in half the room left, the memories by name in the rest
+    own = rules[:len(built_in())]
+    lead = "- the memories, by name, each whole on the page above: "
+    head = head.replace(", a line each.", ", the built-in rules a line each and the memories by name.")
+    if room - len(head) - len(lead) < NAMES_MIN:    # a room too small for the head: the page, then names
+        head = (f"phi (p4-phi): the rules built into p4-phi and this project's {len(rules) - len(own)} feedback and "
+                f"user memories are whole, with their Why, on one page: {page}. Read that page before the work.")
+    left = (room - len(head) - len(lead) - 2 - sum(len(x) + 1 for x in names[:len(own)])) // 2
+    lines = [a + b for a, b in zip(names, fair_cut([rule_of(b) for _, b in own], left))] \
+        if left >= RULE_MIN * len(own) else []
+    left = room - len("\n".join([head] + lines)) - len(lead) - 2
+    lines.append(lead + names_within([n for n, _ in rules[len(own):]], left) + ".")
+    return cut("\n".join([head] + lines), room)
+
+
+RULE_MIN = 40       # the fewest characters fair_cut cuts a rule's line to
+NAMES_MIN = 200     # the least room kept for the memories' names when they are given by name alone
+
+
+def names_within(names, room):
+    """`names` joined with commas in at most `room` characters: as many as fit, then how many more there are."""
+    out = []
+    for k, n in enumerate(names):
+        more = f", and {len(names) - k - 1} more" if k < len(names) - 1 else ""
+        if len(", ".join(out + [n])) + len(more) > room:
+            return ", ".join(out) + f", and {len(names) - k} more" if out else f"{len(names)} memories"
+        out.append(n)
+    return ", ".join(out)
 
 
 # --- rules that change mid-session ----------------------------------------------------------------------------------
