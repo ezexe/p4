@@ -29,7 +29,7 @@ like the top candidate of a message that has an answer: fit on those tasks alone
 match looks like and prints lines for ordinary messages. A silence task is an ordinary message with no positive,
 its candidates the ones `p4.query` hands the ranker, every one a negative weighing SILENT_WEIGHT. The messages come
 from phi/models/silent.jsonl when the store has one, else from the plugin's silent-prompts.jsonl, a copy of the
-train split of ezexe/p4's scripts/session/overrides_tasks.jsonl, three of its rows from that file as it stood at
+train split of the suite now at experiments/p4-suite/session/overrides_tasks.jsonl in ezexe/p4-phi-experiments, three of its rows from that file as it stood at
 973c33f, as each row's `from` says; that file's test split stays out of training.
 Silence tasks train in every fold and are held out of none, and the threshold is chosen on the labelled tasks
 alone.

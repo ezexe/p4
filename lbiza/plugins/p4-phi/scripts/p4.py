@@ -71,9 +71,8 @@ CANDIDATES = 200
 # Without a trained ranker, fallback_order prints a document that passes the four gates below, or a file document
 # that passes the three after them. The gates count the message's words: each word that is neither common nor a
 # number, even one the index lacks, so a message about something else covers little of itself with any document.
-# Looser values let the general prompts of scripts/session/overrides_tasks.jsonl print, and tighter ones drop the
-# documents that labelled tasks are about; test_query.Regressions holds questions that must print and messages that
-# must not.
+# Looser values let general prompts such as those of silent-prompts.jsonl print, and tighter ones drop the documents
+# that labelled tasks are about.
 MIN_RARE = 2                  # the document holds at least this many of the message's words...
 FALLBACK_COVER = 0.75         # ...they are this share of the message's words...
 FALLBACK_ICOVER = 0.65        # ...their idf is this share of the message's, a word the index lacks weighing most...
