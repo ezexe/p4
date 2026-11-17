@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The session tree · p4-phi dox</title>
-<meta name="description" content="An interactive tree of Claude desktop sessions as p4-phi links them: top sessions, children, grandchildren, detach, reparent, branching out and done.">
+<meta name="description" content="An interactive tree of Claude desktop sessions as p4-phi links them: orchestrators, workers and coworkers, detach to top level, reparent, a queue split by write set, and done.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='1' width='14' height='14' rx='4' fill='%230b6b66'/%3E%3C/svg%3E">
 <style>
 :root{
   --bg:#f5f3ec; --panel:#fffdf7; --sunk:#efece2; --ink:#1d1c19; --soft:#5d5a52; --line:#d9d4c6; --link:#a9a392;
@@ -205,14 +206,14 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
   </div>
   <nav class="tabs" aria-label="Pages about the tree">
     <a href="session-tree.html" aria-current="page">The session tree</a>
-    <a href="tree-compare.html">Compared with phi's node tree</a>
+    <a href="tree-compare.html">Two trees that share a name</a>
     <a href="puppeteer.html">The puppeteer</a>
   </nav>
   <h1>The session tree</h1>
-  <p class="lede">A session in the Claude desktop app is either a top session or a session that another session started. p4-phi hands tasks, notes and reports along those links. Make each move on the tree below, watch the links redraw, and copy the call or command that makes the move for real.</p>
+  <p class="lede">A session in the Claude desktop app is either an orchestrator, a session with no parent session, or a session that another session started. p4-phi hands tasks, notes and reports along those links. Make each move on the tree below, watch the links redraw, and copy the call or command that makes the move for real.</p>
   <ul class="facts">
     <li class="f-app"><b>The app keeps one record.</b>It is the nesting in the sidebar. It decides which session is told when a turn ends, and which sessions are archived together.</li>
-    <li class="f-phi"><b>phi keeps another.</b>It is <code>spawnedFrom</code> in each session's <code>session.json</code>. It decides who gets a session's background, notes and reports.</li>
+    <li class="f-phi"><b>p4-phi keeps another.</b>It is <code>spawnedFrom</code> in each session's <code>session.json</code>. It decides who gets a session's start background, notes and reports.</li>
     <li class="f-you"><b>They can disagree.</b>Some moves change only one record. Switch the view above the tree to see each side, and follow the dashed line to the other side's parent.</li>
   </ul>
 
@@ -220,14 +221,13 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
     <section class="card treecard" aria-label="The live tree">
       <div class="bar">
         <div class="seg" role="group" aria-label="Whose record to draw">
-          <button type="button" data-view="phi" aria-pressed="true">phi's tree</button>
+          <button type="button" data-view="phi" aria-pressed="true">p4-phi's tree</button>
           <button type="button" data-view="app" aria-pressed="false">the app's sidebar</button>
         </div>
         <span class="spacer"></span>
         <select id="preset" aria-label="Scenario">
-          <option value="one">One top session</option>
-          <option value="family">A small family</option>
-          <option value="today">Today's tree, 2026-11-16</option>
+          <option value="one">One orchestrator</option>
+          <option value="family">A small tree</option>
         </select>
         <button type="button" class="ghostbtn" id="reset">Reset</button>
       </div>
@@ -250,29 +250,29 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
           <input id="title" type="text" maxlength="58" autocomplete="off">
         </div>
         <div class="acts" id="acts">
-          <button type="button" class="act" data-act="top">New top session <span class="tag both">app + phi</span></button>
-          <button type="button" class="act" data-act="child"><span id="childlabel">Start a child</span> <span class="tag app">app call</span></button>
-          <button type="button" class="act" data-act="request">Start it by request <span class="tag phi">phi</span></button>
-          <button type="button" class="act" data-act="branch">Branch out a queue <span class="tag both">app + phi</span></button>
-          <button type="button" class="act" data-act="detachApp">Detach in the app <span class="tag app">app call</span></button>
-          <button type="button" class="act" data-act="detachPhi">Detach in phi <span class="tag phi">phi</span></button>
+          <button type="button" class="act" data-act="top">New orchestrator <span class="tag both">app + p4-phi</span></button>
+          <button type="button" class="act" data-act="child"><span id="childlabel">Start a worker</span> <span class="tag app">app call</span></button>
+          <button type="button" class="act" data-act="request">Start it by request <span class="tag phi">p4-phi</span></button>
+          <button type="button" class="act" data-act="branch">Split a queue by write set <span class="tag both">app + p4-phi</span></button>
+          <button type="button" class="act" data-act="detachApp">Detach to top level in the app <span class="tag app">app call</span></button>
+          <button type="button" class="act" data-act="detachPhi">Detach to top level in p4-phi <span class="tag phi">p4-phi</span></button>
           <div class="movebar">
             <select id="under" aria-label="Session to put the selected one under"></select>
-            <button type="button" class="act" data-act="reparent">Reparent <span class="tag phi">phi</span></button>
+            <button type="button" class="act" data-act="reparent">Reparent <span class="tag phi">p4-phi</span></button>
           </div>
-          <button type="button" class="act" data-act="done">Mark done <span class="tag phi">phi</span></button>
+          <button type="button" class="act" data-act="done">Mark done <span class="tag phi">p4-phi</span></button>
           <button type="button" class="act" data-act="again">Message it again <span class="tag you">ezexe</span></button>
           <button type="button" class="act wide" data-act="archive">Archive it <span class="tag you">ezexe</span></button>
         </div>
       </section>
 
-      <section class="card sec" id="branch" hidden aria-label="Branch out a queue">
+      <section class="card sec" id="branch" hidden aria-label="Split a queue by write set">
         <h2>The queue to split</h2>
         <div class="queue" id="queue"></div>
         <ul class="groups" id="groups"></ul>
         <div class="rowbtns">
           <button type="button" class="btn" id="qadd">Add a task</button>
-          <button type="button" class="btn go" id="qgo">Start the children</button>
+          <button type="button" class="btn go" id="qgo">Start the workers</button>
           <button type="button" class="btn" id="qclose">Close</button>
         </div>
       </section>
@@ -281,48 +281,48 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
     </div>
   </div>
 
-  <section class="rules" aria-label="Three rules the plugin holds">
-    <h2>Three rules the plugin holds</h2>
-    <p class="intro">Each rule began as an issue, and each is built. The moves above follow them, and each card says what phi does.</p>
+  <section class="rules" aria-label="Three rules p4-phi holds">
+    <h2>Three rules p4-phi holds</h2>
+    <p class="intro">The moves above follow these rules, and each card says what p4-phi does.</p>
     <div class="rule">
-      <h3><a href="https://github.com/ezexe/p4/issues/48">ezexe/p4#48</a>: one writer per file</h3>
+      <h3>One writer per file</h3>
       <ul>
         <li>Every brief declares the files its session may write on a line <code>Files: &lt;paths&gt;</code>, or <code>Files: none</code>.</li>
-        <li>phi refuses a start, or a start request, whose brief declares no file set. The brief of a new top session is exempt from the check on a start.</li>
-        <li>phi holds a start whose file set overlaps a live session's until that session reports done. A session above the starter never holds it.</li>
-        <li>An archived session holds nothing, and since 0.10.0 neither does a session the app shows as stopped, until its next turn.</li>
-        <li>phi keeps the set as <code>fileSet</code> in the child's <code>session.json</code> and shows it under Files on the child's page.</li>
-        <li>There is one work tree. phi asks before a start that passes <code>use_worktree: true</code> or names a branch.</li>
-        <li>A leaf is one issue, one file set, one proving test and one commit. A child whose task spans more splits it again. Only the session that started a child changes its queue, and only the tree's top session pushes.</li>
-        <li>Setting <code>phi.file_sets</code> to false in <code>p4.json</code> turns the check off.</li>
+        <li>p4-phi refuses a start, or a start request, whose brief declares no write set. The brief of a new orchestrator is exempt from the check on a start.</li>
+        <li>p4-phi holds a start whose write set overlaps a live session's until that session reports done. A session above the parent session never holds it.</li>
+        <li>An archived session holds nothing, and neither does a session the app shows as stopped, until its next turn.</li>
+        <li>p4-phi keeps the set as <code>fileSet</code> in the worker's <code>session.json</code> and shows it under Files on the worker's page. <code>phi.py files &lt;path&gt; ...</code> replaces it with the paths given and <code>phi.py files --release</code> empties it, so a start request held on the freed paths is handed out at the next turn ezexe begins in the session that filed it.</li>
+        <li>There is one work tree. p4-phi asks before a start that passes <code>use_worktree: true</code> or names a branch, and before a worker makes a worktree or a branch of its own or moves the checkout to another branch. It also asks before a worker lands work with a push, merge, rebase or pull, unless its brief hands it the landing or it works on an issue of its own.</li>
+        <li>Green work that closes an issue is pushed at once. A worker that took an issue is told to push its <code>Closes #N</code> commit itself once its regression test passes, and the orchestrator is told to push and sync the issue-closing commits of a finished worker that took none.</li>
+        <li>Setting <code>phi.file_sets</code> to false in <code>p4.json</code> turns the check on a start call off. A start request still declares its write set, and one that overlaps a live writer still waits.</li>
       </ul>
     </div>
     <div class="rule">
-      <h3><a href="https://github.com/ezexe/p4/issues/49">ezexe/p4#49</a>: ezexe archives</h3>
+      <h3>ezexe archives</h3>
       <ul>
-        <li>No session archives a session on its own. phi's hook refuses the archive call, for the session itself and for another. The one exception is a puppeteer, in the third rule.</li>
-        <li>A child that is done shows no button and asks for nothing. It reports, retires to its parent as one <code>replaces:</code> note, and the chain treats it as archived from that moment.</li>
-        <li>A top session that is done ends its turn with <code>mcp__ccd_turn__wrap_up</code> whose first action is the app's <code>archive</code>. You archive it with one press.</li>
-        <li>In that closing turn the top session offers the finished sessions of its tree as one <code>AskUserQuestion</code> with <code>multiSelect</code>, and archives exactly the ones ezexe picks. Those are the only archive calls the hook lets through.</li>
-        <li><code>phi/ready-to-archive.md</code> lists the sessions that wait for ezexe.</li>
-        <li>A retired session that is messaged again is named to its parent as reopened.</li>
-        <li>Setting <code>phi.session_archives</code> to true in <code>p4.json</code> restores the old behaviour.</li>
+        <li>No session archives a session on its own. p4-phi's hook refuses the archive call, for the session itself and for another, except for a session ezexe picked, below.</li>
+        <li>A worker that is done shows no button and asks for nothing. It reports, and when its brief said “report when done” it is counted as archived once the issue it closes, if any, is proven, its outcome kept on its parent session as one <code>replaces:</code> note.</li>
+        <li>An orchestrator that is done ends its turn with <code>mcp__ccd_turn__wrap_up</code> whose first action is the app's <code>archive</code>. ezexe archives it with one press.</li>
+        <li>In that closing turn the orchestrator puts the finished sessions of its tree to ezexe as one <code>AskUserQuestion</code> with <code>multiSelect</code>, and archives exactly the ones ezexe picks. Those calls, and a puppeteer's archive of a session ezexe picked, are the only archive calls the hook lets through.</li>
+        <li><code>phi/ready-to-archive.md</code> lists the sessions counted as archived that the app has not archived yet.</li>
+        <li>A session counted as archived that is messaged again is named to its parent session as reopened.</li>
+        <li>Setting <code>phi.session_archives</code> to true in <code>p4.json</code> lets sessions archive sessions with the app's tool.</li>
       </ul>
     </div>
     <div class="rule wide">
-      <h3><a href="https://github.com/ezexe/p4/issues/58">ezexe/p4#58</a>: a puppeteer and the sessions it controls</h3>
+      <h3>A puppeteer and the sessions it controls</h3>
       <ul>
-        <li>A puppeteer is a top session ezexe filed in the sidebar section “puppeteers”. It controls the top sessions of other trees, which stay tops of their own trees in their own sections. The <a href="puppeteer.html">puppeteer page</a> models it.</li>
-        <li>A start request is handed only to the session that filed it, at the next turn ezexe begins in that session, so the app nests the child where phi does.</li>
-        <li>A session whose turn another session began shows the child as a proposal card first, the start call with <code>initiation</code> <code>own_initiative</code>. It writes a start request only where the card is refused too.</li>
-        <li>A top session that has a puppeteer starts no new top session itself. It writes <code>phi.py request ... --to-puppeteer</code>, and its puppeteer starts the session and files it in that project's section.</li>
-        <li>A puppeteer may archive a complete session it controls, or one in such a session's tree, with a <code>reason</code> and no quick select.</li>
+        <li>A puppeteer is the session ezexe files in the sidebar section “puppeteers”. It controls the orchestrators of other trees, which stay at the top of their own trees in their own sections. The <a href="puppeteer.html">puppeteer page</a> models it.</li>
+        <li>A start request is handed only to the session that filed it, at the next turn ezexe begins in that session, so the app nests the worker where p4-phi does.</li>
+        <li>A session whose turn another session began shows the worker as a suggested task card first, the start call with <code>initiation</code> <code>own_initiative</code>. It writes a start request only where the card is refused too.</li>
+        <li>An orchestrator that has a puppeteer starts no new orchestrator itself. It writes <code>phi.py request ... --to-puppeteer</code>, and its puppeteer starts the session, files it in that environment's section and takes it under control, or declines it.</li>
+        <li>A puppeteer may archive a session it controls, or one in such a session's tree, only when ezexe picked it in that turn and p4-phi's records hold it complete.</li>
       </ul>
     </div>
   </section>
 
   <footer>
-    Every call and command here is read from the plugin's source: <code>phi.py</code>, <code>relay.py</code>, <code>starts.py</code> and the <code>phi</code> skill, in <a href="https://github.com/ezexe/p4">ezexe/p4</a> under <code>lbiza/plugins/p4-phi</code>. The tree is a model in your browser. Nothing on this page reaches a real session.
+    Every call, command and line here is read from the plugin's source: <code>phi.py</code>, <code>relay.py</code>, <code>starts.py</code> and <code>plans.py</code>, in <a href="https://github.com/ezexe/p4">ezexe/p4</a> under <code>lbiza/plugins/p4-phi</code>. The tree is a model in your browser. Nothing on this page reaches a real session.
   </footer>
 </div>
 
@@ -374,35 +374,18 @@ var PRESETS={
     var a=mk("Plan the release",null,null,{state:"not shown done",turns:6,tag:"orchestrates"});
     var b=mk("Build the changelog writer",a,a,{state:"not shown done",turns:3,shard:["tools/changelog.py","tools/test_changelog.py"]});
     mk("Check the version bump against the tag",a,a,{state:"done",turns:1,tag:"read-only check"});
-    mk("Write the proving test",b,b,{state:"not shown done",turns:1,shard:["tools/test_changelog.py"]});
+    mk("Write the regression test",b,b,{state:"not shown done",turns:1,shard:["tools/test_changelog.py"]});
     mk("Docs site upkeep",null,null,{state:"not shown done",turns:4,tag:"orchestrates"});
     S.sel=b;
-  },
-  today:function(){
-    var o=mk("Multi-session orchestration and planning",null,null,{state:"not shown done",turns:4,tag:"orchestrates only"});
-    var f=mk("Claude desktop app file organization",null,null,{state:"not shown done",turns:67,tag:"orchestrates"});
-    var a=mk("Acceptance check",null,null,{state:"not shown done",turns:3,tag:"orchestrates"});
-    mk("Raise memory patches as p4 plugin issues",null,null,{state:"not shown done",turns:1,tag:"orchestrates"});
-    var p=mk("Puppeteer: orchestrators that watch and pioneer",null,null,{state:"not shown done",turns:16,tag:"orchestrates"});
-    mk("dox: interactive session-tree page",o,o,{state:"not shown done",turns:1,shard:["dox/"]});
-    mk("p4-phi: build #43, #44, #45, then #41",f,p,{state:"not shown done",turns:1,tag:"builder, serial run"});
-    mk("p4-temportal: every scratchpad becomes a link",f,o);
-    mk("Store: commit the ignore block and sync",f,o);
-    mk("p4-phi store: settle tracked and ignored",f,o);
-    mk("Fix p4-phi line bugs from the acceptance check",a,a,{state:"not shown done",turns:2});
-    mk("Check seven unverified p4-phi fixes",p,o,{tag:"read-only check"});
-    S.sel=o;
   }
 };
 function load(name){
-  S={nodes:{},order:[],view:"phi",sel:null,seq:0,salt:{one:11,family:23,today:37}[name]||5,preset:name,links:{},titles:0,
+  S={nodes:{},order:[],view:"phi",sel:null,seq:0,salt:{one:11,family:23}[name]||5,preset:name,links:{},titles:0,
      queue:null,example:null,con:null};
   PRESETS[name]();
   S.order.forEach(function(k){N(k).born=false});
   S.example={kind:"intro"};
-  S.con={say:name==="today"
-    ?"This is the shape phi.py tree printed earlier on 2026-11-16, with two short side questions and one new top session left out, and one title shortened. Five children came through start requests before 0.10.0, when a request went to whichever session ezexe spoke in next, so the app nests them somewhere else. Switch the view to see it."
-    :"Select a session, then choose a move. You can also drag a session by its grip onto another one."};
+  S.con={say:"Select a session, then choose a move. You can also drag a session by its grip onto another one."};
   $("preset").value=name;$("branch").hidden=true;
   render(true);
 }
@@ -414,11 +397,11 @@ svg.appendChild(rootzone);svg.appendChild(rootlabel);svg.appendChild(gLinks);svg
 var els={},pos={};
 function fit(t,text,max){t.textContent=text;if(t.getComputedTextLength()<=max)return;var n=text.length;while(n>1){n--;t.textContent=text.slice(0,n).replace(/\s+$/,"")+"…";if(t.getComputedTextLength()<=max)break}}
 function meta(n){
-  var v=S.view,o=v==="phi"?"app":"phi",parts=[n.retired?"done, retired":n.state,n.turns+" turn"+(n.turns===1?"":"s")];
+  var v=S.view,o=v==="phi"?"app":"phi",parts=[n.retired?"done, counted as archived":n.state,n.turns+" turn"+(n.turns===1?"":"s")];
   if(n.tag)parts.push(n.tag);
-  if(n.shard.length)parts.push(n.shard.length+" file"+(n.shard.length===1?"":"s")+" in its file set");
+  if(n.shard.length)parts.push(n.shard.length+" file"+(n.shard.length===1?"":"s")+" in its write set");
   if(n.notes)parts.push(n.notes+" replaces: note"+(n.notes===1?"":"s"));
-  if(parentIn(n.id,v)&&!parentIn(n.id,o))parts.push("top session in "+(o==="app"?"the app":"phi"));
+  if(parentIn(n.id,v)&&!parentIn(n.id,o))parts.push("at the top in "+(o==="app"?"the app":"p4-phi"));
   return parts.join(" · ");
 }
 function render(still){
@@ -428,7 +411,7 @@ function render(still){
   var Ht=TOP+rows.length*(H+GAP)+6;
   svg.setAttribute("viewBox","0 0 "+W+" "+Ht);svg.setAttribute("height",Ht);
   rootzone.setAttribute("width",W-2);
-  rootlabel.textContent=drag&&drag.on?"ROOT · drop here to detach in phi":"ROOT · top sessions are siblings";
+  rootlabel.textContent=drag&&drag.on?"TOP LEVEL · drop here to detach to top level in p4-phi":v==="phi"?"ORCHESTRATORS · siblings at the top":"THE SIDEBAR'S TOP LEVEL";
   pos={};
   rows.forEach(function(r,i){var x=X0+r.d*IND;pos[r.id]={x:x,y:TOP+i*(H+GAP),w:W-GUT-x,d:r.d}});
   /* nodes */
@@ -480,14 +463,14 @@ function render(still){
   });
   var hint=$("hint");hint.innerHTML="";
   if(any){hint.appendChild(h("i",v==="app"?{class:"p"}:null));
-    hint.appendChild(document.createTextNode(v==="phi"?"A dashed line runs from a session to the session the app nests it under, where that differs from phi's parent.":"A dashed line runs from a session to the session phi records as its parent, where that differs from the app's nesting."))}
-  else hint.textContent=v==="phi"?"You are looking at phi's record: who started whom, as spawnedFrom says.":"You are looking at the app's record: the nesting in the sidebar.";
+    hint.appendChild(document.createTextNode(v==="phi"?"A dashed line runs from a session to the session the app nests it under, where that differs from p4-phi's parent session.":"A dashed line runs from a session to the session p4-phi records as its parent session, where that differs from the app's nesting."))}
+  else hint.textContent=v==="phi"?"You are looking at p4-phi's record: who started whom, as spawnedFrom says.":"You are looking at the app's record: the nesting in the sidebar.";
   document.querySelectorAll(".seg button").forEach(function(b){b.setAttribute("aria-pressed",b.getAttribute("data-view")===v?"true":"false")});
   panel();treetext();consoleOut();example();
 }
 function treetext(){
   var out=[];(function walk(ids,d){ids.forEach(function(id){var n=N(id);
-    out.push(Array(d+1).join("  ")+"- "+n.title+" ("+id+"): "+n.state+", "+n.turns+" turn"+(n.turns===1?"":"s"));walk(kids(id,"phi"),d+1)})})(roots("phi"),0);
+    out.push(Array(d+1).join("  ")+"- \""+n.title+"\" `"+id+"`: "+n.state+", "+n.turns+" turn"+(n.turns===1?"":"s"));walk(kids(id,"phi"),d+1)})})(roots("phi"),0);
   $("treetext").textContent="$ "+PHI+" tree\n"+(out.join("\n")||"no sessions yet");
 }
 function consoleOut(){
@@ -499,29 +482,29 @@ function say(lines,text){S.con={lines:lines,say:text}}
 
 /* ---------- panel ---------- */
 var TOPS=["Topic: the release notes","Topic: flaky test hunt","Topic: store layout","Topic: hook timeouts","Topic: a second machine"];
-var CHILDREN=["Build the parser","Check the fix against the issue","Write the proving test","Audit the hook timeouts","Trace the slow start","Read the transcript format","Fix the report cut"];
+var CHILDREN=["Build the parser","Check the fix against the issue","Write the regression test","Audit the hook timeouts","Trace the slow start","Read the transcript format","Fix the report cut"];
 function nextTitle(top){var f=$("title"),t=f.value.trim();if(t){f.value="";return t.slice(0,58)}var pool=top?TOPS:CHILDREN;return pool[(S.titles++)%pool.length]}
 function nameOf(id){return id&&N(id)?N(id).title:""}
 function panel(){
   var n=S.sel&&N(S.sel);
   if(!n){S.sel=S.order[0]||null;n=S.sel&&N(S.sel)}
   var acts=$("acts").querySelectorAll("[data-act]"),set=function(a,on){for(var i=0;i<acts.length;i++)if(acts[i].getAttribute("data-act")===a)acts[i].disabled=!on};
-  if(!n){$("selname").textContent="No session left";$("selmeta").textContent="Start a new top session, or reset.";
+  if(!n){$("selname").textContent="No session left";$("selmeta").textContent="Start a new orchestrator, or reset.";
     ["child","request","branch","detachApp","detachPhi","reparent","done","again","archive"].forEach(function(a){set(a,false)});$("under").innerHTML="";return}
   var pp=parentIn(n.id,"phi"),ap=parentIn(n.id,"app");
   $("selname").textContent=n.title;
   var m=$("selmeta");m.innerHTML="";
   m.appendChild(h("code",{text:n.id}));m.appendChild(h("br"));
-  m.appendChild(document.createTextNode("phi: "));m.appendChild(h("b",{text:pp?"started by "+q(nameOf(pp)):"a top session"}));m.appendChild(h("br"));
+  m.appendChild(document.createTextNode("p4-phi: "));m.appendChild(h("b",{text:pp?"started by "+q(nameOf(pp)):"an orchestrator"}));m.appendChild(h("br"));
   m.appendChild(document.createTextNode("the app: "));m.appendChild(h("b",{text:ap?"nested under "+q(nameOf(ap)):"at the top level"}));
   if(pp!==ap){m.appendChild(h("br"));m.appendChild(h("span",{class:"differs",text:"The two records disagree about this session."}))}
-  $("childlabel").textContent=pp?(parentIn(pp,"phi")?"Start a child, one level deeper":"Start a grandchild"):"Start a child";
+  $("childlabel").textContent=pp?"Start a coworker":"Start a worker";
   $("title").placeholder=CHILDREN[S.titles%CHILDREN.length];
   set("child",!n.retired);set("request",!!pp&&!n.retired);set("branch",!n.retired);
   set("detachApp",!!ap);set("detachPhi",!!pp);set("done",!n.retired&&n.state!=="done"||(!n.retired&&!!pp));
   set("again",n.retired);set("archive",true);
   var u=$("under"),keep=u.value;u.innerHTML="";var d=desc(n.id,"phi");
-  S.order.forEach(function(k){if(k===n.id)return;u.appendChild(h("option",{value:k,text:"under "+N(k).title+(d.indexOf(k)>=0?", which it started":k===pp?", where it is now":"")}))});
+  S.order.forEach(function(k){if(k===n.id)return;u.appendChild(h("option",{value:k,text:"under "+N(k).title+(d.indexOf(k)>=0?", which is below it":k===pp?", where it is now":"")}))});
   if(keep&&N(keep)&&keep!==n.id)u.value=keep;
   set("reparent",S.order.length>1);
 }
@@ -535,7 +518,7 @@ function example(){
   box.appendChild(h("h3",{text:x.title}));
   box.appendChild(h("p",{class:"why",text:x.why}));
   (x.steps||[]).forEach(function(st){
-    var who=h("div",{class:"who"},[h("span",{class:"by"},[h("span",{class:"tag "+st.side,text:{app:"app call",phi:"phi command",you:"ezexe"}[st.side]}),document.createTextNode(" "+st.by)])]);
+    var who=h("div",{class:"who"},[h("span",{class:"by"},[h("span",{class:"tag "+st.side,text:{app:"app call",phi:"p4-phi",you:"ezexe"}[st.side]}),document.createTextNode(" "+st.by)])]);
     var el=h("div",{class:"step"},[who]);
     if(st.code){var b=h("button",{class:"copy",type:"button",text:"copy"});b.addEventListener("click",function(){copy(st.code,b)});who.appendChild(b);el.appendChild(h("pre",{text:st.code}))}
     if(st.out)el.appendChild(h("pre",{class:"o"+(st.err?" e":""),text:st.out}));
@@ -544,18 +527,29 @@ function example(){
   });
   if(x.app||x.phi)box.appendChild(h("div",{class:"sides"},[
     h("div",{class:"side app"},[h("b",{text:"The app records"}),x.app||""]),
-    h("div",{class:"side phi"},[h("b",{text:"phi records"}),x.phi||""])]));
+    h("div",{class:"side phi"},[h("b",{text:"p4-phi records"}),x.phi||""])]));
 }
 function copy(text,btn){
   function ok(){btn.textContent="copied";setTimeout(function(){btn.textContent="copy"},1200)}
   function old(){var t=h("textarea");t.value=text;t.style.position="fixed";t.style.opacity="0";document.body.appendChild(t);t.select();try{document.execCommand("copy");ok()}catch(e){}t.remove()}
   try{if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(text).then(ok,old);else old()}catch(e){old()}
 }
-var NEWTOP='This session is a new top session, orchestrating its own topic. Its first act: `mcp__ccd_session_mgmt__detach_session` with `"self"`, so the app stops nesting it and its reports stop going to the starter, then `'+PHI+' detach`.';
-var NO_ARCHIVE="phi (p4-phi): no session archives a session, itself included (ezexe/p4#49). The archive is ezexe's own action in the app.";
-var BUTTON="This is the top session of its tree and it is done, so end this turn with `mcp__ccd_turn__wrap_up` whose first action is the app's `archive`, and a recap of one sentence naming what was done: that puts the button in this session's next-step box, and ezexe archives it with one press. Write no paragraph asking for it, and call no archive tool for this session.";
-var CHILD_DONE="This session was started by another, so it shows no archive button and asks for nothing: report what was done and end the turn. It retires to the session that started it, and the chain treats it as archived. Call no archive tool.";
-var READY="The chain treats them as archived from now. They are ready to archive, but call no archive tool for them now: when the top session of this tree is done, it offers the finished sessions to ezexe as one quick select and archives exactly the ones ezexe picks.";
+/* the lines phi.py and relay.py print: NEW_TOP_BRIEF with new_top_first_act, NO_ARCHIVE, BUTTON, CHILD_DONE and READY;
+   PHI stands for phi.commands(), which prints the absolute path of the installed phi.py */
+/* plans.child_kind and plans.with_level: the model and effort a start call carries, said in one line of its brief */
+var DESIGNS=/^\W*(?:re-?)?(?:design|review|architect|audit|specif|spec\b|propos|investigat|decid|evaluat|assess|analy[sz]|research|plan\b)\w*/i;
+var CODE=/\.(?:py|js|jsx|ts|tsx|rs|go|c|h|cc|cpp|cs|java|kt|rb|sh|ps1|sql|toml|ya?ml)\b(?!\.)|\b(?:scripts?|src|hooks?|lib)\/|\b(?:hook|script|function|module|class|api|test suite|behaviou?r)s?\b|\b(?:fix|implement|build|refactor|port|migrat)\w*\b/i;
+var STATIC=/\b(?:docs?|dox|documentation|readme|changelog|pages?|html|css|markdown|typos?|wording|comments?|renam\w*|version bump|bump\w*|format\w*|static|mechanical|copy\w*|mov\w+)\b|\.(?:md|html|css|txt|svg)\b/i;
+var LEVEL={static:{model:"claude-sonnet-5-5",effort:"medium",said:"static or mechanical work"},build:{model:"inherit",effort:"high",said:"a build that changes behaviour"},design:{model:"inherit",effort:"high",said:"a design or review step"}};
+function workKind(t){if(DESIGNS.test(t))return "design";if(STATIC.test(t)&&!CODE.test(t))return "static";return "build"}
+function withLevel(c,marker){var l=LEVEL[workKind(c.title+"\n"+c.prompt)],out={};for(var k in c)out[k]=c[k];
+  out.prompt=c.prompt+"\n\nModel and effort: "+(l.model==="inherit"?"the parent session's own model":l.model)+" at "+l.effort+" effort, since this is "+l.said+"."+(marker?"\n\n"+marker:"");
+  out.effort=l.effort;if(l.model!=="inherit")out.model=l.model;return out}
+var NEWTOP='This session is a new top session, orchestrating its own topic. Its first act: `mcp__ccd_session_mgmt__detach_session` with `"self"`, so the app stops nesting it and its reports stop going to its parent session, then `'+PHI+' detach`.';
+var NO_ARCHIVE="phi (p4-phi): this archive call is refused: a session is archived by ezexe's own press or pick.";
+var BUTTON="This session is at the top level of its tree and it is done, so end this turn with `mcp__ccd_turn__wrap_up` whose first action is the app's `archive`, and a recap of one sentence naming what was done: that puts the button in this session's next-step box, and ezexe archives it with one press. Write no paragraph asking for it, and call no archive tool for this session.";
+var CHILD_DONE="This session has a parent session, so it shows no archive button and asks for nothing: report what was done and end the turn. Call no archive tool.";
+var READY="p4-phi counts them as archived from now. Call no archive tool for them: when the orchestrator of this tree is done, it puts its finished sessions to ezexe as one multiple-choice question and archives exactly the ones ezexe picks.";
 var ARCHIVE="mcp__ccd_session_mgmt__archive_session";
 function cutTo(t,n){return t.length<=n?t:t.slice(0,n-4)+" ..."}
 /* relay.offer: one option a finished session while they fit one question, else one for all and one a parent */
@@ -570,114 +564,114 @@ function offerOf(top){
   return opts;
 }
 var EX={
-  intro:function(){return{title:"Choose a move",why:"Each move you make on the tree shows here as the call or command that performs it, with what the app and phi each write down. phi starts, stops and messages no session itself. It hands a session the exact call, and the session makes it.",
+  intro:function(){return{title:"Choose a move",why:"Each move you make on the tree shows here as the call or command that performs it, with what the app and p4-phi each write down. p4-phi starts, stops and messages no session itself. It hands a session the exact call, and the session makes it.",
     steps:[{side:"phi",by:"Print the tree from any session.",code:PHI+" tree"},
            {side:"phi",by:"Print one session's page.",code:PHI+" show <sessionId>"}],
-    app:"Each session's record, with the session that started it and whether it is archived.",
+    app:"Each session's record, with its parent session and whether it is archived.",
     phi:"One folder for each session under <project>/.claude/p4/phi/sessions/<sessionId>/, holding session.json, its turns, its notes and its page."}},
-  top:function(e){return{title:"A new top session",
-    why:"A top session is one nobody started. It orchestrates its own topic, and in the root every top session relays to the others as siblings. ezexe can start one by hand in the app, and then no move is needed. When a session starts one, it begins nested under its starter, so it must leave on both sides.",
+  top:function(e){return{title:"A new orchestrator",
+    why:"An orchestrator is a session with no parent session. It orchestrates its own topic, and the orchestrators at the top are siblings: p4-phi hands each what the others change. ezexe can start one by hand in the app, and then no move is needed. When a session starts one, it begins nested under its parent session, so it must detach to top level on both sides.",
     steps:[
-      {side:"app",by:q(e.starterTitle)+" starts it, in a turn ezexe began.",code:call("mcp__ccd_session__start_session",{initiation:"user_asked",title:e.title,context:"fresh",use_worktree:false,
+      {side:"app",by:q(e.starterTitle)+" starts it, in a turn ezexe began.",code:call("mcp__ccd_session__start_session",withLevel({initiation:"user_asked",title:e.title,context:"fresh",use_worktree:false,
         background:"ezexe raised a topic outside this session's task. The new session orchestrates that topic in the same checkout, on the same branch, and reports to no other session.",
-        prompt:"<the topic, with ezexe's words quoted>\n\n"+NEWTOP})},
-      {side:"app",by:"The new session's first act leaves the starter in the app.",code:call("mcp__ccd_session_mgmt__detach_session",{session_id:"self"})},
-      {side:"phi",by:"Then it leaves the starter in phi.",code:PHI+" detach",out:"already a top session",
-        note:"phi reads the new-top line in the brief and detaches the session itself at its first message. That is why this command finds the move already made."},
-      {side:"phi",by:"When the starter's turn was begun by another session, the app refuses the start. The starter shows it as a proposal card, the same call with initiation own_initiative. Only where the card is refused too, it keeps a start request with the same brief. A request's brief always declares its file set.",code:PHI+' request "'+e.title+'" --brief "<the whole brief, with the new-top lines and a line Files: none>"'},
-      {side:"phi",by:"A top session that has a puppeteer starts none of this. It asks its puppeteer, which starts the session and files it.",code:PHI+' request "'+e.title+'" --brief "<the whole brief, with a line Files: none>" --to-puppeteer',
+        prompt:"<the topic, restated as the new session's own instruction>\n\n"+NEWTOP}))},
+      {side:"app",by:"The new session's first act is the app's detach to top level.",code:call("mcp__ccd_session_mgmt__detach_session",{session_id:"self"})},
+      {side:"phi",by:"Then it is detached to top level in p4-phi.",code:PHI+" detach",out:"already an orchestrator",
+        note:"p4-phi reads the new-orchestrator line in the brief and makes the detach to top level itself at the session's first message. That is why this command finds the move already made."},
+      {side:"phi",by:"When the parent session's turn was begun by another session, the app refuses the start. The parent session shows it as a suggested task card, the same call with initiation own_initiative. Only where the card is refused too, it keeps a start request with the same brief, which always declares its write set.",code:PHI+' request "'+e.title+'" --brief "<the whole brief, with the new-orchestrator lines and a line Files: none>"'},
+      {side:"phi",by:"An orchestrator that has a puppeteer starts none of this. It asks its puppeteer, which starts the session and files it.",code:PHI+' request "'+e.title+'" --brief "<the whole brief, with a line Files: none>" --to-puppeteer',
         note:"The puppeteer page shows the whole path."}],
-    app:"No nesting. The starter is no longer told when this session's turns end, and archiving the starter no longer archives it.",
-    phi:"spawnedFrom with an empty sessionId and the source detached. Its page reads: Session `"+e.id+"`, a top session."}},
-  child:function(e){return{title:e.deep?"A grandchild, started the same way":"A child of "+q(e.parentTitle),
-    why:"A session starts another with the app's own tool. The brief names the task, what done looks like and the files the child may write, because phi gives the child the rest."+(e.deep?" A child starts a grandchild with the same call. When the app refuses it, the child shows a proposal card, and uses the start request only where the card is refused too.":""),
+    app:"No nesting. The parent session is no longer told when this session's turns end, and archiving the parent session no longer archives it.",
+    phi:"spawnedFrom with an empty sessionId and the source detached. Its page names it an orchestrator."}},
+  child:function(e){return{title:e.deep?"A coworker, started the same way":"A worker of "+q(e.parentTitle),
+    why:"A session starts another with the app's own tool. The brief names the task, what done looks like and the files the new session may write, because p4-phi gives it the rest."+(e.deep?" A worker starts a coworker with the same call. When the app refuses it, the worker shows a suggested task card, and uses the start request only where the card is refused too.":""),
     steps:[
-      {side:"app",by:q(e.parentTitle)+" makes the call.",code:call("mcp__ccd_session__start_session",{initiation:"user_asked",title:e.title,context:"fresh",use_worktree:false,
-        background:"This is one step of the plan of \""+e.parentTitle+"\". It runs in the same checkout, on the same branch, and it reports to that session when done.",
-        prompt:"<the task and what done looks like>\n\nFiles: <each path this session may write, comma separated, or none>\n\nReport when done."})},
-      {side:"phi",by:"A brief with no Files line never starts. phi's hook on the call refuses it.",err:true,
-        out:"phi (p4-phi): this start is refused: a brief declares its file set (ezexe/p4#48): add a line `Files: <each path this session may write, comma separated>`, or `Files: none` for a session that writes nothing. One writer per file: tasks that share a file go to one child as a serial run, and tasks with disjoint files each get a child."}],
-    app:"The child nests under its starter in the sidebar. The starter is told when the child's turn ends.",
-    phi:"spawnedFrom with the starter's id and the source record. phi keeps the Files line as fileSet, and \"report when done\" marks the child to retire when its work is over. At its first message the child is given the tasks of the sessions above it, their notes, and the last turn of the sessions beside it. Each finished turn's report reaches the starter in full."}},
-  request:function(e){return{title:"A child by start request",
-    why:"The app refuses a start with user_asked in a turn ezexe did not begin. A child's turn is usually begun by another session's message, so a child that wants a grandchild first shows it as a proposal card, which ezexe presses in that session. Only where the card is refused too does it write a start request and carry on. The next turn ezexe begins in that same session starts it. No other session is handed the request.",
+      {side:"app",by:q(e.parentTitle)+" makes the call.",code:call("mcp__ccd_session__start_session",withLevel({initiation:"user_asked",title:e.title,context:"fresh",use_worktree:false,
+        background:"This is one step of the task list of \""+e.parentTitle+"\". It runs in the same checkout, on the same branch, and it reports to that session when done.",
+        prompt:"<the task and what done looks like>\n\nFiles: <each path this session may write, comma separated, or none>\n\nReport when done."}))},
+      {side:"phi",by:"A brief with no Files line never starts. p4-phi's hook on the call refuses it.",err:true,
+        out:"phi (p4-phi): this start is refused: a brief declares its write set: add a line `Files: <each path this session may write, comma separated>`, or `Files: none` for a session that writes nothing. One writer per file: a start whose write set overlaps a live session's is held until that session reports done, tasks that share a file go to one child as a serial run, and tasks with disjoint files each get a child."}],
+    app:"The new session nests under its parent session in the sidebar, and the app tells the parent session when its turns end.",
+    phi:"spawnedFrom with the parent session's id and the source record. p4-phi keeps the Files line as fileSet, and \"report when done\" marks the session to be counted as archived when its work is over. At its first message it is given the tasks of the sessions above it. Since its brief names the paths it works on, it is also given its parent session's step, the task list around it and what its parent's anchor holds on those paths; a session whose brief names no path gets the notes of the sessions above it and the last turn of each sibling instead. Each finished turn's report reaches the parent session beside that session's next message, cut where the hook's room runs short."}},
+  request:function(e){return{title:"A coworker by start request",
+    why:"The app refuses a start with user_asked in a turn ezexe did not begin. A worker's turn is usually begun by another session's message, so a worker that wants a coworker first shows it as a suggested task card, which ezexe presses in that session. Only where the card is refused too does it write a start request and carry on. The next turn ezexe begins in that same session starts it. No other session is handed the request.",
     steps:[
-      {side:"app",by:q(e.reqTitle)+" shows the child as a proposal card first.",code:call("mcp__ccd_session__start_session",{initiation:"own_initiative",title:e.title,context:"fresh",use_worktree:false,
-        prompt:"<the whole brief, with its Files line>"}),note:"When ezexe presses the card, the child starts and no request is written."},
+      {side:"app",by:q(e.reqTitle)+" shows the coworker as a suggested task card first.",code:call("mcp__ccd_session__start_session",{initiation:"own_initiative",title:e.title,context:"fresh",use_worktree:false,
+        prompt:"<the whole brief, with its Files line>"}),note:"When ezexe presses the card, the coworker starts and no request is written."},
       {side:"phi",by:"Only where the card is refused too, "+q(e.reqTitle)+" keeps the request.",code:PHI+' request "'+e.title+'" --brief "<the whole brief, with its Files line>"',
-        out:"kept as start request "+e.rid+": the next turn ezexe begins in this session starts it with `user_asked`, as this session's own child. No other session is handed it. Carry on with the rest of the task, and say in this turn's report that a child waits on ezexe's next message here."},
-      {side:"app",by:"At ezexe's next message in "+q(e.reqTitle)+", phi hands that session this exact call.",code:call("mcp__ccd_session__start_session",{initiation:"user_asked",title:e.title,context:"fresh",use_worktree:false,
-        background:"Requested by the session \""+e.reqTitle+"\" ("+e.req+") in the project <project>, whose task is: <its task>.",
-        prompt:"<the whole brief, with its Files line>\n\nphi start request "+e.rid+" for "+e.req+"."})}],
-    app:"The child nests under the session that asked for it, because that session makes the call. Before 0.10.0 the request went to whichever session ezexe spoke in next, and the app nested the child there.",
-    phi:"The marker line at the end of the brief names the requester. At the child's first message phi writes spawnedFrom with the requester's id and the source requested. start-requests.jsonl holds a row for request, claimed and started. A request whose brief declares no file set is refused, and one whose set overlaps a live session's is handed out only when that session reports done. A request nobody starts within 24 hours is dropped."}},
-  detachApp:function(e){return{title:"Detach in the app",
-    why:"This is the sidebar's Detach to top level. Only the session that started it can make the call, or the session itself with \"self\". It cannot be undone from a session.",
-    steps:[{side:"app",by:"The starter names the session. The session itself passes \"self\".",code:call("mcp__ccd_session_mgmt__detach_session",{session_id:e.id})}],
-    app:"The session stops nesting under its starter. It is no longer archived with it, and the starter is no longer told when its turns end.",
-    phi:"Nothing. phi.py tree still prints the session under "+(e.phiParent?q(e.phiParent):"no parent")+", and its reports still go there. Run phi's detach as well when the session should be a top session on both sides."}},
-  detachPhi:function(e){return{title:"Detach in phi",
-    why:"This makes the session a top session in phi's tree. Run it with no id from inside the session, or name the session from anywhere.",
-    steps:[{side:"phi",by:"Any session of the store can run it.",code:PHI+" detach "+e.id,out:"detached: it is a top session now"}],
-    app:"Nothing. The skill says it plainly: the app's sidebar does not follow either command. "+(e.appParent?"The app still nests it under "+q(e.appParent)+".":"The app already has it at the top level."),
-    phi:"spawnedFrom is rewritten with an empty sessionId, the source detached, and the old parent in from. The old parent's reports get a row saying the session left. Both pages are rendered again."}},
-  reparent:function(e){return{title:e.err?"A move phi refuses":e.same?"A move already made":"Reparent under "+q(e.underTitle),
-    why:"Reparent puts a session, with every session it started, under another one. You can drag a session by its grip onto its new parent, or choose the parent from the list.",
+        out:"kept as start request "+e.rid+". No other session is handed it: it waits on ezexe's click in this session, since the app refuses this start in a turn ezexe did not begin, and the next turn ezexe begins here starts it as this session's own child. Carry on with the rest of the task. End this turn with `mcp__ccd_turn__wrap_up` with `blocked` true, the question \"Start \""+e.title+"\" here?\", cut to fit, and the reply button \"Start it\" first: the app marks this session as needing ezexe, and that one click is a turn ezexe began here, which starts it with the exact call p4-phi hands then."},
+      {side:"app",by:"At the turn ezexe begins in "+q(e.reqTitle)+", p4-phi hands that session this exact call.",code:call("mcp__ccd_session__start_session",withLevel({initiation:"user_asked",title:e.title,context:"fresh",use_worktree:false,
+        background:"Requested by the session \""+e.reqTitle+"\" `"+e.req+"` in the project <project>, whose task is: <its task>.",
+        prompt:"<the whole brief, with its Files line>"},"phi start request "+e.rid+" for "+e.req+"."))}],
+    app:"The coworker nests under the session that filed the request, because that session makes the call.",
+    phi:"The marker line at the end of the brief names the session that filed it. At the coworker's first message p4-phi writes spawnedFrom with that session's id and the source requested. start-requests.jsonl holds a row for the request, its claim and its start. A request whose brief declares no write set is refused, and one whose set overlaps a live session's is handed out only when that session reports done. A request nobody starts within 24 hours is dropped."}},
+  detachApp:function(e){return{title:"Detach to top level in the app",
+    why:"This is the sidebar's Detach to top level. Only its parent session can make the call, or the session itself with \"self\". It cannot be undone from a session.",
+    steps:[{side:"app",by:"The parent session names the session. The session itself passes \"self\".",code:call("mcp__ccd_session_mgmt__detach_session",{session_id:e.id})}],
+    app:"The session stops nesting under its parent session. It is no longer archived with it, and the parent session is no longer told when its turns end.",
+    phi:"Nothing. phi.py tree still prints the session under "+(e.phiParent?q(e.phiParent):"no parent session")+", and its reports still go there. Run p4-phi's detach to top level as well when the session should be an orchestrator on both sides."}},
+  detachPhi:function(e){return{title:"Detach to top level in p4-phi",
+    why:"This makes the session an orchestrator in p4-phi's tree. Run it with no id from inside the session, or name the session from anywhere.",
+    steps:[{side:"phi",by:"Any session of the store can run it.",code:PHI+" detach "+e.id,out:"detached to top level: it is an orchestrator now"}],
+    app:"Nothing. The app's sidebar follows neither of phi.py's two moves. "+(e.appParent?"The app still nests it under "+q(e.appParent)+".":"The app already has it at the top level."),
+    phi:"spawnedFrom is rewritten with an empty sessionId, the source detached, and the old parent session in from. The old parent session's reports get a row saying the session left. Both pages are rendered again."}},
+  reparent:function(e){return{title:e.err?"A move p4-phi refuses":e.same?"A move already made":"Reparent under "+q(e.underTitle),
+    why:"Reparent puts a session, with every session below it, under another one. You can drag a session by its grip onto its new parent session, or choose it from the list.",
     steps:[{side:"phi",by:"Give the session to move, then the session to put it under.",code:PHI+" reparent "+e.moved+" "+e.under,
-      out:e.err?"phi: a session cannot be put under itself or under a session it started":e.same?"already there":"reparented",err:e.err}],
-    app:"Nothing. The app has a call that detaches a session and none that puts one under another, so the sidebar keeps the old nesting.",
-    phi:e.err?"Nothing. The command exits with status 2.":e.same?"Nothing. The session was already there.":"spawnedFrom with the new parent's id, the source reparented, and the old parent in from. The session's latest turn is handed to the new parent's reports, and the old parent's reports note that it left."}},
+      out:e.err?"phi: a session cannot be put under itself or under a session below it":e.same?"already there":"reparented",err:e.err}],
+    app:"Nothing. The app has a call for a detach to top level and none that puts a session under another, so the sidebar keeps the old nesting.",
+    phi:e.err?"Nothing. The command exits with status 2.":e.same?"Nothing. The session was already there.":"spawnedFrom with the new parent session's id, the source reparented, and the old parent session in from. The session's latest turn is handed to the new parent session's reports, and the old parent session's reports note that it left."}},
   branch:function(e){
     var steps=[],first=null;
     e.groups.forEach(function(g){
       if(!g.clash&&!first)first=g;
       steps.push({side:"app",by:"One call for "+q(g.title)+(g.tasks.length>1?", a serial run of "+g.tasks.length+" tasks that share a file.":", a task whose files nobody else touches."),
-        code:call("mcp__ccd_session__start_session",{initiation:"user_asked",title:g.title,context:"fresh",use_worktree:false,
-          background:"One part of the queue of \""+e.parentTitle+"\", split by disjoint file sets. Everything stays in the one work tree, on the parent's branch, with one writer for each file.",
-          prompt:(g.tasks.length>1?"Do these in order, one commit each:\n"+g.tasks.map(function(t,i){return (i+1)+". "+t}).join("\n"):g.tasks[0])+"\n\nFiles: "+g.files.join(", ")+"\n\nReport when done."}),
+        code:call("mcp__ccd_session__start_session",withLevel({initiation:"user_asked",title:g.title,context:"fresh",use_worktree:false,
+          background:"One part of the queue of \""+e.parentTitle+"\", split by disjoint write sets. Everything stays in the one work tree, on the parent session's branch, with one writer for each file.",
+          prompt:(g.tasks.length>1?"Do these in order, one commit each:\n"+g.tasks.map(function(t,i){return (i+1)+". "+t}).join("\n"):g.tasks[0])+"\n\nFiles: "+g.files.join(", ")+"\n\nReport when done."})),
         err:!!g.clash,
-        out:g.clash?"phi (p4-phi): this start is held: its file set shares "+g.clash.hit.slice(0,5).join(", ")+" with \""+g.clash.title+"\" ("+g.clash.id+"), which is live and has not reported done, and no two sessions write the same file at once (ezexe/p4#48). Send this work to that session as the next task of its serial run, or start it once that session reports done.":"",
-        note:g.clash?"This child did not start, so the tree has no node for it.":""});
+        out:g.clash?"phi (p4-phi): this start is held: its write set shares "+g.clash.hit.slice(0,5).join(", ")+" with \""+g.clash.title+"\" `"+g.clash.id+"`, which is live and has not reported done. Send this work to that session as the next task of its serial run, or start it once that session reports done.":"",
+        note:g.clash?"This worker did not start, so the tree does not show it.":""});
     });
-    if(first)steps.push({side:"phi",by:"A child can also declare a shard, so that a message naming one of its paths is sent on to it.",code:PHI+" shard "+first.files.join(" "),
-      out:"kept as this session's shard: "+first.files.map(function(f){return "<project>/"+f}).join(", ")});
-    return{title:"Branch out by file set",
-      why:"A session holding a queue splits it so that no two sessions write the same file at once. Tasks that share a file go to one child as a serial run. Tasks with disjoint files each get a child, and those children run at the same time. A child whose task spans more splits it again the same way.",
+    if(first)steps.push({side:"phi",by:"A worker can also declare owned paths, so that a message naming one of its paths is sent on to it.",code:PHI+" shard "+first.files.join(" "),
+      out:"kept as this session's owned paths: "+first.files.map(function(f){return "<project>/"+f}).join(", ")});
+    return{title:"Split by write set",
+      why:"A session holding a queue splits it so that no two sessions write the same file at once. Tasks that share a file go to one worker as a serial run. Tasks with disjoint files each get a worker, and those workers run at the same time. A worker whose task spans more splits it again the same way.",
       steps:steps,
-      app:"Each child that starts nests under the parent. The app knows nothing about file sets.",
-      phi:"phi reads each child's file set from the Files line of its brief, keeps it as fileSet in the child's session.json and shows it under Files on the child's page. It holds a start whose set overlaps a live session's until that session reports done. A session above the starter never holds it, because a parent's set covers its children's."}},
+      app:"Each worker that starts nests under its parent session. The app knows nothing about write sets.",
+      phi:"p4-phi reads each worker's write set from the Files line of its brief, keeps it as fileSet in the worker's session.json and shows it under Files on the worker's page. It holds a start whose set overlaps a live session's until that session reports done. A session above the parent session never holds it, because a parent session's set covers its workers'."}},
   done:function(e){
     var steps=[];
     if(e.parentTitle){
-      steps.push({side:"phi",by:"The session is marked to retire when its work is done. A brief that says \"report when done\" marks it too.",code:PHI+" disposable",
-        out:"this session is retired when its work is done: its outcome kept as a replaces: note on the session that started it, which treats it as archived and tells ezexe it is ready to archive"});
+      steps.push({side:"phi",by:"The session is marked to be counted as archived when its work is done. A brief that says \"report when done\" marks it too.",code:PHI+" disposable",
+        out:"this session is counted as archived when its work is done: its outcome is kept as a replaces: note on its parent session"});
       steps.push({side:"phi",by:"The session says what was run and what it showed.",code:PHI+' done "<what was run and what it showed>"',out:"this turn will be kept as done\n"+CHILD_DONE});
-      steps.push({side:"phi",by:"At the end of that turn phi writes one note on "+q(e.parentTitle)+".",
-        out:'replaces: "'+e.title+'" ('+e.id+') as a live node: it finished, and the chain treats it as archived from now; ezexe archives it in the app. Changed: <the files it changed>. Heads: <the branch heads it left>. Commits: <its commits>. Still open: nothing. Its findings, from its final report: "<the report>".'});
-      steps.push({side:"phi",by:"The parent's next message carries this line.",
-        out:'phi (p4-phi): finished and retired, their outcome kept as a replaces: note on this session: ['+e.title+'](#'+e.id+'). '+READY});
+      steps.push({side:"phi",by:"At the end of that turn, once the issue it closes, if any, is proven, p4-phi writes one note on "+q(e.parentTitle)+".",
+        out:'replaces: "'+e.title+'" ('+e.id+') as a live session: it finished, and p4-phi counts it as archived from now. Changed: <the files it changed>. Heads: <the branch heads it left>. Commits: <its commits>. Still open: nothing. Its findings, from its final report: "<the report>".'});
+      steps.push({side:"phi",by:"The parent session's next message carries this line.",
+        out:'phi (p4-phi): finished, their outcome kept as a replaces: note on this session: ['+e.title+'](#'+e.id+'). '+READY});
     }else{
       var n=e.count,lines=e.opts.map(function(o){return '- label "'+o.label+'", description "'+o.description+'"'}).join("\n");
       steps.push({side:"phi",by:"The session says what was run and what it showed.",code:PHI+' done "<what was run and what it showed>"',
-        out:"this turn will be kept as done\n"+BUTTON+(n?"\nphi (p4-phi): "+n+" session"+(n===1?"":"s")+" of this tree "+(n===1?"is":"are")+" finished and not yet archived. In this closing turn, before `mcp__ccd_turn__wrap_up`, put them to ezexe as one quick select: one `AskUserQuestion` with `multiSelect` true, the question saying that archiving all of them is the recommended choice, and exactly these options"+(e.opts.length===1?", with a last option \"None of them\"":"")+":\n"+lines+"\nArchive none of them before ezexe has answered. Then call `"+ARCHIVE+"` for exactly the sessions under the options ezexe picked, and for no other: ezexe's selection is the user action, and phi lets those calls through.":"")});
-      if(n)steps.push({side:"app",by:"It puts the finished sessions of its tree to ezexe as one quick select.",
+        out:"this turn will be kept as done\n"+BUTTON+(n?"\nphi (p4-phi): "+n+" session"+(n===1?"":"s")+" of this tree "+(n===1?"is":"are")+" finished and not yet archived. In this closing turn, before `mcp__ccd_turn__wrap_up`, put them to ezexe as one multiple-choice question: one `AskUserQuestion` with `multiSelect` true, the question saying that archiving all of them is the recommended choice, and exactly these options"+(e.opts.length===1?", with a last option \"None of them\"":"")+":\n"+lines+"\nArchive none of them before ezexe has answered. Then call `"+ARCHIVE+"` for exactly the sessions under the options ezexe picked, and for no other: the pick is ezexe's, and p4-phi lets those calls through.":"")});
+      if(n)steps.push({side:"app",by:"It puts the finished sessions of its tree to ezexe as one multiple-choice question.",
         code:call("AskUserQuestion",{questions:[{question:"Which finished sessions should be archived? Archiving all of them is the recommended choice.",header:"Archive",multiSelect:true,
           options:e.opts.concat(e.opts.length===1?[{label:"None of them",description:"Leave it open."}]:[])}]}),
         note:"It then calls "+ARCHIVE+" for exactly the sessions ezexe picked, and for no other."});
       steps.push({side:"app",by:"It ends the turn with the archive button.",
         code:call("mcp__ccd_turn__wrap_up",{recap:"<one sentence naming what was done>",ask:"Archive this session?",actions:[{action:"archive"}]})});
     }
-    return{title:e.parentTitle?"Done, and retired to its parent":"Done, in a top session",
-      why:e.parentTitle?"The session's outcome moves to its parent as one replaces: note. The session is out of the relay from that moment, and it shows no archive button. Its node stays in the tree until it is archived.":"A top session has no parent to retire to. Its turn is kept as done, the tree prints it as done, and it closes with a button that archives it at one press."+(e.count?" Before that it offers the finished sessions of its tree as a quick select.":""),
+    return{title:e.parentTitle?"Done, and counted as archived":"Done, in an orchestrator",
+      why:e.parentTitle?"The session's outcome moves to its parent session as one replaces: note. From that moment p4-phi hands it nothing more and hands nothing of it to other sessions, and it shows no archive button. It stays in the drawing until ezexe archives it.":"An orchestrator has no parent session. Its turn is kept as done, the tree prints it as done, and it closes with a button that archives it at one press."+(e.count?" Before that it puts the finished sessions of its tree to ezexe as one multiple-choice question.":""),
       steps:steps,
       app:e.parentTitle?"Nothing. The session is still open in the sidebar, with no button.":"The archive button in the session's next-step box. Nothing is archived until ezexe presses it or picks a session.",
-      phi:e.parentTitle?"doneRetired in the child's session.json, and the note in the parent's notes.jsonl with the source phi report-when-done retirement. Every session the parent starts later is given that note. phi/ready-to-archive.md lists the child until the app shows it archived.":"The turn's row in turns.jsonl is kept as done."+(e.count?" The labels of the offered options are kept as archiveOffer in the top session's session.json, and the hook reads ezexe's picks by them.":"")}},
+      phi:e.parentTitle?"doneRetired in the worker's session.json, and the note in the parent session's notes.jsonl. Every session the parent session starts later is given that note. phi/ready-to-archive.md lists the worker until the app shows it archived.":"The turn's row in turns.jsonl is kept as done."+(e.count?" The labels of the offered options are kept as archiveOffer in the orchestrator's session.json, and the hook reads ezexe's picks by them.":"")}},
   again:function(e){
     var steps=[{side:"you",by:"ezexe, or another session with SendMessage, writes to the session.",note:"There is no command to run. The session's next message does it."}];
     if(e.parentTitle)steps.push({side:"phi",by:q(e.parentTitle)+" is told once, beside its next message.",
-      out:'"'+e.title+'" ('+e.id+'), which phi held as finished and treated as archived, was messaged again and is reopened: it is a live node once more, so do not count its work as over.'});
+      out:'"'+e.title+'" `'+e.id+'`, which p4-phi held as finished and counted as archived, was messaged again and is reopened: it is a live session once more, so do not count its work as over.'});
     return{title:"Messaged again, so live again",
-      why:"A retired session that gets a new message is a live node once more. phi clears the mark at that message and names the session to its parent as reopened, so the mark never hides work in progress.",
+      why:"A session counted as archived that gets a new message is a live session once more. p4-phi clears its doneRetired at that message and names the session to its parent session as reopened, so the record never hides work in progress.",
       steps:steps,
       app:"A new turn in the same session.",
       phi:"doneRetired and archived are cleared in its session.json, and reopened holds the time. The session leaves phi/ready-to-archive.md. The replaces: note it left on its parent stays."}},
@@ -685,18 +679,18 @@ var EX={
     var steps=[];
     if(e.how==="button")steps.push({side:"you",by:"ezexe presses the archive button in the next-step box of "+q(e.title)+".",note:"The session put the button there with the wrap_up call that ended its closing turn."});
     else if(e.how==="picked"){
-      steps.push({side:"you",by:"ezexe ticks "+q(e.title)+" in the quick select that "+q(e.topTitle)+" shows in its closing turn."});
+      steps.push({side:"you",by:"ezexe ticks "+q(e.title)+" in the multiple-choice question that "+q(e.topTitle)+" puts in its closing turn."});
       steps.push({side:"app",by:q(e.topTitle)+" then archives exactly what ezexe picked.",code:call(ARCHIVE,{session_id:e.id}),
-        note:"phi reads ezexe's picks from the answered question and lets this call through."});
+        note:"p4-phi reads ezexe's picks from the answered question and lets this call through."});
     }else steps.push({side:"you",by:"ezexe archives "+q(e.title)+" by hand in the sidebar.",
-      note:e.retired?"phi already treats it as archived. Until now it waited on phi/ready-to-archive.md, and its top session would have offered it in a quick select when done.":"No session asked for this. ezexe can archive any session at any time."});
-    steps.push({side:"app",by:"A session that makes the call on its own is refused by phi's hook.",code:call(ARCHIVE,{session_id:"self"}),err:true,
+      note:e.retired?"p4-phi already counts it as archived. Until now it waited on phi/ready-to-archive.md, and its orchestrator would have offered it in a multiple-choice question when done.":"No session asked for this. ezexe can archive any session at any time."});
+    steps.push({side:"app",by:"A session that makes the call on its own is refused by p4-phi's hook.",code:call(ARCHIVE,{session_id:"self"}),err:true,
       out:NO_ARCHIVE+(e.child?" This session's turn is kept. "+CHILD_DONE:" "+BUTTON)});
     return{title:"Archived by ezexe",
-      why:"Archiving is ezexe's move. A done top session offers it as a button. A finished child waits for the quick select of its top session. ezexe can also archive any session by hand in the sidebar. No session archives a session on its own, except a puppeteer, which may archive a complete session it controls.",
+      why:"Archiving is ezexe's move. A done orchestrator offers it as a button. A finished worker waits for the multiple-choice question of its orchestrator. ezexe can also archive any session by hand in the sidebar. No session archives a session on its own: an orchestrator or a puppeteer archives only a session ezexe picked.",
       steps:steps,
-      app:"The session's record is marked archived. "+(e.count>1?(e.count-1)+" more session"+(e.count===2?"":"s")+" went with it on this page. ":"")+"The app also archives a session's side sessions that have finished or that share its worktree.",
-      phi:"phi reads the archive from the app's record and keeps it in session.json, so other machines that sync the store see it too. phi.py tree no longer prints the session, or anything under it."}}
+      app:"The session's record is marked archived. "+(e.count>1?(e.count-1)+" more session"+(e.count===2?"":"s")+" went with it on this page. ":"")+"The app also archives the sessions it nests under that session that have finished or that share its worktree.",
+      phi:"p4-phi reads the archive from the app's record. phi.py tree prints neither the session nor anything under it."}}
 };
 
 /* ---------- moves ---------- */
@@ -704,45 +698,45 @@ function cmd(c){return ["cmd",c.replace(PHI,"phi.py")]}
 var ACT={
   top:function(){
     var st=S.sel&&N(S.sel)?rootOf(S.sel,"phi"):null,title=nextTitle(true),id=mk(title,null,null,{tag:"orchestrates"});
-    S.example={kind:"top",id:id,title:title,starterTitle:st?N(st).title:"A top session"};
-    say([["cmd","mcp__ccd_session__start_session, then detach_session \"self\""],["out","already a top session"]],"It sits in the root beside the others, as a sibling in both records.");
+    S.example={kind:"top",id:id,title:title,starterTitle:st?N(st).title:"An orchestrator"};
+    say([["cmd","mcp__ccd_session__start_session, then detach_session \"self\""],["out","already an orchestrator"]],"It sits at the top beside the others, as a sibling in both records.");
     S.sel=id;S.view=S.view;
   },
   child:function(){
     var p=N(S.sel),title=nextTitle(false),deep=!!parentIn(p.id,"phi"),id=mk(title,p.id,p.id);
     if(p.turns===0){p.turns=1;p.state="not shown done"}
     S.example={kind:"child",id:id,title:title,parentTitle:p.title,deep:deep};
-    say([["cmd","mcp__ccd_session__start_session from "+short(p.id)]],"The app nests it and phi records the same parent. Select it and start one more to go a level deeper.");
+    say([["cmd","mcp__ccd_session__start_session from "+short(p.id)]],"The app nests it and p4-phi records the same parent session. Select it and start one more under it.");
     S.keepSel=true;
   },
   request:function(){
     var r=N(S.sel),title=nextTitle(false),starter=r,id=mk(title,r.id,r.id),rid="req-"+hex(S.seq*131+7,10);
     S.example={kind:"request",id:id,title:title,req:r.id,reqTitle:r.title,starterTitle:starter.title,rid:rid};
-    say([cmd(PHI+' request "'+title+'" --brief "…"'),["out","kept as start request "+rid]],"The request was handed only to "+q(starter.title)+", at ezexe's next turn there. That session made the call, so the app and phi name the same parent.");
+    say([cmd(PHI+' request "'+title+'" --brief "…"'),["out","kept as start request "+rid+"."]],"The request was handed only to "+q(starter.title)+", at the next turn ezexe began there. That session made the call, so the app and p4-phi name the same parent session.");
     S.view="phi";S.keepSel=true;
   },
   detachApp:function(){
     var n=N(S.sel),pp=parentIn(n.id,"phi");n.app=null;
     S.example={kind:"detachApp",id:n.id,phiParent:pp?N(pp).title:""};
-    say([["cmd","mcp__ccd_session_mgmt__detach_session {\"session_id\": \""+n.id+"\"}"]],pp?"The app moved it to the top level. phi's tree did not move.":"Both records now have it at the top.");
+    say([["cmd","mcp__ccd_session_mgmt__detach_session {\"session_id\": \""+n.id+"\"}"]],pp?"The app moved it to the top level. p4-phi's tree did not move.":"Both records now have it at the top.");
     S.view="app";
   },
   detachPhi:function(){
     var n=N(S.sel),ap=parentIn(n.id,"app");n.phi=null;
     S.example={kind:"detachPhi",id:n.id,appParent:ap?N(ap).title:""};
-    say([cmd(PHI+" detach "+n.id),["out","detached: it is a top session now"]],ap?"phi made it a top session. The app's sidebar did not move.":"Both records now have it at the top.");
+    say([cmd(PHI+" detach "+n.id),["out","detached to top level: it is an orchestrator now"]],ap?"p4-phi made it an orchestrator. The app's sidebar did not move.":"Both records now have it at the top.");
     S.view="phi";
   },
   reparent:function(){move(S.sel,$("under").value)},
   branch:function(){
     if(!S.queue)S.queue=[
-      {t:"Tell siblings when a shard changes",f:"scripts/relay.py, scripts/test_relay.py"},
-      {t:"Keep a retired child's open steps",f:"scripts/relay.py, scripts/phi.py"},
+      {t:"Tell siblings when owned paths change",f:"scripts/relay.py, scripts/test_relay.py"},
+      {t:"Keep an archived worker's open steps",f:"scripts/relay.py, scripts/phi.py"},
       {t:"Register a landed route",f:"scripts/puppeteer.py, scripts/test_puppeteer.py"},
       {t:"Redraw the four diagrams",f:"README.md"},
       {t:"Say report when done in every brief",f:"scripts/phi.py, scripts/plans.py"}];
     $("branch").hidden=false;queueUI();
-    say([],"Edit the tasks and their files. Tasks that share a file fall into one serial child. Then start the children.");
+    say([],"Edit the tasks and their files. Tasks that share a file fall into one worker's serial run. Then start the workers.");
     if(wrap.clientWidth<700||window.innerWidth<=980)$("branch").scrollIntoView({behavior:REDUCED?"auto":"smooth",block:"nearest"});
   },
   done:function(){
@@ -751,13 +745,13 @@ var ACT={
     if(p){n.retired=true;N(p).notes++}
     var opts=p?[]:offerOf(n.id),count=p?0:desc(n.id,"phi").filter(function(k){return N(k).retired}).length;
     S.example={kind:"done",id:n.id,title:n.title,parentTitle:p?N(p).title:"",opts:opts,count:count};
-    say([cmd(PHI+' done "…"'),["out","this turn will be kept as done"]],p?"Its outcome went up to "+q(N(p).title)+" as a replaces: note. It shows no archive button, and the node stays until ezexe archives it.":"The tree now prints it as done, and it ends its turn with the archive button."+(count?" First it offers the "+count+" finished session"+(count===1?"":"s")+" of its tree to ezexe as a quick select.":""));
+    say([cmd(PHI+' done "…"'),["out","this turn will be kept as done"]],p?"Its outcome went up to "+q(N(p).title)+" as a replaces: note, and p4-phi counts it as archived. It shows no archive button, and it stays in the drawing until ezexe archives it.":"The tree now prints it as done, and it ends its turn with the archive button."+(count?" First it puts the "+count+" finished session"+(count===1?"":"s")+" of its tree to ezexe as one multiple-choice question.":""));
     S.view="phi";S.after=p?function(){fly(n.id,p)}:null;
   },
   again:function(){
     var n=N(S.sel),p=parentIn(n.id,"phi");n.retired=false;n.state="not shown done";n.turns++;
     S.example={kind:"again",id:n.id,title:n.title,parentTitle:p?N(p).title:""};
-    say([],"It is a live node again"+(p?", and "+q(N(p).title)+" is told that it is reopened":"")+". The note it left on its parent stays.");
+    say([],"It is a live session again"+(p?", and "+q(N(p).title)+" is told that it is reopened":"")+". The note it left on its parent session stays.");
   },
   archive:function(){
     var n=N(S.sel),gone={},title=n.title,up=parentIn(n.id,S.view)||parentIn(n.id,"phi"),pp=parentIn(n.id,"phi"),top=N(rootOf(n.id,"phi"));
@@ -769,7 +763,7 @@ var ACT={
     Object.keys(gone).forEach(function(k){delete S.nodes[k]});
     S.order.forEach(function(k){var x=N(k);if(x.phi&&!N(x.phi))x.phi=null;if(x.app&&!N(x.app))x.app=null});
     say(how==="picked"?[["cmd",ARCHIVE+" {\"session_id\": \""+n.id+"\"}"]]:[],
-      (how==="button"?"ezexe pressed its archive button. ":how==="picked"?"ezexe picked it in the quick select, and its top session archived it. ":"ezexe archived it by hand. ")+(count>1?"The sessions under it in either record went with it.":"Nothing else moved."));
+      (how==="button"?"ezexe pressed its archive button. ":how==="picked"?"ezexe picked it in the multiple-choice question, and its orchestrator archived it. ":"ezexe archived it by hand. ")+(count>1?"The sessions under it in either record went with it.":"Nothing else moved."));
     S.sel=up&&N(up)?up:(S.order[0]||null);
   }
 };
@@ -778,8 +772,8 @@ function move(moved,under){
   var bad=moved===under||desc(moved,"phi").indexOf(under)>=0,same=!bad&&m.phi===under;
   if(!bad&&!same)m.phi=under;
   S.example={kind:"reparent",moved:moved,under:under,underTitle:u.title,err:bad,same:same};
-  say([cmd(PHI+" reparent "+moved+" "+under),[bad?"err":"out",bad?"phi: a session cannot be put under itself or under a session it started":same?"already there":"reparented"]],
-    bad?"phi refuses it, because the move would make a loop.":same?"Nothing moved.":"It moved with every session it started. The app's sidebar did not follow.");
+  say([cmd(PHI+" reparent "+moved+" "+under),[bad?"err":"out",bad?"phi: a session cannot be put under itself or under a session below it":same?"already there":"reparented"]],
+    bad?"p4-phi refuses it, because the move would make a loop.":same?"Nothing moved.":"It moved with every session below it. The app's sidebar did not follow.");
   S.sel=moved;S.view="phi";render();
 }
 function run(a){
@@ -842,16 +836,16 @@ function groupsUI(){
   var gs=groupsOf(),ul=$("groups"),sws=$("queue").querySelectorAll(".sw");ul.innerHTML="";
   for(var i=0;i<sws.length;i++)sws[i].style.background="var(--line)";
   gs.forEach(function(g,i){var c=HUES[i%HUES.length];g.rows.forEach(function(r){if(sws[r])sws[r].style.background=c});
-    var li=h("li",null,[h("span",{text:"Child "+(i+1)+": "+(g.tasks.length>1?"a serial run of "+g.tasks.length+" tasks":"one task, running beside the others")}),h("small",{text:g.files.join("  ")})]);
+    var li=h("li",null,[h("span",{text:"Worker "+(i+1)+": "+(g.tasks.length>1?"a serial run of "+g.tasks.length+" tasks":"one task, running beside the others")}),h("small",{text:g.files.join("  ")})]);
     li.style.borderColor=c;ul.appendChild(li)});
-  $("qgo").textContent=gs.length?"Start "+gs.length+(gs.length===1?" child":" children"):"Nothing to start";$("qgo").disabled=!gs.length;
+  $("qgo").textContent=gs.length?"Start "+gs.length+(gs.length===1?" worker":" workers"):"Nothing to start";$("qgo").disabled=!gs.length;
 }
 $("qadd").addEventListener("click",function(){S.queue.push({t:"A new task",f:"path/to/file.py"});queueUI()});
 $("qclose").addEventListener("click",function(){$("branch").hidden=true});
 $("qgo").addEventListener("click",function(){
   var p=S.sel&&N(S.sel);if(!p)return;var gs=groupsOf();if(!gs.length)return;
   /* starts.held_by: a live session that declared files and has not reported done holds an overlapping start;
-     the starter and the sessions above it never do */
+     the parent session and the sessions above it never do */
   var skip={},c=p.id,g0=0;while(c&&g0++<40){skip[c]=1;c=parentIn(c,"phi")}
   var live=S.order.filter(function(k){var x=N(k);return !skip[k]&&x.shard.length&&!x.retired&&x.state!=="done"});
   gs.forEach(function(g){
@@ -863,7 +857,7 @@ $("qgo").addEventListener("click",function(){
   if(made&&p.turns===0){p.turns=1;p.state="not shown done"}
   S.example={kind:"branch",groups:gs,parentTitle:p.title};
   say([["cmd","mcp__ccd_session__start_session × "+gs.length]].concat(held?[["err","phi (p4-phi): this start is held"+(held>1?", "+held+" times":"")]]:[]),
-    (made?made+(made===1?" child holds a file set":" children hold disjoint file sets")+", so there is one writer for each file.":"No child started.")+(held?" phi held "+held+(held===1?" start":" starts")+", because a live session already writes one of those files.":""));
+    (made?made+(made===1?" worker holds a write set":" workers hold disjoint write sets")+", so there is one writer for each file.":"No worker started.")+(held?" p4-phi held "+held+(held===1?" start":" starts")+", because a live session already writes one of those files.":""));
   $("branch").hidden=true;S.view="phi";render();
   if(window.innerWidth<=980)wrap.scrollIntoView({behavior:REDUCED?"auto":"smooth",block:"start"});
 });
@@ -896,7 +890,7 @@ function endDrag(e,cancel){
   drag=null;if(chip){chip.remove();chip=null}try{svg.releasePointerCapture(d.pid)}catch(x){}
   if(!d.on){if(!cancel&&N(d.id)){S.sel=d.id;render()}return}
   mark(null);
-  if(t&&t.root){S.sel=d.id;if(parentIn(d.id,"phi")){$("branch").hidden=true;ACT.detachPhi();render()}else{say([cmd(PHI+" detach "+d.id),["out","already a top session"]],"Nothing moved.");render()}}
+  if(t&&t.root){S.sel=d.id;if(parentIn(d.id,"phi")){$("branch").hidden=true;ACT.detachPhi();render()}else{say([cmd(PHI+" detach "+d.id),["out","already an orchestrator"]],"Nothing moved.");render()}}
   else if(t&&t.id)move(d.id,t.id);
   else render();
 }
