@@ -199,6 +199,26 @@ class Wiring(unittest.TestCase):
             self.run_all("a new store", make)
 
 
+class NoGitBash(unittest.TestCase):
+    """onFailure, by https://code.claude.com/docs/en/hooks, "Block the action when a hook fails" and "Failed hooks on
+    Windows without Git Bash", Claude Code v2.1.295 and later."""
+
+    def test_a_hook_that_cannot_start_never_blocks_a_call(self):
+        """ezexe/p4#121: on Windows without Git Bash a shell-form hook runs in PowerShell, where `sh` is missing, and a
+        PreToolUse hook that fails there with onFailure unset blocks the tool call. Both runners exit 0 whatever
+        their python does, so p4-phi's guards already let a call through when they break; each entry on which
+        onFailure acts sets continue, so a runner that never starts does the same. Stop, SubagentStop and async
+        entries set none, since the docs say onFailure does nothing there."""
+        acts = 0
+        for event, matcher, hook in entries():
+            if event in ("Stop", "SubagentStop") or hook.get("async"):
+                self.assertNotIn("onFailure", hook, (event, hook["command"]))
+            else:
+                self.assertEqual(hook.get("onFailure"), "continue", (event, hook["command"]))
+                acts += event == "PreToolUse"
+        self.assertTrue(acts, "the PreToolUse entries are the ones that can block a call")
+
+
 class SessionEndBudget(unittest.TestCase):
     """SessionEnd hooks share 1.5 seconds, and a plugin hook's timeout does not raise it, by
     https://code.claude.com/docs/en/hooks#sessionend."""

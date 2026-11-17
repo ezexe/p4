@@ -1,5 +1,5 @@
 {
-  "description": "p4-phi's hooks. run-hook.sh runs scripts/phi.py at SessionStart, UserPromptSubmit, Stop, StopFailure and SessionEnd, whose hooks share 1.5 seconds that a plugin's timeout does not raise. recall-hook.sh runs scripts/hook.py at every event here, ConfigChange among them, and hook.py hands phi.py its checks around a tool call and at a subagent's stop.",
+  "description": "p4-phi's hooks. run-hook.sh runs scripts/phi.py at SessionStart, UserPromptSubmit, Stop, StopFailure and SessionEnd, whose hooks share 1.5 seconds that a plugin's timeout does not raise. recall-hook.sh runs scripts/hook.py at every event here, ConfigChange among them, and hook.py hands phi.py its checks around a tool call and at a subagent's stop. Every entry on which onFailure acts sets it to continue, so a runner that cannot start, as on Windows without Git Bash, blocks no call, prompt or change; Stop, SubagentStop and the async entries set none, since onFailure does nothing there.",
   "hooks": {
     "SessionStart": [
       {
@@ -7,7 +7,8 @@
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" session-start",
-            "timeout": 20
+            "timeout": 20,
+            "onFailure": "continue"
           }
         ]
       },
@@ -17,7 +18,8 @@
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/recall-hook.sh\" layout",
-            "timeout": 15
+            "timeout": 15,
+            "onFailure": "continue"
           }
         ]
       },
@@ -27,7 +29,8 @@
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/recall-hook.sh\" catch-up",
-            "timeout": 20
+            "timeout": 20,
+            "onFailure": "continue"
           }
         ]
       }
@@ -38,7 +41,8 @@
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" user-prompt-submit",
-            "timeout": 20
+            "timeout": 20,
+            "onFailure": "continue"
           }
         ]
       },
@@ -47,7 +51,8 @@
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/recall-hook.sh\" recall",
-            "timeout": 10
+            "timeout": 10,
+            "onFailure": "continue"
           }
         ]
       }
@@ -83,7 +88,8 @@
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" stop-failure",
-            "timeout": 10
+            "timeout": 10,
+            "onFailure": "continue"
           }
         ]
       }
@@ -93,7 +99,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" session-end"
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" session-end",
+            "onFailure": "continue"
           }
         ]
       }
@@ -105,7 +112,8 @@
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/recall-hook.sh\" agent",
-            "timeout": 10
+            "timeout": 10,
+            "onFailure": "continue"
           }
         ]
       },
@@ -115,7 +123,8 @@
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/recall-hook.sh\" lookup-check",
-            "timeout": 10
+            "timeout": 10,
+            "onFailure": "continue"
           }
         ]
       }
@@ -127,7 +136,8 @@
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/recall-hook.sh\" lookup-record",
-            "timeout": 10
+            "timeout": 10,
+            "onFailure": "continue"
           },
           {
             "type": "command",
@@ -144,7 +154,8 @@
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/recall-hook.sh\" lookup-record",
-            "timeout": 10
+            "timeout": 10,
+            "onFailure": "continue"
           }
         ]
       }
@@ -168,7 +179,8 @@
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/recall-hook.sh\" settings",
-            "timeout": 10
+            "timeout": 10,
+            "onFailure": "continue"
           }
         ]
       }
@@ -179,7 +191,8 @@
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/recall-hook.sh\" subagent-start",
-            "timeout": 10
+            "timeout": 10,
+            "onFailure": "continue"
           }
         ]
       }
