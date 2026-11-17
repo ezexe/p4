@@ -464,13 +464,25 @@ def repo_key():
                 os.remove(user)
             for where in (wt, sub):
                 os.remove(os.path.join(where, ".claude", "settings.local.json"))
-        # autoMemoryDirectory set to the store itself: the index stays, no pointer is written over it
+        # autoMemoryDirectory set to the store itself: Claude Code loads the index natively, so a start prints no copy
+        # of it; the index stays, and no pointer is written over it by a start, a write or a turn end
         store = os.path.join(main_, ".claude", "p4", "temportal", "memory")
         put(os.path.join(store, "MEMORY.md"), "- [a](a.md) — a\n")
-        assert run("migrate", main_, store, {}) == "- [a](a.md) — a" and read(os.path.join(store, "MEMORY.md")) == \
-            "- [a](a.md) — a\n", "the store's index was replaced by the pointer"
+        out = run("migrate", main_, store, {})
+        assert "- [a](a.md)" not in out, f"a start printed the index Claude Code loads natively\n{out}"
+        assert read(os.path.join(store, "MEMORY.md")) == "- [a](a.md) — a\n", "the store's index was replaced"
+        put(os.path.join(store, "MEMORY.md"), "- [a](a.md) — a\n- [b](b.md) — b\n")
+        put(os.path.join(store, "b.md"), "fact b\n")
+        for written in ("MEMORY.md", "b.md"):
+            w = {"tool_name": "Write", "tool_input": {"file_path": os.path.join(store, written)}}
+            assert run("mirror", main_, store, w) == "", f"mirror acted on {written} in the store"
+        assert read(os.path.join(store, "MEMORY.md")) == "- [a](a.md) — a\n- [b](b.md) — b\n", \
+            "mirror wrote over the store's index"
+        assert read(os.path.join(store, "b.md")) == "fact b\n", "mirror moved a memory out of the store"
+        assert not [n for n in os.listdir(store) if n not in ("MEMORY.md", "b.md")], os.listdir(store)
         run("sweep", main_, store, {})
-        assert read(os.path.join(store, "MEMORY.md")) == "- [a](a.md) — a\n", "turn end wrote over the store's index"
+        assert read(os.path.join(store, "MEMORY.md")) == "- [a](a.md) — a\n- [b](b.md) — b\n", \
+            "turn end wrote over the store's index"
     finally:
         for k, v in saved.items():
             if v is None:

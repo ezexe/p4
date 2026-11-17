@@ -399,6 +399,12 @@ def cmd_migrate(payload, first=""):
         parts = migrate(app, mem, time.strftime("%Y%m%d-%H%M%S"))[0]
     out = notice(parts)
     head = first + (out + "\n" if out else "")
+    if norm(app) == norm(mem):
+        # autoMemoryDirectory names the store's folder, so Claude Code loaded its MEMORY.md natively: no copy
+        sys.stdout.flush()
+        sys.stdout.buffer.write(head.encode("utf-8", errors="replace"))
+        sys.stdout.buffer.flush()
+        return 0
     kept, total = builtin_index(mem)    # Claude Code loaded only the pointer: print what it would have loaded
     path = os.path.normpath(os.path.join(mem, "MEMORY.md"))
 
