@@ -320,7 +320,7 @@ var DEST={
   cmd:{name:"A background command",why:"The Bash or PowerShell tool's own background task. The command runs under the session that called the tool, and that session keeps its turn.",
     spec:[["started by","Bash or PowerShell"],["field","run_in_background: true"]]}
 };
-var HOLD="It goes on with other work or ends its turn. It does not wait in the foreground, sleep or poll.";
+var HOLD="It goes on with other work or ends its turn. The app's own tools tell it that the result comes by a notification, so p4-phi's rule holds no line on waiting, sleeping or polling.";
 function who(ask){return ask==="top"?"The orchestrator":"The worker"}
 
 function steps(kind,ask){

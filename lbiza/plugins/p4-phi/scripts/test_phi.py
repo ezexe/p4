@@ -1363,7 +1363,7 @@ class Rules(unittest.TestCase):
         """On in every project, a store or none; only p4.json's phi.levels: false leaves it out."""
         got = self.start(TOP)
         for word in ("built-in, levels", "`p4-phi:sweep`", "`p4-phi:runner`", "`p4-phi:check`",
-                     "`run_in_background: true`", "completion notification"):
+                     "`run_in_background: true`"):
             self.assertIn(word, got)
         self.assertNotIn("ezexe", phi.LEVELS, "it addresses the session and names no person")
         self.assertIn("built-in, levels", phi.builtin_text())
@@ -1376,6 +1376,16 @@ class Rules(unittest.TestCase):
         off = self.start(KID)
         self.assertNotIn("built-in, levels", off)
         self.assertIn("act-don't-wait", off)
+
+    def test_the_levels_rule_leaves_waiting_sleeping_and_polling_to_the_apps_own_tools(self):
+        """The Agent tool's and the shell tools' own descriptions tell a session that a background subagent or command
+        notifies it when it ends, that a foreground `sleep` is blocked and never to poll, and sub-agents.md says "A
+        background subagent's results reach Claude as a completion notification in a later turn". So the rule handed
+        at a session's start holds no sentence of its own on waiting, and still names the background route."""
+        self.assertIn(phi.LEVELS, self.start(TOP))
+        for word in ("sleep", "poll", "never wait", "wait for it", "completion notification", "Once one is started"):
+            self.assertNotIn(word, phi.LEVELS, word)
+        self.assertIn("`run_in_background: true`", phi.LEVELS)
 
 
 class Ids(unittest.TestCase):

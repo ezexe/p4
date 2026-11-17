@@ -1074,8 +1074,9 @@ ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves this bui
 # - sub-agents.md, "Run subagents in foreground or background": "Foreground subagents block the main conversation
 #   until complete." and "Background subagents run concurrently while you continue working."; in its frontmatter
 #   table, `background`: "Set to `true` to keep this subagent in the background even when Claude asks to wait for it."
-# - sub-agents.md: "A background subagent's report arrives inside a completion notification, which is marked as an
-#   automated event rather than a message from you."
+# - The rule says nothing of waiting, sleeping or polling: the Agent tool's and the shell tools' own descriptions
+#   tell a session that a background subagent or command notifies it when it ends, and sub-agents.md says "A
+#   background subagent's results reach Claude as a completion notification in a later turn."
 # - plugins/components.md, "Agents": "The name form is `<plugin>:<name>`", so agents/sweep.md is `p4-phi:sweep`.
 # - tools-reference.md, "Background commands": "Claude can set `run_in_background: true` to start the command as a
 #   background task and continue working while it runs."
@@ -1086,11 +1087,9 @@ LEVELS = ("built-in, levels: work is delegated to where Claude Code runs it best
           "never held by it. A search or a read across more than a couple of files goes to the background subagent "
           "`p4-phi:sweep`; a command expected to run long, such as a test file, a test suite or a build, goes to "
           "`p4-phi:runner` or to a Bash or PowerShell call of its own with `run_in_background: true`; a read of a "
-          "diff or a result that should not lean on this session's own view goes to `p4-phi:check`. Once one is "
-          "started, go on with other work or end the turn: its completion notification brings the result in a "
-          "later turn, so never wait for it in the foreground, sleep or poll. A worker is started with a "
-          "`model` and an `effort` that fit its step, as the advice that hands out each start call names them; an "
-          "effort above this session's own is not accepted.")
+          "diff or a result that should not lean on this session's own view goes to `p4-phi:check`. A worker is "
+          "started with a `model` and an `effort` that fit its step, as the advice that hands out each start call "
+          "names them; an effort above this session's own is not accepted.")
 plans.BUILT_INS = tuple(x.split(": ", 1)[0].replace("built-in, ", "") for x in (BUILT_IN, LEVELS))   # plans.py's names
 LEVELS_ON = True              # p4.json phi.levels: false leaves the delegation rule and its checks out
 TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps an orchestrator's work in it
