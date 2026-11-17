@@ -333,7 +333,7 @@ function steps(kind,ask){
     ];
     return [
       {dir:"down",legs:["tc"],by:"The orchestrator starts a worker",say:"The start call carries the brief down.",
-       html:"The brief is the step's words, a line <code>Files:</code> with the paths the worker may write, what it must leave done, “report when done”, and the line that says its model and effort. Steps that share a file go to one worker as a serial run. Steps with disjoint files each get a worker.",
+       html:"The brief is the step's words, a line <code>Files:</code> with the paths the worker may write, what it must leave done, “report when done”, and the line that says its model and effort. Steps that share a file go to one worker as a serial run. Steps with disjoint files each get a worker, and each worker writes in a git worktree of its own, so no start waits on another worker's files.",
        code:call("mcp__ccd_session__start_session",{initiation:"user_asked",context:"fresh",use_worktree:true,title:"Fix the review findings in relay.py",effort:"high",
          prompt:"Fix the ten review findings in relay.py.\nFiles: lbiza/plugins/p4-phi/scripts/relay.py\nDone looks like: test_relay.py passes and one commit is on this session's own branch.\nReport when done.\n\nModel and effort: the parent session's own model at high effort, since this is a build that changes behaviour."})},
       {dir:"down",legs:["tc"],by:"Or it shows a suggested task card",say:"A card carries the same brief down.",

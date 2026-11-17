@@ -15,7 +15,7 @@ p4-phi keeps each session's files in `<project>/.claude/p4/phi/sessions/<session
 - Beside its first message, when the sessions linked to it left any: its start background, whose first and last lines say what it holds and how to keep a finding or say the task is done.
 - Beside its next message: the reports of the workers or coworkers it started that finished a turn since.
 - In a subagent it starts: the step the subagent serves and retrieval's lines, added as context at the subagent's start, and before a tool call of the subagent a warning of what changed beside its parent session since its launch, when anything did: a note a sibling session wrote after the launch, or the files it changed, each said once, by what the subagent's own transcript already holds.
-- At the moment each applies: the advice on where each work step of an orchestrator's task list goes; a writing child's issue line, which says its loop; the push line, which goes only to the tree's orchestrator, the one session that lands and pushes, a worker's `Closes #N` commit included, and which names the worker's branch to merge into the default branch first; the refusal of a start whose brief declares no write set; and the line `done` prints, which says what follows.
+- At the moment each applies: the advice on where each work step of an orchestrator's task list goes; a writing child's issue line, which says its loop; the push line, which goes only to the tree's orchestrator, the one session that lands and pushes, a worker's `Closes #N` commit included, and which names the worker's branch to merge into the default branch first; and the line `done` prints, which says what follows.
 
 A feedback memory whose rule an open issue will build into the plugin is tied to that issue by one line in the memory's own front matter, `issue: owner/name#N`.
 Once a commit that closes that issue is on the remote default branch, the next Stop whose turn ran a push, pull, fetch or merge cuts the memory back to one pointer line naming the issue and the code that carries its rule, and rewrites the memory's own line in the memory index to match.
@@ -30,7 +30,6 @@ Run each with `python -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/phi.py"`, and pa
 - `done "<what was run and what it showed>"` keeps this turn as done.
 - `task "<the new task>"` replaces this session's task and keeps the one before.
 - `proof "<command>"` names the regression test of this session's issue.
-- `files <path> ...` replaces this session's write set with the paths it still writes, `files --release` empties it, and `files` alone prints it.
 - `shard <path> ...` sets this session's owned paths, the paths or globs it alone may change, and `shard` alone prints them.
 - `disposable` marks this session as one p4-phi counts as archived once it is done.
 - `request "<title>" --brief "<the whole brief>" --to-puppeteer` asks this session's puppeteer for a new orchestrator, and `request --withdraw <request id>` withdraws a pending start request; any other start a session may not make is the app's suggested task card, `mcp__ccd_session__start_session` with `initiation` `own_initiative`, which `mcp__ccd_session__dismiss_task` withdraws.
@@ -38,7 +37,7 @@ Run each with `python -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/phi.py"`, and pa
 - `detach [sessionId]` moves a session to top level in p4-phi's records, and `reparent <sessionId> <under sessionId>` puts it, with every session below it, under another; the app's sidebar follows neither.
 - `controls <sessionId> ...` records the sessions a puppeteer controls, `controls` alone prints each by its full title, `--drop <sessionId>` ends one, `--hand <new sessionId>` hands over to a successor, `--from <old sessionId>` takes over from one, and `--decline <request id> "<why>"` declines a request.
 - `ledger` prints `ledger.md`, which an orchestrator's watcher writes in its session folder from p4-phi's files and the app's records, and `look` is one pass of that watcher, which the plugin's hooks module runs inside Claude Code at a turn's end, at a message's arrival and on its timer, so no session runs it.
-- `draft "<words>"` drafts the next session for any words, and `pioneer <draft id>` queues a draft whose writer is busy as a start request behind that writer.
+- `draft "<words>"` drafts the next session for any words, and `pioneer <draft id>` prints the gate's verdict for a kept draft again.
 - `readings "<one>" "<two>" --words "<the message>"` drafts one child for each reading of a message, and `merge <group> --result "<text>"` settles a fork between them.
 - `routes` lists the registered routes, `routes --register` registers every landed topic the records back, and `routes --why <sessionId>` says what a topic's route still lacks.
 - `meta` runs the meta pass over every orchestrator's ledger and prints `meta-ledger.md`.
@@ -63,20 +62,24 @@ That line is ezexe's standing word to land green work that closes an issue, so i
 A worker splits at its first message: in these sessions the app has let a started session start others in its first turn and in the turns ezexe's own messages open, though no doc states it, so p4-phi tells it to plan its split then and start a session for every part that writes files or makes a decision, one per disjoint set of files, and where the app refuses that start to show the part as a suggested task card that ezexe presses.
 Subagents keep reads, searches and independent checks, a single command run is a background command, and a review of a code change is the `code-review` skill's.
 A writing part that comes up later is shown as a suggested task card that ezexe presses.
-p4-phi keeps a start request only for the two starts a card cannot hold: one that waits behind a busy writer, which the session that queued it is handed once the writer is free, as a start at a turn ezexe begins there and as the card at any other turn, and one addressed to a puppeteer.
-A start request belongs under the session that filed it, and the app nests a session under whichever session calls the start tool: a session that starts another session's request is told to detach the session it started to top level in the app, p4-phi holds that session under the one that filed the request, and a puppeteer's board or the tree's ledger names it as an exception.
+p4-phi keeps a start request only for the one start a card cannot hold, a start addressed to a puppeteer.
+No start waits on another session's files: no start is refused for the files its brief names, held while a live session covers one of them or queued behind a busy writer, since each session that writes has a worktree of its own.
+A session whose first message carries the marker of a request another session filed, with no line that makes it an orchestrator, is held under the session that filed the request, and that tree's ledger names it as an exception with the call that detaches it to top level in the app.
 A subagent that wrote files is listed on the ledger under Level misses once it stops, from the calls its own transcript holds.
 Before a session creates anything new, such as a module, a page, a format or a kind of test, it finds the documented terms for it and a published implementation guide for that kind of work, logs both with their sources in its decisions file, and builds by them: a writing worker's first message and every start draft carry that line.
 A task list whose first creating step has no such research step before it is advised one, once.
 A question that the code, the history, the issues or the current outside documentation can answer is researched and decided by the session, which logs the decision with its source in its decisions file, the one its brief names or `decisions.md` in the scratchpad directory the app names: the act-don't-wait rule every session is handed and every start draft carry that line, and a question reaches ezexe only once research cannot settle it.
 
-## What a `Files:` line holds
+## What a `Files:` line says
 
-A path on a brief's `Files:` line that is an ancestor of another listed path, or a repository's root, is read as context and not held, unless every listed path is such context, when the first is held, so name a checkout for context in another sentence or on another line.
+A brief's `Files:` line says which files its session covers, and `Files: none` says it writes none.
+p4-phi keeps the line on the session's record and page and in the address book, where a message about one of those files is routed by it.
+The line holds no start and no other session's edit, and no command narrows or releases it.
+A path on the line that is an ancestor of another listed path, or a repository's root, is read as context and left out, unless every listed path is such context, when the first is kept, so name a checkout for context in another sentence or on another line.
 
 ## The address book
 
-Beside its first message, after a clear, and beside each later message where an entry changed, a session is handed its address book: the live sessions of its project's trees and of the trees its puppeteer controls, each by full title and id with its role, its parent, the files its `Files:` line holds, its owned paths, its open issue and its workers or coworkers.
+Beside its first message, after a clear, and beside each later message where an entry changed, a session is handed its address book: the live sessions of its project's trees and of the trees its puppeteer controls, each by full title and id with its role, its parent, the files its `Files:` line names while it is at work on them, its owned paths, its open issue and its workers or coworkers.
 After a compaction the summary keeps the conversation, the book among it, so the start hands only the entries that changed since the session last looked, with the path of `book.md`, and hands the session's own turns again only after a clear, which keeps nothing.
 It names the puppeteer as the one address for a decision of ezexe's authority, a press the app requires or an outcome ezexe should hear, and the session's parent as the address for work off its task.
 The book is whole on `book.md` in the session's folder, and a later line names only the entries that changed since the session last looked.
@@ -134,4 +137,5 @@ A puppeteer, at a message carrying its worker's report, is handed the ids of the
 - It does not stop a session from filing itself in the section "puppeteers", since the app asks nobody: the rule rests on ezexe's filing, and p4-phi says once, in the session and on its record, that it saw the session there, and tells every session it lists who claims it.
 - It does not compact a session and hands no session a compact question: Claude Code compacts a session by itself as its context fills.
 - It does not start a successor or move a session between sections: those are the app's tools, and the puppeteer makes the calls.
-- It does not block a puppeteer's edits, and a start request a controlled tree filed for itself stays the tree's: only one addressed to the puppeteer is closed, when that session declines it.
+- It does not block a puppeteer's edits, and it closes a request addressed to the puppeteer only when that session declines it.
+- It keeps no lock on a file: Claude Code gives each session that writes a git worktree of its own, so p4-phi holds no start and warns of no go for the files another session covers.

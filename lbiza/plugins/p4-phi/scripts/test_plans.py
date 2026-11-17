@@ -978,7 +978,7 @@ class Levels(unittest.TestCase):
         self.assertIn("\nFinding: the plugin in team/plug", said)
         self.assertNotIn("start_session", said, "the plugin-gap line hands no start call: its finding goes up")
         kid = phi._split_full(self.t.p4, relay._session(self.t.p4, A))
-        self.assertIn("a brief that declares its write set on a line `Files: <paths>`", kid)
+        self.assertIn("a brief that names the files it covers on a line `Files: <paths>`", kid)
         self.assertNotIn("suggested task card", kid, "the card is the start tool's own text")
         self.assertIn("It carries the `model` and `effort` a start of its kind of work carries", kid)
         self.assertIn("with the `model` and `effort` its kind of work gets", phi._split_full(self.t.p4, s))
@@ -1032,23 +1032,25 @@ class Levels(unittest.TestCase):
         self.assertIn(f"\"{script}\", with no `model`, so it inherits this session's, `effort` `high`", said)
         self.assertIn("Each brief says them in one line, `Model and effort: ", said)
         brief = "Write the puppeteer pages. Report when done.\nFiles: dox/puppeteer.html"
-        free = "local_wrt00000"                    # a writer the store holds no session of: nothing waits behind it
-        rid, _ = starts.add(self.t.p4, TOP, "dox: the puppeteer pages", brief, after=free)
-        call = starts.call_of(starts.state(self.t.p4)[rid], self.t.p4)
+
+        def requested(title, text):
+            """The call of a start request, as controls.request_call makes it: the brief, then the request's marker."""
+            rid, _ = starts.add(self.t.p4, TOP, title, text, to="local_pup00009")
+            return rid, plans.with_level({"context": "fresh", "title": title,
+                                          "prompt": text + "\n\n" + starts.marker(rid, TOP)}, title + "\n" + text)
+        rid, call = requested("dox: the puppeteer pages", brief)
         self.assertEqual((call["model"], call["effort"]), ("claude-sonnet-5-5", "medium"), "cheaper and lower")
         self.assertIn("\n\nModel and effort: claude-sonnet-5-5 at medium effort, since this is static or mechanical "
                       "work.\n\n" + starts.marker(rid, TOP), call["prompt"])
         self.assertEqual(starts.requester_of(self.t.p4, call["prompt"]), (rid, TOP), "the marker is still read")
         brief2 = "Make relay.py hold the lock in warn. Report when done.\nFiles: scripts/relay.py"
-        rid2, _ = starts.add(self.t.p4, TOP, "the relay lock", brief2, after=free)
-        call = starts.call_of(starts.state(self.t.p4)[rid2], self.t.p4)
+        _, call = requested("the relay lock", brief2)
         self.assertNotIn("model", call, "left out, which is how the app's tool inherits the parent session's model")
         self.assertEqual(call["effort"], "high")
         self.assertIn("Model and effort: the parent session's own model at high effort, since this is a build that "
                       "changes behaviour", call["prompt"])
         own = brief2 + "\nModel: claude-haiku-5-5\nEffort: low"
-        rid3, _ = starts.add(self.t.p4, TOP, "the relay lock, cheaply", own, after=free)
-        call = starts.call_of(starts.state(self.t.p4)[rid3], self.t.p4)
+        _, call = requested("the relay lock, cheaply", own)
         self.assertEqual((call["model"], call["effort"]), ("claude-haiku-5-5", "low"),
                          "the parent session's choice wins")
         self.assertIn("named by the parent session", call["prompt"])

@@ -919,15 +919,16 @@ class NewTask(unittest.TestCase):
 
     def test_a_turn_another_session_started_is_told_only_what_the_start_tool_lacks(self):
         """What a turn ezexe's words did not start may start, and the card it proposes, are the start tool's own
-        text, so p4-phi's line there restates neither. It holds the write set on a brief's `Files:` line and, for an
-        orchestrator, the brief line on which a new orchestrator is detached to top level. It keeps no state, so
+        text, so p4-phi's line there restates neither. It holds the files a brief names on its `Files:` line and,
+        for an orchestrator, the brief line on which a new orchestrator is detached to top level. It keeps no state, so
         each such turn carries the same line, after a compaction too."""
         self.say(TOP, TASK)
         mark = "outside this orchestrator's task gets a new orchestrator of its own"
         line = self.split_line(
             self.say(TOP, '<cross-session-message from="local_x">please also look at Y</cross-session-message>'), mark)
         self.assertIn(f"carries the line \"{phi.NEW_TOP_BRIEF}\"", line)
-        self.assertIn("declares its write set on a line `Files: <paths>`", line)
+        self.assertIn("names the files it covers on a line `Files: <paths>`", line)
+        self.assertNotIn("write set", line)
         self.assertIn("`mcp__ccd_session_mgmt__detach_session` with `\"self\"`", line)
         for restated in self.RESTATED:
             self.assertNotIn(restated, line)
@@ -943,7 +944,7 @@ class NewTask(unittest.TestCase):
         kid = self.split_line(
             self.say(KID, '<cross-session-message from="local_x">please also look at Y</cross-session-message>'),
             "a task of its own in this turn")
-        self.assertIn("a brief that declares its write set on a line `Files: <paths>`", kid)
+        self.assertIn("a brief that names the files it covers on a line `Files: <paths>`", kid)
         self.assertIn("`Model and effort: <model> at <effort> effort`", kid)
         for restated in self.RESTATED:
             self.assertNotIn(restated, kid)
@@ -951,7 +952,7 @@ class NewTask(unittest.TestCase):
         import plans
         with mock.patch.object(phi, "ASK_ROUTE", ""):
             route, asked = phi.new_top_route(False), phi.new_top_route(True)
-        self.assertIn("a line `Files: <paths>`", route, "the write set, which the start tool's text lacks")
+        self.assertIn("a line `Files: <paths>`", route, "the files it covers, which the start tool's text lacks")
         self.assertIn("Both moves are needed: the app's detach to top level", route, "and the detach")
         for restated in self.RESTATED + ("`initiation`",):
             self.assertNotIn(restated, route)

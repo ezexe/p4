@@ -331,7 +331,7 @@ class Supervisor(unittest.TestCase):
                                         f"{page}"), same[:300])
         self.assertNotIn(f"`{KID}`", same, "an entry that did not change is not handed again")
         self.assertNotIn("flush.py", same)
-        self.assertEqual(t.cli(KID, "files", "src/flush.py", "src/batch.py").returncode, 0)
+        self.assertEqual(t.cli(KID, "shard", "src/batch.py").returncode, 0)     # its owned paths: the entry changes
         changed = start("compact")
         self.assertTrue(changed.startswith(f"the address book on {page} changed since this session last looked:"),
                         changed[:300])

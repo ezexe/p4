@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The session tree · p4-phi dox</title>
-<meta name="description" content="An interactive tree of Claude desktop sessions as p4-phi links them: orchestrators, workers and coworkers, detach to top level, reparent, a queue split by write set, and done.">
+<meta name="description" content="An interactive tree of Claude desktop sessions as p4-phi links them: orchestrators, workers and coworkers, detach to top level, reparent, a queue split into workers by the files its tasks write, and done.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='1' width='14' height='14' rx='4' fill='%230b6b66'/%3E%3C/svg%3E">
 <style>
 :root{
@@ -253,7 +253,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
           <button type="button" class="act" data-act="top">New orchestrator <span class="tag both">app + p4-phi</span></button>
           <button type="button" class="act" data-act="child"><span id="childlabel">Start a worker</span> <span class="tag app">app call</span></button>
           <button type="button" class="act" data-act="card">Show it as a card <span class="tag app">app call</span></button>
-          <button type="button" class="act" data-act="branch">Split a queue by write set <span class="tag both">app + p4-phi</span></button>
+          <button type="button" class="act" data-act="branch">Split a queue by its files <span class="tag both">app + p4-phi</span></button>
           <button type="button" class="act" data-act="detachApp">Detach to top level in the app <span class="tag app">app call</span></button>
           <button type="button" class="act" data-act="detachPhi">Detach to top level in p4-phi <span class="tag phi">p4-phi</span></button>
           <div class="movebar">
@@ -266,7 +266,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
         </div>
       </section>
 
-      <section class="card sec" id="branch" hidden aria-label="Split a queue by write set">
+      <section class="card sec" id="branch" hidden aria-label="Split a queue by its files">
         <h2>The queue to split</h2>
         <div class="queue" id="queue"></div>
         <ul class="groups" id="groups"></ul>
@@ -285,16 +285,12 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
     <h2>Three rules p4-phi holds</h2>
     <p class="intro">The moves above follow these rules, and each card says what p4-phi does.</p>
     <div class="rule">
-      <h3>One writer per file</h3>
+      <h3>A worktree for each session that writes</h3>
       <ul>
-        <li>Every brief declares the files its session may write on a line <code>Files: &lt;paths&gt;</code>, or <code>Files: none</code>.</li>
-        <li>p4-phi refuses a start, a suggested task card or a request to a puppeteer whose brief declares no write set. The brief of a new orchestrator is exempt from the check on a start.</li>
-        <li>p4-phi holds a start whose write set overlaps a live session's until that session reports done. A session above the parent session never holds it.</li>
-        <li>An archived session holds nothing, and neither does a session the app shows as stopped, until its next turn.</li>
-        <li>p4-phi keeps the set as <code>fileSet</code> in the worker's <code>session.json</code> and shows it under Files on the worker's page. <code>phi.py files &lt;path&gt; ...</code> replaces it with the paths given and <code>phi.py files --release</code> empties it, so a start request held on the freed paths is handed to the session that queued it at its next turn.</li>
+        <li>A brief names the files its session covers on a line <code>Files: &lt;paths&gt;</code>, or <code>Files: none</code> for a session that writes none. p4-phi keeps the line as <code>fileSet</code> in the worker's <code>session.json</code>, shows it under Files on the worker's page, and names the worker in the address book as the session a message about one of those files goes to.</li>
+        <li>The line holds no start and no edit. p4-phi refuses no start for the files its brief names, holds none while a live session covers one of them and queues none behind a busy writer, and no command narrows or releases the line: each session that writes has a worktree of its own, so no two share a file on disk.</li>
         <li>A worker that writes works in a git worktree and on a branch of its own: each start p4-phi drafts for one passes <code>use_worktree: true</code>, a start for a session that only reads passes <code>false</code>, and so does a new orchestrator's, since it lands its tree's work in the checkout that holds the default branch. p4-phi asks about no branch or worktree that a session in a worktree of its own makes, moves to or enters. It asks a session that shares its starter's checkout before it moves that checkout to another branch, and every started session before it lands work with a push, merge, rebase or pull, since only the tree's orchestrator lands and pushes.</li>
         <li>Green work that closes an issue is landed at once, by the tree's orchestrator alone. A worker commits its <code>Closes #N</code> commit on its own branch, in its own worktree. Once its regression test passes, the orchestrator is handed a line that names that branch and tells it to merge the branch into the default branch first, then to push and to sync each store the change touches, without asking ezexe. The line is ezexe's standing word, so it stands in place of the app's default, by which a session merges a branch of a session it started only when ezexe says so.</li>
-        <li>Setting <code>phi.file_sets</code> to false in <code>p4.json</code> turns the check on a start call off. A request to a puppeteer still declares its write set, and a queued start that overlaps a live writer still waits.</li>
       </ul>
     </div>
     <div class="rule">
@@ -312,8 +308,6 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
       <h3>A puppeteer and the sessions it controls</h3>
       <ul>
         <li>A puppeteer is the session ezexe files in the sidebar section “puppeteers”. It controls the orchestrators of other trees, which stay at the top of their own trees in their own sections. The <a href="puppeteer.html">puppeteer page</a> models it.</li>
-        <li>A start queued behind a busy writer is handed only to the session that queued it, once that writer reports done: as a start at a turn ezexe begins there, and as a suggested task card at any other turn. So the app nests the worker where p4-phi does.</li>
-        <li>A session that starts another session's start request is told to detach the session it started to top level in the app, since the app nests it under its starter and no tool moves it after. p4-phi holds that session under the one that filed the request, and a puppeteer's board or the tree's ledger names it as an exception.</li>
         <li>A session whose turn another session began shows the worker as a suggested task card, the start call with <code>initiation</code> <code>own_initiative</code>, which ezexe starts in that session. p4-phi keeps no request for it, and <code>mcp__ccd_session__dismiss_task</code> withdraws a card that went stale.</li>
         <li>An orchestrator that has a puppeteer starts no new orchestrator itself. It writes <code>phi.py request ... --to-puppeteer</code>, and its puppeteer starts the session, files it in that environment's section and takes it under control, or declines it.</li>
         <li>A puppeteer is told which sessions it controls p4-phi's records hold complete, which no tool of the app tells. Its archive of one goes through the app's approval card like any other.</li>
@@ -399,7 +393,7 @@ function fit(t,text,max){t.textContent=text;if(t.getComputedTextLength()<=max)re
 function meta(n){
   var v=S.view,o=v==="phi"?"app":"phi",parts=[n.retired?"done, counted as archived":n.state,n.turns+" turn"+(n.turns===1?"":"s")];
   if(n.tag)parts.push(n.tag);
-  if(n.shard.length)parts.push(n.shard.length+" file"+(n.shard.length===1?"":"s")+" in its write set");
+  if(n.shard.length)parts.push(n.shard.length+" file"+(n.shard.length===1?"":"s")+" its brief covers");
   if(n.notes)parts.push(n.notes+" replaces: note"+(n.notes===1?"":"s"));
   if(parentIn(n.id,v)&&!parentIn(n.id,o))parts.push("at the top in "+(o==="app"?"the app":"p4-phi"));
   return parts.join(" · ");
@@ -567,7 +561,7 @@ var EX={
         note:"p4-phi reads the new-orchestrator line in the brief and makes the detach to top level itself at the session's first message. That is why this command finds the move already made."},
       {side:"app",by:"When the parent session's turn was begun by another session, the app refuses the start. The parent session shows it as a suggested task card, the same call with initiation own_initiative, which ezexe starts there.",code:call("mcp__ccd_session__start_session",{initiation:"own_initiative",title:e.title,context:"fresh",use_worktree:false,
         prompt:"<the topic, restated as the new session's own instruction>\n\n"+NEWTOP})},
-      {side:"phi",by:"An orchestrator that has a puppeteer starts none of this. It asks its puppeteer, which starts the session and files it.",code:PHI+' request "'+e.title+'" --brief "<the whole brief, with a line Files: none>" --to-puppeteer',
+      {side:"phi",by:"An orchestrator that has a puppeteer starts none of this. It asks its puppeteer, which starts the session and files it.",code:PHI+' request "'+e.title+'" --brief "<the whole brief>" --to-puppeteer',
         note:"The puppeteer page shows the whole path."}],
     app:"No nesting. The parent session is no longer told when this session's turns end, and archiving the parent session no longer archives it.",
     phi:"spawnedFrom with an empty sessionId and the source detached. Its page names it an orchestrator."}},
@@ -576,9 +570,7 @@ var EX={
     steps:[
       {side:"app",by:q(e.parentTitle)+" makes the call.",code:call("mcp__ccd_session__start_session",withLevel({initiation:"user_asked",title:e.title,context:"fresh",use_worktree:true,
         background:"This is one step of the task list of \""+e.parentTitle+"\". It runs in a git worktree of its own, on a branch of its own, and it reports to that session when done.",
-        prompt:"<the task and what done looks like>\n\nFiles: <each path this session may write, comma separated, or none>\n\nReport when done."}))},
-      {side:"phi",by:"A brief with no Files line never starts. p4-phi's hook on the call refuses it.",err:true,
-        out:"phi (p4-phi): this start is refused: a brief declares its write set: add a line `Files: <each path this session may write, comma separated>`, or `Files: none` for a session that writes nothing. One writer per file: a start whose write set overlaps a live session's is held until that session reports done, tasks that share a file go to one child as a serial run, and tasks with disjoint files each get a child."}],
+        prompt:"<the task and what done looks like>\n\nFiles: <each path this session may write, comma separated, or none>\n\nReport when done."}))}],
     app:"The new session nests under its parent session in the sidebar, and the app tells the parent session when its turns end.",
     phi:"spawnedFrom with the parent session's id and the source record. p4-phi keeps the Files line as fileSet, and \"report when done\" marks the session to be counted as archived when its work is over. At its first message it is given the tasks of the sessions above it. Since its brief names the paths it works on, it is also given its parent session's step, the task list around it and what its parent's anchor holds on those paths; a session whose brief names no path gets the notes of the sessions above it and the last turn of each sibling instead. Each finished turn's report reaches the parent session beside that session's next message, cut where the hook's room runs short."}},
   card:function(e){return{title:"A coworker by suggested task card",
@@ -586,11 +578,9 @@ var EX={
     steps:[
       {side:"app",by:q(e.reqTitle)+" shows the coworker as a suggested task card.",code:call("mcp__ccd_session__start_session",withLevel({initiation:"own_initiative",title:e.title,context:"fresh",use_worktree:true,
         background:"This is one part of the task of \""+e.reqTitle+"\". It runs in a git worktree of its own, on a branch of its own, and it reports to that session when done.",
-        prompt:"<the whole brief, with its Files line>"})),note:"When ezexe starts the card, the coworker starts. mcp__ccd_session__dismiss_task withdraws a card that went stale."},
-      {side:"phi",by:"A card whose brief has no Files line is never shown. p4-phi's hook on the call refuses it, as it refuses a start.",err:true,
-        out:"phi (p4-phi): this start is refused: a brief declares its write set: add a line `Files: <each path this session may write, comma separated>`, or `Files: none` for a session that writes nothing. One writer per file: a start whose write set overlaps a live session's is held until that session reports done, tasks that share a file go to one child as a serial run, and tasks with disjoint files each get a child."}],
+        prompt:"<the whole brief, with its Files line>"})),note:"When ezexe starts the card, the coworker starts. mcp__ccd_session__dismiss_task withdraws a card that went stale."}],
     app:"The coworker nests under the session that showed the card.",
-    phi:"spawnedFrom with that session's id and the source record, as for any start. p4-phi keeps a start request only for the two starts a card cannot hold. One waits behind a busy writer: the session that queued it is handed its exact call once that writer reports done, a start at a turn ezexe begins there and a card at any other turn. The other is addressed to a puppeteer."}},
+    phi:"spawnedFrom with that session's id and the source record, as for any start. p4-phi keeps a start request only for the one start a card cannot hold, a start addressed to a puppeteer."}},
   detachApp:function(e){return{title:"Detach to top level in the app",
     why:"This is the sidebar's Detach to top level. Only its parent session can make the call, or the session itself with \"self\". It cannot be undone from a session.",
     steps:[{side:"app",by:"The parent session names the session. The session itself passes \"self\".",code:call("mcp__ccd_session_mgmt__detach_session",{session_id:e.id})}],
@@ -610,22 +600,19 @@ var EX={
   branch:function(e){
     var steps=[],first=null;
     e.groups.forEach(function(g){
-      if(!g.clash&&!first)first=g;
+      if(!first)first=g;
       steps.push({side:"app",by:"One call for "+q(g.title)+(g.tasks.length>1?", a serial run of "+g.tasks.length+" tasks that share a file.":", a task whose files nobody else touches."),
         code:call("mcp__ccd_session__start_session",withLevel({initiation:"user_asked",title:g.title,context:"fresh",use_worktree:true,
           background:"One part of the queue of \""+e.parentTitle+"\", split by the files each part writes. Each part runs in a git worktree of its own, on a branch of its own, and the parent session merges each branch.",
-          prompt:(g.tasks.length>1?"Do these in order, one commit each:\n"+g.tasks.map(function(t,i){return (i+1)+". "+t}).join("\n"):g.tasks[0])+"\n\nFiles: "+g.files.join(", ")+"\n\nReport when done."})),
-        err:!!g.clash,
-        out:g.clash?"phi (p4-phi): this start is held: its write set shares "+g.clash.hit.slice(0,5).join(", ")+" with \""+g.clash.title+"\" `"+g.clash.id+"`, which is live and has not reported done. Send this work to that session as the next task of its serial run, or start it once that session reports done.":"",
-        note:g.clash?"This worker did not start, so the tree does not show it.":""});
+          prompt:(g.tasks.length>1?"Do these in order, one commit each:\n"+g.tasks.map(function(t,i){return (i+1)+". "+t}).join("\n"):g.tasks[0])+"\n\nFiles: "+g.files.join(", ")+"\n\nReport when done."}))});
     });
     if(first)steps.push({side:"phi",by:"A worker can also declare owned paths, so that a message naming one of its paths is sent on to it.",code:PHI+" shard "+first.files.join(" "),
       out:"kept as this session's owned paths: "+first.files.map(function(f){return "<project>/"+f}).join(", ")});
-    return{title:"Split by write set",
-      why:"A session holding a queue splits it so that no two sessions write the same file at once. Tasks that share a file go to one worker as a serial run. Tasks with disjoint files each get a worker, and those workers run at the same time. A worker whose task spans more splits it again the same way.",
+    return{title:"Split by the files each task writes",
+      why:"A session holding a queue splits it by the files its tasks write. Tasks that share a file go to one worker as a serial run, so their changes land in order on one branch. Tasks with disjoint files each get a worker, each in a git worktree and on a branch of its own, and those workers run at the same time. A worker whose task spans more splits it again the same way.",
       steps:steps,
-      app:"Each worker that starts nests under its parent session. The app knows nothing about write sets.",
-      phi:"p4-phi reads each worker's write set from the Files line of its brief, keeps it as fileSet in the worker's session.json and shows it under Files on the worker's page. It holds a start whose set overlaps a live session's until that session reports done. A session above the parent session never holds it, because a parent session's set covers its workers'."}},
+      app:"Each worker nests under its parent session, in a git worktree the app makes for it under <project>/.claude/worktrees/, on a branch of its own.",
+      phi:"p4-phi reads the files each worker covers from the Files line of its brief, keeps them as fileSet in the worker's session.json and shows them under Files on the worker's page. It holds no start for them: each worker writes in its own worktree, and the parent session merges each worker's branch."}},
   done:function(e){
     var steps=[];
     if(e.parentTitle){
@@ -782,7 +769,7 @@ function fly(child,parent){
 /* ---------- branch out ---------- */
 var HUES=["var(--phi)","var(--app)","var(--you)","var(--ok)","var(--bad)","var(--soft)"];
 function files(t){return t.split(/[,\s]+/).map(function(x){return x.trim()}).filter(Boolean)}
-/* starts.files_overlap: equal or nested paths, or a bare name that is the other's file name */
+/* two tasks share a file: equal or nested paths, or a bare name that is the other's file name */
 function fover(x,y){
   var px=x.indexOf("/")>=0,py=y.indexOf("/")>=0;x=x.toLowerCase().replace(/\/+$/,"");y=y.toLowerCase().replace(/\/+$/,"");
   if(px&&py)return x===y||x.indexOf(y+"/")===0||y.indexOf(x+"/")===0;
@@ -822,20 +809,12 @@ $("qadd").addEventListener("click",function(){S.queue.push({t:"A new task",f:"pa
 $("qclose").addEventListener("click",function(){$("branch").hidden=true});
 $("qgo").addEventListener("click",function(){
   var p=S.sel&&N(S.sel);if(!p)return;var gs=groupsOf();if(!gs.length)return;
-  /* starts.held_by: a live session that declared files and has not reported done holds an overlapping start;
-     the parent session and the sessions above it never do */
-  var skip={},c=p.id,g0=0;while(c&&g0++<40){skip[c]=1;c=parentIn(c,"phi")}
-  var live=S.order.filter(function(k){var x=N(k);return !skip[k]&&x.shard.length&&!x.retired&&x.state!=="done"});
-  gs.forEach(function(g){
-    g.clash=null;
-    live.forEach(function(k){if(g.clash)return;var hit=g.files.filter(function(f){return sets([f],N(k).shard)});if(hit.length)g.clash={id:k,title:N(k).title,hit:hit}});
-    if(!g.clash)mk(g.title,p.id,p.id,{shard:g.files.slice(),tag:g.tasks.length>1?"serial run of "+g.tasks.length:""});
-  });
-  var held=gs.filter(function(g){return g.clash}).length,made=gs.length-held;
-  if(made&&p.turns===0){p.turns=1;p.state="not shown done"}
+  /* every worker starts: each writes in a git worktree of its own, so no start waits on another's files */
+  gs.forEach(function(g){mk(g.title,p.id,p.id,{shard:g.files.slice(),tag:g.tasks.length>1?"serial run of "+g.tasks.length:""})});
+  if(p.turns===0){p.turns=1;p.state="not shown done"}
   S.example={kind:"branch",groups:gs,parentTitle:p.title};
-  say([["cmd","mcp__ccd_session__start_session × "+gs.length]].concat(held?[["err","phi (p4-phi): this start is held"+(held>1?", "+held+" times":"")]]:[]),
-    (made?made+(made===1?" worker holds a write set":" workers hold disjoint write sets")+", so there is one writer for each file.":"No worker started.")+(held?" p4-phi held "+held+(held===1?" start":" starts")+", because a live session already writes one of those files.":""));
+  say([["cmd","mcp__ccd_session__start_session × "+gs.length]],
+    gs.length+(gs.length===1?" worker starts":" workers start")+", each in a git worktree and on a branch of its own, so no start waits on another session's files.");
   $("branch").hidden=true;S.view="phi";render();
   if(window.innerWidth<=980)wrap.scrollIntoView({behavior:REDUCED?"auto":"smooth",block:"start"});
 });

@@ -80,18 +80,19 @@ A puppeteer is the orchestrator ezexe files in the sidebar section "puppeteers",
 | What the plugin does | How |
 | :- | :- |
 | Knows a puppeteer | The app's own `claude_desktop_config.json`, beside its `claude-code-sessions` folder, assigns the session to a group named as `phi.puppeteer_section` says, in `preferences.epitaxyPrefs["dframe-group-scopes"]`, each scope with `groups` and `assignments`. A missing or reshaped file makes no session a puppeteer. |
-| Knows which sessions it controls | `phi.py controls <sessionId>` writes `controls` on the puppeteer's record, each entry with the store that session's tree lives in. A controlled session's own hook finds the puppeteer and keeps `puppeteer` on its own record. Each side keeps its own record, and a puppeteer that starts a controlled session's start request writes a `claimed` row into that session's store. |
+| Knows which sessions it controls | `phi.py controls <sessionId>` writes `controls` on the puppeteer's record, each entry with the store that session's tree lives in. A controlled session's own hook finds the puppeteer and keeps `puppeteer` on its own record. Each side keeps its own record. |
 | Tells the controlled session | Once when it comes to have a puppeteer, and once when that ends. |
 | Keeps the board | `board.md` in the puppeteer's folder. |
 | Leaves a puppeteer's steps with it | No advice on where its steps go and no nudge, and at Stop a step that waits on sessions' reports ends the turn while a controlled session is not yet complete. |
-| Warns of an early go | A puppeteer's message to a session it controls gets one line while another controlled session, or one in its tree, still holds a file in that session's write set. The line names the holder by its full title and the command that frees the files. |
 
 What p4-phi does not do here is on the skill's last section.
 
-## Write sets
+## The files a brief covers
 
-A brief declares the files its session writes on a line `Files: <paths>`, and the refusal a start without one meets says why.
-A session narrows its write set with `phi.py files <path> ...` and empties it with `phi.py files --release`, and a start held on the released paths goes ahead at once.
+A brief names the files its session covers on a line `Files: <paths>`, and `Files: none` for a session that writes none.
+p4-phi keeps the line on the session's record and page and in the address book, where a message about one of those files is routed by it.
+The line holds no start and no edit: a session that writes works in a git worktree of its own, so p4-phi keeps no lock on a file.
+No start is refused for the files its brief names, held while a live session covers one of them or queued behind a busy writer, no command narrows or releases the line, and a puppeteer's message is warned about for no file.
 
 ## No setup
 
@@ -112,7 +113,6 @@ Every key is optional.
 | `child_levels` | the table under Delegation | an object: a kind, `static`, `build` or `design`, with its `model`, an id or `inherit`, and its `effort` |
 | `act_dont_wait` | `true` | `false`: the built-in act-don't-wait rule is left out |
 | `top_orchestrates` | `true` | `false`: an orchestrator does its own task list's work |
-| `file_sets` | `true` | `false`: a session may be started by a brief that declares no write set |
 | `issues` | `true` | `false`: no issue loop: a worker takes no open issue its brief names, gets no line on a commit that closes no issue, runs no regression test at Stop and is given no push line |
 | `puppeteer_section` | `puppeteers` | another name for the sidebar section; an empty string makes no session a puppeteer |
 | `clear_at` | 60 | the percent of its context, above 0 and at most 100, past which a session that keeps a state page clears itself at a turn's end; the session reads the share with the app's `get_usage` tool |

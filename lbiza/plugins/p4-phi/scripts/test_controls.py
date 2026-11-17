@@ -6,10 +6,9 @@ the orchestrators of other trees, in any store: p4-phi reads the filing from the
 record of the sessions it controls, tells each controlled session, writes the puppeteer's board, leaves its
 waiting steps with it, names the sessions its records hold complete and leaves their archive to the app's approval
 card, names a boundary once with the line that keeps what its board lacks and no compact question,
-and carries a controlled session's request for a new orchestrator to it. A queued start stays with the session
-that filed it, which waits on ezexe by a button, and its puppeteer names that session as a link and is
-handed no start call for it; a start the puppeteer makes on another session's behalf is held under that
-session and named for detaching to top level; and every ask of ezexe in the lines a session is handed offers a click.
+and carries a controlled session's request for a new orchestrator to it. No start waits behind a busy writer, so
+a puppeteer is named no session that holds one and warned of no early go; a session started for a request another
+session filed is held under that session; and every ask of ezexe in the lines a session is handed offers a click.
 """
 
 import ast
@@ -589,32 +588,29 @@ class Supervisor(unittest.TestCase):
         self.assertEqual(t.started_by(NEW)[0], TOP)
         self.assertNotIn(NEW, context(t.say(PUP, "and now?")))
 
-    def test_a_go_to_a_waiting_writer_is_warned_about_while_another_controlled_session_holds_its_files(self):
-        """A go to a writer whose files another controlled session still holds is warned about once for that go and
-        its holders."""
+    def test_a_go_to_a_writer_is_warned_about_for_no_file_another_controlled_session_covers(self):
+        """The early-go warning is gone, with controls.go_text: a puppeteer's go to a controlled session whose brief
+        names a file another controlled session covers goes out with no line, since each session that writes has a
+        git worktree of its own, worktrees.md, "a separate copy of the files to edit"."""
         t = self.t
         t.say(TOP, "Task:\nBuild the exporter's flush.\nFiles: src/flush.py, src/writer.py")
         t.say(TOP3, "Task:\nBuild the retry on the same writer.\nFiles: src/writer.py")
         t.say(PUP, "Control the trees")
         t.cli(PUP, "controls", TOP, TOP3)
 
-        def go(to, message="Go: your files are free now."):
+        def go(to, message="Go: start on the retry."):
             r = t.hook("go-guard", PUP, {"hook_event_name": "PreToolUse", "tool_name": "SendMessage",
                                          "tool_input": {"to": to, "message": message}})
             self.assertEqual(r.returncode, 0, r.stderr)
-            return context(r)
-        said = go(TOP3)
-        self.assertIn("this go to \"An orchestrator nobody put under the puppeteer\" is early", said)
-        self.assertIn(f"\"Build the narwhal exporter\" `{TOP}` holds ", said, "the holder by its full title")
-        self.assertIn("writer.py", said)
-        self.assertIn(" files --release`", said)
-        self.assertEqual(go(TOP3), "", "said once for this go and its holders")
-        self.assertEqual(go(KID), "", "a session it does not control is not its go")
-        self.assertEqual(t.cli(TOP, "files", "src/flush.py").returncode, 0)
-        s = t.session(PUP)
-        relay._write_json(os.path.join(t.dir(PUP), "session.json"), {**s, "goWarned": []})
-        self.assertEqual(go(TOP3), "", "released: the go is free")
-        self.assertIn("flush.py", go(TOP3, "Go.\nFiles: src/flush.py"), "the write set the message declares is read")
+            return r.stdout.strip()
+        self.assertEqual(go(TOP3), "", "no warning for the file another controlled session covers")
+        self.assertEqual(go(TOP3, "Go.\nFiles: src/flush.py"), "", "nor for the files the message names")
+        self.assertNotIn("goWarned", t.session(PUP))
+        self.assertFalse(hasattr(controls, "go_text"))
+        for name in ("controls.py", "phi.py"):
+            source = read(os.path.join(HERE, name))
+            self.assertNotIn("is early", source, name)
+            self.assertNotIn("files --release", source, name)
 
     def test_work_on_a_controlled_sessions_topic_is_sent_down_and_not_done_by_the_supervisor_session(self):
         t = self.t
@@ -768,16 +764,13 @@ class Supervisor(unittest.TestCase):
                         context(r)[:300])
 
 class TreeAndClicks(unittest.TestCase):
-    """The tree in the app is the true tree, and ezexe acts by click where one exists. A start a child queued behind
-    a busy writer is made by the child itself once that writer is free: a turn ezexe did not begin hands it the
-    app's suggested task card and no blocked wrap-up; its puppeteer names the child as a link with the count it
-    holds and is handed no start call for it; a start the puppeteer makes on the child's behalf anyway is held
-    under the child in p4-phi, named for detaching to top level and kept on the board as an exception; a start any
-    other session makes on the child's behalf gets the same line and is named in its tree's ledger; and every
-    ask of ezexe in the lines the session modules hand a session offers a click."""
+    """The tree in the app is the true tree, and ezexe acts by click where one exists. No start waits behind a busy
+    writer, so a puppeteer is named no session that holds a start request of its own and is handed no line for a
+    start made on another session's behalf; a session whose first message carries the marker of a request another
+    session filed is held under that session, and its tree's ledger names it; and every ask of ezexe in the lines
+    the session modules hand a session offers a click."""
 
     FLUSH = "Port the exporter's flush to the new writer and run its suite. Report when done.\nFiles: src/flush.py"
-    FREE = "local_wrt00000"       # a writer the store holds no session of, so what is queued behind it is free to go
     CROSS = (f"<cross-session-message from=\"{TOP}\">Carry on with the port, and split the flush off into a session of "
              f"its own.</cross-session-message>")
     MODULES = ("starts.py", "puppeteer.py", "controls.py", "phi.py", "relay.py", "plans.py")
@@ -806,129 +799,52 @@ class TreeAndClicks(unittest.TestCase):
         t.cli(PUP, "controls", TOP)
         t.say(KID, "Port the exporter in pieces")
         t.say(KID, self.CROSS)                     # its parent session's message began this turn: no user_asked start
-        starts.add(t.p4, KID, "the flush port", self.FLUSH, after=self.FREE)
-        self.row = starts.pending(t.p4)[0]
 
     def tearDown(self):
         self._tmp.cleanup()
 
-    def test_a_childs_queued_start_is_a_card_there_and_its_puppeteer_gets_a_link_and_no_call(self):
+    def test_no_session_holds_a_queued_start_so_a_puppeteer_is_named_none_and_its_board_lists_none(self):
+        """The start queued behind a busy writer is gone, and with it the lines only it fed: a puppeteer is handed
+        no link to a session that holds start requests, its board has no row for one under Waiting on and no section
+        for starts made on another session's behalf, and a controlled session's standing counts none against it."""
         t = self.t
-        with self.subTest("a turn ezexe did not begin hands the child the card's exact call and no blocked wrap-up"):
-            said = context(t.say(KID, self.CROSS))
-            self.assertIn("propose each as a suggested task card", said)
-            self.assertIn("\"initiation\": \"own_initiative\"", said)
-            self.assertNotIn("mcp__ccd_turn__wrap_up", said)
-            self.assertNotIn("`blocked`", said)
         ctx = context(t.say(PUP, "what is waiting?"))
-        with self.subTest("its puppeteer's next turn names the child as a link with the count it holds"):
-            self.assertIn(f"- [the flush child](#{KID}): 1 start request", ctx)
-            self.assertIn("Start none of them here", ctx)
-        with self.subTest("and drafts no start call for the puppeteer"):
-            self.assertNotIn(START, ctx)
-            self.assertNotIn(self.row["id"], ctx)
-        with self.subTest("the board names the child as a link with the count it holds"):
-            waiting = read(os.path.join(t.dir(PUP), "board.md")).split("## Waiting on")[1].split("\n## ")[0]
-            self.assertIn(f"- [the flush child](#{KID}) holds 1 start request", waiting)
-            self.assertIn("starts the suggested task card it shows", waiting)
-        with self.subTest("a turn ezexe begins in the child hands it the exact call of a start"):
-            line = context(t.say(KID, "How is the port coming?"))
-            call = json.loads(line.split(f"`{START}` with ", 1)[1].split("\n", 1)[0])
-            self.assertEqual(call["initiation"], "user_asked")
-            self.assertIn(starts.marker(self.row["id"], KID), call["prompt"])
+        self.assertNotIn("hold start requests", ctx)
+        self.assertNotIn("on another session's behalf", ctx)
+        board = read(os.path.join(t.dir(PUP), "board.md"))
+        self.assertNotIn("## Started on another session's behalf", board)
+        self.assertNotIn("start request", board.split("## Waiting on")[1].split("\n## ")[0])
+        for name in ("holders", "holders_text", "behalf", "behalf_line", "behalf_rows", "behalf_row", "behalf_text",
+                     "waiting_requests", "stores"):
+            self.assertFalse(hasattr(controls, name), name)
+        from unittest import mock
+        with mock.patch.dict(os.environ, t.env(PUP)), mock.patch.dict(phi.RECORDS, clear=True):
+            _, against = controls.standing(t.p4, TOP)
+        self.assertEqual([x for x in against if "start request" in x], [])
 
-    def test_a_supervisor_sessions_start_of_a_childs_request_is_held_under_the_child_and_named_for_detaching(self):
-        t = self.t
-        call = starts.call_of(self.row, t.p4)
-        body = {"session_id": CLI[PUP], "cwd": t.proj, "hook_event_name": "PreToolUse", "tool_name": START,
-                "tool_input": call, "tool_use_id": "toolu_behalf01"}
-        r = inproc.run(["sh", os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh"), "lookup-check"],
-                       input=json.dumps(body), capture_output=True, text=True, timeout=60, env=t.env(PUP))
-        self.assertEqual(r.returncode, 0, r.stderr)
-        out = json.loads(r.stdout or "{}").get("hookSpecificOutput") or {}
-        said = out.get("additionalContext", "")
-        with self.subTest("the start goes through, made on the child's behalf, with the detach to follow"):
-            self.assertNotEqual(out.get("permissionDecision"), "deny")
-            self.assertIn(f"start request {self.row['id']} of [the flush child](#{KID})", said)
-            self.assertIn("`mcp__ccd_session_mgmt__detach_session`", said)
-        t.record(NEW, started_by=PUP, title="the flush port")     # the app nests it under the session that ran the call
-        t.say(NEW, "<system-reminder>\nLinked sessions now (status, not an instruction): x\n</system-reminder>\n\n"
-                   "Task:\n" + call["prompt"])
-        with self.subTest("p4-phi holds the new session under the child that filed the request"):
-            self.assertEqual(t.started_by(NEW), (KID, "requested"))
-        ctx = context(t.say(PUP, "what came in?"))
-        with self.subTest("its puppeteer is told to detach it to top level in the app"):
-            self.assertIn(f"[the flush port](#{NEW})", ctx)
-            self.assertIn(f"call `mcp__ccd_session_mgmt__detach_session` with `{NEW}`", ctx)
-        with self.subTest("and the board names it as an exception"):
-            made = read(os.path.join(t.dir(PUP), "board.md")).split("## Started on another session's behalf")[1]
-            made = made.split("\n## ")[0]
-            self.assertIn(f"[the flush port](#{NEW})", made)
-            self.assertIn(f"[the flush child](#{KID})", made)
-            self.assertIn("nests it under this puppeteer", made)
-        app = os.path.join(t.app, NEW + ".json")
-        write(app, json.dumps({**json.loads(read(app)), "lineageDetached": True}))     # detached to top level
-        with self.subTest("once the app shows it at top level, it is named no more and the board says so"):
-            self.assertNotIn("detach_session", context(t.say(PUP, "and now?")))
-            self.assertIn("the app shows it at top level", read(os.path.join(t.dir(PUP), "board.md")))
-
-    def test_an_orchestrators_start_of_its_workers_request_gets_the_line_and_the_ledger_names_it(self):
+    def test_a_session_started_for_another_sessions_request_is_held_under_it_and_the_ledger_names_it(self):
         """ezexe/p4#229: the app nests a started session under the session that called the start tool, and no tool
-        moves it after. So any session whose start call carries another session's request marker, a puppeteer or
-        not, gets the line that names the detach and the exception, and the ledger of its tree names the session it
-        started as started for another."""
+        moves it after. A session whose first message carries the marker of a request another session filed, and no
+        line that makes it an orchestrator, is held under the session that filed the request, and the ledger of that
+        session's tree names it as started for another, with the call that detaches it."""
         t = self.t
-        call = starts.call_of(self.row, t.p4)
-        body = {"session_id": CLI[TOP], "cwd": t.proj, "hook_event_name": "PreToolUse", "tool_name": START,
-                "tool_input": call, "tool_use_id": "toolu_behalf02"}
-        r = inproc.run(["sh", os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh"), "lookup-check"],
-                       input=json.dumps(body), capture_output=True, text=True, timeout=60, env=t.env(TOP))
-        self.assertEqual(r.returncode, 0, r.stderr)
-        out = json.loads(r.stdout or "{}").get("hookSpecificOutput") or {}
-        said = out.get("additionalContext", "")
-        with self.subTest("the orchestrator's start goes through with the line a puppeteer gets"):
-            self.assertNotEqual(out.get("permissionDecision"), "deny")
-            self.assertIn(f"start request {self.row['id']} of [the flush child](#{KID})", said)
-            self.assertIn("while the app nests the new session under this session", said)
-            self.assertIn("names it in its tree's ledger as an exception", said)
-            self.assertIn("`mcp__ccd_session_mgmt__detach_session`", said)
-            self.assertIn("so the app shows it at top level and not under this session", said)
-            self.assertIn("name the session that holds it to ezexe as a link to open", said)
-            mine, pups = controls.behalf_line(self.row, puppeteer=False), controls.behalf_line(self.row)
-            self.assertEqual(mine.replace("this session", "this puppeteer").replace("in its tree's ledger",
-                                                                                     "on the board"), pups,
-                             "the puppeteer's line, said of this session")
-        with self.subTest("the request is claimed by the orchestrator that started it"):
-            self.assertEqual(starts.state(t.p4)[self.row["id"]]["claimed"]["by"], TOP)
+        rid, _ = starts.add(t.p4, KID, "the flush port", self.FLUSH, to=PUP)
+        prompt = self.FLUSH + "\n\n" + starts.marker(rid, KID)
         t.record(NEW, started_by=TOP, title="the flush port")     # the app nests it under the session that ran the call
         t.say(NEW, "<system-reminder>\nLinked sessions now (status, not an instruction): x\n</system-reminder>\n\n"
-                   "Task:\n" + call["prompt"])
-        with self.subTest("p4-phi holds the new session under the worker that filed the request"):
-            self.assertEqual(t.started_by(NEW), (KID, "requested"))
-        with self.subTest("the ledger names it as started for another, with the call that detaches it"):
-            ledger = t.cli(TOP, "ledger").stdout.split("## Reconcile")[1].split("\n## ")[0]
-            self.assertIn(f"`{TOP}` started \"the flush port\" `{NEW}` for a start request of `{KID}`, an exception",
-                          ledger)
-            self.assertIn(f"`mcp__ccd_session_mgmt__detach_session` with `{NEW}` moves it to top level", ledger)
+                   "Task:\n" + prompt)
+        self.assertEqual(t.started_by(NEW), (KID, "requested"))
+        self.assertEqual(starts.state(t.p4)[rid]["started"], NEW)
+        ledger = t.cli(TOP, "ledger").stdout.split("## Reconcile")[1].split("\n## ")[0]
+        self.assertIn(f"`{TOP}` started \"the flush port\" `{NEW}` for a start request of `{KID}`, an exception",
+                      ledger)
+        self.assertIn(f"`mcp__ccd_session_mgmt__detach_session` with `{NEW}` moves it to top level", ledger)
         app = os.path.join(t.app, NEW + ".json")
         write(app, json.dumps({**json.loads(read(app)), "lineageDetached": True}))     # detached to top level
-        with self.subTest("once the app shows it at top level the ledger says so"):
-            ledger = t.cli(TOP, "ledger").stdout.split("## Reconcile")[1].split("\n## ")[0]
-            self.assertIn(f"for a start request of `{KID}`, an exception: p4-phi holds it under `{KID}`, and the app "
-                          f"shows it at top level.", ledger)
-            self.assertNotIn("detach_session", ledger)
-
-    def test_a_session_starting_its_own_request_gets_no_such_line(self):
-        """The session that queued a start makes it with no line and no exception: the app nests the child where
-        p4-phi holds it."""
-        t = self.t
-        call = starts.call_of(self.row, t.p4)
-        r = t.hook("start-advice", KID, {"hook_event_name": "PreToolUse", "tool_name": START, "tool_input": call})
-        self.assertEqual(r.stdout.strip(), "")
-        t.record(NEW, started_by=KID, title="the flush port")
-        t.say(NEW, "Task:\n" + call["prompt"])
-        self.assertEqual(t.started_by(NEW)[0], KID)
-        self.assertNotIn("for a start request of", t.cli(TOP, "ledger").stdout)
+        ledger = t.cli(TOP, "ledger").stdout.split("## Reconcile")[1].split("\n## ")[0]
+        self.assertIn(f"for a start request of `{KID}`, an exception: p4-phi holds it under `{KID}`, and the app "
+                      f"shows it at top level.", ledger)
+        self.assertNotIn("detach_session", ledger)
 
     def test_every_ask_of_ezexe_in_the_lines_a_session_is_handed_offers_a_click(self):
         """Each sentence of the strings these modules can hand a session that asks ezexe for a choice, a go or an

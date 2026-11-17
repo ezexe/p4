@@ -255,7 +255,7 @@ def covers(pattern, path):
 
 
 def overlap(a, b):
-    """True when two path or glob entries, of owned paths or write sets, can name the same file."""
+    """True when two path or glob entries can name the same file."""
     ra, rb = _root(a), _root(b)
     return covers(a, b) or covers(b, a) or covers(ra, rb) or covers(rb, ra)
 
