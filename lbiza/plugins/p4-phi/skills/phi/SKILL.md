@@ -75,9 +75,10 @@ A controlled session is told once when it comes to have a puppeteer, and once wh
 Each request of ezexe's to a puppeteer is a row of its ledger, `asks.md` beside its board: a short topic, the session that holds it by full title and id, its state, and what waits on ezexe.
 A question and a quick answer open no row.
 A message the app marks as another session's opens no row and is drafted no start: the body, past its leading reminders, opens with another session's message, a side-sessions event, a task notification, a system notification or a hook's feedback.
-A request takes as its holder the session the puppeteer messages, or the orchestrator it starts, whose own words share the request's topic.
-Its state is read from that holder's turns: routed or started, working, reported, done or closed; one the puppeteer's turn settles with no send, no start and no question is answered.
-A turn on a request that ends on a question leaves it waiting on ezexe until ezexe's next message, which answers the row it names or else the latest.
+A request takes as its holder the session the puppeteer messages, or the orchestrator it starts, whose own words share the request's topic, else, for a send to a controlled session or a start, the request its turn works on.
+Its state is read from that holder's turns: routed or started, working, reported, and done for good once one of them was shown done; closed for good once the holder left the address book with no such turn.
+At the request's next message, one with no holder is answered when the turn on it ended without a question, carried when no turn ended before ezexe moved on, and waits on ezexe when the turn ended on a question.
+A waiting request is answered by ezexe's next message, the row it names or else the latest.
 A finished row leaves the page a day after.
 Beside each of the puppeteer's messages, a short line gives the counts by state and names the page.
 A message of ezexe's that `route_down` sends to a controlled session's topic is drafted no start.

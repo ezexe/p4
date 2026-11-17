@@ -2,20 +2,21 @@
 
 A puppeteer reacts to each of ezexe's messages as it comes; the ledger keeps what became of each. A row holds the
 request's topic, the session that holds it by full title and id, its state and what waits on ezexe. The rows are
-appended to <puppeteer folder>/asks.jsonl, folded by id and compacted when the file grows; asks.md is the page,
-rewritten when it changes, and a short line naming it is handed beside each of the puppeteer's messages.
+appended to <puppeteer folder>/asks.jsonl, folded by id and compacted in steps as the file grows; asks.md is the
+page, rewritten when it changes, and a short line naming it is handed beside each of the puppeteer's messages.
 
   opened   a message of ezexe's that asks for work opens a row: a message the app marks as another session's, a
            question and a quick answer open none, and phi.py hands only ezexe's own messages here. The topic is a
            short phrase of at most TOPIC_CHARS, never a run of ezexe's message.
   holder   the session the puppeteer sends a request to with SendMessage, read at the send by phi.h_go_guard, or an
-           orchestrator newly under its control, each credited to the open row whose topic its own words share.
-  state    read through the address book, book.py, at each render: open with no holder; routed or started; working
-           while the holder is inside a turn; reported once it ended a turn since it took the request; done once
-           that turn was shown done; closed once it left the book; answered when the puppeteer's turn on it ended
-           with no send, no start and no question.
-  waits    the last line of the puppeteer's turn on a request with no holder, when that turn ended on a question for
-           ezexe, set once per turn, until ezexe's next message, which answers the row it names or else the latest.
+           orchestrator newly under its control: the open row whose topic their own words share, else, for a send to
+           a controlled session or a start, the row the turn works on.
+  state    open until the row's next message reads the turn on it: it waits on ezexe when that turn ended on a
+           question, is answered when the turn ended without one, and is carried when no turn ended before the next
+           message. A held row is routed or started, working while the holder is inside a turn, reported once the
+           holder ended a turn since it took the request, and done for good once one of those turns was shown done;
+           closed for good once the holder left the address book, archived or no longer live, with no such turn.
+  waits    the last line of that turn, until ezexe's next message, which answers the row it names or else the latest.
 
 controls.PHI is phi.py, set when phi.py is imported; every function here is called from phi.py.
 """
@@ -36,14 +37,14 @@ PAGE = "asks.md"
 TOPIC_CHARS = 60
 SHOWN = 6                        # rows named in the line beside a message; the rest are on the page
 SHARED = 2                       # content words a send's or a start's text shares with a row's topic, to hold it
-KEEP_S = 24 * 3600               # a done, closed or answered row stays on the page this long
-COMPACT = 400                    # rows of asks.jsonl past which it is folded and written again
+KEEP_S = 24 * 3600               # a finished row stays on the page this long
+COMPACT = 400                    # rows asks.jsonl grows by between two compactions
 ASKS = re.compile(r"\b(?:publish|push|merg|releas|deploy|archiv|start|run|send|install)\w*\b", re.I)
 QUESTION = re.compile(r"\?\s*$")
 ASKING = re.compile(r"^\W*(?:where|what|when|why|how|who|which|whether|is|are|was|were|has|have|had|does|do|did|can|"
                     r"could|should|would|will)\b", re.I)
 ROW_ID = re.compile(r"\bask-(\d+)\b")
-FINISHED = ("done", "closed", "answered")
+FINISHED = ("done", "closed", "answered", "carried")
 
 
 def _phi():
@@ -84,37 +85,45 @@ def rows(home, sid):
         kind = r.get("kind")
         if kind == "opened":
             out[rid] = {"id": rid, "topic": r.get("topic", ""), "said": r.get("said", ""),
-                        "opened": r.get("time", ""), "holder": "", "home": "", "base": 0, "how": "",
-                        "waits": "", "asked": [], "answered": ""}
+                        "opened": r.get("time", ""), "turnBefore": r.get("turnBefore", ""), "holder": "",
+                        "home": "", "base": 0, "how": "", "routed": "", "waits": "", "asked": [], "end": "",
+                        "ended": ""}
             continue
         if rid not in out:
             continue
         if kind == "holder" and not out[rid]["holder"]:
             out[rid].update(holder=r.get("holder", ""), home=r.get("home", ""), base=r.get("base") or 0,
-                            how=r.get("how", ""), waits="", routed=r.get("time", ""))
+                            how=r.get("how", ""), waits="", routed=r.get("time", ""), end="", ended="")
         elif kind == "waits":
             out[rid]["waits"] = r.get("waits", "")
             if r.get("turn"):
                 out[rid]["asked"].append(r["turn"])
-        elif kind == "answered":
-            out[rid]["answered"] = r.get("time", "")
+        elif kind == "end":                        # answered, carried or done: kept, never read again
+            out[rid].update(end=r.get("end", ""), ended=r.get("time", ""))
         elif kind == "folded":                     # a compacted row: every field as it stood
             out[rid].update({k: v for k, v in r.items() if k not in ("id", "kind", "time")})
     return list(out.values())
 
 
-def _compact(home, sid):
-    """asks.jsonl written again as one row per request, once it has grown past COMPACT rows."""
+def _compact(home, sid, state):
+    """asks.jsonl written again as two rows per request, once it has grown by COMPACT rows since the last time."""
     path = log_path(home, sid)
-    if len(relay._rows(path)) <= COMPACT:
+    try:
+        with open(path, "rb") as f:
+            n = f.read().count(b"\n")
+    except OSError:
+        return
+    if n <= int(state.get("compactedAt") or 0) + COMPACT:
         return
     lines = []
     for r in rows(home, sid):
-        lines.append({"kind": "opened", "id": r["id"], "topic": r["topic"], "said": r["said"], "time": r["opened"]})
+        lines.append({"kind": "opened", "id": r["id"], "topic": r["topic"], "said": r["said"], "time": r["opened"],
+                      "turnBefore": r["turnBefore"]})
         lines.append({"kind": "folded", "id": r["id"], "time": _now(),
-                      **{k: r[k] for k in ("holder", "home", "base", "how", "waits", "asked", "answered")},
-                      **({"routed": r["routed"]} if r.get("routed") else {})})
+                      **{k: r[k] for k in ("holder", "home", "base", "how", "routed", "waits", "asked", "end",
+                                           "ended")}})
     _phi().write_atomic(path, "".join(json.dumps(x, ensure_ascii=False) + "\n" for x in lines))
+    state["compactedAt"] = len(lines)
 
 
 def words(text):
@@ -150,22 +159,28 @@ def _state_path(home, sid):
     return os.path.join(relay._dir(home, sid), "asks.json")
 
 
-def _turns(home, sid):
-    return len(relay._rows(os.path.join(relay._dir(home, sid), "turns.jsonl"))) if home and sid else 0
+def _turn_lines(home, sid):
+    """A session's turns.jsonl as its raw lines, counted without parsing."""
+    try:
+        with open(os.path.join(relay._dir(home, sid), "turns.jsonl"), "rb") as f:
+            return f.read().splitlines()
+    except OSError:
+        return []
 
 
 def _hold(home, sid, rid, target, store, how):
     """A row takes its holder, with the count of the holder's turns so far, which tells a later report."""
     _add(home, sid, {"kind": "holder", "id": rid, "holder": target, "home": store, "how": how,
-                     "base": _turns(store, target)})
+                     "base": len(_turn_lines(store, target))})
 
 
 def _credit(have, text):
-    """The open row with no holder whose topic shares the most content words with `text`, at least SHARED; None."""
+    """The row with no holder whose topic shares the most content words with `text`, at least SHARED; None. A row the
+    puppeteer answered itself, or one finished past KEEP_S, takes no holder."""
     said = words(text)
     best, score = None, SHARED - 1
     for r in have:
-        if r["holder"] or r["answered"]:
+        if r["holder"] or r["end"] == "answered" or r["end"] and _old(r):
             continue
         n = len(said & words(r["topic"]))
         if n > score:
@@ -176,97 +191,121 @@ def _credit(have, text):
 # --- the hooks ---------------------------------------------------------------------------------------------------------
 
 def on_message(home, s, req, last_turn=None):
-    """At each message of a puppeteer, before its other lines. First what the turn before did: an orchestrator newly
-    under its control holds the open row its title and task share words with; the row that turn opened, still with
-    no holder, waits on ezexe when the turn ended on a question, once per turn, and is answered when it ended
-    without one. Then this message, `req`, ezexe's own, '' for any other: it answers the row that waits, the one it
-    names or else the latest, and a request opens a row. Returns the row this turn works on, '' for none."""
+    """At each message of a puppeteer, before its other lines. First what came since the message before: an
+    orchestrator newly under its control holds the row its title and task share words with, else the row that
+    message worked on; that row, still with no holder and no wait, waits on ezexe when a turn since ended on a
+    question, is answered when a turn ended without one, and is carried when none ended. Then this message, `req`,
+    ezexe's own, '' for any other: it answers the row that waits, the one it names or else the latest, and a request
+    opens a row. Returns the row this turn works on, '' for none."""
     sid = s["sessionId"]
     state = relay._read_json(_state_path(home, sid))
     now = state.get("now") or ""
     have = rows(home, sid)
+    t = last_turn if isinstance(last_turn, dict) else {}
+    turn = str(t.get("id") or "")
     ctl = {e["sessionId"]: e.get("store") or home for e in controls.controlled(s)}
     if "known" in state:
         for k in [k for k in ctl if k not in state["known"]]:
             ks = relay._session(ctl[k], k) if ctl[k] else {}
-            r = _credit(have, f"{book.title(k, ks)} {ks.get('task') or ''}")
-            if r:
+            r = _credit(have, f"{book.title(k, ks)} {ks.get('task') or ''}") or next(
+                (x for x in have if x["id"] == now and not x["holder"]), None)
+            if r:                                  # credited by its words, else a start of that message's turn
                 _hold(home, sid, r["id"], k, ctl[k], "started")
                 r["holder"] = k
     state["known"] = sorted(ctl)
-    t = last_turn if isinstance(last_turn, dict) else {}
-    turn = str(t.get("id") or "")
-    report = str(t.get("report") or "").strip()
     mine = next((r for r in have if r["id"] == now), None)
-    if mine and not mine["holder"] and turn and turn != state.get("turnAt") and turn not in mine["asked"]:
-        if report and QUESTION.search(report):
-            _add(home, sid, {"kind": "waits", "id": now, "turn": turn, "waits": report.rsplit("\n", 1)[-1][-300:]})
-        elif not mine["waits"]:
-            _add(home, sid, {"kind": "answered", "id": now})
+    if mine and not mine["holder"] and not mine["waits"] and not mine["end"]:
+        if turn and turn != mine["turnBefore"] and turn not in mine["asked"]:
+            report = str(t.get("report") or "").strip()
+            if report and QUESTION.search(report):
+                _add(home, sid, {"kind": "waits", "id": now, "turn": turn,
+                                 "waits": report.rsplit("\n", 1)[-1][-300:]})
+            else:
+                _add(home, sid, {"kind": "end", "id": now, "end": "answered"})
+        else:
+            _add(home, sid, {"kind": "end", "id": now, "end": "carried"})   # ezexe moved on before its turn ended
     have = rows(home, sid)
     now = ""
     if req:
         waiting = [r for r in have if r["waits"]]
+        hit = None
         if waiting:
             named = ROW_ID.search(req)
             hit = next((r for r in waiting if named and r["id"] == f"ask-{named.group(1)}"), None) \
                 or next((r for r in reversed(waiting) if len(words(req) & words(r["topic"])) >= SHARED), None) \
                 or waiting[-1]
-            _add(home, sid, {"kind": "waits", "id": hit["id"], "waits": ""})
-            now = hit["id"]
         elif request(req) and not any(r["said"] == _key(req) for r in have):
             now = f"ask-{len(have) + 1}"
-            _add(home, sid, {"kind": "opened", "id": now, "topic": topic_of(req), "said": _key(req)})
+            _add(home, sid, {"kind": "opened", "id": now, "topic": topic_of(req), "said": _key(req),
+                             "turnBefore": turn})
+        if hit:                                    # ezexe's answer: the row works on again from this message
+            _add(home, sid, {"kind": "waits", "id": hit["id"], "waits": ""})
+            _add(home, sid, {"kind": "opened", "id": hit["id"], "topic": hit["topic"], "said": hit["said"],
+                             "time": hit["opened"], "turnBefore": turn})
+            now = hit["id"]
     state["now"] = now
-    state["turnAt"] = turn                         # the turn read here, so a message with no turn between reads none
+    _compact(home, sid, state)
     relay._write_json(_state_path(home, sid), state)
-    _compact(home, sid)
     return now
 
 
 def on_send(home, s, target, message=""):
-    """At the puppeteer's SendMessage: the open row whose topic the message's own words share takes the target as
-    its holder; a message that shares no topic, such as one to its standing worker, holds none."""
+    """At the puppeteer's SendMessage: the row whose topic the message's own words share takes the target as its
+    holder; failing that, a send to a controlled session holds the row this turn works on. A message on no
+    request's topic to a session it does not control, such as its standing worker, holds none."""
     sid = s["sessionId"]
     target = _phi().safe_id(target) if target else ""
     if not target or target == sid:
         return
-    r = _credit(rows(home, sid), message)
+    have = rows(home, sid)
+    ctl = {e["sessionId"]: e.get("store") or home for e in controls.controlled(s)}
+    r = _credit(have, message)
+    if not r and target in ctl:
+        now = relay._read_json(_state_path(home, sid)).get("now") or ""
+        r = next((x for x in have if x["id"] == now and not x["holder"]), None)
     if r:
-        store = next((e.get("store") or home for e in controls.controlled(s) if e["sessionId"] == target), home)
-        _hold(home, sid, r["id"], target, store, "routed")
+        _hold(home, sid, r["id"], target, ctl.get(target, home), "routed")
 
 
 # --- the page ----------------------------------------------------------------------------------------------------------
 
-def state_of(r, entries, seen=None):
+def state_of(home, sid, r, entries, seen):
     """A row's state, read from its holder's entry in the address book and the turns it ended since it took the
-    request. `seen` keeps each holder's turns and whether it is working, read once per render."""
+    request. A done, and a holder gone from the book, are kept on the row, so it closes for good. `seen` keeps each
+    holder's turn lines and whether it is working, read once per render."""
     if r["waits"]:
         return "waits on ezexe"
+    if r["end"]:
+        return r["end"]
     k = r["holder"]
     if not k:
-        return "answered" if r["answered"] else "open"
+        return "open"
     e = entries.get(k)
-    if not e:
-        return "closed"
-    seen = {} if seen is None else seen
+    where = e["home"] if e else (r["home"] or home)
     if k not in seen:
-        seen[k] = (relay._rows(os.path.join(relay._dir(e["home"], k), "turns.jsonl")),
-                   _phi().puppeteer.working(e["home"], k))
-    turns, working = seen[k]
-    if len(turns) > r["base"] and turns[-1].get("done"):
-        return "done"
+        seen[k] = (_turn_lines(where, k), bool(e) and _phi().puppeteer.working(where, k))
+    lines, working = seen[k]
+    since = lines[r["base"]:]
+    for raw in since:                              # only the turns since the holder took the request are parsed
+        try:
+            if json.loads(raw).get("done"):
+                _add(home, sid, {"kind": "end", "id": r["id"], "end": "done"})
+                return "done"
+        except ValueError:
+            continue
+    if not e:
+        ks = relay._session(where, k) if where else {}
+        if ks.get("sessionId") and controls.out_of_tree(ks):
+            _add(home, sid, {"kind": "end", "id": r["id"], "end": "closed"})
+        return "closed"                            # one no store holds stays closed until it leaves the page
     if working:
         return "working"
-    if len(turns) > r["base"]:
-        return "reported"
-    return r["how"] or "routed"
+    return "reported" if since else (r["how"] or "routed")
 
 
 def _old(r):
-    """True for a finished row past KEEP_S since it was last touched."""
-    when = r.get("answered") or r.get("routed") or r.get("opened") or ""
+    """True for a finished row past KEEP_S since it ended."""
+    when = r.get("ended") or r.get("routed") or r.get("opened") or ""
     try:
         return time.time() - time.mktime(time.strptime(when[:19], "%Y-%m-%d %H:%M:%S")) > KEEP_S
     except ValueError:
@@ -275,13 +314,14 @@ def _old(r):
 
 def render(home, s, store=""):
     """asks.md, rewritten when it changed, and the rows on it with their states and holders' titles: every row but
-    a done, closed or answered one past a day."""
+    a finished one past a day."""
     sid = s["sessionId"]
     have = rows(home, sid)
-    entries = book.entries(home, sid, store) if any(r["holder"] for r in have) else {}
+    live = [r for r in have if not (r["end"] and _old(r))]
+    entries = book.entries(home, sid, store) if any(r["holder"] and not r["end"] for r in live) else {}
     seen, out = {}, []
-    for r in have:
-        st = state_of(r, entries, seen)
+    for r in live:
+        st = state_of(home, sid, r, entries, seen)
         if st in FINISHED and _old(r):
             continue
         k = r["holder"]

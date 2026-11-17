@@ -17,6 +17,7 @@ import asks  # noqa: E402
 import inproc  # noqa: E402
 import issues  # noqa: E402
 import phi  # noqa: E402,F401  sets controls.PHI, which asks.py reads
+import relay  # noqa: E402
 from test_phi import CLI, KID, TOP, Tree, context, read, write  # noqa: E402
 
 TASK = "Make the narwhal exporter write its ports table to the store"
@@ -241,6 +242,79 @@ class RoutingMarks(Trees):
         long = "<system-reminder>\n" + "background " * 600 + "\n</system-reminder>\n"
         self.assertNotIn(DRAFT, context(t.say(PUP, long + marked(BILLING))))
         self.assertEqual(asks.rows(t.p4, PUP), [])
+
+
+class LedgerCloses(Trees):
+    """Every row closes: done for good, closed for good, answered or carried, and a send or a start with no shared
+    word still holds the row its turn works on."""
+
+    def page(self):
+        return read(asks.page_path(self.t.p4, PUP))
+
+    def test_a_done_row_stays_done_after_its_holders_next_turn(self):
+        t = self.t
+        t.say(PUP, ASK1)
+        self.send(PUP, TOP, ASK1 + ", as the exporter's next step.")
+        t.stop(PUP, ASK1, report="Sent to the exporter's orchestrator.", uuid="d1")
+        t.say(TOP, "Add the retry to the flush")
+        self.assertEqual(t.cli(TOP, "done", "the retry landed and its suite ran green").returncode, 0)
+        t.stop(TOP, "Add the retry to the flush", report="The retry landed.", uuid="d2")
+        t.say(PUP, ACCOUNT)
+        self.assertIn(f"`{TOP}` | done", self.page())
+        t.say(TOP, "Now the batch size")
+        t.stop(TOP, "Now the batch size", report="Looking at the batch size.", uuid="d3")
+        t.say(PUP, ACCOUNT)
+        self.assertIn(f"`{TOP}` | done", self.page(), "done is kept on the row")
+
+    def test_a_turn_that_never_ended_leaves_its_row_carried(self):
+        t = self.t
+        t.say(PUP, ASK2)
+        t.say(PUP, ACCOUNT)                        # ezexe moved on before the turn on ask-1 ended
+        self.assertIn("held by no session yet | carried", self.page())
+
+    def test_a_holder_archived_in_the_app_closes_its_row_for_good(self):
+        t = self.t
+        t.say(PUP, ASK2)
+        self.send(PUP, TOP3, ASK2 + ", as the importer's next step.")
+        t.stop(PUP, ASK2, report="Sent to the importer's orchestrator.", uuid="c1")
+        rec = os.path.join(t.app, TOP3 + ".json")
+        d = json.loads(read(rec))
+        write(rec, json.dumps(dict(d, isArchived=True)))
+        t.say(PUP, ACCOUNT)
+        self.assertEqual(asks.rows(t.p4, PUP)[0]["end"], "closed", "kept on the row")
+        write(rec, json.dumps(d))
+        t.say(PUP, ACCOUNT)
+        self.assertIn(f"`{TOP3}` | closed", self.page(), "closed for good")
+
+    def test_a_holder_that_left_the_book_after_a_done_turn_is_done(self):
+        t = self.t
+        t.say(PUP, ASK1)
+        self.send(PUP, TOP, ASK1 + ", as the exporter's next step.")
+        t.stop(PUP, ASK1, report="Sent to the exporter's orchestrator.", uuid="r1")
+        t.say(TOP, "Add the retry to the flush")
+        self.assertEqual(t.cli(TOP, "done", "the retry landed and its suite ran green").returncode, 0)
+        t.stop(TOP, "Add the retry to the flush", report="The retry landed.", uuid="r2")
+        s = t.session(TOP)
+        relay._write_json(os.path.join(t.dir(TOP), "session.json"), dict(s, doneRetired=True))
+        t.say(PUP, ACCOUNT)
+        self.assertIn(f"`{TOP}` | done", self.page(), "its done turn, not its leaving, says what became of it")
+
+    def test_an_unmatched_send_or_a_late_start_still_holds_its_row(self):
+        t = self.t
+        t.say(PUP, ASK2)
+        self.send(PUP, TOP3, "Over to you for the next step.")
+        self.assertEqual(asks.rows(t.p4, PUP)[0]["holder"], TOP3, "a send to a controlled session holds its row")
+        t.stop(PUP, ASK2, report="Sent on.", uuid="u1")
+        new = "local_new00008"
+        CLI.setdefault(new, "77778000-0000-4000-8000-000000000000")
+        t.say(PUP, BILLING)
+        t.record(new, title="Ledger of invoices")
+        t.say(new, "Lay out the ledger")
+        self.assertEqual(t.cli(PUP, "controls", new).returncode, 0)
+        t.stop(PUP, BILLING, report="Started its orchestrator.", uuid="u2")
+        t.say(PUP, ACCOUNT)
+        got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
+        self.assertEqual((got["ask-2"]["holder"], got["ask-2"]["how"]), (new, "started"), "a start with no shared word")
 
 
 if __name__ == "__main__":
