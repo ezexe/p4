@@ -91,7 +91,7 @@ Every key is optional.
 | `max_depth` | 3 | the depth, 1 to 20, at which a session starts no session of its own |
 | `max_children` | 8 | the live children, 1 to 50, past which a session starts none |
 | `sibling_turns` | 5 | the siblings' last turns, 0 to 50, a start background holds |
-| `own_turns` | 3 | a session's own turns, 0 to 50, its background holds after a compaction or a clear |
+| `own_turns` | 3 | a session's own turns, 0 to 50, its background holds after a clear |
 | `chain_max` | 8 | the sessions, 1 to 50, followed upward from a session |
 | `turn_steps` | 12 | the steps and workers, 1 to 100, kept with a turn |
 | `tree_checks` | 6 | the read-only checks of its trees, 0 to 100, an orchestrator runs in one work step |

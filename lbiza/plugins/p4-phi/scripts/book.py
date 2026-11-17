@@ -336,7 +336,7 @@ def write_page(home, s, book, store=""):
 def line(home, s, store="", whole=False, named=False):
     """The book beside a message: at the session's first look, or with `whole`, its addresses and entries, cut to
     SHOWN with the rest on the page; after that only the entries that changed or left since it last looked, and ''
-    when none did, or with `named`, as beside a start's standing instruction, the page alone. Each time it names
+    when none did, or with `named`, as at a start after a compaction, the page alone. Each time it names
     the page."""
     sid = str(s.get("sessionId") or "") if isinstance(s, dict) else ""
     if not sid or not home:

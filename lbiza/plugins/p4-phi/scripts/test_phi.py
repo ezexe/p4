@@ -11,7 +11,7 @@ with no store of its own living in its parent session's store; every finished tu
 its report appended to the parent session's reports and given to that session at its next message, once; a
 worker given the tasks and notes of the sessions above it and the last turn of its siblings; an orchestrator
 given the last turns of the orchestrators before it, with no likeness of words involved; a note refused without
-a source; a session detached to top level, and reparented; a session's own turns after a compaction; silence where
+a source; a session detached to top level, and reparented; a session's own turns after a clear; silence where
 there is nothing to say; no standing instruction for a message about something else, which the app's own session
 tools carry; a feature step as a new topic; a turn another session began shown a suggested task card first and a
 start request second; the caps on depth and live children;
@@ -747,9 +747,20 @@ class Background(unittest.TestCase):
         self.assertIn("source", r.stderr)
         self.assertEqual(phi.load_notes(self.t.p4, TOP), [])
 
-    def test_a_session_is_given_its_own_turns_after_a_compaction(self):
+    def test_a_session_is_given_its_own_turns_after_a_clear_and_none_after_a_compaction(self):
+        """https://code.claude.com/docs/en/context-window.md, "What survives compaction": "When a long session
+        compacts, Claude Code summarizes the conversation history to fit the context window", and the row "Context
+        that hooks added earlier" reads "Summarized with the rest of the conversation". The summary carries the
+        session's own turns and the background it was handed, so a start after a compaction hands neither again. A
+        clear keeps nothing, so a start after it hands the background with the session's own turns."""
+        self.t.say(KID, HANDED)
         self.t.stop(KID, HANDED, [("Edit", {"file_path": "src/export/flush.py"}, "ok")], "Half done.")
         text = self.start(KID, "compact")
+        for gone in ("This session's own turns so far", "Half done.", "edited export/flush.py",
+                     "background for this session"):
+            self.assertNotIn(gone, text, gone)
+        self.assertIn("act-don't-wait", text, "the built-in rules still come")
+        text = self.start(KID, "clear")
         self.assertIn("This session's own turns so far", text)
         self.assertIn("Half done.", text)
         self.assertIn("edited export/flush.py", text)
@@ -983,12 +994,18 @@ class NewTask(unittest.TestCase):
         self.say(KID, HANDED)
         self.assertIn(BRIEF, self.t.session(KID)["task"])
 
-    def test_the_address_book_comes_whole_after_a_compaction(self):
-        self.say(TOP, TASK)
+    def test_the_address_book_comes_by_its_page_after_a_compaction_and_whole_after_a_clear(self):
+        """A compaction's summary keeps the conversation, the book the session was handed among it, and no exact id
+        or path: the start after it names book.md and hands no entry that did not change. A clear keeps nothing."""
+        self.say(TOP, TASK)                          # its first look: the book whole
         r = self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "compact"}, P4_PHI_BOOK="1")
         text = context(r)
-        self.assertIn("this session's address book, whole on", text)
+        self.assertIn("this session's address book, unchanged since it last looked, is whole on", text)
+        self.assertIn("/book.md", text.replace("\\", "/"))
+        self.assertNotIn("this session's address book, whole on", text)
         self.assertNotIn("about something else", text)
+        r = self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "clear"}, P4_PHI_BOOK="1")
+        self.assertIn("this session's address book, whole on", context(r))
 
     def test_the_task_is_changed_by_its_command(self):
         self.say(TOP, TASK)
@@ -1222,8 +1239,9 @@ class Rules(unittest.TestCase):
     def test_the_start_text_carries_every_line_with_any_background(self):
         """A puppeteer whose p4.json names a shared store this machine has not seen, started again after a
         clear and after a compaction, with the default start background and with one set longer than the app's cap:
-        each start text carries the missing-home line, the rules and the address book, and stays within the app's
-        cap with the default background; after a compaction the line that names its board comes first."""
+        each start text carries the missing-home line, the rules and the address book, whole after a clear and by
+        its page after a compaction, and stays within the app's cap with the default background; after a compaction
+        the line that names its board comes first."""
         t = self.t
         write(os.path.join(t.tmp, "claude_desktop_config.json"), json.dumps({"preferences": {"epitaxyPrefs": {
             "dframe-group-scopes": {"acct/org": {"groups": [{"id": "cg-1", "name": "puppeteers"}],
@@ -1246,7 +1264,8 @@ class Rules(unittest.TestCase):
                 text = context(t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": source},
                                       P4_PHI_BOOK="1"))
                 sizes[f"{source}, background_chars {chars}"] = len(text)
-                self.assertIn("this session's address book, whole on", text, source)
+                self.assertIn("this session's address book, whole on" if source == "clear" else
+                              "this session's address book, unchanged since it last looked, is whole on", text, source)
                 self.assertIn("names the shared store git@example.com:team/elsewhere.git", text, source)
                 self.assertIn("act-don't-wait", text, "the built-in rules come with any background")
                 if source == "compact":

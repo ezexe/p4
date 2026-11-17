@@ -311,18 +311,39 @@ class Supervisor(unittest.TestCase):
         self.assertNotIn("address book", rows)
         self.assertNotIn("book_line", rows)
 
-    def test_a_clear_or_a_compaction_hands_the_book_whole(self):
+    def test_a_clear_hands_the_book_whole_and_a_compaction_only_what_changed_with_the_page(self):
+        """https://code.claude.com/docs/en/context-window.md, "What survives compaction", row "Context that hooks
+        added earlier": "Summarized with the rest of the conversation". So after a compaction the book the session
+        was handed is in the summary: the start hands only the entries that changed since it last looked, with the
+        path of book.md, since a summary keeps no exact id or path. A clear keeps nothing, so the book comes
+        whole."""
         t = self.t
-        self.tree()
-        for source in ("clear", "compact"):         # the session remembers none of the entries it was handed
+        self.tree()                                  # KID2's first look: the book whole
+
+        def start(source):
             r = t.hook("session-start", KID2, {"hook_event_name": "SessionStart", "source": source},
                        P4_PHI_BOOK="1")
-            ctx = context(r)
-            self.assertIn(f"`{KID}`", ctx, source)
-            self.assertIn("flush.py", ctx, source)
-            self.assertNotIn("unchanged since it last looked", ctx, source)
-            self.assertTrue(ctx.rsplit("\n\nphi (p4-phi): ", 1)[-1].startswith("this session's address book, whole"),
-                            f"{source}: the book comes last, as main's start text orders it")
+            return context(r).rsplit("\n\nphi (p4-phi): ", 1)[-1]        # the book comes last
+
+        page = book.page_path(t.p4, KID2)
+        same = start("compact")
+        self.assertTrue(same.startswith(f"this session's address book, unchanged since it last looked, is whole on "
+                                        f"{page}"), same[:300])
+        self.assertNotIn(f"`{KID}`", same, "an entry that did not change is not handed again")
+        self.assertNotIn("flush.py", same)
+        self.assertEqual(t.cli(KID, "files", "src/flush.py", "src/batch.py").returncode, 0)
+        changed = start("compact")
+        self.assertTrue(changed.startswith(f"the address book on {page} changed since this session last looked:"),
+                        changed[:300])
+        self.assertIn(f"`{KID}`", changed)
+        self.assertIn("batch.py", changed)
+        self.assertEqual(changed.count("\n- "), 1, "only the entry that changed")
+        whole = start("clear")                      # the session keeps none of the entries it was handed
+        self.assertTrue(whole.startswith("this session's address book, whole"), whole[:300])
+        self.assertIn(f"`{KID}`", whole)
+        self.assertIn("flush.py", whole)
+        self.assertNotIn("unchanged since it last looked", whole)
+        self.assertGreater(whole.count("\n- "), 1)
 
     def test_a_repository_name_or_a_finding_never_passes_for_a_matter_of_ezexes(self):
         t = self.t

@@ -62,7 +62,8 @@ A path on a brief's `Files:` line that is an ancestor of another listed path, or
 
 ## The address book
 
-Beside its first message, after a compaction or a clear, and beside each later message where an entry changed, a session is handed its address book: the live sessions of its project's trees and of the trees its puppeteer controls, each by full title and id with its role, its parent, the files its `Files:` line holds, its owned paths, its open issue and its workers or coworkers.
+Beside its first message, after a clear, and beside each later message where an entry changed, a session is handed its address book: the live sessions of its project's trees and of the trees its puppeteer controls, each by full title and id with its role, its parent, the files its `Files:` line holds, its owned paths, its open issue and its workers or coworkers.
+After a compaction the summary keeps the conversation, the book among it, so the start hands only the entries that changed since the session last looked, with the path of `book.md`, and hands the session's own turns again only after a clear, which keeps nothing.
 It names the puppeteer as the one address for a decision of ezexe's authority, a press the app requires or an outcome ezexe should hear, and the session's parent as the address for work off its task.
 The book is whole on `book.md` in the session's folder, and a later line names only the entries that changed since the session last looked.
 A message about a file, an issue or a piece of work goes straight to the session that holds that file, owns that issue or started that work.
