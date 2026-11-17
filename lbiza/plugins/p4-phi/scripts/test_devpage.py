@@ -54,8 +54,11 @@ class Page(unittest.TestCase):
 
     def test_a_plugin_dir_session_runs_only_from_a_scratch_project(self):
         page = read(PAGE)
-        self.assertIn("A development copy, which is any session started with <code>--plugin-dir</code>, runs only from a "
-                      "scratch project: never in the development project, and never in a project where p4 is used.", page)
+        self.assertIn("A development copy is any session that loads a clone of p4, by the <code>--plugin-dir</code> flag or "
+                      "by the <code>CLAUDE_CODE_PLUGIN_DIRS</code> variable", page)
+        self.assertIn("It runs only from a scratch project: never in the development project, and never in a project "
+                      "where p4 is used.", page)
+        self.assertNotIn("development runs on a clone with the installed copies off", page)
         self.assertIn("Sessions in the development project start without the flag, so no p4 hook runs there.", page)
         self.assertIn("ConfigChange", page)
 
