@@ -2626,7 +2626,10 @@ def h_user_prompt_submit(payload):
             pup = verdict = ""
         RAN["puppeteer"] = verdict or bool(pup)
     watch_over(me.home, s)
-    route = relay.route_text(me.home, s["sessionId"], req, s.get("cwd") or "") if req and not verdict else ""
+    try:                                           # it reads the app's records: a failure costs only its own line
+        route = relay.route_text(me.home, s["sessionId"], req, s.get("cwd") or "") if req and not verdict else ""
+    except Exception:  # noqa: BLE001
+        route = ""
     RAN.pop("new_task", None)
     new_task_text.book_line = ""
     rule = "" if route else new_task_text(me.home, s, me, user=bool(req), req=req)

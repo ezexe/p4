@@ -111,9 +111,10 @@ def github_of(repo):
     return f"{m.group(1)}/{m.group(2)}" if m else ""
 
 
-# a link, a backticked path, or a path: a root or a drive, two separators, or one separator and a file's extension;
-# a slash-joined pair of words such as add/remove is no path, so its work word is still read
-PATH_WORDS = re.compile(r"[A-Za-z][\w+.-]*://\S+|`[^`\n]*[\\/][^`\n]*`|(?:(?:[A-Za-z]:|\.{1,2}|~)|(?<![\w.~-]))"
+# a link, a backticked span, a path or a file name: a path has a root or a drive, two separators, or one separator
+# and a file's extension, so a slash-joined pair of words such as add/remove is no path and its work word is still
+# read; a pair of backticks is taken as one span of code, so the words between two spans stay
+PATH_WORDS = re.compile(r"[A-Za-z][\w+.-]*://\S+|`[^`\n]*`|(?:(?:[A-Za-z]:|\.{1,2}|~)|(?<![\w.~-]))"
                         r"[\\/][\w.\\/*~:-]+|"
                         r"[\w.~-]+(?:[\\/][\w.~*-]+){2,}[\\/]?|[\w.~-]+[\\/][\w~*-]*\.\w[\w.*~-]*|"
                         + FILE_RE.pattern)

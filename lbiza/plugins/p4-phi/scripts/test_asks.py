@@ -50,6 +50,8 @@ class Routing(unittest.TestCase):
         self.assertTrue(issues.writing("Add/remove the retry flag on the exporter's flush."),
                         "a slash-joined pair of words is no path")
         self.assertTrue(issues.writing("Port/rename the retry helper of the exporter."))
+        self.assertTrue(issues.writing("The `flush` helper: add/remove its retry `flag`."),
+                        "a pair of backticks is one span; the words between two spans stay")
 
 
 if __name__ == "__main__":

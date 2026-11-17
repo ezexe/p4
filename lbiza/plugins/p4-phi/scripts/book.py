@@ -38,20 +38,24 @@ PATHS_SHOWN = 4                  # of one entry's files or owned paths, in the l
 ISSUE_RE = re.compile(r"(?<![\w/#])(?:([A-Za-z0-9][\w.-]*/[\w.-]+))?#(\d{1,6})\b")
 ISSUE_URL = re.compile(r"github\.com/([\w.-]+/[\w.-]+)/(?:issues|pull)/(\d+)", re.I)
 # a decision of ezexe's authority, a press the app requires, or an outcome ezexe should hear
-EZEXE = re.compile(r"\bezexe(?:'s)?\b|\b(?:approv\w*|authori[sz]\w*|permissions?|decisions?|decid\w*|"
+EZEXE = re.compile(r"(?<![\w/.-])ezexe(?:'s)?\b(?![/\w])|\b(?:approv\w*|authori[sz]\w*|permissions?|decisions?|decid\w*|"
                    r"push(?:es|ed|ing)?|merg(?:e|es|ed|ing)|publish\w*|deploy\w*|releas(?:e|es|ed|ing)|"
                    r"credentials?|secrets?|passwords?|archiv\w*|press(?:es|ed)?|click\w*|buttons?|spend\w*|"
                    r"purchas\w*|billing|delet\w*|install\w*|sign[ -]?in|log[ -]?in|done|land(?:s|ed)?|"
                    r"clos(?:e|es|ed)|finish(?:es|ed)?|block(?:s|ed)?|stuck|fail(?:s|ed|ing|ure)?|green|"
                    r"pass(?:es|ed)|outcomes?|pay(?:s|ing|ments?)?)\b", re.I)
-# a decision ezexe makes: such a message goes to the puppeteer even when it names a file another session holds
-DECIDES = re.compile(r"\b(?:approv\w*|authori[sz]\w*|permissions?|decisions?|decid\w*|sign[ -]?off|go[ -]ahead|"
-                     r"ezexe(?:'s)? (?:go|say[ -]so|pick|choice|call)|ezexe (?:must|needs to|has to|should))\b", re.I)
-# a link, a backticked path, or a path: a root or a drive, two separators, or one separator and a file's extension;
-# a slash-joined pair of words such as add/remove is no path
-LINKS = re.compile(r"[A-Za-z][\w+.-]*://\S+|`[^`\n]*[\\/][^`\n]*`|(?:(?:[A-Za-z]:|\.{1,2}|~)|(?<![\w.~-]))"
+# an ask of ezexe's decision: such a message goes to the puppeteer even when it names a file another session holds
+DECIDES = re.compile(r"(?<![\w/.-])ezexe(?:'s)?\s+(?:must|needs to|has to|should|to)\s+\w+"
+                     r"|\b(?:needs?|wants?|awaits?|waiting on|waits on|ask|asks|asking)\s+ezexe(?:'s)?(?![/\w])"
+                     r"|(?<![\w/.-])ezexe's\s+(?:go|approval|say[ -]?so|pick|choice|call|decision|permission|"
+                     r"sign[ -]?off|answer)\b", re.I)
+FINDING_LINE = re.compile(r"(?im)^(?:[ \t>*+-]|\d+[.)])*Finding:[^\n]*$")
+# a link, a backticked span, a path, or a file name: a path has a root or a drive, two separators, or one separator
+# and a file's extension, so a slash-joined pair of words such as add/remove is no path; a pair of backticks is
+# taken as one span, so the words between two spans stay
+LINKS = re.compile(r"[A-Za-z][\w+.-]*://\S+|`[^`\n]*`|(?:(?:[A-Za-z]:|\.{1,2}|~)|(?<![\w.~-]))"
                    r"[\\/][\w.\\/*~:-]+|"
-                   r"[\w.~-]+(?:[\\/][\w.~*-]+){2,}[\\/]?|[\w.~-]+[\\/][\w~*-]*\.\w[\w.*~-]*")
+                   r"[\w.~-]+(?:[\\/][\w.~*-]+){2,}[\\/]?|[\w.~-]+[\\/][\w~*-]*\.\w[\w.*~-]*|" + issues.FILE_RE.pattern)
 
 
 def _phi():
@@ -73,8 +77,9 @@ def ezexes(text):
 
 
 def decides(text):
-    """True when a message's own words ask a decision of ezexe's: an approval, a permission or ezexe's go."""
-    return bool(DECIDES.search(words_of(text)))
+    """True when a message's own words ask a decision of ezexe's, such as "ezexe must approve", "needs ezexe's go"
+    or "ask ezexe"; never from a `Finding:` line, which is a finding and goes to the holder of its file."""
+    return bool(DECIDES.search(words_of(FINDING_LINE.sub(" ", str(text or "")))))
 
 
 def words_of(text):
@@ -352,17 +357,19 @@ def issues_named(text):
 
 def _same_file(named, rel_named, root_named, held, hbase):
     """True when a path a message names is a file or folder an entry holds: the same absolute path, a path inside a
-    held folder, a held bare name that is its file name, or one path from its repository's or folder's root ending
-    the other, the shorter of at least two parts, as `export/flush.py` ends `src/export/flush.py` and two clones of
-    one repository name the same file."""
+    held folder, a held bare name that is its file name, or, within one repository, the held path from its root, a
+    path inside it, or a shorter path of at least two parts that ends it, as `export/flush.py` ends
+    `src/export/flush.py`. One repository is the same root, or two clones' roots of the same folder name; a path
+    that is no repository's is read from its session folder."""
     if "/" not in held:
         return named.rsplit("/", 1)[-1] == held
     if named == held or relay.covers(held, named):
         return True
+    root = _root_of(hbase)
+    if bool(root) != bool(root_named) or root and root.rsplit("/", 1)[-1] != root_named.rsplit("/", 1)[-1]:
+        return False                               # another repository: its paths name other files
     a, b = rel_named, _rel(held, hbase)
-    short, long_ = sorted((a, b), key=len)
-    return short.count("/") >= 1 and (long_ == short or long_.endswith("/" + short)
-                                      or a.startswith(b + "/"))
+    return a == b or a.startswith(b + "/") or (a.count("/") >= 1 and b.endswith("/" + a))
 
 
 def _below(every, sid):
@@ -467,17 +474,23 @@ def flag(home, s, target, message, store=""):
 
 
 def tree_issue(home, s, finding, reporter, store="", book=None):
-    """The orchestrator of the reporter's tree, when a `Finding:` line names the issue the reporter itself owns: that
-    issue is its tree's, so the finding is the tree's to place and goes up for no new issue. '' otherwise."""
+    """The topmost orchestrator of the reporter's tree, when a `Finding:` line names an issue the reporter or a
+    session above it owns: that issue is its tree's, so the finding is the tree's to place and goes up for no new
+    issue. A puppeteer above the tree is not its orchestrator. '' otherwise."""
     book = book if book is not None else entries(home, s["sessionId"], store)
     rep = book.get(reporter)
-    if not rep or not rep["number"]:
+    if not rep:
         return ""
-    if not any(n == rep["number"] and (not slug or not rep["slug"] or slug == rep["slug"].lower())
-               for slug, n in issues_named(finding)):
+    line = [reporter] + _chain(relay._sessions(rep["home"]), reporter)
+    asked = issues_named(finding)
+    owned = any(book[k]["number"] and any(n == book[k]["number"] and (not slug or not book[k]["slug"]
+                                                                       or slug == book[k]["slug"].lower())
+                                           for slug, n in asked)
+                for k in line if k in book)
+    if not owned:
         return ""
-    chain = _chain(relay._sessions(rep["home"]), reporter)
-    return chain[-1] if chain else reporter
+    tops = [k for k in line if k in book and book[k]["role"] != "puppeteer"]
+    return tops[-1] if tops else reporter
 
 
 def holder_line(home, s, finding, store="", skip=(), book=None):

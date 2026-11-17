@@ -301,9 +301,54 @@ class Supervisor(unittest.TestCase):
     def test_the_books_text_never_goes_into_the_log(self):
         t = self.t
         self.tree()
+        for source in ("compact", "clear"):          # a start after which the standing instruction is handed again
+            r = t.hook("session-start", KID2, {"hook_event_name": "SessionStart", "source": source},
+                       P4_PHI_NEW_TASK="1")
+            self.assertEqual(r.returncode, 0, r.stderr)
+        t.say(KID2, "and now?", P4_PHI_NEW_TASK="1")
         rows = read(os.path.join(t.dir(KID2), "log.jsonl"))
+        self.assertIn("session-start", rows, "the starts ran and were logged")
         self.assertNotIn("address book", rows)
         self.assertNotIn("book_line", rows)
+
+    def test_a_repository_name_or_a_finding_never_passes_for_a_matter_of_ezexes(self):
+        t = self.t
+        self.tree()
+        said, decision = self.pre(KID2, SEND, {"to": PUP, "message": "The flush in ezexe/p4 drops rows on retry."})
+        self.assertEqual(decision, "deny", "a repository's name is no matter of ezexe's")
+        said, decision = self.pre(KID2, SEND, {"to": PUP, "message": "Finding: the permission check in src/flush.py "
+                                                                    "skips the second batch; files: src/flush.py"})
+        self.assertEqual(decision, "deny")
+        self.assertIn(KID, said, "a finding goes to the holder of its file, whatever words it holds")
+        self.assertFalse(book.decides("Read approvals.py, release.py and merge.py for the batch rules"))
+
+    def test_a_path_in_another_repository_names_another_file(self):
+        t = self.t
+        repo_a, repo_b = os.path.join(t.tmp, "repo-a"), os.path.join(t.tmp, "repo-b")
+        for r in (repo_a, repo_b):
+            os.makedirs(os.path.join(r, ".git"))
+        t.record(KID3, started_by=TOP, title="the other flush", cwd=repo_a)
+        t.say(KID3, "Task:\nPort the flush.\nFiles: src/flush.py", proj=repo_a)
+        t.record(KID2, started_by=TOP, title="the retry check", cwd=repo_b)
+        self.tree()
+        t.say(TOP3, "Build the importer")
+        said, _ = self.pre(KID2, SEND, {"to": TOP3, "message": "Does vendor/src/flush.py drop rows?"})
+        self.assertNotIn(KID3, said, "a longer path is not the held one")
+        self.assertNotIn(KID3, book.holder_line(t.p4, t.session(KID2), "src/flush.py drops rows", "", ()) or "",
+                         "the same path in another repository is another file")
+
+    def test_a_finding_on_an_issue_above_the_reporter_stays_with_its_tree(self):
+        t = self.t
+        self.tree()
+        s = t.session(TOP)
+        s["issue"] = {"repo": "ezexe/p4", "number": 247}
+        relay._write_json(os.path.join(t.dir(TOP), "session.json"), s)
+        t.stop(KID2, "Check the flush's retry and report.",
+               report="Checked.\nFinding: ezexe/p4#247 misses the ledger's closed rows; source: its brief; "
+                      "test: test_asks; files: none")
+        ctx = context(t.say(TOP, "what came in?"))
+        self.assertIn("on the issue this session's tree already holds", ctx)
+        self.assertNotIn("go up to the puppeteer", ctx)
 
     def test_the_route_line_names_the_owner_by_its_whole_title(self):
         t = self.t
@@ -346,8 +391,10 @@ class Supervisor(unittest.TestCase):
         self.assertIn("Name each session to ezexe by its whole title as a link", ctx)
 
     def test_ezexes_words_are_read_without_links_and_paths_but_slash_joined_words_count(self):
-        self.assertTrue(book.decides("Needs your approve/merge of the flush fix"))
+        self.assertTrue(book.decides("Needs ezexe's approval of the flush fix"))
+        self.assertTrue(book.decides("This needs ezexe to approve/merge the flush fix"))
         self.assertTrue(book.ezexes("The retry landed/pushed this morning"))
+        self.assertTrue(book.ezexes("The `flush` helper landed; its `flag` is next"), "words between two spans stay")
         self.assertFalse(book.ezexes("See ezexe/p4#245 and https://github.com/ezexe/p4/issues/245 about the flush"))
         self.assertFalse(book.ezexes("Read E:/work/push/flush.py and src/merge/rows.py about the rows"))
 
