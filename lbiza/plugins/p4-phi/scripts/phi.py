@@ -1378,7 +1378,8 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
     """The standing instruction for a message about something else: once in full for a CLI session that has a task,
     then a line with the task beside each of ezexe's messages. After a compaction a session told before gets one
     line that names standing.md, where the instruction is whole; after a clear it gets the instruction in full again.
-    '' with no task, and beside Claude Code's messages."""
+    Either way the address book comes whole, since the session remembers none of it. '' with no task, and beside
+    Claude Code's messages."""
     task = clean(s.get("task"))
     if not NEW_TASK or not task:
         return ""
@@ -1387,9 +1388,9 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
         told = s["newTaskToldAt"] = {}
     import book                                    # the address book: who holds each file, issue and piece of work
 
-    def plus(text, named=False):
+    def plus(text, named=False, whole=False):
         try:
-            handed = book.line(home, s, me.store, named=named)
+            handed = book.line(home, s, me.store, whole=whole, named=named)
         except Exception:  # noqa: BLE001  a book it cannot write never costs the message its other lines
             handed = ""
         new_task_text.book_line = handed           # kept when the gate's verdict drops the standing line; never
@@ -1400,10 +1401,9 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
         up = spawned_from(s)
         where = (f"hand it up to {up} with SendMessage, holding {RESTATE}" if up else
                  f"start a new orchestrator for it, its brief ending \"{NEW_TOP_BRIEF}\"")
-        return (f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" When a message from ezexe is about "
-                f"something else, {where}, and stay with the task. The standing instruction, handed in full "
-                f"before the compaction, is whole on {standing_path(home, s['sessionId'])}, and the address book "
-                f"of the live sessions on {book.page_path(home, s['sessionId'])}.")
+        return plus(f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" When a message from ezexe is "
+                    f"about something else, {where}, and stay with the task. The standing instruction, handed in full "
+                    f"before the compaction, is whole on {standing_path(home, s['sessionId'])}.", whole=True)
     if again or not told.get(me.cli):
         told[me.cli] = now()
         listed = relay.shards_line(home, s["sessionId"])
@@ -1436,7 +1436,9 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
                    and not controls.is_puppeteer(s, me.store) else "")
                 + (" " + caps_text(home, s) if caps_text(home, s) else ""))
         keep_standing(home, s["sessionId"], "A message about something else", full)
-        return plus(full, named=True)  # the changes since the session last looked, or the page alone
+        # after a clear or a compaction the session remembers no entry: the book whole, cut to its line's caps;
+        # else the changes since it last looked, or the page alone
+        return plus(full, named=True, whole=again)
     if not user:
         RAN["new_task"] = "book"                   # the book's changes alone: no standing line in this message
         return plus("")

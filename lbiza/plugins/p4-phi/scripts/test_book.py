@@ -311,6 +311,19 @@ class Supervisor(unittest.TestCase):
         self.assertNotIn("address book", rows)
         self.assertNotIn("book_line", rows)
 
+    def test_a_clear_or_a_compaction_hands_the_book_whole(self):
+        t = self.t
+        self.tree()
+        for source in ("clear", "compact"):         # the session remembers none of the entries it was handed
+            r = t.hook("session-start", KID2, {"hook_event_name": "SessionStart", "source": source},
+                       P4_PHI_NEW_TASK="1")
+            ctx = context(r)
+            self.assertIn(f"`{KID}`", ctx, source)
+            self.assertIn("flush.py", ctx, source)
+            self.assertNotIn("unchanged since it last looked", ctx, source)
+            self.assertTrue(ctx.rsplit("\n\nphi (p4-phi): ", 1)[-1].startswith("this session's address book, whole"),
+                            f"{source}: the book comes last, as main's start text orders it")
+
     def test_a_repository_name_or_a_finding_never_passes_for_a_matter_of_ezexes(self):
         t = self.t
         self.tree()
