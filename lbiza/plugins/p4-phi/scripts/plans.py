@@ -388,13 +388,10 @@ TABULATES = re.compile(r"^\W*(?:final\s+)?(?:[\w/-]+\s+){0,3}?(?:pass/fail\s+)?(
                        r"findings|steps?|checks?)\b", re.I)
 
 
-# a start the app refuses in a turn ezexe did not begin is a suggested task card in the session that asked
-CARD_EACH = ("This turn was started by another session, so the app refuses `user_asked`: show each as a suggested "
-             "task card, `mcp__ccd_session__start_session` with `initiation` `own_initiative`, which ezexe presses in "
-             "this session, so the app's parent and p4-phi's agree. Only where the card is refused too, write it as a "
-             "start request, `phi.py request \"<title>\" --brief \"<the whole brief>\"`, which the next turn ezexe "
-             "begins in this session starts as this session's child. Each card goes out carrying the `model` and "
-             "`effort` named beside its step, as a start does")
+# the route of a turn ezexe did not begin: what such a turn may start, and the card it proposes, are the start tool's
+# own text, so this names no `initiation` and holds only what that text lacks
+CARD_EACH = ("Give each to `mcp__ccd_session__start_session`, `context` `fresh`, `use_worktree: false`, on this "
+             "session's branch, carrying the `model` and `effort` named beside its step")
 
 
 def judge(plan, cwd):

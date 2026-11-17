@@ -41,10 +41,11 @@ The watcher every orchestrator has is puppeteer.py's and is another thing.
                the puppeteer's record, where the hook of the session that filed it reads it.
   the tree     the app nests a session under the session that calls the start tool, and no tool moves it after, so a
                puppeteer starts only new orchestrators. A start request belongs under the session that
-               filed it: each session of the controlled trees that holds some is named to the puppeteer as
-               a link with how many it holds, beside its messages and on its board, for ezexe to open and press the
-               button that session waits on. A start it makes on such a session's behalf anyway is held under that
-               session in p4-phi, named to it for detaching to top level, and kept on its board as an exception.
+               filed it: each session of the controlled trees that holds some free of their writers is named to the
+               puppeteer as a link with how many it holds, beside its messages and on its board, for ezexe to open
+               and send one message, or start the suggested task card that session shows. A start the puppeteer
+               makes on such a session's behalf anyway is held under that session in p4-phi, named to it for
+               detaching to top level, and kept on its board as an exception.
 """
 
 import hashlib
@@ -159,7 +160,8 @@ def _set(s, rows):
 # --- where a controlled session stands ---------------------------------------------------------------------------------
 
 def waiting_requests(store, sid):
-    """The start requests a session filed for itself that no turn of ezexe's in it has started yet."""
+    """The start requests a session queued for itself that are not started yet: behind a busy writer, free to go,
+    or shown as a suggested task card."""
     return [r for r in starts.open_rows(store) if r.get("requester") == sid and not r.get("to")] if store else []
 
 
@@ -200,8 +202,9 @@ def standing(store, sid):
     asked = waiting_requests(store, sid)
     if asked:
         against.append(f"{len(asked)} start request{'s' if len(asked) != 1 else ''} of its own waiting, the first "
-                       f"\"{asked[0].get('title')}\", which it starts at a turn ezexe begins there: ezexe opens "
-                       f"{link(sid)} and presses the button its turn ended on")
+                       f"\"{asked[0].get('title')}\", which it starts at a turn ezexe begins there or shows as a "
+                       f"suggested task card at any other: ezexe opens {link(sid)} and sends it one message, or "
+                       f"starts its card")
     for path, sha, _, closes in commits:
         try:
             if not issues.landed(path, sha, closes):
@@ -781,7 +784,7 @@ def board(home, s):
     if not controlled(s):
         lines.append("None yet.")
     waits = [f"- {link(k)} holds {n} start request{'s' if n != 1 else ''} only it can start: ezexe opens it and "
-             f"presses the button its turn ended on, or sends it one message." for k, n in holders(s)]
+             f"sends it one message, or starts the suggested task card it shows." for k, n in holders(s)]
 
     def of_kind(kind):
         return [f"- {PHI.clean(n.get('claim'))} Source: {PHI.clean(n.get('source'))}. Kept {n.get('time', '')}."
@@ -991,8 +994,8 @@ def stores(home, s):
 
 
 def holders(s):
-    """Each live session of the trees a puppeteer controls that holds start requests a turn ezexe begins
-    in it would start, as its sessionId and how many, tree by tree."""
+    """Each live session of the trees a puppeteer controls that holds start requests free to go, which its next
+    turn starts or shows as suggested task cards, as its sessionId and how many, tree by tree."""
     out, held = [], {}
     for e in controlled(s):
         top, store = e["sessionId"], e.get("store") or ""
@@ -1018,7 +1021,8 @@ def holders_text(s, req=""):
         return ""
     s["holdersTold"] = key
     return ("phi (p4-phi): sessions of the trees this puppeteer controls hold start requests that only they "
-            "can start, each at a turn ezexe begins in it by the button its turn ended on, so the app nests each child "
+            "can start, each at a turn ezexe begins in it, or by the suggested task card it shows at any other "
+            "turn, so the app nests each child "
             "under the session that asked for it. Start none of them here: a start request belongs under the session "
             "that filed it, and a start made here nests the child under this puppeteer, where no tool moves "
             "it from. End this turn with these lines as they are, each a link ezexe opens:\n"
@@ -1027,9 +1031,11 @@ def holders_text(s, req=""):
 
 def behalf(home, s, prompt, store=""):
     """The start request another session filed for a child of its own and the store it lies in, when a start call of
-    this puppeteer carries its marker; None for any other call or session."""
+    this session carries its marker; None for any other call. A puppeteer is answered from the stores of the
+    sessions it controls as well, any other session from its own store. The app nests a session under the session
+    that calls the start tool and no tool moves it after, so whoever makes such a start is told to detach it."""
     m = starts.MARK_RE.search(str(prompt or ""))
-    if not m or not s.get("sessionId") or m.group(2) == s["sessionId"] or not is_puppeteer(s, store):
+    if not m or not s.get("sessionId") or m.group(2) == s["sessionId"]:
         return None
     for where in stores(home, s):
         r = starts.state(where).get(m.group(1))
@@ -1038,13 +1044,16 @@ def behalf(home, s, prompt, store=""):
     return None
 
 
-def behalf_line(r):
-    """What a puppeteer is told as its start of another session's start request goes through."""
+def behalf_line(r, puppeteer=True):
+    """What a session is told as its start of another session's start request goes through: a puppeteer, whose
+    board names the start, or any other session, whose tree's ledger names it."""
+    me = "this puppeteer" if puppeteer else "this session"
+    where = "on the board" if puppeteer else "in its tree's ledger"
     return (f"phi (p4-phi): this start carries start request {r['id']} of {link(r['requester'])}, which belongs under "
-            f"that session, while the app nests the new session under this puppeteer. p4-phi records it as "
-            f"started on that session's behalf, holds the new session under that session and names it on the board "
+            f"that session, while the app nests the new session under {me}. p4-phi records it as "
+            f"started on that session's behalf, holds the new session under that session and names it {where} "
             f"as an exception. Once the start returns, call `mcp__ccd_session_mgmt__detach_session` with the new "
-            f"session's id, so the app shows it at top level and not under this puppeteer. Start no other "
+            f"session's id, so the app shows it at top level and not under {me}. Start no other "
             f"session's request here: name the session that holds it to ezexe as a link to open.")
 
 

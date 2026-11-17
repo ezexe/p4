@@ -186,7 +186,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
     </div>
     <div class="row">
       <h3>How the tree grows</h3>
-      <div class="cs"><b>Session tree</b>A session calls <code>mcp__ccd_session__start_session</code>. When the app refuses the call, the session shows a suggested task card for ezexe to press, or keeps a start request with <code>phi.py request</code> that the next turn ezexe begins in that session starts.</div>
+      <div class="cs"><b>Session tree</b>A session calls <code>mcp__ccd_session__start_session</code>. When the app refuses the call, the session shows a suggested task card for ezexe to start. p4-phi keeps a start request only for a start that waits behind a busy writer and for one addressed to a puppeteer.</div>
       <div class="cp"><b>Call tree, drawn</b>You move the slider. <code>buildTree(n)</code> makes every node of the tree at once, by recursion.</div>
       <div class="cp"><b>Ensemble, built</b>You run <code>python -m phi_rank.tree train</code> with <code>--k</code>. It trains the first K addresses, the deepest first, and fine-tunes each member on every labelled pool. Pretraining each member on one shard of the store's tracked text is off unless <code>--minutes</code> turns it on.</div>
     </div>

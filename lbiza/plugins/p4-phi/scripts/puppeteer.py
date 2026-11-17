@@ -294,19 +294,20 @@ _APP_LOADED = set()
 
 
 def app_index(roots, home=""):
-    """Each session of the app's records by its sessionId, with its parent, whether it is archived, its title and
-    its name; each record file is read once after each change."""
+    """Each session of the app's records by its sessionId, with its parent, whether it is archived, whether the app
+    detached it to top level, its title and its name; each record file is read once after each change."""
     out = {}
     app_cached(home)
     read = 0
     for p, m, _ in app_look(roots):
         held = _APP.get(p)
-        if not held or held[0] != m:
+        if not held or held[0] != m or (held[1] and "detached" not in held[1]):   # a row kept without that field
             read += 1
             d = relay._read_json(p)
             sp = d.get("spawnedFrom") if isinstance(d.get("spawnedFrom"), dict) else {}
             held = _APP[p] = (m, {"sessionId": str(d.get("sessionId") or ""), "parent": str(sp.get("sessionId") or ""),
                                   "archived": bool(d.get("isArchived")), "title": str(d.get("title") or "")[:120],
+                                  "detached": bool(d.get("lineageDetached")),
                                   "name": str(sp.get("name") or "")} if d.get("sessionId") else None)
         if held[1]:
             out[held[1]["sessionId"]] = held[1]
@@ -440,8 +441,15 @@ def build(home, top, net=False):
             elif rec["archived"]:
                 reconcile.append(f"p4-phi lists \"{title}\" `{sid}` as live, and the app has archived it.")
         held = s.get("spawnedFrom") if isinstance(s.get("spawnedFrom"), dict) else {}
-        if rec and depth and rec["parent"] and rec["parent"] != parent \
-                and held.get("source") not in ("detached", "reparented", "requested"):
+        if rec and depth and rec["parent"] and rec["parent"] != parent and held.get("source") == "requested":
+            # started for another session's start request: the app nests it under its starter and no tool moves it
+            reconcile.append(f"`{rec['parent']}` started \"{title}\" `{sid}` for a start request of `{parent}`, an "
+                             f"exception: p4-phi holds it under `{parent}`, and the app "
+                             + ("shows it at top level." if rec.get("detached") else
+                                f"nests it under `{rec['parent']}` until `mcp__ccd_session_mgmt__detach_session` "
+                                f"with `{sid}` moves it to top level."))
+        elif rec and depth and rec["parent"] and rec["parent"] != parent \
+                and held.get("source") not in ("detached", "reparented"):
             reconcile.append(f"the app shows \"{title}\" `{sid}` started by `{rec['parent']}`, and p4-phi holds it "
                              f"under `{parent}`.")
         plan = plans.load(home, sid)
@@ -484,6 +492,7 @@ def build(home, top, net=False):
             continue
         behind = str(r.get("after") or "")
         how = (f"waits behind \"{phi.title_of(every.get(behind, {}))}\" `{behind}`" if behind and busy(home, behind)
+               else "shown as a suggested task card" if (r.get("claimed") or {}).get("card")
                else "claimed" if r.get("claimed") else "pending")
         asked.append({"id": r["id"], "title": r.get("title", ""), "requester": r.get("requester"), "state": how})
     groups = [g for sid in sorted(live) for g in load_groups(home, sid)]
@@ -1225,9 +1234,9 @@ def verdict_text(home, s, d):
         return (head + f"Route it: SendMessage with `to` {o['sessionId']}, holding {phi.RESTATE}, then tell ezexe in "
                 f"one line that \"{o['title']}\" has it. Start no session for it." + tail)
     if d["verdict"] == "queue":
-        return (head + f"Queue it behind that writer: `{phi.commands()} pioneer {d['id']}` keeps it as a start request "
-                f"that is handed out, with its exact call, at the first turn ezexe begins once the writer is not "
-                f"busy, and this session waits on that turn by the start button p4-phi then names." + tail)
+        return (head + f"Queue it behind that writer: `{phi.commands()} pioneer {d['id']}` keeps it as a start request, "
+                f"and once the writer is not busy p4-phi hands this session its exact call, a start at a turn ezexe "
+                f"begins here and a suggested task card, which ezexe starts here, at any other." + tail)
     if d["verdict"] == "here":
         return head + "No session is started for it." + tail
     return (head + "Start it now: `mcp__ccd_session__start_session` with "
@@ -1719,8 +1728,8 @@ def meta_pass(home, at=None):
     for r in starts.pending(home, at):
         who = relay.link_of({"id": r.get("requester"), "title": phi.title_of(
             every.get(r.get("requester")) or {"sessionId": r.get("requester")})})
-        seeds.append(f"start request {r['id']} \"{r.get('title')}\" waits on a turn ezexe begins in {who}, by the "
-                     f"button its turn ended on.")
+        seeds.append(f"start request {r['id']} \"{r.get('title')}\" is free of its writer and waits on {who}, which "
+                     f"starts it at a turn ezexe begins there or shows it as a suggested task card at any other.")
     out = ["# Meta-ledger", "",
            "Written by p4-phi's meta pass, which the orchestrator that receives ezexe's message runs over every "
            "orchestrator's ledger before it reads the message.",
@@ -1855,13 +1864,7 @@ def command(a, me):
             raise ValueError(f"no draft {a.draft} in this session")
         if d.get("verdict") == "queue":
             rid, new = queue(home, d)
-            print((f"queued as start request {rid}" if new else f"start request {rid} was already kept")
-                  + f" behind {(d.get('busy') or {}).get('sessionId')}: it is handed out at the first turn ezexe "
-                    f"begins once that writer is not busy, and this session waits on that turn by the start button "
-                    f"p4-phi then names.")
-        elif a.request and d.get("verdict") == "start":
-            rid, new = queue(home, d)               # a turn ezexe did not begin: the app refuses the start itself
-            print(starts.requested_text(rid, new, home))
+            print(starts.queued_text(rid, new, (d.get("busy") or {}).get("sessionId")))
         else:
             print(verdict_text(home, s, d))
         return 0
@@ -1909,8 +1912,6 @@ def add_parsers(sub, common):
             p.add_argument("text", help="the words to run routing, the start draft and the gate on")
         if name == "pioneer":
             p.add_argument("draft", help="the draft's id")
-            p.add_argument("--request", action="store_true",
-                           help="keep a clean draft as a start request, for a turn ezexe did not begin")
         if name == "routes":
             p.add_argument("--register", action="store_true", help="register every landed topic the records back")
             p.add_argument("--why", default="", help="a sessionId: say what its route still lacks")

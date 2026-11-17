@@ -33,12 +33,12 @@ Run each with `python -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/phi.py"`, and pa
 - `files <path> ...` replaces this session's write set with the paths it still writes, `files --release` empties it, and `files` alone prints it.
 - `shard <path> ...` sets this session's owned paths, the paths or globs it alone may change, and `shard` alone prints them.
 - `disposable` marks this session as one p4-phi counts as archived once it is done.
-- `request "<title>" --brief "<the whole brief>"` files a start request, `--to-puppeteer` addresses it to this session's puppeteer, and `request --withdraw <request id>` withdraws a pending one.
+- `request "<title>" --brief "<the whole brief>" --to-puppeteer` asks this session's puppeteer for a new orchestrator, and `request --withdraw <request id>` withdraws a pending start request; any other start a session may not make is the app's suggested task card, `mcp__ccd_session__start_session` with `initiation` `own_initiative`, which `mcp__ccd_session__dismiss_task` withdraws.
 - `tree` prints every session that is not archived, with its state, `show [sessionId]` a session's page, and `background` what this session was given.
 - `detach [sessionId]` moves a session to top level in p4-phi's records, and `reparent <sessionId> <under sessionId>` puts it, with every session below it, under another; the app's sidebar follows neither.
 - `controls <sessionId> ...` records the sessions a puppeteer controls, `controls` alone prints each by its full title, `--drop <sessionId>` ends one, `--hand <new sessionId>` hands over to a successor, `--from <old sessionId>` takes over from one, and `--decline <request id> "<why>"` declines a request.
 - `ledger` prints `ledger.md`, which an orchestrator's watcher writes in its session folder from p4-phi's files and the app's records, and `watch` is that watcher, which p4-phi starts itself.
-- `draft "<words>"` drafts the next session for any words, and `pioneer <draft id> --request` keeps a clean draft as a start request.
+- `draft "<words>"` drafts the next session for any words, and `pioneer <draft id>` queues a draft whose writer is busy as a start request behind that writer.
 - `readings "<one>" "<two>" --words "<the message>"` drafts one child for each reading of a message, and `merge <group> --result "<text>"` settles a fork between them.
 - `routes` lists the registered routes, `routes --register` registers every landed topic the records back, and `routes --why <sessionId>` says what a topic's route still lacks.
 - `meta` runs the meta pass over every orchestrator's ledger and prints `meta-ledger.md`.
@@ -55,7 +55,9 @@ So the rule's `model` `haiku` on an `Explore` call stands unless the call names 
 A Workflow script names a model for each stage: https://code.claude.com/docs/en/workflows.md says "A model the script names for a stage counts as the per-invocation model in that order." and "When nothing else assigns one, the agent runs on your session's model.", and no line of that page gives a workflow agent an effort of its own.
 A worker splits at its first message: in these sessions the app has let a started session start others in its first turn and in the turns ezexe's own messages open, though no doc states it, so p4-phi tells it to plan its split then and start a session for every part that writes files or makes a decision, one per disjoint set of files, and where the app refuses that start to show the part as a suggested task card that ezexe presses.
 Subagents keep reads, searches and independent checks, a single command run is a background command, and a review of a code change is the `code-review` skill's.
-A writing part that comes up later is shown as a suggested task card that ezexe presses, and kept as a start request only where the card is refused too.
+A writing part that comes up later is shown as a suggested task card that ezexe presses.
+p4-phi keeps a start request only for the two starts a card cannot hold: one that waits behind a busy writer, which the session that queued it is handed once the writer is free, as a start at a turn ezexe begins there and as the card at any other turn, and one addressed to a puppeteer.
+A start request belongs under the session that filed it, and the app nests a session under whichever session calls the start tool: a session that starts another session's request is told to detach the session it started to top level in the app, p4-phi holds that session under the one that filed the request, and a puppeteer's board or the tree's ledger names it as an exception.
 A subagent that wrote files is listed on the ledger under Level misses once it stops, from the calls its own transcript holds.
 Before a session creates anything new, such as a module, a page, a format or a kind of test, it finds the documented terms for it and a published implementation guide for that kind of work, logs both with their sources in its decisions file, and builds by them: a writing worker's first message and every start draft carry that line.
 A task list whose first creating step has no such research step before it is advised one, once.

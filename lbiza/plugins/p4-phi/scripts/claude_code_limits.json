@@ -57,10 +57,10 @@
     "repo": "ezexe/p4",
     "issue": 220,
     "title": "p4-phi: a session holding a start request asks ezexe for the same press at every turn ezexe did not begin",
-    "behaviour": "start_session with initiation user_asked is refused in a turn that another session's message, a background event or a handed task began, and whether a later turn without blocked clears the app's waiting mark is undocumented.",
+    "behaviour": "start_session with initiation user_asked is refused in a turn that another session's message, a background event or a handed task began, so a start such a turn wants is a suggested task card that waits on ezexe's press.",
     "source": "undocumented; the app's refusal is filed as https://github.com/anthropics/claude-code/issues/109282",
-    "changes_when": "start_session accepts a start in a turn ezexe did not begin, such as under a standing approval, or the waiting mark is documented; p4 then drops its start requests and the held press.",
-    "terms": ["start_session", "user_asked", "initiation", "blocked", "wrap_up"]
+    "changes_when": "start_session accepts a start in a turn ezexe did not begin, such as under a standing approval; p4 then has a session make a start it queued behind a busy writer at any turn, and hands no card call for it.",
+    "terms": ["start_session", "user_asked", "initiation", "own_initiative"]
   },
   {
     "repo": "ezexe/p4",

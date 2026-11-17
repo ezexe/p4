@@ -565,16 +565,16 @@ class TreeOfPlans(unittest.TestCase):
         self.assertIn("Every step stays here as a sub-step", ctx)
         self.assertNotIn("user_asked", ctx)
 
-    def test_in_a_turn_another_session_began_the_advice_is_suggested_task_cards(self):
-        """A turn another session began gets suggested task cards, never a `user_asked` start."""
+    def test_in_a_turn_another_session_began_the_advice_names_no_initiation(self):
+        """What a turn another session began may start, and the card it proposes, are the start tool's own text: the
+        advice there names the tool and each step's model and effort, never an `initiation`, a refusal or a card."""
         self.t.say(B, "Do the three parts")
         self.t.say(B, '<cross-session-message from="local_x">go on</cross-session-message>')
         ctx = self.plan(B, self.three())
-        self.assertIn("show each as a suggested task card", ctx)
-        self.assertIn("`initiation` `own_initiative`", ctx)
+        self.assertIn("Give each to `mcp__ccd_session__start_session`", ctx)
         self.assertIn("carrying the `model` and `effort` named beside its step", ctx)
-        self.assertNotIn("`initiation` `user_asked`", ctx)
-        self.assertNotIn("any session of this store", ctx)
+        for restated in ("`initiation`", "refuses", "suggested task card", "start request"):
+            self.assertNotIn(restated, ctx)
 
     def test_a_child_waiting_on_a_question_the_chain_can_settle_is_flagged_up(self):
         """Act-don't-wait: the parent hears of a child's open question that is not ezexe's to answer."""
@@ -976,7 +976,8 @@ class Levels(unittest.TestCase):
         self.assertIn("\nFinding: the plugin in team/plug", said)
         self.assertNotIn("start_session", said, "the plugin-gap line hands no start call: its finding goes up")
         kid = phi._split_full(self.t.p4, relay._session(self.t.p4, A))
-        self.assertIn("is shown as a suggested task card", kid)
+        self.assertIn("a brief that declares its write set on a line `Files: <paths>`", kid)
+        self.assertNotIn("suggested task card", kid, "the card is the start tool's own text")
         self.assertIn("It carries the `model` and `effort` a start of its kind of work carries", kid)
         self.assertIn("with the `model` and `effort` its kind of work gets", phi._split_full(self.t.p4, s))
         self.assertEqual(plans.said_level("Model: ranker.pt is rebuilt\nEffort: low on the first pass"), {},
@@ -1029,21 +1030,22 @@ class Levels(unittest.TestCase):
         self.assertIn(f"\"{script}\", with no `model`, so it inherits this session's, `effort` `high`", said)
         self.assertIn("Each brief says them in one line, `Model and effort: ", said)
         brief = "Write the puppeteer pages. Report when done.\nFiles: dox/puppeteer.html"
-        rid, _ = starts.add(self.t.p4, TOP, "dox: the puppeteer pages", brief)
+        free = "local_wrt00000"                    # a writer the store holds no session of: nothing waits behind it
+        rid, _ = starts.add(self.t.p4, TOP, "dox: the puppeteer pages", brief, after=free)
         call = starts.call_of(starts.state(self.t.p4)[rid], self.t.p4)
         self.assertEqual((call["model"], call["effort"]), ("claude-sonnet-5-5", "medium"), "cheaper and lower")
         self.assertIn("\n\nModel and effort: claude-sonnet-5-5 at medium effort, since this is static or mechanical "
                       "work.\n\n" + starts.marker(rid, TOP), call["prompt"])
         self.assertEqual(starts.requester_of(self.t.p4, call["prompt"]), (rid, TOP), "the marker is still read")
         brief2 = "Make relay.py hold the lock in warn. Report when done.\nFiles: scripts/relay.py"
-        rid2, _ = starts.add(self.t.p4, TOP, "the relay lock", brief2)
+        rid2, _ = starts.add(self.t.p4, TOP, "the relay lock", brief2, after=free)
         call = starts.call_of(starts.state(self.t.p4)[rid2], self.t.p4)
         self.assertNotIn("model", call, "left out, which is how the app's tool inherits the parent session's model")
         self.assertEqual(call["effort"], "high")
         self.assertIn("Model and effort: the parent session's own model at high effort, since this is a build that "
                       "changes behaviour", call["prompt"])
         own = brief2 + "\nModel: claude-haiku-5-5\nEffort: low"
-        rid3, _ = starts.add(self.t.p4, TOP, "the relay lock, cheaply", own)
+        rid3, _ = starts.add(self.t.p4, TOP, "the relay lock, cheaply", own, after=free)
         call = starts.call_of(starts.state(self.t.p4)[rid3], self.t.p4)
         self.assertEqual((call["model"], call["effort"]), ("claude-haiku-5-5", "low"),
                          "the parent session's choice wins")

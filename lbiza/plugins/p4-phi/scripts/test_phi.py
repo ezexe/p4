@@ -13,8 +13,8 @@ worker given the tasks and notes of the sessions above it and the last turn of i
 given the last turns of the orchestrators before it, with no likeness of words involved; a note refused without
 a source; a session detached to top level, and reparented; a session's own turns after a clear; silence where
 there is nothing to say; no standing instruction for a message about something else, which the app's own session
-tools carry; a feature step as a new topic; a turn another session began shown a suggested task card first and a
-start request second; the caps on depth and live children;
+tools carry; a feature step as a new topic; a turn another session began told only what the start tool's own text
+lacks; the caps on depth and live children;
 the task changed by its command; the rules built into p4-phi at a session's start, the store's feedback and user
 memories never handed again, which the app loads, and a memory changed mid-session given once; the pieces past
 the prompt's cap held on a page; a hook never failing a call; hooks.json's shape and the words given to a session.
@@ -909,27 +909,56 @@ class NewTask(unittest.TestCase):
         self.assertEqual(self.say(TOP, "<side-sessions-event>a session finished a turn</side-sessions-event>"), "")
         self.assertEqual(self.say(TOP, "<task-notification>done</task-notification>"), "")
 
-    def test_a_turn_another_session_started_is_told_to_split_by_a_card_then_a_start_request(self):
-        """The app refuses user_asked in a turn ezexe's words did not start: a split is a suggested task card ezexe
-        presses in this session, and a start request in the store only when the card is refused too."""
+    RESTATED = ("refuses", "`user_asked`", "`own_initiative`", "suggested task card", "start request", "as said before")
+
+    def split_line(self, text, mark):
+        """The one piece of a prompt's context that holds `mark`, p4-phi's line for a turn another session began."""
+        got = [p for p in text.split("\n\n") if mark in p]
+        self.assertEqual(len(got), 1, text)
+        return got[0]
+
+    def test_a_turn_another_session_started_is_told_only_what_the_start_tool_lacks(self):
+        """What a turn ezexe's words did not start may start, and the card it proposes, are the start tool's own
+        text, so p4-phi's line there restates neither. It holds the write set on a brief's `Files:` line and, for an
+        orchestrator, the brief line on which a new orchestrator is detached to top level. It keeps no state, so
+        each such turn carries the same line, after a compaction too."""
         self.say(TOP, TASK)
-        text = self.say(TOP, '<cross-session-message from="local_x">please also look at Y</cross-session-message>')
-        self.assertIn("`initiation` `own_initiative`, which ezexe presses in this session", text)
-        self.assertIn(" request \"<title>\" --brief", text, "the request, where the card is refused too")
-        self.assertNotIn("any session of this store", text)
-        self.assertIn(phi.NEW_TOP_BRIEF, text)
+        mark = "outside this orchestrator's task gets a new orchestrator of its own"
+        line = self.split_line(
+            self.say(TOP, '<cross-session-message from="local_x">please also look at Y</cross-session-message>'), mark)
+        self.assertIn(f"carries the line \"{phi.NEW_TOP_BRIEF}\"", line)
+        self.assertIn("declares its write set on a line `Files: <paths>`", line)
+        self.assertIn("`mcp__ccd_session_mgmt__detach_session` with `\"self\"`", line)
+        for restated in self.RESTATED:
+            self.assertNotIn(restated, line)
+        self.assertLess(len(line), 700)
         again = self.say(TOP, '<cross-session-message from="local_x">and Z as well</cross-session-message>')
-        self.assertNotIn(phi.NEW_TOP_BRIEF, again, "said once in full, then a line")
-        self.assertIn("as said before", again)
-        self.assertLess(len(again), 400)
+        self.assertEqual(self.split_line(again, mark), line, "no state: the same line at each such turn")
+        self.assertNotIn("splitTold", jload(os.path.join(self.t.dir(TOP), "session.json")))
         self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "compact"}, P4_PHI_BOOK="1")
         whole = self.say(TOP, '<cross-session-message from="local_x">and W</cross-session-message>')
-        self.assertIn(phi.NEW_TOP_BRIEF, whole, "after a compaction it is said in full again")
+        self.assertEqual(self.split_line(whole, mark), line, "and after a compaction")
         self.assertEqual(self.say(TOP, "<side-sessions-event>a session finished</side-sessions-event>"), "")
         self.say(KID, HANDED)
-        kid = self.say(KID, '<cross-session-message from="local_x">please also look at Y</cross-session-message>')
-        self.assertIn("`initiation` `own_initiative`", kid, "a child's split is a card too")
-        self.assertIn(" request \"<title>\" --brief", kid)
+        kid = self.split_line(
+            self.say(KID, '<cross-session-message from="local_x">please also look at Y</cross-session-message>'),
+            "a task of its own in this turn")
+        self.assertIn("a brief that declares its write set on a line `Files: <paths>`", kid)
+        self.assertIn("`Model and effort: <model> at <effort> effort`", kid)
+        for restated in self.RESTATED:
+            self.assertNotIn(restated, kid)
+        from unittest import mock
+        import plans
+        with mock.patch.object(phi, "ASK_ROUTE", ""):
+            route, asked = phi.new_top_route(False), phi.new_top_route(True)
+        self.assertIn("a line `Files: <paths>`", route, "the write set, which the start tool's text lacks")
+        self.assertIn("Both moves are needed: the app's detach to top level", route, "and the detach")
+        for restated in self.RESTATED + ("`initiation`",):
+            self.assertNotIn(restated, route)
+            self.assertNotIn(restated, plans.CARD_EACH)
+        self.assertIn("`initiation` `user_asked`", asked, "a turn ezexe began names the start it asked for")
+        with open(phi.__file__, encoding="utf-8") as f:
+            self.assertNotIn("splitTold", f.read(), "the once-then-short state is gone")
 
     def test_a_deep_or_full_session_starts_no_session(self):
         """The caps: three deep in the tree, or eight live children."""
@@ -988,6 +1017,31 @@ class NewTask(unittest.TestCase):
         self.assertIn("act-don't-wait", phi.BUILT_IN)
         self.assertIn("authority", phi.BUILT_IN)
         self.assertIn("ends each turn with one SendMessage line to the starter", phi.BUILT_IN, "ezexe/p4#157")
+
+    def test_the_built_in_rule_leaves_how_a_question_is_laid_out_to_the_apps_own_tools(self):
+        """tools-reference.md, "AskUserQuestion tool behavior": "Claude uses `AskUserQuestion` to ask you
+        multiple-choice questions when it needs a decision or a clarification.", and the desktop app's turn-end tool
+        puts a decision that waits on ezexe as one question with buttons. So the built-in rule names both tools and
+        holds no sentence of its own on how a question is laid out, and it keeps every sentence that text lacks or
+        that no docs page states: the decision by research with its decisions file, the session tree, the matters
+        of ezexe's authority with the push of green issue-closing commits excepted, a child's question to its
+        parent session, a worker's closing line to its waiting starter, and the go a project's rules ask for."""
+        for gone in ("It goes as a click", "never as a paragraph", "whose buttons are the answers", "the go first",
+                     "typed text only", "no click can carry"):
+            self.assertNotIn(gone, phi.BUILT_IN)
+        self.assertIn("goes to ezexe, by the app's own `mcp__ccd_turn__wrap_up` or `AskUserQuestion`:", phi.BUILT_IN)
+        for kept in (phi.DECIDE, "decisions.md in the scratchpad directory the app names",
+                     "a question reaches ezexe only once those cannot settle it",
+                     "the parent's task list and notes, siblings' work and the project's rules can settle",
+                     "permissions or security settings, credentials, spending",
+                     "but for the push of green issue-closing commits, which p4-phi orders at once",
+                     "A child asks its parent session with SendMessage",
+                     "ends each turn with one SendMessage line to the starter",
+                     "that go is ezexe's to give, by a button"):
+            self.assertIn(kept, phi.BUILT_IN)
+        with open(os.path.join(HERE, "claude_code_limits.json"), encoding="utf-8") as f:
+            logged = {row["issue"]: row for row in json.load(f)}
+        self.assertIn("SendMessage", logged[157]["terms"], "the limit behind the worker's closing line is logged")
 
     def test_a_started_sessions_task_is_its_brief(self):
         self.say(TOP, TASK)
