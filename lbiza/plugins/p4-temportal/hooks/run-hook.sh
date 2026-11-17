@@ -3,6 +3,8 @@
 # Claude Code's stdin through, and exits 0 whatever happens, so a broken hook never blocks a call. <part> is `memory`
 # for p4_memory.py, `scratchpad` for scratchpad.py or `lifetime` for lifetime.py. find-python.sh finds the
 # python.
+# A runner that never starts cannot exit 0, as on Windows without Git Bash, where Claude Code runs the command in
+# PowerShell and finds no `sh`, so each entry of hooks.json sets onFailure to continue and such a failure blocks no call.
 # -X utf8 runs the hook in UTF-8 mode: stdin, stdout and open() are UTF-8, not the Windows code page cp1252, so a
 # prompt's UTF-8 punctuation never decodes into lone surrogates that a later UTF-8 write refuses.
 set -u

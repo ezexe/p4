@@ -51,5 +51,17 @@ class AppScratchpadTest(unittest.TestCase):
         self.assertEqual(sorted(set(tmp)), [])
 
 
+
+class NoGitBashTest(unittest.TestCase):
+    def test_a_hook_that_cannot_start_never_blocks_a_call(self):
+        """ezexe/p4#121: on Windows without Git Bash, Claude Code runs a shell-form hook in PowerShell, where `sh` is
+        missing, and a PreToolUse hook that fails there with onFailure unset blocks the tool call, by
+        https://code.claude.com/docs/en/hooks, "Failed hooks on Windows without Git Bash". Each entry sets onFailure to
+        continue, so a runner that never starts lets the call go ahead, as one that starts and exits 0 does."""
+        hooks = [h for groups in HOOKS.values() for g in groups for h in g["hooks"]]
+        self.assertTrue(hooks)
+        self.assertEqual([h["command"] for h in hooks if h.get("onFailure") != "continue"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

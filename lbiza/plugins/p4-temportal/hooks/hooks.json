@@ -4,15 +4,15 @@
       {
         "matcher": "startup|clear|compact",
         "hooks": [
-          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" memory migrate", "timeout": 30}
+          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" memory migrate", "timeout": 30, "onFailure": "continue"}
         ]
       },
       {
         "hooks": [
-          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad notebook-out", "timeout": 20},
-          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad repo-uses", "timeout": 20},
-          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad tmp-unlink", "timeout": 60},
-          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" lifetime sweep", "timeout": 30}
+          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad notebook-out", "timeout": 20, "onFailure": "continue"},
+          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad repo-uses", "timeout": 20, "onFailure": "continue"},
+          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad tmp-unlink", "timeout": 60, "onFailure": "continue"},
+          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" lifetime sweep", "timeout": 30, "onFailure": "continue"}
         ]
       }
     ],
@@ -20,14 +20,14 @@
       {
         "matcher": "Write|Edit|NotebookEdit|Bash|PowerShell",
         "hooks": [
-          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad ask", "timeout": 20}
+          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad ask", "timeout": 20, "onFailure": "continue"}
         ]
       }
     ],
     "SessionEnd": [
       {
         "hooks": [
-          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" lifetime session-end", "timeout": 30}
+          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" lifetime session-end", "timeout": 30, "onFailure": "continue"}
         ]
       }
     ]
