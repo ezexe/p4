@@ -13,7 +13,7 @@ The store files mix two shapes, fenced yaml blocks and dash-led entries, so entr
 and kept by the field each kind carries; a file's own header, whose schema lines hold `[placeholders]`, is skipped.
 
 Run:
-  python scripts/session/store_lessons.py --p4 <a .claude/p4 directory, or a p4 repository> [--out lessons.json]
+  python lbiza/plugins/p4-phi/scripts/store_lessons.py --p4 <a .claude/p4 directory, or a p4 repository> [--out lessons.json]
 """
 
 import argparse

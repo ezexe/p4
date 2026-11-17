@@ -5,7 +5,7 @@ Run: python3 test_migrate.py
 
 A synthetic tree in the vlds layout, built here, holds every kind of file the migration places. The four cloned
 stores, when test_store.FIXTURES holds them, are migrated dry into a temp directory, and ap-p4_mac is also applied:
-every check passes, no entry is unplaced, the counts equal those of `scripts/session/store_lessons.py`, the rulings
+every check passes, no entry is unplaced, the counts equal those of `store_lessons.py` beside this test, the rulings
 dated at or after a retraction with the same owner-words read LIVE, and the archives are byte-identical. The clones
 are only read; nothing is written into them.
 """
@@ -24,7 +24,7 @@ import p4conf  # noqa: E402
 import store as st  # noqa: E402
 from test_store import NOW, fixture, write  # noqa: E402
 
-LESSONS = os.path.normpath(os.path.join(HERE, "..", "..", "..", "..", "scripts", "session", "store_lessons.py"))
+LESSONS = os.path.join(HERE, "store_lessons.py")
 
 
 def store_lessons():

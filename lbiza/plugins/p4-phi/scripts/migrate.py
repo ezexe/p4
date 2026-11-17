@@ -37,7 +37,7 @@ import p4conf  # noqa: E402
 import ranker  # noqa: E402
 import store as st  # noqa: E402
 
-# --- the per-session tree's counts, made as scripts/session/store_lessons.py makes them, for the checks ---------
+# --- the per-session tree's counts, made as store_lessons.py beside this script makes them, for the checks ---------
 
 OLD_KINDS = {"correction": ("ledger.md", re.compile(r"(?m)^\s*-?\s*meant:")),
              "retraction": ("tombstones.md", re.compile(r"(?m)^\s*-?\s*freed:")),

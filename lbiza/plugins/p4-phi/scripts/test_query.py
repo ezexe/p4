@@ -326,5 +326,14 @@ class OrdinarySilentOnFixture(Fixture):
             self.assertEqual(cli.query(p4, text, None, NOW)["lines"], [], text)
 
 
+class PluginReads(unittest.TestCase):
+    def test_no_script_reads_outside_the_plugin(self):
+        """ezexe/p4#79: no script of p4-phi climbs four folders out of the plugin to read an input."""
+        hits = [(n, i) for n in sorted(os.listdir(HERE)) if n.endswith(".py")
+                for i, l in enumerate(open(os.path.join(HERE, n), encoding="utf-8"), 1)
+                if ", ".join(['".."'] * 4) in l]
+        self.assertEqual(hits, [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
