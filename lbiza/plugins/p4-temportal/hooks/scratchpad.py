@@ -729,20 +729,22 @@ def temp_dirs(harness, own, root):
 
 def archived_ids(p4):
     """The session ids p4-phi's records hold as archived: the `sessionId` and every `cliSessionIds` entry of a
-    `phi/sessions/*/session.json` whose `archived` is set. Read-only, and empty where p4-phi keeps nothing."""
-    out = set()
+    `phi/sessions/*/session.json` whose `archived` is set, less every id that a record not archived names. An archived
+    record can list another session's transcript id beside its own, and that session's own record, still live, then
+    keeps its scratchpad directory from being closed. Read-only, and empty where p4-phi keeps nothing."""
+    out, live = set(), set()
     for f in glob.glob(os.path.join(glob.escape(p4), "phi", "sessions", "*", "session.json")):
         try:
             with open(f, encoding="utf-8") as fh:
                 rec = json.load(fh)
         except (OSError, ValueError):
             continue
-        if not isinstance(rec, dict) or not rec.get("archived"):
+        if not isinstance(rec, dict):
             continue
         ids = rec.get("cliSessionIds")
-        for i in [rec.get("sessionId"), *(ids if isinstance(ids, list) else [])]:
-            if isinstance(i, str) and i:
-                out.add(i)
+        named = {i for i in [rec.get("sessionId"), *(ids if isinstance(ids, list) else [])] if isinstance(i, str) and i}
+        (out if rec.get("archived") else live).update(named)
+    out -= live
     return out
 
 

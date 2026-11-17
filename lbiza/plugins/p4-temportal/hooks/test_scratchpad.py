@@ -1018,6 +1018,60 @@ def archived_by_phi_cases():
     print("test_scratchpad.py: archived by phi cases green")
 
 
+def archived_lists_live_cases():
+    """An archived record whose cliSessionIds also lists a live session's transcript id does not end that session: its
+    scratchpad directory, quiet for hours, is kept through tmp-link at a start and through ended-sweep, while the
+    archived session's own directory is closed by each."""
+    if not shutil.which("git") or not shutil.which("sh"):
+        print("test_scratchpad.py: archived lists live cases skipped, no git or sh on PATH")
+        return
+    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-listed-")
+    live, gone = "1a1a1a1a-0000-4000-8000-0000000001a1", "2b2b2b2b-0000-4000-8000-0000000002b2"
+    p4 = os.path.join(root, ".claude", "p4")
+    tmp = {k: os.path.join(p4, "temportal", "tmp", s) for k, s in (("live", live), ("gone", gone))}
+    temp, own = os.path.join(root, "temp"), "4d4d4d4d-0000-4000-8000-0000000004d4"
+    env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp, "CLAUDE_CONFIG_DIR": os.path.join(root, ".config")}
+
+    def git(*args):
+        subprocess.run(["git", "-C", p4] + list(args), check=True, capture_output=True)
+
+    def quiet():
+        for k in tmp:
+            put(tmp[k], "work.md", f"{k} work\n")
+            for d, _dirs, files in os.walk(tmp[k]):
+                age(d, *[os.path.join(d, n) for n in files], hours=3)
+
+    def kept(where):
+        assert os.path.isfile(os.path.join(tmp["live"], "work.md")), f"{where} closed the live session's folder"
+        assert not os.path.exists(os.path.join(tmp["gone"], "work.md")), f"{where} kept the archived session's folder"
+
+    try:
+        os.makedirs(p4)
+        for args in (["init", "-q"], ["config", "user.name", "t"], ["config", "user.email", "t@t"]):
+            git(*args)
+        put(p4, "first.md", "first\n")
+        git("add", "first.md")
+        git("commit", "-q", "-m", "first")
+        # the live session's own record, not archived, and an archived record that lists it beside its own id
+        put(os.path.join(p4, "phi", "sessions", live), "session.json",
+            json.dumps({"sessionId": live, "cliSessionIds": [live]}))
+        put(os.path.join(p4, "phi", "sessions", "local_3c3c3c3c-0000-4000-8000-0000000003c3"), "session.json",
+            json.dumps({"sessionId": "local_3c3c3c3c-0000-4000-8000-0000000003c3", "cliSessionIds": [gone, live],
+                        "archived": "2026-11-17 08:00"}))
+        quiet()
+        os.makedirs(os.path.join(temp, "claude", "30ad6e18862a20e8", own, "scratchpad"))
+        run_sub("tmp-link", {"cwd": root, "session_id": own}, env, CLAUDE_PROJECT_DIR=root)
+        kept("tmp-link at a start")
+        quiet()
+        r = subprocess.run([sys.executable, "-I", SCRIPT, "ended-sweep", "--root", root], capture_output=True,
+                           stdin=subprocess.DEVNULL, timeout=120, env=env_with(env))
+        assert r.returncode == 0, r
+        kept("ended-sweep")
+    finally:
+        wipe(root)
+    print("test_scratchpad.py: archived lists live cases green")
+
+
 def scratchpad_dir_cases():
     """With `scratchpad_dir` on stdin pointing under a CLAUDE_CODE_TMPDIR tree, outside the system temp directory,
     tmp-link links that path, even before its folder exists."""
@@ -1413,6 +1467,9 @@ class Cases(unittest.TestCase):
 
     def test_archived_by_phi_cases(self):
         archived_by_phi_cases()
+
+    def test_archived_lists_live_cases(self):
+        archived_lists_live_cases()
 
     def test_scratchpad_dir_cases(self):
         scratchpad_dir_cases()
