@@ -118,9 +118,8 @@ class HooksJson(unittest.TestCase):
         h = own_hooks(HOOKS_JSON, "/hooks/recall-hook.sh")
         self.assertEqual(set(h), {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop",
                                   "SubagentStop", "ConfigChange"})
-        # ezexe/p4#246: the settings watcher at every start and at a change of a settings file, which it never blocks
-        self.assertEqual([m.get("matcher") for m in h["SessionStart"]
-                          if m["hooks"][0]["command"].split()[-1] == "settings"], [None])
+        # ezexe/p4#246: the settings watcher runs in the layout hook at every start, and here at a change of a
+        # settings file, which it never blocks
         self.assertEqual(h["ConfigChange"][0]["matcher"], "local_settings|project_settings|user_settings")
         self.assertEqual(h["SessionStart"][0]["matcher"], "startup|resume|clear|compact|fork")
         self.assertEqual(h["SessionStart"][0]["hooks"][0]["timeout"], 15)

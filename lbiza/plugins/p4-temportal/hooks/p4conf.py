@@ -26,6 +26,7 @@ import filecmp
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -65,7 +66,7 @@ DEFAULTS = {
         "track": False,                  # true: the session tree in phi/ is committed; false: git ignores it
         "act_dont_wait": True,           # false: p4-phi's act-don't-wait rule is left out in this project
         "top_orchestrates": True,        # false: an orchestrator works its task list itself, no worker unless asked
-        "levels": True,                  # false: no delegation rule, and no long command moved to the background
+        "levels": True,                  # false: no delegation rule, and no line naming a long command's background
         "file_sets": True,               # false: a session may be started by a brief that declares no write set
         "session_archives": False,       # true: a session may archive itself or another session
         "issues": True,                  # false: the issue loop is off: no open issue a brief names, no commit line
@@ -923,7 +924,7 @@ def configure(module_globals, p4, dotted, names, write=True):
 # git by the seeded .gitignore, holds what p4 wrote into which file with the GEN of the copy that wrote it: a key still
 # equal to its entry is p4's and may change at a higher GEN or go, a key that differs was set by hand and leaves the
 # record, and a key the record owns that is missing from the file is written again. RECORD also holds what the
-# watcher in p4-phi's catchup.py last saw of Claude Code and the p4 plugins.
+# watcher below last saw of Claude Code and the p4 plugins.
 SECTION = "claude"
 RECORD = "claude-settings.json"
 SETTINGS_LOCK = ".settings.lock"
@@ -1134,7 +1135,65 @@ def wants(p4, target, platform=None):
     out["autoMemoryDirectory"] = mem if conf.get("autoMemoryDirectory", True) is not False and not other else None
     text = conf.get("attribution.commit")
     out["attribution.commit"] = text if isinstance(text, str) else None
-    return out, {k: v for k, v in conf.items() if k not in WRITES}, conf
+    return out, {k: v for k, v in conf.items() if k not in WRITES and k not in OWN_KEYS}, conf
+
+
+# The two allow rules ezexe approved for p4 to keep in the local file, so a session runs the p4 commands its hook
+# text names without a prompt: phi.py with any arguments, and p4.py sync. On Windows the same two in the PowerShell
+# form too. catchup.py prune-cache deletes files and gets no rule. Each rule is one entry of `permissions.allow` that
+# p4 owns, recorded under RECORD's `rules`: p4 adds and removes only its own entries, never reorders or drops another,
+# rewrites them when the plugin folder moves, and never writes back an entry deleted by hand. Only p4-phi's copy, which
+# sits beside phi.py and so knows the path phi.py prints, writes them; the copy in p4-temportal leaves them as they are.
+# The store's `claude` section sets `allowRules` false to have p4 remove its entries.
+ALLOW_KEY = "permissions.allow"
+OWN_KEYS = ("allowRules",)
+PHI_SCRIPTS = None               # the folder of phi.py the rules name; None: this file's own folder, when phi.py is there
+
+
+def allow_rules(platform, conf):
+    """The allow rules p4 wants, [] for none, or None when this copy cannot tell which and leaves them."""
+    if conf.get("allowRules", True) is False:
+        return []
+    here = PHI_SCRIPTS or os.path.dirname(os.path.abspath(__file__))
+    if not os.path.isfile(os.path.join(here, "phi.py")):
+        return None
+    s = fwd(here)
+    cmds = [f'python -I -X utf8 "{s}/phi.py" *', f'python -I -X utf8 "{s}/p4.py" sync *']
+    out = [f"Bash({c})" for c in cmds]
+    if platform.startswith("win"):
+        out += [f"PowerShell({c})" for c in cmds]
+    return out
+
+
+def _keep_rules(new, rec, name, wanted, owned_only):
+    """p4's own entries of `permissions.allow` in `new` brought to `wanted`; the record's `rules` kept in step."""
+    rules = rec.setdefault("rules", {})
+    mine = dict(rules.get(name) or {})
+    entries, hand = list(mine.get("entries") or []), list(mine.get("hand") or [])
+    cur = _get(new, ALLOW_KEY)
+    if cur is not _NONE and not isinstance(cur, list):
+        return                                          # not a list: left as it is
+    have = list(cur) if cur is not _NONE else []
+    for e in [e for e in entries if e not in have]:
+        entries.remove(e)                               # deleted by hand: never written back
+        hand.append(e)
+    if wanted is not None:
+        for e in [e for e in entries if e not in wanted]:
+            have.remove(e)                              # p4's own, no longer wanted: only that entry goes
+            entries.remove(e)
+        if not owned_only:
+            for e in wanted:
+                if e not in have and e not in hand:
+                    have.append(e)
+                    entries.append(e)
+    if have != (cur if cur is not _NONE else []):
+        _put(new, ALLOW_KEY, have)
+    if entries or hand:
+        rules[name] = {"entries": entries, "hand": list(dict.fromkeys(hand)), "gen": GEN}
+    else:
+        rules.pop(name, None)
+    if not rules:
+        rec.pop("rules", None)
 
 
 def _take_lock(lock, wait_s=3.0, stale_s=60.0):
@@ -1222,6 +1281,7 @@ def _keep(p4, target, platform, owned_only, out, note, tell):
                 owned[k] = {"v": d, "gen": GEN}
             elif _same_value(k, cur, d):
                 owned[k] = {"v": cur, "gen": GEN}      # the value p4 would write: p4's from now
+    _keep_rules(new, rec, name, allow_rules(platform, conf), owned_only)
     if new != data:
         replace_text(target, json.dumps(new, indent=2, ensure_ascii=False) + "\n")
         out["wrote"] = True
@@ -1279,3 +1339,245 @@ def exclude_local(target):
     except OSError:
         return False
     return True
+
+
+# --- The watcher, ezexe/p4#246 -------------------------------------------------------------------------------------
+# p4-phi's hook.py runs watch() at every SessionStart, from its layout handler, and at a ConfigChange of a settings
+# file, and starts read_changelog in a process of its own when a newer Claude Code runs.
+MARKET = "p4-marketplace"
+
+
+def _version(v):
+    out = []
+    for part in str(v or "").split("."):
+        digits = "".join(c for c in part if c.isdigit())
+        out.append(int(digits) if digits else 0)
+    return tuple(out)
+
+
+SETTINGS_ENV = "P4_PHI_SETTINGS"          # 0 turns the settings watcher off
+VERSION_S = 5.0                           # what one `--version` may take
+CHANGELOG_URL = "https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md"
+CHANGELOG_S = 20.0
+WATCH_PAGE = ("phi", "claude-code-watch.md")
+WATCH_PENDING = ("phi", "claude-code-watch.pending.json")
+CONFIG_SOURCES = ("local_settings", "project_settings", "user_settings")
+# The documented defaults p4 relies on, each with the issue to act on when the changelog names it.
+WATCHED = {
+    "autoMemoryDirectory": "ezexe/p4#246", "autoMemoryEnabled": "ezexe/p4#246",
+    "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "ezexe/p4#246", "MEMORY.md": "ezexe/p4#92",
+    "blockReadsOutsideWorkingDirectories": "ezexe/p4#246", "blockWritesOutsideWorkingDirectories": "ezexe/p4#246",
+    "additionalDirectories": "ezexe/p4#246", "settings.local.json": "ezexe/p4#246", "attribution": "ezexe/p4#246",
+    "includeCoAuthoredBy": "ezexe/p4#246", "cleanupPeriodDays": "ezexe/p4#131",
+    "desktopSessionCleanupPeriodDays": "ezexe/p4#131", "enableArtifact": "ezexe/p4#131",
+    "scratchpad_dir": "ezexe/p4#131", "CLAUDE_PID": "ezexe/p4#246", "10,000 characters": "ezexe/p4#243",
+    "CLAUDE_CODE_STOP_HOOK_BLOCK_CAP": "ezexe/p4#246", "BASH_DEFAULT_TIMEOUT_MS": "ezexe/p4#243",
+    "ConfigChange": "ezexe/p4#246", "SessionStart": "ezexe/p4#246", "crossSessionInbound": "ezexe/p4#246",
+}
+
+
+def exe_of_pid(pid):
+    """The executable path of process `pid`: QueryFullProcessImageNameW on Windows, /proc/<pid>/exe on Linux and
+    `ps -o comm=` elsewhere; None when it cannot be read."""
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.OpenProcess.restype = wintypes.HANDLE
+        k32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        k32.QueryFullProcessImageNameW.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
+                                                   ctypes.POINTER(wintypes.DWORD))
+        k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        h = k32.OpenProcess(0x1000, False, int(pid))            # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return None
+        try:
+            buf, size = ctypes.create_unicode_buffer(32768), wintypes.DWORD(32768)
+            return buf.value if k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)) else None
+        finally:
+            k32.CloseHandle(h)
+    try:
+        return os.readlink(f"/proc/{int(pid)}/exe")
+    except (OSError, ValueError):
+        pass
+    try:
+        r = subprocess.run(["ps", "-o", "comm=", "-p", str(int(pid))], capture_output=True, text=True, timeout=2)
+        p = r.stdout.strip()
+        return p if r.returncode == 0 and os.path.isabs(p) else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def claude_binary():
+    """(path, weak) of the Claude Code binary running this session: the process CLAUDE_PID names, or, when it is
+    unset as before v2.1.214 or unreadable, `claude` on the PATH, a weaker reading since the desktop app runs its own
+    copy. (None, True) when neither is found."""
+    pid = os.environ.get("CLAUDE_PID")
+    if pid and pid.isdigit():
+        try:
+            p = exe_of_pid(int(pid))
+        except (OSError, ValueError, AttributeError):
+            p = None
+        if p and os.path.isfile(p):
+            return p, False
+    import shutil
+    return shutil.which("claude"), True
+
+
+def read_version(path):
+    """The version `<path> --version` prints, '' when it prints none in VERSION_S."""
+    import re
+    try:
+        r = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=VERSION_S,
+                           stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    m = re.search(r"\d+\.\d+\.\d+", r.stdout or "")
+    return m.group(0) if m else ""
+
+
+def plugin_versions(project):
+    """{name: version} of the p4 plugins installed for `project`, the highest of each, from Claude Code's
+    installed_plugins.json: an install at user scope, or one scoped to this project."""
+    out = {}
+    data = (read_json(os.path.join(_config_dir(), "plugins", "installed_plugins.json")) or {}).get("plugins") or {}
+    for key, rows in data.items():
+        name, _, market = str(key).partition("@")
+        if market != MARKET:
+            continue
+        for r in rows if isinstance(rows, list) else [rows]:
+            if not isinstance(r, dict) or not r.get("version"):
+                continue
+            if r.get("scope") in ("local", "project") and _norm(r.get("projectPath") or "") != _norm(project):
+                continue
+            if name not in out or _version(r["version"]) > _version(out[name]):
+                out[name] = r["version"]
+    return out
+
+
+def section_of(p4):
+    """The `claude` section of the store's p4.json as it stands, read without load's merge."""
+    return _flat((read_json(path(p4)) or {}).get(SECTION) or {})
+
+
+def watch(project, payload):
+    """At every SessionStart: the cheap comparison of the running Claude Code binary, the p4 plugins' versions and
+    the store's `claude` section with the record; any change runs keep_settings. At a ConfigChange of a settings
+    file: keep_settings on the keys the record owns. Returns {"asks": the lines naming keys a store wants that p4
+    never writes, "newer": (old, new) when a newer Claude Code runs, else None}."""
+    out = {"asks": [], "newer": None}
+    if os.environ.get(SETTINGS_ENV) == "0":
+        return out
+    p4 = os.path.join(main_root(project)[0], ".claude", "p4")
+    if not os.path.isdir(p4):
+        return out
+    if payload.get("hook_event_name") == "ConfigChange":
+        if payload.get("source") in CONFIG_SOURCES:
+            keep_settings(project, owned_only=True, p4=p4)
+        return out
+    rec = read_record(p4)
+    seen = rec.get("claude") or {}
+    note = {}
+    binary, weak = claude_binary()
+    if binary:
+        try:
+            st = os.stat(binary)
+        except OSError:
+            st = None
+        if st and (seen.get("path"), seen.get("size"), seen.get("mtime")) != (binary, st.st_size, st.st_mtime):
+            v = read_version(binary)
+            note["claude"] = {"path": binary, "size": st.st_size, "mtime": st.st_mtime,
+                              "version": v or seen.get("version") or "", "weak": weak}
+            if v and seen.get("version") and _version(v) > _version(seen["version"]):
+                out["newer"] = (seen["version"], v)
+    plugins = plugin_versions(project)
+    if plugins != (rec.get("plugins") or {}):
+        note["plugins"] = plugins
+    if not note and section_of(p4) == rec.get("section"):
+        return out
+    out["asks"] = keep_settings(project, p4=p4, note=note, tell=True)["asks"]
+    return out
+
+
+def watched_terms(limits=None):
+    """{term: issue}: WATCHED, and the `terms` of every entry of claude_code_limits.json, each with its issue. A
+    missing or unreadable file adds nothing."""
+    out = dict(WATCHED)
+    try:
+        with open(limits or "", encoding="utf-8") as f:
+            rows = json.load(f)
+    except (OSError, ValueError):
+        rows = []
+    for r in rows if isinstance(rows, list) else []:
+        if not isinstance(r, dict):
+            continue
+        issue = f"{r.get('repo') or 'ezexe/p4'}#{r.get('issue')}" if r.get("issue") else (r.get("repo") or "")
+        for t in r.get("terms") or []:
+            if isinstance(t, str) and t.strip():
+                out.setdefault(t.strip(), issue)
+    return out
+
+
+def changelog_hits(text, old, new, terms):
+    """[(term, version, issue, line)] for each watched term in the `## <version>` sections after `old` up to `new`."""
+    import re
+    hits, ver = [], None
+    lo, hi = _version(old), _version(new)
+    for line in text.splitlines():
+        m = re.match(r"^##\s+v?(\d+\.\d+\.\d+)", line)
+        if m:
+            ver = m.group(1) if lo < _version(m.group(1)) <= hi else None
+            continue
+        if not ver:
+            continue
+        low = line.lower()
+        for term, issue in terms.items():
+            if term.lower() in low:
+                hits.append((term, ver, issue, line.strip().lstrip("-* ").strip()[:300]))
+    return hits
+
+
+def read_changelog(p4, old, new, text=None, limits=None):
+    """Read the changelog between `old` and `new` and write each hit to the store's watch page and to its pending
+    file, which the next prompt's hook hands a session line by line. Returns the hits."""
+    if text is None:
+        import urllib.request
+        try:
+            with urllib.request.urlopen(CHANGELOG_URL, timeout=CHANGELOG_S) as r:
+                text = r.read().decode("utf-8", "replace")
+        except (OSError, ValueError):
+            return []
+    hits = changelog_hits(text, old, new, watched_terms(limits))
+    page = os.path.join(p4, *WATCH_PAGE)
+    os.makedirs(os.path.dirname(page), exist_ok=True)
+    head = "" if os.path.exists(page) else (
+        "# Claude Code changes p4 watches\n\nEach section is one read of Claude Code's changelog after a new version"
+        " ran here, by p4conf.py's watcher.\n")
+    body = f"\n## {time.strftime('%Y-%m-%d %H:%M')}, {old} to {new}\n\n"
+    body += "".join(f"- `{t}` in {v}, act on {i}: {l}\n" for t, v, i, l in hits) or "- No watched term.\n"
+    with open(page, "a", encoding="utf-8", newline="\n") as f:
+        f.write(head + body)
+    if hits:
+        pend = os.path.join(p4, *WATCH_PENDING)
+        have = (read_json(pend) or {}).get("lines") or []
+        lines = have + [f"phi (p4-phi): Claude Code {v} changed `{t}` by its changelog; read that entry and "
+                        f"{os.path.join(*WATCH_PAGE)} in the store, and act on {i}." for t, v, i, _ in hits]
+        replace_text(pend, json.dumps({"lines": list(dict.fromkeys(lines))}, ensure_ascii=False) + "\n")
+    return hits
+
+
+def claim_watch(p4):
+    """The pending watch lines, taken by one rename so one session gets each once; [] when there are none."""
+    pend = os.path.join(p4, *WATCH_PENDING)
+    mine = f"{pend}.{os.getpid()}"
+    try:
+        os.replace(pend, mine)
+    except OSError:
+        return []
+    try:
+        return [l for l in (read_json(mine) or {}).get("lines") or [] if isinstance(l, str)]
+    finally:
+        try:
+            os.remove(mine)
+        except OSError:
+            pass

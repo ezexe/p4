@@ -30,15 +30,6 @@
             "timeout": 20
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/recall-hook.sh\" settings",
-            "timeout": 15
-          }
-        ]
       }
     ],
     "UserPromptSubmit": [

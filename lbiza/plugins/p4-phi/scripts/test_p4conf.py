@@ -499,8 +499,10 @@ class ClaudeSettings(unittest.TestCase):
             json.dump({"spinnerTipsEnabled": False}, f)
         hook.init_layout(self.project)
         got = self.read(self.local())
-        self.assertEqual(got, {"spinnerTipsEnabled": False, "autoMemoryDirectory": self.memory()})
-        self.assertEqual(list(got), ["spinnerTipsEnabled", "autoMemoryDirectory"], "the user's keys keep their order")
+        self.assertEqual({k: got[k] for k in ("spinnerTipsEnabled", "autoMemoryDirectory")},
+                         {"spinnerTipsEnabled": False, "autoMemoryDirectory": self.memory()})
+        self.assertEqual(list(got), ["spinnerTipsEnabled", "autoMemoryDirectory", "permissions"],
+                         "the user's keys keep their order")
         self.assertTrue(os.path.isfile(self.record()), "the record is .claude/p4/claude-settings.json")
         rec = Path(self.record()).read_text(encoding="utf-8")
         self.assertIn("autoMemoryDirectory", rec)
@@ -554,7 +556,7 @@ class ClaudeSettings(unittest.TestCase):
             json.dump({"autoMemoryDirectory": "D:/mine"}, f)
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
         p4conf.keep_settings(self.project)
-        self.assertFalse(os.path.exists(self.local()))
+        self.assertNotIn("autoMemoryDirectory", self.read(self.local()))
 
     def test_a_key_of_the_security_class_is_named_and_never_written(self):
         """ezexe/p4#246: a permission key a store wants is named with its value and not written; the commit
@@ -567,9 +569,67 @@ class ClaudeSettings(unittest.TestCase):
         out = p4conf.keep_settings(self.project, tell=True)
         got = self.read(self.local())
         self.assertEqual(got["attribution"], {"commit": "Co-Authored-By: x <x@x>"})
-        self.assertNotIn("permissions", got)
+        self.assertNotIn("Bash(ls *)", got["permissions"]["allow"], "a store's own permission key is never written")
         self.assertTrue(any("permissions.allow" in a and "Bash(ls *)" in a for a in out["asks"]), out)
         self.assertEqual(p4conf.keep_settings(self.project, tell=True)["asks"], [], "named once for one value")
+
+    def rules(self, scripts):
+        s = os.path.abspath(scripts).replace("\\", "/")
+        cmds = [f'python -I -X utf8 "{s}/phi.py" *', f'python -I -X utf8 "{s}/p4.py" sync *']
+        return [f"Bash({c})" for c in cmds] + [f"PowerShell({c})" for c in cmds]
+
+    def test_the_two_allow_rules_are_p4s_own_entries_beside_the_users(self):
+        """ezexe approved two allow rules, phi.py and p4.py sync, as Bash and on Windows PowerShell: after two checks
+        each is in permissions.allow once, the user's own allow, ask and deny rules are untouched and in order, and
+        no rule names catchup.py prune-cache."""
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        mine = {"allow": ["Bash(npm test)", "Read(./docs/**)"], "ask": ["Bash(git push *)"], "deny": ["Bash(rm *)"]}
+        with open(self.local(), "w", encoding="utf-8") as f:
+            json.dump({"permissions": mine}, f)
+        for _ in range(2):
+            p4conf.keep_settings(self.project, platform="win32")
+        got = self.read(self.local())["permissions"]
+        self.assertEqual(got["allow"], mine["allow"] + self.rules(HERE), "the user's rules first, each of p4's once")
+        self.assertEqual((got["ask"], got["deny"]), (mine["ask"], mine["deny"]))
+        self.assertFalse([r for r in got["allow"] if "prune-cache" in r or "catchup.py" in r])
+        rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
+        self.assertEqual(sorted(list(rec["rules"].values())[0]["entries"]), sorted(self.rules(HERE)))
+
+    def test_the_rules_follow_the_plugin_folder_and_an_entry_deleted_by_hand_stays_gone(self):
+        from unittest import mock
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        with open(self.local(), "w", encoding="utf-8") as f:
+            json.dump({"permissions": {"allow": ["Bash(npm test)"]}}, f)
+        p4conf.keep_settings(self.project, platform="win32")
+        moved = os.path.join(self.tmp, "plugins", "p4-phi", "scripts")
+        os.makedirs(moved)
+        Path(moved, "phi.py").write_text("", encoding="utf-8")
+        with mock.patch.object(p4conf, "PHI_SCRIPTS", moved):
+            p4conf.keep_settings(self.project, platform="win32")
+            allow = self.read(self.local())["permissions"]["allow"]
+            self.assertEqual(allow, ["Bash(npm test)"] + self.rules(moved), "the old entries replaced by the new")
+            d = self.read(self.local())
+            d["permissions"]["allow"].remove(self.rules(moved)[0])
+            with open(self.local(), "w", encoding="utf-8") as f:
+                json.dump(d, f)
+            p4conf.keep_settings(self.project, platform="win32")
+            self.assertNotIn(self.rules(moved)[0], self.read(self.local())["permissions"]["allow"],
+                             "deleted by hand: not written back")
+
+    def test_the_users_autoMemoryEnabled_is_never_touched(self):
+        """autoMemoryEnabled is ezexe's switch: a local `false` stays after two checks and the record never names it,
+        while autoMemoryDirectory beside it stays p4's."""
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        with open(self.local(), "w", encoding="utf-8") as f:
+            json.dump({"autoMemoryDirectory": self.memory(), "autoMemoryEnabled": False}, f)
+        for _ in range(2):
+            p4conf.keep_settings(self.project)
+        got = self.read(self.local())
+        self.assertIs(got["autoMemoryEnabled"], False)
+        self.assertEqual(got["autoMemoryDirectory"], self.memory())
+        rec = Path(self.record()).read_text(encoding="utf-8")
+        self.assertNotIn("autoMemoryEnabled", rec)
+        self.assertIn("autoMemoryDirectory", rec)
 
     def test_a_file_that_is_not_json_is_left_as_it_is(self):
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
@@ -582,6 +642,110 @@ class ClaudeSettings(unittest.TestCase):
             p4conf.keep_settings(self.project)
         self.assertEqual(Path(self.local()).read_text(encoding="utf-8"), "{not json")
         self.assertIn("settings.local.json", err.getvalue())
+
+
+def _write(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(data if isinstance(data, str) else json.dumps(data))
+
+
+class Watcher(unittest.TestCase):
+    """ezexe/p4#246: the running Claude Code binary, read through CLAUDE_PID, sets off the whole settings check."""
+
+    setUp = ClaudeSettings.setUp
+
+    def stub(self, version):
+        """A stand-in binary that prints `version` for --version and counts its runs."""
+        self.count = os.path.join(self.tmp, "runs.txt")
+        if os.name == "nt":
+            p = os.path.join(self.tmp, "bin", "claude.cmd")
+            _write(p, f'@echo off\r\necho x>>"{self.count}"\r\necho {version} (Claude Code)\r\n')
+        else:
+            p = os.path.join(self.tmp, "bin", "claude")
+            _write(p, f'#!/bin/sh\necho x >> "{self.count}"\necho "{version} (Claude Code)"\n')
+            os.chmod(p, 0o755)
+        return p
+
+    def runs(self):
+        try:
+            with open(self.count, encoding="utf-8") as f:
+                return len(f.read().split())
+        except OSError:
+            return 0
+
+    def test_a_new_claude_code_binary_runs_the_whole_check(self):
+        from unittest import mock
+        p4 = os.path.join(self.project, ".claude", "p4")
+        os.makedirs(p4)
+        local = os.path.join(self.project, ".claude", "settings.local.json")
+        mem = os.path.abspath(os.path.join(p4, "temportal", "memory")).replace("\\", "/")
+        stub = self.stub("2.1.400")
+        # a record from an earlier start: the key p4 owns, which is now missing from the file, and an older binary
+        _write(os.path.join(p4, "claude-settings.json"), {
+            "files": {os.path.abspath(local).replace("\\", "/"): {"autoMemoryDirectory": {"v": mem, "gen": 1}}},
+            "claude": {"path": stub, "size": 1, "mtime": 1.0, "version": "2.1.300"}})
+        _write(local, {"spinnerTipsEnabled": False})
+        env = {"CLAUDE_PID": "4242"}
+        with mock.patch.dict(os.environ, env), \
+                mock.patch.object(p4conf, "exe_of_pid", lambda pid: stub if pid == 4242 else None):
+            os.environ.pop("CLAUDE_PROJECT_DIR", None)
+            got = p4conf.watch(self.project, {"source": "resume", "hook_event_name": "SessionStart"})
+            self.assertEqual(self.runs(), 1, "a changed binary is asked its version")
+            with open(local, encoding="utf-8") as f:
+                self.assertEqual(json.load(f).get("autoMemoryDirectory"), mem, "the whole check wrote the key again")
+            with open(os.path.join(p4, "claude-settings.json"), encoding="utf-8") as f:
+                self.assertEqual(json.load(f)["claude"]["version"], "2.1.400")
+            self.assertEqual(got["newer"], ("2.1.300", "2.1.400"), "the changelog between the two is read")
+            p4conf.watch(self.project, {"source": "startup", "hook_event_name": "SessionStart"})
+            self.assertEqual(self.runs(), 1, "the same binary: no --version runs")
+
+    def test_the_process_claude_pid_names_is_read_from_the_system(self):
+        p = p4conf.exe_of_pid(os.getpid())
+        self.assertTrue(p and os.path.isfile(p), p)
+        self.assertTrue(os.path.basename(p).lower().startswith("python"), p)
+
+    def test_a_config_change_by_hand_leaves_the_record_and_never_blocks(self):
+        p4 = os.path.join(self.project, ".claude", "p4")
+        os.makedirs(p4)
+        local = os.path.join(self.project, ".claude", "settings.local.json")
+        p4conf.keep_settings(self.project)
+        with open(local, encoding="utf-8") as f:
+            d = json.load(f)
+        d["autoMemoryDirectory"] = "D:/mine"
+        _write(local, d)
+        os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        out = p4conf.watch(self.project, {"hook_event_name": "ConfigChange", "source": "local_settings",
+                                          "file_path": local})
+        self.assertEqual(out, {"asks": [], "newer": None}, "a ConfigChange check never blocks")
+        with open(local, encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["autoMemoryDirectory"], "D:/mine")
+        self.assertNotIn("autoMemoryDirectory", json.dumps(p4conf.read_record(p4).get("files") or {}))
+
+    def test_a_watched_term_in_a_newer_version_reaches_the_next_prompt_once(self):
+        p4 = os.path.join(self.project, ".claude", "p4")
+        os.makedirs(p4)
+        text = ("# Changelog\n\n## 2.1.402\n\n- Fixed the spinner\n\n## 2.1.401\n\n- `ConfigChange` hooks now get a"
+                " new field\n\n## 2.1.300\n\n- `autoMemoryDirectory` added\n")
+        hits = p4conf.read_changelog(p4, "2.1.300", "2.1.401", text=text)
+        self.assertEqual([(t, v, i) for t, v, i, _ in hits], [("ConfigChange", "2.1.401", "ezexe/p4#246")],
+                         "only the sections after the recorded version up to the new one")
+        with open(os.path.join(p4, *p4conf.WATCH_PAGE), encoding="utf-8") as f:
+            self.assertIn("`ConfigChange` in 2.1.401", f.read())
+        got = p4conf.claim_watch(p4)
+        self.assertEqual(len(got), 1)
+        self.assertIn("ConfigChange", got[0])
+        self.assertIn("2.1.401", got[0])
+        self.assertIn("ezexe/p4#246", got[0])
+        self.assertEqual(p4conf.claim_watch(p4), [], "one session gets the line once")
+
+    def test_the_issues_workers_terms_are_watched_when_their_file_is_there(self):
+        from unittest import mock
+        path = os.path.join(self.tmp, "limits.json")
+        _write(path, [{"repo": "ezexe/p4", "issue": 999, "title": "t", "behaviour": "b", "source": "s",
+                      "changes_when": "c", "terms": ["fooSetting"]}])
+        self.assertEqual(p4conf.watched_terms(path)["fooSetting"], "ezexe/p4#999")
+        self.assertEqual(p4conf.watched_terms(os.path.join(self.tmp, "none.json")), p4conf.WATCHED)
 
 
 if __name__ == "__main__":

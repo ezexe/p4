@@ -11,16 +11,17 @@ event and matcher hooks/hooks.json runs it on, and what it does.
                  p4conf.migrate_layout; makes `.claude/p4/` with its folders, its .gitignore, p4.json and its git
                  repository where they are missing; adds the `.git/info/exclude` line; seeds the store's sync
                  workflow once the store has an origin; on the `compact` source, marks the compaction in the
-                 session's view record; and brings the repository's and the dependencies' documents and the
-                 index up to date.
-                 It prints nothing unless ezexe pinned rules, and then the block `Standing rules from ezexe:` of
-                 at most PINNED_CHARS characters as `additionalContext`.
-  settings       SessionStart, every source, and ConfigChange, matcher `local_settings|project_settings|user_settings`.
-                 catchup.settings_hook: at a start the cheap comparison of the running Claude Code binary, the p4
-                 plugins' versions and the store's `claude` section with p4conf's record, and on any change
-                 p4conf.keep_settings and, for a newer Claude Code, the changelog read in a process of its own; at
-                 a ConfigChange keep_settings on the keys the record owns, never a block. One `systemMessage`
-                 naming a key a store wants that p4 never writes; nothing otherwise.
+                 session's view record; runs p4conf.watch, the cheap comparison of the running Claude Code binary,
+                 the p4 plugins' versions and the store's `claude` section with p4conf's record, which on any
+                 change runs p4conf.keep_settings and, for a newer Claude Code, starts `changelog`; and brings the
+                 repository's and the dependencies' documents and the index up to date.
+                 It prints a `systemMessage` only naming a key a store wants that p4 never writes, and
+                 `additionalContext` only when ezexe pinned rules: the block `Standing rules from ezexe:` of at
+                 most PINNED_CHARS characters.
+  settings       ConfigChange, matcher `local_settings|project_settings|user_settings`. p4conf.watch checks the
+                 keys the record owns, never a block, and prints nothing.
+  changelog      Run by the layout hook in a process of its own, with the store and two versions on stdin.
+                 p4conf.read_changelog, nothing printed.
   recall         UserPromptSubmit. A line for each change of Claude Code the changelog read found, once, then the
                  retrieval lines that `injected` lets through as `additionalContext`, with said.py's handles and
                  instruction unless `recall.said.mode` is off, and nothing when it lets none through. It opens the
@@ -345,6 +346,7 @@ def sweep_served(p4, now_s=None):
 def h_layout(payload):
     project = project_of(payload)
     p4 = init_layout(project)
+    asks = settings_watch(project, payload)
     sweep_served(p4)
     if payload.get("source") == "compact" and payload.get("session_id"):
         try:                    # view.py: the compaction marked where it happened, not guessed from the transcript
@@ -354,8 +356,57 @@ def h_layout(payload):
             pass
     refresh_index(p4, project)
     block = pinned_block(p4)
+    out = {"systemMessage": "phi (p4-phi): " + "; ".join(asks) + "."} if asks else {}
     if block:
-        return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": block}}
+        out["hookSpecificOutput"] = {"hookEventName": "SessionStart", "additionalContext": block}
+    return out or None
+
+
+# --- `settings`, on ConfigChange, and the watcher the layout hook runs ----------------------------------------
+
+LIMITS = os.path.join(HERE, "claude_code_limits.json")
+
+
+def settings_watch(project, payload):
+    """p4conf.watch at a start or a settings change: the asks to show ezexe, and for a newer Claude Code the
+    changelog read started in a process of its own. A failure is one line on stderr, never the hook's."""
+    try:
+        got = p4conf.watch(project, payload)
+    except (OSError, ValueError) as e:
+        print(f"p4: the settings watcher failed: {e}", file=sys.stderr)
+        return []
+    if got["newer"]:
+        start_changelog(os.path.join(p4conf.main_root(project)[0], ".claude", "p4"), *got["newer"])
+    return got["asks"]
+
+
+def start_changelog(p4, old, new):
+    """`hook.py changelog` in a process of its own, so no web call runs in a hook's time; True when it started."""
+    import subprocess
+    flags = 0
+    if os.name == "nt":
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    try:
+        proc = subprocess.Popen([sys.executable, "-I", "-X", "utf8", os.path.abspath(__file__), "changelog"],
+                                cwd=p4, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                creationflags=flags, start_new_session=(os.name != "nt"))
+        proc.stdin.write(json.dumps({"p4": p4, "from": old, "to": new}).encode("utf-8"))
+        proc.stdin.close()
+        return True
+    except OSError:
+        return False
+
+
+def h_settings(payload):
+    """ConfigChange of the local, project or user settings file: the keys the record owns checked, never a block."""
+    settings_watch(project_of(payload), payload)
+    return None
+
+
+def h_changelog(payload):
+    """The detached changelog read start_changelog starts, with the store and the two versions on stdin."""
+    if payload.get("p4") and payload.get("from") and payload.get("to"):
+        p4conf.read_changelog(payload["p4"], payload["from"], payload["to"], limits=LIMITS)
     return None
 
 
@@ -367,8 +418,7 @@ def h_recall(payload):
     p4 = p4_of(payload)
     if not os.path.exists(os.path.join(p4, "phi", "claude-code-watch.pending.json")):
         return out
-    import catchup
-    watch = catchup.claim_watch(p4)
+    watch = p4conf.claim_watch(p4)
     if not watch:
         return out
     hso = dict((out or {}).get("hookSpecificOutput") or {"hookEventName": "UserPromptSubmit"})
@@ -693,12 +743,7 @@ def h_catch_up(payload):
     return catchup.hook(payload)
 
 
-def h_settings(payload):
-    import catchup
-    return catchup.settings_hook(payload)
-
-
-HANDLERS = {"catch-up": h_catch_up, "settings": h_settings, "layout": h_layout, "recall": h_recall, "agent": h_agent,
+HANDLERS = {"catch-up": h_catch_up, "settings": h_settings, "changelog": h_changelog, "layout": h_layout, "recall": h_recall, "agent": h_agent,
             "close": h_close, "subagent-stop": h_subagent_stop, "train": h_train,
             "lookup-check": h_lookup_check, "lookup-record": h_lookup_record}
 
