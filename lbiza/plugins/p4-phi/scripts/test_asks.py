@@ -17,6 +17,7 @@ import asks  # noqa: E402
 import inproc  # noqa: E402
 import issues  # noqa: E402
 import phi  # noqa: E402,F401  sets controls.PHI, which asks.py reads
+import puppeteer  # noqa: E402
 import relay  # noqa: E402
 from test_phi import CLI, KID, TOP, Tree, context, read, write  # noqa: E402
 
@@ -229,6 +230,20 @@ class PuppeteerRouting(Trees):
 
 class RoutingMarks(Trees):
     """The app's marks are read at the start of a message's body, past its leading reminders, and nowhere else."""
+
+    def test_a_controlled_orchestrator_handed_work_by_another_session_still_gets_its_draft(self):
+        t = self.t
+        ctx = context(t.say(TOP, marked("Rename the retry helper in `src/export/flush.py` for the ports table and "
+                                        "update its callers across the exporter", sender=PUP)))
+        self.assertIn(DRAFT, ctx, "the marks hold back only a puppeteer's routing")
+
+    def test_a_slash_commands_wrapper_is_no_message_of_ezexes(self):
+        t = self.t
+        for tag in ("command-name", "command-message", "local-command-stdout"):
+            said = f"<{tag}>/compact</{tag}>\n" + BILLING
+            self.assertTrue(puppeteer.from_session(said), tag)
+            t.say(PUP, said)
+        self.assertEqual(asks.rows(t.p4, PUP), [])
 
     def test_a_paste_holding_a_session_tag_is_still_ezexes(self):
         t = self.t

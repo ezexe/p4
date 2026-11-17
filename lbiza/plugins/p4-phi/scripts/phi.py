@@ -2604,9 +2604,11 @@ def h_user_prompt_submit(payload):
                         "`\"self\"` before anything else, so the app stops nesting it under its parent session and its "
                         "reports stop going there; it orchestrates its own topic, and the other orchestrators are "
                         "its siblings."))
-    # ezexe's own message: one the app marks as another session's, or a handed-over task, is none
-    ezexes = req if req and not handed_over(payload.get("prompt")) \
-        and not puppeteer.from_session(payload.get("prompt")) else ""
+    # ezexe's own message: a handed-over task is none, and to a puppeteer, neither is one the app marks as another
+    # session's; an orchestrator's routing still reads the work another session hands it
+    ezexes = req if req and not handed_over(payload.get("prompt")) else ""
+    if ezexes and puppeteer.from_session(payload.get("prompt")) and controls.is_puppeteer(s, me.store):
+        ezexes = ""
     if not spawned_from(s):
         try:                                       # a puppeteer and the sessions it controls
             parts[0:0] = pair_parts(me, s, ezexes, parts[0], notice)

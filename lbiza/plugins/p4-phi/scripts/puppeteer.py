@@ -970,17 +970,19 @@ def readings_of(req):
 
 
 # the app's marks of a message that is not ezexe's, at the start of its body once the leading reminders are off:
-# another session's message, a side-sessions event, a task notification, a system notification, or a hook's words
-# given back to the session. A paste that holds such a tag further in is still ezexe's.
+# another session's message, a side-sessions event, a task notification, a system notification, a hook's words
+# given back to the session, or a slash command's wrapper, which rows.HARNESS_RE takes for the harness's too. A
+# paste that holds such a tag further in is still ezexe's.
 SESSION_MARK = re.compile(r"\A\s*(?:Another Claude session sent a message:|<cross-session-message\b|"
-                          r"<side-sessions-event\b|<task-notification\b|\[SYSTEM NOTIFICATION\b|"
+                          r"<side-sessions-event\b|<task-notification\b|<command-name\b|<command-message\b|"
+                          r"<local-command|\[SYSTEM NOTIFICATION\b|"
                           r"(?:Stop|SubagentStop|UserPromptSubmit) hook (?:feedback|blocking))", re.I)
 
 
 def from_session(prompt):
     """True when the app marks a message as another session's or its own: the body, past its leading reminders,
-    opens with a cross-session message, a side-sessions event, a task notification, a system notification or a
-    hook's feedback. Every other message a puppeteer is given is ezexe's, and only those are read for work or kept
+    opens with a cross-session message, a side-sessions event, a task notification, a system notification, a
+    hook's feedback or a slash command's wrapper. Every other message a puppeteer is given is ezexe's, and only those are read for work or kept
     as requests."""
     text = str(prompt or "")
     reminder = _phi().REMINDER

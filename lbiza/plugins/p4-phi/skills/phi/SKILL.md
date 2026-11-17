@@ -74,7 +74,8 @@ Its rule is handed once, beside its first message after p4-phi sees the filing; 
 A controlled session is told once when it comes to have a puppeteer, and once when that ends.
 Each request of ezexe's to a puppeteer is a row of its ledger, `asks.md` beside its board: a short topic, the session that holds it by full title and id, its state, and what waits on ezexe.
 A message of ezexe's with a work word opens a row, also while another row waits on ezexe, unless it is a status question such as "where does it stand" or "did it land".
-A message the app marks as another session's opens no row and is drafted no start: the body, past its leading reminders, opens with another session's message, a side-sessions event, a task notification, a system notification or a hook's feedback.
+A message to a puppeteer that the app marks as another session's opens no row and is drafted no start: the body, past its leading reminders, opens with another session's message, a side-sessions event, a task notification, a system notification, a hook's feedback or a slash command's wrapper.
+An orchestrator's routing still reads the work another session's message hands it.
 A request takes as its holder the session the puppeteer messages, or the orchestrator it starts, whose own words share the request's topic, else, for a send to a controlled session or a start, the request its turn works on.
 Its state is read from that holder's turns: routed or started, working, reported, and done for good once one of them was shown done; closed for good once the holder left the address book with no such turn.
 At the request's next message, one with no holder is answered when the turn on it ended without a question, carried when no turn ended before ezexe moved on, and waits on ezexe when the turn ended on a question.
