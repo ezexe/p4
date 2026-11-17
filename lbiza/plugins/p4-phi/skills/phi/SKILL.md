@@ -73,12 +73,12 @@ A puppeteer is a session nobody started that ezexe filed in the sidebar section 
 Its rule is handed once, beside its first message after p4-phi sees the filing; its board, `board.md` in its session folder, says on its head how it is kept; and the line p4-phi hands at a boundary says what to do then.
 A controlled session is told once when it comes to have a puppeteer, and once when that ends.
 Each request of ezexe's to a puppeteer is a row of its ledger, `asks.md` beside its board: a short topic, the session that holds it by full title and id, its state, and what waits on ezexe.
-A question and a quick answer open no row.
+A message of ezexe's with a work word opens a row, also while another row waits on ezexe, unless it is a status question such as "where does it stand" or "did it land".
 A message the app marks as another session's opens no row and is drafted no start: the body, past its leading reminders, opens with another session's message, a side-sessions event, a task notification, a system notification or a hook's feedback.
 A request takes as its holder the session the puppeteer messages, or the orchestrator it starts, whose own words share the request's topic, else, for a send to a controlled session or a start, the request its turn works on.
 Its state is read from that holder's turns: routed or started, working, reported, and done for good once one of them was shown done; closed for good once the holder left the address book with no such turn.
 At the request's next message, one with no holder is answered when the turn on it ended without a question, carried when no turn ended before ezexe moved on, and waits on ezexe when the turn ended on a question.
-A waiting request is answered by ezexe's next message, the row it names or else the latest.
+A waiting request is answered by ezexe's next message that names it, by its id or its topic's words; failing that, a quick message or one that opens no request of its own answers the latest.
 A finished row leaves the page a day after.
 Beside each of the puppeteer's messages, a short line gives the counts by state and names the page.
 A message of ezexe's that `route_down` sends to a controlled session's topic is drafted no start.

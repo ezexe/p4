@@ -317,5 +317,48 @@ class LedgerCloses(Trees):
         self.assertEqual((got["ask-2"]["holder"], got["ask-2"]["how"]), (new, "started"), "a start with no shared word")
 
 
+class LedgerWaits(Trees):
+    """A request is never lost to a row that waits on ezexe, and an answer is never taken for a request."""
+
+    def test_a_new_request_while_a_row_waits_opens_its_own_row(self):
+        t = self.t
+        t.say(PUP, ASK3)
+        t.stop(PUP, ASK3, report="The notes are ready. " + WAIT, uuid="q1")
+        t.say(PUP, BILLING)
+        got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
+        self.assertEqual(sorted(got), ["ask-1", "ask-2"])
+        self.assertEqual(got["ask-1"]["waits"], "The notes are ready. " + WAIT, "the wait is not answered")
+        self.assertEqual(got["ask-1"]["end"], "")
+
+    def test_a_quick_answer_while_a_row_waits_answers_it_and_opens_none(self):
+        t = self.t
+        t.say(PUP, ASK3)
+        t.stop(PUP, ASK3, report="The notes are ready. " + WAIT, uuid="k1")
+        t.say(PUP, "yes, push it")
+        got = asks.rows(t.p4, PUP)
+        self.assertEqual(len(got), 1, "a quick answer is no request")
+        self.assertEqual(got[0]["waits"], "", "it answers the row that waits")
+
+    def test_a_status_question_opens_no_row(self):
+        t = self.t
+        t.say(PUP, "Did the exporter's flush retry land and get pushed to main this morning?")
+        t.say(PUP, "Has the importer's release gone out to the store yet?")
+        self.assertEqual(asks.rows(t.p4, PUP), [])
+
+    def test_short_and_question_form_requests_open_rows(self):
+        t = self.t
+        t.say(PUP, "Push main and sync the stores")
+        t.say(PUP, "Can you add a retry to the importer's quote parser?")
+        self.assertEqual(len(asks.rows(t.p4, PUP)), 2)
+
+    def test_a_request_repeated_on_another_day_is_a_row_of_its_own(self):
+        from unittest import mock
+        with mock.patch.object(asks.time, "strftime", return_value="2026-11-17"):
+            one = asks._key(ASK1)
+        with mock.patch.object(asks.time, "strftime", return_value="2026-11-18"):
+            two = asks._key(ASK1)
+        self.assertNotEqual(one, two)
+
+
 if __name__ == "__main__":
     unittest.main()

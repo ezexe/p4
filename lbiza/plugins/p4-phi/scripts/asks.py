@@ -5,9 +5,10 @@ request's topic, the session that holds it by full title and id, its state and w
 appended to <puppeteer folder>/asks.jsonl, folded by id and compacted in steps as the file grows; asks.md is the
 page, rewritten when it changes, and a short line naming it is handed beside each of the puppeteer's messages.
 
-  opened   a message of ezexe's that asks for work opens a row: a message the app marks as another session's, a
-           question and a quick answer open none, and phi.py hands only ezexe's own messages here. The topic is a
-           short phrase of at most TOPIC_CHARS, never a run of ezexe's message.
+  opened   a message of ezexe's with a work word that is not a status question opens a row, also while another row
+           waits on ezexe: a message the app marks as another session's opens none, and phi.py hands only ezexe's own
+           messages here. The topic is a short phrase of at most TOPIC_CHARS, never a run of ezexe's message. The
+           same request on another day is a new row.
   holder   the session the puppeteer sends a request to with SendMessage, read at the send by phi.h_go_guard, or an
            orchestrator newly under its control: the open row whose topic their own words share, else, for a send to
            a controlled session or a start, the row the turn works on.
@@ -16,7 +17,9 @@ page, rewritten when it changes, and a short line naming it is handed beside eac
            message. A held row is routed or started, working while the holder is inside a turn, reported once the
            holder ended a turn since it took the request, and done for good once one of those turns was shown done;
            closed for good once the holder left the address book, archived or no longer live, with no such turn.
-  waits    the last line of that turn, until ezexe's next message, which answers the row it names or else the latest.
+  waits    the last line of that turn, until a message of ezexe's answers it: one that names the row by its id or by
+           SHARED words of its topic, a quick one of fewer than QUICK_WORDS content words, or any other that opens no
+           row of its own, each of the last two answering the latest.
 
 controls.PHI is phi.py, set when phi.py is imported; every function here is called from phi.py.
 """
@@ -39,10 +42,12 @@ SHOWN = 6                        # rows named in the line beside a message; the 
 SHARED = 2                       # content words a send's or a start's text shares with a row's topic, to hold it
 KEEP_S = 24 * 3600               # a finished row stays on the page this long
 COMPACT = 400                    # rows asks.jsonl grows by between two compactions
-ASKS = re.compile(r"\b(?:publish|push|merg|releas|deploy|archiv|start|run|send|install)\w*\b", re.I)
+ASKS = re.compile(r"\b(?:publish|push|merg|releas|deploy|archiv|start|run|send|install|sync|land|ship)\w*\b", re.I)
 QUESTION = re.compile(r"\?\s*$")
-ASKING = re.compile(r"^\W*(?:where|what|when|why|how|who|which|whether|is|are|was|were|has|have|had|does|do|did|can|"
-                    r"could|should|would|will)\b", re.I)
+# a question of where things stand; "can you" or "would you" asks for work in a question's form, and "do" or "have"
+# opens a request as often as a question
+STATUS = re.compile(r"^\W*(?:where|what|when|why|how|who|which|whether|is|are|was|were|has|had|does|did)\b",
+                    re.I)
 ROW_ID = re.compile(r"\bask-(\d+)\b")
 FINISHED = ("done", "closed", "answered", "carried")
 
@@ -64,7 +69,9 @@ def _now():
 
 
 def _key(text):
-    return hashlib.sha1(" ".join(str(text or "").split()).encode("utf-8")).hexdigest()[:12]
+    """A request's key: its words and its day, so the same request on a later day opens a row of its own."""
+    said = time.strftime("%Y-%m-%d") + " " + " ".join(str(text or "").split())
+    return hashlib.sha1(said.encode("utf-8")).hexdigest()[:12]
 
 
 def _add(home, sid, row):
@@ -131,20 +138,15 @@ def words(text):
 
 
 def quick(text):
+    """True for a message of fewer content words than a quick thing has, such as "yes, push it"."""
     return len(words(text)) < _phi().puppeteer.QUICK_WORDS
 
 
-def question(text):
-    """True for a message that asks where things stand rather than for work."""
-    first = " ".join(str(text or "").split())
-    return bool(QUESTION.search(first) or ASKING.match(first))
-
-
 def request(text):
-    """True when a message of ezexe's asks for work: a change, or an act such as a publish, a push or a start, in more
-    than a quick thing's words, and not a question."""
+    """True when a message of ezexe's asks for work: any message with a work word, a change or an act such as a
+    publish, a push or a start, that is not a status question such as "where does it stand" or "did it land"."""
     text = str(text or "")
-    if quick(text) or question(text):
+    if STATUS.match(" ".join(text.split())):
         return False
     return issues.writing(text) or bool(ASKS.search(issues.PATH_WORDS.sub(" ", text)))
 
@@ -195,8 +197,10 @@ def on_message(home, s, req, last_turn=None):
     orchestrator newly under its control holds the row its title and task share words with, else the row that
     message worked on; that row, still with no holder and no wait, waits on ezexe when a turn since ended on a
     question, is answered when a turn ended without one, and is carried when none ended. Then this message, `req`,
-    ezexe's own, '' for any other: it answers the row that waits, the one it names or else the latest, and a request
-    opens a row. Returns the row this turn works on, '' for none."""
+    ezexe's own, '' for any other: one that names a waiting row, by its id or its topic's words, answers that row;
+    while a row waits, a quick one answers the latest; else a request opens a row of its own, so a request is
+    never taken for an answer, and any other message answers the latest row that waits. Returns the row this turn
+    works on, '' for none."""
     sid = s["sessionId"]
     state = relay._read_json(_state_path(home, sid))
     now = state.get("now") or ""
@@ -228,16 +232,18 @@ def on_message(home, s, req, last_turn=None):
     now = ""
     if req:
         waiting = [r for r in have if r["waits"]]
-        hit = None
-        if waiting:
-            named = ROW_ID.search(req)
-            hit = next((r for r in waiting if named and r["id"] == f"ask-{named.group(1)}"), None) \
-                or next((r for r in reversed(waiting) if len(words(req) & words(r["topic"])) >= SHARED), None) \
-                or waiting[-1]
-        elif request(req) and not any(r["said"] == _key(req) for r in have):
-            now = f"ask-{len(have) + 1}"
-            _add(home, sid, {"kind": "opened", "id": now, "topic": topic_of(req), "said": _key(req),
-                             "turnBefore": turn})
+        named = ROW_ID.search(req)
+        hit = next((r for r in waiting if named and r["id"] == f"ask-{named.group(1)}"), None) or next(
+            (r for r in reversed(waiting) if len(words(req) & words(r["topic"])) >= SHARED), None)
+        if not hit and waiting and quick(req):
+            hit = waiting[-1]                      # "yes, push it": the answer to the latest question
+        if not hit and request(req):
+            if not any(r["said"] == _key(req) for r in have):
+                now = f"ask-{len(have) + 1}"
+                _add(home, sid, {"kind": "opened", "id": now, "topic": topic_of(req), "said": _key(req),
+                                 "turnBefore": turn})
+        elif waiting:
+            hit = hit or waiting[-1]
         if hit:                                    # ezexe's answer: the row works on again from this message
             _add(home, sid, {"kind": "waits", "id": hit["id"], "waits": ""})
             _add(home, sid, {"kind": "opened", "id": hit["id"], "topic": hit["topic"], "said": hit["said"],
