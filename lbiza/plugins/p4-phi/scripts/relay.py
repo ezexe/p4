@@ -101,7 +101,19 @@ def _write_raw(path, d):
     tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"     # one writer's temp file never another's
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(d, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
-    os.replace(tmp, path)
+    end = time.time() + REPLACE_WAIT_S
+    while True:
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:                   # Windows, while a reader that takes no lock has `path` open
+            if time.time() > end:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+                raise
+            time.sleep(0.01)
 
 
 def _rows(path):
@@ -1631,6 +1643,8 @@ class locked:
 
 LOCK_WAIT_S = 3.0
 LOCK_STALE_S = 10.0
+REPLACE_WAIT_S = LOCK_WAIT_S / 3   # a write waits out a reader for well under the lock's wait, so a writer
+                                   # waiting on the lock it holds meanwhile never gives up for it
 
 
 def _pend_archive(home, parent, sid, s, kind):
@@ -1638,18 +1652,24 @@ def _pend_archive(home, parent, sid, s, kind):
     lock, since two children counted as archived in the same minute would each read-modify-write the parent's
     session.json, and the later write would drop the earlier child."""
     ppath = os.path.join(_dir(home, parent), "session.json")
+
+    def later():                                  # kept on a file of its own, which drain_archive reads later
+        _write_json(os.path.join(_dir(home, parent), f"archive-pending-{_safe(sid)}.json"),
+                    {"id": sid, "title": _title(s), "kind": kind})
     with locked(ppath) as lk:
         pd = _read_json(ppath) if lk.held else {}
         if not pd:                                # never written unlocked, and a record that reads empty, as while
-            _write_json(os.path.join(_dir(home, parent), f"archive-pending-{_safe(sid)}.json"),   # another writer's
-                        {"id": sid, "title": _title(s), "kind": kind})   # os.replace runs on Windows, drops no child:
-            return                                # kept on a file of its own, read later
-        if pd:
-            pend = pd.setdefault("staleChildren", [])
-            pend[:] = [x for x in pend if not (isinstance(x, dict) and x.get("id") == sid)]
-            pend.append({"id": sid, "title": _title(s), "kind": kind})
-            pd["staleTold"] = [x for x in pd.get("staleTold") or [] if x != sid]
+            later()                               # another writer's os.replace runs on Windows, drops no child
+            return
+        pend = pd.setdefault("staleChildren", [])
+        pend[:] = [x for x in pend if not (isinstance(x, dict) and x.get("id") == sid)]
+        pend.append({"id": sid, "title": _title(s), "kind": kind})
+        pd["staleTold"] = [x for x in pd.get("staleTold") or [] if x != sid]
+        try:
             _write_json(ppath, pd)
+        except OSError:                           # the child is already marked retired, so no later run puts it
+            later()                               # on the parent: it goes where the next run reads it
+            return
     ready_page(home)
 
 

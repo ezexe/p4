@@ -1232,16 +1232,78 @@ class TopOrchestrates(unittest.TestCase):
         import threading
         home = self.t.p4
         ids = [f"local_race{k:04d}" for k in range(8)]
-        threads = [threading.Thread(target=relay._pend_archive, args=(home, TOP, i, {"title": i}, "done"))
-                   for i in ids]
+        raised = []
+
+        def archive(i):
+            try:
+                relay._pend_archive(home, TOP, i, {"title": i}, "done")
+            except Exception as e:                # a child lost to a write that raised, named in the failure
+                raised.append(f"{i}: {e!r}")
+        threads = [threading.Thread(target=archive, args=(i,)) for i in ids]
         for th in threads:
             th.start()
         for th in threads:
             th.join()
+        self.assertEqual(raised, [])
         pend = relay._session(home, TOP).get("staleChildren") or []
         later = [x["id"] for x in relay.drain_archive(home, TOP)]   # a record read empty mid-replace keeps a file
         self.assertEqual(sorted([x["id"] for x in pend] + later), ids)
         self.assertFalse(os.path.exists(os.path.join(relay._dir(home, TOP), "session.json.lock")))
+
+    def test_a_write_of_a_record_another_reader_holds_open_waits_for_it(self):
+        """Every finished child's ready_page reads each session.json with no lock, and on Windows os.replace onto a
+        file a reader holds open raises PermissionError, which lost that child in the test above about once in
+        four loaded suite runs. The write waits for the reader instead."""
+        import threading
+        path = os.path.join(relay._dir(self.t.p4, TOP), "session.json")
+        before = relay._read_json(path)
+        f = open(path, encoding="utf-8")          # a reader, as relay._read_json in ready_page is
+        threading.Timer(0.3, f.close).start()
+        relay._write_json(path, {**before, "staleTold": ["local_held0001"]})
+        f.close()
+        self.assertEqual(relay._read_json(path).get("staleTold"), ["local_held0001"])
+        self.assertEqual([x for x in os.listdir(os.path.dirname(path)) if x.endswith(".tmp")], [], "no temp file left")
+
+    @unittest.skipUnless(os.name == "nt", "only Windows refuses a replace onto a file a reader holds open")
+    def test_a_reader_that_never_lets_go_fails_the_write_well_inside_the_lock_wait(self):
+        """A write that cannot replace the record gives up after REPLACE_WAIT_S, a third of LOCK_WAIT_S, so another
+        writer waiting on the lock it holds meanwhile takes the lock rather than giving up and writing unlocked."""
+        path = os.path.join(relay._dir(self.t.p4, TOP), "session.json")
+        before = relay._read_json(path)
+        with open(path, encoding="utf-8"):        # a reader that holds the record open throughout
+            t0 = time.time()
+            with self.assertRaises(PermissionError):
+                relay._write_json(path, {**before, "staleTold": ["local_held0002"]})
+            took = time.time() - t0
+        self.assertLess(relay.REPLACE_WAIT_S, relay.LOCK_WAIT_S / 2)
+        self.assertGreaterEqual(took, relay.REPLACE_WAIT_S * 0.9)
+        self.assertLess(took, relay.LOCK_WAIT_S * 0.6, "given up well before a writer waiting on the lock gives up")
+        self.assertFalse(os.path.exists(path + ".lock"))
+        self.assertEqual([x for x in os.listdir(os.path.dirname(path)) if x.endswith(".tmp")], [], "no temp file left")
+
+    def test_a_retired_child_whose_parent_write_fails_is_kept_for_the_parents_next_message(self):
+        """relay.retire_done marks the child doneRetired before it puts it on the parent, so a parent write that fails
+        for good would leave the parent never told. The child goes to its archive-pending file instead, which the
+        parent's next message drains."""
+        home, C = self.t.p4, self.C
+        self.t.record(C, TOP, title="check 3")
+        self.t.say(C, HANDED_DISPOSABLE)
+        ppath = os.path.join(relay._dir(home, TOP), "session.json")
+        raw = relay._write_raw
+
+        def refused(path, d):
+            if os.path.normcase(path) == os.path.normcase(ppath):
+                raise PermissionError(13, "held open by a reader", path)
+            return raw(path, d)
+        relay._write_raw = refused
+        try:
+            self.assertTrue(relay.retire_done(home, TOP, C, "2026-11-17 19:00"))
+        finally:
+            relay._write_raw = raw
+        self.assertTrue(relay._session(home, C).get("doneRetired"))
+        self.assertFalse(relay.retire_done(home, TOP, C, "2026-11-17 19:01"), "a later run does not count it again")
+        self.assertEqual([x["id"] for x in relay.drain_archive(home, TOP)], [C], "the parent is still told")
+        self.assertFalse(os.path.exists(ppath + ".lock"))
 
     def test_an_archived_childs_note_keeps_the_findings_of_its_final_report(self):
         """An archived child's replaces: note keeps the findings of its final report, even when they stand in the
