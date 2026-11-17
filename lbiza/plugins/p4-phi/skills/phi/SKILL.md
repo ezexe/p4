@@ -11,13 +11,14 @@ p4-phi keeps each session's files in `<project>/.claude/p4/phi/sessions/<session
 
 ## What reaches a session without a command
 
-- At its start: the rules built into p4-phi, whole. The store's feedback and user memories reach it as their lines in the memory index the app loads, and a memory that changes later is handed once at the next message.
+- At its start: the rules built into p4-phi, whole. The store's feedback and user memories reach it as their lines in the memory index the app loads, and a memory that changes later is handed once at the next message, unless it was cut back to a pointer or its body says the plugin carries its rule.
 - Beside its first message, when the sessions linked to it left any: its start background, whose first and last lines say what it holds and how to keep a finding or say the task is done.
 - Beside its next message: the reports of the workers or coworkers it started that finished a turn since.
 - In a subagent it starts: the step the subagent serves and retrieval's lines, added as context at the subagent's start, and before a tool call of the subagent a warning of what changed beside its parent session since its launch, when anything did: a note a sibling session wrote after the launch, or the files it changed, each said once, by what the subagent's own transcript already holds.
 - At the moment each applies: the advice on where each work step of an orchestrator's task list goes; a writing child's issue line, which says its loop; the push line, which goes only to the tree's orchestrator, the one session that lands and pushes, a worker's `Closes #N` commit included, and which names the worker's branch to merge into the default branch first; and the line `done` prints, which says what follows.
 
 A feedback memory whose rule an open issue will build into the plugin is tied to that issue by one line in the memory's own front matter, `issue: owner/name#N`.
+p4-phi writes that line when the `gh issue create` that files the issue carries the memory's `Finding:` line with its `source:`, and whoever files it another way writes the line by hand.
 Once a commit that closes that issue is on the remote default branch, the next Stop whose turn ran a push, pull, fetch or merge cuts the memory back to one pointer line naming the issue and the code that carries its rule, and rewrites the memory's own line in the memory index to match.
 
 The push line has the orchestrator run the full suite once, on the commit being pushed, as one background command, and keep the verdict with `note "suite green at <hash>"`.
@@ -39,6 +40,7 @@ Run each with `python -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/phi.py"`, and pa
 - `disposable` marks this session as one p4-phi counts as archived once it is done.
 - `request "<title>" --brief "<the whole brief>" --to-puppeteer` asks this session's puppeteer for a new orchestrator, and `request --withdraw <request id>` withdraws a pending start request; any other start a session may not make is the app's suggested task card, `mcp__ccd_session__start_session` with `initiation` `own_initiative`, which `mcp__ccd_session__dismiss_task` withdraws.
 - `tree` prints every session that is not archived, with its state, `show [sessionId]` a session's page, and `background` what this session was given.
+- `gaps` lists each feedback memory of the store that still holds a behaviour rule with no landed feature: one tied to no issue, and one whose issue is open.
 - `detach [sessionId]` moves a session to top level in p4-phi's records, and `reparent <sessionId> <under sessionId>` puts it, with every session below it, under another; the app's sidebar follows neither.
 - `controls <sessionId> ...` records the sessions a puppeteer controls, `controls` alone prints each by its full title, `--drop <sessionId>` ends one, `--hand <new sessionId>` hands over to a successor, `--from <old sessionId>` takes over from one, and `--decline <request id> "<why>"` declines a request.
 - `ledger` prints `ledger.md`, which an orchestrator's watcher writes in its session folder from p4-phi's files and the app's records, and `look` is one pass of that watcher, which the plugin's hooks module runs inside Claude Code at a turn's end, at a message's arrival and on its timer, so no session runs it.

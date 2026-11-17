@@ -1193,6 +1193,31 @@ class Rules(unittest.TestCase):
         self.assertIn("Indent with tabs in the exporter", got)
         self.assertNotIn("memories changed", self.live("and now", conf), "nothing repeats")
 
+    def test_a_memory_whose_issue_landed_is_handed_as_a_pointer_not_a_rule(self):
+        """ezexe/p4#226: a memory cut back to a pointer once its issue landed, whose front matter holds `landed:`, and
+        one whose body says the plugin carries its rule, are no rules to hand an open session, while a changed
+        preference still is."""
+        conf = os.path.join(self._tmp.name, "conf")
+        os.makedirs(conf)
+        p4 = self.t.p4
+        memory(p4, "ask-before-push", "feedback", "A session asks ezexe before it pushes a branch of its own.")
+        self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"}, CLAUDE_CONFIG_DIR=conf)
+        self.assertNotIn("memories changed", self.live("Build the exporter", conf))
+        write(os.path.join(p4, "temportal", "memory", "ask-before-push.md"),
+              "---\nname: ask-before-push\ndescription: carried by the plugin since ezexe/demo#7 landed in abc1234\n"
+              "metadata:\n  type: feedback\nissue: ezexe/demo#7\nlanded: abc1234\n---\n\n"
+              "The plugin holds this rule since ezexe/demo#7 landed in abc1234: `scripts/phi.py`.\n")
+        memory(p4, "one-child-a-task", "feedback", "p4-phi carries this now: a session starts one child for each task.")
+        memory(p4, "tabs-not-spaces", "feedback", "Indent with four spaces in the exporter, never tabs.")
+        got = self.live("carry on", conf)
+        changed = got.split("Changed or added:")[1].split("Removed, no longer rules")[0]
+        self.assertIn("four spaces in the exporter", changed, "a changed preference is still handed")
+        self.assertNotIn("ask-before-push", changed, "a pointer is not handed as a rule")
+        self.assertNotIn("one-child-a-task", changed, "a memory the plugin carries is not handed as a rule")
+        self.assertIn("ask-before-push", got.split("Removed, no longer rules")[1], "the pointer leaves the rules")
+        self.assertNotIn("ask-before-push", [n for n, _ in phi.memory_rules(p4, rules_only=True)])
+        self.assertIn("ask-before-push", [n for n, _ in phi.memory_rules(p4)], "its name is still read")
+
     def test_a_line_added_to_the_global_claude_md_is_left_to_the_app(self):
         """memory.md: the app reads CLAUDE.md again after a compaction, so p4-phi hands no line of it."""
         conf = os.path.join(self._tmp.name, "conf")

@@ -213,6 +213,92 @@ def plugin_project(root=None):
     return {"cwd": "", "repo": repo, "store": "", "cloud": True}
 
 
+ISSUE_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/issues/(\d+)\b")
+CREATES = re.compile(r"\bgh(?:\.exe)?\b[^|;&\n]*?\bissue\s+create\b")
+SOURCE = re.compile(r"source:\s*([^;\n\"']+?\.md)\b")
+TIE = "issue: {repo}#N"
+
+
+def tie(store, command, response):
+    """The tie of a behaviour memory to the issue filed for it, ezexe/p4#226. When a `gh issue create` whose text
+    carries a `Finding:` line naming a feedback memory of the store's memory folder as its `source:` answered with
+    the address of the issue it made, that memory's front matter takes the line `issue: owner/name#N`, once: a memory
+    that holds an `issue:` line is left as it is. The publisher makes the call, and p4-phi files nothing itself.
+    Returns each memory tied, as its path and the issue."""
+    command, mem = str(command or ""), memory_dir(store)
+    made = ISSUE_URL.search(str(response or ""))
+    if not mem or not made or not CREATES.search(command):
+        return []
+    slug, n = made.group(1), int(made.group(2))
+    out = []
+    for raw in SOURCE.findall(command):
+        path = relay.norm(raw.strip().replace("\\\\", "/"))
+        if not path.startswith(mem + "/") or memory_of(store, path) is None:
+            continue
+        try:
+            with open(path, encoding="utf-8", newline="") as f:
+                text = f.read()
+        except (OSError, UnicodeDecodeError):
+            continue
+        eol = "\r\n" if "\r\n" in text else "\n"
+        m = re.match(r"\A(---[ \t]*\r?\n)(.*?)(\r?\n---[ \t]*(?:\r?\n|\Z))", text, re.S)
+        if not m or re.search(r"(?mi)^issue:\s*\S", m.group(2)):
+            continue
+        tied = f"{m.group(1)}{m.group(2)}{eol}issue: {slug}#{n}{m.group(3)}{text[m.end():]}"
+        try:
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(tied)
+        except OSError:
+            continue
+        out.append((path, f"{slug}#{n}"))
+    return out
+
+
+def unlanded(store):
+    """Each feedback memory of the store's memory folder that still holds a behaviour rule with no landed feature,
+    ezexe/p4#226: one with no `issue:` line, and one whose issue GitHub shows open or cannot show. A fact, a
+    preference, a memory whose body says the plugin carries it, and one whose issue landed are left out. Returns
+    (name, path, issue, state) for each, the issue '' and the state 'no issue' for one that names none, else the
+    state 'open' or 'unknown'."""
+    import issues
+    mem, out = memory_dir(store), []
+    try:
+        names = sorted(n for n in os.listdir(mem) if n.endswith(".md") and n != "MEMORY.md")
+    except OSError:
+        return out
+    for n in names:
+        path = relay.norm(os.path.join(mem, n))
+        got = memory_of(store, path)
+        if not got or not about_behaviour(got[1]) or carried(got[1]):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                front = FRONT.match(f.read().replace("\r\n", "\n"))
+        except (OSError, UnicodeDecodeError):
+            continue
+        head = front.group(1) if front else ""
+        if issues.LANDED_KEY.search(head):
+            continue                               # cut back at its issue's landing
+        named = issues.TIED.search(head)
+        if not named:
+            out.append((got[0], path, "", "no issue"))
+            continue
+        slug, num = named.group(1), int(named.group(2))
+        state = issues.issue_state(slug, num)
+        if state != "CLOSED":
+            out.append((got[0], path, f"{slug}#{num}", "open" if state == "OPEN" else "unknown"))
+    return out
+
+
+def unlanded_text(store):
+    """What `phi.py gaps` prints: a line for each memory `unlanded` finds, or one line saying none is left."""
+    rows = unlanded(store)
+    if not rows:
+        return "no feedback memory holds a behaviour rule with no landed feature"
+    return "\n".join(f"{name}: " + ("no issue" if not issue else f"{issue}, {state}") + f", {path}"
+                     for name, path, issue, state in rows)
+
+
 def advice(home, store, s, path, root=None, before=""):
     """The line a session gets after writing a plugin-gap memory into its project's store, once per memory content:
     the gap as one `Finding:` line to write into this turn's report, and the session it goes up to, which publishes
@@ -272,7 +358,11 @@ def advice(home, store, s, path, root=None, before=""):
               f"it. This session publishes no issue and starts no session for it.")
     where = (f" Its project on this machine is {proj['cwd']}." if proj.get("cwd") else
              " No checkout of it is known on this machine.")
+    tied = (f" Once the issue is filed, the memory is tied to it by one line in its front matter, "
+            f"`{TIE.format(repo=repo)}`: p4-phi writes that line when the publisher's call that files it carries "
+            f"this `Finding:` line with its `source:`, and whoever files it another way writes the line by hand. "
+            f"The landing that closes the issue then cuts the memory back to a pointer.")
     return (f"phi (p4-phi): the memory `{name}` you just wrote describes session or plugin behaviour, so it patches "
             f"over a gap in the plugin, whose repository is {repo}.{where} Check whether the plugin does this already; "
             f"if not, write the gap into this turn's report as this one line, with its test and files filled in:\n"
-            f"{line}\n{up}")
+            f"{line}\n{up}{tied}")

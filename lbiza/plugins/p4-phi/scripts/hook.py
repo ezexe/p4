@@ -777,6 +777,11 @@ PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "mcp__ccd_turn__wrap_up": "w
               "Edit": "memory-gap", "MultiEdit": "memory-gap", "TaskStop": "task-stop", "KillShell": "task-stop"}
 
 
+# After a shell call: phi.py's tie of a behaviour memory to the issue a `gh issue create` filed for it. It answers
+# nothing, so it runs behind a clean call with the lookup row and beside a failed one, and needs no gate of its own.
+PHI_TIE = {"Bash": "issue-tie", "PowerShell": "issue-tie"}
+
+
 def phi_route(payload, table):
     """phi.py's handlers that `table` names for this tool, run in this process in their order until one answers:
     that answer, or None. A failure in phi.py is swallowed and never touches the lookup hooks. A session registers a
@@ -827,6 +832,7 @@ def h_lookup_phi(payload):
 
 def h_lookup_row(payload):
     """A clean call's lookup row, written in the background by the async entry; nothing printed."""
+    phi_route(payload, PHI_TIE)                    # a `gh issue create` that filed a memory's finding ties it
     import lookups
     p4 = ready(payload)
     if p4:
@@ -840,6 +846,7 @@ def h_lookup_record(payload):
     task under its step; their answer is returned for `update_plan`, `wrap_up`, Write and Edit. Otherwise lookups.py writes the
     call's row, and a failure other sessions already met is told what they did about it."""
     drop_launch(payload)
+    phi_route(payload, PHI_TIE)                    # as h_lookup_row does behind a clean call: one of the two runs
     out = phi_route(payload, PHI_RECORD)
     if out and str(payload.get("tool_name") or "") in ("mcp__ccd_turn__update_plan", "mcp__ccd_turn__wrap_up", "Write", "Edit",
                                                              "MultiEdit"):

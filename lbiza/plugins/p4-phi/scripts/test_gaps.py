@@ -200,6 +200,70 @@ class Hook(unittest.TestCase):
         self.assertIn("\nFinding: the plugin in team/plug",
                       json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"])
 
+    def test_a_behaviour_memory_is_filed_and_carries_its_issue_number(self):
+        """ezexe/p4#226: the gap advice names the tie, and a `gh issue create` that carries the memory's `Finding:`
+        line and answers with the new issue's address ties the memory to that issue, by one `issue:` line in its front
+        matter, once. The publisher makes the call: p4-phi files nothing itself."""
+        self.t.say(TOP, "Build the exporter")
+        path = memory(self.t.p4, "children-on-parent-branch", CHILD_RULE)
+        got = self.wrote(path)
+        self.assertIn("`issue: team/plug#N`", got, "the advice names the tie")
+        finding = [x for x in got.split("\n") if x.startswith("Finding: ")][0]
+        self.assertIn("source: " + relay.norm(path), finding)
+
+        def create(use, number, command=None):
+            r = self.t.hook("issue-tie", TOP, {
+                "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_use_id": use,
+                "tool_input": {"command": command or f"gh issue create -R team/plug --title gap --body '{finding}'"},
+                "tool_response": {"stdout": f"https://github.com/team/plug/issues/{number}\n", "stderr": ""}})
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(context(r), "", "the tie is a write and says nothing")
+            with open(path, encoding="utf-8") as f:
+                return f.read()
+
+        self.assertNotIn("issue:", create("t0", 40, "gh issue list -R team/plug"), "a call that files nothing")
+        self.assertNotIn("issue:", create("t1", 40, "gh issue create -R team/plug --title other --body 'no memory'"),
+                         "an issue filed for something else")
+        text = create("t2", 41)
+        head, _, body = text.partition("\n---\n")
+        self.assertIn("\nissue: team/plug#41", head, "the line sits in the front matter")
+        self.assertIn("type: feedback", head)
+        self.assertIn(CHILD_RULE.split("\n")[0], body, "the rule itself is left as it was")
+        self.assertEqual(create("t3", 42), text, "a memory that holds an issue line is left as it is")
+        self.assertEqual(gaps.unlanded(self.t.p4)[0][2], "team/plug#41", "and the check reads the tie")
+
+    def test_the_memory_check_lists_each_behaviour_memory_with_no_landed_feature(self):
+        """ezexe/p4#226: one command lists every feedback memory that still holds a behaviour rule with no landed
+        feature: one with no issue, and one whose issue is open. A fact, a preference, a memory whose body says the
+        plugin carries it, and one cut back at its issue's landing are left out."""
+        from unittest import mock
+        import issues
+        p4 = self.t.p4
+        memory(p4, "the-store-lives-here", "The store of this project lives on the second disk.", kind="project")
+        memory(p4, "four-spaces", STYLE_RULE)
+        memory(p4, "carried-rule", "p4-phi carries this now: a session starts one child for each task and reports.")
+        landed = memory(p4, "landed-rule", "The plugin holds this rule since team/plug#7 landed: `scripts/phi.py`.")
+        with open(landed, encoding="utf-8") as f:
+            text = f.read()
+        write(landed, text.replace("\n---\n", "\nissue: team/plug#7\nlanded: abc1234\n---\n", 1))
+        tied = memory(p4, "open-rule", CHILD_RULE)
+        with open(tied, encoding="utf-8") as f:
+            text = f.read()
+        write(tied, text.replace("\n---\n", "\nissue: team/plug#9\n---\n", 1))
+        memory(p4, "untied-rule", "A worker session reports to its parent session before it archives itself.")
+        with mock.patch.object(issues, "issue_state", lambda slug, n: {7: "CLOSED", 9: "OPEN"}.get(n, "")):
+            rows = gaps.unlanded(p4)
+            text = gaps.unlanded_text(p4)
+        self.assertEqual([(name, issue, state) for name, _, issue, state in rows],
+                         [("open-rule", "team/plug#9", "open"), ("untied-rule", "", "no issue")])
+        self.assertIn("open-rule: team/plug#9, open, ", text)
+        self.assertIn("untied-rule: no issue, ", text)
+        r = self.t.cli(TOP, "gaps")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("untied-rule: no issue, ", r.stdout, "the command prints the same list")
+        self.assertNotIn("carried-rule", r.stdout)
+        self.assertNotIn("landed-rule", r.stdout)
+
     def test_a_turn_ezexe_did_not_begin_gets_the_same_finding_line_and_no_card_or_request(self):
         """A turn ezexe did not begin writes the gap into its report too: no card, and no start request kept in this
         store or in the plugin's."""

@@ -1459,9 +1459,11 @@ INDEX_LINK = re.compile(r"\]\(([^)]+\.md)\)")
 WHY = re.compile(r"\A\s*\*\*Why")
 
 
-def memory_rules(home):
+def memory_rules(home, rules_only=False):
     """The store's feedback and user memories in <home>/temportal/memory, each as its name and body, in the order
-    MEMORY.md lists them, then the ones it does not list."""
+    MEMORY.md lists them, then the ones it does not list. With `rules_only`, a memory that holds no rule of its own
+    is left out: one cut back to a pointer once its issue landed, whose front matter holds `landed:`, and one whose
+    body says the plugin carries its rule, ezexe/p4#226."""
     mem = p4conf.sub(home, "memory")
     try:
         files = sorted(f for f in os.listdir(mem) if f.endswith(".md") and f != "MEMORY.md")
@@ -1482,6 +1484,10 @@ def memory_rules(home):
         kind = re.search(r"(?m)^\s*type:\s*(\w+)", m.group(1)) if m else None
         if not kind or kind.group(1) not in ("feedback", "user"):
             continue
+        if rules_only:
+            import gaps
+            if issues.LANDED_KEY.search(m.group(1)) or gaps.carried(m.group(2)):
+                continue                           # the plugin carries the rule: a pointer, not a rule to hand
         name = re.search(r"(?m)^name:\s*(.+)$", m.group(1))
         out.append((name.group(1).strip() if name else f[:-3], m.group(2).strip()))
     return out
@@ -1549,8 +1555,8 @@ def live_rules(s, store):
     when nothing changed or nothing was seen before. Records what is on disk now in `s`."""
     if not RULES:
         return ""
-    new = [f"memory {name}\t{name}: {rule_of(body)}"
-           for name, body in (memory_rules(store) if store else [])][:LIVE_RULES_LINES]
+    new = [f"memory {name}\t{name}: {rule_of(body)}"       # a pointer and a carried rule are no rules to hand
+           for name, body in (memory_rules(store, rules_only=True) if store else [])][:LIVE_RULES_LINES]
     key = hashlib.sha1("\n".join(new).encode("utf-8", "replace")).hexdigest()[:16]
     seen = s.get("rulesSeen") if isinstance(s.get("rulesSeen"), dict) else {}
     s["rulesSeen"] = {"hash": key, "lines": new}
@@ -1895,6 +1901,22 @@ def h_memory_gap(payload):
                        before=gaps.before_write(path, inp, payload.get("tool_response")))   # what the file held
     RAN["memory_gap"] = bool(text)
     return text or None
+
+
+def h_issue_tie(payload):
+    """PostToolUse on Bash and PowerShell: a `gh issue create` that carried a behaviour memory's `Finding:` line and
+    answered with the new issue's address ties that memory to the issue, by one `issue:` line in its front matter,
+    ezexe/p4#226. It says nothing: the tie is a write, and the publisher that made the call is told nothing more."""
+    me = Me(payload)
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    cmd = str(inp.get("command") or "")
+    if not me.store or "issue" not in cmd or "create" not in cmd:
+        return None
+    import gaps
+    resp = payload.get("tool_response")
+    tied = gaps.tie(me.store, cmd, resp if isinstance(resp, str) else json.dumps(resp or ""))
+    RAN["issue_tied"] = len(tied)
+    return None
 
 
 def h_self_archive(payload):
@@ -3036,6 +3058,7 @@ HOOKS["restart-check"] = ROUTED["restart-check"] = ("PreToolUse", h_restart_chec
 ROUTED.update({"agent-launch": ("PreToolUse", h_agent_launch), "agent-start": ("SubagentStart", h_agent_start),
                "agent-pre": ("PreToolUse", h_agent_call), "agent-stop": ("SubagentStop", h_agent_stop)})
 HOOKS["issue-guard"] = ROUTED["issue-guard"] = ("PreToolUse", h_issue_guard)
+HOOKS["issue-tie"] = ROUTED["issue-tie"] = ("PostToolUse", h_issue_tie)
 
 
 def hook_main(name):
@@ -3171,7 +3194,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="phi.py: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
-                 "request", "proof", "controls"):
+                 "request", "proof", "controls", "gaps"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in, this session's when left out")
         p.add_argument("--session", default="", help="the sessionId, this session's when left out")
@@ -3230,6 +3253,10 @@ def main(argv=None):
             return puppeteer.command(a, me)
         if a.cmd == "tree":
             print(tree_text(me.home) or "no sessions yet")
+            return 0
+        if a.cmd == "gaps":                        # the behaviour memories no landed feature carries yet
+            import gaps
+            print(gaps.unlanded_text(me.store or me.home))
             return 0
         if a.cmd == "detach":
             if not a.moved and not me.id:
