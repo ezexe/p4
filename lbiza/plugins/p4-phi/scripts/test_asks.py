@@ -89,6 +89,9 @@ class Trees(unittest.TestCase):
             t.stop(k, task, report="Started on it.", uuid="s0")
         t.say(PUP, "Control the exporter and the importer trees")
         self.assertEqual(t.cli(PUP, "controls", TOP, TOP3).returncode, 0)
+        for path in (asks.log_path(t.p4, PUP), os.path.join(t.dir(PUP), "asks.json")):
+            if os.path.exists(path):                # "Control the trees" is ezexe's first request: each test starts
+                os.remove(path)                     # with an empty ledger
 
     def send(self, host, to, message):
         """The PreToolUse of a SendMessage, through `recall-hook.sh lookup-check` as hooks.json runs it."""
@@ -469,18 +472,17 @@ class LedgerWaits(Trees):
         t = self.t
         t.say(PUP, ASK3)
         t.stop(PUP, ASK3, report="The notes are ready. " + WAIT, uuid="v1")
-        t.say(PUP, "Ok, now start a session for the billing dashboard with charts of each customer's invoices")
-        got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
-        self.assertEqual(sorted(got), ["ask-1", "ask-2"], "a request after a reply's first word opens its row")
-        self.assertNotEqual(got["ask-1"]["waits"], "", "and answers nothing")
-        for k, said in enumerate(("Go through the logs and sync the stores", "Don't forget to sync the stores")):
+        for k, said in enumerate(("Go through the logs and sync the stores", "Don't forget to sync the stores",
+                                  "Restart the importer worker",
+                                  "Please investigate why the importer's flush fails",
+                                  "thanks")):
             t.say(PUP, said)
             got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
-            self.assertEqual(len(got), 3 + k, f"{said}: a request whose verb is a reply word opens its row")
+            self.assertEqual(len(got), 2 + k, f"{said}: no reply word stands alone at its start, so it opens a row")
             self.assertNotEqual(got["ask-1"]["waits"], "", f"{said}: and answers nothing")
-        t.say(PUP, "Yes, and sync the importer's stores too")
+        t.say(PUP, "Ok, now start a session for the billing dashboard with charts of each customer's invoices")
         got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
-        self.assertEqual(len(got), 5, "a short request beside a whole reply word opens its row")
+        self.assertEqual(len(got), 7, "a request after a reply word opens its row")
         self.assertEqual(got["ask-1"]["waits"], "", "and the reply answers the wait as well")
 
     def test_a_wrap_up_question_waits_whatever_its_buttons(self):
@@ -532,6 +534,7 @@ class LedgerWaits(Trees):
         t.say(PUP, "ask-1: yes")
         got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
         self.assertNotEqual(got["ask-2"]["waits"], "", "ask-1 waits on nothing, so no other row is answered")
+        self.assertEqual(len(got), 2, "an id with a reply alone opens no row")
 
     def test_an_old_minute_only_row_leaves_the_page_and_takes_no_holder(self):
         t = self.t

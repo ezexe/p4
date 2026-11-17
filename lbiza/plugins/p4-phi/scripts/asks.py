@@ -5,35 +5,33 @@ request's topic, the session that holds it by full title and id, its state and w
 appended to <puppeteer folder>/asks.jsonl, folded by id and compacted in steps as the file grows; asks.md is the
 page, rewritten when it changes, and a short line naming it is handed beside each of the puppeteer's messages.
 
-  opened   a message of ezexe's that holds a request opens a row, whatever its length and also while another row
-           waits on ezexe: a work word or an opening read ask such as "investigate" or "check", outside a status
-           question, past a reply's first words and a row's id. A
-           message the app marks as another session's opens none, and phi.py hands only ezexe's own messages here.
-           The topic is a short phrase of at most TOPIC_CHARS, never a run of ezexe's message. The same words again
-           join their row while it is live, and open a new row once it is finished or on another day.
+  opened   every message of ezexe's opens a row, whatever its words and also while another row waits on ezexe, unless it
+           is a status question about existing work or a reply with nothing after it; no list of verbs decides it. Past
+           a reply word or a row's id, what follows opens a row when it asks for more than the answer: SHARED words of
+           its own on another topic than the row's. A message the app marks as another session's opens none, and phi.py
+           hands only ezexe's own messages here. The topic is a short phrase of at most TOPIC_CHARS, never a run of
+           ezexe's message. The same words again join their row while it is live, and open a new row once it is finished
+           or on another day.
   holder   the session the puppeteer sends a request to with SendMessage, read at the send by phi.h_go_guard, or an
-           orchestrator newly under its control: the open row whose topic their own words share, else, for a send to
-           a controlled session or a start, the row the turn works on. Its turns are counted in its own store, found
-           from the app's record when it is not a controlled session; when no store is found, only its turns ended
-           after the row took it count, read by their exact times.
-  state    open until the row's next message reads the turn on it: it waits on ezexe when that turn ended on a
-           question or asked ezexe one with mcp__ccd_turn__wrap_up, whatever its buttons, and is answered when the
-           turn ended without either. It is carried when ezexe's next message comes before any turn ended; another
-           session's message, which can come inside the turn, carries nothing. A held row is routed or started, working while the holder
-           is inside a turn, reported once the holder ended a turn since it took the request, and done for good once
-           one of those turns was shown done. A holder the address book leaves out is read from its own store. It is
-           closed for good once the holder is archived or no longer live with no such turn. A held row whose holder
+           orchestrator newly under its control: the open row whose topic their own words share, else, for a send to a
+           controlled session or a start, the row the turn works on. Its turns are counted in its own store, found from
+           the app's record when it is not a controlled session; when no store is found, only its turns ended after the
+           row took it count, read by their exact times.
+  state    open until the row's next message reads the turn on it: it waits on ezexe when that turn ended on a question
+           or asked ezexe one with mcp__ccd_turn__wrap_up, whatever its buttons, and is answered when the turn ended
+           without either. It is carried when ezexe's next message comes before any turn ended; another session's
+           message, which can come inside the turn, carries nothing. A held row is routed or started, working while the
+           holder is inside a turn, reported once the holder ended a turn since it took the request, and done for good
+           once one of those turns was shown done. A holder the address book leaves out is read from its own store. It
+           is closed for good once the holder is archived or no longer live with no such turn. A held row whose holder
            ended no turn on it for KEEP_S ends as it stands, reported once it reported, else carried, read before
            working, since an interrupted turn runs no Stop hook. A row shows a finished state only with its end kept,
            and a finished row, or one that waits on ezexe, never takes a holder: only ezexe's answer ends a wait.
-  waits    the last line of that turn, or the question it asked with its reply buttons' whole labels, until a
-           message of ezexe's answers it: a button's label, the row's id, a reply that opens with a whole reply word
-           followed by a stop, such as "yes, push it" or "go ahead.", or any other that holds no request, no read ask
-           and is no question. A row's id answers that row or nothing. A reply answers the waiting row whose topic
-           it shares SHARED words with, else the latest. What follows a reply's first words or a row's id, when it asks for
-           work on another topic in SHARED words of its own, opens a row of its own; a reply then answers the wait as
-           well only when that request is a quick thing's words, and a row's id always does. A question of ezexe's
-           leaves the wait.
+  waits    the last line of that turn, or the question it asked with its reply buttons' whole labels, until ezexe's
+           recognized reply to it, and nothing else, answers it: a button's label the row offered, the row's id, which
+           answers that row or nothing, or a reply word or phrase standing alone at the message's start, followed by a
+           stop, such as "yes, push it" or "go ahead.", which answers the waiting row whose topic it shares SHARED words
+           with, else the latest.
 
 controls.PHI is phi.py, set when phi.py is imported; every function here is called from phi.py.
 """
@@ -46,7 +44,6 @@ import time
 
 import book
 import controls
-import issues
 import relay
 
 LOG = "asks.jsonl"
@@ -56,12 +53,14 @@ SHOWN = 6                        # rows named in the line beside a message; the 
 SHARED = 2                       # content words a send's or a start's text shares with a row's topic, to hold it
 KEEP_S = 24 * 3600               # a finished row stays on the page this long
 COMPACT = 400                    # rows asks.jsonl grows by between two compactions
-ASKS = re.compile(r"\b(?:publish|push|merg|releas|deploy|archiv|start|run|send|install|sync|land|ship)\w*\b", re.I)
 QUESTION = re.compile(r"\?\s*$")
-# a question of where things stand; "can you" or "would you" asks for work in a question's form, and "do" or "have"
-# opens a request as often as a question
-STATUS = re.compile(r"^\W*(?:where|what|when|why|how|who|which|whether|is|are|was|were|has|had|does|did)\b",
-                    re.I)
+# a question of where existing work stands: one opening with a question word, or an ask for an account of it; "do"
+# and "have" open a request as often as a question
+STATUS = re.compile(r"^\W*(?:where|what|when|why|how|who|which|whether|is|are|was|were|has|had|does|did)\b|"
+                    r"^\W*(?:give|tell|show|update) me\b.{0,40}\b(?:account|status|update|summary|progress|"
+                    r"where\b.*\bstands?)\b", re.I)
+# a question in a request's form: "can you add the retry?" asks for work
+ASKS_WORK = re.compile(r"^\W*(?:can|could|would|will) you\b|^\W*please\b", re.I)
 ROW_ID = re.compile(r"\bask-(\d+)\b")
 # a reply to the question a row waits on: a whole reply word or phrase that opens the message and is followed by a
 # stop or the message's end, as "yes, push it" or "go ahead."; "go through the logs" or "don't forget the sync"
@@ -157,11 +156,6 @@ def words(text):
     return _phi().puppeteer.words(text)
 
 
-def quick(text):
-    """True for a message of fewer content words than a quick thing has, such as "push it"."""
-    return len(words(text)) < _phi().puppeteer.QUICK_WORDS
-
-
 def _label(text):
     return " ".join(re.sub(r"[^\w\s']", " ", str(text or "").lower()).split())
 
@@ -173,23 +167,18 @@ def _rest(text):
     return (rest[m.end():] if m else rest).strip(" \t\n,.;:!-")
 
 
-def asking(text):
-    """True for a question of ezexe's that is no request: one that opens with a question word, as "where does it
-    stand", or ends on a question mark."""
+def status(text):
+    """True for a question of ezexe's about existing work: one that opens with a question word, as "where does it
+    stand", asks for an account of where things stand, or ends on a question mark without asking for work, as "and
+    now?" does and "can you add the retry?" does not."""
     first = " ".join(str(text or "").split())
-    return bool(STATUS.match(first) or QUESTION.search(first))
+    return bool(STATUS.match(first) or QUESTION.search(first) and not ASKS_WORK.match(first))
 
 
-def request(text):
-    """True when a message of ezexe's asks for work: any message with a work word, a change or an act such as a
-    publish, a push or a start, or one that opens with a read ask such as "investigate", "check" or "explain",
-    that is not a status question such as "where does it stand" or "did it land"."""
-    text = str(text or "")
-    if STATUS.match(" ".join(text.split())):
-        return False
-    words_only = issues.PATH_WORDS.sub(" ", text)
-    return issues.writing(text) or bool(ASKS.search(words_only)) \
-        or bool(issues.READS.match(re.sub(r"^[\s#*>`-]+", "", words_only)))
+def opens(text):
+    """True when a message of ezexe's opens a row: any message that is not empty and not a status question. No list
+    of verbs decides it, so "restart the importer worker" and "please investigate the flush" each open a row."""
+    return bool(str(text or "").strip()) and not status(text)
 
 
 def topic_of(text):
@@ -242,11 +231,10 @@ def on_message(home, s, req, last_turn=None):
     since ended on a question or offered buttons, and is answered when a turn ended without either. When none
     ended, ezexe's message carries it, and another session's message, which can come inside the turn, leaves it to
     work on. Then this message, `req`, ezexe's own, '' for any other: a button's label answers the row that offered
-    it; a row's id answers that row; a reply such as "yes, push it" answers the row whose topic it shares or else
-    the latest. What follows a reply's first words or a row's id, when it is a request of more than a quick thing's
-    words on another topic, opens a row of its own, and a reply that holds one answers nothing. Any other request
-    opens a row, a question leaves every wait in place, and any other message answers the latest row that waits.
-    Returns the row this turn works on, '' for none."""
+    it; a row's id answers that row or nothing; a reply word standing alone at its start answers the row whose
+    topic it shares or else the latest, and what follows such a reply or id opens a row when it asks for more.
+    Every other message opens a row unless it is a status question, and answers no wait. Returns the row this
+    turn works on, '' for none."""
     sid = s["sessionId"]
     state = relay._read_json(_state_path(home, sid))
     now = state.get("now") or ""
@@ -284,22 +272,27 @@ def on_message(home, s, req, last_turn=None):
     have = rows(home, sid)
     now, also = (keep[0], keep[1:]) if keep else ("", [])
     if req:
+        # a wait ends only by ezexe's recognized reply to it: a label the row offered, the row's id, or a reply word
+        # or phrase standing alone at the message's start; every other message of ezexe's opens a row of its own
         waiting = [r for r in have if r["waits"]]
         named = ROW_ID.search(req)
-        pressed = next((r for r in reversed(waiting) if _label(req) in {_label(x) for x in r["offered"]}), None)
-        hit = pressed or next((r for r in waiting if named and r["id"] == f"ask-{named.group(1)}"), None)
+        replied = bool(REPLY.match(ROW_ID.sub(" ", req).lstrip(" \t\n,.;:!-")))
         rest = _rest(req)
-        if not hit and waiting and REPLY.match(req) and not named:
-            hit = next((r for r in reversed(waiting) if len(words(req) & words(r["topic"])) >= SHARED),
-                       None) or waiting[-1]
-        new = ""                                   # a request beside the answer, on another topic than its row's
-        if hit and not pressed and request(rest) and len(words(rest) & words(hit["topic"])) < SHARED \
-                and len(words(rest) - words(hit["topic"]) - words(hit["waits"])) >= SHARED:
-            new = rest                             # "push it" asks nothing new; "sync the stores" does
-            if not named and not quick(rest):      # "ok, now start the billing dashboard": a request, no answer
-                hit = None
-        if hit and new or not hit and request(req):
-            new = new or (rest if named else req)
+        hit = next((r for r in reversed(waiting) if _label(req) in {_label(x) for x in r["offered"]}), None)
+        new = ""
+        if not hit:
+            if named:                              # the row's id answers that row or nothing
+                hit = next((r for r in waiting if r["id"] == f"ask-{named.group(1)}"), None)
+            elif replied and waiting:
+                hit = next((r for r in reversed(waiting) if len(words(req) & words(r["topic"])) >= SHARED),
+                           None) or waiting[-1]
+            if named or replied:                   # past the reply: a request of its own, when it asks for more
+                if opens(rest) and (not hit or len(words(rest) & words(hit["topic"])) < SHARED
+                                    and len(words(rest) - words(hit["topic"]) - words(hit["waits"])) >= SHARED):
+                    new = rest                     # "push it" asks nothing new; "sync the stores" does
+            elif opens(req):
+                new = req
+        if new:
             same = next((r for r in have if r["said"] == _key(new) and _live(r)), None)
             if same:                               # the same words again, while their row is live
                 now = "" if same["holder"] or same["waits"] else same["id"]
@@ -307,9 +300,6 @@ def on_message(home, s, req, last_turn=None):
                 now = f"ask-{len(have) + 1}"
                 _add(home, sid, {"kind": "opened", "id": now, "topic": topic_of(new), "said": _key(new),
                                  "turnBefore": turn})
-        elif not hit and waiting and not asking(req) and not named:   # a row's id answers that row or nothing
-            hit = next((r for r in reversed(waiting) if len(words(req) & words(r["topic"])) >= SHARED),
-                       None) or waiting[-1]
         if hit:                                    # ezexe's answer: the row works on again from this message
             _add(home, sid, {"kind": "waits", "id": hit["id"], "waits": "", "offered": []})
             _add(home, sid, {"kind": "opened", "id": hit["id"], "topic": hit["topic"], "said": hit["said"],
