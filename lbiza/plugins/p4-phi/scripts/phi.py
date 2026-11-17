@@ -2355,7 +2355,8 @@ def pair_parts(me, s, req, changed="", notice=lambda text: text):
     started, now controlled; an orchestrator ezexe started beside them; the controlled sessions' reports by reference; at a
     turn ezexe began, the requests addressed to it and where ezexe's message belongs; the sessions of the controlled
     trees that hold start requests, as links; each start it made on another session's behalf, to detach to top
-    level; a boundary; and its board rewritten. Any other orchestrator gets its puppeteer, once, and
+    level; a boundary; once a controlled tree closed or reported done, the open issues no live session holds, each
+    to route or start; and its board rewritten. Any other orchestrator gets its puppeteer, once, and
     what became of the requests it sent it."""
     out = []
     if not controls.is_puppeteer(s, me.store):
@@ -2404,6 +2405,13 @@ def pair_parts(me, s, req, changed="", notice=lambda text: text):
         if not pieces[0].startswith("phi (p4-phi): a boundary: "):
             pieces[0] = notice(pieces[0])
         out += pieces
+    try:
+        unheld = controls.open_issues_text(me.home, s)
+    except Exception:  # noqa: BLE001  a listing it cannot read never costs the message its other lines
+        unheld = ""
+    if unheld:                                     # a tree closed or reported done: the open issues no session holds
+        RAN["open_issues"] = unheld.count("\n- ")
+        out.append(notice(unheld))
     controls.board(me.home, s)
     return out
 

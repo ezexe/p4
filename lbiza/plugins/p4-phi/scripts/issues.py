@@ -384,14 +384,17 @@ def plan_lines(home, sid):
 
 
 def repos_at(base):
-    """The GitHub repositories at a folder, each as its path and its `owner/name`: the folder's own, else those
-    nested one or two folders under it."""
-    for found in ([relay.repo_of(base)] if base else []), nested_repos(base):
-        out = [(repo, github_of(repo)) for repo in found if repo]
-        out = [(repo, slug) for repo, slug in out if slug]
-        if out:
-            return out
-    return []
+    """The GitHub repositories at a folder, one at a time, each as its path and its `owner/name`: the folder's own,
+    then those nested one or two folders under it. A caller that only needs to know there is one takes the first,
+    which costs one git call where the folder's own repository is on GitHub."""
+    own = relay.repo_of(base) if base else ""
+    slug = github_of(own)
+    if slug:
+        yield own, slug
+    for repo in nested_repos(base):
+        slug = github_of(repo) if repo != own else ""
+        if slug:
+            yield repo, slug
 
 
 def ensure(home, s, text, base, where):
@@ -414,7 +417,7 @@ def ensure(home, s, text, base, where):
     task, text = str(s.get("task") or ""), str(text or "")
     whole = text if task[:200] in text else "\n".join(p for p in (task, text) if p)
     if not writing(whole):                         # a check, an audit, a question: its findings go up all the same
-        if not (repos_named(whole, base) or repos_at(base)):
+        if not (repos_named(whole, base) or next(repos_at(base), None)):
             return ""
         s["findingsTold"] = now()
         return FINDINGS_READS

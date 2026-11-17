@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -31,6 +32,8 @@ import starts  # noqa: E402
 import controls  # noqa: E402
 from test_phi import CLI, KID, KID2, TOP, Tree, context, memory, read, transcript, write  # noqa: E402
 from test_phi import PROMPT, START as SESSION_START  # noqa: E402
+import puppeteer  # noqa: E402  the watcher, whose slow look lists a puppeteer's open issues
+from test_issues import FAKE_GH, GhTree  # noqa: E402  the stand-in for gh, and a tree whose hooks run it
 
 PUP, PUP2, TOP2, TOP3, NEW = ("local_pup00001", "local_pup00002", "local_top00002", "local_top00003",
                               "local_new00001")
@@ -1141,6 +1144,165 @@ class LandedWorker(unittest.TestCase):
         self.git(land, "push", "-q", "origin", "main")
         self.git(work, "fetch", "-q", bare, "main:refs/remotes/origin/main")
         self.assertTrue(issues.landed(work, sha, ["#7"]), "this repository's own #7, named whole")
+
+
+class OpenIssues(unittest.TestCase):
+    """ezexe/p4#231: an open issue of a repository a controlled session works in is the puppeteer's to resolve. The
+    puppeteer's own watcher lists the open issues at its slow looks, one `gh issue list` a repository, and keeps the
+    ones no live session's record holds as `issue`. When a controlled tree closes or a controlled session reports
+    done, the puppeteer is handed one line naming each once, beside the running orchestrator whose topic covers it
+    or as the start of a new orchestrator, and none of them as a choice of ezexe's. No page of the Claude Code docs
+    hands a session a repository's open issues, and the timer the look runs on is the hooks module's:
+    https://code.claude.com/docs/en/plugins/mods/api.md, "Run work in the background"."""
+
+    file = Supervisor.file
+    COVERED = "The narwhal exporter writes its ports table twice"
+    APART = "The lunar calendar widget misreads leap seconds"
+
+    def setUp(self):
+        if not shutil.which("git") or not shutil.which("sh"):
+            self.skipTest("no git or sh")
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        tmp = self._tmp.name
+        self.ghdir = os.path.join(tmp, "gh")
+        os.makedirs(self.ghdir)
+        write(os.path.join(self.ghdir, "gh.py"), FAKE_GH)
+        os.environ["FAKE_GH_DIR"] = self.ghdir
+        self.addCleanup(os.environ.pop, "FAKE_GH_DIR", None)
+        self.t = t = GhTree(tmp, os.path.join(self.ghdir, "gh.py"))
+        t.record(PUP, title="Control the exporter and the importer trees")
+        t.record(TOP, title="Build the narwhal exporter")
+        t.record(TOP2, title="Build the moon importer")
+        t.record(KID, started_by=TOP, title="the flush fix")
+        self.file("puppeteers", PUP)
+        self.work = os.path.join(t.proj, "work").replace("\\", "/")
+        write(os.path.join(self.work, "lib", "x.py"), "x = 1\n")
+        for args in (("init", "-q", "-b", "main"), ("add", "-A"), ("commit", "-qm", "one"),
+                     ("remote", "add", "origin", "https://github.com/ezexe/demo.git")):
+            subprocess.run(["git", "-C", self.work, "-c", "user.name=t", "-c", "user.email=t@t", *args], check=True,
+                           capture_output=True)
+
+    def scene(self, title):
+        """A puppeteer that controls two trees, a live worker of the first that holds ezexe/demo#7 as its issue, and
+        GitHub listing #7 and #8, the second under `title`."""
+        t = self.t
+        t.say(PUP, "Control the trees")
+        t.say(TOP, "Build the narwhal exporter and its ports table")
+        t.say(TOP2, "Build the moon importer")
+        t.cli(PUP, "controls", TOP, TOP2)
+        t.say(KID, f"Fix ezexe/demo issue #7: the off-by-one in {self.work}/lib/x.py, and commit it.")
+        self.assertEqual(t.session(KID)["issue"]["number"], 7, "the worker holds #7 as its issue")
+        write(os.path.join(self.ghdir, "open.json"), json.dumps({"ezexe/demo": [
+            {"number": 7, "title": "The exporter drops the last row"}, {"number": 8, "title": title}]}))
+
+    def look(self, clock=None, **env):
+        """One slow look of the puppeteer's watcher, as the hooks module runs it."""
+        r = inproc.run([sys.executable, "-I", "-X", "utf8", os.path.join(HERE, "phi.py"), "look", "--net"],
+                       capture_output=True, text=True, env=self.t.env(PUP, **{"P4_PHI_WATCH": "1", **env}),
+                       cwd=self.t.proj, timeout=120, clock=clock)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def listings(self):
+        with open(os.path.join(self.ghdir, "calls.jsonl"), encoding="utf-8") as f:
+            return [c for c in (json.loads(x) for x in f) if c[:2] == ["issue", "list"]]
+
+    def kept(self):
+        return json.loads(read(os.path.join(self.t.dir(PUP), "open-issues.json")))["repos"]
+
+    def close(self, host):
+        app = os.path.join(self.t.app, host + ".json")
+        write(app, json.dumps({**json.loads(read(app)), "isArchived": True}))      # ezexe archived it in the app
+
+    def said(self, ctx):
+        """The line that hands the open issues, with the issues it names, '' when the context holds none."""
+        at = ctx.find("open on the repositories the controlled sessions work in")
+        if at < 0:
+            return ""
+        start = ctx.rfind("phi (p4-phi): ", 0, at)
+        return ctx[start:].split("\n\n", 1)[0]
+
+    def test_the_look_lists_each_repository_once_and_keeps_the_issues_no_live_session_holds(self):
+        t = self.t
+        self.scene(self.COVERED)
+        got = self.look()
+        self.assertEqual((got["watching"], got["net"]), (True, True))
+        self.assertEqual(self.kept()["ezexe/demo"]["issues"], [{"number": 8, "title": self.COVERED}],
+                         "#7, which a live worker's record holds, is dropped")
+        self.assertEqual([c[c.index("-R") + 1] for c in self.listings()], ["ezexe/demo"], "one listing a repository")
+        self.look()
+        self.assertEqual(len(self.listings()), 1, "never more often than the slow reads of GitHub")
+        self.look(clock=inproc.Clock(time.time() + puppeteer.ISSUE_TTL_S + 5))
+        self.assertEqual(len(self.listings()), 2, "listed again once that long has passed")
+        self.look(clock=inproc.Clock(time.time() + 3 * puppeteer.ISSUE_TTL_S), P4_PHI_WATCH_NET="0")
+        self.assertEqual(len(self.listings()), 2, "P4_PHI_WATCH_NET=0 keeps the look from GitHub")
+        self.look(clock=inproc.Clock(time.time() + 5 * puppeteer.ISSUE_TTL_S), P4_PHI_ISSUES="0")
+        self.assertEqual(len(self.listings()), 2, "and so does the issue loop's switch")
+        self.assertIn("phi/sessions/*/open-issues.json", relay.IGNORED, "a tracked store keeps the listing out")
+        t.say(TOP, "carry on")
+        r = inproc.run([sys.executable, "-I", "-X", "utf8", os.path.join(HERE, "phi.py"), "look", "--net"],
+                       capture_output=True, text=True, env=t.env(TOP, P4_PHI_WATCH="1"), cwd=t.proj, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(os.path.exists(os.path.join(t.dir(TOP), "open-issues.json")), "only a puppeteer's look lists")
+        self.assertEqual(len(self.listings()), 2)
+
+    def test_a_closed_tree_hands_the_puppeteer_the_unheld_issue_beside_the_orchestrator_that_covers_it(self):
+        t = self.t
+        self.scene(self.COVERED)
+        self.look()
+        self.assertEqual(self.said(context(t.say(PUP, "anything?"))), "", "no tree has closed or reported done")
+        self.close(TOP2)
+        ctx = context(t.say(PUP, "anything now?"))
+        line = self.said(ctx)
+        self.assertIn("a boundary: the tree of \"Build the moon importer\" has closed", ctx)
+        with self.subTest("the issue no session holds is named beside the orchestrator whose topic covers it"):
+            self.assertIn(f"- ezexe/demo#8 \"{self.COVERED}\", https://github.com/ezexe/demo/issues/8: send it to "
+                          f"\"Build the narwhal exporter\" `{TOP}`, whose topic covers it", line)
+            self.assertNotIn("so start a new orchestrator for it", line, "a start only where no topic covers it")
+        with self.subTest("the one a live worker's record holds is not named"):
+            self.assertNotIn("ezexe/demo#7", ctx)
+        with self.subTest("it says to close what a landed commit covers and to route or start the rest"):
+            self.assertIn("close each one a landed commit already covers", line)
+            self.assertIn("Send each other one straight to the orchestrator named beside it", line)
+            self.assertIn("start a new orchestrator for each one that names none", line)
+        with self.subTest("and holds no ask of ezexe for it"):
+            self.assertIn("none of them is a question for ezexe", line)
+            self.assertIsNone(TreeAndClicks.ASKS.search(line), line)
+            for ask in ("AskUserQuestion", "mcp__ccd_turn__wrap_up", "button", "ezexe decides", "ezexe picks"):
+                self.assertNotIn(ask, line)
+        with self.subTest("each is named once"):
+            self.assertEqual(self.said(context(t.say(PUP, "and now?"))), "")
+            t.cli(TOP, "done", "its suite ran green")
+            t.stop(TOP, "Build the narwhal exporter and its ports table", report="Built.")
+            self.assertEqual(self.said(context(t.say(PUP, "a report came in"))), "", "nor at the next report")
+
+    def test_an_issue_no_controlled_topic_covers_is_named_as_the_start_of_a_new_orchestrator(self):
+        t = self.t
+        self.scene(self.APART)
+        self.look()
+        t.cli(TOP2, "done", "its suite ran green")
+        t.stop(TOP2, "Build the moon importer", report="Built.")       # a controlled session reports done
+        line = self.said(context(t.say(PUP, "a report came in")))
+        self.assertIn(f"- ezexe/demo#8 \"{self.APART}\", https://github.com/ezexe/demo/issues/8: no running "
+                      f"orchestrator's topic covers it, so start a new orchestrator for it", line)
+        self.assertNotIn("send it to", line)
+        self.assertNotIn("ezexe/demo#7", line)
+        self.assertIsNone(TreeAndClicks.ASKS.search(line), line)
+
+    def test_with_the_issue_loop_off_no_issue_is_named(self):
+        t = self.t
+        self.scene(self.COVERED)
+        self.look()
+        self.close(TOP2)
+        self.assertEqual(self.said(context(t.say(PUP, "anything now?", P4_PHI_ISSUES="0"))), "", "P4_PHI_ISSUES=0")
+        relay._write_json(os.path.join(t.p4, "p4.json"), {"phi": {"issues": False}})
+        ctx = context(t.say(PUP, "and now?"))
+        self.assertEqual(self.said(ctx), "", "phi.issues false")
+        self.assertNotIn("ezexe/demo#8", ctx)
+        os.remove(os.path.join(t.p4, "p4.json"))
+        self.assertIn("ezexe/demo#8", self.said(context(t.say(PUP, "and with the loop on?"))),
+                      "the closed tree is counted once the loop is on")
 
 
 if __name__ == "__main__":

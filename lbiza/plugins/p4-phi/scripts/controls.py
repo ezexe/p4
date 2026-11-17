@@ -35,6 +35,11 @@ The watcher every orchestrator has is puppeteer.py's and is another thing.
                when one of its hooks fires, so a boundary reached while the puppeteer is idle is told
                beside its next message: a command hook with `asyncRewake` could wake it at once, `SendMessage` with
                `notify_when_idle` could tell it when a controlled session goes idle, and p4-phi uses neither.
+  open issues  an open issue of a repository a controlled session works in is the puppeteer's to resolve. When a
+               controlled tree has closed or a controlled session has reported done, the puppeteer is handed the
+               ones no live session holds, each once, beside the running orchestrator whose topic covers it or as
+               the start of a new orchestrator, and none as a choice of ezexe's. Its own watcher lists them from
+               GitHub at its slow looks, so no hook reads GitHub for the line.
   archiving    the app asks ezexe before every archive call, by the ask rule the settings keeper writes on the
                archive tool, and the tool refuses a session with live background work. p4-phi only names the
                controlled sessions its records hold complete, which no tool of the app tells: no open plan step,
@@ -1267,6 +1272,20 @@ def go_text(home, s, target, message=""):
 def route_down(s, words_):
     """The line that sends ezexe's message to a puppeteer on to the controlled session whose topic covers
     it, and an empty string when no controlled session's topic covers it."""
+    best = covering(s, words_)
+    if not best:
+        return ""
+    sid = best["sessionId"]
+    return (f"phi (p4-phi): this message reads as work on the topic \"{full_title(sid)}\" `{sid}` orchestrates. If so, "
+            f"do not do it here and start no child for it: send that session one message with SendMessage, holding "
+            f"{PHI.RESTATE}, and telling it to brief and start a worker of its own for it. Keep it on the board with `{PHI.commands()} note \"<what was sent "
+            f"and to whom>\" --source \"<the message>\" --kind waiting` until its report comes.")
+
+
+def covering(s, words_):
+    """The running session a puppeteer controls whose topic covers some words, as its row of `controls`, and None
+    when none does: the live one whose full title and task share the most content words with them, SHARE at
+    least."""
     said = plans.words(words_)
     best, score = None, SHARE - 1
     for e in controlled(s):
@@ -1277,10 +1296,74 @@ def route_down(s, words_):
         n = len(said & (plans.words(full_title(e["sessionId"], k)) | plans.words(k.get("task"))))
         if n > score:
             best, score = e, n
-    if not best:
+    return best
+
+
+# --- the open issues no session holds --------------------------------------------------------------------------------
+#
+# An open issue of a repository a controlled session works in is the puppeteer's to resolve and is no choice of
+# ezexe's. The puppeteer's own watcher lists them from GitHub at its slow looks, puppeteer.list_open, and no hook
+# reads GitHub for this: the line below reads the file that look keeps.
+
+OPEN_SHOWN = 12                  # the issues one line names; the rest wait for the next tree that closes or reports done
+OPEN_NAMED = 400                 # the issues a puppeteer was named, remembered so each is named once
+
+
+def open_issues(home, s):
+    """The open issues the puppeteer's watcher last listed that no live session's record holds as `issue`, each as
+    its `owner/name` and its row of number and title, in the order listed."""
+    w = _watcher()
+    repos = relay._read_json(w.open_path(home, s["sessionId"])).get("repos")
+    held = w.held_issues(home, s)
+    return [(slug, x) for slug, row in (repos.items() if isinstance(repos, dict) else [])
+            for x in (row.get("issues") if isinstance(row, dict) else None) or []
+            if isinstance(x, dict) and str(x.get("number") or "").isdigit()
+            and f"{slug.lower()}#{int(x['number'])}" not in held]
+
+
+def open_issues_text(home, s):
+    """The one line a puppeteer is handed when a controlled tree has closed or a controlled session has reported
+    done: the open issues of the repositories its controlled sessions work in that no live session holds, each
+    named once. Beside each stands the running orchestrator whose topic covers it, picked as route_down picks one
+    for ezexe's words, so the puppeteer sends it straight there, or the start of a new orchestrator where none
+    covers it. It tells the puppeteer to close what a landed commit covers and to route or start the rest, and puts
+    none to ezexe. One line names OPEN_SHOWN at most. A tree that closed or a session that reported done while the
+    watcher had listed nothing to name is counted when it has. '' with the issue loop off. The caller saves what
+    was told."""
+    if not issues.on(home):
         return ""
-    sid = best["sessionId"]
-    return (f"phi (p4-phi): this message reads as work on the topic \"{full_title(sid)}\" `{sid}` orchestrates. If so, "
-            f"do not do it here and start no child for it: send that session one message with SendMessage, holding "
-            f"{PHI.RESTATE}, and telling it to brief and start a worker of its own for it. Keep it on the board with `{PHI.commands()} note \"<what was sent "
-            f"and to whom>\" --source \"<the message>\" --kind waiting` until its report comes.")
+    told = s.get("openIssues") if isinstance(s.get("openIssues"), dict) else {}
+    closed, done = [], {}
+    for e in controlled(s):
+        sid, store = e["sessionId"], e.get("store") or ""
+        if PHI.app_record(sid).get("isArchived"):
+            closed.append(sid)
+            continue
+        turns = PHI.load_turns(store, sid) if store else []
+        if turns and turns[-1].get("done"):
+            done[sid] = str(turns[-1].get("time") or "")
+    was = told.get("done") if isinstance(told.get("done"), dict) else {}
+    if not [k for k in closed if k not in (told.get("closed") or [])] \
+            and not [k for k, when in done.items() if was.get(k) != when]:
+        return ""
+    named = [x for x in told.get("named") or [] if isinstance(x, str)]
+    rows = [(slug, x) for slug, x in open_issues(home, s) if f"{slug.lower()}#{int(x['number'])}" not in named]
+    if not rows:
+        return ""
+    more, rows, lines = len(rows) - OPEN_SHOWN, rows[:OPEN_SHOWN], []
+    for slug, x in rows:
+        n, title = int(x["number"]), PHI.clean(x.get("title"))
+        e = covering(s, title)
+        where = (f"send it to \"{full_title(e['sessionId'])}\" `{e['sessionId']}`, whose topic covers it" if e else
+                 "no running orchestrator's topic covers it, so start a new orchestrator for it")
+        lines.append(f"- {slug}#{n} \"{title}\", https://github.com/{slug}/issues/{n}: {where}")
+        named.append(f"{slug.lower()}#{n}")
+    s["openIssues"] = {"closed": closed, "done": done, "named": named[-OPEN_NAMED:]}
+    return (f"phi (p4-phi): this session's watcher last listed {'this issue' if len(rows) == 1 else 'these issues'} "
+            f"as open on the repositories the controlled sessions work in and held by no live session. An open issue "
+            f"there is this puppeteer's to resolve, and none of them is a question for "
+            f"ezexe. Have its standing worker close each one a landed commit already covers. Send each other one "
+            f"straight to the orchestrator named beside it, in one SendMessage holding the issue's link and "
+            f"{PHI.RESTATE}, and start a new orchestrator for each one that names none. Each is named here "
+            f"once" + (f", and {more} more wait for the next tree that closes or reports done" if more > 0 else "")
+            + ":\n" + "\n".join(lines))

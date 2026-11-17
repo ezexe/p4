@@ -9,7 +9,8 @@ import type { EngineInterface, Register, SessionContextUsage, SessionRateLimit, 
 // What find-python.sh runs to prove an interpreter: the interpreter prints its own path.
 const PROOF = "import sys; print(sys.executable.replace(chr(92), '/'))"
 
-// How long a look may run before Claude Code ends it. A slow look reads GitHub once for each issue of the subtree.
+// How long a look may run before Claude Code ends it. A slow look reads GitHub once for each issue of the subtree,
+// and a puppeteer's once more for each repository its controlled sessions work in, to list its open issues.
 const LOOK_MS = 60_000
 const SLOW_LOOK_MS = 300_000
 

@@ -83,6 +83,11 @@ A `Finding:` on a held file or an owned issue goes straight to its holder, named
 A puppeteer is a session nobody started that ezexe filed in the sidebar section "puppeteers", and it controls the orchestrators of other trees.
 Its rule is handed once, beside its first message after p4-phi sees the filing; its board, `board.md` in its session folder, says on its head how it is kept; and the line p4-phi hands at a boundary, a controlled tree that closed or every controlled session idle with no request waiting, says to keep what the board lacks with `note`.
 Claude Code compacts a session by itself, so a boundary carries no compact question and no line for ezexe to type, and after a compaction, typed or automatic, the SessionStart entry hands a puppeteer its board's path first.
+When a controlled tree closes or a controlled session reports done, a puppeteer is handed one line naming the open issues of the repositories its controlled sessions work in that no live session's record holds as its issue, each once.
+Beside each one the line names the running orchestrator whose topic covers it, picked as `route_down` picks one for ezexe's words, so the puppeteer sends it straight there in one message, and one that no running orchestrator covers is named as the start of a new orchestrator.
+The line tells the puppeteer to close what a landed commit covers and to route or start the rest, and none of them is put to ezexe as a choice.
+The puppeteer's own watcher lists those issues at its slow looks, with one `gh issue list` a repository and no more often than it reads GitHub, and keeps them in `open-issues.json` in the puppeteer's folder, so no hook reads GitHub for the line.
+`P4_PHI_WATCH_NET` at `0` keeps the look from listing, and with `phi.issues` false, or `P4_PHI_ISSUES` at `0`, the line names none.
 A controlled session is told once when it comes to have a puppeteer, and once when that ends.
 Each request of ezexe's to a puppeteer is a row of its ledger, `asks.md` beside its board: a short topic, the session that holds it by full title and id, its state, and what waits on ezexe.
 Every message of ezexe's opens a row, whatever its words and also while another row waits on ezexe, unless it is a status question about existing work such as "where does it stand" or "did it land", or a reply with nothing after it.

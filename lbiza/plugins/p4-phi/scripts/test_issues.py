@@ -6,7 +6,8 @@ stand-in for `gh`.
     python3 -I lbiza/plugins/p4-phi/scripts/test_issues.py
 
 The stand-in answers `issue view` from a state file the test writes, as GitHub closes the issue once the `Closes #7`
-commit is pushed; a state of UNREACHABLE makes `issue view` fail, as gh fails when it cannot reach GitHub. It logs
+commit is pushed; a state of UNREACHABLE makes `issue view` fail, as gh fails when it cannot reach GitHub. It answers
+`issue list` from open.json, which holds each repository's open issues as gh prints them. It logs
 every call, so a test sees that no `issue create` is made. The work repository's `origin` reads as GitHub and pushes
 to a bare repository beside it.
 """
@@ -50,6 +51,10 @@ elif args[:2] == ["issue", "view"]:
     print(states.get(args[2], "OPEN"))
 elif args[:2] == ["issue", "comment"]:
     print("https://github.com/ezexe/demo/issues/7#issuecomment-1")
+elif args[:2] == ["issue", "list"]:
+    p = os.path.join(d, "open.json")
+    listed = json.load(open(p, encoding="utf-8")) if os.path.exists(p) else {}
+    print(json.dumps(listed.get(args[args.index("-R") + 1], [])))
 else:
     sys.exit(1)
 '''

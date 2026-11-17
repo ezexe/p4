@@ -15,7 +15,9 @@ start draft, the gate and the watcher, which the functions `prompty`, `prompter`
              starts no session. The watcher is one look at a time over an orchestrator's subtree, which the
              plugin's hooks module runs inside Claude Code at a turn's end, at a message's arrival and on its
              timer: a look writes <session>/ledger.md from p4-phi's records and the app's session records, only
-             when one of them changed, with a reconcile line for each divergence between the two.
+             when one of them changed, with a reconcile line for each divergence between the two. A puppeteer's
+             slow look also lists the open issues of the repositories its controlled sessions work in, and keeps
+             the ones no live session holds in <session>/open-issues.json for the line controls.py hands it.
   recursive  a landed topic registers its route in <session>/routes.jsonl beside the ledger, only when the records
              back what the reports claimed: the issue is closed, a commit that closes it is pushed, and the session
              and its children are archived with their outcome kept. Routing scores a message against the registered
@@ -42,6 +44,7 @@ the folder of the app's session records.
 
 import glob
 import hashlib
+import itertools
 import json
 import os
 import re
@@ -392,6 +395,96 @@ def issue_state(home, slug, n, net=False):
     return got
 
 
+# --- the open issues no session holds --------------------------------------------------------------------------------
+# An open issue of a repository a puppeteer's controlled sessions work in is the puppeteer's to resolve. No page of
+# the Claude Code docs and no tool of the app hands a session a repository's open issues, so a slow look of the
+# puppeteer's own watcher lists them, one `gh issue list` a repository, and keeps the ones no live session holds in
+# its folder's open-issues.json, which controls.open_issues_text reads. No hook reads GitHub for it.
+
+OPEN_FILE = "open-issues.json"
+OPEN_MOST = 100                  # the open issues one listing asks a repository for
+OPEN_REPOS = 12                  # the repositories one puppeteer's looks list
+LIST_S = 20                      # one `gh issue list` of a look, which no hook waits on
+
+
+def open_path(home, sid):
+    return os.path.join(relay._dir(home, sid), OPEN_FILE)
+
+
+def held_issues(home, s):
+    """Each issue a live session's record holds as `issue`, as `owner/name#N` in lower case, over a puppeteer's own
+    store and the stores of the sessions it controls."""
+    c, held = _phi().controls, set()
+    for store in c.stores(home, s):
+        for k in relay._sessions(store).values():
+            iss = k.get("issue") if isinstance(k.get("issue"), dict) else {}
+            if iss.get("repo") and str(iss.get("number") or "").isdigit() and not c.out_of_tree(k):
+                held.add(f"{str(iss['repo']).lower()}#{int(iss['number'])}")
+    return held
+
+
+def controlled_repos(home, s):
+    """The GitHub repositories the sessions a puppeteer controls work in, each as its `owner/name`, OPEN_REPOS at
+    most: the repository of each issue a session of a controlled tree holds, then the repository of each controlled
+    session's folder and those nested one or two folders under it."""
+    held, at = [], []
+    for e in _phi().controls.controlled(s):
+        store = str(e.get("store") or "")
+        if not store:
+            continue
+        every = relay._sessions(store)
+        for _, _, k in subtree(store, e["sessionId"], every):
+            iss = k.get("issue") if isinstance(k.get("issue"), dict) else {}
+            held.append(str(iss.get("repo") or ""))
+        folder = str((every.get(e["sessionId"]) or {}).get("cwd") or "") \
+            or os.path.dirname(os.path.dirname(os.path.abspath(store)))
+        if folder not in at:
+            at.append(folder)
+    out = []
+    for slug in itertools.chain(held, (slug for folder in at for _, slug in issues.repos_at(folder))):
+        if len(out) >= OPEN_REPOS:
+            break                                  # the folders past it are not asked for their repositories
+        if slug and slug.lower() not in [x.lower() for x in out]:
+            out.append(slug)
+    return out
+
+
+def list_open(home, sid):
+    """A puppeteer's slow look at GitHub: the open issues of the repositories its controlled sessions work in, with
+    each one a live session's record holds as `issue` dropped, kept in open-issues.json in the puppeteer's folder.
+    Each repository is listed with one `gh issue list`, and never one listed less than ISSUE_TTL_S ago; one gh
+    could not list keeps what was last listed. A session that is no puppeteer or controls none lists nothing, and
+    nothing is listed with the issue loop off. Returns what the file holds."""
+    c = _phi().controls
+    s = relay._session(home, sid)
+    if not issues.on(home) or not c.controlled(s) or not c.is_puppeteer(s, conf_store(home, sid)):
+        return {}
+    path = open_path(home, sid)
+    kept = relay._read_json(path).get("repos")
+    kept = kept if isinstance(kept, dict) else {}
+    held, at, repos = held_issues(home, s), time.time(), {}
+    for slug in controlled_repos(home, s):
+        row = kept.get(slug) if isinstance(kept.get(slug), dict) else {}
+        last = row.get("at") if isinstance(row.get("at"), (int, float)) else 0
+        if at - last > ISSUE_TTL_S:
+            r = issues.gh(["issue", "list", "-R", slug, "--state", "open", "--limit", str(OPEN_MOST), "--json",
+                           "number,title"], timeout=LIST_S)
+            try:
+                listed = json.loads(r.stdout) if r is not None and r.returncode == 0 else None
+            except ValueError:
+                listed = None
+            if isinstance(listed, list):
+                row = {"at": at, "time": now(),
+                       "issues": [{"number": int(x["number"]), "title": _short(x.get("title"), 200)} for x in listed
+                                  if isinstance(x, dict) and str(x.get("number") or "").isdigit()]}
+        if row:
+            repos[slug] = dict(row, issues=[x for x in row.get("issues") or [] if isinstance(x, dict)
+                                            and f"{slug.lower()}#{x.get('number')}" not in held])
+    if repos != kept:
+        _write_json(path, {"repos": repos})
+    return {"repos": repos}
+
+
 # --- the ledger -------------------------------------------------------------------------------------------------------
 
 SOURCES = ("session.json", "plan.json", "turns.jsonl", "notes.jsonl", "reports.jsonl", "log.jsonl", "routes.jsonl")
@@ -648,7 +741,8 @@ def model(home, top):
 def tick(home, top, net=True, slow=True):
     """One look of the watcher: the readings merged, the closed sessions checked for unfinished work, the ledger,
     and, when the ledger changed or the look is a slow one, the landed topics registered as routes and the registered
-    routes checked. `net` lets the look read GitHub."""
+    routes checked. `net` lets the look read GitHub, and a slow look that reads it lists, for a puppeteer, the open
+    issues no live session holds."""
     try:
         merge_all(home, top)
     except Exception:  # noqa: BLE001
@@ -663,6 +757,11 @@ def tick(home, top, net=True, slow=True):
             if register_routes(home, top, net=net):
                 refresh(home, top)
             check_routes(home, net=net)
+        except Exception:  # noqa: BLE001
+            pass
+    if net and slow:
+        try:
+            list_open(home, top)                    # a puppeteer's open issues, as often as its slow reads of GitHub
         except Exception:  # noqa: BLE001
             pass
     return changed
