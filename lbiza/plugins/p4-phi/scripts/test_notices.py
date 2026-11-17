@@ -50,7 +50,23 @@ class Notices(unittest.TestCase):
         self.assertEqual(notices.open_notices(self.p4), [])
         self.assertEqual(open(notices.path(self.p4), encoding="utf-8").read(), before)
         self.assertEqual([notices.notice_family(c) for c in ("json ranker", "pt ranker", "ranker server", "hook close", "train")],
-                         ["json", "ranker", "ranker", "hook", "train"])
+                         ["json", "ranker", "ranker", "release", "train"])
+
+    def test_a_hook_notice_is_answered_by_a_later_release(self):
+        """A hook's notice, on a store with nothing to train, is of the family "release": the release that wrote it
+        leaves it open, and the next release of p4-phi answers it with a row of retrain-resolved.tsv. A notice no
+        release can answer, an unreadable ranker, stays open across releases."""
+        with mock.patch.object(notices, "plugin_version", return_value="0.11.5"):
+            self.assertTrue(notices.notify(self.p4, "hook stop", RuntimeError("boom"), "abcd1234", now="2026-11-09 10:00"))
+            self.assertTrue(notices.notify(self.p4, "json ranker", ValueError("bad file"), "abcd1234", now="2026-11-09 10:00"))
+            self.assertEqual(notices.notice_family("hook stop"), "release")
+            self.assertEqual([r["component"] for r in notices.open_notices(self.p4)], ["hook stop", "json ranker"])
+        with mock.patch.object(notices, "plugin_version", return_value="0.11.6"):
+            self.assertEqual([r["component"] for r in notices.open_notices(self.p4)], ["json ranker"])
+            self.assertEqual([r["component"] for r in notices.open_notices(self.p4)], ["json ranker"])
+        with open(notices.path(self.p4, notices.RESOLVED), encoding="utf-8") as f:
+            answers = [l.rstrip("\n").split("\t") for l in f if l.strip() and not l.startswith("#")]
+        self.assertEqual([(a[3], a[4], a[6]) for a in answers], [("hook stop", "RuntimeError", "released p4-phi 0.11.6")])
 
     def test_an_answer_closes_only_the_notice_of_its_kind(self):
         """Two notices of one minute and one component, each with a plain-string error and so an empty error field,
