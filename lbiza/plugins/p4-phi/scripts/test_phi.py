@@ -176,6 +176,9 @@ def context(r):
     return json.loads(out)["hookSpecificOutput"]["additionalContext"]
 
 
+APP_CAP = 10000     # hooks.md: a hook's text past this goes to a file, with a 2,000-character preview
+
+
 def runs_of(sent, text, n=8):
     """The runs of `n` words of `sent` that `text` holds, compared word by word with case and punctuation dropped."""
     words = lambda x: re.findall(r"[a-z0-9']+", str(x).lower())                       # noqa: E731
@@ -1081,7 +1084,7 @@ class Rules(unittest.TestCase):
                 self.assertIn("- " + phi.BUILT_IN, text, (host, source))
                 for word in ("tabs-not-spaces", "Indent with tabs", "long-rule", "Run the ports check", "out/Narwhal"):
                     self.assertNotIn(word, text, (host, source))
-                self.assertLessEqual(len(text), phi.HOOK_CHARS)
+                self.assertLessEqual(len(text), APP_CAP)
 
     def test_the_page_holds_every_rule_in_full(self):
         self.start(TOP)
@@ -1122,16 +1125,61 @@ class Rules(unittest.TestCase):
         self.t.say(TOP, TASK)
         text = self.start(KID)
         self.assertIn("act-don't-wait", text)
-        self.assertLessEqual(len(text), phi.HOOK_CHARS)
+        self.assertLessEqual(len(text), APP_CAP)
         first = context(self.t.say(KID, HANDED))                         # a fresh child's background: its first message
         self.assertIn("background for this session", first)
-        self.assertLessEqual(len(first), phi.HOOK_CHARS)
+        self.assertLessEqual(len(first), APP_CAP)
 
-    def test_the_start_text_keeps_to_the_hooks_room_with_every_line_it_carries(self):
+    def test_the_start_and_first_message_text_past_9500_characters_passes_whole_act_lines_first(self):
+        """ezexe/p4#243 D9: p4-phi cuts no text of its own at a session's start or first message; past 10,000
+        characters the app's own overflow file takes it, so the lines that ask the session to act come first, inside
+        the app's preview, and the rest follows whole."""
+        t = self.t
+        write(os.path.join(t.p4, "phi", "phi.json"), json.dumps({"background_chars": 12000}))
+        t.say(TOP, TASK)
+        for k in range(12):                                         # notes long enough to fill a 12,000 background
+            r = t.cli(TOP, "note", f"replaces: part {k} of the old exporter, " + "the ports table rows. " * 200,
+                      "--source", f"export/part{k}.py:1")
+            self.assertEqual(r.returncode, 0, r.stderr)
+        t.stop(TOP, TASK, report="Half done: " + "the flush writes the ports table. " * 40)
+        first = context(t.say(KID, HANDED))
+        self.assertGreater(len(first), 9500)
+        self.assertIn("Each turn's report is kept either way", first, "the background's last line, whole")
+        self.assertNotIn("did not fit", first)
+        self.assertFalse(os.path.exists(os.path.join(t.dir(KID), "held.md")), "no page of p4-phi's own")
+        self.assertLess(first.index("phi (p4-phi): this is this session's first message"),
+                        first.index("background for this session"), "the act line leads, inside the app's preview")
+        self.assertLessEqual(len(context(t.say(KID, "go on"))), phi.PROMPT_CHARS, "a later prompt keeps its room")
+        start = context(t.hook(START, KID, {"hook_event_name": "SessionStart", "source": "clear"}, P4_PHI_NEW_TASK="1"))
+        self.assertGreater(len(start), 9500)
+        self.assertIn("Each turn's report is kept either way", start, "the background's last line, whole")
+        act = start.index("When a message from ezexe is about something else")
+        self.assertLess(act, 2000, "inside the app's 2,000-character preview")
+        self.assertLess(act, start.index("act-don't-wait"), "what asks it to act comes before the rules")
+        self.assertLess(start.index("act-don't-wait"), start.index("background for this session"))
+
+    def test_an_orchestrators_long_command_runs_as_sent(self):
+        """ezexe/p4#243 D4: the app moves a foreground command to the background at its timeout, so p4-phi returns
+        no `updatedInput` for an orchestrator's lone test command, only the line."""
+        t = self.t
+        t.say(TOP, TASK)
+        inp = {"command": "cd scripts && python -I -X utf8 test_flush.py 2>&1 | tail -3", "description": "Run tests"}
+        body = {"session_id": CLI[TOP], "cwd": t.proj, "hook_event_name": "PreToolUse", "tool_name": "Bash",
+                "tool_input": inp, "tool_use_id": "toolu_d4"}
+        r = inproc.run(["sh", os.path.join(ROOT, "hooks", "recall-hook.sh"), "lookup-check"], input=json.dumps(body),
+                       capture_output=True, text=True, timeout=60,
+                       env=t.env(TOP, CLAUDE_PLUGIN_DATA=os.path.join(t.tmp, "data")))
+        self.assertEqual((r.returncode, r.stderr.strip()), (0, ""))
+        out = json.loads(r.stdout)["hookSpecificOutput"]
+        self.assertNotIn("updatedInput", out, "the call runs as sent")
+        self.assertNotIn("permissionDecision", out)
+        self.assertIn("on a call of its own with `run_in_background: true`", out["additionalContext"])
+
+    def test_the_start_text_carries_every_line_with_any_background(self):
         """A puppeteer whose p4.json names a shared store this machine has not seen, started again after a
-        clear and after a compaction, with the default start background and with one set longer than the hook's room:
-        each start text is at most HOOK_CHARS and still carries the standing instruction and the missing-home line,
-        and after a compaction the line that names its board comes first."""
+        clear and after a compaction, with the default start background and with one set longer than the app's cap:
+        each start text carries the standing instruction, the missing-home line and the rules, and stays within the
+        app's cap with the default background; after a compaction the line that names its board comes first."""
         t = self.t
         write(os.path.join(t.tmp, "claude_desktop_config.json"), json.dumps({"preferences": {"epitaxyPrefs": {
             "dframe-group-scopes": {"acct/org": {"groups": [{"id": "cg-1", "name": "puppeteers"}],
@@ -1148,7 +1196,7 @@ class Rules(unittest.TestCase):
                    "Built and checked: " + "the part reads the ports table back and its check passes. " * 8,
                    uuid=f"u{n}")
         sizes = {}
-        for chars in (phi.BACKGROUND_CHARS, 2 * phi.HOOK_CHARS):
+        for chars in (phi.BACKGROUND_CHARS, 2 * APP_CAP):
             write(os.path.join(t.p4, "phi", "phi.json"), json.dumps({"background_chars": chars}))
             for source in ("clear", "compact"):
                 text = context(t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": source},
@@ -1160,7 +1208,7 @@ class Rules(unittest.TestCase):
                 if source == "compact":
                     self.assertTrue(text.startswith("phi (p4-phi): this session is a puppeteer and its "
                                                     "context was compacted"), text[:200])
-        self.assertLessEqual(max(sizes.values()), phi.HOOK_CHARS, sizes)
+        self.assertLessEqual(max(v for k, v in sizes.items() if k.endswith(str(phi.BACKGROUND_CHARS))), APP_CAP, sizes)
 
     def test_off_is_silence_and_no_memories_is_the_built_in_rules_alone(self):
         write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"rules": False}))

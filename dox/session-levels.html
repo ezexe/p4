@@ -224,9 +224,9 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
     </div>
   </div>
 
-  <section class="block" aria-label="The rewrite of a long foreground command">
-    <h2>The rewrite</h2>
-    <p class="intro">A long command is a <code>test_*.py</code> run, <code>pytest</code>, <code>unittest</code>, or an <code>npm</code>, <code>pnpm</code>, <code>cargo</code>, <code>go</code> or <code>make</code> <code>test</code> or <code>build</code>. The plugin's PreToolUse hook reads every Bash and PowerShell call for one. Pick a call and a caller to see what the hook does with it.</p>
+  <section class="block" aria-label="The line for a long foreground command">
+    <h2>The line</h2>
+    <p class="intro">A long command is a <code>test_*.py</code> run, <code>pytest</code>, <code>unittest</code>, or an <code>npm</code>, <code>pnpm</code>, <code>cargo</code>, <code>go</code> or <code>make</code> <code>test</code> or <code>build</code>. The plugin's PreToolUse hook reads every Bash and PowerShell call for one and changes none: the app moves a foreground command to the background itself once it reaches its timeout, two minutes by default, and its result then says so. Pick a call and a caller to see what the hook says beside it.</p>
     <div class="rw">
       <div class="card sec">
         <h2>The call</h2>
@@ -236,7 +236,6 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
             <button type="button" data-who="child">a worker</button>
             <button type="button" data-who="agent">a subagent</button>
           </div>
-          <label><input type="checkbox" id="rwtimeout"> with its own <code>timeout</code></label>
         </div>
         <div class="cmds" id="cmds"></div>
       </div>
@@ -247,19 +246,19 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
         <pre class="rwout" id="rwout"></pre>
       </div>
     </div>
-    <p class="after">An orchestrator's call is moved only when it is the long command and nothing else. Parts before the command may go to a folder or set a variable, and its output may pass through filters such as <code>tail</code> or <code>grep</code>. A call with a later part runs as sent, since the later part needs the command finished. So does a call that carries a <code>timeout</code> of its own, since the caller chose to wait. The call of a session that has a parent session is never changed: it gets the line once per step of its task list, or once per kind of command while no step is in progress. A call that already has <code>run_in_background: true</code> is passed over. In a project with a store, a command the session's own records show as still running is refused once, with the id of the running copy, and a second try goes through as a repeat of it.</p>
+    <p class="after">Every long call runs as sent, an orchestrator's and a worker's alike, and gets the line once per step of the session's task list, or once per kind of command while no step is in progress. A call that already has <code>run_in_background: true</code> is passed over. A command the app moved to the background at its timeout is recorded as a background task by its result. In a project with a store, an orchestrator's call that is the long command alone, when the session's own records show the same command still running, is refused once, with the id of the running copy, and a second try goes through as a repeat of it.</p>
   </section>
 
   <section class="block" aria-label="On by default">
     <h2>On by default</h2>
-    <p class="intro">Nothing has to be configured. The delegation rule, the three agents and the rewrite work in any project the plugin is enabled in.</p>
+    <p class="intro">Nothing has to be configured. The delegation rule, the three agents and the line work in any project the plugin is enabled in.</p>
     <div class="rules">
       <div class="rule">
         <h3>Nothing to set up</h3>
         <ul>
           <li>Every session is given the delegation rule at its start, as one of p4-phi's built-in rules beside act-don't-wait.</li>
           <li>The agents are files in the plugin's <code>agents/</code> folder, so they load with the plugin under the names <code>p4-phi:sweep</code>, <code>p4-phi:runner</code> and <code>p4-phi:check</code>.</li>
-          <li>The rewrite works in a project with no <code>.claude/p4</code> store. Whether the session has a parent session is then read from the app's record of it.</li>
+          <li>The line works in a project with no <code>.claude/p4</code> store. Whether the session has a parent session is then read from the app's record of it.</li>
           <li>Without a store, what a session was already told is kept in the plugin's data folder and removed after seven days unused.</li>
         </ul>
       </div>
@@ -267,7 +266,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
         <h3>One key turns it off</h3>
         <ul>
           <li>Set <code>phi.levels</code> to <code>false</code> in the project's <code>.claude/p4/p4.json</code>.</li>
-          <li>The delegation rule is then left out, no long command is moved or remarked on, no step of a task list is named for a background subagent, and a worker is not told at its first message how to split its own work.</li>
+          <li>The delegation rule is then left out, no long command is remarked on, no step of a task list is named for a background subagent, and a worker is not told at its first message how to split its own work.</li>
           <li>No key turns it on. Any value but <code>false</code>, or no key at all, leaves it on.</li>
         </ul>
         <pre>{
@@ -396,7 +395,7 @@ function steps(kind,ask){
   ];
   if(kind==="bg")return [
     {dir:"down",legs:["ask"],by:W+" starts the command",say:"The shell call starts a background task.",
-     html:"The command goes on a call of its own with <code>run_in_background: true</code>. "+(ask==="top"?"When the orchestrator sends such a command without the field, the plugin's hook adds it. The rewrite below shows which calls.":"A worker's foreground call is not changed. It runs as sent, and the worker is told once per step of its task list, or once per kind of command while no step is in progress, to start such a command this way."),
+     html:"The command goes on a call of its own with <code>run_in_background: true</code>. "+"A foreground call is not changed. It runs as sent, the app moves it to the background at its timeout, and the session is told once per step of its task list, or once per kind of command while no step is in progress, to start such a command this way.",
      code:call("Bash",{command:"python test_phi.py",run_in_background:true})},
     {dir:"hold",legs:["ask"],by:W+" goes on or ends its turn",say:"The command runs. The session keeps its turn.",
      html:HOLD},
@@ -605,7 +604,7 @@ $("plan").addEventListener("input",function(){
   else{out.innerHTML="This step is work, so p4-phi names it for a worker. It is "+KIND_WORDS[kindOfWork(t)]+".";S.ask="top";pick("work")}
 });
 
-/* ---------- the rewrite: each row is phi.long_read's own answer for that call, and the lines are h_level's ---------- */
+/* ---------- the line: each row is phi.long_read's own answer for that call, and the line is h_level's ---------- */
 var CALLS=[
   {c:"python test_phi.py",kind:"a test file",alone:true},
   {c:"cd scripts && python -m pytest -q",kind:"pytest",alone:true},
@@ -619,10 +618,9 @@ var CALLS=[
   {c:"python -m py_compile test_x.py",kind:"",alone:false},
   {c:"git status",kind:"",alone:false}
 ];
-var R={i:0,who:"top",timeout:false};
+var R={i:0,who:"top"};
 function rewrite(){
   var x=CALLS[R.i],v=$("verdict"),why=$("rwwhy"),out=$("rwout"),inp={command:x.c};
-  if(R.timeout)inp.timeout=600000;
   document.querySelectorAll("#cmds button").forEach(function(b,i){b.setAttribute("aria-pressed",String(i===R.i))});
   document.querySelectorAll("#rwwho button").forEach(function(b){b.setAttribute("aria-pressed",String(b.getAttribute("data-who")===R.who))});
   out.hidden=false;
@@ -636,25 +634,12 @@ function rewrite(){
     why.textContent="A runner's whole work is to wait on its command, so the hook passes over every call a subagent makes.";
     out.hidden=true;return;
   }
-  if(R.who==="top"&&x.alone&&!R.timeout){
-    var moved={};for(var k in inp)moved[k]=inp[k];moved.run_in_background=true;
-    v.className="verdict moved";v.textContent="Moved to the background.";
-    why.textContent="The call is the long command and nothing else, and this is the orchestrator. The hook returns the same input with one field added, and one line beside the result.";
-    out.textContent=JSON.stringify({hookSpecificOutput:{hookEventName:"PreToolUse",updatedInput:moved,
-      additionalContext:"phi (p4-phi): this call runs "+x.kind+", which runs long, and this is the orchestrator, so p4-phi started it in the background by adding `run_in_background: true`. Go on with other work or end the turn: its completion notification brings the result, so never wait for it, sleep or poll."}},null,2);
-    return;
-  }
-  var reasons=[];
-  if(R.who==="child")reasons.push("This session has a parent session, and only an orchestrator's call is moved.");
-  if(!x.alone)reasons.push("The command is one part of a longer call, and nothing may be changed about how the other parts run.");
-  if(R.timeout)reasons.push("The call carries a timeout of its own, so the caller chose to wait.");
   v.className="verdict sent";v.textContent="Runs as sent, with one line.";
-  why.textContent=reasons.join(" ")+" The line is said once per step of the session's task list, or once per kind of command while no step is in progress.";
+  why.textContent="The hook changes no call: the app moves a foreground command to the background itself once it reaches its timeout. The line is said once per step of the session's task list, or once per kind of command while no step is in progress."+(R.who==="top"&&x.alone?" In an orchestrator this call, the long command alone, is refused once instead while the same command already runs in the background.":"");
   out.textContent="phi (p4-phi): this call runs "+x.kind+" in this session's foreground, and a command like it runs long. Start such a command on a call of its own with `run_in_background: true`, or hand it to the `p4-phi:runner` subagent, then go on with other work or end the turn: its completion notification brings the result, so never wait for it in the foreground, sleep or poll. Said once for this step.";
 }
 CALLS.forEach(function(x,i){var b=h("button",{type:"button",text:x.c,"aria-pressed":"false"});b.addEventListener("click",function(){R.i=i;rewrite()});$("cmds").appendChild(b)});
 document.querySelectorAll("#rwwho button").forEach(function(b){b.addEventListener("click",function(){R.who=b.getAttribute("data-who");rewrite()})});
-$("rwtimeout").addEventListener("change",function(){R.timeout=$("rwtimeout").checked;rewrite()});
 
 var rw=0;
 if(window.ResizeObserver)new ResizeObserver(function(){var w=wrap.clientWidth;if(w!==rw){rw=w;draw(false)}}).observe(wrap);

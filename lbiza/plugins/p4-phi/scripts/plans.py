@@ -595,7 +595,14 @@ WRITES = re.compile(r"\b(?:fix\w*|writ\w*|add\w*|chang\w*|edit\w*|implement\w*|u
                     r"push\w*|merg\w*|land\w*|releas\w*|ship\w*|install\w*)\b", re.I)
 LEVELS = True                 # phi.project_conf sets it from p4.json phi.levels
 LEVEL_WHAT = {"sweep": "only reads or searches", "runner": "only runs a command"}
-LAUNCHED = re.compile(r"\s*Command running in background with ID", re.I)   # a shell call's result in the background
+# A shell call's result once its command runs in the background: started there, or moved there by the app at its
+# timeout, which tools-reference.md, "Foreground commands that move to the background", words as "Command did not
+# complete within its 120s timeout and was moved to the background", the seconds those of the timeout that applied,
+# "followed by the task ID and the path of the file the output is being written to". Only the app's own shapes
+# count, a result that opens with one of the two sentences, so a command whose output merely quotes one, such as
+# a grep of these lines, is no task.
+LAUNCHED = re.compile(r"Command running in background with ID|Command did not complete within its \d+s timeout "
+                      r"and was moved to the background", re.I)
 
 
 def level_of(text):
@@ -1305,12 +1312,23 @@ STOPPED = re.compile(r'"name"\s*:\s*"(?:TaskStop|KillShell)"\s*,\s*"input"\s*:\s
 BACKGROUND_AGENT = re.compile(r"(?:launched|running|runs) in the background|async agent|run_in_background", re.I)
 
 
+def launched(response):
+    """True when a shell call's result is the app's own for a command in the background: a dict with a
+    backgroundTaskId, or a result string, or a dict's stdout, stderr or output, that opens with LAUNCHED."""
+    if isinstance(response, dict):
+        if response.get("backgroundTaskId"):
+            return True
+        texts = [response.get(k) for k in ("stdout", "stderr", "output")]
+    else:
+        texts = [response]
+    return any(isinstance(t, str) and LAUNCHED.match(t.lstrip()) for t in texts)
+
+
 def register(home, s, tool, inp, response, cwd, at_epoch=None):
     """Record a background task under the step in progress -> the task, or None when the call ran in the
     foreground or names no task id."""
-    if tool in ("Bash", "PowerShell") and not inp.get("run_in_background") and not LAUNCHED.match(
-            response if isinstance(response, str) else ""):
-        return None                               # a foreground command; one a hook moved to the background shows it
+    if tool in ("Bash", "PowerShell") and not inp.get("run_in_background") and not launched(response):
+        return None                               # a foreground command; one the app moved shows it in its result
     if tool == "Agent" and not inp.get("run_in_background") and not BACKGROUND_AGENT.search(str(response)):
         return None                               # a foreground agent has finished by its result
     text = response if isinstance(response, str) else json.dumps(response, default=str)

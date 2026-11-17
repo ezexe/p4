@@ -16,7 +16,9 @@ The hooks, each in its h_ function:
   clear, and to a session no app runs.
 - UserPromptSubmit keeps the first request as the task and gives the start background with the first message when
   the start did not, then the reports of the workers that finished a turn since the last look, the standing
-  instruction and what the sessions beside it changed; what does not fit in the hook's room is held whole on held.md.
+  instruction and what the sessions beside it changed. A start and a first message pass whole, the lines that ask
+  the session to act first, past the app's cap to its own file; at a later message what does not fit in PROMPT_CHARS
+  is held whole on held.md.
 - Stop keeps the turn and appends it to the parent session's reports, sends the turn back while steps the session
   tree can settle are open, runs a writing child's issue gate, counts a child marked report when done as archived,
   tells the orchestrator to push issue-closing commits and makes the anchors.
@@ -63,7 +65,11 @@ REPORTS = True
 TURNS = True
 NEW_TASK = True
 RULES = True
-HOOK_CHARS = 9500                # Claude Code shows a hook's context up to 10,000 characters, else files it away
+# hooks.md, "additionalContext": a hook's text past 10,000 characters is written "to a file in the session directory"
+# and Claude is passed "the file path with a preview of up to the first 2,000 characters instead". p4-phi leaves
+# that cap and its overflow file to the app and cuts no text of its own at a session's start or first message: it
+# puts the lines that ask the session to act first, so they fall inside the app's preview, and the rest follows
+# whole.
 HELD_HEAD = 90                   # of a piece that did not fit, shown beside the prompt so it is known for what it is
 PHI_LEAD = re.compile(r"^phi \(p4-phi\)[^:]*:\s*")
 PROMPT_CHARS = 4000              # the ceiling on what p4-phi adds beside one prompt; the rest is held on a page
@@ -2050,19 +2056,14 @@ def h_restart_check(payload):
                                    "permissionDecisionReason": why}}
 
 
-# --- delegation: a long command never holds an orchestrator's turn ----------------------------------------------
+# --- delegation: a long command is told to the session, and the app moves it ------------------------------------
 #
-# hooks.md, "PreToolUse decision control": `updatedInput` "Modifies the tool's input parameters before execution.
-# Replaces the entire input object, so include unchanged fields alongside modified ones. Claude Code evaluates
-# permission rules and a Bash command's auto-background eligibility against the input your hook returns, not the input
-# Claude sent." and `additionalContext` is a "String added to Claude's context alongside the tool result." Its section
-# "PreToolUse input" gives the Bash input's `run_in_background` as a "boolean ... Whether to run the command in
-# background". The page does not say in words that a hook may add that field. A plugin's command hook that adds it with
-# no `permissionDecision` gets a PostToolUse that carries `"run_in_background": true` and a `backgroundTaskId`, with a
-# result that reads "Command running in background with ID". The transcript keeps the input as it was sent, without
-# the field, so a launch is also known by that result. With no `permissionDecision`, "auto mode can deny the changed
-# call", but "a `command` hook in settings or a plugin's hooks file can change Bash, PowerShell, Monitor, Edit, Write,
-# and NotebookEdit calls without this denial."
+# tools-reference.md, "Foreground commands that move to the background": "When a foreground command reaches its
+# timeout without finishing, Claude Code moves it to the background instead of stopping it", the timeout being
+# `BASH_DEFAULT_TIMEOUT_MS`, two minutes by default on the env-vars page. So p4-phi rewrites no call with
+# `updatedInput`: a long command runs as sent, and the session is told once per step to start such a command in the
+# background itself or hand it to the runner. hooks.md, "PreToolUse decision control": `additionalContext` is a
+# "String added to Claude's context alongside the tool result."
 
 TEST_FILE = re.compile(r"^test_\w+\.py$", re.I)
 LONG_RUN = re.compile(r"^(?:(?:npm|pnpm)\s+(?:run\s+)?(?:test|build)\b|(?:cargo|go)\s+(?:test|build)\b|"
@@ -2211,12 +2212,12 @@ def level_told(me, s, key):
 
 
 def h_level(payload):
-    """PreToolUse on a shell call that runs a known long command in the foreground. In an orchestrator a call
-    that is that command and nothing else is returned with `updatedInput`: the same input plus
-    `run_in_background: true`, and one line saying so. Every other such call runs as sent, with the line once per
-    step: in a worker; where the command is one part of a longer call, whose later parts need it finished;
-    and where the call carries a `timeout` of its own, since the caller chose to wait. A subagent's call is left
-    alone: a runner's whole work is to wait on its command. Works with no store: top-level or child is read from the
+    """PreToolUse on a shell call that runs a known long command in the foreground. The call runs as sent, with one
+    line, once per step, saying to start such a command on a call of its own in the background or hand it to the
+    runner: the app itself moves a foreground command to the background once it reaches its timeout, so p4-phi
+    rewrites no call. In an orchestrator, a call that is that command alone is refused while the same command
+    already runs in the background, since restart-check reads `run_in_background`. A subagent's call is left alone:
+    a runner's whole work is to wait on its command. Works with no store: top-level or child is read from the
     session's own file where there is one, else from the app's record."""
     if not LEVELS_ON or payload.get("agent_id") or str(payload.get("tool_name") or "") not in SHELL_TOOLS:
         return None
@@ -2230,31 +2231,23 @@ def h_level(payload):
     s = load_session(me.home, me.id) if me.home and me.id else {}
     child = bool(spawned_from(s) if s else spawned_from(me.rec))
     waits = inp.get("timeout") is not None or inp.get("timeout_ms") is not None
-    if child or not alone or waits:
-        plan = plans.load(me.home, me.id) if me.home else {}
-        st = plans.step_of(plan, plan.get("current") or "") if plan.get("steps") else None
-        key = nudge_key(st) if st else "kind:" + kind
-        if level_told(me, s, key):
-            return None
-        RAN["level"] = "told"
-        return (f"phi (p4-phi): this call runs {kind} in this session's foreground, and a command like it runs long. "
-                f"Start such a command on a call of its own with `run_in_background: true`, or hand it to the "
-                f"`p4-phi:runner` subagent, then go on with other work or end the turn: its completion "
-                f"notification brings the result, so never wait for it in the foreground, sleep or poll. Said once "
-                f"for this step.")
-    if me.home and me.id:                          # the copy this session already runs is not started again
-        why = puppeteer.restart_text(me.home, me.id, str(inp.get("command")))
+    if not child and alone and not waits and me.home and me.id:   # the copy this session already runs is not
+        why = puppeteer.restart_text(me.home, me.id, str(inp.get("command")))   # started again
         if why:
             RAN["restart"] = "held"
             return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                            "permissionDecisionReason": why}}
-    RAN["level"] = "background"
-    return {"hookSpecificOutput": {
-        "hookEventName": "PreToolUse", "updatedInput": {**inp, "run_in_background": True},
-        "additionalContext": (f"phi (p4-phi): this call runs {kind}, which runs long, and this is the orchestrator"
-                              f", so p4-phi started it in the background by adding `run_in_background: true`. "
-                              f"Go on with other work or end the turn: its completion notification brings the result, "
-                              f"so never wait for it, sleep or poll.")}}
+    plan = plans.load(me.home, me.id) if me.home else {}
+    st = plans.step_of(plan, plan.get("current") or "") if plan.get("steps") else None
+    key = nudge_key(st) if st else "kind:" + kind
+    if level_told(me, s, key):
+        return None
+    RAN["level"] = "told"
+    return (f"phi (p4-phi): this call runs {kind} in this session's foreground, and a command like it runs long. "
+            f"Start such a command on a call of its own with `run_in_background: true`, or hand it to the "
+            f"`p4-phi:runner` subagent, then go on with other work or end the turn: its completion "
+            f"notification brings the result, so never wait for it in the foreground, sleep or poll. Said once "
+            f"for this step.")
 
 
 def session_archives(store):
@@ -2353,9 +2346,9 @@ def h_session_start(payload):
     elif source in ("compact", "clear"):
         first = controls.state_first(me.home, s)   # a standing worker's or coworker's state page first
     rules = rules_text(me.store, fork=bool(s.get("forked"))) if source != "resume" else ""
-    text = cut(text, HOOK_CHARS - len(first) - len(rules) - len(rule) - 6)    # the room the lines around it leave
     save_session(me.home, s)
-    return "\n\n".join(p for p in (first, rules, text, rule) if p) or None
+    # what asks the session to act first, inside the app's preview past its cap, then the rules and the background
+    return "\n\n".join(p for p in (first, rule, rules, text) if p) or None
 
 
 def watch_over(home, s):
@@ -2397,14 +2390,17 @@ def started_by(me, payload):
 
 
 def fit(parts, room, home, sid, keep=()):
-    """The parts that fit in `room`, in their order, each whole; what does not fit is kept whole on the session's
-    held.md and named by count, by that page and by how each begins. No piece is shown cut, since a cut piece, such
-    as a list of start requests, is of no use in part. A piece in `keep` asks the session to act at this message, so
-    it is never held: the room goes to those first, and the other pieces fit in what is left."""
+    """The parts that fit in `room`, in their order, each whole; with no `room`, every part, the ones in `keep`
+    first, so past the app's own cap they fall inside its preview. What does not fit in a room is kept whole on the
+    session's held.md and named by count, by that page and by how each begins. No piece is shown cut, since a cut
+    piece, such as a list of start requests, is of no use in part. A piece in `keep` asks the session to act at this
+    message, so it is never held: the room goes to those first, and the other pieces fit in what is left."""
     parts = [p for p in parts if p]
+    kept = {id(p) for p in keep if p}
+    if room is None:                               # the app's own cap and file: the notices first, then the rest
+        return "\n\n".join([p for p in parts if id(p) in kept] + [p for p in parts if id(p) not in kept])
     if sum(len(p) + 2 for p in parts) - 2 <= room:
         return "\n\n".join(parts)
-    kept = {id(p) for p in keep if p}
     tail = 260 + len(relay.held_path(home, sid)) + 3 * (HELD_HEAD + 8)    # the lines that name what is held
     free = room - tail - sum(len(p) + 2 for p in parts if id(p) in kept)
     out, over, used = [], [], 0
@@ -2503,11 +2499,11 @@ def h_user_prompt_submit(payload):
                                    s.get("cwd") or payload.get("cwd") or "", "brief")   # from its brief
         RAN["issue"] = (s.get("issue") or {}).get("number", "")
     handed = given(s, me, me.home)
-    room = HOOK_CHARS if handed else min(PROMPT_CHARS, HOOK_CHARS)   # the start background comes once, first message
+    room = None if handed else PROMPT_CHARS       # the first message passes whole, past the app's cap to its file
     parts = [live_rules(s, me.store, os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or ""),
              pin_of(me.home, s), handed]
     if REPORTS:
-        text, seen = reports_text(me.home, s, room * 3 // 5, me.store)
+        text, seen = reports_text(me.home, s, room * 3 // 5 if room else None, me.store)
         s["reportsSeen"] = seen
         parts.append(text)
     save_session(me.home, s)
@@ -2607,9 +2603,11 @@ def h_user_prompt_submit(payload):
     save_session(me.home, s)
     # the rebase check, on every message: what the sessions beside this one changed, and the warnings, first
     used = sum(len(p) + 2 for p in parts + [last] if p)
-    text, _ = relay.rebase(me.home, s["sessionId"], max(room // 3, room - used), fair_cut, touches_of(me.home, s))
+    share = max(room // 3, room - used) if room else PROMPT_CHARS
+    text, _ = relay.rebase(me.home, s["sessionId"], share, fair_cut, touches_of(me.home, s))
     RAN["relay"] = len(text)
-    return fit([text, last] + parts, room, me.home, s["sessionId"], keep)
+    lead = [text] if room is None else []        # with no room the rebase's stop warnings still lead
+    return fit([text, last] + parts, room, me.home, s["sessionId"], lead + keep)
 
 
 def pair_parts(me, s, req, changed="", notice=lambda text: text):
@@ -3180,8 +3178,8 @@ def replay(me, s, transcript):
         payload = {"tool_name": b["name"], "tool_input": b.get("input") or {}, "tool_response": results[tid],
                    "tool_use_id": tid, "transcript_path": transcript}
         if name == "task" and b["name"] in SHELL_TOOLS and not (b.get("input") or {}).get("run_in_background") \
-                and not plans.LAUNCHED.match(str(results[tid])):
-            continue                                # a foreground command; one a hook moved back is known by its result
+                and not plans.launched(results[tid]):
+            continue                                # a foreground command; one the app moved is known by its result
         if not once(me.home, me.id, name, payload):
             continue
         if name == "plan":

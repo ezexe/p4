@@ -27,7 +27,7 @@ Every behaviour below rests on a sentence of the Claude Code docs at `https://co
 | Keeps each agent in the background | `sub-agents.md`, "Supported frontmatter fields" | "Set to `true` to keep this subagent in the background even when Claude asks to wait for it." |
 | Tells a session to go on or end its turn, and never to wait, sleep or poll | `sub-agents.md` | "Background subagents run concurrently while you continue working." and "A background subagent's report arrives inside a completion notification" |
 | Tells a session to start a long command with `run_in_background: true` | `tools-reference.md`, "Background commands" | "Claude can set `run_in_background: true` to start the command as a background task and continue working while it runs." |
-| In an orchestrator, returns a long foreground command with `updatedInput`: the same input plus `run_in_background: true` | `hooks.md`, "PreToolUse decision control" | "Modifies the tool's input parameters before execution. Replaces the entire input object, so include unchanged fields alongside modified ones." |
+| Lets a long foreground command run as sent, an orchestrator's too, since the app moves it to the background at its timeout | `tools-reference.md`, "Foreground commands that move to the background" | "When a foreground command reaches its timeout without finishing, Claude Code moves it to the background instead of stopping it" |
 | Says so in one line beside the result | `hooks.md`, "PreToolUse decision control" | "`additionalContext`: String added to Claude's context alongside the tool result." |
 | Keeps the python its runners proved on Windows, and in a project with no store its once-per-step memory, in the plugin's data folder | `plugins/manifest-reference.md`, "Environment variables" | "`${CLAUDE_PLUGIN_ROOT}` changes when the plugin updates, so don't write state there." and `${CLAUDE_PLUGIN_DATA}` is "kept across plugin updates" |
 
@@ -68,7 +68,7 @@ The plugin works in any project it is enabled in.
 It needs no key in `p4.json`, no entry in a project's `settings.json` or `settings.local.json`, no environment variable and no existing `.claude/p4` store, and it writes to no settings file.
 
 - The plugin's own SessionStart hook makes the store `.claude/p4/` at the first session of a project and writes `p4.json` with the defaults `p4conf.py` holds, which leave out `child_levels`, `puppeteer_section` and `puppeteer_chars`: those three are read when a project sets them. A value it wrote follows a later change of its default, and a value set by hand stays. A value set by hand moves only when it equals the value recorded as written, at the next generation, or, in a store from before the record, a past default.
-- Before the store exists, a session is given the built-in rules, and an orchestrator's long command is moved to the background.
+- Before the store exists, a session is given the built-in rules, and a session's long foreground command gets the line.
 - The plugin ships no `settings.json`, a file no plugin page of the docs describes.
 
 ### `p4.json`, section `phi`
@@ -77,7 +77,7 @@ Every key is optional.
 
 | Key | Default | What `false` or a value does |
 | :- | :- | :- |
-| `levels` | `true` | `false`: no delegation rule and no long command moved to the background |
+| `levels` | `true` | `false`: no delegation rule and no line beside a long foreground command |
 | `child_levels` | the table under Delegation | an object: a kind, `static`, `build` or `design`, with its `model`, an id or `inherit`, and its `effort` |
 | `act_dont_wait` | `true` | `false`: the built-in act-don't-wait rule is left out |
 | `top_orchestrates` | `true` | `false`: an orchestrator does its own task list's work |

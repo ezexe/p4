@@ -553,6 +553,29 @@ class TreeOfPlans(unittest.TestCase):
                                          "tool_response": "Plan updated.", "tool_use_id": "toolu_rp1"})
         self.assertEqual(plans.load(t.p4, A)["current"], "2.2", "a replayed call is not applied again by a hook")
 
+    def test_a_replayed_command_is_a_task_only_by_the_apps_own_result(self):
+        """The transcript replay records a foreground call as a background task only when its result opens with the
+        app's sentence, as a command the app moved at its timeout does, never when the output merely quotes it."""
+        t = self.t
+        self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/"))
+        path = os.path.join(self._tmp.name, "c-transcript.jsonl")
+        rows = [{"type": "user", "message": {"role": "user", "content": "Move the store layout into phi, in steps"}}]
+        for k, (cmd, out) in enumerate((
+                ('grep -rn "background with ID" scripts/',
+                 'scripts/test_plans.py:889: "Command running in background with ID: bg7quoted1. Output is x"'),
+                ("python -I tests/test_flush.py",
+                 "Command did not complete within its 120s timeout and was moved to the background with ID: "
+                 "bg7moved01. Output is being written to: x"))):
+            rows.append({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": f"toolu_rq{k}", "name": "Bash", "input": {"command": cmd}}]}})
+            rows.append({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": f"toolu_rq{k}", "content": out}]}})
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write("".join(json.dumps(r) + chr(10) for r in rows))
+        t.hook("user-prompt-submit", A, {"hook_event_name": "UserPromptSubmit", "prompt": "go on",
+                                         "transcript_path": path})
+        self.assertEqual([x["id"] for _, x in plans._tasks(plans.load(t.p4, A))], ["bg7moved01"])
+
     def test_the_transcript_is_read_on_from_where_the_last_replay_stopped(self):
         """Each message and each Stop read the transcript on from the place kept, the first call still without a
         result, so no call is passed before its result is in."""
@@ -722,8 +745,9 @@ class TreeOfPlans(unittest.TestCase):
 
 
 class Levels(unittest.TestCase):
-    """Delegation: an orchestrator's long foreground command is started in the background by the hook; a child
-    is told once per step; a step is named for the subagent that does it."""
+    """Delegation: a long foreground command runs as sent, and its session is told once per step to start such a
+    command in the background, since the app moves it there at its own timeout; a step is named for the subagent that
+    does it."""
 
     LONG = {"command": "cd scripts && python -I -X utf8 test_flush.py 2>&1 | tail -3", "description": "Run the tests"}
 
@@ -753,14 +777,21 @@ class Levels(unittest.TestCase):
         self.assertEqual((r.returncode, r.stderr.strip()), (0, ""))
         return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else {}
 
-    def test_a_top_sessions_long_foreground_command_is_started_in_the_background(self):
+    def test_a_top_sessions_long_foreground_command_runs_as_sent_with_the_line(self):
+        """ezexe/p4#243 D4: the app moves a foreground command to the background at its timeout, so no call is
+        rewritten; the orchestrator is told once."""
         out = self.pre(TOP, dict(self.LONG))
         self.assertEqual(out["hookEventName"], "PreToolUse")
-        self.assertEqual(out["updatedInput"], {**self.LONG, "run_in_background": True},
-                         "every field as sent, plus the one added")
-        self.assertIn("started it in the background", out["additionalContext"])
+        self.assertNotIn("updatedInput", out, "the call runs as sent")
         self.assertNotIn("permissionDecision", out)
-        self.assertEqual(self.pre(TOP, dict(self.LONG), tool="PowerShell")["updatedInput"]["run_in_background"], True)
+        self.assertIn("on a call of its own with `run_in_background: true`", out["additionalContext"])
+        self.assertEqual(self.pre(TOP, dict(self.LONG)), {}, "once for this kind")
+        self.plan(TOP, items("Port the exporter", "Land it"))          # a new step: the line is owed again
+        shell = self.pre(TOP, dict(self.LONG), tool="PowerShell")
+        self.assertNotIn("updatedInput", shell, "a PowerShell call runs as sent too")
+        self.assertIn("on a call of its own with `run_in_background: true`", shell["additionalContext"])
+        again = self.pre(TOP, dict(self.LONG), tool="PowerShell").get("additionalContext", "")
+        self.assertNotIn("runs long", again, "once for this step")             # the step's nudge may come instead
         for quiet in ({"command": "ls -la"}, {"command": "grep -n pytest notes.md"},
                       {**self.LONG, "run_in_background": True}):
             self.assertEqual(self.pre(TOP, quiet), {}, quiet)
@@ -796,7 +827,7 @@ class Levels(unittest.TestCase):
             self.assertEqual(phi.long_read(cmd), want, cmd)
 
     def test_a_call_that_is_more_than_the_command_runs_as_sent(self):
-        """Only the command alone, with no timeout of its own, is moved to the background; the rest get the line."""
+        """A call that is more than the command, or carries a timeout, runs as sent with the line too."""
         for k, inp in enumerate(({"command": 'python scripts/test_phi.py && git commit -m "x"'},
                                  {"command": "python test_x.py > out.txt; grep FAIL out.txt"},
                                  {"command": "sleep 5 && pytest"},
@@ -809,8 +840,9 @@ class Levels(unittest.TestCase):
     def test_the_shell_gate_is_as_wide_as_the_matcher(self):
         """What phi.long_kind takes, recall-hook.sh lets through to it."""
         for cmd in ("py.test tests", "npm  test", "pnpm run build", "go test ./...", "make -j8 test"):
-            self.assertEqual(self.pre(TOP, {"command": cmd}).get("updatedInput"),
-                             {"command": cmd, "run_in_background": True}, cmd)
+            out = self.pre(TOP, {"command": cmd})
+            self.assertNotIn("updatedInput", out, cmd)
+            self.assertIn("runs long", out.get("additionalContext", ""), cmd)
         for cmd in ("python -m py_compile scripts/test_phi.py", "python scripts/phi.py show test_x.py",
                     "git log | python tools/count.py test_phi.py", 'python -c "import test_x.py"', "pytest --version",
                     "cat > n.md <<EOF\npytest runs the suite\nEOF"):
@@ -851,12 +883,13 @@ class Levels(unittest.TestCase):
         self.assertEqual(self.pre(TOP, dict(self.LONG)), {})
         self.assertEqual(self.pre(A, dict(self.LONG)), {})
 
-    def test_the_rewrite_and_the_line_need_no_store(self):
+    def test_the_line_needs_no_store(self):
         t2 = Tree(os.path.join(self._tmp.name, "bare"), store=False)
         t2.record(TOP, title="top")
         t2.record(A, TOP, title="a child")
         out = self.pre(TOP, dict(self.LONG), tree=t2)
-        self.assertEqual(out["updatedInput"], {**self.LONG, "run_in_background": True})
+        self.assertNotIn("updatedInput", out)
+        self.assertIn("Said once", out["additionalContext"])
         told = self.pre(A, dict(self.LONG), tree=t2)
         self.assertNotIn("updatedInput", told)
         self.assertIn("Said once", told["additionalContext"])
@@ -864,8 +897,9 @@ class Levels(unittest.TestCase):
         self.assertTrue(os.listdir(os.path.join(self._tmp.name, "data", "levels")), "in the plugin's data folder")
         self.assertFalse(os.path.exists(os.path.join(t2.proj, ".claude")), "nothing written into the project")
 
-    def test_a_command_already_running_is_not_started_again_by_the_rewrite(self):
-        """restart-check reads `run_in_background`, which the rewritten call gains only after the hooks."""
+    def test_a_command_already_running_is_not_started_again(self):
+        """restart-check reads `run_in_background`, which a foreground call lacks, so the orchestrator's call of the
+        same command alone is refused here."""
         r = self.t.hook("task", TOP, {"hook_event_name": "PostToolUse", "tool_name": "Bash",
                                       "tool_input": {**self.LONG, "run_in_background": True},
                                       "tool_response": {"stdout": "", "backgroundTaskId": "bg7level01"}})
@@ -875,12 +909,27 @@ class Levels(unittest.TestCase):
         self.assertIn("bg7level01", out["permissionDecisionReason"])
 
     def test_a_launch_the_transcript_shows_without_the_field_is_still_recorded(self):
-        """The transcript keeps a call's input as it was sent, so a command the hook moved to the background is known
-        by its result."""
+        """A call sent without `run_in_background` that runs in the background is known by its result: started there,
+        or moved there by the app at its timeout, as a string or as a dict's field."""
         s = relay._session(self.t.p4, TOP)
         got = plans.register(self.t.p4, s, "Bash", dict(self.LONG),
                              "Command running in background with ID: bg7level02. Output is being written to: x", "")
         self.assertEqual(got["id"], "bg7level02")
+        moved = ("Command did not complete within its 120s timeout and was moved to the background with ID: "
+                 "bg7level03. Output is being written to: C:/tmp/tasks/bg7level03.output")
+        self.assertEqual(plans.register(self.t.p4, s, "Bash", dict(self.LONG), moved, "")["id"], "bg7level03")
+        got = plans.register(self.t.p4, s, "PowerShell", dict(self.LONG),
+                             {"stdout": "", "stderr": moved.replace("bg7level03", "bg7level04")}, "")
+        self.assertEqual(got["id"], "bg7level04", "a dict result is read whole")
+        self.assertIsNone(plans.register(self.t.p4, s, "Bash", dict(self.LONG), {"stdout": "14 tests OK"}, ""),
+                          "a finished foreground command is no task")
+        quoted = ('scripts/test_plans.py:889:  "Command running in background with ID: bg7level02. Output is being '
+                  'written to: x", "")\nscripts/plans.py:600: Command did not complete within its 120s timeout and '
+                  'was moved to the background')
+        grep = {"command": 'grep -rn "background with ID" scripts/'}
+        for response in (quoted, {"stdout": quoted, "stderr": ""}, "14 tests OK\n" + moved):
+            self.assertIsNone(plans.register(self.t.p4, s, "Bash", grep, response, ""),
+                              "output that quotes the app's sentence is no task")
         self.assertIsNone(plans.register(self.t.p4, s, "PowerShell", {"command": "Get-Item x"}, "ID: notatask1", ""))
 
     def test_each_step_is_named_for_the_level_it_runs_at(self):
