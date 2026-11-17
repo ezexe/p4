@@ -442,7 +442,7 @@ def split_advice(home, s, plan, owner_turn, cap):
     """One line naming the steps that can each run as a worker, said once per set; '' when fewer than two."""
     free, kept = judge(plan, s.get("cwd") or "")
     subs = [st for st in free if LEVELS and level_of(st.get("content")) != "session"]
-    free = [st for st in free if st not in subs]   # a read or a run goes to its subagent, never a session
+    free = [st for st in free if st not in subs]   # a read goes to Explore and a run to the background, never a session
     if len(free) < 2:
         return ""
     path = os.path.join(relay._dir(home, s["sessionId"]), "session.json")
@@ -468,8 +468,8 @@ def split_advice(home, s, plan, owner_turn, cap):
     stay = ("; ".join(f"{a}, {why}" for a, why in kept)) or "none"
     each = "; ".join(f"{st['addr']} with {level_words(st.get('content'))}" for st in free)
     sub = " ".join(f"Step {st['addr']} \"{relay._short(st.get('content'), 90)}\" "
-                   f"{LEVEL_WHAT[level_of(st.get('content'))]}: it goes to the background subagent "
-                   f"`p4-phi:{level_of(st.get('content'))}`, not a session." for st in subs)
+                   f"{LEVEL_WHAT[level_of(st.get('content'))]}: it goes to "
+                   f"{LEVEL_WHERE[level_of(st.get('content'))]}, not a session." for st in subs)
     return (f"phi (p4-phi): steps {named} can each run on their own: no path another step names, nothing leaning "
             f"on another step, more than a quick thing, and each writes files. {route}; one session per step, its "
             f"brief that step's slice: the step's words, its paths and what it must leave done. Its model and "
@@ -573,9 +573,15 @@ def top_groups(plan, cwd):
 
 # --- delegation: where a step runs --------------------------------------------------------------------------------
 #
-# A step that only reads or searches is a background subagent's, `p4-phi:sweep`; one that only runs a command is
-# `p4-phi:runner`'s; the rest is a worker's. sub-agents.md says "Background subagents run concurrently while
-# you continue working", and plugins/components.md, under "Agents", names a plugin's agent `<plugin>:<name>`.
+# A step that only reads or searches is the built-in Explore subagent's; one that only runs a command is a background
+# command of the session's own; the rest is a worker's. sub-agents.md says of Explore "A fast, read-only agent
+# optimized for searching and analyzing codebases." and gives its model as "the parent conversation's model", so the
+# call names a small one: "The per-invocation `model` parameter" is the first source in the page's model order, and
+# "On an Agent tool call, the parameter takes a model alias". The page also says "With nothing configured, a subagent
+# that Claude spawns from your main conversation starts in the background." tools-reference.md, "Background
+# commands", says "Claude can set `run_in_background: true` to start the command as a background task and continue
+# working while it runs.", and interactive-mode.md says "Output is written to a file and Claude can retrieve it using
+# the Read tool".
 
 READS = re.compile(r"^\W*(?:find|search|look\s+(?:for|up|at|into|through)|read|grep|list|locate|survey|scan|map|"
                    r"inventory|explore|trace|identify|count|collect|gather|sweep)\b", re.I)
@@ -584,28 +590,34 @@ WRITES = re.compile(r"\b(?:fix\w*|writ\w*|add\w*|chang\w*|edit\w*|implement\w*|u
                     r"mak\w+|mov\w+|commit\w*|refactor\w*|port\w*|delet\w*|migrat\w*|rewrit\w*|replac\w*|patch\w*|"
                     r"push\w*|merg\w*|land\w*|releas\w*|ship\w*|install\w*)\b", re.I)
 LEVELS = True                 # phi.project_conf sets it from p4.json phi.levels
-LEVEL_WHAT = {"sweep": "only reads or searches", "runner": "only runs a command"}
+LEVEL_WHAT = {"read": "only reads or searches", "run": "only runs a command"}
+EXPLORE = "the built-in subagent `Explore`, with `model` `haiku` on the Agent call"
+BACKGROUND = "a Bash or PowerShell call of its own with `run_in_background: true`"
+LEVEL_WHERE = {"read": EXPLORE, "run": BACKGROUND}                # where each such step goes
 
 
 def level_of(text):
-    """'sweep' for a step that only reads or searches, 'runner' for one that only runs a command, else 'session'."""
+    """'read' for a step that only reads or searches, 'run' for one that only runs a command, else 'session'."""
     text = str(text or "")
     if WRITES.search(text):
         return "session"
     if READS.search(text):
-        return "sweep"
+        return "read"
     if RUNS.search(text):
-        return "runner"
+        return "run"
     return "session"
 
 
 # --- the model and effort a worker is started with ---------------------------------------------------------
 #
-# The three background subagents carry a model and an effort in their files, and every start call p4-phi hands out
+# A plugin agent carries a model and an effort in its file, and every start call p4-phi hands out
 # carries an `effort`, and a `model` unless it keeps the parent session's. `mcp__ccd_session__start_session` takes
 # `model`, the same family or cheaper than the caller's, and `effort`, at or below the caller's, both for a `fresh`
 # start only, as its schema says. The kind of a step picks its entry of CHILD_LEVELS, which p4.json's
-# phi.child_levels can set; LEVEL_HOW says the rule to the session that makes the call.
+# phi.child_levels can set; LEVEL_HOW says the rule to the session that makes the call. The caller's own effort is
+# the hook input's `effort.level`, "the effort level setting when the hook runs" by hooks.md, "Common input fields",
+# where "`$CLAUDE_EFFORT` holds the same level.": phi.own_effort reads it into PARENT_EFFORT, and child_level names
+# no effort above it.
 
 CHILD_LEVELS = {"static": {"model": "claude-sonnet-5-5", "effort": "medium"},
                 "build": {"model": "inherit", "effort": "high"},
@@ -677,14 +689,28 @@ def said_level(brief):
     return out
 
 
+PARENT_EFFORT = ""            # phi.Me sets it: the effort the session of this hook runs at, '' where nothing names it
+
+
+def capped(effort):
+    """`effort`, or PARENT_EFFORT when that is the lower of the two: the app starts no session above its starter's
+    effort, a limit no docs page states and scripts/claude_code_limits.json logs."""
+    if PARENT_EFFORT in EFFORTS and effort in EFFORTS and EFFORTS.index(effort) > EFFORTS.index(PARENT_EFFORT):
+        return PARENT_EFFORT
+    return effort
+
+
 def child_level(text, brief=""):
     """{"model", "effort", "kind"} a worker is started with for a step or a brief: its kind's entry of
-    CHILD_LEVELS, with what the brief itself names laid over it. `model` is 'inherit' for the parent session's own."""
+    CHILD_LEVELS, with what the brief itself names laid over it, and the effort held to PARENT_EFFORT. `model` is
+    'inherit' for the parent session's own."""
     kind = child_kind(text if str(text or "").strip() else brief)
     out = {**CHILD_LEVELS.get(kind, CHILD_LEVELS_DEFAULT[kind]), "kind": kind}
     said = said_level(brief or text)
     if said:
         out.update(said, said=True)
+    if capped(out["effort"]) != out["effort"]:
+        out.update(effort=capped(out["effort"]), capped=True)
     return out
 
 
@@ -702,6 +728,8 @@ def level_line(level):
     model = ("the parent session's own model" if str(level.get("model") or "inherit").lower() == "inherit"
              else level["model"])
     why = "named by the parent session" if level.get("said") else f"since this is {CHILD_KINDS[level['kind']]}"
+    if level.get("capped"):
+        why += ", held to the parent session's own effort"
     return f"Model and effort: {model} at {level['effort']} effort, {why}."
 
 
@@ -739,7 +767,13 @@ def level_words(text):
 
 LEVEL_CARD = ("It carries the `model` and `effort` a start of its kind of work carries, said in one line of its brief, "
               "`Model and effort: <model> at <effort> effort`.")
-LEVEL_HOW = ("Each call carries the `model` and `effort` named beside its steps, which the kind of work decides: by "
+# The app's own tool reports the plan limits: `mcp__ccd_session_mgmt__get_usage` returns "The account's Claude Code
+# plan limits and how full a session's context window is", "For pacing side sessions", as its description says. So
+# the read is one line that names the tool, and p4-phi reads no limit itself.
+LIMITS_FIRST = ("Before a batch of session starts or Agent calls, read the plan limits once with "
+                "`mcp__ccd_session_mgmt__get_usage`, so each `model` is picked from the work and what the limits show.")
+LEVEL_HOW = (LIMITS_FIRST + " "
+             "Each call carries the `model` and `effort` named beside its steps, which the kind of work decides: by "
              "default static or mechanical work runs on a cheaper model at medium effort, and a build that changes "
              "behaviour or a design or review step on this session's own model at high effort. An effort above this "
              "session's own is not accepted, so pass this session's own then. Each brief says them in one line, "
@@ -749,8 +783,8 @@ LEVEL_HOW = ("Each call carries the `model` and `effort` named beside its steps,
 
 def top_advice(home, s, plan, owner_turn, cap, levels=None):
     """The orchestrator's line: each work step, or serial run, to one fresh child, and with delegation on each
-    step that only reads or only runs a command to a background subagent; said once per set. '' when no work step
-    is new."""
+    step that only reads to the built-in Explore subagent and each that only runs a command to a background
+    command; said once per set. '' when no work step is new."""
     groups, kept = top_groups(plan, s.get("cwd") or "")
     path = os.path.join(relay._dir(home, s["sessionId"]), "session.json")
     disk = relay._read_json(path)
@@ -770,7 +804,7 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
     def child(g):
         if level(g) != "session":
             return (f"step {g[0]['addr']} \"{relay._short(g[0].get('content'), 90)}\", which {LEVEL_WHAT[level(g)]}: "
-                    f"a background subagent, `p4-phi:{level(g)}`, not a session")
+                    f"it goes to {LEVEL_WHERE[level(g)]}, not a session")
         kinds = [child_kind(st.get("content")) for st in g]      # a run takes the model and effort of its hardest step
         hardest = next(st for k in ("design", "build", "static") for st, kd in zip(g, kinds) if kd == k)
         how = level_words(hardest.get("content"))
@@ -784,7 +818,7 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
             "and push.")
     stay = ("; ".join(f"{a}, {why}" for a, why in kept)) or "none"
     subs = [g for g in new[:26] if level(g) != "session"]
-    agents = "" if subs else ""                    # the subagent's name beside its step says enough
+    agents = "" if subs else ""                    # where it goes, named beside its step, says enough
     if cap:
         return (f"{head} Its work steps would each go to a child: {named}. But {cap[0].lower() + cap[1:]} "
                 f"Staying here meanwhile: every step.{agents}")

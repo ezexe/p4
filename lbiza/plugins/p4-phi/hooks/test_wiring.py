@@ -282,7 +282,7 @@ class Matchers(unittest.TestCase):
     def test_subagent_stop_leaves_out_an_empty_agent_type(self):
         m = self.matcher_of("SubagentStop", "subagent-stop")
         self.assertFalse(self.takes(m, ""), m)
-        for name in ("Explore", "general-purpose", "p4-phi:sweep"):
+        for name in ("Explore", "general-purpose", "p4-phi:check"):
             self.assertTrue(self.takes(m, name), name)
 
 

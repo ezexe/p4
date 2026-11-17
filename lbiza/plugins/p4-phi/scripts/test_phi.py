@@ -1362,9 +1362,10 @@ class Rules(unittest.TestCase):
     def test_the_levels_rule_is_given_with_no_configuration_and_p4_json_turns_it_off(self):
         """On in every project, a store or none; only p4.json's phi.levels: false leaves it out."""
         got = self.start(TOP)
-        for word in ("built-in, levels", "`p4-phi:sweep`", "`p4-phi:runner`", "`p4-phi:check`",
-                     "`run_in_background: true`", "completion notification"):
+        for word in ("built-in, levels", "the built-in subagent `Explore`", "`p4-phi:check`",
+                     "`run_in_background: true`"):
             self.assertIn(word, got)
+        self.assertNotIn("p4-phi:runner", got)
         self.assertNotIn("ezexe", phi.LEVELS, "it addresses the session and names no person")
         self.assertIn("built-in, levels", phi.builtin_text())
         with tempfile.TemporaryDirectory() as tmp:
@@ -1376,6 +1377,96 @@ class Rules(unittest.TestCase):
         off = self.start(KID)
         self.assertNotIn("built-in, levels", off)
         self.assertIn("act-don't-wait", off)
+
+    def test_the_levels_rule_leaves_waiting_sleeping_and_polling_to_the_apps_own_tools(self):
+        """The Agent tool's and the shell tools' own descriptions tell a session that a background subagent or command
+        notifies it when it ends, that a foreground `sleep` is blocked and never to poll, and sub-agents.md says "A
+        background subagent's results reach Claude as a completion notification in a later turn". So the rule handed
+        at a session's start holds no sentence of its own on waiting, and still names the background route."""
+        self.assertIn(phi.LEVELS, self.start(TOP))
+        for word in ("sleep", "poll", "never wait", "wait for it", "completion notification", "Once one is started"):
+            self.assertNotIn(word, phi.LEVELS, word)
+        self.assertIn("`run_in_background: true`", phi.LEVELS)
+
+    def test_a_read_across_files_goes_to_the_built_in_explore_subagent_on_a_small_model(self):
+        """sub-agents.md: Explore is "A fast, read-only agent optimized for searching and analyzing codebases." and
+        runs on "the parent conversation's model", and "The per-invocation `model` parameter" is first in the page's
+        model order. So the plugin ships no search agent, and the rule names `Explore` with `model` `haiku` on the
+        call."""
+        self.assertFalse(os.path.exists(os.path.join(ROOT, "agents", "sweep.md")), "the plugin's own copy is gone")
+        self.assertIn("goes to the built-in subagent `Explore`, with `model` `haiku` on the Agent call", phi.LEVELS)
+        self.assertNotIn("sweep", phi.LEVELS)
+        self.assertNotIn("p4-phi:sweep", self.start(TOP))
+
+    def test_the_levels_rule_names_the_read_of_the_plan_limits(self):
+        """The built-in rule `levels` handed at a session's start names the app's own `get_usage`, which reports the
+        account's plan limits, before a batch of starts or Agent calls, once, and names no stop or restart of a
+        running session."""
+        got = self.start(TOP)
+        self.assertIn("Before a batch of session starts or Agent calls, read the plan limits once with "
+                      "`mcp__ccd_session_mgmt__get_usage`", got)
+        self.assertEqual(phi.LEVELS.count("mcp__ccd_session_mgmt__get_usage"), 1)
+        for word in ("stop_session", "restart", "start it again", "set_session_model"):
+            self.assertNotIn(word, phi.LEVELS, word)
+
+    def test_the_levels_rule_says_a_workflow_script_names_a_model_for_each_stage(self):
+        """workflows.md, "Cost": "A model the script names for a stage counts as the per-invocation model in that
+        order. When nothing else assigns one, the agent runs on your session's model." So the rule handed at a
+        session's start tells it to name a model for each stage, in the page's words, and the skill quotes both
+        sentences with the page."""
+        got = self.start(TOP)
+        self.assertIn("A Workflow script names a model for each stage", got)
+        for quote in ("\"A model the script names for a stage counts as the per-invocation model\"",
+                      "\"runs on your session's model\""):
+            self.assertIn(quote, phi.LEVELS)
+        with open(os.path.join(ROOT, "skills", "phi", "SKILL.md"), encoding="utf-8") as f:
+            skill = f.read()
+        self.assertIn("A Workflow script names a model for each stage: https://code.claude.com/docs/en/workflows.md "
+                      "says \"A model the script names for a stage counts as the per-invocation model in that order.\" "
+                      "and \"When nothing else assigns one, the agent runs on your session's model.\"", skill)
+
+    def test_no_p4_setting_names_a_subagents_model_and_the_pages_name_claude_codes_own_routes(self):
+        """sub-agents.md, "Choose a model": "When more than one source sets a model, Claude Code uses the first in
+        this order", the call's `model`, the definition's `model` field, `CLAUDE_CODE_SUBAGENT_MODEL`, the main
+        conversation's model. So p4.json holds no key for a subagent's model or effort, `phi.child_levels` takes a
+        worker's kinds only, and the skill and the README name the native routes with the page."""
+        import p4conf
+        plans = phi.plans
+        for key in p4conf.DEFAULTS["phi"]:
+            self.assertNotIn("agent", key, "no key of p4.json's phi section names a subagent")
+        self.assertEqual(sorted(plans.CHILD_LEVELS_DEFAULT), ["build", "design", "static"])
+        given = plans.child_levels({"check": {"model": "claude-haiku-5-5", "effort": "low"},
+                                    "Explore": {"model": "opus"}})
+        self.assertEqual(given, plans.CHILD_LEVELS_DEFAULT, "a subagent's name is no kind of worker")
+        with open(os.path.join(ROOT, "skills", "phi", "SKILL.md"), encoding="utf-8") as f:
+            skill = f.read()
+        with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as f:
+            readme = f.read()
+        for page in (skill, readme):
+            for word in ("sub-agents.md", "\"Choose a model\"", "`CLAUDE_CODE_SUBAGENT_MODEL`",
+                         "`CLAUDE_CODE_SUBAGENT_MODEL_FORCE`", "`Explore`", "`p4-phi:check`"):
+                self.assertIn(word, page, word)
+        self.assertIn("No p4 setting names a subagent's model or effort, since Claude Code sets both", skill)
+        self.assertIn("p4-phi has no setting for a subagent's model or effort, since Claude Code sets both.", readme)
+
+    def test_a_review_of_a_code_change_goes_to_the_bundled_code_review_skill_and_check_reads_the_rest(self):
+        """code-review-local.md: "Claude can start `/code-review` on its own, without you typing the command" and
+        "without `--fix`, the review's instructions ask Claude for a report only." Its target "can be a pull request
+        number, a branch name, a file path, or a Git revision range", so the plugin's own reviewer is kept for a
+        result that is no code change, and its description sends a code change to the skill."""
+        self.assertIn("a review of a code change that should not lean on this session's own view goes to the bundled "
+                      "skill `code-review`, run with the Skill tool on that change's commits or paths and without "
+                      "`--fix`, so it reports and changes no file", phi.LEVELS)
+        self.assertIn("such a read of a result that is no code change goes to the subagent `p4-phi:check`", phi.LEVELS)
+        self.assertNotIn("a read of a diff", phi.LEVELS, "a diff is the skill's")
+        with open(os.path.join(ROOT, "agents", "check.md"), encoding="utf-8") as f:
+            front = f.read().split("---")[1]
+        said = next(line for line in front.splitlines() if line.startswith("description:"))
+        self.assertIn("a result that is no code change", said)
+        self.assertIn("A code change goes to the bundled skill `code-review` instead.", said)
+        self.assertNotIn("diff", said)
+        self.assertIn("tools: Read, Grep, Glob", front, "it still holds no tool that writes or runs")
+        self.assertEqual(sorted(os.listdir(os.path.join(ROOT, "agents"))), ["check.md"], "the plugin's one agent")
 
 
 class Ids(unittest.TestCase):

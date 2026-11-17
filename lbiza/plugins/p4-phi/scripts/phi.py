@@ -407,6 +407,35 @@ class Me:
         if self.title and self.id:
             GIVEN_TITLES[self.id] = self.title
         project_conf(self.store)
+        plans.PARENT_EFFORT = own_effort(self, payload, other=bool(session))
+
+
+def own_effort(me, payload, other=False):
+    """The effort level the session of this hook or command runs at, which plans.child_level holds every start's
+    effort to: the hook input's `effort.level`, else CLAUDE_EFFORT, which Claude Code sets for hook commands and
+    Bash subprocesses, else the last level the session's record kept. hooks.md, "Common input fields": `effort` is
+    an "Object whose `level` is the effort level setting when the hook runs, including a skill's, subagent's, or
+    `ultrathink` level", so a subagent's call names the subagent's level and is not read, and a command run for
+    another session names its caller's. A level that differs from the record's is kept there. '' where nothing
+    names one."""
+    level = ""
+    if not other and not payload.get("agent_id"):
+        given = payload.get("effort")
+        level = str((given.get("level") if isinstance(given, dict) else "") or os.environ.get("CLAUDE_EFFORT") or "")
+        level = level.strip().lower()
+        level = level if level in plans.EFFORTS else ""
+    if not me.home or not me.id:
+        return level
+    held = load_session(me.home, me.id)
+    kept = str(held.get("effort") or "")
+    if level and level != kept and held.get("sessionId"):   # a session with no record yet keeps none: a later hook does
+        path = os.path.join(session_dir(me.home, me.id), "session.json")
+        with relay.locked(path):
+            s = load_session(me.home, me.id)
+            if s.get("sessionId"):
+                s["effort"] = level
+                _save_session(me.home, s)
+    return level or (kept if kept in plans.EFFORTS else "")
 
 
 # --- sessions --------------------------------------------------------------------------------------------------------
@@ -459,7 +488,7 @@ def _save_session(home, s):
             s[k] = {**disk[k], **(s.get(k) or {})}
     for k in ("rootStep", "shard", "disposable", "doneRetired", "archived", "appRoot", "nudged", "issue",
               "issueLooked", "findingsTold", "controls", "puppeteerSeen", "handedTo",
-              "handedFrom"):
+              "handedFrom", "effort"):
         if k in disk and k not in s:
             s[k] = disk[k]
     if not s.pop("_controlsSet", None) and isinstance(disk.get("controls"), list):
@@ -1074,23 +1103,46 @@ ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves this bui
 # - sub-agents.md, "Run subagents in foreground or background": "Foreground subagents block the main conversation
 #   until complete." and "Background subagents run concurrently while you continue working."; in its frontmatter
 #   table, `background`: "Set to `true` to keep this subagent in the background even when Claude asks to wait for it."
-# - sub-agents.md: "A background subagent's report arrives inside a completion notification, which is marked as an
-#   automated event rather than a message from you."
-# - plugins/components.md, "Agents": "The name form is `<plugin>:<name>`", so agents/sweep.md is `p4-phi:sweep`.
+# - The rule says nothing of waiting, sleeping or polling: the Agent tool's and the shell tools' own descriptions
+#   tell a session that a background subagent or command notifies it when it ends, and sub-agents.md says "A
+#   background subagent's results reach Claude as a completion notification in a later turn."
+# - sub-agents.md, "Built-in subagents", Explore: "A fast, read-only agent optimized for searching and analyzing
+#   codebases." Its model is "the parent conversation's model", so the rule names a small one on the call: "The
+#   per-invocation `model` parameter" is first in the page's model order, and "On an Agent tool call, the parameter
+#   takes a model alias, not a full model ID or `inherit`."
+# - code-review-local.md: "`/code-review` is a bundled skill", "Claude can start `/code-review` on its own, without
+#   you typing the command", "In a terminal session, the review runs as a background subagent with its own context
+#   window", and "without `--fix`, the review's instructions ask Claude for a report only." The page calls that run
+#   "a forked subagent", of which skills.md, "Run skills in a subagent", says "The subagent doesn't see your
+#   conversation history". So a code change is reviewed by that skill. Its target "can be a pull request number, a
+#   branch name, a file path, or a Git revision range", so a result that is no code change has none, and the page's
+#   route past the skill is "Build your own reviewer: write a reviewer subagent or a review skill": that is
+#   agents/check.md.
+# - plugins/components.md, "Agents": "The name form is `<plugin>:<name>`", so agents/check.md is `p4-phi:check`.
+# - The read of the plan limits is the app's own tool, `mcp__ccd_session_mgmt__get_usage`, which plans.LIMITS_FIRST
+#   names: a command hook calls no session tool, so the rule asks the session for the read.
 # - tools-reference.md, "Background commands": "Claude can set `run_in_background: true` to start the command as a
-#   background task and continue working while it runs."
+#   background task and continue working while it runs." interactive-mode.md, "How backgrounding works": "Output is
+#   written to a file and Claude can retrieve it using the Read tool". So a long command needs no agent to run it.
 # - tools-reference.md, "Foreground commands that move to the background": "When a foreground command reaches its
 #   timeout without finishing, Claude Code moves it to the background instead of stopping it, unless the command
 #   starts with `sleep`." The default is `BASH_DEFAULT_TIMEOUT_MS`, "two minutes out of the box".
+REVIEW = ("the bundled skill `code-review`, run with the Skill tool on that change's commits or paths and without "
+          "`--fix`, so it reports and changes no file")
+# workflows.md, "Cost": "Claude Code picks each workflow agent's model in the same order it uses for subagents. A
+# model the script names for a stage counts as the per-invocation model in that order. When nothing else assigns one,
+# the agent runs on your session's model." No line of that page gives a workflow agent an effort of its own.
+WORKFLOW = ("A Workflow script names a model for each stage, since by the workflows page of the Claude Code docs \"A "
+            "model the script names for a stage counts as the per-invocation model\" and an agent with none \"runs "
+            "on your session's model\".")
 LEVELS = ("built-in, levels: work is delegated to where Claude Code runs it best, so this session's own turn is "
-          "never held by it. A search or a read across more than a couple of files goes to the background subagent "
-          "`p4-phi:sweep`; a command expected to run long, such as a test file, a test suite or a build, goes to "
-          "`p4-phi:runner` or to a Bash or PowerShell call of its own with `run_in_background: true`; a read of a "
-          "diff or a result that should not lean on this session's own view goes to `p4-phi:check`. Once one is "
-          "started, go on with other work or end the turn: its completion notification brings the result in a "
-          "later turn, so never wait for it in the foreground, sleep or poll. A worker is started with a "
-          "`model` and an `effort` that fit its step, as the advice that hands out each start call names them; an "
-          "effort above this session's own is not accepted.")
+          "never held by it. A search or a read across more than a couple of files goes to " + plans.EXPLORE + "; "
+          "a command expected to run long, such as a test file, a test suite or a build, goes to " + plans.BACKGROUND
+          + "; a review of a code change that should not lean on this session's own view goes to " + REVIEW + "; "
+          "such a read of a result that is no code change goes to the subagent `p4-phi:check`. "
+          + plans.LIMITS_FIRST + " A worker is "
+          "started with a `model` and an `effort` that fit its step, as the advice that hands out each start call "
+          "names them; an effort above this session's own is not accepted. " + WORKFLOW)
 plans.BUILT_INS = tuple(x.split(": ", 1)[0].replace("built-in, ", "") for x in (BUILT_IN, LEVELS))   # plans.py's names
 LEVELS_ON = True              # p4.json phi.levels: false leaves the delegation rule and its checks out
 TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps an orchestrator's work in it
@@ -1741,7 +1793,7 @@ TREE_CHECK = re.compile(r"(?:^|[\s;&|(])(?:git\s+(?:-C\s+\S+\s+)?(?:log|status|d
 def tree_checked(me, s, st):
     """An orchestrator's read-only check of its trees in a work step, such as a session list, `git log`,
     `gh issue list` or `gh issue view`: counted, and never handed off while they are few. Past TREE_CHECKS in one
-    step it is told once that the rest is a read for `p4-phi:sweep`. None while they are few."""
+    step it is told once that the rest is a read for the built-in Explore subagent. None while they are few."""
     key = nudge_key(st)
     held = s.get("treeChecks") if isinstance(s.get("treeChecks"), dict) else {}
     n = (int(held.get("n") or 0) if held.get("key") == key else 0) + 1
@@ -1752,8 +1804,8 @@ def tree_checked(me, s, st):
     RAN["tree_checks"] = n
     return (f"phi (p4-phi): step {st.get('addr')} has now run {n} read-only checks of its trees here. A few, such as "
             f"a session list, `git log`, `gh issue list` or `gh issue view`, are this orchestrator's own "
-            f"orchestration; past {TREE_CHECKS} the rest is a read across the trees: hand it to the background "
-            f"subagent `p4-phi:sweep`. Said once for this step.")
+            f"orchestration; past {TREE_CHECKS} the rest is a read across the trees: hand it to "
+            f"{plans.EXPLORE}. Said once for this step.")
 
 
 def h_puppeteer_tool(payload):
@@ -1801,15 +1853,17 @@ def h_nudge(payload):
         if str(payload.get("tool_name") or "") in SHELL_TOOLS and TREE_CHECK.search(str(inp.get("command") or "")):
             return tree_checked(me, s, st)         # a few read-only checks of its trees are orchestration
         return None
+    level = plans.level_of(st.get("content")) if LEVELS_ON else "session"
+    if level == "run" and inp.get("run_in_background") is True:
+        return None                                # the step's command already runs where the rule sends it
     s["nudged"] = (list(s.get("nudged") or []) + [nudge_key(st)])[-50:]
     save_session(me.home, s)
     nudge_arm(me, s)
     RAN["nudge"] = st.get("addr")
-    level = plans.level_of(st.get("content")) if LEVELS_ON else "session"
-    if level != "session":                         # a step a subagent does needs no session
+    if level != "session":                         # a step that only reads or only runs a command needs no session
         return (f"phi (p4-phi): this is the orchestrator, kept free for orchestration, and step "
                 f"{st.get('addr')}, \"{cut(clean(st.get('content')), 120)}\", {plans.LEVEL_WHAT[level]}: hand it to "
-                f"the background subagent `p4-phi:{level}`. "
+                f"{plans.LEVEL_WHERE[level]}. "
                 f"Said once for this step.")
     return (f"phi (p4-phi): this is the orchestrator, kept free for orchestration, and step {st.get('addr')}, "
             f"\"{cut(clean(st.get('content')), 120)}\", is work: hand it to a worker with "

@@ -2,7 +2,7 @@
 
 What linked Claude Code sessions hand each other, and retrieval from the project's own history, in one plugin.
 The skill `skills/phi/SKILL.md` lists the commands a session runs and what p4-phi does not do.
-This page holds how to install p4-phi, the docs sentences its delegation rests on, the model and effort a worker starts with, what p4-phi does for a puppeteer, and the settings, none of which has to be set.
+This page holds how to install p4-phi, the docs sentences its delegation rests on, the model and effort a worker starts with, what sets a subagent's, what p4-phi does for a puppeteer, and the settings, none of which has to be set.
 
 ## Install
 
@@ -24,11 +24,15 @@ Every behaviour below rests on a sentence of the Claude Code docs at `https://co
 
 | What the plugin does | The page | The sentence it rests on |
 | :- | :- | :- |
-| Ships three agents in `agents/`, named `p4-phi:sweep`, `p4-phi:runner` and `p4-phi:check` | `plugins/components.md`, "Agents" | "Each Markdown file under `agents/` defines one" and "The name form is `<plugin>:<name>`" |
-| Sets `model`, `effort`, `maxTurns`, `tools` and `background` on each, and none of `hooks`, `mcpServers` or `permissionMode` | `plugins/components.md`, "Frontmatter fields in plugin agents" | "Supported fields: `name`, `description`, `model`, `effort`, `maxTurns`, ... `tools`, ... `background`" and "Ignored fields: `permissionMode`, `hooks`, `mcpServers`, and `initialPrompt`" |
-| Keeps each agent in the background | `sub-agents.md`, "Supported frontmatter fields" | "Set to `true` to keep this subagent in the background even when Claude asks to wait for it." |
-| Tells a session to go on or end its turn, and never to wait, sleep or poll | `sub-agents.md` | "Background subagents run concurrently while you continue working." and "A background subagent's report arrives inside a completion notification" |
+| Sends a search or a read across files to the built-in subagent `Explore`, and ships no search agent of its own | `sub-agents.md`, "Built-in subagents" | "A fast, read-only agent optimized for searching and analyzing codebases." and "Claude delegates to Explore when it needs to search or understand a codebase without making changes." |
+| Names `model` `haiku` on that Agent call | `sub-agents.md`, "Built-in subagents" and "Choose a model" | Explore's model is "the parent conversation's model", and the first source in the model order is "The per-invocation `model` parameter, which Claude can pass when it starts the subagent. On an Agent tool call, the parameter takes a model alias, not a full model ID or `inherit`." |
+| Sends a review of a code change to the bundled skill `code-review`, run without `--fix` | `code-review-local.md`, "Let Claude start the review" and "What the review reads and edits" | "Claude can start `/code-review` on its own, without you typing the command" and "without `--fix`, the review's instructions ask Claude for a report only." |
+| Keeps a reviewer of its own only for a result that is no code change | `code-review-local.md`, "Choose what to review" and "Change or build on the review" | "A target can be a pull request number, a branch name, a file path, or a Git revision range." and "Build your own reviewer: write a reviewer subagent or a review skill" |
+| Ships that one agent in `agents/`, named `p4-phi:check` | `plugins/components.md`, "Agents" | "Each Markdown file under `agents/` defines one" and "The name form is `<plugin>:<name>`" |
+| Sets `model`, `effort`, `maxTurns`, `tools` and `background` on it, and none of `hooks`, `mcpServers` or `permissionMode` | `plugins/components.md`, "Frontmatter fields in plugin agents" | "Supported fields: `name`, `description`, `model`, `effort`, `maxTurns`, ... `tools`, ... `background`" and "Ignored fields: `permissionMode`, `hooks`, `mcpServers`, and `initialPrompt`" |
+| Keeps that agent in the background | `sub-agents.md`, "Supported frontmatter fields" | "Set to `true` to keep this subagent in the background even when Claude asks to wait for it." |
 | Tells a session to start a long command with `run_in_background: true` | `tools-reference.md`, "Background commands" | "Claude can set `run_in_background: true` to start the command as a background task and continue working while it runs." |
+| Ships no agent that runs a command, since the session reads the command's output file itself | `interactive-mode.md`, "How backgrounding works" | "Output is written to a file and Claude can retrieve it using the Read tool" |
 | Lets a long foreground command run as sent, an orchestrator's too, since the app moves it to the background at its timeout | `tools-reference.md`, "Foreground commands that move to the background" | "When a foreground command reaches its timeout without finishing, Claude Code moves it to the background instead of stopping it" |
 | Keeps the python its runners proved on Windows in the plugin's data folder | `plugins/manifest-reference.md`, "Environment variables" | "`${CLAUDE_PLUGIN_ROOT}` changes when the plugin updates, so don't write state there." and `${CLAUDE_PLUGIN_DATA}` is "kept across plugin updates" |
 
@@ -42,6 +46,20 @@ These are the defaults:
 | `static`: docs pages, a rename, a version bump and other mechanical work that names no code | `claude-sonnet-5-5` | `medium` |
 | `build`: every other step, such as a change to behaviour or anything that names code | the parent session's own | `high` |
 | `design`: a design or review step | the parent session's own | `high` |
+
+No start is named above the effort of the session that makes it.
+p4-phi reads that session's level from the hook input's `effort.level`, or from `CLAUDE_EFFORT`, keeps the last level seen on the session's record, and holds each start's `effort` to it.
+The level is Claude Code's own: `hooks.md`, "Common input fields", calls `effort` an "Object whose `level` is the effort level setting when the hook runs" and says "`$CLAUDE_EFFORT` holds the same level."
+The limit is the app's and no docs page states it: a started session's effort is at most its starter's, which `scripts/claude_code_limits.json` logs.
+
+p4-phi has no setting for a subagent's model or effort, since Claude Code sets both.
+`sub-agents.md`, "Choose a model", gives the order of the sources: "The per-invocation `model` parameter, which Claude can pass when it starts the subagent", then "The `model` field in the subagent's definition, including `inherit`", then "The `CLAUDE_CODE_SUBAGENT_MODEL` environment variable", then "The main conversation's model, or the spawning subagent's model for a nested subagent".
+
+| Subagent | What sets its model and effort | How a project or ezexe sets another |
+| :- | :- | :- |
+| `Explore`, Claude Code's own | The `model` `haiku` the delegation rule names on the Agent call, the first source in the order | Another `model` on the call. With no `model` on the call, a file named `Explore` under `.claude/agents/` or `~/.claude/agents/`: "A user or project subagent named `Explore` overrides the built-in and keeps its own `model` field" |
+| `p4-phi:check`, the plugin's own | `model: inherit` and `effort: high` in `agents/check.md` | A `model` or an `effort` on the Agent call: "The parameter overrides the `effort` field", and for the effort "The `CLAUDE_CODE_EFFORT_LEVEL` environment variable takes precedence over both." |
+| Every subagent | One model under `env` of a settings file: "set `CLAUDE_CODE_SUBAGENT_MODEL` to that model and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` to `1`" | "While `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is on, Claude Code ignores the `model` field in subagent definitions, and Claude can't pass a model when it starts a subagent." |
 
 ## A puppeteer and the sessions it controls
 

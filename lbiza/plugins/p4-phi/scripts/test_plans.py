@@ -92,8 +92,8 @@ class Tasks(unittest.TestCase):
         plans.keep_in_flight(s, {"background_tasks": [
             {"id": "bsmoke001", "type": "shell", "status": "running", "description": "smoke", "command": "sh smoke.sh",
              "extra": 1},
-            {"id": "a8ed9430d359ce61d", "type": "subagent", "status": "running", "description": "sweep",
-             "agent_type": "p4-phi:sweep"}]})
+            {"id": "a8ed9430d359ce61d", "type": "subagent", "status": "running", "description": "search",
+             "agent_type": "Explore"}]})
         self.assertEqual([t["id"] for t in plans.in_flight(s)], ["bsmoke001", "a8ed9430d359ce61d"])
         self.assertNotIn("extra", s["backgroundTasks"][0])
         self.assertTrue(s["backgroundAt"])
@@ -665,7 +665,7 @@ class TreeOfPlans(unittest.TestCase):
 
 class Levels(unittest.TestCase):
     """Delegation: a long foreground command runs as sent with no line, since the app moves it to the background at
-    its own timeout; a step is named for the subagent that does it."""
+    its own timeout; a step is named for where it runs."""
 
     LONG = {"command": "cd scripts && python -I -X utf8 test_flush.py 2>&1 | tail -3", "description": "Run the tests"}
 
@@ -719,9 +719,9 @@ class Levels(unittest.TestCase):
         self.assertEqual(self.pre(TOP, {"command": "python other.py", "run_in_background": True}), {})
 
     def test_each_step_is_named_for_the_level_it_runs_at(self):
-        for text, level in (("Find where the exporter is configured across src/", "sweep"),
-                            ("Read the hooks docs and list what PreToolUse may return", "sweep"),
-                            ("Run test_flush.py", "runner"), ("Re-run the build", "runner"),
+        for text, level in (("Find where the exporter is configured across src/", "read"),
+                            ("Read the hooks docs and list what PreToolUse may return", "read"),
+                            ("Run test_flush.py", "run"), ("Re-run the build", "run"),
                             ("Run the tests and fix what fails", "session"),
                             ("Port the exporter to the new writer", "session"),
                             ("Find and remove the dead flags", "session")):
@@ -729,15 +729,17 @@ class Levels(unittest.TestCase):
         p = self.t.proj
         ctx = self.plan(TOP, items("Find where the exporter is configured across src/", "Run test_flush.py",
                                    f"Port the exporter in {p}/src/export/flush.py to the new writer"))
-        self.assertIn("which only reads or searches: a background subagent, `p4-phi:sweep`, not a session", ctx)
-        self.assertIn("which only runs a command: a background subagent, `p4-phi:runner`, not a session", ctx)
+        self.assertIn("which only reads or searches: it goes to the built-in subagent `Explore`, with `model` `haiku` "
+                      "on the Agent call, not a session", ctx)
+        self.assertIn("which only runs a command: it goes to a Bash or PowerShell call of its own with "
+                      "`run_in_background: true`, not a session", ctx)
         self.assertIn("mcp__ccd_session__start_session", ctx, "the step that writes still goes to a worker")
         self.assertIn("split by the files they write", ctx)
         s = relay._session(self.t.p4, TOP)
         plain = plans.top_advice(self.t.p4, {**s, "splitAdvised": []}, {"steps": [
             {"addr": "9", "content": "Find where the ports table is read across lib/", "status": "pending"}]},
             True, "", levels=False)
-        self.assertNotIn("p4-phi:sweep", plain, "with delegation off every work step is a child's")
+        self.assertNotIn("`Explore`", plain, "with delegation off every work step is a child's")
 
     def test_no_start_call_or_card_is_handed_out_with_neither_key(self):
         """A child's card advice carries the `model` and `effort` keys, the plugin-gap line hands no start call at
@@ -772,6 +774,27 @@ class Levels(unittest.TestCase):
                                  "prompt": "Rebuild it in train.py.\nModel: ranker.pt is rebuilt"})
         self.assertNotIn("model", call, "its kind's choice stands: a build inherits")
         self.assertEqual(call["effort"], "high")
+
+    def test_the_advice_for_a_batch_of_starts_names_the_read_of_the_plan_limits(self):
+        """The advice of plans.top_advice for two work steps names the app's own `get_usage`, which reports the
+        account's plan limits, once, and names no stop or restart of a running session. The advice a worker gets for
+        steps that can each run on their own carries the same line."""
+        s = relay._session(self.t.p4, TOP)
+        said = plans.top_advice(self.t.p4, {**s, "splitAdvised": []}, {"steps": [
+            {"addr": "1", "content": "Write the puppeteer pages under dox/", "status": "pending"},
+            {"addr": "2", "content": "Change how plans.py reads the address of a step", "status": "pending"}]}, True, "")
+        self.assertIn("Before a batch of session starts or Agent calls, read the plan limits once with "
+                      "`mcp__ccd_session_mgmt__get_usage`", said)
+        self.assertEqual(said.count("mcp__ccd_session_mgmt__get_usage"), 1)
+        self.assertLess(said.index("get_usage"), said.index("Each call carries the `model` and `effort`"),
+                        "the read comes before the levels are named")
+        for word in ("stop_session", "restart", "start it again", "set_session_model"):
+            self.assertNotIn(word, said, word)
+        self.assertEqual(plans.LEVEL_HOW.count("mcp__ccd_session_mgmt__get_usage"), 1)
+        p = self.t.proj
+        kid = self.plan(A, items(f"Edit {p}/src/export/flush.py to write through the new writer",
+                                 f"Rewrite the flush page in {p}/docs/flush.md with the new calls"))
+        self.assertEqual(kid.count("mcp__ccd_session_mgmt__get_usage"), 1, "a worker's split advice names it too")
 
     def test_a_child_session_is_started_with_a_model_and_an_effort_that_fit_its_step(self):
         """A child that writes static pages under dox/ starts on a cheaper model and a lower effort than its parent."""
@@ -831,6 +854,89 @@ class Levels(unittest.TestCase):
             self.assertEqual(plans.child_level(script)["effort"], "high", "an effort the app does not have is ignored")
         finally:
             plans.CHILD_LEVELS = old
+
+
+class ParentEffort(unittest.TestCase):
+    """The app starts no session above its starter's effort, a limit no docs page states and
+    scripts/claude_code_limits.json logs. hooks.md, "Common input fields", gives every hook with a tool-use context
+    `effort`, an "Object whose `level` is the effort level setting when the hook runs", and says "`$CLAUDE_EFFORT`
+    holds the same level." So p4-phi reads the starter's level there, keeps the last one seen on the session's record,
+    and names no start's effort above it."""
+
+    BUILD = "Change how plans.py reads the address of a step"
+    DOCS = "Write the puppeteer pages under dox/"
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP, title="top")
+        self.t.say(TOP, "Build the exporter")
+        self.env = os.environ.pop("CLAUDE_EFFORT", None)     # a run from a session's shell carries that session's own
+        self.me = type("Me", (), {"home": self.t.p4, "id": TOP})()
+
+    def tearDown(self):
+        plans.PARENT_EFFORT = ""
+        os.environ.pop("CLAUDE_EFFORT", None)
+        if self.env is not None:
+            os.environ["CLAUDE_EFFORT"] = self.env
+        self._tmp.cleanup()
+
+    def plan(self, host, inp, **payload):
+        r = self.t.hook("plan", host, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                                       "tool_input": inp, "tool_response": "Plan updated.", **payload})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
+
+    def test_a_start_call_for_a_build_step_from_a_starter_at_medium_names_no_effort_above_medium(self):
+        p = self.t.proj
+        ctx = self.plan(TOP, items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
+                                   f"Rewrite the parser in {p}/src/parse.py for the new grammar", "Commit and push"),
+                        effort={"level": "medium"})
+        self.assertIn("with no `model`, so it inherits this session's, `effort` `medium`", ctx)
+        for above in ("high", "xhigh", "max"):
+            self.assertNotIn(f"`effort` `{above}`", ctx, "no start is named above its starter's effort")
+        self.assertEqual(relay._session(self.t.p4, TOP).get("effort"), "medium", "the level seen is kept on the record")
+        plans.PARENT_EFFORT = "medium"
+        self.assertEqual(plans.child_level(self.BUILD),
+                         {"model": "inherit", "effort": "medium", "kind": "build", "capped": True})
+        call = plans.with_level({"context": "fresh", "title": "the step address",
+                                 "prompt": "Change how plans.py reads the address of a step.\nFiles: scripts/plans.py"})
+        self.assertEqual(call["effort"], "medium")
+        self.assertIn("Model and effort: the parent session's own model at medium effort, since this is a build that "
+                      "changes behaviour, held to the parent session's own effort.", call["prompt"])
+        own = plans.with_level({"context": "fresh", "title": "x", "prompt": "Fix relay.py.\nEffort: max"})
+        self.assertEqual(own["effort"], "medium", "an effort the brief names itself is held to the starter's too")
+
+    def test_an_effort_at_or_below_the_starters_is_named_as_its_kind_gives_it(self):
+        for mine, docs, build in (("", "medium", "high"), ("low", "low", "low"), ("medium", "medium", "medium"),
+                                  ("high", "medium", "high"), ("xhigh", "medium", "high"), ("max", "medium", "high")):
+            plans.PARENT_EFFORT = mine
+            self.assertEqual((plans.child_level(self.DOCS)["effort"], plans.child_level(self.BUILD)["effort"]),
+                             (docs, build), mine or "no level seen")
+        plans.PARENT_EFFORT = "high"
+        self.assertNotIn("capped", plans.child_level(self.BUILD), "an effort its starter can give is not marked")
+        self.assertNotIn("held to", plans.level_line(plans.child_level(self.BUILD)))
+
+    def test_the_level_is_read_from_the_hook_input_or_the_variable_and_the_last_one_seen_is_kept(self):
+        me = self.me
+        self.assertEqual(phi.own_effort(me, {}), "", "nothing names one")
+        self.assertEqual(phi.own_effort(me, {"effort": {"level": "medium"}}), "medium")
+        self.assertEqual(relay._session(self.t.p4, TOP)["effort"], "medium")
+        self.assertEqual(phi.own_effort(me, {}), "medium", "a hook input with no effort: the record's last level")
+        self.assertEqual(phi.own_effort(me, {"effort": {"level": "max"}, "agent_id": "a1"}), "medium",
+                         "a subagent's call names the subagent's level")
+        self.assertEqual(phi.own_effort(me, {"effort": {"level": "max"}}, other=True), "medium",
+                         "a command run for another session names its caller's level")
+        self.assertEqual(phi.own_effort(me, {"effort": {"level": "loud"}}), "medium", "no level the app has")
+        self.assertEqual(phi.own_effort(me, {"effort": "high"}), "medium", "no object with a level")
+        os.environ["CLAUDE_EFFORT"] = "low"
+        self.assertEqual(phi.own_effort(me, {}), "low", "CLAUDE_EFFORT holds the same level")
+        self.assertEqual(phi.own_effort(me, {"effort": {"level": "xhigh"}}), "xhigh", "the hook input comes first")
+        self.assertEqual(relay._session(self.t.p4, TOP)["effort"], "xhigh")
+        gone = type("Me", (), {"home": self.t.p4, "id": "local_norecord"})()
+        self.assertEqual(phi.own_effort(gone, {"effort": {"level": "high"}}), "high")
+        self.assertFalse(os.path.exists(os.path.join(self.t.p4, "phi", "sessions", "local_norecord")),
+                         "a session with no record yet gets none made")
 
 
 class TopOrchestrates(unittest.TestCase):
@@ -936,6 +1042,25 @@ class TopOrchestrates(unittest.TestCase):
         self.plan(A, items(f"Port the exporter in {p}/src/export/flush.py to the new writer", "Commit it"))
         self.assertEqual(self.check(A, "Edit", {"file_path": f"{p}/src/export/flush.py"}, "toolu_n7"), "",
                          "a child is never nudged")
+
+    def test_a_step_that_only_runs_a_command_goes_to_a_background_command_and_the_plugin_ships_no_runner(self):
+        """tools-reference.md, "Background commands": "Claude can set `run_in_background: true` to start the command
+        as a background task and continue working while it runs.", and interactive-mode.md, "How backgrounding
+        works": "Output is written to a file and Claude can retrieve it using the Read tool". So the plugin ships no
+        agent that runs a command: an orchestrator's step that only runs one is nudged to a background call of its
+        own, and a call that is in the background already gets no line."""
+        self.assertFalse(os.path.exists(os.path.join(os.path.dirname(HERE), "agents", "runner.md")))
+        self.assertNotIn("runner", phi.LEVELS)
+        self.assertIn("goes to a Bash or PowerShell call of its own with `run_in_background: true`", phi.LEVELS)
+        self.plan(TOP, items("Run test_flush.py", "Commit and push"))
+        run = {"command": "python test_flush.py"}
+        self.assertEqual(self.check(TOP, "Bash", {**run, "run_in_background": True}, "toolu_b1"), "",
+                         "it runs where the rule sends it")
+        said = self.check(TOP, "Bash", run, "toolu_b2")
+        self.assertIn("only runs a command: hand it to a Bash or PowerShell call of its own with "
+                      "`run_in_background: true`", said)
+        self.assertNotIn("p4-phi:", said, "no agent of the plugin's own is named for a command")
+        self.assertEqual(self.check(TOP, "Bash", run, "toolu_b3"), "", "said once for the step")
 
     def test_a_child_marked_report_when_done_leaves_a_replaces_note_and_is_named_to_its_parent(self):
         t, C = self.t, self.C
@@ -1415,7 +1540,8 @@ class WaitsOnReports(unittest.TestCase):
             self.assertEqual(self.check(TOP, "Bash", {"command": cmd}, f"tu-r{k}"), "", cmd)
         said = self.check(TOP, "Bash", {"command": "git log --stat -3"}, "tu-r7")
         self.assertIn("has now run 7 read-only checks of its trees here", said)
-        self.assertIn("`p4-phi:sweep`", said)
+        self.assertIn("hand it to the built-in subagent `Explore`, with `model` `haiku` on the Agent call", said)
+        self.assertNotIn("p4-phi:", said, "no agent of the plugin's own is named for a read")
         self.assertNotIn("worker", said)
         self.assertEqual(self.check(TOP, "Bash", {"command": "git log -1"}, "tu-r8"), "", "said once for the step")
         self.assertIn("is work: hand it to a worker",

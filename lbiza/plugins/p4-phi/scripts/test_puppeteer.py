@@ -377,7 +377,8 @@ class WorkerSplit(Base):
         self.assertIn("\"Edit ", sessions)
         self.assertIn("\"Rewrite the flush page", sessions)
         self.assertNotIn("Find every caller", sessions, "a read is no session of its own")
-        self.assertIn("`p4-phi:sweep`", ctx.split("can each run on their own")[1])
+        self.assertIn("the built-in subagent `Explore`, with `model` `haiku` on the Agent call",
+                      ctx.split("can each run on their own")[1])
 
     def test_a_subagent_that_wrote_files_is_a_level_miss_on_the_ledger(self):
         t = self.t
