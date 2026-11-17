@@ -5,25 +5,32 @@ request's topic, the session that holds it by full title and id, its state and w
 appended to <puppeteer folder>/asks.jsonl, folded by id and compacted in steps as the file grows; asks.md is the
 page, rewritten when it changes, and a short line naming it is handed beside each of the puppeteer's messages.
 
-  opened   a message of ezexe's with a work word that is not a status question and not a reply opens a row, whatever
-           its length and also while another row waits on ezexe: a message the app marks as another session's opens
-           none, and phi.py hands only ezexe's own messages here. The topic is a short phrase of at most TOPIC_CHARS,
-           never a run of ezexe's message. The same words again join their row while it is live, and open a new row
-           once it is finished or on another day.
+  opened   a message of ezexe's that holds a request opens a row, whatever its length and also while another row
+           waits on ezexe: a work word, outside a status question, past a reply's first words and a row's id. A
+           message the app marks as another session's opens none, and phi.py hands only ezexe's own messages here.
+           The topic is a short phrase of at most TOPIC_CHARS, never a run of ezexe's message. The same words again
+           join their row while it is live, and open a new row once it is finished or on another day.
   holder   the session the puppeteer sends a request to with SendMessage, read at the send by phi.h_go_guard, or an
            orchestrator newly under its control: the open row whose topic their own words share, else, for a send to
            a controlled session or a start, the row the turn works on. Its turns are counted in its own store, found
-           from the app's record when it is not a controlled session; when no store is found, only its turns after
-           the row took it count.
+           from the app's record when it is not a controlled session; when no store is found, only its turns ended
+           after the row took it count, read by their exact times.
   state    open until the row's next message reads the turn on it: it waits on ezexe when that turn ended on a
-           question, and is answered when the turn ended without one. It is carried when ezexe's next message comes
-           before any turn ended; another session's message, which can come inside the turn, carries nothing. A held row is routed or started, working while the holder is inside a turn, reported once the
-           holder ended a turn since it took the request, and done for good once one of those turns was shown done;
-           closed for good once the holder left the address book, archived or no longer live, with no such turn.
-  waits    the last line of that turn, until a message of ezexe's answers it: one that names the row by its id, a
-           reply such as "yes, push it" or "go ahead", or any other that is neither a request nor a question. A reply
-           answers the waiting row whose topic it shares SHARED words with, else the latest. A request or a question
-           of ezexe's leaves the wait in place.
+           question or offered ezexe buttons with mcp__ccd_turn__wrap_up, and is answered when the turn ended without
+           either. It is carried when ezexe's next message comes before any turn ended; another session's message,
+           which can come inside the turn, carries nothing. A held row is routed or started, working while the holder
+           is inside a turn, reported once the holder ended a turn since it took the request, and done for good once
+           one of those turns was shown done. A holder the address book leaves out is read from its own store. It is
+           closed for good once the holder is archived or no longer live with no such turn. A held row whose holder
+           is not inside a turn and ended none for KEEP_S ends as it stands: reported once it reported, else carried.
+           A row shows a finished state only with its end kept.
+  waits    the last line of that turn, or the question its buttons answer, with their labels, until a message of
+           ezexe's answers it: a button's label, the row's id, a reply such as "yes, push it" or "go ahead", or any
+           other that holds no request and is no question. A reply answers the waiting row whose topic it shares
+           SHARED words with, else the latest. What follows a reply's first words or a row's id, when it asks for
+           work on another topic in SHARED words of its own, opens a row of its own; a reply then answers the wait as
+           well only when that request is a quick thing's words, and a row's id always does. A question of ezexe's
+           leaves the wait.
 
 controls.PHI is phi.py, set when phi.py is imported; every function here is called from phi.py.
 """
@@ -100,16 +107,18 @@ def rows(home, sid):
         if kind == "opened":
             out[rid] = {"id": rid, "topic": r.get("topic", ""), "said": r.get("said", ""),
                         "opened": r.get("time", ""), "turnBefore": r.get("turnBefore", ""), "holder": "",
-                        "home": "", "base": 0, "how": "", "routed": "", "waits": "", "asked": [], "end": "",
-                        "ended": ""}
+                        "home": "", "base": 0, "how": "", "routed": "", "at": "", "waits": "", "offered": [],
+                        "asked": [], "end": "", "ended": ""}
             continue
         if rid not in out:
             continue
         if kind == "holder" and not out[rid]["holder"]:
             out[rid].update(holder=r.get("holder", ""), home=r.get("home", ""), base=r.get("base") or 0,
-                            how=r.get("how", ""), waits="", routed=r.get("time", ""), end="", ended="")
+                            how=r.get("how", ""), waits="", routed=r.get("time", ""), at=r.get("at", ""), end="",
+                            ended="")
         elif kind == "waits":
             out[rid]["waits"] = r.get("waits", "")
+            out[rid]["offered"] = [x for x in r.get("offered") or [] if isinstance(x, str)]
             if r.get("turn"):
                 out[rid]["asked"].append(r["turn"])
         elif kind == "end":                        # answered, carried or done: kept, never read again
@@ -134,14 +143,30 @@ def _compact(home, sid, state):
         lines.append({"kind": "opened", "id": r["id"], "topic": r["topic"], "said": r["said"], "time": r["opened"],
                       "turnBefore": r["turnBefore"]})
         lines.append({"kind": "folded", "id": r["id"], "time": _now(),
-                      **{k: r[k] for k in ("holder", "home", "base", "how", "routed", "waits", "asked", "end",
-                                           "ended")}})
+                      **{k: r[k] for k in ("holder", "home", "base", "how", "routed", "at", "waits", "offered",
+                                           "asked", "end", "ended")}})
     _phi().write_atomic(path, "".join(json.dumps(x, ensure_ascii=False) + "\n" for x in lines))
     state["compactedAt"] = len(lines)
 
 
 def words(text):
     return _phi().puppeteer.words(text)
+
+
+def quick(text):
+    """True for a message of fewer content words than a quick thing has, such as "push it"."""
+    return len(words(text)) < _phi().puppeteer.QUICK_WORDS
+
+
+def _label(text):
+    return " ".join(re.sub(r"[^\w\s']", " ", str(text or "").lower()).split())
+
+
+def _rest(text):
+    """A message past the ids of rows it names and a reply's first words: what it asks besides its answer."""
+    rest = ROW_ID.sub(" ", str(text or ""))
+    m = REPLY.match(rest)
+    return (rest[m.end():] if m else rest).strip(" \t\n,.;:!-")
 
 
 def asking(text):
@@ -184,7 +209,7 @@ def _hold(home, sid, rid, target, store, how):
     report. With no folder of the holder's in `store`, the count is -1, and only its turns after this one count."""
     known = bool(store) and os.path.isdir(relay._dir(store, target))
     _add(home, sid, {"kind": "holder", "id": rid, "holder": target, "home": store if known else "", "how": how,
-                     "base": len(_turn_lines(store, target)) if known else -1})
+                     "base": len(_turn_lines(store, target)) if known else -1, "at": _phi().now_exact()})
 
 
 def _credit(have, text):
@@ -206,13 +231,15 @@ def _credit(have, text):
 def on_message(home, s, req, last_turn=None):
     """At each message of a puppeteer, before its other lines. First what came since the message before: an
     orchestrator newly under its control holds the row its title and task share words with, else the row that
-    message worked on; that row, still with no holder and no wait, waits on ezexe when a turn since ended on a
-    question, and is answered when a turn ended without one. When none ended, ezexe's message carries it, and
-    another session's message, which can come inside the turn, leaves it to work on. Then this message, `req`,
-    ezexe's own, '' for any other: one that names a waiting row by its id answers it, and so does a reply such as
-    "yes, push it", the row whose topic it shares or else the latest; a request opens a row of its own, so a
-    request is never taken for an answer; a question leaves every wait in place; any other message answers the
-    latest row that waits. Returns the row this turn works on, '' for none."""
+    message worked on; each row that message worked on, still with no holder and no wait, waits on ezexe when a turn
+    since ended on a question or offered buttons, and is answered when a turn ended without either. When none
+    ended, ezexe's message carries it, and another session's message, which can come inside the turn, leaves it to
+    work on. Then this message, `req`, ezexe's own, '' for any other: a button's label answers the row that offered
+    it; a row's id answers that row; a reply such as "yes, push it" answers the row whose topic it shares or else
+    the latest. What follows a reply's first words or a row's id, when it is a request of more than a quick thing's
+    words on another topic, opens a row of its own, and a reply that holds one answers nothing. Any other request
+    opens a row, a question leaves every wait in place, and any other message answers the latest row that waits.
+    Returns the row this turn works on, '' for none."""
     sid = s["sessionId"]
     state = relay._read_json(_state_path(home, sid))
     now = state.get("now") or ""
@@ -229,46 +256,61 @@ def on_message(home, s, req, last_turn=None):
                 _hold(home, sid, r["id"], k, ctl[k], "started")
                 r["holder"] = k
     state["known"] = sorted(ctl)
-    mine = next((r for r in have if r["id"] == now), None)
-    keep = ""
-    if mine and not mine["holder"] and not mine["waits"] and not mine["end"]:
+    keep = []
+    for mine in [r for r in have if r["id"] in [now] + list(state.get("also") or [])]:
+        if mine["holder"] or mine["waits"] or mine["end"]:
+            continue
+        rid = mine["id"]
         if turn and turn != mine["turnBefore"] and turn not in mine["asked"]:
             report = str(t.get("report") or "").strip()
-            if report and QUESTION.search(report):
-                _add(home, sid, {"kind": "waits", "id": now, "turn": turn,
-                                 "waits": report.rsplit("\n", 1)[-1][-300:]})
+            offered = [x for x in t.get("offered") or [] if isinstance(x, str) and x.strip()]
+            if report and QUESTION.search(report) or offered:
+                said = str(t.get("ask") or "").strip() or report.rsplit("\n", 1)[-1]
+                _add(home, sid, {"kind": "waits", "id": rid, "turn": turn, "waits": said[-300:],
+                                 "offered": offered[:6]})
             else:
-                _add(home, sid, {"kind": "end", "id": now, "end": "answered"})
+                _add(home, sid, {"kind": "end", "id": rid, "end": "answered"})
         elif req:
-            _add(home, sid, {"kind": "end", "id": now, "end": "carried"})   # ezexe moved on before its turn ended
+            _add(home, sid, {"kind": "end", "id": rid, "end": "carried"})   # ezexe moved on before its turn ended
         else:
-            keep = now                             # another session's message, maybe inside the turn: still on it
+            keep.append(rid)                       # another session's message, maybe inside the turn: still on it
     have = rows(home, sid)
-    now = keep
+    now, also = (keep[0], keep[1:]) if keep else ("", [])
     if req:
         waiting = [r for r in have if r["waits"]]
         named = ROW_ID.search(req)
-        hit = next((r for r in waiting if named and r["id"] == f"ask-{named.group(1)}"), None)
+        pressed = next((r for r in reversed(waiting) if _label(req) in {_label(x) for x in r["offered"]}), None)
+        hit = pressed or next((r for r in waiting if named and r["id"] == f"ask-{named.group(1)}"), None)
+        rest = _rest(req)
         if not hit and waiting and REPLY.match(req):
             hit = next((r for r in reversed(waiting) if len(words(req) & words(r["topic"])) >= SHARED),
                        None) or waiting[-1]
-        if not hit and request(req):
-            same = next((r for r in have if r["said"] == _key(req) and _live(r)), None)
+        new = ""                                   # a request beside the answer, on another topic than its row's
+        if hit and not pressed and request(rest) and len(words(rest) & words(hit["topic"])) < SHARED \
+                and len(words(rest) - words(hit["topic"]) - words(hit["waits"])) >= SHARED:
+            new = rest                             # "push it" asks nothing new; "sync the stores" does
+            if not named and not quick(rest):      # "ok, now start the billing dashboard": a request, no answer
+                hit = None
+        if hit and new or not hit and request(req):
+            new = new or req
+            same = next((r for r in have if r["said"] == _key(new) and _live(r)), None)
             if same:                               # the same words again, while their row is live
                 now = "" if same["holder"] or same["waits"] else same["id"]
             else:
                 now = f"ask-{len(have) + 1}"
-                _add(home, sid, {"kind": "opened", "id": now, "topic": topic_of(req), "said": _key(req),
+                _add(home, sid, {"kind": "opened", "id": now, "topic": topic_of(new), "said": _key(new),
                                  "turnBefore": turn})
         elif not hit and waiting and not asking(req):
             hit = next((r for r in reversed(waiting) if len(words(req) & words(r["topic"])) >= SHARED),
                        None) or waiting[-1]
         if hit:                                    # ezexe's answer: the row works on again from this message
-            _add(home, sid, {"kind": "waits", "id": hit["id"], "waits": ""})
+            _add(home, sid, {"kind": "waits", "id": hit["id"], "waits": "", "offered": []})
             _add(home, sid, {"kind": "opened", "id": hit["id"], "topic": hit["topic"], "said": hit["said"],
                              "time": hit["opened"], "turnBefore": turn})
-            now = hit["id"]
-    state["now"] = now
+            if now and now != hit["id"]:
+                also.append(hit["id"])             # answered beside a new request: read at the next message too
+            now = now or hit["id"]
+    state["now"], state["also"] = now, [x for x in also if x != now]
     _compact(home, sid, state)
     relay._write_json(_state_path(home, sid), state)
     return now
@@ -294,10 +336,24 @@ def on_send(home, s, target, message=""):
 
 # --- the page ----------------------------------------------------------------------------------------------------------
 
+def _end(home, sid, r, end):
+    """A row's end, kept on its log and on the row in hand."""
+    _add(home, sid, {"kind": "end", "id": r["id"], "end": end})
+    r.update(end=end, ended=_now())
+    return end
+
+
+def _stamp(row):
+    """A turn's end as a string that orders by time: its exact time when it has one, else its minute."""
+    return str(row.get("at") or row.get("time") or "")
+
+
 def state_of(home, sid, r, entries, seen):
-    """A row's state, read from its holder's entry in the address book and the turns it ended since it took the
-    request. A done, and a holder gone from the book, are kept on the row, so it closes for good. `seen` keeps each
-    holder's turn lines and whether it is working, read once per render."""
+    """A row's state, read from its holder's turns since it took the request, in the holder's own store: the
+    address book's entry when it has one, else the store the row kept or the app's record names. A done, a closed
+    and the end of a row whose holder went quiet for KEEP_S are kept on the row, so it closes for good and a
+    finished state is never shown without its end. `seen` keeps each holder's turn lines and whether it is working,
+    read once per render."""
     if r["waits"]:
         return "waits on ezexe"
     if r["end"]:
@@ -306,9 +362,9 @@ def state_of(home, sid, r, entries, seen):
     if not k:
         return "open"
     e = entries.get(k)
-    where = e["home"] if e else (r["home"] or home)
+    where = e["home"] if e else (r["home"] or controls.store_of(k) or home)
     if k not in seen:
-        seen[k] = (_turn_lines(where, k), bool(e) and _phi().puppeteer.working(where, k))
+        seen[k] = (_turn_lines(where, k), _phi().puppeteer.working(where, k))
     lines, working = seen[k]
     counted = r["base"] >= 0 and r["home"] and relay.norm(r["home"]) == relay.norm(where)
     since = []
@@ -317,19 +373,26 @@ def state_of(home, sid, r, entries, seen):
             row = json.loads(raw)
         except ValueError:
             continue
-        if not counted and str(row.get("time") or "")[:16] <= str(r.get("routed") or "")[:16]:
-            continue                               # counted in another store, or none: only a later minute's turn
+        if not counted:                            # counted in another store, or none: only a turn ended after it
+            at, held = _stamp(row), str(r.get("at") or r.get("routed") or "")
+            if (at <= held) if row.get("at") and r.get("at") else (at[:16] < held[:16]):
+                continue
         since.append(row)
         if row.get("done"):
-            _add(home, sid, {"kind": "end", "id": r["id"], "end": "done"})
-            return "done"
+            return _end(home, sid, r, "done")
     if not e:
         ks = relay._session(where, k) if where else {}
         if ks.get("sessionId") and controls.out_of_tree(ks):
-            _add(home, sid, {"kind": "end", "id": r["id"], "end": "closed"})
-        return "closed"                            # one no store holds stays closed until it leaves the page
+            return _end(home, sid, r, "closed")
     if working:
         return "working"
+    last = max([_stamp(x) for x in since] + [str(r.get("at") or r.get("routed") or "")])
+    try:
+        quiet = time.time() - time.mktime(time.strptime(last[:16], "%Y-%m-%d %H:%M")) > KEEP_S
+    except ValueError:
+        quiet = False
+    if quiet:                                      # a long-lived holder that never shows it done
+        return _end(home, sid, r, "reported" if since else "carried")
     return "reported" if since else (r["how"] or "routed")
 
 
@@ -357,8 +420,6 @@ def render(home, s, store=""):
     seen, out = {}, []
     for r in live:
         st = state_of(home, sid, r, entries, seen)
-        if st in FINISHED and _old(r):
-            continue
         k = r["holder"]
         title = (entries[k]["title"] if k in entries else book.title(k)) if k else ""
         out.append(dict(r, state=st, title=title))

@@ -765,7 +765,7 @@ def failure_note(cmd, result):
 def turn_of(turn, report):
     """A transcript's turn as the row kept for it: the prompt, the files edited and the commands that worked and
     the sessions started, in order, what failed, and the report."""
-    steps, failed = [], []
+    steps, failed, offered, ask = [], [], [], ""
 
     def add(to, s):
         if s and s not in to:
@@ -784,11 +784,19 @@ def turn_of(turn, report):
             add(steps, f"started the session \"{cut(clean(inp.get('title') or inp.get('name')), 80)}\"")
         elif name in ("Agent", "Task"):
             add(steps, f"ran a subagent: {cut(clean(inp.get('description')), 80)}")
+        elif name == "mcp__ccd_turn__wrap_up" and clean(inp.get("ask")):
+            # the question put to ezexe and its reply buttons, whose label the app sends back as ezexe's message
+            ask = cut(clean(inp.get("ask")), 300)
+            offered = [cut(clean(a.get("label")), 80) for a in inp.get("actions") or []
+                       if isinstance(a, dict) and clean(a.get("label")) and not a.get("action")]
     prompt = cut(turn.get("prompt") or "", TASK_CHARS)
     uuid = turn.get("uuid") or ""
-    return {"id": uuid or "turn-" + hashlib.sha1(prompt.encode("utf-8", "replace")).hexdigest()[:12],
-            "prompt": prompt, "steps": steps[:TURN_STEPS], "failed": failed[:4],
-            "report": (report or "").strip()[:REPORT_CHARS], "done": ""}
+    row = {"id": uuid or "turn-" + hashlib.sha1(prompt.encode("utf-8", "replace")).hexdigest()[:12],
+           "prompt": prompt, "steps": steps[:TURN_STEPS], "failed": failed[:4],
+           "report": (report or "").strip()[:REPORT_CHARS], "done": ""}
+    if offered:
+        row.update(ask=ask, offered=offered[:6])
+    return row
 
 
 def said_of(turn, report):
@@ -2733,7 +2741,7 @@ def h_stop(payload):
     if not turn:
         return None
     row = turn_of(turn, report if isinstance(report, str) else "")
-    row.update({"time": now(), "sessionId": s["sessionId"], "cliSessionId": me.cli})
+    row.update({"time": now(), "at": now_exact(), "sessionId": s["sessionId"], "cliSessionId": me.cli})
     earlier_ = load_turns(me.home, s["sessionId"])
     if earlier_ and earlier_[-1].get("atArchive") and earlier_[-1].get("id") == row["id"]:
         return None                                # kept already when this session archived itself

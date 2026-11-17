@@ -78,12 +78,14 @@ The same words again join their row while it is live, and open a new row once it
 A message to a puppeteer that the app marks as another session's opens no row and is drafted no start: the body, past its leading reminders, opens with another session's message, a side-sessions event, a task notification, a system notification, a hook's feedback or a slash command's wrapper.
 An orchestrator's routing still reads the work another session's message hands it.
 A request takes as its holder the session the puppeteer messages, or the orchestrator it starts, whose own words share the request's topic, else, for a send to a controlled session or a start, the request its turn works on.
-Its state is read from that holder's turns in the holder's own store since it took the request: routed or started, working, reported, and done for good once one of them was shown done; closed for good once the holder left the address book with no such turn.
-At the request's next message, one with no holder is answered when the turn on it ended without a question, and waits on ezexe when the turn ended on a question.
+Its state is read from that holder's turns in the holder's own store since it took the request, also for a holder the address book leaves out: routed or started, working, reported, and done for good once one of them was shown done; closed for good once the holder is archived or no longer live with no such turn.
+A held request whose holder is not inside a turn and ended none for a day ends as it stands: reported once it reported, else carried, since a long-lived orchestrator may never show it done.
+A finished state shows only with its end kept, and a finished row leaves the page a day after it ended.
+At the request's next message, one with no holder is answered when the turn on it ended without a question, and waits on ezexe when the turn ended on a question or offered ezexe buttons with `mcp__ccd_turn__wrap_up`, whose labels are kept with the wait.
 It is carried when ezexe's next message comes before any turn ended; another session's message, which can come inside the turn, carries nothing.
-A waiting request is answered by ezexe's message that names it by its id, by a reply, which answers the waiting request whose topic it shares or else the latest, or by any other message of ezexe's that is neither a request nor a question.
+A waiting request is answered by a button label it offered, which the app sends back as ezexe's message, by ezexe's message that names it by its id, by a reply, which answers the waiting request whose topic it shares or else the latest, or by any other message of ezexe's that is neither a request nor a question.
+What follows a reply's first words or a request's id, when it asks for work on another topic, opens a request of its own; a reply then answers the wait as well only when that request is short, and an id always does.
 A request or a question of ezexe's leaves the wait in place.
-A finished row leaves the page a day after.
 Beside each of the puppeteer's messages, a short line gives the counts by state and names the page.
 A message of ezexe's that `route_down` sends to a controlled session's topic is drafted no start.
 A puppeteer's turns hold messages only, and every other task goes to its one standing worker, which it starts under itself with the brief line `Standing worker of its puppeteer` and which splits its task groups into standing coworkers.

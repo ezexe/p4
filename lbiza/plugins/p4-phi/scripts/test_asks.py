@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -309,6 +310,58 @@ class LedgerCloses(Trees):
         t.say(PUP, ACCOUNT)
         self.assertIn(f"`{wk}` | routed", self.page(), "its done turn before the request is not this request's")
 
+    def test_a_live_holder_the_book_leaves_out_is_read_from_its_own_store(self):
+        t = self.t
+        other = os.path.join(t.tmp, "other")
+        os.makedirs(os.path.join(other, ".claude", "p4"))
+        out = "local_out00003"
+        CLI.setdefault(out, "77773000-0000-4000-8000-000000000000")
+        t.record(out, title="Build the ports table", cwd=other)
+        t.say(out, "Build the ports table", proj=other)
+        t.stop(out, "Build the ports table", report="Started.", uuid="o0", proj=other)
+        t.say(PUP, ASK1)
+        self.send(PUP, out, ASK1 + ", beside the ports table.")
+        t.stop(PUP, ASK1, report="Sent to the ports table's orchestrator.", uuid="o1")
+        t.say(PUP, ACCOUNT)
+        self.assertIn(f"`{out}` | routed", self.page(), "a live session outside the controlled trees is no closed one")
+        t.say(out, "Add the retry", proj=other)
+        t.say(PUP, ACCOUNT)
+        self.assertIn(f"`{out}` | working", self.page())
+
+    def test_a_holder_quiet_for_a_day_ends_the_row(self):
+        t = self.t
+        t.say(PUP, ASK1)
+        self.send(PUP, TOP, ASK1 + ", as the exporter's next step.")
+        t.stop(PUP, ASK1, report="Sent to the exporter's orchestrator.", uuid="q1")
+        path = asks.log_path(t.p4, PUP)
+        day = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - asks.KEEP_S - 600))
+        rows = [json.loads(x) for x in read(path).splitlines() if x.strip()]
+        for r in rows:
+            if r.get("kind") == "holder":
+                r.update(time=day, at=day + ".000")
+        write(path, "".join(json.dumps(r) + "\n" for r in rows))
+        t.say(PUP, ACCOUNT)
+        got = asks.rows(t.p4, PUP)
+        self.assertEqual(got[0]["end"], "carried", "a holder that ended no turn on it for a day")
+        self.assertIn(f"`{TOP}` | carried", self.page())
+
+    def test_a_holder_turn_in_the_same_minute_as_the_send_counts(self):
+        t = self.t
+        t.say(PUP, ASK1)
+        self.send(PUP, TOP, ASK1 + ", as the exporter's next step.")
+        path = asks.log_path(t.p4, PUP)
+        rows = [json.loads(x) for x in read(path).splitlines() if x.strip()]
+        for r in rows:
+            if r.get("kind") == "holder":
+                r.update(base=-1, home="")         # a holder whose store was not found at the send
+        write(path, "".join(json.dumps(r) + "\n" for r in rows))
+        t.stop(PUP, ASK1, report="Sent to the exporter's orchestrator.", uuid="s1")
+        t.say(TOP, "Add the retry to the flush")
+        self.assertEqual(t.cli(TOP, "done", "the retry landed").returncode, 0)
+        t.stop(TOP, "Add the retry to the flush", report="The retry landed.", uuid="s2")
+        t.say(PUP, ACCOUNT)
+        self.assertIn(f"`{TOP}` | done", self.page(), "its turn ended after the send, in the same minute")
+
     def test_a_turn_that_never_ended_leaves_its_row_carried(self):
         t = self.t
         t.say(PUP, ASK2)
@@ -411,6 +464,42 @@ class LedgerWaits(Trees):
         got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
         self.assertEqual(sorted(got), ["ask-1", "ask-2", "ask-3"], "a short request and one sharing the topic's words")
         self.assertEqual(got["ask-1"]["waits"], "The notes are ready. " + WAIT, "the wait stays")
+
+    def test_a_reply_that_holds_a_new_request_opens_its_row(self):
+        t = self.t
+        t.say(PUP, ASK3)
+        t.stop(PUP, ASK3, report="The notes are ready. " + WAIT, uuid="v1")
+        t.say(PUP, "Ok, now start a session for the billing dashboard with charts of each customer's invoices")
+        got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
+        self.assertEqual(sorted(got), ["ask-1", "ask-2"], "a request after a reply's first word opens its row")
+        self.assertNotEqual(got["ask-1"]["waits"], "", "and answers nothing")
+        t.say(PUP, "Go through the logs and sync the stores")
+        got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
+        self.assertEqual(sorted(got), ["ask-1", "ask-2", "ask-3"], "a short one opens its row too")
+        self.assertEqual(got["ask-1"]["waits"], "", "and answers the wait as well")
+
+    def test_a_row_id_beside_a_new_request_answers_the_row_and_opens_one(self):
+        t = self.t
+        t.say(PUP, ASK3)
+        t.stop(PUP, ASK3, report="The notes are ready. " + WAIT, uuid="v2")
+        t.say(PUP, "ask-1: yes. Also build the billing dashboard with monthly invoice charts for each account")
+        got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
+        self.assertEqual(sorted(got), ["ask-1", "ask-2"])
+        self.assertEqual(got["ask-1"]["waits"], "")
+
+    def test_a_pressed_button_answers_the_row_that_offered_it(self):
+        t = self.t
+        t.say(PUP, ASK3)
+        wrap = {"recap": "The notes are ready.", "ask": "Publish the release notes now, or after the retry lands?",
+                "actions": [{"label": "Publish the notes now"}, {"label": "Wait for the retry"}]}
+        t.stop(PUP, ASK3, calls=[("mcp__ccd_turn__wrap_up", wrap, "ok")], report="The notes are ready.",
+               uuid="v3")
+        t.say(PUP, "Publish the notes now")
+        self.assertIn('"offered": ["Publish the notes now", "Wait for the retry"]', read(asks.log_path(t.p4, PUP)),
+                      "the labels are kept with the wait")
+        got = asks.rows(t.p4, PUP)
+        self.assertEqual(len(got), 1, "a button's label is the row's answer, no request")
+        self.assertEqual(got[0]["waits"], "")
 
     def test_a_question_of_ezexes_leaves_the_wait_in_place(self):
         t = self.t
