@@ -915,18 +915,50 @@ class ForkOrFresh(ThreeSessions):
         for line in (plans.CARD_EACH, phi.FIRST_SPLIT):
             self.assertIn("`use_worktree: true`, so it works in a git worktree and on a branch of its own", line)
 
-    def test_a_child_making_its_own_branch_is_asked_and_the_top_level_session_is_not(self):
-        def guard(host, cmd, tool="Bash"):
-            r = self.t.hook("branch-guard", host, {"tool_name": tool, "tool_input": {"command": cmd}})
+    def test_a_session_in_its_own_worktree_is_asked_about_no_branch_and_one_that_shares_a_checkout_before_it_moves_it(self):
+        """The stop on a child's own worktree is gone: a session started in a git worktree of its own makes a branch,
+        moves to one and enters a worktree unasked, since worktrees.md gives each such session "a separate copy of
+        the files to edit". What still guards something stays: a child that shares its starter's checkout is asked
+        before it moves that checkout to another branch, and every child before it lands work."""
+        def guard(host, cmd, tool="Bash", cwd=None):
+            r = self.t.hook("branch-guard", host, {"tool_name": tool, "tool_input": {"command": cmd},
+                                                   **({"cwd": cwd} if cwd else {})})
             return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
-        self.assertEqual(guard(B, "git switch -c mine")["permissionDecision"], "ask")
-        self.assertIsNotNone(guard(B, "", tool="EnterWorktree"))
+        self.assertEqual(guard(B, "git switch -c mine")["permissionDecision"], "ask", "it moves the shared checkout")
+        self.assertEqual(guard(B, "git checkout -b mine")["permissionDecision"], "ask")
+        self.assertIsNone(guard(B, "", tool="EnterWorktree"), "entering a worktree is Claude Code's own way apart")
+        self.assertIsNone(guard(B, "git worktree add ../wt -b mine"), "a worktree made moves no checkout")
+        self.assertIsNone(guard(B, "git branch mine"), "a branch made without a move")
         self.assertIsNone(guard(B, "git status && git commit -qm x"), "ordinary git is never asked")
         self.assertIsNone(guard(B, "grep -n 'git checkout -b' docs.md"), "quoted text is not a command")
         self.assertIsNone(guard(B, "git checkout -- lib/x.py"), "restoring a file is not a branch change")
         self.assertEqual(guard(B, "git switch main")["permissionDecision"], "ask", "a branch change in a child")
         self.assertIn("moves the parent's too", guard(B, "git checkout feature/x")["permissionDecisionReason"])
         self.assertIsNone(guard(TOP, "git switch -c mine"), "an orchestrator decides its own branches")
+        # a worker the app started in a worktree of its own: the hook's `cwd` is the worktree
+        own = os.path.join(self.work, ".claude", "worktrees", "the-flush")
+        subprocess.run(["git", "-C", self.work, "worktree", "add", "-q", "-b", "claude/the-flush", own],
+                       check=True, capture_output=True)
+        reader = "local_reader01"
+        CLI.setdefault(reader, "eeee5555-0000-4000-8000-000000000000")
+        self.t.record(GRAND, TOP, title="the flush worker", cwd=own)
+        self.t.record(reader, GRAND, title="a check of the flush", cwd=own)
+        for host in (GRAND, reader):
+            self.assertEqual(self.t.say(host, "Task:\nLook at the flush.").returncode, 0)
+        for cmd in ("git switch -c mine", "git checkout -b mine", "git switch main", "git checkout feature/x",
+                    "git worktree add ../wt -b mine", "git branch mine"):
+            self.assertIsNone(guard(GRAND, cmd, cwd=own), f"its own worktree: {cmd}")
+        self.assertIsNone(guard(GRAND, "", tool="EnterWorktree", cwd=own))
+        self.assertIn("merges and pushes", guard(GRAND, "git push origin HEAD", cwd=own)["permissionDecisionReason"],
+                      "landing stays the orchestrator's")
+        self.assertEqual(guard(reader, "git switch main", cwd=own)["permissionDecision"], "ask",
+                         "a reader started with use_worktree false shares its starter's worktree")
+        import phi
+        self.assertFalse(hasattr(phi, "BRANCHING"), "no pattern for a branch or a worktree a child makes")
+        with open(phi.__file__, encoding="utf-8") as f:
+            source = f.read()
+        self.assertNotIn("entering a worktree of its own", source)
+        self.assertNotIn("making a worktree or branch of its own", source)
 
     def test_a_hand_pull_or_push_in_a_store_is_asked_and_names_p4_sync(self):
         """A store moves only by p4.py sync."""

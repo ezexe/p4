@@ -2702,16 +2702,37 @@ def h_start_advice(payload):
 
 
 QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
-BRANCH_MOVE = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b[^\n|;&]*?\b(switch\b|checkout\s+(?!--)(?!-[^bB])(?![\w./-]*\.\w{1,6}\s*$)[\w./-]+\s*$)")
-BRANCHING = re.compile(r"\bgit\b[^\n|;&]*?\b(worktree\s+add|switch\s+(-c|--create|-C)|checkout\s+(-b|-B)|"
-                       r"branch\s+(?!-)[\w./-]+\s*$|branch\s+(?!-)[\w./-]+\s+[\w./-]+)")
+# a git command that moves the checkout it runs in to another branch: `git switch`, `git checkout -b` and `git
+# checkout <branch>`. Restoring a file, as `git checkout -- <path>` or `git checkout <file>`, moves nothing, and
+# neither does `git branch <name>` or `git worktree add`.
+BRANCH_MOVE = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b[^\n|;&]*?\b(switch\b|checkout\s+-[bB]\b|"
+                         r"checkout\s+(?!-)(?![\w./-]*\.\w{1,6}\s*$)[\w./-]+\s*$)")
+
+
+def own_checkout(home, s, cwd):
+    """True when a started session works in a git worktree of its own. worktrees.md, "What worktrees share with the
+    main checkout": for a worktree session started from the desktop app, "To reach the files Claude is working on,
+    read the worktree's path from the hook's `cwd` input field." So the folder `cwd` lies in is read: it is a linked
+    worktree, by its `.git` file, and it is not the checkout the session's starter works in, by that session's
+    record. A session started with `use_worktree: false` works in its starter's checkout, a worktree or not, and
+    gets False."""
+    here = relay.repo_of(cwd) if cwd else ""
+    if not here:
+        return False
+    main, found = p4conf.main_root(here)
+    if not found or relay.norm(os.path.realpath(main)) == here:
+        return False                               # the main checkout, which the sessions started without one share
+    above = load_session(home, spawned_from(s))
+    return relay.repo_of(str(above.get("cwd") or "")) != here
 
 
 def h_branch_guard(payload):
-    """PreToolUse on EnterWorktree and shell calls in a worker: making a worktree or a branch of its own is
-    asked first, since a child works on its parent's branch. So is landing work, a git push, merge, rebase or pull,
-    whatever the child's record, brief or parent says: only the tree's orchestrator lands and pushes. Silent
-    otherwise."""
+    """PreToolUse on a shell call in a session another session started. Landing work, a git push, merge, rebase or
+    pull, is asked first, whatever the child's record, brief or parent says: only the tree's orchestrator lands and
+    pushes. A child that shares its starter's checkout, as one started with `use_worktree: false` does, is asked
+    before it moves that checkout to another branch, since the move is its starter's too. A session in a git
+    worktree of its own, as own_checkout reads it, is asked about no branch it makes or moves to and no worktree it
+    makes or enters, since its checkout is its own. Silent otherwise, and for EnterWorktree."""
     me = Me(payload)
     if not me.home or not me.id:
         return None
@@ -2720,14 +2741,12 @@ def h_branch_guard(payload):
         return None
     name = str(payload.get("tool_name") or "")
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
-    if name == "EnterWorktree":
-        what = "entering a worktree of its own"
-    elif name in SHELL_TOOLS and BRANCHING.search(QUOTED.sub("''", str(inp.get("command") or ""))) \
-            and re.search(r"(?:^|&&|\|\||;|\||\n)\s*git\b", QUOTED.sub("''", str(inp.get("command") or ""))):
-        what = "making a worktree or branch of its own"
-    elif name in SHELL_TOOLS and BRANCH_MOVE.search(QUOTED.sub("''", str(inp.get("command") or ""))):
+    if name not in SHELL_TOOLS:
+        return None
+    if BRANCH_MOVE.search(QUOTED.sub("''", str(inp.get("command") or ""))) \
+            and not own_checkout(me.home, s, str(payload.get("cwd") or s.get("cwd") or "")):
         what = "moving the checkout to another branch, which in a shared checkout moves the parent's too"
-    elif name in SHELL_TOOLS and issues.landing(inp.get("command")):
+    elif issues.landing(inp.get("command")):
         verb = issues.landing(inp.get("command"))
         RAN["branch_guard"] = verb
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
@@ -2744,9 +2763,10 @@ def h_branch_guard(payload):
     RAN["branch_guard"] = what
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
                                    "permissionDecisionReason": f"phi (p4-phi): this session is a child, and {what} is "
-                                                               f"asked first: a child works on its "
-                                                               f"parent's branch in the parent's checkout, so its work "
-                                                               f"needs no merge."}}
+                                                               f"asked first: this session works in the checkout of "
+                                                               f"the session that started it. A session that writes "
+                                                               f"is started with `use_worktree: true` and moves only "
+                                                               f"its own."}}
 
 
 STORE_MOVE = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b([^\n|;&]*?)\b(push|pull)(?![\w-])([^\n|;&]*)")
