@@ -7,9 +7,11 @@ writes the file when it is missing, when it lacks a key of DEFAULTS and when a d
 file wrote has changed, keeping every value set by hand: WRITTEN records what it wrote. Two limits: a value set by
 hand that equals the value load recorded as written moves at the next GEN, and in a store from before the record a
 value set by hand that equals a past default in HISTORY moves. A file that is not valid JSON is never overwritten: the
-defaults are used and a line goes to stderr. p4conf lets no environment variable win over a setting: a plugin that
-lets one win over its section for a run reads it itself. The settings keeper below reads CLAUDE_PROJECT_DIR and
-CLAUDE_CONFIG_DIR, as Claude Code sets them.
+defaults are used and a line goes to stderr. Each setting has a variable `P4_<SECTION>_<KEY>`, named by env_name,
+and `load` reads a valid one ahead of p4.json for the session's own store; a value that does not fit is passed over
+for p4.json's. The settings keeper below writes each setting a store changed from its default as such a variable under
+`env` of the project's local settings file, and reads CLAUDE_PROJECT_DIR and CLAUDE_CONFIG_DIR, as Claude Code sets
+them.
 
 It also holds the store's layout: each plugin writes in a folder of its own, `.claude/p4/<plugin>/`, beside p4.json
 and the store's own git files. `sub(p4, name, ...)` is where a kind of file lives and `rel(name, ...)` the same path
@@ -17,7 +19,8 @@ as git names it. `migrate_layout(p4)` moves files from an earlier place of the l
 Every plugin calls it at its start, so whichever plugin runs first moves them.
 
 It also keeps the Claude Code settings p4 relies on, ezexe/p4#246: `keep_settings(project)` writes
-`autoMemoryDirectory`, and `attribution.commit` when the store gives a text, into the project's
+`autoMemoryDirectory`, `attribution.commit` when the store gives a text, `disableAllHooks` and
+`disableSkillShellExecution` at their default false, and the `P4_*` variables under `env` into the project's
 `.claude/settings.local.json`, merged with what is there, and records what it owns in the store's RECORD.
 """
 
@@ -835,11 +838,21 @@ def written_record(kept, record):
     return out
 
 
-def load(p4, write=True, warn=True):
-    """The merged settings. Writes p4.json when it is missing, lacks a default key or holds a default an older
-    generation wrote, if `write` and `p4` exists. Under WRITTEN it records what it wrote and its GEN. A section of OPEN,
-    such as temportal.cache, is one setting: when an older copy merges a rule a newer GEN dropped back into it, the
-    section no longer equals its entry and counts as set by hand."""
+def load(p4, write=True, warn=True, env=True):
+    """The merged settings, with each valid P4_* variable of env_overrides ahead of p4.json when `env` and the store
+    is the session's own, by env_applies. p4.json itself never takes a variable's value."""
+    merged = _load_file(p4, write, warn)
+    if env and env_applies(p4):
+        for key, v in env_overrides(warn=warn).items():
+            _put(merged, key, v)
+    return merged
+
+
+def _load_file(p4, write=True, warn=True):
+    """The settings of p4.json merged over DEFAULTS. Writes p4.json when it is missing, lacks a default key or holds a
+    default an older generation wrote, if `write` and `p4` exists. Under WRITTEN it records what it wrote and its GEN.
+    A section of OPEN, such as temportal.cache, is one setting: when an older copy merges a rule a newer GEN dropped
+    back into it, the section no longer equals its entry and counts as set by hand."""
     over, existed = {}, os.path.exists(path(p4))
     if existed:
         try:
@@ -912,10 +925,165 @@ def apply(module_globals, values, names, defaults=None):
 
 
 def configure(module_globals, p4, dotted, names, write=True):
-    """apply() from the section of p4.json at `dotted`, such as "recall.query"; returns that section."""
+    """apply() from the section of p4.json at `dotted`, such as "recall.query", with the P4_* variables ahead of it;
+    returns that section. A constant a variable set goes back to the value it had before once the variable is gone,
+    since a process that runs hooks in turn keeps its module globals."""
     values = _at(load(p4, write=write), dotted)
+    from_env = {k.split(".")[-1] for k in env_overrides(warn=False) if k.rsplit(".", 1)[0] == dotted} \
+        if env_applies(p4) else set()
+    saved = module_globals.get("_P4_ENV_SAVED") or {}
+    for key, const in names.items():
+        if const in saved and key not in from_env:
+            module_globals[const] = saved.pop(const)
+        elif key in from_env and const in module_globals and const not in saved:
+            saved[const] = module_globals[const]
+    if saved:
+        module_globals["_P4_ENV_SAVED"] = saved
+    else:
+        module_globals.pop("_P4_ENV_SAVED", None)
     apply(module_globals, values, names, _at(DEFAULTS, dotted))
     return values
+
+
+# --- p4's settings as P4_* variables ----------------------------------------------------------------------------------
+# Every setting of DEFAULTS that steers behaviour, and each phi key of READ_WHEN_SET, has a variable: P4_ and its
+# dotted path in upper case with each dot an underscore, such as P4_PHI_MAX_DEPTH for phi.max_depth, apart from the
+# names of ENV_NAMES. keep_settings writes each setting a store changed from its default, a READ_WHEN_SET key whenever
+# the store sets it, under `env` of the project's local settings file and removes it once the setting is back at its
+# default. Claude Code puts that block into the environment of every hook and command of a session, by env-vars.md,
+# so load reads a variable ahead of p4.json, and a variable ezexe sets by hand there or in the shell wins too.
+# Encoding, by env_text: a bool is 1 or 0, as the older switches P4_SCRATCHPAD_ASKS and P4_PHI_ISSUES take; a string
+# is written as it is unless that text would read back as another value, and then as JSON; every other value is
+# compact JSON. Decoding, by env_value: empty is unset; for a key that takes a bool, 1, 0, true and false; else JSON,
+# and a text that is no JSON is a string. A value whose type does not fit the key's, as ENV_TYPES or the default's type
+# say, is passed over with one stderr line, so the setting falls back to p4.json's value, which is the default unless
+# the store changed it; a reader's own range check, such as phi.apply_caps, then keeps the default for a value out of
+# range. A variable only ever applies to the store of the session's own project, by env_applies.
+ENV_PREFIX = "P4_"
+ENV_SKIP = ("recall.updated",)            # who last set recall.inject and learn, and when: a record, not a setting
+ENV_SET_ONLY = tuple(k for k in READ_WHEN_SET if k.startswith("phi."))
+# A name the rule would give that an older variable of other meaning already has: P4_PHI_WATCH_S is puppeteer.py's
+# tick for one run, used whether or not a session is busy, while phi.watch_s is the tick of a busy watcher only.
+ENV_NAMES = {"phi.watch_s": "P4_PHI_WATCH_SECONDS"}
+# Keys that take more than their default's type: recall.inject is false, true or "rules-facts".
+ENV_TYPES = {"recall.inject": (bool, str)}
+_BAD = object()
+_WARNED = set()
+
+
+def env_name(key):
+    return ENV_NAMES.get(key) or ENV_PREFIX + key.upper().replace(".", "_")
+
+
+def env_keys():
+    """{dotted key: its default, or _NONE for a key read only when set}, in the order of DEFAULTS."""
+    out = {k: v for k, v in _leaves(DEFAULTS) if k not in ENV_SKIP}
+    out.update({k: _NONE for k in ENV_SET_ONLY})
+    return out
+
+
+def _types(key, default):
+    """The types a key takes, or None for any JSON value."""
+    if key in ENV_TYPES:
+        return ENV_TYPES[key]
+    if default is None or default is _NONE:
+        return None
+    if isinstance(default, bool):
+        return (bool,)
+    if isinstance(default, float):
+        return (float, int)
+    return (type(default),)
+
+
+def _fits(v, types):
+    if types is None:
+        return True
+    if isinstance(v, bool):
+        return bool in types
+    return isinstance(v, tuple(t for t in types if t is not bool))
+
+
+def env_value(key, text, default=_NONE):
+    """The value the variable's `text` gives `key`: _NONE when it is empty, _BAD when it does not fit the key."""
+    if text is None or text == "":
+        return _NONE
+    types = _types(key, default)
+    if types and bool in types and text.strip().lower() in ("0", "1", "true", "false"):
+        return text.strip().lower() in ("1", "true")
+    try:
+        v = json.loads(text)
+    except ValueError:
+        v = text
+    return v if _fits(v, types) else _BAD
+
+
+def _same_json(a, b):
+    return json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
+
+
+def env_text(key, v, default=_NONE):
+    """The text env_value reads back as `v` for `key`."""
+    tries = []
+    if isinstance(v, bool):
+        tries.append("1" if v else "0")
+    if isinstance(v, str):
+        tries.append(v)
+    tries.append(json.dumps(v, ensure_ascii=False, separators=(",", ":")))
+    for t in tries:
+        got = env_value(key, t, default)
+        if got is not _BAD and got is not _NONE and _same_json(got, v):
+            return t
+    return tries[-1]
+
+
+def env_overrides(environ=None, warn=True):
+    """{dotted key: value} of every P4_* variable set to a value that fits its key."""
+    environ = os.environ if environ is None else environ
+    out = {}
+    for key, default in env_keys().items():
+        name = env_name(key)
+        v = env_value(key, environ.get(name), default)
+        if v is _BAD:
+            if warn and (name, environ.get(name)) not in _WARNED:
+                _WARNED.add((name, environ.get(name)))
+                print(f"p4: {name}={environ.get(name)} does not fit {key}; p4.json's value used", file=sys.stderr)
+            continue
+        if v is not _NONE:
+            out[key] = v
+    return out
+
+
+def env_applies(p4):
+    """True when the P4_* variables of this process belong to store `p4`: a session's variables come from its own
+    project's settings files, so they apply to that project's store and to no other, such as a shared home store.
+    Without CLAUDE_PROJECT_DIR, as in a command run by hand, they apply to any store."""
+    project = os.environ.get("CLAUDE_PROJECT_DIR")
+    if not project:
+        return True
+    p4 = os.path.abspath(p4)
+    if os.path.basename(p4) != "p4" or os.path.basename(os.path.dirname(p4)) != ".claude":
+        return True
+    return _norm(main_root(project)[0]) == _norm(os.path.dirname(os.path.dirname(p4)))
+
+
+def env_wants(p4):
+    """{variable: text} of each setting store `p4` changes from its default in p4.json, read without the variables."""
+    conf = _load_file(p4, write=False, warn=False)
+    out = {}
+    for key, default in env_keys().items():
+        v = _get(conf, key)
+        if v is _NONE or (default is not _NONE and _equal(v, default)):
+            continue
+        text = env_text(key, v, default)
+        if env_value(key, text, default) is not _BAD:   # a value p4 would pass over is not written either
+            out[env_name(key)] = text
+    return out
+
+
+def _equal(a, b):
+    """Equal as settings: 5 and 5.0 are, true and 1 are not."""
+    nums = all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in (a, b))
+    return a == b if nums else _same_json(a, b)
 
 
 # --- Claude Code's own settings, ezexe/p4#246 ---------------------------------------------------------------------
@@ -932,11 +1100,21 @@ SECTION = "claude"
 RECORD = "claude-settings.json"
 SETTINGS_LOCK = ".settings.lock"
 LOCAL = "settings.local.json"
-WRITES = ("autoMemoryDirectory", "attribution.commit")
+WRITES = ("autoMemoryDirectory", "attribution.commit", "disableAllHooks", "disableSkillShellExecution")
+# Keys written at their default false, which p4's hooks and skills rely on, as the development project's local file
+# that ezexe set as the reference holds them: written only while no user, project or managed file sets another value,
+# which the local one would override.
+KEPT_OFF = ("disableAllHooks", "disableSkillShellExecution")
+ENV_KEY = "env"                  # where the P4_* variables go: each one p4 owns is the dotted key env.<name>
+# Raised by one whenever the keys this copy writes change, so a store's next start runs the whole check: the record
+# holds the KEEPER of the copy that last ran it.
+KEEPER = 2
 # The class of keys ezexe decides, by #246: every key of the topics "Permission settings", "Sandbox settings",
 # "Authentication and providers" and "Enterprise and managed settings" of settings-reference.md, the table
 # "Exceptions to managed settings precedence" of settings.md, and the keys named beside them. A dotted key under one
-# of these is in the class too.
+# of these is in the class too. ezexe's yes covers only what the keeper writes of it: the two allow rules,
+# disableAllHooks at false and p4's own P4_* variables under env; a store's `claude` section naming any key of the
+# class is still told it is ezexe's to decide.
 SECURITY = (
     "permissions", "sandbox", "autoMode", "allowManagedPermissionRulesOnly", "disableAutoMode",
     "useAutoModeDuringPlan", "skipAutoPermissionPrompt", "skipDangerousModePermissionPrompt",
@@ -1128,8 +1306,9 @@ def _elsewhere(key, target, platform):
 
 def wants(p4, target, platform=None):
     """({key: value or None}, {key: value}, the section, [(file, value)]): the keys of WRITES p4 keeps in `target`,
-    None for one it wants gone, the other keys the store's `claude` section names, which are never written, the
-    whole section, and each other file that names another memory folder."""
+    None for one it wants gone, and `env.<name>` for each P4_* variable of env_wants; the other keys the store's
+    `claude` section names, which are never written; the whole section; and each other file that names another
+    memory folder."""
     platform = platform or sys.platform
     conf = _flat(load(p4, write=False, warn=False).get(SECTION) or {})
     out = {}
@@ -1139,6 +1318,10 @@ def wants(p4, target, platform=None):
     out["autoMemoryDirectory"] = mem if conf.get("autoMemoryDirectory", True) is not False and not other else None
     text = conf.get("attribution.commit")
     out["attribution.commit"] = text if isinstance(text, str) else None
+    for k in KEPT_OFF:
+        out[k] = None if [v for _f, v in _elsewhere(k, target, platform) if v is not False] else False
+    for name, text in env_wants(p4).items():
+        out[f"{ENV_KEY}.{name}"] = text
     return out, {k: v for k, v in conf.items() if k not in WRITES and k not in OWN_KEYS}, conf, other
 
 
@@ -1328,6 +1511,7 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
         rec.update(note)
         if not owned_only:
             rec["section"] = _flat(load(p4, write=False, warn=False).get(SECTION) or {})
+            rec["keeper"], rec["p4env"] = KEEPER, env_wants(p4)
         if json.dumps(rec, sort_keys=True) != before or not os.path.exists(record_path(p4)):
             write_record(p4, rec)
         return
@@ -1341,31 +1525,17 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
     gone = list(hand.get(name) or [])
     want, others, conf, other = wants(p4, target, platform)
     new = copy.deepcopy(data)
-    for k in WRITES:
-        d, cur, e = want.get(k), _get(new, k), _entry(owned.get(k))
-        if e:
-            if cur is _NONE:
-                owned.pop(k)                            # deleted by hand: no longer p4's, never written back
-                gone.append(k)
-            elif cur != e[0]:
-                owned.pop(k)                            # set by hand: no longer p4's, never touched again
-            elif e[1] > GEN:
-                pass                                    # a newer copy wrote it: left to that copy
-            elif d is None:
-                _del(new, k)
-                owned.pop(k)
-            elif not _same_value(k, cur, d):
-                _put(new, k, d)
-                owned[k] = {"v": d, "gen": GEN}
-        elif d is not None and not owned_only and k not in gone:
-            if cur is _NONE:
-                if k == "autoMemoryDirectory":          # what Claude Code wrote in its own folder comes along first
-                    carry_memory(default_memory(project), sub(p4, "memory"))
-                _put(new, k, d)
-                owned[k] = {"v": d, "gen": GEN}
-            elif _same_value(k, cur, d):
-                owned[k] = {"v": cur, "gen": GEN}      # the value p4 would write: p4's from now
+    p4env = {k.split(".", 1)[1]: v for k, v in want.items() if k.startswith(ENV_KEY + ".")}
+    # in the order of the reference file: the two keys, p4's allow rules, the keys kept off, then the variables
+    env = [k for k in want if k.startswith(ENV_KEY + ".")]
+    env += [k for k in owned if k.startswith(ENV_KEY + ".") and k not in env]
+    if not isinstance(new.get(ENV_KEY, {}), dict):
+        env = []                                        # an `env` that is not an object: left as it is
+    for k in [k for k in WRITES if k not in KEPT_OFF]:
+        _keep_key(p4, project, new, k, want.get(k), owned, gone, owned_only)
     _keep_rules(new, rec, name, allow_rules(platform, conf), owned_only)
+    for k in list(KEPT_OFF) + env:
+        _keep_key(p4, project, new, k, want.get(k), owned, gone, owned_only)
     if new != data:
         replace_text(target, json.dumps(new, indent=2, ensure_ascii=False) + "\n")
         out["wrote"] = True
@@ -1385,6 +1555,7 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
     rec.update(note)
     if not owned_only:
         rec["section"] = conf
+        rec["keeper"], rec["p4env"] = KEEPER, p4env
     if tell:
         told = rec.get("asked") or {}
         for k, v in others.items():
@@ -1410,6 +1581,35 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
         rec.pop("files", None)
     if json.dumps(rec, sort_keys=True) != before or not os.path.exists(record_path(p4)):
         write_record(p4, rec)
+
+
+def _keep_key(p4, project, new, k, d, owned, gone, owned_only):
+    """Key `k` of the local file `new` brought to `d`, None for gone, by the record's rule: a key p4 owns that is
+    deleted or changed by hand leaves the record for good, one a newer copy wrote is left to it, and an unowned key is
+    written only where it is missing, or taken as p4's where it already holds p4's value."""
+    cur, e = _get(new, k), _entry(owned.get(k))
+    if e:
+        if cur is _NONE:
+            owned.pop(k)                                # deleted by hand: no longer p4's, never written back
+            gone.append(k)
+        elif cur != e[0]:
+            owned.pop(k)                                # set by hand: no longer p4's, never touched again
+        elif e[1] > GEN:
+            pass                                        # a newer copy wrote it: left to that copy
+        elif d is None:
+            _del(new, k)
+            owned.pop(k)
+        elif not _same_value(k, cur, d):
+            _put(new, k, d)
+            owned[k] = {"v": d, "gen": GEN}
+    elif d is not None and not owned_only and k not in gone:
+        if cur is _NONE:
+            if k == "autoMemoryDirectory":              # what Claude Code wrote in its own folder comes along first
+                carry_memory(default_memory(project), sub(p4, "memory"))
+            _put(new, k, d)
+            owned[k] = {"v": d, "gen": GEN}
+        elif _same_value(k, cur, d):
+            owned[k] = {"v": cur, "gen": GEN}          # the value p4 would write: p4's from now
 
 
 def exclude_local(target):
@@ -1566,8 +1766,8 @@ def _binaries(seen):
 
 def watch(project, payload):
     """At every SessionStart: the cheap comparison of the running Claude Code binary, the p4 plugins' versions, the
-    store's `claude` section, a local file left unread and the memory folder other files name with the record; any
-    change runs keep_settings. Each binary is kept by its path, so the desktop app's copy and the `claude` command
+    store's `claude` section, a local file left unread, the memory folder other files name, the KEEPER of the
+    copy that last ran the check and the P4_* variables p4.json asks for with the record; any change runs keep_settings. Each binary is kept by its path, so the desktop app's copy and the `claude` command
     used in turn are each read once. At a ConfigChange of a settings file: keep_settings on the keys the record owns.
     Returns {"asks": the lines for ezexe, "newer": (old, new) when a newer Claude Code runs, else None}."""
     out = {"asks": [], "newer": None}
@@ -1606,7 +1806,8 @@ def watch(project, payload):
     other = [[fwd(f), v] for f, v in _elsewhere("autoMemoryDirectory", target, sys.platform)
              if not _same_value("autoMemoryDirectory", v, fwd(sub(p4, "memory")))]
     if (not note and section_of(p4) == rec.get("section") and unread in ("none", _mtime(target))
-            and other == (rec.get("otherMemory") or [])):
+            and other == (rec.get("otherMemory") or []) and rec.get("keeper") == KEEPER
+            and env_wants(p4) == (rec.get("p4env") or {})):
         return out
     out["asks"] = keep_settings(project, p4=p4, note=note, tell=True)["asks"]
     return out

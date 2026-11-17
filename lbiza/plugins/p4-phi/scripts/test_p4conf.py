@@ -629,7 +629,8 @@ class ClaudeSettings(unittest.TestCase):
         got = self.read(self.local())
         self.assertEqual({k: got[k] for k in ("spinnerTipsEnabled", "autoMemoryDirectory")},
                          {"spinnerTipsEnabled": False, "autoMemoryDirectory": self.memory()})
-        self.assertEqual(list(got), ["spinnerTipsEnabled", "autoMemoryDirectory", "permissions"],
+        self.assertEqual(list(got), ["spinnerTipsEnabled", "autoMemoryDirectory", "permissions", "disableAllHooks",
+                                     "disableSkillShellExecution"],
                          "the user's keys keep their order")
         self.assertTrue(os.path.isfile(self.record()), "the record is .claude/p4/claude-settings.json")
         rec = Path(self.record()).read_text(encoding="utf-8")
@@ -993,6 +994,253 @@ class Watcher(unittest.TestCase):
                       "changes_when": "c", "terms": ["fooSetting"]}])
         self.assertEqual(p4conf.watched_terms(path)["fooSetting"], "ezexe/p4#999")
         self.assertEqual(p4conf.watched_terms(os.path.join(self.tmp, "none.json")), p4conf.WATCHED)
+
+    def test_a_setting_changed_in_p4_json_reaches_the_local_file_at_the_next_start(self):
+        """p4.json is no settings file, so no ConfigChange tells of an edit: the next start's cheap check sees that
+        the variables p4.json asks for differ from the record's and runs the whole check, with no --version."""
+        from unittest import mock
+        p4 = os.path.join(self.project, ".claude", "p4")
+        os.makedirs(p4)
+        local = os.path.join(self.project, ".claude", "settings.local.json")
+        stub = self.stub("2.1.400")
+        with mock.patch.dict(os.environ, {"CLAUDE_PID": "4242"}), \
+                mock.patch.object(p4conf, "exe_of_pid", lambda pid: stub if pid == 4242 else None):
+            os.environ.pop("CLAUDE_PROJECT_DIR", None)
+            p4conf.watch(self.project, {"source": "startup", "hook_event_name": "SessionStart"})
+            with open(local, encoding="utf-8") as f:
+                self.assertNotIn("env", json.load(f), "every setting at its default: no variable")
+            _write(p4conf.path(p4), {"phi": {"max_depth": 5}})
+            p4conf.watch(self.project, {"source": "startup", "hook_event_name": "SessionStart"})
+            with open(local, encoding="utf-8") as f:
+                self.assertEqual(json.load(f)["env"], {"P4_PHI_MAX_DEPTH": "5"})
+            self.assertEqual(self.runs(), 1, "the same binary: no --version runs")
+
+
+# The development project's local settings file, which ezexe set as the reference for what the keeper writes in a
+# project where p4 runs, with its paths as placeholders. enabledPlugins and autoMemoryEnabled are ezexe's own keys: the
+# keeper never writes or changes them, and a local autoMemoryEnabled false would turn off the auto memory that
+# autoMemoryDirectory points at the store.
+REFERENCE = {
+    "enabledPlugins": {"p4-phi@p4-marketplace": False, "p4-temportal@p4-marketplace": False},
+    "autoMemoryEnabled": False,
+    "autoMemoryDirectory": "<memory>",
+    "attribution": {"commit": "Co-Authored-By: Anthropics Connoisseur of Hallucinations <noreply@anthropic.com>"},
+    "permissions": {"allow": [
+        'Bash(python -I -X utf8 "<scripts>/phi.py" *)',
+        'Bash(python -I -X utf8 "<scripts>/p4.py" sync *)',
+        'PowerShell(python -I -X utf8 "<scripts>/phi.py" *)',
+        'PowerShell(python -I -X utf8 "<scripts>/p4.py" sync *)']},
+    "disableAllHooks": False,
+    "disableSkillShellExecution": False,
+}
+EZEXES_OWN = ("enabledPlugins", "autoMemoryEnabled")
+
+
+class SettingsVariables(unittest.TestCase):
+    """Every p4 setting a project changes from its default is a P4_* variable under `env` of the project's local
+    settings file, read ahead of p4.json."""
+
+    setUp = ClaudeSettings.setUp
+    local = ClaudeSettings.local
+    read = ClaudeSettings.read
+    memory = ClaudeSettings.memory
+    record = ClaudeSettings.record
+
+    def store(self, conf=None):
+        p4 = os.path.join(self.project, ".claude", "p4")
+        os.makedirs(p4, exist_ok=True)
+        if conf is not None:
+            _write(p4conf.path(p4), conf)
+        return p4
+
+    def test_every_setting_has_one_variable_of_its_own(self):
+        """Each setting of DEFAULTS but the record recall.updated, and each phi key read when set, has a name of its
+        own, and no name is an older variable of another meaning: the three older switches that share a name mean
+        what their setting means."""
+        import re
+        keys = p4conf.env_keys()
+        leaves = {k for k, _v in p4conf._leaves(p4conf.DEFAULTS)} - set(p4conf.ENV_SKIP)
+        self.assertEqual(set(keys) - set(p4conf.ENV_SET_ONLY), leaves)
+        names = [p4conf.env_name(k) for k in keys]
+        self.assertEqual(len(names), len(set(names)), "two settings share a name")
+        self.assertTrue(all(re.fullmatch(r"P4_[A-Z0-9_]+", n) for n in names), names)
+        older = set()
+        for path in PLUGINS.rglob("*.py"):
+            if path.name != "p4conf.py" and not path.name.startswith("test_"):
+                older |= set(re.findall(r"P4_[A-Z0-9_]+", path.read_text(encoding="utf-8", errors="replace")))
+        self.assertEqual(older & set(names), {"P4_SCRATCHPAD_ASKS", "P4_RECALL_INJECT", "P4_PHI_ISSUES"})
+        self.assertEqual(p4conf.env_name("phi.watch_s"), "P4_PHI_WATCH_SECONDS", "P4_PHI_WATCH_S is puppeteer's tick")
+
+    def test_each_value_reads_back_from_the_text_written(self):
+        """A bool is 1 or 0, a string is written as it is unless it would read back as another value, and every
+        other value is compact JSON; each reads back as the same value of the same type."""
+        cases = {"phi.max_depth": [5, 1], "phi.watch_s": [2.5, 10.0], "phi.levels": [False, True],
+                 "recall.inject": [False, True, "rules-facts"], "recall.said.mode": ["shadow", "1", "true", "[x"],
+                 "phi.home": ["https://github.com/x/y.git", "5", True, None], "scratchpad.ignorable_ext": [[], ["a"]],
+                 "temportal.cache": [{"notebook/.out": {"max_age_days": 3}}], "phi.child_levels": [{"worker": "x"}],
+                 "recall.lookups.threshold": [0.7]}
+        keys = p4conf.env_keys()
+        for key, values in cases.items():
+            for v in values:
+                text = p4conf.env_text(key, v, keys[key])
+                got = p4conf.env_value(key, text, keys[key])
+                self.assertEqual(json.dumps(got), json.dumps(v), f"{key}={v!r} written as {text!r}")
+        self.assertEqual(p4conf.env_text("phi.levels", False, True), "0")
+        self.assertEqual(p4conf.env_text("recall.inject", "rules-facts", "rules-facts"), "rules-facts")
+        self.assertEqual(p4conf.env_text("recall.said.mode", "true", "off"), '"true"', "true would read back as no string")
+        self.assertEqual(p4conf.env_text("phi.home", "5", None), '"5"')
+        self.assertEqual(p4conf.env_text("scratchpad.ignorable_ext", ["a", "b"], []), '["a","b"]')
+
+    def test_a_variable_wins_over_p4_json_and_a_bad_one_falls_back_to_it(self):
+        """A variable that fits its key wins over p4.json; an empty one is unset; one that does not fit is passed
+        over with one stderr line, so the setting takes p4.json's value, the default where p4.json keeps it; p4.json
+        never takes a variable's value."""
+        import contextlib
+        import io
+        from unittest import mock
+        p4 = self.store({"phi": {"max_depth": 5}})
+        cases = [("7", 7), ("", 5), ("deep", 5), ("1.5", 5), ("true", 5)]
+        for text, want in cases:
+            err = io.StringIO()
+            with mock.patch.dict(os.environ, {"P4_PHI_MAX_DEPTH": text}), contextlib.redirect_stderr(err):
+                self.assertEqual(p4conf.load(p4)["phi"]["max_depth"], want, f"P4_PHI_MAX_DEPTH={text!r}")
+            self.assertEqual(bool(err.getvalue()), want == 5 and text != "", err.getvalue())
+        with mock.patch.dict(os.environ, {"P4_PHI_LEVELS": "0", "P4_PHI_WATCH_SECONDS": "10",
+                                          "P4_RECALL_INJECT": "1", "P4_SCRATCHPAD_ASKS": "yes",
+                                          "P4_TEMPORTAL_CACHE": '{"x": {"max_age_days": 1}}'}):
+            got = p4conf.load(p4, warn=False)
+        self.assertIs(got["phi"]["levels"], False)
+        self.assertEqual(got["phi"]["watch_s"], 10)
+        self.assertIs(got["recall"]["inject"], True)
+        self.assertIs(got["scratchpad"]["asks"], False, "yes is no bool: the default")
+        self.assertEqual(got["temportal"]["cache"], {"x": {"max_age_days": 1}})
+        with open(p4conf.path(p4), encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["phi"]["max_depth"], 5, "p4.json keeps its own value")
+        with mock.patch.dict(os.environ, {"P4_PHI_MAX_DEPTH": "7"}):
+            self.assertEqual(p4conf.load(p4, env=False)["phi"]["max_depth"], 5)
+
+    def test_a_constant_a_variable_set_goes_back_once_the_variable_is_gone(self):
+        """A process that runs hooks in turn keeps its module globals: configure puts back a constant a variable
+        set, so the next run without the variable gets the code's own value, as scratchpad.py's ASKS does."""
+        from unittest import mock
+        p4 = self.store({})
+        g = {"ASKS": False, "REPO_USES_MAX": 200}
+        names = {"asks": "ASKS", "repo_uses_max": "REPO_USES_MAX"}
+        with mock.patch.dict(os.environ, {"P4_SCRATCHPAD_ASKS": "1", "P4_SCRATCHPAD_REPO_USES_MAX": "9"}):
+            p4conf.configure(g, p4, "scratchpad", names)
+        self.assertEqual((g["ASKS"], g["REPO_USES_MAX"]), (True, 9))
+        p4conf.configure(g, p4, "scratchpad", names)
+        self.assertEqual((g["ASKS"], g["REPO_USES_MAX"]), (False, 200))
+
+    def test_a_variable_applies_to_its_own_projects_store_only(self):
+        """A session's variables come from its own project's settings, so a shared home store keeps its p4.json."""
+        from unittest import mock
+        mine = self.store({})
+        other = os.path.join(self.tmp, "home", ".claude", "p4")
+        os.makedirs(other)
+        with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": self.project, "P4_PHI_TRACK": "1"}):
+            self.assertIs(p4conf.section(mine, "phi")["track"], True)
+            self.assertIs(p4conf.section(other, "phi")["track"], False)
+
+    def test_the_caps_reader_takes_a_variable_and_keeps_the_default_out_of_range(self):
+        """phi.project_conf reads the tree caps through load, so a variable sets them, and apply_caps keeps the
+        default for a value of the right type out of its range."""
+        from unittest import mock
+        import phi
+        p4 = self.store({"phi": {"max_children": 6}})
+        try:
+            with mock.patch.dict(os.environ, {"P4_PHI_MAX_DEPTH": "4", "P4_PHI_TURN_STEPS": "999"}):
+                phi.project_conf(p4)
+                self.assertEqual((phi.MAX_DEPTH, phi.MAX_CHILDREN, phi.TURN_STEPS), (4, 6, 12))
+        finally:
+            phi.project_conf(None)
+
+    def test_a_changed_setting_is_written_under_env_and_goes_at_its_default(self):
+        """Each setting p4.json changes is a variable p4 owns under `env`; one back at its default goes, and `env`
+        goes with the last of p4's variables."""
+        p4 = self.store({"phi": {"max_depth": 5, "home": "https://github.com/x/y.git", "watch_s": 5},
+                         "recall": {"inject": False}, "scratchpad": {"ignorable_ext": ["log"]}})
+        p4conf.keep_settings(self.project)
+        self.assertEqual(self.read(self.local())["env"], {
+            "P4_SCRATCHPAD_IGNORABLE_EXT": '["log"]', "P4_PHI_HOME": "https://github.com/x/y.git",
+            "P4_PHI_MAX_DEPTH": "5", "P4_RECALL_INJECT": "0"}, "watch_s 5 equals the default 5.0: no variable")
+        owned = list(json.loads(Path(self.record()).read_text(encoding="utf-8"))["files"].values())[0]
+        self.assertIn("env.P4_PHI_MAX_DEPTH", owned)
+        _write(p4conf.path(p4), {"phi": {"max_depth": 3, "home": "https://github.com/x/y.git"},
+                                 "recall": {"inject": False}})
+        p4conf.keep_settings(self.project)
+        self.assertEqual(self.read(self.local())["env"], {"P4_PHI_HOME": "https://github.com/x/y.git",
+                                                         "P4_RECALL_INJECT": "0"})
+        _write(p4conf.path(p4), {})
+        p4conf.keep_settings(self.project)
+        self.assertNotIn("env", self.read(self.local()))
+
+    def test_ezexes_own_keys_and_variables_stay_untouched(self):
+        """enabledPlugins, autoMemoryEnabled, every permission key but p4's own allow entries, ezexe's own variables
+        and a P4_* variable set by hand are left as they are, and the record never names them; a variable p4 wrote
+        and ezexe changed leaves the record and is never touched again."""
+        self.store({"phi": {"max_depth": 5, "max_children": 6, "chain_max": 4}})
+        mine = {"enabledPlugins": {"p4-phi@p4-marketplace": False}, "autoMemoryEnabled": False,
+                "permissions": {"allow": ["Bash(npm test)"], "ask": ["Bash(git push *)"], "deny": ["Read(./.env)"],
+                                "defaultMode": "acceptEdits", "additionalDirectories": ["D:/x"]},
+                "env": {"FOO": "1", "P4_PHI_MAX_CHILDREN": "4"}}
+        _write(self.local(), mine)
+        for _ in range(2):
+            p4conf.keep_settings(self.project, platform="win32")
+        got = self.read(self.local())
+        for k in ("enabledPlugins", "autoMemoryEnabled"):
+            self.assertEqual(got[k], mine[k])
+        self.assertEqual({k: v for k, v in got["permissions"].items() if k != "allow"},
+                         {k: v for k, v in mine["permissions"].items() if k != "allow"})
+        self.assertEqual(got["permissions"]["allow"][0], "Bash(npm test)")
+        self.assertEqual(got["env"], {"FOO": "1", "P4_PHI_MAX_CHILDREN": "4", "P4_PHI_MAX_DEPTH": "5",
+                                      "P4_PHI_CHAIN_MAX": "4"})
+        rec = json.dumps(json.loads(Path(self.record()).read_text(encoding="utf-8"))["files"])
+        for k in ("enabledPlugins", "autoMemoryEnabled", "FOO", "P4_PHI_MAX_CHILDREN", "defaultMode", "deny"):
+            self.assertNotIn(k, rec)
+        got["env"]["P4_PHI_MAX_DEPTH"] = "6"
+        del got["env"]["P4_PHI_CHAIN_MAX"]
+        _write(self.local(), got)
+        self.store({"phi": {"max_depth": 7, "chain_max": 4}})
+        p4conf.keep_settings(self.project, platform="win32")
+        env = self.read(self.local())["env"]
+        self.assertEqual(env["P4_PHI_MAX_DEPTH"], "6", "changed by hand: ezexe's from now")
+        self.assertNotIn("P4_PHI_CHAIN_MAX", env, "deleted by hand: not written back")
+
+    def reference(self, env=None):
+        scripts = os.path.abspath(HERE).replace("\\", "/")
+        text = json.dumps({k: v for k, v in REFERENCE.items() if k not in EZEXES_OWN})
+        out = json.loads(text.replace("<memory>", self.memory()).replace("<scripts>", scripts))
+        if env:
+            out["env"] = env
+        return out
+
+    def test_a_fresh_projects_file_is_the_reference_file(self):
+        """A fresh project whose store gives the co-author line: the keeper's file is the reference file, keys in
+        the same order, apart from ezexe's own keys and the paths; after a setting changes it holds that variable
+        too, and nothing else moves."""
+        self.store({"claude": {"attribution.commit": REFERENCE["attribution"]["commit"]}})
+        p4conf.keep_settings(self.project, platform="win32")
+        got = self.read(self.local())
+        self.assertEqual(got, self.reference())
+        self.assertEqual(list(got), list(self.reference()))
+        self.store({"claude": {"attribution.commit": REFERENCE["attribution"]["commit"]},
+                    "phi": {"max_depth": 5}})
+        p4conf.keep_settings(self.project, platform="win32")
+        got = self.read(self.local())
+        self.assertEqual(got, self.reference({"P4_PHI_MAX_DEPTH": "5"}))
+        self.assertEqual(list(got), list(self.reference({"P4_PHI_MAX_DEPTH": "5"})))
+
+    def test_a_key_kept_off_yields_to_another_file_that_sets_it(self):
+        """disableAllHooks and disableSkillShellExecution are written false only while no user, project or managed
+        file sets another value, which a local false would override."""
+        conf = os.environ["CLAUDE_CONFIG_DIR"]
+        _write(os.path.join(conf, "settings.json"), {"disableAllHooks": True})
+        self.store({})
+        p4conf.keep_settings(self.project)
+        got = self.read(self.local())
+        self.assertNotIn("disableAllHooks", got)
+        self.assertIs(got["disableSkillShellExecution"], False)
 
 
 if __name__ == "__main__":

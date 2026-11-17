@@ -1097,7 +1097,7 @@ FILE_SETS = True              # p4.json phi.file_sets: false starts sessions who
 
 def project_conf(store):
     """The project's own keys of p4.json's `phi` section, read from the store where the session runs, not from a
-    shared store."""
+    shared store, each with its P4_* variable ahead of it, by p4conf.load."""
     global ACT_DONT_WAIT, TOP_ORCHESTRATES, FILE_SETS, LEVELS_ON
     try:
         d = p4conf.section(store, "phi", write=False) if store else {}
@@ -1130,8 +1130,9 @@ CAP_DEFAULTS = {k: p4conf.DEFAULTS["phi"][k] for k in CAPS}
 
 
 def apply_caps(d):
-    """Sets each cap from the `phi` section `d`, or back to its default where `d` holds no fitting value: a hook run
-    in process keeps module globals, so a store that sets none gets the defaults again."""
+    """Sets each cap from the `phi` section `d`, or back to its default where `d` holds no fitting value, one of the
+    wrong type or out of range, whether p4.json or a P4_* variable gave it: a hook run in process keeps module
+    globals, so a store that sets none gets the defaults again."""
     mods = {"phi": sys.modules[__name__], "plans": plans, "controls": controls, "puppeteer": puppeteer}
     for key, (mod, name, least, most) in CAPS.items():
         default = CAP_DEFAULTS[key]

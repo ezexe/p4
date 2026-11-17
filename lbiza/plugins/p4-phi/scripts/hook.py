@@ -12,8 +12,9 @@ event and matcher hooks/hooks.json runs it on, and what it does.
                  repository where they are missing; adds the `.git/info/exclude` line; seeds the store's sync
                  workflow once the store has an origin; on the `compact` source, marks the compaction in the
                  session's view record; runs p4conf.watch, the cheap comparison of the running Claude Code binary,
-                 the p4 plugins' versions and the store's `claude` section with p4conf's record, which on any
-                 change runs p4conf.keep_settings and, for a newer Claude Code, starts `changelog`; and brings the
+                 the p4 plugins' versions, the store's `claude` section and the P4_* variables its p4.json asks
+                 for with p4conf's record, which on any change runs p4conf.keep_settings and, for a newer Claude
+                 Code, starts `changelog`; and brings the
                  repository's and the dependencies' documents and the index up to date.
                  It prints a `systemMessage` only naming a key a store wants that p4 never writes, and
                  `additionalContext` only when ezexe pinned rules: the block `Standing rules from ezexe:` of at
