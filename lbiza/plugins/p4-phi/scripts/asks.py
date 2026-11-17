@@ -65,7 +65,6 @@ STATUS = re.compile(r"^\W*(?:where|what|when|why|how|who|which|whether|is|are|wa
 # a question in a request's form: "can you add the retry?" or "should we rerun it?" asks for work
 ASKS_WORK = re.compile(r"^\W*(?:(?:can|could|would|will) you|(?:can|could|should|shall) we)\b|^\W*please\b", re.I)
 SENTENCE = re.compile(r"(?<=[.!?])\s+(?=\S)")
-ROW_ID = re.compile(r"\bask-(\d+)\b")
 # a row's id leading a message, as "ask-1: yes": only so does an id answer its row
 ID_LEAD = re.compile(r"^\W*ask-(\d+)\b[\s:,.;]*", re.I)
 # a reply to the question a row waits on: a whole reply word or phrase that opens the message and is followed by a
@@ -173,11 +172,11 @@ def _after(text, m):
 def status(text):
     """True for a question of ezexe's about existing work: one that opens with a question word, as "where does it
     stand", asks for an account of where things stand, or ends on a question mark without asking for work, as "and
-    now?" does and "can you add the retry?" does not. In a message of several sentences the question mark and
-    the request's form are read on its last sentence."""
-    first = " ".join(str(text or "").split())
-    last = SENTENCE.split(first)[-1]               # in a message of several sentences, its question is the last
-    return bool(STATUS.match(first) or QUESTION.search(last) and not ASKS_WORK.match(last))
+    now?" does and "can you add the retry?" does not. A message of several sentences is one only when each of
+    them is, so "Restart the importer. Ok?" and "Is the importer down? Restart it." are requests."""
+    said = " ".join(str(text or "").split())
+    return bool(said) and all(STATUS.match(x) or QUESTION.search(x) and not ASKS_WORK.match(x)
+                              for x in SENTENCE.split(said))
 
 
 def opens(text):
@@ -262,9 +261,10 @@ def on_message(home, s, req, last_turn=None):
     target = None
     if asked and turn and turn != state.get("turnRead"):
         said = ask or report.rsplit("\n", 1)[-1]
-        m = ROW_ID.search(said)
-        if m:                                      # the question names its row, as the line asks: "ask-1: ..."
-            target = next((r for r in have if r["id"] == f"ask-{m.group(1)}" and not r["end"]), None)
+        m = ID_LEAD.match(said)
+        if m:                                      # the question starts with its row's id, as the line asks
+            target = next((r for r in have if r["id"] == f"ask-{m.group(1)}" and not r["end"]
+                           and not r["holder"]), None)   # a held or finished row takes no wait
         elif not any(r["waits"] for r in have):    # else the turn's own row, only while no other row waits
             target = next((r for r in have if r["id"] == now and not r["holder"] and not r["waits"]
                            and not r["end"]), None)
@@ -298,13 +298,14 @@ def on_message(home, s, req, last_turn=None):
         own = next((r for r in have if lead and r["id"] == f"ask-{lead.group(1)}"), None)
         offers = [r for r in waiting if _label(after if lead else req) in {_label(x) for x in r["offered"]}]
         pressed = (own if own in offers else None) if lead else (offers[0] if len(offers) == 1 else None)
+        shared = not lead and len(offers) > 1      # a label two rows offered: a reply with nothing to attach to
         m = REPLY.match(after)
         named = lead if lead and (m or pressed) else None   # an id answers its row only before a reply or a label
         replied = bool(m) if named else bool(REPLY.match(req))
         rest = _after(after, m) if named else _after(req, REPLY.match(req))
         hit = pressed if pressed and pressed["waits"] else None
         new = ""
-        if not hit and not pressed:
+        if not hit and not pressed and not shared:
             if named:                              # the row's id answers that row or nothing
                 hit = own if own and own["waits"] else None
             elif replied and waiting:

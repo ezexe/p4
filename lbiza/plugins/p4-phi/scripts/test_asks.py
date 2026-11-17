@@ -540,6 +540,44 @@ class LedgerWaits(Trees):
         t.say(PUP, "Should we rerun the failing suite?")
         self.assertEqual(len(asks.rows(t.p4, PUP)), 2)
 
+    def test_a_message_is_status_only_when_every_sentence_is(self):
+        t = self.t
+        t.say(PUP, "Restart the importer worker and resync the stores. Ok?")
+        t.say(PUP, "Is the importer down? Restart it.")
+        self.assertEqual(len(asks.rows(t.p4, PUP)), 2)
+        t.say(PUP, "Is the importer down? Where does its flush stand?")
+        self.assertEqual(len(asks.rows(t.p4, PUP)), 2, "two questions are status")
+
+    def test_a_question_waits_on_the_row_whose_id_starts_it_and_never_on_a_held_one(self):
+        t = self.t
+        t.say(PUP, ASK1)
+        self.send(PUP, TOP, ASK1 + ", as the exporter's next step.")
+        t.stop(PUP, ASK1, report="Sent on.", uuid="g1")
+        t.say(PUP, ASK2)
+        wrap = {"recap": "Ready.", "ask": "Should I write these the way ask-1 did?", "actions": []}
+        t.stop(PUP, ASK2, calls=[("mcp__ccd_turn__wrap_up", wrap, "ok")], report="Ready.", uuid="g2")
+        t.say(PUP, marked("The importer's parser is in review."))
+        got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
+        self.assertEqual(got["ask-1"]["waits"], "", "an id inside the question names no row, and ask-1 is held")
+        self.assertEqual(got["ask-2"]["waits"], "Should I write these the way ask-1 did?", "the turn's own row")
+        t.say(PUP, BILLING)
+        wrap = {"recap": "Ready.", "ask": "Ask-3: monthly or weekly charts?", "actions": []}
+        t.stop(PUP, BILLING, calls=[("mcp__ccd_turn__wrap_up", wrap, "ok")], report="Ready.", uuid="g3")
+        t.say(PUP, marked("The importer's parser is in review."))
+        self.assertEqual(asks.rows(t.p4, PUP)[2]["waits"], "Ask-3: monthly or weekly charts?", "case aside")
+
+    def test_a_label_two_rows_offered_changes_nothing(self):
+        t = self.t
+        wrap = {"recap": "Ready.", "actions": [{"label": "Yes"}, {"label": "Wait"}]}
+        for k, ask in enumerate((ASK2, ASK3)):
+            t.say(PUP, ask)
+            t.stop(PUP, ask, calls=[("mcp__ccd_turn__wrap_up", dict(wrap, ask=f"ask-{k + 1}: go on?"), "ok")],
+                   report="Ready.", uuid=f"y{k}")
+        t.say(PUP, "Yes")
+        got = asks.rows(t.p4, PUP)
+        self.assertEqual(len(got), 2, "it opens no row")
+        self.assertEqual([r["waits"] for r in got], ["ask-1: go on?", "ask-2: go on?"], "and answers none")
+
     def test_a_long_button_label_is_kept_whole(self):
         t = self.t
         t.say(PUP, ASK3)
