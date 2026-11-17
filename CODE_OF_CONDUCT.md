@@ -1,4 +1,3 @@
 <div align="center">
-<img width="500" height="500" alt="VibesCodingGIFbyHamzah" src="https://github.com/user-attachments/assets/9f4d4d3a-c0aa-4637-8dfc-174deaea2bc6" />
-
+<img width="400" height="251" alt="HappyBigLebowskiGIF" src="https://github.com/user-attachments/assets/042e2a46-c011-408b-98ae-40720228ec35" />
 </div>
