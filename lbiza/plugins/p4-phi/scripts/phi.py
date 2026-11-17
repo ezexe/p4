@@ -1390,6 +1390,7 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
         keep_standing(home, s["sessionId"], "A message about something else", full)
         return plus(full, whole=True)
     if not user:
+        RAN["new_task"] = "book"                   # the book's changes alone: no standing line in this message
         return plus("")
     RAN["new_task"] = "line"
     parent = spawned_from(s)
@@ -2629,13 +2630,17 @@ def h_user_prompt_submit(payload):
         RAN["puppeteer"] = verdict or bool(pup)
     watch_over(me.home, s)
     route = relay.route_text(me.home, s["sessionId"], req, s.get("cwd") or "") if req and not verdict else ""
+    RAN.pop("new_task", None)
     rule = "" if route else new_task_text(me.home, s, me, user=bool(req), req=req)
     book_line = RAN.pop("book_line", "")
     if verdict and RAN.get("new_task") in ("line", "feature"):
         rule = book_line                           # the gate's verdict says where the message goes; the book stays
     parts.append(pup)
-    # the standing line, which carries the address book's changes, and a cross-session turn's split advice, both
-    last = route or "\n\n".join(x for x in (rule, split_text(me.home, s, payload.get("prompt"), me.cli)) if x)
+    # a standing line in this message stands in for a cross-session turn's split advice, which comes at the next
+    # such turn; the address book's changes alone never do
+    split = split_text(me.home, s, payload.get("prompt"), me.cli) \
+        if not route and RAN.get("new_task") in (None, "book") else ""
+    last = route or "\n\n".join(x for x in (rule, split) if x)
     save_session(me.home, s)
     # the rebase check, on every message: what the sessions beside this one changed, and the warnings, first
     used = sum(len(p) + 2 for p in parts + [last] if p)
