@@ -3056,7 +3056,11 @@ def hook_main(name):
             if me.home and me.id and not once(me.home, me.id, name, payload):
                 return 0
             RAN.update(home=me.home, session=me.id)
-        text = fn(payload)
+        controls.one_hook(True)                     # each controlled session is read once in this hook
+        try:
+            text = fn(payload)
+        finally:
+            controls.one_hook(False)
         if isinstance(text, dict):                  # a hook that answers with its own JSON, such as start-advice
             log_run(name, json.dumps(text), started)
             sys.stdout.write(json.dumps(text))

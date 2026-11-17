@@ -163,10 +163,78 @@ def _set(s, rows):
 
 # --- where a controlled session stands ---------------------------------------------------------------------------------
 
+# One read of each controlled session in one hook, and what git and GitHub answered kept, ezexe/p4#216. A puppeteer's
+# message hook asked where a controlled session stands in its reports, its boundary and its board, and its Stop hook in
+# the sessions it waits on and its board, each time running git for every closing commit and gh for every issue, which
+# took the hooks past their limits. Inside a hook, which phi.hook_main marks with one_hook, standing is read once for
+# a session and every caller gets that answer. A commit found landed stays landed and an issue found closed is kept
+# by its number, in the store's phi/.cache/known.json, so no later hook runs git or gh for them.
+_ONE = [None]                    # inside a hook, {(store, sid): standing's answer}; None outside one
+KNOWN = ("phi", ".cache", "known.json")
+KNOWN_MOST = 2000                # the commits and the issues one store keeps
+
+
+def one_hook(on):
+    """Marks a hook's start and its end: between them each controlled session is read once."""
+    _ONE[0] = {} if on else None
+
+
+def _known(store):
+    d = relay._read_json(os.path.join(store, *KNOWN)) if store else {}
+    return d if isinstance(d, dict) else {}
+
+
+def _know(store, kind, key):
+    if not store:
+        return
+    d = _known(store)
+    have = [x for x in d.get(kind) or [] if isinstance(x, str)]
+    if key not in have:
+        d[kind] = (have + [key])[-KNOWN_MOST:]
+        try:
+            relay._write_json(os.path.join(store, *KNOWN), d)
+        except OSError:
+            pass
+
+
+def landed_once(store, path, sha, closes):
+    """issues.landed, with a commit it found landed kept by its sha, so git is asked once for it."""
+    if sha in (_known(store).get("landed") or []):
+        return True
+    got = issues.landed(path, sha, closes)
+    if got:
+        _know(store, "landed", sha)
+    return got
+
+
+def closed_once(store, slug, n):
+    """True when GitHub shows the issue closed, with one it showed closed kept by its number, so gh is asked once."""
+    key = f"{str(slug).lower()}#{n}"
+    if key in (_known(store).get("closed") or []):
+        return True
+    got = issues.issue_state(slug, n) == "CLOSED"
+    if got:
+        _know(store, "closed", key)
+    return got
+
+
 def standing(store, sid):
-    """Where a controlled session stands, read from the app's record and its own store and written nowhere. Returns
-    its state, one of archived, unread, working, open, shown done and not shown done, and the list of what p4-phi's
-    records hold against archiving it."""
+    """Where a controlled session stands: _standing's answer, read once for a session inside one hook."""
+    memo = _ONE[0]
+    key = (os.path.normcase(os.path.abspath(store)) if store else "", sid)
+    if memo is not None and key in memo:
+        state, against = memo[key]
+        return state, list(against)
+    state, against = _standing(store, sid)
+    if memo is not None:
+        memo[key] = (state, list(against))
+    return state, against
+
+
+def _standing(store, sid):
+    """Where a controlled session stands, read from the app's record and its own store and written nowhere but for
+    the answers of git and GitHub it keeps. Returns its state, one of archived, unread, working, open, shown done and
+    not shown done, and the list of what p4-phi's records hold against archiving it."""
     rec = PHI.app_record(sid)
     if not rec:
         return "unread", ["the app holds no record of it on this machine"]
@@ -184,7 +252,7 @@ def standing(store, sid):
         commits = relay.closing_commits(store, sid, s)
     except Exception:  # noqa: BLE001
         commits = []
-    if steps and not issues_closed(s, commits):    # once its issues are closed, a stale step holds nothing
+    if steps and not issues_closed(s, commits, store):   # once its issues are closed, a stale step holds nothing
         against.append(f"{len(steps)} open plan step{'s' if len(steps) != 1 else ''}, the next "
                        f"\"{PHI.cut(PHI.clean(steps[0].get('content')), 80)}\"")
     tasks = _watcher().held_tasks(store, sid)
@@ -199,7 +267,7 @@ def standing(store, sid):
             against.append(f"\"{full_title(kid, k)}\" under it is still working")
     for path, sha, _, closes in commits:
         try:
-            if not issues.landed(path, sha, closes):
+            if not landed_once(store, path, sha, closes):
                 against.append(f"commit {sha}, which closes {', '.join(closes)}, is on no remote branch, and no "
                                f"commit there closes the same issue or carries the same change")
         except Exception:  # noqa: BLE001
@@ -210,8 +278,9 @@ def standing(store, sid):
     return ("working" if working else "open" if against else "shown done" if shown else "not shown done"), against
 
 
-def issues_closed(s, commits):
-    """True when a session names issues, by its own issue or its closing commits, and GitHub shows each closed."""
+def issues_closed(s, commits, store=""):
+    """True when a session names issues, by its own issue or its closing commits, and GitHub shows each closed. With
+    `store`, an issue GitHub showed closed is kept there and not asked for again."""
     named = set()
     held = s.get("issue") if isinstance(s.get("issue"), dict) else {}
     if held.get("repo") and str(held.get("number") or "").isdigit():
@@ -222,7 +291,7 @@ def issues_closed(s, commits):
             slug = slug or issues.github_of(path)
             if slug and n.isdigit():
                 named.add((slug, int(n)))
-    return bool(named) and all(issues.issue_state(slug, n) == "CLOSED" for slug, n in sorted(named))
+    return bool(named) and all(closed_once(store, slug, n) for slug, n in sorted(named))
 
 
 def last_report(store, sid):

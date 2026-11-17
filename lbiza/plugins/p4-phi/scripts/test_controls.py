@@ -12,6 +12,7 @@ session filed is held under that session; and every ask of ezexe in the lines a 
 """
 
 import ast
+import contextlib
 import json
 import os
 import re
@@ -1220,6 +1221,91 @@ class OpenIssues(unittest.TestCase):
         os.remove(os.path.join(t.p4, "p4.json"))
         self.assertIn("ezexe/demo#8", self.said(context(t.say(PUP, "and with the loop on?"))),
                       "the closed tree is counted once the loop is on")
+
+
+class OneReadAHook(unittest.TestCase):
+    """ezexe/p4#216: a puppeteer's message hook asked where a controlled session stands in its reports, its boundary
+    and its board, and its Stop hook in the sessions it waits on and its board, each time running git for every
+    closing commit and gh for every issue, which took the hooks past their limits. Inside one hook a controlled
+    session is read once and every caller gets that answer. A commit found landed and an issue found closed are kept
+    in the store's phi/.cache/known.json, so a later hook asks neither git nor gh for them."""
+
+    file = Supervisor.file
+    setUp = LandedWorker.setUp
+    git = LandedWorker.git
+    edit = LandedWorker.edit
+    worker_closing_7 = LandedWorker.worker_closing_7
+
+    def landed_scene(self):
+        """The worker's closing commit, pushed and on a remote branch of its clone, with #7 closed on GitHub."""
+        work, bare, _, sha = self.worker_closing_7()
+        self.git(work, "push", "-q", bare, "main")
+        self.git(work, "fetch", "-q", bare, "main:refs/remotes/origin/main")
+        return sha
+
+    def counted(self):
+        """controls._standing and issues.landed wrapped to count, with the env a hook process gets."""
+        from unittest import mock
+        import issues
+        reads, gits = [], []
+        stood, landed = controls._standing, issues.landed
+
+        def standing(store, sid):
+            reads.append(sid)
+            return stood(store, sid)
+
+        def asked(path, sha, closes):
+            gits.append(sha)
+            return landed(path, sha, closes)
+        stack = contextlib.ExitStack()
+        stack.enter_context(mock.patch.object(controls, "_standing", standing))
+        stack.enter_context(mock.patch.object(issues, "landed", asked))
+        stack.enter_context(mock.patch.dict(os.environ, self.t.env(PUP)))
+        stack.enter_context(mock.patch.dict(phi.RECORDS, clear=True))
+        self.addCleanup(stack.close)
+        return reads, gits
+
+    def test_inside_one_hook_a_session_is_read_once_and_a_landed_commit_is_asked_of_git_once(self):
+        sha = self.landed_scene()
+        reads, gits = self.counted()
+        controls.one_hook(True)
+        try:
+            answers = [controls.standing(self.t.p4, KID) for _ in range(3)]      # as reports, boundary and board ask
+        finally:
+            controls.one_hook(False)
+        self.assertEqual(reads, [KID], "three callers of one hook, one read")
+        self.assertEqual(gits, [sha], "git is asked once for the closing commit")
+        self.assertEqual(answers[0], answers[1])
+        self.assertEqual(answers[0], answers[2])
+        answers[0][1].append("a caller's own line")
+        self.assertNotIn("a caller's own line", controls.standing(self.t.p4, KID)[1], "each caller gets its own list")
+        known = json.loads(read(os.path.join(self.t.p4, "phi", ".cache", "known.json")))
+        self.assertEqual(known["landed"], [sha], "the commit found landed, kept by its sha")
+        self.assertEqual(known["closed"], ["ezexe/demo#7"], "the issue found closed, kept by its number")
+        del reads[:], gits[:]
+        controls.one_hook(True)                              # a later hook
+        try:
+            again = controls.standing(self.t.p4, KID)
+        finally:
+            controls.one_hook(False)
+        self.assertEqual(reads, [KID], "a later hook reads the session again")
+        self.assertEqual(gits, [], "and runs no git for a commit already found landed")
+        self.assertEqual(again[0], answers[0][0])
+        del reads[:]
+        controls.standing(self.t.p4, KID)
+        controls.standing(self.t.p4, KID)
+        self.assertEqual(reads, [KID, KID], "outside a hook each call reads afresh")
+
+    def test_a_puppeteers_message_hook_and_its_stop_hook_read_each_controlled_session_once(self):
+        self.landed_scene()
+        reads, _ = self.counted()
+        t = self.t
+        self.assertEqual(t.say(PUP, "Where does the exporter tree stand?").returncode, 0)
+        self.assertLessEqual(reads.count(TOP), 1, "one message hook reads a controlled session at most once")
+        said = len(reads)
+        self.assertEqual(t.stop(PUP, "Where does the exporter tree stand?", report="it stands").returncode, 0)
+        self.assertLessEqual(reads[said:].count(TOP), 1, "one Stop hook reads a controlled session at most once")
+        self.assertIsNone(controls._ONE[0], "the memo ends with the hook")
 
 
 if __name__ == "__main__":

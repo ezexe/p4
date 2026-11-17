@@ -1142,6 +1142,8 @@ IGNORED = ("phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/session
            "phi/sessions/*/watcher.json", "phi/meta-ledger.md", "phi/.issue-states.json", "phi/.routes-checked",
            # a session's context fill and plan limits, which the hooks module writes for this machine's session
            "phi/sessions/*/usage.json",
+           # what git and GitHub answered once on this machine: the commits found landed and the issues found closed
+           "phi/.cache/",
            # the open issues a puppeteer's watcher last listed from GitHub, listed again at its next slow look
            "phi/sessions/*/open-issues.json",
            # what did not fit beside a prompt, and the standing instructions an earlier p4-phi wrote: pages of this
