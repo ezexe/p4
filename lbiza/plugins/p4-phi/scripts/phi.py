@@ -2349,23 +2349,29 @@ def h_session_start(payload):
     RAN["start"] = source
     asks(s)
     lost = source in ("compact", "clear")
-    text = rule = ""
+    text = rule = book_line = ""
     if not (source == "startup" and not spawned_from(s) and not s.get("task")
             and os.environ.get("CLAUDE_CODE_HOST_SESSION_ID")):
         # with a host id and nothing recorded, the app has not yet written this session's parent session, and the
         # first message tells
         text = given(s, me, me.home, own=lost or len(s.get("cliSessionIds") or []) > 1, brief=source == "compact")
+        new_task_text.book_line = ""
         rule = new_task_text(me.home, s, me, user=False, again=lost, brief=source == "compact") if lost else ""
+        book_line = getattr(new_task_text, "book_line", "") or ""
+        if book_line and rule.endswith(book_line):    # the address book goes last, whole on its page as well
+            rule = rule[:-len(book_line)].rstrip("\n")
+        else:
+            book_line = ""
     pin = pin_of(me.home, s)
     text = "\n\n".join(p for p in (pin, text) if p)
     live_rules(s, me.store, os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or "")   # what it starts with
     relay.remember_store(me.store)
+    notices = []
     if tracked(me.home):                           # a failed first commit, said once; no git call while untracked
-        rule = "\n\n".join(p for p in (rule, relay.track_notice(me.home)) if p)
+        notices.append(relay.track_notice(me.home))
     if me.home_missing:
-        rule = "\n\n".join(p for p in (rule, f"phi (p4-phi): this project's p4.json names the shared store "
-                                               f"{me.home_missing} for the session tree, and this machine has not "
-                                               f"seen it; the tree stays in this project's store.") if p)
+        notices.append(f"phi (p4-phi): this project's p4.json names the shared store {me.home_missing} for the "
+                       f"session tree, and this machine has not seen it; the tree stays in this project's store.")
     first = ""
     if source == "compact" and controls.is_puppeteer(s, me.store):
         first = controls.compacted(me.home, s)     # a puppeteer's board path before anything else
@@ -2374,8 +2380,10 @@ def h_session_start(payload):
         first = controls.state_first(me.home, s)   # a standing worker's or coworker's state page first
     rules = rules_text(me.store, fork=bool(s.get("forked"))) if source != "resume" else ""
     save_session(me.home, s)
-    # what asks the session to act first, inside the app's preview past its cap, then the rules and the background
-    return "\n\n".join(p for p in (first, rule, rules, text) if p) or None
+    # past the app's cap of 10,000 characters Claude sees a preview of the first 2,000 and the file's path, so what
+    # asks the session to act comes first: the page to resume from, the notices and the standing instruction, then
+    # the built-in rules and the background, and last the address book, which is whole on its page as well
+    return "\n\n".join(p for p in (first, *notices, rule, rules, text, book_line) if p) or None
 
 
 def watch_over(home, s):

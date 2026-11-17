@@ -1240,6 +1240,41 @@ class Rules(unittest.TestCase):
                                                     "context was compacted"), text[:200])
         self.assertLessEqual(max(v for k, v in sizes.items() if k.endswith(str(phi.BACKGROUND_CHARS))), APP_CAP, sizes)
 
+    def test_past_the_apps_cap_the_act_lines_and_notices_lead_and_the_address_book_comes_last(self):
+        """ezexe/p4#243 D9: past 10,000 characters the app hands Claude a preview of the first 2,000 and the file's
+        path. A clear's start text with a long background and a long address book keeps the notices and the
+        standing instruction inside that preview, the built-in rules before the background, and the book last."""
+        t = self.t
+        subprocess.run(["git", "init", "-q", t.p4], check=True, capture_output=True)
+        gd = subprocess.run(["git", "-C", t.p4, "rev-parse", "--absolute-git-dir"], capture_output=True,
+                            text=True).stdout.strip()
+        write(os.path.join(gd, relay.TRACK_STATE), json.dumps(
+            {"fails": 1, "next": time.time() + 3600, "reason": "index.lock is held", "owed": []}))
+        write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"track": True,
+                                                                  "home": "git@example.com:team/elsewhere.git"}}))
+        write(os.path.join(t.p4, "phi", "phi.json"), json.dumps({"background_chars": 2 * APP_CAP}))
+        t.say(TOP, TASK, P4_PHI_NEW_TASK="1")
+        for k in range(24):
+            host = f"local_wkr{k:05d}"
+            t.record(host, TOP, f"Port part {k} of the narwhal exporter's flush to the new writer")
+            t.say(host, f"Port part {k} of the flush.\nFiles: src/export/flush_part_{k}.py, tests/test_part_{k}.py")
+        calls = [("Edit", {"file_path": f"src/export/flush_part_{k}.py"}, "ok") for k in range(14)]
+        for n in range(3):
+            t.stop(TOP, "Build the next part of the narwhal tools and check it. " * 5, calls,
+                   "Built and checked: " + "the part reads the ports table back and its check passes. " * 8,
+                   uuid=f"u{n}")
+        text = context(t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "clear"},
+                              P4_PHI_NEW_TASK="1"))
+        self.assertGreater(len(text), APP_CAP, "past the app's cap, so only the preview is seen whole")
+        for line in ("the session tree's first commit in", "names the shared store git@example.com:team/elsewhere.git",
+                     "When a message from ezexe is about something else"):
+            self.assertIn(line, text)
+            self.assertLessEqual(text.index(line) + len(line), 2000, f"inside the app's preview: {line}")
+        book = text.index("this session's address book")
+        for later in ("built-in, act-don't-wait", "built-in, levels", "background for this session"):
+            self.assertLess(text.index(later), book, f"{later} comes before the address book")
+        self.assertLess(text.index("built-in, levels"), text.index("background for this session"))
+
     def test_off_is_silence_and_no_memories_is_the_built_in_rules_alone(self):
         write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"rules": False}))
         self.assertEqual(self.start(TOP), "")
