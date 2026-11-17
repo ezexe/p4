@@ -73,17 +73,18 @@ A puppeteer is a session nobody started that ezexe filed in the sidebar section 
 Its rule is handed once, beside its first message after p4-phi sees the filing; its board, `board.md` in its session folder, says on its head how it is kept; and the line p4-phi hands at a boundary says what to do then.
 A controlled session is told once when it comes to have a puppeteer, and once when that ends.
 Each request of ezexe's to a puppeteer is a row of its ledger, `asks.md` beside its board: a short topic, the session that holds it by full title and id, its state, and what waits on ezexe.
-A message of ezexe's with a work word opens a row, whatever its length and also while another row waits on ezexe, unless it is a status question such as "where does it stand" or "did it land", or a reply such as "yes, push it".
+A message of ezexe's with a work word or an opening read ask such as "investigate" opens a row, whatever its length and also while another row waits on ezexe, unless it is a status question such as "where does it stand" or "did it land", or a reply such as "yes, push it".
 The same words again join their row while it is live, and open a new row once it is finished.
 A message to a puppeteer that the app marks as another session's opens no row and is drafted no start: the body, past its leading reminders, opens with another session's message, a side-sessions event, a task notification, a system notification, a hook's feedback or a slash command's wrapper.
 An orchestrator's routing still reads the work another session's message hands it.
 A request takes as its holder the session the puppeteer messages, or the orchestrator it starts, whose own words share the request's topic, else, for a send to a controlled session or a start, the request its turn works on.
 Its state is read from that holder's turns in the holder's own store since it took the request, also for a holder the address book leaves out: routed or started, working, reported, and done for good once one of them was shown done; closed for good once the holder is archived or no longer live with no such turn.
-A held request whose holder is not inside a turn and ended none for a day ends as it stands: reported once it reported, else carried, since a long-lived orchestrator may never show it done.
+A held request whose holder ended no turn on it for a day ends as it stands: reported once it reported, else carried, since a long-lived orchestrator may never show it done and an interrupted turn runs no Stop hook.
+A send never ends a wait, and a finished request never takes a holder.
 A finished state shows only with its end kept, and a finished row leaves the page a day after it ended.
-At the request's next message, one with no holder is answered when the turn on it ended without a question, and waits on ezexe when the turn ended on a question or offered ezexe buttons with `mcp__ccd_turn__wrap_up`, whose labels are kept with the wait.
+At the request's next message, one with no holder is answered when the turn on it ended without a question, and waits on ezexe when the turn ended on a question or asked one with `mcp__ccd_turn__wrap_up`, whatever its buttons, whose labels are kept whole with the wait.
 It is carried when ezexe's next message comes before any turn ended; another session's message, which can come inside the turn, carries nothing.
-A waiting request is answered by a button label it offered, which the app sends back as ezexe's message, by ezexe's message that names it by its id, by a reply, which answers the waiting request whose topic it shares or else the latest, or by any other message of ezexe's that is neither a request nor a question.
+A waiting request is answered by a button label it offered, which the app sends back as ezexe's message, by ezexe's message that names it by its id, which answers that request or nothing, by a reply that opens with a whole reply word followed by a stop, which answers the waiting request whose topic it shares or else the latest, or by any other message of ezexe's that is neither a request, a read ask nor a question.
 What follows a reply's first words or a request's id, when it asks for work on another topic, opens a request of its own; a reply then answers the wait as well only when that request is short, and an id always does.
 A request or a question of ezexe's leaves the wait in place.
 Beside each of the puppeteer's messages, a short line gives the counts by state and names the page.

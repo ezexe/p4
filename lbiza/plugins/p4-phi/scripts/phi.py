@@ -785,16 +785,17 @@ def turn_of(turn, report):
         elif name in ("Agent", "Task"):
             add(steps, f"ran a subagent: {cut(clean(inp.get('description')), 80)}")
         elif name == "mcp__ccd_turn__wrap_up" and clean(inp.get("ask")):
-            # the question put to ezexe and its reply buttons, whose label the app sends back as ezexe's message
+            # the question put to ezexe and its reply buttons, whose label the app sends back as ezexe's message, so
+            # each is kept whole; a question with no reply button waits on typed text
             ask = cut(clean(inp.get("ask")), 300)
-            offered = [cut(clean(a.get("label")), 80) for a in inp.get("actions") or []
+            offered = [clean(a.get("label")) for a in inp.get("actions") or []
                        if isinstance(a, dict) and clean(a.get("label")) and not a.get("action")]
     prompt = cut(turn.get("prompt") or "", TASK_CHARS)
     uuid = turn.get("uuid") or ""
     row = {"id": uuid or "turn-" + hashlib.sha1(prompt.encode("utf-8", "replace")).hexdigest()[:12],
            "prompt": prompt, "steps": steps[:TURN_STEPS], "failed": failed[:4],
            "report": (report or "").strip()[:REPORT_CHARS], "done": ""}
-    if offered:
+    if ask:
         row.update(ask=ask, offered=offered[:6])
     return row
 

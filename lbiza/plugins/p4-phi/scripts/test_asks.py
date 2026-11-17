@@ -473,10 +473,96 @@ class LedgerWaits(Trees):
         got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
         self.assertEqual(sorted(got), ["ask-1", "ask-2"], "a request after a reply's first word opens its row")
         self.assertNotEqual(got["ask-1"]["waits"], "", "and answers nothing")
-        t.say(PUP, "Go through the logs and sync the stores")
+        for k, said in enumerate(("Go through the logs and sync the stores", "Don't forget to sync the stores")):
+            t.say(PUP, said)
+            got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
+            self.assertEqual(len(got), 3 + k, f"{said}: a request whose verb is a reply word opens its row")
+            self.assertNotEqual(got["ask-1"]["waits"], "", f"{said}: and answers nothing")
+        t.say(PUP, "Yes, and sync the importer's stores too")
         got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
-        self.assertEqual(sorted(got), ["ask-1", "ask-2", "ask-3"], "a short one opens its row too")
-        self.assertEqual(got["ask-1"]["waits"], "", "and answers the wait as well")
+        self.assertEqual(len(got), 5, "a short request beside a whole reply word opens its row")
+        self.assertEqual(got["ask-1"]["waits"], "", "and the reply answers the wait as well")
+
+    def test_a_wrap_up_question_waits_whatever_its_buttons(self):
+        t = self.t
+        for k, actions in enumerate(([], [{"label": "Archive", "action": "archive"}])):
+            t.say(PUP, ASK3 if not k else BILLING)
+            wrap = {"recap": "The notes are ready.", "ask": "Which page should the release notes go on",
+                    "actions": actions}
+            t.stop(PUP, "x", calls=[("mcp__ccd_turn__wrap_up", wrap, "ok")], report="The notes are ready.",
+                   uuid=f"w{k}")
+            t.say(PUP, marked("The importer's parser is in review."))
+            got = asks.rows(t.p4, PUP)[k]
+            self.assertEqual(got["waits"], "Which page should the release notes go on", f"buttons: {actions}")
+
+    def test_a_long_button_label_is_kept_whole(self):
+        t = self.t
+        t.say(PUP, ASK3)
+        label = "Publish the release notes now on the releases page, and let the flush retry follow in the next one"
+        wrap = {"recap": "Ready.", "ask": "Publish now?", "actions": [{"label": label}, {"label": "Wait"}]}
+        t.stop(PUP, ASK3, calls=[("mcp__ccd_turn__wrap_up", wrap, "ok")], report="Ready.", uuid="lb")
+        t.say(PUP, label)
+        got = asks.rows(t.p4, PUP)
+        self.assertEqual((len(got), got[0]["waits"]), (1, ""), "the app's whole label answers its row")
+
+    def test_a_read_ask_while_a_row_waits_opens_its_own_row(self):
+        t = self.t
+        t.say(PUP, ASK3)
+        t.stop(PUP, ASK3, report="The notes are ready. " + WAIT, uuid="ra")
+        t.say(PUP, "Investigate why the importer's flush fails on the second batch of quoted rows")
+        got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
+        self.assertEqual(sorted(got), ["ask-1", "ask-2"])
+        self.assertNotEqual(got["ask-1"]["waits"], "", "the wait stays")
+
+    def test_a_send_never_ends_a_wait(self):
+        t = self.t
+        t.say(PUP, ASK3)
+        t.stop(PUP, ASK3, report="The notes are ready. " + WAIT, uuid="sw")
+        t.say(PUP, marked("The importer's parser is in review."))
+        self.send(PUP, TOP, "Publish the exporter's release notes on the releases page when the retry lands")
+        got = asks.rows(t.p4, PUP)
+        self.assertEqual((got[0]["holder"], got[0]["waits"]), ("", "The notes are ready. " + WAIT))
+
+    def test_a_row_id_answers_that_row_or_nothing(self):
+        t = self.t
+        t.say(PUP, ASK2)
+        t.stop(PUP, ASK2, report="The parser already reads them.", uuid="i1")
+        t.say(PUP, ASK3)
+        t.stop(PUP, ASK3, report="The notes are ready. " + WAIT, uuid="i2")
+        t.say(PUP, "ask-1: yes")
+        got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
+        self.assertNotEqual(got["ask-2"]["waits"], "", "ask-1 waits on nothing, so no other row is answered")
+
+    def test_an_old_minute_only_row_leaves_the_page_and_takes_no_holder(self):
+        t = self.t
+        t.say(PUP, ASK2)
+        t.say(PUP, ACCOUNT)                        # ask-1 carried
+        path = asks.log_path(t.p4, PUP)
+        day = time.strftime("%Y-%m-%d %H:%M", time.localtime(time.time() - asks.KEEP_S - 600))
+        rows = [json.loads(x) for x in read(path).splitlines() if x.strip()]
+        for r in rows:
+            r["time"] = day                        # as a row kept to the minute
+        write(path, "".join(json.dumps(r) + "\n" for r in rows))
+        self.send(PUP, TOP3, ASK2 + ", as the importer's next step.")
+        t.say(PUP, ACCOUNT)
+        self.assertEqual(asks.rows(t.p4, PUP)[0]["holder"], "", "a finished row is never revived")
+        self.assertNotIn("ask-1", self.page(), "a finished row a day old leaves the page")
+
+    def test_a_holder_read_as_working_for_a_day_ends_the_row(self):
+        t = self.t
+        t.say(PUP, ASK1)
+        self.send(PUP, TOP, ASK1 + ", as the exporter's next step.")
+        t.stop(PUP, ASK1, report="Sent on.", uuid="iw")
+        t.say(TOP, "Add the retry to the flush")   # interrupted: no Stop follows
+        path = asks.log_path(t.p4, PUP)
+        day = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - asks.KEEP_S - 600))
+        rows = [json.loads(x) for x in read(path).splitlines() if x.strip()]
+        for r in rows:
+            if r.get("kind") == "holder":
+                r.update(time=day, at=day + ".000")
+        write(path, "".join(json.dumps(r) + "\n" for r in rows))
+        t.say(PUP, ACCOUNT)
+        self.assertIn(f"`{TOP}` | carried", self.page())
 
     def test_a_row_id_beside_a_new_request_answers_the_row_and_opens_one(self):
         t = self.t
