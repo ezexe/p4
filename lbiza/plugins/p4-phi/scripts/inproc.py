@@ -204,7 +204,7 @@ EDITS = _tool("Edit", "Write", "MultiEdit", "NotebookEdit")
 WEB = _tool("WebFetch", "WebSearch")
 SHELLS = _tool("Bash", "PowerShell")
 OTHERS = [b"mcp__ccd_session_mgmt__archive_session", b"mcp__ccd_session__start_session",
-          b"mcp__ccd_session_mgmt__set_session_model", b"mcp__ccd_session_mgmt__send_message"] + _tool(
+          b"mcp__ccd_session_mgmt__send_message"] + _tool(
     "EnterWorktree", "SendMessage")                # a message to another session: phi.py's go-guard reads it
 LONG = re.compile(rb"test_.*\.py|pytest|py\.test|unittest|npm.*test|npm.*build|cargo.*test|cargo.*build|go.*test|"
                   rb"go.*build|make.*test|make.*build", re.S)

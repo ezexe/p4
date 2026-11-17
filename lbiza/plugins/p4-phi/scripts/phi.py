@@ -1781,13 +1781,6 @@ def h_wrap_up(payload):
     return line
 
 
-def h_model_fixed(payload):
-    """PreToolUse on set_session_model: a model is chosen at a session's start and not changed after."""
-    RAN["model_fixed"] = True
-    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                   "permissionDecisionReason": controls.MODEL_FIXED}}
-
-
 def h_nudge(payload):
     """PreToolUse on Edit, Write and shell commands in an orchestrator with a task list: one line, once per
     step, that the work goes to a worker. Never a block; reading, git's reading and landing commands are never
@@ -2940,7 +2933,6 @@ ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "store-guar
                                      "self-archive", "task-stop")})
 ROUTED["nudge"] = ("PreToolUse", h_nudge)
 ROUTED["puppeteer-tool"] = ("PreToolUse", h_puppeteer_tool)
-ROUTED["model-fixed"] = ("PreToolUse", h_model_fixed)
 ROUTED["wrap-up"] = ("PostToolUse", h_wrap_up)
 HOOKS["go-guard"] = ROUTED["go-guard"] = ("PreToolUse", h_go_guard)
 HOOKS["restart-check"] = ROUTED["restart-check"] = ("PreToolUse", h_restart_check)

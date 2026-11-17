@@ -680,10 +680,11 @@ class Supervisor(unittest.TestCase):
         self.assertRegex(lines, rf"`{TOP3}`[^\n]*lower")
         self.assertRegex(lines, rf"`{TOP4}`[^\n]*low\b")
         self.assertIn("note", lines, "logged on the board")
+        import p4conf
+        self.assertIn("mcp__ccd_session_mgmt__set_session_model", p4conf.DENY_RULES, "the app's deny rule refuses it")
         said, out = self.pre(PUP, "mcp__ccd_session_mgmt__set_session_model",
                              {"session_id": TOP, "model": "claude-haiku-5-5"})
-        self.assertIn("model", said)
-        self.assertIn("chosen at its start", said)
+        self.assertNotIn("permissionDecision", out, "p4-phi keeps no refusal of its own")
         self.assertIn("set_session_effort", controls.RULE)
         self.assertIn("only on the start call", controls.RULE)
 

@@ -691,9 +691,6 @@ LOWER = re.compile(r"\b(?:land(?:ed|ing|ings)?|relay(?:ed|s)?|pushed|rerun|reran
 EFFORT = {"raise": "raise, its report names faults from a check, a fix started again or a stall",
           "lower": "lower, its turn was routine relays, landings, word commits or reruns",
           "low": "low, it is shown done with nothing open"}
-MODEL_FIXED = ("phi (p4-phi): a session's model was chosen at its start, from its work and the plan limits, and is "
-               "not changed after, since a change mid-run re-prices its turns. Tune its effort with "
-               "`mcp__ccd_session_mgmt__set_session_effort` instead.")
 
 
 def effort_of(state, first):
