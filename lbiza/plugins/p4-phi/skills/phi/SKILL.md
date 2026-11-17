@@ -106,7 +106,10 @@ At a message carrying reports, a puppeteer is handed a line naming each reportin
 A session whose p4-phi task names a page by `State page: <path>`, and the standing worker and each coworker, is handed that page's path first after a compaction or a clear.
 No line p4-phi hands a session names a place under `.claude` to write, since every such write asks ezexe.
 A standing worker's or coworker's page stays where its first scratchpad put it, kept on its record, since a clear gives the session a new scratchpad.
-The app counts a session's context, so p4-phi measures none: at its `wrap_up`, such a session is told to read its share with `mcp__ccd_session_mgmt__get_usage` on `"self"` and, where it reads past `phi.clear_at` percent, 60 by default in `.claude/p4/p4.json`, to bring the page up to date and make `clear_session` on `"self"` its turn's last call, after clearing each of its coworkers that is idle with an empty queue.
+At every `wrap_up`, such a session is told to bring the page up to date, whatever its context reads, so a clear loses nothing, its own or one the session that started it makes.
+The app counts a session's context, so p4-phi measures none: the same line tells the session to read its share with `mcp__ccd_session_mgmt__get_usage` on `"self"` and, where it reads past `phi.clear_at` percent, 60 by default in `.claude/p4/p4.json`, to make `clear_session` on `"self"` its turn's last call.
+No tool clears a session together with the sessions it started, so ahead of its own clear the line names one `clear_session` call for each coworker p4-phi's records hold idle with an empty queue: a live session it started itself that keeps a state page, is not inside a turn, holds no open plan step and no background task, and whose last report it has been handed.
+A queued message, a pin and a session open on ezexe's screen are in none of p4-phi's records, so the app's own refusal of the clear covers them, and a coworker whose clear is refused stays as it is.
 A puppeteer, at a message carrying its worker's report, is handed the ids of the worker and its coworkers, to read each one's `get_usage`.
 
 ## What it does not do

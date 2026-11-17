@@ -1771,8 +1771,8 @@ def h_puppeteer_tool(payload):
 
 
 def h_wrap_up(payload):
-    """PostToolUse on wrap_up: a session that keeps a state page is told to read its context with the app's own
-    count and, past the line, to clear itself."""
+    """PostToolUse on wrap_up: a session that keeps a state page is told to bring it up to date, to read its context
+    with the app's own count and, past the line, to clear its idle coworkers and then itself."""
     me = Me(payload)
     if not me.home or not me.id:
         return ""

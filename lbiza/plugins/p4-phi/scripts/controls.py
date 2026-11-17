@@ -444,22 +444,46 @@ def clear_at(store):
     return at if isinstance(at, (int, float)) and not isinstance(at, bool) and 0 < at <= 100 else CLEAR_AT
 
 
+# A clear that resumes from a state page is p4's own rule. `/clear` starts one conversation over, sessions.md, "Manage
+# context within a session": "start fresh with an empty context. Claude Code saves the previous session". The
+# description of `mcp__ccd_session_mgmt__clear_session` takes one session a call, this one or "an idle session this
+# session started", and refuses one "the user has pinned, has open on screen, or that still holds a queued message
+# or other live work". No page and no tool clears a session together with the sessions it started, so the line below
+# names each call, the coworkers' ahead of the session's own.
+
+def idle_coworkers(home, s):
+    """The live sessions `s` started itself that p4-phi's records hold idle with an empty queue and a state page to
+    resume from: not inside a turn, no open plan step, no background task still running at its last turn's end, and
+    no report `s` has not been handed yet. A queued message, a pin, a session open on ezexe's screen and a turn begun
+    after this read are in none of p4-phi's records: the app's own refusal of the clear covers them."""
+    sid = s["sessionId"]
+    seen = s.get("reportsSeen") if isinstance(s.get("reportsSeen"), int) else 0
+    unread = {r["sessionId"] for r in PHI.latest_reports(PHI.load_reports(home, sid)[seen:])}
+    w = _watcher()
+    return [k for k, ks in sorted(plans._children(home, sid).items())
+            if page_of_task(home, ks) and k not in unread and not w.working(home, k)
+            and not plans.open_steps(home, k) and not w.held_tasks(home, k)]
+
+
 def clear_line(home, s, store):
-    """At a turn's `wrap_up`: a session that keeps a state page is told to read its context share with the app's
-    `get_usage` on `"self"` and, past the share p4.json names, to bring the page up to date and clear itself as the
-    turn's last call. '' with no page."""
+    """At a turn's `wrap_up`, for a session that keeps a state page: bring the page up to date, whatever its context
+    reads, so a clear loses nothing; then read its context share with the app's `get_usage` on `"self"` and, past the
+    share p4.json names, clear each coworker of `idle_coworkers` and itself, its own clear the turn's last call. ''
+    with no page."""
     page = page_of_task(home, s)
     if not page:
         return ""
-    at = clear_at(store)
-    kids = sorted(k for k, v in relay._sessions(home).items() if PHI.spawned_from(v) == s["sessionId"] and live(k))
-    first = (f" Before that, clear each of its coworkers that is idle with an empty queue, by "
+    kids = idle_coworkers(home, s)
+    whose = ", its own or one the session that started it makes," if PHI.spawned_from(s) else ""
+    first = (f", then clear each coworker p4-phi's records hold idle with an empty queue, by "
              f"`mcp__ccd_session_mgmt__clear_session` on its id, whatever its own context reads, so the family resets "
-             f"together: {', '.join(f'`{k}`' for k in kids)}." if kids else "")
-    return (f"phi (p4-phi): read this session's context with `mcp__ccd_session_mgmt__get_usage` on `\"self\"`. Where "
-            f"it reads past {at} percent, bring its state page up to date at {page}, send what the turn still owes, "
-            f"and make `mcp__ccd_session_mgmt__clear_session` with `\"self\"` the last call of this turn; it resumes "
-            f"from the page in its next turn.{first} If the app refuses the clear, try again at the next turn's end.")
+             f"together: {', '.join(f'`{k}`' for k in kids)}. A coworker clear the app refuses leaves that coworker "
+             f"as it is. After those, make" if kids else ", and make")
+    return (f"phi (p4-phi): bring this session's state page up to date at {page} before this turn ends, so a clear"
+            f"{whose} loses nothing. Then read its context with `mcp__ccd_session_mgmt__get_usage` on `\"self\"`. "
+            f"Where it reads past {clear_at(store)} percent, send what the turn still owes{first} "
+            f"`mcp__ccd_session_mgmt__clear_session` with `\"self\"` the last call of this turn; it resumes from the "
+            f"page in its next turn. If the app refuses the clear of this session, try again at the next turn's end.")
 
 
 def board_path(home, sid):
