@@ -106,7 +106,7 @@ At a message carrying reports, a puppeteer is handed a line naming each reportin
 A session whose p4-phi task names a page by `State page: <path>`, and the standing worker and each coworker, is handed that page's path first after a compaction or a clear.
 No line p4-phi hands a session names a place under `.claude` to write, since every such write asks ezexe.
 A standing worker's or coworker's page stays where its first scratchpad put it, kept on its record, since a clear gives the session a new scratchpad.
-At its `wrap_up`, such a session whose last call's context passes `phi.clear_at` percent of `phi.context_window` tokens, 60 and 200,000 by default in `.claude/p4/p4.json`, is told to bring the page up to date and make `clear_session` on `"self"` its turn's last call, after clearing each of its coworkers that is idle with an empty queue.
+The app counts a session's context, so p4-phi measures none: at its `wrap_up`, such a session is told to read its share with `mcp__ccd_session_mgmt__get_usage` on `"self"` and, where it reads past `phi.clear_at` percent, 60 by default in `.claude/p4/p4.json`, to bring the page up to date and make `clear_session` on `"self"` its turn's last call, after clearing each of its coworkers that is idle with an empty queue.
 A puppeteer, at a message carrying its worker's report, is handed the ids of the worker and its coworkers, to read each one's `get_usage`.
 
 ## What it does not do

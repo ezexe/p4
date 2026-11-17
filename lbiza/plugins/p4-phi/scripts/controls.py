@@ -404,12 +404,11 @@ def usage_line(home, s, prompt, store):
     ids = [held] + sorted(k for k, v in every.items() if PHI.spawned_from(v) == held and live(k))
     return (f"phi (p4-phi): its standing worker `{held}` reported. Read `mcp__ccd_session_mgmt__get_usage` for each "
             f"of {', '.join(f'`{k}`' for k in ids)}, and send the worker one line naming any whose context passes "
-            f"{CLEAR_AT} percent, so that session brings its state page up to date and calls "
+            f"{clear_at(store)} percent, so that session brings its state page up to date and calls "
             f"`mcp__ccd_session_mgmt__clear_session` with `\"self\"` at its turn's end.")
 
 
 STATE_IN_TASK = re.compile(r"\bState page:\s*(\S+?)[.,;]?(?=\s|$)")
-WINDOW = 200000                  # p4.json phi.context_window: the tokens of a session's context window
 
 
 def page_of_task(home, s):
@@ -433,50 +432,34 @@ def state_first(home, s):
             f"else, and resume from it: {page}")
 
 
-def context_used(transcript):
-    """The tokens of the context of a transcript's last assistant call: its input, cache creation and cache read
-    together, from that row's `message.usage`; 0 when none is read."""
-    try:
-        with open(transcript, "rb") as f:
-            f.seek(0, 2)
-            f.seek(max(0, f.tell() - 400000))
-            rows = f.read().decode("utf-8", "replace").splitlines()
-    except (OSError, TypeError, ValueError):
-        return 0
-    for line in reversed(rows):
-        if '"usage"' not in line:
-            continue
-        try:
-            d = json.loads(line)
-        except ValueError:
-            continue
-        u = (d.get("message") or {}).get("usage") if isinstance(d.get("message"), dict) else None
-        if d.get("type") == "assistant" and isinstance(u, dict):
-            return sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens",
-                                                     "cache_read_input_tokens"))
-    return 0
+# The app counts a session's context itself. The description of `mcp__ccd_session_mgmt__get_usage` gives `context`
+# as "that session's window as the composer shows it — tokens used, percent, where auto-compact starts", "read from
+# the session's own process". So p4-phi sums no usage row of a transcript and holds no window size: a line that turns
+# on the share names that call on `"self"`, which the session makes while its own process runs.
+
+def clear_at(store):
+    """The percent of its context past which a session that keeps a state page clears itself: p4.json phi.clear_at
+    when it is a number above 0 and at most 100, else CLEAR_AT."""
+    at = _conf(store, "clear_at")
+    return at if isinstance(at, (int, float)) and not isinstance(at, bool) and 0 < at <= 100 else CLEAR_AT
 
 
-def clear_line(home, s, transcript, store):
-    """At a turn's `wrap_up`: past the share of its window p4.json names, a session that keeps a state page is told
-    to bring it up to date and clear itself as the turn's last call. '' below the line or with no page."""
+def clear_line(home, s, store):
+    """At a turn's `wrap_up`: a session that keeps a state page is told to read its context share with the app's
+    `get_usage` on `"self"` and, past the share p4.json names, to bring the page up to date and clear itself as the
+    turn's last call. '' with no page."""
     page = page_of_task(home, s)
     if not page:
         return ""
-    window, at = _conf(store, "context_window"), _conf(store, "clear_at")
-    window = window if isinstance(window, int) and not isinstance(window, bool) and window > 0 else WINDOW
-    at = at if isinstance(at, (int, float)) and not isinstance(at, bool) and 0 < at <= 100 else CLEAR_AT
-    used = context_used(transcript)
-    if used * 100 < at * window:
-        return ""
+    at = clear_at(store)
     kids = sorted(k for k, v in relay._sessions(home).items() if PHI.spawned_from(v) == s["sessionId"] and live(k))
     first = (f" Before that, clear each of its coworkers that is idle with an empty queue, by "
              f"`mcp__ccd_session_mgmt__clear_session` on its id, whatever its own context reads, so the family resets "
              f"together: {', '.join(f'`{k}`' for k in kids)}." if kids else "")
-    return (f"phi (p4-phi): this session's context is at {used * 100 // window} percent, past the line of {at} "
-            f"percent. Bring its state page up to date at {page}, send what the turn still owes, and make "
-            f"`mcp__ccd_session_mgmt__clear_session` with `\"self\"` the last call of this turn; it resumes from the "
-            f"page in its next turn.{first} If the app refuses the clear, try again at the next turn's end.")
+    return (f"phi (p4-phi): read this session's context with `mcp__ccd_session_mgmt__get_usage` on `\"self\"`. Where "
+            f"it reads past {at} percent, bring its state page up to date at {page}, send what the turn still owes, "
+            f"and make `mcp__ccd_session_mgmt__clear_session` with `\"self\"` the last call of this turn; it resumes "
+            f"from the page in its next turn.{first} If the app refuses the clear, try again at the next turn's end.")
 
 
 def board_path(home, sid):

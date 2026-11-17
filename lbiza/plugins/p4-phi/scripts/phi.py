@@ -1771,11 +1771,12 @@ def h_puppeteer_tool(payload):
 
 
 def h_wrap_up(payload):
-    """PostToolUse on wrap_up: past the line, a session that keeps a state page is told to clear itself."""
+    """PostToolUse on wrap_up: a session that keeps a state page is told to read its context with the app's own
+    count and, past the line, to clear itself."""
     me = Me(payload)
     if not me.home or not me.id:
         return ""
-    line = controls.clear_line(me.home, load_session(me.home, me.id), payload.get("transcript_path"), me.store)
+    line = controls.clear_line(me.home, load_session(me.home, me.id), me.store)
     RAN["clear"] = bool(line)
     return line
 

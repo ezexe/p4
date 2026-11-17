@@ -437,6 +437,32 @@ class P4Conf(unittest.TestCase):
             self.assertIn("phi." + key, p4conf.RETIRED)
             self.assertNotIn("phi." + key, p4conf.env_keys())
 
+    def test_the_retired_context_window_is_dropped_and_has_no_variable(self):
+        """The app counts a session's context and gives it through `mcp__ccd_session_mgmt__get_usage`, so p4 holds no
+        window size: phi.context_window is neither read, written, called unknown nor mirrored as
+        P4_PHI_CONTEXT_WINDOW, and a value of the variable changes nothing. phi.clear_at, the share past which a
+        session clears itself, stays a key read when a store sets it."""
+        import contextlib
+        import io
+        from unittest import mock
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump({"phi": {"context_window": 1000000, "clear_at": 45}}, f)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            s = p4conf.load(self.p4)
+        self.assertEqual(err.getvalue(), "")
+        self.assertNotIn("context_window", s["phi"])
+        self.assertNotIn("context_window", self.read()["phi"])
+        self.assertIn("phi.context_window", p4conf.RETIRED)
+        self.assertNotIn("phi.context_window", p4conf.env_keys())
+        self.assertNotIn("P4_PHI_CONTEXT_WINDOW", [p4conf.env_name(k) for k in p4conf.env_keys()])
+        self.assertEqual(s["phi"]["clear_at"], 45)
+        self.assertIn("phi.clear_at", p4conf.env_keys())
+        with mock.patch.dict(os.environ, {"P4_PHI_CONTEXT_WINDOW": "500000"}), contextlib.redirect_stderr(err):
+            again = p4conf.load(self.p4, write=False)
+        self.assertEqual(json.dumps(again, sort_keys=True), json.dumps(s, sort_keys=True))
+        self.assertEqual(err.getvalue(), "")
+
     def test_the_keeper_writes_and_keeps_scratchpad_tmp_false(self):
         """p4-temportal 0.3.9 links a session's scratchpad into temportal/tmp unless p4.json's scratchpad.tmp is false,
         so every store holds it false: a store that lacks it, one load wrote true into, and one from before the record
@@ -1498,7 +1524,7 @@ class SettingsVariables(unittest.TestCase):
         from unittest import mock
         p4 = self.store({})
         bad = {"P4_SCRATCHPAD_IGNORABLE_EXT": "[1,2]", "P4_RECALL_DEPS_ROOTS": '"x"',
-               "P4_PHI_CHILD_LEVELS": "[1]", "P4_PHI_CONTEXT_WINDOW": '"wide"', "P4_PHI_CLEAR_AT": "true",
+               "P4_PHI_CHILD_LEVELS": "[1]", "P4_PHI_CLEAR_AT": "true",
                "P4_RECALL_LOOKUPS_THRESHOLD": '"high"', "P4_RECALL_SAID_MODE": "loud",
                "P4_RECALL_INJECT": "all", "P4_PHI_MAX_DEPTH": "[" * 20000,
                "P4_TEMPORTAL_CACHE": '{"x": {"max_age_days": "a"}}'}

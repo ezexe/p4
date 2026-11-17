@@ -148,16 +148,19 @@ OPEN = ("temportal.cache",)
 
 # Keys read when a project sets them and never written by default, so a later change to the code's own value reaches
 # every store: kept as set, never called unknown.
-READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.context_window", "phi.clear_at", "claude")
+READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.clear_at", "claude")
 
 # Keys no plugin reads, top-level or dotted: never returned or called unknown, and dropped from p4.json when it is
 # rewritten for another reason. The memory section and the scratchpad tmp keys went with p4-temportal's move to the
 # app's own auto memory and scratchpad, and phi.session_archives with the archive guard, which the app's approval card
 # on the archive tool replaced. phi.puppeteer_chars and phi.compactions steer nothing: Claude Code compacts a session
 # by itself, so a puppeteer's boundary notice carries no compact question to count characters or compactions for.
+# phi.context_window steers nothing either: the app counts a session's context, and a session reads its share with
+# the app's get_usage tool, so p4 holds no window size to count against.
 RETIRED = ("plans", "version", "memory", "scratchpad.tmp_idle_days", "scratchpad.tmp_max_file_mb",
            "scratchpad.tmp_max_files", "scratchpad.tmp_empty_idle_hours", "scratchpad.scratch_sweep_minutes",
-           "scratchpad.tmp_skip_dirs", "phi.session_archives", "phi.puppeteer_chars", "phi.compactions")
+           "scratchpad.tmp_skip_dirs", "phi.session_archives", "phi.puppeteer_chars", "phi.compactions",
+           "phi.context_window")
 
 # Where each kind of file lives in the store, by plugin. p4-temportal keeps the auto memory, the notebook and saved
 # code in temportal/, and p4-phi keeps its session tree, the retrieval corpus and
@@ -973,7 +976,7 @@ ENV_NAMES = {"phi.watch_s": "P4_PHI_WATCH_SECONDS"}
 ENV_SCHEMA = {
     "phi.home": str, "recall.lookups.threshold": "num", "recall.teacher.cutoff": str,
     "phi.child_levels": "levels", "phi.puppeteer_section": str,
-    "phi.context_window": int, "phi.clear_at": "num", "temportal.cache": "rules", "recall.inject": "inject",
+    "phi.clear_at": "num", "temportal.cache": "rules", "recall.inject": "inject",
 }
 # The strings a key's reader knows.
 ENV_CHOICES = {"recall.said.mode": ("off", "shadow", "on"), "recall.lookups.web": ("note", "answer", "shadow", "off"),

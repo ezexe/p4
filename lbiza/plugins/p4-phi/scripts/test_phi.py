@@ -1461,8 +1461,8 @@ class FixtureFolder(unittest.TestCase):
 
 
 class StatePage(unittest.TestCase):
-    """A session whose p4-phi task names a state page resumes from it after a clear, and is told to clear itself
-    at a turn's end once its context passes the line."""
+    """A session whose p4-phi task names a state page resumes from it after a clear, and at a turn's end is told to
+    read its context share with the app's `get_usage` and to clear itself past the line."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -1471,12 +1471,13 @@ class StatePage(unittest.TestCase):
         self.page = os.path.join(t.tmp, "tmp", "state.md").replace("\\", "/")
         t.say(TOP, "Build the exporter")
         t.cli(TOP, "task", f"Build the narwhal exporter. State page: {self.page}")
-        write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"context_window": 200000}}))
 
     def tearDown(self):
         self._tmp.cleanup()
 
     def wrap_up(self, used, uuid):
+        """TOP's `wrap_up`, answered through `recall-hook.sh lookup-record`, with a transcript whose last assistant
+        row holds `used` tokens of usage, which p4-phi does not read."""
         t = self.t
         path = os.path.join(t.tmp, f"wrap{uuid}.jsonl")
         transcript(path, "Build the exporter", [], "Built.", uuid)
@@ -1496,12 +1497,28 @@ class StatePage(unittest.TestCase):
         ctx = context(self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "clear"}))
         self.assertTrue(ctx.startswith("phi (p4-phi): ") and self.page in ctx.split("\n", 1)[0], ctx[:300])
 
-    def test_past_the_line_a_wrap_up_is_answered_with_the_clear_and_below_it_with_nothing(self):
+    def test_a_wrap_up_names_the_apps_usage_read_whatever_the_transcript_holds(self):
+        """The app counts a session's context: the description of `mcp__ccd_session_mgmt__get_usage` gives `context`
+        as "that session's window as the composer shows it — tokens used, percent, where auto-compact starts". So
+        p4-phi sums no usage row of the transcript against a window of its own. The line at a `wrap_up` names that
+        call on `"self"` and the share phi.clear_at sets, and reads the same whatever the transcript's last row
+        holds and whatever a store's phi.context_window says."""
+        import controls
         said = self.wrap_up(130000, "1")
+        self.assertIn('`mcp__ccd_session_mgmt__get_usage` on `"self"`', said)
+        self.assertIn(f"past {controls.CLEAR_AT} percent", said)
         self.assertIn(self.page, said)
-        self.assertIn("mcp__ccd_session_mgmt__clear_session", said)
-        self.assertIn('"self"', said)
-        self.assertNotIn("clear_session", self.wrap_up(100000, "2"))
+        self.assertIn('`mcp__ccd_session_mgmt__clear_session` with `"self"`', said)
+        self.assertLess(said.index("get_usage"), said.index("clear_session"), "the read comes before the clear")
+        self.assertNotRegex(said, r"context is at \d+ percent", "p4-phi states no share of its own")
+        self.assertEqual(self.wrap_up(20000, "2"), said, "the transcript's usage row is not read")
+        write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"context_window": 1000, "clear_at": 40}}))
+        low = self.wrap_up(20000, "3")
+        self.assertIn("past 40 percent", low, "phi.clear_at sets the line")
+        self.assertEqual(low.replace("past 40 percent", f"past {controls.CLEAR_AT} percent"), said,
+                         "phi.context_window steers nothing")
+        for name in ("context_used", "WINDOW"):
+            self.assertFalse(hasattr(controls, name), f"controls.{name} measures no context")
 
     def test_a_worker_past_the_line_is_told_to_clear_its_coworkers_first(self):
         t = self.t
@@ -1550,7 +1567,6 @@ class NoWriteUnderClaude(unittest.TestCase):
         write(os.path.join(t.tmp, "claude_desktop_config.json"), json.dumps({"preferences": {"epitaxyPrefs": {
             "dframe-group-scopes": {"acct/org": {"groups": [{"id": "cg-1", "name": "puppeteers", "mode": "code"}],
                                                  "assignments": {"code:" + self.PUP: "cg-1"}}}}}}))
-        write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"context_window": 200000}}))
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -1564,10 +1580,7 @@ class NoWriteUnderClaude(unittest.TestCase):
     def wrap_up(self, host):
         t = self.t
         path = transcript(os.path.join(t.tmp, f"wrap-{host}.jsonl"), "Check the archives", [], "Checked.")
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"type": "assistant", "message": {"content": [], "usage": {
-                "input_tokens": 2000, "cache_creation_input_tokens": 8000, "cache_read_input_tokens": 120000}}}) + "\n")
-        body = {"session_id": CLI.get(host, host), "cwd": t.proj, "hook_event_name": "PostToolUse",
+        body ={"session_id": CLI.get(host, host), "cwd": t.proj, "hook_event_name": "PostToolUse",
                 "tool_name": "mcp__ccd_turn__wrap_up", "tool_input": {"recap": "Checked."},
                 "tool_response": "Nothing is pending.", "transcript_path": path, "tool_use_id": f"toolu_wrap{host}",
                 "scratchpad_dir": self.pad(host)}
