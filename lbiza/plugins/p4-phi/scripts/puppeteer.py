@@ -4,15 +4,15 @@
 It acts for an orchestrator with a task, or any session that started sessions. Its steps are routing, the
 start draft, the gate and the watcher, which the functions `prompty`, `prompter`, `pioneer` and `look` run:
 
-  linear     Routing reads ezexe's message against the records the ledger is built from: the area it names, the
-             live session that is that area's code owner, the running writer that holds its files. The start draft
-             is the exact next session: its topic, a brief written as its own instruction, its parent session, fork or
-             fresh, the issue it closes. The gate checks the draft: the issue it names is open, or it names none,
-             p4-phi files none and the child's findings go up in its report; no running writer holds the same files;
-             the parent session is the right orchestrator. A clean draft is handed as
-             the exact start_session call; one whose area has a live code owner is routed there with SendMessage;
-             one whose writer is busy is queued as a start request behind it; one the depth or count cap holds
-             starts no session. The watcher is one look at a time over an orchestrator's subtree, which the
+  linear     Routing reads ezexe's message against the records the ledger is built from: the area it names and the
+             live session that is that area's code owner. The start draft is the exact next session: its topic, a
+             brief written as its own instruction, its parent session and the issue it closes, started fresh, a
+             worker in a git worktree of its own. The gate checks the draft: the issue it names is open, or it
+             names none, p4-phi files none and the child's findings go up in its report; the parent session is the
+             right orchestrator. A clean draft is handed as the exact start_session call; one whose area has a
+             live code owner is routed there with SendMessage; one the depth or count cap holds starts no session.
+             No draft waits on a running writer's files, since a worker writes in a worktree of its own. The
+             watcher is one look at a time over an orchestrator's subtree, which the
              plugin's hooks module runs inside Claude Code at a turn's end, at a message's arrival and on its
              timer: a look writes <session>/ledger.md from p4-phi's records and the app's session records, only
              when one of them changed, with a reconcile line for each divergence between the two. A puppeteer's
@@ -241,16 +241,6 @@ def working(home, sid):
         if r.get("hook") in ("user-prompt-submit", "stop"):
             last = r["hook"]
     return last == "user-prompt-submit"
-
-
-def busy(home, sid):
-    """True while a session is a running writer: live, and inside a turn or on a step in progress."""
-    s = relay._session(home, sid)
-    if not s or closed(s) or relay.gone(home, s):
-        return False
-    if working(home, sid):
-        return True
-    return any(x.get("status") == "in_progress" for x in plans.load(home, sid).get("steps") or [])
 
 
 # --- the app's records ------------------------------------------------------------------------------------------------
@@ -615,9 +605,7 @@ def build(home, top, net=False):
     for r in starts.state(home).values():
         if r.get("requester") not in ids or r.get("started") or at - float(r.get("at") or 0) > starts.EXPIRE_S:
             continue
-        behind = str(r.get("after") or "")
-        how = (f"waits behind \"{phi.title_of(every.get(behind, {}))}\" `{behind}`" if behind and busy(home, behind)
-               else "shown as a suggested task card" if (r.get("claimed") or {}).get("card")
+        how = ("shown as a suggested task card" if (r.get("claimed") or {}).get("card")
                else "claimed" if r.get("claimed") else "pending")
         asked.append({"id": r["id"], "title": r.get("title", ""), "requester": r.get("requester"), "state": how})
     groups = [g for sid in sorted(live) for g in load_groups(home, sid)]
@@ -1108,14 +1096,14 @@ def own_message(home, s, req):
 
 def prompty(home, s, req, base):
     """Routing: ezexe's message read against the records the ledger is built from. It returns the paths and words
-    the message carries, whether it is work at all, the live session that is its area's code owner, the running
-    writer that holds its files, the registered routes it matches, and the readings it leaves open."""
+    the message carries, whether it is work at all, the live session that is its area's code owner, the registered
+    routes it matches, and the readings it leaves open."""
     phi = _phi()
     sid = s["sessionId"]
     every = relay._sessions(home)
     named = [p for p in relay.paths_in(req, base) if not relay.names_nothing(p, home, base)]
     read = {"words": req, "paths": named, "work": issues.writing(req) and len(words(req)) >= QUICK_WORDS,
-            "owner": None, "busy": None, "routes": [], "readings": readings_of(req), "own": False,
+            "owner": None, "routes": [], "readings": readings_of(req), "own": False,
             "within": True}
     if not read["work"]:
         return read
@@ -1145,12 +1133,6 @@ def prompty(home, s, req, base):
             cand = None
         if cand and (best is None or cand[:2] > best[:2]):
             best = cand
-        if not cand and read["busy"] is None and named and busy(home, oid):
-            files = set(relay.edited_files(home, oid)) | set(relay.paths_in(o.get("task") or "", o.get("cwd") or base))
-            held = next((f for f in sorted(files) if not relay.names_nothing(f, home, base)
-                         and any(relay.overlap(f, x) for x in named)), "")
-            if held:
-                read["busy"] = {"sessionId": oid, "title": phi.title_of(o), "why": f"it is a running writer on {held}"}
     if best:
         read["owner"] = {"sessionId": best[2], "title": phi.title_of(every[best[2]]), "why": best[3]}
     read["routes"] = [{"score": sc, "shared": n, "id": r["id"], "topic": r.get("topic"), "context": r.get("context"),
@@ -1170,6 +1152,9 @@ def load_draft(home, sid, did):
 
 
 RUN_WORDS = 8                    # words in a row of a message that a brief handed to another session may not hold
+# the line a worker's brief carries, since its start passes `use_worktree: true`: where it works and who lands it
+WORKTREE_LINE = ("This session works in a git worktree of its own, on a branch of its own: commit there. Its tree's "
+                 "orchestrator merges that branch into the default branch and pushes, and this session does neither.")
 
 
 def shares_run(sent, text, n=RUN_WORDS):
@@ -1185,12 +1170,13 @@ def topic_of(req):
     return relay.clause_cut(first, 58).strip(" .,;:")
 
 
-def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
+def prompter(home, s, req, read, base, reading=None):
     """The start draft for a message, the exact next session: its topic, a brief written as an instruction to that
-    session, its parent session, fork or fresh, and the issue it closes when the message names one. The brief states
-    the task by its title, its files, what done looks like, and the model and effort the call adds; it quotes no
-    sentence of the message and says nothing of who asked or how the request travelled. A close registered route
-    gives the starting shape."""
+    session, its parent session and the issue it closes when the message names one. The brief states the task by
+    its title, its files, what done looks like, and the model and effort the call adds; it quotes no sentence of the
+    message and says nothing of who asked or how the request travelled. A close registered route gives the starting
+    shape. Every draft is `fresh`: a worker's draft writes, so its call passes `use_worktree: true`, which the start
+    tool's own text gives as "\"fresh\" only (rejected with \"fork\")"."""
     phi = _phi()
     sid = s["sessionId"]
     parent = sid if read["within"] or relay._parent(s) else ""
@@ -1222,7 +1208,10 @@ def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
     paths = read["paths"] or ((route or {}).get("slice") or {}).get("paths") or []
     if paths:
         lines += ["Area: " + ", ".join(f"`{p}`" for p in paths[:8]) + ".", ""]
-    lines += ["Files: " + (", ".join(f"`{p}`" for p in paths[:8]) if paths and not reading else "none"), ""]
+    if reading:                                     # a reading changes no file
+        lines += ["Files: none", ""]
+    elif paths:                                     # what a worker's brief says it covers; one that names none has none
+        lines += ["Files: " + ", ".join(f"`{p}`" for p in paths[:8]), ""]
     if reading:
         lines += ["A reading explores: change no tracked file and commit nothing, since the readings beside this one "
                   "share the checkout. Its parent session lands the reading that survives the merge.", "",
@@ -1234,15 +1223,14 @@ def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
         elif slug:
             lines += [f"It names no issue in {slug}, and p4-phi files none: each finding goes into the report as one "
                       f"`Finding:` line, which the parent session passes up unchanged.", ""]
+        if parent:
+            lines += [WORKTREE_LINE, ""]
         lines += [phi.RESEARCH, "", phi.DECIDE, "",
                   "Done looks like: the change made, its regression test passing, committed and reported.",
                   "Report when done."]
     if not parent:
         lines += ["", f"{phi.NEW_TOP_BRIEF} {phi.new_top_first_act()}"]
     context = "fresh"
-    if parent and not reading:
-        context = (route or {}).get("context") or relay.advise_start(home, sid, {"prompt": "\n".join(lines)},
-                                                                     transcript_bytes)[0]
     did = "drf-" + hashlib.sha1(f"{sid}\n{req}\n{(reading or {}).get('text', '')}".encode("utf-8", "replace")
                                 ).hexdigest()[:10]
     lines += ["", f"phi draft {did} for {parent or 'root'}."]
@@ -1257,10 +1245,12 @@ def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
 
 
 def call_of(d):
-    """The exact start_session input that starts a draft."""
+    """The exact start_session input that starts a draft. A worker's draft writes, so it passes `use_worktree: true`
+    and the worker gets a git worktree and a branch of its own. A reading changes no file and shares this checkout,
+    and a new orchestrator lands in it, so each passes false, as starts.use_worktree says."""
     call = {"initiation": "user_asked", "title": d["title"], "context": d["context"], "prompt": d["brief"]}
     if d["context"] == "fresh":
-        call.update(use_worktree=False, background=d["background"])
+        call.update(use_worktree=bool(d.get("parent")) and not d.get("reading"), background=d["background"])
     # a fresh draft names its model and effort, judged by the message it came from as well as its brief; the
     # decide-by-research line every brief carries is no word of its kind of work
     brief = d["brief"].replace(_phi().DECIDE, "")
@@ -1270,9 +1260,10 @@ def call_of(d):
 # --- the gate, then the dispatch --------------------------------------------------------------------------------------
 
 def pioneer(home, s, d, read, net=True):
-    """The gate: a draft checked for the state of the issue it names, that no running writer holds the same files,
-    and that its parent session is the right orchestrator. The verdict is start, route, queue, or here when
-    the depth or count cap holds, with what the gate saw; the draft is kept."""
+    """The gate: a draft checked for the state of the issue it names and that its parent session is the right
+    orchestrator. The verdict is start, route, or here when the depth or count cap holds, with what the gate saw;
+    the draft is kept. No draft waits on a running writer: a worker's start passes `use_worktree: true`, so it
+    writes in a git worktree of its own and shares no file on disk with a session at work."""
     phi = _phi()
     sid = s["sessionId"]
     gate = []
@@ -1288,39 +1279,24 @@ def pioneer(home, s, d, read, net=True):
     else:
         gate.append("its files are in no GitHub repository, so it carries no issue")
     cap = phi.caps_text(home, s)
-    owner, held = read.get("owner"), read.get("busy")
+    owner = read.get("owner")
     if owner and not d.get("reading"):
         verdict = "route"
         gate.append(f"its area has a live code owner, \"{owner['title']}\" `{owner['sessionId']}`: {owner['why']}")
     elif cap:
         verdict = "here"
         gate.append(cap)
-    elif held:
-        verdict = "queue"
-        gate.append(f"\"{held['title']}\" `{held['sessionId']}` holds its files: {held['why']}")
     else:
         verdict = "start"
-        gate.append("no running writer holds its files")
     gate.append("its parent is this session, the orchestrator of its topic" if d["parent"] else
                 "it is outside this session's topic, so it is a new orchestrator")
-    if d.get("reading") and verdict == "queue":
-        verdict = "start"                           # a reading changes no file, so no writer is in its way
-    d.update(verdict=verdict, gate=gate, owner=owner, busy=held)
+    d.update(verdict=verdict, gate=gate, owner=owner)
     relay._write_json(os.path.join(drafts_dir(home, sid), f"{d['id']}.json"), d)
     return d
 
 
-def queue(home, d):
-    """Keeps a draft whose writer is busy as a start request behind that writer. Returns the request id and True
-    when the request is new."""
-    behind = (d.get("busy") or {}).get("sessionId", "")
-    return starts.add(home, d["parent"] or d["drafter"], d["title"], d["brief"], d["context"],
-                      background=d["background"], after=behind)
-
-
 def verdict_text(home, s, d):
-    """What the gate hands the session: the exact call, the exact message, the exact command, or that no session is
-    started."""
+    """What the gate hands the session: the exact call, the exact message, or that no session is started."""
     phi = _phi()
     head = (f"phi (p4-phi): routing read this message of ezexe's as work for a session of its own"
             + (f", and it closely matches the registered route \"{d['route']}\"" if d.get("route") else "")
@@ -1332,10 +1308,6 @@ def verdict_text(home, s, d):
         o = d["owner"]
         return (head + f"Route it: SendMessage with `to` {o['sessionId']}, holding {phi.RESTATE}, then tell ezexe in "
                 f"one line that \"{o['title']}\" has it. Start no session for it." + tail)
-    if d["verdict"] == "queue":
-        return (head + f"Queue it behind that writer: `{phi.commands()} pioneer {d['id']}` keeps it as a start request, "
-                f"and once the writer is not busy p4-phi hands this session its exact call, a start at a turn ezexe "
-                f"begins here and a suggested task card, which ezexe starts here, at any other." + tail)
     if d["verdict"] == "here":
         return head + "No session is started for it." + tail
     return (head + "Start it now: `mcp__ccd_session__start_session` with "
@@ -1360,7 +1332,7 @@ def save_group(home, g):
     _write_json(os.path.join(groups_dir(home, g["parent"]), f"{g['id']}.json"), g)
 
 
-def explore(home, s, req, texts, base, transcript_bytes=0):
+def explore(home, s, req, texts, base):
     """Drafts an under-determined message as one sibling child for each distinct reading, and returns the group and
     its drafts. The depth and count caps hold: no more readings than this session may still start."""
     phi = _phi()
@@ -1379,8 +1351,7 @@ def explore(home, s, req, texts, base, transcript_bytes=0):
     read["owner"] = None                            # the readings are this orchestrator's to merge: none is routed away
     drafts = []
     for k, t in enumerate(texts, 1):
-        d = prompter(home, s, req, read, base, transcript_bytes,
-                     reading={"group": gid, "k": k, "n": len(texts), "text": t, "title": t})
+        d = prompter(home, s, req, read, base, reading={"group": gid, "k": k, "n": len(texts), "text": t, "title": t})
         d["parent"] = sid
         drafts.append(pioneer(home, s, d, read, net=False))
     g = {"id": gid, "parent": sid, "time": now(), "words": req, "state": "open",
@@ -1670,7 +1641,7 @@ def unfinished(home, sid, procs=True):
     at = time.time()
     for r in starts.state(home).values():
         if r.get("requester") == sid and not r.get("started") and at - float(r.get("at") or 0) <= starts.EXPIRE_S:
-            items.append(f"start request {r.get('id')} \"{_short(r.get('title'), 80)}\" that it queued was never "
+            items.append(f"start request {r.get('id')} \"{_short(r.get('title'), 80)}\" that it filed was never "
                          f"started")
     return items
 
@@ -1825,11 +1796,6 @@ def meta_pass(home, at=None):
             if v.get("state") == "OPEN" and not any(r.get("issue") == k and (r.get("working") or r.get("step"))
                                                     for r in rows):
                 seeds.append(f"{k} is open and no session under {name[t]} is at work on it.")
-    for r in starts.pending(home, at):
-        who = relay.link_of({"id": r.get("requester"), "title": phi.title_of(
-            every.get(r.get("requester")) or {"sessionId": r.get("requester")})})
-        seeds.append(f"start request {r['id']} \"{r.get('title')}\" is free of its writer and waits on {who}, which "
-                     f"starts it at a turn ezexe begins there or shows it as a suggested task card at any other.")
     out = ["# Meta-ledger", "",
            "Written by p4-phi's meta pass, which the orchestrator that receives ezexe's message runs over every "
            "orchestrator's ledger before it reads the message.",
@@ -1871,7 +1837,7 @@ def meta_text(home, s, found):
 
 # --- the prompt hook ----------------------------------------------------------------------------------------------------
 
-def on_prompt(home, s, req, base, transcript_bytes=0):
+def on_prompt(home, s, req, base):
     """A message of ezexe's in an orchestrator: the meta pass when it is an orchestrator, its ledger made
     current, then routing, the start draft and the gate. Returns the text for the session and the verdict, which is
     empty when no draft was made. It changes `s` and never saves it."""
@@ -1890,12 +1856,12 @@ def on_prompt(home, s, req, base, transcript_bytes=0):
         return "\n\n".join(p for p in parts if p), ""
     if len(read["readings"]) >= 2 and not read["owner"]:
         try:
-            g, drafts = explore(home, s, req, read["readings"], base, transcript_bytes)
+            g, drafts = explore(home, s, req, read["readings"], base)
             parts.append(explore_text(home, s, g, drafts))
             return "\n\n".join(p for p in parts if p), "explore"
         except ValueError:
             pass
-    d = pioneer(home, s, prompter(home, s, req, read, base, transcript_bytes), read)
+    d = pioneer(home, s, prompter(home, s, req, read, base), read)
     parts.append(verdict_text(home, s, d))
     if d["verdict"] == "start":
         parts.append(f"If one draft would have to guess between distinct readings of the message, start none of it: "
@@ -1963,11 +1929,7 @@ def command(a, me):
         d = load_draft(home, sid, a.draft)
         if not d:
             raise ValueError(f"no draft {a.draft} in this session")
-        if d.get("verdict") == "queue":
-            rid, new = queue(home, d)
-            print(starts.queued_text(rid, new, (d.get("busy") or {}).get("sessionId")))
-        else:
-            print(verdict_text(home, s, d))
+        print(verdict_text(home, s, d))            # the gate's verdict for a kept draft, as it was handed
         return 0
     if a.cmd == "readings":
         g, drafts = explore(home, s, a.words or " / ".join(a.texts), a.texts, base)

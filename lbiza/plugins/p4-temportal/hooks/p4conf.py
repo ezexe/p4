@@ -57,7 +57,6 @@ DEFAULTS = {
         "act_dont_wait": True,           # false: p4-phi's act-don't-wait rule is left out in this project
         "top_orchestrates": True,        # false: an orchestrator works its task list itself, no worker unless asked
         "levels": True,                  # false: no delegation rule
-        "file_sets": True,               # false: a session may be started by a brief that declares no write set
         "issues": True,                  # false: the issue loop is off: no open issue a brief names, no commit line
                                          # for it, no regression test at Stop and no push line
         # caps a project sets, ezexe/p4#125, read by phi.CAPS and apply_caps, which keep the default for a value of
@@ -156,11 +155,13 @@ READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.clear_at", "c
 # on the archive tool replaced. phi.puppeteer_chars and phi.compactions steer nothing: Claude Code compacts a session
 # by itself, so a puppeteer's boundary notice carries no compact question to count characters or compactions for.
 # phi.context_window steers nothing either: the app counts a session's context, and a session reads its share with
-# the app's get_usage tool, so p4 holds no window size to count against.
+# the app's get_usage tool, so p4 holds no window size to count against. phi.file_sets went with the refusal of a
+# start whose brief declares no files: a session that writes works in a git worktree of its own, so no start is
+# held or refused for the files its brief names.
 RETIRED = ("plans", "version", "memory", "scratchpad.tmp_idle_days", "scratchpad.tmp_max_file_mb",
            "scratchpad.tmp_max_files", "scratchpad.tmp_empty_idle_hours", "scratchpad.scratch_sweep_minutes",
            "scratchpad.tmp_skip_dirs", "phi.session_archives", "phi.puppeteer_chars", "phi.compactions",
-           "phi.context_window")
+           "phi.context_window", "phi.file_sets")
 
 # Where each kind of file lives in the store, by plugin. p4-temportal keeps the auto memory, the notebook and saved
 # code in temportal/, and p4-phi keeps its session tree, the retrieval corpus and
@@ -781,7 +782,7 @@ def _write(p4, data):
 WRITTEN = "_written"
 # The generation of DEFAULTS: raised by one whenever a default changes, with the value it had added to HISTORY, so a
 # store's written values follow the change. test_p4conf.py pins DEFAULTS to this number.
-GEN = 7
+GEN = 8
 # Past defaults by dotted path: a store from before the record whose value equals one of these, or today's default,
 # counts that value as written by load, so it follows today's default.
 HISTORY = {"recall.teacher.model": ["claude-fable-5-1"], "recall.lookups.web": ["answer"], "scratchpad.tmp": [True],

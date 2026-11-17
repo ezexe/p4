@@ -42,18 +42,14 @@ The watcher every orchestrator has is puppeteer.py's and is another thing.
                GitHub at its slow looks, so no hook reads GitHub for the line.
   archiving    the app asks ezexe before every archive call, by the ask rule the settings keeper writes on the
                archive tool, and the tool refuses a session with live background work. p4-phi only names the
-               controlled sessions its records hold complete, which no tool of the app tells: no open plan step,
-               closing commit unpushed or start request waiting.
+               controlled sessions its records hold complete, which no tool of the app tells: no open plan step
+               and no closing commit unpushed.
   requests     a controlled session that would start a new orchestrator writes `request ... --to-puppeteer`
                into its own store; the puppeteer's hooks read it there, and what became of it is kept on
                the puppeteer's record, where the hook of the session that filed it reads it.
   the tree     the app nests a session under the session that calls the start tool, and no tool moves it after, so a
-               puppeteer starts only new orchestrators. A start request belongs under the session that
-               filed it: each session of the controlled trees that holds some free of their writers is named to the
-               puppeteer as a link with how many it holds, beside its messages and on its board, for ezexe to open
-               and send one message, or start the suggested task card that session shows. A start the puppeteer
-               makes on such a session's behalf anyway is held under that session in p4-phi, named to it for
-               detaching to top level, and kept on its board as an exception.
+               puppeteer starts only new orchestrators and its one standing worker. A worker of a controlled tree
+               is that tree's own to start, as a start or as the suggested task card its session shows.
 """
 
 import hashlib
@@ -167,12 +163,6 @@ def _set(s, rows):
 
 # --- where a controlled session stands ---------------------------------------------------------------------------------
 
-def waiting_requests(store, sid):
-    """The start requests a session queued for itself that are not started yet: behind a busy writer, free to go,
-    or shown as a suggested task card."""
-    return [r for r in starts.open_rows(store) if r.get("requester") == sid and not r.get("to")] if store else []
-
-
 def standing(store, sid):
     """Where a controlled session stands, read from the app's record and its own store and written nowhere. Returns
     its state, one of archived, unread, working, open, shown done and not shown done, and the list of what p4-phi's
@@ -207,12 +197,6 @@ def standing(store, sid):
             continue
         if _watcher().working(store, kid) or plans.open_steps(store, kid):
             against.append(f"\"{full_title(kid, k)}\" under it is still working")
-    asked = waiting_requests(store, sid)
-    if asked:
-        against.append(f"{len(asked)} start request{'s' if len(asked) != 1 else ''} of its own waiting, the first "
-                       f"\"{asked[0].get('title')}\", which it starts at a turn ezexe begins there or shows as a "
-                       f"suggested task card at any other: ezexe opens {link(sid)} and sends it one message, or "
-                       f"starts its card")
     for path, sha, _, closes in commits:
         try:
             if not issues.landed(path, sha, closes):
@@ -269,8 +253,8 @@ RULE = (
     "flow up, which the worker's issues coworker drafts and publishes, handing each number up for this session to "
     "record with `{cmd} note \"<the finding> as #N\" --source \"<the issue>\" --kind published`. Beside that worker "
     "it starts only new "
-    "orchestrators, since the app nests a session under its starter for good, and names a session holding a start "
-    "request to ezexe as a link. It checks the orchestrators and its own worker for stalls and context, and tunes "
+    "orchestrators, since the app nests a session under its starter for good. It checks the orchestrators and its "
+    "own worker for stalls and context, and tunes "
     "their effort from their reports, with no one asking, by `mcp__ccd_session_mgmt__set_session_effort`, logging "
     "each change on its board; a model is passed only on the start call and never changed after. A `Finding:` line "
     "stays on its board until such a note holds its text. It shows ezexe a result in its reply as a short "
@@ -845,13 +829,11 @@ def board(home, s):
                      + (f" Page: {page_of(store, k)}" if store else ""))
     if not controlled(s):
         lines.append("None yet.")
-    waits = [f"- {link(k)} holds {n} start request{'s' if n != 1 else ''} only it can start: ezexe opens it and "
-             f"sends it one message, or starts the suggested task card it shows." for k, n in holders(s)]
 
     def of_kind(kind):
         return [f"- {PHI.clean(n.get('claim'))} Source: {PHI.clean(n.get('source'))}. Kept {n.get('time', '')}."
                 for n in notes if PHI.clean(n.get("kind")) == kind]
-    lines += ["", "## Waiting on", ""] + (waits + of_kind("decision") + of_kind("waiting") or ["Nothing."])
+    lines += ["", "## Waiting on", ""] + (of_kind("decision") + of_kind("waiting") or ["Nothing."])
     asked = requests_for(s)
     answers = s.get("requestAnswers") if isinstance(s.get("requestAnswers"), dict) else {}
     lines += ["", "## Requests to this puppeteer", ""]
@@ -866,8 +848,6 @@ def board(home, s):
         lines += ["", "## Ledger of requests", "",
                   f"{len(have)} request{'s' if len(have) != 1 else ''} to this puppeteer, each with the session that "
                   f"holds it and its state, whole on {asks.page_path(home, sid)}."]
-    lines += ["", "## Started on another session's behalf", ""]
-    lines += [behalf_row(r) for r, _ in behalf_rows(home, s)] or ["None."]
     found = [f for f in findings(s) if not published(f[2], notes)]
     lines += ["", "## Findings", ""]
     if found:
@@ -961,8 +941,7 @@ def boundary(home, s):
             ready.append(e["sessionId"])
     told = s.get("boundary") if isinstance(s.get("boundary"), dict) else {}
     newly = [k for k in closed if k not in (told.get("closed") or [])]
-    idle = all(st != "working" for _, st, _ in states) and not any(
-        waiting_requests(e.get("store") or "", e["sessionId"]) for e in rows)
+    idle = all(st != "working" for _, st, _ in states)
     fresh = [k for k in ready if k not in (told.get("ready") or [])]
     if not newly and not idle and not fresh:
         return ""
@@ -1044,128 +1023,12 @@ def take(home, s, old):
             f"{'s' if n != 1 else ''} from \"{full_title(old, o)}\" `{old}`")
 
 
-# --- start requests stay with the session that filed them ----------------------------------------------------------------
-
-def stores(home, s):
-    """This puppeteer's own store and those of the sessions it controls, each once."""
-    out = {}
-    for where in [home] + [e.get("store") or "" for e in controlled(s)]:
-        if where:
-            out.setdefault(os.path.normcase(os.path.abspath(where)), where)
-    return list(out.values())
-
-
-def holders(s):
-    """Each live session of the trees a puppeteer controls that holds start requests free to go, which its next
-    turn starts or shows as suggested task cards, as its sessionId and how many, tree by tree."""
-    out, held = [], {}
-    for e in controlled(s):
-        top, store = e["sessionId"], e.get("store") or ""
-        if store not in held:
-            held[store] = [r.get("requester") for r in starts.pending(store)] if store else []
-        for sid in dict.fromkeys(held[store]):
-            if sid and (sid == top or top in PHI.chain_of(store, sid)) \
-                    and not out_of_tree(PHI.load_session(store, sid)):
-                out.append((sid, held[store].count(sid)))
-    return out
-
-
-def holders_text(s, req=""):
-    """The line a puppeteer is handed while sessions of the trees it controls hold start requests: each as
-    a link with how many it holds, and no start call. Handed at each turn ezexe begins, and at another turn when what
-    is held has changed; the caller saves what was told."""
-    rows = holders(s)
-    if not rows:
-        s.pop("holdersTold", None)
-        return ""
-    key = [[k, n] for k, n in rows]
-    if not req and s.get("holdersTold") == key:
-        return ""
-    s["holdersTold"] = key
-    return ("phi (p4-phi): sessions of the trees this puppeteer controls hold start requests that only they "
-            "can start, each at a turn ezexe begins in it, or by the suggested task card it shows at any other "
-            "turn, so the app nests each child "
-            "under the session that asked for it. Start none of them here: a start request belongs under the session "
-            "that filed it, and a start made here nests the child under this puppeteer, where no tool moves "
-            "it from. End this turn with these lines as they are, each a link ezexe opens:\n"
-            + "\n".join(f"- {link(k)}: {n} start request{'s' if n != 1 else ''}" for k, n in rows))
-
-
-def behalf(home, s, prompt, store=""):
-    """The start request another session filed for a child of its own and the store it lies in, when a start call of
-    this session carries its marker; None for any other call. A puppeteer is answered from the stores of the
-    sessions it controls as well, any other session from its own store. The app nests a session under the session
-    that calls the start tool and no tool moves it after, so whoever makes such a start is told to detach it."""
-    m = starts.MARK_RE.search(str(prompt or ""))
-    if not m or not s.get("sessionId") or m.group(2) == s["sessionId"]:
-        return None
-    for where in stores(home, s):
-        r = starts.state(where).get(m.group(1))
-        if r and r.get("requester") == m.group(2) and not r.get("to"):
-            return r, where
-    return None
-
-
-def behalf_line(r, puppeteer=True):
-    """What a session is told as its start of another session's start request goes through: a puppeteer, whose
-    board names the start, or any other session, whose tree's ledger names it."""
-    me = "this puppeteer" if puppeteer else "this session"
-    where = "on the board" if puppeteer else "in its tree's ledger"
-    return (f"phi (p4-phi): this start carries start request {r['id']} of {link(r['requester'])}, which belongs under "
-            f"that session, while the app nests the new session under {me}. p4-phi records it as "
-            f"started on that session's behalf, holds the new session under that session and names it {where} "
-            f"as an exception. Once the start returns, call `mcp__ccd_session_mgmt__detach_session` with the new "
-            f"session's id, so the app shows it at top level and not under {me}. Start no other "
-            f"session's request here: name the session that holds it to ezexe as a link to open.")
-
-
-def behalf_rows(home, s):
-    """The start requests of other sessions that this puppeteer started, each with the store it lies in."""
-    return [(r, where) for where in stores(home, s) for r in starts.state(where).values()
-            if (r.get("claimed") or {}).get("by") == s["sessionId"] and r.get("requester") != s["sessionId"]
-            and not r.get("to")]
-
-
-def behalf_row(r):
-    """A start made on another session's behalf as the board names it: what the app shows of the new session."""
-    kid = str(r.get("started") or "")
-    head = (f"- start request {r['id']} \"{r.get('title')}\" of {link(r['requester'])}, which this puppeteer "
-            f"started")
-    if kid == "withdrawn" or not kid:
-        return head + (", withdrawn since." if kid else ": its session has not reached p4-phi's records yet.")
-    return (head + f" as {link(kid)}: p4-phi holds it under that session, and the app "
-            + ("shows it at top level." if PHI.app_record(kid).get("lineageDetached") else
-               "nests it under this puppeteer until it is detached to top level with "
-               "`mcp__ccd_session_mgmt__detach_session`."))
-
-
-def behalf_text(home, s):
-    """The line naming each session this puppeteer started on another session's behalf that the app still
-    nests under it, once each, with the call that detaches it to top level; the caller saves what was told."""
-    told = [x for x in s.get("behalfTold") or [] if isinstance(x, str)]
-    named = []
-    for r, _ in behalf_rows(home, s):
-        kid = str(r.get("started") or "")
-        rec = PHI.app_record(kid) if kid.startswith("local_") else {}
-        if not rec or kid in told or rec.get("lineageDetached") or rec.get("isArchived"):
-            continue
-        told.append(kid)
-        named.append(f"- {link(kid)}, started for start request {r['id']} of {link(r['requester'])}: call "
-                     f"`mcp__ccd_session_mgmt__detach_session` with `{kid}`")
-    if not named:
-        return ""
-    s["behalfTold"] = told[-50:]
-    return ("phi (p4-phi): this puppeteer started these sessions on another session's behalf, so the app "
-            "nests each under it while p4-phi holds each under the session that filed its start request. Detach to "
-            "top level each one now, so the app never shows it under this puppeteer; the board names each "
-            "as an exception:\n" + "\n".join(named))
-
-
 # --- requests through the puppeteer ------------------------------------------------------------------------------
 
 def request_call(r):
     """The exact start_session input for a request addressed to a puppeteer: a new orchestrator in
-    the environment of the session that filed the request."""
+    the environment of the session that filed the request, in that project's own checkout, where it lands its
+    tree's work, so `use_worktree` is false, as starts.use_worktree gives a new orchestrator."""
     project = os.path.dirname(os.path.dirname(os.path.abspath(r["store"]))).replace("\\", "/")
     bg = str(r.get("background") or "")
     if len(bg) < starts.BACKGROUND_MIN:
@@ -1174,7 +1037,7 @@ def request_call(r):
     if not PHI.NEW_TOP.search(brief):
         brief += "\n\n" + PHI.NEW_TOP_BRIEF + " " + PHI.new_top_first_act()
     return plans.with_level({"initiation": "user_asked", "title": r["title"], "context": "fresh",
-                             "use_worktree": False, "cwd": project, "background": bg,
+                             "use_worktree": starts.use_worktree(brief), "cwd": project, "background": bg,
                              "prompt": brief + "\n\n" + starts.marker(r["id"], r["requester"])},
                             r["title"] + "\n" + r["brief"])     # a fresh start names its model and effort
 
@@ -1222,49 +1085,6 @@ def answers_text(home, s):
             lines.append(f"its puppeteer \"{full_title(r['to'])}\" declined the request {r['id']} "
                          f"\"{r.get('title')}\": {a.get('why', '')}")
     return ("phi (p4-phi): " + "; ".join(lines) + ". Start no session for it.") if lines else ""
-
-
-# --- a go to a waiting writer --------------------------------------------------------------------------------------------
-
-def go_text(home, s, target, message=""):
-    """A puppeteer's message to a session it controls. Returns one line when another controlled session,
-    or a session in its tree, still holds a file of that writer's write set: the holder by full title, and what
-    frees the files. Returns an empty string when nothing is held or this go and its holders were warned of
-    already. The write set is the one the message declares on a `Files:` line, else the one the target declared."""
-    target = PHI.safe_id(target) if target else ""
-    rows = controlled(s)
-    mine = next((e for e in rows if e["sessionId"] == target), None)
-    if not mine:
-        return ""
-    store = mine.get("store") or ""
-    t = PHI.load_session(store, target) if store else {}
-    files = starts.files_of(message, t.get("cwd") or "") or [x for x in t.get("fileSet") or [] if isinstance(x, str)]
-    if not files:
-        return ""
-    held = []
-    for e in rows:
-        st = e.get("store") or ""
-        if e["sessionId"] == target or not st:
-            continue
-        for sid, _, theirs in starts.writers(st):
-            above = PHI.chain_of(st, sid)
-            if sid == target or target in above or (sid != e["sessionId"] and e["sessionId"] not in above):
-                continue
-            hit = starts.files_overlap(files, theirs)
-            if hit:
-                held.append((sid, full_title(sid), hit))
-    if not held:
-        return ""
-    key = hashlib.sha1(json.dumps([target, sorted((sid, hit) for sid, _, hit in held)]).encode("utf-8")).hexdigest()[:12]
-    told = [k for k in s.get("goWarned") or [] if isinstance(k, str)]
-    if key in told:
-        return ""
-    s["goWarned"] = (told + [key])[-40:]
-    names = "; ".join(f"\"{title}\" `{sid}` holds {', '.join(hit[:4])}" for sid, title, hit in held[:4])
-    return (f"phi (p4-phi): this go to \"{full_title(target)}\" is early: {names}. Hold the go until that session "
-            f"reports done, or have it release what "
-            f"it has landed with `{PHI.commands()} files --release` or `{PHI.commands()} files <the paths it still "
-            f"writes>` first. Said once for this go and these holders.")
 
 
 # --- work sent down to a controlled session --------------------------------------------------------------------------------

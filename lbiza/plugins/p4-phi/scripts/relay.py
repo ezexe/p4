@@ -255,7 +255,7 @@ def covers(pattern, path):
 
 
 def overlap(a, b):
-    """True when two path or glob entries, of owned paths or write sets, can name the same file."""
+    """True when two path or glob entries can name the same file."""
     ra, rb = _root(a), _root(b)
     return covers(a, b) or covers(b, a) or covers(ra, rb) or covers(rb, ra)
 
@@ -1793,8 +1793,45 @@ def owed(repos, main="main"):
     return out
 
 
-def push_text(child_title, child, commits, owes=()):
-    """The orchestrator's line: push and sync a finished child's issue-closing commits now, without asking.
+# A worker that writes commits on a branch of its own, in its own git worktree, so its commits are not in the checkout
+# its orchestrator lands in until that branch is merged. The branch is read where the worker's own Stop hook runs:
+# from git in the worktree its closing commits lie in, else from the app's record of the session, whose `branch` is
+# the one the app made with the worktree. Where neither names it, the push line sends the orchestrator to the
+# worker's report, since the app's own note of a started session's turn names its branch.
+
+def branch_of(sid, s, repo):
+    """The branch of the worktree `repo` a session commits in, '' when nothing names it: the branch checked out
+    there, by git, else the `branch` of the app's record of the session."""
+    r = _git(repo, "rev-parse", "--abbrev-ref", "HEAD") if repo else None
+    name = r.stdout.strip() if r is not None and r.returncode == 0 else ""
+    if name and name != "HEAD":
+        return name
+    archived_in_app(s)                            # makes sure RECORD is set: phi.py hands relay the app's records
+    try:
+        return str(RECORD(sid).get("branch") or "") if RECORD and str(sid).startswith("local_") else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def worktree_branches(sid, s, commits):
+    """The worktrees a finished session's `commits` lie in, each with its branch as branch_of reads it: a linked
+    worktree's commits wait on a merge. A commit in a main checkout, which sessions share, is on the branch checked
+    out there and names none."""
+    import p4conf                                 # main_root: the main checkout a worktree's `.git` file leads to
+    out = []
+    for repo in dict.fromkeys(c[0] for c in commits):
+        main, found = p4conf.main_root(repo) if repo else ("", False)
+        if found and norm(os.path.realpath(main)) != norm(os.path.realpath(repo)):
+            out.append((repo, branch_of(sid, s, repo)))
+    return out
+
+
+def push_text(child_title, child, commits, owes=(), branches=()):
+    """The orchestrator's line: land a finished child's issue-closing commits now, without asking. With `branches`,
+    the worktrees those commits lie in and the branch of each, as worktree_branches gives them, it has each branch
+    merged into the default branch first, since the commits are on the child's own branch and not in the
+    orchestrator's checkout. The line is ezexe's standing word to land green work that closes an issue and says
+    so, since by the app's own default a session merges a branch of a session it started only when ezexe says so.
     With `owes`, what the change still owes comes first: finished before the push, or named in the report before
     it."""
     named = "; ".join(f"{sha} \"{_short(subj, 80)}\" closes {', '.join(n)} in {repo}" for repo, sha, subj, n in commits)
@@ -1805,10 +1842,20 @@ def push_text(child_title, child, commits, owes=()):
                  + (f"; and {len(owes) - OWED_MAX} more" if len(owes) > OWED_MAX else "")
                  + ". Finish each first. Where one cannot be finished from here, name it in the report before "
                    "pushing, not after.")
+    merge = ""
+    if branches:
+        where = "; ".join((f"`{b}`" if b else "the branch its report names") + f", in its worktree {repo}"
+                          for repo, b in branches)
+        merge = (f" Those commits are on that session's own branch, {where}, and not in this session's checkout: "
+                 f"merge that branch into the default branch first, in the checkout that holds the default branch. "
+                 f"This line is ezexe's standing word to land green work that closes an issue, so it stands in "
+                 f"place of the app's default, by which a session merges a branch of a session it started only "
+                 f"when ezexe says so.")
     return (f"phi (p4-phi): \"{child_title}\" `{child}` finished with commits that close issues: {named}. "
-            f"Green work that closes an issue is pushed at once: "
-            f"once its suites pass, push that repository's main and sync each store it touches with "
-            f"`p4.py sync --push`, without asking ezexe, and say in one line what was pushed.{first} A force-push, a "
+            f"Green work that closes an issue is landed at once.{merge} "
+            f"Once its suites pass, push that repository's main and sync each store it touches with "
+            f"`p4.py sync --push`, without asking ezexe, and say in one line what was "
+            f"{'merged and ' if merge else ''}pushed.{first} A force-push, a "
             f"history rewrite or a deletion still waits on ezexe's go, asked as a `mcp__ccd_turn__wrap_up` question "
             f"whose first button is that go.")
 

@@ -3,7 +3,7 @@
 The book is a directory in the sense of the FIPA Agent Management Specification, SC00023K: the white pages, each
 live session by its id, and the yellow pages, what each holds. For one session it lists the live sessions of its
 project's trees and of the trees its puppeteer controls, each by full title and id, with its role, its parent, the
-files its brief declared on a `Files:` line and has not freed by reporting done, its owned paths, its open issue and
+files its brief names on a `Files:` line while it is at work on them, its owned paths, its open issue and
 its workers and coworkers. It names the puppeteer as the one address for a decision of ezexe's, and the session's
 parent as the address for work off its task.
 
@@ -123,8 +123,9 @@ def puppeteer(home, s, store=""):
 
 
 def held_files(home, s):
-    """The files a session's brief declared and it has not freed: none once its last turn reported done, or the app
-    shows it stopped, as starts.writers reads them."""
+    """The files a session's brief says it covers, for as long as it is at work on them: none once its last turn
+    reported done, or the app shows it stopped. They are what a message about a file is routed by, and hold no
+    start and no edit."""
     files = s.get("fileSet")
     if not isinstance(files, list) or not files:
         return []
@@ -464,7 +465,7 @@ def flag(home, s, target, message, store=""):
     text = str(message or "")
     if not sid or not target or target == sid or not text.strip():
         return ""
-    # a `Files:` line declares the recipient's write set, which controls.go_text reads; it names no other's file
+    # a `Files:` line names the files the recipient is to cover; it names no other session's file
     read = starts.FILES_LINE.sub(" ", text)
     pid = puppeteer(home, s, store)[0]
     to_pup = target == pid and sid != pid and relay._parent(s) != pid

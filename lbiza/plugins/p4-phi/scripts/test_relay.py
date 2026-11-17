@@ -853,14 +853,15 @@ class ThreeSessions(unittest.TestCase):
 class ForkOrFresh(ThreeSessions):
     """The advice on start_session, a fork's pinned agenda, and a fresh child's slice of the parent's anchor."""
 
-    def advise(self, host, context_, prompt, size):
+    def advise(self, host, context_, prompt, size, **more):
         path = os.path.join(self._tmp.name, host + "-transcript.jsonl")
         with open(path, "w", encoding="utf-8") as f:
             f.write("x" * size)
         r = self.t.hook("start-advice", host, {"hook_event_name": "PreToolUse",
                                                "tool_name": "mcp__ccd_session__start_session",
                                                "tool_input": {"initiation": "user_asked", "context": context_,
-                                                              "title": "a child", "prompt": prompt + "\nFiles: none"},
+                                                              "title": "a child", "prompt": prompt + "\nFiles: none",
+                                                              **more},
                                                "transcript_path": path})
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
@@ -887,30 +888,77 @@ class ForkOrFresh(ThreeSessions):
         out = self.advise(TOP, "fresh", f"Rework `{self.x('lib')}`", 10 * 1024)
         self.assertIn('advises context "fork"', out["permissionDecisionReason"])
 
-    def test_a_start_with_its_own_worktree_or_branch_is_asked(self):
+    def test_a_start_with_its_own_worktree_or_branch_is_not_asked(self):
+        """A session that writes gets a git worktree and a branch of its own, worktrees.md, "Running each Claude Code
+        session in its own worktree gives it a separate copy of the files to edit", so p4-phi asks about neither,
+        and its own word for a new worker's call is `use_worktree: true`. A fresh start in a worktree is not
+        advised to fork either: the start tool's text gives `use_worktree` as rejected with a fork."""
         self.t.cli(TOP, "shard", self.x("lib"))
         path = os.path.join(self._tmp.name, "short.jsonl")
         with open(path, "w", encoding="utf-8") as f:
             f.write("x")
-        for extra in ({"use_worktree": True}, {"branch_name": "my-branch"}):
+        for extra in ({"use_worktree": True}, {"use_worktree": True, "branch_name": "my-branch"},
+                      {"use_worktree": True, "source_branch": "main"}):
             r = self.t.hook("start-advice", TOP, {"tool_name": "mcp__ccd_session__start_session", "transcript_path": path,
                                                   "tool_input": {"context": "fresh", "prompt": "write docs\nFiles: none", **extra}})
-            out = json.loads(r.stdout)["hookSpecificOutput"]
-            self.assertEqual(out["permissionDecision"], "ask")
-            self.assertIn("use_worktree: false", out["permissionDecisionReason"])
+            self.assertEqual(r.stdout.strip(), "", f"not asked: {extra}")
+        self.assertIsNone(self.advise(TOP, "fresh", f"Rework `{self.x('lib')}`", 10 * 1024, use_worktree=True),
+                          "a fork is not advised over a worktree of its own")
+        self.assertIn('advises context "fork"', self.advise(TOP, "fresh", f"Rework `{self.x('lib')}`", 10 * 1024,
+                                                            use_worktree=False)["permissionDecisionReason"])
+        import phi
+        import plans
+        with open(phi.__file__, encoding="utf-8") as f:
+            source = f.read()
+        self.assertNotIn("pass `use_worktree: false`", source, "no line tells a session to drop the worktree")
+        self.assertNotIn("no worktree or", source)
+        for line in (plans.CARD_EACH, phi.FIRST_SPLIT):
+            self.assertIn("`use_worktree: true`, so it works in a git worktree and on a branch of its own", line)
 
-    def test_a_child_making_its_own_branch_is_asked_and_the_top_level_session_is_not(self):
-        def guard(host, cmd, tool="Bash"):
-            r = self.t.hook("branch-guard", host, {"tool_name": tool, "tool_input": {"command": cmd}})
+    def test_a_session_in_its_own_worktree_is_asked_about_no_branch_and_one_that_shares_a_checkout_before_it_moves_it(self):
+        """The stop on a child's own worktree is gone: a session started in a git worktree of its own makes a branch,
+        moves to one and enters a worktree unasked, since worktrees.md gives each such session "a separate copy of
+        the files to edit". What still guards something stays: a child that shares its starter's checkout is asked
+        before it moves that checkout to another branch, and every child before it lands work."""
+        def guard(host, cmd, tool="Bash", cwd=None):
+            r = self.t.hook("branch-guard", host, {"tool_name": tool, "tool_input": {"command": cmd},
+                                                   **({"cwd": cwd} if cwd else {})})
             return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
-        self.assertEqual(guard(B, "git switch -c mine")["permissionDecision"], "ask")
-        self.assertIsNotNone(guard(B, "", tool="EnterWorktree"))
+        self.assertEqual(guard(B, "git switch -c mine")["permissionDecision"], "ask", "it moves the shared checkout")
+        self.assertEqual(guard(B, "git checkout -b mine")["permissionDecision"], "ask")
+        self.assertIsNone(guard(B, "", tool="EnterWorktree"), "entering a worktree is Claude Code's own way apart")
+        self.assertIsNone(guard(B, "git worktree add ../wt -b mine"), "a worktree made moves no checkout")
+        self.assertIsNone(guard(B, "git branch mine"), "a branch made without a move")
         self.assertIsNone(guard(B, "git status && git commit -qm x"), "ordinary git is never asked")
         self.assertIsNone(guard(B, "grep -n 'git checkout -b' docs.md"), "quoted text is not a command")
         self.assertIsNone(guard(B, "git checkout -- lib/x.py"), "restoring a file is not a branch change")
         self.assertEqual(guard(B, "git switch main")["permissionDecision"], "ask", "a branch change in a child")
         self.assertIn("moves the parent's too", guard(B, "git checkout feature/x")["permissionDecisionReason"])
         self.assertIsNone(guard(TOP, "git switch -c mine"), "an orchestrator decides its own branches")
+        # a worker the app started in a worktree of its own: the hook's `cwd` is the worktree
+        own = os.path.join(self.work, ".claude", "worktrees", "the-flush")
+        subprocess.run(["git", "-C", self.work, "worktree", "add", "-q", "-b", "claude/the-flush", own],
+                       check=True, capture_output=True)
+        reader = "local_reader01"
+        CLI.setdefault(reader, "eeee5555-0000-4000-8000-000000000000")
+        self.t.record(GRAND, TOP, title="the flush worker", cwd=own)
+        self.t.record(reader, GRAND, title="a check of the flush", cwd=own)
+        for host in (GRAND, reader):
+            self.assertEqual(self.t.say(host, "Task:\nLook at the flush.").returncode, 0)
+        for cmd in ("git switch -c mine", "git checkout -b mine", "git switch main", "git checkout feature/x",
+                    "git worktree add ../wt -b mine", "git branch mine"):
+            self.assertIsNone(guard(GRAND, cmd, cwd=own), f"its own worktree: {cmd}")
+        self.assertIsNone(guard(GRAND, "", tool="EnterWorktree", cwd=own))
+        self.assertIn("merges and pushes", guard(GRAND, "git push origin HEAD", cwd=own)["permissionDecisionReason"],
+                      "landing stays the orchestrator's")
+        self.assertEqual(guard(reader, "git switch main", cwd=own)["permissionDecision"], "ask",
+                         "a reader started with use_worktree false shares its starter's worktree")
+        import phi
+        self.assertFalse(hasattr(phi, "BRANCHING"), "no pattern for a branch or a worktree a child makes")
+        with open(phi.__file__, encoding="utf-8") as f:
+            source = f.read()
+        self.assertNotIn("entering a worktree of its own", source)
+        self.assertNotIn("making a worktree or branch of its own", source)
 
     def test_a_hand_pull_or_push_in_a_store_is_asked_and_names_p4_sync(self):
         """A store moves only by p4.py sync."""
@@ -933,6 +981,46 @@ class ForkOrFresh(ThreeSessions):
         self.assertIsNone(guard(TOP, f"git -C {self.work} push"), "a project checkout is not a store")
         self.assertIsNone(guard(TOP, f"cd {clone} && git push origin main"), "a clone kept in a scratchpad directory")
         self.assertIsNone(guard(TOP, f"git -C {p4} status"), "reading a store is never asked")
+
+    def test_a_started_sessions_hand_pull_in_a_store_through_lookup_check_names_p4_sync(self):
+        """ezexe/p4#240: through `recall-hook.sh lookup-check`, the entry hooks.json wires before every tool call, a
+        started session's hand pull or push inside a store is asked by the store guard, which runs ahead of the
+        branch guard: its reason names `p4.py sync --push --p4 <store>` and the tree's orchestrator as the session
+        that runs it. The same session's pull in the project's own checkout keeps the branch guard's ask."""
+        p4 = self.t.p4.replace("\\", "/")
+        subprocess.run(["git", "init", "-q", p4], check=True, capture_output=True)
+        gate = os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh")
+
+        def check(host, tool, cmd, k):
+            body = {"session_id": CLI[host], "cwd": self.t.proj, "hook_event_name": "PreToolUse", "tool_name": tool,
+                    "tool_input": {"command": cmd}, "tool_use_id": f"toolu_store00{k}"}
+            r = inproc.run(["sh", gate, "lookup-check"], input=json.dumps(body), capture_output=True, text=True,
+                           timeout=60, env=self.t.env(host))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return json.loads(r.stdout).get("hookSpecificOutput", {}) if r.stdout.strip() else {}
+        for k, (tool, cmd) in enumerate((("Bash", f"cd {p4} && git pull origin main"),
+                                         ("Bash", f"git -C {p4} push origin main"),
+                                         ("PowerShell", f"cd {p4}; git pull origin main"),
+                                         ("PowerShell", f"git -C {p4} push origin main"))):
+            out = check(B, tool, cmd, k)
+            self.assertEqual(out.get("permissionDecision"), "ask", f"{tool}: {cmd}")
+            reason = out.get("permissionDecisionReason", "")
+            self.assertIn("sync --push --p4", reason, f"{tool}: {cmd}")
+            self.assertIn(relay.norm(p4), relay.norm(reason), "the store by its path")
+            self.assertIn(f"its tree's orchestrator's to run, \"top\" `{TOP}`", reason, "and the session that runs it")
+            self.assertNotIn("Ask its parent session", reason, "not the branch guard's reason")
+        own = check(B, "Bash", "git pull", 7)
+        self.assertEqual(own.get("permissionDecision"), "ask")
+        self.assertIn("merges and pushes", own.get("permissionDecisionReason", ""), "outside a store: the branch guard")
+        self.assertNotIn("sync --push --p4", own.get("permissionDecisionReason", ""))
+        top = check(TOP, "Bash", f"cd {p4} && git pull origin main", 8)
+        self.assertIn("sync --push --p4", top.get("permissionDecisionReason", ""))
+        self.assertNotIn("orchestrator's to run", top.get("permissionDecisionReason", ""),
+                         "the orchestrator runs the sync itself")
+        import hook
+        for tool in ("Bash", "PowerShell"):
+            names = hook.PHI_CHECK[tool]
+            self.assertLess(names.index("store-guard"), names.index("branch-guard"), tool)
 
     def test_a_child_landing_work_is_always_asked(self):
         """ezexe/p4#232: only the tree's orchestrator merges and pushes. Neither a brief that says "Closes #7" and

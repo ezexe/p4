@@ -131,8 +131,8 @@ class Hook(unittest.TestCase):
                    "the orchestrator to push main and sync each store at once, so follow that line.")
         self.t.say(TOP, "<cross-session-message from=\"local_x\">tidy the memories</cross-session-message>")
         self.assertEqual(self.wrote(memory(self.t.p4, "always-push-issue-work", carried)), "")
-        self.assertEqual(starts.pending(self.t.p4), [], "no start request is kept in this store")
-        self.assertEqual(starts.pending(os.path.join(self.plug, ".claude", "p4")), [], "nor in the plugin's")
+        self.assertEqual(starts.open_rows(self.t.p4), [], "no start request is kept in this store")
+        self.assertEqual(starts.open_rows(os.path.join(self.plug, ".claude", "p4")), [], "nor in the plugin's")
         self.assertNotIn("gapsTold", self.t.session(TOP), "and it is not counted as a gap told")
         both = "p4-temportal and p4-phi carry this now: a store moves only by p4.py sync."
         self.assertEqual(self.wrote(memory(self.t.p4, "store-sync-by-p4-sync", both)), "")
@@ -208,8 +208,8 @@ class Hook(unittest.TestCase):
         self.assertIn("\nFinding: the plugin in team/plug", got)
         self.assertNotIn("own_initiative", got)
         self.assertNotIn("start request", got)
-        self.assertEqual(starts.pending(self.t.p4), [])
-        self.assertEqual(starts.pending(os.path.join(self.plug, ".claude", "p4")), [])
+        self.assertEqual(starts.open_rows(self.t.p4), [])
+        self.assertEqual(starts.open_rows(os.path.join(self.plug, ".claude", "p4")), [])
 
     def test_a_child_with_no_supervisor_session_above_it_writes_the_gap_for_its_top_level_session(self):
         self.t.record(KID, TOP, title="the flush child")

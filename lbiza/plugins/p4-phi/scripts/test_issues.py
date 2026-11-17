@@ -339,6 +339,62 @@ class Loop(unittest.TestCase):
         self.assertIn("test_x.py", notes)
         self.assertIn(A, context(self.t.say(TOP, "what next?")), "the parent gets its archive line")
 
+    def test_a_worktree_workers_closing_commit_is_merged_from_its_branch_before_the_push(self):
+        """A worker that writes commits on its own branch, in its own git worktree, so its `Closes #7` commit is not
+        in its orchestrator's checkout. The push line its orchestrator gets names that branch and its worktree, has
+        the branch merged into the default branch first, and says it is ezexe's standing word, which stands in place
+        of the app's default of merging a started session's branch only when ezexe says so. The branch is read from
+        git in the worktree, and from the app's record of the session where git names none."""
+        import relay
+        own = os.path.join(self.work, ".claude", "worktrees", "the-x-fix").replace("\\", "/")
+        self.git(self.work, "worktree", "add", "-q", "-b", "claude/the-x-fix", own)
+        self.t.record(A, TOP, title="the x fix", cwd=own)
+        ctx = context(self.t.hook("user-prompt-submit", A, {
+            "hook_event_name": "UserPromptSubmit", "cwd": own,
+            "prompt": f"Build ezexe/demo issue #7: fix the off-by-one in {own}/lib/x.py and commit it. Archive when "
+                      f"done."}))
+        self.assertIn("ezexe/demo#7", ctx)
+        write(os.path.join(own, "lib", "x.py"), "x = 2\n")
+        write(os.path.join(own, "test_x.py"), "import sys\nsys.exit(0)\n")
+        self.git(own, "add", "-A")
+        self.git(own, "commit", "-qm", "lib: fix x\n\nCloses #7")
+        sha = self.git(own, "rev-parse", "--short", "HEAD").stdout.strip()
+        self.assertNotIn(sha, self.git(self.work, "log", "--format=%h", "main").stdout, "not in the main checkout")
+        exe = sys.executable.replace("\\", "/")
+        self.finish(f"Run `\"{exe}\" -I test_x.py` to prove the fix")
+        self.assertIn("so this work is proven", self.stop("w1").get("reason", ""))
+        line = next(w["text"] for w in self.t.session(TOP)["relayPending"] if sha in w["text"])
+        self.assertIn("finished with commits that close issues", line)
+        self.assertIn("on that session's own branch, `claude/the-x-fix`, in its worktree " + relay.norm(own), line)
+        self.assertIn("merge that branch into the default branch first", line)
+        self.assertLess(line.index("merge that branch into the default branch first"), line.index("push that"))
+        self.assertIn("ezexe's standing word to land green work that closes an issue", line)
+        self.assertIn("in place of the app's default, by which a session merges a branch of a session it started "
+                      "only when ezexe says so", line)
+        self.assertIn("say in one line what was merged and pushed", line)
+        commits = [(relay.norm(own), sha, "lib: fix x", ["#7"])]
+        self.assertEqual(relay.worktree_branches(A, self.t.session(A), commits),
+                         [(relay.norm(own), "claude/the-x-fix")])
+        shared = [(relay.norm(self.work), sha, "lib: fix x", ["#7"])]
+        self.assertEqual(relay.worktree_branches(A, self.t.session(A), shared), [], "a shared checkout names none")
+        plain = relay.push_text("the x fix", A, shared)
+        self.assertNotIn("merge", plain, "a commit in the shared checkout waits on no merge")
+        self.assertIn("say in one line what was pushed", plain)
+        self.git(own, "checkout", "-q", "--detach")
+        rec = os.path.join(self.t.app, A + ".json")
+        write(rec, json.dumps({**json.loads(read(rec)), "branch": "claude/the-x-fix-9f3a1c"}))
+        import phi
+        phi.RECORDS.pop(A, None)
+        os.environ["P4_PHI_APP_SESSIONS"] = os.path.join(self.t.tmp, "app")
+        try:
+            self.assertEqual(relay.branch_of(A, self.t.session(A), relay.norm(own)), "claude/the-x-fix-9f3a1c",
+                             "a detached worktree: the app's record names the branch")
+        finally:
+            os.environ.pop("P4_PHI_APP_SESSIONS", None)
+            phi.RECORDS.pop(A, None)
+        unnamed = relay.push_text("the x fix", A, commits, branches=[(relay.norm(own), "")])
+        self.assertIn("the branch its report names, in its worktree", unnamed)
+
     def test_the_push_line_names_only_commits_whose_own_message_closes_the_issue_in_its_own_repository(self):
         """ezexe/p4#232: the orchestrator's push line for a worker with issue 7 names only a commit of the issue's own
         repository whose own message closes #7: not one whose message says it does not close #7, and not a commit

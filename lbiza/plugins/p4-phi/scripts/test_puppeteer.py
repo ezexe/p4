@@ -8,8 +8,8 @@ linear: the ledger an orchestrator's watcher writes holds a row for each live se
 only when a source changed, and leads with a reconcile line when the app archived a session p4-phi lists or shows a
 child p4-phi does not hold; the watcher is one look at a time, `phi.py look`, which the plugin's hooks module starts
 and which ends, and no hook starts a process; a message of ezexe's that is work is drafted from ezexe's words and gate-checked into the exact
-start_session call, into a SendMessage to the session whose owned paths hold its area, or into a start request queued
-behind the running writer that holds its files, handed out only once that writer is idle; a question is left alone.
+start_session call, a worker's with `use_worktree: true` whatever a running writer edits, or into a SendMessage to the
+session whose owned paths hold its area; a question is left alone.
 recursive: a landed topic registers its route only once its issue is closed, a commit closing it is pushed and its
 session is archived with its outcome kept; a later message with matching words is drafted from that route; a route
 whose issue was reopened is withdrawn.
@@ -154,10 +154,12 @@ class Linear(Base):
         self.assertNotIn("this message of ezexe's", context(t.say(TOP, ASK)), "a question is no draft")
         ctx = context(t.say(TOP, RETRY))
         self.assertIn("routing read this message", ctx)
-        self.assertIn("no running writer holds its files", ctx)
+        self.assertNotIn("running writer", ctx, "the gate looks for no writer of its files")
         self.assertIn("its parent is this session", ctx)
         call = call_in(ctx)
-        self.assertEqual((call["initiation"], call["context"], call["use_worktree"]), ("user_asked", "fresh", False))
+        self.assertEqual((call["initiation"], call["context"], call["use_worktree"]), ("user_asked", "fresh", True),
+                         "a worker's draft writes, so it gets a git worktree and a branch of its own")
+        self.assertIn(puppeteer.WORKTREE_LINE, call["prompt"], "its brief says where it works and who lands it")
         self.assertNotIn(RETRY, call["prompt"], "the brief quotes no sentence of the message")
         self.assertIn("Report when done.", call["prompt"])
         self.assertGreaterEqual(len(call["background"]), 80)
@@ -174,6 +176,8 @@ class Linear(Base):
         other = context(t.say(TOP, "Write a changelog generator for the billing dashboard's release notes"))
         self.assertIn("so it is a new orchestrator", other)
         self.assertIn(phi.NEW_TOP_BRIEF, call_in(other)["prompt"])
+        self.assertIs(call_in(other)["use_worktree"], False, "a new orchestrator lands in this checkout")
+        self.assertNotIn(puppeteer.WORKTREE_LINE, call_in(other)["prompt"])
 
     def test_a_draft_whose_area_has_a_live_owner_is_routed_there(self):
         t = self.t
@@ -203,8 +207,11 @@ class Linear(Base):
             if sentence not in call["title"]:
                 self.assertNotIn(sentence, brief, "no sentence of the message beyond the title")
         self.assertFalse([x for x in brief.splitlines() if x.startswith(">")], "no quoted block")
-        for line in ("Files: ", "Done looks like: ", "Model and effort: "):
+        for line in ("Done looks like: ", "Model and effort: "):
             self.assertIn(line, brief)
+        self.assertNotIn("Files: none", brief, "a brief that writes and names no path claims no empty set of files")
+        named = call_in(context(t.say(TOP, "Fix the row count in `src/export/flush.py` when the table is empty")))
+        self.assertRegex(named["prompt"], r"(?m)^Files: `[^`]*src/export/flush\.py`$", "its files, where it names them")
         self.assertIn(call["title"], brief, "the task, stated by its title")
         travelled = re.compile(r"ezexe asked|ezexe's (?:words|message)|routed from|relayed by|from ezexe|"
                                r"words quoted", re.I)
@@ -233,31 +240,38 @@ class Linear(Base):
                 if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs:
                     self.assertIsNone(asks.search(n.value), f"{name}:{n.lineno} {n.value[:120]}")
 
-    def test_a_draft_whose_writer_is_busy_is_queued_behind_it(self):
+    def test_a_draft_whose_files_a_running_writer_edits_is_started_in_a_worktree_and_never_queued(self):
+        """The queue behind a busy writer is gone: a draft that names a file a running writer is at work on is
+        handed as a start at once, with `use_worktree: true`, since that worker writes in a git worktree of its own
+        and shares no file on disk with the running writer. The gate names no writer, keeps no start request, and
+        `pioneer` prints the same verdict again."""
         t = self.t
         t.record(TOP2, title="the docs top")
         t.say(TOP, TASK)
         t.say(TOP2, "Write the docs for the billing dashboard")
         t.say(KID, handed("Port `src/export/flush.py` to the new writer."))     # in a turn: a running writer
         ctx = context(t.say(TOP, "Rename the retry helper in `src/export/flush.py` and update its callers"))
-        self.assertIn(f"\"the flush port\" `{KID}` holds its files", ctx)
-        did = puppeteer.DRAFT_RE.search(ctx.replace("draft drf-", "phi draft drf-").replace(";", " for x.")).group(1)
-        self.assertIn(f"pioneer {did}`", ctx)
+        self.assertNotIn("holds its files", ctx)
+        self.assertNotIn("Queue it", ctx)
+        self.assertNotIn("running writer", ctx)
+        call = call_in(ctx)
+        self.assertIn("Files: `", call["prompt"], "the files its brief says it covers")
+        did = puppeteer.DRAFT_RE.search(call["prompt"]).group(1)
+        draft = jload(os.path.join(t.dir(TOP), "drafts", did + ".json"))
+        self.assertEqual(draft["verdict"], "start")
+        self.assertNotIn("busy", draft)
+        self.assertEqual((call["initiation"], call["context"]), ("user_asked", "fresh"))
+        self.assertIs(call["use_worktree"], bool(draft["parent"]), "a worker's draft in a worktree of its own")
+        worker = puppeteer.call_of({**draft, "parent": TOP})
+        self.assertIs(worker["use_worktree"], True, "whatever a running writer edits")
         r = t.cli(TOP, "pioneer", did)
-        self.assertIn("queued as start request req-", r.stdout + r.stderr)
-        self.assertIn("a suggested task card, which ezexe starts here, at any other", r.stdout)
-        self.assertNotIn("start button", ctx + r.stdout, "no turn is told to wait on a start button")
-        self.assertEqual([x["after"] for x in starts.state(t.p4).values()], [KID])
-        self.assertNotIn("starts this session queued", context(t.say(TOP, "How is the exporter coming along?")),
-                         "not handed out while the writer is busy")
+        self.assertIn("Start it now: `mcp__ccd_session__start_session` with ", r.stdout)
+        self.assertNotIn("queued", r.stdout + r.stderr)
+        self.assertEqual(starts.state(t.p4), {}, "no start request is kept")
         text, _ = self.ledger()
-        self.assertIn(f"waits behind \"the flush port\" `{KID}`", text)
-        t.stop(KID, "Port the flush", report="Ported.")
-        self.assertNotIn("starts this session queued", context(t.say(TOP2, "And how are the docs now?")),
-                         "never handed to a session that did not file it")
-        line = context(t.say(TOP, "And how is the exporter now?"))
-        self.assertIn("starts this session queued behind a busy writer are free to go", line)
-        self.assertIn("Rename the retry helper", call_in(line)["prompt"])
+        self.assertNotIn("waits behind", text)
+        for name in ("queue", "busy"):
+            self.assertFalse(hasattr(puppeteer, name), name)
 
 
 class WorkerSplit(Base):
@@ -361,7 +375,9 @@ class TermsAndGuides(Base):
         self.assertIn(phi.RESEARCH, brief)
 
     def test_a_start_draft_carries_the_decide_by_research_line(self):
-        """A writing start and a start whose Files: line is none both carry the decide-by-research sentence."""
+        """A writing start whose message names its files and one whose message names none both carry the
+        decide-by-research sentence. The second has no `Files:` line, since a brief that writes claims no empty
+        set of files."""
         t = self.t
         t.say(TOP, TASK)
         t.stop(TOP, TASK, report="planned")
@@ -371,7 +387,7 @@ class TermsAndGuides(Base):
         self.assertIn(phi.DECIDE, writing)
         t.stop(TOP, "retry", report="drafted")
         none = call_in(context(t.say(TOP, RETRY)))["prompt"]
-        self.assertIn("Files: none", none)
+        self.assertNotIn("Files:", none)
         self.assertIn(phi.DECIDE, none)
         self.assertIn("decisions.md", phi.DECIDE)
 
@@ -600,14 +616,14 @@ class AtArchive(Base):
                                        (4343, f"python phi.py ledger --p4 /another/store --session {KID}"),
                                        (7, "python other.py")]
         try:
-            starts.add(self.t.p4, KID, "A follow-up nobody starts", "Do the follow-up in the exporter.", after=TOP)
+            starts.add(self.t.p4, KID, "A follow-up nobody starts", "Do the follow-up in the exporter.", to=TOP)
             left = puppeteer.unfinished(self.t.p4, KID)
         finally:
             puppeteer.PROCESSES = None
         self.assertTrue(any(x.startswith("process 4242 it started is still alive") for x in left), left)
         self.assertFalse(any("process 7 " in x for x in left))
         self.assertFalse(any("process 4343 " in x for x in left), "the same session id in another store is not its")
-        self.assertTrue(any("that it queued was never started" in x for x in left), left)
+        self.assertTrue(any("that it filed was never started" in x for x in left), left)
 
     def test_a_self_archive_is_never_held_by_a_background_task(self):
         """The archive tool itself refuses a session with live background work, audit row S24, so p4-phi neither

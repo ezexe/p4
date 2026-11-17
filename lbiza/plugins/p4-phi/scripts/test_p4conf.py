@@ -463,6 +463,31 @@ class P4Conf(unittest.TestCase):
         self.assertEqual(json.dumps(again, sort_keys=True), json.dumps(s, sort_keys=True))
         self.assertEqual(err.getvalue(), "")
 
+    def test_the_retired_file_sets_key_is_dropped_and_has_no_variable(self):
+        """A session that writes works in a git worktree of its own, worktrees.md, "Running each Claude Code session
+        in its own worktree gives it a separate copy of the files to edit", so no start is refused or held for the
+        files its brief names. phi.file_sets, which switched that refusal, is neither read, written, called unknown
+        nor mirrored as P4_PHI_FILE_SETS, and a value of the variable changes nothing."""
+        import contextlib
+        import io
+        from unittest import mock
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump({"phi": {"file_sets": False}}, f)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            s = p4conf.load(self.p4)
+        self.assertEqual(err.getvalue(), "")
+        self.assertNotIn("file_sets", s["phi"])
+        self.assertNotIn("file_sets", self.read().get("phi", {}))
+        self.assertNotIn("file_sets", p4conf.DEFAULTS["phi"])
+        self.assertIn("phi.file_sets", p4conf.RETIRED)
+        self.assertNotIn("phi.file_sets", p4conf.env_keys())
+        self.assertNotIn("P4_PHI_FILE_SETS", [p4conf.env_name(k) for k in p4conf.env_keys()])
+        with mock.patch.dict(os.environ, {"P4_PHI_FILE_SETS": "0"}), contextlib.redirect_stderr(err):
+            again = p4conf.load(self.p4, write=False)
+        self.assertEqual(json.dumps(again, sort_keys=True), json.dumps(s, sort_keys=True))
+        self.assertEqual(err.getvalue(), "")
+
     def test_the_keeper_writes_and_keeps_scratchpad_tmp_false(self):
         """p4-temportal 0.3.9 links a session's scratchpad into temportal/tmp unless p4.json's scratchpad.tmp is false,
         so every store holds it false: a store that lacks it, one load wrote true into, and one from before the record
@@ -506,7 +531,7 @@ class P4Conf(unittest.TestCase):
         """DEFAULTS is pinned to its GEN: a change of a default fails here until GEN is raised, the old value added to
         HISTORY and the pin below updated."""
         import hashlib
-        pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca", 4: "857fe1fd14a29f6a", 5: "52f39f39f1f34c83", 6: "80d9cae8899e4527", 7: "58861a65cec942df"}   # append only: one more line for each GEN
+        pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca", 4: "857fe1fd14a29f6a", 5: "52f39f39f1f34c83", 6: "80d9cae8899e4527", 7: "58861a65cec942df", 8: "aac06d8c3ca8f985"}   # append only: one more line for each GEN
         got = hashlib.sha256(json.dumps(p4conf.DEFAULTS, sort_keys=True).encode()).hexdigest()[:16]
         self.assertEqual(p4conf.GEN, max(pins))
         self.assertEqual(p4conf.GEN, len(pins), "no generation is skipped or replaced")

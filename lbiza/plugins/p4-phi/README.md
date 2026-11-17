@@ -34,6 +34,8 @@ Every behaviour below rests on a sentence of the Claude Code docs at `https://co
 | Tells a session to start a long command with `run_in_background: true` | `tools-reference.md`, "Background commands" | "Claude can set `run_in_background: true` to start the command as a background task and continue working while it runs." |
 | Ships no agent that runs a command, since the session reads the command's output file itself | `interactive-mode.md`, "How backgrounding works" | "Output is written to a file and Claude can retrieve it using the Read tool" |
 | Lets a long foreground command run as sent, an orchestrator's too, since the app moves it to the background at its timeout | `tools-reference.md`, "Foreground commands that move to the background" | "When a foreground command reaches its timeout without finishing, Claude Code moves it to the background instead of stopping it" |
+| Drafts every start of a worker that writes with `use_worktree: true`, so it works in a git worktree and on a branch of its own, and every start of a session that only reads with `false` | `worktrees.md`, its opening, and `desktop.md`, "Run a session in its own worktree" | "Running each Claude Code session in its own worktree gives it a separate copy of the files to edit, so one session can build a feature while a second fixes a bug." and "Worktrees are stored in `<project-root>/.claude/worktrees/` by default." |
+| Drafts a new orchestrator's start with `use_worktree: false`, since it lands its tree's work in the checkout that holds the default branch and syncs the store under it | `worktrees.md`, "How Claude Code enforces isolation" | "Claude Code blocks a Bash, PowerShell, or Monitor command whose working directory resolves to the main checkout" and "Claude Code blocks a Bash or Monitor command that redirects git into the main checkout." |
 | Keeps the python its runners proved on Windows in the plugin's data folder | `plugins/manifest-reference.md`, "Environment variables" | "`${CLAUDE_PLUGIN_ROOT}` changes when the plugin updates, so don't write state there." and `${CLAUDE_PLUGIN_DATA}` is "kept across plugin updates" |
 | Runs a hooks module, `hooks/register.ts`, inside Claude Code, named in `hooks/hooks.json` beside the command hooks | `plugins/mods/reference.md`, "Files" | "`modules`: an array with one path, relative to this file, to the hooks module" and "Can also hold settings hooks under `hooks`." |
 | Reads the proved python in the module from the plugin's data folder, which it finds under the plugins root by the plugin's name | `plugins/loading.md`, "Find plugins on disk" | `data/<plugin-id>/` is "The plugin's persistent directory, exposed as `${CLAUDE_PLUGIN_DATA}`." |
@@ -78,20 +80,21 @@ A puppeteer is the orchestrator ezexe files in the sidebar section "puppeteers",
 | What the plugin does | How |
 | :- | :- |
 | Knows a puppeteer | The app's own `claude_desktop_config.json`, beside its `claude-code-sessions` folder, assigns the session to a group named as `phi.puppeteer_section` says, in `preferences.epitaxyPrefs["dframe-group-scopes"]`, each scope with `groups` and `assignments`. A missing or reshaped file makes no session a puppeteer. |
-| Knows which sessions it controls | `phi.py controls <sessionId>` writes `controls` on the puppeteer's record, each entry with the store that session's tree lives in. A controlled session's own hook finds the puppeteer and keeps `puppeteer` on its own record. Each side keeps its own record, and a puppeteer that starts a controlled session's start request writes a `claimed` row into that session's store. |
+| Knows which sessions it controls | `phi.py controls <sessionId>` writes `controls` on the puppeteer's record, each entry with the store that session's tree lives in. A controlled session's own hook finds the puppeteer and keeps `puppeteer` on its own record. Each side keeps its own record. |
 | Tells the controlled session | Once when it comes to have a puppeteer, and once when that ends. |
 | Keeps the board | `board.md` in the puppeteer's folder. |
 | Lets one session publish a tree's issues | `gh issue create` runs only in the session that publishes for a tree: the issues coworker of the puppeteer's standing worker, whose brief holds the line `Issues coworker of its standing worker`, that worker until one is marked, the puppeteer until it has a worker, and the tree's orchestrator under no puppeteer. In any other session the PreToolUse check refuses the call with one line naming the `Finding:` form and that session by full title. A permission rule cannot do this, since it holds in every session that reads its settings file: `permissions.md`, "Manage permissions", has the dialog list "all permission rules and the `settings.json` file each rule comes from", and "Extend permissions with hooks" names hooks for what is decided "at runtime". |
 | Hands a puppeteer the open issues no session holds | The puppeteer's watcher lists the open issues of the repositories its controlled sessions work in at its slow looks, one `gh issue list` a repository, and keeps the ones no live session's record holds as its issue in `open-issues.json` in the puppeteer's folder. When a controlled tree closes or a controlled session reports done, the puppeteer gets one line naming each once, beside the running orchestrator whose topic covers it or as the start of a new orchestrator, to close what a landed commit covers and to route or start the rest. None is put to ezexe as a choice, and no hook reads GitHub for it. |
 | Leaves a puppeteer's steps with it | No advice on where its steps go and no nudge, and at Stop a step that waits on sessions' reports ends the turn while a controlled session is not yet complete. |
-| Warns of an early go | A puppeteer's message to a session it controls gets one line while another controlled session, or one in its tree, still holds a file in that session's write set. The line names the holder by its full title and the command that frees the files. |
 
 What p4-phi does not do here is on the skill's last section.
 
-## Write sets
+## The files a brief covers
 
-A brief declares the files its session writes on a line `Files: <paths>`, and the refusal a start without one meets says why.
-A session narrows its write set with `phi.py files <path> ...` and empties it with `phi.py files --release`, and a start held on the released paths goes ahead at once.
+A brief names the files its session covers on a line `Files: <paths>`, and `Files: none` for a session that writes none.
+p4-phi keeps the line on the session's record and page and in the address book, where a message about one of those files is routed by it.
+The line holds no start and no edit: a session that writes works in a git worktree of its own, so p4-phi keeps no lock on a file.
+No start is refused for the files its brief names, held while a live session covers one of them or queued behind a busy writer, no command narrows or releases the line, and a puppeteer's message is warned about for no file.
 
 ## No setup
 
@@ -112,7 +115,6 @@ Every key is optional.
 | `child_levels` | the table under Delegation | an object: a kind, `static`, `build` or `design`, with its `model`, an id or `inherit`, and its `effort` |
 | `act_dont_wait` | `true` | `false`: the built-in act-don't-wait rule is left out |
 | `top_orchestrates` | `true` | `false`: an orchestrator does its own task list's work |
-| `file_sets` | `true` | `false`: a session may be started by a brief that declares no write set |
 | `issues` | `true` | `false`: no issue loop: a worker takes no open issue its brief names, gets no line on a commit that closes no issue, runs no regression test at Stop and is given no push line |
 | `puppeteer_section` | `puppeteers` | another name for the sidebar section; an empty string makes no session a puppeteer |
 | `clear_at` | 60 | the percent of its context, above 0 and at most 100, past which a session that keeps a state page clears itself at a turn's end; the session reads the share with the app's `get_usage` tool |

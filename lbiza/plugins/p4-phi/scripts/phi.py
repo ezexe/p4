@@ -25,12 +25,12 @@ The hooks, each in its h_ function:
   tells the orchestrator to push issue-closing commits and makes the anchors.
 - The checks before and after a tool call ride on the retrieval hooks' entries, through `routed`.
 
-Commands: note, done, task, shard, files, show, tree, background, detach, reparent, disposable, request, proof and
-controls, with the watcher's commands from puppeteer.py; `--help` gives the arguments of each.
+Commands: note, done, task, shard, show, tree, background, detach, reparent, disposable, request, proof and controls,
+with the watcher's commands from puppeteer.py; `--help` gives the arguments of each.
 
 Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `book`, `rules`,
 `background_chars`, `reports_chars`, `prompt_chars` and `wait_s`, and `puppeteer`, which puppeteer.on reads. The `phi`
-section of p4.json: `act_dont_wait`, `levels`, `top_orchestrates`, `file_sets` and `child_levels`, read from the
+section of p4.json: `act_dont_wait`, `levels`, `top_orchestrates` and `child_levels`, read from the
 session's own store, `home`, which names a shared store for the session tree, and `puppeteer_section`, which
 controls.py reads. P4_PHI=0 turns the plugin off, P4_PHI_BOOK=0 the address book beside a
 message and P4_PHI_RULES=0 the rules. P4_PHI_WAIT sets how long a first message waits for the app's
@@ -52,7 +52,7 @@ import node as nd  # noqa: E402  a session's place in the tree, which retrieval 
 import p4conf  # noqa: E402  the store's layout, each plugin's files in .claude/p4/<plugin>/
 import plans  # noqa: E402  each session's task list with step addresses, which its parent's anchor holds
 import relay  # noqa: E402  owned paths, deltas and anchors, which keep linked sessions in step while they work
-import starts  # noqa: E402  write sets, and the starts a card cannot hold: behind a busy writer, or to a puppeteer
+import starts  # noqa: E402  the files a brief covers, a start's checkout, and a start request to a puppeteer
 import issues  # noqa: E402  a writing child's issue, its Closes #N commit, regression test, push and archive
 import puppeteer  # noqa: E402  the watcher's ledger, routing, start drafts, the gate, routes, readings, meta pass
 
@@ -496,10 +496,6 @@ def _save_session(home, s):
         s["controls"] = disk["controls"]          # only `controls` and a puppeteer's own start change it
     if int(disk.get("anchorSeen") or 0) > int(s.get("anchorSeen") or 0):
         s["anchorSeen"] = disk["anchorSeen"]
-    if str(disk.get("fileSetAt") or "") > str(s.get("fileSetAt") or ""):
-        for k in ("fileSet", "fileSetAt", "fileSets"):    # `phi.py files` ran while this hook held an older copy
-            if k in disk:
-                s[k] = disk[k]
     moved = disk.get("spawnedFrom") if isinstance(disk.get("spawnedFrom"), dict) else {}
     mine = s.get("spawnedFrom") if isinstance(s.get("spawnedFrom"), dict) else {}
     if moved.get("source") in ("detached", "reparented", "requested") \
@@ -1075,58 +1071,9 @@ def reports_text(home, s, room=None, store=""):
     return "\n".join(out), len(rows)
 
 
-# --- a session's write set, narrowed or released ---------------------------------------------------------------------
-
-def set_files(home, s, paths, base):
-    """Replace a session's declared write set. Returns the new set and what it released. The set before it is kept
-    on the record, and the start guard reads the new one at once, since it reads each record as it runs."""
-    new = []
-    for p in paths:
-        name = str(p or "").strip().strip("`'\"").rstrip(".")
-        if not name:
-            continue
-        entry = relay.norm(name, base) if re.search(r"[\\/]", name) else name.lower()
-        if entry not in new:
-            new.append(entry)
-    old = [x for x in s.get("fileSet") or [] if isinstance(x, str)] if isinstance(s.get("fileSet"), list) else []
-    if isinstance(s.get("fileSet"), list):
-        kept = [x for x in s.get("fileSets") or [] if isinstance(x, dict)]
-        s["fileSets"] = (kept + [{"files": old, "until": now()}])[-20:]
-    s["fileSet"], s["fileSetAt"] = new, now_exact()
-    s.pop("filesHeldTold", None)
-    save_session(home, s)
-    return new, [x for x in old if x not in new]
-
-
 def now_exact():
     """A time that orders two writes of one minute."""
     return time.strftime("%Y-%m-%d %H:%M:%S") + f".{int(time.time() * 1000) % 1000:03d}"
-
-
-def files_held_text(home, s, closing=None, pushed=None):
-    """The line a session is given once when its issue-closing commit is on a remote branch and it still holds
-    files: the files, and the command that releases them. '' otherwise. The caller saves the record."""
-    files = [x for x in s.get("fileSet") or [] if isinstance(x, str)] if isinstance(s.get("fileSet"), list) else []
-    if not files:
-        return ""
-    try:
-        closing = relay.closing_commits(home, s["sessionId"], s) if closing is None else closing
-        pushed = pushed or issues._pushed
-        done = [(sha, closes) for path, sha, _, closes in closing if pushed(path, sha)]
-    except Exception:  # noqa: BLE001
-        return ""
-    key = ",".join(sha for sha, _ in done)
-    if not done or s.get("filesHeldTold") == key:
-        return ""
-    s["filesHeldTold"] = key
-    sha, closes = done[-1]
-    base = s.get("cwd") or ""
-    shown = ", ".join(f"`{relay.show(f, base) if '/' in f else f}`" for f in files[:8]) + (
-        f" and {len(files) - 8} more" if len(files) > 8 else "")
-    return (f"phi (p4-phi): this session's commit {sha}, which closes #{', #'.join(closes)}, is on a remote branch, "
-            f"and it still holds {len(files)} file{'s' if len(files) != 1 else ''}: {shown}. No other session can "
-            f"be started on them until this one reports done. If its work on them is landed, release them with "
-            f"`{commands()} files --release`, or keep only what it still writes with `{commands()} files <path> ...`.")
 
 
 MAX_DEPTH = 3                 # a session this deep in the tree starts no session of its own
@@ -1209,13 +1156,12 @@ LEVELS = ("built-in, levels: work is delegated to where Claude Code runs it best
 plans.BUILT_INS = tuple(x.split(": ", 1)[0].replace("built-in, ", "") for x in (BUILT_IN, LEVELS))   # plans.py's names
 LEVELS_ON = True              # p4.json phi.levels: false leaves the delegation rule and its checks out
 TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps an orchestrator's work in it
-FILE_SETS = True              # p4.json phi.file_sets: false starts sessions whose briefs declare no write set
 
 
 def project_conf(store):
     """The project's own keys of p4.json's `phi` section, read from the store where the session runs, not from a
     shared store, each with its P4_* variable ahead of it, by p4conf.load."""
-    global ACT_DONT_WAIT, TOP_ORCHESTRATES, FILE_SETS, LEVELS_ON
+    global ACT_DONT_WAIT, TOP_ORCHESTRATES, LEVELS_ON
     try:
         d = p4conf.section(store, "phi", write=False) if store else {}
     except Exception:  # noqa: BLE001
@@ -1224,7 +1170,6 @@ def project_conf(store):
         d = {}
     ACT_DONT_WAIT = d.get("act_dont_wait") is not False
     TOP_ORCHESTRATES = d.get("top_orchestrates") is not False
-    FILE_SETS = d.get("file_sets") is not False
     LEVELS_ON = d.get("levels") is not False
     plans.LEVELS = LEVELS_ON
     plans.CHILD_LEVELS = plans.child_levels(d.get("child_levels"))   # one key sets each kind's model and effort
@@ -1256,7 +1201,7 @@ def apply_caps(d):
         setattr(mods[mod], name, type(default)(v) if ok else default)
 
 
-NEW_TOP = re.compile(r"\b(?:this|it) (?:session )?is a new top session\b", re.I)
+NEW_TOP = starts.NEW_TOP       # a new orchestrator's brief line, which starts.use_worktree reads too
 NEW_TOP_BRIEF = "This session is a new top session, orchestrating its own topic."
 RESTATE = ("the task restated as your own instruction to the session that receives it: what it is to do and why, "
            "from its side, a line `Files: <paths>` and what done looks like, with no message quoted and nothing "
@@ -1281,14 +1226,14 @@ def asks(s):
 
 def new_top_route(owner_turn=True):
     """How an orchestrator starts a new orchestrator for a topic outside its task: what the start tool's own text
-    lacks, the write set on the brief's `Files:` line and the two moves that detach the session to top level. In a
+    lacks, the files the brief covers on its `Files:` line and the two moves that detach the session to top level. In a
     turn ezexe did not begin it names no `initiation`: what such a turn may start, and the card it proposes, are that
-    tool's own text."""
+    tool's own text. It passes `use_worktree: false`, as starts.use_worktree gives a new orchestrator."""
     if ASK_ROUTE:
         return ASK_ROUTE
     how = ("Start it with `mcp__ccd_session__start_session`, `initiation` `user_asked`" if owner_turn else
            "Give it to `mcp__ccd_session__start_session`")
-    return (f"{how}, `context` `fresh`, `use_worktree: false`, with the `model` and `effort` its kind of work gets, "
+    return (f"{how}, `context` `fresh`, {plans.TOP_TREE}, with the `model` and `effort` its kind of work gets, "
             f"said in one line of the brief; its brief: {RESTATE}, and "
             f"the lines \"{NEW_TOP_BRIEF} {new_top_first_act()}\" Both moves are needed: the app's detach to top "
             f"level, else it stays nested under this session and reports here, and p4-phi's, which p4-phi also makes "
@@ -1324,7 +1269,8 @@ FIRST_SPLIT = ("phi (p4-phi): this is this session's first message. In these ses
                "session start others in its first turn and in the turns ezexe's own messages open, though no doc "
                "states it. Plan its split now, before other work: every part of its task that writes files or makes a "
                "decision gets a session of its own, one per disjoint set of files, started in this turn with "
-               "`mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, `use_worktree: false`, "
+               "`mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, " + plans.OWN_TREE
+               + " for a part that writes files and `use_worktree: false` for one that only reads, "
                "each brief holding its `Files:` line; where the app refuses that start, the part is shown as a "
                "suggested task card, the start tool's `initiation` `own_initiative`, which ezexe presses in this "
                "session. Subagents keep reads, "
@@ -1395,7 +1341,7 @@ def first_split_text(home, s):
 
 def split_text(home, s, prompt):
     """A turn another session's message started. What such a turn may start, and the card it proposes, are the start
-    tool's own text, so this line holds only what that text lacks: the caps, the write set a brief declares, and
+    tool's own text, so this line holds only what that text lacks: the caps, the files a brief names, and
     for an orchestrator the brief line that detaches a new orchestrator to top level. It is short and keeps no
     state, so every such turn carries it whole. '' for ezexe's own turns, the app's events and a session with no
     task."""
@@ -1409,18 +1355,19 @@ def split_text(home, s, prompt):
 def _split_full(home, s):
     """What a brief written in a turn another session began holds beyond what the start tool asks of it: a
     child's, its `Files:` line and its level line; a new orchestrator's, those and the line on which it is detached
-    to top level, or for a controlled orchestrator the request to its puppeteer."""
+    to top level, or for a controlled orchestrator the request to its puppeteer. A new orchestrator's start passes
+    `use_worktree: false`, for the reason new_top_route's line gives."""
     if spawned_from(s):
         return ("phi (p4-phi): a task of its own in this turn, outside this session's task, goes out by "
-                "`mcp__ccd_session__start_session` with a brief that declares its write set on a line "
+                "`mcp__ccd_session__start_session` with a brief that names the files it covers on a line "
                 f"`Files: <paths>`. {plans.LEVEL_CARD}")
     head = "phi (p4-phi): a topic in this turn outside this orchestrator's task gets a new orchestrator of its own. "
     if ASK_ROUTE:
         ask = PHI_LEAD.sub("", controls.ask_text(s))
         return head + ask[:1].upper() + ask[1:]
     return (head + "It goes out by `mcp__ccd_session__start_session`, `context` `fresh`, `use_worktree: false`, "
-            "with the `model` and `effort` its kind of work gets, said in one line of its brief, which declares "
-            f"its write set on a line `Files: <paths>` and carries the line \"{NEW_TOP_BRIEF}\": on that line "
+            "with the `model` and `effort` its kind of work gets, said in one line of its brief, which names "
+            f"the files it covers on a line `Files: <paths>` and carries the line \"{NEW_TOP_BRIEF}\": on that line "
             "p4-phi detaches it to top level at its first message and has it call "
             "`mcp__ccd_session_mgmt__detach_session` with `\"self\"`, so the app stops nesting it under this "
             "session.")
@@ -1476,7 +1423,7 @@ def render_page(home, sid):
         out = [f"# {name_of(s)}", "",
                f"Session `{sid}`, started by `{above}`." if above else f"Session `{sid}`, an orchestrator.", ""]
         if isinstance(s.get("fileSet"), list):
-            out += ["## Files", "", "The write set its brief declares:",
+            out += ["## Files", "", "The files its brief says it covers:",
                     ""] + ([f"- `{f}`" for f in s["fileSet"]] or ["- none: it writes no file"]) + [""]
         notes = load_notes(home, sid)
         if notes:
@@ -1921,7 +1868,7 @@ def h_nudge(payload):
                 f"Said once for this step.")
     return (f"phi (p4-phi): this is the orchestrator, kept free for orchestration, and step {st.get('addr')}, "
             f"\"{cut(clean(st.get('content')), 120)}\", is work: hand it to a worker with "
-            f"`mcp__ccd_session__start_session`, `context` `fresh`, `use_worktree: false`, "
+            f"`mcp__ccd_session__start_session`, `context` `fresh`, {plans.OWN_TREE}, "
             f"{plans.level_words(st.get('content'))}, its brief that step, a "
             f"line `Files: <the paths it may write>`, the line `{plans.level_line(plans.child_level(st.get('content')))}` "
             f"and \"report when done\", and keep this session for planning, messaging and landing. Said once for this "
@@ -2225,7 +2172,7 @@ def h_user_prompt_submit(payload):
         RAN["disposable"] = True
     if "fileSet" not in s and not load_turns(me.home, s["sessionId"]):
         declared = starts.files_of(payload.get("prompt"), s.get("cwd") or payload.get("cwd") or "")
-        if declared is not None:                   # the write set its brief declares, kept and shown on its page
+        if declared is not None:                   # the files its brief says it covers, kept and shown on its page
             s["fileSet"] = declared
             RAN["files"] = len(declared)
     if s.get("doneRetired") or s.get("archived"):
@@ -2268,11 +2215,6 @@ def h_user_prompt_submit(payload):
     s["staleTold"] = (list(s.get("staleTold") or []) + [x.get("id") for x in pend if isinstance(x, dict)])[-50:]
     if stale:
         parts.insert(0, notice(stale))
-    began = bool(req) and not handed_over(payload.get("prompt"))     # ezexe began this turn
-    freed = starts.freed_text(me.home, s["sessionId"], began)
-    if freed:                                      # the starts it queued behind a writer that is free: a start at
-        parts.insert(0, notice(freed))             # ezexe's turn, the app's suggested task card at any other
-        RAN["queued_starts"] = freed.count("\n- ")
     if issue_line:
         parts.insert(0, notice(issue_line))
     pad = str(payload.get("scratchpad_dir") or "").replace("\\", "/").rstrip("/")
@@ -2293,12 +2235,6 @@ def h_user_prompt_submit(payload):
     research = research_text(me.home, s)
     if research:
         parts.insert(0, notice(research))
-    if FILE_SETS and s.get("fileSet") and load_turns(me.home, s["sessionId"]):
-        held_line = files_held_text(me.home, s)    # its closing commit is pushed and it still holds files
-        if held_line:
-            parts.insert(0, notice(held_line))
-            RAN["files_held"] = len(s["fileSet"])
-            save_session(me.home, s)
     if detached_now:
         parts.insert(0, notice("phi (p4-phi): this session's brief marks it a new orchestrator, so p4-phi detached it "
                         "to top level at this first message. Now call `mcp__ccd_session_mgmt__detach_session` with "
@@ -2324,11 +2260,7 @@ def h_user_prompt_submit(payload):
     pup = verdict = ""
     if ezexes:
         try:                                       # meta pass and ledger, then routing, start draft and gate
-            size = os.path.getsize(payload.get("transcript_path") or "")
-        except OSError:
-            size = 0
-        try:
-            pup, verdict = puppeteer.on_prompt(me.home, s, req, s.get("cwd") or payload.get("cwd") or "", size)
+            pup, verdict = puppeteer.on_prompt(me.home, s, req, s.get("cwd") or payload.get("cwd") or "")
         except Exception:  # noqa: BLE001
             pup = verdict = ""
         RAN["puppeteer"] = verdict or bool(pup)
@@ -2353,11 +2285,9 @@ def h_user_prompt_submit(payload):
 def pair_parts(me, s, req, changed="", notice=lambda text: text):
     """Beside an orchestrator's message. A puppeteer gets what it is, once; the orchestrators it
     started, now controlled; an orchestrator ezexe started beside them; the controlled sessions' reports by reference; at a
-    turn ezexe began, the requests addressed to it and where ezexe's message belongs; the sessions of the controlled
-    trees that hold start requests, as links; each start it made on another session's behalf, to detach to top
-    level; a boundary; once a controlled tree closed or reported done, the open issues no live session holds, each
-    to route or start; and its board rewritten. Any other orchestrator gets its puppeteer, once, and
-    what became of the requests it sent it."""
+    turn ezexe began, the requests addressed to it and where ezexe's message belongs; a boundary; once a controlled
+    tree closed or reported done, the open issues no live session holds, each to route or start; and its board
+    rewritten. Any other orchestrator gets its puppeteer, once, and what became of the requests it sent it."""
     out = []
     if not controls.is_puppeteer(s, me.store):
         told = controls.pair_text(s, me.store)
@@ -2397,7 +2327,6 @@ def pair_parts(me, s, req, changed="", notice=lambda text: text):
         out.append(tune)
     if req:
         out += [p for p in (controls.requests_text(me.home, s), controls.route_down(s, req)) if p]
-    out += [p for p in (controls.holders_text(s, req), controls.behalf_text(me.home, s)) if p]
     edge = controls.boundary(me.home, s)
     if edge:
         RAN["boundary"] = True
@@ -2509,7 +2438,8 @@ def h_stop(payload):
             top = (chain_of(me.home, s["sessionId"]) or [above])[-1]
             relay.warn(me.home, top, "push:" + s["sessionId"] + ":" + ",".join(c[1] for c in new),
                        relay.push_text(title_of(cur), s["sessionId"], new,
-                                       relay.owed(list(dict.fromkeys(c[0] for c in new)))))   # what each still owes
+                                       relay.owed(list(dict.fromkeys(c[0] for c in new))),   # what each still owes
+                                       relay.worktree_branches(s["sessionId"], cur, new)))   # the branch to merge
             RAN["push_owes"] = True
             cur["closesTold"] = (told + [c[1] for c in new])[-100:]
             save_session(me.home, cur)
@@ -2629,8 +2559,9 @@ def h_go_guard(payload):
     """PreToolUse on a message one session sends another, for every sender. A message that names a file or an
     issue another live session holds, sent to neither that session nor the session that started it, or a message
     to the puppeteer that names no matter of ezexe's, is held by a `deny` whose reason names the session it belongs
-    to, from book.flag, once for that message and target, so a resend goes through. A puppeteer's go to a waiting
-    writer is warned about while another session it controls still holds a file in that writer's write set."""
+    to, from book.flag, once for that message and target, so a resend goes through. A puppeteer's message that
+    goes out takes the request its turn opened to the session messaged. No message is warned about for the files
+    another session holds: each session that writes has a worktree of its own, so a go waits on no file."""
     me = Me(payload)
     if not me.home or not me.id:
         return None
@@ -2645,50 +2576,39 @@ def h_go_guard(payload):
         held = book.flag(me.home, s, target, message, me.store)
     except Exception:  # noqa: BLE001  a book it cannot read never stops a send
         held = ""
-    text = ""
-    if not spawned_from(s) and controls.is_puppeteer(s, me.store):
-        text = controls.go_text(me.home, s, target, message)
-        if text:
-            RAN["go_held"] = target[:40]
-            save_session(me.home, s)
-        if not held:                               # the request this turn opened goes to the session messaged
-            import asks as requests
-            try:
-                requests.on_send(me.home, s, target, message)
-            except Exception:  # noqa: BLE001
-                pass
     if held:
         RAN["send_flagged"] = target[:40]
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                       "permissionDecisionReason": "\n\n".join(x for x in (held, text) if x)}}
-    return text or None
+                                       "permissionDecisionReason": held}}
+    if not spawned_from(s) and controls.is_puppeteer(s, me.store):
+        import asks as requests                    # the request this turn opened goes to the session messaged
+        try:
+            requests.on_send(me.home, s, target, message)
+        except Exception:  # noqa: BLE001
+            pass
+    return None
 
 
 def h_start_advice(payload):
-    """PreToolUse on mcp__ccd_session__start_session. It denies three starts: a controlled session's new
-    orchestrator, which its puppeteer starts instead; a start whose brief declares no write set; and a start
-    whose write set a live session holds. For the rest it advises fork or fresh by relay.advise_start, from the
-    parent's transcript size and how much of the parent's scope the brief's paths cover, and asks before a worktree
-    or a branch of the child's own: silent when the call already does what is advised, else a permission `ask` with
-    the reason, so ezexe sees it and decides. A PreToolUse `permissionDecision` is `allow`, `deny`, `ask` or `defer`;
+    """PreToolUse on mcp__ccd_session__start_session. It denies two starts: a controlled session's new
+    orchestrator, which its puppeteer starts instead, and a puppeteer's second standing worker. No start is refused
+    for the files its brief names and none waits on another session's files: each session that writes has a git
+    worktree of its own, so no two share a file on disk. For the rest it advises fork or fresh by
+    relay.advise_start, from the parent's transcript size and how much of the parent's scope the brief's paths
+    cover: silent when the call already does what is advised, and for a fresh start that passes
+    `use_worktree: true`, which a fork cannot take, else a permission `ask` with the reason, so ezexe sees it and
+    decides. A start in a worktree or on a branch of the child's own is never asked about: a session that writes
+    gets both, as starts.use_worktree says. A PreToolUse `permissionDecision` is `allow`, `deny`, `ask` or `defer`;
     where `permissions.denyInsteadOfPrompting` is set, a call that would wait on a prompt is denied. The input is
     never rewritten with `updatedInput`, since a fresh start needs a brief and background only the caller can
-    write. A start of another session's start request, a puppeteer's or any other session's, goes through, claimed
-    as made on that session's behalf, with the line that has the new session detached to top level. A call that
-    proposes a start request as a suggested task card claims it for good, since the card holds it from then on."""
+    write. A call that carries the marker of a start request to a puppeteer claims it, and is advised nothing."""
     me = Me(payload)
     if not me.home or not me.id:
         return None
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     if inp.get("proposal_id") and not inp.get("prompt"):
         return None                                 # starting a card already made: nothing to decide
-    caller = load_session(me.home, me.id)
     card = inp.get("initiation") == "own_initiative"
-    made = controls.behalf(me.home, caller, inp.get("prompt"), me.store)
-    if made:                                        # a start of another session's start request, by any session
-        starts.claim(made[1], inp.get("prompt"), me.id, card=card)
-        RAN["behalf"] = made[0]["id"]
-        return controls.behalf_line(made[0], controls.is_puppeteer(caller, me.store))
     why = controls.start_refused(me.home, load_session(me.home, me.id), inp.get("prompt"), me.store)
     if why is None:                                 # a puppeteer's standing worker, the first one
         RAN["standing_start"] = True
@@ -2708,23 +2628,6 @@ def h_start_advice(payload):
                                            "permissionDecisionReason": (
                                                "phi (p4-phi): this start is refused: "
                                                + PHI_LEAD.sub("", controls.ask_text(mine)))}}
-    if brief and not NEW_TOP.search(brief) and FILE_SETS:
-        s = load_session(me.home, me.id)
-        files = starts.files_of(brief, s.get("cwd") or payload.get("cwd") or "")
-        why = ""
-        if files is None:                           # every brief declares its write set
-            why = "phi (p4-phi): this start is refused: " + starts.FILES_WANTED
-        else:
-            who, hit = starts.held_by(me.home, me.id, files)
-            if who:
-                why = (f"phi (p4-phi): this start is held: its write set shares {', '.join(hit[:5])} with {who}, "
-                       f"which is live and has not reported done. "
-                       f"Send this work to that session as the next task of its serial run, or "
-                       f"start it once that session reports done.")
-        if why:
-            RAN["files"] = "none" if files is None else "held"
-            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                           "permissionDecisionReason": why}}
     wanted = "fork" if str(inp.get("context") or "fresh") == "fork" else "fresh"
     try:
         size = os.path.getsize(payload.get("transcript_path") or "")
@@ -2732,30 +2635,47 @@ def h_start_advice(payload):
         size = 0
     advised, why = relay.advise_start(me.home, me.id, inp, size)
     RAN.update(advice=advised, wanted=wanted, transcript=size)
-    reasons = []
-    if advised != wanted:
-        reasons.append(f"phi (p4-phi) advises context \"{advised}\" here, not \"{wanted}\": {why}.")
-    if inp.get("use_worktree") is True or inp.get("branch_name") or inp.get("source_branch"):
-        reasons.append("phi (p4-phi): a child works on this session's branch in this checkout, with no worktree or "
-                       "branch of its own: pass `use_worktree: false` and leave out branch_name and "
-                       "source_branch.")
-    if not reasons:
+    # a fresh start in a worktree of its own is never advised to fork: the start tool's own text says `use_worktree`
+    # is "rejected with \"fork\"", and of a fork that "from a plain checkout it shares the folder"
+    if advised == wanted or (advised == "fork" and inp.get("use_worktree") is True):
         return None
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
-                                   "permissionDecisionReason": " ".join(reasons)}}
+                                   "permissionDecisionReason": f"phi (p4-phi) advises context \"{advised}\" here, "
+                                                               f"not \"{wanted}\": {why}."}}
 
 
 QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
-BRANCH_MOVE = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b[^\n|;&]*?\b(switch\b|checkout\s+(?!--)(?!-[^bB])(?![\w./-]*\.\w{1,6}\s*$)[\w./-]+\s*$)")
-BRANCHING = re.compile(r"\bgit\b[^\n|;&]*?\b(worktree\s+add|switch\s+(-c|--create|-C)|checkout\s+(-b|-B)|"
-                       r"branch\s+(?!-)[\w./-]+\s*$|branch\s+(?!-)[\w./-]+\s+[\w./-]+)")
+# a git command that moves the checkout it runs in to another branch: `git switch`, `git checkout -b` and `git
+# checkout <branch>`. Restoring a file, as `git checkout -- <path>` or `git checkout <file>`, moves nothing, and
+# neither does `git branch <name>` or `git worktree add`.
+BRANCH_MOVE = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b[^\n|;&]*?\b(switch\b|checkout\s+-[bB]\b|"
+                         r"checkout\s+(?!-)(?![\w./-]*\.\w{1,6}\s*$)[\w./-]+\s*$)")
+
+
+def own_checkout(home, s, cwd):
+    """True when a started session works in a git worktree of its own. worktrees.md, "What worktrees share with the
+    main checkout": for a worktree session started from the desktop app, "To reach the files Claude is working on,
+    read the worktree's path from the hook's `cwd` input field." So the folder `cwd` lies in is read: it is a linked
+    worktree, by its `.git` file, and it is not the checkout the session's starter works in, by that session's
+    record. A session started with `use_worktree: false` works in its starter's checkout, a worktree or not, and
+    gets False."""
+    here = relay.repo_of(cwd) if cwd else ""
+    if not here:
+        return False
+    main, found = p4conf.main_root(here)
+    if not found or relay.norm(os.path.realpath(main)) == here:
+        return False                               # the main checkout, which the sessions started without one share
+    above = load_session(home, spawned_from(s))
+    return relay.repo_of(str(above.get("cwd") or "")) != here
 
 
 def h_branch_guard(payload):
-    """PreToolUse on EnterWorktree and shell calls in a worker: making a worktree or a branch of its own is
-    asked first, since a child works on its parent's branch. So is landing work, a git push, merge, rebase or pull,
-    whatever the child's record, brief or parent says: only the tree's orchestrator lands and pushes. Silent
-    otherwise."""
+    """PreToolUse on a shell call in a session another session started. Landing work, a git push, merge, rebase or
+    pull, is asked first, whatever the child's record, brief or parent says: only the tree's orchestrator lands and
+    pushes. A child that shares its starter's checkout, as one started with `use_worktree: false` does, is asked
+    before it moves that checkout to another branch, since the move is its starter's too. A session in a git
+    worktree of its own, as own_checkout reads it, is asked about no branch it makes or moves to and no worktree it
+    makes or enters, since its checkout is its own. Silent otherwise, and for EnterWorktree."""
     me = Me(payload)
     if not me.home or not me.id:
         return None
@@ -2764,32 +2684,32 @@ def h_branch_guard(payload):
         return None
     name = str(payload.get("tool_name") or "")
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
-    if name == "EnterWorktree":
-        what = "entering a worktree of its own"
-    elif name in SHELL_TOOLS and BRANCHING.search(QUOTED.sub("''", str(inp.get("command") or ""))) \
-            and re.search(r"(?:^|&&|\|\||;|\||\n)\s*git\b", QUOTED.sub("''", str(inp.get("command") or ""))):
-        what = "making a worktree or branch of its own"
-    elif name in SHELL_TOOLS and BRANCH_MOVE.search(QUOTED.sub("''", str(inp.get("command") or ""))):
+    if name not in SHELL_TOOLS:
+        return None
+    if BRANCH_MOVE.search(QUOTED.sub("''", str(inp.get("command") or ""))) \
+            and not own_checkout(me.home, s, str(payload.get("cwd") or s.get("cwd") or "")):
         what = "moving the checkout to another branch, which in a shared checkout moves the parent's too"
-    elif name in SHELL_TOOLS and issues.landing(inp.get("command")):
+    elif issues.landing(inp.get("command")):
         verb = issues.landing(inp.get("command"))
         RAN["branch_guard"] = verb
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
                                        "permissionDecisionReason": f"phi (p4-phi): this session is a child, and `"
                                                                    f"{verb}` lands work, which only the tree's "
-                                                                   f"orchestrator does: a child commits on its "
-                                                                   f"parent's branch and reports, a `Closes #N` "
-                                                                   f"commit included, and the tree's orchestrator "
-                                                                   f"merges and pushes. Ask its parent session, "
+                                                                   f"orchestrator does: a child that writes works "
+                                                                   f"in its own worktree, commits there on its own "
+                                                                   f"branch and reports, a `Closes #N` commit "
+                                                                   f"included, and the tree's orchestrator merges "
+                                                                   f"and pushes. Ask its parent session, "
                                                                    f"{spawned_from(s)}, with SendMessage instead."}}
     else:
         return None
     RAN["branch_guard"] = what
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
                                    "permissionDecisionReason": f"phi (p4-phi): this session is a child, and {what} is "
-                                                               f"asked first: a child works on its "
-                                                               f"parent's branch in the parent's checkout, so its work "
-                                                               f"needs no merge."}}
+                                                               f"asked first: this session works in the checkout of "
+                                                               f"the session that started it. A session that writes "
+                                                               f"is started with `use_worktree: true` and moves only "
+                                                               f"its own."}}
 
 
 STORE_MOVE = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b([^\n|;&]*?)\b(push|pull)(?![\w-])([^\n|;&]*)")
@@ -2816,7 +2736,9 @@ def store_root(path):
 def h_store_guard(payload):
     """PreToolUse on a shell call: a hand `git pull`, `git push` or force-push in a store is asked first, and
     `p4.py sync --push --p4 <store>` named as the way, since two machines write the same files and a plain merge or
-    a line-union damages them."""
+    a line-union damages them. A session another session started is also told which session runs that sync: its
+    tree's orchestrator, the one session that lands and pushes. hook.py runs this guard ahead of the branch guard,
+    so a started session's pull or push inside a store hears of the sync and not only of its parent's landing."""
     if str(payload.get("tool_name") or "") not in SHELL_TOOLS:
         return None
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
@@ -2841,12 +2763,18 @@ def h_store_guard(payload):
     what = "a force-push" if force and m.group(2) == "push" else f"a hand `git {m.group(2)}`"
     RAN["store_guard"] = what
     sync = f"python -I -X utf8 \"{os.path.join(HERE, 'p4.py')}\" sync --push --p4 \"{store}\"".replace("\\", "/")
+    me = Me(payload)
+    s = load_session(me.home, me.id) if me.home and me.id else {}
+    top, title = issues.lander(me.home, s) if spawned_from(s) else ("", "")
+    whose = (f" This session is a child, and the sync is its tree's orchestrator's to run, \"{title}\" `{top}`, the "
+             f"one session that lands and pushes: ask that session with SendMessage, and run neither here."
+             if top else "")
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
                                    "permissionDecisionReason": f"phi (p4-phi): this is {what} in the store {store}. "
                                                                f"A store moves only by `{sync}`, since two machines "
                                                                f"write the same files and a plain merge or a "
                                                                f"line-union damages them. Then check each entry the "
-                                                               f"sync names as changed."}}
+                                                               f"sync names as changed.{whose}"}}
 
 
 def once(home, sid, kind, payload):
@@ -3234,7 +3162,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="phi.py: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
-                 "request", "proof", "controls", "files"):
+                 "request", "proof", "controls"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in, this session's when left out")
         p.add_argument("--session", default="", help="the sessionId, this session's when left out")
@@ -3258,10 +3186,6 @@ def main(argv=None):
                                                     "none shows them")
         if name == "reparent":
             p.add_argument("under")
-        if name == "files":
-            p.add_argument("paths", nargs="*", help="the paths this session still writes, replacing its declared "
-                                                    "write set; none shows it")
-            p.add_argument("--release", action="store_true", help="hold no file any more")
         if name == "request":
             p.add_argument("title", nargs="?", default="", help="the new orchestrator's title")
             p.add_argument("--withdraw", default="", metavar="REQUEST",
@@ -3334,21 +3258,6 @@ def main(argv=None):
             for line in lines:
                 print("phi: " + line)
             return 0
-        if a.cmd == "files":
-            if a.release and a.paths:
-                raise ValueError("pass the paths this session still writes, or --release for none, not both")
-            if not a.paths and not a.release:
-                held = s.get("fileSet") if isinstance(s.get("fileSet"), list) else None
-                print("this session declared no write set" if held is None else
-                      "this session holds no file" if not held else "\n".join(held))
-                return 0
-            new, freed = set_files(me.home, s, a.paths, os.getcwd())
-            render_page(me.home, s["sessionId"])
-            print("this session holds no file now" if not new else "kept as this session's write set: "
-                  + ", ".join(new))
-            if freed:
-                print("released: " + ", ".join(freed) + ". A start on them is no longer held by this session.")
-            return 0
         if a.cmd == "controls":
             if not controls.is_puppeteer(s, me.store):
                 held = controls.section_of(s["sessionId"])
@@ -3386,8 +3295,7 @@ def main(argv=None):
             if not pid:
                 raise ValueError("this session has no puppeteer: no session filed in the sidebar "
                                  "section lists it under `controls`")
-            rid, new = starts.add(me.home, s["sessionId"], a.title, brief, "fresh", background=a.background,
-                                  declared=True, to=pid)
+            rid, new = starts.add(me.home, s["sessionId"], a.title, brief, "fresh", background=a.background, to=pid)
             print(starts.asked_text(rid, new, clean(a.title), pid, controls.full_title(pid)))
             return 0
         if a.cmd == "proof":

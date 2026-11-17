@@ -388,10 +388,15 @@ TABULATES = re.compile(r"^\W*(?:final\s+)?(?:[\w/-]+\s+){0,3}?(?:pass/fail\s+)?(
                        r"findings|steps?|checks?)\b", re.I)
 
 
+# The checkout a start gets, in the words of a line, as starts.use_worktree decides it for an exact call: a worker that
+# writes works in a git worktree and on a branch of its own, and a new orchestrator in this checkout.
+OWN_TREE = "`use_worktree: true`, so it works in a git worktree and on a branch of its own and commits there"
+TOP_TREE = ("`use_worktree: false`, since an orchestrator lands its tree's work in this checkout and its workers get "
+            "the worktrees")
 # the route of a turn ezexe did not begin: what such a turn may start, and the card it proposes, are the start tool's
 # own text, so this names no `initiation` and holds only what that text lacks
-CARD_EACH = ("Give each to `mcp__ccd_session__start_session`, `context` `fresh`, `use_worktree: false`, on this "
-             "session's branch, carrying the `model` and `effort` named beside its step")
+CARD_EACH = (f"Give each to `mcp__ccd_session__start_session`, `context` `fresh`, {OWN_TREE}, carrying the `model` "
+             "and `effort` named beside its step")
 
 
 def judge(plan, cwd):
@@ -460,8 +465,7 @@ def split_advice(home, s, plan, owner_turn, cap):
         return (f"phi (p4-phi): steps {named} could each run on their own, but {cap[0].lower() + cap[1:]} "
                 f"Every step stays here as a sub-step. {judged}")
     route = ("Start each now with `mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, "
-             "`use_worktree: false`, on this session's branch" if owner_turn else
-             CARD_EACH)
+             + OWN_TREE if owner_turn else CARD_EACH)
     stay = ("; ".join(f"{a}, {why}" for a, why in kept)) or "none"
     each = "; ".join(f"{st['addr']} with {level_words(st.get('content'))}" for st in free)
     sub = " ".join(f"Step {st['addr']} \"{relay._short(st.get('content'), 90)}\" "
@@ -822,8 +826,7 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
     if subs and len(subs) == len(new[:26]):
         return f"{head} Its work steps need no session: {named}.{agents} Staying here: {stay}."
     route = ("Start each now with `mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, "
-             "`use_worktree: false`, on this session's branch" if owner_turn else
-             CARD_EACH)
+             + OWN_TREE if owner_turn else CARD_EACH)
     return (f"{head} Hand its work steps to workers, split by the files they write: steps that share a file go "
             f"to one child as a serial run, and steps with disjoint files each get a child: {named}. {route}. Each "
             f"brief is its steps' words, a line `Files: <the paths it may write>`, what they must leave done, and "
