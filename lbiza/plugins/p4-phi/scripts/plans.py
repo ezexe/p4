@@ -874,9 +874,58 @@ def agent_bind(home, s, agent_id, kind=""):
     return True
 
 
-def agent_warn(home, s, agent_id):
+HEARD_TAIL = 4 * 1024 * 1024  # bytes of a subagent's transcript, from its end, read for what hooks told it
+HEARD_ROWS = 5                # rows from its top looked through for the first one that carries a time
+
+
+def agent_heard(path):
+    """What a subagent's own transcript says of it -> its start, as the minute a note carries, and each line a hook
+    added to its context within the file's last HEARD_TAIL bytes; None when the file cannot be read or dates no row.
+    hooks.md, "Add context for Claude": "Claude Code saves the injected text in the session transcript", and
+    claude-directory.md keeps a subagent's transcript "in the same format as the session transcript": a row of type
+    `attachment` whose attachment has the type `hook_additional_context` and the text under `content`."""
+    import time as _t
+    from datetime import datetime
+    start = None
+    try:
+        with open(path, "rb") as f:
+            for _ in range(HEARD_ROWS):
+                try:
+                    stamp = str(json.loads(f.readline()).get("timestamp")).replace("Z", "+00:00")
+                    start = datetime.fromisoformat(stamp).timestamp()
+                    break
+                except (ValueError, AttributeError, TypeError):
+                    continue
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - HEARD_TAIL))
+            tail = f.read().split(b"\n")[1 if size > HEARD_TAIL else 0:]
+    except OSError:
+        return None
+    if start is None:
+        return None
+    told = set()
+    for raw in tail:
+        if b"hook_additional_context" not in raw:
+            continue
+        try:
+            a = json.loads(raw).get("attachment")
+        except (ValueError, AttributeError):
+            continue
+        if isinstance(a, dict) and a.get("type") == "hook_additional_context":
+            content = a.get("content")
+            for item in content if isinstance(content, list) else [content]:
+                told.update(x.strip() for x in str(item or "").splitlines())
+    return _t.strftime("%Y-%m-%d %H:%M", _t.localtime(start)), told
+
+
+def agent_warn(home, s, agent_id, transcript=""):
     """A subagent's next tool call: what changed beside the launching session since it was launched or last told,
-    and its step revised or gone; '' when nothing did."""
+    and its step revised or gone; '' when nothing did. `transcript` is the subagent's own, which says when it
+    started and what it has heard, so the task keeps neither: a sibling's note is told when it was written after the
+    start, a note carrying its minute and one of the start's own minute counting as there before it, and a line is
+    told when the transcript does not hold it already, so a sibling's files are said once and again when the line
+    names other files. While the transcript cannot be read, what the siblings changed waits."""
     sid = s["sessionId"]
     p = load(home, sid)
     t = _agent(p, agent_id)
@@ -886,28 +935,29 @@ def agent_warn(home, s, agent_id):
     v = int(anchor.get("version") or 0)
     lines = []
     seen = int(t.get("anchorSeen") or 0)
-    given = t.setdefault("marksGiven", [])
-    if v > seen:
+    heard = agent_heard(transcript) if v > seen else None
+    if heard:
+        since, told = heard
         for nid, at in sorted((anchor.get("changedAt") or {}).items()):
             if nid == sid or int(at or 0) <= seen:
                 continue
             n = (anchor.get("nodes") or {}).get(nid) or {}
-            new = [m for m in n.get("marks") or [] if relay.mark_key(nid, m) not in given]
-            given.extend(relay.mark_key(nid, m) for m in new)    # each note told once, however often its session changes
-            marks = [m.get("claim") for m in new][-2:]
             files = [] if n.get("marks") else (n.get("files") or [])[:4]
-            said = "; ".join(relay._short(x, 200) for x in marks) or (
-                "changed " + ", ".join(relay.show(f, s.get("cwd") or "") for f in files) if files else "")
-            if said:
-                lines.append(f"\"{n.get('title') or nid}\": {said}")
+            said = [relay._short(m.get("claim"), 200) for m in n.get("marks") or [] if str(m.get("time") or "") > since]
+            if files:
+                said = ["changed " + ", ".join(relay.show(f, s.get("cwd") or "") for f in files)]
+            said = [f"\"{n.get('title') or nid}\": {x}" for x in said]
+            lines += [x for x in said if f"- {x}" not in told][-2:]     # the two newest it has not heard
     step = next((st for st in p.get("steps") or [] for x in st.get("tasks") or [] if x is t), None)
     if t.get("stepText") and step is None:
         lines.append("the step you were launched for is no longer in the launching session's task list")
     elif step is not None and t.get("stepText") and step.get("content") != t["stepText"]:
         lines.append(f"the step you were launched for now reads \"{relay._short(step.get('content'), 160)}\"")
         t["stepText"] = step.get("content")
-    if v > seen or lines:
-        t["anchorSeen"] = v
+    if heard or lines:
+        if heard:
+            t["anchorSeen"] = v
+        t.pop("marksGiven", None)                 # what an earlier copy kept of the notes it had told
         relay._write_json(_path(home, sid), p)
     if not lines:
         return ""

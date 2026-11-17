@@ -30,6 +30,11 @@ def items(*steps, at=0):
                       for k, c in enumerate(steps)], "scope": "first_task"}
 
 
+def stamp(at=None):
+    """A time as a transcript row carries it, now when none is given."""
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() if at is None else at)) + ".000Z"
+
+
 class Apply(unittest.TestCase):
     def test_addresses_advance_done_start_and_revisions(self):
         p, started, rev = plans.apply({}, items("one", "two", "three"), "2")
@@ -128,6 +133,47 @@ class TreeOfPlans(unittest.TestCase):
         self.assertEqual(out["hookEventName"], "PostToolUse")
         return out["additionalContext"]
 
+    def recall(self, name, body, host=A):
+        """One entry of recall-hook.sh, run for a session with the hook input `body`."""
+        r = inproc.run(["sh", os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh"), name],
+                       input=json.dumps({"session_id": CLI[host], "cwd": self.t.proj, **body}),
+                       capture_output=True, text=True, timeout=60, env=self.t.env(host, P4_RECALL_SYNC="1"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r
+
+    def subagent(self, agent_id, started=None, host=A):
+        """A subagent as Claude Code keeps it, started through the SubagentStart entry: its own transcript,
+        `<session>/subagents/agent-<agent_id>.jsonl` beside the session's, whose first row carries its start ->
+        that transcript's path."""
+        main = os.path.join(self.t.tmp, "projects", CLI[host] + ".jsonl")
+        path = os.path.join(os.path.splitext(main)[0], "subagents", f"agent-{agent_id}.jsonl")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "user", "isSidechain": True, "agentId": agent_id, "sessionId": CLI[host],
+                                "timestamp": stamp(started), "message": {"role": "user", "content": "read it"}}) + "\n")
+        self.recall("subagent-start", {"hook_event_name": "SubagentStart", "agent_id": agent_id,
+                                       "agent_type": "general-purpose", "transcript_path": main}, host)
+        return path
+
+    def sub_call(self, agent_id, k, host=A):
+        """One tool call of a subagent: checked by `lookup-check` before it runs, the context the check added kept
+        as a row of the subagent's transcript, as Claude Code keeps it, and the call recorded after -> what the
+        check told the subagent."""
+        main = os.path.join(self.t.tmp, "projects", CLI[host] + ".jsonl")
+        body = {"transcript_path": main, "agent_id": agent_id, "agent_type": "general-purpose", "tool_name": "Read",
+                "tool_input": {"file_path": "README.md"}, "tool_use_id": f"toolu_{agent_id}_{k}"}
+        said = context(self.recall("lookup-check", {**body, "hook_event_name": "PreToolUse"}, host))
+        if said:
+            with open(os.path.join(os.path.splitext(main)[0], "subagents", f"agent-{agent_id}.jsonl"), "a",
+                      encoding="utf-8") as f:
+                f.write(json.dumps({"type": "attachment", "isSidechain": True, "agentId": agent_id,
+                                    "timestamp": stamp(), "attachment": {
+                                        "type": "hook_additional_context", "hookEvent": "PreToolUse",
+                                        "hookName": "PreToolUse:Read", "toolUseID": body["tool_use_id"],
+                                        "content": [said]}}) + "\n")
+        self.recall("lookup-record", {**body, "hook_event_name": "PostToolUse", "tool_response": "ok"}, host)
+        return said
+
     def test_a_child_gets_its_parents_step_as_its_parent_step(self):
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
         self.assertEqual([x["addr"] for x in plans.load(self.t.p4, A)["steps"]], ["2.1", "2.2", "2.3"])
@@ -160,12 +206,16 @@ class TreeOfPlans(unittest.TestCase):
         relay.make_anchor(home, TOP, "2026-11-12 18:00")
         node = json.load(open(relay.anchor_path(home, TOP), encoding="utf-8"))["nodes"][A]
         self.assertEqual(node["plan"]["steps"][0]["tasks"][0]["id"], "agentx001", "the delta carries it")
-        self.assertEqual(plans.agent_warn(home, sa, "agentx001"), "", "nothing changed since its launch")
+        own = os.path.join(t.tmp, "agent-agentx001.jsonl")         # its own transcript: it started two minutes ago
+        with open(own, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "user", "timestamp": stamp(time.time() - 120)}) + "\n")
+        self.assertEqual(plans.agent_warn(home, sa, "agentx001", own), "", "nothing changed since its launch")
         t.cli(B, "note", "replaces: the old docs layout in docs/layout.md", "--source", "test")
         relay.make_anchor(home, TOP, "2026-11-12 18:01")
-        warned = plans.agent_warn(home, sa, "agentx001")
+        self.assertEqual(plans.agent_warn(home, sa, "agentx001"), "", "what a sibling changed waits for its transcript")
+        warned = plans.agent_warn(home, sa, "agentx001", own)
         self.assertIn("the old docs layout", warned)
-        self.assertEqual(plans.agent_warn(home, sa, "agentx001"), "", "told once")
+        self.assertEqual(plans.agent_warn(home, sa, "agentx001", own), "", "told once")
         self.plan(A, items("Rewrite p4conf.LAYOUT and OLDER", "Move recall/ into phi/", "Commit the move"))
         self.assertEqual(plans.load(home, A)["steps"][0]["tasks"][0]["id"], "agentx001", "reworded in place")
         self.assertIn("now reads \"Rewrite p4conf.LAYOUT and OLDER\"", plans.agent_warn(home, sa, "agentx001"))
@@ -342,30 +392,18 @@ class TreeOfPlans(unittest.TestCase):
     def test_a_siblings_note_is_told_to_a_subagent_once_however_often_that_sibling_changes(self):
         """A subagent's tool calls, run through the `lookup-check` and `lookup-record` hooks, tell it a sibling's note
         once, though that sibling's entry in the parent's anchor changes twice more after it, and tell it that
-        sibling's newer note in turn."""
+        sibling's newer note in turn. What it has heard is read from its own transcript: its task keeps no list of
+        the notes told."""
         t = self.t
-        hook = os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh")
         n = iter(range(100))
 
-        def run(name, body):
-            r = inproc.run(["sh", hook, name], input=json.dumps({"session_id": CLI[A], "cwd": t.proj, **body}),
-                           capture_output=True, text=True, timeout=60, env=t.env(A, P4_RECALL_SYNC="1"))
-            self.assertEqual(r.returncode, 0, r.stderr)
-            return r
-
         def call():
-            """One tool call of the subagent, checked before it runs and recorded after -> what the check told it."""
-            body = {"tool_name": "Read", "tool_input": {"file_path": "README.md"}, "agent_id": "agentn004",
-                    "tool_use_id": f"toolu_sub{next(n)}"}
-            r = run("lookup-check", {**body, "hook_event_name": "PreToolUse"})
-            run("lookup-record", {**body, "hook_event_name": "PostToolUse", "tool_response": "ok"})
-            return context(r)
+            return self.sub_call("agentn004", next(n))
 
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
-        run("agent", {"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_use_id": "toolu_launch",
-                      "tool_input": {"prompt": "read the layout code", "description": "probe"}})
-        run("subagent-start", {"hook_event_name": "SubagentStart", "agent_id": "agentn004",
-                               "agent_type": "general-purpose"})
+        self.recall("agent", {"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_use_id": "toolu_launch",
+                              "tool_input": {"prompt": "read the layout code", "description": "probe"}})
+        own = self.subagent("agentn004", started=time.time() - 120)
         self.assertEqual([call(), call()], ["", ""], "its start bound it, and nothing changed since its launch")
         t.cli(B, "note", "replaces: the old docs layout in docs/layout.md", "--source", "test")
         steps = ("Write the layout docs", "Check the docs build", "Commit the docs")
@@ -379,6 +417,66 @@ class TreeOfPlans(unittest.TestCase):
         newer = call()
         self.assertIn("the docs build script", newer, "a newer note of that sibling is told")
         self.assertNotIn("the old docs layout", newer)
+        self.assertNotIn("marksGiven", plans._agent(plans.load(t.p4, A), "agentn004"))
+        with open(own, encoding="utf-8") as f:              # the transcript alone says what it heard: without those
+            first = f.readline()                            # rows the same change tells the first note again
+        with open(own, "w", encoding="utf-8") as f:
+            f.write(first)
+        self.plan(B, items(*steps, "Push the docs", "Tag the docs", at=3))
+        self.assertIn("the old docs layout", call())
+
+    def test_a_subagent_is_not_told_a_note_written_before_its_launch(self):
+        """ezexe/p4#195: a sibling of the launching session wrote a note, and a subagent launched after it is not
+        told that note when the sibling's entry in the parent's anchor next changes, while a subagent that was
+        running when the note was written is. The start is the first row of the subagent's own transcript, and the
+        task keeps no list of notes."""
+        t = self.t
+        self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
+        before = self.subagent("agentd195a", started=time.time() - 120)
+        t.cli(B, "note", "replaces: the old docs layout in docs/layout.md", "--source", "test")
+        self.plan(B, items("Write the layout docs", "Check the docs build"))    # the anchor holds the note
+        self.recall("agent", {"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_use_id": "toolu_195",
+                              "tool_input": {"prompt": "read the layout code", "description": "probe"}})
+        after = self.subagent("agentd195b")
+        self.assertTrue(os.path.isfile(before) and os.path.isfile(after))
+        self.plan(B, items("Write the layout docs", "Check the docs build", at=1))   # its entry changes, through its plan hook
+        self.assertEqual(self.sub_call("agentd195b", 0), "", "launched after the note: not told it")
+        self.assertIn("the old docs layout", self.sub_call("agentd195a", 0), "running when it was written: told it")
+        for agent_id in ("agentd195a", "agentd195b"):
+            task = plans._agent(plans.load(t.p4, A), agent_id)
+            self.assertEqual(set(task), {"id", "tool", "agent", "status", "anchorSeen", "stepText"}, "no field added")
+
+    def test_a_subagent_hears_a_siblings_unchanged_files_once(self):
+        """ezexe/p4#196: a sibling of the launching session with no notes changes its entry in the parent's anchor
+        twice more with the same files, and the subagent's tool calls, through `lookup-check`, give the files line
+        once; files that differ are said again. The line already given is found in the subagent's own transcript,
+        where Claude Code keeps the context a PreToolUse hook added."""
+        t = self.t
+        docs = f"{t.proj}/docs/layout.md".replace("\\", "/")
+        t.say(B, "Write the layout docs")
+        self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
+        self.subagent("agente196")
+        n = iter(range(100))
+
+        def call():
+            return self.sub_call("agente196", next(n))
+
+        self.assertEqual(call(), "")
+        t.stop(B, "Write the layout docs", calls=[("Write", {"file_path": docs, "content": "x"}, "ok")],
+               report="Wrote the layout page.")
+        steps = ("Write the layout docs", "Check the docs build", "Commit the docs")
+        told = [call()]
+        for at in range(2):                       # its entry changes twice more, its files the same
+            self.plan(B, items(*steps, at=at))
+            told.append(call())
+        self.assertEqual(["changed docs/layout.md" in x for x in told], [True, False, False], told)
+        self.assertIn("\"the docs child\": changed docs/layout.md", told[0])
+        more = f"{t.proj}/docs/build.md".replace("\\", "/")
+        t.stop(B, "Write the layout docs", calls=[("Write", {"file_path": more, "content": "x"}, "ok")],
+               report="Wrote the build page.", uuid="u1")
+        self.assertIn("docs/build.md", call(), "files that differ are said")
+        task = plans._agent(plans.load(t.p4, A), "agente196")
+        self.assertEqual(set(task), {"id", "tool", "agent", "status", "anchorSeen", "stepText"}, "no field added")
 
     def three(self, *extra):
         p = self.t.proj

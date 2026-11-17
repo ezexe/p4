@@ -2865,9 +2865,25 @@ def h_agent_start(payload):
     return None
 
 
+def agent_transcript(payload):
+    """The path of a subagent's own transcript, from a hook input inside the subagent, '' when the input leads to
+    none. The input's `transcript_path` is the session's, and sub-agents.md puts the subagent's beside it, in
+    "`~/.claude/projects/{project}/{sessionId}/subagents/`. Each transcript is stored as `agent-{agentId}.jsonl`"."""
+    main, agent_id = str(payload.get("transcript_path") or ""), str(payload.get("agent_id") or "")
+    if not main or not agent_id:
+        return ""
+    main, name = os.path.expanduser(main), f"agent-{agent_id}.jsonl"
+    if os.path.basename(main) == name:
+        return main
+    under = [os.path.join(os.path.dirname(main), str(payload.get("session_id") or ""), "subagents", name),
+             os.path.join(os.path.splitext(main)[0], "subagents", name)]
+    return next((x for x in under if os.path.isfile(x)), under[-1])
+
+
 def h_agent_call(payload):
     """A subagent's tool call, before it runs, routed from the retrieval hook's check: warned of what changed beside
-    the launching session. recall-hook.sh lets a subagent's check through only while phi/.agents/ names it."""
+    the launching session, held against its own transcript for when it started and what it has heard already.
+    recall-hook.sh lets a subagent's check through only while phi/.agents/ names it."""
     agent_id = str(payload.get("agent_id") or "")
     me = Me(payload)
     if not agent_id or not me.home or not me.id:
@@ -2875,7 +2891,7 @@ def h_agent_call(payload):
     s = load_session(me.home, me.id)
     if not s:
         return None
-    text = plans.agent_warn(me.home, s, agent_id)
+    text = plans.agent_warn(me.home, s, agent_id, agent_transcript(payload))
     RAN["agent"] = "warned" if text else "checked"
     return text or None
 
