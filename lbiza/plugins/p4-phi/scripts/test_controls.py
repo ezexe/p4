@@ -315,12 +315,9 @@ class Supervisor(unittest.TestCase):
 
     def test_five_complete_sessions_are_each_an_option_of_their_own_in_one_askuserquestion(self):
         """An AskUserQuestion takes up to four questions of up to four options each, so five complete sessions are
-        two questions of one AskUserQuestion, and ezexe's pick of the fifth alone archives the fifth. The five
-        ended-turn lines quote page paths under the temp folder and the effort line quotes phi.py's path in the
-        checkout, so at the 4000 the offer fit or was held by the machine's paths; the store's own `prompt_chars`
-        gives the puppeteer the hook's whole room, and what is held for want of room is test_phi.py's subject."""
+        two questions of one AskUserQuestion, and ezexe's pick of the fifth alone archives the fifth. The offer is
+        a notice that is never held, so the machine's paths in the ended-turn and effort lines cannot push it out."""
         t = self.t
-        write(os.path.join(t.p4, "phi", "phi.json"), json.dumps({"prompt_chars": phi.HOOK_CHARS}))
         t.record(TOP4, title="Build the ports table")
         t.record(TOP5, title="Build the moon format reader")
         five = [(TOP, self.TITLE), (TOP2, "Build the importer"), (TOP3, "An orchestrator nobody put under the puppeteer"),
