@@ -69,15 +69,15 @@ import p4conf  # noqa: E402
 import ranker  # noqa: E402
 import store as st  # noqa: E402
 
-DEFAULT_TEACHER = "claude-fable-5-1"
+DEFAULT_TEACHER = "claude-fable-5-2"
 SECOND_OPINION = "claude-opus-5-5"
 # $ per million tokens, input and output, by model id; a model id no key prefixes is priced as DEFAULT_TEACHER
-PRICES = {"claude-fable-5-1": (10.0, 50.0), "claude-opus-5-5": (4.0, 20.0), "claude-sonnet-5-5": (2.0, 10.0),
-          "claude-haiku-5-5": (0.10, 0.50)}
+PRICES = {"claude-fable-5-2": (8.0, 40.0), "claude-fable-5-1": (10.0, 50.0), "claude-opus-5-5": (4.0, 20.0),
+          "claude-sonnet-5-5": (2.0, 10.0), "claude-haiku-5-5": (0.10, 0.50)}
 # Training cutoffs as YYYY-MM, by model id. cutoff_of gives a model whose cutoff is None, or that the table lacks,
 # the table's oldest known cutoff, which errs toward marking more documents as newer than the teacher's training.
-CUTOFFS = {"claude-opus-5-5": "2026-06", "claude-fable-5-1": None, "claude-sonnet-5-5": None,
-           "claude-haiku-5-5": None}
+CUTOFFS = {"claude-opus-5-5": "2026-06", "claude-fable-5-2": None, "claude-fable-5-1": None,
+           "claude-sonnet-5-5": None, "claude-haiku-5-5": None}
 CAND_K = 60                   # BM25's top and the ranker's top, each
 CAND_CHARS = 140              # a document's date, kind and text are cut to this length
 NEWER_MAX = 12                # documents newer than the cutoff sent with a task

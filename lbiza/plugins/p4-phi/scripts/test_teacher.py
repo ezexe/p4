@@ -82,7 +82,7 @@ class Prompt(Base):
             if line.startswith("[c"):
                 self.assertLessEqual(len(line.split("] ", 1)[1].split(" {")[0].replace(" [newer than your training]",
                                                                                          "")), te.CAND_CHARS)
-        kw = te.request("claude-fable-5-1", te.edit_system("2026-06"), item["user"], te.EDIT_SCHEMA)
+        kw = te.request("claude-fable-5-2", te.edit_system("2026-06"), item["user"], te.EDIT_SCHEMA)
         self.assertEqual(kw["thinking"], {"type": "adaptive"})
         self.assertEqual(kw["output_config"]["format"]["type"], "json_schema")
         self.assertIn("wins over your own prior", kw["system"])
@@ -102,16 +102,16 @@ class Prompt(Base):
         self.assertTrue(all(d == "keep" and "no decision" in why for d, _, _, why in decisions))
 
     def test_batch_writes_edits_and_labels_with_the_answering_model(self):
-        client = te.FakeClient(answer_as="claude-fable-5-1-20261101")
+        client = te.FakeClient(answer_as="claude-fable-5-2-20261101")
         s = te.edit_labels(self.p4, args("--limit", "3"), client=client, out=quiet)
         self.assertEqual(s["edited"], 3)
         rows = self.rows()
         self.assertEqual(len({r["task"] for r in rows}), 3)
-        self.assertTrue(all(r["teacher"] == "claude-fable-5-1-20261101" for r in rows), "response.model is recorded")
+        self.assertTrue(all(r["teacher"] == "claude-fable-5-2-20261101" for r in rows), "response.model is recorded")
         self.assertTrue(all(r["edited"] == NOW and "batch:" in r["note"] and "from:pool" in r["note"] for r in rows))
         md = self.edits_md()
         self.assertEqual(md.count("\n## "), 3)
-        self.assertIn("teacher: claude-fable-5-1-20261101; edited: 2026-11-01 18:00", md)
+        self.assertIn("teacher: claude-fable-5-2-20261101; edited: 2026-11-01 18:00", md)
         self.assertRegex(md, r"\n- (keep|drop|add) \S+.*: shares \d+ words")
         # the newest tasks first, and an edited task is not sent again
         tasks = lb.read_tasks(self.p4)
@@ -155,14 +155,14 @@ class Newer(Base):
         sec2 = item2["user"].split("Entries newer than your training cutoff")[1].split("Candidates")[0]
         self.assertNotIn("firmware is 4.2", sec2)
         self.assertEqual(te.cutoff_of("claude-opus-5-5"), "2026-06")
-        self.assertEqual(te.cutoff_of("claude-fable-5-1"), "2026-06", "an unknown cutoff is the oldest known one")
+        self.assertEqual(te.cutoff_of("claude-fable-5-2"), "2026-06", "an unknown cutoff is the oldest known one")
         conf = p4conf.load(self.p4)
         conf["recall"]["teacher"].update({"model": "claude-opus-5-5", "cutoff": "2026-08"})
         p4conf._write(self.p4, conf)
         self.assertEqual(te.teacher_of(self.p4), "claude-opus-5-5", "p4.json's teacher, not the default")
         self.assertEqual(te.cutoff_of("claude-opus-5-5", self.p4), "2026-08", "p4.json's cutoff, not the table's")
-        self.assertEqual(te.cutoff_of("claude-fable-5-1", self.p4), "2026-06", "another model keeps its own cutoff")
-        self.assertEqual(te.cutoff_of("claude-fable-5-1", self.p4, "2026-03"), "2026-03")
+        self.assertEqual(te.cutoff_of("claude-fable-5-2", self.p4), "2026-06", "another model keeps its own cutoff")
+        self.assertEqual(te.cutoff_of("claude-fable-5-2", self.p4, "2026-03"), "2026-03")
         self.assertIn("around 2026-08", te.edit_system(te.cutoff_of(te.teacher_of(self.p4), self.p4)))
 
 
@@ -181,7 +181,7 @@ class Refusal(Base):
         self.assertIn("(task skipped)", md)
         # still unedited, so the next run sends it again
         ctx = te.Context(self.p4)
-        self.assertIn(newest["id"], te.pick_tasks(self.p4, ctx, "claude-fable-5-1", False, None))
+        self.assertIn(newest["id"], te.pick_tasks(self.p4, ctx, "claude-fable-5-2", False, None))
 
 
 class Cost(Base):
@@ -218,8 +218,8 @@ class Cost(Base):
         self.assertAlmostEqual(sum(c["usd"] for c in sp["calls"]), s["spent"], places=5)
         self.assertAlmostEqual(sp["total"], s["spent"], places=5)
         c = sp["calls"][0]
-        self.assertAlmostEqual(c["usd"], (c["input"] * 10.0 + c["output"] * 50.0) / 1e6, places=6,
-                               msg="Fable 5.1 at $10 / $50 per million")
+        self.assertAlmostEqual(c["usd"], (c["input"] * 8.0 + c["output"] * 40.0) / 1e6, places=6,
+                               msg="Fable 5.2 at $8 / $40 per million")
         # appended, never replaced
         te.edit_labels(self.p4, args("--limit", "1"), client=te.FakeClient(), out=quiet)
         with open(lb.mpath(self.p4, te.SPEND), encoding="utf-8") as f:
@@ -227,7 +227,7 @@ class Cost(Base):
 
     def test_running_spend_stops_at_the_cap(self):
         budget = te.Budget(0.0)
-        plan = [("t", te.request("claude-fable-5-1", "s", "u", te.EDIT_SCHEMA), 0.01)]
+        plan = [("t", te.request("claude-fable-5-2", "s", "u", te.EDIT_SCHEMA), 0.01)]
         got = list(te.run_calls(self.p4, te.FakeClient(), plan, budget, "x", out=quiet))
         self.assertEqual(got, [])
 
@@ -239,18 +239,18 @@ class ReEdit(Base):
         te.edit_labels(self.p4, args("--limit", "2"), client=te.FakeClient(), out=quiet)   # fable, the next 2
         by = te.edited_by(self.p4)
         sonnet = {t for t, m in by.items() if m == "claude-sonnet-5-5"}
-        fable = {t for t, m in by.items() if m == "claude-fable-5-1"}
+        fable = {t for t, m in by.items() if m == "claude-fable-5-2"}
         self.assertEqual((len(sonnet), len(fable)), (2, 2))
         ctx = te.Context(self.p4)
-        self.assertEqual(set(te.pick_tasks(self.p4, ctx, "claude-fable-5-1", True, None)), sonnet)
+        self.assertEqual(set(te.pick_tasks(self.p4, ctx, "claude-fable-5-2", True, None)), sonnet)
         self.assertEqual(set(te.pick_tasks(self.p4, ctx, "claude-sonnet-5-5", True, None)), fable)
-        unedited = set(te.pick_tasks(self.p4, ctx, "claude-fable-5-1", False, None))
+        unedited = set(te.pick_tasks(self.p4, ctx, "claude-fable-5-2", False, None))
         self.assertFalse(unedited & (sonnet | fable))
         before = {(r["task"], r["entry"], r["teacher"]) for r in self.rows() if r["task"] in fable}
         s = te.edit_labels(self.p4, args("--re-edit"), client=te.FakeClient(), out=quiet)
         self.assertEqual(s["tasks"], 2)
         by = te.edited_by(self.p4)
-        self.assertTrue(all(by[t] == "claude-fable-5-1" for t in sonnet | fable))
+        self.assertTrue(all(by[t] == "claude-fable-5-2" for t in sonnet | fable))
         self.assertEqual({(r["task"], r["entry"], r["teacher"]) for r in self.rows() if r["task"] in fable}, before,
                          "the current teacher's edits are left alone")
         self.assertEqual(len(set(te.edited_by(self.p4))), 4, "no task gained or lost its edit")
@@ -264,7 +264,7 @@ class ReEdit(Base):
         te.edit_labels(self.p4, a, client=te.FakeClient(), out=quiet)
         by = te.edited_by(self.p4)
         tasks = lb.read_tasks(self.p4)
-        redone = {t for t, m in by.items() if m == "claude-fable-5-1"}
+        redone = {t for t, m in by.items() if m == "claude-fable-5-2"}
         self.assertEqual(len(redone), 2)
         newest = sorted(tasks, key=lambda t: (tasks[t]["time"], t), reverse=True)[:2]
         self.assertEqual(redone, set(newest))
@@ -333,7 +333,7 @@ class Dictionary(Base):
         self.assertEqual((s["entries"], s["written"]), (1, 1))
         g = self.block("gizmo")
         self.assertIn("  means: (fake) gizmo as in: fix the gizmo board", g)
-        self.assertRegex(g, r"  means-by: claude-fable-5-1 2026-11-01 18:00 [0-9a-f]{8}")
+        self.assertRegex(g, r"  means-by: claude-fable-5-2 2026-11-01 18:00 [0-9a-f]{8}")
         self.assertEqual(self.block("widget"), widget, "a meaning ezexe wrote is untouched")
         self.assertEqual(self.block("doohickey"), owner, "ezexe's entry is untouched")
         v = {x["term"]: x for x in st.read_vocabulary(self.p4)}
@@ -357,7 +357,7 @@ class Dictionary(Base):
                                        client=te.FakeClient(), out=quiet)["entries"], 0, "same teacher: nothing")
         s = te.dictionary(self.p4, dargs("--re-edit"), client=te.FakeClient(), out=quiet)
         self.assertEqual(s["written"], 1)
-        self.assertIn("means-by: claude-fable-5-1", self.block("gizmo"))
+        self.assertIn("means-by: claude-fable-5-2", self.block("gizmo"))
         self.assertEqual(self.block("gizmo").count("  means:"), 1)
 
     def test_an_edit_made_during_the_batch_wins(self):
@@ -366,7 +366,7 @@ class Dictionary(Base):
         e = next(x for x in st.load_file(self.p4, st.VOCABULARY) if x.value == "gizmo")
         t = self.text().replace("  means: (pending)", "  means: what ezexe typed meanwhile")
         write(p4conf.sub(self.p4, "store", st.VOCABULARY), t)
-        n = te.write_meanings(self.p4, {(e.line, "gizmo", "(pending)"): "the teacher's"}, "claude-fable-5-1", NOW)
+        n = te.write_meanings(self.p4, {(e.line, "gizmo", "(pending)"): "the teacher's"}, "claude-fable-5-2", NOW)
         self.assertEqual(n, 0)
         self.assertEqual(self.text(), t)
 
@@ -399,7 +399,7 @@ class Eval(Base):
         # spoil the edits: the batch's rows become a noisy store's labels, on the rules naming neither topic
         bid = next(iter(lb.read_batches(self.p4)))
         noisy = synthetic(os.path.join(self.tmp.name, "n"), n_tasks=8, noisy=True)
-        rows = [{**r, "source": "store+edited", "weight": "1.0", "teacher": "claude-fable-5-1", "edited": NOW,
+        rows = [{**r, "source": "store+edited", "weight": "1.0", "teacher": "claude-fable-5-2", "edited": NOW,
                  "note": f"batch:{bid}; from:pool; add"} for r in lb.read_tsv(lb.mpath(noisy, lb.RAW))]
         lb.write_tsv(lb.mpath(self.p4, lb.TRAIN), lb.TRAIN_HEAD, rows)
         c = train.raw_vs_edited(self.p4)
@@ -459,7 +459,7 @@ class Facts(Base):
         self.assertTrue(cmake.fields["source"].startswith("https://docs.example.org/"), cmake.fields)
         self.assertEqual(cmake.fields["verified"], NOW)
         self.assertEqual(cmake.fields["time"], "2026-10-29 11:00", "the fact is timed by ezexe's question")
-        self.assertEqual(cmake.fields["by"], "claude-fable-5-1")
+        self.assertEqual(cmake.fields["by"], "claude-fable-5-2")
         self.assertEqual(st.feature_kind("facts.md", cmake), "fact sourced")
         with open(lb.mpath(self.p4, te.SPEND), encoding="utf-8") as f:
             spend = json.load(f)
@@ -533,6 +533,21 @@ class Cli(Base):
                             "--fake", "--max-usd", "0.001"], capture_output=True, text=True)
         self.assertEqual(r.returncode, 3)
         self.assertIn("nothing was sent", r.stdout)
+
+
+
+class Defaults(unittest.TestCase):
+    def test_the_default_teacher_is_the_current_fable_and_priced(self):
+        """The default teacher is the current Fable id in teacher.py and in p4conf's DEFAULTS alike, and every default
+        id has a price and a cutoff entry, so price() never falls back to a missing key."""
+        t = p4conf.DEFAULTS["recall"]["teacher"]
+        self.assertEqual((te.DEFAULT_TEACHER, t["model"]), ("claude-fable-5-2", "claude-fable-5-2"))
+        self.assertEqual(t["second_opinion"], te.SECOND_OPINION)
+        for m in (te.DEFAULT_TEACHER, te.SECOND_OPINION):
+            self.assertIn(m, te.PRICES)
+            self.assertIn(m, te.CUTOFFS)
+        self.assertEqual(te.price(te.DEFAULT_TEACHER), (8.0, 40.0))
+        self.assertEqual(te.price("claude-unknown-9"), te.PRICES[te.DEFAULT_TEACHER])
 
 
 if __name__ == "__main__":

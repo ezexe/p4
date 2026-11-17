@@ -127,7 +127,7 @@ DEFAULTS = {
             "first_floor": 0.36, "owed_labels": 10, "owed_age_s": 3600, "max_tasks": 400,
         },
         "teacher": {
-            "model": "claude-fable-5-1", "second_opinion": "claude-opus-5-5", "cutoff": None, "effort": "high",
+            "model": "claude-fable-5-2", "second_opinion": "claude-opus-5-5", "cutoff": None, "effort": "high",
             "max_tokens": 16000, "agree_min": 0.65, "newer_max": 12, "cand_k": 60, "dict_batch": 20,
         },
     },
