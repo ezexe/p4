@@ -1120,6 +1120,22 @@ class Rules(unittest.TestCase):
                 self.assertIn("more", got, (room, brief))
         self.assertIn("act-don't-wait: ", phi.rules_text(self.t.p4, 9000), "the built-in rules still come whole")
 
+    def test_a_failed_first_commit_is_told_at_the_next_start_once(self):
+        """ezexe/p4#218: a store whose index.lock fails the tree's first commit; the next start says so once."""
+        p4 = self.t.p4
+        for args in (("init", "-q"), ("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty",
+                                       "-m", "store")):
+            subprocess.run(["git", "-C", p4, *args], check=True, capture_output=True)
+        write(os.path.join(p4, "p4.json"), json.dumps({"phi": {"track": True}}))
+        gd = subprocess.run(["git", "-C", p4, "rev-parse", "--absolute-git-dir"], capture_output=True,
+                            text=True).stdout.strip()
+        write(os.path.join(gd, "index.lock"), "")               # a stale lock of git's own: every commit fails
+        self.assertFalse(relay.track(p4, first_only=True, wait=True))
+        told = self.start(TOP)
+        self.assertEqual(told.count("the session tree's first commit in"), 1, told)
+        self.assertIn("index.lock", told)
+        self.assertNotIn("the session tree's first commit in", self.start(TOP), "said once")
+
     def test_a_fork_gets_the_built_in_rules_alone(self):
         """A fork's inherited conversation already holds the store's feedback and user memories."""
         self.assertEqual(phi.rules_text(self.t.p4, 9000, fork=True), phi.builtin_text())

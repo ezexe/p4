@@ -2296,6 +2296,14 @@ def ran_for(s, me):
                source=held.get("source", ""), cli=me.cli)
 
 
+def tracked(home):
+    """True where the store's p4.json sets phi.track, as relay.track reads it."""
+    try:
+        return bool((p4conf.section(home, "phi", write=False) or {}).get("track"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def h_session_start(payload):
     me = Me(payload)
     if not me.home or not me.id:
@@ -2325,6 +2333,8 @@ def h_session_start(payload):
     text = "\n\n".join(p for p in (pin, text) if p)
     live_rules(s, me.store, os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or "")   # what it starts with
     relay.remember_store(me.store)
+    if tracked(me.home):                           # a failed first commit, said once; no git call while untracked
+        rule = "\n\n".join(p for p in (rule, relay.track_notice(me.home)) if p)
     if me.home_missing:
         rule = "\n\n".join(p for p in (rule, f"phi (p4-phi): this project's p4.json names the shared store "
                                                f"{me.home_missing} for the session tree, and this machine has not "
