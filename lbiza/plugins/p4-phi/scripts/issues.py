@@ -111,9 +111,15 @@ def github_of(repo):
     return f"{m.group(1)}/{m.group(2)}" if m else ""
 
 
+PATH_WORDS = re.compile(r"[A-Za-z][\w+.-]*://\S+|`[^`\n]*[\\/][^`\n]*`|(?:[A-Za-z]:)?[\w.~-]*[\\/][\w.\\/*~:-]+|"
+                        + FILE_RE.pattern)
+
+
 def writing(text):
-    """True when a brief or task list asks for changes, not a check, an audit, a question or a message to pass on."""
-    text = str(text or "")
+    """True when a brief or task list asks for changes, not a check, an audit, a question or a message to pass on.
+    The paths, links and file names it names are taken out first, so a folder named `land` or `build` is no work
+    word: only the message's own words decide."""
+    text = PATH_WORDS.sub(" ", str(text or ""))
     if READ_ONLY.search(text):
         return False
     lead = re.sub(r"^[\s#*>`-]+", "", text)
