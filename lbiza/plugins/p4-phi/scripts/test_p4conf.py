@@ -1071,6 +1071,17 @@ class SettingsVariables(unittest.TestCase):
         self.assertEqual(older & set(names), {"P4_SCRATCHPAD_ASKS", "P4_RECALL_INJECT", "P4_PHI_ISSUES"})
         self.assertEqual(p4conf.env_name("phi.watch_s"), "P4_PHI_WATCH_SECONDS", "P4_PHI_WATCH_S is puppeteer's tick")
 
+    def test_the_settings_page_lists_every_variable_with_its_default(self):
+        """dox/claude-settings.html has a row for each variable: its name, its setting and its default as written."""
+        import html
+        page = (PLUGINS.parents[1] / "dox" / "claude-settings.html").read_text(encoding="utf-8")
+        for key, default in p4conf.env_keys().items():
+            row = f"<tr><td><code>{p4conf.env_name(key)}</code></td><td><code>{key}</code></td><td>"
+            self.assertIn(row, page, key)
+            if default is not p4conf._NONE and default is not None:
+                shown = html.escape(p4conf.env_text(key, default, default), quote=False)
+                self.assertIn(f"{row}<code>{shown}</code></td>", page, key)
+
     def test_each_value_reads_back_from_the_text_written(self):
         """A bool is 1 or 0, a string is written as it is unless it would read back as another value, and every
         other value is compact JSON; each reads back as the same value of the same type."""
