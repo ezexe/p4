@@ -1155,7 +1155,8 @@ class TopOrchestrates(unittest.TestCase):
         for th in threads:
             th.join()
         pend = relay._session(home, TOP).get("staleChildren") or []
-        self.assertEqual(sorted(x["id"] for x in pend), ids)
+        later = [x["id"] for x in relay.drain_archive(home, TOP)]   # a record read empty mid-replace keeps a file
+        self.assertEqual(sorted([x["id"] for x in pend] + later), ids)
         self.assertFalse(os.path.exists(os.path.join(relay._dir(home, TOP), "session.json.lock")))
 
     def test_an_archived_childs_note_keeps_the_findings_of_its_final_report(self):

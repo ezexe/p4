@@ -1127,6 +1127,49 @@ class WarnTogether(unittest.TestCase):
         finally:
             shutil.rmtree(home, ignore_errors=True)
 
+    def test_a_permission_error_on_the_lock_is_waited_out(self):
+        """Windows raises PermissionError creating a lock file another thread is removing: the lock is tried again
+        within LOCK_WAIT_S, and the warning lands on the record under the lock."""
+        home = tempfile.mkdtemp(prefix="p4-phi-warn-")
+        real = os.open
+        hits = []
+        try:
+            top = "local_topwarn"
+            path = os.path.join(relay._dir(home, top), "session.json")
+            relay._write_json(path, {"sessionId": top})
+
+            def once(p, *a, **k):
+                if str(p).endswith("session.json.lock") and not hits:
+                    hits.append(p)
+                    raise PermissionError(13, "Permission denied", p)
+                return real(p, *a, **k)
+            os.open = once
+            relay.warn(home, top, "key1", "after one PermissionError")
+            os.open = real
+            self.assertTrue(hits, "the lock met a PermissionError")
+            on = [w["text"] for w in relay._read_json(path).get("relayPending") or []]
+            self.assertEqual(on, ["after one PermissionError"])
+            self.assertEqual(glob.glob(os.path.join(relay._dir(home, top), "warn-pending-*.json")), [])
+        finally:
+            os.open = real
+            shutil.rmtree(home, ignore_errors=True)
+
+    def test_a_child_counted_as_archived_meets_an_empty_read_and_is_kept(self):
+        """A parent's record that reads empty under its lock, as while another writer's os.replace runs on Windows,
+        drops no child counted as archived: the child is kept on a file of its own."""
+        home = tempfile.mkdtemp(prefix="p4-phi-warn-")
+        read = relay._read_json
+        try:
+            path = os.path.join(relay._dir(home, "top"), "session.json")
+            relay._write_json(path, {"sessionId": "top"})
+            relay._read_json = lambda p: {} if p == path else read(p)
+            relay._pend_archive(home, "top", "kid1", {"title": "kid one"}, "done")
+            relay._read_json = read
+            self.assertEqual([x["id"] for x in relay.drain_archive(home, "top")], ["kid1"])
+        finally:
+            relay._read_json = read
+            shutil.rmtree(home, ignore_errors=True)
+
     def test_a_warning_that_cannot_get_the_lock_is_kept_and_drained(self):
         home = tempfile.mkdtemp(prefix="p4-phi-warn-")
         wait = relay.LOCK_WAIT_S

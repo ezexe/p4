@@ -1443,6 +1443,10 @@ class locked:
                     _GAVE_UP[self.lock] = time.time()
                     return self                   # never block a hook for good: go on unlocked
                 time.sleep(0.02)
+            except PermissionError:               # Windows, while another thread or process removes the lock file
+                if time.time() > end:
+                    return self
+                time.sleep(0.02)
             except OSError:
                 return self
 
@@ -1466,11 +1470,11 @@ def _pend_archive(home, parent, sid, s, kind):
     session.json, and the later write would drop the earlier child."""
     ppath = os.path.join(_dir(home, parent), "session.json")
     with locked(ppath) as lk:
-        if not lk.held:                           # never written unlocked: kept on a file of its own, read later
-            _write_json(os.path.join(_dir(home, parent), f"archive-pending-{_safe(sid)}.json"),
-                        {"id": sid, "title": _title(s), "kind": kind})
-            return
-        pd = _read_json(ppath)
+        pd = _read_json(ppath) if lk.held else {}
+        if not pd:                                # never written unlocked, and a record that reads empty, as while
+            _write_json(os.path.join(_dir(home, parent), f"archive-pending-{_safe(sid)}.json"),   # another writer's
+                        {"id": sid, "title": _title(s), "kind": kind})   # os.replace runs on Windows, drops no child:
+            return                                # kept on a file of its own, read later
         if pd:
             pend = pd.setdefault("staleChildren", [])
             pend[:] = [x for x in pend if not (isinstance(x, dict) and x.get("id") == sid)]
