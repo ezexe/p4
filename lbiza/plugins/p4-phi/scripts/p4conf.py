@@ -1097,19 +1097,37 @@ def env_overrides(environ=None, warn=True):
 
 def env_written(p4):
     """{variable: the texts p4 wrote for it}: each one the ownership record says p4 wrote into any local file of
-    store `p4`, the entry it owns now and those it replaced or removed, which a running session may still hold."""
+    store `p4`, the entry it owns now and those it replaced or removed, which a running session may still hold. {}
+    without a record; None when the record, or any part of it this reads, is malformed, so no variable can be told
+    from p4's own."""
     if not os.path.exists(record_path(p4)):
         return {}
-    rec = read_record(p4)
-    out = {}
-    for owned in (rec.get("files") or {}).values():
-        for k, e in (owned or {}).items():
-            if k.startswith(ENV_KEY + ".") and _entry(e):
-                out.setdefault(k.split(".", 1)[1], set()).add(e["v"])
-    for past in (rec.get("p4past") or {}).values():
-        for name, texts in (past or {}).items():
-            out.setdefault(name, set()).update(t for t in texts if isinstance(t, str))
-    return out
+    try:
+        rec = read_json(record_path(p4))
+        if not isinstance(rec, dict):
+            return None
+        out = {}
+        files, past = rec.get("files", {}), rec.get("p4past", {})
+        if not isinstance(files, dict) or not isinstance(past, dict):
+            return None
+        for owned in files.values():
+            if not isinstance(owned, dict):
+                return None
+            for k, e in owned.items():
+                if k.startswith(ENV_KEY + "."):
+                    if not (isinstance(e, dict) and isinstance(e.get("v"), str)):
+                        return None
+                    out.setdefault(k.split(".", 1)[1], set()).add(e["v"])
+        for texts_of in past.values():
+            if not isinstance(texts_of, dict):
+                return None
+            for name, texts in texts_of.items():
+                if not (isinstance(texts, list) and all(isinstance(t, str) for t in texts)):
+                    return None
+                out.setdefault(name, set()).update(texts)
+        return out
+    except Exception:  # noqa: BLE001 — a record edited by hand never breaks a load
+        return None
 
 
 def person_env(p4, environ=None, warn=True):
@@ -1122,6 +1140,8 @@ def person_env(p4, environ=None, warn=True):
     if not got:
         return got
     wrote = env_written(p4)
+    if wrote is None:
+        return {}                                       # a malformed record: p4.json alone holds
     return {k: v for k, v in got.items() if environ.get(env_name(k)) not in wrote.get(env_name(k), ())}
 
 
@@ -1149,6 +1169,24 @@ def env_wants(p4):
         text = env_text(key, v, default)
         if env_value(key, text, default) is not _BAD:   # a value p4 would pass over is not written either
             out[env_name(key)] = text
+    return out
+
+
+def env_entries(p4, target, platform=None, environ=None):
+    """env_wants without each variable that is set elsewhere, which p4's entry in the local file would override: in
+    this process's environment with a text p4 did not write, as the shell or another settings file gives it, or in the
+    user, project or managed settings file beside `target`, as _elsewhere reads them for autoMemoryDirectory."""
+    platform = platform or sys.platform
+    environ = os.environ if environ is None else environ
+    wrote = env_written(p4) or {}
+    here = env_applies(p4)
+    out = {}
+    for name, text in env_wants(p4).items():
+        if here and environ.get(name) and environ.get(name) not in wrote.get(name, ()):
+            continue
+        if _elsewhere(f"{ENV_KEY}.{name}", target, platform):
+            continue
+        out[name] = text
     return out
 
 
@@ -1226,7 +1264,24 @@ def read_json(p):
 
 
 def read_record(p4):
-    return read_json(record_path(p4)) or {}
+    """The record, with each part the keeper reads that is not of its shape dropped, so a record edited by hand never
+    stops the keeper: p4 then owns none of what that part held."""
+    rec = read_json(record_path(p4)) or {}
+    for k in ("files", "p4past", "kept", "hand", "rules", "unreadable"):
+        if k in rec and not (isinstance(rec[k], dict) and all(isinstance(v, (dict, list, float, int, type(None)))
+                                                              for v in rec[k].values())):
+            rec.pop(k)
+    for k in ("files", "p4past", "kept"):
+        for name in [n for n, v in (rec.get(k) or {}).items() if not isinstance(v, dict)]:
+            rec[k].pop(name)
+    for owned in (rec.get("files") or {}).values():
+        for key in [x for x, e in owned.items() if not _entry(e)]:
+            owned.pop(key)
+    for texts_of in (rec.get("p4past") or {}).values():
+        for name in [n for n, t in texts_of.items()
+                     if not (isinstance(t, list) and all(isinstance(x, str) for x in t))]:
+            texts_of.pop(name)
+    return rec
 
 
 def replace_text(p, text, tries=5):
@@ -1390,7 +1445,7 @@ def wants(p4, target, platform=None):
     out["autoMemoryDirectory"] = mem if conf.get("autoMemoryDirectory", True) is not False and not other else None
     text = conf.get("attribution.commit")
     out["attribution.commit"] = text if isinstance(text, str) else None
-    for name, text in env_wants(p4).items():
+    for name, text in env_entries(p4, target, platform).items():
         out[f"{ENV_KEY}.{name}"] = text
     return out, {k: v for k, v in conf.items() if k not in WRITES and k not in OWN_KEYS}, conf, other
 
@@ -1581,7 +1636,7 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
         rec.update(note)
         if not owned_only:
             rec["section"] = _flat(load(p4, write=False, warn=False).get(SECTION) or {})
-            rec.setdefault("kept", {})[name] = {"keeper": KEEPER, "p4env": env_wants(p4)}
+            rec.setdefault("kept", {})[name] = {"keeper": KEEPER, "p4env": env_entries(p4, target, platform)}
         if json.dumps(rec, sort_keys=True) != before or not os.path.exists(record_path(p4)):
             write_record(p4, rec)
         return
@@ -1678,9 +1733,10 @@ def _keep_key(p4, project, new, k, d, owned, gone, owned_only, past=None):
     removes goes into `past`, since a running session still holds it."""
     cur, e = _get(new, k), _entry(owned.get(k))
     variable = k.startswith(ENV_KEY + ".")
-    if e and variable and past is not None and cur == e[0] and e[1] <= GEN and (d is None or cur != d):
-        n = k.split(".", 1)[1]
-        past[n] = (past.get(n, []) + [cur])[-PAST_MAX:]
+    if e and variable and past is not None and isinstance(e[0], str) and (
+            cur is _NONE or cur != e[0] or (e[1] <= GEN and (d is None or cur != d))):
+        n = k.split(".", 1)[1]                          # deleted or changed by hand, replaced or removed by p4
+        past[n] = (past.get(n, []) + [e[0]])[-PAST_MAX:]
     if e:
         if cur is _NONE:
             owned.pop(k)                                # deleted by hand: no longer p4's, never written back
@@ -1861,8 +1917,8 @@ def watch(project, payload):
     """At every SessionStart: the cheap comparison of the running Claude Code binary, the p4 plugins' versions, the
     store's `claude` section, a local file left unread, the memory folder other files name, and, for this
     session's own local file, the KEEPER of the copy that last kept it and the P4_* variables p4.json asks for, with
-    the record; any change runs keep_settings. Each binary is kept by its path, so the desktop app's copy and the `claude` command
-    used in turn are each read once. At a ConfigChange of a settings file: keep_settings on the keys the record owns.
+    the record; any change runs keep_settings. Each binary is kept by its path, so the desktop app's copy and the
+    `claude` command used in turn are each read once. At a ConfigChange of a settings file: keep_settings on the keys the record owns.
     Returns {"asks": the lines for ezexe, "newer": (old, new) when a newer Claude Code runs, else None}."""
     out = {"asks": [], "newer": None}
     if os.environ.get(SETTINGS_ENV) == "0":
@@ -1901,7 +1957,8 @@ def watch(project, payload):
              if not _same_value("autoMemoryDirectory", v, fwd(sub(p4, "memory")))]
     if (not note and section_of(p4) == rec.get("section") and unread in ("none", _mtime(target))
             and other == (rec.get("otherMemory") or [])
-            and ((rec.get("kept") or {}).get(fwd(target)) or {}) == {"keeper": KEEPER, "p4env": env_wants(p4)}):
+            and ((rec.get("kept") or {}).get(fwd(target)) or {})
+            == {"keeper": KEEPER, "p4env": env_entries(p4, target)}):
         return out
     out["asks"] = keep_settings(project, p4=p4, note=note, tell=True)["asks"]
     return out

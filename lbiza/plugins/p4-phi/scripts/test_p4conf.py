@@ -1387,6 +1387,54 @@ class SettingsVariables(unittest.TestCase):
         finally:
             sys.path.remove(hooks)
 
+    def test_a_variable_set_elsewhere_gets_no_entry_of_p4s(self):
+        """A variable set in the shell with a text p4 did not write, or in the user, project or managed settings,
+        gets no entry of p4's in the local file, which would override it, and p4's own entry goes once the variable
+        appears there; p4's own text in the environment is no such variable."""
+        from unittest import mock
+        p4 = self.store({"phi": {"max_depth": 5, "max_children": 4, "chain_max": 4}})
+        _write(os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "settings.json"), {"env": {"P4_PHI_MAX_CHILDREN": "6"}})
+        with mock.patch.dict(os.environ, {"P4_PHI_MAX_DEPTH": "8"}):
+            p4conf.keep_settings(self.project)
+            self.assertEqual(self.read(self.local())["env"], {"P4_PHI_CHAIN_MAX": "4"})
+            self.assertEqual(p4conf.load(p4)["phi"]["max_depth"], 8, "the shell's value holds")
+        with mock.patch.dict(os.environ, {"P4_PHI_CHAIN_MAX": "4"}):
+            p4conf.keep_settings(self.project)
+            self.assertEqual(self.read(self.local())["env"], {"P4_PHI_CHAIN_MAX": "4", "P4_PHI_MAX_DEPTH": "5"},
+                             "p4's own text in the environment is no other setter")
+        _write(os.path.join(self.project, ".claude", "settings.json"), {"env": {"P4_PHI_CHAIN_MAX": "2"}})
+        p4conf.keep_settings(self.project)
+        self.assertEqual(self.read(self.local())["env"], {"P4_PHI_MAX_DEPTH": "5"}, "p4's entry gives way")
+
+    def test_a_text_a_person_changed_or_deleted_mid_session_stays_p4s(self):
+        """An entry p4 wrote that a person then changes or deletes leaves the record, but its text is kept as one
+        p4 wrote, so a session that still holds it reads p4.json and not that text."""
+        from unittest import mock
+        p4 = self.store({"phi": {"max_depth": 5, "chain_max": 4}})
+        p4conf.keep_settings(self.project)
+        d = self.read(self.local())
+        d["env"]["P4_PHI_MAX_DEPTH"] = "6"
+        del d["env"]["P4_PHI_CHAIN_MAX"]
+        _write(self.local(), d)
+        p4conf.keep_settings(self.project, owned_only=True)
+        self.store({"phi": {"max_depth": 7, "chain_max": 2}})
+        with mock.patch.dict(os.environ, {"P4_PHI_MAX_DEPTH": "5", "P4_PHI_CHAIN_MAX": "4"}):
+            got = p4conf.load(p4)["phi"]
+        self.assertEqual((got["max_depth"], got["chain_max"]), (7, 2))
+        with mock.patch.dict(os.environ, {"P4_PHI_MAX_DEPTH": "6"}):
+            self.assertEqual(p4conf.load(p4)["phi"]["max_depth"], 6, "the person's own text wins")
+
+    def test_a_malformed_record_falls_back_to_p4_json(self):
+        """A record edited by hand into another shape never makes a load or a keep raise: no variable can then be
+        told from p4's own, so p4.json alone holds."""
+        from unittest import mock
+        p4 = self.store({"phi": {"max_depth": 5}})
+        for rec in ('{"files": "x"}', '{"files": {"f": {"env.P4_PHI_MAX_DEPTH": {"v": [1]}}}}',
+                    '{"files": {"f": []}}', '{"p4past": {"f": {"P4_PHI_MAX_DEPTH": "5"}}}', "[1]", "{not json"):
+            _write(self.record(), rec)
+            with mock.patch.dict(os.environ, {"P4_PHI_MAX_DEPTH": "9"}):
+                self.assertEqual(p4conf.load(p4)["phi"]["max_depth"], 5, rec)
+                p4conf.keep_settings(self.project)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
