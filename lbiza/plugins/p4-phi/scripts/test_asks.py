@@ -281,6 +281,34 @@ class LedgerCloses(Trees):
         t.say(PUP, ACCOUNT)
         self.assertIn(f"`{TOP}` | done", self.page(), "done is kept on the row")
 
+    def test_another_sessions_message_inside_the_turn_carries_no_row(self):
+        t = self.t
+        t.say(PUP, ASK2)
+        t.say(PUP, marked("The importer's parser is in review."))   # before the puppeteer's turn on ask-1 ended
+        t.stop(PUP, ASK2, report="The importer's parser already reads quoted rows over two lines.", uuid="m1")
+        t.say(PUP, ACCOUNT)
+        self.assertIn("held by no session yet | answered", self.page())
+
+    def test_a_holder_in_another_store_counts_only_its_turns_since_the_request(self):
+        t = self.t
+        other = os.path.join(t.tmp, "other")
+        os.makedirs(os.path.join(other, ".claude", "p4"))
+        top2, wk = "local_top00002", "local_wkr00002"
+        CLI.setdefault(top2, "77772000-0000-4000-8000-000000000000")
+        CLI.setdefault(wk, "77772100-0000-4000-8000-000000000000")
+        t.record(top2, title="Build the ports table", cwd=other)
+        t.say(top2, "Build the ports table", proj=other)
+        self.assertEqual(t.cli(PUP, "controls", top2).returncode, 0)
+        t.record(wk, started_by=top2, title="the ports writer", cwd=other)
+        t.say(wk, "Task:\nWrite the ports rows.\nFiles: src/ports.py", proj=other)
+        self.assertEqual(t.cli(wk, "done", "the rows were written", proj=other).returncode, 0)
+        t.stop(wk, "Write the ports rows.", report="Written.", uuid="p1", proj=other)
+        t.say(PUP, ASK1)
+        self.send(PUP, wk, ASK1 + ", beside the ports rows.")
+        t.stop(PUP, ASK1, report="Sent to the ports writer.", uuid="p2")
+        t.say(PUP, ACCOUNT)
+        self.assertIn(f"`{wk}` | routed", self.page(), "its done turn before the request is not this request's")
+
     def test_a_turn_that_never_ended_leaves_its_row_carried(self):
         t = self.t
         t.say(PUP, ASK2)
@@ -373,6 +401,40 @@ class LedgerWaits(Trees):
         with mock.patch.object(asks.time, "strftime", return_value="2026-11-18"):
             two = asks._key(ASK1)
         self.assertNotEqual(one, two)
+
+    def test_a_request_of_any_length_while_a_row_waits_opens_its_own_row(self):
+        t = self.t
+        t.say(PUP, ASK3)
+        t.stop(PUP, ASK3, report="The notes are ready. " + WAIT, uuid="l1")
+        t.say(PUP, "Push main and sync the stores")
+        t.say(PUP, "Publish the importer's release notes on its own page as well")
+        got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
+        self.assertEqual(sorted(got), ["ask-1", "ask-2", "ask-3"], "a short request and one sharing the topic's words")
+        self.assertEqual(got["ask-1"]["waits"], "The notes are ready. " + WAIT, "the wait stays")
+
+    def test_a_question_of_ezexes_leaves_the_wait_in_place(self):
+        t = self.t
+        t.say(PUP, ASK3)
+        t.stop(PUP, ASK3, report="The notes are ready. " + WAIT, uuid="l2")
+        t.say(PUP, "where does the flush stand?")
+        got = asks.rows(t.p4, PUP)
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0]["waits"], "The notes are ready. " + WAIT)
+        self.assertIn("waits on ezexe", self.page())
+
+    def page(self):
+        return read(asks.page_path(self.t.p4, PUP))
+
+    def test_the_same_words_again_join_a_live_row_and_open_a_new_one_once_it_is_finished(self):
+        t = self.t
+        t.say(PUP, ASK2)
+        t.stop(PUP, ASK2, report="The importer's parser already reads quoted rows over two lines.", uuid="l3")
+        t.say(PUP, ASK2)
+        self.assertEqual(len(asks.rows(t.p4, PUP)), 2, "the first row was answered: a new one")
+        self.send(PUP, TOP3, ASK2 + ", as the importer's next step.")
+        t.stop(PUP, ASK2, report="Sent to the importer's orchestrator.", uuid="l4")
+        t.say(PUP, ASK2)
+        self.assertEqual(len(asks.rows(t.p4, PUP)), 2, "the second row is held and live: joined")
 
 
 if __name__ == "__main__":
