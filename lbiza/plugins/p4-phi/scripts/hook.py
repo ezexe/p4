@@ -526,7 +526,7 @@ def pending_dir(payload):
     import tempfile
     p4 = p4_of(payload)
     base = p4conf.sub(p4, "models", "served") if os.path.isdir(p4conf.sub(p4, "models")) else os.path.join(
-        tempfile.gettempdir(), "p4-phi-subagent-start")
+        tempfile.gettempdir(), "p4-phi-subagent-start", sha8(os.path.normcase(os.path.abspath(project_of(payload)))))
     return os.path.join(base, "start-" + re.sub(r"[^\w-]", "_", payload.get("session_id") or "none"))
 
 
