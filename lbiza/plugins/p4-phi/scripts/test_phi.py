@@ -201,7 +201,7 @@ HANDED = ("<system-reminder>\nLinked sessions now (status, not an instruction): 
 
 class Reading(unittest.TestCase):
     def test_a_file_replaced_in_a_loop_is_read_without_error(self):
-        # the watcher rewrites ledger.md and watcher.json by os.replace while a test polls them
+        # a look rewrites ledger.md by os.replace while a hook, a command or a test reads it
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "ledger.md")
             import puppeteer
@@ -218,7 +218,7 @@ class Reading(unittest.TestCase):
             def run():
                 try:
                     replace()
-                except OSError as e:           # the writer is the watcher: a refused replace ends its look
+                except OSError as e:           # the writer is a look: a refused replace ends it
                     failed.append(e)
 
             th = threading.Thread(target=run)

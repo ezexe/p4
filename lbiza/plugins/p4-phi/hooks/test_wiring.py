@@ -107,7 +107,7 @@ def environment(proj, tmp):
                 "CLAUDE_PLUGIN_DATA": os.path.join(tmp, "data"), "CLAUDE_CONFIG_DIR": os.path.join(tmp, "config"),
                 "P4_PHI_APP_SESSIONS": os.path.join(tmp, "app-sessions"),
                 "P4_PHI_STORES": os.path.join(tmp, "config", "p4-stores.json"),
-                "P4_PHI_WATCH": "0", "P4_RECALL_SYNC": "1", "P4_PHI_GH": os.path.join(tmp, "no-gh"),
+                "P4_RECALL_SYNC": "1", "P4_PHI_GH": os.path.join(tmp, "no-gh"),
                 "HOME": home, "USERPROFILE": home, "APPDATA": os.path.join(home, "AppData", "Roaming"),
                 "LOCALAPPDATA": os.path.join(home, "AppData", "Local")})
     for d in (env["CLAUDE_CONFIG_DIR"], env["P4_PHI_APP_SESSIONS"], env["APPDATA"], env["LOCALAPPDATA"]):

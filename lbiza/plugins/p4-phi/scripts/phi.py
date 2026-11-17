@@ -1932,7 +1932,6 @@ def h_session_start(payload):
     s = ensure_session(me.home, me.id, me.rec, me.cli)
     ran_for(s, me)
     mark_fork(s, me, payload)
-    watch_over(me.home, s)
     source = payload.get("source") or "startup"
     RAN["start"] = source
     asks(s)
@@ -1968,15 +1967,6 @@ def h_session_start(payload):
     # asks the session to act comes first: the page to resume from and the notices, then the built-in rules and the
     # background, and last the address book, which is whole on its page as well
     return "\n\n".join(p for p in (first, *notices, rules, text, book_line) if p) or None
-
-
-def watch_over(home, s):
-    """An orchestrator's one watcher, started when none is alive. Never fails the hook."""
-    try:
-        if puppeteer.ensure_watcher(home, s):
-            RAN["watcher"] = "started"
-    except Exception:  # noqa: BLE001
-        pass
 
 
 def started_by(me, payload):
@@ -2201,7 +2191,6 @@ def h_user_prompt_submit(payload):
         except Exception:  # noqa: BLE001
             pup = verdict = ""
         RAN["puppeteer"] = verdict or bool(pup)
-    watch_over(me.home, s)
     try:                                           # it reads the app's records: a failure costs only its own line
         route = relay.route_text(me.home, s["sessionId"], req, s.get("cwd") or "") if req and not verdict else ""
     except Exception:  # noqa: BLE001
@@ -2332,7 +2321,6 @@ def h_stop(payload):
             RAN["merged"] = len(puppeteer.merge_all(me.home, above))
         except Exception:  # noqa: BLE001
             pass
-    watch_over(me.home, s)
     replay(me, s, payload.get("transcript_path") or "")
     s = load_session(me.home, s["sessionId"]) or s
     if isinstance(s.get("stale"), dict) and s["stale"].get("told"):

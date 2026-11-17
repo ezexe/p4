@@ -2,7 +2,7 @@
 """puppeteer.py: the four steps p4-phi takes for an orchestrator, after the four diagrams of ezexe/p4's README.md.
 
 It acts for an orchestrator with a task, or any session that started sessions. Its steps are routing, the
-start draft, the gate and the watcher, which the functions `prompty`, `prompter`, `pioneer` and `watch` run:
+start draft, the gate and the watcher, which the functions `prompty`, `prompter`, `pioneer` and `look` run:
 
   linear     Routing reads ezexe's message against the records the ledger is built from: the area it names, the
              live session that is that area's code owner, the running writer that holds its files. The start draft
@@ -12,9 +12,10 @@ start draft, the gate and the watcher, which the functions `prompty`, `prompter`
              the parent session is the right orchestrator. A clean draft is handed as
              the exact start_session call; one whose area has a live code owner is routed there with SendMessage;
              one whose writer is busy is queued as a start request behind it; one the depth or count cap holds
-             starts no session. The watcher is one background process for each orchestrator: it writes
-             <session>/ledger.md from p4-phi's records and the app's session records, only when one of them
-             changed, with a reconcile line for each divergence between the two.
+             starts no session. The watcher is one look at a time over an orchestrator's subtree, which the
+             plugin's hooks module runs inside Claude Code at a turn's end, at a message's arrival and on its
+             timer: a look writes <session>/ledger.md from p4-phi's records and the app's session records, only
+             when one of them changed, with a reconcile line for each divergence between the two.
   recursive  a landed topic registers its route in <session>/routes.jsonl beside the ledger, only when the records
              back what the reports claimed: the issue is closed, a commit that closes it is pushed, and the session
              and its children are archived with their outcome kept. Routing scores a message against the registered
@@ -27,14 +28,15 @@ start draft, the gate and the watcher, which the functions `prompty`, `prompter`
              orchestrator's ledger and writes <home>/phi/meta-ledger.md: duplicate topics, orchestrators in conflict
              over the same files or issue, stale topics, and what is left open for the next generation.
 
-p4-phi's hooks are command hooks, which start no session and send no message, so the gate's verdict is the exact call
-for the session to make, and the session, which can tell a question from work, makes it or leaves it.
+The hooks that hand a session its lines are command hooks, which start no session and send no message, so the gate's
+verdict is the exact call for the session to make, and the session, which can tell a question from work, makes it or
+leaves it.
 
-Commands, through phi.py: `ledger`, `watch`, `draft "<words>"`, `pioneer <draft id>`, `routes`, `readings "<a>"
+Commands, through phi.py: `ledger`, `look`, `draft "<words>"`, `pioneer <draft id>`, `routes`, `readings "<a>"
 "<b>" ... --words "<the message>"`, `merge <group> --result "<text>"`, `meta`, `settle <session> "<what took it up>"`.
 Settings: `puppeteer` set to false in phi/phi.json turns off the watcher and the prompt hook's steps, and
-P4_PHI_PUPPETEER=0 or 1 overrides it for one run. P4_PHI_WATCH=0 starts no watcher, P4_PHI_WATCH_S sets the
-watcher's tick in seconds, P4_PHI_WATCH_NET=0 keeps the watcher from reading GitHub, and P4_PHI_APP_SESSIONS names
+P4_PHI_PUPPETEER=0 or 1 overrides it for one run. P4_PHI_WATCH=0 runs no look, P4_PHI_WATCH_S sets the
+watcher's tick in seconds, P4_PHI_WATCH_NET=0 keeps a look from reading GitHub, and P4_PHI_APP_SESSIONS names
 the folder of the app's session records.
 """
 
@@ -59,11 +61,9 @@ import starts  # noqa: E402
 import issues  # noqa: E402
 
 PHI = None                       # phi.py's running module, which phi.py sets when it imports this one
-WATCH_S = 5.0                    # the watcher's tick
+WATCH_S = 5.0                    # the watcher's tick: the least seconds between two looks
 WATCH_SLOW_S = 30.0              # its tick once nothing changed for WATCH_CALM_S
 WATCH_CALM_S = 600.0
-WATCH_QUIT_S = 24 * 3600.0       # a watcher whose sources stood still this long ends; the next hook starts another
-BEAT_DEAD_S = 300.0              # a watcher silent this long is taken as gone: far past its slowest look
 ISSUE_TTL_S = 120.0              # how long an issue's state read from GitHub is believed
 GH_S = 6                         # one gh call of this module's, which a prompt hook may be waiting on
 ROUTE_CHECK_S = 600.0            # how often registered routes are checked for a reopen or a revert
@@ -114,8 +114,35 @@ def _short(s, n):
 REPLACE_S = 5.0                  # seconds a write waits out readers that hold its file open
 
 
+_LOOKED = [""]                   # the session folder the look in this process runs over, and '' outside a look
+
+
+def _make(folder):
+    """The folder a file goes in, made with what is above it. While a look runs, its own session folder is never
+    made: once that folder is deleted the look writes nothing more, and no write of it brings the folder back,
+    ezexe/p4#206. A folder below it is made one level at a time, which fails where the session folder is gone."""
+    held = _LOOKED[0]
+    if not held:
+        os.makedirs(folder, exist_ok=True)
+        return
+    if not os.path.isdir(held):
+        raise FileNotFoundError(f"{held}: the session folder of this look is gone")
+    at, below = os.path.abspath(folder), []
+    while os.path.normcase(at) != held and os.path.dirname(at) != at:
+        below.append(at)
+        at = os.path.dirname(at)
+    if os.path.normcase(at) != held:               # a file of the store, outside the session folder
+        os.makedirs(folder, exist_ok=True)
+        return
+    for d in reversed(below):
+        try:
+            os.mkdir(d)
+        except FileExistsError:
+            pass
+
+
 def _write(path, text):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    _make(os.path.dirname(path))
     tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"     # one writer's temp file never another's
     try:
         with open(tmp, "w", encoding="utf-8", newline="\n") as f:
@@ -145,8 +172,13 @@ def _read(path):
         return ""
 
 
+def _write_json(path, d):
+    """`d` written to `path` as relay writes a file that is no session's record."""
+    _write(path, json.dumps(d, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
+
+
 def _append(path, row):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    _make(os.path.dirname(path))
     with open(path, "a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
@@ -220,7 +252,7 @@ def busy(home, sid):
 
 # --- the app's records ------------------------------------------------------------------------------------------------
 
-_APP = {}                        # each record's path to its mtime_ns and row, kept while a watcher runs
+_APP = {}                        # each record's path to its mtime_ns and row, kept for one process
 
 
 def app_roots(home, top):
@@ -275,7 +307,7 @@ def app_cache_path(home):
 
 
 def app_cached(home):
-    """Loads what the last hook or watcher read from the app's records, kept in the store as each record's path to
+    """Loads what the last hook or look read from the app's records, kept in the store as each record's path to
     its mtime_ns and row, so the next process reads one file and not every record. Only a record whose time changed
     is opened again."""
     if home and home not in _APP_LOADED:
@@ -355,7 +387,7 @@ def issue_state(home, slug, n, net=False):
         if state and state != got:
             kept = relay._read_json(states_path(home))
             kept[key] = got = state
-            relay._write_json(states_path(home), kept)
+            _write_json(states_path(home), kept)
     return got
 
 
@@ -584,7 +616,7 @@ def refresh(home, top, net=False, force=False):
     if changed:
         _write(path, text)
     if changed or not os.path.exists(model_path(home, top)):
-        relay._write_json(model_path(home, top), m)
+        _write_json(model_path(home, top), m)
     after = signature(home, top, roots) if net else sig      # an issue state read now is a source too
     if _read(sig_path).strip() != after:
         _write(sig_path, after + "\n")
@@ -598,56 +630,16 @@ def model(home, top):
 
 
 # --- the watcher ------------------------------------------------------------------------------------------------------
+# The watcher runs from the plugin's hooks module, hooks/register.ts, inside Claude Code. The module starts
+# `phi.py look` at the events of its session that change what the ledger shows, a turn's end and a message's
+# arrival, and on its timer for what no event of that session shows: the sessions below it, the app's records and
+# GitHub. A look is one pass and ends. The module keeps one look in flight at most, and paces itself by what a look
+# answers.
 
-def watcher_path(home, top):
-    return os.path.join(relay._dir(home, top), "watcher.json")
-
-
-def watcher_alive(home, top):
-    w = relay._read_json(watcher_path(home, top))
-    return bool(w.get("pid")) and time.time() - float(w.get("beat") or 0) < BEAT_DEAD_S
-
-
-def ensure_watcher(home, s):
-    """Starts the one background watcher of an orchestrator when none has said it is alive lately. Returns True when
-    it started one."""
-    if os.environ.get("P4_PHI_WATCH") == "0" or not on(home) or not orchestrator(home, s) or closed(s):
-        return False
-    top = s["sessionId"]
-    if watcher_alive(home, top):
-        return False
-    relay._write_json(watcher_path(home, top), {"pid": -1, "beat": time.time(), "started": now()})   # the claim
-    flags = 0
-    if os.name == "nt":                 # a console of its own with no window, which git and the rest it starts share;
-        flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0)       # DETACHED_PROCESS would give each its own window
-                 | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
-    try:
-        subprocess.Popen([sys.executable, "-I", "-X", "utf8", os.path.join(HERE, "phi.py"), "watch", "--p4", home,
-                          "--session", top], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, creationflags=flags, start_new_session=os.name != "nt",
-                         close_fds=True, cwd=HERE)
-    except OSError:
-        return False
-    return True
-
-
-_ROUTES = {}                     # each orchestrator to when this process last looked for landed topics
-
-
-def code_stamp():
-    """The modification times of the scripts a watcher runs."""
-    out = []
-    for f in ("puppeteer.py", "phi.py", "relay.py", "plans.py", "starts.py", "issues.py"):
-        try:
-            out.append(os.stat(os.path.join(HERE, f)).st_mtime_ns)
-        except OSError:
-            out.append(0)
-    return out
-
-
-def tick(home, top, net=True):
+def tick(home, top, net=True, slow=True):
     """One look of the watcher: the readings merged, the closed sessions checked for unfinished work, the ledger,
-    and the landed topics registered as routes."""
+    and, when the ledger changed or the look is a slow one, the landed topics registered as routes and the registered
+    routes checked. `net` lets the look read GitHub."""
     try:
         merge_all(home, top)
     except Exception:  # noqa: BLE001
@@ -657,8 +649,7 @@ def tick(home, top, net=True):
     except Exception:  # noqa: BLE001
         pass
     _, changed = refresh(home, top, net=net)
-    if changed or time.time() - _ROUTES.get(top, 0) > ISSUE_TTL_S:
-        _ROUTES[top] = time.time()
+    if changed or slow:
         try:
             if register_routes(home, top, net=net):
                 refresh(home, top)
@@ -676,60 +667,69 @@ def conf_store(home, top):
     return _phi().store_at(str(s.get("cwd") or "")) or home
 
 
-def watch(home, top, once=False, max_s=None, interval=None):
-    """The watcher's loop over one orchestrator's subtree, until the orchestrator is closed, another watcher took
-    over, nothing changed for a day, or the plugin's own scripts changed under it: the marketplace runs from its
-    checkout, so a watcher on yesterday's code ends and the next hook starts one on today's. It says it is alive
-    before each look, never after, so a slow look is not taken for a dead watcher and a second one started; and it
-    yields to a newer watcher before it looks, not after."""
-    me = os.getpid()
-    code = code_stamp()
-    started = time.time()
-    last_change, last_sig, ticks, slowest, last_ms = started, "", 0, 0, 0
-    os.environ.setdefault("GIT_TERMINAL_PROMPT", "0")      # no git or gh call of a watcher ever waits on a person
-    os.environ.setdefault("GH_PROMPT_DISABLED", "1")
-    began = now()
+def pace(home, top="", watching=False):
+    """What the hooks module paces a session's looks by, in seconds: `watch_s`, the least time between two looks,
+    `wait_s`, how long its timer waits after this one, and `net_s`, how often a look reads GitHub and checks the
+    routes. P4_PHI_WATCH_S sets both ticks for one run. Without it the least time is WATCH_S, and the wait is WATCH_S
+    while the orchestrator's sources change and WATCH_SLOW_S once they stood still for WATCH_CALM_S, which the time
+    of ledger.sig tells, a file written only when a source changed. A session with no look to run waits WATCH_SLOW_S,
+    and the module doubles that wait at each such answer."""
+    try:
+        quick = max(float(os.environ.get("P4_PHI_WATCH_S") or 0), 0.0)
+    except ValueError:
+        quick = 0.0
+    calm = not watching
+    if watching:
+        try:
+            calm = time.time() - os.path.getmtime(os.path.join(relay._dir(home, top), "ledger.sig")) >= WATCH_CALM_S
+        except OSError:
+            calm = False
+    return {"watch_s": quick or WATCH_S, "wait_s": quick or (WATCH_SLOW_S if calm else WATCH_S), "net_s": ISSUE_TTL_S}
+
+
+def look(home, sid, net=False, folder_only=False):
+    """One look over the subtree of the session `sid`, run by the hooks module, and what the module reads of it.
+    The answer holds `dir`, the session's folder, where it has one; `watching`, True when the session is an
+    orchestrator and the look went over its subtree; `why`, what kept the look from running; `off`, True when
+    P4_PHI or P4_PHI_WATCH is 0, where the module runs no look at all; `changed`, True when the ledger was
+    rewritten; `net`, True when the look read GitHub; and the three times of `pace`.
+    `net` asks for a slow look, which reads GitHub unless P4_PHI_WATCH_NET is 0 and checks the routes.
+    `folder_only` answers the folder and does nothing else.
+    A session whose folder was never made, or was deleted, gets no look: nothing is written and no folder is made,
+    and a folder deleted while the look runs stays gone, ezexe/p4#206."""
+    sid = _phi().safe_id(sid)
+    folder = relay._dir(home, sid) if sid else ""
+    if not sid or not os.path.isfile(os.path.join(folder, "session.json")):
+        return {"watching": False, "why": "no session folder", **pace(home)}
+    out = {"watching": False, "dir": folder.replace("\\", "/")}
+    if folder_only:
+        return out
+    if os.environ.get("P4_PHI") == "0" or os.environ.get("P4_PHI_WATCH") == "0":
+        return dict(out, off=True, why="off")
+    if not on(home):
+        return dict(out, why="the puppeteer steps are off", **pace(home))
+    if not orchestrator(home, relay._session(home, sid)):
+        return dict(out, why="no orchestrator", **pace(home))
     try:                                            # the project's caps, WATCH_S and STALE_S among them, from the
-        _phi().project_conf(conf_store(home, top))  # orchestrator's own store, as its hooks read them
+        _phi().project_conf(conf_store(home, sid))  # orchestrator's own store, as its hooks read them
     except Exception:  # noqa: BLE001
         pass
-    while True:
-        if not os.path.isdir(relay._dir(home, top)):
-            return 0
-        w = relay._read_json(watcher_path(home, top))
-        if ticks and w.get("pid") not in (me, -1):
-            return 0                                # another watcher took this orchestrator
-        at = time.time()
-        relay._write_json(watcher_path(home, top), {"pid": me, "beat": at, "started": began, "ticks": ticks,
-                                                    "lastTickMs": last_ms, "slowestTickMs": slowest})
-        s = relay._session(home, top)
-        try:
-            tick(home, top, net=os.environ.get("P4_PHI_WATCH_NET") != "0")
-        except Exception:  # noqa: BLE001
-            pass
-        ticks += 1
-        last_ms = round((time.time() - at) * 1000)
-        slowest = max(slowest, last_ms)
-        if once or closed(s) or relay.gone(home, s):
-            break
-        at = time.time()
-        sig = _read(os.path.join(relay._dir(home, top), "ledger.sig")).strip()
-        if sig != last_sig:
-            last_sig, last_change = sig, at
-        if at - last_change > WATCH_QUIT_S or (max_s and at - started > max_s) or code_stamp() != code:
-            break
-        try:
-            quick = float(os.environ.get("P4_PHI_WATCH_S") or 0)
-        except ValueError:
-            quick = 0
-        time.sleep(interval or quick or (WATCH_S if at - last_change < WATCH_CALM_S else WATCH_SLOW_S))
-    w = relay._read_json(watcher_path(home, top))
-    if w.get("pid") == me:
-        try:
-            os.remove(watcher_path(home, top))
-        except OSError:
-            pass
-    return 0
+    os.environ.setdefault("GIT_TERMINAL_PROMPT", "0")      # no git or gh call of a look ever waits on a person
+    os.environ.setdefault("GH_PROMPT_DISABLED", "1")
+    reads = bool(net) and os.environ.get("P4_PHI_WATCH_NET") != "0"
+    changed = False
+    _LOOKED[0] = os.path.normcase(os.path.abspath(folder))
+    try:
+        changed = tick(home, sid, net=reads, slow=bool(net))
+    except Exception:  # noqa: BLE001
+        pass
+    finally:
+        _LOOKED[0] = ""
+    if not os.path.isdir(folder):
+        return {"watching": False, "why": "no session folder", **pace(home)}
+    if relay.gone(home, relay._session(home, sid)):       # the look that shows its end, then none
+        return dict(out, why="closed", changed=changed, **pace(home))
+    return dict(out, watching=True, changed=changed, net=reads, **pace(home, sid, True))
 
 
 # --- routes: the loop that recurses -----------------------------------------------------------------------------------
@@ -1249,7 +1249,7 @@ def load_groups(home, sid):
 
 
 def save_group(home, g):
-    relay._write_json(os.path.join(groups_dir(home, g["parent"]), f"{g['id']}.json"), g)
+    _write_json(os.path.join(groups_dir(home, g["parent"]), f"{g['id']}.json"), g)
 
 
 def explore(home, s, req, texts, base, transcript_bytes=0):
@@ -1504,8 +1504,9 @@ def process_rows():
 
 def left_processes(home, s):
     """The live processes a session started, told by its marks in their command lines: its id beside its own store,
-    as its watcher carries both, and the app's scratchpad directory of each of its CLI sessions, <id>/scratchpad
-    under the temp folder, with the one phi keeps as `scratchpadDir`, where its clones and test runs live.
+    as a phi.py command given `--p4` and `--session` carries both, and the app's scratchpad directory of each of its
+    CLI sessions, <id>/scratchpad under the temp folder, with the one phi keeps as `scratchpadDir`, where its clones
+    and test runs live.
     The id alone is no mark, since a session of another store, such as a test's, can carry the same id."""
     sid = str(s.get("sessionId") or "")
     store = os.path.abspath(home).replace("\\", "/").lower() if home else ""
@@ -1797,7 +1798,7 @@ def on_prompt(home, s, req, base, transcript_bytes=0):
 
 # --- the commands -----------------------------------------------------------------------------------------------------
 
-COMMANDS = ("ledger", "watch", "draft", "pioneer", "routes", "readings", "merge", "meta", "settle")
+COMMANDS = ("ledger", "look", "draft", "pioneer", "routes", "readings", "merge", "meta", "settle")
 
 
 def command(a, me):
@@ -1826,19 +1827,20 @@ def command(a, me):
         for r in all_routes(home).values():
             print(f"{r['id']} \"{r.get('topic')}\" {r.get('issue')} {r.get('context')}: {_short(r.get('words'), 160)}")
         return 0
+    if a.cmd == "look":                            # ahead of ensure_session: a look makes no session's folder
+        sys.stdout.write(json.dumps(look(home, me.id, net=a.net, folder_only=a.folder), ensure_ascii=False,
+                                    sort_keys=True) + "\n")
+        return 0
     if not me.id:
         print("phi: this is not a session, since the environment holds no session id; pass --session", file=sys.stderr)
         return 2
     s = phi.ensure_session(home, me.id, me.rec, "" if a.session else me.cli)
     sid = s["sessionId"]
     base = s.get("cwd") or os.getcwd()
-    if a.cmd == "watch":
-        return watch(home, sid, once=a.once, max_s=a.max_s or None, interval=a.interval or None)
     if a.cmd == "ledger":
         text, changed = refresh(home, sid, net=a.net, force=a.net)
         sys.stdout.write(text)
-        print(f"phi: {ledger_path(home, sid)} " + ("rewritten" if changed else "unchanged") + "; watcher "
-              + ("alive" if watcher_alive(home, sid) else "not running"), file=sys.stderr)
+        print(f"phi: {ledger_path(home, sid)} " + ("rewritten" if changed else "unchanged"), file=sys.stderr)
         return 0
     if a.cmd == "draft":
         read = prompty(home, s, a.text, base)
@@ -1899,10 +1901,9 @@ def add_parsers(sub, common):
     for name in COMMANDS:
         p = sub.add_parser(name)
         common(p)
-        if name == "watch":
-            p.add_argument("--once", action="store_true")
-            p.add_argument("--max-s", type=float, default=0)
-            p.add_argument("--interval", type=float, default=0)
+        if name == "look":
+            p.add_argument("--net", action="store_true", help="a slow look: read GitHub and check the routes")
+            p.add_argument("--folder", action="store_true", help="only answer where the session's folder is")
         if name == "ledger":
             p.add_argument("--net", action="store_true", help="read the issues' states from GitHub now")
         if name == "draft":

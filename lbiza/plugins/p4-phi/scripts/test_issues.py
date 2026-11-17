@@ -557,26 +557,6 @@ class NoConsoleWindow(unittest.TestCase):
             catchup.HERE = saved
         self.assertNoWindow(out, "catchup.start_sync")
 
-    def test_the_orchestrators_watcher_opens_no_console_window(self):
-        import puppeteer
-        out = os.path.join(self.tmp, "home")
-        os.makedirs(out)
-        saved = {k: getattr(puppeteer, k) for k in ("HERE", "on", "orchestrator", "closed", "watcher_alive",
-                                                     "watcher_path")}
-        puppeteer.HERE = self.fake
-        puppeteer.on = puppeteer.orchestrator = lambda *a: True
-        puppeteer.closed = puppeteer.watcher_alive = lambda *a: False
-        puppeteer.watcher_path = lambda home, top: os.path.join(self.tmp, "watcher.json")
-        env = os.environ.pop("P4_PHI_WATCH", None)
-        try:
-            self.assertTrue(puppeteer.ensure_watcher(out, {"sessionId": "local_watch0001"}))
-        finally:
-            for k, v in saved.items():
-                setattr(puppeteer, k, v)
-            if env is not None:
-                os.environ["P4_PHI_WATCH"] = env
-        self.assertNoWindow(out, "puppeteer.ensure_watcher")
-
 
 class FindingsGoUp(unittest.TestCase):
     """No session publishes a new issue on its own. A writing child whose brief names no issue files none and is told

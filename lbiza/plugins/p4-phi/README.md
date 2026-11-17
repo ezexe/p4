@@ -33,6 +33,12 @@ Every behaviour below rests on a sentence of the Claude Code docs at `https://co
 | Keeps the python its runners proved on Windows in the plugin's data folder | `plugins/manifest-reference.md`, "Environment variables" | "`${CLAUDE_PLUGIN_ROOT}` changes when the plugin updates, so don't write state there." and `${CLAUDE_PLUGIN_DATA}` is "kept across plugin updates" |
 | Runs a hooks module, `hooks/register.ts`, inside Claude Code, named in `hooks/hooks.json` beside the command hooks | `plugins/mods/reference.md`, "Files" | "`modules`: an array with one path, relative to this file, to the hooks module" and "Can also hold settings hooks under `hooks`." |
 | Reads the proved python in the module from the plugin's data folder, which it finds under the plugins root by the plugin's name | `plugins/loading.md`, "Find plugins on disk" | `data/<plugin-id>/` is "The plugin's persistent directory, exposed as `${CLAUDE_PLUGIN_DATA}`." |
+| Runs an orchestrator's watcher from the module's timer, and starts no process that outlives a look | `plugins/mods/api.md`, "Run work in the background" | "`$.clock.every` and `$.clock.after` take the place of `setInterval` and `setTimeout`" and "The timer's callback runs outside any event, so it keeps running between turns and doesn't start one." |
+| Runs each look of the watcher, `phi.py look`, as one command that ends | `plugins/mods/api.md`, "Reach files, processes, and the network" | "`run(['git', 'status'])` starts a command and resolves when it exits." |
+| Asks for a look at a turn's end and at a message's arrival | `plugins/mods/reference.md`, "Events" | `turn.complete` fires when "A turn ended", and `session.receive` when "A message arrives from, or is about to go to, another agent or session." |
+
+The watcher keeps one look in flight at most and `phi.watch_s` seconds between two looks.
+A session that is no orchestrator pays one check, and its timer's wait then doubles to ten minutes at most.
 
 Without a data folder, as when a test runs a hook, the proved python is kept in the plugin's own folder.
 
@@ -127,7 +133,7 @@ Each is for one run, a test or one machine's unusual layout.
 
 | Variable | Unset means | Set |
 | :- | :- | :- |
-| `P4_PHI` | phi.py's hooks run | `0` turns off phi.py's three hook commands and the checks hook.py hands it, while retrieval goes on |
+| `P4_PHI` | phi.py's hooks run | `0` turns off phi.py's three hook commands, the checks hook.py hands it and the watcher, while retrieval goes on |
 | `P4_PHI_RULES`, `P4_PHI_BOOK` | as `phi.json` says | `0` or `1` for one run |
 | `P4_PHI_PUPPETEER` | as `puppeteer` in `phi.json` says | `0` or `1` for one run |
 | `P4_PHI_WATCH` | an orchestrator's watcher runs | `0` keeps it from starting |
@@ -154,4 +160,4 @@ The page `dox/plugin-development.html` in ezexe/p4 says how: a clone loaded with
 - `python` 3, `sh` and `git` must be on PATH. On Windows, `sh` comes with Git.
 - The issue loop needs `gh`, signed in, and a repository whose `origin` is on GitHub. Without them it does nothing.
 - The session tree is read from the Claude desktop app's records. In a plain terminal session every session is an orchestrator.
-- The hooks module needs Claude Code v2.1.287 or later, and it does not load in a session started with `--safe-mode` or `--bare`, or where `disableAllHooks` is set. Source: https://code.claude.com/docs/en/plugins/mods/create.md.
+- The hooks module needs Claude Code v2.1.287 or later, and it does not load in a session started with `--safe-mode` or `--bare`, or where `disableAllHooks` is set. Source: https://code.claude.com/docs/en/plugins/mods/create.md. Where it does not load no watcher runs, and a ledger is rewritten at ezexe's message to its orchestrator and by `phi.py ledger`.
