@@ -81,6 +81,8 @@ def hook(sub, payload, env):
 
 
 def run(sub, root, app, payload=None, **kw):
+    """A fixture's git never looks above the test's own temp folder, so a repository around it decides nothing."""
+    kw.setdefault("GIT_CEILING_DIRECTORIES", os.path.dirname(tempfile.gettempdir()))
     return hook(sub, payload or {}, clean_env(CLAUDE_PROJECT_DIR=root, P4_MEMORY_APPDATA=app, **kw))
 
 

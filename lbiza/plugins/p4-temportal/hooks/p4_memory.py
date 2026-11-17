@@ -2,7 +2,7 @@
 """p4_memory.py: p4-temportal's memory part. Claude Code writes and loads the project's auto memory itself, in the
 store's `<project>/.claude/p4/temportal/memory/` once `autoMemoryDirectory` in the project's
 `.claude/settings.local.json` names that folder, by https://code.claude.com/docs/en/memory, section Storage location.
-p4-phi writes that key. Until it is there, Claude Code keeps the memory in its own folder,
+p4-phi's settings writer, ezexe/p4#246, writes that key. Until it is there, Claude Code keeps the memory in its own folder,
 `~/.claude/projects/<project>/memory/`, and this part moves no file out of it and writes nothing into it.
 
   migrate    at SessionStart, moves files left in an earlier place of the store's layout and prints that move's line
@@ -163,7 +163,7 @@ def local_is_users(root):
     inside = git("rev-parse", "--is-inside-work-tree")
     if inside is None or inside.returncode != 0 or inside.stdout.strip() != b"true":
         return False
-    tracked = git("ls-files", "--error-unmatch", "--", os.path.join(".claude", "settings.local.json"))
+    tracked = git("ls-files", "--error-unmatch", "--", ".claude/settings.local.json")
     return tracked is not None and tracked.returncode == 1
 
 
