@@ -51,10 +51,21 @@ A writing part that comes up later is shown as a suggested task card that ezexe 
 A subagent that wrote files is listed on the ledger under Level misses.
 Before a session creates anything new, such as a module, a page, a format or a kind of test, it finds the documented terms for it and a published implementation guide for that kind of work, logs both with their sources in its decisions file, and builds by them: a writing worker's first message and every start draft carry that line.
 A task list whose first creating step has no such research step before it is advised one, once.
+A question that the code, the history, the issues or the current outside documentation can answer is researched and decided by the session, which logs the decision with its source in its decisions file, the one its brief names or `decisions.md` in its scratchpad directory: the act-don't-wait rule every session is handed and every start draft carry that line, and a question reaches ezexe only once research cannot settle it.
 
 ## What a `Files:` line holds
 
 A path on a brief's `Files:` line that is an ancestor of another listed path, or a repository's root, is read as context and not held, unless every listed path is such context, when the first is held, so name a checkout for context in another sentence or on another line.
+
+## The address book
+
+Beside the standing instruction, and beside each later message where an entry changed, a session is handed its address book: the live sessions of its project's trees and of the trees its puppeteer controls, each by full title and id with its role, its parent, the files its `Files:` line holds, its owned paths, its open issue and its workers or coworkers.
+It names the puppeteer as the one address for a decision of ezexe's authority, a press the app requires or an outcome ezexe should hear, and the session's parent as the address for work off its task.
+The book is whole on `book.md` in the session's folder, and a later line names only the entries that changed since the session last looked.
+A message about a file, an issue or a piece of work goes straight to the session that holds that file, owns that issue or started that work.
+Before a `SendMessage` or `send_message` goes, p4-phi reads the paths and issue numbers it names against the book: one sent to neither the holder nor the session that started the holder is held with the holder named, and so is one to the puppeteer that names no matter of ezexe's.
+Each hold is said once for one message and recipient, so sending it again as it is goes through.
+A `Finding:` on a held file or an owned issue goes straight to its holder, named under the reports that carry it; only one no live session covers goes up for an issue.
 
 ## A puppeteer
 

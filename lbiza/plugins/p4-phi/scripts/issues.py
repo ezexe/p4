@@ -61,7 +61,9 @@ FINDING_FORM = ("Finding: <the claim>; source: <the file and line it was read at
 FINDING = re.compile(r"(?m)^(?:[ \t>*+-]|\d+[.)])*(Finding:[ \t]*\S[^\n]*)$")
 FINDINGS_LINE = (
     "phi (p4-phi): this session's brief names no open issue, and p4-phi files none, since no session publishes a new "
-    "issue on its own. Write each finding that needs an issue into this session's report as one line in this form: `"
+    "issue on its own. A finding on a file another live session holds, or on an issue another live session owns, "
+    "goes straight to that session with SendMessage, as this session's address book names it, and nowhere else. "
+    "Write each finding no live session covers into this session's report as one line in this form: `"
     + FINDING_FORM + "`. Its parent session passes those lines up unchanged, to the puppeteer that controls "
     "this session tree, or to its orchestrator where none does, which publishes what needs an issue and places "
     "the session that resolves it.")

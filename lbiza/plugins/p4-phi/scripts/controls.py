@@ -278,7 +278,10 @@ RULE = (
 PAIR = (
     "This session is controlled by a puppeteer: \"{title}\" `{pid}`, which ezexe filed in the sidebar "
     "section \"{section}\", lists this one among the sessions it controls. This session stays at the top of its own "
-    "tree, in its own section, and orchestrates that tree itself. Its tree is archived only on ezexe's pick, "
+    "tree, in its own section, and orchestrates that tree itself. That puppeteer is the one address for a decision "
+    "of ezexe's authority, a press the app requires or an outcome ezexe should hear; a message about a file, an "
+    "issue or a piece of work goes straight to the session that holds that file, owns that issue or started that "
+    "work, as the address book names it, never through the puppeteer. Its tree is archived only on ezexe's pick, "
     "by the button or the multiple-choice question p4-phi hands it at its end.")
 PAIR_OVER = ("This session has left the control of its puppeteer: \"{title}\" `{pid}` dropped it from the "
              "sessions it controls, or left the sidebar section. This session starts its own new orchestrators.")

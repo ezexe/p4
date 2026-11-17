@@ -886,32 +886,51 @@ def findings_text(home, s, new, store=""):
     """The line under the reports of a session's workers that carry `Finding:` lines, '' when none does. A
     worker passes them up unchanged in its own report; an orchestrator that a puppeteer controls
     leaves them to that puppeteer, whose board lists them; any other orchestrator publishes and places
-    them itself."""
-    found = []
+    them itself. A finding on a file or an issue another live session holds goes straight to that session, named
+    beside it by the address book, book.py; only the rest go up for an issue."""
+    import book
+    found, held = [], []
     for r in reversed(new):
         t = r.get("turn") if isinstance(r.get("turn"), dict) else {}
+        by = str(r.get("sessionId") or "")
         for line in issues.findings(f"{t.get('report') or ''}\n{t.get('said') or ''}"):
-            if line not in found:
+            if line in found or any(line == h[0] for h in held):
+                continue
+            try:                                   # the reporter and those above it hold nothing it found
+                who = book.holder_line(home, s, line, store, skip=[by, *chain_of(home, by)] if by else ())
+            except Exception:  # noqa: BLE001
+                who = ""
+            if who:
+                held.append((line, who))
+            else:
                 found.append(line)
-    if not found:
+    if not found and not held:
         return ""
+    straight = ("phi (p4-phi): these reports carry `Finding:` lines on a file or an issue a live session holds. "
+                "Send each one straight to the session named under it with SendMessage, and nowhere else; it "
+                "goes up for no issue:\n" + "\n".join(f"- {cut(x, 400)}\n  to {who}" for x, who in
+                                                     held[:FINDINGS_SHOWN])) if held else ""
+    if not found:
+        return straight
     n = len(found)
-    head = f"phi (p4-phi): these reports carry {n} `Finding:` line{'s' if n != 1 else ''}"
+    head = f"phi (p4-phi): these reports carry {n} `Finding:` line{'s' if n != 1 else ''} no live session holds"
     listed = "\n".join(f"- {cut(x, 400)}" for x in found[:FINDINGS_SHOWN]) + (
         f"\n- and {n - FINDINGS_SHOWN} more, each whole in its session's report" if n > FINDINGS_SHOWN else "")
     if spawned_from(s):
-        return (f"{head}. Pass each one up unchanged in this session's own report, and publish no issue for it:\n"
+        rest = (f"{head}. Pass each one up unchanged in this session's own report, and publish no issue for it:\n"
                 + listed)
-    pid, _ = controls.puppeteer_of(s, store)
-    if pid:
-        return (f"{head}. They go up to the puppeteer \"{controls.full_title(pid)}\" `{pid}`, whose board "
+    elif controls.puppeteer_of(s, store)[0]:
+        pid = controls.puppeteer_of(s, store)[0]
+        rest = (f"{head}. They go up to the puppeteer \"{controls.full_title(pid)}\" `{pid}`, whose board "
                 f"lists them, and it publishes the issues they need and places the session that resolves each: this "
                 f"session publishes none.")
-    return (f"{head}, and no puppeteer controls this session tree, so the findings in them are this "
-            f"session's to publish and place. Check each against the open issues and the running sessions, and send "
-            f"one a running session covers to that session; for the rest, publish the issue and place the session "
-            f"that resolves it, as a child of the session in this tree that holds its files or as a new orchestrator"
-            f":\n" + listed)
+    else:
+        rest = (f"{head}, and no puppeteer controls this session tree, so the findings in them are this "
+                f"session's to publish and place. Check each against the open issues and the running sessions, and "
+                f"send one a running session covers to that session; for the rest, publish the issue and place the "
+                f"session that resolves it, as a child of the session in this tree that holds its files or as a new "
+                f"orchestrator:\n" + listed)
+    return "\n\n".join(x for x in (straight, rest) if x)
 
 
 def reports_text(home, s, room=None, store=""):
@@ -1314,6 +1333,11 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
     told = s.setdefault("newTaskToldAt", {})
     if not isinstance(told, dict):
         told = s["newTaskToldAt"] = {}
+    import book                                    # the address book: who holds each file, issue and piece of work
+
+    def plus(text, whole=False):
+        handed = book.line(home, s, me.store, whole=whole)
+        return "\n\n".join(x for x in (text, handed) if x)
     if brief and told.get(me.cli) and os.path.isfile(standing_path(home, s["sessionId"])):
         RAN["new_task"] = "page"                   # after a compaction, a line with its page, not in full
         up = spawned_from(s)
@@ -1321,7 +1345,8 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
                  f"start a new orchestrator for it, its brief ending \"{NEW_TOP_BRIEF}\"")
         return (f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" When a message from ezexe is about "
                 f"something else, {where}, and stay with the task. The standing instruction, handed in full "
-                f"before the compaction, is whole on {standing_path(home, s['sessionId'])}.")
+                f"before the compaction, is whole on {standing_path(home, s['sessionId'])}, and the address book "
+                f"of the live sessions on {book.page_path(home, s['sessionId'])}.")
     if again or not told.get(me.cli):
         told[me.cli] = now()
         listed = relay.shards_line(home, s["sessionId"])
@@ -1354,29 +1379,30 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
                    and not controls.is_puppeteer(s, me.store) else "")
                 + (" " + caps_text(home, s) if caps_text(home, s) else ""))
         keep_standing(home, s["sessionId"], "A message about something else", full)
-        return full
+        return plus(full, whole=True)
     if not user:
-        return ""
+        return plus("")
     RAN["new_task"] = "line"
     parent = spawned_from(s)
     if req and feature_request(home, s, req):
         RAN["new_task"] = "feature"
         if parent:
-            return (f"phi (p4-phi): this message asks for something new that is not in this session's task list, and "
-                    f"a feature is a new topic even within a broad task: hand it up to {parent} with SendMessage, "
-                    f"holding {RESTATE}, as a new topic for a new orchestrator, and stay with the task.")
-        return (f"phi (p4-phi): this message asks for something new that is not in this session's task list. A "
-                f"feature is a new topic even within a broad task like \"{cut(task, LINE_TASK)}\", so it gets a new "
-                f"orchestrator of its own, a sibling of this one. "
-                f"{new_top_route(s.get('turnBy', 'user') == 'user')} Tell ezexe in one line which session has it, and "
-                f"stay with the task.")
+            return plus(f"phi (p4-phi): this message asks for something new that is not in this session's task "
+                        f"list, and a feature is a new topic even within a broad task: hand it up to {parent} with "
+                        f"SendMessage, holding {RESTATE}, as a new topic for a new orchestrator, and stay with the "
+                        f"task.")
+        return plus(f"phi (p4-phi): this message asks for something new that is not in this session's task list. A "
+                    f"feature is a new topic even within a broad task like \"{cut(task, LINE_TASK)}\", so it gets a "
+                    f"new orchestrator of its own, a sibling of this one. "
+                    f"{new_top_route(s.get('turnBy', 'user') == 'user')} Tell ezexe in one line which session has "
+                    f"it, and stay with the task.")
     if parent:
-        return (f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" If this message is about something "
-                f"else, hand it up to {parent} with SendMessage, holding {RESTATE}, and stay with the task; "
-                f"otherwise carry on.")
-    return (f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" If this message is about something "
-            f"else, start a new orchestrator for it as the standing instruction says, its brief ending "
-            f"\"{NEW_TOP_BRIEF}\", and stay with the task; otherwise carry on.")
+        return plus(f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" If this message is about "
+                    f"something else, hand it up to {parent} with SendMessage, holding {RESTATE}, and stay with the "
+                    f"task; otherwise carry on.")
+    return plus(f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" If this message is about something "
+                f"else, start a new orchestrator for it as the standing instruction says, its brief ending "
+                f"\"{NEW_TOP_BRIEF}\", and stay with the task; otherwise carry on.")
 
 
 def render_page(home, sid):
@@ -2840,20 +2866,35 @@ def log_run(name, text, started):
 
 
 def h_go_guard(payload):
-    """PreToolUse on a message one session sends another: a puppeteer's go to a waiting writer is warned
-    about while another session it controls still holds a file in that writer's write set. Never a block."""
+    """PreToolUse on a message one session sends another, for every sender. A message that names a file or an
+    issue another live session holds, sent to neither that session nor the session that started it, or a message
+    to the puppeteer that names no matter of ezexe's, is held by a `deny` whose reason names the session it belongs
+    to, from book.flag, once for that message and target, so a resend goes through. A puppeteer's go to a waiting
+    writer is warned about while another session it controls still holds a file in that writer's write set."""
     me = Me(payload)
     if not me.home or not me.id:
         return None
     s = load_session(me.home, me.id)
-    if spawned_from(s) or not controls.is_puppeteer(s, me.store):
+    if not s.get("sessionId"):
         return None
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     target = str(inp.get("to") or inp.get("session_id") or inp.get("sessionId") or "")
-    text = controls.go_text(me.home, s, target, str(inp.get("message") or inp.get("content") or inp.get("text") or ""))
-    if text:
-        RAN["go_held"] = target[:40]
-        save_session(me.home, s)
+    message = str(inp.get("message") or inp.get("content") or inp.get("text") or "")
+    import book
+    try:
+        held = book.flag(me.home, s, target, message, me.store)
+    except Exception:  # noqa: BLE001  a book it cannot read never stops a send
+        held = ""
+    text = ""
+    if not spawned_from(s) and controls.is_puppeteer(s, me.store):
+        text = controls.go_text(me.home, s, target, message)
+        if text:
+            RAN["go_held"] = target[:40]
+            save_session(me.home, s)
+    if held:
+        RAN["send_flagged"] = target[:40]
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                       "permissionDecisionReason": "\n\n".join(x for x in (held, text) if x)}}
     return text or None
 
 
