@@ -202,10 +202,18 @@ def page_path(home, sid):
     return p.replace("\\", "/")
 
 
+def setting_fits(value, default):
+    """True when a phi.json value can stand for a setting: of the default's type, or an integer for a float
+    setting, as JSON writes 3 for 3.0. A bool is never taken for a number, nor a number for a bool."""
+    if isinstance(default, float) and not isinstance(value, bool):
+        return isinstance(value, (int, float))
+    return type(value) is type(default)
+
+
 def configure(home):
     d = read_json(os.path.join(home, "phi", "phi.json"))
     for key, name in SETTINGS.items():
-        if key in d and type(d[key]) is type(globals()[name]):
+        if key in d and setting_fits(d[key], globals()[name]):
             globals()[name] = d[key]
     if os.environ.get("P4_PHI_RULES") in ("0", "1"):
         globals()["RULES"] = os.environ["P4_PHI_RULES"] == "1"

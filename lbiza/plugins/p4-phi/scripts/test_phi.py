@@ -309,6 +309,18 @@ class Sessions(unittest.TestCase):
                                   "session_title": "Another name"})
         self.assertEqual(self.t.session(KID).get("title"), "Fix the dropped row")
 
+    def test_configure_takes_an_integer_for_a_float_setting(self):
+        """ezexe/p4#159: phi/phi.json's `"wait_s": 3` is a number for WAIT_S, which is a float."""
+        os.makedirs(os.path.join(self.t.p4, "phi"), exist_ok=True)
+        write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"wait_s": 3, "rules": 1}))
+        before = (phi.WAIT_S, phi.RULES)
+        try:
+            phi.configure(self.t.p4)
+            self.assertEqual(phi.WAIT_S, 3)
+            self.assertEqual(phi.RULES, before[1], "a number is still not taken for a true/false setting")
+        finally:
+            phi.WAIT_S, phi.RULES = before
+
     def test_a_starters_process_never_adds_its_transcript_to_its_childs_record(self):
         """ezexe/p4#191: a hook of the starter's process that handles its child's record, as when it reads the
         child's report, reports the starter's transcript id; the child's cliSessionIds keep only the child's own."""
