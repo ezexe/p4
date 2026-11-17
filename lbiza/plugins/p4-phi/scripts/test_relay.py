@@ -899,6 +899,28 @@ class GhWrapper(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class GhSetting(unittest.TestCase):
+    """P4_PHI_GH names the gh every p4-phi call runs, the worktree check's as well as the issue loop's."""
+
+    def test_open_pr_runs_the_gh_p4_phi_gh_names(self):
+        tmp = tempfile.mkdtemp(prefix="p4-phi-ghset-")
+        stand_in = os.path.join(tmp, "gh_stand_in.py")
+        with open(stand_in, "w", encoding="utf-8") as f:
+            f.write("print(1)" + chr(10))
+        old = {k: os.environ.get(k) for k in ("PATH", "P4_PHI_GH")}
+        try:
+            os.environ["PATH"] = tmp                         # no gh on PATH
+            os.environ["P4_PHI_GH"] = stand_in
+            self.assertIs(relay._open_pr(tmp, "topic"), True)
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class OfferPastFour(unittest.TestCase):
     """Past OFFER_MAX finished sessions, every parent's sessions sit under an option of their own."""
 

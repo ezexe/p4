@@ -1728,17 +1728,28 @@ def worktrees(repo):
     return out[1:]
 
 
+def gh(args, cwd=None, timeout=GIT_S):
+    """gh's CompletedProcess, None when there is no gh or it failed to start or finish. It is the one way p4-phi
+    runs gh: the gh P4_PHI_GH names, a `.py` file there run with this Python, else the gh on PATH by the full path
+    shutil.which found, so a gh.cmd or gh.bat wrapper on Windows runs as gh.exe would."""
+    import shutil
+    cmd = os.environ.get("P4_PHI_GH") or shutil.which("gh")
+    if not cmd:
+        return None
+    argv = [sys.executable, "-I", "-X", "utf8", cmd] if cmd.endswith(".py") else [cmd]
+    try:
+        return subprocess.run(argv + list(args), capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              timeout=timeout, cwd=cwd or None)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def _open_pr(repo, branch):
     """True when gh lists an open pull request for the branch, False when it lists none, and None when gh is
     missing, fails or takes longer than GIT_S, so whether there is one could not be read."""
-    import shutil
-    exe = shutil.which("gh")              # on Windows it may be gh.cmd or gh.bat, which only its full path starts
-    if not exe:
-        return None
-    try:
-        r = subprocess.run([exe, "pr", "list", "--head", branch, "--state", "open", "--json", "number", "-q", "length"],
-                           cwd=repo, capture_output=True, text=True, timeout=GIT_S)
-    except (OSError, subprocess.SubprocessError):
+    r = gh(["pr", "list", "--head", branch, "--state", "open", "--json", "number", "-q", "length"], cwd=repo,
+           timeout=GIT_S)
+    if r is None:
         return None
     n = r.stdout.strip()
     return n != "0" if r.returncode == 0 and n.isdigit() else None

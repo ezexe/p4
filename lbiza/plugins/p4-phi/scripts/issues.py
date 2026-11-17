@@ -93,16 +93,9 @@ def now():
 
 
 def gh(args, cwd=None, timeout=GH_S):
-    """gh's CompletedProcess, None when there is no gh or it failed to start."""
-    cmd = os.environ.get("P4_PHI_GH") or shutil.which("gh")
-    if not cmd:
-        return None
-    argv = [sys.executable, "-I", "-X", "utf8", cmd] if cmd.endswith(".py") else [cmd]
-    try:
-        return subprocess.run(argv + list(args), capture_output=True, text=True, encoding="utf-8", errors="replace",
-                              timeout=timeout, cwd=cwd or None)
-    except (OSError, subprocess.SubprocessError):
-        return None
+    """gh's CompletedProcess, None when there is no gh or it failed to start: relay.gh, the one way p4-phi runs gh,
+    with a hook's time for one gh call."""
+    return relay.gh(args, cwd=cwd, timeout=timeout)
 
 
 def git(repo, *args):
