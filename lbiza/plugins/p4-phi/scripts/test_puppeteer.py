@@ -789,6 +789,27 @@ class Scorers(Base):
                if e["case"] == "others" and e["session"] == TOP and "retry" in e["message"]]
         self.assertEqual(got, [("", "here")])
 
+    def test_a_message_over_task_chars_kept_cut_still_gets_its_label(self):
+        import prompty_eval
+        t = self.t
+        t.say(TOP, TASK)
+        t.stop(TOP, TASK, report="planned")
+        long = RETRY + " in the store, " + " ".join(f"then check table {k} of the ports writer" for k in range(60))
+        self.assertGreater(len(long), phi.TASK_CHARS)
+        t.say(TOP, long)
+        t.stop(TOP, long, report="Sent it on: \"the flush port\" has it.", uuid="u1")
+        kept = [u.get("prompt") for u in prompty_eval.turns_of(t.p4, TOP) if "retry" in str(u.get("prompt"))]
+        self.assertTrue(kept and kept[0].endswith(" ..."), kept)
+        did = "drf-0123456789"
+        write(os.path.join(puppeteer.drafts_dir(t.p4, TOP), f"{did}.json"),
+              json.dumps({"id": did, "words": long, "verdict": "route", "drafter": TOP,
+                          "owner": {"sessionId": KID, "title": "the flush port"}}))
+        t.say(KID, handed("Give the exporter a second attempt whenever saving rows fails."))
+        t.stop(KID, "Give the exporter a second attempt", report="done", uuid="u2")
+        got = [(e["label"], e["kind"]) for e in prompty_eval.examples(t.p4)
+               if e["case"] == "others" and e["session"] == TOP and "retry" in e["message"]]
+        self.assertEqual(got, [(KID, "relayed")])
+
 class Parallel(Base):
     EITHER = ("Fix the narwhal exporter's flush: either buffer the rows in memory until the table closes or write "
               "each row straight to the store")
