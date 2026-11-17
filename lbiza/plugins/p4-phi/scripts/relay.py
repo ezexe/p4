@@ -654,10 +654,19 @@ def too_broad(p, home):
 
 
 def scratch(home, sid, f):
-    """True for a file under the store's temportal/tmp, where every session's scratchpad directory lies: such a
-    file is never a conflict, so a note that names the store warns of no session's scratch files."""
-    t = norm(os.path.join(home, "temportal", "tmp"))
-    return covers(t, f)
+    """True for a file in one of the session's scratchpads: the app's scratchpad directory of any of its CLI sessions,
+    `<id>/scratchpad` under the temp folder, the one hooks get as `scratchpad_dir` and phi keeps as `scratchpadDir`,
+    or the store's temportal/tmp, where a session started before p4-temportal 0.3.10 had its scratchpad linked. Such
+    a file, a clone's among them, is never a conflict, so another session's note warns of no scratch file."""
+    if covers(norm(os.path.join(home, "temportal", "tmp")), f):
+        return True
+    s = _session(home, sid)
+    pad = norm(s.get("scratchpadDir")) if isinstance(s.get("scratchpadDir"), str) else ""
+    if pad and covers(pad, f):
+        return True
+    low = "/" + str(f).replace("\\", "/").lower() + "/"
+    return any(f"/{c.lower()}/scratchpad/" in low for c in s.get("cliSessionIds") or []
+               if isinstance(c, str) and len(c) >= 8)
 
 
 FAR_WHOLE = 400                  # notes that do not touch a session are still shown when all of them are this short

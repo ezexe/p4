@@ -1463,14 +1463,16 @@ def process_rows():
 
 def left_processes(home, s):
     """The live processes a session started, told by its marks in their command lines: its id beside its own store,
-    as its watcher carries both, and its session scratchpad directory under temportal/tmp/, where its test runs live.
+    as its watcher carries both, and the app's scratchpad directory of each of its CLI sessions, <id>/scratchpad
+    under the temp folder, with the one phi keeps as `scratchpadDir`, where its clones and test runs live.
     The id alone is no mark, since a session of another store, such as a test's, can carry the same id."""
     sid = str(s.get("sessionId") or "")
     store = os.path.abspath(home).replace("\\", "/").lower() if home else ""
-    marks = []
-    for cli in s.get("cliSessionIds") or []:
-        if isinstance(cli, str) and len(cli) >= 8:
-            marks.append(f"temportal/tmp/{cli}".lower())
+    marks = [f"/{cli}/scratchpad".lower() for cli in s.get("cliSessionIds") or []
+             if isinstance(cli, str) and len(cli) >= 8]
+    pad = str(s.get("scratchpadDir") or "").replace("\\", "/").rstrip("/").lower()
+    if pad:
+        marks.append(pad)
     if not marks and not (sid and store):
         return []
     out = []

@@ -347,6 +347,21 @@ class Sessions(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
+    def test_no_session_is_told_a_scratchpad_directory_in_the_store(self):
+        """ezexe/p4#241: the scratchpad is the app's, so no session, with a parent or none, is told a folder under the
+        store's temportal/tmp, at its start, at its first message or at a start after a clear."""
+        t = self.t
+        said = []
+        for host, first in ((TOP, TASK), (KID, HANDED)):
+            said.append(context(t.hook(START, host, {"hook_event_name": "SessionStart", "source": "startup"})))
+            said.append(context(t.say(host, first)))
+            said.append(context(t.hook(START, host, {"hook_event_name": "SessionStart", "source": "clear"})))
+        self.assertIn("background for this session", said[4], "the started session's first message ran")
+        plugin = ROOT.replace("\\", "/")                   # a clone of the plugin may itself sit under such a folder
+        for text in said:
+            self.assertNotIn("temportal/tmp", text.replace("\\", "/").replace(plugin, "<plugin>"))
+            self.assertNotIn("scratchpad directory is", text)
+
     def test_which_session_started_it_comes_from_the_apps_record(self):
         self.t.hook(START, KID, {"hook_event_name": "SessionStart", "source": "startup"})
         s = self.t.session(KID)

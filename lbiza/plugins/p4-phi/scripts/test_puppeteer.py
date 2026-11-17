@@ -479,6 +479,26 @@ class TermsAndGuides(Base):
         self.assertNotIn(phi.RESEARCH_STEP_HEAD, ok, "a plan that researches first is advised nothing")
 
 
+class LeftProcesses(unittest.TestCase):
+    def test_a_sessions_processes_are_found_by_its_apps_scratchpad(self):
+        """ezexe/p4#131: a test run from the app's scratchpad of any of its CLI sessions, <id>/scratchpad, or from the
+        one phi keeps as scratchpadDir, is the session's own; the store's temportal/tmp is no mark, since no session
+        runs there since p4-temportal 0.3.10."""
+        cli = "aaaa1111-0000-4000-8000-000000000000"
+        rows = [(90001, f"python C:/Users/u/AppData/Local/Temp/claude/h/{cli}/scratchpad/run.py"),
+                (90002, f"python E:/proj/.claude/p4/temportal/tmp/{cli}/p4/test_x.py"),
+                (90003, "python E:/proj/other.py"),
+                (90004, "python D:/pads/first-turn/w/p4/suite/run.py")]
+        held = puppeteer.process_rows
+        puppeteer.process_rows = lambda: rows
+        try:
+            got = puppeteer.left_processes("", {"sessionId": "local_x", "cliSessionIds": [cli],
+                                                "scratchpadDir": "D:/pads/first-turn"})
+        finally:
+            puppeteer.process_rows = held
+        self.assertEqual([pid for pid, _ in got], [90001, 90004])
+
+
 class WatcherLeft(unittest.TestCase):
     """A test that starts a real watcher ends it, whether the test passes or fails midway."""
 

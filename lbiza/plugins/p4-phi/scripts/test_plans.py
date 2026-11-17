@@ -1534,7 +1534,7 @@ class OwnLines(unittest.TestCase):
 
     def test_startup_rules_and_session_links_bear_on_no_step(self):
         report = ("At session start, the project's standing rules from memory: act-don't-wait, never-ship-unfinished, "
-                  "temp-files-in-p4-tmp, keep-working-through-open-tasks, children-on-parent-branch and "
+                  "decide-by-research, keep-working-through-open-tasks, children-on-parent-branch and "
                   "archive-superseded-children.\n"
                   "- built-in, act-don't-wait: a next step the chain can settle is decided and done.\n"
                   "- [Check 6: phi session lines check](#local_abdc4c95-fe9b-4d58-b3ff-942b8338b3de)\n"

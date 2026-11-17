@@ -134,8 +134,8 @@ class Hook(unittest.TestCase):
         self.assertEqual(starts.pending(self.t.p4), [], "no start request is kept in this store")
         self.assertEqual(starts.pending(os.path.join(self.plug, ".claude", "p4")), [], "nor in the plugin's")
         self.assertNotIn("gapsTold", self.t.session(TOP), "and it is not counted as a gap told")
-        both = "p4-temportal and p4-phi carry this now: a session's scratchpad links to the store's tmp folder."
-        self.assertEqual(self.wrote(memory(self.t.p4, "temp-files-in-p4-tmp", both)), "")
+        both = "p4-temportal and p4-phi carry this now: a store moves only by p4.py sync."
+        self.assertEqual(self.wrote(memory(self.t.p4, "store-sync-by-p4-sync", both)), "")
         self.assertTrue(gaps.carried("The archiving of a worker is built into p4-phi since 0.8."))
         self.assertFalse(gaps.carried(CHILD_RULE))
         self.t.say(TOP, "and the rest")

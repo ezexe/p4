@@ -37,6 +37,25 @@ class Paths(unittest.TestCase):
         self.assertFalse(relay.overlap("e:/w/lib", "e:/w/docs"))
         self.assertEqual(relay.norm("/e/projects/x/", ""), relay.norm("E:/projects/x", ""))
 
+    def test_a_file_in_the_apps_scratchpad_of_the_session_is_scratch_and_never_a_conflict(self):
+        """ezexe/p4#131: a session's clones and probes live in the app's scratchpad, so a file there, by any of its
+        CLI sessions' <id>/scratchpad or by the scratchpadDir phi keeps, is scratch, as one under the store's
+        temportal/tmp of an older session still is; a file of the project is not."""
+        tmp = tempfile.mkdtemp()
+        try:
+            home = os.path.join(tmp, "proj", ".claude", "p4")
+            cli = "aaaa1111-0000-4000-8000-000000000000"
+            write(os.path.join(home, "phi", "sessions", "local_x", "session.json"), json.dumps(
+                {"sessionId": "local_x", "cliSessionIds": [cli], "scratchpadDir": "D:/pads/first-turn"}))
+            n = lambda p: relay.norm(p, os.path.join(tmp, "proj"))                        # noqa: E731
+            for f in (f"C:/Users/u/AppData/Local/Temp/claude/h/{cli}/scratchpad/p4/x.py",
+                      "D:/pads/first-turn/w/p4/x.py", os.path.join(home, "temportal", "tmp", cli, "x.py")):
+                self.assertTrue(relay.scratch(home, "local_x", n(f)), f)
+            for f in (os.path.join(tmp, "proj", "src", "x.py"), "C:/Users/u/AppData/Local/Temp/claude/h/other/x.py"):
+                self.assertFalse(relay.scratch(home, "local_x", n(f)), f)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_a_childs_slice_names_its_paths_relative_and_no_scratchpad_in_the_store(self):
         """The slice's paths as the project names them. No line names a scratchpad under .claude: the app names each
         session's scratchpad itself, and every write under .claude asks ezexe."""
