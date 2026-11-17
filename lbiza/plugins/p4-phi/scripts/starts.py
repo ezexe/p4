@@ -95,17 +95,22 @@ def files_of(brief, base=""):
 
 
 def _listed(value, base):
+    """The names of a `Files:` list: a piece is held only when it is one name, backticked or plain, with at most a
+    trailing parenthetical such as `(new)`; a piece that is a clause of words, as `the tests only`, names no file."""
     out = []
     for tok in re.split(r"\s*(?:,|;|\band\b)\s*", value):
-        ticked = re.findall(r"`([^`\s]+)`", tok)
-        plain = tok.strip().strip("'\"").rstrip(".").strip()
-        for name in ticked or ([plain.split(" ")[0]] if plain else []):
-            name = name.strip("`'\"").rstrip(".")
-            if not name:
-                continue
-            entry = relay.norm(name, base) if re.search(r"[\\/]", name) else name.lower()
-            if entry not in out:
-                out.append(entry)
+        piece = re.sub(r"\s*\([^()]*\)\s*$", "", tok.strip()).strip().strip("'\"").rstrip(".").strip()
+        lead = re.match(r"(`[^`\s]+`)\s+[A-Z]", piece)
+        if lead:
+            piece = lead.group(1)                       # a name, then a new sentence whose full stop was left out
+        if not piece or re.search(r"\s", piece.replace("`", "")) or piece.count("`") not in (0, 2):
+            continue
+        name = piece.strip("`'\"").rstrip(".")
+        if not name:
+            continue
+        entry = relay.norm(name, base) if re.search(r"[\\/]", name) else name.lower()
+        if entry not in out:
+            out.append(entry)
     return out
 
 

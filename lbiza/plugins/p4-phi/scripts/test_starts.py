@@ -266,6 +266,26 @@ class StartRequests(unittest.TestCase):
         self.assertEqual(starts.files_of("Files: none. The checkout is `" + root + "`.", base), [])
         self.assertIsNone(starts.files_of("The checkout is `" + root + "`.", base))
 
+    def test_a_clause_on_a_files_line_holds_no_word_of_it(self):
+        """A piece of a `Files:` list that is a clause of words names no file; a piece that is one name, backticked or
+        plain, with at most a trailing parenthetical, is held."""
+        base = self.t.proj
+        os.makedirs(os.path.join(base, "p4", ".git"))
+        root = relay.norm(os.path.join(base, "p4"))
+        sj = relay.norm("E:/x/phi/sessions/*/session.json", base)
+        st = relay.norm("lbiza/plugins/p4-phi/scripts/starts.py", base)
+        self.assertEqual(starts.files_of("Files: `E:/x/phi/sessions/*/session.json`, its `cliSessionIds` field only.",
+                                         base), [sj])
+        self.assertEqual(starts.files_of("Files: `lbiza/plugins/p4-phi/scripts/starts.py`, the tests only.", base),
+                         [st])
+        self.assertEqual(starts.files_of("Files: `lbiza/plugins/p4-phi/scripts/starts.py` and nothing else.", base),
+                         [st])
+        self.assertEqual(starts.files_of("Files: `" + root + "`, the whole checkout.", base), [root])
+        self.assertEqual(starts.files_of("Files: `lbiza/plugins/p4-phi/scripts/starts.py`, `test_starts.py` (new).",
+                                         base), [st, "test_starts.py"])
+        self.assertEqual(starts.files_of("Files: Makefile, `README`", base), ["makefile", "readme"])
+        self.assertEqual(starts.files_of("Files: none, this session changes no file.", base), [])
+
     def test_a_session_whose_closing_commit_is_pushed_is_told_what_it_still_holds(self):
         """Once its closing commit is on a remote branch, a session is told once what it still holds, with the
         command that releases it."""
