@@ -1,9 +1,10 @@
 // p4-phi's hooks module: the part of the plugin that runs inside Claude Code, where a command hook can only print.
 // It finds the python that find-python.sh proved for the plugin's runners, and it is an orchestrator's watcher: it
 // runs `phi.py look`, one pass over the session's subtree that writes its ledger, at a turn's end, at a message's
-// arrival and on a timer.
+// arrival and on a timer. It keeps the session's usage, which no command hook is given, in usage.json in the
+// session's folder in the store, for the python scripts to read.
 
-import type { EngineInterface, Register, Timer } from 'claude-code'
+import type { EngineInterface, Register, SessionContextUsage, SessionRateLimit, Timer } from 'claude-code'
 
 // What find-python.sh runs to prove an interpreter: the interpreter prints its own path.
 const PROOF = "import sys; print(sys.executable.replace(chr(92), '/'))"
@@ -30,8 +31,11 @@ type Answer = {
 // The python that runs the plugin's scripts, searched for once. A reload of the module starts all of this over.
 let finding: Promise<string | undefined> | undefined
 
-// The watcher. P4_PHI=0 or P4_PHI_WATCH=0 turns it off, which is read once, ahead of the first look.
-let switches: Promise<boolean> | undefined
+// P4_PHI=0 turns the module's work off, and P4_PHI_WATCH=0 the watcher alone. Both are read once.
+type Switches = { isPhiOff: boolean; isWatchOff: boolean }
+let switches: Promise<Switches> | undefined
+
+// The watcher.
 let isOff = false
 // A look is in flight: there is never a second one.
 let isLooking = false
@@ -48,6 +52,13 @@ let tickMs = 5_000
 let waitMs = 5_000
 let slowMs = 120_000
 let timer: Timer | undefined
+
+// The session's own folder in the store, as phi.py answers it, asked for once.
+let folder: string | undefined
+// The whole points of the usage last written to usage.json, and the writes, one after another.
+let written: string | undefined
+let writing: Promise<void> = Promise.resolve()
+
 // What was said to the debug log, each line once.
 const said = new Set<string>()
 
@@ -207,11 +218,13 @@ function dueAfter(): number {
   return isAsked ? tickMs : Math.max(tickMs, waitMs)
 }
 
-async function isSwitchedOff($: EngineInterface): Promise<boolean> {
+async function readSwitches($: EngineInterface): Promise<Switches> {
   try {
-    return (await $.env.get('P4_PHI')) === '0' || (await $.env.get('P4_PHI_WATCH')) === '0'
+    const isPhiOff = (await $.env.get('P4_PHI')) === '0'
+
+    return { isPhiOff, isWatchOff: isPhiOff || (await $.env.get('P4_PHI_WATCH')) === '0' }
   } catch {
-    return false
+    return { isPhiOff: false, isWatchOff: false }
   }
 }
 
@@ -219,8 +232,8 @@ async function isSwitchedOff($: EngineInterface): Promise<boolean> {
 // early is taken by the timer when it is due.
 async function look($: EngineInterface, isEvent: boolean): Promise<void> {
   try {
-    switches ??= isSwitchedOff($)
-    if (await switches) isOff = true
+    switches ??= readSwitches($)
+    if ((await switches).isWatchOff) isOff = true
     if (isOff) return
     if (isEvent) isAsked = true
     const now = await $.clock.now()
@@ -246,6 +259,7 @@ async function look($: EngineInterface, isEvent: boolean): Promise<void> {
     } finally {
       isLooking = false
     }
+    folder = answer?.dir ?? folder
     paceBy(answer, now, isSlow, wasAsked)
     arm($, dueAfter() - ((await $.clock.now()) - now))
   } catch (error) {
@@ -253,11 +267,93 @@ async function look($: EngineInterface, isEvent: boolean): Promise<void> {
   }
 }
 
+// The whole points of a session's usage. A figure that moves inside one point changes nothing here, so it writes
+// nothing: the context's percent is whole as Claude Code gives it, and a window's percent used has one decimal.
+function points(context: SessionContextUsage, limits: readonly SessionRateLimit[]): string {
+  const windows = limits.map(limit => `${limit.kind}:${Math.floor(limit.percentUsed)}:${limit.resetsAt ?? ''}`)
+
+  return [context.window, context.percent ?? '', ...windows.sort()].join('|')
+}
+
+// The session's folder in the store. Python is asked where it is, once, and again while the session has none.
+async function folderOf($: EngineInterface): Promise<string | undefined> {
+  folder ??= (await ask($, ['look', '--folder'], LOOK_MS))?.dir
+
+  return folder
+}
+
+// Writes the figures to usage.json in the session's folder when one of them moved a whole point. `$.fs.write` makes
+// the folders of the file it writes, so a session folder that was deleted is left alone, and asked for again.
+async function writeUsage(
+  $: EngineInterface,
+  context: SessionContextUsage,
+  limits: readonly SessionRateLimit[],
+): Promise<void> {
+  try {
+    switches ??= readSwitches($)
+    if ((await switches).isPhiOff) return
+    const moved = points(context, limits)
+    if (moved === written) return
+    const dir = await folderOf($)
+    if (dir === undefined) return
+    if (!(await $.fs.exists(`${dir}/session.json`))) {
+      folder = undefined
+
+      return
+    }
+    const record = {
+      at: await $.clock.now(),
+      context: { tokens: context.tokens, window: context.window, percent: context.percent },
+      rateLimits: limits.map(limit => ({
+        kind: limit.kind,
+        percentUsed: limit.percentUsed,
+        resetsAt: limit.resetsAt,
+      })),
+    }
+    await $.fs.write(`${dir}/usage.json`, `${JSON.stringify(record)}\n`)
+    written = moved
+  } catch (error) {
+    note($, `usage.json was not written: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
+  }
+}
+
+function record($: EngineInterface, context: SessionContextUsage, limits: readonly SessionRateLimit[]): void {
+  writing = writing.then(() => writeUsage($, context, limits))
+}
+
+// At a session's start, and at each reload of the module: the first look, which arms the timer and answers the
+// session's folder, and then the usage as it stands.
+async function begin($: EngineInterface): Promise<void> {
+  await look($, true)
+  try {
+    const usage = await $.session.usage()
+    record($, usage.context, usage.rateLimits)
+  } catch (error) {
+    note($, `the session's usage was not read: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
+  }
+}
+
 export const register: Register = on => {
-  // At a session's start, and at each reload of the module: the first look, which arms the timer. The session
-  // does not wait for it.
+  // The session does not wait for its first look.
   on('session.start', ($, e, next) => {
-    void look($, true)
+    void begin($)
+
+    return next(e)
+  })
+
+  // Claude Code raises this after each turn and when a plan limit's percent used changes.
+  on('session.measure', ($, e, next) => {
+    record($, e.context, e.rateLimits)
+
+    return next(e)
+  })
+
+  // After a /clear or a resume the process goes on under another session id, whose folder can be another one.
+  on('session.end', ($, e, next) => {
+    if (e.reason === 'clear' || e.reason === 'resume') {
+      folder = undefined
+      written = undefined
+    }
 
     return next(e)
   })

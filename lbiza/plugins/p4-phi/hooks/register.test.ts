@@ -1,10 +1,11 @@
 // p4-phi's hooks module under `claude plugin test`: each hook here stands for the engine, beneath the plugin.
 
 import { expect, mock, test } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import type { On, SessionUsage } from 'claude-code'
 
 const DATA = '/home/u/.claude/plugins/data/p4-phi-inline'
 const KEPT = '/opt/python/bin/python3'
+const FOLDER = '/work/project/.claude/p4/phi/sessions/local_top00001'
 const START = { cwd: '/', surface: 'desktop', isInteractive: true } as const
 const TURN = { answer: 'done', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as const
 const WORD = { origin: { kind: 'peer' }, text: 'the flush is ported' } as const
@@ -13,8 +14,29 @@ const WORD = { origin: { kind: 'peer' }, text: 'the flush is ported' } as const
 type Answer = Record<string, string | number | boolean>
 
 // An orchestrator whose sources change, and a session with nothing to watch, as puppeteer.look answers them.
-const ORCHESTRATOR: Answer = { watching: true, changed: false, net: false, watch_s: 5, wait_s: 5, net_s: 120 }
-const WORKER: Answer = { watching: false, why: 'no orchestrator', watch_s: 5, wait_s: 30, net_s: 120 }
+const ORCHESTRATOR: Answer = {
+  dir: FOLDER,
+  watching: true,
+  changed: false,
+  net: false,
+  watch_s: 5,
+  wait_s: 5,
+  net_s: 120,
+}
+const WORKER: Answer = { dir: FOLDER, watching: false, why: 'no orchestrator', watch_s: 5, wait_s: 30, net_s: 120 }
+
+// What `$.session.usage()` answered a live probe in the desktop app on Claude Code 2.1.325.
+const USAGE: SessionUsage = {
+  startedAt: 1794938960087,
+  context: { tokens: 575167, window: 1000000, percent: 58 },
+  rateLimits: [{ kind: 'seven_day', percentUsed: 82, resetsAt: '2026-11-21T06:00:00.000Z' }],
+  cost: { usd: 138.67 },
+}
+// The same figures as the module writes them to usage.json, less the time of the record: test_phi.py reads this
+// line back through phi.usage_of.
+const RECORD =
+  '"context":{"tokens":575167,"window":1000000,"percent":58},' +
+  '"rateLimits":[{"kind":"seven_day","percentUsed":82,"resetsAt":"2026-11-21T06:00:00.000Z"}]}'
 
 // The files of a machine by path, the commands on its PATH that prove themselves as a python, and what a look
 // answers there.
@@ -22,14 +44,17 @@ type Machine = {
   files?: Record<string, string>
   pythons?: Record<string, string>
   look?: (args: readonly string[]) => Answer | Promise<Answer>
+  usage?: SessionUsage
 }
 
-// What the module read, the pythons it tried, and each phi.py command it ran with its whole call.
+// What the module read, the pythons it tried, each phi.py command it ran with its whole call, and what it wrote.
 type Seen = {
+  files: Record<string, string>
   read: string[]
   tried: string[][]
   looks: string[][]
   calls: { argv: readonly string[]; env: Readonly<Record<string, string>> | undefined }[]
+  wrote: { path: string; text: string }[]
   logged: string[]
 }
 
@@ -39,9 +64,18 @@ function plain(path: string): string {
 }
 
 function machine(on: On, has: Machine): Seen {
-  const seen: Seen = { read: [], tried: [], looks: [], calls: [], logged: [] }
-  const files = has.files ?? { [`${DATA}/.python`]: `${KEPT}\n`, [KEPT]: '' }
+  const files = has.files ?? { [`${DATA}/.python`]: `${KEPT}\n`, [KEPT]: '', [`${FOLDER}/session.json`]: '{}' }
+  const seen: Seen = { files, read: [], tried: [], looks: [], calls: [], wrote: [], logged: [] }
   on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  on('session.usage', () => ({ value: has.usage ?? USAGE }))
+  on('fs.write', (_, e) => {
+    seen.wrote.push({ path: plain(e.path), text: e.text })
+    files[plain(e.path)] = e.text
+
+    return { value: undefined }
+  })
   on('session.id', () => ({ value: 'cli-0001' }))
   on('session.root', () => ({ value: '/work/project' }))
   on('turn.complete', () => ({ text: '' }))
@@ -285,24 +319,40 @@ test("an orchestrator's look is asked for by a subagent's turn end and by a mess
   expect(seen.looks.length).toBe(4)
 })
 
-test('P4_PHI_WATCH=0 runs no look and arms no timer', async ($, on) => {
+test('P4_PHI_WATCH=0 runs no look and arms no timer, and the usage is still kept', async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA, P4_PHI_WATCH: '0' })
   const clock = mock.clock(on)
-  const seen = machine(on, {})
+  const seen = machine(on, { look: () => ({ dir: FOLDER, watching: false }) })
 
   await $.session.start(START)
   await $.turn.complete(TURN)
   await $.session.receive(WORD)
   await clock.advance(3_600_000)
 
+  // The one command is the question of where the session's folder is.
+  expect(seen.looks).toEqual([['look', '--folder']])
+  expect(seen.wrote.map(file => file.path)).toEqual([`${FOLDER}/usage.json`])
+})
+
+test('P4_PHI=0 runs nothing and writes nothing', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA, P4_PHI: '0' })
+  const clock = mock.clock(on)
+  const seen = machine(on, {})
+
+  await $.session.start(START)
+  await $.turn.complete(TURN)
+  await $.session.measure({ context: USAGE.context, rateLimits: USAGE.rateLimits, changed: ['context'] })
+  await clock.advance(3_600_000)
+
   expect(seen.looks).toEqual([])
   expect(seen.read).toEqual([])
+  expect(seen.wrote).toEqual([])
 })
 
 test('a look that answers off is the last one', async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   const clock = mock.clock(on)
-  const seen = machine(on, { look: () => ({ watching: false, off: true, why: 'off' }) })
+  const seen = machine(on, { look: () => ({ dir: FOLDER, watching: false, off: true, why: 'off' }) })
 
   await $.session.start(START)
   await clock.settle()
@@ -310,4 +360,103 @@ test('a look that answers off is the last one', async ($, on) => {
   await clock.advance(3_600_000)
 
   expect(seen.looks.length).toBe(1)
+})
+
+test('the usage is written once at the start, to the folder the first look answered', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on, { now: 1794942221358 })
+  const seen = machine(on, {})
+
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(seen.wrote).toEqual([{ path: `${FOLDER}/usage.json`, text: `{"at":1794942221358,${RECORD}\n` }])
+  expect(seen.looks).toEqual([['look', '--net']])
+})
+
+test('a figure writes when it moves a whole point, and not inside one', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, {})
+  const week = { kind: 'seven_day', percentUsed: 82, resetsAt: '2026-11-21T06:00:00.000Z' }
+  const measure = async (context: SessionUsage['context'], rateLimits: SessionUsage['rateLimits']) => {
+    await $.session.measure({ context, rateLimits, changed: ['context'] })
+    await clock.settle()
+
+    return seen.wrote.length
+  }
+
+  await $.session.start(START)
+  await clock.settle()
+  expect(seen.wrote.length).toBe(1)
+
+  // More tokens inside the same percent, and a window that moves inside its point.
+  expect(await measure({ tokens: 579000, window: 1000000, percent: 58 }, [week])).toBe(1)
+  expect(await measure({ tokens: 579000, window: 1000000, percent: 58 }, [{ ...week, percentUsed: 82.9 }])).toBe(1)
+
+  // The context's next percent, then the window's next point, its reset, and a second window.
+  expect(await measure({ tokens: 590000, window: 1000000, percent: 59 }, [week])).toBe(2)
+  expect(await measure({ tokens: 590000, window: 1000000, percent: 59 }, [{ ...week, percentUsed: 83 }])).toBe(3)
+  const reset = { kind: 'seven_day', percentUsed: 0, resetsAt: '2026-11-28T06:00:00.000Z' }
+  expect(await measure({ tokens: 590000, window: 1000000, percent: 59 }, [reset])).toBe(4)
+  const hours = { kind: 'five_hour', percentUsed: 7.5, resetsAt: '2026-11-17T22:00:00.000Z' }
+  expect(await measure({ tokens: 590000, window: 1000000, percent: 59 }, [reset, hours])).toBe(5)
+
+  // A fresh window after a compaction has no fill yet: the record holds the window alone.
+  expect(await measure({ window: 1000000 }, [reset, hours])).toBe(6)
+  expect(JSON.parse(seen.wrote.at(-1)?.text ?? '{}').context).toEqual({ window: 1000000 })
+})
+
+test('with no session folder nothing is written, and python is asked again at the next measure', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let hasFolder = false
+  const seen = machine(on, {
+    look: () => (hasFolder ? WORKER : { watching: false, why: 'no session folder', watch_s: 5, wait_s: 30 }),
+  })
+
+  await $.session.start(START)
+  await clock.settle()
+  expect(seen.wrote).toEqual([])
+  expect(seen.looks).toEqual([['look', '--net'], ['look', '--folder']])
+
+  hasFolder = true
+  await $.session.measure({ context: USAGE.context, rateLimits: USAGE.rateLimits, changed: ['context'] })
+  await clock.settle()
+  expect(seen.looks.at(-1)).toEqual(['look', '--folder'])
+  expect(seen.wrote.map(file => file.path)).toEqual([`${FOLDER}/usage.json`])
+})
+
+test('a session folder that was deleted is not made again by the usage record', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, {})
+
+  await $.session.start(START)
+  await clock.settle()
+  expect(seen.wrote.length).toBe(1)
+
+  delete seen.files[`${FOLDER}/session.json`]
+  await $.session.measure({
+    context: { tokens: 700000, window: 1000000, percent: 70 },
+    rateLimits: USAGE.rateLimits,
+    changed: ['context'],
+  })
+  await clock.settle()
+  expect(seen.wrote.length).toBe(1)
+})
+
+test('after a clear the folder is asked for again and the usage is written again', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA, P4_PHI_WATCH: '0' })
+  const clock = mock.clock(on)
+  const seen = machine(on, { look: () => ({ dir: FOLDER, watching: false }) })
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.session.end({ reason: 'clear', sessionId: 'cli-0001', resume: { id: 'cli-0001' } })
+  await $.session.measure({ context: USAGE.context, rateLimits: USAGE.rateLimits, changed: ['context'] })
+  await clock.settle()
+
+  expect(seen.looks).toEqual([['look', '--folder'], ['look', '--folder']])
+  expect(seen.wrote.length).toBe(2)
 })

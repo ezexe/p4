@@ -36,9 +36,11 @@ Every behaviour below rests on a sentence of the Claude Code docs at `https://co
 | Runs an orchestrator's watcher from the module's timer, and starts no process that outlives a look | `plugins/mods/api.md`, "Run work in the background" | "`$.clock.every` and `$.clock.after` take the place of `setInterval` and `setTimeout`" and "The timer's callback runs outside any event, so it keeps running between turns and doesn't start one." |
 | Runs each look of the watcher, `phi.py look`, as one command that ends | `plugins/mods/api.md`, "Reach files, processes, and the network" | "`run(['git', 'status'])` starts a command and resolves when it exits." |
 | Asks for a look at a turn's end and at a message's arrival | `plugins/mods/reference.md`, "Events" | `turn.complete` fires when "A turn ended", and `session.receive` when "A message arrives from, or is about to go to, another agent or session." |
+| Keeps a session's context fill and plan limits in `usage.json` in the session's folder, written by the module at the session's start and at each whole point a figure moves | `plugins/mods/reference.md`, "Mods API methods" and "Events" | "`usage()` returns `{ startedAt, context, rateLimits, cost }`: `context` has `tokens`, `window`, and `percent`, and `rateLimits` is a list of `{ kind, percentUsed, resetsAt }`.", and `session.measure` fires "After each turn, and when a plan limit's percent used changes" |
 
 The watcher keeps one look in flight at most and `phi.watch_s` seconds between two looks.
 A session that is no orchestrator pays one check, and its timer's wait then doubles to ten minutes at most.
+`phi.usage_of` in `scripts/phi.py` reads `usage.json` back for the python scripts, since a command hook's input holds neither figure.
 
 Without a data folder, as when a test runs a hook, the proved python is kept in the plugin's own folder.
 
@@ -133,7 +135,7 @@ Each is for one run, a test or one machine's unusual layout.
 
 | Variable | Unset means | Set |
 | :- | :- | :- |
-| `P4_PHI` | phi.py's hooks run | `0` turns off phi.py's three hook commands, the checks hook.py hands it and the watcher, while retrieval goes on |
+| `P4_PHI` | phi.py's hooks run | `0` turns off phi.py's three hook commands, the checks hook.py hands it, the watcher and the usage record, while retrieval goes on |
 | `P4_PHI_RULES`, `P4_PHI_BOOK` | as `phi.json` says | `0` or `1` for one run |
 | `P4_PHI_PUPPETEER` | as `puppeteer` in `phi.json` says | `0` or `1` for one run |
 | `P4_PHI_WATCH` | an orchestrator's watcher runs | `0` keeps it from starting |

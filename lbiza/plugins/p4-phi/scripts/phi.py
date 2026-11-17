@@ -592,6 +592,50 @@ def load_reports(home, sid, tail=None):
     return read_rows(reports_path(home, sid), tail)
 
 
+USAGE_FILE = "usage.json"        # in a session's folder: what Claude Code measured of it, written by hooks/register.ts
+
+
+def usage_of(home, sid):
+    """What Claude Code last measured of a session's usage, read from usage.json in the session's folder. The
+    plugin's hooks module writes that file at the session's start and at every whole point a figure moves, from
+    `$.session.usage()`, whose `context` "has `tokens`, `window`, and `percent`" and whose `rateLimits` "is a list of
+    `{ kind, percentUsed, resetsAt }`", https://code.claude.com/docs/en/plugins/mods/reference.md.
+    Returns {} where there is no record to read: no hooks module ran for the session, or the file holds no context
+    window. Else a dict of three keys:
+      `at`          when the record was written, in seconds since the epoch;
+      `context`     `tokens`, the input tokens the last response was answered over, `window`, the model's context
+                    window in tokens, and `percent`, tokens over window as a whole percentage. `tokens` and `percent`
+                    are None until the first response of the live window, at a session's start and after a
+                    compaction;
+      `rateLimits`  a list, empty off a subscription, each entry with `kind`, such as five_hour or seven_day,
+                    `percentUsed`, 0 to 100 with one decimal at most, and `resetsAt`, an ISO 8601 time, or '' where
+                    Claude Code gave none.
+    The module's write is not atomic, so a file that does not parse is read once more."""
+    if not sid:
+        return {}
+    path = os.path.join(session_dir(home, sid), USAGE_FILE)
+    d = read_json(path)
+    if not d and os.path.exists(path):
+        time.sleep(0.02)
+        d = read_json(path)
+
+    def number(v):
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+    ctx = d.get("context") if isinstance(d.get("context"), dict) else {}
+    window = number(ctx.get("window"))
+    if not window or window <= 0:
+        return {}
+    limits = []
+    for r in d.get("rateLimits") if isinstance(d.get("rateLimits"), list) else []:
+        if isinstance(r, dict) and isinstance(r.get("kind"), str) and number(r.get("percentUsed")) is not None:
+            limits.append({"kind": r["kind"], "percentUsed": float(r["percentUsed"]),
+                           "resetsAt": r["resetsAt"] if isinstance(r.get("resetsAt"), str) else ""})
+    return {"at": (number(d.get("at")) or 0) / 1000.0,
+            "context": {"tokens": number(ctx.get("tokens")), "window": int(window),
+                        "percent": number(ctx.get("percent"))},
+            "rateLimits": limits}
+
+
 def latest_reports(rows, skip=""):
     """From the rows of a reports file, each session's latest turn, newest first. A session that left is dropped."""
     by = {}
