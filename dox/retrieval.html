@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Retrieval · p4-phi dox</title>
+<meta name="description" content="How p4-phi&#x27;s retrieval works: the corpus of a project&#x27;s own history, the index, the lines it adds beside a message, how it learns from labels, the teacher model, the dictionary and the files it keeps.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='1' width='14' height='14' rx='4' fill='%230b6b66'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#f5f3ec; --panel:#fffdf7; --sunk:#efece2; --ink:#1d1c19; --soft:#5d5a52; --line:#d9d4c6;
+  --phi:#0b6b66; --phi-bg:#dcefec;
+  --mono:ui-monospace,"Cascadia Code","SF Mono",Menlo,Consolas,monospace;
+  --sans:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#131418; --panel:#1b1d23; --sunk:#16171c; --ink:#e9e6dd; --soft:#a29e93; --line:#33363f;
+    --phi:#62d2c6; --phi-bg:#16312f;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#131418; --panel:#1b1d23; --sunk:#16171c; --ink:#e9e6dd; --soft:#a29e93; --line:#33363f;
+  --phi:#62d2c6; --phi-bg:#16312f;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 var(--sans)}
+.wrap{max-width:920px;margin:0 auto;padding:24px 16px 64px}
+a{color:var(--phi)}
+code{font:.88em var(--mono);background:var(--sunk);border-radius:4px;padding:1px 4px;overflow-wrap:anywhere}
+:focus-visible{outline:2px solid var(--phi);outline-offset:2px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.mark{font:600 13px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--phi);text-decoration:none}
+.mark:hover{text-decoration:underline}
+.pill{font:600 12px/1 var(--mono);color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:9px 13px;cursor:pointer;white-space:nowrap}
+.pill:hover{border-color:var(--phi)}
+h1{font-size:clamp(30px,5.4vw,44px);line-height:1.08;letter-spacing:-.02em;margin:16px 0 10px;text-wrap:balance}
+.lede{color:var(--soft);max-width:70ch;margin:0 0 18px}
+nav.toc{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}
+nav.toc a{font:600 13px/1 var(--sans);text-decoration:none;color:var(--soft);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:8px 12px}
+nav.toc a:hover{border-color:var(--phi);color:var(--ink)}
+section{margin:30px 0 0}
+h2{font-size:23px;letter-spacing:-.01em;margin:0 0 6px;scroll-margin-top:12px}
+p.intro{color:var(--soft);max-width:72ch;margin:0 0 12px}
+dl{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+dl>div{display:grid;grid-template-columns:minmax(0,220px) minmax(0,1fr);border-top:1px solid var(--line)}
+dl>div:first-child{border-top:0}
+dt{padding:11px 14px;font-weight:650;font-size:14.5px;background:var(--sunk);overflow-wrap:anywhere}
+dd{margin:0;padding:11px 14px;font-size:14.5px}
+dd p{margin:0 0 6px} dd p:last-child{margin:0}
+footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);font-size:14px;color:var(--soft)}
+@media (max-width:640px){dl>div{grid-template-columns:minmax(0,1fr)}dt{padding-bottom:4px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <a class="mark" href="index.html">← p4-phi · dox</a>
+    <button class="pill" id="theme" type="button" aria-label="Switch between light and dark">theme</button>
+  </div>
+  <h1>Retrieval</h1>
+  <p class="lede">Beside each message of ezexe's and each subagent's task, p4-phi finds the few entries of the project's own history it is confident of, such as a rule, a correction, a fact, an earlier answer or a saved file, and by default passes on the rules and facts among them. It learns which entries help from what each turn used. This page says what the code does, each entry read from its source line.</p>
+  <nav class="toc" aria-label="Sections">
+    <a href="#corpus">The corpus</a>
+    <a href="#index">The index</a>
+    <a href="#serving">What retrieval adds beside a message</a>
+    <a href="#messages">Message rows</a>
+    <a href="#commands">Commands</a>
+    <a href="#learning">How it learns</a>
+    <a href="#training">Training and evaluation</a>
+    <a href="#teacher">The teacher model</a>
+    <a href="#dictionary">The dictionary</a>
+    <a href="#files">Files and the migration</a>
+  </nav>
+  <section id="corpus" aria-labelledby="corpus-h">
+    <h2 id="corpus-h">The corpus</h2>
+    <p class="intro">Retrieval ranks the entries a project keeps under its store's <code>phi/store/</code>, beside its auto memory and saved code. Every path here is under the project's <code>.claude/p4/</code>.</p>
+    <dl>
+      <div><dt>The files</dt><dd><p><code>rules.md</code>, <code>corrections.md</code>, <code>retractions.md</code> and <code>facts.md</code>, with <code>vocabulary.md</code> for the dictionary and one file <code>messages/&lt;first 8 characters of the session id&gt;.md</code> for each session's message rows.</p><p>Each file opens with three header lines that name its fields: <code>ruling</code>, <code>owner-words</code>, <code>scope</code>, <code>form</code>, <code>status</code>, <code>time</code>, <code>pinned</code> and <code>plain</code> for a rule; <code>key</code>, <code>time</code>, <code>match</code>, <code>meant</code> and <code>delta</code> for a correction, or <code>asked</code>, <code>time</code> and <code>omitted</code> for a missed detail; <code>freed</code>, <code>time</code>, <code>cause</code>, <code>owner-words</code>, <code>swept</code> and <code>lesson</code> for a retraction; <code>claim</code>, <code>source</code>, <code>verified</code>, <code>by</code>, <code>time</code>, <code>from</code> and <code>supersedes</code> for a fact. The reader checks none of these fields.</p></dd></div>
+      <div><dt>An entry</dt><dd><p>An entry opens on a line <code>- key: value</code> at the left edge. Each further field is a line <code>  key: value</code> indented two spaces, and a line indented four spaces carries on the field above it. Any other line ends the entry, which is how the header lines are passed over.</p></dd></div>
+      <div><dt>An entry's id</dt><dd><p><code>&lt;file&gt;:&lt;time&gt;:&lt;first 8 hex digits of the SHA-1 of the entry's first value&gt;</code>, such as <code>rules.md:2026-11-10 14:02:1a2b3c4d</code>, with <code>~2</code>, <code>~3</code> added to a second entry of the same base in one file. The id holds no line number, so an edit elsewhere in the file keeps it. A memory section is <code>memory/&lt;name&gt;::&lt;8 hex digits of its heading&gt;</code> and a saved-code head <code>src/&lt;path&gt;::&lt;8 hex digits of the path&gt;</code>.</p></dd></div>
+      <div><dt>Status</dt><dd><p>An entry is LIVE unless its own <code>status:</code> says SPENT, FREED or EXPIRED, or a retraction frees it. A retraction frees an entry with the same <code>owner-words</code> that is older than it or where either is undated, and one whose first value and the retraction's <code>freed:</code> text overlap so that the shorter, at least 24 characters long, is inside the longer. Retractions and message rows are never freed. Only LIVE entries are ranked.</p></dd></div>
+      <div><dt>The word a line starts with</dt><dd><p>A line names its entry's kind: <code>rule</code>, <code>correction</code>, <code>missed detail</code> for a correction with <code>asked</code> or <code>omitted</code>, <code>retracted</code>, <code>fact</code>, <code>memory</code>, <code>earlier message</code> or <code>saved code</code>. It reads <code>- &lt;date or undated&gt; &lt;kind&gt;: &lt;text&gt; (&lt;path&gt;:&lt;line&gt;)</code>. A repository file prints <code>- file: …</code> and a commit <code>- commit &lt;date&gt;: …</code>.</p></dd></div>
+    </dl>
+  </section>
+  <section id="index" aria-labelledby="index-h">
+    <h2 id="index-h">The index</h2>
+    <dl>
+      <div><dt><code>phi/models/index.json</code></dt><dd><p>One document for each LIVE entry of the four corpus files, each completed message row of ezexe's, each auto memory section, each saved-code head, and each repository or dependency document. It holds BM25 postings with document lengths, the table of short messages, each session's rows for the repeat line, the dictionary, the <code>supersedes:</code> pairs of facts and the rules by the minute they were written. <code>index-cache.tmp</code> beside it is a faster copy, and git ignores both.</p></dd></div>
+      <div><dt>When it is built again</dt><dd><p>When it is missing, of another version, older than any of its sources, or when the number of source files changed. Its sources are <code>phi/store</code>, <code>temportal/memory</code>, <code>temportal/src</code>, <code>repo.json</code> and <code>deps.json</code>.</p></dd></div>
+      <div><dt>Words</dt><dd><p>A word is a run of letters, digits and underscores that starts with a letter or underscore, or a dotted number such as <code>3.15</code>. A word also yields its camel-case and snake-case parts. Each is lowercased and kept when it has three characters or more, a dot, or a letter and a digit such as <code>p4</code>, and is not a stop word.</p></dd></div>
+    </dl>
+  </section>
+  <section id="serving" aria-labelledby="serving-h">
+    <h2 id="serving-h">What retrieval adds beside a message</h2>
+    <p class="intro">The <code>recall</code> entry of p4-phi's <code>hooks/hooks.json</code> runs on each message of ezexe's, with a timeout of 10 seconds, and finds at most five lines for it. <code>recall.inject</code> in <code>p4.json</code> decides which of them reach the session: by default <code>rules-facts</code>, which passes only the lines of rules and facts and keeps the others in the served record for learning; <code>true</code> passes every line and <code>false</code> none, and <code>P4_RECALL_INJECT</code> set to <code>0</code>, <code>1</code> or <code>rules-facts</code> wins for one run.</p>
+    <dl>
+      <div><dt>A short message</dt><dd><p>A message of at most five words that ezexe sent at least twice before, once answered, gets one line: <code>- you have said "&lt;message&gt;" &lt;N&gt; times; last time (&lt;date&gt;) it was taken as: &lt;answer&gt;</code>. Where the last three readings differ, the line names the two most frequent with their counts. No ranked line follows it, though the repeated-message line may.</p></dd></div>
+      <div><dt>A repeated message</dt><dd><p>A message that resembles an answered one of the same session, the same words or, from three words on, half of them shared, gets <code>- an earlier message like this one (&lt;time&gt;) was answered: &lt;answer&gt;</code>.</p></dd></div>
+      <div><dt>Ranked lines</dt><dd><p>The rest are ranked by BM25 over the message's words, with dictionary hits at half weight. With a trained ranker, a line prints when its score reaches the ranker's threshold. With none, the message's other word forms join at half weight, and a document prints when it holds at least two of the message's words, covering 75% of them and 65% of their weight, at a density of 0.35 per square root of its length; a file document may pass on looser gates of its own, a document the dictionary points at needs no gate, and one of the session tree's needs one shared word. On that road a rule written in the same minute as a correction or retraction takes that line's place. At most two lines come from one file and five in all, each cut to 160 characters.</p></dd></div>
+      <div><dt>Jargon</dt><dd><p>A line that holds a word of the store's own jargon, such as <code>ruling</code>, <code>tombstone</code>, <code>read barrier</code> or <code>vlds</code>, is dropped unless its entry has a <code>plain:</code> field, whose wording is then printed instead.</p></dd></div>
+      <div><dt>The session tree's words</dt><dd><p>With <code>recall.node.on</code> true in <code>p4.json</code>, up to 12 of the rarest words of this session's task and of the tasks and notes of the sessions above it join the query at weight 0.3, and the entries labelled for those sessions' tasks become candidates. It is off by default.</p></dd></div>
+      <div><dt>Pinned rules at the start</dt><dd><p>At every session start p4-phi adds the LIVE rules of <code>rules.md</code> marked <code>pinned: yes</code>, newest first, under the line <code>Standing rules from ezexe:</code>, up to 1,500 characters.</p></dd></div>
+      <div><dt>Settings</dt><dd><p>The section <code>recall.query</code> of <code>p4.json</code> holds the numbers above: <code>max_lines</code> 5, <code>per_file</code> 2, <code>text_chars</code> 160, <code>history_chars</code> 120, <code>candidates</code> 200, <code>min_rare</code> 2, <code>fallback_cover</code> 0.75, <code>fallback_icover</code> 0.65, <code>fallback_dense</code> 0.35, <code>file_shared</code> 4, <code>file_cover</code> 0.55, <code>file_dense</code> 0.75, <code>variant_weight</code> 0.5 and <code>expand_weight</code> 0.5.</p></dd></div>
+      <div><dt>A failing hook</dt><dd><p>A retrieval hook of <code>hook.py</code> that raises an error exits 0 and adds nothing, with one line for ezexe, <code>phi (p4-phi): the &lt;name&gt; hook failed with &lt;error&gt;; nothing was added</code>, and one row a day in <code>phi/models/retrain-needed.tsv</code> for the p4-model skill.</p></dd></div>
+    </dl>
+  </section>
+  <section id="messages" aria-labelledby="messages-h">
+    <h2 id="messages-h">Message rows</h2>
+    <dl>
+      <div><dt>A row</dt><dd><p>Each message opens a row in its session's file with <code>fingerprint:</code>, the message cut to 300 characters, <code>time:</code> and <code>arrival:</code>, which is <code>turn</code>, <code>notification</code> or <code>agent message</code>. A turn's row names in <code>resembles:</code> the newest answered row it resembles.</p></dd></div>
+      <div><dt>Completed from the reply</dt><dd><p>When the turn ends, the row takes <code>addressed:</code>, the reply's first paragraph, and <code>recommended:</code>, its first recommending sentence. A row that resembled an earlier one is <code>ECHO</code> when the answers resemble each other too and <code>SUPERSEDED</code> when they do not, and a new one is <code>FRESH</code>. A notification's row is complete when it arrives.</p></dd></div>
+    </dl>
+  </section>
+  <section id="commands" aria-labelledby="commands-h">
+    <h2 id="commands-h">Commands</h2>
+    <p class="intro">Each runs as <code>python -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/p4.py" &lt;command&gt;</code>, with <code>--p4 &lt;store&gt;</code> to name a store.</p>
+    <dl>
+      <div><dt><code>index</code></dt><dd><p>Builds the index again when it is stale, or always with <code>--force</code>, and prints <code>index: rebuilt, &lt;n&gt; documents -&gt; &lt;path&gt;</code> or <code>index: fresh</code>. <code>--repo</code> first reads the project's tracked files and commits, and <code>--deps</code> its dependencies' documentation.</p></dd></div>
+      <div><dt><code>query --text "&lt;message&gt;"</code></dt><dd><p>Prints the lines retrieval would add, or the whole result with <code>--json</code>; <code>--session</code> gives the session for the repeat line.</p></dd></div>
+      <div><dt><code>check</code></dt><dd><p>Prints each corpus file's entries by status, the message rows, the dictionary, the labels and the index, ending on the share of indexed documents that hold jargon and no <code>plain:</code>, with a target under 10%.</p></dd></div>
+    </dl>
+  </section>
+  <section id="learning" aria-labelledby="learning-h">
+    <h2 id="learning-h">How it learns</h2>
+    <p class="intro">Each turn leaves labels: which documents of the index helped with which task. Rows go to <code>phi/models/labels.tsv</code>, <code>labels-raw.tsv</code> and <code>tasks.tsv</code>.</p>
+    <dl>
+      <div><dt>At a turn's end</dt><dd><p>The <code>close</code> hook on Stop completes the turn's message row, then labels each document retrieval served by whether the turn used it, and each repository file by what the turn did with it. It records the task, removes the served record and refreshes the index. It trains nothing.</p></dd></div>
+      <div><dt>After a subagent</dt><dd><p>The <code>subagent-stop</code> hook does the same for a subagent whose task retrieval served lines to, reading the subagent's own transcript.</p></dd></div>
+      <div><dt>Usage labels</dt><dd><p>A served document counts as used when the reply and the turn's edits and commands hold two of its rare words that the message did not, or a path it names that the message did not. Each such label weighs 0.3.</p></dd></div>
+      <div><dt>Repository labels</dt><dd><p>Each file a turn touched gets a label by what happened to it: edited 1 at weight 1.0, invoked 1 at 0.7, cited 1 at 0.7, dropped 0 at 0.3, unopened 0 at 0.2. A positive also reaches the file's symbols the turn named and its newest commit at half weight. <code>p4.py labels --from-transcripts --slug &lt;folder&gt;</code> labels the turns of earlier transcripts the same way, those of sessions with a message file unless <code>--all-sessions</code>, and replaces every repository row of <code>labels.tsv</code>, the hooks' rows included.</p></dd></div>
+      <div><dt>Other sources</dt><dd><p><code>p4.py labels --from-history</code> labels a repeated short message on its earlier reading at weight 1.0, and store entries at 0.5. The migration imports labelled pools at 0.7. A label with no weight of its own reads at 0.7 for a pool, 0.5 for the store, 0.3 for usage and 1.0 otherwise.</p></dd></div>
+      <div><dt>Newer facts</dt><dd><p>A fact that <code>supersedes:</code> another takes over the older fact's positive labels for every task dated at or after it, or undated.</p></dd></div>
+      <div><dt>The <code>train</code> hook</dt><dd><p>Runs on Stop in the background, unless <code>recall.learn</code> is false, and trains only when a round is owed: the first label of a store, a dependency change since the last round, or ten new labels with the last round at least an hour old.</p></dd></div>
+    </dl>
+  </section>
+  <section id="training" aria-labelledby="training-h">
+    <h2 id="training-h">Training and evaluation</h2>
+    <dl>
+      <div><dt>The ranker</dt><dd><p><code>phi/models/ranker.json</code> is a logistic model in the standard library: 2<sup>18</sup> hashed features of each candidate, such as its BM25 score and rank, its file, kind, status and age, and how many of the message's rare words it holds, fitted by AdaGrad over 25 epochs.</p></dd></div>
+      <div><dt><code>p4.py train</code> and <code>eval</code></dt><dd><p><code>train</code> runs one round, appends it to <code>phi/models/eval.tsv</code> and writes <code>ranker.json</code> only when the round is promoted, printing <code>train: round N promoted</code> or <code>kept old</code> with why. <code>eval</code> runs the same round and writes nothing. A round needs three labelled tasks with a positive among their candidates, and holds each out in turn up to 40, then uses five folds by time.</p></dd></div>
+      <div><dt>The threshold</dt><dd><p>The threshold is the one from 0.30 to 0.95 with the best mean F1 among those whose precision reaches 0.6, or the most precise one when none does, chosen on the labelled tasks alone.</p></dd></div>
+      <div><dt>Promotion</dt><dd><p>A round is kept old when its R-precision falls more than 0.02 below the last promoted round's, when its short-message rate falls, when its precision at the threshold is under 0.6, or when a dictionary entry that harms working messages stays on. Before any round is promoted, a store with at least three tasks labelled from pools alone needs those tasks to reach an R-precision of 0.36.</p></dd></div>
+      <div><dt>Silence tasks</dt><dd><p>Ordinary messages that should get no line, from <code>phi/models/silent.jsonl</code> or the plugin's <code>silent-prompts.jsonl</code>. Each candidate BM25 gives them is a negative, they train every fold, and the round reports the share the model would still print for.</p></dd></div>
+      <div><dt>Pool tasks</dt><dd><p>A task labelled from a pool keeps every candidate of the four corpus files, held entries included, so its negatives are the whole pool. Any other task keeps its positives and 60 negatives.</p></dd></div>
+      <div><dt>Settings</dt><dd><p><code>recall.train</code> in <code>p4.json</code>: <code>candidates</code> 200, <code>train_neg</code> 60, <code>folds</code> 5, <code>floor_drop</code> 0.02, <code>min_precision</code> 0.6, <code>first_floor</code> 0.36, <code>owed_labels</code> 10, <code>owed_age_s</code> 3600, <code>max_tasks</code> 400.</p></dd></div>
+      <div><dt>The re-exploration measure</dt><dd><p><code>p4.py labels --reexploration</code> counts, for each turn that opened a file it went on to use, the tool calls and input tokens spent before that file was opened, and how often the top five of retrieval held the file. It changes no label.</p></dd></div>
+    </dl>
+  </section>
+  <section id="teacher" aria-labelledby="teacher-h">
+    <h2 id="teacher-h">The teacher model</h2>
+    <p class="intro">A larger model edits the labels of a batch of tasks through <code>p4.py teacher</code>, and its rows enter training as <code>store+edited</code> at weight 1.0.</p>
+    <dl>
+      <div><dt>The models</dt><dd><p><code>recall.teacher</code> in <code>p4.json</code> names the teacher, <code>claude-fable-5-1</code> by default, and the second opinion, <code>claude-opus-5-5</code>, with <code>effort</code> high and <code>agree_min</code> 0.65.</p></dd></div>
+      <div><dt>The cutoff</dt><dd><p>Each candidate newer than the teacher's training cutoff is marked <code>[newer than your training]</code>, and up to 12 such entries that share a word with the task are sent beside it. The cutoff is <code>--cutoff</code>, else <code>recall.teacher.cutoff</code>, else the table in <code>teacher.py</code>, which knows only <code>claude-opus-5-5</code>'s, 2026-06, and gives that to the others.</p></dd></div>
+      <div><dt>Stored facts</dt><dd><p>The prompt tells the teacher that a stored fact with <code>verified:</code> or <code>checked:</code> wins over its own knowledge, and shows each fact's <code>verified</code>, <code>checked</code>, <code>since</code> and <code>prior</code> fields. No code checks its answers against them.</p></dd></div>
+      <div><dt>The second opinion</dt><dd><p><code>--second-opinion N</code> sends the newest N tasks to the second model. A batch whose two answers agree below an F1 of 0.65 is held in <code>teacher-batches.json</code>, and its tasks' own labels return to training.</p></dd></div>
+      <div><dt>Edited against raw</dt><dd><p>Each round with teacher labels fits once on the raw labels and once with the teacher's in their place, and scores both on the raw ones. A writing round that finds the teacher's worse holds those batches.</p></dd></div>
+      <div><dt>What a label records</dt><dd><p><code>labels.tsv</code> has the columns <code>task, entry, label, source, weight, time, teacher, edited, note</code>: the teacher that answered and the date it edited. <code>--re-edit</code> sends again the tasks another teacher edited.</p></dd></div>
+    </dl>
+  </section>
+  <section id="dictionary" aria-labelledby="dictionary-h">
+    <h2 id="dictionary-h">The dictionary</h2>
+    <p class="intro"><code>phi/store/vocabulary.md</code> maps ezexe's own words to what they mean and the entries they point at.</p>
+    <dl>
+      <div><dt>An entry</dt><dd><p><code>term</code>, <code>means</code>, <code>means-by</code>, <code>because</code>, <code>source</code>, <code>points-at</code>, <code>added</code> and <code>status</code>, <code>on</code> or <code>off</code>. One whose <code>means</code> is empty or starts <code>(pending</code> is pending.</p></dd></div>
+      <div><dt>Seeding</dt><dd><p>The migration writes one pending entry for the rarest word of ezexe's message before each correction, missed detail, retraction, repeat and follow-up. An entry whose first source is a follow-up starts <code>off</code>. The teacher fills the meanings.</p></dd></div>
+      <div><dt>Expansion</dt><dd><p>An entry that is on, not pending, and named in a message adds its meaning's missing words to the query at half weight, and the documents it points at pass the no-ranker road's word gates.</p></dd></div>
+      <div><dt>The check</dt><dd><p>Every round tests each entry that is on: a query on its quoted reason must rank what it points at in the top five, and it may change the top five of no more than 5% of 200 working messages. A failing entry is set <code>off</code>, unless its <code>source</code> holds the word <code>owner</code>: such an entry is listed and stays on, and keeps the round from promotion when it harms working messages.</p></dd></div>
+    </dl>
+  </section>
+  <section id="files" aria-labelledby="files-h">
+    <h2 id="files-h">Files and the migration</h2>
+    <dl>
+      <div><dt><code>phi/models/</code></dt><dd><p><code>index.json</code>, <code>ranker.json</code>, <code>eval.tsv</code>, the label files, <code>teacher-batches.json</code>, <code>label-edits.md</code>, <code>spend.json</code>, <code>retrain-needed.tsv</code>, and the indexes of the repository and its dependencies. ezexe/phi's p4-model skill writes the <code>.pt</code> ranker beside them.</p></dd></div>
+      <div><dt>Served records</dt><dd><p><code>phi/models/served/</code> holds one record of what retrieval served for each message, <code>turn-&lt;session&gt;</code>, and for each subagent's task, <code>agent-&lt;8 hex digits&gt;</code>, which the turn's end reads and removes. Records older than a day are removed at a session's start, and git ignores the folder.</p></dd></div>
+      <div><dt><code>p4.py migrate</code></dt><dd><p>Moves a store of the older layout into this one. It is a dry run unless <code>--apply</code>, writes its report to <code>phi/archive/migration-&lt;date&gt;.md</code>, and exits 1 on a failed check or an entry it could not place.</p></dd></div>
+    </dl>
+  </section>
+  <footer>Each entry is read from <code>hook.py</code>, <code>p4.py</code>, <code>store.py</code>, <code>rows.py</code>, <code>ranker.py</code>, <code>labels.py</code>, <code>train.py</code>, <code>teacher.py</code>, <code>migrate.py</code>, <code>node.py</code> and <code>p4conf.py</code> of p4-phi, in <a href="https://github.com/ezexe/p4">ezexe/p4</a> under <code>lbiza/plugins/p4-phi/scripts</code>. The <code>.pt</code> ranker and the ensemble of shard models are ezexe/phi's, whose <a href="https://github.com/ezexe/phi">repository</a> trains them.</footer>
+</div>
+<script>
+(function(){
+  var root=document.documentElement,key="dox-theme",btn=document.getElementById("theme");
+  function stored(){try{return localStorage.getItem(key)}catch(e){return null}}
+  function current(){return root.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")}
+  function label(){btn.textContent=current()==="dark"?"light theme":"dark theme"}
+  var s=stored(); if(s==="dark"||s==="light")root.setAttribute("data-theme",s);
+  label();
+  try{matchMedia("(prefers-color-scheme: dark)").addEventListener("change",label)}catch(e){}
+  btn.addEventListener("click",function(){var n=current()==="dark"?"light":"dark";root.setAttribute("data-theme",n);try{localStorage.setItem(key,n)}catch(e){}label()});
+})();
+</script>
+</body>
+</html>
