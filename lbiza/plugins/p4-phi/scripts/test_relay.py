@@ -887,15 +887,25 @@ class GhWrapper(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "a .cmd wrapper is a Windows install")
     def test_a_gh_cmd_wrapper_is_run(self):
         tmp = tempfile.mkdtemp(prefix="p4-phi-gh-")
-        old = os.environ.get("PATH", "")
+        old = {k: os.environ.get(k) for k in ("PATH", "P4_PHI_GH")}
         try:
+            os.environ.pop("P4_PHI_GH", None)               # an environment that names a gh cannot change the result
             os.environ["PATH"] = tmp + os.pathsep + os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
             for listed, want in (("1", True), ("0", False)):
                 with open(os.path.join(tmp, "gh.cmd"), "w") as f:
                     f.write(f"@echo {listed}\n")
                 self.assertEqual(relay._open_pr(tmp, "topic"), want, listed)
+            # cmd.exe reads a .cmd wrapper's arguments again: a branch named x&... must run no second command
+            mark = os.path.join(tmp, "ran.txt")
+            for name in ("x&echo.>ran.txt", "x|echo.>ran.txt"):     # no space, so no quotes guard it
+                relay._open_pr(tmp, name)
+                self.assertFalse(os.path.exists(mark), name)
         finally:
-            os.environ["PATH"] = old
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
             shutil.rmtree(tmp, ignore_errors=True)
 
 

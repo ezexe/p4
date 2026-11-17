@@ -1728,6 +1728,9 @@ def worktrees(repo):
     return out[1:]
 
 
+CMD_META = set('&|<>^%!"()\r\n')         # what cmd.exe reads in a .cmd or .bat file's arguments; no quoting stops it
+
+
 def gh(args, cwd=None, timeout=GIT_S):
     """gh's CompletedProcess, None when there is no gh or it failed to start or finish. It is the one way p4-phi
     runs gh: the gh P4_PHI_GH names, a `.py` file there run with this Python, else the gh on PATH by the full path
@@ -1737,6 +1740,8 @@ def gh(args, cwd=None, timeout=GIT_S):
     if not cmd:
         return None
     argv = [sys.executable, "-I", "-X", "utf8", cmd] if cmd.endswith(".py") else [cmd]
+    if cmd.lower().endswith((".cmd", ".bat")) and any(set(str(a)) & CMD_META for a in args):
+        return None                         # cmd.exe reads a wrapper's arguments again, & and | as commands
     try:
         return subprocess.run(argv + list(args), capture_output=True, text=True, encoding="utf-8", errors="replace",
                               timeout=timeout, cwd=cwd or None)
