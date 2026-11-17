@@ -33,7 +33,8 @@ The scratchpad directory is on unless p4.json's scratchpad.tmp is false or P4_SC
                  A file that an earlier turn end staged in such a repository, store or copy leaves the index again,
                  while one a commit holds keeps that commit's version there, so no deletion of it is staged. A
                  scratchpad directory over scratchpad.tmp_max_files has only its tracked files' changes staged, so
-                 no file added earlier stays staged after it is gone.
+                 no file added earlier stays staged after it is gone. A turn end that finds every file and folder of
+                 the directory as the last stage left them runs no git command to stage it.
   tmp-close      at SessionEnd, commits the session's scratchpad directory and only then removes its files: its
                  staged files are committed alone, leaving whatever else is staged, the files that commit holds are
                  deleted with the folders they leave empty, and the removal is committed too. A file no commit holds
@@ -72,6 +73,7 @@ Every failure prints a one-line notice and exits 0."""
 import json
 import os
 import glob
+import hashlib
 import re
 import shutil
 import stat
@@ -561,24 +563,36 @@ def stage_tmp(p4, sid):
     removal of a tracked file that is gone. A file that an earlier turn end staged in a folder nested_repo leaves out
     is taken out of the index again, while one a commit holds keeps that commit's version there, so no deletion of it
     is staged. False when the directory is too large to stage: then only its tracked files' changes are staged, so a
-    file staged earlier and gone since does not stay staged."""
+    file staged earlier and gone since does not stay staged. None when one of its git commands failed or timed out,
+    as on another process's index.lock, else True."""
     target = p4conf.sub(p4, "tmp", sid)
     copies = []
     files = tmp_files(target, copies) if os.path.isdir(target) else []
-    git_p4(p4, "add", "-u", "--", tmp_rel(sid), timeout=25)
+
+    def ran(r, codes=(0,)):
+        return r is not None and r.returncode in codes
+
+    # `add -u` exits 128 on a folder git tracks nothing in, as on a held index.lock, so it runs only when there is
+    # something tracked to update
+    tracked = git_p4(p4, "ls-files", "-z", "--", tmp_rel(sid))
+    ok = ran(tracked)
+    if ok and tracked.stdout:
+        ok = ran(git_p4(p4, "add", "-u", "--", tmp_rel(sid), timeout=25))
     if files is None:
         return False
     if copies:
-        git_p4(p4, "--literal-pathspecs", "reset", "-q", "--pathspec-from-file=-", "--pathspec-file-nul",
-               stdin=nul([os.path.relpath(c, p4).replace("\\", "/") for c in copies]), timeout=25)
+        ok = ran(git_p4(p4, "--literal-pathspecs", "reset", "-q", "--pathspec-from-file=-", "--pathspec-file-nul",
+                        stdin=nul([os.path.relpath(c, p4).replace("\\", "/") for c in copies]), timeout=25)) and ok
     rels = [os.path.relpath(f, p4).replace("\\", "/") for f in files]
     if rels:
         ignored = git_p4(p4, "check-ignore", "-z", "--stdin", stdin=nul(rels))
+        ok = ran(ignored, (0, 1)) and ok              # 1: none of them is ignored
         skip = set(ignored.stdout.decode("utf-8", "surrogateescape").split("\0")) if ignored else set()
         rels = [r for r in rels if r not in skip]
     if rels:
-        git_p4(p4, "add", "--pathspec-from-file=-", "--pathspec-file-nul", stdin=nul(rels), timeout=25)
-    return True
+        ok = ran(git_p4(p4, "add", "--pathspec-from-file=-", "--pathspec-file-nul", stdin=nul(rels),
+                        timeout=25)) and ok
+    return True if ok else None
 
 
 def commit_flags(p4):
@@ -607,6 +621,7 @@ def close_tmp(p4, sid):
     only then deleted, the removal committed too. A file no commit holds, because git ignores it, it is over the cap or
     it changed since, stays on disk. Returns the commit that holds the files, or '' when nothing was removed."""
     rel, target = tmp_rel(sid), p4conf.sub(p4, "tmp", sid)
+    drop_staged_mark(p4, sid)                          # before any return: the folder is closing, empty or not
     if not os.path.isdir(target) or stage_tmp(p4, sid) is False:
         return ""
     r = git_p4(p4, "diff", "--cached", "--quiet", "--", rel)
@@ -839,6 +854,7 @@ def close_idle(p4, own, hashdir=None, named=None):
                     pass
             try:
                 os.rmdir(d)
+                drop_staged_mark(p4, sid)
             except OSError:
                 pass
             continue
@@ -1105,8 +1121,115 @@ def cmd_tmp_sweep(payload):
             sweep_scratchpads(harness, sid, os.path.join(root, ".claude", "p4"), stamp, root)
     if p4 and sid:
         restore_tmp(p4, sid)
-        stage_tmp(p4, sid)
+        target, mark = p4conf.sub(p4, "tmp", sid), staged_mark(p4, sid)
+        files = tmp_print(p4, target)
+        now = tmp_digest(p4, sid, files) if files is not None and mark else ""
+        if not now or read_text(mark) != now:          # an empty digest, the index unread, never matches
+            seen = ""
+            if stage_tmp(p4, sid) is True and files is not None and mark:
+                seen = tmp_digest(p4, sid, files)      # the index as this stage left it
+            if seen:
+                try:
+                    os.makedirs(os.path.dirname(mark), exist_ok=True)
+                    with open(mark, "w", encoding="utf-8") as f:
+                        f.write(seen)
+                except OSError:
+                    pass
     return 0
+
+
+def git_dir(p4):
+    """The store's git directory without a git command: `.git` itself, or the folder a `.git` file names. None when
+    neither is there."""
+    dot = os.path.join(p4, ".git")
+    if os.path.isdir(dot):
+        return dot
+    try:
+        with open(dot, encoding="utf-8") as f:
+            line = f.readline().strip()
+    except OSError:
+        return None
+    if not line.startswith("gitdir:"):
+        return None
+    return os.path.normpath(os.path.join(p4, line[len("gitdir:"):].strip()))
+
+
+def git_common_dir(p4):
+    """What `git rev-parse --git-common-dir` prints, without a git command: the folder a worktree's `commondir` file
+    names, which holds info/exclude for every worktree, else the git directory itself. Per gitrepository-layout(5)."""
+    gd = git_dir(p4)
+    named = read_text(os.path.join(gd, "commondir")) if gd else None
+    return os.path.normpath(os.path.join(gd, named.strip())) if named and named.strip() else gd
+
+
+def staged_mark(p4, sid):
+    """Where tmp-sweep keeps the print of a scratchpad directory it last staged: in the store's git directory, out of
+    the working tree."""
+    gd = git_dir(p4)
+    return os.path.join(gd, "p4-tmp-staged", sid) if gd else None
+
+
+def drop_staged_mark(p4, sid):
+    """tmp-sweep's mark of a folder that is closing or gone, removed so marks do not pile up in the git directory."""
+    mark = staged_mark(p4, sid)
+    if mark:
+        try:
+            os.remove(mark)
+        except OSError:
+            pass
+
+
+def read_text(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def tmp_print(p4, target):
+    """The part of a scratchpad directory's print read from disk: each file tmp_files would stage, by path, size and
+    modification time, with tmp_files' skips and cap, and the modification time of each ignore file of the store that
+    reaches the directory, `info/exclude` and `.gitignore` at the store's top and in each folder down to the
+    directory. None when the directory is missing or over the cap, which tmp-sweep then stages every time. A file
+    edited to the same size within one tick of the file system's clock, or a change to core.excludesFile, does not
+    change it. Nor does a tracked file that tmp_files leaves out, under a skipped folder or a copy of a repository,
+    over the size cap, or a link: a change to one is staged by the next turn end that stages for another reason, and
+    at the close in any case, since close_tmp stages before it commits."""
+    if not os.path.isdir(target):
+        return None
+    files = tmp_files(target)
+    if files is None:
+        return None
+    rows = []
+    for p in sorted(files):
+        try:
+            st = os.lstat(p)
+        except OSError:
+            return None
+        rows.append(f"f {os.path.relpath(p, target)} {st.st_size} {st.st_mtime_ns}")
+    d = os.path.normpath(p4)
+    ignores = [os.path.join(git_common_dir(p4) or os.path.join(d, ".git"), "info", "exclude"),
+               os.path.join(d, ".gitignore")]
+    for part in os.path.relpath(target, d).split(os.sep)[:-1]:
+        d = os.path.join(d, part)
+        ignores.append(os.path.join(d, ".gitignore"))
+    for g in ignores:
+        try:
+            rows.append(f"i {g} {os.stat(g).st_mtime_ns}")
+        except OSError:
+            rows.append(f"i {g} -")
+    return "\n".join(rows)
+
+
+def tmp_digest(p4, sid, files):
+    """A scratchpad directory's print, kept small: a digest of tmp_print's rows and of the index's entries for the
+    directory, so a `git reset` or `git rm --cached` of its paths changes it too. It costs one `git ls-files`, in
+    place of the stage's three git commands. '' when that command fails, which never matches a kept print."""
+    index = git_p4(p4, "ls-files", "-s", "-z", "--", tmp_rel(sid))
+    if index is None or index.returncode != 0:
+        return ""
+    return hashlib.sha256(files.encode("utf-8", "surrogateescape") + b"\0\0" + index.stdout).hexdigest() + "\n"
 
 
 def cmd_tmp_close(payload):

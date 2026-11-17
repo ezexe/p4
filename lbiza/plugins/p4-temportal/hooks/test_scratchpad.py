@@ -1072,6 +1072,184 @@ def archived_lists_live_cases():
     print("test_scratchpad.py: archived lists live cases green")
 
 
+def quiet_sweep_cases():
+    """A tmp-sweep with nothing new under the session's scratchpad directory since the last stage runs no `git add`,
+    while a new file, an edited one and a removed one are each staged by the next tmp-sweep."""
+    if not shutil.which("git"):
+        print("test_scratchpad.py: quiet sweep cases skipped, no git on PATH")
+        return
+    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-quiet-")
+    sid = "6f6f6f6f-0000-4000-8000-0000000006f6"
+    p4 = os.path.join(root, ".claude", "p4")
+    mine, rel = os.path.join(p4, "temportal", "tmp", sid), f"temportal/tmp/{sid}"
+    trace = os.path.join(root, "git-trace.txt")
+    env = {"CLAUDE_CONFIG_DIR": os.path.join(root, ".config"), "GIT_TRACE": trace}
+
+    def git(*args):
+        return subprocess.run(["git", "-C", p4] + list(args), check=True, capture_output=True, text=True).stdout
+
+    def sweep():
+        if os.path.exists(trace):
+            os.remove(trace)
+        run_sub("tmp-sweep", {"cwd": root, "session_id": sid}, env, CLAUDE_PROJECT_DIR=root)
+        with open(trace, encoding="utf-8", errors="replace") as f:
+            return [x for x in f if "trace: built-in: git" in x and " add " in x]
+
+    def staged():
+        return sorted(git("diff", "--cached", "--name-only", "--", rel).split())
+
+    try:
+        os.makedirs(p4)
+        for args in (["init", "-q"], ["config", "user.name", "t"], ["config", "user.email", "t@t"]):
+            git(*args)
+        put(p4, "first.md", "first\n")
+        git("add", "first.md")
+        git("commit", "-q", "-m", "first")
+        put(mine, "a.md", "a\n")
+        put(mine, "sub/b.md", "b\n")
+        assert sweep(), "the first tmp-sweep staged nothing"
+        assert staged() == [f"{rel}/a.md", f"{rel}/sub/b.md"], staged()
+        adds = sweep()
+        assert adds == [], f"a quiet tmp-sweep ran git add:\n{''.join(adds)}"
+        put(mine, "sub/c.md", "c\n")
+        assert sweep() and f"{rel}/sub/c.md" in staged(), "a new file was not staged"
+        put(mine, "a.md", "a, longer now\n")
+        sweep()
+        assert git("show", f":{rel}/a.md") == "a, longer now\n", "an edited file was not staged"
+        os.remove(os.path.join(mine, "sub", "b.md"))
+        sweep()
+        assert f"{rel}/sub/b.md" not in staged(), "a removed file stayed staged"
+        assert sweep() == [], "a quiet tmp-sweep after the removal ran git add"
+        # a write under a folder tmp_files never stages, here a .venv, leaves the turn end quiet
+        put(mine, ".venv/lib/x.py", "x = 1\n")
+        assert sweep() == [], "a write under .venv made the turn end stage"
+        # a stage that failed, here on another process's index.lock, is tried again at the next quiet turn end
+        put(mine, "d.md", "d\n")
+        lock = os.path.join(p4, ".git", "index.lock")
+        put(os.path.dirname(lock), "index.lock", "")
+        sweep()
+        os.remove(lock)
+        assert f"{rel}/d.md" not in staged(), "the fixture's lock did not stop the stage"
+        sweep()
+        assert f"{rel}/d.md" in staged(), "after a failed stage a quiet turn end staged nothing"
+        # the folder taken out of the index, as the layout move's `git rm --cached` does, is staged again
+        git("rm", "-r", "-q", "--cached", "--", rel)
+        sweep()
+        assert f"{rel}/d.md" in staged(), "a folder taken out of the index was not staged again"
+        # a file the store's .gitignore or info/exclude stops ignoring is staged at the next turn end
+        for ignores, ext in ((os.path.join(p4, ".gitignore"), "ign"), (os.path.join(p4, ".git", "info", "exclude"),
+                                                                          "skip")):
+            put(os.path.dirname(ignores), os.path.basename(ignores), f"*.{ext}\n")
+            put(mine, f"e.{ext}", "e\n")
+            sweep()
+            assert f"{rel}/e.{ext}" not in staged(), f"*.{ext} was staged while ignored"
+            put(os.path.dirname(ignores), os.path.basename(ignores), "")
+            sweep()
+            assert f"{rel}/e.{ext}" in staged(), f"*.{ext} was not staged once {ignores} stopped ignoring it"
+        mark = os.path.join(p4, ".git", "p4-tmp-staged", sid)
+        assert os.path.isfile(mark) and os.path.getsize(mark) < 200, "the mark is missing or holds more than a digest"
+        run_sub("tmp-close", {"cwd": root, "session_id": sid}, env, CLAUDE_PROJECT_DIR=root)
+        assert not os.path.exists(mark), "the mark was left after the folder closed"
+    finally:
+        wipe(root)
+    print("test_scratchpad.py: quiet sweep cases green")
+
+
+def quiet_sweep_mark_cases():
+    """tmp-sweep's mark goes with its folder: a close of an empty folder removes it, and so does a start that removes
+    another session's empty folder. A digest that could not read the index is never kept, so two such turn ends in a
+    row both stage. In a store that is a worktree, info/exclude is read from the common git folder."""
+    if not shutil.which("git"):
+        print("test_scratchpad.py: quiet sweep mark cases skipped, no git on PATH")
+        return
+    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-mark-")
+    sid, other = "7a7a7a7a-0000-4000-8000-0000000007a7", "8b8b8b8b-0000-4000-8000-0000000008b8"
+    p4 = os.path.join(root, ".claude", "p4")
+    temp = os.path.join(root, "temp")
+    env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp, "CLAUDE_CONFIG_DIR": os.path.join(root, ".config")}
+
+    def git(where, *args):
+        return subprocess.run(["git", "-C", where] + list(args), check=True, capture_output=True, text=True).stdout
+
+    def mark(s, store=p4):
+        gd = git(store, "rev-parse", "--absolute-git-dir").strip()
+        return os.path.join(gd, "p4-tmp-staged", s)
+
+    def store(at):
+        os.makedirs(at)
+        for args in (["init", "-q"], ["config", "user.name", "t"], ["config", "user.email", "t@t"]):
+            git(at, *args)
+        put(at, "first.md", "first\n")
+        git(at, "add", "first.md")
+        git(at, "commit", "-q", "-m", "first")
+
+    saved, env_saved = list(sys.path), dict(os.environ)
+    try:
+        store(p4)
+        # a close of an empty folder removes its mark
+        put(os.path.join(p4, "temportal", "tmp", sid), "a.md", "a\n")
+        run_sub("tmp-sweep", {"cwd": root, "session_id": sid}, env, CLAUDE_PROJECT_DIR=root)
+        assert os.path.isfile(mark(sid)), "tmp-sweep kept no mark"
+        os.remove(os.path.join(p4, "temportal", "tmp", sid, "a.md"))
+        git(p4, "rm", "-q", "--cached", "--", f"temportal/tmp/{sid}/a.md")
+        run_sub("tmp-close", {"cwd": root, "session_id": sid}, env, CLAUDE_PROJECT_DIR=root)
+        assert not os.path.exists(mark(sid)), "the close of an empty folder left its mark"
+        # a start that removes another session's empty folder removes its mark
+        empty = os.path.join(p4, "temportal", "tmp", other)
+        os.makedirs(empty)
+        put(os.path.dirname(mark(other)), other, "a digest\n")
+        age(empty, hours=3)
+        os.makedirs(os.path.join(temp, "claude", "30ad6e18862a20e8", sid, "scratchpad"))
+        run_sub("tmp-link", {"cwd": root, "session_id": sid}, env, CLAUDE_PROJECT_DIR=root)
+        assert not os.path.exists(empty), "the start left another session's empty folder"
+        assert not os.path.exists(mark(other)), "the start removed the empty folder but left its mark"
+        # an index that cannot be read leaves no mark, so the next turn end stages again
+        sys.path[:0] = [os.path.join(os.path.dirname(os.path.dirname(HERE)), "p4-phi", "scripts"), HERE]
+        import scratchpad
+        os.environ.update(env, CLAUDE_PROJECT_DIR=root)
+        put(os.path.join(p4, "temportal", "tmp", sid), "b.md", "b\n")
+        real, adds = scratchpad.git_p4, []
+
+        def failing(store_dir, *args, **kw):
+            if args[:2] == ("ls-files", "-s"):
+                return None
+            if args[:1] == ("add",):
+                adds.append(args)
+            return real(store_dir, *args, **kw)
+        scratchpad.git_p4 = failing
+        try:
+            for turn in (1, 2):
+                scratchpad.cmd_tmp_sweep({"cwd": root, "session_id": sid})
+                assert not os.path.exists(mark(sid)), f"turn end {turn} kept a mark it could not read the index for"
+                assert adds, f"turn end {turn} skipped the stage with an unreadable index"
+                adds.clear()
+        finally:
+            scratchpad.git_p4 = real
+        # a store that is a worktree reads info/exclude from the common git folder
+        main = os.path.join(root, "main")
+        store(main)
+        wt = os.path.join(root, "wt", ".claude", "p4")
+        git(main, "worktree", "add", "-q", wt)
+        common = os.path.join(main, ".git", "info", "exclude")
+        put(os.path.dirname(common), "exclude", "*.wt\n")
+        mine = os.path.join(wt, "temportal", "tmp", sid)
+        put(mine, "e.wt", "e\n")
+        payload = {"cwd": os.path.join(root, "wt"), "session_id": sid}
+        run_sub("tmp-sweep", payload, env, CLAUDE_PROJECT_DIR=payload["cwd"])
+        listed = git(wt, "diff", "--cached", "--name-only")
+        assert "e.wt" not in listed, listed
+        put(os.path.dirname(common), "exclude", "")
+        run_sub("tmp-sweep", payload, env, CLAUDE_PROJECT_DIR=payload["cwd"])
+        listed = git(wt, "diff", "--cached", "--name-only")
+        assert f"temportal/tmp/{sid}/e.wt" in listed, f"the common info/exclude was not read: {listed!r}"
+    finally:
+        sys.path[:] = saved
+        os.environ.clear()
+        os.environ.update(env_saved)
+        wipe(root)
+    print("test_scratchpad.py: quiet sweep mark cases green")
+
+
 def scratchpad_dir_cases():
     """With `scratchpad_dir` on stdin pointing under a CLAUDE_CODE_TMPDIR tree, outside the system temp directory,
     tmp-link links that path, even before its folder exists."""
@@ -1470,6 +1648,12 @@ class Cases(unittest.TestCase):
 
     def test_archived_lists_live_cases(self):
         archived_lists_live_cases()
+
+    def test_quiet_sweep_cases(self):
+        quiet_sweep_cases()
+
+    def test_quiet_sweep_mark_cases(self):
+        quiet_sweep_mark_cases()
 
     def test_scratchpad_dir_cases(self):
         scratchpad_dir_cases()
