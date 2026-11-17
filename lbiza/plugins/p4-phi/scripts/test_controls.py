@@ -737,6 +737,21 @@ class Supervisor(unittest.TestCase):
         self.assertNotIn("orchestrates. If so", context(t.say(PUP, "How is the weather on the moon today?")))
 
 
+    def test_rules_md_holds_a_memorys_new_wording_once_the_board_names_its_change(self):       # 200
+        t = self.t
+        conf = os.path.join(t.tmp, "conf")
+        os.makedirs(conf)
+        memory(t.p4, "tabs-not-spaces", "feedback", "Indent with tabs in the exporter.")
+        t.hook("session-start", PUP, {"hook_event_name": "SessionStart", "source": "startup"}, CLAUDE_CONFIG_DIR=conf)
+        t.say(PUP, "Control the trees", CLAUDE_CONFIG_DIR=conf)
+        rules = os.path.join(t.p4, "phi", "rules.md")
+        self.assertIn("Indent with tabs in the exporter.", read(rules))
+        memory(t.p4, "tabs-not-spaces", "feedback", "Indent with four spaces in the exporter, never tabs.")
+        t.say(PUP, "carry on", CLAUDE_CONFIG_DIR=conf)
+        self.assertIn("- tabs-not-spaces, ", read(os.path.join(t.dir(PUP), "board.md")))
+        self.assertIn("Indent with four spaces in the exporter, never tabs.", read(rules))
+        self.assertNotIn("Indent with tabs in the exporter.", read(rules))
+
     def pre(self, host, tool, inp, proj=None, **more):
         """One PreToolUse call through `recall-hook.sh lookup-check`, as hooks.json runs it: the reason or the
         context it hands, '' for none."""
