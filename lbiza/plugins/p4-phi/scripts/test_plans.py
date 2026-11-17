@@ -92,8 +92,8 @@ class Tasks(unittest.TestCase):
         plans.keep_in_flight(s, {"background_tasks": [
             {"id": "bsmoke001", "type": "shell", "status": "running", "description": "smoke", "command": "sh smoke.sh",
              "extra": 1},
-            {"id": "a8ed9430d359ce61d", "type": "subagent", "status": "running", "description": "sweep",
-             "agent_type": "p4-phi:sweep"}]})
+            {"id": "a8ed9430d359ce61d", "type": "subagent", "status": "running", "description": "search",
+             "agent_type": "Explore"}]})
         self.assertEqual([t["id"] for t in plans.in_flight(s)], ["bsmoke001", "a8ed9430d359ce61d"])
         self.assertNotIn("extra", s["backgroundTasks"][0])
         self.assertTrue(s["backgroundAt"])
@@ -719,8 +719,8 @@ class Levels(unittest.TestCase):
         self.assertEqual(self.pre(TOP, {"command": "python other.py", "run_in_background": True}), {})
 
     def test_each_step_is_named_for_the_level_it_runs_at(self):
-        for text, level in (("Find where the exporter is configured across src/", "sweep"),
-                            ("Read the hooks docs and list what PreToolUse may return", "sweep"),
+        for text, level in (("Find where the exporter is configured across src/", "read"),
+                            ("Read the hooks docs and list what PreToolUse may return", "read"),
                             ("Run test_flush.py", "runner"), ("Re-run the build", "runner"),
                             ("Run the tests and fix what fails", "session"),
                             ("Port the exporter to the new writer", "session"),
@@ -729,15 +729,17 @@ class Levels(unittest.TestCase):
         p = self.t.proj
         ctx = self.plan(TOP, items("Find where the exporter is configured across src/", "Run test_flush.py",
                                    f"Port the exporter in {p}/src/export/flush.py to the new writer"))
-        self.assertIn("which only reads or searches: a background subagent, `p4-phi:sweep`, not a session", ctx)
-        self.assertIn("which only runs a command: a background subagent, `p4-phi:runner`, not a session", ctx)
+        self.assertIn("which only reads or searches: it goes to the built-in subagent `Explore`, with `model` `haiku` "
+                      "on the Agent call, not a session", ctx)
+        self.assertIn("which only runs a command: it goes to the background subagent `p4-phi:runner`, not a session",
+                      ctx)
         self.assertIn("mcp__ccd_session__start_session", ctx, "the step that writes still goes to a worker")
         self.assertIn("split by the files they write", ctx)
         s = relay._session(self.t.p4, TOP)
         plain = plans.top_advice(self.t.p4, {**s, "splitAdvised": []}, {"steps": [
             {"addr": "9", "content": "Find where the ports table is read across lib/", "status": "pending"}]},
             True, "", levels=False)
-        self.assertNotIn("p4-phi:sweep", plain, "with delegation off every work step is a child's")
+        self.assertNotIn("`Explore`", plain, "with delegation off every work step is a child's")
 
     def test_no_start_call_or_card_is_handed_out_with_neither_key(self):
         """A child's card advice carries the `model` and `effort` keys, the plugin-gap line hands no start call at
@@ -1415,7 +1417,8 @@ class WaitsOnReports(unittest.TestCase):
             self.assertEqual(self.check(TOP, "Bash", {"command": cmd}, f"tu-r{k}"), "", cmd)
         said = self.check(TOP, "Bash", {"command": "git log --stat -3"}, "tu-r7")
         self.assertIn("has now run 7 read-only checks of its trees here", said)
-        self.assertIn("`p4-phi:sweep`", said)
+        self.assertIn("hand it to the built-in subagent `Explore`, with `model` `haiku` on the Agent call", said)
+        self.assertNotIn("p4-phi:", said, "no agent of the plugin's own is named for a read")
         self.assertNotIn("worker", said)
         self.assertEqual(self.check(TOP, "Bash", {"command": "git log -1"}, "tu-r8"), "", "said once for the step")
         self.assertIn("is work: hand it to a worker",

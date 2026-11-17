@@ -1362,7 +1362,7 @@ class Rules(unittest.TestCase):
     def test_the_levels_rule_is_given_with_no_configuration_and_p4_json_turns_it_off(self):
         """On in every project, a store or none; only p4.json's phi.levels: false leaves it out."""
         got = self.start(TOP)
-        for word in ("built-in, levels", "`p4-phi:sweep`", "`p4-phi:runner`", "`p4-phi:check`",
+        for word in ("built-in, levels", "the built-in subagent `Explore`", "`p4-phi:runner`", "`p4-phi:check`",
                      "`run_in_background: true`"):
             self.assertIn(word, got)
         self.assertNotIn("ezexe", phi.LEVELS, "it addresses the session and names no person")
@@ -1386,6 +1386,16 @@ class Rules(unittest.TestCase):
         for word in ("sleep", "poll", "never wait", "wait for it", "completion notification", "Once one is started"):
             self.assertNotIn(word, phi.LEVELS, word)
         self.assertIn("`run_in_background: true`", phi.LEVELS)
+
+    def test_a_read_across_files_goes_to_the_built_in_explore_subagent_on_a_small_model(self):
+        """sub-agents.md: Explore is "A fast, read-only agent optimized for searching and analyzing codebases." and
+        runs on "the parent conversation's model", and "The per-invocation `model` parameter" is first in the page's
+        model order. So the plugin ships no search agent, and the rule names `Explore` with `model` `haiku` on the
+        call."""
+        self.assertFalse(os.path.exists(os.path.join(ROOT, "agents", "sweep.md")), "the plugin's own copy is gone")
+        self.assertIn("goes to the built-in subagent `Explore`, with `model` `haiku` on the Agent call", phi.LEVELS)
+        self.assertNotIn("sweep", phi.LEVELS)
+        self.assertNotIn("p4-phi:sweep", self.start(TOP))
 
 
 class Ids(unittest.TestCase):

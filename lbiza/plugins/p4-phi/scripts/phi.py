@@ -1077,15 +1077,19 @@ ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves this bui
 # - The rule says nothing of waiting, sleeping or polling: the Agent tool's and the shell tools' own descriptions
 #   tell a session that a background subagent or command notifies it when it ends, and sub-agents.md says "A
 #   background subagent's results reach Claude as a completion notification in a later turn."
-# - plugins/components.md, "Agents": "The name form is `<plugin>:<name>`", so agents/sweep.md is `p4-phi:sweep`.
+# - sub-agents.md, "Built-in subagents", Explore: "A fast, read-only agent optimized for searching and analyzing
+#   codebases." Its model is "the parent conversation's model", so the rule names a small one on the call: "The
+#   per-invocation `model` parameter" is first in the page's model order, and "On an Agent tool call, the parameter
+#   takes a model alias, not a full model ID or `inherit`."
+# - plugins/components.md, "Agents": "The name form is `<plugin>:<name>`", so agents/check.md is `p4-phi:check`.
 # - tools-reference.md, "Background commands": "Claude can set `run_in_background: true` to start the command as a
 #   background task and continue working while it runs."
 # - tools-reference.md, "Foreground commands that move to the background": "When a foreground command reaches its
 #   timeout without finishing, Claude Code moves it to the background instead of stopping it, unless the command
 #   starts with `sleep`." The default is `BASH_DEFAULT_TIMEOUT_MS`, "two minutes out of the box".
 LEVELS = ("built-in, levels: work is delegated to where Claude Code runs it best, so this session's own turn is "
-          "never held by it. A search or a read across more than a couple of files goes to the background subagent "
-          "`p4-phi:sweep`; a command expected to run long, such as a test file, a test suite or a build, goes to "
+          "never held by it. A search or a read across more than a couple of files goes to " + plans.EXPLORE + "; "
+          "a command expected to run long, such as a test file, a test suite or a build, goes to "
           "`p4-phi:runner` or to a Bash or PowerShell call of its own with `run_in_background: true`; a read of a "
           "diff or a result that should not lean on this session's own view goes to `p4-phi:check`. A worker is "
           "started with a `model` and an `effort` that fit its step, as the advice that hands out each start call "
@@ -1740,7 +1744,7 @@ TREE_CHECK = re.compile(r"(?:^|[\s;&|(])(?:git\s+(?:-C\s+\S+\s+)?(?:log|status|d
 def tree_checked(me, s, st):
     """An orchestrator's read-only check of its trees in a work step, such as a session list, `git log`,
     `gh issue list` or `gh issue view`: counted, and never handed off while they are few. Past TREE_CHECKS in one
-    step it is told once that the rest is a read for `p4-phi:sweep`. None while they are few."""
+    step it is told once that the rest is a read for the built-in Explore subagent. None while they are few."""
     key = nudge_key(st)
     held = s.get("treeChecks") if isinstance(s.get("treeChecks"), dict) else {}
     n = (int(held.get("n") or 0) if held.get("key") == key else 0) + 1
@@ -1751,8 +1755,8 @@ def tree_checked(me, s, st):
     RAN["tree_checks"] = n
     return (f"phi (p4-phi): step {st.get('addr')} has now run {n} read-only checks of its trees here. A few, such as "
             f"a session list, `git log`, `gh issue list` or `gh issue view`, are this orchestrator's own "
-            f"orchestration; past {TREE_CHECKS} the rest is a read across the trees: hand it to the background "
-            f"subagent `p4-phi:sweep`. Said once for this step.")
+            f"orchestration; past {TREE_CHECKS} the rest is a read across the trees: hand it to "
+            f"{plans.EXPLORE}. Said once for this step.")
 
 
 def h_puppeteer_tool(payload):
@@ -1808,7 +1812,7 @@ def h_nudge(payload):
     if level != "session":                         # a step a subagent does needs no session
         return (f"phi (p4-phi): this is the orchestrator, kept free for orchestration, and step "
                 f"{st.get('addr')}, \"{cut(clean(st.get('content')), 120)}\", {plans.LEVEL_WHAT[level]}: hand it to "
-                f"the background subagent `p4-phi:{level}`. "
+                f"{plans.LEVEL_WHERE[level]}. "
                 f"Said once for this step.")
     return (f"phi (p4-phi): this is the orchestrator, kept free for orchestration, and step {st.get('addr')}, "
             f"\"{cut(clean(st.get('content')), 120)}\", is work: hand it to a worker with "

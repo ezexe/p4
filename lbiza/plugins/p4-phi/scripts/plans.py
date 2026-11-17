@@ -468,8 +468,8 @@ def split_advice(home, s, plan, owner_turn, cap):
     stay = ("; ".join(f"{a}, {why}" for a, why in kept)) or "none"
     each = "; ".join(f"{st['addr']} with {level_words(st.get('content'))}" for st in free)
     sub = " ".join(f"Step {st['addr']} \"{relay._short(st.get('content'), 90)}\" "
-                   f"{LEVEL_WHAT[level_of(st.get('content'))]}: it goes to the background subagent "
-                   f"`p4-phi:{level_of(st.get('content'))}`, not a session." for st in subs)
+                   f"{LEVEL_WHAT[level_of(st.get('content'))]}: it goes to "
+                   f"{LEVEL_WHERE[level_of(st.get('content'))]}, not a session." for st in subs)
     return (f"phi (p4-phi): steps {named} can each run on their own: no path another step names, nothing leaning "
             f"on another step, more than a quick thing, and each writes files. {route}; one session per step, its "
             f"brief that step's slice: the step's words, its paths and what it must leave done. Its model and "
@@ -573,9 +573,13 @@ def top_groups(plan, cwd):
 
 # --- delegation: where a step runs --------------------------------------------------------------------------------
 #
-# A step that only reads or searches is a background subagent's, `p4-phi:sweep`; one that only runs a command is
-# `p4-phi:runner`'s; the rest is a worker's. sub-agents.md says "Background subagents run concurrently while
-# you continue working", and plugins/components.md, under "Agents", names a plugin's agent `<plugin>:<name>`.
+# A step that only reads or searches is the built-in Explore subagent's; one that only runs a command is
+# `p4-phi:runner`'s; the rest is a worker's. sub-agents.md says of Explore "A fast, read-only agent optimized for
+# searching and analyzing codebases." and gives its model as "the parent conversation's model", so the call names a
+# small one: "The per-invocation `model` parameter" is the first source in the page's model order, and "On an Agent
+# tool call, the parameter takes a model alias". The page also says "With nothing configured, a subagent that Claude
+# spawns from your main conversation starts in the background.", and plugins/components.md, under "Agents", names
+# a plugin's agent `<plugin>:<name>`.
 
 READS = re.compile(r"^\W*(?:find|search|look\s+(?:for|up|at|into|through)|read|grep|list|locate|survey|scan|map|"
                    r"inventory|explore|trace|identify|count|collect|gather|sweep)\b", re.I)
@@ -584,16 +588,18 @@ WRITES = re.compile(r"\b(?:fix\w*|writ\w*|add\w*|chang\w*|edit\w*|implement\w*|u
                     r"mak\w+|mov\w+|commit\w*|refactor\w*|port\w*|delet\w*|migrat\w*|rewrit\w*|replac\w*|patch\w*|"
                     r"push\w*|merg\w*|land\w*|releas\w*|ship\w*|install\w*)\b", re.I)
 LEVELS = True                 # phi.project_conf sets it from p4.json phi.levels
-LEVEL_WHAT = {"sweep": "only reads or searches", "runner": "only runs a command"}
+LEVEL_WHAT = {"read": "only reads or searches", "runner": "only runs a command"}
+EXPLORE = "the built-in subagent `Explore`, with `model` `haiku` on the Agent call"
+LEVEL_WHERE = {"read": EXPLORE, "runner": "the background subagent `p4-phi:runner`"}   # where each such step goes
 
 
 def level_of(text):
-    """'sweep' for a step that only reads or searches, 'runner' for one that only runs a command, else 'session'."""
+    """'read' for a step that only reads or searches, 'runner' for one that only runs a command, else 'session'."""
     text = str(text or "")
     if WRITES.search(text):
         return "session"
     if READS.search(text):
-        return "sweep"
+        return "read"
     if RUNS.search(text):
         return "runner"
     return "session"
@@ -601,7 +607,7 @@ def level_of(text):
 
 # --- the model and effort a worker is started with ---------------------------------------------------------
 #
-# The three background subagents carry a model and an effort in their files, and every start call p4-phi hands out
+# A plugin agent carries a model and an effort in its file, and every start call p4-phi hands out
 # carries an `effort`, and a `model` unless it keeps the parent session's. `mcp__ccd_session__start_session` takes
 # `model`, the same family or cheaper than the caller's, and `effort`, at or below the caller's, both for a `fresh`
 # start only, as its schema says. The kind of a step picks its entry of CHILD_LEVELS, which p4.json's
@@ -770,7 +776,7 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
     def child(g):
         if level(g) != "session":
             return (f"step {g[0]['addr']} \"{relay._short(g[0].get('content'), 90)}\", which {LEVEL_WHAT[level(g)]}: "
-                    f"a background subagent, `p4-phi:{level(g)}`, not a session")
+                    f"it goes to {LEVEL_WHERE[level(g)]}, not a session")
         kinds = [child_kind(st.get("content")) for st in g]      # a run takes the model and effort of its hardest step
         hardest = next(st for k in ("design", "build", "static") for st, kd in zip(g, kinds) if kd == k)
         how = level_words(hardest.get("content"))
