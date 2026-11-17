@@ -46,6 +46,10 @@ import time
 MARKS = ("deprecates:", "replaces:")
 PATH_RE = re.compile(r"`([^`\s]+)`|((?:[A-Za-z]:)?[\w.~-]*[\\/][\w.\\/*~-]+)")
 GIT_S = 5                        # what one git call may take inside a hook
+TRACK_HOOK_S = 6                 # all of relay.track's git calls inside a hook: SessionStart has 20 s, Stop 30 s, and
+                                 # the self-archive PreToolUse 10 s
+TRACK_S = 300                    # one git call of the tree's first commit, run in a process of its own outside the
+                                 # hooks: the path filter runs a python per file of the tree
 
 
 # --- files ---------------------------------------------------------------------------------------------------------
@@ -391,9 +395,9 @@ TURN_WARNINGS = 3          # turn reports kept for one session's next message; o
 
 # --- deltas ----------------------------------------------------------------------------------------------------------
 
-def _git(cwd, *args):
+def _git(cwd, *args, timeout=None):
     try:
-        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=GIT_S)
+        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=timeout or GIT_S)
     except (OSError, subprocess.SubprocessError):
         return None
 
@@ -1142,17 +1146,19 @@ FILTER_ATTR = "phi/** filter=p4path"
 ARCHIVE_ATTR = "phi/archive/** -filter"      # the archive is kept verbatim: no path in it is rewritten
 
 
-def _path_filter(home):
+def _path_filter(home, g=None):
     """The store's git runs pathfilter.py on phi/ but its archive: set in this machine's git config, which names
     this machine's python and plugin, and in .gitattributes, which every machine shares, where the archive's line
-    follows the filter's, since the last line that matches a path decides it. True when .gitattributes changed."""
+    follows the filter's, since the last line that matches a path decides it. True when .gitattributes changed.
+    `g` runs its git calls, as relay.track's hook budget; a value it could not read is left to a later call."""
+    run = g or (lambda *a: _git(home, *a))
     py = sys.executable.replace("\\", "/")
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pathfilter.py").replace("\\", "/")
     for kind in ("clean", "smudge"):
         want = f'"{py}" -I "{script}" {kind}'
-        have = _git(home, "config", "--local", "--get", f"filter.p4path.{kind}")
-        if not have or have.stdout.strip() != want:
-            _git(home, "config", "--local", f"filter.p4path.{kind}", want)
+        have = run("config", "--local", "--get", f"filter.p4path.{kind}")
+        if have is not None and have.stdout.strip() != want:
+            run("config", "--local", f"filter.p4path.{kind}", want)
     ga = os.path.join(home, ".gitattributes")
     try:
         with open(ga, encoding="utf-8") as f:
@@ -1220,11 +1226,14 @@ def tree_ignore(home, tracked):
     return True
 
 
-def track(home, first_only=False):
-    """Stages phi/ in the store's git, and the first time commits it on its own. Returns True when it committed. Only
-    when the store's p4.json sets phi.track; otherwise the session tree is kept ignored. The IGNORED lines are made
-    sure of either way, so the watcher's state files never show as untracked. The project's root goes into git as
-    {project} through the store's path filter, so another machine's checkout names its own files."""
+def track(home, first_only=False, wait=False):
+    """Stages phi/ in the store's git, and the first time commits it on its own. Only when the store's p4.json sets
+    phi.track; otherwise the session tree is kept ignored. The IGNORED lines are made sure of either way, so the
+    watcher's state files never show as untracked. The project's root goes into git as {project} through the store's
+    path filter, so another machine's checkout names its own files.
+    Inside a hook its git calls end within TRACK_HOOK_S. The first commit, which can take far longer, is run by
+    track_first in a process of its own that the hook starts and does not wait on; `wait` runs it here instead.
+    Returns True when the first commit was made in this call."""
     try:
         import p4conf
         on = bool((p4conf.section(home, "phi", write=False) or {}).get("track"))
@@ -1241,30 +1250,168 @@ def track(home, first_only=False):
         except OSError:
             pass
         return False
-    top = _git(home, "rev-parse", "--show-toplevel")
+    deadline = time.time() + TRACK_HOOK_S
+
+    def g(*args):
+        left = deadline - time.time()
+        return _git(home, *args, timeout=min(GIT_S, left)) if left > 0 else None
+    top = g("rev-parse", "--show-toplevel")
     if not top or top.returncode != 0 or norm(top.stdout.strip()) != norm(home):
         return False
-    gd = _git(home, "rev-parse", "--absolute-git-dir")
-    mark = os.path.join(gd.stdout.strip(), TRACKED_MARK) if gd and gd.returncode == 0 else ""
-    first = bool(mark) and not os.path.exists(mark)
+    gd = g("rev-parse", "--absolute-git-dir")
+    if not gd or gd.returncode != 0:
+        return False
+    gd = gd.stdout.strip()
+    first = not os.path.exists(os.path.join(gd, TRACKED_MARK))
     if first_only and not first:
         return False
     changed = _ignore_lines(home) or dropped
-    attrs = _path_filter(home)
-    _git(home, "add", "-A", "--", "phi", *([".gitignore"] if changed else []), *([".gitattributes"] if attrs else []))
+    attrs = _path_filter(home, g)
     if not first:
+        if deadline - time.time() >= TRACK_ADD_LEFT_S:   # a git stopped mid-add would leave its index.lock behind
+            g("add", "-A", "--", "phi", *([".gitignore"] if changed else []), *([".gitattributes"] if attrs else []))
         return False
-    paths = ["phi"] + ([".gitignore"] if changed else []) + ([".gitattributes"] if attrs else [])
-    staged = _git(home, "diff", "--cached", "--name-only", "--", *paths)
-    if staged and staged.stdout.strip():
-        _git(home, "-c", "user.name=p4", "-c", "user.email=p4@localhost", "commit", "-q", "--no-verify", "-m",
-             "phi: the session tree, tracked", "--", *paths)
+    _owe(gd, [".gitignore"] if changed else [], [".gitattributes"] if attrs else [])
+    if wait:
+        return track_first(home)
+    state = _read_json(os.path.join(gd, TRACK_STATE))
+    if time.time() >= float(state.get("next") or 0) and not _track_running(gd):
+        _start_track_first(home)
+    return False
+
+
+TRACK_ADD_LEFT_S = 2.0           # the least of the hook's budget a staging add starts with
+TRACK_STALE = 5                  # a track-first lock untouched for this many TRACK_S is a run that died
+TRACK_STATE = "p4-phi-track.json"  # in the store's git directory: what the first commit owes, and its failures
+TRACK_LOCK = "p4-phi-track.lock"
+TRACK_SUBJECT = "phi: the session tree, tracked"
+
+
+def _owe(gd, *paths):
+    """Records in the git directory the paths the tree's first commit owes beside phi/, kept until it is made, so a
+    retry commits the .gitignore and .gitattributes an earlier call changed."""
+    path = os.path.join(gd, TRACK_STATE)
+    st = _read_json(path)
+    owed = list(st.get("owed") or [])
+    more = [x for ps in paths for x in ps if x not in owed]
+    if more or not os.path.exists(path):
+        st["owed"] = owed + more
+        _write_json(path, st)
+
+
+def _track_running(gd):
     try:
+        return time.time() - os.path.getmtime(os.path.join(gd, TRACK_LOCK)) < TRACK_STALE * TRACK_S
+    except OSError:
+        return False
+
+
+def _start_track_first(home):
+    flags = 0
+    if os.name == "nt":
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    try:
+        subprocess.Popen([sys.executable, "-I", "-X", "utf8", os.path.abspath(__file__), "track-first", home],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=flags, start_new_session=os.name != "nt", close_fds=True)
+    except OSError:
+        pass                               # unmarked: the next hook starts it again
+
+
+def track_first(home):
+    """The tree's first commit, of phi/ and what earlier calls recorded it owes, with TRACK_S for each git call.
+    One runs at a time, under a lock in the git directory. A commit already made, as by a run that ended before its
+    mark, is found and not made again. A failure is kept with its reason and tried again only after a wait that
+    doubles each time, up to an hour; track_notice words it once. True when the tree is now marked tracked."""
+    gd = _git(home, "rev-parse", "--absolute-git-dir", timeout=TRACK_S)
+    if not gd or gd.returncode != 0:
+        return False
+    gd = gd.stdout.strip()
+    mark, spath, lock = (os.path.join(gd, n) for n in (TRACKED_MARK, TRACK_STATE, TRACK_LOCK))
+    if os.path.exists(mark):
+        return False
+    try:
+        if os.path.exists(lock) and not _track_running(gd):
+            dead = f"{lock}.dead-{os.getpid()}"
+            os.replace(lock, dead)         # a run that died long ago; of two runs that find it, one moves it
+            if time.time() - os.path.getmtime(dead) < TRACK_STALE * TRACK_S:
+                os.replace(dead, lock)     # a live run's lock, made after the check: put back and left to it
+                return False
+            os.remove(dead)
+        os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except OSError:
+        return False                       # another run holds it
+
+    def git(*args):
+        try:
+            os.utime(lock)                 # a live run's lock is never taken for a dead one's
+        except OSError:
+            pass
+        return _git(home, *args, timeout=TRACK_S)
+    try:
+        st = _read_json(spath)
+        if time.time() < float(st.get("next") or 0):
+            return False
+        landed = git("log", "-1", "--format=%H", "--fixed-strings", f"--grep={TRACK_SUBJECT}")
+        if not (landed and landed.returncode == 0 and landed.stdout.strip()):
+            paths = ["phi"] + [x for x in st.get("owed") or [] if os.path.exists(os.path.join(home, x))]
+            if _path_filter(home, git) and ".gitattributes" not in paths:
+                paths.append(".gitattributes")
+            why, r = "", None
+            have = git("config", "--local", "--get", "filter.p4path.clean")
+            if have is None or have.returncode != 0:   # without it git takes this machine's paths into history
+                why = "the path filter is not set"
+            steps = () if why else (("add", "-A", "--", *paths), ("diff", "--cached", "--name-only", "--", *paths))
+            for args in steps:
+                r = git(*args)
+                if r is None or r.returncode != 0:
+                    why = (r.stderr.strip() if r is not None else "") or f"git {args[0]} did not finish"
+                    break
+            if not why and r.stdout.strip():
+                r = git("-c", "user.name=p4", "-c", "user.email=p4@localhost", "commit", "-q",
+                        "--no-verify", "-m", TRACK_SUBJECT, "--", *paths)
+                if r is None or r.returncode != 0:
+                    why = (r.stderr.strip() if r is not None else "") or "git commit did not finish"
+            if why:
+                st = dict(_read_json(spath))      # what hooks owed meanwhile is kept
+                n = int(st.get("fails") or 0) + 1
+                st.update(fails=n, next=time.time() + min(3600, 60 * 2 ** (n - 1)),
+                          reason=why.strip().splitlines()[0][:300],
+                          told=bool(st.get("told")))
+                _write_json(spath, st)
+                return False
         with open(mark, "w", encoding="utf-8") as f:
             f.write("tracked\n")
-    except OSError:
-        pass
-    return True
+        owed = [x for x in _read_json(spath).get("owed") or [] if os.path.exists(os.path.join(home, x))]
+        if owed:                           # what a hook recorded meanwhile, or a commit found made did not hold
+            git("add", "--", *owed)
+        try:
+            os.remove(spath)
+        except OSError:
+            pass
+        return True
+    finally:
+        try:
+            os.remove(lock)
+        except OSError:
+            pass
+
+
+def track_notice(home):
+    """One line, once, when the tree's first commit has failed: the reason, and when it is tried again; else ''."""
+    gd = _git(home, "rev-parse", "--absolute-git-dir")
+    if not gd or gd.returncode != 0:
+        return ""
+    spath = os.path.join(gd.stdout.strip(), TRACK_STATE)
+    st = _read_json(spath)
+    if not st.get("fails") or st.get("told"):
+        return ""
+    st["told"] = True
+    _write_json(spath, st)
+    when = time.strftime("%H:%M", time.localtime(float(st.get("next") or 0)))
+    n = int(st["fails"])
+    return (f"phi (p4-phi): the session tree's first commit in {home} failed, {n} time{'s' if n != 1 else ''}: "
+            f"{st.get('reason')}. It is tried again from {when}, outside the hooks.")
 
 
 # --- one session tree for several stores: phi.home --------------------------------------------------------------------
@@ -1445,6 +1592,7 @@ class locked:
                 time.sleep(0.02)
             except PermissionError:               # Windows, while another thread or process removes the lock file
                 if time.time() > end:
+                    _GAVE_UP[self.lock] = time.time()
                     return self
                 time.sleep(0.02)
             except OSError:
@@ -2064,3 +2212,9 @@ def reopened(home, s, now):
              f"\"{_title(s)}\" `{sid}`, which p4-phi held as finished and counted as archived, was messaged again and "
              f"is reopened: it is a live session once more, so do not count its work as over.")
     ready_page(home)
+
+
+if __name__ == "__main__":                 # the first commit of the session tree, started by a hook: track-first <home>
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    if len(sys.argv) == 3 and sys.argv[1] == "track-first":
+        track_first(sys.argv[2])

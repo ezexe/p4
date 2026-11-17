@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -435,6 +436,189 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn("eee555", ctx)
         self.assertNotIn("ddd444", ctx)
 
+    def _tracked_store(self, uuid):
+        t = self.t
+        for args in (("init", "-q"), ("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty",
+                                       "-m", "store")):
+            subprocess.run(["git", "-C", t.p4, *args], check=True, capture_output=True)
+        self.assertEqual(t.stop(TOP, "plan it", report="Planned.", uuid=uuid).returncode, 0)
+        write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"track": True}}))
+        gd = subprocess.run(["git", "-C", t.p4, "rev-parse", "--absolute-git-dir"], capture_output=True,
+                            text=True).stdout.strip()
+        return gd
+
+    def _subjects(self):
+        return subprocess.run(["git", "-C", self.t.p4, "log", "--format=%s"], capture_output=True,
+                              text=True).stdout.splitlines()
+
+    def test_a_hook_leaves_the_first_commit_to_a_process_of_its_own(self):
+        """Inside a hook the tree's first commit is not waited on: the hook starts it in a process of its own and
+        returns, and that process makes it, with the .gitignore the hook changed, and marks the tree tracked."""
+        gd = self._tracked_store("hk1")
+        self.assertFalse(relay.track(self.t.p4, first_only=True), "the hook does not wait for the commit")
+        mark = os.path.join(gd, relay.TRACKED_MARK)
+        end = time.time() + 120
+        while not os.path.exists(mark) and time.time() < end:
+            time.sleep(0.2)
+        self.assertTrue(os.path.exists(mark), "the process of its own made the commit")
+        self.assertEqual(self._subjects().count(relay.TRACK_SUBJECT), 1)
+        shown = subprocess.run(["git", "-C", self.t.p4, "show", "--name-only", "--format=", "HEAD"],
+                               capture_output=True, text=True).stdout.split()
+        self.assertIn(".gitignore", shown)
+
+    def test_a_failed_first_commit_backs_off_says_so_once_and_commits_what_it_owes_on_the_retry(self):
+        t = self.t
+        gd = self._tracked_store("fc1")
+        held = os.path.join(gd, "index.lock")                  # a stale lock of git's own: every commit fails
+        write(held, "")
+        self.assertFalse(relay.track(t.p4, first_only=True, wait=True))
+        self.assertFalse(os.path.exists(os.path.join(gd, relay.TRACKED_MARK)), "no mark without the commit")
+        st = relay._read_json(os.path.join(gd, relay.TRACK_STATE))
+        self.assertEqual(st["fails"], 1)
+        self.assertGreater(st["next"], time.time(), "tried again only after a wait")
+        self.assertIn(".gitignore", st["owed"])
+        self.assertFalse(relay.track(t.p4, first_only=True, wait=True))
+        self.assertEqual(relay._read_json(os.path.join(gd, relay.TRACK_STATE))["fails"], 1, "not tried in the wait")
+        self.assertIn("index.lock", relay.track_notice(t.p4))
+        self.assertEqual(relay.track_notice(t.p4), "", "said once")
+        os.remove(held)
+        st = relay._read_json(os.path.join(gd, relay.TRACK_STATE))
+        relay._write_json(os.path.join(gd, relay.TRACK_STATE), dict(st, next=0))
+        self.assertTrue(relay.track(t.p4, first_only=True, wait=True))
+        shown = subprocess.run(["git", "-C", t.p4, "show", "--name-only", "--format=", "HEAD"], capture_output=True,
+                               text=True).stdout.split()
+        self.assertIn(".gitignore", shown, "the retry commits what the first try owed")
+
+    def test_a_hook_spends_no_more_than_its_budget_on_git(self):
+        """Every git call relay.track makes in a hook, the path filter's included, ends within TRACK_HOOK_S, however
+        slow git is."""
+        t = self.t
+        self._tracked_store("bg1")
+        real, old = relay._git, (relay.TRACK_HOOK_S, relay._start_track_first)
+
+        def slow(cwd, *args, timeout=None):
+            time.sleep(min(1.0, timeout or relay.GIT_S))
+            return real(cwd, *args, timeout=timeout)
+        try:
+            relay._git, relay.TRACK_HOOK_S, relay._start_track_first = slow, 2.0, lambda home: None
+            began = time.time()
+            relay.track(t.p4, first_only=True)
+            took = time.time() - began
+        finally:
+            relay._git = real
+            relay.TRACK_HOOK_S, relay._start_track_first = old
+        self.assertLess(took, 2.0 + 1.5, "the path filter's git calls are inside the budget too")
+
+    def test_a_running_first_commit_keeps_its_lock_fresh(self):
+        """The track-first lock is touched before each git call, so a run longer than the stale limit is never taken
+        for a dead one."""
+        t = self.t
+        gd = self._tracked_store("lk1")
+        lock = os.path.join(gd, relay.TRACK_LOCK)
+        real, seen = relay._git, []
+
+        def aging(cwd, *args, timeout=None):
+            if os.path.exists(lock):
+                seen.append(time.time() - os.path.getmtime(lock))
+                old = time.time() - relay.TRACK_STALE * relay.TRACK_S - 10
+                r = real(cwd, *args, timeout=timeout)
+                os.utime(lock, (old, old))            # as if this call took longer than the stale limit
+                return r
+            return real(cwd, *args, timeout=timeout)
+        try:
+            relay._git = aging
+            self.assertTrue(relay.track(t.p4, first_only=True, wait=True))
+        finally:
+            relay._git = real
+        self.assertGreater(len(seen), 2)
+        self.assertLess(max(seen), 60, "touched before every call")
+
+    def test_what_a_hook_owes_while_the_first_commit_runs_is_staged(self):
+        t = self.t
+        gd = self._tracked_store("ow1")
+        real = relay._git
+
+        def owing(cwd, *args, timeout=None):
+            r = real(cwd, *args, timeout=timeout)
+            if "commit" in args:                     # a hook records an owed file while the commit runs
+                write(os.path.join(t.p4, "owed.txt"), "x\n")
+                relay._owe(gd, ["owed.txt"])
+            return r
+        try:
+            relay._git = owing
+            self.assertTrue(relay.track(t.p4, first_only=True, wait=True))
+        finally:
+            relay._git = real
+        staged = subprocess.run(["git", "-C", t.p4, "diff", "--cached", "--name-only"], capture_output=True,
+                                text=True).stdout.split()
+        self.assertIn("owed.txt", staged)
+
+    def test_a_staging_add_is_not_started_with_too_little_of_the_budget_left(self):
+        t = self.t
+        gd = self._tracked_store("ad1")
+        self.assertTrue(relay.track(t.p4, first_only=True, wait=True))
+        write(os.path.join(t.p4, "phi", "new.json"), "{}\n")
+        real, old, calls = relay._git, relay.TRACK_HOOK_S, []
+
+        def seen(cwd, *args, timeout=None):
+            calls.append(args[0])
+            return real(cwd, *args, timeout=timeout)
+        try:
+            relay._git, relay.TRACK_HOOK_S = seen, relay.TRACK_ADD_LEFT_S - 0.5
+            relay.track(t.p4)
+        finally:
+            relay._git, relay.TRACK_HOOK_S = real, old
+        self.assertNotIn("add", calls)
+        self.assertTrue(os.path.exists(os.path.join(gd, relay.TRACKED_MARK)))
+
+    def test_the_first_commit_sets_the_path_filter_and_fails_closed_without_it(self):
+        """A hook whose budget ran out before the path filter was set leaves it to track_first, which sets it before
+        its add, and makes no commit when it cannot be set, since git takes an undefined filter as none."""
+        t = self.t
+        gd = self._tracked_store("pf1")
+        real = relay._path_filter
+        try:
+            relay._path_filter = lambda home, g=None: False          # never set, as a hook out of budget
+            self.assertFalse(relay.track(t.p4, first_only=True, wait=True))
+        finally:
+            relay._path_filter = real
+        self.assertFalse(os.path.exists(os.path.join(gd, relay.TRACKED_MARK)))
+        self.assertNotIn(relay.TRACK_SUBJECT, self._subjects(), "no commit without the filter")
+        st = relay._read_json(os.path.join(gd, relay.TRACK_STATE))
+        self.assertEqual(st["reason"], "the path filter is not set")
+        subprocess.run(["git", "-C", t.p4, "config", "--local", "--unset", "filter.p4path.clean"], capture_output=True)
+        relay._write_json(os.path.join(gd, relay.TRACK_STATE), dict(st, next=0))
+        self.assertTrue(relay.track_first(t.p4), "track_first sets the filter itself")
+        committed = subprocess.run(["git", "-C", t.p4, "show", f"HEAD:phi/sessions/{TOP}/session.json"],
+                                   capture_output=True, text=True).stdout
+        self.assertIn("{project}", committed)
+
+    def test_a_failed_first_commit_keeps_what_hooks_owed_meanwhile(self):
+        t = self.t
+        gd = self._tracked_store("om1")
+        write(os.path.join(gd, "index.lock"), "")                   # the add fails
+        real = relay._git
+
+        def owing(cwd, *args, timeout=None):
+            if args[:1] == ("add",):
+                relay._owe(gd, ["late.txt"])                       # a hook records an owed file meanwhile
+            return real(cwd, *args, timeout=timeout)
+        try:
+            relay._git = owing
+            self.assertFalse(relay.track(t.p4, first_only=True, wait=True))
+        finally:
+            relay._git = real
+        self.assertIn("late.txt", relay._read_json(os.path.join(gd, relay.TRACK_STATE))["owed"])
+
+    def test_a_commit_made_before_its_mark_is_not_made_again(self):
+        t = self.t
+        gd = self._tracked_store("lm1")
+        self.assertTrue(relay.track(t.p4, first_only=True, wait=True))
+        os.remove(os.path.join(gd, relay.TRACKED_MARK))       # a run that ended after its commit, before its mark
+        write(os.path.join(t.p4, "phi", "later.json"), "{}\n")
+        self.assertTrue(relay.track(t.p4, first_only=True, wait=True))
+        self.assertEqual(self._subjects().count(relay.TRACK_SUBJECT), 1)
+
     def test_the_phi_folder_is_committed_once_without_logs_and_staged_after(self):
         t = self.t
         for args in (("init", "-q"), ("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty",
@@ -449,7 +633,7 @@ class ThreeSessions(unittest.TestCase):
         self.assertFalse([x for x in status.splitlines() if "phi/sessions/" in x or x.endswith(
             ("phi/anchor.json", "phi/reports.jsonl", "phi/start-requests.jsonl"))], status)
         write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"track": True}}))
-        self.assertTrue(relay.track(t.p4, first_only=True))
+        self.assertTrue(relay.track(t.p4, first_only=True, wait=True))
         shown = subprocess.run(["git", "-C", t.p4, "show", "--name-only", "--format=%s", "HEAD"],
                                capture_output=True, text=True).stdout.split()
         self.assertEqual(shown[:4], ["phi:", "the", "session", "tree,"])
@@ -495,7 +679,7 @@ class ThreeSessions(unittest.TestCase):
         relay.track(t.p4)
         self.assertEqual(open(os.path.join(t.p4, ".gitignore"), encoding="utf-8").read(), text, "written once")
         write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"track": True}}))
-        relay.track(t.p4)
+        relay.track(t.p4, wait=True)            # no first commit left running past the test's folder
         self.assertEqual(shown(), [], "on: still ignored")
         lines = open(os.path.join(t.p4, ".gitignore"), encoding="utf-8").read().splitlines()
         for line in state:
@@ -513,7 +697,7 @@ class ThreeSessions(unittest.TestCase):
                 "z.json": json.dumps({"cwd": root}) + "\n"}
         write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"track": True}}))
         subprocess.run(["git", "-C", t.p4, "init", "-q", "-b", "main"], check=True, capture_output=True)
-        self.assertTrue(relay.track(t.p4), "a store p4-phi tracks, with its ignore lines and its path filter")
+        self.assertTrue(relay.track(t.p4, wait=True), "a store p4-phi tracks, with its ignore lines and its path filter")
         for name, text in kept.items():
             write(os.path.join(t.p4, "archive", name), text)
         for args in (("add", "-A", "--", "archive", "p4.json"), (*g, "commit", "-qm", "the old archive")):
@@ -1136,6 +1320,25 @@ class WarnTogether(unittest.TestCase):
             self.assertEqual(len(pend), 9, "the eight warnings and the first, through eight saves and eight writes")
             self.assertFalse(os.path.exists(path + ".lock"))
         finally:
+            shutil.rmtree(home, ignore_errors=True)
+
+    def test_a_lock_given_up_on_after_permission_errors_is_remembered(self):
+        home = tempfile.mkdtemp(prefix="p4-phi-warn-")
+        real, wait = os.open, relay.LOCK_WAIT_S
+        try:
+            path = os.path.join(home, "session.json")
+
+            def never(p, *a, **k):
+                if str(p).endswith(".lock"):
+                    raise PermissionError(13, "Permission denied", p)
+                return real(p, *a, **k)
+            os.open, relay.LOCK_WAIT_S = never, 0.05
+            with relay.locked(path) as lk:
+                self.assertFalse(lk.held)
+            self.assertIn(path + ".lock", relay._GAVE_UP)
+        finally:
+            os.open, relay.LOCK_WAIT_S = real, wait
+            relay._GAVE_UP.pop(os.path.join(home, "session.json") + ".lock", None)
             shutil.rmtree(home, ignore_errors=True)
 
     def test_a_permission_error_on_the_lock_is_waited_out(self):
