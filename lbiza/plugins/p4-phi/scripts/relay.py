@@ -968,8 +968,10 @@ def route_text(home, sid, text, base):
     got = owners(home, sid, text, base)
     if not got:
         return ""
-    oid, title, pat = got[0]
-    return (f"phi (p4-phi): this message names {pat}, among the owned paths of \"{title}\" `{oid}`. Send it there "
+    oid, _, pat = got[0]
+    import book                                    # the session by its whole title
+    return (f"phi (p4-phi): this message names {pat}, among the owned paths of \"{book.title(oid, _session(home, oid))}\" "
+            f"`{oid}`. Send it there "
             f"with SendMessage to {oid} instead of working on it here.")
 
 

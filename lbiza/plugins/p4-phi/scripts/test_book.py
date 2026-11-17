@@ -265,6 +265,64 @@ class Supervisor(unittest.TestCase):
                                                                    "ran green."}), ("", ""),
                          "an outcome ezexe should hear goes to the puppeteer")
 
+    def test_a_path_from_inside_the_repository_finds_its_holder(self):
+        t = self.t
+        self.tree()
+        t.say(TOP3, "Build the importer")
+        said, decision = self.pre(KID2, SEND, {"to": TOP3, "message": "Does flush/../src/flush.py still drop rows? "
+                                                                     "I mean `src/flush.py` as the batch sees it."})
+        self.assertIn(KID, said)
+        t.record(KID3, started_by=TOP, title="the export child")
+        t.say(KID3, "Task:\nBuild the export flush.\nFiles: src/export/flush.py")
+        said, _ = self.pre(KID2, SEND, {"to": TOP3, "message": "Is export/flush.py still dropping its last batch?"})
+        self.assertIn(KID3, said, "a path from deeper in the repository names the same file")
+
+    def test_a_decision_of_ezexes_goes_to_the_puppeteer_though_it_names_a_held_file(self):
+        self.tree()
+        self.assertEqual(self.pre(KID2, SEND, {"to": PUP, "message": "ezexe must approve deleting src/flush.py "
+                                                                   "before the batch work goes on."}), ("", ""))
+
+    def test_a_finding_on_the_trees_own_issue_stays_with_the_tree(self):
+        t = self.t
+        self.tree()
+        t.record(KID3, started_by=TOP, title="the export child")
+        t.say(KID3, "Task:\nBuild the export flush.\nFiles: none")
+        for k in (KID, KID2, KID3):
+            s = t.session(k)
+            s["issue"] = {"repo": "ezexe/p4", "number": 245}
+            relay._write_json(os.path.join(t.dir(k), "session.json"), s)
+        t.stop(KID2, "Check the flush's retry and report.",
+               report="Checked.\nFinding: ezexe/p4#245 misses the retry of the second batch; source: its brief; "
+                      "test: test_flush; files: none")
+        ctx = context(t.say(TOP, "what came in?"))
+        self.assertIn("on the issue this session's tree already holds", ctx)
+        self.assertNotIn("go up to the puppeteer", ctx, "the tree's own issue is no new issue")
+
+    def test_the_books_text_never_goes_into_the_log(self):
+        t = self.t
+        self.tree()
+        rows = read(os.path.join(t.dir(KID2), "log.jsonl"))
+        self.assertNotIn("address book", rows)
+        self.assertNotIn("book_line", rows)
+
+    def test_the_route_line_names_the_owner_by_its_whole_title(self):
+        t = self.t
+        long = "Build the narwhal exporter's flush, retry and batch writer, and land each with its suite green"
+        t.record(KID3, started_by=TOP, title=long)
+        t.say(KID3, "Task:\nBuild the writer.\nFiles: src/writer.py")
+        self.assertEqual(t.cli(KID3, "shard", os.path.join(t.proj, "src", "writer")).returncode, 0)
+        t.say(TOP, "Build the narwhal exporter")
+        t.record(TOP3, title="An orchestrator nobody put under the puppeteer")
+        t.say(TOP3, "Build the importer")
+        ctx = context(t.say(TOP3, f"please look at {os.path.join(t.proj, 'src', 'writer', 'rows.py')}"))
+        self.assertIn(f"\"{long}\" `{KID3}`", ctx)
+
+    def test_ezexes_words_are_read_without_links_and_paths_but_slash_joined_words_count(self):
+        self.assertTrue(book.decides("Needs your approve/merge of the flush fix"))
+        self.assertTrue(book.ezexes("The retry landed/pushed this morning"))
+        self.assertFalse(book.ezexes("See ezexe/p4#245 and https://github.com/ezexe/p4/issues/245 about the flush"))
+        self.assertFalse(book.ezexes("Read E:/work/push/flush.py and src/merge/rows.py about the rows"))
+
     def test_issues_named_reads_slugs_bare_numbers_and_links_and_no_path_or_anchor(self):
         self.assertEqual(book.issues_named("ezexe/p4#245 and #236, https://github.com/ezexe/phi/issues/12 and "
                                            "[a](#local_x) and C#"), [("ezexe/phi", 12), ("ezexe/p4", 245), ("", 236)])

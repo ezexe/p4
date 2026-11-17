@@ -44,6 +44,14 @@ EZEXE = re.compile(r"\bezexe(?:'s)?\b|\b(?:approv\w*|authori[sz]\w*|permissions?
                    r"purchas\w*|billing|delet\w*|install\w*|sign[ -]?in|log[ -]?in|done|land(?:s|ed)?|"
                    r"clos(?:e|es|ed)|finish(?:es|ed)?|block(?:s|ed)?|stuck|fail(?:s|ed|ing|ure)?|green|"
                    r"pass(?:es|ed)|outcomes?|pay(?:s|ing|ments?)?)\b", re.I)
+# a decision ezexe makes: such a message goes to the puppeteer even when it names a file another session holds
+DECIDES = re.compile(r"\b(?:approv\w*|authori[sz]\w*|permissions?|decisions?|decid\w*|sign[ -]?off|go[ -]ahead|"
+                     r"ezexe(?:'s)? (?:go|say[ -]so|pick|choice|call)|ezexe (?:must|needs to|has to|should))\b", re.I)
+# a link, a backticked path, or a path: a root or a drive, two separators, or one separator and a file's extension;
+# a slash-joined pair of words such as add/remove is no path
+LINKS = re.compile(r"[A-Za-z][\w+.-]*://\S+|`[^`\n]*[\\/][^`\n]*`|(?:(?:[A-Za-z]:|\.{1,2}|~)|(?<![\w.~-]))"
+                   r"[\\/][\w.\\/*~:-]+|"
+                   r"[\w.~-]+(?:[\\/][\w.~*-]+){2,}[\\/]?|[\w.~-]+[\\/][\w~*-]*\.\w[\w.*~-]*")
 
 
 def _phi():
@@ -61,7 +69,17 @@ def title(sid, s=None):
 def ezexes(text):
     """True when a message's own words name a matter of ezexe's: a decision of ezexe's authority, a press the app
     requires or an outcome ezexe should hear. Links, paths and repository names such as ezexe/p4 are no words."""
-    return bool(EZEXE.search(issues.PATH_WORDS.sub(" ", ISSUE_RE.sub(" ", str(text or "")))))
+    return bool(EZEXE.search(words_of(text)))
+
+
+def decides(text):
+    """True when a message's own words ask a decision of ezexe's: an approval, a permission or ezexe's go."""
+    return bool(DECIDES.search(words_of(text)))
+
+
+def words_of(text):
+    """A message with its links, paths and issue references taken out."""
+    return LINKS.sub(" ", ISSUE_URL.sub(" ", ISSUE_RE.sub(" ", str(text or ""))))
 
 
 # --- the entries -------------------------------------------------------------------------------------------------------
@@ -334,17 +352,17 @@ def issues_named(text):
 
 def _same_file(named, rel_named, root_named, held, hbase):
     """True when a path a message names is a file or folder an entry holds: the same absolute path, a path inside a
-    held folder, the same path from the root of a repository of the same name, as two clones of one repository are,
-    or a held bare name that is its file name."""
+    held folder, a held bare name that is its file name, or one path from its repository's or folder's root ending
+    the other, the shorter of at least two parts, as `export/flush.py` ends `src/export/flush.py` and two clones of
+    one repository name the same file."""
     if "/" not in held:
         return named.rsplit("/", 1)[-1] == held
     if named == held or relay.covers(held, named):
         return True
-    root = _root_of(hbase)
-    if not root or not root_named or root.rsplit("/", 1)[-1] != root_named.rsplit("/", 1)[-1]:
-        return False
-    b = _rel(held, hbase)
-    return "/" in rel_named and (rel_named == b or rel_named.startswith(b + "/"))
+    a, b = rel_named, _rel(held, hbase)
+    short, long_ = sorted((a, b), key=len)
+    return short.count("/") >= 1 and (long_ == short or long_.endswith("/" + short)
+                                      or a.startswith(b + "/"))
 
 
 def _below(every, sid):
@@ -404,6 +422,8 @@ def flag(home, s, target, message, store=""):
     read = starts.FILES_LINE.sub(" ", text)
     pid = puppeteer(home, s, store)[0]
     to_pup = target == pid and sid != pid and relay._parent(s) != pid
+    if to_pup and decides(text):
+        return ""                                 # a decision of ezexe's: the puppeteer is its address
     if not to_pup and not issues_named(read) and not relay.paths_in(read, str(s.get("cwd") or "")):
         return ""                                 # names no path and no issue: nothing to read against the book
     book = entries(home, sid, store)
@@ -444,6 +464,20 @@ def flag(home, s, target, message, store=""):
     state["flagged"] = (said + [key])[-60:]
     relay._write_json(_state_path(home, sid), state)
     return reason + " Said once for this message and recipient, so sending it again as it is goes through."
+
+
+def tree_issue(home, s, finding, reporter, store="", book=None):
+    """The orchestrator of the reporter's tree, when a `Finding:` line names the issue the reporter itself owns: that
+    issue is its tree's, so the finding is the tree's to place and goes up for no new issue. '' otherwise."""
+    book = book if book is not None else entries(home, s["sessionId"], store)
+    rep = book.get(reporter)
+    if not rep or not rep["number"]:
+        return ""
+    if not any(n == rep["number"] and (not slug or not rep["slug"] or slug == rep["slug"].lower())
+               for slug, n in issues_named(finding)):
+        return ""
+    chain = _chain(relay._sessions(rep["home"]), reporter)
+    return chain[-1] if chain else reporter
 
 
 def holder_line(home, s, finding, store="", skip=(), book=None):

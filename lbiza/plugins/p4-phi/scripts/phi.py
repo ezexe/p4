@@ -889,26 +889,33 @@ def findings_text(home, s, new, store=""):
     them itself. A finding on a file or an issue another live session holds goes straight to that session, named
     beside it by the address book, book.py; only the rest go up for an issue."""
     import book
-    found, held, bk = [], [], {}
+    found, held, own, bk = [], [], [], {}
     for r in reversed(new):
         t = r.get("turn") if isinstance(r.get("turn"), dict) else {}
         by = str(r.get("sessionId") or "")
         for line in issues.findings(f"{t.get('report') or ''}\n{t.get('said') or ''}"):
-            if line in found or any(line == h[0] for h in held):
+            if line in found or line in own or any(line == h[0] for h in held):
                 continue
             try:                                   # the reporter and those above it hold nothing it found
                 if "all" not in bk:
                     bk["all"] = book.entries(home, s["sessionId"], store)
-                who = book.holder_line(home, s, line, store, skip=[by, *chain_of(home, by)] if by else (),
-                                       book=bk["all"])
+                tree = book.tree_issue(home, s, line, by, store, bk["all"]) if by else ""
+                who = (f"\"{book.title(tree)}\" `{tree}`, the orchestrator of the tree whose issue it names"
+                       if tree else book.holder_line(home, s, line, store,
+                                                     skip=[by, *chain_of(home, by)] if by else (), book=bk["all"]))
             except Exception:  # noqa: BLE001
-                who = ""
-            if who:
+                tree = who = ""
+            if tree and tree == s["sessionId"]:
+                own.append(line)                   # the issue this session's tree holds: its own to place
+            elif who:
                 held.append((line, who))
             else:
                 found.append(line)
+    mine = ("phi (p4-phi): these reports carry `Finding:` lines on the issue this session's tree already holds, so "
+            "this session places each in its own tree and no new issue is published for it:\n"
+            + "\n".join(f"- {cut(x, 400)}" for x in own[:FINDINGS_SHOWN])) if own else ""
     if not found and not held:
-        return ""
+        return mine
     straight = ("phi (p4-phi): these reports carry `Finding:` lines on a file or an issue a live session holds. "
                 "Send each one straight to the session named under it with SendMessage, and nowhere else; it "
                 "goes up for no issue:\n" + "\n".join(f"- {cut(x, 400)}\n  to {who}" for x, who in
@@ -916,7 +923,7 @@ def findings_text(home, s, new, store=""):
                 + (f"\n- and {len(held) - FINDINGS_SHOWN} more, each whole in its session's report"
                    if len(held) > FINDINGS_SHOWN else "")) if held else ""
     if not found:
-        return straight
+        return "\n\n".join(x for x in (mine, straight) if x)
     n = len(found)
     head = f"phi (p4-phi): these reports carry {n} `Finding:` line{'s' if n != 1 else ''} no live session holds"
     listed = "\n".join(f"- {cut(x, 400)}" for x in found[:FINDINGS_SHOWN]) + (
@@ -935,7 +942,7 @@ def findings_text(home, s, new, store=""):
                 f"send one a running session covers to that session; for the rest, publish the issue and place the "
                 f"session that resolves it, as a child of the session in this tree that holds its files or as a new "
                 f"orchestrator:\n" + listed)
-    return "\n\n".join(x for x in (straight, rest) if x)
+    return "\n\n".join(x for x in (mine, straight, rest) if x)
 
 
 def reports_text(home, s, room=None, store=""):
@@ -1345,7 +1352,8 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
             handed = book.line(home, s, me.store, whole=whole)
         except Exception:  # noqa: BLE001  a book it cannot write never costs the message its other lines
             handed = ""
-        RAN["book_line"] = handed                  # kept when the gate's verdict drops the standing line
+        new_task_text.book_line = handed           # kept when the gate's verdict drops the standing line; never
+        # in RAN, whose every key goes into log.jsonl
         return "\n\n".join(x for x in (text, handed) if x)
     if brief and told.get(me.cli) and os.path.isfile(standing_path(home, s["sessionId"])):
         RAN["new_task"] = "page"                   # after a compaction, a line with its page, not in full
@@ -2631,8 +2639,9 @@ def h_user_prompt_submit(payload):
     watch_over(me.home, s)
     route = relay.route_text(me.home, s["sessionId"], req, s.get("cwd") or "") if req and not verdict else ""
     RAN.pop("new_task", None)
+    new_task_text.book_line = ""
     rule = "" if route else new_task_text(me.home, s, me, user=bool(req), req=req)
-    book_line = RAN.pop("book_line", "")
+    book_line, new_task_text.book_line = getattr(new_task_text, "book_line", ""), ""
     if verdict and RAN.get("new_task") in ("line", "feature"):
         rule = book_line                           # the gate's verdict says where the message goes; the book stays
     parts.append(pup)
