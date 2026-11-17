@@ -84,7 +84,9 @@ A send never ends a wait, and a finished request never takes a holder.
 A finished state shows only with its end kept, and a finished row leaves the page a day after it ended.
 At the request's next message, one with no holder is answered when the turn on it ended without a question, and waits on ezexe when the turn ended on a question or asked one with `mcp__ccd_turn__wrap_up`, whatever its buttons, whose labels are kept whole with the wait.
 It is carried when ezexe's next message comes before any turn ended; another session's message, which can come inside the turn, carries nothing.
-A waiting request is answered only by ezexe's recognized reply to it: a button label it offered, which the app sends back as ezexe's message, a message naming it by its id, which answers that request or nothing, or a reply word or phrase standing alone at the message's start, which answers the waiting request whose topic it shares or else the latest.
+A turn's question goes to the request whose id it starts with, as "ask-1: ...", which the line beside each message asks for, else to the request the turn worked on only while no other request waits, else to none.
+A waiting request is answered only by ezexe's recognized reply to it: a button label it offered, which the app sends back as ezexe's message, its id leading the message before a reply word or a label, which answers that request or nothing, or a reply word or phrase standing alone at the message's start and followed by a stop that is no hyphen, which answers the waiting request whose topic it shares or else the latest.
+An id anywhere else in a message answers nothing, and a question whose last sentence asks "can you", "can we", "should we" or the like opens a request.
 What follows such a reply or id opens a request of its own when it asks for more than the answer, and nothing else ezexe says ends a wait.
 Beside each of the puppeteer's messages, a short line gives the counts by state and names the page.
 A message of ezexe's that `route_down` sends to a controlled session's topic is drafted no start.

@@ -489,13 +489,56 @@ class LedgerWaits(Trees):
         t = self.t
         for k, actions in enumerate(([], [{"label": "Archive", "action": "archive"}])):
             t.say(PUP, ASK3 if not k else BILLING)
-            wrap = {"recap": "The notes are ready.", "ask": "Which page should the release notes go on",
-                    "actions": actions}
+            said = f"ask-{k + 1}: Which page should the release notes go on"
+            wrap = {"recap": "The notes are ready.", "ask": said, "actions": actions}
             t.stop(PUP, "x", calls=[("mcp__ccd_turn__wrap_up", wrap, "ok")], report="The notes are ready.",
                    uuid=f"w{k}")
             t.say(PUP, marked("The importer's parser is in review."))
             got = asks.rows(t.p4, PUP)[k]
-            self.assertEqual(got["waits"], "Which page should the release notes go on", f"buttons: {actions}")
+            self.assertEqual(got["waits"], said, f"buttons: {actions}")
+
+    def test_a_turns_question_attaches_only_to_the_row_it_names(self):
+        t = self.t
+        t.say(PUP, ASK3)
+        t.stop(PUP, ASK3, report="The notes are ready. " + WAIT, uuid="n1")
+        t.say(PUP, "thanks")                       # opens ask-2 while ask-1 waits
+        wrap = {"recap": "Ready.", "ask": "Publish now, or wait for the retry?",
+                "actions": [{"label": "Publish now"}, {"label": "Wait for it"}]}
+        t.stop(PUP, "thanks", calls=[("mcp__ccd_turn__wrap_up", wrap, "ok")], report="Ready.", uuid="n2")
+        t.say(PUP, marked("The importer's parser is in review."))
+        got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
+        self.assertEqual(got["ask-2"]["waits"], "", "a question that names no row while another waits goes to none")
+        self.assertEqual(got["ask-1"]["waits"], "The notes are ready. " + WAIT)
+        wrap = dict(wrap, ask="ask-1: Publish now, or wait for the retry?")
+        t.stop(PUP, "x", calls=[("mcp__ccd_turn__wrap_up", wrap, "ok")], report="Ready.", uuid="n3")
+        t.say(PUP, "Publish now")
+        got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
+        self.assertEqual(got["ask-1"]["waits"], "", "the label answers the row that offered it")
+        self.assertEqual(len(got), 2, "and opens no row")
+
+    def test_a_hyphen_is_no_stop_after_a_reply_word(self):
+        t = self.t
+        t.say(PUP, ASK3)
+        t.stop(PUP, ASK3, report="The notes are ready. " + WAIT, uuid="h1")
+        t.say(PUP, "fine-tune the classifier on the new batches of quoted rows")
+        got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
+        self.assertEqual((len(got), got["ask-1"]["waits"]), (2, "The notes are ready. " + WAIT))
+
+    def test_a_row_id_answers_only_as_the_lead_of_a_reply(self):
+        t = self.t
+        t.say(PUP, ASK3)
+        t.stop(PUP, ASK3, report="The notes are ready. " + WAIT, uuid="d1")
+        t.say(PUP, "where does ask-1 stand?")
+        t.say(PUP, "ask-1 can wait, first restart the importer worker")
+        got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
+        self.assertEqual(sorted(got), ["ask-1", "ask-2"], "a status question opens none, the request one")
+        self.assertEqual(got["ask-1"]["waits"], "The notes are ready. " + WAIT, "neither mention answers it")
+
+    def test_a_request_in_a_question_form_opens_a_row(self):
+        t = self.t
+        t.say(PUP, "The importer's flush fails on batch two. Can we add a retry to it?")
+        t.say(PUP, "Should we rerun the failing suite?")
+        self.assertEqual(len(asks.rows(t.p4, PUP)), 2)
 
     def test_a_long_button_label_is_kept_whole(self):
         t = self.t

@@ -27,11 +27,14 @@ page, rewritten when it changes, and a short line naming it is handed beside eac
            ended no turn on it for KEEP_S ends as it stands, reported once it reported, else carried, read before
            working, since an interrupted turn runs no Stop hook. A row shows a finished state only with its end kept,
            and a finished row, or one that waits on ezexe, never takes a holder: only ezexe's answer ends a wait.
-  waits    the last line of that turn, or the question it asked with its reply buttons' whole labels, until ezexe's
-           recognized reply to it, and nothing else, answers it: a button's label the row offered, the row's id, which
-           answers that row or nothing, or a reply word or phrase standing alone at the message's start, followed by a
-           stop, such as "yes, push it" or "go ahead.", which answers the waiting row whose topic it shares SHARED words
-           with, else the latest.
+  waits    the last line of a turn that asked ezexe a question, or the question it asked with mcp__ccd_turn__wrap_up and
+           its reply buttons' whole labels. The question goes to the row whose id it starts with, as the line asks,
+           "ask-1: ...", else to the turn's own row only while no other row waits, else to none. It waits until ezexe's
+           recognized reply to it, and nothing else, answers it: a button's label, which answers the row that offered
+           it, the row's id leading the message before a reply word or a label, which answers that row or nothing, or a
+           reply word or phrase standing alone at the message's start, followed by a stop that is no hyphen, such as
+           "yes, push it" or "go ahead.", which answers the waiting row whose topic it shares SHARED words with, else
+           the latest. An id anywhere else in a message answers nothing.
 
 controls.PHI is phi.py, set when phi.py is imported; every function here is called from phi.py.
 """
@@ -59,14 +62,17 @@ QUESTION = re.compile(r"\?\s*$")
 STATUS = re.compile(r"^\W*(?:where|what|when|why|how|who|which|whether|is|are|was|were|has|had|does|did)\b|"
                     r"^\W*(?:give|tell|show|update) me\b.{0,40}\b(?:account|status|update|summary|progress|"
                     r"where\b.*\bstands?)\b", re.I)
-# a question in a request's form: "can you add the retry?" asks for work
-ASKS_WORK = re.compile(r"^\W*(?:can|could|would|will) you\b|^\W*please\b", re.I)
+# a question in a request's form: "can you add the retry?" or "should we rerun it?" asks for work
+ASKS_WORK = re.compile(r"^\W*(?:(?:can|could|would|will) you|(?:can|could|should|shall) we)\b|^\W*please\b", re.I)
+SENTENCE = re.compile(r"(?<=[.!?])\s+(?=\S)")
 ROW_ID = re.compile(r"\bask-(\d+)\b")
+# a row's id leading a message, as "ask-1: yes": only so does an id answer its row
+ID_LEAD = re.compile(r"^\W*ask-(\d+)\b[\s:,.;]*", re.I)
 # a reply to the question a row waits on: a whole reply word or phrase that opens the message and is followed by a
 # stop or the message's end, as "yes, push it" or "go ahead."; "go through the logs" or "don't forget the sync"
 # opens with a request's verb, not a reply
 REPLY = re.compile(r"^\W*(?:yes|yeah|yep|no|nope|ok|okay|sure|fine|agreed|approved|go ahead|go|do it|wait|hold|"
-                   r"not yet|don't|do not)(?=\s*(?:[,.;:!?–—-]|$))", re.I)
+                   r"not yet|don't|do not)(?=\s*(?:[,.;:!?–—]|$)|\s+-\s)", re.I)
 FINISHED = ("done", "closed", "answered", "carried")
 
 
@@ -160,19 +166,18 @@ def _label(text):
     return " ".join(re.sub(r"[^\w\s']", " ", str(text or "").lower()).split())
 
 
-def _rest(text):
-    """A message past the ids of rows it names and a reply's first words: what it asks besides its answer."""
-    rest = ROW_ID.sub(" ", str(text or ""))
-    m = REPLY.match(rest)
-    return (rest[m.end():] if m else rest).strip(" \t\n,.;:!-")
+def _after(text, m):
+    return str(text or "")[m.end():].strip(" \t\n,.;:!-") if m else str(text or "").strip()
 
 
 def status(text):
     """True for a question of ezexe's about existing work: one that opens with a question word, as "where does it
     stand", asks for an account of where things stand, or ends on a question mark without asking for work, as "and
-    now?" does and "can you add the retry?" does not."""
+    now?" does and "can you add the retry?" does not. In a message of several sentences the question mark and
+    the request's form are read on its last sentence."""
     first = " ".join(str(text or "").split())
-    return bool(STATUS.match(first) or QUESTION.search(first) and not ASKS_WORK.match(first))
+    last = SENTENCE.split(first)[-1]               # in a message of several sentences, its question is the last
+    return bool(STATUS.match(first) or QUESTION.search(last) and not ASKS_WORK.match(last))
 
 
 def opens(text):
@@ -251,18 +256,31 @@ def on_message(home, s, req, last_turn=None):
                 _hold(home, sid, r["id"], k, ctl[k], "started")
                 r["holder"] = k
     state["known"] = sorted(ctl)
+    report = str(t.get("report") or "").strip()
+    ask = str(t.get("ask") or "").strip()
+    asked = bool(ask) or bool(report and QUESTION.search(report))
+    target = None
+    if asked and turn and turn != state.get("turnRead"):
+        said = ask or report.rsplit("\n", 1)[-1]
+        m = ROW_ID.search(said)
+        if m:                                      # the question names its row, as the line asks: "ask-1: ..."
+            target = next((r for r in have if r["id"] == f"ask-{m.group(1)}" and not r["end"]), None)
+        elif not any(r["waits"] for r in have):    # else the turn's own row, only while no other row waits
+            target = next((r for r in have if r["id"] == now and not r["holder"] and not r["waits"]
+                           and not r["end"]), None)
+        if target:
+            offered = [x for x in t.get("offered") or [] if isinstance(x, str) and x.strip()]
+            _add(home, sid, {"kind": "waits", "id": target["id"], "turn": turn, "waits": said[-300:],
+                             "offered": offered[:6]})
+    state["turnRead"] = turn
     keep = []
     for mine in [r for r in have if r["id"] in [now] + list(state.get("also") or [])]:
-        if mine["holder"] or mine["waits"] or mine["end"]:
+        if mine["holder"] or mine["waits"] or mine["end"] or mine is target:
             continue
         rid = mine["id"]
         if turn and turn != mine["turnBefore"] and turn not in mine["asked"]:
-            report = str(t.get("report") or "").strip()
-            offered = [x for x in t.get("offered") or [] if isinstance(x, str) and x.strip()]
-            if report and QUESTION.search(report) or str(t.get("ask") or "").strip():
-                said = str(t.get("ask") or "").strip() or report.rsplit("\n", 1)[-1]
-                _add(home, sid, {"kind": "waits", "id": rid, "turn": turn, "waits": said[-300:],
-                                 "offered": offered[:6]})
+            if asked:
+                keep.append(rid)                   # its turn asked ezexe of another row: still to be settled
             else:
                 _add(home, sid, {"kind": "end", "id": rid, "end": "answered"})
         elif req:
@@ -275,14 +293,20 @@ def on_message(home, s, req, last_turn=None):
         # a wait ends only by ezexe's recognized reply to it: a label the row offered, the row's id, or a reply word
         # or phrase standing alone at the message's start; every other message of ezexe's opens a row of its own
         waiting = [r for r in have if r["waits"]]
-        named = ROW_ID.search(req)
-        replied = bool(REPLY.match(ROW_ID.sub(" ", req).lstrip(" \t\n,.;:!-")))
-        rest = _rest(req)
-        hit = next((r for r in reversed(waiting) if _label(req) in {_label(x) for x in r["offered"]}), None)
+        lead = ID_LEAD.match(req)
+        after = _after(req, lead)
+        own = next((r for r in have if lead and r["id"] == f"ask-{lead.group(1)}"), None)
+        offers = [r for r in waiting if _label(after if lead else req) in {_label(x) for x in r["offered"]}]
+        pressed = (own if own in offers else None) if lead else (offers[0] if len(offers) == 1 else None)
+        m = REPLY.match(after)
+        named = lead if lead and (m or pressed) else None   # an id answers its row only before a reply or a label
+        replied = bool(m) if named else bool(REPLY.match(req))
+        rest = _after(after, m) if named else _after(req, REPLY.match(req))
+        hit = pressed if pressed and pressed["waits"] else None
         new = ""
-        if not hit:
+        if not hit and not pressed:
             if named:                              # the row's id answers that row or nothing
-                hit = next((r for r in waiting if r["id"] == f"ask-{named.group(1)}"), None)
+                hit = own if own and own["waits"] else None
             elif replied and waiting:
                 hit = next((r for r in reversed(waiting) if len(words(req) & words(r["topic"])) >= SHARED),
                            None) or waiting[-1]
@@ -461,6 +485,9 @@ def line(home, s, store=""):
     if any(r["waits"] for r in note):
         text += (" A request that waits on ezexe is put to it as the question of this turn's `mcp__ccd_turn__wrap_up`,"
                  " with buttons that answer it.")
+    if note:
+        text += (" A question this turn puts to ezexe about a request starts with its id, as \"ask-1: ...\", so the "
+                 "answer finds its row.")
     if note:
         text += "\n" + "\n".join(f"- {r['id']}: {r['topic']} | {r['state']}"
                                  + (f": {r['waits']}" if r["waits"] else "") for r in note)
