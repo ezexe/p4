@@ -12,13 +12,13 @@ _prompts that build prompts to prompter prompts into pioneer prompts that puppet
 prompty → prompter → pioneer → puppeteer
 ```
 
-The four names are the four steps p4-phi takes when ezexe sends a message to an orchestrator, or to any session that started sessions: routing, the start draft, the gate and the watcher, run by the functions `prompty`, `prompter`, `pioneer` and `watch` of [`puppeteer.py`](lbiza/plugins/p4-phi/scripts/puppeteer.py).
+The four names are the four steps p4-phi takes when ezexe sends a message to an orchestrator, or to any session that started sessions: routing, the start draft, the gate and the watcher, run by the functions `prompty`, `prompter`, `pioneer` and `look` of [`puppeteer.py`](lbiza/plugins/p4-phi/scripts/puppeteer.py).
 Routing reads the message against the records the orchestrator's ledger is built from: the area it names, the live session that is that area's code owner, and the running writer that holds its files.
 The start draft is the exact next session: its topic, a brief written as its own instruction, its parent session, fork or fresh, and the issue it closes.
 The gate checks the draft: it reads the state of the issue the draft names, looks for a running writer that holds the same files, and names the parent session the start draft chose, this orchestrator or none for a new orchestrator.
 A draft that names no issue tells the worker that p4-phi files none, so its findings go up in its report.
 The gate's verdict is what the session is handed: the exact `start_session` call for a clean draft, the `SendMessage` that routes it to its area's live code owner, the command that keeps it as a start request behind a busy writer, or no start where the depth or count cap holds.
-The watcher is one background process for each orchestrator.
+The watcher is the plugin's hooks module, which runs one look for an orchestrator inside Claude Code at a turn's end, at a message's arrival and on its timer.
 It rewrites `ledger.md` in that session's folder under the store's `phi/sessions/` from p4-phi's records and the app's session records when one of them changes, with a reconcile line where the two disagree about a live session.
 
 ## Recursive Refinement

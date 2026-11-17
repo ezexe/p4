@@ -1140,6 +1140,8 @@ IGNORED = ("phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/session
            # the watcher's pages are made again from the records; routes.jsonl is kept
            "phi/sessions/*/ledger.md", "phi/sessions/*/ledger.json", "phi/sessions/*/ledger.sig",
            "phi/sessions/*/watcher.json", "phi/meta-ledger.md", "phi/.issue-states.json", "phi/.routes-checked",
+           # a session's context fill and plan limits, which the hooks module writes for this machine's session
+           "phi/sessions/*/usage.json",
            # what did not fit beside a prompt, and the standing instructions an earlier p4-phi wrote: pages of this
            # machine
            "phi/sessions/*/held.md", "phi/sessions/*/standing.md",
