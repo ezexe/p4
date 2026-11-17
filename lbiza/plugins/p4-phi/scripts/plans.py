@@ -380,8 +380,11 @@ ORCHESTRATES = re.compile(r"^\W*(?:start|kick\s*off|launch)\s+(?!writing|adding|
 # acceptance session does, stay orchestration.
 MANAGES = re.compile(r"\b(?:un)?(?:archiv|relay|messag|start|stop|review|check|brief|spawn|ask|tell|nudg|queu|send|"
                      r"sent|pass|hand|forward)\w*\b"
-                     r"[^.;]*?\b(?:child(?:ren)?|(?:sub-?)?sessions?)\b(?!\s+(?:tree|page|record|files?|json|logs?|"
+                     r"[^.;]*?\b(?:(?:child(?:ren)?|(?:sub-?)?sessions?)\b(?!\s+(?:tree|page|record|files?|json|logs?|"
                      r"state|ids?|store))"   # manages a worker: orchestration, not "check phi session tree"
+                     # or a worker or a coworker, the tree's lower levels, not "the worker pool" or "worker threads"
+                     r"|(?:co-?)?workers?\b(?!\s+(?:pools?|threads?|process(?:es)?|counts?|queues?|types?|config\w*|"
+                     r"sizes?|limits?|scripts?|files?|modules?|code)\b))"
                      # queues, sends, passes, hands or forwards something to a session named by its id, its quoted
                      # title or its role, such as "Queue issues #19-#24 to p4-phi fixer"
                      r"|\b(?:queu|send|sent|pass|hand|forward)\w*\b[^.;]*?\b(?:to|for)\s+(?:the\s+)?"
@@ -503,7 +506,9 @@ def split_advice(home, s, plan, owner_turn, cap):
 # matches the app", though WAITS matches `verif` and `confirm` anywhere. It stays only when it names a child or a
 # sub-session, or checks or lands the work.
 CHECK_WORK = re.compile(r"^\W*(?:re-?)?(?:check|verify|validate|audit|inspect|confirm)\w*\b", re.I)
-CHILD_WORD = re.compile(r"\b(?:child(?:ren)?(?:'s|’s)?|sub-?sessions?)\b", re.I)
+CHILD_WORD = re.compile(r"\b(?:child(?:ren)?(?:'s|’s)?|sub-?sessions?)\b"   # or a worker, as MANAGES reads one
+                        r"|\b(?:co-?)?workers?\b(?!\s+(?:pools?|threads?|process(?:es)?|counts?|queues?|types?|"
+                        r"config\w*|sizes?|limits?|scripts?|files?|modules?|code)\b)", re.I)
 # syncing a store is landing work: the orchestrator is the one that pushes and syncs each store
 SYNCS = re.compile(r"^\W*(?:re-?)?sync(?:s|ed|ing|hronis\w+|hroniz\w+)?\b"
                    r"|\bsync(?:s|ed|ing)?\s+(?:[\w'’-]+\s+){0,3}?stores?\b|\bp4\.py\s+sync\b", re.I)
@@ -515,7 +520,7 @@ SYNCS = re.compile(r"^\W*(?:re-?)?sync(?:s|ed|ing|hronis\w+|hroniz\w+)?\b"
 AWAITS_TOP = re.compile(r"\b(?:a?wait\w*|until|hold\w*\s+for)\b[^.;]*\b(?:reports?|sessions?|trees?|tops?|results?|"
                         r"answers?|repl(?:y|ies)|word)\b", re.I)
 OTHERS = re.compile(r"\b(?:reports?|answers?|repl(?:y|ies)|word)\s+from\b"
-                    r"|\b(?:sessions?|trees?|child(?:ren)?|tops?|siblings?|puppeteers?|orchestrators?)"
+                    r"|\b(?:sessions?|trees?|child(?:ren)?|tops?|siblings?|puppeteers?|orchestrators?|(?:co-?)?workers?)"
                     r"(?:'s|s'|’s|s’|')?\s+(?:own\s+|last\s+|final\s+)?(?:reports?|results?|answers?|repl(?:y|ies)|"
                     r"outcomes?|findings)\b", re.I)
 BUILDS = re.compile(r"^\W*(?:fix|writ|add|chang|edit|implement|updat|remov|renam|creat|mak|refactor|port|rewrit|"

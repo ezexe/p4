@@ -1327,6 +1327,15 @@ class TopOrchestrates(unittest.TestCase):
         self.assertEqual([[st["addr"] for st in g] for g in groups], [["4"]], "starting a server is work")
         marker = os.path.join(self.t.p4, "phi", ".nudge", CLI[TOP])
         self.assertFalse(os.path.exists(marker), "archiving a child owes no nudge")
+        # ezexe/p4#203: the tree's levels are named worker and coworker, and a step that manages one stays here too
+        self.assertEqual(plans.top_stays("Start a worker for the docs"), "manages a worker, which is orchestration")
+        groups, kept = plans.top_groups({"steps": [
+            {"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate((
+                "Start a worker for the docs", "Message the coworker about the tests", "Check the worker's report",
+                "Stop the co-worker on the old branch", "Fix the worker pool size in src/pool.py",
+                "Stop the worker pool in src/pool.py"))]}, "")
+        self.assertEqual([a for a, _ in kept], ["1", "2", "3", "4"])
+        self.assertEqual([[st["addr"] for st in g] for g in groups], [["5", "6"]], "a worker pool is work, not a session")
 
     def test_phis_own_commands_are_never_nudged(self):
         p = self.t.proj
