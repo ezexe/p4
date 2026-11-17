@@ -566,6 +566,24 @@ class LedgerWaits(Trees):
         t.say(PUP, marked("The importer's parser is in review."))
         self.assertEqual(asks.rows(t.p4, PUP)[2]["waits"], "Ask-3: monthly or weekly charts?", "case aside")
 
+    def test_a_new_row_never_takes_the_id_of_a_row_whose_opening_line_was_lost(self):
+        t = self.t
+        for k, ask in enumerate((ASK1, ASK2)):
+            t.say(PUP, ask)
+            t.stop(PUP, ask, report="Nothing is needed.", uuid=f"x{k}")
+        t.say(PUP, ASK3)
+        t.stop(PUP, ASK3, report="The notes are ready. " + WAIT, uuid="x2")
+        t.say(PUP, marked("The importer's parser is in review."))
+        path = asks.log_path(t.p4, PUP)
+        lines = read(path).splitlines()
+        k = next(i for i, x in enumerate(lines) if '"ask-2"' in x and '"opened"' in x)
+        lines[k] = lines[k][:25]                   # a line cut short in the middle of the log
+        write(path, "\n".join(lines) + "\n")
+        t.say(PUP, BILLING)
+        got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
+        self.assertIn("ask-4", got, "one past the highest id the log holds")
+        self.assertEqual(got["ask-3"]["waits"], "The notes are ready. " + WAIT, "the live ask-3 keeps its wait")
+
     def test_a_label_two_rows_offered_changes_nothing(self):
         t = self.t
         wrap = {"recap": "Ready.", "actions": [{"label": "Yes"}, {"label": "Wait"}]}

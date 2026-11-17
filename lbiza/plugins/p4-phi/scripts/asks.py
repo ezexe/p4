@@ -91,6 +91,22 @@ def _now():
     return time.strftime("%Y-%m-%d %H:%M:%S")
 
 
+ID_SEEN = re.compile(r'"id":\s*"ask-(\d+)"')
+
+
+def _next_id(home, sid, have=()):
+    """The id of a new row: one past the highest number any id in the log holds, read from its raw lines, so a row
+    whose opening line was lost or malformed never has its id given again and its later lines never fold into a
+    new row."""
+    try:
+        with open(log_path(home, sid), encoding="utf-8", errors="replace") as f:
+            seen = [int(n) for n in ID_SEEN.findall(f.read())]
+    except OSError:
+        seen = []
+    seen += [int(r["id"].split("-", 1)[1]) for r in have if str(r.get("id", "")).split("-", 1)[-1].isdigit()]
+    return f"ask-{max(seen, default=0) + 1}"
+
+
 def _key(text):
     """A request's key: its words and its day, so the same request on a later day opens a row of its own."""
     said = time.strftime("%Y-%m-%d") + " " + " ".join(str(text or "").split())
@@ -322,7 +338,7 @@ def on_message(home, s, req, last_turn=None):
             if same:                               # the same words again, while their row is live
                 now = "" if same["holder"] or same["waits"] else same["id"]
             else:
-                now = f"ask-{len(have) + 1}"
+                now = _next_id(home, sid, have)
                 _add(home, sid, {"kind": "opened", "id": now, "topic": topic_of(new), "said": _key(new),
                                  "turnBefore": turn})
         if hit:                                    # ezexe's answer: the row works on again from this message
