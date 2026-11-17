@@ -549,11 +549,13 @@ def title_of(s):
 
 
 def name_of(s, row=None):
-    """A session as another session is shown it: its title, else its id, never a cut of the prompt it was sent,
-    which title_of falls back to. `row`, a report row, gives the id where the session file is gone."""
+    """A session as another session is shown it, by book.title: the app's title, else the one p4-phi holds, else
+    its id, never a cut of the prompt it was sent, which title_of falls back to. `row`, a report row, gives the id
+    where the session file is gone."""
+    import book
     s = s if isinstance(s, dict) else {}
     sid = str(s.get("sessionId") or (row or {}).get("sessionId") or "")
-    return s.get("title") or (f"session {sid[:14]}" if sid else "a session")
+    return book.title(sid, s) or "a session"
 
 
 def chain_of(home, sid):
@@ -800,8 +802,8 @@ def said_of(turn, report):
 
 def turn_lines(title, t, report=300, prompt=0):
     """A turn as lines: its session's title, whether it was shown done, its steps, workers, failures and report. Its
-    prompt, cut to `prompt` characters, only where the reader is the session it was sent to or a page that keeps
-    it: no session is handed a run of the words of a prompt sent to another."""
+    prompt, cut to `prompt` characters, only where the reader is the session it was sent to: no session is handed
+    a run of the words of a prompt sent to another."""
     how = "done: " + cut(clean(t["done"]), 160) if t.get("done") else "not shown done"
     said = f": {cut(clean(t.get('prompt')), prompt)}" if prompt and t.get("prompt") else ""
     out = [f"- \"{title}\", {how}, {t.get('time', '')}{said}"]
@@ -1425,18 +1427,18 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
 
 
 def render_page(home, sid):
-    """session.md: a session as one page, with its task, notes, turns and workers, rewritten from its files.
-    With no `sid`, sessions.md: the orchestrators of the project."""
+    """session.md: a session as one page, with its title, files, notes, turns and workers, rewritten from its files.
+    With no `sid`, sessions.md: the orchestrators of the project. A page quotes no prompt, its own session's or
+    another's, since a child is pointed to its parent's page and a parent to its worker's: each session is named by
+    its title, and each turn by its steps and its report."""
     out = []
     if sid:
         s = load_session(home, sid)
         if not s.get("sessionId"):
             return
         above = spawned_from(s)
-        out = [f"# {title_of(s)}", "",
+        out = [f"# {name_of(s)}", "",
                f"Session `{sid}`, started by `{above}`." if above else f"Session `{sid}`, an orchestrator.", ""]
-        if s.get("task"):
-            out += ["## Task", "", s["task"].strip(), ""]
         if isinstance(s.get("fileSet"), list):
             out += ["## Files", "", "The write set its brief declares:",
                     ""] + ([f"- `{f}`" for f in s["fileSet"]] or ["- none: it writes no file"]) + [""]
@@ -1449,7 +1451,7 @@ def render_page(home, sid):
         if turns:
             out += ["## Turns", ""]
             for t in turns:
-                out += turn_lines(title_of(s), t, report=1200, prompt=400)
+                out += turn_lines(name_of(s), t, report=1200)
             out.append("")
     else:
         out = ["# Orchestrators of this project", ""]
@@ -1458,7 +1460,7 @@ def render_page(home, sid):
         if sid:
             out += ["## Workers, newest first", ""]
         for r in rows:
-            out += turn_lines(r.get("title") or r["sessionId"][:14], r["turn"], report=600, prompt=300)
+            out += turn_lines(name_of(load_session(home, r["sessionId"]), r), r["turn"], report=600)
             out.append(f"  session: `{r['sessionId']}`")
         out.append("")
     write_atomic(page_path(home, sid), "\n".join(out))
@@ -2693,13 +2695,13 @@ def h_stop(payload):
     row["delta"] = relay.delta(me.home, s, [f for f in files if f],
                                s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd(),
                                since=str(earlier[-1].get("time") or "") if earlier else "")
-    row["sessions"] = [f"\"{r.get('title') or r['sessionId'][:14]}\": "
+    row["sessions"] = [f"\"{name_of(load_session(me.home, r['sessionId']), r)}\": "
                        f"{'done' if r['turn'].get('done') else 'not shown done'}"
                        for r in latest_reports(load_reports(me.home, s["sessionId"]))][:TURN_STEPS]
     append_line(os.path.join(session_dir(me.home, s["sessionId"]), "turns.jsonl"), row)
     above = spawned_from(s)
     append_line(reports_path(me.home, above),
-                {"time": row["time"], "sessionId": s["sessionId"], "title": title_of(s), "turn": row})
+                {"time": row["time"], "sessionId": s["sessionId"], "title": name_of(s), "turn": row})
     s.pop("done", None)
     if not s.get("task"):
         s["task"], s["taskAt"] = row["prompt"], row["time"]
@@ -3419,7 +3421,7 @@ def reparent(home, sid, under, source="reparented"):
     turns = load_turns(home, sid)
     if turns:
         append_line(reports_path(home, under),
-                    {"time": now(), "sessionId": sid, "title": title_of(s), "turn": turns[-1]})
+                    {"time": now(), "sessionId": sid, "title": name_of(s), "turn": turns[-1]})
     for x in (sid, old, under):
         render_page(home, x)
     return True

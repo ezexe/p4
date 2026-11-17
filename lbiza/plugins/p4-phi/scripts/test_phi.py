@@ -571,10 +571,12 @@ class Turns(unittest.TestCase):
         t = self.t.turns(TOP)[0]
         self.assertEqual(t["sessions"], ["\"Fix the dropped row\": done"])
         page = read(os.path.join(self.t.dir(TOP), "session.md"))
-        self.assertIn(TASK, page)
+        self.assertIn("# Narwhal exporter", page)
         self.assertIn("an orchestrator", page)
         self.assertIn("## Workers", page)
         self.assertIn("Fix the dropped row", page)
+        for sent in (TASK, BRIEF):               # ezexe/p4#204: a child is pointed to this page, so it quotes no prompt
+            self.assertEqual(runs_of(sent, page), [], sent)
         tops = phi.load_reports(self.t.p4, "")
         self.assertEqual(tops[-1]["sessionId"], TOP)
         self.assertTrue(os.path.exists(os.path.join(self.t.p4, "phi", "reports.jsonl")))
@@ -666,24 +668,30 @@ class Background(unittest.TestCase):
         self.assertNotIn("- \"Check the ports table\", ", text)     # not its own turns: it has none
 
     def test_a_session_with_no_title_is_named_by_its_id_and_never_by_its_prompt(self):
-        """ezexe/p4#204: title_of falls back to a cut of a session's prompt; another session is shown its id."""
+        """ezexe/p4#204: title_of falls back to a cut of a session's prompt, so a session with no title, such as a CLI
+        one, is shown to others by its id: in a background, in a report row and in a turn's list of workers, and so on
+        the pages a child is pointed to."""
         t = self.t
-        t.say(KID, HANDED)
         t.record("local_grand002", KID, "Time the flush")
         sent = "Time each flush of the ports table and say which one of them is slow."
+        t.say(KID, HANDED)
         t.say("local_grand002", handed(sent))
+        for sid in (KID, "local_grand002"):                     # no title in the app's record or in p4-phi's
+            for path in (os.path.join(t.app, sid + ".json"), os.path.join(t.dir(sid), "session.json")):
+                d = jload(path)
+                d.pop("title", None)
+                write(path, json.dumps(d))
         t.stop("local_grand002", sent, [], "The third flush is slow.")
-        for sid in (KID, "local_grand002"):                     # sessions no app titled, such as a CLI one
-            path = os.path.join(t.dir(sid), "session.json")
-            s = jload(path)
-            s.pop("title", None)
-            write(path, json.dumps(s))
+        t.stop(KID, HANDED, [], "Started a coworker to time the flush.")
         t.record(GRAND, KID, "Bisect flush_rows")
         text = context(t.say(GRAND, handed("Bisect the history of flush_rows for the commit that lost the row.")))
-        self.assertIn(f"\"session {KID[:14]}\"", text)
+        self.assertIn(f"\"{KID}\"", text)
         self.assertIn("The third flush is slow.", text)
+        pages = read(os.path.join(t.dir(TOP), "session.md")) + read(os.path.join(t.dir(KID), "session.md"))
+        self.assertIn(f"\"local_grand002\"", pages)
         for said in (BRIEF, sent):
             self.assertEqual(runs_of(said, text), [], said)
+            self.assertEqual(runs_of(said, pages), [], said)
 
     def test_the_next_top_level_session_is_given_the_one_before_whatever_its_words(self):
         self.t.stop(TOP, TASK, [("Edit", {"file_path": "src/export/flush.py"}, "ok")], "Half done.")
@@ -749,7 +757,7 @@ class Background(unittest.TestCase):
     def test_show_prints_a_sessions_page(self):
         out = self.t.cli(TOP, "show").stdout
         self.assertIn("# Narwhal exporter", out)
-        self.assertIn(TASK, out)
+        self.assertIn("an orchestrator", out)
 
     def test_off_is_off(self):
         self.t.cli(TOP, "note", "The ports table is written by flush_rows", "--source", "flush.py:40")
