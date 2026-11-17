@@ -2537,20 +2537,22 @@ def h_start_advice(payload):
     the reason, so ezexe sees it and decides. A PreToolUse `permissionDecision` is `allow`, `deny`, `ask` or `defer`;
     where `permissions.denyInsteadOfPrompting` is set, a call that would wait on a prompt is denied. The input is
     never rewritten with `updatedInput`, since a fresh start needs a brief and background only the caller can
-    write. A puppeteer's start of another session's start request goes through, claimed as made on that
-    session's behalf, with the line that has the new session detached to top level. A call that proposes a start
-    request as a suggested task card claims it for good, since the card holds it from then on."""
+    write. A start of another session's start request, a puppeteer's or any other session's, goes through, claimed
+    as made on that session's behalf, with the line that has the new session detached to top level. A call that
+    proposes a start request as a suggested task card claims it for good, since the card holds it from then on."""
     me = Me(payload)
     if not me.home or not me.id:
         return None
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     if inp.get("proposal_id") and not inp.get("prompt"):
         return None                                 # starting a card already made: nothing to decide
-    made = controls.behalf(me.home, load_session(me.home, me.id), inp.get("prompt"), me.store)
-    if made:                                        # a puppeteer starting another session's start request
-        starts.claim(made[1], inp.get("prompt"), me.id)
+    caller = load_session(me.home, me.id)
+    card = inp.get("initiation") == "own_initiative"
+    made = controls.behalf(me.home, caller, inp.get("prompt"), me.store)
+    if made:                                        # a start of another session's start request, by any session
+        starts.claim(made[1], inp.get("prompt"), me.id, card=card)
         RAN["behalf"] = made[0]["id"]
-        return controls.behalf_line(made[0])
+        return controls.behalf_line(made[0], controls.is_puppeteer(caller, me.store))
     why = controls.start_refused(me.home, load_session(me.home, me.id), inp.get("prompt"), me.store)
     if why is None:                                 # a puppeteer's standing worker, the first one
         RAN["standing_start"] = True
@@ -2558,7 +2560,6 @@ def h_start_advice(payload):
     if why:                                         # a second while the first is live
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                        "permissionDecisionReason": why}}
-    card = inp.get("initiation") == "own_initiative"
     if starts.claim(me.home, inp.get("prompt"), me.id, card=card):
         RAN["claimed"] = "card" if card else True   # a start request's call, given exactly: the asker decided it
         return None

@@ -294,19 +294,20 @@ _APP_LOADED = set()
 
 
 def app_index(roots, home=""):
-    """Each session of the app's records by its sessionId, with its parent, whether it is archived, its title and
-    its name; each record file is read once after each change."""
+    """Each session of the app's records by its sessionId, with its parent, whether it is archived, whether the app
+    detached it to top level, its title and its name; each record file is read once after each change."""
     out = {}
     app_cached(home)
     read = 0
     for p, m, _ in app_look(roots):
         held = _APP.get(p)
-        if not held or held[0] != m:
+        if not held or held[0] != m or (held[1] and "detached" not in held[1]):   # a row kept without that field
             read += 1
             d = relay._read_json(p)
             sp = d.get("spawnedFrom") if isinstance(d.get("spawnedFrom"), dict) else {}
             held = _APP[p] = (m, {"sessionId": str(d.get("sessionId") or ""), "parent": str(sp.get("sessionId") or ""),
                                   "archived": bool(d.get("isArchived")), "title": str(d.get("title") or "")[:120],
+                                  "detached": bool(d.get("lineageDetached")),
                                   "name": str(sp.get("name") or "")} if d.get("sessionId") else None)
         if held[1]:
             out[held[1]["sessionId"]] = held[1]
@@ -440,8 +441,15 @@ def build(home, top, net=False):
             elif rec["archived"]:
                 reconcile.append(f"p4-phi lists \"{title}\" `{sid}` as live, and the app has archived it.")
         held = s.get("spawnedFrom") if isinstance(s.get("spawnedFrom"), dict) else {}
-        if rec and depth and rec["parent"] and rec["parent"] != parent \
-                and held.get("source") not in ("detached", "reparented", "requested"):
+        if rec and depth and rec["parent"] and rec["parent"] != parent and held.get("source") == "requested":
+            # started for another session's start request: the app nests it under its starter and no tool moves it
+            reconcile.append(f"`{rec['parent']}` started \"{title}\" `{sid}` for a start request of `{parent}`, an "
+                             f"exception: p4-phi holds it under `{parent}`, and the app "
+                             + ("shows it at top level." if rec.get("detached") else
+                                f"nests it under `{rec['parent']}` until `mcp__ccd_session_mgmt__detach_session` "
+                                f"with `{sid}` moves it to top level."))
+        elif rec and depth and rec["parent"] and rec["parent"] != parent \
+                and held.get("source") not in ("detached", "reparented"):
             reconcile.append(f"the app shows \"{title}\" `{sid}` started by `{rec['parent']}`, and p4-phi holds it "
                              f"under `{parent}`.")
         plan = plans.load(home, sid)

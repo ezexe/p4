@@ -180,6 +180,32 @@ class StartRequests(unittest.TestCase):
         self.assertEqual(gone.returncode, 0, gone.stderr)
         self.assertIn("withdraw that card with `mcp__ccd_session__dismiss_task`", gone.stdout)
 
+    def test_two_turns_in_a_row_that_ezexe_did_not_begin_hand_the_card_and_no_blocked_wrap_up(self):
+        """ezexe/p4#220: no turn hands a session the ask ezexe was put again and again. A session that holds a start
+        it may not make is handed the card's call at each of two turns in a row that ezexe did not begin, and at
+        neither a wrap-up question, a `blocked` mark or a start button. Once it proposes the card, the app holds that
+        one ask of ezexe, and a third such turn hands nothing for the request."""
+        t = self.t
+        rid, _ = starts.add(t.p4, KID, "the flush port", BRIEF, after=FREE)
+        for turn in ("the first turn", "the second turn"):
+            line = context(t.say(KID, CROSS))
+            self.assertIn("propose each as a suggested task card", line, turn)
+            self.assertIn("\"initiation\": \"own_initiative\"", line, turn)
+            self.assertIn(starts.marker(rid, KID), json.loads(
+                line.split("\"the flush port\": `mcp__ccd_session__start_session` with ", 1)[1]
+                .split("\n", 1)[0])["prompt"], turn)
+            for ask in ("mcp__ccd_turn__wrap_up", "`blocked`", "Start it", "Start them", "waits on ezexe's click",
+                        "reply button"):
+                self.assertNotIn(ask, line, turn)
+        self.assertNotIn("claimed", starts.state(t.p4)[rid], "handing the call claims nothing")
+        card = starts.call_of(starts.state(t.p4)[rid], t.p4, card=True)
+        t.hook("start-advice", KID, {"hook_event_name": "PreToolUse",
+                                     "tool_name": "mcp__ccd_session__start_session", "tool_input": card})
+        third = context(t.say(KID, CROSS))
+        self.assertNotIn("starts this session queued", third, "the card holds the one ask")
+        self.assertNotIn(rid, third)
+        self.assertNotIn("mcp__ccd_turn__wrap_up", third)
+
     def test_at_most_three_cards_are_handed_a_turn(self):
         """The app shows at most three suggested task cards a turn, so a turn ezexe did not begin is handed three of
         the freed starts, and a turn ezexe began all of them."""

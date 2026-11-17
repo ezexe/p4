@@ -1048,9 +1048,11 @@ def holders_text(s, req=""):
 
 def behalf(home, s, prompt, store=""):
     """The start request another session filed for a child of its own and the store it lies in, when a start call of
-    this puppeteer carries its marker; None for any other call or session."""
+    this session carries its marker; None for any other call. A puppeteer is answered from the stores of the
+    sessions it controls as well, any other session from its own store. The app nests a session under the session
+    that calls the start tool and no tool moves it after, so whoever makes such a start is told to detach it."""
     m = starts.MARK_RE.search(str(prompt or ""))
-    if not m or not s.get("sessionId") or m.group(2) == s["sessionId"] or not is_puppeteer(s, store):
+    if not m or not s.get("sessionId") or m.group(2) == s["sessionId"]:
         return None
     for where in stores(home, s):
         r = starts.state(where).get(m.group(1))
@@ -1059,13 +1061,16 @@ def behalf(home, s, prompt, store=""):
     return None
 
 
-def behalf_line(r):
-    """What a puppeteer is told as its start of another session's start request goes through."""
+def behalf_line(r, puppeteer=True):
+    """What a session is told as its start of another session's start request goes through: a puppeteer, whose
+    board names the start, or any other session, whose tree's ledger names it."""
+    me = "this puppeteer" if puppeteer else "this session"
+    where = "on the board" if puppeteer else "in its tree's ledger"
     return (f"phi (p4-phi): this start carries start request {r['id']} of {link(r['requester'])}, which belongs under "
-            f"that session, while the app nests the new session under this puppeteer. p4-phi records it as "
-            f"started on that session's behalf, holds the new session under that session and names it on the board "
+            f"that session, while the app nests the new session under {me}. p4-phi records it as "
+            f"started on that session's behalf, holds the new session under that session and names it {where} "
             f"as an exception. Once the start returns, call `mcp__ccd_session_mgmt__detach_session` with the new "
-            f"session's id, so the app shows it at top level and not under this puppeteer. Start no other "
+            f"session's id, so the app shows it at top level and not under {me}. Start no other "
             f"session's request here: name the session that holds it to ezexe as a link to open.")
 
 

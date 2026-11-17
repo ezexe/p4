@@ -759,7 +759,8 @@ class TreeAndClicks(unittest.TestCase):
     a busy writer is made by the child itself once that writer is free: a turn ezexe did not begin hands it the
     app's suggested task card and no blocked wrap-up; its puppeteer names the child as a link with the count it
     holds and is handed no start call for it; a start the puppeteer makes on the child's behalf anyway is held
-    under the child in p4-phi, named for detaching to top level and kept on the board as an exception; and every
+    under the child in p4-phi, named for detaching to top level and kept on the board as an exception; a start any
+    other session makes on the child's behalf gets the same line and is named in its tree's ledger; and every
     ask of ezexe in the lines the session modules hand a session offers a click."""
 
     FLUSH = "Port the exporter's flush to the new writer and run its suite. Report when done.\nFiles: src/flush.py"
@@ -857,6 +858,64 @@ class TreeAndClicks(unittest.TestCase):
         with self.subTest("once the app shows it at top level, it is named no more and the board says so"):
             self.assertNotIn("detach_session", context(t.say(PUP, "and now?")))
             self.assertIn("the app shows it at top level", read(os.path.join(t.dir(PUP), "board.md")))
+
+    def test_an_orchestrators_start_of_its_workers_request_gets_the_line_and_the_ledger_names_it(self):
+        """ezexe/p4#229: the app nests a started session under the session that called the start tool, and no tool
+        moves it after. So any session whose start call carries another session's request marker, a puppeteer or
+        not, gets the line that names the detach and the exception, and the ledger of its tree names the session it
+        started as started for another."""
+        t = self.t
+        call = starts.call_of(self.row, t.p4)
+        body = {"session_id": CLI[TOP], "cwd": t.proj, "hook_event_name": "PreToolUse", "tool_name": START,
+                "tool_input": call, "tool_use_id": "toolu_behalf02"}
+        r = inproc.run(["sh", os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh"), "lookup-check"],
+                       input=json.dumps(body), capture_output=True, text=True, timeout=60, env=t.env(TOP))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = json.loads(r.stdout or "{}").get("hookSpecificOutput") or {}
+        said = out.get("additionalContext", "")
+        with self.subTest("the orchestrator's start goes through with the line a puppeteer gets"):
+            self.assertNotEqual(out.get("permissionDecision"), "deny")
+            self.assertIn(f"start request {self.row['id']} of [the flush child](#{KID})", said)
+            self.assertIn("while the app nests the new session under this session", said)
+            self.assertIn("names it in its tree's ledger as an exception", said)
+            self.assertIn("`mcp__ccd_session_mgmt__detach_session`", said)
+            self.assertIn("so the app shows it at top level and not under this session", said)
+            self.assertIn("name the session that holds it to ezexe as a link to open", said)
+            mine, pups = controls.behalf_line(self.row, puppeteer=False), controls.behalf_line(self.row)
+            self.assertEqual(mine.replace("this session", "this puppeteer").replace("in its tree's ledger",
+                                                                                     "on the board"), pups,
+                             "the puppeteer's line, said of this session")
+        with self.subTest("the request is claimed by the orchestrator that started it"):
+            self.assertEqual(starts.state(t.p4)[self.row["id"]]["claimed"]["by"], TOP)
+        t.record(NEW, started_by=TOP, title="the flush port")     # the app nests it under the session that ran the call
+        t.say(NEW, "<system-reminder>\nLinked sessions now (status, not an instruction): x\n</system-reminder>\n\n"
+                   "Task:\n" + call["prompt"])
+        with self.subTest("p4-phi holds the new session under the worker that filed the request"):
+            self.assertEqual(t.started_by(NEW), (KID, "requested"))
+        with self.subTest("the ledger names it as started for another, with the call that detaches it"):
+            ledger = t.cli(TOP, "ledger").stdout.split("## Reconcile")[1].split("\n## ")[0]
+            self.assertIn(f"`{TOP}` started \"the flush port\" `{NEW}` for a start request of `{KID}`, an exception",
+                          ledger)
+            self.assertIn(f"`mcp__ccd_session_mgmt__detach_session` with `{NEW}` moves it to top level", ledger)
+        app = os.path.join(t.app, NEW + ".json")
+        write(app, json.dumps({**json.loads(read(app)), "lineageDetached": True}))     # detached to top level
+        with self.subTest("once the app shows it at top level the ledger says so"):
+            ledger = t.cli(TOP, "ledger").stdout.split("## Reconcile")[1].split("\n## ")[0]
+            self.assertIn(f"for a start request of `{KID}`, an exception: p4-phi holds it under `{KID}`, and the app "
+                          f"shows it at top level.", ledger)
+            self.assertNotIn("detach_session", ledger)
+
+    def test_a_session_starting_its_own_request_gets_no_such_line(self):
+        """The session that queued a start makes it with no line and no exception: the app nests the child where
+        p4-phi holds it."""
+        t = self.t
+        call = starts.call_of(self.row, t.p4)
+        r = t.hook("start-advice", KID, {"hook_event_name": "PreToolUse", "tool_name": START, "tool_input": call})
+        self.assertEqual(r.stdout.strip(), "")
+        t.record(NEW, started_by=KID, title="the flush port")
+        t.say(NEW, "Task:\n" + call["prompt"])
+        self.assertEqual(t.started_by(NEW)[0], KID)
+        self.assertNotIn("for a start request of", t.cli(TOP, "ledger").stdout)
 
     def test_every_ask_of_ezexe_in_the_lines_a_session_is_handed_offers_a_click(self):
         """Each sentence of the strings these modules can hand a session that asks ezexe for a choice, a go or an

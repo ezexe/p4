@@ -52,6 +52,7 @@ A worker splits at its first message: in these sessions the app has let a starte
 Subagents keep reads, searches, single command runs and independent checks.
 A writing part that comes up later is shown as a suggested task card that ezexe presses.
 p4-phi keeps a start request only for the two starts a card cannot hold: one that waits behind a busy writer, which the session that queued it is handed once the writer is free, as a start at a turn ezexe begins there and as the card at any other turn, and one addressed to a puppeteer.
+A start request belongs under the session that filed it, and the app nests a session under whichever session calls the start tool: a session that starts another session's request is told to detach the session it started to top level in the app, p4-phi holds that session under the one that filed the request, and a puppeteer's board or the tree's ledger names it as an exception.
 A subagent that wrote files is listed on the ledger under Level misses.
 Before a session creates anything new, such as a module, a page, a format or a kind of test, it finds the documented terms for it and a published implementation guide for that kind of work, logs both with their sources in its decisions file, and builds by them: a writing worker's first message and every start draft carry that line.
 A task list whose first creating step has no such research step before it is advised one, once.
