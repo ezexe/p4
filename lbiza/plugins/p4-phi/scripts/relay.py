@@ -1100,16 +1100,6 @@ def slice_text(home, s):
     return "\n".join(out)
 
 
-def scratch_line(home, cli, base):
-    """The session scratchpad directory a started session keeps its temporary files in, named at its start so it
-    never asks or guesses."""
-    if not cli:
-        return ""
-    return (f"phi (p4-phi): this session's scratchpad directory is "
-            f"{show(norm(os.path.join(home, 'temportal', 'tmp', cli)), base)}/"
-            f": temporary files go there, and are named by that path.")
-
-
 def anchor_version(home, parent):
     return int(_read_json(anchor_path(home, parent)).get("version") or 0) if parent else 0
 

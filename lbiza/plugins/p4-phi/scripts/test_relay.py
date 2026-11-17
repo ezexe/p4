@@ -37,11 +37,10 @@ class Paths(unittest.TestCase):
         self.assertFalse(relay.overlap("e:/w/lib", "e:/w/docs"))
         self.assertEqual(relay.norm("/e/projects/x/", ""), relay.norm("E:/projects/x", ""))
 
-    def test_a_child_is_told_its_scratchpad_directory_and_paths_relative(self):
-        """The child's own scratchpad directory, and the slice's paths as the project names them."""
-        line = relay.scratch_line("E:/proj/.claude/p4", "abc-1", "E:/proj")
-        self.assertIn("scratchpad directory is .claude/p4/temportal/tmp/abc-1/", line)
-        self.assertEqual(relay.scratch_line("E:/proj/.claude/p4", "", "E:/proj"), "")
+    def test_a_childs_slice_names_its_paths_relative_and_no_scratchpad_in_the_store(self):
+        """The slice's paths as the project names them. No line names a scratchpad under .claude: the app names each
+        session's scratchpad itself, and every write under .claude asks ezexe."""
+        self.assertFalse(hasattr(relay, "scratch_line"))
         tmp = tempfile.mkdtemp()
         try:
             home = os.path.join(tmp, ".claude", "p4")

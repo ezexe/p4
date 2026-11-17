@@ -29,7 +29,7 @@ import relay  # noqa: E402
 import starts  # noqa: E402
 import controls  # noqa: E402
 from test_phi import CLI, KID, KID2, TOP, Tree, context, memory, read, transcript, write  # noqa: E402
-from test_phi import START as SESSION_START  # noqa: E402
+from test_phi import PROMPT, START as SESSION_START  # noqa: E402
 
 PUP, PUP2, TOP2, TOP3, NEW = ("local_pup00001", "local_pup00002", "local_top00002", "local_top00003",
                               "local_new00001")
@@ -835,11 +835,15 @@ class Supervisor(unittest.TestCase):
         said, _ = self.pre(PUP, START, {"initiation": "user_asked", "title": "Standing worker", "prompt": brief})
         self.assertNotIn("refused", said, "the first standing worker is let through")
         t.record(WORKER, started_by=PUP, title="Puppeteer's standing worker")
-        ctx = context(t.say(WORKER, brief))
+        pad = os.path.join(t.tmp, "app-scratchpad", "worker").replace("\\", "/")
+        ctx = context(t.hook(PROMPT, WORKER, {"hook_event_name": "UserPromptSubmit", "prompt": brief,
+                                              "scratchpad_dir": pad}))
         self.assertIn("standing coworker", ctx)
         self.assertIn("Model and effort:", ctx)
         self.assertIn("one closing message to the puppeteer", ctx)
-        self.assertIn(os.path.join(t.dir(WORKER), "state.md").replace("\\", "/"), ctx, "its state page")
+        self.assertIn(f"{pad}/state.md", ctx, "its state page, in the app's scratchpad")
+        self.assertNotIn(os.path.join(t.dir(WORKER), "state.md").replace("\\", "/"), ctx, "never under .claude")
+        self.assertNotIn("temportal/tmp", ctx, "a started session is told no scratchpad in the store")
         said, out = self.pre(PUP, START, {"initiation": "user_asked", "title": "Standing worker again",
                                           "prompt": brief})
         self.assertEqual(out.get("permissionDecision"), "deny", "a second standing worker while the first is live")
@@ -851,9 +855,15 @@ class Supervisor(unittest.TestCase):
         said, _ = self.pre(PUP, "Bash", {"command": "ls E:/x"}, agent_id="agent_x1")
         self.assertNotIn(WORKER, said, "a subagent of the puppeteer is not the puppeteer")
         self.assertTrue(os.path.exists(os.path.join(t.p4, "phi", ".puppeteers", CLI[PUP])), "the marker the gate reads")
+        copad = os.path.join(t.tmp, "app-scratchpad", "co1").replace("\\", "/")
         for sid in (CO1, CO2):
             t.record(sid, started_by=WORKER, title="a standing coworker")
-            self.assertIn("standing coworker", context(t.say(sid, "Check the archives.\nFiles: none")))
+            said = {"hook_event_name": "UserPromptSubmit", "prompt": "Check the archives.\nFiles: none"}
+            if sid == CO1:
+                said["scratchpad_dir"] = copad
+            self.assertIn("standing coworker", context(t.hook(PROMPT, sid, said)))
+        t.hook(PROMPT, CO1, {"hook_event_name": "UserPromptSubmit", "prompt": "next",
+                             "scratchpad_dir": copad + "-after-a-clear"})
         ctx = context(t.say(PUP, f'<cross-session-message from="{WORKER}">Checked 4 archives; page: x.md'
                                  f'</cross-session-message>'))
         line = next((x for x in ctx.splitlines() if "get_usage" in x and WORKER in x), "")
@@ -862,7 +872,7 @@ class Supervisor(unittest.TestCase):
         self.assertIn(f"{controls.CLEAR_AT} percent", line)
         self.assertNotIn(f"worker `{WORKER}` reported", context(t.say(PUP, "and now?")), "only at its report")
         r = t.hook("session-start", CO1, {"hook_event_name": "SessionStart", "source": "compact"})
-        page = os.path.join(t.dir(CO1), "state.md").replace("\\", "/")
+        page = f"{copad}/state.md"              # the scratchpad of its first turn, kept across a clear
         self.assertTrue(context(r).startswith("phi (p4-phi): ") and page in context(r).split("\n", 1)[0],
                         context(r)[:300])
 

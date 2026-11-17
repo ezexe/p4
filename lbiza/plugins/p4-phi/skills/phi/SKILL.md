@@ -51,7 +51,7 @@ A writing part that comes up later is shown as a suggested task card that ezexe 
 A subagent that wrote files is listed on the ledger under Level misses.
 Before a session creates anything new, such as a module, a page, a format or a kind of test, it finds the documented terms for it and a published implementation guide for that kind of work, logs both with their sources in its decisions file, and builds by them: a writing worker's first message and every start draft carry that line.
 A task list whose first creating step has no such research step before it is advised one, once.
-A question that the code, the history, the issues or the current outside documentation can answer is researched and decided by the session, which logs the decision with its source in its decisions file, the one its brief names or `decisions.md` in its scratchpad directory: the act-don't-wait rule every session is handed and every start draft carry that line, and a question reaches ezexe only once research cannot settle it.
+A question that the code, the history, the issues or the current outside documentation can answer is researched and decided by the session, which logs the decision with its source in its decisions file, the one its brief names or `decisions.md` in the scratchpad directory the app names: the act-don't-wait rule every session is handed and every start draft carry that line, and a question reaches ezexe only once research cannot settle it.
 
 ## What a `Files:` line holds
 

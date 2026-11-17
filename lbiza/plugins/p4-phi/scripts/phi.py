@@ -1033,7 +1033,7 @@ def files_held_text(home, s, closing=None, pushed=None):
 
 MAX_DEPTH = 3                 # a session this deep in the tree starts no session of its own
 MAX_CHILDREN = 8              # nor one that has this many live children already
-DECISIONS = "its decisions file, the one its brief names or decisions.md in its scratchpad directory"
+DECISIONS = "its decisions file, the one its brief names or decisions.md in the scratchpad directory the app names"
 DECIDE = ("A question that the code, the history, the issues or the current outside documentation can answer is "
           f"researched and decided by this session, which logs the decision with its source in {DECISIONS}; a "
           "question reaches ezexe only once those cannot settle it.")
@@ -1696,8 +1696,6 @@ def given(s, me, home, own=False, brief=False):
         step = plans.slice_for(home, s)
         piece = relay.slice_text(home, s) if cut_to else ""
         text = "\n\n".join(p for p in (text, step, piece) if p)
-    if above:
-        text = "\n\n".join(p for p in (text, relay.scratch_line(home, me.cli, s.get("cwd") or "")) if p)
     if above and "anchorSeen" not in s:
         # the start is the child's base: a fresh child's slice or a fork's inherited conversation already holds the
         # anchor as it is now, so the rebase check hands over only what changes after it
@@ -2588,6 +2586,9 @@ def h_user_prompt_submit(payload):
         RAN.update({"start_requests": asked.count("\n- ")} if began else {"start_waiting": True})
     if issue_line:
         parts.insert(0, notice(issue_line))
+    pad = str(payload.get("scratchpad_dir") or "").replace("\\", "/").rstrip("/")
+    if pad and not s.get("scratchpadDir"):        # the app's scratchpad of the first turn: a clear's new
+        s["scratchpadDir"] = pad                  # conversation still finds the state page written there
     stand = (controls.worker_first(me.home, s, payload.get("prompt"), me.store)
              if spawned_from(s) and not load_turns(me.home, s["sessionId"]) else "")
     first_split = first_split_text(me.home, s)

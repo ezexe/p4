@@ -334,8 +334,14 @@ def live(sid):
     return bool(rec) and not rec.get("isArchived")
 
 
-def state_page(home, sid):
-    return os.path.join(PHI.session_dir(home, sid), "state.md").replace("\\", "/")
+STATE_NAME = "state.md in its own scratchpad directory, the one the app names"
+
+
+def state_page(s):
+    """A standing session's state page: state.md in the app's scratchpad of its first turn, never under .claude,
+    where every write asks ezexe."""
+    pad = str(s.get("scratchpadDir") or "").rstrip("/")
+    return f"{pad}/state.md" if pad else STATE_NAME
 
 
 def start_refused(home, s, brief, store):
@@ -357,7 +363,7 @@ def worker_first(home, s, prompt, store):
     if not pid:
         return ""
     up = PHI.load_session(home, pid)
-    page = state_page(home, s["sessionId"])
+    page = state_page(s)
     if is_worker_brief(prompt) and is_puppeteer(up, store):
         up["standingWorker"] = s["sessionId"]
         PHI.save_session(home, up)
@@ -423,7 +429,7 @@ def page_of_task(home, s):
     if m:
         return m.group(1).replace("\\", "/")
     if s.get("standingKind") in ("worker", "coworker"):
-        return state_page(home, s["sessionId"])
+        return state_page(s)
     return ""
 
 
