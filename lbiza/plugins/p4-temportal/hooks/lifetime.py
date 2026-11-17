@@ -5,23 +5,23 @@ Two kinds of lifetime clear files, as a browser clears its cache and its cookies
 p4.json section `temportal.cache` with paths relative to temportal/, clears the files older than `max_age_days`, and
 then the oldest files while the folder holds more than `max_mb`. Neither clears a set-aside copy younger than an
 hour, which the same start's layout move set aside. The rule of `.layout-conflicts` clears the store's
-phi/.layout-conflicts/ too, where a layout move sets aside the older copies of phi's files. In both folders a copy's
-age starts at the later of its own time and its folder's, since a move keeps the time of the copy it sets aside and
-gives the folder it lands in a new one, and neither folder is cleared when it or phi/ is a link or resolves to any
-other place. A cookie is one file or folder with its own expiry, set by `lifetime.py set <path> <lifetime>` and kept
-in temportal/expires.json, and the lifetime `session` clears it when the session that set it ends. A cache rule whose
-path resolves to memory/, in any letter case, or to a folder outside temportal/ clears nothing. A cookie is refused
-inside memory/, on tmp/ or anything in it, and on scratchpad/, src/ or expires.json themselves: a session scratchpad
-directory in tmp/ is committed before it is removed, and the others are never cleared whole.
+phi/.layout-conflicts/ too, where a layout move sets aside the older copies of the files in phi/. In both folders a
+copy's age starts at the later of its own time and its folder's, since a move keeps the time of the copy it sets
+aside and gives the folder it lands in a new one, and neither folder is cleared when it or phi/ is a link or resolves
+to any other place. A cookie is one file or folder with its own expiry, set by `lifetime.py set <path> <lifetime>`
+and kept in temportal/expires.json, and the lifetime `session` clears it when the session that set it ends. A cache
+rule whose path resolves to memory/, in any letter case, or to a folder outside temportal/ clears nothing. A cookie
+is refused inside memory/, on tmp/ or anything in it, and on scratchpad/, src/ or expires.json themselves: a session
+scratchpad directory in tmp/ is committed before it is removed, and the others are never cleared whole.
 
 A file the store's git tracks is removed with its removal staged, so its last version stays in the history, and an
 ignored or untracked file is deleted. The retention sweep stages those removals and no other change, so an edit
 pending elsewhere in the store stays unstaged.
 
 A session scratchpad path Claude Code gives is a link into temportal/tmp/<session>/, and a delete of that path, by
-this sweep or by Claude Code's own cleanup of old sessions, removes the link and leaves the store's folder and its
-files: Node's recursive fs.rmSync, which Claude Code runs on, and Python's shutil.rmtree were both seen to do so on a
-Windows junction (Node 26.13, 2026-11-16), and `remove` here unlinks a link without entering it.
+this retention sweep or by Claude Code's own cleanup of old sessions, removes the link and leaves the store's folder
+and its files: Node's recursive fs.rmSync, which Claude Code runs on, and Python's shutil.rmtree were both seen to do
+so on a Windows junction (Node 26.13, 2026-11-16), and `remove` here unlinks a link without entering it.
 
   sweep                    the retention sweep at SessionStart: clears what has expired and prints one line when it
                            cleared something. Before it, as every hook of a start does, it moves files left in an

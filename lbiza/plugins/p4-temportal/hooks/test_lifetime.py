@@ -165,7 +165,7 @@ class Lifetime(unittest.TestCase):
         lifetime.sweep(self.p4)
         self.assertFalse(os.path.exists(big1), "the oldest goes first")
         self.assertFalse(os.path.exists(big2))
-        self.assertEqual(lifetime.sweep(self.p4), "", "a second sweep has nothing to clear")
+        self.assertEqual(lifetime.sweep(self.p4), "", "a second retention sweep has nothing to clear")
 
     def test_a_size_cap_keeps_a_copy_the_same_start_set_aside(self):
         """A hand-set max_mb on the .layout-conflicts rule clears oldest first whatever the age, so a copy a layout

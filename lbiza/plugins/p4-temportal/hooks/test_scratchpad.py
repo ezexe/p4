@@ -555,7 +555,7 @@ def sweep_cases():
                 unlink(pad[k])
         for d in (root, temp, cfg, other):
             wipe(d)
-    print("test_scratchpad.py: sweep cases green")
+    print("test_scratchpad.py: scratchpad link cases green")
 
 
 def tmp_empty_and_cap_cases():
@@ -992,7 +992,7 @@ def archived_by_phi_cases():
     archived by archived_ids, its app id and its CLI id both, so a change of p4-phi's record format fails here."""
     scripts = os.path.join(os.path.dirname(os.path.dirname(HERE)), "p4-phi", "scripts")
     if not os.path.isfile(os.path.join(scripts, "phi.py")):
-        print("test_scratchpad.py: archived by phi cases skipped, no p4-phi beside this plugin")
+        print("test_scratchpad.py: archived by p4-phi cases skipped, no p4-phi beside this plugin")
         return
     home = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-phi-")
     saved = list(sys.path)
@@ -1015,7 +1015,7 @@ def archived_by_phi_cases():
     finally:
         sys.path[:] = saved
         wipe(home)
-    print("test_scratchpad.py: archived by phi cases green")
+    print("test_scratchpad.py: archived by p4-phi cases green")
 
 
 def archived_lists_live_cases():
@@ -1076,7 +1076,7 @@ def quiet_sweep_cases():
     """A tmp-sweep with nothing new under the session's scratchpad directory since the last stage runs no `git add`,
     while a new file, an edited one and a removed one are each staged by the next tmp-sweep."""
     if not shutil.which("git"):
-        print("test_scratchpad.py: quiet sweep cases skipped, no git on PATH")
+        print("test_scratchpad.py: quiet stage cases skipped, no git on PATH")
         return
     root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-quiet-")
     sid = "6f6f6f6f-0000-4000-8000-0000000006f6"
@@ -1152,7 +1152,7 @@ def quiet_sweep_cases():
         assert not os.path.exists(mark), "the mark was left after the folder closed"
     finally:
         wipe(root)
-    print("test_scratchpad.py: quiet sweep cases green")
+    print("test_scratchpad.py: quiet stage cases green")
 
 
 def quiet_sweep_mark_cases():
@@ -1160,7 +1160,7 @@ def quiet_sweep_mark_cases():
     another session's empty folder. A digest that could not read the index is never kept, so two such turn ends in a
     row both stage. In a store that is a worktree, info/exclude is read from the common git folder."""
     if not shutil.which("git"):
-        print("test_scratchpad.py: quiet sweep mark cases skipped, no git on PATH")
+        print("test_scratchpad.py: quiet stage mark cases skipped, no git on PATH")
         return
     root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-mark-")
     sid, other = "7a7a7a7a-0000-4000-8000-0000000007a7", "8b8b8b8b-0000-4000-8000-0000000008b8"
@@ -1247,7 +1247,7 @@ def quiet_sweep_mark_cases():
         os.environ.clear()
         os.environ.update(env_saved)
         wipe(root)
-    print("test_scratchpad.py: quiet sweep mark cases green")
+    print("test_scratchpad.py: quiet stage mark cases green")
 
 
 def scratchpad_dir_cases():
