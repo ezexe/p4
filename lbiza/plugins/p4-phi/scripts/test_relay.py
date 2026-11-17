@@ -971,7 +971,8 @@ class ForkOrFresh(ThreeSessions):
         gate = os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh")
         for k, cmd in enumerate(("gh pr merge 12", "gh api -X PATCH repos/o/r/git/refs/heads/main -f sha=abc",
                                  "/usr/bin/git push", "/usr/bin/git pull", "/usr/bin/git rebase main",
-                                 "C:\\Git\\bin\\git rebase main")):
+                                 "C:\\Git\\bin\\git rebase main", '"/usr/bin/git" pull',
+                                 '"/usr/bin/git" rebase main')):
             body = {"session_id": CLI[B], "cwd": self.t.proj, "hook_event_name": "PreToolUse", "tool_name": "Bash",
                     "tool_input": {"command": cmd}, "tool_use_id": f"toolu_gate000{k}"}
             self.assertTrue(inproc.gate(json.dumps(body).encode(), self.t.proj), f"the in-process gate: {cmd}")

@@ -1732,9 +1732,6 @@ def outcome(home, sid, s):
     return files, heads_, commits, still
 
 
-CLOSES = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+((?:[\w.-]+/[\w.-]+)?#\d+)", re.I)
-
-
 def closing_commits(home, sid, s):
     """The commits a session made since its first turn whose messages close an issue with a line such as
     `Closes #N`, oldest first, each as its repository, short sha, subject and issues."""

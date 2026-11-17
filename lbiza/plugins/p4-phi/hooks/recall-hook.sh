@@ -58,9 +58,9 @@ if [ "$name" = lookup-check ]; then
     # what may land work however git or gh is called, such as /usr/bin/git push, gh pr merge or a gh api ref update:
     # phi.py's branch guard reads it, ezexe/p4#232
     *push*|*merge*|*[!A-Za-z0-9_.-]gh[!A-Za-z0-9_-]*|*[\\][ntr]gh[!A-Za-z0-9_-]*) ;;
-    # git after a path separator, as /usr/bin/git pull or C:\Git\bin\git, as inproc.gate passes it; no / or \ goes in a
-    # bracket here, since bash reads such a bracket as plain text
-    */git[\ \"\'\;\).]*|*'\git'[\ \"\'\;\).]*) ;;
+    # git after a path separator, as /usr/bin/git pull or C:\Git\bin\git, as inproc.gate passes it, and in quotes, where the
+    # payload's escaped quote puts a backslash right after git
+    */git[\\\ \"\'\;\).]*|*'\git'[\\\ \"\'\;\).]*) ;;
     # a command that may run long: phi.py's check that a long command runs in the background reads it. Every other
     # shell call ends here.
     # At least as wide as phi.long_kind, which reads words whatever the space between them: a call the gate
