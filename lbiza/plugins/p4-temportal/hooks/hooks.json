@@ -16,14 +16,6 @@
         ]
       }
     ],
-    "PreToolUse": [
-      {
-        "matcher": "Write|Edit|NotebookEdit|Bash|PowerShell",
-        "hooks": [
-          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad ask", "timeout": 20, "onFailure": "continue"}
-        ]
-      }
-    ],
     "SessionEnd": [
       {
         "hooks": [

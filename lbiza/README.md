@@ -18,6 +18,15 @@ A store in an older layout, flat in `.claude/p4/` or with `store/` and `models/`
 A file that differs between the two places keeps the newer copy, and the older one goes to `<plugin>/.layout-conflicts/`, or is deleted when git ignores the file.
 A session scratchpad link that pointed at the older place is pointed at the moved folder.
 
+## An ask before code goes to a temp folder or the notebook
+
+p4-temportal asks nothing before a write, since Claude Code's own ask rules do it, and p4 never writes a permission key, which is ezexe's.
+A project that wants that ask lists ask rules on `Edit` paths under `permissions.ask` in its own settings file, one rule per extension, such as `Edit(//tmp/**/*.py)`, `Edit(~/AppData/Local/Temp/**/*.py)` and `Edit(/.claude/p4/temportal/notebook/**/*.py)`.
+An `Edit` rule covers Write and NotebookEdit too, by https://code.claude.com/docs/en/permissions.md: "`Edit` rules apply to all built-in tools that edit files."
+In those rules `//` starts at the filesystem root, `~/` at the home folder and a single `/` at the project in project settings, as the same page's table of path patterns says.
+No permission mode approves a call an ask rule matches, bypassPermissions included, by https://code.claude.com/docs/en/permission-modes.md.
+A path a shell command writes, by a redirect or `cp`, is not an `Edit` path, so these rules do not see it.
+
 ## Settings
 
 Both plugins read their settings from `<project>/.claude/p4/p4.json`, one section each for `memory`, `scratchpad`, `temportal`, `recall` and `phi`.

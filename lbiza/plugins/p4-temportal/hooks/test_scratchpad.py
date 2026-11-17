@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """test_scratchpad.py: acceptance tests for p4-temportal's scratchpad part. The notebook's .out/ is seeded,
 silently the first time, and seeded again, logs, build output and binaries move into it, and a clean tree prints
-nothing at a session start. With P4_SCRATCHPAD_ASKS=1 the PreToolUse ask fires, and never denies, before a code file
-goes to a temp location, the session's scratchpad path or the notebook, and repo-uses prints one line for each file
-under .claude/p4/temportal/src/ the repository names; with the switch off both are silent. Then each session's
-scratchpad, which is the app's: no start, turn end or session end links, stages, commits or removes one. Run it as
+nothing at a session start. With P4_SCRATCHPAD_ASKS=1 repo-uses prints one line for each file under
+.claude/p4/temportal/src/ the repository names, and with the switch off it is silent. The PreToolUse ask is gone for
+Claude Code's own ask rules on Edit paths: hooks.json runs no PreToolUse hook, and a session that still runs
+`scratchpad ask` gets nothing. Then each session's scratchpad, which is the app's: no start, turn end or session end
+links, stages, commits or removes one. Run it as
 `python -I -X utf8 lbiza/plugins/p4-temportal/hooks/test_scratchpad.py` from the checkout, and exit 0 is green; the git
 cases skip, saying so, without git on PATH."""
 
@@ -21,10 +22,6 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOKS_JSON = os.path.join(HERE, "hooks.json")
-SCRATCH = "C:/Users/someone/AppData/Local/Temp/claude/30ad6e18862a20e8/abc123/scratchpad"
-MAC_SCRATCH = "/private/tmp/claude-501/-Users-ez-x/f27bc042/scratchpad"
-P4_SRC = "E:/projects/x/.claude/p4/temportal/src"
-PAD = "E:/projects/x/.claude/p4/temportal/notebook"
 ON = {"P4_SCRATCHPAD_ASKS": "1"}
 
 def wipe(path):
@@ -51,7 +48,7 @@ def env_with(extra=None, **kw):
 def run_sub(sub, payload, extra=None, **kw):
     """scratchpad.py's main() with that subcommand, run in this process the way its own process would run it: its
     argv, the payload on its stdin and the environment given in place of this one -> its stdout, stripped. It saves a
-    python start per call, which over the ask cases is most of this file's time."""
+    python start per call."""
     import contextlib
     import io
     if HERE not in sys.path:
@@ -74,69 +71,6 @@ def run_sub(sub, payload, extra=None, **kw):
         sys.argv, sys.stdin = saved[2], saved[3]
     assert code == 0, code
     return out.buffer.getvalue().decode("utf-8", "replace").strip()
-
-
-def ask(payload, extra=ON):
-    out = run_sub("ask", payload, extra)
-    if not out:
-        return None
-    d = json.loads(out)["hookSpecificOutput"]
-    assert d["hookEventName"] == "PreToolUse" and d["permissionDecision"] == "ask", d   # never a deny
-    return d
-
-
-def write(path):
-    return {"tool_name": "Write", "cwd": "E:/projects/x", "tool_input": {"file_path": path, "content": "x"}}
-
-
-def bash(cmd):
-    return {"tool_name": "Bash", "cwd": "E:/projects/x", "tool_input": {"command": cmd}}
-
-
-ASK_CASES = [
-    write(f"{SCRATCH}/sweep.py"), write(f"{MAC_SCRATCH}/probe.sh"),
-    write(f"{PAD}/probe.py"), write(".claude/p4/temportal/notebook/edit.py"),
-    bash("cat > .claude/p4/temportal/notebook/gen.py <<'EOF'\nprint(1)\nEOF\n"),
-    write(f"{PAD}/envtest.cmake"), write(f"{PAD}/probe/CMakeLists.txt"), write(f"{PAD}/probe/Makefile"),
-    write(f"{PAD}/harness.html"), write(f"{PAD}/.out/kept.py"),
-    bash("cat > /tmp/probe.sh <<'EOF'\necho hi\nEOF\n"),
-    bash(f'python - <<\'EOF\'\nopen("{SCRATCH}/gen.py", "w").write("x")\nEOF\n'),
-    bash(f"cp tools/x.py {SCRATCH}/x.py"), bash("echo hi | tee -a /tmp/run.sh"),
-    {"tool_name": "Edit", "cwd": "E:/projects/x",
-     "tool_input": {"file_path": f"{SCRATCH}/sweep.py", "old_string": "a", "new_string": "b"}},
-]
-PASS_CASES = [
-    write(f"{SCRATCH}/commit-msg.txt"), write(f"{SCRATCH}/notes.md"),
-    write(f"{P4_SRC}/sweep.py"), write(f"{P4_SRC}/CMakeLists.txt"), write("E:/projects/x/tools/build.py"),
-    write("E:/projects/x/CMakeLists.txt"), write("E:/projects/x/web/index.html"),
-    write(f"{PAD}/notes.md"), write(f"{PAD}/cmdlines.txt"), write(f"{PAD}/run.log"),
-    bash("cat > /tmp/out.json <<'EOF'\n{}\nEOF\n"), bash("grep -n def /tmp/probe.sh"),
-    bash("cp /tmp/probe.py tools/probe.py"),
-    {"tool_name": "Read", "tool_input": {"file_path": f"{SCRATCH}/sweep.py"}},
-]
-
-
-def asks():
-    for p in ASK_CASES:
-        d = ask(p)
-        assert d, f"did not ask: {p['tool_input']}"
-        reason = d["permissionDecisionReason"]
-        advice = reason.split("; ", 1)[1]           # after the file and where it was headed: where it belongs
-        assert "belongs in the repo" in advice and ".claude" not in advice, reason
-    for p in PASS_CASES:
-        assert ask(p) is None, f"asked: {p['tool_input']}"
-    # ezexe/p4#131: the reason sends code to the repo or the session's own scratchpad, never to a folder under .claude/
-    d = ask(write("/tmp/sweep.py"))
-    assert "otherwise in the session's own scratchpad" in d["permissionDecisionReason"], d
-    assert "otherwise" not in ask(write(f"{SCRATCH}/sweep.py"))["permissionDecisionReason"], "a scratchpad sent to itself"
-    # a subagent is never asked: ezexe, who answers the prompt, cannot redirect a running agent
-    for p in ASK_CASES:
-        assert ask(dict(p, agent_id="agent_01ABC", agent_type="Explore")) is None, f"subagent asked: {p['tool_input']}"
-    # the switch: off by default and for any value but 1
-    for extra in ({}, {"P4_SCRATCHPAD_ASKS": "0"}, {"P4_SCRATCHPAD_ASKS": ""}, {"P4_SCRATCHPAD_ASKS": "yes"}):
-        for p in ASK_CASES:
-            assert ask(p, extra) is None, f"asked with {extra}: {p['tool_input']}"
-    print("test_scratchpad.py: ask cases green")
 
 
 def put(base, rel, text="x\n"):
@@ -361,9 +295,6 @@ def parallel_hooks_cases():
 class Cases(unittest.TestCase):
     """Each case group a test method, so unittest and pytest collect them."""
 
-    def test_asks(self):
-        asks()
-
     def test_notebook_out(self):
         notebook_out()
 
@@ -467,28 +398,9 @@ class AppScratchpad(unittest.TestCase):
         self.assertEqual(self.git("rev-parse", "HEAD"), head, "a start made a commit in the store")
 
 
-class InProcess(unittest.TestCase):
-    """ezexe/p4#122: the ask cases, over a hundred runs of the hook, run its main() in this process, so they start no
-    process and take a fraction of the time one process a case took."""
-
-    def test_the_ask_cases_start_no_process(self):
-        import time as clock
-        real = (subprocess.run, subprocess.Popen)
-
-        def refuse(*a, **k):
-            raise AssertionError(f"a process was started: {a[0] if a else k}")
-        start = clock.monotonic()
-        try:
-            subprocess.run = subprocess.Popen = refuse
-            asks()
-        finally:
-            subprocess.run, subprocess.Popen = real
-        print(f"test_scratchpad.py: the ask cases took {(clock.monotonic() - start) * 1000:.0f} ms")
-
-
 class FailureNotice(unittest.TestCase):
-    """ezexe/p4#114: a failure of the ask on PreToolUse, where plain stdout reaches nobody, and an unknown subcommand
-    print a systemMessage, which Claude Code shows ezexe on every event."""
+    """ezexe/p4#114: a failure of a subcommand, and an unknown subcommand, print a systemMessage, which Claude Code
+    shows ezexe on every event, where plain stdout reaches nobody on most."""
 
     def test_a_degraded_or_unknown_subcommand_prints_a_system_message(self):
         import contextlib
@@ -498,22 +410,22 @@ class FailureNotice(unittest.TestCase):
         import scratchpad as sp
         root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-fail-")
         self.addCleanup(wipe, root)
-        old = (sp.cmd_ask, sys.argv, sys.stdin)
+        old = (sp.cmd_notebook_out, sys.argv, sys.stdin)
 
         def broken(*a, **k):
             raise OSError("disk gone")
         try:
-            sp.cmd_ask = broken
-            for sub, want in (("ask", "scratchpad ask degraded: OSError: disk gone"), ("nope", "unknown subcommand")):
+            sp.cmd_notebook_out = broken
+            for sub, want in (("notebook-out", "scratchpad notebook-out degraded: OSError: disk gone"), ("nope", "unknown subcommand")):
                 sys.argv = ["scratchpad.py", sub]
                 sys.stdin = io.TextIOWrapper(io.BytesIO(json.dumps(
-                    {"cwd": root, "hook_event_name": "PreToolUse"}).encode()), encoding="utf-8")
+                    {"cwd": root, "hook_event_name": "SessionStart"}).encode()), encoding="utf-8")
                 out = io.StringIO()
                 with contextlib.redirect_stdout(out):
                     self.assertEqual(sp.main(), 0)
                 self.assertIn(want, json.loads(out.getvalue())["systemMessage"])
         finally:
-            sp.cmd_ask, sys.argv, sys.stdin = old
+            sp.cmd_notebook_out, sys.argv, sys.stdin = old
 
 
 class Unlink(unittest.TestCase):
@@ -600,87 +512,51 @@ def unlink(link):
     os.unlink(link) if os.path.islink(link) else os.rmdir(link)
 
 
-class AskPaths(unittest.TestCase):
-    """Which written paths the ask names, on scratchpad.py's own functions."""
+class RetiredAsk(unittest.TestCase):
+    """The PreToolUse ask on code headed for a temp folder or the notebook is Claude Code's own ask rule on an Edit
+    path, by https://code.claude.com/docs/en/permissions.md: "`Edit` rules apply to all built-in tools that edit
+    files." p4-temportal runs no copy of it."""
 
-    @classmethod
-    def setUpClass(cls):
+    def test_hooks_json_runs_no_pretooluse_hook(self):
+        with open(HOOKS_JSON, encoding="utf-8") as f:
+            hooks = json.load(f)["hooks"]
+        self.assertNotIn("PreToolUse", hooks)
+        self.assertEqual([c for e in hooks for c in event_hooks(e) if "scratchpad ask" in c], [])
+
+    def test_scratchpad_py_has_no_ask(self):
         if HERE not in sys.path:
             sys.path.insert(0, HERE)
-
-    def test_the_macos_scratchpad_is_the_scratchpad(self):
         import scratchpad as sp
-        self.assertTrue(sp.in_harness_scratchpad("/private/tmp/claude-501/-Users-ez-x/f27bc042/scratchpad/x.py"))
-        self.assertTrue(sp.in_harness_scratchpad(MAC_SCRATCH + "/probe.py"))
+        for name in ("cmd_ask", "written_paths", "in_temp", "in_notebook", "in_harness_scratchpad", "WRITE_RES"):
+            self.assertFalse(hasattr(sp, name), name)
 
-    def test_a_repositorys_tmp_folder_is_no_temp_location(self):
-        import scratchpad as sp
-        for p in ("E:/projects/x/tmp/build.py", "src/tmp/gen.py", "/home/u/repo/tmp/a.py",
-                  "E:/projects/x/.claude/p4/temportal/tmp/sid/a.py"):
-            self.assertFalse(sp.in_temp(p), p)
-        for p in ("/tmp/x.py", "/private/tmp/x.py", "/var/folders/ab/T/x.py", "/private/var/folders/ab/T/x.py", "C:/Users/u/AppData/Local/Temp/x.py",
-                  "$env:TEMP/x.py", "%TEMP%/x.py", "$TMPDIR/x.py"):
-            self.assertTrue(sp.in_temp(p), p)
+    def test_a_session_that_still_runs_the_ask_gets_nothing(self):
+        """A session that loaded an older hooks.json still runs `scratchpad ask` before each write: with the asks on,
+        the runner ends it with no python started and scratchpad.py's main() prints nothing."""
+        payload = {"tool_name": "Write", "cwd": "E:/projects/x", "tool_input": {"file_path": "/tmp/x.py", "content": "x"}}
+        self.assertEqual(run_sub("ask", payload, ON), "")
+        if not shutil.which("sh"):
+            self.skipTest("no sh on PATH")
+        proj = tempfile.mkdtemp(prefix="p4-temportal-runner-ask-")
+        self.addCleanup(wipe, proj)
+        os.makedirs(os.path.join(proj, ".claude", "p4"))
+        with open(os.path.join(proj, ".claude", "p4", "p4.json"), "w", encoding="utf-8") as f:
+            f.write('{"scratchpad": {"asks": true}}')
+        env = env_with(ON, CLAUDE_PLUGIN_ROOT=os.path.join(proj, "no-plugin"), CLAUDE_PROJECT_DIR=proj)
+        r = subprocess.run([shutil.which("sh"), os.path.join(HERE, "run-hook.sh"), "scratchpad", "ask"],
+                           input=json.dumps(dict(payload, cwd=proj)).encode(), env=env, capture_output=True, cwd=proj)
+        self.assertEqual((r.returncode, r.stdout), (0, b""), "the runner reached python, whose missing finder speaks")
 
-    def test_a_notebook_in_the_notebook_folder_is_not_asked_about_or_listed(self):
+    def test_repo_uses_lists_no_notebook(self):
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
         import scratchpad as sp
-        self.assertIsNone(ask(write("E:/projects/x/.claude/p4/temportal/notebook/analysis.ipynb")))
-        self.assertIsNotNone(ask(write("C:/Users/u/AppData/Local/Temp/analysis.ipynb")))
         with tempfile.TemporaryDirectory() as root:
             nb = os.path.join(root, ".claude", "p4", "temportal", "notebook")
             os.makedirs(nb)
             open(os.path.join(nb, "analysis.ipynb"), "w").close()
             listed = [p for ps in sp.repo_use_candidates(root).values() for p in ps]
             self.assertFalse([p for p in listed if p.endswith(".ipynb")], listed)
-
-    def test_a_powershell_write_by_a_positional_path_is_asked_about(self):
-        for cmd in ("Set-Content $env:TEMP\\x.py 'print(1)'", "'print(1)' | Out-File $env:TEMP\\x.py",
-                    "'x' | Out-File -Encoding utf8 $env:TEMP\\x.py", "Set-Content -Value x $env:TEMP\\x.py",
-                    "New-Item -ItemType File $env:TEMP\\x.py", "Add-Content -Value x $env:TMP\\x.py",
-                    "Set-Content -Value x C:\\Users\\u\\AppData\\Local\\Temp\\x.py"):
-            d = ask({"tool_name": "PowerShell", "cwd": "E:/projects/x", "tool_input": {"command": cmd}})
-            self.assertIsNotNone(d, cmd)
-            self.assertIn("x.py", d["permissionDecisionReason"], cmd)
-        for cmd in ("Get-Content $env:TEMP\\x.py", "Get-Content $env:TEMP\\x.py | Select-String print"):
-            self.assertIsNone(ask({"tool_name": "PowerShell", "cwd": "E:/projects/x", "tool_input": {"command": cmd}}),
-                              cmd)
-
-    def test_powershell_and_notebookedit_writes_are_read(self):
-        import scratchpad as sp
-        for cmd in ('"print(1)" > $env:TEMP/x.py', 'Set-Content -Path $env:TEMP/x.py -Value "print(1)"',
-                    '"print(1)" | Out-File -FilePath $env:TEMP/x.py'):
-            got = sp.written_paths({"tool_name": "PowerShell", "tool_input": {"command": cmd}})
-            self.assertIn("$env:TEMP/x.py", got, cmd)
-        got = sp.written_paths({"tool_name": "NotebookEdit", "tool_input": {"notebook_path": "/tmp/n.ipynb"}})
-        self.assertEqual(got, ["/tmp/n.ipynb"])
-        with open(HOOKS_JSON, encoding="utf-8") as f:
-            pre = json.load(f)["hooks"]["PreToolUse"]
-        ask = [h for h in pre if any("scratchpad ask" in c["command"] for c in h["hooks"])][0]
-        for tool in ("Write", "Edit", "Bash", "PowerShell", "NotebookEdit"):
-            self.assertIn(tool, ask["matcher"].split("|"))
-
-    def test_the_runner_skips_the_ask_only_when_it_is_off(self):
-        """run-hook.sh starts no python for the ask while it is off, and runs it in every form asks_on() reads as
-        on: the ask is given exactly when the asks are on."""
-        proj = tempfile.mkdtemp(prefix="p4-temportal-runner-ask-")
-        self.addCleanup(wipe, proj)
-        os.makedirs(os.path.join(proj, ".claude", "p4"))
-        payload = json.dumps({"tool_name": "Write", "cwd": proj, "tool_input": {"file_path": "/tmp/x.py"}})
-        cases = [('{"scratchpad": {"asks": true}}', None, True), ('{"scratchpad": {"asks" : true}}', None, True),
-                 ('{"scratchpad": {"asks": 1}}', None, True), ('{"scratchpad": {"asks": "yes"}}', None, True),
-                 ('{\n "scratchpad": {\n  "asks": true\n }\n}', None, True), ("{}", " 1", True),
-                 ('{"scratchpad": {"asks": false}}', None, False), ('{"scratchpad": {"asks": 0}}', None, False),
-                 ("{}", None, False), ('{"scratchpad": {"asks": true}}', "0", False)]
-        for conf, env_val, on in cases:
-            with open(os.path.join(proj, ".claude", "p4", "p4.json"), "w", encoding="utf-8") as f:
-                f.write(conf)
-            env = {k: v for k, v in os.environ.items() if k != "P4_SCRATCHPAD_ASKS"}
-            env.update(CLAUDE_PLUGIN_ROOT=os.path.dirname(HERE), CLAUDE_PROJECT_DIR=proj)
-            if env_val is not None:
-                env["P4_SCRATCHPAD_ASKS"] = env_val
-            r = subprocess.run(["sh", os.path.join(HERE, "run-hook.sh"), "scratchpad", "ask"], input=payload.encode(),
-                               env=env, capture_output=True, cwd=proj)
-            self.assertEqual("permissionDecision" in r.stdout.decode("utf-8", "replace"), on, (conf, env_val))
 
 
 if __name__ == "__main__":

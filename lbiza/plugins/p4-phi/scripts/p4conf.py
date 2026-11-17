@@ -36,7 +36,7 @@ FILE = "p4.json"
 
 DEFAULTS = {
     "scratchpad": {
-        "asks": False,                   # the two asks about where code belongs; P4_SCRATCHPAD_ASKS=1 or 0 wins
+        "asks": False,                   # repo-uses, the start line on code the repo uses; P4_SCRATCHPAD_ASKS wins
         "tmp": False,                    # no link from a session's scratchpad to temportal/tmp: p4-temportal 0.3.9
                                          # and older read it and link when it is missing or true, so it is kept false
         # the extensions and folder names the notebook moves into its .out/

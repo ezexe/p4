@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""scratchpad.py: p4-temportal's notebook part and its two asks. The notebook is the store's folder of notes kept
+"""scratchpad.py: p4-temportal's notebook part and its repo-uses line. The notebook is the store's folder of notes kept
 across sessions, at the place p4conf.LAYOUT gives the key `scratchpad`, `<project>/.claude/p4/temportal/notebook/`,
 with its logs, build output and binaries in its `.out/`, which ignores itself. Each session's scratchpad directory is
 Claude Code's own: it makes one under the system temp directory for each session and deletes it with the session's
@@ -22,19 +22,17 @@ transcript, and no command here moves, links, stages, commits or removes one.
 as tmp-unlink does. `tmp-sweep` and `tmp-close` kept each session's scratchpad in the store; a session started before
 they were retired still runs them, so they exit 0 and print nothing.
 
-The two asks are off unless p4.json's scratchpad.asks is true or P4_SCRATCHPAD_ASKS=1:
+repo-uses is off unless p4.json's scratchpad.asks is true or P4_SCRATCHPAD_ASKS=1:
 
   repo-uses      at SessionStart, prints one line for each file under `.claude/p4/temportal/src/` that the project
                  repository's tracked code, build, docs or CI names: that file is code the repository uses, so it
                  belongs there. It only reads, with one `git grep`, and is silent outside a git repository or without
                  git.
-  ask            at PreToolUse, reads the paths a call writes: a Write's or Edit's file_path, and for a Bash command
-                 every path in a write position, a redirect, tee, python's open() in a write mode, or the destination
-                 of cp or mv. A code file, by extension or by name, headed for a temp location, the session's
-                 scratchpad path or the notebook gets an ask naming where it belongs: the repository if it will use
-                 the file, else the session's own scratchpad. A `.ipynb` headed for the notebook gets none, since the
-                 notebook is where p4-temportal keeps notebooks. It never denies, and it is silent inside a subagent,
-                 whose writer ezexe cannot redirect from the prompt.
+
+`ask` was a PreToolUse ask on code written to a temp folder or the notebook. Claude Code does that itself with an ask
+rule on an `Edit` path, which covers Write, Edit and NotebookEdit, as https://code.claude.com/docs/en/permissions.md
+says: "`Edit` rules apply to all built-in tools that edit files." So it is retired, and a session that loaded an older
+hooks.json still runs it, so it exits 0 and prints nothing.
 
 Every failure prints a one-line systemMessage and exits 0."""
 
@@ -59,28 +57,6 @@ CODE_EXT = {"py", "pyw", "sh", "bash", "zsh", "ps1", "psm1", "bat", "cmd", "js",
             "ipynb"}
 # Code by name rather than by extension: by extension alone CMakeLists.txt is a `.txt` note.
 CODE_NAMES = {"cmakelists.txt", "makefile", "gnumakefile", "dockerfile", "justfile", "rakefile"}
-# the scratchpad paths Claude Code gives: under the temp folder on Windows and Linux, and /private/tmp/claude-<uid>/ on
-# macOS
-SCRATCHPAD_MARKERS = ("/temp/claude/", "/tmp/claude/", "/tmp/claude-")
-# temp folders only where a path starts with one
-ROOT_TEMP = ("/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/")
-TEMP_MARKERS = ("/appdata/local/temp/", "%temp%", "%tmp%",
-                "$tmpdir", "${tmpdir}", "$env:temp", "$env:tmp")
-_PATH = r"(?:\"([^\"\n]+)\"|'([^'\n]+)'|([^\s\"'<>|;&()`]+))"
-WRITE_RES = [
-    re.compile(r">{1,2}[ \t]*" + _PATH),
-    re.compile(r"\btee\b(?:[ \t]+-[A-Za-z]+)*[ \t]+" + _PATH),
-    re.compile(r"\bopen\(\s*(?:\"([^\"\n]+)\"|'([^'\n]+)')\s*,\s*[\"'][aw]"),
-    # PowerShell's writers, by their path parameter
-    re.compile(r"(?i)\b(?:Set-Content|Add-Content|Out-File|New-Item)\b[^\n|;]*?-(?:Path|FilePath|LiteralPath)[ \t]+"
-               + _PATH),
-]
-ARGS_RES = [re.compile(r"\b(?:cp|mv)\b([^\n|;&]*)")]
-# PowerShell's writers by a positional path, wherever it stands among the parameters, as in
-# `'x' | Out-File -Encoding utf8 $env:TEMP\x.py`: every argument that is no parameter is read as a path, and one that
-# names no code file in a temp place is passed over by the ask. A reader such as Get-Content is never matched.
-PS_WRITER_ARGS = re.compile(r"(?i)\b(?:Set-Content|Add-Content|Out-File|New-Item)\b([^\n|;]*)")
-TOKEN_RE = re.compile(r"\"[^\"\n]*\"|'[^'\n]*'|\S+")
 
 OUT_NAME = ".out"
 OUT_IGNORE = "*\n"
@@ -101,9 +77,9 @@ project_root = hookio.project_root
 
 
 ASKS = False                # p4.json scratchpad.asks; P4_SCRATCHPAD_ASKS=1 or 0 wins for one run
-# the commands that kept each session's scratchpad in the store, which a session started before they were retired
-# still runs at its start, its turn ends and its end
-RETIRED = ("tmp-sweep", "tmp-close")
+# the commands a session started before they were retired still runs: the two that kept each session's scratchpad in
+# the store, at its start, its turn ends and its end, and the PreToolUse ask
+RETIRED = ("tmp-sweep", "tmp-close", "ask")
 
 
 def configure(payload, write=True, root=None):
@@ -330,7 +306,7 @@ def cmd_tmp_unlink(payload, root=None):
     return 0
 
 
-# ---- repo-uses, one of the two asks ---------------------------------------------------------------------------
+# ---- repo-uses ------------------------------------------------------------------------------------------------
 
 def repo_use_candidates(root):
     """{basename: [project-relative paths]} of every code file under `.claude/p4/temportal/src/`, skipping dot
@@ -395,86 +371,6 @@ def cmd_repo_uses(payload):
     return 0
 
 
-# ---- ask, one of the two asks ---------------------------------------------------------------------------------
-
-def _norm(path):
-    return path.replace("\\", "/").lower()
-
-
-def in_harness_scratchpad(path):
-    p = _norm(path)
-    return any(m in p for m in SCRATCHPAD_MARKERS) and "/scratchpad" in p
-
-
-def in_temp(path):
-    """True for a path in a temp folder of the system: /tmp/ only at the root, since a repository's own tmp/ folder,
-    or the store's temportal/tmp/, is no temp location."""
-    p = _norm(path)
-    return p.startswith(ROOT_TEMP) or any(m in p for m in TEMP_MARKERS)
-
-
-def in_notebook(path):
-    p, nb = _norm(path), ".claude/p4/" + p4conf.rel("scratchpad").lower() + "/"
-    return "/" + nb in p or p.startswith(nb)
-
-
-def _first(m):
-    return next((g for g in m.groups() if g), "")
-
-
-def written_paths(payload):
-    tool = str(payload.get("tool_name") or "")
-    inp = payload.get("tool_input") or {}
-    if not isinstance(inp, dict):
-        return []
-    if tool in ("Write", "Edit", "NotebookEdit"):
-        fp = str(inp.get("file_path") or inp.get("notebook_path") or "")
-        return [fp] if fp else []
-    if tool not in ("Bash", "PowerShell"):
-        return []
-    cmd = str(inp.get("command") or "")
-    out = []
-    for rx in WRITE_RES:
-        out += [_first(m) for m in rx.finditer(cmd)]
-    for rx in ARGS_RES:
-        for m in rx.finditer(cmd):
-            toks = [t.strip("\"'") for t in TOKEN_RE.findall(m.group(1)) if not t.startswith("-")]
-            out += toks[-1:]                            # the destination: cp / mv write only their last argument
-    for m in PS_WRITER_ARGS.finditer(cmd):
-        out += [t.strip("\"'") for t in TOKEN_RE.findall(m.group(1)) if not t.startswith("-")]
-    return [p for p in out if p]
-
-
-def cmd_ask(payload):
-    if not asks_on() or payload.get("agent_id"):
-        return 0
-    reasons, seen = [], set()
-    for p in written_paths(payload):
-        if p in seen or not is_code(p):
-            continue
-        seen.add(p)
-        own = in_harness_scratchpad(p)
-        if own:
-            where = "the session's scratchpad, which Claude Code deletes with its transcript"
-        elif in_notebook(p):
-            if p.lower().endswith(".ipynb"):            # the notebook folder is where p4-temportal keeps notebooks
-                continue
-            where = f"the notebook .claude/p4/{p4conf.rel('scratchpad')}/, which is for notes, logs and output"
-        elif in_temp(p):
-            where = "a temp location"
-        else:
-            continue
-        name = os.path.basename(p.replace("\\", "/"))
-        reasons.append(f"{name} is code headed for {where}, at {p}; if the repo will use it, it belongs in the repo "
-                       "where the repo keeps that kind of code" + ("" if own else ", otherwise in the session's own "
-                                                                  "scratchpad"))
-    if not reasons:
-        return 0
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
-                                             "permissionDecisionReason": "p4-temportal: " + "; ".join(reasons[:3])
-                                             + "."}}))
-    return 0
-
 
 def main():
     for stream in (sys.stdout, sys.stderr):
@@ -498,14 +394,12 @@ def main():
             return cmd_notebook_out(payload)
         if sub == "repo-uses":
             return cmd_repo_uses(payload)
-        if sub == "ask":
-            return cmd_ask(payload)
         if sub in ("tmp-unlink", "tmp-link"):          # tmp-link: what a session started on 0.3.9 still runs
             return cmd_tmp_unlink(payload)
         print(json.dumps({"systemMessage": f"scratchpad.py: unknown subcommand {sub!r}"}))
         return 0
     except Exception as e:  # noqa: BLE001 — a hook degrades, never raises
-        # a systemMessage reaches ezexe whatever the event, where the ask's plain stdout on PreToolUse reaches nobody
+        # a systemMessage reaches ezexe whatever the event, where plain stdout reaches nobody on most events
         print(json.dumps({"systemMessage": f"p4-temportal scratchpad {sub} degraded: {type(e).__name__}: {e}"}))
         return 0
 
