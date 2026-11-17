@@ -433,6 +433,33 @@ class TermsAndGuides(Base):
         self.assertIn("documented terms", brief)
         self.assertIn(phi.RESEARCH, brief)
 
+    def test_a_start_draft_carries_the_decide_by_research_line(self):
+        """A writing start and a start whose Files: line is none both carry the decide-by-research sentence."""
+        t = self.t
+        t.say(TOP, TASK)
+        t.stop(TOP, TASK, report="planned")
+        writing = call_in(context(t.say(TOP, "Add a retry to `src/export/flush.py` for when the ports table write "
+                                            "fails")))["prompt"]
+        self.assertRegex(writing, r"Files: `[^`]*src/export/flush\.py`")
+        self.assertIn(phi.DECIDE, writing)
+        t.stop(TOP, "retry", report="drafted")
+        none = call_in(context(t.say(TOP, RETRY)))["prompt"]
+        self.assertIn("Files: none", none)
+        self.assertIn(phi.DECIDE, none)
+        self.assertIn("decisions.md", phi.DECIDE)
+
+    def test_the_decide_line_does_not_change_a_starts_model_or_effort(self):
+        """Its words "documentation" and "decisions.md" are no sign of docs work: a reading's start is levelled as
+        if the line were not there."""
+        words = "Should the exporter buffer rows in memory or write each one to the store"
+        brief = "# Reading 1 of 2\n\nTask: Reading 1 of 2.\n\n{}Done looks like: the reading worked through."
+        bare = {"title": "Reading 1 of 2", "words": words, "context": "fresh", "background": "x", "brief":
+                brief.format("")}
+        with_line = dict(bare, brief=brief.format(phi.DECIDE + "\n\n"))
+        got, want = puppeteer.call_of(with_line), puppeteer.call_of(bare)
+        self.assertEqual((got.get("model"), got.get("effort")), (want.get("model"), want.get("effort")))
+        self.assertIn(phi.DECIDE, got["prompt"], "the line itself still reaches the child")
+
     def test_a_plan_with_no_research_step_before_its_first_creating_step_is_advised_one(self):
         t = self.t
         t.say(TOP, TASK)
@@ -855,6 +882,7 @@ class Parallel(Base):
         for call in calls:                  # a reading's brief and title hand the child no run of the message's words
             self.assertEqual(runs_of(self.EITHER, call["prompt"] + " " + call["title"]), [], call)
         self.assertIn("Result: <what this reading comes to>", calls[0]["prompt"])
+        self.assertIn(phi.DECIDE, calls[0]["prompt"], "a reading decides by research too")
         for kid, call in zip((KID, KID2), calls):
             t.say(kid, handed(call["prompt"]))
         gid = t.session(KID)["reading"]["group"]

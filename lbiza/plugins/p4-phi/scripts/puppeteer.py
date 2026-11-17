@@ -1076,7 +1076,8 @@ def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
     lines += ["Files: " + (", ".join(f"`{p}`" for p in paths[:8]) if paths and not reading else "none"), ""]
     if reading:
         lines += ["A reading explores: change no tracked file and commit nothing, since the readings beside this one "
-                  "share the checkout. Its parent session lands the reading that survives the merge.",
+                  "share the checkout. Its parent session lands the reading that survives the merge.", "",
+                  phi.DECIDE, "",
                   "Done looks like: the reading worked through, and its `Result:` line reported.", "Report when done."]
     else:
         if named:
@@ -1084,7 +1085,7 @@ def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
         elif slug:
             lines += [f"It names no issue in {slug}, and p4-phi files none: each finding goes into the report as one "
                       f"`Finding:` line, which the parent session passes up unchanged.", ""]
-        lines += [phi.RESEARCH, "",
+        lines += [phi.RESEARCH, "", phi.DECIDE, "",
                   "Done looks like: the change made, its regression test passing, committed and reported.",
                   "Report when done."]
     if not parent:
@@ -1111,8 +1112,10 @@ def call_of(d):
     call = {"initiation": "user_asked", "title": d["title"], "context": d["context"], "prompt": d["brief"]}
     if d["context"] == "fresh":
         call.update(use_worktree=False, background=d["background"])
-    # a fresh draft names its model and effort, judged by the message it came from as well as its brief
-    return plans.with_level(call, d["title"] + "\n" + str(d.get("words") or "") + "\n" + d["brief"])
+    # a fresh draft names its model and effort, judged by the message it came from as well as its brief; the
+    # decide-by-research line every brief carries is no word of its kind of work
+    brief = d["brief"].replace(_phi().DECIDE, "")
+    return plans.with_level(call, d["title"] + "\n" + str(d.get("words") or "") + "\n" + brief)
 
 
 # --- the gate, then the dispatch --------------------------------------------------------------------------------------

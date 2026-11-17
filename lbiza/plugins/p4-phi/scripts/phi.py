@@ -989,8 +989,13 @@ def files_held_text(home, s, closing=None, pushed=None):
 
 MAX_DEPTH = 3                 # a session this deep in the tree starts no session of its own
 MAX_CHILDREN = 8              # nor one that has this many live children already
-BUILT_IN = ("built-in, act-don't-wait: a next step that the task, the parent's task list and notes, siblings' work "
-            "and the project's rules can settle is decided and done, with one line saying what was chosen and why. "
+DECISIONS = "its decisions file, the one its brief names or decisions.md in its scratchpad directory"
+DECIDE = ("A question that the code, the history, the issues or the current outside documentation can answer is "
+          f"researched and decided by this session, which logs the decision with its source in {DECISIONS}; a "
+          "question reaches ezexe only once those cannot settle it.")
+BUILT_IN = ("built-in, act-don't-wait: " + DECIDE + " A next step that the task, the parent's task list and notes, "
+            "siblings' work and the project's rules can settle is decided and done, with one line saying what was "
+            "chosen and why. "
             "Only a matter of ezexe's authority goes to ezexe: permissions or security settings, credentials, "
             "spending, and actions that cannot be undone or publish outward, but for the push of green issue-closing "
             "commits, which p4-phi orders at once. It goes as a click, never as a paragraph to answer: a "
@@ -1137,7 +1142,7 @@ FIRST_SPLIT = ("phi (p4-phi): this is this session's first message. In these ses
 RESEARCH = ("Before it creates anything new, such as a module, a page, a format or a kind of test, this session finds "
             "the documented terms for what it creates, from Anthropic's docs, the platform's docs or the field's "
             "published sources, and a published implementation guide for that kind of work. It logs both, each with "
-            "its source, in its decisions file, the one its brief names or decisions.md in its scratchpad directory, "
+            f"its source, in {DECISIONS}, "
             "and builds by them. A name only this project uses stays only where no published source names the thing, "
             "and the decisions file says where it looked.")
 RESEARCH_STEP_HEAD = ("phi (p4-phi): this task list creates something new with no step before it that finds the "

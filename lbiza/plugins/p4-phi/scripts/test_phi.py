@@ -1099,6 +1099,12 @@ class Rules(unittest.TestCase):
             os.remove(os.path.join(self.t.p4, "temportal", "memory", f))
         self.assertEqual(self.start(TOP), phi.builtin_text(), "act-don't-wait holds in a project with no memories")
 
+    def test_the_built_in_rule_names_research_and_the_decisions_file(self):
+        """A question research can answer is decided by the session and logged with its source, never put to ezexe."""
+        line = next(x for x in self.start(TOP).splitlines() if "act-don't-wait" in x)
+        for word in ("code", "history", "issues", "documentation", "decisions file", "decisions.md", "source"):
+            self.assertIn(word, line)
+
     def test_a_fork_gets_the_built_in_rules_alone(self):
         """A fork's inherited conversation already holds the store's feedback and user memories."""
         self.assertEqual(phi.rules_text(self.t.p4, 9000, fork=True), phi.builtin_text())
