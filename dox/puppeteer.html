@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The puppeteer · p4-phi dox</title>
-<meta name="description" content="An interactive model of a p4-phi puppeteer: a top session filed in the sidebar section puppeteers, the top sessions it controls, its board, its compact notice, and what phi refuses.">
+<meta name="description" content="An interactive model of a p4-phi puppeteer: the orchestrator ezexe files in the sidebar section puppeteers, the orchestrators it controls, its board, its boundary notice, the archive offers ezexe picks from, and what p4-phi refuses.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%230b6b66'/%3E%3C/svg%3E">
 <style>
 :root{
   --bg:#f5f3ec; --panel:#fffdf7; --sunk:#efece2; --ink:#1d1c19; --soft:#5d5a52; --line:#d9d4c6; --link:#a9a392;
@@ -119,6 +120,10 @@ details.tt pre{margin:10px 0 2px;font-size:11.5px;line-height:1.55;white-space:p
 .btn{border:1px solid var(--line);background:var(--bg);border-radius:9px;padding:9px 12px;font-size:14px;font-weight:600;cursor:pointer}
 .btn.go{background:var(--phi);border-color:var(--phi);color:var(--panel)}
 .btn:hover{border-color:var(--ink)}
+.box .opts{display:grid;gap:6px;margin:0 0 10px}
+.box .opts:empty{display:none}
+.box .opts label{display:flex;gap:8px;align-items:flex-start;font-size:14px;cursor:pointer}
+.box .opts small{display:block;color:var(--soft);font-size:12.5px}
 
 .ex h3{font-size:18px;margin:0 0 4px;letter-spacing:-.01em}
 .ex .why{color:var(--soft);font-size:14.5px;margin:0 0 12px}
@@ -190,14 +195,14 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
   <nav class="tabs" aria-label="Pages about sessions">
     <a href="puppeteer.html" aria-current="page">The puppeteer</a>
     <a href="session-tree.html">The session tree</a>
-    <a href="session-levels.html">Session levels</a>
+    <a href="session-levels.html">Delegation</a>
   </nav>
-  <h1>A puppeteer and the sessions it controls</h1>
-  <p class="lede">Since version 0.10.0, p4-phi knows a session that controls the top sessions of other trees. ezexe files a top session in the sidebar section “puppeteers”, and it controls the topmost orchestrating sessions of one or more projects. Make each move on the model below, read the line phi hands out, and watch the board rewrite itself.</p>
+  <h1>A puppeteer and the orchestrators it controls</h1>
+  <p class="lede">ezexe files one orchestrator in the sidebar section “puppeteers”, and that makes it a puppeteer: it controls the orchestrators of one or more projects, which stay at the top of their own trees. p4-phi reads the filing, hands the puppeteer its lines beside each message, keeps its board, and lets through only the archive calls ezexe picked. Make each move on the model below, read the lines p4-phi hands out, and watch the board rewrite itself.</p>
   <ul class="facts">
-    <li class="f-you"><b>The filing makes it one.</b>A puppeteer is a top session that the app's own file shows in the section “puppeteers”. phi reads that file each time it matters and keeps no mark of its own.</li>
-    <li class="f-phi"><b>The mark is a pair.</b>The puppeteer records each session it controls with <code>phi.py controls</code>. A controlled session stays the top of its own tree, in its own section, and is told of its puppeteer once.</li>
-    <li class="f-app"><b>Its state lives on a board.</b>A puppeteer's context only grows, so phi keeps <code>board.md</code> for it, hands it reports by reference, and names the point where compacting is safe.</li>
+    <li class="f-you"><b>The filing makes it one.</b>A puppeteer is an orchestrator that the app's own file shows in the section “puppeteers”. p4-phi reads that file each time it matters and keeps no copy of its own.</li>
+    <li class="f-phi"><b>A record on each side.</b>The puppeteer records each orchestrator it controls with <code>phi.py controls</code>, as <code>controls</code> on its own session.json. A controlled session stays at the top of its own tree, in its own section, and keeps <code>puppeteer</code> on its own record.</li>
+    <li class="f-app"><b>Its state lives on a board.</b>A puppeteer's context only grows, so p4-phi keeps <code>board.md</code> for it, hands it each report as one line and a page, and names the point where compacting is safe.</li>
   </ul>
 
   <div class="stage">
@@ -210,7 +215,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
         <button type="button" class="ghostbtn" id="reset">Reset</button>
       </div>
       <div class="svgwrap"><svg id="tree" role="group" aria-label="Sessions, their trees and the control links"></svg></div>
-      <p class="hint"><span><i></i>started by, in a tree</span><span><i class="c"></i>controlled by the puppeteer</span><span>Click a session to select it.</span></p>
+      <p class="hint"><span><i></i>parent session to worker, in a tree</span><span><i class="c"></i>controlled by the puppeteer</span><span>Click a session to select it.</span></p>
       <div class="console" id="console" aria-live="polite"></div>
       <details class="tt" open>
         <summary>What <code>board.md</code> holds, as of the puppeteer's last hook</summary>
@@ -230,42 +235,44 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
           <button type="button" class="act" data-act="message">Message the puppeteer <span class="tag you">ezexe</span></button>
           <button type="button" class="act" data-act="route">Give it work on this topic <span class="tag you">ezexe</span></button>
           <button type="button" class="act" data-act="press">Press its card <span class="tag you">ezexe</span></button>
-          <button type="button" class="act" data-act="speak">Speak in this session <span class="tag you">ezexe</span></button>
-          <button type="button" class="act" data-act="direct">Start a top session beside it <span class="tag you">ezexe</span></button>
+          <button type="button" class="act" data-act="speak">Press its Start it button <span class="tag you">ezexe</span></button>
+          <button type="button" class="act" data-act="direct">Start an orchestrator beside it <span class="tag you">ezexe</span></button>
           <button type="button" class="act" data-act="stopcard">Its card is refused <span class="tag app">app</span></button>
         </div>
 
         <p class="grp">The puppeteer</p>
         <div class="acts">
-          <button type="button" class="act" data-act="controls"><span id="ctllabel"></span> <span class="tag phi">phi</span></button>
-          <button type="button" class="act" data-act="startreq">Start and file the request <span class="tag app">app call</span></button>
-          <button type="button" class="act" data-act="decline">Decline the request <span class="tag phi">phi</span></button>
-          <button type="button" class="act" data-act="archive">Note, then archive it <span class="tag app">app call</span></button>
+          <button type="button" class="act" data-act="controls"><span id="ctllabel"></span> <span class="tag phi">p4-phi</span></button>
+          <button type="button" class="act" data-act="startreq">Start the request it was handed <span class="tag app">app call</span></button>
+          <button type="button" class="act" data-act="decline">Decline that request <span class="tag phi">p4-phi</span></button>
+          <button type="button" class="act" data-act="behalf">Start this session's request itself <span class="tag app">app call</span></button>
+          <button type="button" class="act" data-act="untie">Detach to top level <span class="tag app">app call</span></button>
+          <button type="button" class="act" data-act="archive">Archive this session <span class="tag app">app call</span></button>
         </div>
         <div class="field">
-          <label for="hold">phi's records of it also show</label>
+          <label for="hold">p4-phi's records of it also show</label>
           <select id="hold">
             <option value="none">nothing more</option>
             <option value="steps">an open plan step</option>
-            <option value="task">a running background task</option>
+            <option value="task">a background task with no end recorded</option>
             <option value="commit">a closing commit on no remote branch</option>
           </select>
-          <label class="ck"><input type="checkbox" id="reason" checked> the archive call carries a <code>reason</code></label>
-          <label class="ck"><input type="checkbox" id="past"> phi has handed the puppeteer more than 200000 characters</label>
+          <label class="ck"><input type="checkbox" id="past"> p4-phi has handed the puppeteer 200000 characters or more since its last compaction</label>
         </div>
 
         <p class="grp">The selected session</p>
         <div class="acts">
-          <button type="button" class="act" data-act="turn"><span id="turnlabel"></span> <span class="tag phi">phi</span></button>
-          <button type="button" class="act" data-act="ask">Ask for a new top session <span class="tag phi">phi</span></button>
+          <button type="button" class="act" data-act="turn"><span id="turnlabel"></span> <span class="tag phi">p4-phi</span></button>
+          <button type="button" class="act" data-act="ask">Ask for a new orchestrator <span class="tag phi">p4-phi</span></button>
         </div>
       </section>
 
-      <section class="card sec" id="boxsec" hidden aria-label="The puppeteer's next-step box">
-        <h2>The puppeteer's next-step box</h2>
+      <section class="card sec" id="boxsec" hidden aria-label="What the puppeteer puts to ezexe">
+        <h2>What the puppeteer puts to ezexe</h2>
         <div class="box">
           <p class="q" id="boxq"></p>
           <p class="r" id="boxr"></p>
+          <div class="opts" id="boxopts"></div>
           <div class="rowbtns" id="boxbtns"></div>
         </div>
       </section>
@@ -276,14 +283,14 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
 
   <section class="block" aria-label="A stopped or archived session frees its files">
     <h2>A stopped or archived session frees its files</h2>
-    <p class="intro">phi holds a start whose file set overlaps a live session's, so that one session writes a file at a time. Before 0.10.0 a session that ezexe stopped still counted as a live writer, and its replacement was held behind it. Choose what became of the first writer of <code>dox/</code> and see whether its replacement starts.</p>
+    <p class="intro">p4-phi holds a start whose write set overlaps a live session's, so that one session writes a file at a time. A puppeteer's own message to a controlled session meets the same holders as a warning that never blocks. Choose what became of the first writer of <code>dox/</code> and see whether the start that follows it goes.</p>
     <div class="rw">
       <div class="card sec">
         <h2>The first writer</h2>
         <div class="cmds" id="writer"></div>
       </div>
       <div class="card sec" aria-live="polite">
-        <h2>The replacement's start</h2>
+        <h2>The start that follows it</h2>
         <p class="verdict" id="wverdict"></p>
         <p class="rwwhy" id="wwhy"></p>
         <pre class="rwout" id="wout"></pre>
@@ -293,67 +300,69 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
 
   <section class="block" aria-label="What holds the rule up">
     <h2>What holds the rule up</h2>
-    <p class="intro">The rule began as <a href="https://github.com/ezexe/p4/issues/58">ezexe/p4#58</a>. <code>scripts/controls.py</code> holds it, and <code>scripts/test_controls.py</code> proves it.</p>
+    <p class="intro"><code>scripts/controls.py</code> holds the rule, <code>scripts/phi.py</code> runs it from p4-phi's hooks, and <code>scripts/test_controls.py</code> tests it.</p>
     <div class="rules">
       <div class="rule">
-        <h3>How phi knows a puppeteer</h3>
+        <h3>How p4-phi knows a puppeteer</h3>
         <ul>
-          <li>A hook cannot call the app's tools, but the app keeps the sidebar on disk. <code>claude_desktop_config.json</code>, beside the app's <code>claude-code-sessions</code> folder, holds <code>preferences.epitaxyPrefs["dframe-group-scopes"]</code>.</li>
-          <li>Each scope there has <code>groups</code>, with an id and a name, and <code>assignments</code>, which map <code>code:&lt;sessionId&gt;</code> to a group id.</li>
-          <li>A session is a puppeteer when it is a top session and that file assigns it to a group named “puppeteers”. A child filed there is not one.</li>
+          <li>p4-phi's hooks are command hooks, which call none of the app's tools, but the app keeps the sidebar on disk. <code>claude_desktop_config.json</code>, beside the app's <code>claude-code-sessions</code> folder, holds <code>preferences.epitaxyPrefs["dframe-group-scopes"]</code>.</li>
+          <li>Each scope there has <code>groups</code>, each with an <code>id</code> and a <code>name</code>, and <code>assignments</code>, which map <code>code:&lt;sessionId&gt;</code> to a group id.</li>
+          <li>A session is a puppeteer when no session started it and that file assigns it to a group named “puppeteers”. A worker filed there is not one.</li>
           <li>A file that is missing or shaped otherwise makes nobody a puppeteer.</li>
-          <li>Nothing stops a session from filing itself, since the app asks nobody. The rule rests on ezexe's filing. phi says once, in the session and on its record, that it saw the session there, and every session it lists is told who claims it.</li>
+          <li>Nothing stops a session from filing itself, since the app asks nobody. The rule rests on ezexe's filing: p4-phi says once, in the session and on its record as <code>puppeteerSeen</code>, that it saw the session there, and tells each session it lists which session controls it.</li>
         </ul>
       </div>
       <div class="rule">
-        <h3>Where the pair is kept</h3>
+        <h3>Where each side's record is kept</h3>
         <ul>
-          <li>The puppeteer's record is where every top session's is: <code>session.json</code> in the store of the folder it was opened in.</li>
-          <li><code>controls</code> on that record lists each controlled session with the store its tree lives in.</li>
-          <li>A controlled session's own hook finds the pair and keeps <code>puppeteer</code> on its own record.</li>
-          <li>Each side reads the other's store, and neither writes into it. A request stays in the requester's store, and what became of it stays on the puppeteer's record.</li>
-          <li>A top session that a puppeteer starts in another project keeps its record in that project's store, from its first message on.</li>
+          <li>The puppeteer's record is where every orchestrator's is: <code>session.json</code> in the store of the folder it was opened in.</li>
+          <li><code>controls</code> on that record lists each controlled session with the store its tree lives in, and marks <code>started</code> on each one the puppeteer started itself.</li>
+          <li>A controlled session's own hook finds the puppeteer that lists it and keeps <code>puppeteer</code> on its own record. A puppeteer that has handed over to a successor counts for none of them.</li>
+          <li>Each side reads the other's store. A request stays in the store of the session that filed it, and what became of it stays on the puppeteer's record. The one row a puppeteer's hook writes into a controlled session's store is the <code>claimed</code> row of a start request it starts on that session's behalf.</li>
+          <li>An orchestrator the puppeteer starts in another project keeps its record in that project's store.</li>
         </ul>
       </div>
       <div class="rule">
         <h3>What a puppeteer does itself</h3>
         <ul>
-          <li>It tells ezexe in one place where each controlled session stands, each by its full title, and relays ezexe's rule changes to all of them.</li>
-          <li>It writes no plugin or project files. phi gives it this as text and does not block its edits.</li>
-          <li>Its plan gets no hand-off advice and no nudge. Waiting on reports, and the few read-only checks against git and GitHub, are its own work.</li>
-          <li>Its turn may end on a step that waits on, awaits or collects the reports of sessions it controls, while one of them is not yet complete. Every other top session is sent back to its next open step.</li>
-          <li>Deleting data, force pushes and publishing still need ezexe's yes in the session that acts.</li>
+          <li>It tells ezexe in one place where each controlled session stands, each by its full title, and sends the feedback and user memories ezexe changes to all of them with <code>SendMessage</code>.</li>
+          <li>It writes no plugin or project files. p4-phi tells it so in the line it hands the puppeteer once.</li>
+          <li>Its task list gets no advice to hand its steps out and no nudge. Waiting on reports, and the few read-only checks against git and GitHub, are its own work.</li>
+          <li>Its turn may end on a step that waits on the sessions it controls while one of them is still working, holds something open or is not shown done.</li>
+          <li>It publishes the issues the <code>Finding:</code> lines of its trees need, and places the session that resolves each.</li>
+          <li>When it messages a controlled session whose write set another controlled tree still holds, p4-phi warns it once, naming the holder by its full title and what frees the files, and never blocks the message.</li>
         </ul>
       </div>
       <div class="rule">
-        <h3>What phi refuses</h3>
+        <h3>What p4-phi refuses</h3>
         <ul>
           <li><code>controls</code> from a session that is not a puppeteer, and nothing is recorded.</li>
-          <li><code>controls</code> naming the puppeteer itself, a session the app holds no record of, or a session another session started. A child is reached through its top.</li>
+          <li><code>controls</code> naming the puppeteer itself, a session the app holds no record of, or a session another session started. A worker is reached through its orchestrator.</li>
           <li>A puppeteer's archive of a session it does not control, unless the session is in a controlled tree, in the puppeteer's own tree, or is the puppeteer that handed over to it.</li>
-          <li>Its archive of a session that is mid-turn, has an open plan step, a running background task, a session still working under it, a start request of its own waiting, or an issue-closing commit on no remote branch.</li>
-          <li>An archive call whose <code>reason</code> is shorter than twelve characters.</li>
-          <li>A controlled session's own start of a new top session.</li>
-          <li><code>controls --decline</code> with no open request of that id, or with no real reason.</li>
+          <li>Its archive of a session ezexe did not pick in that turn, by the button or the multiple-choice question.</li>
+          <li>Its archive of a session that is mid-turn, has an open plan step, a background task with no end recorded, a session still working under it, a start request of its own waiting, or an issue-closing commit on no remote branch.</li>
+          <li>A controlled session's own start of a session whose brief says <code>This session is a new top session</code>, the line every new orchestrator's brief carries.</li>
+          <li><code>controls --decline</code> with no open request of that id addressed to this puppeteer, or with a reason shorter than twelve characters.</li>
           <li><code>controls --from</code> naming a puppeteer that has not run <code>controls --hand</code> for this session.</li>
-          <li><code>request --to-puppeteer</code> from a session that has no puppeteer.</li>
+          <li><code>request --to-puppeteer</code> from a session no puppeteer lists, or with a brief that has no <code>Files:</code> line.</li>
+          <li><code>controls --hand</code> naming the puppeteer itself or a session the app holds no record of.</li>
         </ul>
       </div>
       <div class="rule">
-        <h3>What phi does not do</h3>
+        <h3>What p4-phi does not do</h3>
         <ul>
-          <li>It does not compact a session, start a successor or move a session between sections. Those are the app's tools, and the puppeteer makes the calls phi names.</li>
-          <li>It speaks only when a hook fires. A boundary reached while the puppeteer is idle is named beside its next message.</li>
-          <li>The character count covers what phi's own hooks handed, so it is a floor under the context's real size.</li>
-          <li>It does not withdraw a tree's own start request. A puppeteer may decline only a request addressed to it.</li>
-          <li>For every other session the archive rule of <a href="https://github.com/ezexe/p4/issues/49">ezexe/p4#49</a> is unchanged.</li>
+          <li>It does not compact a session, start a successor, move a session between sections or archive one. Those are the app's tools, and the session makes the calls p4-phi names.</li>
+          <li>It speaks only when one of its hooks fires, so a boundary reached while the puppeteer is idle is named beside its next message. A command hook with <code>asyncRewake</code> could wake it at once, and <code>SendMessage</code> with <code>notify_when_idle</code> could tell it when a session goes idle, and p4-phi uses neither.</li>
+          <li>The character count covers what p4-phi's own hooks handed, so it is a floor under the context's real size.</li>
+          <li>It hands a start request only to the session that filed it. A puppeteer may decline only a request addressed to it, and the hook of the session that filed it then closes the row as withdrawn.</li>
+          <li>Where a project's p4.json sets <code>phi.session_archives</code> to true, sessions archive with the app's tool and none of these archive checks run.</li>
         </ul>
       </div>
       <div class="rule">
         <h3>Two keys, both optional</h3>
         <ul>
           <li><code>phi.puppeteer_section</code> names the sidebar section. It is “puppeteers” when the key is absent, and an empty string turns the rule off.</li>
-          <li><code>phi.puppeteer_chars</code> is the number of characters phi may hand a puppeteer between compactions before the boundary notice says so. It is 200000 when the key is absent.</li>
+          <li><code>phi.puppeteer_chars</code> is the number of characters p4-phi may hand a puppeteer between compactions before its boundary notice says so, and each further multiple names a boundary again while one holds. It is 200000 when the key is absent.</li>
           <li>After three compactions the notice offers a successor in place of “Later”.</li>
         </ul>
         <pre>{
@@ -367,30 +376,30 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
   </section>
 
   <section class="block" aria-label="The controls command">
-    <h2>One command, five forms</h2>
+    <h2>One command and its flags</h2>
     <p class="intro">Only a puppeteer may run it. Every form ends by rewriting the board and printing where each controlled session stands.</p>
     <div class="tablewrap">
       <table>
         <thead><tr><th>The command</th><th>What it does</th></tr></thead>
         <tbody>
-          <tr><td class="c"><code>phi.py controls</code></td><td>Prints each controlled session by its full title, with its store, its state and what phi's records hold against archiving it. Then it prints the archive calls phi let through or refused, and the board's path.</td></tr>
-          <tr><td class="c"><code>phi.py controls &lt;sessionId&gt; ...</code></td><td>Records the top sessions ezexe put under this puppeteer.</td></tr>
-          <tr><td class="c"><code>phi.py controls --drop &lt;sessionId&gt;</code></td><td>Ends a pair. The dropped session is told once that it has no puppeteer.</td></tr>
-          <tr><td class="c"><code>phi.py controls --decline &lt;request id&gt; "&lt;why&gt;"</code></td><td>Declines a request for a new top session. The requester is told at its next message and starts no session for it.</td></tr>
-          <tr><td class="c"><code>phi.py controls --hand &lt;sessionId&gt;</code></td><td>Marks the hand-over to a fresh puppeteer on the old one's record.</td></tr>
-          <tr><td class="c"><code>phi.py controls --from &lt;sessionId&gt;</code></td><td>Run by the successor. It takes over the same controlled sessions and the old puppeteer's notes.</td></tr>
+          <tr><td class="c"><code>phi.py controls</code></td><td>Prints each controlled session by its full title, with its store, its state and what p4-phi's records hold against archiving it. Then it prints when p4-phi first saw this session in the section, the archive calls it let through or refused, and the board's path.</td></tr>
+          <tr><td class="c"><code>phi.py controls &lt;sessionId&gt; ...</code></td><td>Records the orchestrators ezexe put under this puppeteer, each printed as <code>controlled: "&lt;title&gt;" `&lt;sessionId&gt;`, store &lt;store&gt;</code>.</td></tr>
+          <tr><td class="c"><code>phi.py controls --drop &lt;sessionId&gt;</code></td><td>Ends the control of a session, printed as <code>dropped from control: &lt;sessionId&gt;</code>. The dropped session is told once, at its next message, that it has left the puppeteer's control.</td></tr>
+          <tr><td class="c"><code>phi.py controls --decline &lt;request id&gt; "&lt;why&gt;"</code></td><td>Declines a request for a new orchestrator. The session that filed it is told at its next message, and starts no session for it.</td></tr>
+          <tr><td class="c"><code>phi.py controls --hand &lt;sessionId&gt;</code></td><td>Run by the old puppeteer: keeps its hand-over to the successor on its own record.</td></tr>
+          <tr><td class="c"><code>phi.py controls --from &lt;sessionId&gt;</code></td><td>Run by the successor. It takes over the old puppeteer's controlled sessions, its notes, its declined requests and the memories ezexe changed during the run.</td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
-  <section class="block" aria-label="A word that is already taken">
-    <h2>A word that is already taken</h2>
-    <p class="intro">Since <a href="https://github.com/ezexe/p4/issues/38">ezexe/p4#38</a>, <code>puppeteer.py</code> is every orchestrator's watcher. The puppeteer on this page is narrower: the one session ezexe filed in the section, paired with the sessions it controls. The <code>phi</code> skill says which is meant where both appear.</p>
+  <section class="block" aria-label="The puppeteer and the watcher">
+    <h2>The puppeteer and the watcher</h2>
+    <p class="intro">A puppeteer is a session. The watcher is a process: <code>puppeteer.py</code> runs one in the background for each orchestrator, and it rewrites that orchestrator's <code>ledger.md</code> from p4-phi's records and the app's session records when one of them changes, with a reconcile line for each divergence between the two. <code>phi.py ledger</code> prints the ledger and rewrites it when it changed, and <code>phi.py settle &lt;sessionId&gt; "&lt;what took it up&gt;"</code> clears a session's row from the ledger's section of work left unfinished at an archive. A puppeteer has a watcher and a ledger like every orchestrator, and its board is a page of its own beside them.</p>
   </section>
 
   <footer>
-    Every rule, call and line here is read from the plugin's source: <code>controls.py</code>, <code>phi.py</code>, <code>starts.py</code>, <code>plans.py</code>, <code>gaps.py</code> and the <code>phi</code> skill, in <a href="https://github.com/ezexe/p4">ezexe/p4</a> under <code>lbiza/plugins/p4-phi</code>. The projects, titles and ids on this page are invented, and the model lives in your browser. Nothing on this page reaches a real session.
+    Every rule, call and line here is read from p4-phi's source: <code>controls.py</code>, <code>phi.py</code>, <code>starts.py</code>, <code>relay.py</code>, <code>plans.py</code> and <code>puppeteer.py</code>, in <a href="https://github.com/ezexe/p4">ezexe/p4</a> under <code>lbiza/plugins/p4-phi/scripts</code>. A command shown as <code>&lt;p4-phi&gt;/scripts/phi.py</code> carries the plugin folder's absolute path in the lines p4-phi prints. The projects, titles and ids on this page are invented, and the model runs in your browser. Nothing on this page reaches a real session.
   </footer>
 </div>
 
@@ -410,15 +419,19 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
 })();
 
 /* ---------- helpers ---------- */
-var PHI='python -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/phi.py"';
+var PHI='python -I -X utf8 "<p4-phi>/scripts/phi.py"';
 var NS="http://www.w3.org/2000/svg";
 function $(id){return document.getElementById(id)}
-function h(tag,attrs,kids){var e=document.createElement(tag);if(attrs)for(var k in attrs){if(k==="text")e.textContent=attrs[k];else if(k==="html")e.innerHTML=attrs[k];else e.setAttribute(k,attrs[k])}(kids||[]).forEach(function(c){e.appendChild(typeof c==="string"?document.createTextNode(c):c)});return e}
+function h(tag,attrs,kids){var e=document.createElement(tag);if(attrs)for(var k in attrs){if(k==="text")e.textContent=attrs[k];else e.setAttribute(k,attrs[k])}(kids||[]).forEach(function(c){e.appendChild(typeof c==="string"?document.createTextNode(c):c)});return e}
 function sv(tag,attrs){var e=document.createElementNS(NS,tag);if(attrs)for(var k in attrs){if(k==="text")e.textContent=attrs[k];else e.setAttribute(k,attrs[k])}return e}
 function q(t){return "“"+t+"”"}
 function hex(n,len){var x=(Math.imul(n,2654435761)>>>0).toString(16)+(Math.imul(n+17,40503)>>>0).toString(16);while(x.length<len)x="0"+x;return x.slice(0,len)}
 function call(tool,obj){return tool+"\n"+JSON.stringify(obj,null,2)}
 function plural(n,w){return n+" "+w+(n===1?"":"s")}
+function cut(t,n){return t.length<=n?t:t.slice(0,n-1)+"…"}
+/* phi.cut and json.dumps, as the lines p4-phi prints them */
+function pcut(t,n){return t.length<=n?t:t.slice(0,Math.max(0,n-4)).replace(/\s+$/,"")+" ..."}
+function dumps(o){return "{"+Object.keys(o).map(function(k){return JSON.stringify(k)+": "+JSON.stringify(o[k])}).join(", ")+"}"}
 function copy(text,btn){
   function ok(){btn.textContent="copied";setTimeout(function(){btn.textContent="copy"},1200)}
   function old(){var t=h("textarea");t.value=text;t.style.position="fixed";t.style.opacity="0";document.body.appendChild(t);t.select();try{document.execCommand("copy");ok()}catch(e){}t.remove()}
@@ -426,311 +439,411 @@ function copy(text,btn){
 }
 
 /* ---------- the model ---------- */
-var SECTION="puppeteers",COMPACTIONS=3,CEILING=200000,MAX=10;
+var SECTION="puppeteers",COMPACTIONS=3,CEILING=200000,MAX=12;
 var ENVS={atlas:{section:"atlas",store:"<atlas>/.claude/p4"},harbor:{section:"",store:"<harbor>/.claude/p4"}};
 var HOME="<watch>/.claude/p4";
 var TITLES=["Search index rebuild","Importer rewrite","Nightly report fixes","Login flow cleanup","Queue worker timeouts"];
+var RESTATE="the task restated as your own instruction to the session that receives it: what it is to do and why, from its side, a line `Files: <paths>` and what done looks like, with no message quoted and nothing of who asked or how the request travelled";
+var NEW_TOP_BRIEF="This session is a new top session, orchestrating its own topic.";
+var LEVEL="Model and effort: <model> at <effort> effort, since this is <its kind of work>.";
+var BRIEF="<the whole brief, with its Files line>";
+var NOT_PICKED="Not picked by ezexe in this turn: a puppeteer archives only what ezexe picks, by the button or the multiple-choice question p4-phi hands it";
+var ARCHIVE="mcp__ccd_session_mgmt__archive_session";
 var S;
 function N(id){return S.n[id]}
 function mk(title,par,env,o){
-  var id="local_"+hex(++S.seq*7919+S.salt,8),n={id:id,title:title,par:par||null,env:env||"",working:false,controlled:false,told:false,
-    card:null,req:null,archived:false,hold:"none",last:"",report:"",started:false,announced:false,stopped:false};
+  var id="local_"+hex(++S.seq*7919+S.salt,8),n={id:id,title:title,par:par||null,env:env||"",working:false,controlled:false,done:false,
+    card:null,req:null,archived:false,hold:"none",last:"",report:"",started:false,announced:false,stopped:false,direct:false,behalfOf:"",atTop:false};
   if(o)for(var k in o)n[k]=o[k];
   S.n[id]=n;S.order.push(id);return id;
 }
 function tick(){S.clock++;var m=S.clock%60,hh=11+Math.floor(S.clock/60);return "2026-11-16 "+hh+":"+(m<10?"0":"")+m}
 function fresh(){
   S={n:{},order:[],seq:0,rid:0,salt:41,clock:38,filed:false,seen:"",sel:null,reqs:[],answers:[],archives:[],notes:[],seenTurn:{},
-     edge:{key:"",closed:[]},box:null,compactions:0,past:false,example:{kind:"intro"},con:null,board:"",titles:0,old:null};
+     edge:{key:"",closed:[],ready:[]},box:null,compactions:0,past:false,example:{kind:"intro"},con:null,board:"",titles:0,
+     holdersKey:"",behalf:[],behalfTold:[]};
   S.p=mk("Cross-project watch",null,"");
   var a=mk("Release pipeline",null,"atlas",{working:true});
   mk("Write the changelog test",a,"atlas",{working:true});
-  mk("Docs site upkeep",null,"atlas",{last:"2026-11-16 11:31",report:"The link check passes on every page, and nothing is left to land."});
-  mk("Billing export",null,"harbor",{last:"2026-11-16 11:34",report:"The export runs against the March ledger, and one commit is on main."});
+  mk("Docs site upkeep",null,"atlas",{done:true,last:"2026-11-16 11:31",report:"The link check passes on every page, and nothing is left to land."});
+  mk("Billing export",null,"harbor",{done:true,last:"2026-11-16 11:34",report:"The export runs against the March ledger, and one commit is on main.\nFinding: the export skips refunds dated on the last day of a month; source: export/refunds.py:88; test: test_month_end_refund; files: export/refunds.py"});
   S.sel=a;S.board=boardText();
-  S.con={say:"Start by filing the session "+q(N(S.p).title)+" in the section. Until ezexe does, phi treats it as a top session like any other."};
+  S.con={say:"Start by filing the session "+q(N(S.p).title)+" in the section. Until ezexe does, p4-phi treats it as an orchestrator like any other."};
 }
 function kids(id){return S.order.filter(function(k){return N(k).par===id})}
+function below(id){var out=[];kids(id).forEach(function(k){out.push(k);out=out.concat(below(k))});return out}
 function tops(env){return S.order.filter(function(k){var n=N(k);return !n.par&&n.env===env})}
 function topOf(id){var n=N(id);while(n.par)n=N(n.par);return n.id}
 function isP(id){return id===S.p}
 function pair(n){return S.filed&&n.controlled}
+function inControlled(n){return S.filed&&N(topOf(n.id)).controlled}
 function storeOf(n){return n.env?ENVS[n.env].store:HOME}
 function pageOf(n){return storeOf(n)+"/phi/sessions/"+n.id+"/session.md"}
 function boardPath(){return HOME+"/phi/sessions/"+S.p+"/board.md"}
+function link(n){return "["+n.title+"]("+"#"+n.id+")"}
 function controlled(){return S.order.filter(function(k){return N(k).controlled})}
 function openReqs(){return S.reqs.filter(function(r){return !r.done})}
 function count(){return S.order.length}
+function firstLine(n){return pcut(n.report.split("\n")[0],200)}
 
-/* controls.standing: where a session stands, and what phi's records hold against archiving it */
+/* controls.standing: a session's state, and what p4-phi's records hold against archiving it */
 function standing(n){
   if(n.archived)return{state:"archived",against:[]};
   var a=[];
   if(n.working)a.push("its last message has no turn's end recorded after it, so it is mid-turn");
   if(n.hold==="steps")a.push("1 open plan step, the next \"Land the change and push main\"");
-  if(n.hold==="task")a.push("1 background task with no end recorded: python -I -X utf8 test_export.py");
-  kids(n.id).forEach(function(k){var c=N(k);if(!c.archived&&c.working)a.push("\""+c.title+"\" under it is still working")});
-  if(n.req)a.push("1 start request of its own waiting, the first \""+n.req.title+"\": ezexe has to speak in that session, or press its card");
-  if(n.hold==="commit")a.push("commit 4c1d9e2, which closes #212, is on no remote branch");
-  return{state:n.working?"working":a.length?"open":"not shown done",against:a};
+  if(n.hold==="task")a.push("1 background task with no end recorded: b3k9x2qz \"python -I -X utf8 test_export.py\"");
+  below(n.id).forEach(function(k){var c=N(k);if(!c.archived&&(c.working||c.hold==="steps"))a.push("\""+c.title+"\" under it is still working")});
+  if(n.req)a.push("1 start request of its own waiting, the first \""+n.req.title+"\", which it starts at a turn ezexe begins there: ezexe opens "+link(n)+" and presses the button its turn ended on");
+  if(n.hold==="commit")a.push("commit 4c1d9e2, which closes #212, is on no remote branch, and no commit there closes the same issue or carries the same change");
+  return{state:n.working?"working":a.length?"open":n.done?"shown done":"not shown done",against:a};
+}
+function finished(top){return below(top).filter(function(k){var c=N(k);return !c.archived&&!c.working&&c.done})}
+/* controls.complete: what the puppeteer can offer ezexe, and what it cannot */
+function complete(){
+  var ready=[],left=[];
+  controlled().forEach(function(k){var n=N(k),st=standing(n);if(st.state==="archived")return;
+    if(st.state==="shown done"&&!st.against.length)ready.push({id:k,title:n.title,kids:finished(k)});
+    else left.push({title:n.title,why:st.against.join("; ")||"p4-phi's records do not show its task done"})});
+  return{ready:ready,left:left};
 }
 function filing(env){
   var t=controlled().filter(function(k){return N(k).env===env&&ENVS[env].section})[0];
   return t?"the section \""+ENVS[env].section+"\"":"the ungrouped list under its project";
 }
-/* controls.boundary: a controlled tree has closed, or every controlled session is idle with no request waiting */
-function boundary(){
-  var rows=controlled().map(N);
-  if(!S.filed||!rows.length)return{on:false,why:"it controls no session"};
-  if(openReqs().length)return{on:false,why:"a request to the puppeteer is unanswered"};
-  var closed=rows.filter(function(n){return n.archived}).map(function(n){return n.id});
-  var newly=closed.filter(function(k){return S.edge.closed.indexOf(k)<0});
-  var idle=rows.every(function(n){return n.archived||!n.working})&&!rows.some(function(n){return n.req});
-  if(!newly.length&&!idle)return{on:false,why:rows.some(function(n){return n.req})?"a controlled session has a start request waiting":"a controlled session is mid-turn"};
-  var key=rows.map(function(n){return n.id+standing(n).state+n.last}).join("|")+(S.past?"+":"");
-  return{on:true,key:key,closed:closed,why:newly.length?"the tree of \""+N(newly[0]).title+"\" has closed":"every controlled session is idle and no request is waiting"};
+function holders(){
+  var out=[];
+  S.order.forEach(function(k){var n=N(k);if(n.req&&!n.archived&&inControlled(n))out.push(n)});
+  return out;
 }
+function behalfRow(b){
+  var head="- start request "+b.rid+" \""+b.title+"\" of "+link(N(b.req))+", which this puppeteer started";
+  return head+" as "+link(N(b.kid))+": p4-phi holds it under that session, and the app "+(N(b.kid).atTop?"shows it at top level.":"nests it under this puppeteer until it is detached to top level with `mcp__ccd_session_mgmt__detach_session`.");
+}
+
 /* controls.board */
 function boardText(){
-  var p=N(S.p),L=["# Puppeteer board: "+p.title+" ("+p.id+")","","Rewritten by p4-phi's hooks, never by hand.",
-    "What is not here is kept with `phi.py note`, and after a compaction this page is read first.","","## Controlled sessions",""],waits=[];
+  var p=N(S.p),L=["# Puppeteer board: \""+p.title+"\" `"+p.id+"`","","Rewritten by p4-phi's hooks and its `controls` command, never by hand.",
+    "What is not here is kept with `phi.py note`: `--kind decision` or `--kind waiting` puts it under Waiting on, `--kind parked` under Parked, and any other kind under Notes.","","## Controlled sessions",""];
   controlled().forEach(function(k){var n=N(k),st=standing(n);
-    L.push("- \""+n.title+"\" `"+n.id+"`, store "+storeOf(n)+": "+st.state+(st.against.length?": "+st.against.join("; "):"")+"."+(n.last?" Last report "+n.last+": "+n.report:"")+" Page: "+pageOf(n));
-    if(n.req)waits.push("- ezexe has to speak in \""+n.title+"\" `"+n.id+"`, or press its card: it has 1 child session waiting to be started.")});
+    L.push("- \""+n.title+"\" `"+n.id+"`, store "+storeOf(n)+": "+st.state+(st.against.length?": "+st.against.join("; "):"")+"."+(n.last?" Last report "+n.last+": "+firstLine(n):"")+" Page: "+pageOf(n))});
   if(!controlled().length)L.push("None yet.");
-  function kind(k){return S.notes.filter(function(x){return x.kind===k}).map(function(x){return "- "+x.claim+" Source: "+x.source+". Kept "+x.time+"."})}
-  L=L.concat(["","## Waiting on",""],waits.concat(kind("decision"),kind("waiting")).length?waits.concat(kind("decision"),kind("waiting")):["Nothing."]);
+  function kind(k){return S.notes.filter(function(x){return k==="other"?["decision","waiting","parked"].indexOf(x.kind)<0:x.kind===k}).map(function(x){return "- "+x.claim+" Source: "+x.source+". Kept "+x.time+"."})}
+  var waits=holders().map(function(n){return "- "+link(n)+" holds 1 start request only it can start: ezexe opens it and presses the button its turn ended on, or sends it one message."}).concat(kind("decision"),kind("waiting"));
+  L=L.concat(["","## Waiting on",""],waits.length?waits:["Nothing."]);
   L=L.concat(["","## Requests to this puppeteer",""]);
   openReqs().forEach(function(r){L.push("- "+r.id+" \""+r.title+"\" from \""+N(r.from).title+"\": open.")});
   S.answers.forEach(function(a){L.push("- "+a.id+" \""+a.title+"\": declined "+a.time+": "+a.why)});
   if(!openReqs().length&&!S.answers.length)L.push("None.");
+  L=L.concat(["","## Started on another session's behalf",""],S.behalf.length?S.behalf.map(behalfRow):["None."]);
+  var found=[];controlled().forEach(function(k){[k].concat(below(k)).forEach(function(x){var n=N(x);n.report.split("\n").forEach(function(l){if(/^Finding:/.test(l))found.push("- \""+n.title+"\" `"+n.id+"`: "+l)})})});
+  L=L.concat(["","## Findings",""]);
+  if(found.length)L=L.concat(["The `Finding:` lines of the reports of the controlled sessions and of the sessions of their trees. This puppeteer publishes each one that needs an issue, once it has checked the open issues and the running sessions, and places the session that resolves it: the controlled session whose tree holds its files is sent it in one SendMessage, and one no controlled session covers gets a new orchestrator.",""],found);else L.push("None.");
   L=L.concat(["","## Parked",""],kind("parked").length?kind("parked"):["Nothing."]);
-  L=L.concat(["","## Rules ezexe changed during the run","","None."]);
-  L=L.concat(["","## Notes",""],kind("").length?kind(""):["None."]);
+  L=L.concat(["","## Feedback and user memories ezexe changed during the run","","None."]);
+  L=L.concat(["","## Notes",""],kind("other").length?kind("other"):["None."]);
   L=L.concat(["","## Archived and left",""]);
   if(S.archives.length)S.archives.forEach(function(a){L.push("- "+(a.let?"archived":"left")+" "+a.time+": \""+a.title+"\" `"+a.id+"`: "+a.why)});else L.push("None.");
   return L.join("\n");
 }
 function controlsText(){
-  var L=controlled().map(function(k){var n=N(k),st=standing(n);return "- \""+n.title+"\" ("+n.id+"), store "+storeOf(n)+": "+st.state+(st.against.length?": "+st.against.join("; "):"")});
-  if(!L.length)L.push("no session is controlled yet: `controls <sessionId> ...` records the top sessions ezexe put under this one");
-  if(S.seen)L.push("phi first saw this session in the section at "+S.seen+".");
-  S.archives.forEach(function(a){L.push("- "+(a.let?"archived":"left")+" "+a.time+": \""+a.title+"\" ("+a.id+"): "+a.why)});
+  var L=controlled().map(function(k){var n=N(k),st=standing(n);return "- \""+n.title+"\" `"+n.id+"`, store "+storeOf(n)+": "+st.state+(st.against.length?": "+st.against.join("; "):"")});
+  if(!L.length)L.push("no session is controlled yet: `controls <sessionId> ...` records the orchestrators ezexe put under this one");
+  if(S.seen)L.push("p4-phi first saw this session in the section at "+S.seen+".");
+  S.archives.forEach(function(a){L.push("- "+(a.let?"archived":"left")+" "+a.time+": \""+a.title+"\" `"+a.id+"`: "+a.why)});
   L.push("The board: "+boardPath());
   return L.join("\n");
 }
 function note(claim,source,kind){S.notes.push({claim:claim,source:source,kind:kind||"",time:tick()})}
 function nextTitle(){return TITLES[S.titles++%TITLES.length]}
 
-/* ---------- the lines phi hands out, as controls.py, starts.py and phi.py write them ---------- */
-function RULE(){return "phi (p4-phi): This session is a puppeteer: ezexe filed it in the sidebar section \""+SECTION+"\", so it controls the top sessions of other trees, which stay tops of their own trees in their own sections, siblings and never its children. Record them with `"+PHI+" controls <sessionId> ...`; `"+PHI+" controls` then prints where each stands, to tell ezexe in one place, each by its full title. Its board, "+boardPath()+", is rewritten by phi; what phi cannot see goes on it through `"+PHI+" note`, with `--kind decision` for what waits on ezexe, `--kind waiting` for what waits on a session and `--kind parked` for a parked issue. It relays ezexe's rule changes to all of them. It writes no plugin or project files. Work ezexe gives it on a topic a controlled session orchestrates goes to that session in one message, and that session starts its own child; a topic none covers gets a new top session that this puppeteer starts and then files in its environment's section with `mcp__ccd_sidebar__move_sessions`, never in \""+SECTION+"\". Waiting on their reports, and the few read-only checks of their results against git and GitHub, are its own work and never a child's; its turn may end while it waits, with a line naming whom it waits on. It may archive a complete session it controls, or one in such a session's tree, a top session included, without a quick select: first keep its outcome with `"+PHI+" note`, then `mcp__ccd_session_mgmt__archive_session` with a `reason` saying what showed the task done, the work landed and pushed, and no other session needing its scratch clone. phi refuses one that is mid-turn, has open steps, a running background task or a start request waiting, or has an issue-closing commit on no remote branch. It names each session it archived and each it left, with the reason. Deleting data, force pushes and publishing still need ezexe's yes in the session that acts: being a puppeteer widens nothing there."}
-function PAIR(){var p=N(S.p);return "phi (p4-phi): This session has a puppeteer: \""+p.title+"\" ("+p.id+"), a session ezexe filed in the sidebar section \""+SECTION+"\", lists this one among the sessions it controls. This session stays the top of its own tree, in its own section, with its own steerer and lander, and still pushes its own work. Its puppeteer reads its state, relays ezexe's rule changes, may decline a request this session sends it, and may archive this session and the sessions of its tree once they are complete. A new top session is asked of the puppeteer and never started here: `"+PHI+" request \"<title>\" --brief \"<the whole brief>\" --to-puppeteer`. Anything irreversible or outward still needs ezexe's yes in this session, whoever relays the request."}
-function PAIR_OVER(){var p=N(S.p);return "phi (p4-phi): This session no longer has a puppeteer: \""+p.title+"\" ("+p.id+") dropped it from the sessions it controls, or left the sidebar section. It is a top session as before, and starts its own new top sessions again."}
-function ASK(){return "phi (p4-phi): this session has a puppeteer, so where a line here says to start a new top session, start none: write `"+PHI+" request \"<title>\" --brief \"<the whole brief>\" --to-puppeteer`, the brief declaring its file set on a line `Files: <paths>`. Its puppeteer \""+N(S.p).title+"\" starts it, files it in this environment's section and takes it under control, or declines it with one line to ezexe."}
-function ROUTE(n){return "phi (p4-phi): this message reads as work on the topic \""+n.title+"\" ("+n.id+") orchestrates. If so, do not do it here and start no child for it: send that session one message with SendMessage, holding ezexe's words, a line `Files: <paths>` and what done looks like, and telling it to brief and start a child session of its own for it. Keep it on the board with `"+PHI+" note \"<what was sent and to whom>\" --source \"<the message>\" --kind waiting` until its report comes. A topic no controlled session covers gets a new top session that this puppeteer starts and files."}
-var CARD="phi (p4-phi): this turn was started by another session, not ezexe, so the app refuses `mcp__ccd_session__start_session` with `user_asked`. Work in it that is a task of its own, outside this session's task, is shown as a proposal card, `mcp__ccd_session__start_session` with `initiation` `own_initiative`, which ezexe presses in this session, so the app's parent and phi's agree. Only where the card is refused too, write it as a start request, `"+PHI+" request \"<title>\" --brief \"<the whole brief>\"`, the brief declaring its file set on a line `Files: <paths>`: the next turn ezexe begins in this session starts it as this session's child. Do the rest here; a question the chain can settle is answered, not waited on.";
-var NEWTOP='This session is a new top session, orchestrating its own topic. Its first act: `mcp__ccd_session_mgmt__detach_session` with `"self"`, so the app stops nesting it and its reports stop going to the starter, then `'+PHI+' detach`.';
-var NO_ARCHIVE="phi (p4-phi): no session archives a session, itself included (ezexe/p4#49). The archive is ezexe's own action in the app.";
-var ARCHIVE="mcp__ccd_session_mgmt__archive_session";
-function NOTICE(b){
+/* ---------- the lines p4-phi hands out, as controls.py, starts.py and phi.py write them ---------- */
+function RULE(){return "phi (p4-phi): This session is a puppeteer: ezexe filed it in the sidebar section \""+SECTION+"\", so it controls the orchestrators of other trees, which stay at the top of their own trees, in their own sections, as its siblings and never its children. Record them with `"+PHI+" controls <sessionId> ...`; `"+PHI+" controls` then prints where each stands, to tell ezexe in one place, each by its full title. Its board is "+boardPath()+", and what p4-phi cannot see goes on it through `"+PHI+" note`. It sends the feedback and user memories ezexe changes to all of them with SendMessage. It writes no plugin or project files. Work ezexe gives it on a topic a controlled session orchestrates goes to that session in one SendMessage holding "+RESTATE+", and that session briefs and starts a worker of its own for it; this session neither does that work nor starts a child for it. A topic none covers gets a new orchestrator that this puppeteer starts and then files in its environment's section with `mcp__ccd_sidebar__move_sessions`, never in \""+SECTION+"\". It starts only new orchestrators: the app nests a session under the session that calls the start tool and no tool moves it after, so a start request belongs under the session that filed it, and this session never starts one for another session but names that session to ezexe as a link to open. Waiting on their reports, and the few read-only checks of their results against git and GitHub, are its own work and never a child's; its turn may end while it waits, with a line naming whom it waits on. The `Finding:` lines the reports of their trees carry are listed on its board under Findings, and it publishes the issues they need and places the session that resolves each, as the board says. It archives a session only on ezexe's pick, by the button or the multiple-choice question p4-phi hands it."}
+function PAIR(){var p=N(S.p);return "phi (p4-phi): This session is controlled by a puppeteer: \""+p.title+"\" `"+p.id+"`, which ezexe filed in the sidebar section \""+SECTION+"\", lists this one among the sessions it controls. This session stays at the top of its own tree, in its own section, and orchestrates that tree itself. Its tree is archived only on ezexe's pick, by the button or the multiple-choice question p4-phi hands it at its end."}
+function PAIR_OVER(t,id){return "phi (p4-phi): This session has left the control of its puppeteer: \""+t+"\" `"+id+"` dropped it from the sessions it controls, or left the sidebar section. This session starts its own new orchestrators."}
+function ASK_ROUTE(){return "This session is controlled by a puppeteer, so it starts no new orchestrator itself: write `"+PHI+" request \"<title>\" --brief \"<the whole brief>\" --to-puppeteer`, the brief holding "+RESTATE+". Its puppeteer \""+N(S.p).title+"\" starts it as an orchestrator of this environment, files it in this environment's section and takes it under control, or declines it with one line to ezexe."}
+function ASK(){return "this session is controlled by a puppeteer, so where a line here says to start a new orchestrator, start none: write `"+PHI+" request \"<title>\" --brief \"<the whole brief>\" --to-puppeteer`, the brief holding a line `Files: <paths>`. Its puppeteer \""+N(S.p).title+"\" starts it or declines it with one line to ezexe."}
+function ROUTE(n){return "phi (p4-phi): this message reads as work on the topic \""+n.title+"\" `"+n.id+"` orchestrates. If so, do not do it here and start no child for it: send that session one message with SendMessage, holding "+RESTATE+", and telling it to brief and start a worker of its own for it. Keep it on the board with `"+PHI+" note \"<what was sent and to whom>\" --source \"<the message>\" --kind waiting` until its report comes."}
+function FIRST_ACT(){return "Its first act: `mcp__ccd_session_mgmt__detach_session` with `\"self\"`, so the app stops nesting it and its reports stop going to its parent session, then `"+PHI+" detach`."}
+function NOT_PUPPETEER(){return "phi: this session is not a puppeteer: that is an orchestrator ezexe filed in the sidebar section \""+SECTION+"\", and the app's file shows this one in no section"}
+function marker(rid,from){return "phi start request "+rid+" for "+from+"."}
+function wait1(t){return "End this turn with `mcp__ccd_turn__wrap_up` with `blocked` true, the question \"Start \""+t+"\" here?\", cut to fit, and the reply button \"Start it\" first: the app marks this session as needing ezexe, and that one click is a turn ezexe began here, which starts it with the exact call p4-phi hands then."}
+/* starts.call_of: the call a start request is started by */
+function reqCall(rid,t,from){return {initiation:"user_asked",title:t,context:"fresh",use_worktree:false,background:"<its start background>",prompt:BRIEF+"\n\n"+LEVEL+"\n\n"+marker(rid,from),effort:"<effort>"}}
+/* controls.request_call: a request addressed to the puppeteer, a new orchestrator in the environment of the session that filed it */
+function puppCall(r){var from=N(r.from);return {initiation:"user_asked",title:r.title,context:"fresh",use_worktree:false,cwd:"<"+from.env+">",background:"<its start background>",
+  prompt:BRIEF+"\n\n"+NEW_TOP_BRIEF+" "+FIRST_ACT()+"\n\n"+LEVEL+"\n\n"+marker(r.id,r.from),effort:"<effort>"}}
+function NOTICE(why){
   var second=S.compactions>=COMPACTIONS?"the app's `new_session` action, which starts the successor puppeteer from the board; its brief is the board's path and `"+PHI+" controls --from "+S.p+"`, and this session then runs `"+PHI+" controls --hand <its sessionId>`":"\"Later\"";
-  return "phi (p4-phi): a boundary: "+b.why+"."+(S.past?" phi has handed this session 214806 characters since its last compaction, past the ceiling of "+CEILING+".":"")+" When this turn's relays are done, keep what is not yet on the board, "+boardPath()+", with `"+PHI+" note`. Then read the context level with `mcp__ccd_session_mgmt__get_usage` on `\"self\"` and end the turn with `mcp__ccd_turn__wrap_up` whose question is one short sentence with that level, such as \"Context is at 71%, auto-compact starts at 85%. Compact now?\", and whose buttons are \"Compact now\" and "+second+". On \"Compact now\" answer with one line only: `/compact keep the path of the puppeteer board, "+boardPath()+", and read it first`. On \"Later\" say nothing more.";
+  return "phi (p4-phi): a boundary: "+why+"."+(S.past?" p4-phi has handed this session 214806 characters since its last compaction, past the ceiling of "+CEILING+".":"")+" When this turn's messages are sent, keep what is not yet on the board, "+boardPath()+", with `"+PHI+" note`. Then read the context usage with `mcp__ccd_session_mgmt__get_usage` on `\"self\"` and end the turn with `mcp__ccd_turn__wrap_up` whose question is one short sentence with that usage, such as \"Context is at 71%, auto-compact starts at 85%. Compact now?\", and whose buttons are \"Compact now\" and "+second+". On \"Compact now\" answer with one line only, for ezexe to type, since a session cannot compact itself and no button sends a command: `/compact keep the path of the board, "+boardPath()+", and read it first`. On \"Later\" say nothing more.";
 }
-function reqCall(r){
-  var from=N(r.from);
-  return call("mcp__ccd_session__start_session",{initiation:"user_asked",title:r.title,context:"fresh",use_worktree:false,cwd:"<"+from.env+">",
-    background:"Requested by the session \""+from.title+"\" ("+from.id+") in the project <"+from.env+">, whose task is: <its task>.",
-    prompt:"<the topic, with ezexe's words quoted>\n\nFiles: <paths>\n\n"+NEWTOP+"\n\nphi start request "+r.id+" for "+from.id+"."});
+function COMPACT_LINE(){return "/compact keep the path of the board, "+boardPath()+", and read it first"}
+
+/* controls.offer and offer_text: archiving is ezexe's own pick */
+function offerOpts(ready){
+  var seen={};
+  return ready.map(function(r){var o={label:r.title,ids:[r.id].concat(r.kids),description:"Archive "+r.id+(r.kids.length?" and the "+plural(r.kids.length,"finished session")+" of its tree":"")+"."};
+    seen[o.label]=(seen[o.label]||0)+1;if(seen[o.label]>1)o.label+=" ("+seen[o.label]+")";return o});
+}
+function offerText(c,button){
+  var lead="First keep each outcome that is not on the board yet with `"+PHI+" note`.";
+  var out=c.left.length?" Not offered, and named to ezexe as left with the reason: "+c.left.slice(0,6).map(function(l){return "\""+l.title+"\" because "+l.why}).join("; ")+".":"";
+  if(c.ready.length===1&&button){var r=c.ready[0],k=r.kids.length;
+    return "phi (p4-phi): \""+r.title+"\" `"+r.id+"`, a session this puppeteer controls, is complete"+(k?", with "+plural(k,"finished session")+" in its tree":"")+". Archiving it is ezexe's own pick, never this session's judgement. "+lead+" Then end the turn with `mcp__ccd_turn__wrap_up` whose question is \"Archive \""+r.title+"\"?\", cut to fit, and whose buttons are the replies \"Archive it\" and \"Not now\". Archive nothing in this turn. When ezexe presses \"Archive it\", which comes as ezexe's next message, archive exactly "+(k?"that session and those of its tree":"that session")+" in that turn, and p4-phi lets it through; on anything else leave it and say so."+out}
+  var n=c.ready.length,opts=offerOpts(c.ready),asks=Math.ceil(opts.length/4),lines=[];
+  for(var k=0;k<asks;k++)lines.push((asks>1?"Question "+(k+1)+":\n":"")+opts.slice(Math.floor(k*opts.length/asks),Math.floor((k+1)*opts.length/asks)).map(function(o){return "- label \""+o.label+"\", description \""+o.description+"\""}).join("\n"));
+  var how=asks===1?"one multiple-choice question: one `AskUserQuestion` with `multiSelect` true":asks+" multiple-choice questions in "+(asks<=4?"one `AskUserQuestion`":Math.ceil(asks/4)+" `AskUserQuestion` calls of at most 4 questions")+", each question with a text of its own and `multiSelect` true";
+  return "phi (p4-phi): "+n+" session"+(n!==1?"s":"")+" this puppeteer controls "+(n!==1?"are":"is")+" complete. Archiving "+(n!==1?"them":"it")+" is ezexe's own pick, never this session's judgement. "+lead+" Then, before `mcp__ccd_turn__wrap_up`, put them to ezexe as "+how+", each option a session by its full title, exactly these options"+(opts.length===1?", with a last option \"None of them\"":"")+(asks>1?" under these questions":"")+":\n"+
+    lines.join("\n")+"\nArchive none of them before ezexe has answered. Then archive exactly the sessions under the options ezexe picked, and no other: p4-phi lets through only those. Name each one archived and each one left."+out;
+}
+
+/* controls.boundary: a controlled tree has closed, or every controlled session is idle with no request waiting */
+function holds(){
+  var rows=controlled().map(N);
+  if(!S.filed||!rows.length)return{on:false,why:"it controls no session"};
+  if(openReqs().length)return{on:false,why:"a request to the puppeteer is unanswered"};
+  var closed=rows.filter(function(n){return n.archived}).map(function(n){return n.id});
+  var newly=closed.filter(function(k){return S.edge.closed.indexOf(k)<0});
+  var idle=rows.every(function(n){return standing(n).state!=="working"})&&!rows.some(function(n){return n.req});
+  return{on:!!(newly.length||idle),newly:newly,idle:idle,closed:closed,why:newly.length?"the tree of \""+N(newly[0]).title+"\" has closed":idle?"every controlled session is idle and no request is waiting":"a controlled session is working or has a start request waiting"};
+}
+function boundary(){
+  var b=holds(),rows=controlled().map(N);
+  if(!S.filed||!rows.length||openReqs().length)return null;
+  var ready=complete().ready.map(function(r){return r.id}),fresh_=ready.filter(function(k){return S.edge.ready.indexOf(k)<0});
+  if(!b.newly.length&&!b.idle&&!fresh_.length)return null;
+  var key=JSON.stringify([rows.map(function(n){return [n.id,standing(n).state,n.last]}).sort(),S.past?1:0]);
+  if(S.edge.key===key)return null;
+  S.edge={key:key,closed:b.closed,ready:ready};
+  var c=complete(),atEdge=!!(b.newly.length||b.idle),pick=c.ready.length?offerText(c,!atEdge):"";
+  var opts=offerOpts(c.ready),second=S.compactions>=COMPACTIONS?"new":"later";
+  if(pick&&!atEdge){S.box=c.ready.length===1?{kind:"button",opts:opts}:{kind:"question",opts:opts,then:null};
+    return{parts:[pick],why:"A controlled session is complete while another still works, so there is no boundary yet."}}
+  S.box=pick?{kind:"question",opts:opts,then:second}:{kind:"compact",second:second};
+  return{parts:(pick?[pick]:[]).concat([NOTICE(b.why)]),why:"A boundary, named once."};
 }
 
 /* the puppeteer's message hook, phi.pair_parts: everything it is handed beside one message */
 function hook(byEzexe,route){
   var out=[];
-  if(!S.seen){S.seen=tick();out.push({side:"phi",by:"Said once, the first time phi sees the session in the section. The time is kept on its record.",out:RULE()})}
+  if(!S.seen){S.seen=tick();out.push({side:"phi",by:"Said once, the first time p4-phi sees the session in the section. The time is kept on its record as puppeteerSeen.",out:RULE()})}
   var lines=[];
   S.order.forEach(function(k){var n=N(k);
-    if(n.started&&!n.controlled&&!n.archived){n.controlled=true;n.told=true;
-      lines.push("\""+n.title+"\" ("+n.id+") is a top session this puppeteer started, so it is now controlled. File it in "+filing(n.env)+" with `mcp__ccd_sidebar__move_sessions`, never in \""+SECTION+"\".")}});
+    if(n.started&&!n.controlled&&!n.archived){n.controlled=true;n.told=false;
+      lines.push("\""+n.title+"\" `"+n.id+"` is an orchestrator this puppeteer started, so it is controlled. File it in "+filing(n.env)+" with `mcp__ccd_sidebar__move_sessions`, never in \""+SECTION+"\".")}});
   S.order.forEach(function(k){var n=N(k);
     if(!n.par&&n.env&&!n.controlled&&!n.announced&&!n.archived&&n.direct&&controlled().some(function(c){return N(c).env===n.env})){n.announced=true;
-      lines.push("\""+n.title+"\" ("+n.id+") is a new top session in "+storeOf(n)+" that this puppeteer does not control: `"+PHI+" controls "+n.id+"` takes it under control.")}});
-  if(lines.length)out.push({side:"phi",by:"Sessions that came into its environments since its last hook.",out:"phi (p4-phi): "+lines.join(" ")});
+      lines.push("\""+n.title+"\" `"+n.id+"` is a new orchestrator in "+storeOf(n)+" that this puppeteer does not control: `"+PHI+" controls "+n.id+"` takes it under control.")}});
+  if(lines.length)out.push({side:"phi",by:"Orchestrators that came into its environments since its last hook.",out:"phi (p4-phi): "+lines.join(" ")});
   var seen=[];
   controlled().forEach(function(k){var n=N(k);
-    if(n.last&&S.seenTurn[k]!==n.last){S.seenTurn[k]=n.last;seen.push("- \""+n.title+"\" ("+n.id+") ended a turn at "+n.last+", "+standing(n).state+": "+n.report+" Its page: "+pageOf(n))}});
-  if(seen.length)out.push({side:"phi",by:"Reports by reference: one line a session, and the path of its page.",
-    out:"phi (p4-phi): the sessions this puppeteer controls ended turns. Each is one line and its page; read a page only when its detail is needed:\n"+seen.join("\n"),
-    note:"The report's own text is never handed. The first line is cut at 200 characters."});
+    if(n.last&&S.seenTurn[k]!==n.last){S.seenTurn[k]=n.last;seen.push("- \""+n.title+"\" `"+n.id+"` ended a turn at "+n.last+", "+standing(n).state+": "+firstLine(n)+" Its page: "+pageOf(n))}});
+  if(seen.length)out.push({side:"phi",by:"Reports by reference: one line for each session, and the path of its page.",
+    out:"phi (p4-phi): the sessions this puppeteer controls ended turns. Each is one line and its page, which holds up to 1,200 characters of the report; read a page only when its detail is needed:\n"+seen.join("\n"),
+    note:"The line carries the report's first line, cut at 200 characters, and never the rest of its text."});
   if(byEzexe){
     var rows=openReqs();
     if(rows.length){rows.forEach(function(r){r.handed=true});
-      out.push({side:"phi",by:"The requests addressed to it, read from each requester's own store.",
-        out:"phi (p4-phi): controlled sessions ask this puppeteer for new top sessions. This turn ezexe began, so for each either start it with exactly the call given and then file it with `mcp__ccd_sidebar__move_sessions` where named, never in the puppeteers' section, or decline it with `"+PHI+" controls --decline <request id> \"<why>\"` and one line to ezexe. phi records a started one as controlled at this session's next hook:\n"+
-          rows.map(function(r){return "- "+r.id+" \""+r.title+"\" from \""+N(r.from).title+"\" ("+r.from+"), to be filed in "+filing(N(r.from).env)+": `mcp__ccd_session__start_session` with "+reqCall(r).split("\n").slice(1).join("\n")}).join("\n")})}
+      out.push({side:"phi",by:"The requests addressed to it, read from the store of each session that filed one.",
+        out:"phi (p4-phi): controlled sessions ask this puppeteer for new orchestrators. This turn ezexe began, so for each either start it with exactly the call given and then file it with `mcp__ccd_sidebar__move_sessions` where named, never in the section this session is filed in, or decline it with `"+PHI+" controls --decline <request id> \"<why>\"` and one line to ezexe. p4-phi records a started one as controlled at this session's next hook:\n"+
+          rows.map(function(r){return "- "+r.id+" \""+r.title+"\" from \""+N(r.from).title+"\" `"+r.from+"`, to be filed in "+filing(N(r.from).env)+": `mcp__ccd_session__start_session` with "+dumps(puppCall(r))}).join("\n")})}
     if(route)out.push({side:"phi",by:"The message shares two or more content words with a controlled session's title or task.",out:ROUTE(route)});
   }
-  var b=boundary();
-  if(b.on&&S.edge.key!==b.key){S.edge={key:b.key,closed:b.closed};S.box={second:S.compactions>=COMPACTIONS?"new":"later"};
-    out.push({side:"phi",by:"A boundary, named once.",out:NOTICE(b),note:"The notice is a question with two buttons. They are in the puppeteer's next-step box above."})}
+  var hs=holders(),hkey=hs.map(function(n){return n.id}).join(",");
+  if(!hs.length)S.holdersKey="";
+  else if(byEzexe||S.holdersKey!==hkey){S.holdersKey=hkey;
+    out.push({side:"phi",by:"Sessions of its trees that hold start requests, each as a link. Handed at each turn ezexe begins, and at another turn when what is held has changed.",
+      out:"phi (p4-phi): sessions of the trees this puppeteer controls hold start requests that only they can start, each at a turn ezexe begins in it by the button its turn ended on, so the app nests each child under the session that asked for it. Start none of them here: a start request belongs under the session that filed it, and a start made here nests the child under this puppeteer, where no tool moves it from. End this turn with these lines as they are, each a link ezexe opens:\n"+hs.map(function(n){return "- "+link(n)+": 1 start request"}).join("\n")})}
+  var named=S.behalf.filter(function(b){var k=N(b.kid);return k&&!k.atTop&&!k.archived&&S.behalfTold.indexOf(b.kid)<0});
+  if(named.length){named.forEach(function(b){S.behalfTold.push(b.kid)});
+    out.push({side:"phi",by:"Each session the puppeteer started on another session's behalf that the app still nests under it, named once.",
+      out:"phi (p4-phi): this puppeteer started these sessions on another session's behalf, so the app nests each under it while p4-phi holds each under the session that filed its start request. Detach to top level each one now, so the app never shows it under this puppeteer; the board names each as an exception:\n"+
+        named.map(function(b){return "- "+link(N(b.kid))+", started for start request "+b.rid+" of "+link(N(b.req))+": call `mcp__ccd_session_mgmt__detach_session` with `"+b.kid+"`"}).join("\n")})}
+  var edge=boundary();
+  if(edge)edge.parts.forEach(function(p,i){out.push({side:"phi",by:i===edge.parts.length-1?edge.why:"The complete sessions it controls, offered to ezexe.",out:p,
+    note:i===edge.parts.length-1?"What the puppeteer puts to ezexe is in the box above.":""})});
   S.board=boardText();
   return out;
+}
+
+/* a puppeteer's archive call, as phi.py's archive hook and controls.archive decide it */
+function controlsStore(n){return n.controlled||N(topOf(n.id)).controlled}
+function archiveCall(n,picked){
+  var why="";
+  if(!controlsStore(n))why=n.id+" is not a session this puppeteer controls, nor in the tree of one: `"+PHI+" controls <sessionId>` records an orchestrator ezexe put under it";
+  else{var st=standing(n);
+    if(st.against.length)why="p4-phi's records do not hold it complete: "+st.against.join("; ");
+    else if(!picked)why=NOT_PICKED+". p4-phi's records hold it complete, so it can be offered";
+    if(st.against.length&&!picked)why+=". "+NOT_PICKED}
+  S.archives.push({id:n.id,title:n.title,let:!why,why:pcut(why||"ezexe picked it in this turn",300),time:tick()});
+  if(!why){n.archived=true;n.working=false}
+  return why;
 }
 
 /* ---------- the worked examples ---------- */
 var EX={
   intro:function(){return{title:"Choose a move",
-    why:"Each move shows here as the call, the command or the line phi hands out, with what the app and phi each hold. phi starts, files, compacts and archives nothing itself. It names the exact call, and the session makes it.",
+    why:"Each move shows here as the call, the command or the line p4-phi hands out, with what the app and p4-phi each hold. p4-phi starts, files, compacts and archives nothing itself. It names the exact call, and the session makes it.",
     steps:[{side:"phi",by:"A puppeteer prints where each controlled session stands.",code:PHI+" controls"},
-           {side:"phi",by:"It keeps what phi cannot see, so that the board shows it.",code:PHI+' note "<claim>" --source "<where it was checked>" --kind decision'}],
+           {side:"phi",by:"It keeps what p4-phi cannot see, so that the board shows it.",code:PHI+' note "<claim>" --source "<where it was checked>" --kind decision',out:"kept"}],
     app:"The sidebar's sections and which session is filed in which, in claude_desktop_config.json.",
     phi:"controls on the puppeteer's session.json, puppeteer on each controlled session's own, and board.md in the puppeteer's session folder."}},
   file:function(e){return e.on?{title:"Filed in "+q(SECTION),
-    why:"The filing is what makes a top session a puppeteer. ezexe drags it into the section, or has it moved there. No command of phi's marks it, so no mark can go stale or be forged.",
+    why:"The filing is what makes an orchestrator a puppeteer. ezexe drags it into the section, or has it moved there. No command of p4-phi's marks it, so no copy of the filing can go stale or be forged.",
     steps:[{side:"you",by:"ezexe files "+q(e.title)+" in the sidebar section "+q(SECTION)+".",note:"A session can also be moved with the app's tool mcp__ccd_sidebar__move_sessions. The app asks nobody, so the rule rests on ezexe's filing."},
-           {side:"phi",by:"At the session's next message phi reads the app's file and finds it there.",note:"Press Message the puppeteer to see what it is told."}],
+           {side:"phi",by:"At the session's next message p4-phi reads the app's file and finds it there.",note:"Press Message the puppeteer to see what it is told."}],
     app:"claude_desktop_config.json assigns code:"+e.id+" to the group named "+SECTION+".",
-    phi:"Nothing yet. puppeteerSeen is written at the session's next message, with the time."}
+    phi:e.seen?"puppeteerSeen is already on its record, so the rule is not said again.":"Nothing yet. puppeteerSeen is written at the session's next message, with the time."}
    :{title:"Out of the section",
-    why:"A session that leaves the section is no puppeteer from that moment, because phi reads the filing each time it matters. Its record still lists the sessions under controls, and no pair exists while it is filed elsewhere.",
-    steps:[{side:"you",by:"ezexe moves "+q(e.title)+" out of the section."}].concat(e.n?[{side:"phi",by:"Each session it controlled is told once, at its own next message.",out:PAIR_OVER()}]:[]),
+    why:"A session that leaves the section is no puppeteer from that moment, because p4-phi reads the filing each time it matters. Its record still lists the sessions under controls, and they count for nothing while it is filed elsewhere.",
+    steps:[{side:"you",by:"ezexe moves "+q(e.title)+" out of the section."}].concat(e.n?[{side:"phi",by:"Each session it controlled is told once, at its own next message.",out:PAIR_OVER(e.title,e.id)}]:[]),
     app:"The assignment of code:"+e.id+" no longer names the group "+SECTION+".",
-    phi:"Each controlled session's hook removes puppeteer from its own record. The controls list on this session's record stays, and counts for nothing until it is filed again."}},
+    phi:"Each controlled session's hook removes puppeteer from its own record. The controls list on this session's record stays."}},
   controls:function(e){
-    if(e.err)return{title:"A pair phi refuses",why:e.why,
+    if(e.err)return{title:"A record p4-phi refuses",why:e.why,
       steps:[{side:"phi",by:q(N(S.p).title)+" runs the command.",code:PHI+" controls "+e.id,out:e.err,err:true}],
-      app:"Nothing.",phi:"Nothing. The command records no pair."};
-    if(e.drop)return{title:"The pair ended",
-      why:"Dropping the entry ends the pair. The session moves nowhere and loses nothing: it is a top session as before, and it starts its own new top sessions again.",
-      steps:[{side:"phi",by:"The puppeteer drops the entry.",code:PHI+" controls --drop "+e.id,out:"no longer controlled: "+e.id+"\n"+e.text},
-             {side:"phi",by:q(e.title)+" is told once, at its next message.",out:PAIR_OVER()}],
+      app:"Nothing.",phi:"Nothing. The command records nothing."};
+    if(e.drop)return{title:"Control ended",
+      why:"Dropping the entry ends the control. The session moves nowhere and loses nothing: it is an orchestrator as before, and it starts its own new orchestrators again.",
+      steps:[{side:"phi",by:"The puppeteer drops the entry.",code:PHI+" controls --drop "+e.id,out:"dropped from control: "+e.id+"\n"+e.text},
+             {side:"phi",by:q(e.title)+" is told once, at its next message.",out:PAIR_OVER(N(S.p).title,S.p)}],
       app:"Nothing. The session stays in its own section.",
       phi:"The entry leaves controls on the puppeteer's record. The session's own hook removes puppeteer from its own record."};
-    return{title:"A pair: the puppeteer, and "+q(e.title),
-      why:"ezexe names the sessions a puppeteer controls, and the puppeteer records each. The pair exists when both hold: the app shows the puppeteer filed in the section, and its record lists the session under controls.",
-      steps:[{side:"phi",by:"The puppeteer records the top session.",code:PHI+" controls "+e.id,out:"controlled: \""+e.title+"\" ("+e.id+"), store "+e.store+"\n"+e.text},
-             {side:"phi",by:q(e.title)+" is told once, at its next message. Its own hook finds the pair.",out:PAIR()}],
-      app:"Nothing. The controlled session stays in "+(e.section?"the section "+q(e.section):"the ungrouped list under its project")+", the top of its own tree.",
-      phi:"controls on the puppeteer's record gains the session's id and its store, "+e.store+". The session's own record keeps puppeteer with the puppeteer's id and the time. Neither side writes into the other's store."}},
+    return{title:"Controlled: "+q(e.title),
+      why:"ezexe names the orchestrators a puppeteer controls, and the puppeteer records each. Control holds while both are true: the app shows the puppeteer filed in the section, and its record lists the session under controls.",
+      steps:[{side:"phi",by:"The puppeteer records the orchestrator.",code:PHI+" controls "+e.id,out:"controlled: \""+e.title+"\" `"+e.id+"`, store "+e.store+"\n"+e.text},
+             {side:"phi",by:q(e.title)+" is told once, at its next message. Its own hook finds the puppeteer that lists it.",out:PAIR()}],
+      app:"Nothing. The controlled session stays in "+(e.section?"the section "+q(e.section):"the ungrouped list under its project")+", at the top of its own tree.",
+      phi:"controls on the puppeteer's record gains the session's id, its store "+e.store+" and the time. The session's own record keeps puppeteer with the puppeteer's id and the time. Neither side writes into the other's store."}},
   message:function(e){
-    if(!e.filed)return{title:"A top session like any other",
-      why:"The session is not filed in the section, so phi hands it nothing of the puppeteer's. Its plan gets the usual hand-off advice, and its archive calls are refused as every session's are.",
-      steps:[{side:"phi",by:"Its controls command is refused.",code:PHI+" controls",err:true,
-        out:"phi: this session is not a puppeteer: that is a top session ezexe filed in the sidebar section \""+SECTION+"\", and the app's file shows this one in no section"}],
+    if(!e.filed)return{title:"An orchestrator like any other",
+      why:"The session is not filed in the section, so p4-phi hands it nothing of a puppeteer's. Its task list gets the usual advice to hand its steps out, and its archive calls are refused as every orchestrator's are.",
+      steps:[{side:"phi",by:"Its controls command is refused.",code:PHI+" controls",err:true,out:NOT_PUPPETEER()}],
       app:"No assignment to the group "+SECTION+".",phi:"Nothing."};
     return{title:e.steps.length?"Beside the puppeteer's message":"Nothing new to hand it",
-      why:"phi speaks only when a hook fires, so everything a puppeteer learns arrives beside a message. A start request that another session filed is never among it: such a request is handed only to the session that filed it.",
+      why:"p4-phi speaks only when a hook fires, so everything a puppeteer learns arrives beside a message. A start request another session filed is never handed to the puppeteer: only the session that filed it is handed its call.",
       steps:e.steps.length?e.steps:[{side:"phi",by:"No session it controls ended a turn since it last looked, no request is addressed to it, and no new boundary is reached.",note:"The board is still rewritten when what it holds has changed."}],
-      app:"A new turn in the puppeteer.",
+      app:"A turn in the puppeteer.",
       phi:"The board is rewritten. controlSeen on the puppeteer's record keeps the time of each report it was handed, so the same turn is never handed twice."}},
-  route:function(e){return{title:"Work goes down to the topic's top session",
-    why:"When ezexe gives the puppeteer work on a topic a controlled session already orchestrates, the puppeteer neither does it nor starts the child. It sends one message to that top session, and that session creates its own child, so the child nests where the work belongs.",
+  route:function(e){return{title:"Work goes to the topic's orchestrator",
+    why:"When ezexe gives the puppeteer work on a topic a controlled session already orchestrates, the puppeteer neither does it nor starts the worker. It sends one message to that orchestrator, which briefs and starts a worker of its own, so the worker nests where the work belongs.",
     steps:e.steps.concat([
-      {side:"app",by:"The puppeteer sends "+q(e.title)+" one message.",code:call("SendMessage",{to:e.id,message:"<ezexe's words, quoted>\n\nFiles: <paths>\n\nDone looks like: <what must be true>\n\nBrief and start a child session of your own for it."})},
-      {side:"phi",by:"The puppeteer keeps it on the board until the report comes.",code:PHI+' note "Sent the '+e.work+' work to '+e.title+'" --source "ezexe\'s message" --kind waiting'},
-      {side:"phi",by:"That message began the turn in "+q(e.title)+", so the app would refuse its start. phi tells it to show a card.",out:CARD},
-      {side:"app",by:q(e.title)+" shows the child as a proposal card.",code:call("mcp__ccd_session__start_session",{initiation:"own_initiative",title:e.work,context:"fresh",use_worktree:false,prompt:"<the task and what done looks like>\n\nFiles: <paths>\n\nReport when done."}),
+      {side:"app",by:"The puppeteer sends "+q(e.title)+" one message.",code:call("SendMessage",{to:e.id,message:"<the task restated as your own instruction: what to do and why, from your side>\n\nFiles: <paths>\n\nDone looks like: <what must be true>\n\nBrief and start a worker of your own for it."})},
+      {side:"phi",by:"The puppeteer keeps it on the board until the report comes.",code:PHI+' note "Sent the '+e.work+' work to '+e.title+'." --source "ezexe\'s message" --kind waiting',out:"kept"},
+      {side:"app",by:"That message began a turn ezexe did not begin in "+q(e.title)+", so the app refuses its start with user_asked. It shows the worker as a suggested task card.",code:call("mcp__ccd_session__start_session",{initiation:"own_initiative",title:e.work,context:"fresh",use_worktree:false,prompt:"<the task and what done looks like>\n\nFiles: <paths>\n\n"+LEVEL+"\n\nReport when done.",effort:"<effort>"}),
         note:"Select the session, then press its card as ezexe, or have the card refused."}]),
-    app:"A card in "+q(e.title)+". No session has started yet.",
+    app:"A suggested task card in "+q(e.title)+". No session has started yet.",
     phi:"A note of kind waiting on the puppeteer's record, printed on the board under Waiting on."}},
-  press:function(e){return{title:"The card pressed, in the session that asked",
-    why:"ezexe presses the card in the session that showed it, so the app's parent and phi's parent are the same session.",
+  press:function(e){return{title:"The card pressed, in the session that showed it",
+    why:"ezexe presses the card in the session that showed it, so the app's parent session and p4-phi's are the same session.",
     steps:[{side:"you",by:"ezexe presses the card in "+q(e.parent)+"."},
-           {side:"app",by:"The app starts "+q(e.title)+" as that session's child."}],
-    app:"The child nests under "+q(e.parent)+".",
-    phi:"spawnedFrom on the child names the same session. Its reports go there in full, and the puppeteer is handed one line when "+q(e.parent)+" ends a turn."}},
+           {side:"app",by:"The app starts "+q(e.title)+" as that session's worker."}],
+    app:"The worker nests under "+q(e.parent)+".",
+    phi:"spawnedFrom on the worker names the same session. Its reports go there in full, and the puppeteer is handed one line when "+q(e.parent)+" ends a turn."}},
   stopcard:function(e){return{title:"The card refused too, so a start request",
-    why:"Only where the card is refused does the session write a start request. Since 0.10.0 a request is handed only to the session that filed it, at the next turn ezexe begins there. Before, it went to whichever session ezexe spoke in next, and when that was the puppeteer the app nested the child under the puppeteer.",
-    steps:[{side:"phi",by:q(e.parent)+" keeps the request.",code:PHI+' request "'+e.title+'" --brief "<the whole brief, with its Files line>"',
-      out:"kept as start request "+e.rid+": the next turn ezexe begins in this session starts it with `user_asked`, as this session's own child. No other session is handed it. Carry on with the rest of the task, and say in this turn's report that a child waits on ezexe's next message here."},
-      {side:"phi",by:"The puppeteer's board names where ezexe has to speak.",out:"- ezexe has to speak in \""+e.parent+"\" `"+e.pid+"`, or press its card: it has 1 child session waiting to be started.",
-        note:"The line is printed under Waiting on at the puppeteer's next hook. The same request holds that session's archive."}],
-    app:"Nothing. No session has started.",
-    phi:"A request row in start-requests.jsonl in the requester's own store, with the requester's id."}},
+    why:"Only where the card is refused does the session keep a start request. It is handed only to the session that filed it, at the next turn ezexe begins there, so the app nests the worker where p4-phi does.",
+    steps:[{side:"phi",by:q(e.parent)+" keeps the request.",code:PHI+' request "'+e.title+'" --brief "'+BRIEF+'"',
+      out:"kept as start request "+e.rid+". No other session is handed it: it waits on ezexe's click in this session, since the app refuses this start in a turn ezexe did not begin, and the next turn ezexe begins here starts it as this session's own child. Carry on with the rest of the task. "+wait1(e.title)},
+      {side:"phi",by:"The puppeteer's board names where ezexe has to press.",out:"- "+e.link+" holds 1 start request only it can start: ezexe opens it and presses the button its turn ended on, or sends it one message.",
+        note:"The line is under Waiting on, and the puppeteer is handed the session as a link at its next hook. The same request holds that session's archive."}],
+    app:"A blocked next-step box in "+q(e.parent)+", whose first button is Start it. No session has started.",
+    phi:"A request row in phi/start-requests.jsonl in the store of the session that filed it."}},
   speak:function(e){return{title:"Handed to the session that filed it",
-    why:"This turn ezexe began in the session that filed the request, so phi hands it the exact call. The session starts its own child, and the app nests the child where phi does.",
-    steps:[{side:"you",by:"ezexe writes to "+q(e.parent)+"."},
-           {side:"phi",by:"phi hands that session its own request, and no other session's.",
-            out:"phi (p4-phi): start requests this session filed in turns ezexe did not begin, when the app refused them `user_asked`. This turn ezexe began here, so start each now, with exactly the call given, before the rest of this turn's work:\n- \""+e.title+"\": `mcp__ccd_session__start_session` with "+JSON.stringify({initiation:"user_asked",title:e.title,context:"fresh",use_worktree:false,background:"<its background>",prompt:"<the whole brief, with its Files line>\n\nphi start request "+e.rid+" for "+e.pid+"."})+"\nEach is this session's own child, in the app's nesting and in phi's, and its reports come here in full."}],
-    app:"The child nests under "+q(e.parent)+", which made the call.",
+    why:"ezexe opens the session and presses Start it, which is a turn ezexe began there, so p4-phi hands that session the exact call. The session starts its own worker, and the app nests it where p4-phi does.",
+    steps:[{side:"you",by:"ezexe opens "+q(e.parent)+" and presses Start it."},
+           {side:"phi",by:"p4-phi hands that session its own request, and no other session's.",
+            out:"phi (p4-phi): start requests this session filed in turns ezexe did not begin. This turn ezexe began here, so start each now, with exactly the call given, before the rest of this turn's work:\n- \""+e.title+"\": `mcp__ccd_session__start_session` with "+dumps(reqCall(e.rid,e.title,e.pid))+"\nEach is this session's own child, in the app's nesting and in p4-phi's."}],
+    app:"The worker nests under "+q(e.parent)+", which made the call.",
     phi:"spawnedFrom names the same session, and the request's row is marked started."}},
-  ask:function(e){return{title:"A new top session is asked of the puppeteer",
-    why:"A session that has a puppeteer starts no new top session itself. Where phi would tell a top session to start one, on a new topic, a plugin gap or pioneer's verdict, a controlled session is told to write a request to its puppeteer.",
-    steps:[{side:"phi",by:"The line "+q(e.from)+" is given in place of the start.",out:ASK()},
-           {side:"phi",by:"It writes the request into its own store.",code:PHI+' request "'+e.title+'" --brief "<the whole brief, with a line Files: none>" --to-puppeteer',
-            out:"kept as request "+e.rid+" to this session's puppeteer: \""+e.title+"\" is handed to it at the next turn ezexe begins there, and it starts the session, files it in this environment's section and takes it under control, or declines it. Start nothing for it here, and carry on with the rest of the task."},
-           {side:"app",by:"Its own start of a session whose brief carries the new-top lines is refused by phi's hook.",code:call("mcp__ccd_session__start_session",{initiation:"user_asked",title:e.title,context:"fresh",use_worktree:false,prompt:"<the topic>\n\n"+NEWTOP}),err:true,
-            out:"phi (p4-phi): this start is refused.",note:"The refusal goes on to name the request command above."}],
+  behalf:function(e){return{title:"Started by the puppeteer on that session's behalf",
+    why:"The app nests a session under the session that calls the start tool, and no tool moves it after. So a start the puppeteer makes for another session's request nests under the puppeteer. p4-phi lets it through, holds the worker under the session that filed the request, and names the call by which the puppeteer moves it to top level.",
+    steps:[{side:"app",by:"The puppeteer makes the call that carries the request's marker.",code:call("mcp__ccd_session__start_session",reqCall(e.rid,e.title,e.pid))},
+           {side:"phi",by:"p4-phi's start hook answers the call.",out:"phi (p4-phi): this start carries start request "+e.rid+" of "+e.link+", which belongs under that session, while the app nests the new session under this puppeteer. p4-phi records it as started on that session's behalf, holds the new session under that session and names it on the board as an exception. Once the start returns, call `mcp__ccd_session_mgmt__detach_session` with the new session's id, so the app shows it at top level and not under this puppeteer. Start no other session's request here: name the session that holds it to ezexe as a link to open."}],
+    app:"The worker nests under the puppeteer until it is detached to top level.",
+    phi:"The request's row is claimed by the puppeteer. The board lists it under Started on another session's behalf, and the next hook names it once with the call that moves it to top level."}},
+  untie:function(e){return{title:"Moved to top level",
+    why:"The worker leaves the puppeteer's nesting in the app. p4-phi already holds it under the session that filed the request.",
+    steps:[{side:"app",by:"The puppeteer makes the call p4-phi named.",code:call("mcp__ccd_session_mgmt__detach_session",{session_id:e.id})}],
+    app:"The worker shows at top level, with lineageDetached on its record.",
+    phi:"The board's row says the app shows it at top level."}},
+  ask:function(e){return{title:"A new orchestrator is asked of the puppeteer",
+    why:"A session a puppeteer controls starts no new orchestrator itself. Where p4-phi would tell an orchestrator to start one, for a topic outside its task, a plugin gap or the gate's verdict, a controlled session is told to file a request to its puppeteer.",
+    steps:[{side:"phi",by:"The line "+q(e.from)+" follows in place of the start.",out:ASK_ROUTE()},
+           {side:"phi",by:"It files the request in its own store.",code:PHI+' request "'+e.title+'" --brief "'+BRIEF+'" --to-puppeteer',
+            out:"kept as request "+e.rid+" to this session's puppeteer: \""+e.title+"\" is handed to it at the next turn ezexe begins there, by the link "+link(N(S.p))+" ezexe opens to send it one message, and it starts the session, files it in this environment's section and takes it under control, or declines it. Start nothing for it here: name that link to ezexe in this turn's report, and carry on with the rest of the task."},
+           {side:"app",by:"Its own start of a new orchestrator is refused by p4-phi's start hook.",code:call("mcp__ccd_session__start_session",{initiation:"user_asked",title:e.title,context:"fresh",use_worktree:false,prompt:"<the topic>\n\n"+NEW_TOP_BRIEF+" "+FIRST_ACT()}),err:true,
+            out:"phi (p4-phi): this start is refused: "+ASK()}],
     app:"Nothing. No session has started.",
-    phi:"A request row in "+e.store+"/phi/start-requests.jsonl with the puppeteer's id in to. It is never handed to its requester. The puppeteer's hooks read it there, beside the next turn ezexe begins in the puppeteer."}},
+    phi:"A request row in "+e.store+"/phi/start-requests.jsonl with the puppeteer's id in to. The puppeteer's hooks read it there, at the next turn ezexe begins in the puppeteer."}},
   startreq:function(e){return{title:"Started by the puppeteer, filed in its environment",
-    why:"The puppeteer starts the session as the orchestrator of its own topic, in the requester's project, and then files it where that environment's controlled top sessions are. It is never filed in "+q(SECTION)+".",
-    steps:[{side:"app",by:"The puppeteer makes exactly the call phi gave it.",code:reqCall(e.r)},
-           {side:"app",by:"It files the new session in "+e.where+".",code:"mcp__ccd_sidebar__move_sessions",note:"The section is the one the app's file shows for the controlled top sessions of that environment, or the ungrouped project list when they are in none."},
-           {side:"phi",by:"At the puppeteer's next hook the session is controlled, with no command.",out:"phi (p4-phi): \""+e.r.title+"\" ("+e.id+") is a top session this puppeteer started, so it is now controlled. File it in "+e.where+" with `mcp__ccd_sidebar__move_sessions`, never in \""+SECTION+"\".",
-            note:"phi finds it by the app's record, which names the puppeteer as its starter. The new session is told of its puppeteer at its next message, as any controlled session is."}],
-    app:"A new top session in <"+e.env+">, detached from its starter by its own first act, and filed in "+e.where+".",
+    why:"The puppeteer starts the session as the orchestrator of its own topic, in the project of the session that asked, and then files it where that environment's controlled orchestrators are. It is never filed in "+q(SECTION)+".",
+    steps:[{side:"app",by:"The puppeteer makes exactly the call p4-phi handed it.",code:call("mcp__ccd_session__start_session",puppCall(e.r))},
+           {side:"app",by:"It files the new session in "+e.where+".",code:"mcp__ccd_sidebar__move_sessions",note:"The new session's own first act is detach to top level, in the app and in p4-phi."},
+           {side:"phi",by:"At the puppeteer's next hook the session is controlled, with no command.",out:"phi (p4-phi): \""+e.r.title+"\" `"+e.id+"` is an orchestrator this puppeteer started, so it is controlled. File it in "+e.where+" with `mcp__ccd_sidebar__move_sessions`, never in \""+SECTION+"\".",
+            note:"p4-phi finds it by the app's record, which names the puppeteer as its parent session. The new session is told of its puppeteer at its next message, as any controlled session is."}],
+    app:"A new orchestrator in <"+e.env+">, filed in "+e.where+".",
     phi:"The new session keeps its record in "+e.store+", its own environment's store, and not in the puppeteer's. controls on the puppeteer's record gains it, marked started."}},
   decline:function(e){return{title:"Declined, with one line to ezexe",
-    why:"A request addressed to the puppeteer is the puppeteer's to answer. What became of it is written on the puppeteer's record, and the requester's hook reads it from there.",
-    steps:[{side:"phi",by:"The puppeteer declines it and tells ezexe in one line.",code:PHI+" controls --decline "+e.r.id+' "'+e.why+'"',out:"declined "+e.r.id+" \""+e.r.title+"\": its requester is told at its next message"},
+    why:"A request addressed to the puppeteer is the puppeteer's to answer. What became of it is written on the puppeteer's record, and the hook of the session that filed it reads it from there.",
+    steps:[{side:"phi",by:"The puppeteer declines it and tells ezexe in one line.",code:PHI+" controls --decline "+e.r.id+' "'+e.why+'"',out:"declined "+e.r.id+" \""+e.r.title+"\": the session that filed it is told at its next message\n"+e.text},
            {side:"phi",by:q(e.from)+" is told at its next message.",out:"phi (p4-phi): its puppeteer \""+N(S.p).title+"\" declined the request "+e.r.id+" \""+e.r.title+"\": "+e.why+". Start no session for it."}],
     app:"Nothing.",
-    phi:"requestAnswers on the puppeteer's record keeps the answer. The requester's own hook closes the row in its own store as withdrawn."}},
-  direct:function(e){return{title:"A top session ezexe started directly",
-    why:"ezexe may still start a top session by hand. phi then names it to the puppeteer of that environment once, so that ezexe is not the only one tracking it."+(e.has?"":" An environment in which the puppeteer controls nothing has no puppeteer, and nobody is told."),
+    phi:"requestAnswers on the puppeteer's record keeps the answer. The hook of the session that filed it closes the row in its own store as withdrawn."}},
+  direct:function(e){return{title:"An orchestrator ezexe started directly",
+    why:"ezexe may still start an orchestrator by hand. p4-phi then names it once to the puppeteer that controls a session in that store."+(e.has?"":" The puppeteer controls no session in that store, so nobody is told."),
     steps:[{side:"you",by:"ezexe starts "+q(e.title)+" in <"+e.env+">."}].concat(e.has?[
-      {side:"phi",by:"At the puppeteer's next hook it is named once, with the command that takes it under control.",out:"phi (p4-phi): \""+e.title+"\" ("+e.id+") is a new top session in "+e.store+" that this puppeteer does not control: `"+PHI+" controls "+e.id+"` takes it under control.",
-       note:"Press Message the puppeteer to see it arrive. It is named when it is live, newer than the puppeteer's first control in that store, and not under control."}]:[]),
-    app:"A new top session, wherever ezexe put it.",
-    phi:e.has?"announced on the puppeteer's record will keep its id, so it is named once.":"Nothing on the puppeteer's side."}},
+      {side:"phi",by:"At the puppeteer's next hook it is named once, with the command that takes it under control.",out:"phi (p4-phi): \""+e.title+"\" `"+e.id+"` is a new orchestrator in "+e.store+" that this puppeteer does not control: `"+PHI+" controls "+e.id+"` takes it under control.",
+       note:"Press Message the puppeteer to see it arrive. It is named when the app's record names no parent session, it was created after the puppeteer's first control in that store, and it is not under control."}]:[]),
+    app:"A new orchestrator, wherever ezexe put it.",
+    phi:e.has?"announced on the puppeteer's record keeps its id, so it is named once.":"Nothing on the puppeteer's side."}},
   turn:function(e){return e.ended?{title:"A turn ended in "+q(e.title),
-    why:e.pair?"The puppeteer is not handed the report. At its next hook it gets one line and the path of the session's page, and it reads the page only when the detail is needed.":"The session is not controlled, so the puppeteer is handed nothing about it.",
+    why:e.pair?"The puppeteer is not handed the report. At its next hook it gets one line and the path of the session's page, and it reads the page only when the detail is needed.":"The puppeteer controls neither this session nor its tree, so it is handed nothing about it.",
     steps:[{side:"phi",by:"The session's own Stop hook keeps the turn and its report in its own store.",note:e.pair?"Press Message the puppeteer to see the line arrive.":""}],
-    app:"The session shows as idle.",phi:"A row in the session's turns.jsonl. Its page is rendered again."}
+    app:"The session shows as idle.",phi:"A row in the session's turns.jsonl, kept as done. Its page is rendered again."}
    :{title:"A message reached "+q(e.title),
-    why:"A session whose last message has no turn's end recorded after it is mid-turn. phi reads that from the session's own hook log and keeps no new field for it.",
-    steps:[{side:"you",by:"ezexe, or another session, writes to it."}].concat(e.wasStopped?[{side:"app",by:"The new turn clears lastTurnStopped on the app's record, so the session holds its file set again."}]:[]),
-    app:"A new turn in the session.",phi:"A row in the session's hook log. The puppeteer's archive of it is refused while the turn is open."}},
+    why:"A session whose last message has no turn's end recorded after it is mid-turn. p4-phi reads that from the session's own hook log and keeps no field of its own for it.",
+    steps:[{side:"you",by:"ezexe, or another session, writes to it."}].concat(e.pair&&!e.told?[{side:"phi",by:"Its own hook finds the puppeteer that lists it, and tells it once.",out:PAIR()}]:[]).concat(e.wasStopped?[{side:"app",by:"The turn clears lastTurnStopped on the app's record, so the session holds its write set again."}]:[]),
+    app:"A turn in the session.",phi:"A row in the session's hook log. The puppeteer's archive of it is refused while the turn is open."}},
   archive:function(e){
-    if(e.plain)return{title:"Refused, as for every session",
-      why:"The session that made the call is not a puppeteer, so the rule of ezexe/p4#49 holds: no session archives a session on its own.",
-      steps:[{side:"app",by:q(N(S.p).title)+" makes the call.",code:call(ARCHIVE,{session_id:e.id,reason:e.reason}),err:true,
-        out:NO_ARCHIVE+" phi already treats a finished or superseded session as archived. A top session that is done offers its tree's finished sessions to ezexe as one quick select, an `AskUserQuestion` with `multiSelect`, and archives only the ones ezexe picked there: "+e.id+" was not picked in this turn."}],
+    if(e.plain)return{title:"Refused, as for every orchestrator",
+      why:"The session that made the call is not a puppeteer, and nothing it may archive was picked in this turn: an orchestrator archives only the finished sessions of its own tree that ezexe picked.",
+      steps:[{side:"app",by:q(N(S.p).title)+" makes the call.",code:call(ARCHIVE,{session_id:e.id,reason:"<what showed it done>"}),err:true,
+        out:"phi (p4-phi): this archive call is refused: a session is archived by ezexe's own press or pick. p4-phi already counts a finished or superseded session as archived. An orchestrator that is done offers its tree's finished sessions to ezexe as one multiple-choice question, `AskUserQuestion` with `multiSelect`, and archives only the ones ezexe picked there: "+e.id+" is not a finished session of this tree that ezexe picked in that question in this turn."}],
       app:"Nothing is archived.",phi:"Nothing."};
-    var steps=[{side:"phi",by:"First the puppeteer keeps the session's outcome.",code:PHI+' note "'+e.title+': <its outcome, its commits, what is still open>" --source "its page and git log"'},
-      {side:"app",by:"Then it makes the call, with no quick select.",code:call(ARCHIVE,e.reason?{session_id:e.id,reason:e.reason}:{session_id:e.id}),err:!!e.why,
-        out:e.why?"phi (p4-phi): this puppeteer's archive of "+e.id+" is refused: "+e.why+". Name it to ezexe as left, with that reason.":"",
-        note:e.why?"The call never reaches the app.":"phi's hook lets the call through. The app also refuses a session that is working."}];
-    return{title:e.why?"An archive phi refuses":"Archived by its puppeteer",
-      why:"A puppeteer may archive a complete session it controls, or one in such a session's tree. phi's records can show a turn begun and not ended, open plan steps, a running background task, a session still working under it, a start request waiting, and a closing commit on no remote branch. What they cannot show is the puppeteer's to check and say in the reason.",
-      steps:steps,
-      app:e.why?"Nothing is archived.":"The session's record is marked archived."+(e.top?" Its tree has closed, which is a boundary.":""),
-      phi:"puppeteerArchives on the puppeteer's record keeps the call, let through or refused, with its reason. The board prints the list under Archived and left, and controls prints it too."}},
+    return{title:"An archive p4-phi refuses",
+      why:"A puppeteer archives only what ezexe picked in that turn, and only a session p4-phi's records hold complete. Where they do, p4-phi offers it to ezexe at the puppeteer's next boundary.",
+      steps:[{side:"app",by:"The puppeteer makes the call with no pick of ezexe's behind it.",code:call(ARCHIVE,{session_id:e.id,reason:"<what showed it done>"}),err:true,
+        out:"phi (p4-phi): this puppeteer's archive of "+e.id+" is refused: "+e.why+". Name it to ezexe as left, with that reason.",note:"The call never reaches the app."}],
+      app:"Nothing is archived.",
+      phi:"puppeteerArchives on the puppeteer's record keeps the call as left, with the reason. The board prints it under Archived and left, and controls prints it too."}},
+  archived:function(e){return{title:"Archived on ezexe's pick",
+    why:"ezexe's answer is the pick. The puppeteer archives exactly the sessions under it, and p4-phi lets each through because ezexe picked it in this turn and p4-phi's records hold it complete.",
+    steps:e.pre.concat([{side:"you",by:e.how}]).concat(e.ids.length?e.ids.map(function(x){return{side:"app",by:"The puppeteer archives "+q(x.title)+".",code:call(ARCHIVE,{session_id:x.id}),out:x.why?"phi (p4-phi): this puppeteer's archive of "+x.id+" is refused: "+x.why+". Name it to ezexe as left, with that reason.":"",err:!!x.why,note:x.why?"":"p4-phi's archive hook lets the call through."}}):[{side:"phi",by:"Nothing was picked, so the puppeteer leaves each session and says so."}]),
+    app:e.ids.length?"Each session let through is archived. A controlled orchestrator that is archived closes its tree, which is a boundary.":"Nothing is archived.",
+    phi:"puppeteerArchives on the puppeteer's record keeps each call with \"ezexe picked it in this turn\" where the call carries no reason of twelve characters or more. The board prints them under Archived and left."}},
   compact:function(){return{title:"Compact now",
-    why:"A session cannot compact itself, and the app has no compact action for a button. So the click cannot do the compaction, and the puppeteer answers with the one line ezexe types.",
+    why:"A session cannot compact itself, and no button sends a command. So the press cannot do the compaction, and the puppeteer answers with the one line ezexe types.",
     steps:[{side:"you",by:"ezexe presses Compact now."},
-           {side:"app",by:"The puppeteer answers with one line only.",code:"/compact keep the path of the puppeteer board, "+boardPath()+", and read it first",
-            note:"The board was brought up to date before the buttons were shown, so either answer is safe. Press ezexe types it in the box above."}],
+           {side:"app",by:"The puppeteer answers with one line only.",code:COMPACT_LINE(),
+            note:"The board was brought up to date before the buttons were shown, so either answer is safe."}],
     app:"Nothing yet. The context is compacted when ezexe runs the command.",phi:"Nothing."}},
   compacted:function(e){return{title:"After the compaction, the board comes first",
     why:"The first thing a puppeteer is handed after a compaction is the path of its board, before the project's rules and everything else beside its prompt.",
     steps:[{side:"you",by:"ezexe types the command in the puppeteer."},
            {side:"phi",by:"The SessionStart hook runs with the source compact.",out:"phi (p4-phi): this session is a puppeteer and its context was compacted. Read its board before anything else: "+boardPath()}],
     app:"The session's context is compacted.",
-    phi:"compactedAt holds the time, so the character count starts again. compactions is now "+e.n+". The boundary that was named is forgotten, so the next one is named afresh."+(e.n>=COMPACTIONS?" From now the notice's second button starts a successor.":"")}},
+    phi:"compactedAt holds the time, so the character count starts again. compactions is "+e.n+". The boundary that was named is forgotten, so the next one is named afresh."+(e.n>=COMPACTIONS?" The notice's second button starts a successor from here on.":"")}},
   later:function(){return{title:"Later",
-    why:"On Later the puppeteer says nothing more. phi does not repeat the notice at the same boundary. It names the next one when a controlled session's state changes, or when the character count passes the ceiling again.",
+    why:"On Later the puppeteer says nothing more. p4-phi does not repeat the notice at the same boundary. It names the next one when a controlled session's state or last report changes, or when the character count passes another multiple of the ceiling.",
     steps:[{side:"you",by:"ezexe presses Later."}],
     app:"Nothing.",phi:"boundary on the puppeteer's record keeps the key of what was told."}},
   successor:function(e){return{title:"A successor takes over",
-    why:"After three compactions, compacting no longer helps enough. The second button starts a fresh puppeteer from the board, which takes over the same controlled sessions and then archives the old one.",
-    steps:[{side:"you",by:"ezexe presses the button, which is the app's new_session action.",note:"The successor's brief is the board's path and the command below. ezexe's filing, or the old puppeteer's move, puts it in the section "+q(SECTION)+"."},
-           {side:"phi",by:"The old puppeteer marks the hand-over.",code:PHI+" controls --hand "+e.id,out:"handed over to \""+e.title+"\" ("+e.id+"): it runs `controls --from "+e.old+"`, then keeps this session's outcome with `note` and archives it"},
-           {side:"phi",by:"The successor takes over.",code:PHI+" controls --from "+e.old,out:"took over "+plural(e.n,"controlled session")+" and "+plural(e.notes,"note")+" from \""+e.oldTitle+"\" ("+e.old+")"},
-           {side:"app",by:"It notes the old puppeteer's outcome and archives it.",code:call(ARCHIVE,{session_id:e.old,reason:"Handed over to this session with controls --hand, and its notes are taken over."}),
-            note:"The archive hook lets this through for the puppeteer that handed over to the caller."}],
-    app:"The old puppeteer is archived. The new one is filed in "+q(SECTION)+".",
-    phi:"handedTo on the old record and handedFrom on the new one. A puppeteer that has handed over no longer counts as anyone's puppeteer, so each controlled session is told once of its new one."}}
+    why:"After three compactions, compacting is not enough. The second button starts a fresh puppeteer from the board, which takes over the same controlled sessions and offers the old puppeteer to ezexe to archive.",
+    steps:[{side:"you",by:"ezexe presses the button, the app's new_session action.",note:"The successor's brief is the board's path and the command below. ezexe's filing puts it in the section "+q(SECTION)+"."},
+           {side:"phi",by:"The old puppeteer keeps its hand-over.",code:PHI+" controls --hand "+e.id,out:"handed over to \""+e.title+"\" `"+e.id+"`: it runs `controls --from "+e.old+"`, then keeps this session's outcome with `note` and offers it to ezexe to archive, as any complete session it controls: it archives this session only on ezexe's pick, by the button or the multiple-choice question p4-phi hands it"},
+           {side:"phi",by:"The successor takes over.",code:PHI+" controls --from "+e.old,out:"took over "+plural(e.n,"controlled session")+" and "+plural(e.notes,"note")+" from \""+e.oldTitle+"\" `"+e.old+"`"}],
+    app:"The successor is filed in "+q(SECTION)+". The old puppeteer stays until ezexe picks it to archive.",
+    phi:"handedTo on the old record and handedFrom on the new one. A puppeteer that has handed over counts as no session's puppeteer, so each controlled session is told once of the successor."}}
 };
 
 /* ---------- moves ---------- */
@@ -741,16 +854,16 @@ var ACT={
   file:function(){
     var p=N(S.p);S.filed=!S.filed;
     var n=controlled().length;
-    controlled().forEach(function(k){N(k).told=S.filed});
-    S.example={kind:"file",on:S.filed,title:p.title,id:p.id,n:n};
+    S.example={kind:"file",on:S.filed,title:p.title,id:p.id,n:n,seen:!!S.seen};
+    controlled().forEach(function(k){N(k).told=false});
     if(!S.filed)S.box=null;
-    say([],S.filed?"The app's file now shows it in the section. Message it to see what phi tells it.":"It is a top session like any other again."+(n?" The sessions it controlled are each told once.":""));
+    say([],S.filed?"The app's file shows it in the section. Message it to see what p4-phi tells it.":"It is an orchestrator like any other again."+(n?" The sessions it controlled are each told once.":""));
   },
   message:function(){
     if(!S.filed){S.example={kind:"message",filed:false};say([cmd(PHI+" controls"),["err","phi: this session is not a puppeteer"]],"File it in the section first.");return}
     var steps=hook(true,null);
     S.example={kind:"message",filed:true,steps:steps};
-    say([],steps.length?"phi handed it "+plural(steps.length,"thing")+" beside the message, and rewrote the board.":"Nothing new. phi rewrote the board only if what it holds changed.");
+    say([],steps.length?"p4-phi handed it "+plural(steps.length,"line")+" beside the message, and rewrote the board.":"Nothing new. p4-phi rewrote the board only if what it holds changed.");
   },
   route:function(){
     var n=N(S.sel);if(full())return;
@@ -758,52 +871,63 @@ var ACT={
     n.card={title:work};n.working=true;
     note("Sent the "+work+" work to "+n.title+".","ezexe's message","waiting");S.board=boardText();
     S.example={kind:"route",steps:steps,title:n.title,id:n.id,work:work};
-    say([["cmd","SendMessage to "+n.id]],"The puppeteer sent the work down and kept a note. "+q(n.title)+" now shows a card for its own child.");
+    say([["cmd","SendMessage to "+n.id]],"The puppeteer sent the work on and kept a note. "+q(n.title)+" shows a suggested task card for its own worker.");
   },
   press:function(){
-    var n=N(S.sel),t=n.card.title;n.card=null;
-    var id=mk(t,n.id,n.env,{working:true});
+    var n=N(S.sel),t=n.card.title;if(full())return;n.card=null;
+    mk(t,n.id,n.env,{working:true});
     S.example={kind:"press",title:t,parent:n.title};
-    say([["cmd","mcp__ccd_session__start_session, own_initiative, pressed by ezexe"]],"The child nests under the session that asked, in the app and in phi.");
-    void id;
+    say([["cmd","mcp__ccd_session__start_session, own_initiative, pressed by ezexe"]],"The worker nests under the session that showed the card, in the app and in p4-phi.");
   },
   stopcard:function(){
-    var n=N(S.sel),t=n.card.title,rid="req-"+hex(++S.rid*131+S.salt,10);n.card=null;n.req={rid:rid,title:t};
-    S.example={kind:"stopcard",title:t,parent:n.title,pid:n.id,rid:rid};
-    say([cmd(PHI+' request "'+t+'" --brief "…"'),["out","kept as start request "+rid]],"The request waits for ezexe's next turn in "+q(n.title)+". Messaging the puppeteer hands it nothing of this.");
+    var n=N(S.sel),t=n.card.title,rid="req-"+hex(++S.rid*131+S.salt,10);n.card=null;n.req={rid:rid,title:t};n.working=false;n.last=tick();n.done=false;n.report="It holds a start request that waits on ezexe's click here.";
+    S.example={kind:"stopcard",title:t,parent:n.title,pid:n.id,rid:rid,link:link(n)};
+    say([cmd(PHI+' request "'+t+'" --brief "…"'),["out","kept as start request "+rid]],"The request waits for ezexe's click in "+q(n.title)+". The puppeteer is handed the session as a link, never the request.");
   },
   speak:function(){
-    var n=N(S.sel),r=n.req;n.req=null;n.working=true;
+    var n=N(S.sel),r=n.req;if(full())return;n.req=null;n.working=true;
     mk(r.title,n.id,n.env,{working:true});
     S.example={kind:"speak",title:r.title,parent:n.title,pid:n.id,rid:r.rid};
-    say([["cmd","mcp__ccd_session__start_session, user_asked, from "+n.id]],"The session that filed the request started its own child.");
+    say([["cmd","mcp__ccd_session__start_session, user_asked, from "+n.id]],"The session that filed the request started its own worker.");
+  },
+  behalf:function(){
+    var n=N(S.sel),r=n.req;if(full())return;n.req=null;
+    var kid=mk(r.title,n.id,n.env,{working:true,behalfOf:S.p});
+    S.behalf.push({rid:r.rid,title:r.title,req:n.id,kid:kid});S.board=boardText();
+    S.example={kind:"behalf",title:r.title,rid:r.rid,pid:n.id,link:link(n)};
+    say([["cmd","mcp__ccd_session__start_session, from the puppeteer"]],"The app nests the worker under the puppeteer, while p4-phi holds it under "+q(n.title)+". Its next move is detach to top level.");
+    S.sel=kid;
+  },
+  untie:function(){
+    var n=N(S.sel);n.atTop=true;S.board=boardText();
+    S.example={kind:"untie",id:n.id};
+    say([["cmd","mcp__ccd_session_mgmt__detach_session "+n.id]],"The app shows the worker at top level. p4-phi holds it under the session that filed the request.");
   },
   direct:function(){
     var n=N(topOf(S.sel));if(full())return;
-    var t=nextTitle(),has=S.filed&&controlled().some(function(k){return N(k).env===n.env}),id=mk(t,null,n.env,{direct:has,working:true});
+    var t=nextTitle(),has=S.filed&&controlled().some(function(k){return N(k).env===n.env}),id=mk(t,null,n.env,{direct:true,working:true});
     S.example={kind:"direct",title:t,id:id,env:n.env,store:ENVS[n.env].store,has:has};
-    say([],has?"The puppeteer controls a session in that project, so phi names the new one to it at its next hook.":"The puppeteer controls nothing in that project, so nobody is told.");
+    say([],has?"The puppeteer controls a session in that store, so p4-phi names the new one to it at its next hook.":"The puppeteer controls no session in that store, so nobody is told.");
   },
   controls:function(){
     var n=N(S.sel),p=N(S.p);
-    if(!S.filed){S.example={kind:"controls",id:n.id,why:"Only a puppeteer may record a pair. A session outside the section is refused, and nothing is recorded.",
-      err:"phi: this session is not a puppeteer: that is a top session ezexe filed in the sidebar section \""+SECTION+"\", and the app's file shows this one in no section"};
+    if(!S.filed){S.example={kind:"controls",id:n.id,why:"Only a puppeteer may record a session under its control. A session outside the section is refused, and nothing is recorded.",err:NOT_PUPPETEER()};
       say([cmd(PHI+" controls "+n.id),["err","phi: this session is not a puppeteer"]],"File it in the section first.");return}
-    if(n.id===S.p){S.example={kind:"controls",id:n.id,why:"The pair is the puppeteer and another session.",err:"phi: a puppeteer does not control itself"};
-      say([cmd(PHI+" controls "+n.id),["err","phi: a puppeteer does not control itself"]],"Select one of the other top sessions.");return}
-    if(n.par){S.example={kind:"controls",id:n.id,why:"A puppeteer controls top sessions. A session that another session started belongs to that session's tree and is reached through its top.",
-      err:"phi: "+n.id+" was started by another session: a puppeteer controls top sessions, and a child is reached through its top"};
-      say([cmd(PHI+" controls "+n.id),["err","phi: it was started by another session"]],"Select the top session of its tree.");return}
+    if(n.id===S.p){S.example={kind:"controls",id:n.id,why:"A puppeteer controls other orchestrators, never itself.",err:"phi: a puppeteer does not control itself"};
+      say([cmd(PHI+" controls "+n.id),["err","phi: a puppeteer does not control itself"]],"Select one of the other orchestrators.");return}
+    if(n.par){S.example={kind:"controls",id:n.id,why:"A puppeteer controls orchestrators. A session that another session started belongs to that session's tree and is reached through its orchestrator.",
+      err:"phi: "+n.id+" was started by another session: a puppeteer controls orchestrators, and a worker is reached through its orchestrator"};
+      say([cmd(PHI+" controls "+n.id),["err","phi: it was started by another session"]],"Select the orchestrator of its tree.");return}
     if(n.controlled){n.controlled=false;n.told=false;S.board=boardText();
       S.example={kind:"controls",drop:true,id:n.id,title:n.title,text:controlsText()};
-      say([cmd(PHI+" controls --drop "+n.id),["out","no longer controlled: "+n.id]],q(n.title)+" is told once that it has no puppeteer.");return}
-    n.controlled=true;n.told=true;S.board=boardText();
+      say([cmd(PHI+" controls --drop "+n.id),["out","dropped from control: "+n.id]],q(n.title)+" is told once that it has left the puppeteer's control.");return}
+    n.controlled=true;n.told=false;S.board=boardText();
     S.example={kind:"controls",id:n.id,title:n.title,store:storeOf(n),section:ENVS[n.env].section,text:controlsText()};
-    say([cmd(PHI+" controls "+n.id),["out","controlled: \""+n.title+"\" ("+n.id+")"]],q(p.title)+" controls it now. It stays the top of its own tree, in its own section.");
+    say([cmd(PHI+" controls "+n.id),["out","controlled: \""+n.title+"\" `"+n.id+"`"]],q(p.title)+" controls it. It stays at the top of its own tree, in its own section.");
   },
   ask:function(){
     var n=N(S.sel),t=nextTitle(),rid="req-"+hex(++S.rid*131+S.salt,10);
-    S.reqs.push({id:rid,title:t,from:n.id,done:false,handed:false});
+    S.reqs.push({id:rid,title:t,from:n.id,done:false,handed:false});S.board=boardText();
     S.example={kind:"ask",from:n.title,title:t,rid:rid,store:storeOf(n)};
     say([cmd(PHI+' request "'+t+'" --brief "…" --to-puppeteer'),["out","kept as request "+rid+" to this session's puppeteer"]],"It starts nothing. The puppeteer is handed the request at the next turn ezexe begins in it.");
   },
@@ -812,91 +936,99 @@ var ACT={
     var from=N(r.from),where=filing(from.env);r.done=true;
     var id=mk(r.title,null,from.env,{started:true,working:true});
     S.example={kind:"startreq",r:r,id:id,env:from.env,store:ENVS[from.env].store,where:where};
-    say([["cmd","mcp__ccd_session__start_session, then mcp__ccd_sidebar__move_sessions"]],"The new top session is in "+where+". phi records it as controlled at the puppeteer's next hook.");
+    say([["cmd","mcp__ccd_session__start_session, then mcp__ccd_sidebar__move_sessions"]],"The new orchestrator is in "+where+". p4-phi records it as controlled at the puppeteer's next hook.");
     S.sel=id;
   },
   decline:function(){
     var r=openReqs().filter(function(x){return x.handed})[0],why="ezexe froze new topics in this project until the release is out";r.done=true;
     S.answers.push({id:r.id,title:r.title,why:why,time:tick()});S.board=boardText();
-    S.example={kind:"decline",r:r,why:why,from:N(r.from).title};
-    say([cmd(PHI+" controls --decline "+r.id+' "…"'),["out","declined "+r.id]],"The requester is told at its next message, and starts no session for it.");
+    S.example={kind:"decline",r:r,why:why,from:N(r.from).title,text:controlsText()};
+    say([cmd(PHI+" controls --decline "+r.id+' "…"'),["out","declined "+r.id]],"The session that filed it is told at its next message, and starts no session for it.");
   },
   turn:function(){
     var n=N(S.sel);
-    if(n.working){n.working=false;n.last=tick();n.report=n.report||"Its step is finished and its tests pass.";
+    if(n.working){n.working=false;n.done=true;n.last=tick();n.report="Its step is finished and its tests pass.";
       S.example={kind:"turn",ended:true,title:n.title,pair:pair(n)};
       say([],pair(n)?"The puppeteer is handed one line about it at its next hook.":"Its turn is kept in its own store.");
-    }else{var was=n.stopped;n.working=true;n.stopped=false;
-      S.example={kind:"turn",ended:false,title:n.title,wasStopped:was};
+    }else{var was=n.stopped,told=n.told;n.working=true;n.stopped=false;if(pair(n))n.told=true;
+      S.example={kind:"turn",ended:false,title:n.title,wasStopped:was,pair:pair(n),told:told};
       say([],q(n.title)+" is mid-turn.");}
   },
   archive:function(){
-    var n=N(S.sel),reason=$("reason").checked?"Its page shows the task done, its commit is on origin/main, and no session uses its scratch clone.":"";
-    if(!S.filed){S.example={kind:"archive",plain:true,id:n.id,reason:reason};
-      say([["cmd",ARCHIVE+" {\"session_id\": \""+n.id+"\"}"],["err","refused: no session archives a session"]],"A session outside the section archives nothing.");return}
-    var top=N(topOf(n.id)),why="";
-    if(!top.controlled)why=n.id+" is not a session this puppeteer controls, nor in the tree of one: `"+PHI+" controls <sessionId>` records a top session ezexe put under it";
-    else{var st=standing(n);
-      if(st.against.length)why="phi's records do not hold it complete: "+st.against.join("; ");
-      else if(!reason)why="the call carries no `reason`: say there what showed its task done, its work landed and pushed, and that no other session needs its scratch clone, since phi's records cannot show those"}
-    S.archives.push({id:n.id,title:n.title,let:!why,why:why||reason,time:tick()});
-    if(!why){n.archived=true;n.working=false;note(n.title+": <its outcome, its commits, what is still open>.","its page and git log","")}
-    S.board=boardText();
-    S.example={kind:"archive",id:n.id,title:n.title,reason:reason,why:why,top:!n.par};
-    say([["cmd",ARCHIVE+" {\"session_id\": \""+n.id+"\"}"],[why?"err":"out",why?"refused by phi's hook":"let through"]],
-      why?"The puppeteer names it to ezexe as left, with that reason. The call is kept on its record.":"The call is kept on the puppeteer's record with its reason."+(!n.par?" A controlled tree has closed, so the next message names a boundary.":""));
+    var n=N(S.sel);
+    if(!S.filed){S.example={kind:"archive",plain:true,id:n.id};
+      say([["cmd",ARCHIVE+" {\"session_id\": \""+n.id+"\"}"],["err","refused by p4-phi's archive hook"]],"Archiving is ezexe's own press or pick.");return}
+    var why=archiveCall(n,false);S.board=boardText();
+    S.example={kind:"archive",id:n.id,why:why};
+    say([["cmd",ARCHIVE+" {\"session_id\": \""+n.id+"\"}"],["err","refused by p4-phi's archive hook"]],"The puppeteer names it to ezexe as left, with that reason. The call is kept on its record.");
   }
 };
+function archivePicked(ids,how,pre){
+  var done=[];
+  ids.forEach(function(id){var n=N(id);if(!n||n.archived)return;var why=archiveCall(n,true);done.push({id:id,title:n.title,why:why})});
+  S.board=boardText();
+  S.example={kind:"archived",ids:done,how:how,pre:pre||[]};
+}
 function boxPress(which){
-  if(which==="compact"){S.box={typed:true};S.example={kind:"compact"};say([],"The puppeteer answered with the one line for ezexe to type.")}
-  else if(which==="typed"){S.compactions++;S.edge={key:"",closed:[]};S.box=null;S.past=false;S.board=boardText();
-    S.example={kind:"compacted",n:S.compactions};say([["cmd","/compact keep the path of the puppeteer board, and read it first"]],"The board's path is the first thing phi hands the puppeteer after the compaction.")}
+  var b=S.box;
+  if(which==="yes"){var pre=hook(true,null);var ids=b.opts[0].ids;S.box=null;
+    archivePicked(ids,"ezexe presses Archive it, which comes to the puppeteer as ezexe's next message.",pre);
+    say([["cmd","Archive it"]],"The puppeteer archived exactly the sessions under the button.")}
+  else if(which==="no"){S.box=null;S.example={kind:"archived",ids:[],how:"ezexe presses Not now.",pre:[]};say([["cmd","Not now"]],"The puppeteer leaves the session and says so.")}
+  else if(which==="submit"){
+    var picks=[];document.querySelectorAll("#boxopts input:checked").forEach(function(x){if(x.value!=="none")picks=picks.concat(b.opts[+x.value].ids)});
+    var then=b.then;S.box=then?{kind:"compact",second:then}:null;
+    archivePicked(picks,picks.length?"ezexe answers the multiple-choice question.":"ezexe answers the question with no session picked.");
+    say([["cmd","AskUserQuestion answered"]],picks.length?"The puppeteer archived exactly the picked sessions."+(then?" Its turn then ends on the compaction question.":""):"Nothing was picked, so nothing is archived.")}
+  else if(which==="compact"){S.box={kind:"typed"};S.example={kind:"compact"};say([],"The puppeteer answered with the one line for ezexe to type.")}
+  else if(which==="typed"){S.compactions++;S.edge={key:"",closed:[],ready:[]};S.box=null;S.past=false;S.board=boardText();
+    S.example={kind:"compacted",n:S.compactions};say([["cmd","/compact keep the path of the board, and read it first"]],"The board's path is the first thing p4-phi hands the puppeteer after the compaction.")}
   else if(which==="later"){S.box=null;S.example={kind:"later"};say([],"The puppeteer says nothing more.")}
   else if(which==="new"){
     var old=N(S.p),oid=old.id,otitle=old.title;
     delete S.n[oid];old.id="local_"+hex(++S.seq*7919+S.salt,8);old.title="Cross-project watch, second";S.n[old.id]=old;
     S.order[S.order.indexOf(oid)]=old.id;if(S.sel===oid)S.sel=old.id;S.p=old.id;
-    S.archives.push({id:oid,title:otitle,let:true,why:"Handed over to this session with controls --hand, and its notes are taken over.",time:tick()});
-    S.compactions=0;S.box=null;S.edge={key:"",closed:S.edge.closed};S.seen=tick();S.board=boardText();
+    S.compactions=0;S.box=null;S.edge={key:"",closed:[],ready:[]};S.seen="";
+    controlled().forEach(function(k){N(k).told=false});S.board=boardText();
     S.example={kind:"successor",id:old.id,title:old.title,old:oid,oldTitle:otitle,n:controlled().length,notes:S.notes.length};
-    say([cmd(PHI+" controls --hand "+old.id),cmd(PHI+" controls --from "+oid)],"The fresh puppeteer controls the same sessions, and the old one is archived.");
+    say([cmd(PHI+" controls --hand "+old.id),cmd(PHI+" controls --from "+oid)],"The successor controls the same sessions. Message it to see the rule it is given once.");
   }
   render();
 }
 
 /* ---------- drawing ---------- */
-var NW=124,NH=44,GAP=12,PAD=16,Y0=58,Y1=170,Y2=256;
-function cutTo(t,n){return t.length<=n?t:t.slice(0,n-1)+"…"}
+var NW=124,NH=44,GAP=12,PAD=16,Y0=58,Y1=170,Y2=256,Y3=342;
 function draw(){
   var svg=$("tree");while(svg.firstChild)svg.removeChild(svg.firstChild);
-  var pos={},bands=[],x=PAD;
+  var pos={},bands=[],x=PAD,deep=false;
+  function width(k){var ks=kids(k);if(!ks.length)return NW+GAP;return ks.reduce(function(a,c){return a+width(c)},0)}
+  function place(k,x0,y){var w=width(k);pos[k]={x:x0+w/2-GAP/2,y:y};var cx=x0;kids(k).forEach(function(c){if(y>=Y2)deep=true;place(c,cx,y===Y1?Y2:Y3);cx+=width(c)})}
   Object.keys(ENVS).forEach(function(env){
     var bx=x;
-    tops(env).forEach(function(t){var ks=kids(t),w=Math.max(1,ks.length)*(NW+GAP);
-      pos[t]={x:x+w/2-GAP/2,y:Y1};ks.forEach(function(k,i){pos[k]={x:x+i*(NW+GAP)+NW/2,y:Y2}});x+=w});
+    tops(env).forEach(function(t){place(t,x,Y1);x+=width(t)});
     bands.push({env:env,x0:bx-8,x1:x-GAP+8});x+=14;
   });
-  var W=Math.max(520,x-14+PAD),H=Y2+NH/2+16,dx=(W-(x-14+PAD))/2;
+  var low=deep?Y3:Y2,W=Math.max(520,x-14+PAD),H=low+NH/2+16,dx=(W-(x-14+PAD))/2;
   svg.setAttribute("viewBox","0 0 "+W+" "+H);
   pos[S.p]={x:W/2-dx,y:Y0};
   var g=sv("g",{transform:"translate("+dx+",0)"});svg.appendChild(g);
   g.appendChild(sv("rect",{class:"band"+(S.filed?" on":""),x:pos[S.p].x-NW/2-22,y:8,width:NW+44,height:NH+44,rx:12}));
   g.appendChild(sv("text",{class:"bandt",x:pos[S.p].x,y:24,"text-anchor":"middle",text:S.filed?"section \""+SECTION+"\"":"in no section"}));
   bands.forEach(function(b){
-    g.appendChild(sv("rect",{class:"band",x:b.x0,y:Y1-NH/2-26,width:b.x1-b.x0,height:Y2-Y1+NH+36,rx:12}));
+    g.appendChild(sv("rect",{class:"band",x:b.x0,y:Y1-NH/2-26,width:Math.max(0,b.x1-b.x0),height:low-Y1+NH+36,rx:12}));
     g.appendChild(sv("text",{class:"bandt",x:b.x0+10,y:Y1-NH/2-10,text:"<"+b.env+"> · "+(ENVS[b.env].section?"section \""+ENVS[b.env].section+"\"":"ungrouped list")}));
   });
-  S.order.forEach(function(k){var n=N(k);if(n.par&&pos[n.par]){var a=pos[n.par],b=pos[k];
+  S.order.forEach(function(k){var n=N(k);if(n.par&&pos[n.par]&&pos[k]){var a=pos[n.par],b=pos[k];
     g.appendChild(sv("path",{class:"link",d:"M"+a.x+" "+(a.y+NH/2)+" C"+a.x+" "+(a.y+NH/2+22)+" "+b.x+" "+(b.y-NH/2-22)+" "+b.x+" "+(b.y-NH/2)}))}});
   if(S.filed)controlled().forEach(function(k){var a=pos[S.p],b=pos[k];
     g.appendChild(sv("path",{class:"ctrl",d:"M"+a.x+" "+(a.y+NH/2)+" C"+a.x+" "+(a.y+NH/2+40)+" "+b.x+" "+(b.y-NH/2-50)+" "+b.x+" "+(b.y-NH/2)}))});
-  S.order.forEach(function(k){var n=N(k),p=pos[k],st=standing(n);
+  S.order.forEach(function(k){var n=N(k),p=pos[k],st=standing(n);if(!p)return;
     var cls="node"+(isP(k)&&S.filed?" pup":"")+(pair(n)?" ctl":"")+(S.sel===k?" sel":"")+(n.archived?" gone":"")+(n.working?" busy":"");
-    var e=sv("g",{class:cls,transform:"translate("+(p.x-NW/2)+","+(p.y-NH/2)+")",tabindex:"0",role:"button","aria-label":n.title+", "+(isP(k)?(S.filed?"the puppeteer":"a top session"):st.state)+(S.sel===k?", selected":"")});
+    var e=sv("g",{class:cls,transform:"translate("+(p.x-NW/2)+","+(p.y-NH/2)+")",tabindex:"0",role:"button","aria-label":n.title+", "+(isP(k)?(S.filed?"the puppeteer":"an orchestrator"):st.state)+(S.sel===k?", selected":"")});
     e.appendChild(sv("rect",{class:"box",width:NW,height:NH,rx:9}));
     e.appendChild(sv("circle",{class:"dot",cx:12,cy:15,r:4}));
-    e.appendChild(sv("text",{class:"t",x:22,y:19,text:cutTo(n.title,15)}));
-    var meta=isP(k)?(S.filed?"puppeteer":"top session"):n.archived?"archived":n.card?"shows a card":n.req?"request waits":n.working?"mid-turn":"idle";
+    e.appendChild(sv("text",{class:"t",x:22,y:19,text:cut(n.title,15)}));
+    var meta=isP(k)?(S.filed?"puppeteer":"orchestrator"):n.archived?"archived":n.card?"shows a card":n.req?"request waits":n.behalfOf&&!n.atTop?"app: under puppeteer":n.working?"mid-turn":"idle";
     e.appendChild(sv("text",{class:"m",x:12,y:35,text:meta}));
     var t=sv("title");t.textContent=n.title;e.appendChild(t);
     function pick(){S.sel=k;render()}
@@ -906,10 +1038,10 @@ function draw(){
   });
 }
 function renderExample(){
-  var e=S.example||{kind:"intro"},x=EX[e.kind](e),box=$("example");box.innerHTML="";
+  var e=S.example||{kind:"intro"},x=EX[e.kind](e),box=$("example");box.textContent="";
   box.appendChild(h("h3",{text:x.title}));box.appendChild(h("p",{class:"why",text:x.why}));
   x.steps.forEach(function(s){
-    var right=h("span",{class:"right"},[h("span",{class:"tag "+(s.side==="you"?"you":s.side),text:s.side==="you"?"ezexe":s.side==="app"?"app":"phi"})]);
+    var right=h("span",{class:"right"},[h("span",{class:"tag "+(s.side==="you"?"you":s.side),text:s.side==="you"?"ezexe":s.side==="app"?"app":"p4-phi"})]);
     if(s.code){var b=h("button",{type:"button",class:"copy",text:"copy"});b.addEventListener("click",function(){copy(s.code,b)});right.appendChild(b)}
     var st=h("div",{class:"step"},[h("div",{class:"who"},[h("span",{class:"by",text:s.by}),right])]);
     if(s.code)st.appendChild(h("pre",{text:s.code}));
@@ -919,42 +1051,51 @@ function renderExample(){
   });
   if(x.app||x.phi)box.appendChild(h("div",{class:"sides"},[
     h("div",{class:"side app"},[h("b",{text:"What the app holds"}),x.app||"Nothing."]),
-    h("div",{class:"side phi"},[h("b",{text:"What phi holds"}),x.phi||"Nothing."])]));
+    h("div",{class:"side phi"},[h("b",{text:"What p4-phi holds"}),x.phi||"Nothing."])]));
 }
 function renderBox(){
-  var sec=$("boxsec"),b=S.box,btns=$("boxbtns");sec.hidden=!b;btns.innerHTML="";if(!b)return;
+  var sec=$("boxsec"),b=S.box,btns=$("boxbtns"),opts=$("boxopts");sec.hidden=!b;btns.textContent="";opts.textContent="";if(!b)return;
   function add(label,which,go){var x=h("button",{type:"button",class:"btn"+(go?" go":""),text:label});x.addEventListener("click",function(){boxPress(which)});btns.appendChild(x)}
-  if(b.typed){$("boxq").textContent="/compact keep the path of the puppeteer board, and read it first";
-    $("boxr").textContent="The puppeteer's whole answer is this one line. Only ezexe can run it.";add("ezexe types it","typed",true);return}
+  if(b.kind==="button"){$("boxq").textContent="Archive “"+b.opts[0].label+"”?";
+    $("boxr").textContent="The puppeteer kept the outcome with phi.py note and ended its turn with mcp__ccd_turn__wrap_up. Archiving it is ezexe's own pick.";
+    add("Archive it","yes",true);add("Not now","no",false);return}
+  if(b.kind==="question"){$("boxq").textContent="Which complete sessions should the puppeteer archive?";
+    $("boxr").textContent="AskUserQuestion with multiSelect true, each option a session by its full title.";
+    b.opts.forEach(function(o,i){opts.appendChild(h("label",null,[h("input",{type:"checkbox",value:String(i)}),h("span",null,[o.label,h("small",{text:o.description})])]))});
+    if(b.opts.length===1)opts.appendChild(h("label",null,[h("input",{type:"checkbox",value:"none"}),h("span",null,["None of them"])]));
+    add("Submit","submit",true);return}
+  if(b.kind==="typed"){$("boxq").textContent=COMPACT_LINE();
+    $("boxr").textContent="The puppeteer's whole answer is this one line, for ezexe to type.";add("ezexe types it","typed",true);return}
   $("boxq").textContent="Context is at 71%, auto-compact starts at 85%. Compact now?";
-  $("boxr").textContent="The puppeteer read the level with mcp__ccd_session_mgmt__get_usage and ended its turn with mcp__ccd_turn__wrap_up.";
+  $("boxr").textContent="The puppeteer read the context usage with mcp__ccd_session_mgmt__get_usage and ended its turn with mcp__ccd_turn__wrap_up.";
   add("Compact now","compact",true);
   if(b.second==="new")add("New session","new",false);else add("Later","later",false);
 }
 function render(){
   if(!N(S.sel))S.sel=S.p;
   draw();
-  var n=N(S.sel),p=isP(n.id),st=standing(n),b=boundary();
+  var n=N(S.sel),p=isP(n.id),st=standing(n),b=holds();
   $("cfiled").textContent=S.filed?"filed in “"+SECTION+"”":"not filed";$("cfiled").className="chip"+(S.filed?" on":"");
   $("cedge").textContent=b.on?"boundary: reached":"no boundary";$("cedge").className="chip"+(b.on?" edge":"");$("cedge").title=b.why;
   $("ccomp").textContent=plural(S.compactions,"compaction");
   $("selname").textContent=n.title;
-  $("selmeta").textContent=n.id+" · "+(p?(S.filed?"the puppeteer, in no project's tree":"a top session, not filed in the section"):
-    (n.par?"started by "+q(N(n.par).title):"a top session")+" in <"+n.env+"> · "+st.state+(pair(n)?" · controlled":n.par&&pair(N(topOf(n.id)))?" · in a controlled tree":""));
+  $("selmeta").textContent=n.id+" · "+(p?(S.filed?"the puppeteer, in no project's tree":"an orchestrator, not filed in the section"):
+    (n.par?"started by "+q(N(n.par).title):"an orchestrator")+" in <"+n.env+"> · "+st.state+(pair(n)?" · controlled":n.par&&inControlled(n)?" · in a controlled tree":""));
   $("filelabel").textContent=S.filed?"Take the puppeteer out of the section":"File "+q(N(S.p).title)+" in “"+SECTION+"”";
   $("ctllabel").textContent=n.controlled?"Drop this session":"Control this session";
-  $("turnlabel").textContent=n.working?"It ends its turn":"It gets a message";
+  $("turnlabel").textContent=n.working?"It ends its turn, done":"It gets a message";
   $("hold").value=p?"none":n.hold;$("hold").disabled=p||n.archived;
   function set(a,on){document.querySelector('[data-act="'+a+'"]').disabled=!on}
   var live=!p&&!n.archived,handed=openReqs().some(function(r){return r.handed});
   set("file",true);set("message",true);
   set("route",live&&!n.par&&pair(n)&&!n.card&&!n.req);
   set("press",live&&!!n.card);set("stopcard",live&&!!n.card);set("speak",live&&!!n.req);
+  set("behalf",live&&!!n.req&&inControlled(n));set("untie",live&&!!n.behalfOf&&!n.atTop);
   set("direct",live);set("controls",!n.archived);
   set("startreq",S.filed&&handed);set("decline",S.filed&&handed);
-  set("archive",live);set("turn",live&&!n.card);
+  set("archive",live);set("turn",live&&!n.card&&!n.req);
   set("ask",live&&!n.par&&pair(n));
-  var c=$("console");c.innerHTML="";
+  var c=$("console");c.textContent="";
   ((S.con&&S.con.lines)||[]).forEach(function(l){c.appendChild(h("div",{class:l[0],text:l[1]}))});
   if(S.con&&S.con.say)c.appendChild(h("div",{class:"say",text:S.con.say}));
   $("past").checked=S.past;
@@ -962,27 +1103,27 @@ function render(){
   renderBox();renderExample();
 }
 document.querySelectorAll("[data-act]").forEach(function(b){b.addEventListener("click",function(){ACT[b.getAttribute("data-act")]();render()})});
-$("hold").addEventListener("change",function(){var n=N(S.sel);if(isP(n.id))return;n.hold=this.value;
-  say([],this.value==="none"?"phi's records hold nothing more against "+q(n.title)+".":"The board will show it at the puppeteer's next hook, and an archive of "+q(n.title)+" is refused.");render()});
+$("hold").addEventListener("change",function(){var n=N(S.sel);if(isP(n.id))return;n.hold=this.value;S.board=boardText();
+  say([],this.value==="none"?"p4-phi's records hold nothing more against "+q(n.title)+".":"The board shows it at the puppeteer's next hook, and an archive of "+q(n.title)+" is refused.");render()});
 $("past").addEventListener("change",function(){S.past=this.checked;
-  say([],this.checked?"The count is past the ceiling, so the next boundary notice says so, and a boundary already named is named again.":"The count is under the ceiling again.");render()});
+  say([],this.checked?"The count has reached the ceiling, so the next boundary notice says so, and a boundary already named is named again.":"The count is under the ceiling again.");render()});
 $("reset").addEventListener("click",function(){fresh();render()});
 
 /* ---------- a stopped or archived session frees its files ---------- */
 var WRITER=[
-  ["live","Live, and not reported done","Its last turn is not kept as done.",false,"The first writer is live and has not reported done, so its file set is held. No two sessions write the same file at once."],
-  ["done","Reported done","Its last turn is kept as done.",true,"A session whose last turn is kept as done holds nothing."],
-  ["archived","Archived","The app's record shows it archived.",true,"An archived session is out of the tree, so it holds nothing. This was so before 0.10.0."],
-  ["stopped","Stopped by ezexe","The app's record carries lastTurnStopped.",true,"Nothing in phi's own files says a session was stopped. The app's record does, in lastTurnStopped, and since 0.10.0 starts.writers leaves such a session out."],
-  ["again","Stopped, then messaged again","Its next turn cleared the mark.",false,"The mark lasts until the session's next turn. A stopped session that is messaged again is a live writer again."]
+  ["live","Live, and not reported done","Its last turn is not kept as done.",false,"The first writer is live and has not reported done, so its write set is held, and one session writes a file at a time."],
+  ["done","Reported done","Its last turn is kept as done.",true,"A session whose last turn is kept as done holds no file."],
+  ["archived","Archived","The app's record shows it archived.",true,"An archived session holds no file."],
+  ["stopped","Stopped by ezexe","The app's record carries lastTurnStopped.",true,"p4-phi's own files record no stop. The app's record does, in lastTurnStopped, and starts.writers leaves such a session out."],
+  ["again","Stopped, then messaged again","Its next turn cleared lastTurnStopped.",false,"The app clears lastTurnStopped at the session's next turn, so a stopped session that is messaged again is a live writer again."]
 ];
-var W_HELD="phi (p4-phi): this start is held: its file set shares dox/ with \"dox: the first pass\" (local_5b0e61a9), which is live and has not reported done, and no two sessions write the same file at once (ezexe/p4#48). Send this work to that session as the next task of its serial run, or start it once that session reports done.";
+var W_HELD="phi (p4-phi): this start is held: its write set shares dox/ with \"dox: the first pass\" `local_5b0e61a9`, which is live and has not reported done. Send this work to that session as the next task of its serial run, or start it once that session reports done.";
 function drawWriter(sel){
-  var box=$("writer");box.innerHTML="";
+  var box=$("writer");box.textContent="";
   WRITER.forEach(function(w){var b=h("button",{type:"button","aria-pressed":String(w[0]===sel)},[w[1],h("small",{text:w[2]})]);
     b.addEventListener("click",function(){drawWriter(w[0])});box.appendChild(b);
-    if(w[0]===sel){$("wverdict").textContent=w[3]?"The replacement starts":"The replacement is held";$("wverdict").className="verdict "+(w[3]?"go":"held");
-      $("wwhy").textContent=w[4];$("wout").textContent=w[3]?"mcp__ccd_session__start_session runs as sent.\nFiles: dox/":W_HELD}});
+    if(w[0]===sel){$("wverdict").textContent=w[3]?"The start goes":"The start is held";$("wverdict").className="verdict "+(w[3]?"go":"held");
+      $("wwhy").textContent=w[4];$("wout").textContent=w[3]?"p4-phi lets mcp__ccd_session__start_session through as sent.\nFiles: dox/":W_HELD}});
 }
 
 fresh();render();drawWriter("stopped");
