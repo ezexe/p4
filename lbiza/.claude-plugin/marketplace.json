@@ -11,7 +11,7 @@
       "name": "p4-temportal",
       "source": "./plugins/p4-temportal",
       "description": "Stands in for three of Claude Code's own places inside the project: the auto memory directory, the session scratchpad directory and temporary files, with lifetimes that clear what is no longer relevant.",
-      "version": "0.3.7",
+      "version": "0.3.8",
       "category": "productivity",
       "keywords": [
         "memory",
