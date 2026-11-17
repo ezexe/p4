@@ -20,9 +20,10 @@
   archive  a finished child, marked `disposable` or archiving itself, is counted as archived only with the issue
            closed and the test passed, its outcome note on the parent carrying the issue link, the commit and the test.
            A child that archives itself before it is finished is counted as archived at once, its open steps named.
-  memory   a memory that an `issue: owner/name#N` line in its front matter ties to an issue is cut back at the Stop
-           after that issue's closing commit reaches the remote default branch: one pointer line names the issue and
-           the code that carries its rule, and its line in MEMORY.md says the same.
+  memory   a memory that an `issue: owner/name#N` line in its front matter ties to an issue is cut back at a Stop
+           whose turn ran a push, pull, fetch or merge, once that issue's closing commit is on the remote default
+           branch: one pointer line names the issue and the code that carries its rule, and its own line in
+           MEMORY.md says the same, in the folder Claude Code loads auto memory from and in the store's.
 
 `gh` is P4_PHI_GH when set, and a .py file named there is run with this Python; else `gh` on PATH. P4_PHI_ISSUES
 set to 0 or false, read as p4conf reads it, or p4.json's phi.issues false turns the loop off. phi.py calls these from its hooks.
@@ -422,8 +423,42 @@ def _commits(repo, rng, limit=40):
     return rows
 
 
+# GitHub's closing keywords, each a whole word at a line's start or after whitespace, so "prefix #7" and "disclose #7"
+# close nothing; a negation before it on its line, as in "does not close #7", closes nothing either
+KEYWORD = re.compile(r"(?im)(?:^|(?<=\s))(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?[ \t]+"
+                     r"((?:[\w.-]+/[\w.-]+)?#\d+)(?!\d)")
+NEGATION = re.compile(r"(?i)(?:\b(?:not|never|no longer|cannot)|n['’]t)\s+(?:\w+\s+){0,2}$")
+KEYWORD_GREP = "(^|[[:space:]])(close[sd]?|fix(e[sd])?|resolve[sd]?):?[[:space:]]+"
+
+
+def closing_refs(body):
+    """The issues a commit message closes, each as `#N` or `owner/name#N`, in order and each once."""
+    text, out = str(body or ""), []
+    for m in KEYWORD.finditer(text):
+        if NEGATION.search(text[text.rfind("\n", 0, m.start()) + 1:m.start()]):
+            continue
+        if m.group(1) not in out:
+            out.append(m.group(1))
+    return out
+
+
+def closing_on(repo, revs, n, limit=50):
+    """The short sha and subject of the newest commit in `revs` whose message closes issue `n` of this repository,
+    as a bare `#N` or as its own `owner/name#N`; None for none. git's --grep finds the candidates and closing_refs
+    decides."""
+    here = github_of(repo)
+    whose = f"({here.replace('.', '[.]')})?" if here else ""
+    out = git(repo, "log", *revs, "-E", "-i", f"-n{limit}", "--format=%h%x1f%s%x1f%B%x1e",
+              f"--grep={KEYWORD_GREP}{whose}#{n}([^0-9]|$)")
+    for rec in out.split("\x1e"):
+        parts = rec.strip().split("\x1f")
+        if len(parts) >= 3 and closes(parts[2], here, n):
+            return parts[0], parts[1]
+    return None
+
+
 def closes(body, slug, n):
-    for ref in relay.CLOSES.findall(body or ""):
+    for ref in closing_refs(body):
         other, _, num = ref.rpartition("#")
         if num == str(n) and (not other or other.lower() == slug.lower()):
             return True
@@ -764,36 +799,62 @@ FRONT = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?(.*)\Z", re.S)
 TIED = re.compile(r"(?mi)^issue:\s*(?:https?://github\.com/)?([\w.-]+/[\w.-]+?)(?:#|/issues/)(\d+)\s*$")
 LANDED_KEY = re.compile(r"(?mi)^landed:")
 INDEX = "MEMORY.md"
+SEEN_FILE = "memory-landed.json"                   # in the store's phi folder: each repository's default head checked
 
 
-def memory_dir(home):
+def memory_dirs(home):
+    """The memory folders a cut-back edits: the one Claude Code loads auto memory from, by `autoMemoryDirectory`
+    in the managed, local, project and user settings in that order of precedence, or its own folder for the project
+    where none sets it; then the store's temportal/memory, which p4 keeps beside it."""
+    out = []
     try:
         import p4conf
-        return p4conf.sub(home, "memory") if home else ""
+        project = p4conf.session_project(home) if home else None
+        if project:
+            local = p4conf.settings_file(project)
+            files = next((v for k, v in p4conf.MANAGED.items() if sys.platform.startswith(k)), [])
+            files = list(files) + [local, os.path.join(project, ".claude", "settings.json"),
+                                   os.path.join(p4conf._config_dir(), "settings.json")]
+            loaded = ""
+            for f in files:
+                v = p4conf._get(p4conf.read_json(f) or {}, "autoMemoryDirectory")
+                if isinstance(v, str) and v.strip():
+                    loaded = os.path.expanduser(v.strip())
+                    break
+            out.append(loaded or p4conf.default_memory(project))
+        if home:
+            out.append(p4conf.sub(home, "memory"))
     except Exception:  # noqa: BLE001
-        return ""
+        pass
+    seen, dirs = set(), []
+    for d in out:
+        k = relay.norm(d)
+        if d and k not in seen:
+            seen.add(k)
+            dirs.append(d)
+    return dirs
 
 
 def tied_memories(home):
-    """Each memory in the store's memory folder that an `issue: owner/name#N` line in its front matter ties to an
-    issue and that is not cut back yet, as its path, front matter, `owner/name` and number. Nothing runs git."""
-    d = memory_dir(home)
-    try:
-        names = sorted(os.listdir(d)) if d else []
-    except OSError:
-        return []
+    """Each memory in the memory folders that an `issue: owner/name#N` line in its front matter ties to an issue and
+    that is not cut back yet, as its path, front matter, `owner/name` and number. Nothing runs git."""
     out = []
-    for f in names:
-        if not f.endswith(".md") or f.lower() == INDEX.lower():
-            continue
+    for d in memory_dirs(home):
         try:
-            with open(os.path.join(d, f), encoding="utf-8") as fh:
-                m = FRONT.match(fh.read().replace("\r\n", "\n"))
-        except (OSError, UnicodeDecodeError):
+            names = sorted(os.listdir(d))
+        except OSError:
             continue
-        t = TIED.search(m.group(1)) if m else None
-        if t and not LANDED_KEY.search(m.group(1)):
-            out.append((os.path.join(d, f), m.group(1), t.group(1), int(t.group(2))))
+        for f in names:
+            if not f.endswith(".md") or f.lower() == INDEX.lower():
+                continue
+            try:
+                with open(os.path.join(d, f), encoding="utf-8") as fh:
+                    m = FRONT.match(fh.read().replace("\r\n", "\n"))
+            except (OSError, UnicodeDecodeError):
+                continue
+            t = TIED.search(m.group(1)) if m else None
+            if t and not LANDED_KEY.search(m.group(1)):
+                out.append((os.path.join(d, f), m.group(1), t.group(1), int(t.group(2))))
     return out
 
 
@@ -807,15 +868,9 @@ def default_ref(repo):
 
 def closed_on_default(repo, n):
     """The short sha and subject of the commit on the remote default branch whose message closes issue `n` of this
-    repository, as a bare `#N` or as its own `owner/name#N`; None when none is there."""
+    repository; None when none is there."""
     ref = default_ref(repo)
-    if not ref:
-        return None
-    here = github_of(repo)
-    whose = f"({here.replace('.', '[.]')})?" if here else ""
-    out = git(repo, "log", ref, "-E", "-i", "-n", "1", "--format=%h%x1f%s",
-              rf"--grep=(close[sd]?|fix(e[sd])?|resolve[sd]?) +{whose}#{n}([^0-9]|$)")
-    return tuple(out.split("\x1f", 1)) if "\x1f" in out else None
+    return closing_on(repo, [ref], n) if ref else None
 
 
 def pointer(slug, n, sha, subj, files):
@@ -825,21 +880,33 @@ def pointer(slug, n, sha, subj, files):
             + (f", in {shown}" if shown else "") + "; the rule lives there, not in this memory.")
 
 
-def cut_back(home, cwd=""):
-    """Each memory tied to an issue whose closing commit is on the remote default branch of a checkout at hand,
-    the cwd's repository or one nested under it, cut back to its pointer: the body becomes one line naming the
-    issue and the code that carries the rule, the front matter's description says the same and gains a `landed:`
-    line, and the memory's line in MEMORY.md is rewritten to match. Returns the paths cut back."""
-    if not on(home):
+def cut_back(home, cwd="", commands=()):
+    """At a Stop whose turn ran a command that can bring a closing commit onto the default branch, a push, pull,
+    fetch, merge or rebase, `gh pr merge` or a `gh api` merge: each memory tied to an issue whose closing commit is
+    now on the remote default branch of a checkout at hand, the cwd's repository or one nested under it, is cut back
+    to its pointer. The body becomes one line naming the issue and the code that carries the rule, the front
+    matter's description says the same and gains a `landed:` line, and the memory's own line in MEMORY.md, the one
+    whose first link is the memory, is rewritten to match. A repository whose default head is the one the last check
+    saw is not searched again. Returns the paths cut back."""
+    if not on(home) or not any(landing(c, MOVES) for c in commands or () if c):
         return []
     tied = tied_memories(home)
     if not tied:
         return []
-    repos = {}
+    try:
+        import p4conf
+        seen_path = p4conf.sub(home, "phi", SEEN_FILE)
+    except Exception:  # noqa: BLE001
+        seen_path = ""
+    seen = relay._read_json(seen_path) if seen_path else {}
+    repos, heads = {}, {}
     for repo in [relay.repo_of(cwd) if cwd else ""] + nested_repos(cwd):
         slug = github_of(repo).lower() if repo else ""
         if slug and slug not in repos:
-            repos[slug] = repo
+            ref = default_ref(repo)
+            head = git(repo, "rev-parse", ref) if ref else ""
+            if head and seen.get(relay.norm(repo)) != head:
+                repos[slug], heads[relay.norm(repo)] = repo, head
     out = []
     for path, front, slug, n in tied:
         repo = repos.get(slug.lower())
@@ -856,6 +923,8 @@ def cut_back(home, cwd=""):
         _write(path, f"---\n{head}\nlanded: {sha}\n---\n\n{line}\n")
         _reindex(os.path.dirname(path), os.path.basename(path), short)
         out.append(path)
+    if heads and seen_path:
+        relay._write_json(seen_path, dict(seen, **heads))
     return out
 
 
@@ -867,14 +936,16 @@ def _write(path, text):
 
 
 def _reindex(folder, name, short):
-    """The memory's line in MEMORY.md, its link kept and the rest made `short`."""
+    """The memory's own line in MEMORY.md, the one whose first link is the memory, its link kept and the rest made
+    `short`. A line that links the memory only after another link is another memory's, and is left as it is; with no
+    MEMORY.md, or no line of its own there, nothing is written."""
     p = os.path.join(folder, INDEX)
     try:
         with open(p, encoding="utf-8") as f:
             lines = f.read().replace("\r\n", "\n").split("\n")
     except (OSError, UnicodeDecodeError):
         return
-    link = re.compile(r"^(.*?\]\(" + re.escape(name) + r"\))")
+    link = re.compile(r"^([^\[]*\[[^\]]*\]\(" + re.escape(name) + r"\))")
     changed = False
     for i, ln in enumerate(lines):
         m = link.match(ln)
@@ -897,9 +968,7 @@ def landed(repo, sha, closes):
         slug, _, n = str(c).rpartition("#")
         if not n.isdigit() or slug and slug.lower() != here.lower():
             continue                               # another repository's issue: no commit here closes it
-        whose = f"({here.replace('.', '[.]')})?" if here else ""   # a bare #N, or this repository's own owner/name#N
-        if git(repo, "log", "--remotes", "-E", "-i", "-n", "1", "--format=%h",
-               rf"--grep=(close[sd]?|fix(e[sd])?|resolve[sd]?) +{whose}#{n}([^0-9]|$)"):
+        if closing_on(repo, ["--remotes"], n):    # a bare #N, or this repository's own owner/name#N
             return True
     for branch in git(repo, "branch", "-r", "--format=%(refname:short)").split():
         if "->" in branch or branch.endswith("/HEAD"):

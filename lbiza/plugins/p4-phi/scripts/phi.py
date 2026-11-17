@@ -2826,7 +2826,9 @@ def h_stop(payload):
     render_page(me.home, s["sessionId"])
     render_page(me.home, above)
     try:                                           # a memory whose issue landed is cut back to its pointer
-        RAN["memories_cut"] = len(issues.cut_back(me.home, payload.get("cwd") or s.get("cwd") or ""))
+        RAN["memories_cut"] = len(issues.cut_back(me.home, payload.get("cwd") or s.get("cwd") or "", [
+            c["input"].get("command") for c in turn.get("calls") or []
+            if c.get("name") in SHELL_TOOLS and isinstance(c.get("input"), dict)]))
     except Exception:  # noqa: BLE001
         pass
     relay.track(me.home)                           # staged for the store's next commit, so it reaches the others

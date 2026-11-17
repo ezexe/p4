@@ -367,14 +367,16 @@ class Loop(unittest.TestCase):
         write(tied, rule)
         write(other, rule.replace("#7", "#9"))
         write(os.path.join(mem, "MEMORY.md"), "# Memory index\n\n- [One lander](one-lander.md) — only the orchestrator "
-                                              "pushes\n- [Other](other.md) — x\n")
+                                              "pushes\n- [Other](other.md) — x\n- [A](a.md) — see "
+                                              "[One lander](one-lander.md)\n")
         self.commit("lib: fix x\n\nCloses #7")
         sha = self.git(self.work, "rev-parse", "--short", "HEAD").stdout.strip()
-        self.assertEqual(self.t.stop(TOP, "land it", report="Committed.", uuid="m1").returncode, 0)
+        self.land("m1", "git commit -qam fix")
         self.assertEqual(read(tied), rule, "kept whole while the commit is on no remote default branch")
         self.git(self.work, "push", "-q", "-u", "origin", "main")
-        r = self.t.stop(TOP, "land it", report="Pushed.", uuid="m2")
-        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.t.stop(TOP, "look", report="Looked.", uuid="m2").returncode, 0)
+        self.assertEqual(read(tied), rule, "a Stop whose turn ran no push, pull, fetch or merge checks nothing")
+        self.land("m3")
         body = read(tied)
         self.assertNotIn("a child commits and reports", body)
         self.assertIn(f"Pointer: the plugin carries this rule since ezexe/demo#7 landed in commit {sha} \"lib: fix x\""
@@ -386,7 +388,65 @@ class Loop(unittest.TestCase):
         self.assertIn(f"- [One lander](one-lander.md) — carried by the plugin since ezexe/demo#7 landed in {sha}\n",
                       index)
         self.assertIn("- [Other](other.md) — x", index)
+        self.assertIn("- [A](a.md) — see [One lander](one-lander.md)\n", index, "a line whose first link is another's")
         self.assertEqual(read(other), rule.replace("#7", "#9"), "a memory whose issue did not land is kept whole")
+        self.land("m4")
+        self.assertEqual(read(tied), body, "a second Stop leaves the pointer as it is")
+        self.assertEqual(read(os.path.join(mem, "MEMORY.md")), index, "and the index too")
+
+    def land(self, uuid, cmd="git push -u origin main"):
+        """A Stop of the top session whose turn ran `cmd`."""
+        r = self.t.stop(TOP, "land it", [("Bash", {"command": cmd}, "ok")], report="Landed.", uuid=uuid)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_a_memory_is_not_cut_back_by_a_message_that_does_not_close_its_issue_or_a_commit_off_the_default(self):
+        """GitHub's closing keywords count only as whole words at a line's start or after whitespace, and not after a
+        negation: "prefix #7", "disclose #7" and "does not close #7" on the default branch cut nothing, and
+        issues.landed does not take them for a landing of #7. A `Closes #7` commit on another remote branch cuts
+        nothing either."""
+        import p4conf
+        mem = p4conf.sub(self.t.p4, "memory")
+        rule = "---\nname: r\ntype: feedback\nissue: ezexe/demo#7\n---\n\nOnly the orchestrator pushes.\n"
+        write(os.path.join(mem, "r.md"), rule)
+        for i, msg in enumerate(("lib: a prefix #7 for x", "lib: disclose #7 in the log",
+                                 "lib: tidy\n\nThis does not close #7 yet.")):
+            self.commit(msg, f"x = {i + 5}\n")
+        self.git(self.work, "push", "-q", "-u", "origin", "main")
+        self.land("n1")
+        self.assertEqual(read(os.path.join(mem, "r.md")), rule, "no closing keyword closed #7")
+        self.commit("lib: fix x\n\nCloses #7", "x = 9\n")
+        sha = self.git(self.work, "rev-parse", "--short", "HEAD").stdout.strip()
+        self.assertFalse(issues.landed(self.work, sha, ["#7"]), "no remote commit closes #7")
+        self.assertEqual(issues.closing_refs("Fixes #3, closes ezexe/demo#4\nfix: #5\nprefix #6"),
+                         ["#3", "ezexe/demo#4", "#5"])
+        self.git(self.work, "push", "-q", "origin", "HEAD:feature")
+        self.land("n2", "git fetch origin")
+        self.assertEqual(read(os.path.join(mem, "r.md")), rule, "a closing commit on another branch has not landed")
+
+    def test_the_cut_back_edits_the_memory_folder_claude_code_loads_with_or_without_an_index_line(self):
+        """The cut-back edits the folder `autoMemoryDirectory` names, where Claude Code loads auto memory from, and the
+        store's own memory folder. A folder with no MEMORY.md gets none, and a MEMORY.md with no line for the memory
+        is left as it is."""
+        import p4conf
+        loaded = os.path.join(self.t.tmp, "loaded-memory")
+        local = p4conf.settings_file(p4conf.session_project(self.t.p4))
+        conf = p4conf.read_json(local) or {}
+        conf["autoMemoryDirectory"] = loaded.replace("\\", "/")
+        write(local, json.dumps(conf))
+        rule = "---\nname: r\ntype: feedback\nissue: ezexe/demo#7\n---\n\nOnly the orchestrator pushes.\n"
+        mem = p4conf.sub(self.t.p4, "memory")
+        write(os.path.join(loaded, "r.md"), rule)
+        write(os.path.join(mem, "s.md"), rule)
+        index = "# Memory index\n\n- [Other](other.md) — x\n"
+        write(os.path.join(mem, "MEMORY.md"), index)
+        self.commit("lib: fix x\n\nCloses #7")
+        self.git(self.work, "push", "-q", "-u", "origin", "main")
+        self.land("l1")
+        self.assertEqual((p4conf.read_json(local) or {}).get("autoMemoryDirectory"), loaded.replace("\\", "/"))
+        for path in (os.path.join(loaded, "r.md"), os.path.join(mem, "s.md")):
+            self.assertIn("Pointer: the plugin carries this rule since ezexe/demo#7", read(path), path)
+        self.assertFalse(os.path.exists(os.path.join(loaded, "MEMORY.md")), "no index is made where there was none")
+        self.assertEqual(read(os.path.join(mem, "MEMORY.md")), index, "an index with no line for it is kept")
 
     def test_a_run_in_the_background_whose_process_is_gone_is_run_again_at_the_next_stop(self):
         """A regression test that outlasts P4_PHI_PROOF_S runs on in the background through the `proof-run` entry,

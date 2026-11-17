@@ -17,6 +17,9 @@ p4-phi keeps each session's files in `<project>/.claude/p4/phi/sessions/<session
 - In a subagent it starts: the step the subagent serves and retrieval's lines, appended to the Agent call's prompt, and before a tool call of the subagent a warning of what changed beside its parent session since its launch, when anything did.
 - At the moment each applies: ezexe's standing instruction for a message about something else, in full at the first message and kept on the session's `standing.md`; the advice on where each work step of an orchestrator's task list goes; a writing child's issue line, which says its loop; the push line, which goes only to the tree's orchestrator, the one session that lands and pushes, a worker's `Closes #N` commit included; the refusal of a start whose brief declares no write set; and the line `done` prints, which says what follows.
 
+A feedback memory whose rule an open issue will build into the plugin is tied to that issue by one line in the memory's own front matter, `issue: owner/name#N`.
+Once a commit that closes that issue is on the remote default branch, the next Stop whose turn ran a push, pull, fetch or merge cuts the memory back to one pointer line naming the issue and the code that carries its rule, and rewrites the memory's own line in the memory index to match.
+
 A store moves only by `python -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/p4.py" sync --push --p4 "<store>"`.
 
 ## Commands
