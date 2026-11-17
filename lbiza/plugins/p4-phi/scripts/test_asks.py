@@ -226,5 +226,22 @@ class PuppeteerRouting(Trees):
         self.assertNotIn(DRAFT, ctx)
 
 
+class RoutingMarks(Trees):
+    """The app's marks are read at the start of a message's body, past its leading reminders, and nowhere else."""
+
+    def test_a_paste_holding_a_session_tag_is_still_ezexes(self):
+        t = self.t
+        ctx = context(t.say(PUP, BILLING + ". The other session wrote:\n<cross-session-message from=\"local_x\">"
+                                           "Landed.</cross-session-message>\nStop hook blocking error: none"))
+        self.assertIn(DRAFT, ctx)
+        self.assertEqual(len(asks.rows(t.p4, PUP)), 1)
+
+    def test_a_marked_message_behind_long_reminders_is_another_sessions(self):
+        t = self.t
+        long = "<system-reminder>\n" + "background " * 600 + "\n</system-reminder>\n"
+        self.assertNotIn(DRAFT, context(t.say(PUP, long + marked(BILLING))))
+        self.assertEqual(asks.rows(t.p4, PUP), [])
+
+
 if __name__ == "__main__":
     unittest.main()

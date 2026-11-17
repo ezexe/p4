@@ -969,18 +969,24 @@ def readings_of(req):
     return [a, b] if a and b and a.lower() != b.lower() else []
 
 
-# the app's marks of a message that is not ezexe's: another session's message, a side-sessions event, a task
-# notification, a system notification, or a hook's words given back to the session
-SESSION_MARK = re.compile(r"<cross-session-message\b|<side-sessions-event\b|<task-notification\b|"
-                          r"\[SYSTEM NOTIFICATION\b|^\s*(?:Stop|SubagentStop|UserPromptSubmit) hook (?:feedback|blocking)",
-                          re.I | re.M)
+# the app's marks of a message that is not ezexe's, at the start of its body once the leading reminders are off:
+# another session's message, a side-sessions event, a task notification, a system notification, or a hook's words
+# given back to the session. A paste that holds such a tag further in is still ezexe's.
+SESSION_MARK = re.compile(r"\A\s*(?:Another Claude session sent a message:|<cross-session-message\b|"
+                          r"<side-sessions-event\b|<task-notification\b|\[SYSTEM NOTIFICATION\b|"
+                          r"(?:Stop|SubagentStop|UserPromptSubmit) hook (?:feedback|blocking))", re.I)
 
 
 def from_session(prompt):
-    """True when the app marks a message as another session's or its own: a cross-session message, a side-sessions
-    event, a task notification, a system notification or a hook's feedback. Every other message a puppeteer is
-    given is ezexe's, and only those are read for work or kept as requests."""
-    return bool(SESSION_MARK.search(str(prompt or "")[:4000]))
+    """True when the app marks a message as another session's or its own: the body, past its leading reminders,
+    opens with a cross-session message, a side-sessions event, a task notification, a system notification or a
+    hook's feedback. Every other message a puppeteer is given is ezexe's, and only those are read for work or kept
+    as requests."""
+    text = str(prompt or "")
+    reminder = _phi().REMINDER
+    while reminder.match(text):
+        text = reminder.sub("", text, count=1)
+    return bool(SESSION_MARK.match(text))
 
 
 def own_message(home, s, req):

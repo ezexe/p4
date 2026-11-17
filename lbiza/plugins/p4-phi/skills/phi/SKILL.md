@@ -72,7 +72,14 @@ A `Finding:` on a held file or an owned issue goes straight to its holder, named
 A puppeteer is a session nobody started that ezexe filed in the sidebar section "puppeteers", and it controls the orchestrators of other trees.
 Its rule is handed once, beside its first message after p4-phi sees the filing; its board, `board.md` in its session folder, says on its head how it is kept; and the line p4-phi hands at a boundary says what to do then.
 A controlled session is told once when it comes to have a puppeteer, and once when that ends.
-Each request of ezexe's to a puppeteer is a row of its ledger, `asks.md` beside its board: a short topic, the session that holds it by full title and id, its state, and what waits on ezexe. A message the app marks as another session's, a question and a quick answer open no row, and such a message is drafted no start. A request takes as its holder the session the puppeteer messages, or the orchestrator it starts, whose own words share the request's topic. Its state is read from that holder's turns: routed or started, working, reported, done or closed; one the puppeteer's turn settles with no send, no start and no question is answered. A turn on a request that ends on a question leaves it waiting on ezexe until ezexe's next message, which answers the row it names or else the latest. A finished row leaves the page a day after. Beside each of the puppeteer's messages, a short line gives the counts by state and names the page.
+Each request of ezexe's to a puppeteer is a row of its ledger, `asks.md` beside its board: a short topic, the session that holds it by full title and id, its state, and what waits on ezexe.
+A question and a quick answer open no row.
+A message the app marks as another session's opens no row and is drafted no start: the body, past its leading reminders, opens with another session's message, a side-sessions event, a task notification, a system notification or a hook's feedback.
+A request takes as its holder the session the puppeteer messages, or the orchestrator it starts, whose own words share the request's topic.
+Its state is read from that holder's turns: routed or started, working, reported, done or closed; one the puppeteer's turn settles with no send, no start and no question is answered.
+A turn on a request that ends on a question leaves it waiting on ezexe until ezexe's next message, which answers the row it names or else the latest.
+A finished row leaves the page a day after.
+Beside each of the puppeteer's messages, a short line gives the counts by state and names the page.
 A message of ezexe's that `route_down` sends to a controlled session's topic is drafted no start.
 A puppeteer's turns hold messages only, and every other task goes to its one standing worker, which it starts under itself with the brief line `Standing worker of its puppeteer` and which splits its task groups into standing coworkers.
 A second such start is refused while the first is live, and a puppeteer's shell call or edit is answered with a line that sends the task to its worker.
