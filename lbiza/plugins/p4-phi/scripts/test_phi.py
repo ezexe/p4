@@ -852,7 +852,8 @@ class NewTask(unittest.TestCase):
         self.assertIn(land, brief)
         self.say(TOP, TASK)
         self.say(TOP, "also, the fence colour?")
-        told = self.say(KID, "Task:\nPick the fence colour. ezexe's words: \"the fence colour?\" " + brief)
+        told = self.say(KID, "Task:\nPick the fence colour and update the fence. ezexe's words: \"the fence colour?\" "
+                        + brief)                         # a work word of the brief's own, not of the plugin's path
         self.assertIn("did not fit", told, "the room is full, so pieces are held")
         self.assertIn("p4-phi detached it to top level at this first message. Now call "
                       "`mcp__ccd_session_mgmt__detach_session` with `\"self\"` before anything else", told)
