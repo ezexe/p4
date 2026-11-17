@@ -6,9 +6,12 @@
            `issue`, and a line tells the child. p4-phi files no issue, since no session publishes a new issue on its
            own: a child that takes none is told to write each finding into its report as one `Finding:` line, which
            its parent session passes up unchanged to the puppeteer that controls its session tree, or to its
-           orchestrator where none does, and that session publishes what needs an issue. A read-only child, such
-           as a check, an audit, a question or a message to pass on, gets neither, and neither does a repository with
-           no GitHub remote.
+           orchestrator where none does, and the one session that publishes for that tree, which
+           controls.publisher names, publishes what needs an issue. A read-only child, such as a check, an audit,
+           a question or a message to pass on, takes no issue and is handed the same line at its first message, for
+           the repository its brief names or the one it runs in. A reading and a repository with no GitHub remote
+           get neither. A shell call that runs `gh issue create` in any other session than that publisher is
+           refused by phi.py's issue guard, which `publishes` reads the call for.
   commits  at each step boundary, a commit made since the issue was taken that closes no issue gets one line.
   proof    before the child counts as finished, its task list names the regression test that proves the issue fixed:
            a backticked command or a test file in a step that speaks of a test, or `phi.py proof "<command>"`. p4-phi
@@ -63,14 +66,20 @@ TEST_FILE = re.compile(r"((?:[A-Za-z]:)?[\w./\\-]*?\btest_[\w-]+\.py|[\w./\\-]*?
 FINDING_FORM = ("Finding: <the claim>; source: <the file and line it was read at>; test: <the deciding test>; files: <the paths a "
                 "fix changes>")
 FINDING = re.compile(r"(?m)^(?:[ \t>*+-]|\d+[.)])*(Finding:[ \t]*\S[^\n]*)$")
-FINDINGS_LINE = (
-    "phi (p4-phi): this session's brief names no open issue, and p4-phi files none, since no session publishes a new "
-    "issue on its own. A finding on a file another live session holds, or on an issue another live session owns, "
+FINDINGS_REST = (
+    "A finding on a file another live session holds, or on an issue another live session owns, "
     "goes straight to that session with SendMessage, as this session's address book names it, and nowhere else. "
     "Write each finding no live session covers into this session's report as one line in this form: `"
     + FINDING_FORM + "`. Its parent session passes those lines up unchanged, to the puppeteer that controls "
-    "this session tree, or to its orchestrator where none does, which publishes what needs an issue and places "
-    "the session that resolves it.")
+    "this session tree, or to its orchestrator where none does, which places the session that resolves it, and the "
+    "one session that publishes for this tree publishes what needs an issue: `gh issue create` is refused in every "
+    "other session.")
+FINDINGS_LINE = (
+    "phi (p4-phi): this session's brief names no open issue, and p4-phi files none, since no session publishes a new "
+    "issue on its own. " + FINDINGS_REST)
+FINDINGS_READS = (                                 # a read-only worker, whose brief may name an issue it only reads
+    "phi (p4-phi): this session's brief asks for no change, so it takes no issue as its own, and p4-phi files none, "
+    "since no session publishes a new issue on its own. " + FINDINGS_REST)
 
 
 def findings(text):
@@ -186,52 +195,87 @@ def _gh_api(args):
     return "gh api" if (method or ("POST" if fields else "GET")) != "GET" else ""
 
 
-def landing(cmd, verbs=LANDS, depth=0):
-    """What a shell line runs that lands work, '' for none. Its tokens are read with each quoted string whole, so a
-    quoted argument such as a commit message, a grep pattern or a path with spaces is data: git or git.exe, by the
-    last part of its path, followed past its own options by one of `verbs`; `gh pr merge`; a `gh api` call with a
-    method other than GET; or a graphql mutation that names a merge or a ref. A quoted string is read again as a
-    command only where it is the script of bash, sh, zsh, pwsh or powershell after -c, -lc or -Command, of cmd after
-    /c or /k, or of iex or Invoke-Expression."""
+def _scan(cmd, hit, depth=0):
+    """The first answer `hit` gives for a word of a shell line as a program's name with the words after it, '' for
+    none. The line's tokens are read with each quoted string whole, so a quoted argument such as a commit message, a
+    grep pattern or a path with spaces is data. A quoted string is read again as a command only where it is the
+    script of bash, sh, zsh, pwsh or powershell after -c, -lc or -Command, of cmd after /c or /k, or of iex or
+    Invoke-Expression."""
     toks = _tokens(cmd)
     for i, w in enumerate(toks):
         exe, nxt = _exe(w), toks[i + 1:]
+        got = ""
         if depth < 3 and exe in SH_LIKE:
             for k, a in enumerate(nxt[:4]):
                 if re.fullmatch(r"-[a-z]*c|-command|-c(?:ommand)?", a, re.I) and k + 1 < len(nxt):
-                    hit = landing(nxt[k + 1], verbs, depth + 1)
-                    if hit:
-                        return hit
+                    got = got or _scan(nxt[k + 1], hit, depth + 1)
         elif depth < 3 and exe == "cmd":
             for k, a in enumerate(nxt[:4]):
                 if a.lower() in ("/c", "/k"):
-                    hit = landing(" ".join(nxt[k + 1:]), verbs, depth + 1)
-                    if hit:
-                        return hit
+                    got = got or _scan(" ".join(nxt[k + 1:]), hit, depth + 1)
         elif depth < 3 and exe in EVALS and nxt:
-            hit = landing(nxt[0], verbs, depth + 1)
-            if hit:
-                return hit
-        elif exe == "git":
+            got = _scan(nxt[0], hit, depth + 1)
+        else:
+            got = hit(exe, nxt)
+        if got:
+            return got
+    return ""
+
+
+def _args(nxt):
+    """The words after a program's name up to the end of its command."""
+    args = []
+    for a in nxt:
+        if a in SEPS:
+            break
+        args.append(a)
+    return args
+
+
+def landing(cmd, verbs=LANDS):
+    """What a shell line runs that lands work, '' for none, read as `_scan` reads a line: git or git.exe, by the
+    last part of its path, followed past its own options by one of `verbs`; `gh pr merge`; a `gh api` call with a
+    method other than GET; or a graphql mutation that names a merge or a ref."""
+    def hit(exe, nxt):
+        if exe == "git":
             k = 0
             while k < len(nxt) and nxt[k].startswith("-") and nxt[k] not in SEPS:
                 k += 2 if nxt[k] in GIT_VALUED else 1
             if k < len(nxt) and nxt[k].lower() in verbs:
                 return f"git {nxt[k].lower()}"
         elif exe == "gh" and "merge" in verbs:
-            args = []
-            for a in nxt:
-                if a in SEPS:
-                    break
-                args.append(a)
+            args = _args(nxt)
             low = [a.lower() for a in args]
             if low[:2] == ["pr", "merge"]:
                 return "gh pr merge"
             if low[:1] == ["api"]:
-                hit = _gh_api(args[1:])
-                if hit:
-                    return hit
-    return ""
+                return _gh_api(args[1:])
+        return ""
+    return _scan(cmd, hit)
+
+
+GH_VALUED = {"-R", "--repo"}                       # gh's options that take the next word as their value
+
+
+def publishes(cmd):
+    """'gh issue create' when a shell line runs it, or its alias `gh issue new`, '' for none, read as `_scan` reads
+    a line: gh or gh.exe, by the last part of its path, followed past its options by those two words. The words in
+    a quoted argument, such as a commit message that names the command, are data."""
+    if "issue" not in str(cmd or ""):
+        return ""
+
+    def hit(exe, nxt):
+        if exe != "gh":
+            return ""
+        said, args, k = [], _args(nxt), 0
+        while k < len(args) and len(said) < 2:
+            if args[k].startswith("-"):
+                k += 2 if args[k] in GH_VALUED else 1
+                continue
+            said.append(args[k].lower())
+            k += 1
+        return "gh issue create" if said in (["issue", "create"], ["issue", "new"]) else ""
+    return _scan(cmd, hit)
 
 
 SLUG = re.compile(r"(?<![\w./\\-])([A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*)(?![\w/\\-])")
@@ -339,10 +383,23 @@ def plan_lines(home, sid):
                      for x in plans.load(home, sid).get("steps") or [])
 
 
+def repos_at(base):
+    """The GitHub repositories at a folder, each as its path and its `owner/name`: the folder's own, else those
+    nested one or two folders under it."""
+    for found in ([relay.repo_of(base)] if base else []), nested_repos(base):
+        out = [(repo, github_of(repo)) for repo in found if repo]
+        out = [(repo, slug) for repo, slug in out if slug]
+        if out:
+            return out
+    return []
+
+
 def ensure(home, s, text, base, where):
     """At a child's first message, `where` "brief", or its first task list, `where` "plan": the open issue its brief
     names, taken as its own and kept in s["issue"], or else FINDINGS_LINE, which sends its findings up in its report.
-    p4-phi files no issue. s is changed and the caller saves it. Returns the line for the child, '' for none."""
+    A child whose brief asks for no change takes no issue and is handed FINDINGS_READS, for the repository its brief
+    names or else the one it runs in. p4-phi files no issue. s is changed and the caller saves it. Returns the line
+    for the child, '' for none."""
     parent = relay._parent(s)
     if not parent or not on(home):
         return ""
@@ -356,8 +413,11 @@ def ensure(home, s, text, base, where):
     s["issueLooked"] = looked + [where]
     task, text = str(s.get("task") or ""), str(text or "")
     whole = text if task[:200] in text else "\n".join(p for p in (task, text) if p)
-    if not writing(whole):
-        return ""
+    if not writing(whole):                         # a check, an audit, a question: its findings go up all the same
+        if not (repos_named(whole, base) or repos_at(base)):
+            return ""
+        s["findingsTold"] = now()
+        return FINDINGS_READS
     repos = repos_named(whole, base)
     if not repos:
         return ""

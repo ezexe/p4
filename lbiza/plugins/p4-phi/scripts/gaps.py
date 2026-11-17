@@ -4,8 +4,9 @@ A session writes a feedback memory into the store's temportal/memory/ when a plu
 such as "a child never merges" or "a store moves only by p4.py sync". Such a memory hides a gap that belongs in the
 plugin. No session publishes a new issue on its own, so when a session writes a feedback memory whose rule describes
 session or plugin behaviour, p4-phi tells it to write the gap into this turn's report as one `Finding:` line. That
-line goes up to the puppeteer that controls its session tree, or to its orchestrator where none does,
-which publishes the issue on the plugin's repository and places the session that resolves it. A memory about code
+line goes up to the puppeteer that controls its session tree, or to its orchestrator where none does, which
+places the session that resolves it, and the session controls.publisher names for that tree publishes the issue on
+the plugin's repository: the line names that session by full title. A memory about code
 style gets nothing, nor does one that says the plugin already carries its rule, nor a write that only shortens or
 removes text.
 
@@ -245,19 +246,27 @@ def advice(home, store, s, path, root=None, before=""):
         disk["gapsTold"] = (told + [sig])[-50:]
         relay._write_json(spath, disk)
     import controls                                # the session that publishes the issues of this session tree
-    sid, title, supervisor = controls.publisher(home, s, store)
+    sid, title, kind = controls.publisher(home, s, store)
     repo = proj["repo"]
     says = re.sub(r"(?<!\.)\.$", "", relay._short(rule, 600))      # its last full stop would stand before the `;`
     line = (f"Finding: the plugin in {repo} does not carry the feedback memory \"{name}\", which says: {says}; "
             f"source: {relay.norm(path)}; test: <the test in {repo} that shows the plugin does it>; files: <the paths "
             f"in {repo} a fix changes>")
-    if sid == s["sessionId"]:
-        up = ("This session is " + ("the puppeteer" if supervisor else
+    standing = kind in ("issues coworker", "standing worker")   # it publishes, and its puppeteer places
+    if sid == s["sessionId"] and standing:
+        up = (f"This session is {controls.PUBLISHER[kind]}, so the issue is its own to publish: it publishes the "
+              f"issue in {repo} and hands its number up to its puppeteer, which places the session that resolves it.")
+    elif sid == s["sessionId"]:
+        up = ("This session is " + ("the puppeteer" if kind else
                                     "the orchestrator of its tree, and no puppeteer controls it")
               + f", so the finding is its own to publish and place: it publishes the issue in {repo} and places the "
                 f"session that resolves it.")
+    elif standing:
+        up = (f"The report carries it up unchanged, and the session that publishes for this session tree, "
+              f"{controls.PUBLISHER[kind]}, \"{title}\" `{sid}`, publishes the issue, while its puppeteer places the "
+              f"session that resolves it. This session publishes no issue and starts no session for it.")
     else:
-        who = (f"the puppeteer \"{title}\" `{sid}`, which controls this session tree," if supervisor else
+        who = (f"the puppeteer \"{title}\" `{sid}`, which controls this session tree," if kind else
                f"the orchestrator \"{title}\" `{sid}` of this session tree, which no puppeteer controls,")
         up = (f"The report carries it up unchanged, and {who} publishes the issue and places the session that resolves "
               f"it. This session publishes no issue and starts no session for it.")

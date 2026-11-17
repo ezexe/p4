@@ -766,6 +766,55 @@ class Supervisor(unittest.TestCase):
         self.assertTrue(context(r).startswith("phi (p4-phi): ") and page in context(r).split("\n", 1)[0],
                         context(r)[:300])
 
+    def test_the_publisher_of_a_tree_is_the_issues_coworker_then_the_standing_worker_then_the_puppeteer(self):  # 227
+        """ezexe/p4#227: controls.publisher names the one session that publishes the issues of a tree. Under no
+        puppeteer that is the tree's orchestrator. Under a puppeteer it is the issues coworker of the puppeteer's
+        standing worker once a coworker's brief marks one on record, else the standing worker, else the puppeteer,
+        for every session of the puppeteer's own tree and of each tree it controls, in any store."""
+        from unittest import mock
+        t = self.t
+
+        def publisher(host, proj=None):
+            """controls.publisher for a session, read afresh with the env a hook process gets."""
+            store = os.path.join(proj or t.proj, ".claude", "p4")
+            with mock.patch.dict(os.environ, t.env(host, proj)), mock.patch.dict(phi.RECORDS, clear=True), \
+                    mock.patch.dict(controls._SECTIONS, clear=True):
+                return controls.publisher(store, phi.load_session(store, host), store)
+
+        def archive(host):
+            app = os.path.join(t.app, host + ".json")
+            write(app, json.dumps({**json.loads(read(app)), "isArchived": True}))
+        everywhere = ((PUP, None), (TOP, None), (KID, None), (TOP2, self.other))
+        t.say(PUP, "Control the trees")
+        t.say(TOP, "Build the exporter")
+        t.say(TOP2, "Build the importer", proj=self.other)
+        t.say(TOP3, "Something else")
+        t.say(KID, "Fix the row")
+        self.assertEqual(publisher(KID), (TOP, "Build the narwhal exporter", ""), "a tree under no puppeteer")
+        t.cli(PUP, "controls", TOP, TOP2)
+        self.assertEqual(publisher(TOP3), (TOP3, "An orchestrator nobody put under the puppeteer", ""))
+        pup = (PUP, "Control the exporter and the importer trees, and tell ezexe where each stands", "puppeteer")
+        for host, proj in everywhere:
+            self.assertEqual(publisher(host, proj), pup, host)
+        t.record(WORKER, started_by=PUP, title="Puppeteer's standing worker")
+        t.say(WORKER, "Run the puppeteer's checks and counts.\n" + controls.WORKER_BRIEF)
+        worker = (WORKER, "Puppeteer's standing worker", "standing worker")
+        for host, proj in everywhere + ((WORKER, None),):
+            self.assertEqual(publisher(host, proj), worker, host)
+        t.record(CO1, started_by=WORKER, title="Check the archives")
+        t.record(CO2, started_by=WORKER, title="Draft and publish the issues")
+        t.say(CO1, "Check the archives.\nFiles: none")
+        self.assertEqual(publisher(KID), worker, "a coworker whose brief lacks the line is no issues coworker")
+        t.say(CO2, "Publish each finding that needs an issue.\n" + controls.ISSUES_BRIEF)
+        self.assertEqual(t.session(CO2).get("standingGroup"), "issues", "the brief's line marks it on its record")
+        coworker = (CO2, "Draft and publish the issues", "issues coworker")
+        for host, proj in everywhere + ((WORKER, None), (CO1, None), (CO2, None)):
+            self.assertEqual(publisher(host, proj), coworker, host)
+        archive(CO2)
+        self.assertEqual(publisher(KID), worker, "an issues coworker the app archived publishes nothing")
+        archive(WORKER)
+        self.assertEqual(publisher(TOP2, self.other), pup, "nor does an archived standing worker")
+
 class TreeAndClicks(unittest.TestCase):
     """The tree in the app is the true tree, and ezexe acts by click where one exists. A start a child queued behind
     a busy writer is made by the child itself once that writer is free: a turn ezexe did not begin hands it the

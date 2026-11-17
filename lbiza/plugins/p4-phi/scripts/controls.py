@@ -24,8 +24,11 @@ The watcher every orchestrator has is puppeteer.py's and is another thing.
                ezexe changed during the run and its notes by kind. After a compaction its path is the first thing the
                puppeteer is handed.
   findings     no session publishes a new issue on its own. A finding goes up in the reports of the session tree as one
-               `Finding:` line, and the puppeteer that controls the tree publishes what needs an issue and
-               places the session that resolves it; where none controls the tree, its orchestrator does.
+               `Finding:` line, and the puppeteer that controls the tree places the session that resolves it, while
+               one session publishes what needs an issue for every tree it controls: the issues coworker of its
+               standing worker, that worker until such a coworker is on record, and the puppeteer until it has a
+               worker. Where none controls the tree, its orchestrator does both. `publisher` names that session, and
+               a `gh issue create` in any other session is refused with its title.
   a boundary   a controlled tree has closed, or every controlled session is idle with no request waiting. The
                puppeteer is told once to keep what is not on its board with `note`. Claude Code compacts a
                session by itself and p4-phi asks ezexe nothing about it. p4-phi speaks only
@@ -292,6 +295,8 @@ ASK = ("phi (p4-phi): this session is controlled by a puppeteer, so where a line
 
 WORKER_BRIEF = "Standing worker of its puppeteer"
 WORKER_LINE = re.compile(r"(?m)^\s*Standing worker of its puppeteer\b")
+ISSUES_BRIEF = "Issues coworker of its standing worker"      # the line of a coworker's brief that marks it on record
+ISSUES_LINE = re.compile(r"(?m)^\s*Issues coworker of its standing worker\b")
 CLEAR_AT = 60                    # percent of a session's context past which it clears itself and resumes from its page
 HAND_UP = ("It hands {up} a page's path and its counts, never the page's text, and it never publishes a result as "
            "an Artifact or sends it as a file unless ezexe asks.")
@@ -303,11 +308,17 @@ WORKER_FIRST = ("phi (p4-phi): this session is the standing worker of the puppet
                 "publishes. In this turn, since the app refuses starts in a turn another session's message began, it "
                 "starts a standing coworker for each group of its tasks, each brief with a line `Model and effort: "
                 "<model> at <effort> effort` naming the smallest model the group needs: Opus for judging work such as "
-                "issue writing, Sonnet for mechanical checks, Haiku for plain reads. Each coworker ends every turn "
+                "issue writing, Sonnet for mechanical checks, Haiku for plain reads. The brief of the coworker that "
+                "drafts and publishes the issues also holds the line `" + ISSUES_BRIEF + "`, which makes it the one "
+                "session of the puppeteer's trees whose `gh issue create` runs; until one is on record that call "
+                "runs here. Each coworker ends every turn "
                 "with one message to it, and it ends each turn with one closing message to the puppeteer holding "
                 "only what is ezexe's or what the puppeteer asked for. " + HAND_UP + " " + STATE_PAGE)
 COWORKER_FIRST = ("phi (p4-phi): this session is a standing coworker of \"{title}\" `{pid}`, the standing worker of a "
                   "puppeteer. It ends every turn with one message to that worker. " + HAND_UP + " " + STATE_PAGE)
+ISSUES_FIRST = (" Its brief makes it the issues coworker: the one session whose `gh issue create` runs for the trees "
+                "that puppeteer controls. It checks each finding against the open issues and the running sessions, "
+                "publishes the ones that need an issue, and hands each number up.")
 
 
 def is_worker_brief(text):
@@ -351,7 +362,8 @@ def start_refused(home, s, brief, store):
 
 def worker_first(home, s, prompt, store):
     """The standing worker's or a standing coworker's first message: what it is and how it hands up. It records the
-    worker on its puppeteer's session; the caller saves `s`. '' for any other session."""
+    worker on its puppeteer's session, and a coworker whose brief holds ISSUES_BRIEF as the issues coworker, by
+    `standingGroup` on its own record; the caller saves `s`. '' for any other session."""
     pid = PHI.spawned_from(s)
     if not pid:
         return ""
@@ -364,7 +376,11 @@ def worker_first(home, s, prompt, store):
         return WORKER_FIRST.format(title=full_title(pid, up), pid=pid, page=page, up="its puppeteer")
     if up.get("standingKind") == "worker":
         s["standingKind"] = "coworker"
-        return COWORKER_FIRST.format(title=full_title(pid, up), pid=pid, page=page, up="that worker")
+        said = COWORKER_FIRST.format(title=full_title(pid, up), pid=pid, page=page, up="that worker")
+        if ISSUES_LINE.search(str(prompt or "")):
+            s["standingGroup"] = "issues"
+            said += ISSUES_FIRST
+        return said
     return ""
 
 
@@ -576,15 +592,56 @@ def ask_text(s):
     return ASK.format(cmd=PHI.commands(), title=full_title(held["sessionId"])) if held.get("sessionId") else ""
 
 
+def issues_coworker(home, worker):
+    """The live coworker of a standing worker whose brief marked it the issues coworker, the first started when
+    there are two; '' for none."""
+    marked = [(str(k.get("createdAt") or ""), sid) for sid, k in relay._sessions(home).items()
+              if PHI.spawned_from(k) == worker and k.get("standingGroup") == "issues" and live(sid)]
+    return min(marked)[1] if marked else ""
+
+
+PUBLISHER = {"issues coworker": "the issues coworker of its puppeteer's standing worker",
+             "standing worker": "its puppeteer's standing worker", "puppeteer": "its puppeteer",
+             "": "the orchestrator of its tree"}
+
+
 def publisher(home, s, store=""):
-    """The session that publishes the issues a session's findings need: the puppeteer that controls the
-    orchestrator of its tree, else that orchestrator, which may be the session itself. Returns its
-    sessionId, its full title, and whether it is a puppeteer."""
+    """The session that publishes the issues a session's findings need, the one session of its tree whose
+    `gh issue create` runs. Under a puppeteer, which is the top of the session's chain or controls it: the issues
+    coworker of that puppeteer's standing worker once one is on record, else the standing worker, else the
+    puppeteer. Under none: the orchestrator of its tree, which may be the session itself. Returns its sessionId,
+    its full title, and what it is, a key of PUBLISHER: "issues coworker", "standing worker", "puppeteer", or ''
+    for an orchestrator no puppeteer controls."""
     chain = PHI.chain_of(home, s["sessionId"])
     top = (PHI.load_session(home, chain[-1]) or {"sessionId": chain[-1]}) if chain else s
-    pid = top["sessionId"] if is_puppeteer(top, store) else puppeteer_of(top, store)[0]
-    sid = pid or top["sessionId"]
-    return sid, full_title(sid, top if sid == top["sessionId"] else None), bool(pid)
+    pid, pstore = (top["sessionId"], home) if is_puppeteer(top, store) else puppeteer_of(top, store)
+    if not pid:
+        return top["sessionId"], full_title(top["sessionId"], top), ""
+    p = top if pid == top["sessionId"] else PHI.load_session(pstore, pid)
+    worker = worker_of(p)
+    if worker and live(worker):
+        co = issues_coworker(pstore, worker)
+        return (co, full_title(co), "issues coworker") if co else (worker, full_title(worker), "standing worker")
+    return pid, full_title(pid, p), "puppeteer"
+
+
+def create_refused(home, s, store=""):
+    """For a `gh issue create` in the session `s`: '' in the session that publishes for its tree, else the one line
+    that refuses the call, naming the `Finding:` form and that session by full title. A session below it writes the
+    line into its report; its puppeteer and its standing worker, which the reports go up to, send it the line."""
+    sid, title, kind = publisher(home, s, store)
+    if sid == s["sessionId"]:
+        return ""
+    who = PUBLISHER[kind]
+    above = kind in ("issues coworker", "standing worker") and (is_puppeteer(s, store)
+                                                              or s.get("standingKind") == "worker")
+    if above:                                      # said of the session's own worker or coworker
+        who = "its own issues coworker" if s.get("standingKind") == "worker" else who.replace("its puppeteer's", "its")
+    how = ("Send that session the finding with SendMessage, as one line in this form" if above else
+           "Write the finding into this session's report as one line in this form, which goes up unchanged")
+    return (f"phi (p4-phi): this call is refused: no session publishes a new issue on its own, and `gh issue create` "
+            f"runs only in the session that publishes for this session's tree, {who}, \"{title}\" `{sid}`. {how}: "
+            f"`{issues.FINDING_FORM}`.")
 
 
 # --- sessions that come under control without a command ----------------------------------------------------------------

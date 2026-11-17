@@ -25,10 +25,14 @@ sys.path.insert(0, HERE)
 import inproc  # noqa: E402
 import issues  # noqa: E402
 from test_phi import CLI, GRAND, KID, KID2, TOP, Tree, context, read, write  # noqa: E402
+import controls  # noqa: E402  after test_phi, whose import of phi.py hands controls.py that module
 
 A, B = KID, KID2
 SUP = "local_sup00001"
 CLI.setdefault(SUP, "eeee5555-0000-4000-8000-000000000000")
+WRK, COW, COW2 = "local_wrk00001", "local_cow00001", "local_cow00002"     # a standing worker and two coworkers
+for k, sid in enumerate((WRK, COW, COW2)):
+    CLI.setdefault(sid, f"eeee666{k}-0000-4000-8000-000000000000")
 RECALL = os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh")
 FAKE_GH = r'''
 import json, os, sys
@@ -149,12 +153,14 @@ class Loop(unittest.TestCase):
 
     def test_a_writing_child_in_a_github_repo_files_no_issue_and_is_told_to_send_its_findings_up(self):
         """A writing child whose brief names no issue is handed the `Finding:` line once and files nothing; a
-        read-only child, a repository with no GitHub remote and P4_PHI_ISSUES=0 get neither an issue nor the line."""
+        read-only child is handed its form of the line and takes no issue; a repository with no GitHub remote and
+        P4_PHI_ISSUES=0 get neither an issue nor the line."""
         ctx = context(self.t.say(A, f"Fix the off-by-one in {self.work}/lib/x.py and commit it. Archive when done."))
         self.assertIn(issues.FINDINGS_LINE, ctx)
         self.assertNotIn("issue", self.t.session(A), "no issue record")
         self.assertNotIn("Finding:", self.plan(A, items("Fix x", "Run the tests")), "said once")
-        self.assertNotIn("Finding:", context(self.t.say(B, f"Check what {self.work}/lib/x.py does and report it.")))
+        self.assertIn(issues.FINDINGS_READS, context(self.t.say(B, f"Check what {self.work}/lib/x.py does and report "
+                                                                   f"it.")), "a read-only child's findings go up too")
         self.assertNotIn("issue", self.t.session(B), "a read-only child gets no issue")
         self.assertNotIn("Finding:", context(self.t.say(GRAND, f"Fix the bug in {self.plain}/a.py and commit it.")))
         self.assertNotIn("issue", self.t.session(GRAND), "a repo with no GitHub remote gets none")
@@ -650,6 +656,141 @@ class FindingsGoUp(unittest.TestCase):
             self.assertIn("Finding: ", gap)
             self.assertNotIn("gh issue create", gap)
         self.assertEqual(self.created(), [], "and no issue is filed by anyone")
+
+    CREATE = "gh issue create -R ezexe/demo --title x --body y"
+
+    def pre(self, host, command, tool="Bash", **env):
+        """One shell call through the `lookup-check` entry hooks.json runs before every tool call: its
+        hookSpecificOutput, {} when the hook said nothing."""
+        self._calls = getattr(self, "_calls", 0) + 1
+        body = {"session_id": CLI.get(host, host), "cwd": self.work, "hook_event_name": "PreToolUse",
+                "tool_name": tool, "tool_input": {"command": command}, "tool_use_id": f"toolu_gh{self._calls:03d}"}
+        r = inproc.run(["sh", RECALL, "lookup-check"], input=json.dumps(body), capture_output=True, text=True,
+                       timeout=60, env=self.t.env(host, **env))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout).get("hookSpecificOutput") or {} if r.stdout.strip() else {}
+
+    def refused(self, host, command=CREATE, tool="Bash", **env):
+        """The reason `host`'s call is denied with, '' when it passes."""
+        out = self.pre(host, command, tool, **env)
+        return out.get("permissionDecisionReason", "") if out.get("permissionDecision") == "deny" else ""
+
+    def test_gh_issue_create_is_refused_outside_the_publisher_of_its_tree(self):
+        """ezexe/p4#227. https://code.claude.com/docs/en/permissions.md, "Manage permissions": the `/permissions`
+        dialog "lists all permission rules and the `settings.json` file each rule comes from", so a rule on
+        `gh issue create` holds in every session that reads the file alike. "Extend permissions with hooks": hooks
+        "evaluate permissions at runtime", and "The hook output can deny the tool call". So the PreToolUse check
+        refuses the call in a worker with one line that holds the `Finding:` form and its tree's publisher by full
+        title, and the same call in the publisher's session passes."""
+        t = self.t
+        t.say(TOP, "Build the demo")
+        t.say(A, f"Fix the off-by-one in {self.work}/lib/x.py and commit it. Archive when done.")
+        why = self.refused(A)
+        with self.subTest("a worker's call is denied with the form and the publisher's title, in one line"):
+            self.assertIn(self.FORM, why)
+            self.assertIn(f"the orchestrator of its tree, \"top\" `{TOP}`", why)
+            self.assertIn("into this session's report", why)
+            self.assertNotIn("\n", why)
+        with self.subTest("the same call in the publisher's session passes"):
+            self.assertEqual(self.pre(TOP, self.CREATE), {})
+        with self.subTest("PowerShell, gh's alias, an option ahead of the words and a shell's script are read"):
+            self.assertIn(self.FORM, self.refused(A, tool="PowerShell"))
+            self.assertIn(self.FORM, self.refused(A, "cd work; gh.exe issue new --title x"))
+            self.assertIn(self.FORM, self.refused(A, "gh -R ezexe/demo issue create --title x"))
+            self.assertIn(self.FORM, self.refused(A, f"bash -lc \"{self.CREATE}\""))
+        with self.subTest("another gh call, and the words as data, pass"):
+            self.assertEqual(self.refused(A, "gh issue view 7 -R ezexe/demo"), "")
+            self.assertEqual(self.refused(A, "gh issue list -R ezexe/demo --search \"issue create\""), "")
+            self.assertEqual(self.refused(A, "git commit -m \"gh issue create is the publisher's\""), "")
+            self.assertEqual(issues.publishes("echo 'gh issue create'"), "")
+            self.assertEqual(issues.publishes(self.CREATE), "gh issue create")
+        with self.subTest("the issue loop's switch turns the refusal off"):
+            self.assertEqual(self.refused(A, P4_PHI_ISSUES="0"), "")
+        self.assertEqual(self.created(), [], "the check runs no gh")
+
+    def test_a_read_only_worker_is_handed_the_finding_form_at_its_first_message(self):
+        """ezexe/p4#227: a worker whose brief is a check that writes nothing takes no issue and is handed the
+        `Finding:` form at its first message, once, as a writing worker is."""
+        t = self.t
+        t.record(B, TOP, title="the x check")
+        t.say(TOP, "Build the demo")
+        first = context(t.say(B, "Check that the suite passes on main and report what fails.\nFiles: none"))
+        self.assertIn(self.FORM, first)
+        self.assertEqual(first.count(issues.FINDINGS_READS), 1)
+        self.assertIn("takes no issue as its own", first)
+        self.assertIn("passes those lines up unchanged", first)
+        self.assertNotIn("issue", t.session(B), "it takes no issue")
+        self.assertNotIn("Finding:", context(t.say(B, "And the lint?")), "said at the first message only")
+        named = "local_kid00003"
+        t.record(named, TOP, title="the #7 check")
+        self.assertIn(issues.FINDINGS_READS, context(t.say(named, "Check the pushed work for ezexe/demo#7 and report "
+                                                                  "it.")), "an issue it only reads is not taken")
+        self.assertNotIn("issue", t.session(named))
+        off = "local_kid00004"
+        t.record(off, TOP, title="the switched-off check")
+        self.assertNotIn("Finding:", context(t.say(off, "Check that the suite passes and report what fails.",
+                                                   P4_PHI_ISSUES="0")), "the switch turns it off")
+        self.assertEqual(self.created(), [])
+
+    def test_under_a_puppeteer_only_the_issues_coworker_of_its_standing_worker_publishes(self):
+        """ezexe/p4#227: under a puppeteer the publisher is the issues coworker of the puppeteer's standing worker
+        once one is on record, else the standing worker, else the puppeteer. The call passes in that session and is
+        denied in every other session of the puppeteer's trees, the puppeteer's own among them, with the publisher's
+        full title in the reason."""
+        t = self.t
+        t.record(WRK, SUP, title="Run the puppeteer's checks")
+        t.record(COW, WRK, title="Draft and publish the issues")
+        t.record(COW2, WRK, title="Check the archives")
+        t.say(SUP, "Watch the demo trees")
+        t.say(TOP, "Build the demo")
+        t.cli(SUP, "controls", TOP)
+        t.say(A, f"Fix the off-by-one in {self.work}/lib/x.py and commit it. Archive when done.")
+        with self.subTest("with no standing worker on record the puppeteer publishes"):
+            self.assertEqual(self.refused(SUP), "")
+            self.assertIn(f"its puppeteer, \"Watch the demo trees\" `{SUP}`", self.refused(TOP))
+            self.assertIn(f"`{SUP}`", self.refused(A))
+        said = context(t.say(WRK, "Run the puppeteer's checks and counts.\n" + controls.WORKER_BRIEF))
+        with self.subTest("then its standing worker, which is told the line that marks the issues coworker"):
+            self.assertIn(f"`{controls.ISSUES_BRIEF}`", said)
+            self.assertEqual(self.refused(WRK), "")
+            why = self.refused(SUP)
+            self.assertIn(f"its standing worker, \"Run the puppeteer's checks\" `{WRK}`", why)
+            self.assertIn("Send that session the finding with SendMessage", why)
+            self.assertIn(self.FORM, why)
+        said = context(t.say(COW, "Check each finding against the open issues and publish the ones that need one.\n"
+                                  + controls.ISSUES_BRIEF))
+        t.say(COW2, "Check the archives.\nFiles: none")
+        with self.subTest("the brief line marks the issues coworker on its record"):
+            self.assertIn("the one session whose `gh issue create` runs", said)
+            self.assertEqual(t.session(COW).get("standingGroup"), "issues")
+            self.assertNotIn("standingGroup", t.session(COW2))
+        with self.subTest("the call passes in the issues coworker's session"):
+            self.assertEqual(self.refused(COW), "")
+        title = f"\"Draft and publish the issues\" `{COW}`"
+        with self.subTest("and is denied in the puppeteer's, with the coworker's title in the reason"):
+            why = self.refused(SUP)
+            self.assertIn(f"the issues coworker of its standing worker, {title}", why)
+            self.assertIn(self.FORM, why)
+        with self.subTest("and in its standing worker's, another coworker's and each session of a controlled tree"):
+            self.assertIn(f"its own issues coworker, {title}", self.refused(WRK))
+            for host in (COW2, TOP, A):
+                why = self.refused(host)
+                self.assertIn(f"the issues coworker of its puppeteer's standing worker, {title}", why, host)
+                self.assertIn("into this session's report", why, host)
+        mem = os.path.join(t.p4, "temportal", "memory", "children-on-parent-branch.md")
+        write(mem, "---\nname: children-on-parent-branch\ndescription: x\nmetadata:\n  type: feedback\n---\n\n"
+                   "A session started from another works on the parent's branch, and only the parent merges and "
+                   "pushes.\n")
+        gap = self.record(A, "Write", {"file_path": mem}, "ok", "toolu_write02", P4_PHI_PLUGIN_ROOT=self.plug)
+        with self.subTest("the plugin-gap line names the issues coworker as the session that publishes"):
+            self.assertIn(f"the issues coworker of its puppeteer's standing worker, {title}, publishes the issue",
+                          gap)
+        app = os.path.join(t.app, COW + ".json")
+        write(app, json.dumps({**json.loads(read(app)), "isArchived": True}))
+        with self.subTest("once the app has archived the coworker, the standing worker publishes again"):
+            self.assertEqual(self.refused(WRK), "")
+            self.assertIn(f"`{WRK}`", self.refused(SUP))
+        self.assertEqual(self.created(), [])
 
 
 class Words(unittest.TestCase):

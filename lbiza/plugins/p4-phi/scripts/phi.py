@@ -1027,8 +1027,12 @@ def findings_text(home, s, new, store=""):
                 + listed)
     elif controls.puppeteer_of(s, store)[0]:
         pid = controls.puppeteer_of(s, store)[0]
+        by, by_title, kind = controls.publisher(home, s, store)
+        does = ("it publishes the issues they need and places" if by == pid else
+                f"{controls.PUBLISHER[kind].replace('its puppeteer', 'that puppeteer')}, \"{by_title}\" `{by}`, "
+                f"publishes the issues they need, while the puppeteer places")
         rest = (f"{head}. They go up to the puppeteer \"{controls.full_title(pid)}\" `{pid}`, whose board "
-                f"lists them, and it publishes the issues they need and places the session that resolves each: this "
+                f"lists them, and {does} the session that resolves each: this "
                 f"session publishes none.")
     else:
         rest = (f"{head}, and no puppeteer controls this session tree, so the findings in them are this "
@@ -1980,6 +1984,34 @@ def h_restart_check(payload):
     if not why:
         return None
     RAN["restart"] = "held"
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                   "permissionDecisionReason": why}}
+
+
+# permissions.md, "Manage permissions": the `/permissions` dialog "lists all permission rules and the `settings.json`
+# file each rule comes from", and "Settings precedence": "Permission rules follow the same settings precedence as all
+# other Claude Code settings". A rule names a tool and a pattern and holds in every session that reads its file, so
+# an ask or deny rule on `gh issue create` cannot tell the session that publishes for a tree from any other. The
+# same page, "Extend permissions with hooks": hooks "evaluate permissions at runtime", and "The hook output can deny
+# the tool call". So the part a rule lacks, which session runs the call, is this PreToolUse check.
+
+def h_issue_guard(payload):
+    """PreToolUse on a shell call that runs `gh issue create`: refused in every session but the one that publishes
+    for its tree, which controls.publisher names, with one line naming the `Finding:` form and that session by full
+    title. Silent in that session, in a session p4-phi holds no record of, and with the issue loop off."""
+    if str(payload.get("tool_name") or "") not in SHELL_TOOLS:
+        return None
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    if not issues.publishes(inp.get("command")):
+        return None
+    me = Me(payload)
+    if not me.home or not me.id or not issues.on(me.home):
+        return None
+    s = load_session(me.home, me.id)
+    why = controls.create_refused(me.home, s, me.store) if s.get("sessionId") else ""
+    if not why:
+        return None
+    RAN["issue_guard"] = "refused"
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                    "permissionDecisionReason": why}}
 
@@ -3062,6 +3094,7 @@ HOOKS["go-guard"] = ROUTED["go-guard"] = ("PreToolUse", h_go_guard)
 HOOKS["restart-check"] = ROUTED["restart-check"] = ("PreToolUse", h_restart_check)
 ROUTED.update({"agent-launch": ("PreToolUse", h_agent_launch), "agent-start": ("SubagentStart", h_agent_start),
                "agent-pre": ("PreToolUse", h_agent_call), "agent-stop": ("SubagentStop", h_agent_stop)})
+HOOKS["issue-guard"] = ROUTED["issue-guard"] = ("PreToolUse", h_issue_guard)
 
 
 def hook_main(name):

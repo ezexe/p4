@@ -107,6 +107,11 @@ A message of ezexe's that `route_down` sends to a controlled session's topic is 
 A puppeteer's turns hold messages only, and every other task goes to its one standing worker, which it starts under itself with the brief line `Standing worker of its puppeteer` and which splits its task groups into standing coworkers.
 A second such start is refused while the first is live, and a puppeteer's shell call or edit is answered with a line that sends the task to its worker.
 The worker's and each coworker's first message says what it is, that it hands up a page's path and its counts and never publishes a result as an Artifact or a file unless ezexe asks, and that it keeps a state page, `state.md` in the scratchpad directory the app names for its first turn, the folder its hooks get as `scratchpad_dir`.
+A coworker whose brief holds the line `Issues coworker of its standing worker` is the issues coworker, kept on its record as `standingGroup`, and the worker's first message names that line.
+One session publishes the issues of a tree: under a puppeteer the issues coworker of its standing worker, that worker until a brief marks such a coworker, and the puppeteer until it has a worker, and under no puppeteer the tree's orchestrator.
+A Bash or PowerShell call that runs `gh issue create` in any other session is refused with one line that names the `Finding:` form and that session by full title, since a permission rule on the command holds in every session that reads its settings file and cannot tell one session from another.
+`phi.issues` false turns that refusal off with the rest of the issue loop.
+A worker whose brief asks for no change takes no issue and is handed the `Finding:` form at its first message, as a writing worker whose brief names no open issue is.
 At a message carrying reports, a puppeteer is handed a line naming each reporting session whose effort to raise, lower or set low with `set_session_effort`; a call to `set_session_model` is refused by the deny rule p4's settings keeper writes, since a model is passed only on the start call.
 
 ## State pages and clearing
