@@ -37,7 +37,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VENV = ROOT / ".venv"
-REQUIREMENTS = ROOT / "requirements.txt"
+PACKAGES = ("anthropic>=2.6",)      # p4's own needs beyond ezexe/phi and torch: the SDK p4-phi's teacher.py calls
 PHI_GIT = "git+https://github.com/ezexe/phi"
 TORCH_CPU = "https://download.pytorch.org/whl/cpu"
 CHECK = ("torch", "numpy", "phi_prune", "phi_rank", "phi_store", "phi_model", "anthropic")
@@ -177,7 +177,7 @@ def main(argv=None) -> int:
         steps.append([py, "-m", "pip", "install", "-q", "numpy"])    # ezexe/phi's other dependency, without torch
     steps.append([py, "-m", "pip", "install", "-q"] + ([] if torch_ok else ["--no-deps"])
                  + (["-e", src] if editable else [src]))
-    steps.append([py, "-m", "pip", "install", "-q", "-r", REQUIREMENTS])
+    steps.append([py, "-m", "pip", "install", "-q", *PACKAGES])
     for s in steps:
         if run(*s):
             print("make_venv.py: the step above failed; .venv is left as it is")

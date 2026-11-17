@@ -67,7 +67,7 @@ class Venv(unittest.TestCase):
 
     def test_no_torch_build_finishes_the_venv_without_it(self):
         """Every torch install fails, as on an Intel Mac on Python 3.14: ezexe/phi goes in with --no-deps beside numpy,
-        the requirements still install, and the run ends ready rather than failing."""
+        the anthropic SDK still installs, and the run ends ready rather than failing."""
         v.python_of(v.VENV).parent.mkdir(parents=True)
         v.python_of(v.VENV).write_text("")
         self.phi(self.tmp / "phi")
@@ -89,7 +89,7 @@ class Venv(unittest.TestCase):
         self.assertEqual(len(phi), 1)
         self.assertIn("--no-deps", phi[0])
         self.assertTrue(any(c[-1] == "numpy" for c in calls))
-        self.assertTrue(any(str(v.REQUIREMENTS) in c for c in calls))
+        self.assertTrue(any(c[-len(v.PACKAGES):] == list(v.PACKAGES) for c in calls))
 
     def test_an_intel_mac_finishes_the_venv_without_torch(self):
         """PyPI's last torch for macOS on x86_64 is 2.2.2 and ezexe/phi needs 2.4.1 or newer, so on an Intel Mac no
