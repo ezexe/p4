@@ -152,8 +152,8 @@ class TreeOfPlans(unittest.TestCase):
         text = plans.agent_launch(home, sa, "toolu_a1", {"prompt": "read the layout code", "description": "probe"})
         self.assertIn("subagent of", text)
         self.assertIn("step 2.1", text)
-        self.assertTrue(plans.agent_bind(home, sa, "agentx001"), "its first tool call binds its id")
-        self.assertFalse(plans.agent_bind(home, sa, "agentx001"))
+        self.assertTrue(plans.agent_bind(home, sa, "agentx001", "Explore"), "its first tool call binds its id")
+        self.assertFalse(plans.agent_bind(home, sa, "agentx001", "Explore"))
         step = plans.load(home, A)["steps"][0]
         self.assertEqual([(x["id"], x["tool"]) for x in step["tasks"]], [("agentx001", "Agent")])
         self.assertNotIn("agentsPending", plans.load(home, A))
@@ -169,9 +169,9 @@ class TreeOfPlans(unittest.TestCase):
         self.plan(A, items("Rewrite p4conf.LAYOUT and OLDER", "Move recall/ into phi/", "Commit the move"))
         self.assertEqual(plans.load(home, A)["steps"][0]["tasks"][0]["id"], "agentx001", "reworded in place")
         self.assertIn("now reads \"Rewrite p4conf.LAYOUT and OLDER\"", plans.agent_warn(home, sa, "agentx001"))
-        self.assertIn(f"down: \"the layout child\" launched subagent agentx001 for its step 2.1",
+        self.assertIn("down: \"the layout child\" launched subagent agentx001 for its step 2.1, agent type `Explore`.",
                       " ".join(w["text"] for w in relay._session(home, TOP).get("relayPending") or []),
-                      "the parent is told the subagent's id")
+                      "the parent is told the subagent's id and the agent type its hook input carries")
 
     def test_a_workers_subagent_is_handed_no_run_of_the_orchestrators_prompt(self):
         """ezexe/p4#204: the Agent launch of a worker, through the `agent` PreToolUse hook, hands its subagent the
@@ -218,11 +218,66 @@ class TreeOfPlans(unittest.TestCase):
         p["steps"][0]["content"] = "Rewrite p4conf.LAYOUT for the temportal folder"
         relay._write_json(plans._path(home, A), p)
         self.assertIn("now reads \"Rewrite p4conf.LAYOUT for the temportal folder\"", plans.agent_warn(home, sa, "agenty002"))
-        self.assertTrue(plans.agent_stop(home, sa, "agenty002", "Moved; tests green."))
+        self.assertTrue(plans.agent_stop(home, sa, "agenty002"))
         task = plans.load(home, A)["steps"][0]["tasks"][0]
-        self.assertEqual((task["status"], task["result"]), ("completed", "Moved; tests green."))
+        self.assertEqual(task["status"], "completed")
         self.assertEqual(plans.agent_warn(home, sa, "agenty002"), "", "a stopped subagent is told nothing")
-        self.assertTrue(plans.agent_stop(home, sa, "agentz003", "no tools used"), "one that made no call is bound at stop")
+        self.assertTrue(plans.agent_stop(home, sa, "agentz003"), "one that made no call is bound at stop")
+
+    def test_a_subagents_task_holds_no_copy_of_what_claude_code_keeps(self):
+        """Candidate 12: the description, the start, the result and the files a subagent wrote are in the Agent
+        call's input, the Stop input's `background_tasks` and the subagent's own transcript, so its task holds the
+        step it serves and the anchor's version at its launch, and each reader takes the rest from where Claude Code
+        keeps it."""
+        t, home = self.t, self.t.p4
+        hook = os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh")
+
+        def run(name, body):
+            r = inproc.run(["sh", hook, name], input=json.dumps({"session_id": CLI[A], "cwd": t.proj, **body}),
+                           capture_output=True, text=True, timeout=60, env=t.env(A, P4_RECALL_SYNC="1"))
+            self.assertEqual(r.returncode, 0, r.stderr)
+
+        self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
+        run("agent", {"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_use_id": "toolu_copy",
+                      "tool_input": {"prompt": "list every reader of the quagga table",
+                                     "description": "Quagga table readers", "subagent_type": "Explore"}})
+        sub = {"agent_id": "agentc005", "agent_type": "Explore"}
+        run("lookup-record", {**sub, "hook_event_name": "PostToolUse", "tool_name": "Read", "tool_use_id": "toolu_c1",
+                              "tool_input": {"file_path": "README.md"}, "tool_response": "ok"})
+        node = json.load(open(relay.anchor_path(home, TOP), encoding="utf-8"))["nodes"][A]
+        self.assertEqual(node["plan"]["steps"][0]["tasks"],
+                         [{"id": "agentc005", "tool": "Agent", "status": "open", "heads": []}],
+                         "the anchor carries the running subagent by its id, under its step")
+        path = os.path.join(t.tmp, "agent-agentc005.jsonl")
+        from test_phi import transcript
+        transcript(path, "list every reader of the quagga table",
+                   [("Write", {"file_path": "docs/quagga.md", "content": "x"}, "ok")], "Seven readers, all listed.")
+        run("subagent-stop", {**sub, "hook_event_name": "SubagentStop", "agent_transcript_path": path,
+                              "last_assistant_message": "Seven readers, all listed."})
+        task = plans.load(home, A)["steps"][0]["tasks"][0]
+        self.assertEqual(set(task), {"id", "tool", "agent", "status", "anchorSeen", "stepText", "wrote"}, task)
+        self.assertEqual((task["id"], task["status"], task["stepText"], task["wrote"]),
+                         ("agentc005", "completed", "Rewrite p4conf.LAYOUT", ["docs/quagga.md"]),
+                         "the files are read from the transcript the SubagentStop input names")
+        kept = json.dumps(plans.load(home, A))
+        for copied in ("Quagga table readers", "list every reader", "Seven readers"):
+            self.assertNotIn(copied, kept, "its description, prompt and result stay with Claude Code")
+        told = " ".join(w["text"] for w in relay._session(home, TOP).get("relayPending") or [])
+        self.assertIn("launched subagent agentc005 for its step 2.1, agent type `Explore`.", told)
+        self.assertNotIn("Quagga", told)
+        # a turn's words are held against a running subagent's description as the Stop input lists it
+        s = {}
+        plans.keep_in_flight(s, {"background_tasks": [
+            {"id": "agentc006", "type": "subagent", "status": "running", "description": "Quagga table readers",
+             "agent_type": "Explore"},
+            {"id": "bshell001", "type": "shell", "status": "running", "description": "Quagga table dump",
+             "command": "sh dump.sh"}]})
+        self.assertEqual(plans.flying(s), ["Quagga table readers"])
+        steps = plans.open_steps(home, A)
+        said = "The quagga table gained two readers in the exporter."
+        self.assertEqual(plans.matches(said, steps, [], ""), [], "no step's own words bear on it")
+        self.assertEqual([st["addr"] for st, _ in plans.matches(said, steps, [], "", flying=plans.flying(s))],
+                         ["2.1"], "it counts for the step in progress, which the running subagent serves")
 
     def test_a_siblings_note_is_told_to_a_subagent_once_however_often_that_sibling_changes(self):
         """A subagent's tool calls, run through the `lookup-check` and `lookup-record` hooks, tell it a sibling's note

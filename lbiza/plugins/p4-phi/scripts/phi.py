@@ -2858,10 +2858,7 @@ def h_agent_call(payload):
         text = plans.agent_warn(me.home, s, agent_id)
         RAN["agent"] = "warned" if text else "checked"
         return text or None
-    bound = plans.agent_bind(me.home, s, agent_id)
-    wrote = agent_writes([{"name": payload.get("tool_name"), "input": payload.get("tool_input")}])
-    if wrote and plans.agent_wrote(me.home, me.id, agent_id, wrote):
-        RAN["agent_wrote"] = len(wrote)
+    bound = plans.agent_bind(me.home, s, agent_id, str(payload.get("agent_type") or ""))
     if bound:
         try:
             os.makedirs(os.path.dirname(agent_marker(me, agent_id)), exist_ok=True)
@@ -2899,13 +2896,14 @@ def agent_writes(calls):
 
 
 def h_agent_stop(payload):
-    """SubagentStop, from the retrieval hook's entry: the subagent's entry closed with its last message."""
+    """SubagentStop, from the retrieval hook's entry: the subagent's entry closed, and the files its own transcript
+    shows it wrote kept on it for the ledger. The input names that transcript as `agent_transcript_path`."""
     agent_id = str(payload.get("agent_id") or "")
     me = Me(payload)
     if not agent_id or not me.home or not me.id:
         return None
     s = load_session(me.home, me.id)
-    if s and plans.agent_stop(me.home, s, agent_id, payload.get("last_assistant_message") or ""):
+    if s and plans.agent_stop(me.home, s, agent_id, str(payload.get("agent_type") or "")):
         RAN["agent"] = "stopped"
     wrote = agent_writes(transcript_calls(payload.get("agent_transcript_path") or ""))
     if s and wrote and plans.agent_wrote(me.home, me.id, agent_id, wrote):
