@@ -801,6 +801,12 @@ def board(home, s):
               for rid, a in sorted(answers.items()) if isinstance(a, dict)]
     if not asked and not answers:
         lines.append("None.")
+    import asks                                    # ezexe's own requests, a row each, on their page
+    have = asks.rows(home, sid)
+    if have:
+        lines += ["", "## Ledger of requests", "",
+                  f"{len(have)} request{'s' if len(have) != 1 else ''} to this puppeteer, each with the session that "
+                  f"holds it and its state, whole on {asks.page_path(home, sid)}."]
     lines += ["", "## Started on another session's behalf", ""]
     lines += [behalf_row(r) for r, _ in behalf_rows(home, s)] or ["None."]
     found = [f for f in findings(s) if not published(f[2], notes)]

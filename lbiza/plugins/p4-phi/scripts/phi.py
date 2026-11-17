@@ -2679,6 +2679,16 @@ def pair_parts(me, s, req, changed="", notice=lambda text: text):
     lines = controls.take_started(me.home, s) + controls.announce(me.home, s)
     if lines:
         out.append("phi (p4-phi): " + " ".join(lines))
+    import asks as requests                        # ezexe's requests, a row each, on asks.md beside the board
+    try:
+        turns = load_turns(me.home, s["sessionId"])
+        requests.on_message(me.home, s, req, turns[-1] if turns else None)
+        ledger = requests.line(me.home, s, me.store)
+    except Exception:  # noqa: BLE001  a ledger it cannot write never costs the message its other lines
+        ledger = ""
+    if ledger:
+        RAN["asks"] = ledger.count("\n- ")
+        out.append(ledger)
     rows = []
     seen = controls.reports(s, rows)
     if seen:
@@ -2916,6 +2926,12 @@ def h_go_guard(payload):
         if text:
             RAN["go_held"] = target[:40]
             save_session(me.home, s)
+        if not held:                               # the request this turn opened goes to the session messaged
+            import asks as requests
+            try:
+                requests.on_send(me.home, s, target)
+            except Exception:  # noqa: BLE001
+                pass
     if held:
         RAN["send_flagged"] = target[:40]
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
