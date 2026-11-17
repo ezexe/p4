@@ -6,8 +6,8 @@
 Checked, one diagram of ezexe/p4's README.md a class:
 linear: the ledger an orchestrator's watcher writes holds a row for each live session of its subtree, is rewritten
 only when a source changed, and leads with a reconcile line when the app archived a session p4-phi lists or shows a
-child p4-phi does not hold; the watcher is one background process, started by a hook and ended when its orchestrator
-is archived; a message of ezexe's that is work is drafted from ezexe's words and gate-checked into the exact
+child p4-phi does not hold; the watcher is one look at a time, `phi.py look`, which the plugin's hooks module starts
+and which ends, and no hook starts a process; a message of ezexe's that is work is drafted from ezexe's words and gate-checked into the exact
 start_session call, into a SendMessage to the session whose owned paths hold its area, or into a start request queued
 behind the running writer that holds its files, handed out only once that writer is idle; a question is left alone.
 recursive: a landed topic registers its route only once its issue is closed, a commit closing it is pushed and its
@@ -19,12 +19,10 @@ meta: a message of ezexe's to an orchestrator runs the meta pass over every orch
 meta-ledger.md, with the duplicate topic, the conflict over one file and the stale topic it finds.
 """
 
-import glob
 import json
 import os
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
@@ -34,7 +32,6 @@ from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import issues  # noqa: E402
 import phi  # noqa: E402
 import puppeteer  # noqa: E402
 import starts  # noqa: E402
@@ -72,29 +69,6 @@ def call_in(ctx, k=0):
     return json.JSONDecoder().raw_decode(piece)[0]
 
 
-def stop_watchers(p4, wait=10.0):
-    """Ends every watcher started under the store `p4`, by the pid its watcher.json holds, and waits for each to
-    end. A claim whose watcher has not written its pid yet is waited on for it."""
-    end = time.time() + wait
-    for path in sorted(glob.glob(os.path.join(p4, "phi", "sessions", "*", "watcher.json"))):
-        pid = -1
-        while time.time() < end and os.path.exists(path):
-            try:
-                pid = int(jload(path).get("pid") or -1)
-            except (OSError, ValueError, TypeError):
-                pid = -1
-            if pid > 0:
-                break
-            time.sleep(0.1)
-        if pid > 0 and issues._alive(pid):
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except OSError:
-                pass
-            while time.time() < end and issues._alive(pid):
-                time.sleep(0.1)
-
-
 class Base(unittest.TestCase):
     def setUp(self):
         if not shutil.which("sh"):
@@ -102,7 +76,6 @@ class Base(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.t = t = Tree(self._tmp.name)
-        self.addCleanup(stop_watchers, t.p4)          # runs first, pass or fail, before the folder goes
         t.record(TOP, title="the exporter top")
         t.record(KID, TOP, title="the flush port")
 
@@ -113,22 +86,6 @@ class Base(unittest.TestCase):
 
     def path(self, host, name):
         return os.path.join(self.t.dir(host), name)
-
-    def settled(self, host, name, parse=read, empty="", wait=5.0):
-        """A file of `host` that the watcher replaces as it runs, parsed by `parse`. On Windows a read that meets
-        the replace fails, or finds no file for a moment, so it is tried again until `wait` runs out, and `empty`
-        when there is none."""
-        end = time.time() + wait
-        while True:
-            try:
-                return parse(self.path(host, name))
-            except (OSError, ValueError):
-                if time.time() >= end:
-                    return empty
-                time.sleep(0.05)
-
-    def watcher(self, host):
-        return self.settled(host, "watcher.json", jload, {})
 
 
 class Linear(Base):
@@ -171,38 +128,9 @@ class Linear(Base):
         self.assertEqual(len([x for x in head.splitlines() if x.startswith("- ")]), 2, "a line a divergence")
         self.assertLess(text.index("## Reconcile"), text.index("## Sessions"))
 
-    def test_one_background_watcher_an_orchestrator_started_by_a_hook_and_ended_with_it(self):
-        t = self.t
-        r = t.say(TOP, TASK, P4_PHI_WATCH="1", P4_PHI_WATCH_S="0.3", P4_PHI_WATCH_NET="0")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual([x.get("watcher") for x in t.log(TOP) if x.get("watcher")], ["started"])
-        end = time.time() + 30
-        while time.time() < end and not (os.path.exists(self.path(TOP, "ledger.md"))
-                                         and self.watcher(TOP).get("pid", -1) > 0):
-            time.sleep(0.2)
-        self.assertGreater(self.watcher(TOP).get("pid", -1), 0, "the watcher runs")
-        self.assertIn(f"\" `{TOP}`", self.settled(TOP, "ledger.md"))
-        beat = self.watcher(TOP)
-        self.assertLess(time.time() - beat.get("beat", 0), 20, "it says it is alive at every look, before the look")
-        self.assertIn("slowestTickMs", beat)
-        t.say(TOP, ASK, P4_PHI_WATCH="1", P4_PHI_WATCH_S="0.3", P4_PHI_WATCH_NET="0")
-        self.assertEqual(len([x for x in t.log(TOP) if x.get("watcher")]), 1, "one watcher, not one a message")
-        t.say(KID, handed("Port the flush to the new writer."))       # the watcher writes it in, no command run
-        end = time.time() + 30
-        while time.time() < end and f"`{KID}`: working" not in self.settled(TOP, "ledger.md"):
-            time.sleep(0.2)
-        self.assertIn(f"`{KID}`: working", self.settled(TOP, "ledger.md"))
-        s = t.session(TOP)
-        s["archived"] = True
-        write(self.path(TOP, "session.json"), json.dumps(s))
-        end = time.time() + 30
-        while time.time() < end and os.path.exists(self.path(TOP, "watcher.json")):
-            time.sleep(0.2)
-        self.assertFalse(os.path.exists(self.path(TOP, "watcher.json")), "it ends when its orchestrator is archived")
-
     def test_a_ledger_is_built_without_git(self):
-        # a ledger is built from the records alone: a git call for each session at each look would keep a watcher
-        # from saying it is alive in time, and a second watcher would be started beside it
+        # a ledger is built from the records alone: a look runs every few seconds, and a git call for each session
+        # at each one would make every look slow
         t = self.t
         t.say(TOP, TASK)
         t.say(KID, handed("Fix `src/export/flush.py` for ezexe/demo#7 and commit it."))
@@ -480,7 +408,7 @@ class TermsAndGuides(Base):
 
 class WatcherCaps(unittest.TestCase):
     def test_a_watcher_reads_its_caps_from_the_orchestrators_own_store_not_the_shared_one(self):
-        """ezexe/p4#125: phi.project_conf reads the caps from the store where the session runs, so the watcher of a
+        """ezexe/p4#125: phi.project_conf reads the caps from the store where the session runs, so a look over a
         tree kept in a shared store, which phi.home names, reads them from its orchestrator's own project too."""
         tmp = tempfile.mkdtemp()
         try:
@@ -515,40 +443,6 @@ class LeftProcesses(unittest.TestCase):
         finally:
             puppeteer.process_rows = held
         self.assertEqual([pid for pid, _ in got], [90001, 90004])
-
-
-class WatcherLeft(unittest.TestCase):
-    """A test that starts a real watcher ends it, whether the test passes or fails midway."""
-
-    def test_a_watcher_test_made_to_fail_midway_leaves_no_watcher_running(self):
-        pids = []
-
-        def midway(case, *args, **kw):
-            pids.append(jload(case.path(TOP, "watcher.json")).get("pid", -1))
-            raise AssertionError("made to fail midway, once its watcher runs")
-
-        def kill_left():
-            for pid in pids:
-                if issues._alive(pid):
-                    os.kill(pid, signal.SIGTERM)
-        self.addCleanup(kill_left)
-        kept = []
-        case = Linear("test_one_background_watcher_an_orchestrator_started_by_a_hook_and_ended_with_it")
-        result = unittest.TestResult()
-        # the fixture folder outlives the test, as it does when Windows refuses to delete a folder a live process
-        # writes into, so only the test's own cleanup can end the watcher
-        with mock.patch.object(Linear, "assertIn", midway), \
-                mock.patch.object(tempfile.TemporaryDirectory, "cleanup", lambda d: kept.append(d)):
-            case.run(result)
-        self.addCleanup(lambda: [d.cleanup() for d in kept])
-        if result.skipped:
-            self.skipTest(result.skipped[0][1])
-        self.assertEqual((len(result.failures), result.errors), (1, []), result.failures)
-        self.assertGreater(pids[0], 0, "the watcher ran when the test failed")
-        end = time.time() + 5
-        while time.time() < end and issues._alive(pids[0]):
-            time.sleep(0.2)
-        self.assertFalse(issues._alive(pids[0]), "no `phi.py watch` outlives the test that started it")
 
 
 class Recursive(unittest.TestCase):
@@ -702,8 +596,8 @@ class AtArchive(Base):
         self.assertEqual(self.t.hook("restart-check", KID, other).stdout.strip(), "", "another command is no restart")
 
     def test_processes_it_left_and_requests_nobody_started_are_named(self):
-        puppeteer.PROCESSES = lambda: [(4242, f"python phi.py watch --p4 {self.t.p4} --session {KID}"),
-                                       (4343, f"python phi.py watch --p4 /another/store --session {KID}"),
+        puppeteer.PROCESSES = lambda: [(4242, f"python phi.py ledger --p4 {self.t.p4} --session {KID}"),
+                                       (4343, f"python phi.py ledger --p4 /another/store --session {KID}"),
                                        (7, "python other.py")]
         try:
             starts.add(self.t.p4, KID, "A follow-up nobody starts", "Do the follow-up in the exporter.", after=TOP)
@@ -1151,6 +1045,164 @@ class Writes(unittest.TestCase):
             self.assertEqual(os.listdir(os.path.dirname(path)), [])
             puppeteer._write(path, "{}")
             self.assertEqual(os.listdir(os.path.dirname(path)), ["app-index.json"])
+
+
+class Look(Base):
+    """The watcher runs from the plugin's hooks module: "`$.clock.every` and `$.clock.after` take the place of
+    `setInterval` and `setTimeout`" and "The timer's callback runs outside any event, so it keeps running between
+    turns and doesn't start one.", https://code.claude.com/docs/en/plugins/mods/api.md. The module starts
+    `phi.py look`, one pass over an orchestrator's subtree that ends, and paces itself by what the look answers. No
+    hook starts a process, and nothing of the detached watcher is left."""
+
+    def look(self, host=TOP, *args, **env):
+        env = self.t.env(host, **{"P4_PHI_WATCH": "1", "P4_PHI_WATCH_NET": "0", **env})
+        r = inproc.run([sys.executable, "-I", "-X", "utf8", os.path.join(HERE, "phi.py"), "look", *args],
+                       capture_output=True, text=True, env=env, cwd=self.t.proj, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def files(self):
+        """Every file and folder of the store with its size and time."""
+        out = {}
+        for root, dirs, names in os.walk(self.t.p4):
+            for n in dirs + names:
+                st = os.stat(os.path.join(root, n))
+                out[os.path.relpath(os.path.join(root, n), self.t.p4)] = (st.st_size, st.st_mtime_ns)
+        return out
+
+    def test_a_look_is_one_pass_that_writes_the_ledger_and_answers_what_the_module_paces_by(self):
+        t = self.t
+        t.say(TOP, TASK)
+        t.say(KID, handed("Port the flush to the new writer."))
+        got = self.look()
+        self.assertEqual((got["watching"], got["changed"], got["net"]), (True, True, False))
+        self.assertEqual(os.path.normcase(os.path.normpath(got["dir"])), os.path.normcase(t.dir(TOP)))
+        self.assertEqual((got["watch_s"], got["wait_s"], got["net_s"]), (5.0, 5.0, 120.0),
+                         "a look every phi.watch_s seconds at most, and GitHub read every two minutes")
+        self.assertIn(f"`{KID}`: working", read(self.path(TOP, "ledger.md")), "written in, with no command run")
+        before = os.stat(self.path(TOP, "ledger.md")).st_mtime_ns
+        again = self.look()
+        self.assertEqual((again["watching"], again["changed"]), (True, False))
+        self.assertEqual(os.stat(self.path(TOP, "ledger.md")).st_mtime_ns, before, "rewritten only on a change")
+        old = time.time() - puppeteer.WATCH_CALM_S - 5
+        os.utime(self.path(TOP, "ledger.sig"), (old, old))
+        self.assertEqual(self.look()["wait_s"], 30.0, "the slow tick once nothing changed for ten minutes")
+        quick = self.look(P4_PHI_WATCH_S="0.3")
+        self.assertEqual((quick["watch_s"], quick["wait_s"]), (0.3, 0.3), "P4_PHI_WATCH_S is the tick for one run")
+        write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"watch_s": 12}}))
+        try:
+            self.assertEqual(self.look()["watch_s"], 12.0, "phi.watch_s of the orchestrator's own store")
+        finally:
+            os.remove(os.path.join(t.p4, "p4.json"))
+            phi.project_conf(t.p4)
+
+    def test_a_session_with_nothing_to_watch_pays_one_cheap_check(self):
+        t = self.t
+        t.say(TOP, TASK)
+        t.say(KID, handed("Port the flush to the new writer."))
+        before = self.files()
+        kid = self.look(KID)
+        self.assertEqual((kid["watching"], kid["why"], kid["wait_s"]), (False, "no orchestrator", 30.0))
+        self.assertNotIn("changed", kid, "no pass over a subtree")
+        self.assertFalse(os.path.exists(self.path(KID, "ledger.md")))
+        off = self.look(P4_PHI_WATCH="0")
+        self.assertEqual((off["watching"], off["off"]), (False, True), "P4_PHI_WATCH=0 keeps every look from running")
+        self.assertEqual(self.look(P4_PHI="0")["off"], True)
+        self.assertEqual(self.look(P4_PHI_PUPPETEER="0")["why"], "the puppeteer steps are off")
+        only = self.look(TOP, "--folder", P4_PHI_WATCH="0")
+        self.assertEqual(list(only), ["dir", "watching"], "where the session's folder is, and nothing else")
+        self.assertEqual(self.files(), before, "none of them wrote a file")
+
+    def test_a_look_on_a_deleted_session_folder_writes_nothing_and_makes_no_folder(self):
+        """ezexe/p4#206: a session folder that is gone gets no look, and one deleted while a look runs is not made
+        again by any write of that look."""
+        t = self.t
+        t.say(TOP, TASK)
+        t.say(KID, handed("Port the flush to the new writer."))
+        self.assertTrue(self.look()["watching"])
+        shutil.rmtree(t.dir(TOP))
+        before = self.files()
+        gone = self.look()
+        self.assertEqual((gone["watching"], gone["why"]), (False, "no session folder"))
+        self.assertNotIn("dir", gone)
+        self.assertEqual(self.look(TOP, "--folder"), {"watching": False, "why": "no session folder", "watch_s": 5.0,
+                                                      "wait_s": 30.0, "net_s": 120.0})
+        self.assertEqual(self.files(), before, "nothing written, and no folder made")
+        self.assertFalse(os.path.exists(t.dir(TOP)))
+
+    def test_a_session_folder_deleted_while_its_look_runs_stays_gone(self):
+        t = self.t
+        t.say(TOP, TASK)
+        t.say(KID, handed("Port the flush to the new writer."))
+        t.stop(KID, "Port the flush", report="Ported; the suite passes.")       # a source changed: the look rebuilds
+        real = puppeteer.build
+
+        def build_then_delete(home, top, net=False):
+            m = real(home, top, net)
+            shutil.rmtree(t.dir(TOP))               # deleted in the middle of the look, ahead of its writes
+            return m
+        env = {"P4_PHI_APP_SESSIONS": os.path.join(t.tmp, "app"), "P4_PHI_WATCH": "1", "P4_PHI_WATCH_NET": "0"}
+        with mock.patch.object(puppeteer, "build", build_then_delete), mock.patch.dict(os.environ, env):
+            os.environ.pop("P4_PHI", None)
+            got = puppeteer.look(t.p4, TOP, net=True)
+        self.assertEqual((got["watching"], got["why"]), (False, "no session folder"))
+        self.assertFalse(os.path.exists(t.dir(TOP)), "no write of the look brought the folder back")
+        self.assertEqual(puppeteer._LOOKED, [""], "the guard ends with the look")
+
+    def test_a_look_makes_a_folder_below_its_session_folder_only_while_that_folder_stands(self):
+        folder = self.t.dir(TOP)
+        os.makedirs(folder)
+        puppeteer._LOOKED[0] = os.path.normcase(os.path.abspath(folder))
+        try:
+            puppeteer._write_json(os.path.join(folder, "readings", "grp-1.json"), {"id": "grp-1"})
+            self.assertEqual(jload(os.path.join(folder, "readings", "grp-1.json")), {"id": "grp-1"})
+            puppeteer._write(os.path.join(self.t.p4, "phi", ".cache", "app-index.json"), "{}")     # a file of the store
+            shutil.rmtree(folder)
+            for path in (os.path.join(folder, "ledger.md"), os.path.join(folder, "readings", "grp-2.json"),
+                         os.path.join(self.t.p4, "phi", ".routes-checked")):
+                with self.assertRaises(FileNotFoundError):
+                    puppeteer._write(path, "x")
+            with self.assertRaises(FileNotFoundError):
+                puppeteer._append(os.path.join(folder, "routes.jsonl"), {"kind": "route"})
+        finally:
+            puppeteer._LOOKED[0] = ""
+        self.assertFalse(os.path.exists(folder))
+        self.assertFalse(os.path.exists(os.path.join(self.t.p4, "phi", ".routes-checked")))
+
+    def test_the_slow_pass_runs_only_when_the_ledger_changed_or_the_look_is_a_slow_one(self):
+        """A look is a fresh process, so it holds no clock of its own: the module asks for the slow pass, which
+        registers and checks the routes and reads GitHub, once every `net_s` seconds."""
+        t = self.t
+        t.say(TOP, TASK)
+        self.look()
+        ran = []
+        with mock.patch.object(puppeteer, "register_routes", lambda *a, **k: ran.append("register") or []), \
+                mock.patch.object(puppeteer, "check_routes", lambda *a, **k: ran.append("check") or []):
+            self.assertFalse(puppeteer.tick(t.p4, TOP, net=False, slow=False))
+            self.assertEqual(ran, [], "nothing changed and the look is no slow one")
+            puppeteer.tick(t.p4, TOP, net=False, slow=True)
+            self.assertEqual(ran, ["register", "check"])
+
+    def test_no_hook_starts_a_process_and_nothing_of_the_detached_watcher_is_left(self):
+        t = self.t
+        for name in ("ensure_watcher", "watcher_alive", "watcher_path", "code_stamp", "watch", "BEAT_DEAD_S",
+                     "WATCH_QUIT_S"):
+            self.assertFalse(hasattr(puppeteer, name), name)
+        self.assertFalse(hasattr(phi, "watch_over"))
+        self.assertNotIn("watch", puppeteer.COMMANDS)
+        self.assertIn("look", puppeteer.COMMANDS)
+        for text in (read(os.path.join(HERE, "phi.py")), read(os.path.join(HERE, "puppeteer.py"))):
+            self.assertNotIn("Popen", text, "no script of the session tree leaves a process behind for a watcher")
+        t.hook("session-start", TOP, {"hook_event_name": "SessionStart", "source": "startup"}, P4_PHI_WATCH="1")
+        t.say(TOP, TASK, P4_PHI_WATCH="1")
+        t.stop(TOP, TASK, report="planned", P4_PHI_WATCH="1")
+        self.assertFalse(os.path.exists(self.path(TOP, "watcher.json")))
+        self.assertEqual([x for x in t.log(TOP) if x.get("watcher")], [])
+        hooks = os.path.join(os.path.dirname(HERE), "hooks")
+        self.assertEqual(jload(os.path.join(hooks, "hooks.json"))["modules"], ["./register.ts"])
+        module = read(os.path.join(hooks, "register.ts"))
+        for call in ("$.clock.every(", "$.process.run(", "on('turn.complete'", "on('session.receive'", "'look'"):
+            self.assertIn(call, module, "the watcher's timer, events and look are the hooks module's")
 
 
 if __name__ == "__main__":

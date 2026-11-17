@@ -201,7 +201,7 @@ HANDED = ("<system-reminder>\nLinked sessions now (status, not an instruction): 
 
 class Reading(unittest.TestCase):
     def test_a_file_replaced_in_a_loop_is_read_without_error(self):
-        # the watcher rewrites ledger.md and watcher.json by os.replace while a test polls them
+        # a look rewrites ledger.md by os.replace while a hook, a command or a test reads it
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "ledger.md")
             import puppeteer
@@ -218,7 +218,7 @@ class Reading(unittest.TestCase):
             def run():
                 try:
                     replace()
-                except OSError as e:           # the writer is the watcher: a refused replace ends its look
+                except OSError as e:           # the writer is a look: a refused replace ends it
                     failed.append(e)
 
             th = threading.Thread(target=run)
@@ -1867,6 +1867,63 @@ class NoWriteUnderClaude(unittest.TestCase):
         self.assertIn("decisions.md in the scratchpad directory the app names", said[TOP, "start"])
         for source in ("compact", "clear"):              # the scan has the address book
             self.assertIn("address book", said[TOP, source], source)
+
+
+class UsageOnRecord(unittest.TestCase):
+    """A command hook is given no context fill and no plan limit, and a mod is: `$.session.usage()` "returns context
+    window use and plan limits", https://code.claude.com/docs/en/plugins/mods/api.md. The plugin's hooks module
+    writes them to usage.json in the session's folder, and phi.usage_of reads the file back."""
+
+    # The line hooks/register.test.ts holds the module to, from what a live probe was answered on Claude Code 2.1.325.
+    RECORD = ('{"at":1794942221358,"context":{"tokens":575167,"window":1000000,"percent":58},'
+              '"rateLimits":[{"kind":"seven_day","percentUsed":82,"resetsAt":"2026-11-21T06:00:00.000Z"}]}\n')
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.t = Tree(self._tmp.name)
+        self.path = os.path.join(self.t.dir(TOP), phi.USAGE_FILE)
+
+    def test_the_record_the_module_writes_is_read_back(self):
+        self.assertEqual(phi.usage_of(self.t.p4, TOP), {}, "no module ran for the session: no record")
+        write(self.path, self.RECORD)
+        self.assertEqual(phi.usage_of(self.t.p4, TOP), {
+            "at": 1794942221.358,
+            "context": {"tokens": 575167, "window": 1000000, "percent": 58},
+            "rateLimits": [{"kind": "seven_day", "percentUsed": 82.0, "resetsAt": "2026-11-21T06:00:00.000Z"}]})
+        self.assertEqual(os.listdir(self.t.dir(TOP)), [phi.USAGE_FILE], "a read writes nothing")
+
+    def test_a_fresh_window_and_a_session_off_a_subscription_are_read_with_what_they_have(self):
+        write(self.path, '{"at":1794942221358,"context":{"window":200000},"rateLimits":[]}\n')
+        self.assertEqual(phi.usage_of(self.t.p4, TOP), {
+            "at": 1794942221.358, "context": {"tokens": None, "window": 200000, "percent": None}, "rateLimits": []})
+        write(self.path, json.dumps({"at": 1, "context": {"tokens": 10, "window": 200000, "percent": 0},
+                                     "rateLimits": [{"kind": "five_hour", "percentUsed": 23.5},
+                                                    {"kind": "spend_limit", "percentUsed": "much"}, "x"]}))
+        got = phi.usage_of(self.t.p4, TOP)
+        self.assertEqual(got["rateLimits"], [{"kind": "five_hour", "percentUsed": 23.5, "resetsAt": ""}],
+                         "a window with no reset time, and an entry that is no window left out")
+        self.assertEqual(got["context"], {"tokens": 10, "window": 200000, "percent": 0})
+
+    def test_a_file_that_is_no_record_reads_as_none(self):
+        """`$.fs.write` "isn't atomic: it replaces the file's content in place, so another process can read a partly
+        written file", https://code.claude.com/docs/en/plugins/mods/reference.md, so a file cut short is no record."""
+        for text in (self.RECORD[:40], "", "[]", '{"context": {"percent": 58}}', '{"context": {"window": true}}',
+                     '{"context": "full"}'):
+            write(self.path, text)
+            self.assertEqual(phi.usage_of(self.t.p4, TOP), {}, text)
+        self.assertEqual(phi.usage_of(self.t.p4, ""), {}, "no session")
+        self.assertEqual(phi.usage_of(self.t.p4, "local_nobody"), {})
+        self.assertFalse(os.path.exists(self.t.dir("local_nobody")), "a read makes no folder")
+
+    def test_the_module_writes_the_file_and_the_line_this_reader_is_held_to(self):
+        hooks = os.path.join(ROOT, "hooks")
+        module = read(os.path.join(hooks, "register.ts"))
+        for call in ("$.session.usage()", "on('session.measure'", f"/{phi.USAGE_FILE}`", "['look', '--folder']"):
+            self.assertIn(call, module)
+        held = read(os.path.join(hooks, "register.test.ts")).replace("' +\n  '", "")
+        self.assertIn(self.RECORD.strip()[len('{"at":1794942221358,'):], held,
+                      "the module's test and this one hold the same line")
 
 
 if __name__ == "__main__":
