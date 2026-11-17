@@ -31,6 +31,8 @@ Every behaviour below rests on a sentence of the Claude Code docs at `https://co
 | Tells a session to start a long command with `run_in_background: true` | `tools-reference.md`, "Background commands" | "Claude can set `run_in_background: true` to start the command as a background task and continue working while it runs." |
 | Lets a long foreground command run as sent, an orchestrator's too, since the app moves it to the background at its timeout | `tools-reference.md`, "Foreground commands that move to the background" | "When a foreground command reaches its timeout without finishing, Claude Code moves it to the background instead of stopping it" |
 | Keeps the python its runners proved on Windows in the plugin's data folder | `plugins/manifest-reference.md`, "Environment variables" | "`${CLAUDE_PLUGIN_ROOT}` changes when the plugin updates, so don't write state there." and `${CLAUDE_PLUGIN_DATA}` is "kept across plugin updates" |
+| Runs a hooks module, `hooks/register.ts`, inside Claude Code, named in `hooks/hooks.json` beside the command hooks | `plugins/mods/reference.md`, "Files" | "`modules`: an array with one path, relative to this file, to the hooks module" and "Can also hold settings hooks under `hooks`." |
+| Reads the proved python in the module from the plugin's data folder, which it finds under the plugins root by the plugin's name | `plugins/loading.md`, "Find plugins on disk" | `data/<plugin-id>/` is "The plugin's persistent directory, exposed as `${CLAUDE_PLUGIN_DATA}`." |
 
 Without a data folder, as when a test runs a hook, the proved python is kept in the plugin's own folder.
 
@@ -152,3 +154,4 @@ The page `dox/plugin-development.html` in ezexe/p4 says how: a clone loaded with
 - `python` 3, `sh` and `git` must be on PATH. On Windows, `sh` comes with Git.
 - The issue loop needs `gh`, signed in, and a repository whose `origin` is on GitHub. Without them it does nothing.
 - The session tree is read from the Claude desktop app's records. In a plain terminal session every session is an orchestrator.
+- The hooks module needs Claude Code v2.1.287 or later, and it does not load in a session started with `--safe-mode` or `--bare`, or where `disableAllHooks` is set. Source: https://code.claude.com/docs/en/plugins/mods/create.md.

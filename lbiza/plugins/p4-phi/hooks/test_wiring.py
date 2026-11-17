@@ -440,5 +440,51 @@ class NoPython(unittest.TestCase):
                               (os.path.basename(runner), r.stdout))
 
 
+class Module(unittest.TestCase):
+    """The hooks module, by https://code.claude.com/docs/en/plugins/mods/reference.md, "Files": hooks.json holds
+    "`modules`: an array with one path, relative to this file, to the hooks module" and "Can also hold settings hooks
+    under `hooks`", and the module "Exports `register(on, options)`"."""
+
+    MODULE = os.path.join(HERE, "register.ts")
+
+    def text(self):
+        with open(self.MODULE, encoding="utf-8") as f:
+            return f.read()
+
+    def manifest(self):
+        with open(os.path.join(ROOT, ".claude-plugin", "plugin.json"), encoding="utf-8") as f:
+            return json.load(f)
+
+    def test_hooks_json_names_the_module_beside_the_command_hooks_and_it_exists(self):
+        with open(HOOKS_JSON, encoding="utf-8") as f:
+            d = json.load(f)
+        self.assertEqual(d.get("modules"), ["./register.ts"], "one path, relative to hooks.json")
+        self.assertTrue(d.get("hooks"), "the command hooks stay beside it")
+        self.assertTrue(os.path.isfile(self.MODULE))
+        self.assertRegex(self.text(), r"(?m)^export const register: Register = ")
+        self.assertTrue(os.path.isfile(os.path.join(HERE, "register.test.ts")), "its tests, for `claude plugin test`")
+
+    def test_the_module_names_no_path_of_one_machine(self):
+        """It reads the python the runners proved from the plugin's data folder or the plugin's own folder, as
+        find-python.sh keeps it, and finds both through the mod API."""
+        text = self.text()
+        self.assertNotRegex(text, r"(?<![A-Za-z])[A-Za-z]:[\\/](?![\\/])\w|/Users/|/home/|AppData")
+        self.assertIn("$.plugin.root", text)
+        self.assertIn("/.python", text)
+        for name in ("CLAUDE_PLUGIN_DATA", "CLAUDE_CODE_PLUGIN_CACHE_DIR", "CLAUDE_CONFIG_DIR"):
+            self.assertIn(f"$.env.get('{name}')", text)
+
+    def test_the_manifest_names_no_contract_and_no_engines_range(self):
+        """A mod "that keeps values in `$.state`" ships a types contract, and this module keeps none. The manifest
+        reference says of `engines`: "Requires Claude Code v2.1.323 or later. To keep the plugin working on v2.0.15
+        through v2.1.75, omit `engines`. Those versions reject the manifest with an `Unrecognized key` error when it
+        has the field", https://code.claude.com/docs/en/plugins/manifest-reference.md. The module's calls are in
+        every Claude Code that reads the field, so a range would turn nothing off and would cost those versions the
+        whole plugin."""
+        self.assertNotIn("$.state", self.text())
+        self.assertNotIn("types", self.manifest())
+        self.assertNotIn("engines", self.manifest())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
