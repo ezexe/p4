@@ -15,11 +15,11 @@ prompty → prompter → pioneer → puppeteer
 The four names are the four steps p4-phi takes when ezexe sends a message to an orchestrator, or to any session that started sessions: routing, the start draft, the gate and the watcher, run by the functions `prompty`, `prompter`, `pioneer` and `watch` of [`puppeteer.py`](lbiza/plugins/p4-phi/scripts/puppeteer.py).
 Routing reads the message against the records the orchestrator's ledger is built from: the area it names, the live session that is that area's code owner, and the running writer that holds its files.
 The start draft is the exact next session: its topic, a brief written as its own instruction, its parent session, fork or fresh, and the issue it closes.
-The gate checks the draft: the state of the issue it names, that no running writer holds the same files, and that its parent session is the right orchestrator.
-A draft that names no issue, or a closed one, carries none, and p4-phi files none: the worker's findings go up in its report.
-A clean draft is handed to the session as the exact `start_session` call, one whose area has a live code owner is routed there with `SendMessage`, one whose writer is busy is queued as a start request behind it, and one the depth or count cap holds starts no session.
+The gate checks the draft: it reads the state of the issue the draft names, looks for a running writer that holds the same files, and names the parent session the start draft chose, this orchestrator or none for a new orchestrator.
+A draft that names no issue tells the worker that p4-phi files none, so its findings go up in its report.
+The gate's verdict is what the session is handed: the exact `start_session` call for a clean draft, the `SendMessage` that routes it to its area's live code owner, the command that keeps it as a start request behind a busy writer, or no start where the depth or count cap holds.
 The watcher is one background process for each orchestrator.
-It rewrites `ledger.md` in that session's folder under the store's `phi/sessions/` from p4-phi's records and the app's session records when one of them changes, with a reconcile line for each place the two diverge.
+It rewrites `ledger.md` in that session's folder under the store's `phi/sessions/` from p4-phi's records and the app's session records when one of them changes, with a reconcile line where the two disagree about a live session.
 
 ## Recursive Refinement
 
@@ -44,11 +44,11 @@ prompty → prompter ─┼─ pioneer_b ─┼─ puppeteer
 ```
 
 Here the message is under-determined, and one draft would have to guess between distinct readings of it.
-A message that names its readings itself, as in "either A or B", is drafted as one worker for each reading, and `phi.py readings` does the same for readings the session names.
+A message that names its readings itself, as in "either A or B", is drafted as one worker for each reading when no code owner matches and the depth and count caps leave room, and `phi.py readings` does the same for readings the session names.
 The orchestrator starts each worker beside the others with the exact call the gate hands it.
-A reading changes no tracked file and commits nothing, and its worker ends its report with a `Result:` line.
+Each reading's brief tells its worker to change no tracked file and commit nothing, and to end its report with a `Result:` line.
 p4-phi merges the group once every reading has a result, and tells the orchestrator beside its next message: a reading shown done with `phi.py done` is merged from that text, and one archived with no result is marked lost so its group still closes.
-Readings that converge collapse to one result, and only a fork that survives the merge goes to ezexe, as one `AskUserQuestion` with options and a default.
+Readings that converge collapse to one result. A fork that survives the merge is settled by the session tree where it can be, with `phi.py merge <group> --result`, and otherwise goes to ezexe as one `AskUserQuestion` with options and a default.
 
 ## Meta-Prompting
 
@@ -61,7 +61,7 @@ puppeteer_c ──┘
 Here each of `puppeteer_a`, `puppeteer_b` and `puppeteer_c` is an orchestrator.
 Whichever orchestrator receives ezexe's message runs the meta pass over every orchestrator's ledger before routing, and writes `meta-ledger.md` in the store's `phi/` folder.
 The pass finds duplicate topics, orchestrators in conflict over the same files or issue, and topics that are stale or have landed, and it seeds the next generation of topics from what is left open.
-An orchestrator told of a finding settles it with the other orchestrator through `SendMessage`, and only a conflict the two cannot settle goes to ezexe.
+An orchestrator told of a finding settles a duplicate or a conflict with the other orchestrator through `SendMessage` and names a session whose work is over to ezexe as a link to open and archive, and only a conflict the two cannot settle goes to ezexe as a question.
 
 The marketplace's two plugins, p4-phi and p4-temportal, and where each keeps its files are described in [`lbiza/README.md`](lbiza/README.md), and [p4-phi's README](lbiza/plugins/p4-phi/README.md) gives the commands that install them.
 The interactive docs are published at [ezexe.github.io/p4](https://ezexe.github.io/p4/), where [the session tree](https://ezexe.github.io/p4/session-tree.html) lets you make each move on a live tree.
@@ -87,4 +87,4 @@ The script installs ezexe/phi editable from a checkout beside this one, `../phi`
 `--cuda` takes PyPI's default torch build in place of the CPU wheels.
 Where PyTorch publishes no build for the machine, `.venv` is finished without torch: retrieval and `phi_model check` run, and the `.pt` ranker and the ensemble of shard models are off.
 An Intel Mac always takes that route, since ezexe/phi needs torch 2.4.1 or newer and PyPI's last torch for macOS on x86_64 is 2.2.2.
-The script stops before it makes or tops up `.venv` when the Python that will run ezexe/phi is older than the `requires-python` of ezexe/phi's `pyproject.toml`.
+The script stops before it makes or tops up `.venv` when the Python that will run ezexe/phi is older than the lower bound of `requires-python` in ezexe/phi's `pyproject.toml`, with Python 3.11 in its place for an ezexe/phi from GitHub whose file cannot be read or sets no lower bound.
