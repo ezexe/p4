@@ -819,7 +819,9 @@ def written_record(kept, record):
 
 def load(p4, write=True, warn=True):
     """The merged settings. Writes p4.json when it is missing, lacks a default key or holds a default an older
-    generation wrote, if `write` and `p4` exists. Under WRITTEN it records what it wrote and its GEN."""
+    generation wrote, if `write` and `p4` exists. Under WRITTEN it records what it wrote and its GEN. A section of OPEN,
+    such as temportal.cache, is one setting: when an older copy merges a rule a newer GEN dropped back into it, the
+    section no longer equals its entry and counts as set by hand."""
     over, existed = {}, os.path.exists(path(p4))
     if existed:
         try:

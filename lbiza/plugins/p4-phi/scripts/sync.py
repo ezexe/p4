@@ -55,7 +55,7 @@ MODEL_PREFIX = ("models/ranker",)
 MODEL_EXT = (".pt", ".phid")
 INDEX_LINE = re.compile(rb"^- \[[^\]]+\]\([^)]+\)")        # `- [Title](file.md) ...`, as memory/MEMORY.md lists
 NAME, EMAIL = "p4-sync", "p4-sync@users.noreply.github.com"
-SEED = 17    # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
+SEED = 18    # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
 
 
 def git(*args, check=True, cwd=None):
@@ -291,8 +291,13 @@ def merge_settings(base, ours, theirs, dflt=None):
             if other is not None and other[0] == "w" and not get(base, p)[1] and other[1].get("gen", 0) >= 0:
                 record[p] = other[1]                    # new on one side, as an older plugin never had it: written
             continue                                    # otherwise removed on a side: merge_json decided
+        sides = ((ours, so, ro), (theirs, st, rt))
         if so[0] == st[0] == "w":
             pick = (theirs, st) if st[1].get("gen", 0) > so[1].get("gen", 0) else (ours, so)
+        elif (get(ours, p) == get(theirs, p) and any(s[0] == "w" for _d, s, _r in sides)
+              and all(s[0] == "w" or r is None for _d, s, r in sides)):
+            # the same value on both sides, written on one and held by a side from before the record: still written
+            pick = next((d, s) for d, s, _r in sides if s[0] == "w")
         elif rank[st[0]] > rank[so[0]]:
             pick = (theirs, st)
         elif rank[so[0]] > rank[st[0]]:

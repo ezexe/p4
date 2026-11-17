@@ -371,6 +371,17 @@ class Sync(unittest.TestCase):
             self.assertEqual(got["q"], {"n": 6, "x": 3})
             self.assertEqual(got["_written"], {"q.x": rec(3, 2)})
 
+    def test_merge_settings_with_no_ancestor_keeps_a_written_entry_a_pre_record_side_matches(self):
+        """With no common ancestor, a side from before the record holding the same value does not turn the other
+        side's written entry into a value set by hand; a side with a record but no entry for it does."""
+        rec = {"t.model": {"v": "fable-5-1", "gen": 0}, "q.n": {"v": 5, "gen": 1}}
+        recorded = {"t": {"model": "fable-5-1"}, "q": {"n": 5}, "_written": rec}
+        pre = {"t": {"model": "fable-5-1"}, "q": {"n": 5}}
+        for a, b in ((pre, recorded), (recorded, pre)):
+            self.assertEqual(sync.merge_settings(None, a, b)["_written"], rec)
+        hand = {"t": {"model": "fable-5-1"}, "q": {"n": 5}, "_written": {"q.n": {"v": 5, "gen": 1}}}
+        self.assertEqual(sync.merge_settings(None, hand, recorded)["_written"], {"q.n": {"v": 5, "gen": 1}})
+
     def test_merge_json(self):
         m = sync.merge_json
         d = {"said": {"mode": "off"}}
@@ -426,7 +437,7 @@ class Sync(unittest.TestCase):
         import hashlib
         with open(os.path.join(HERE, "sync.py"), "rb") as f:
             text = f.read().replace(b"\r\n", b"\n")
-        self.assertEqual({sync.SEED: hashlib.sha1(text).hexdigest()[:12]}, {17: "4c73defe651c"},
+        self.assertEqual({sync.SEED: hashlib.sha1(text).hexdigest()[:12]}, {18: "4a4dcf9f9973"},
                          "sync.py changed: raise SEED and pin the new text")
         p4 = os.path.join(os.path.dirname(self.origin), "p4")
         os.makedirs(p4)
