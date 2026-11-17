@@ -106,6 +106,22 @@ class Base(unittest.TestCase):
     def path(self, host, name):
         return os.path.join(self.t.dir(host), name)
 
+    def settled(self, host, name, parse=read, empty="", wait=5.0):
+        """A file of `host` that the watcher replaces as it runs, parsed by `parse`. On Windows a read that meets
+        the replace fails, or finds no file for a moment, so it is tried again until `wait` runs out, and `empty`
+        when there is none."""
+        end = time.time() + wait
+        while True:
+            try:
+                return parse(self.path(host, name))
+            except (OSError, ValueError):
+                if time.time() >= end:
+                    return empty
+                time.sleep(0.05)
+
+    def watcher(self, host):
+        return self.settled(host, "watcher.json", jload, {})
+
 
 class Linear(Base):
     def test_the_ledger_holds_a_row_a_live_session_and_is_rewritten_only_on_change(self):
@@ -154,20 +170,20 @@ class Linear(Base):
         self.assertEqual([x.get("watcher") for x in t.log(TOP) if x.get("watcher")], ["started"])
         end = time.time() + 30
         while time.time() < end and not (os.path.exists(self.path(TOP, "ledger.md"))
-                                         and jload(self.path(TOP, "watcher.json")).get("pid", -1) > 0):
+                                         and self.watcher(TOP).get("pid", -1) > 0):
             time.sleep(0.2)
-        self.assertGreater(jload(self.path(TOP, "watcher.json"))["pid"], 0, "the watcher runs")
-        self.assertIn(f"\" `{TOP}`", read(self.path(TOP, "ledger.md")))
-        beat = jload(self.path(TOP, "watcher.json"))
-        self.assertLess(time.time() - beat["beat"], 20, "it says it is alive at every look, before the look")
+        self.assertGreater(self.watcher(TOP).get("pid", -1), 0, "the watcher runs")
+        self.assertIn(f"\" `{TOP}`", self.settled(TOP, "ledger.md"))
+        beat = self.watcher(TOP)
+        self.assertLess(time.time() - beat.get("beat", 0), 20, "it says it is alive at every look, before the look")
         self.assertIn("slowestTickMs", beat)
         t.say(TOP, ASK, P4_PHI_WATCH="1", P4_PHI_WATCH_S="0.3", P4_PHI_WATCH_NET="0")
         self.assertEqual(len([x for x in t.log(TOP) if x.get("watcher")]), 1, "one watcher, not one a message")
         t.say(KID, handed("Port the flush to the new writer."))       # the watcher writes it in, no command run
         end = time.time() + 30
-        while time.time() < end and f"`{KID}`: working" not in read(self.path(TOP, "ledger.md")):
+        while time.time() < end and f"`{KID}`: working" not in self.settled(TOP, "ledger.md"):
             time.sleep(0.2)
-        self.assertIn(f"`{KID}`: working", read(self.path(TOP, "ledger.md")))
+        self.assertIn(f"`{KID}`: working", self.settled(TOP, "ledger.md"))
         s = t.session(TOP)
         s["archived"] = True
         write(self.path(TOP, "session.json"), json.dumps(s))
@@ -1025,12 +1041,13 @@ class Writes(unittest.TestCase):
             raise PermissionError("held open")
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, ".cache", "app-index.json")
-            os.replace = refuse
+            os.replace, wait = refuse, puppeteer.REPLACE_S
+            puppeteer.REPLACE_S = 0                # a replace refused for good: no waiting it out
             try:
                 with self.assertRaises(OSError):
                     puppeteer._write(path, "{}")
             finally:
-                os.replace = real
+                os.replace, puppeteer.REPLACE_S = real, wait
             self.assertEqual(os.listdir(os.path.dirname(path)), [])
             puppeteer._write(path, "{}")
             self.assertEqual(os.listdir(os.path.dirname(path)), ["app-index.json"])

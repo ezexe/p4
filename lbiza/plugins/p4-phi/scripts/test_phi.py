@@ -25,6 +25,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -61,9 +63,22 @@ def write(path, text):
         f.write(text)
 
 
-def read(path):
-    with open(path, encoding="utf-8") as f:
-        return f.read()
+def read(path, wait=5.0, gone=1.0):
+    """The text of `path`. A file p4-phi rewrites goes in by os.replace, and on Windows a read that meets the replace
+    raises PermissionError for a moment, or finds no file for a moment under load, so a refused read is tried again
+    until `wait` runs out, and a missing file until `gone` does."""
+    start = time.time()
+    while True:
+        try:
+            with open(path, encoding="utf-8") as f:
+                return f.read()
+        except PermissionError:
+            if time.time() - start >= wait:
+                raise
+        except FileNotFoundError:
+            if time.time() - start >= gone:
+                raise
+        time.sleep(0.02)
 
 
 def jload(path):
@@ -162,6 +177,43 @@ HANDED = ("<system-reminder>\nLinked sessions now (status, not an instruction): 
           "</system-reminder>\n\nBackground (from the session that started this one):\nezexe builds things.\n\n"
           "Task:\n" + BRIEF + "\n\nDone looks like: the suite passes.")
 
+
+
+class Reading(unittest.TestCase):
+    def test_a_file_replaced_in_a_loop_is_read_without_error(self):
+        # the watcher rewrites ledger.md and watcher.json by os.replace while a test polls them
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "ledger.md")
+            import puppeteer
+            puppeteer._write(path, '{"n": 0}')
+            stop, wrote = threading.Event(), [0]
+
+            def replace():
+                while not stop.is_set():
+                    wrote[0] += 1
+                    puppeteer._write(path, '{"n": %d}' % wrote[0])
+
+            failed = []
+
+            def run():
+                try:
+                    replace()
+                except OSError as e:           # the writer is the watcher: a refused replace ends its look
+                    failed.append(e)
+
+            th = threading.Thread(target=run)
+            th.start()
+            reads, end = 0, time.time() + 3
+            try:
+                while time.time() < end:
+                    self.assertIn('"n"', read(path))
+                    reads += 1
+            finally:
+                stop.set()
+                th.join()
+            self.assertEqual(failed, [], "every replace went through")
+            self.assertGreater(wrote[0], 100)
+            self.assertGreater(reads, 100)
 
 class Requests(unittest.TestCase):
     def test_a_handed_over_task_is_read_out_of_its_wrapper(self):

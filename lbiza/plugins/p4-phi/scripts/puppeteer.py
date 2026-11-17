@@ -45,6 +45,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -110,13 +111,24 @@ def _short(s, n):
     return relay._short(s, n)
 
 
+REPLACE_S = 5.0                  # seconds a write waits out readers that hold its file open
+
+
 def _write(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = f"{path}.{os.getpid()}.tmp"
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"     # one writer's temp file never another's
     try:
         with open(tmp, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
-        os.replace(tmp, path)
+        end = time.time() + REPLACE_S
+        while True:
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:                # Windows refuses a replace while a reader holds the file open
+                if time.time() >= end:
+                    raise
+                time.sleep(0.02)
     except OSError:
         try:                                       # a replace Windows refused leaves no temp file behind
             os.remove(tmp)
