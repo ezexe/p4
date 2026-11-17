@@ -270,7 +270,11 @@ class Loop(unittest.TestCase):
         self.assertEqual(out.get("decision"), "block")
         self.assertIn("failed", out.get("reason", ""))
         self.assertFalse(self.t.session(A).get("doneRetired"), "a failing test keeps the child open")
-        said = [c for c in self.calls() if c[:2] == ["issue", "comment"]]
+        self.assertNotIn("close issues", json.dumps(self.t.session(TOP)), "unproven work gets no push line")
+        self.plan(A, items("Fix x", "Write it up", status="completed"))
+        self.stop("f2")
+        self.assertNotIn("close issues", json.dumps(self.t.session(TOP)), "nor work whose test is not named")
+        said =[c for c in self.calls() if c[:2] == ["issue", "comment"]]
         self.assertTrue(any("failed" in c[c.index("--body") + 1] for c in said), "the result is on the issue")
         notes = os.path.join(self.t.dir(TOP), "notes.jsonl")
         if os.path.exists(notes):
@@ -289,6 +293,8 @@ class Loop(unittest.TestCase):
         with the link."""
         self.start_writer()
         step = self.regression_test(True)
+        self.git(self.work, "commit", "-q", "--allow-empty", "-m", "lib: a sibling's fix\n\nCloses #9")
+        sibling = self.git(self.work, "rev-parse", "--short", "HEAD").stdout.strip()
         self.commit("lib: fix x\n\nCloses #7")
         sha = self.git(self.work, "rev-parse", "--short", "HEAD").stdout.strip()
         self.finish(step)
@@ -304,6 +310,7 @@ class Loop(unittest.TestCase):
         pending = json.dumps(self.t.session(TOP))
         self.assertIn("finished with commits that close issues", pending, "the top of its tree has the push line")
         self.assertIn(sha, pending, "naming the `Closes #7` commit")
+        self.assertNotIn(sibling, pending, "and not a sibling's `Closes #9` commit in the shared checkout")
         guard = self.t.hook("branch-guard", A, {"hook_event_name": "PreToolUse", "tool_name": "Bash",
                                                  "tool_input": {"command": "git push -u origin main"}})
         self.assertEqual(json.loads(guard.stdout)["hookSpecificOutput"]["permissionDecision"], "ask",

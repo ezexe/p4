@@ -2806,7 +2806,7 @@ def h_stop(payload):
                 RAN["unfinished"] = len(puppeteer.archive_check(me.home, s["sessionId"]))
             except Exception:  # noqa: BLE001
                 pass
-    if above and finished:                         # a child with an issue too: only the orchestrator pushes
+    if above and finished and (proved or issues.proven_now(s)):   # with an issue, once its test passed
         cur = load_session(me.home, s["sessionId"]) or s
         told = list(cur.get("closesTold") or [])
         new = [c for c in issues.closing_commits(me.home, cur, payload.get("cwd") or "") if c[1] not in told]
@@ -3049,7 +3049,6 @@ QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
 BRANCH_MOVE = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b[^\n|;&]*?\b(switch\b|checkout\s+(?!--)(?!-[^bB])(?![\w./-]*\.\w{1,6}\s*$)[\w./-]+\s*$)")
 BRANCHING = re.compile(r"\bgit\b[^\n|;&]*?\b(worktree\s+add|switch\s+(-c|--create|-C)|checkout\s+(-b|-B)|"
                        r"branch\s+(?!-)[\w./-]+\s*$|branch\s+(?!-)[\w./-]+\s+[\w./-]+)")
-LANDING = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b[^\n|;&]*?\b(push|merge|rebase|pull)(?![\w-])")
 
 
 def h_branch_guard(payload):
@@ -3072,11 +3071,11 @@ def h_branch_guard(payload):
         what = "making a worktree or branch of its own"
     elif name in SHELL_TOOLS and BRANCH_MOVE.search(QUOTED.sub("''", str(inp.get("command") or ""))):
         what = "moving the checkout to another branch, which in a shared checkout moves the parent's too"
-    elif name in SHELL_TOOLS and LANDING.search(QUOTED.sub("''", str(inp.get("command") or ""))):
-        verb = LANDING.search(QUOTED.sub("''", str(inp.get("command") or ""))).group(1)
-        RAN["branch_guard"] = f"git {verb}"
+    elif name in SHELL_TOOLS and issues.landing(inp.get("command")):
+        verb = issues.landing(inp.get("command"))
+        RAN["branch_guard"] = verb
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
-                                       "permissionDecisionReason": f"phi (p4-phi): this session is a child, and `git "
+                                       "permissionDecisionReason": f"phi (p4-phi): this session is a child, and `"
                                                                    f"{verb}` lands work, which only the tree's "
                                                                    f"orchestrator does: a child commits on its "
                                                                    f"parent's branch and reports, a `Closes #N` "

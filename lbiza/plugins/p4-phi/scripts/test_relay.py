@@ -954,12 +954,26 @@ class ForkOrFresh(ThreeSessions):
         def guard(host, cmd):
             r = self.t.hook("branch-guard", host, {"tool_name": "Bash", "tool_input": {"command": cmd}})
             return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
-        for cmd in ("git push origin main", "cd /x && git merge feature", "git -C p4 rebase main", "git pull"):
+        for cmd in ("git push origin main", "cd /x && git merge feature", "git -C p4 rebase main", "git pull",
+                    "git -C /x/work push", "git push origin HEAD:main", "x & git push", "(git push)",
+                    '& "C:/Program Files/Git/cmd/git.exe" push origin main', "/usr/bin/git push", "FOO=1 git push",
+                    'bash -c "git push origin main"', 'pwsh -Command "git push"', "env GIT_TRACE=1 git push",
+                    "git --git-dir=/x/.git push", "git -c core.x=y push", "echo $(git push)",
+                    "gh pr merge 12 --squash", "gh api -X PATCH repos/o/r/git/refs/heads/main -f sha=abc",
+                    "gh api repos/o/r/merges -f base=main -f head=fix", "gh api -X PUT repos/o/r/pulls/3/merge"):
             out = guard(B, cmd)
+            self.assertIsNotNone(out, cmd)
             self.assertEqual(out["permissionDecision"], "ask", cmd)
             self.assertIn("merges and pushes", out["permissionDecisionReason"])
+        r = self.t.hook("branch-guard", B, {"tool_name": "PowerShell", "tool_input": {
+            "command": "Set-Location C:/x; & git.exe push origin main"}})
+        self.assertEqual(json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"], "ask", "a PowerShell push")
         self.assertIsNone(guard(B, "git merge-base --is-ancestor a b"), "merge-base lands nothing")
         self.assertIsNone(guard(B, "git log --grep 'push'"), "quoted words are not a command")
+        self.assertIsNone(guard(B, 'git commit -qm "say git push to land it"'), "a message naming a push")
+        self.assertIsNone(guard(B, 'echo "git push"'), "an echo lands nothing")
+        self.assertIsNone(guard(B, "gh pr view 12"), "a view lands nothing")
+        self.assertIsNone(guard(B, "gh api repos/o/r/git/refs/heads/main"), "reading a ref lands nothing")
         self.assertIsNone(guard(TOP, "git push origin main"), "the orchestrator lands the work")
         s = relay._session(self.t.p4, B)
         for task in ("Fix x. Closes #7 on ezexe/demo; run the suites, then push it yourself.",

@@ -137,6 +137,97 @@ def writing(text):
     return bool(WRITES.search(text))
 
 
+# --- a shell command that lands work -----------------------------------------------------------------------------------
+
+LANDS = ("push", "merge", "rebase", "pull")
+MOVES = LANDS + ("fetch",)                         # what may bring a closing commit onto the default branch here
+SEP = re.compile(r"&&|\|\||\$\(|[;&|\n()`]")
+TOKEN = re.compile(r"\"([^\"]*)\"|'([^']*)'|(\S+)")
+WRAPPERS = {"sudo", "command", "exec", "env", "time", "nohup", "call", "start-process", "invoke-expression", "iex"}
+SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "pwsh", "powershell", "cmd"}
+GIT_VALUED = {"-c", "-C", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"}
+GH_REFS = re.compile(r"(?:^|/)git/refs\b|/merges\b|/pulls/\d+/merge\b", re.I)
+
+
+def _segments(cmd):
+    """The simple commands of a shell line, split at each unquoted `;`, `&`, `&&`, `||`, `|`, newline, paren,
+    backtick or `$(`, each kept with its quotes."""
+    out, cur, i, q = [], [], 0, ""
+    text = str(cmd or "")
+    while i < len(text):
+        ch = text[i]
+        if q:
+            cur.append(ch)
+            q = "" if ch == q else q
+            i += 1
+            continue
+        if ch in "\"'":
+            q = ch
+            cur.append(ch)
+            i += 1
+            continue
+        m = SEP.match(text, i)
+        if m:
+            out.append("".join(cur))
+            cur = []
+            i = m.end()
+            continue
+        cur.append(ch)
+        i += 1
+    out.append("".join(cur))
+    return [s for s in out if s.strip()]
+
+
+def _tokens(seg):
+    return [next(g for g in m.groups() if g is not None) for m in TOKEN.finditer(seg)]
+
+
+def _exe(tok):
+    """A program's own name, the last part of its path, lowercased, without `.exe`."""
+    base = re.split(r"[\\/]", tok.strip())[-1].lower()
+    return base[:-4] if base.endswith(".exe") else base
+
+
+def landing(cmd, verbs=LANDS, depth=0):
+    """What a shell line runs that lands work, such as "git push" or "gh pr merge", '' for none. git or git.exe is
+    found by the last part of its path after a call operator, an env prefix, a paren, a quote or a wrapper such as
+    `env` or `sudo`, and inside `bash -c`, `pwsh -Command` or `cmd /c`; git's own options before its subcommand, such
+    as `-C <dir>`, are passed over, so `git log --grep push` lands nothing. `gh pr merge` and a `gh api` call on a
+    ref, a merge or a pull request's merge land work too."""
+    for seg in _segments(cmd):
+        toks = _tokens(seg)
+        while toks and (re.match(r"^[A-Za-z_]\w*=", toks[0]) or _exe(toks[0]) in WRAPPERS or toks[0] in ("&", ".")):
+            toks = toks[1:]
+        if not toks:
+            continue
+        exe, rest = _exe(toks[0]), toks[1:]
+        if exe in SHELLS and depth < 3:
+            for k, t in enumerate(rest):
+                if t.lower() in ("-c", "-command", "/c", "/k") and k + 1 < len(rest):
+                    hit = landing(" ".join(rest[k + 1:]) if exe == "cmd" else rest[k + 1], verbs, depth + 1)
+                    if hit:
+                        return hit
+            continue
+        if exe == "git":
+            k = 0
+            while k < len(rest) and rest[k].startswith("-"):
+                k += 2 if rest[k] in GIT_VALUED else 1
+            if k < len(rest) and rest[k].lower() in verbs:
+                return f"git {rest[k].lower()}"
+        elif exe == "gh" and "merge" in verbs:
+            words = [t.lower() for t in rest]
+            if words[:2] == ["pr", "merge"]:
+                return "gh pr merge"
+            if words[:1] == ["api"] and any(GH_REFS.search(t) for t in rest[1:]):
+                said = re.search(r"(?:^|\s)(?:-X|--method)(?:\s+|=)(\w+)", " ".join(rest))
+                fields = any(w in ("-f", "-F", "--field", "--raw-field", "--input") or
+                             re.match(r"^(?:--field|--raw-field|--input)=", w) for w in words)
+                method = said.group(1).upper() if said else ("POST" if fields else "GET")   # as gh api decides
+                if method != "GET":
+                    return "gh api"
+    return ""
+
+
 SLUG = re.compile(r"(?<![\w./\\-])([A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*)(?![\w/\\-])")
 SLUG_SAID = re.compile(r"(?:github\.com[:/]+|-R\s+|--repo\s+|\b(?:on|in|of|to|repo|repository)\s+)"
                        r"([A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w-]*(?:\.[\w-]+)*?)(?=\.git\b|[#/\s,;:)]|\.?\s|\.?$)|"
@@ -366,17 +457,26 @@ def own_commits(s, cwd=""):
 
 
 def closing_commits(home, s, cwd=""):
-    """relay.closing_commits for the push line its orchestrator gets, with the closing commits made in the
-    repository of the session's own issue since it was taken, which a turn that edited no file there leaves out."""
+    """The commits the push line its orchestrator gets names. For a session with no issue of its own,
+    relay.closing_commits. For one with an issue, only the commits that close that issue, from both
+    relay.closing_commits and the commits made in its issue's repository since it was taken, which a turn that
+    edited no file there leaves out: no record says which session made a commit in a checkout siblings share, and
+    each commits as the same git author, so a sibling's `Closes #M` there is told apart only by its issue number."""
     out = relay.closing_commits(home, s["sessionId"], s)
-    if isinstance(s.get("issue"), dict) and on(home):
-        seen = {sha for _, sha, _, _ in out}
-        for repo, sha, subj, body in own_commits(s, cwd):
-            refs = list(dict.fromkeys(relay.CLOSES.findall(body or "")))
-            if refs and sha not in seen:
-                seen.add(sha)
-                out.append((repo, sha, subj, refs))
-    return out
+    iss = s.get("issue") if isinstance(s.get("issue"), dict) else None
+    if not iss or not on(home):
+        return out
+    slug, n = iss["repo"], iss["number"]
+    mine, seen = [], set()
+    for repo, sha, subj, refs in out:
+        if any(closes(f"Closes {r}", slug, n) for r in refs) and sha not in seen:
+            seen.add(sha)
+            mine.append((repo, sha, subj, [f"#{n}"]))
+    for repo, sha, subj, body in own_commits(s, cwd):
+        if closes(body, slug, n) and sha not in seen:
+            seen.add(sha)
+            mine.append((repo, sha, subj, [f"#{n}"]))
+    return mine
 
 
 def unclosed_text(home, s, cwd=""):
@@ -570,6 +670,12 @@ def lander(home, s):
     return top, relay._title(relay._session(home, top)) if top else ""
 
 
+def proven_now(s):
+    """True when a session's work may be pushed: it has no issue, or the last gate saw its regression test pass."""
+    iss = s.get("issue") if isinstance(s, dict) else None
+    return not isinstance(iss, dict) or bool(iss.get("passed"))
+
+
 def _told(iss, key):
     if iss.get("gateTold") == key:
         return True
@@ -587,6 +693,7 @@ def gate(home, s, cwd=""):
         return True, "", ""
     slug, n = iss["repo"], iss["number"]
     ref = f"{slug}#{n}"
+    iss.pop("passed", None)                        # set again below only when the test passed on this head
     proof = proof_of(home, s)
     if not proof:
         return False, ("" if _told(iss, "no-test") else
@@ -612,6 +719,7 @@ def gate(home, s, cwd=""):
                        f"phi (p4-phi): the regression test `{proof['cmd']}` failed on {head} with exit code "
                        f"{d.get('code')}, so this session stays open until it passes. Its last "
                        f"lines: {tail}"), ""
+    iss["passed"] = head
     mine = own_commits(s, cwd)
     closing = [(repo, sha, subj) for repo, sha, subj, body in mine if closes(body, slug, n)]
     st = issue_state(slug, n)
