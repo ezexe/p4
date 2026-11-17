@@ -9,16 +9,17 @@ prints nothing when nothing is behind. Otherwise one `systemMessage` for ezexe, 
             never waits on a merge, and its output goes to `<git dir>/p4-sync.log`; when it cannot start, the line
             gives the whole command that syncs the store, as phi.py builds it. The fetch that finds out is given
             FETCH_S seconds. Nothing is forced, and nothing is pulled outside `p4.py sync`.
-  plugins   a former plugin, enabled or only installed, and an installed p4-phi or p4-temportal older than the
-            marketplace's get the exact `claude plugin` commands that close them, in order. A former plugin is a key
-            of the marketplace's `renames` map that names a plugin in its place, and which the marketplace no longer
-            offers. The commands are printed, never run: plugin settings are ezexe's.
   cache     the version folders under <config>/plugins/cache/p4-marketplace/ that no install uses: how many and
             their size, in one line, said again only when the count changes. Nothing is deleted here: Claude Code
             removes a version folder 14 days after an update or uninstall orphans it, and `catchup.py prune-cache`
             deletes them at once when ezexe runs it.
 
 P4_PHI_CATCHUP=0 turns it off. CLAUDE_CONFIG_DIR stands in for ~/.claude, as Claude Code reads it.
+
+An installed p4 plugin behind its marketplace, and a former name the marketplace's `renames` map gives, are Claude
+Code's own: marketplace auto-update, once ezexe turns it on for p4-marketplace, updates the installed copies after a
+session starts, and a renamed plugin's settings keys are rewritten by the renames map, by
+https://code.claude.com/docs/en/plugins/install.md and https://code.claude.com/docs/en/plugins/host-marketplace.md.
 """
 
 import json
@@ -33,7 +34,6 @@ if HERE not in sys.path:
 import p4conf  # noqa: E402
 
 MARKET = "p4-marketplace"
-CURRENT = ("p4-phi", "p4-temportal")
 FETCH_S = 5.0                 # what the fetch that finds a branch behind may take at a start
 SIZE_S = 2.0                  # what measuring the unused version folders may take
 ENV = "P4_PHI_CATCHUP"
@@ -52,152 +52,16 @@ def read_json(path):
         return {}
 
 
-def version(v):
-    out = []
-    for part in str(v or "").split("."):
-        digits = "".join(c for c in part if c.isdigit())
-        out.append(int(digits) if digits else 0)
-    return tuple(out)
-
-
 def same_path(a, b):
     return os.path.normcase(os.path.normpath(a or "")) == os.path.normcase(os.path.normpath(b or ""))
 
 
-# --- plugins -------------------------------------------------------------------------------------------------
-
-def enabled(project):
-    """`{(name, scope): True|False}` for the p4 plugins the settings files name, user scope first."""
-    out = {}
-    for scope, path in (("user", os.path.join(config_dir(), "settings.json")),
-                        ("project", os.path.join(project, ".claude", "settings.json")),
-                        ("local", os.path.join(project, ".claude", "settings.local.json"))):
-        for key, on in (read_json(path).get("enabledPlugins") or {}).items():
-            name, _, market = str(key).partition("@")
-            if market == MARKET:
-                out[(name, scope)] = bool(on)
-    return out
-
-
-def installs(project):
-    """`{name: [(scope, version, installPath)]}` of the installs that apply in `project`."""
-    data = read_json(os.path.join(config_dir(), "plugins", "installed_plugins.json")).get("plugins") or {}
-    out = {}
-    for key, rows in data.items():
-        name, _, market = str(key).partition("@")
-        if market != MARKET:
-            continue
-        for r in rows if isinstance(rows, list) else [rows]:
-            if not isinstance(r, dict):
-                continue
-            if r.get("scope") in ("local", "project") and not same_path(r.get("projectPath"), project):
-                continue
-            out.setdefault(name, []).append((r.get("scope") or "user", r.get("version") or "", r.get("installPath") or ""))
-    return out
-
+# --- cache --------------------------------------------------------------------------------------------------
 
 def all_install_paths():
     data = read_json(os.path.join(config_dir(), "plugins", "installed_plugins.json")).get("plugins") or {}
     return [r.get("installPath") for rows in data.values() for r in (rows if isinstance(rows, list) else [rows])
             if isinstance(r, dict) and r.get("installPath")]
-
-
-def market_location():
-    """Where Claude Code keeps this machine's copy of the marketplace, '' when it knows none."""
-    return (read_json(os.path.join(config_dir(), "plugins", "known_marketplaces.json")).get(MARKET) or {}).get(
-        "installLocation") or ""
-
-
-def retired():
-    """{former plugin: the plugin in its place}: the marketplace's `renames` map, which maps a former name to its new
-    one or to null, less the names mapped to null, which nothing takes the place of."""
-    loc = market_location()
-    renames = read_json(os.path.join(loc, ".claude-plugin", "marketplace.json")).get("renames") if loc else None
-    return {k: v for k, v in (renames or {}).items() if isinstance(k, str) and isinstance(v, str) and v}
-
-
-def market_versions():
-    """{name: version} the marketplace offers: each plugin's own plugin.json, else marketplace.json."""
-    loc = market_location()
-    if not loc:
-        return {}
-    out = {}
-    for p in read_json(os.path.join(loc, ".claude-plugin", "marketplace.json")).get("plugins") or []:
-        if isinstance(p, dict) and p.get("name"):
-            out[p["name"]] = p.get("version") or ""
-            own = read_json(os.path.join(loc, str(p.get("source") or "").lstrip("./").replace("/", os.sep),
-                                         ".claude-plugin", "plugin.json"))
-            if own.get("version"):
-                out[p["name"]] = own["version"]
-    return out
-
-
-def every_install():
-    """`[(name, scope, version, projectPath)]` of every p4 install on this machine, any project."""
-    data = read_json(os.path.join(config_dir(), "plugins", "installed_plugins.json")).get("plugins") or {}
-    out = []
-    for key, rows in data.items():
-        name, _, market = str(key).partition("@")
-        if market != MARKET:
-            continue
-        for r in rows if isinstance(rows, list) else [rows]:
-            if isinstance(r, dict):
-                out.append((name, r.get("scope") or "user", r.get("version") or "", r.get("projectPath") or ""))
-    return out
-
-
-def plugin_commands(project):
-    """The `claude plugin` commands that bring the p4 plugins up to date, in order; [] when none. A command that
-    has to run inside another project, to remove an install scoped to it, ends with `(in <project>)`."""
-    on = enabled(project)
-    have = installs(project)
-    offer = market_versions()
-    former = retired()
-    every = every_install()
-    out, need, seen = [], {}, set()
-
-    def retire(name, scope, where=""):
-        key = (name, scope, os.path.normcase(where))
-        if key in seen:
-            return
-        seen.add(key)
-        out.append(f"claude plugin uninstall {name}@{MARKET} --scope {scope}" + (f" (in {where})" if where else ""))
-        if scope == "user" or need.get(former[name]) != "user":
-            need[former[name]] = scope
-    # a renamed plugin is former only where the marketplace no longer offers it: a marketplace that still lists
-    # p4-recall holds a p4-phi without retrieval, and uninstalling p4-recall there would leave no retrieval at all.
-    # A former plugin installed but disabled is listed too: its install record and cache folders stay until it is
-    # uninstalled.
-    for (name, scope), state in sorted(on.items()):
-        if state and name in former and name not in offer:
-            retire(name, scope)
-    for name, scope, _, where in sorted(every):
-        if name in former and name not in offer:
-            retire(name, scope, "" if scope == "user" or same_path(where, project) else where)
-    moves, updates = [], []
-    for name in CURRENT:
-        rows = have.get(name, [])
-        # the successor goes where the former plugin was: after p4-recall at user scope, p4-phi in two projects
-        # alone would leave every other project without retrieval. Each project's own install is removed first, in
-        # that project, so the plugin is never installed twice where both scopes reach.
-        to_user = need.get(name) == "user" and name in offer and "user" not in {sc for sc, _, _ in rows}
-        if to_user:
-            for n, scope, _, where in sorted(every, key=lambda r: (not same_path(r[3], project), r[3], r[1])):
-                if n == name and scope in ("local", "project"):
-                    here = same_path(where, project)
-                    moves.append(f"claude plugin uninstall {name}@{MARKET} --scope {scope}"
-                                 + ("" if here else f" (in {where})"))
-            moves.append(f"claude plugin install {name}@{MARKET} --scope user")
-        elif name in need and name in offer and need[name] not in {sc for sc, _, _ in rows}:
-            moves.append(f"claude plugin install {name}@{MARKET} --scope {need[name]}")
-        for scope, v, _ in rows:
-            if to_user and scope in ("local", "project"):
-                continue                            # removed above: no update for it
-            if offer.get(name) and version(v) < version(offer[name]):
-                updates.append(f"claude plugin update {name}@{MARKET} --scope {scope}")
-    if moves or updates:
-        out = [f"claude plugin marketplace update {MARKET}"] + out + moves + updates
-    return out
 
 
 def old_cache():
@@ -315,14 +179,7 @@ def run(project, p4, sync=True):
                 parts.append(f"the store's branch {got[0]} is {got[1]} commit(s) behind origin/{main}; "
                              + ("`p4.py sync` is merging it in the background" if started
                                 else f"run `{sync_command(p4)}` to merge it"))
-    cmds = plugin_commands(project)
     n, size = old_cache()
-    if cmds:
-        shown = []
-        for c in cmds:
-            cmd, _, where = c.partition(" (in ")
-            shown.append(f"`{cmd}`" + (f" in {where.rstrip(')')}" if where else ""))
-        parts.append("plugins behind; run, in this order: " + " ; ".join(shown))
     # the cache line is said again only when the count changes: until Claude Code removes the folders, the same
     # line would print at every start
     mark = os.path.join(p4, "phi", "catchup.json")

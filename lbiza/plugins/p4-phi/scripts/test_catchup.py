@@ -30,18 +30,9 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.mkdtemp(prefix="p4-catchup-")
         self.conf = os.path.join(self.tmp, "config")
         self.project = os.path.join(self.tmp, "proj")
-        self.market = os.path.join(self.tmp, "market")
         os.makedirs(self.project)
         self.old = os.environ.get("CLAUDE_CONFIG_DIR")
         os.environ["CLAUDE_CONFIG_DIR"] = self.conf
-        write(os.path.join(self.conf, "plugins", "known_marketplaces.json"),
-              {M: {"source": {"source": "directory", "path": self.market}, "installLocation": self.market}})
-        write(os.path.join(self.market, ".claude-plugin", "marketplace.json"), {"name": M, "plugins": [
-            {"name": "p4-phi", "source": "./plugins/p4-phi", "version": "0.7.0"},
-            {"name": "p4-temportal", "source": "./plugins/p4-temportal", "version": "0.2.0"}],
-            "renames": {"p4-memory": "p4-temportal", "p4-scratchpad": "p4-temportal", "p4-recall": "p4-phi"}})
-        for name, v in (("p4-phi", "0.7.0"), ("p4-temportal", "0.2.0")):
-            write(os.path.join(self.market, "plugins", name, ".claude-plugin", "plugin.json"), {"name": name, "version": v})
 
     def tearDown(self):
         if self.old is None:
@@ -70,82 +61,20 @@ class Base(unittest.TestCase):
 
 
 class Plugins(Base):
-    def test_a_name_the_marketplace_renames_is_retired(self):
-        """ezexe/p4#185: the retired plugins are the marketplace's `renames`, row P14 of the platform page, so a name
-        only that map holds is uninstalled in favour of the plugin it names, and a name mapped to null is not."""
-        path = os.path.join(self.market, ".claude-plugin", "marketplace.json")
-        with open(path, encoding="utf-8") as f:
-            m = json.load(f)
-        m["renames"].update({"p4-old-name": "p4-phi", "p4-gone": None})
-        write(path, m)
-        self.install([("p4-old-name", "user", "0.1.0", None), ("p4-gone", "user", "0.1.0", None),
-                      ("p4-phi", "user", "0.7.0", None)], {"p4-old-name": True, "p4-gone": True, "p4-phi": True})
-        cmds = catchup.plugin_commands(self.project)
-        self.assertIn(f"claude plugin uninstall p4-old-name@{M} --scope user", cmds)
-        self.assertFalse(any("p4-gone" in c for c in cmds), cmds)
+    def test_a_plugin_behind_its_marketplace_is_claude_codes_own(self):
+        """Marketplace auto-update, by https://code.claude.com/docs/en/plugins/install.md, "Keep plugins updated":
+        "Plugins update automatically when the marketplace they came from has auto-update turned on." A plugin behind
+        its marketplace and a former name in its renames map get no line from p4."""
+        for name in ("plugin_commands", "installs", "enabled", "retired", "market_versions", "every_install"):
+            self.assertFalse(hasattr(catchup, name), name)
+        self.install([("p4-recall", "user", "0.9.0", None), ("p4-phi", "user", "0.1.0", None)],
+                     {"p4-recall": True, "p4-phi": True})
+        self.assertNotIn("claude plugin", catchup.run(self.project, os.path.join(self.project, ".claude", "p4")))
 
     def test_nothing_behind_is_silent(self):
         self.install([("p4-phi", "user", "0.7.0", None), ("p4-temportal", "user", "0.2.0", None)],
                      {"p4-phi": True, "p4-temportal": True, "p4-recall": False})
-        self.assertEqual(catchup.plugin_commands(self.project), [])
         self.assertEqual(catchup.run(self.project, os.path.join(self.project, ".claude", "p4")), "")
-
-    def test_a_retired_plugin_and_an_old_version_get_their_commands(self):
-        self.install([("p4-recall", "user", "0.9.0", None), ("p4-phi", "local", "0.5.0", self.project),
-                      ("p4-phi", "local", "0.4.0", os.path.join(self.tmp, "other")),
-                      ("p4-temportal", "user", "0.2.0", None)],
-                     {"p4-recall": True, "p4-temportal": True, "p4-memory": False}, {"p4-phi": True})
-        other = os.path.join(self.tmp, "other")
-        self.assertEqual(catchup.plugin_commands(self.project), [
-            f"claude plugin marketplace update {M}",
-            f"claude plugin uninstall p4-recall@{M} --scope user",
-            f"claude plugin uninstall p4-phi@{M} --scope local",
-            f"claude plugin uninstall p4-phi@{M} --scope local (in {other})",
-            f"claude plugin install p4-phi@{M} --scope user"],
-            "p4-recall was on at user scope: p4-phi moves to user scope, each project's own install removed "
-            "first in its project, so it is never installed twice, and nothing removed is updated")
-
-    def test_ezexes_config_retires_disabled_plugins_too(self):
-        """Every former plugin installed at user scope, p4-memory and p4-scratchpad disabled and p4-recall on,
-        beside p4-temportal at user scope and p4-phi in two projects: each former plugin is uninstalled, each
-        project's p4-phi is removed in its project, and p4-phi is installed once, at user scope."""
-        ap = os.path.join(self.tmp, "AudioPlugin")
-        self.install([("p4-memory", "user", "0.1.10", None), ("p4-scratchpad", "user", "0.1.12", None),
-                      ("p4-recall", "user", "0.9.0", None), ("p4-temportal", "user", "0.2.0", None),
-                      ("p4-phi", "local", "0.5.0", self.project), ("p4-phi", "local", "0.5.0", ap)],
-                     {"p4-memory": False, "p4-scratchpad": False, "p4-recall": True, "p4-temportal": True},
-                     {"p4-phi": True})
-        cmds = catchup.plugin_commands(self.project)
-        self.assertEqual(cmds, [
-            f"claude plugin marketplace update {M}",
-            f"claude plugin uninstall p4-recall@{M} --scope user",
-            f"claude plugin uninstall p4-memory@{M} --scope user",
-            f"claude plugin uninstall p4-scratchpad@{M} --scope user",
-            f"claude plugin uninstall p4-phi@{M} --scope local",
-            f"claude plugin uninstall p4-phi@{M} --scope local (in {ap})",
-            f"claude plugin install p4-phi@{M} --scope user"])
-        self.assertEqual(sum(c.startswith(f"claude plugin install p4-phi@{M}") for c in cmds), 1)
-        line = catchup.run(self.project, os.path.join(self.project, ".claude", "p4"), sync=False)
-        self.assertIn(f"`claude plugin uninstall p4-phi@{M} --scope local` in {ap}", line)
-
-    def test_a_retired_plugin_whose_successor_is_missing_gets_an_install(self):
-        self.install([("p4-memory", "user", "0.1.10", None), ("p4-scratchpad", "user", "0.1.12", None)],
-                     {"p4-memory": True, "p4-scratchpad": True})
-        cmds = catchup.plugin_commands(self.project)
-        self.assertEqual(cmds[0], f"claude plugin marketplace update {M}")
-        self.assertIn(f"claude plugin uninstall p4-memory@{M} --scope user", cmds)
-        self.assertIn(f"claude plugin uninstall p4-scratchpad@{M} --scope user", cmds)
-        self.assertEqual(cmds.count(f"claude plugin install p4-temportal@{M} --scope user"), 1)
-
-    def test_a_plugin_the_marketplace_still_offers_is_not_retired(self):
-        mj = os.path.join(self.market, ".claude-plugin", "marketplace.json")
-        with open(mj, encoding="utf-8") as f:
-            m = json.load(f)
-        m["plugins"].append({"name": "p4-recall", "source": "./plugins/p4-recall", "version": "0.9.0"})
-        write(mj, m)
-        self.install([("p4-recall", "user", "0.9.0", None), ("p4-phi", "user", "0.7.0", None)],
-                     {"p4-recall": True, "p4-phi": True})
-        self.assertEqual(catchup.plugin_commands(self.project), [], "no uninstall before p4-phi carries retrieval")
 
     def test_old_cache_folders_are_counted_and_deleted_only_by_prune_cache(self):
         self.install([("p4-phi", "user", "0.7.0", None)], {"p4-phi": True})
@@ -168,8 +97,7 @@ class Plugins(Base):
         self.assertEqual(len(removed), 3)
         self.assertTrue(os.path.isdir(os.path.join(cache, "p4-phi", "0.7.0")), "the folder an install uses stays")
 
-    def test_versions_compare_as_numbers(self):
-        self.assertLess(catchup.version("0.9.0"), catchup.version("0.10.0"))
+    def test_a_size_cut_short_is_a_floor(self):
         self.assertEqual(catchup.size_text(-2048), "at least 2.0 KB")
 
 
