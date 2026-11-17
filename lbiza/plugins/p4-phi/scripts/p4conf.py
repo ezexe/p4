@@ -1220,14 +1220,14 @@ WRITES = ("autoMemoryDirectory", "attribution.commit")
 ENV_KEY = "env"                  # where the P4_* variables go: each one p4 owns is the dotted key env.<name>
 # Raised by one whenever the keys this copy writes change, so a store's next start runs the whole check: the record
 # holds the KEEPER of the copy that last ran it.
-KEEPER = 4
+KEEPER = 5
 PAST_MAX = 5                     # texts kept per variable of those p4 wrote and later replaced or removed
 # The class of keys ezexe decides, by #246: every key of the topics "Permission settings", "Sandbox settings",
 # "Authentication and providers" and "Enterprise and managed settings" of settings-reference.md, the table
 # "Exceptions to managed settings precedence" of settings.md, and the keys named beside them. A dotted key under one
 # of these is in the class too. ezexe's yes covers only what the keeper writes of it: the two allow rules, the ask
-# rule on the archive tool and p4's own P4_* variables under env; a store's `claude` section naming any key of the
-# class is still told it is ezexe's to decide.
+# rule on the archive tool, the deny rule on the model tool and p4's own P4_* variables under env; a store's `claude`
+# section naming any key of the class is still told it is ezexe's to decide.
 SECURITY = (
     "permissions", "sandbox", "autoMode", "allowManagedPermissionRulesOnly", "disableAutoMode",
     "useAutoModeDuringPlan", "skipAutoPermissionPrompt", "skipDangerousModePermissionPrompt",
@@ -1285,6 +1285,8 @@ _PER_FILE = {
                         and _int(v.get("gen", 0))),
     "askRules": lambda v: (isinstance(v, dict) and _strs(v.get("entries", [])) and _strs(v.get("hand", []))
                            and _int(v.get("gen", 0))),
+    "denyRules": lambda v: (isinstance(v, dict) and _strs(v.get("entries", [])) and _strs(v.get("hand", []))
+                            and _int(v.get("gen", 0))),
     "unreadable": lambda v: v is None or (isinstance(v, (int, float)) and not isinstance(v, bool)),
 }
 
@@ -1561,6 +1563,12 @@ def allow_rules(platform, conf):
 # Both copies write it, since its text names no plugin folder.
 ASK_KEY = "permissions.ask"
 ASK_RULES = ("mcp__ccd_session_mgmt__archive_session",)
+# The deny rule ezexe approved, kept the same way under RECORD's `denyRules`: a session's model is chosen on its start
+# call and never changed after, since a change mid-run re-prices its turns, so set_session_model is denied, which
+# replaced p4-phi's own refusal of the call. https://code.claude.com/docs/en/permissions: "Deny rules prevent Claude
+# Code from using the specified tool", and "Rules are evaluated in order: deny, then ask, then allow."
+DENY_KEY = "permissions.deny"
+DENY_RULES = ("mcp__ccd_session_mgmt__set_session_model",)
 
 
 def rule_identity(rule):
@@ -1700,8 +1708,8 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
     frozen = env_written(p4) is None                   # a malformed record: every P4_* entry left as it is
     p4env = None if frozen else {k.split(".", 1)[1]: v for k, v in want.items() if k.startswith(ENV_KEY + ".")}
     past = {n: list(t) for n, t in ((rec.get("p4past") or {}).get(name) or {}).items()}
-    # in the order of the reference file: the two keys, p4's allow rules, its ask rule, then the variables; then each
-    # key an earlier copy wrote that this one no longer owns, such as disableAllHooks, which goes
+    # in the order of the reference file: the two keys, p4's allow rules, its ask and deny rules, then the variables;
+    # then each key an earlier copy wrote that this one no longer owns, such as disableAllHooks, which goes
     env = [k for k in want if k.startswith(ENV_KEY + ".")]
     env += [k for k in owned if k.startswith(ENV_KEY + ".") and k not in env]
     if frozen or not isinstance(new.get(ENV_KEY, {}), dict):
@@ -1713,6 +1721,7 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
         _keep_key(p4, project, new, k, want.get(k), owned, gone, owned_only)
     _keep_rules(new, rec, name, allow_rules(platform, conf), owned_only)
     _keep_rules(new, rec, name, list(ASK_RULES), owned_only, ASK_KEY, "askRules")
+    _keep_rules(new, rec, name, list(DENY_RULES), owned_only, DENY_KEY, "denyRules")
     for k in env + dropped:
         _keep_key(p4, project, new, k, want.get(k), owned, gone, owned_only, past)
     cur_env = new.get(ENV_KEY) if isinstance(new.get(ENV_KEY), dict) else {}
