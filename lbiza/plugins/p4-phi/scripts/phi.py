@@ -1887,6 +1887,21 @@ def h_restart_check(payload):
                                    "permissionDecisionReason": why}}
 
 
+def h_task_stop(payload):
+    """PostToolUse on TaskStop, or KillShell in an older session: the stopped task's entry leaves the list the last
+    Stop kept, since a stop sends no completion notice. Prints nothing."""
+    me = Me(payload)
+    if not me.home or not me.id:
+        return None
+    s = load_session(me.home, me.id)
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    tid = inp.get("task_id") or inp.get("shell_id") or inp.get("id")
+    if s and tid and plans.clear_in_flight(s, json.dumps({"name": "TaskStop", "input": {"task_id": str(tid)}})):
+        save_session(me.home, s)
+        RAN["task_stop"] = str(tid)
+    return None
+
+
 def mark_fork(s, me, payload):
     """A session the app records as a fork, that SessionStart says began as one, its `source` "fork" as hooks.md's
     SessionStart input names it, or whose first message is a fork's, is kept as one."""
@@ -2078,6 +2093,7 @@ def h_user_prompt_submit(payload):
     req = request_of(payload.get("prompt"))
     s["turnBy"] ="user" if req else (
         "session" if re.search(r"<cross-session-message\b", str(payload.get("prompt") or "")) else "event")
+    plans.clear_in_flight(s, payload.get("prompt"))   # a completion notice ends its entry
     mark_fork(s, me, payload)
     if not s.get("disposable") and relay.DISPOSABLE.search(str(payload.get("prompt") or "")) \
             and not load_turns(me.home, s["sessionId"]):
@@ -2274,6 +2290,10 @@ def h_stop(payload):
     if not me.home or not me.id:
         return None
     configure(me.home)
+    if isinstance(payload.get("background_tasks"), list):   # hooks.md, Stop input: kept before any return
+        kept = ensure_session(me.home, me.id, me.rec, me.cli)
+        if plans.keep_in_flight(kept, payload):
+            save_session(me.home, kept)
     if not TURNS:
         return None
     s = ensure_session(me.home, me.id, me.rec, me.cli)
@@ -2322,7 +2342,6 @@ def h_stop(payload):
     watch_over(me.home, s)
     replay(me, s, payload.get("transcript_path") or "")
     s = load_session(me.home, s["sessionId"]) or s
-    plans.keep_in_flight(s, payload)              # hooks.md, Stop input: the work still in flight, for the checks
     if isinstance(s.get("stale"), dict) and s["stale"].get("told"):
         s.pop("stale", None)                       # told what superseded it, and a turn of its own ended since
         s["unstaled"] = now()
@@ -2401,7 +2420,7 @@ def h_stop(payload):
     why = plans.keep_going(me.home, now_s, row["report"], turn.get("calls") or [], row["id"],
                            bool(payload.get("stop_hook_active")), waits=waits,
                            background=payload.get("background_tasks") if isinstance(payload.get("background_tasks"),
-                                                                                     list) else ())
+                                                                                     list) else plans.in_flight(now_s))
     why = "\n\n".join(p for p in (held, why) if p)   # the regression test's verdict, then the open steps
     if why:                                        # open steps the session tree can settle send the turn back
         RAN["kept_going"] = True
@@ -2915,9 +2934,10 @@ HOOKS = {"session-start": ("SessionStart", h_session_start),
          "store-guard": ("PreToolUse", h_store_guard),
          "plan": ("PostToolUse", h_plan),
          "memory-gap": ("PostToolUse", h_memory_gap),
+         "task-stop": ("PostToolUse", h_task_stop),
          "self-archive": ("PreToolUse", h_self_archive)}
 ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "store-guard", "plan", "memory-gap",
-                                     "self-archive")})
+                                     "self-archive", "task-stop")})
 ROUTED["nudge"] = ("PreToolUse", h_nudge)
 ROUTED["puppeteer-tool"] = ("PreToolUse", h_puppeteer_tool)
 ROUTED["model-fixed"] = ("PreToolUse", h_model_fixed)

@@ -769,7 +769,7 @@ PHI_CHECK = {"mcp__ccd_session__start_session": "start-advice", "EnterWorktree":
              "Edit": ("nudge", "puppeteer-tool"), "Write": ("nudge", "puppeteer-tool"),
              "MultiEdit": ("nudge", "puppeteer-tool"), "NotebookEdit": ("nudge", "puppeteer-tool")}
 PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "mcp__ccd_turn__wrap_up": "wrap-up", "Write": "memory-gap",
-              "Edit": "memory-gap", "MultiEdit": "memory-gap"}
+              "Edit": "memory-gap", "MultiEdit": "memory-gap", "TaskStop": "task-stop", "KillShell": "task-stop"}
 
 
 def phi_route(payload, table):

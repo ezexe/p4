@@ -538,6 +538,7 @@ class HooksJson(unittest.TestCase):
             self.assertEqual(ran("lookup-record", "Read", clean), [], "a clean read: nothing waits")
             self.assertEqual(ran("lookup-record", "Bash", clean), [], "a clean shell call: p4-phi keeps no record")
             self.assertEqual(ran("lookup-record", "Write", clean), ["lookup-phi"], "phi's memory-gap check waits")
+            self.assertEqual(ran("lookup-record", "TaskStop", clean), ["lookup-phi"], "a stop ends a saved entry")
             self.assertEqual(ran("lookup-record", "Read", dict(clean, agent_id="a1")), ["lookup-phi"],
                              "a subagent's binding waits")
             self.assertEqual(ran("lookup-record-async", "Bash", clean), ["lookup-row"], "the row alone, behind")

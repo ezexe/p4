@@ -74,6 +74,19 @@ class Tasks(unittest.TestCase):
         p = plans.load(self.t.p4, TOP)
         self.assertFalse(p.get("loose") or any(st.get("tasks") for st in p.get("steps") or []))
 
+    def test_the_list_is_kept_with_turns_off(self):
+        """The Stop hook keeps the list before any of its early returns, so phi.json's `turns` false keeps it too."""
+        from test_phi import STOP, transcript
+        with open(os.path.join(self.t.p4, "phi", "phi.json"), "w", encoding="utf-8") as f:
+            json.dump({"turns": False}, f)
+        path = transcript(os.path.join(self.t.tmp, TOP + "off.jsonl"), "Build it", (), "Running.", "off")
+        r = self.t.hook(STOP, TOP, {"hook_event_name": "Stop", "transcript_path": path,
+                                    "last_assistant_message": "Running.",
+                                    "background_tasks": [{"id": "boff00001", "type": "shell", "status": "running",
+                                                          "command": "sh smoke.sh"}]})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([t["id"] for t in plans.in_flight(relay._session(self.t.p4, TOP))], ["boff00001"])
+
     def test_the_stop_inputs_list_is_kept_until_a_stop_lists_again(self):
         s = {}
         plans.keep_in_flight(s, {"background_tasks": [
@@ -1278,7 +1291,23 @@ class KeepGoing(unittest.TestCase):
                                                      "description": "the suite", "command": "pytest"}]})
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotEqual((json.loads(r.stdout) if r.stdout.strip() else {}).get("decision"), "block")
-        self.assertEqual(self.stop("Still porting.", uuid="u9").get("decision"), "block", "an empty list does not")
+        path = transcript(os.path.join(t.tmp, TOP + "none.jsonl"), "Build the two plugins", (), "Still porting.", "u9")
+        r = t.hook(STOP, TOP, {"hook_event_name": "Stop", "transcript_path": path,
+                               "last_assistant_message": "Still porting.", "stop_hook_active": False,
+                               "background_tasks": []})
+        self.assertEqual(json.loads(r.stdout).get("decision"), "block", "an empty list does not")
+
+    def test_a_stop_with_no_list_reads_the_saved_one(self):
+        """An input with no `background_tasks` is no empty list: keep_going falls back on the list the last Stop
+        kept, so a task still running there lets the turn end."""
+        from test_phi import STOP, transcript
+        t = self.t
+        path = transcript(os.path.join(t.tmp, TOP + "kept.jsonl"), "Build the two plugins", (), "Waiting.", "kept")
+        r = t.hook(STOP, TOP, {"hook_event_name": "Stop", "transcript_path": path, "last_assistant_message": "Waiting.",
+                               "background_tasks": [{"id": "bkept0001", "type": "shell", "status": "running",
+                                                     "command": "pytest"}]})
+        self.assertNotEqual((json.loads(r.stdout) if r.stdout.strip() else {}).get("decision"), "block")
+        self.assertNotEqual(self.stop("Still waiting.", uuid="u8").get("decision"), "block", "the saved list is read")
 
     def test_only_a_running_background_task_lets_the_turn_end(self):
         """ezexe/p4#147: each `background_tasks` entry carries a `status`, the task's current one; a task listed as

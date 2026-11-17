@@ -97,6 +97,7 @@ if [ "$name" = lookup-record ] || [ "$name" = lookup-record-async ]; then
     case "$payload" in
       *'"agent_id"'*) ;;                          # a subagent's call: bound to its record now
       *'"tool_name":"Write"'*|*'"tool_name": "Write"'*) ;;
+      *'"tool_name":"TaskStop"'*|*'"tool_name": "TaskStop"'*|*'"tool_name":"KillShell"'*|*'"tool_name": "KillShell"'*) ;;
       *'"tool_name":"Edit"'*|*'"tool_name": "Edit"'*|*'"tool_name":"MultiEdit"'*|*'"tool_name": "MultiEdit"'*) ;;
       *) exit 0 ;;
     esac

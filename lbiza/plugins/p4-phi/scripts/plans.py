@@ -1268,20 +1268,38 @@ def keep_going(home, s, report, calls, turn_id, active=False, waits=(), backgrou
 # `description` and, for a shell task, its `command`, and is present when the task registry is reachable. p4-phi
 # records no launch of its own: the Stop hook keeps that list on session.json, and the checks that run between turns,
 # such as the restart check and the archive checks, read it there, since PreToolUse input lists no running task.
-# A step's subagents stay in its task list, as agent_bind puts them, so _tasks reads them.
+# An entry leaves the kept list once its completion notice arrives as a message or a TaskStop or KillShell call stops
+# it, so nothing names it as running after its end. A step's subagents stay in its task list, as agent_bind puts
+# them, so _tasks reads them.
 
 IN_FLIGHT_FIELDS = ("id", "type", "status", "description", "command")
+NOTICE = re.compile(r"<task-id>\s*([^<\s]+)\s*</task-id>.*?<status>\s*([^<\s]+)\s*</status>", re.S)
+STOPPED = re.compile(r'"name"\s*:\s*"(?:TaskStop|KillShell)"\s*,\s*"input"\s*:\s*\{[^{}]*?'
+                     r'"(?:task_id|shell_id|id)"\s*:\s*"([A-Za-z0-9_-]{6,})"')
 
 
 def keep_in_flight(s, payload):
-    """The Stop input's `background_tasks` kept on the session as `backgroundTasks`, with the time they were read.
-    An input with no list, as when the registry was not reachable or the call is the Stop a self-archive makes, leaves
-    the last list read as it was."""
+    """The Stop input's `background_tasks` kept on the session as `backgroundTasks`, with the time they were read ->
+    True when kept. An input with no list, as when the registry was not reachable or the call is the Stop a
+    self-archive makes, leaves the last list read as it was."""
     tasks = payload.get("background_tasks") if isinstance(payload, dict) else None
     if not isinstance(tasks, list):
-        return
+        return False
     s["backgroundTasks"] = [{k: t[k] for k in IN_FLIGHT_FIELDS if k in t} for t in tasks if isinstance(t, dict)][:50]
     s["backgroundAt"] = _now()
+    return True
+
+
+def clear_in_flight(s, text):
+    """The kept entries whose completion notice, or whose TaskStop or KillShell call, `text` holds, taken off the
+    session -> the ids taken off."""
+    ended = {m.group(1) for m in NOTICE.finditer(str(text or ""))} | {
+        m.group(1) for m in STOPPED.finditer(str(text or ""))}
+    kept = s.get("backgroundTasks") if isinstance(s.get("backgroundTasks"), list) else []
+    gone = [t.get("id") for t in kept if isinstance(t, dict) and t.get("id") in ended]
+    if gone:
+        s["backgroundTasks"] = [t for t in kept if not (isinstance(t, dict) and t.get("id") in ended)]
+    return gone
 
 
 def in_flight(s):

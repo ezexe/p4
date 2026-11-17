@@ -1619,8 +1619,8 @@ def archive_checks(home, top):
 
 
 def held_tasks(home, sid):
-    """The background tasks still running at a session's last turn's end, by the Stop input, that hold its own
-    archive, each as its id and its quoted words."""
+    """The background tasks still running at a session's last turn's end, by the Stop input, and not ended since by
+    a completion notice or a stop, each as its id and its quoted words."""
     return [f"{t.get('id')} \"{_short(t.get('description') or t.get('command'), 80)}\""
             for t in plans.in_flight(relay._session(home, sid))]
 

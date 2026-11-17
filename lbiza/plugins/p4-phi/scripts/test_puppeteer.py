@@ -713,6 +713,39 @@ class AtArchive(Base):
         self.assertFalse(any("process 4343 " in x for x in left), "the same session id in another store is not its")
         self.assertTrue(any("that it queued was never started" in x for x in left), left)
 
+    def test_a_self_archive_is_never_held_by_a_background_task(self):
+        """The archive tool itself refuses a session with live background work, audit row S24, so p4-phi neither
+        holds a self-archive for a saved entry nor names one in its refusal."""
+        self.background(KID, "sh run-suites.sh", "bg33333333")
+        call = {"hook_event_name": "PreToolUse", "tool_name": "mcp__ccd_session_mgmt__archive_session",
+                "tool_input": {"session_id": "self"}}
+        self.assertNotIn("bg33333333", self.t.hook("self-archive", KID, dict(call, tool_use_id="sa1")).stdout)
+
+    def test_a_completion_notice_clears_the_saved_entry(self):
+        """main read a task's end from its notice; the saved list does too, so a notice in the message that ends
+        the task ends its entry, and the restart check and the pages stop naming it as running."""
+        self.background(KID, "sh run-suites.sh", "bg44444444")
+        self.assertTrue(puppeteer.held_tasks(self.t.p4, KID))
+        self.t.say(KID, "<task-notification>\n<task-id>bg44444444</task-id>\n<status>completed</status>\n"
+                        "<summary>Background command finished</summary>\n</task-notification>")
+        self.assertEqual(puppeteer.held_tasks(self.t.p4, KID), [])
+        call = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_use_id": "tu4",
+                "tool_input": {"command": "sh run-suites.sh", "run_in_background": True}}
+        self.assertEqual(self.t.hook("restart-check", KID, call).stdout.strip(), "", "ended: started again freely")
+        self.assertFalse(any("bg44444444" in x for x in puppeteer.unfinished(self.t.p4, KID, procs=False)))
+
+    def test_a_task_stop_clears_the_saved_entry(self):
+        """A stop sends no notice, so a TaskStop or KillShell call ends the entry, through the lookup-record gate."""
+        for tool, key, tid in (("TaskStop", "task_id", "bg55555555"), ("KillShell", "shell_id", "bg66666666")):
+            self.background(KID, "sh run-suites.sh", tid)
+            body = {"session_id": CLI[KID], "cwd": self.t.proj, "hook_event_name": "PostToolUse", "tool_name": tool,
+                    "tool_input": {key: tid}, "tool_response": "stopped", "tool_use_id": f"toolu_{tid}"}
+            r = inproc.run(["sh", os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh"), "lookup-record"],
+                           input=json.dumps(body), capture_output=True, text=True, timeout=60,
+                           env=self.t.env(KID, P4_RECALL_SYNC="1"))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(puppeteer.held_tasks(self.t.p4, KID), [], tool)
+
 
 class Scorers(Base):
     """Routing's route and code owner picks go through the trained ranker when the store keeps a model, and through
