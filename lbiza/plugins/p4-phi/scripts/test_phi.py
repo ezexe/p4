@@ -941,20 +941,18 @@ class NewTask(unittest.TestCase):
     def test_a_project_sets_its_caps_in_p4_json(self):
         """ezexe/p4#125: the caps a project would decide are p4.json `phi` keys; a value of the wrong type or out of
         range keeps the default, and a store that sets none gets the defaults back."""
-        import controls
         import plans
         import puppeteer
         home = self.t.p4
         self.say(TOP, TASK)
         write(os.path.join(home, "p4.json"), json.dumps({"phi": {
             "max_depth": 1, "max_children": 2, "sibling_turns": 1, "own_turns": 1, "chain_max": 2, "turn_steps": 4,
-            "tree_checks": 2, "keep_going_max": 1, "compactions": 5, "watch_s": 10, "stale_s": 3600}}))
+            "tree_checks": 2, "keep_going_max": 1, "watch_s": 10, "stale_s": 3600}}))
         try:
             phi.project_conf(home)
             self.assertEqual((phi.MAX_DEPTH, phi.MAX_CHILDREN, phi.OTHERS, phi.OWN, phi.CHAIN_MAX, phi.TURN_STEPS,
                               phi.TREE_CHECKS), (1, 2, 1, 1, 2, 4, 2))
-            self.assertEqual((plans.KEEP_GOING_MAX, controls.COMPACTIONS, puppeteer.WATCH_S, puppeteer.STALE_S),
-                             (1, 5, 10.0, 3600.0))
+            self.assertEqual((plans.KEEP_GOING_MAX, puppeteer.WATCH_S, puppeteer.STALE_S), (1, 10.0, 3600.0))
             write(os.path.join(home, "phi", "sessions", KID, "session.json"),
                   json.dumps({"sessionId": KID, "spawnedFrom": {"sessionId": TOP}, "task": "t"}))
             self.assertIn("start no session", phi.caps_text(home, phi.load_session(home, KID)), "one deep is the most")
@@ -963,7 +961,7 @@ class NewTask(unittest.TestCase):
             phi.project_conf(home)
             self.assertEqual((phi.MAX_DEPTH, phi.MAX_CHILDREN, plans.KEEP_GOING_MAX, puppeteer.WATCH_S),
                              (3, 8, 2, 5.0), "a value that does not fit keeps the default")
-            self.assertEqual((phi.OTHERS, controls.COMPACTIONS, puppeteer.STALE_S), (5, 3, 86400.0), "and unset ones")
+            self.assertEqual((phi.OTHERS, puppeteer.STALE_S), (5, 86400.0), "and unset ones")
             for odd in ([1, 2], "deep", 4):            # a `phi` that is no section raises nothing and keeps the defaults
                 write(os.path.join(home, "p4.json"), json.dumps({"phi": odd}))
                 phi.MAX_DEPTH = 7

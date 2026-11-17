@@ -27,7 +27,8 @@ The watcher every orchestrator has is puppeteer.py's and is another thing.
                `Finding:` line, and the puppeteer that controls the tree publishes what needs an issue and
                places the session that resolves it; where none controls the tree, its orchestrator does.
   a boundary   a controlled tree has closed, or every controlled session is idle with no request waiting. The
-               puppeteer is told once to end its turn on a question with two buttons. p4-phi speaks only
+               puppeteer is told once to keep what is not on its board with `note`. Claude Code compacts a
+               session by itself and p4-phi asks ezexe nothing about it. p4-phi speaks only
                when one of its hooks fires, so a boundary reached while the puppeteer is idle is told
                beside its next message: a command hook with `asyncRewake` could wake it at once, `SendMessage` with
                `notify_when_idle` could tell it when a controlled session goes idle, and p4-phi uses neither.
@@ -61,10 +62,6 @@ import starts
 PHI = None                       # phi.py's own module, handed over when phi.py imports this one
 
 SECTION = "puppeteers"           # p4.json phi.puppeteer_section; "" turns the rule off
-CHARS = 200000                   # p4.json phi.puppeteer_chars: once p4-phi has handed a puppeteer this many
-#                                  characters since its last compaction, its boundary notice says so, and each further
-#                                  multiple gives that notice again while a boundary holds
-COMPACTIONS = 3                  # after this many, the notice offers a successor in place of "Later"
 REASON_MIN = 12                  # characters of a reason that says something
 RECENT = 120                     # the app's newest records looked through for sessions a puppeteer started
 SHARE = 2                        # content words a message shares with a controlled session's topic to be sent there
@@ -87,11 +84,6 @@ def section_name(store):
     """The section's name for this project: p4.json phi.puppeteer_section when it is a string, else the default."""
     name = _conf(store, "puppeteer_section")
     return name.strip() if isinstance(name, str) else SECTION
-
-
-def ceiling(store):
-    n = _conf(store, "puppeteer_chars")
-    return n if isinstance(n, int) and not isinstance(n, bool) and n > 0 else CHARS
 
 
 def sections():
@@ -872,20 +864,17 @@ def waited_on(s):
     return out
 
 
-# --- a boundary, and the notice that is a button -------------------------------------------------------------------------
+# --- a boundary, and its notice ------------------------------------------------------------------------------------------
+#
+# context-window.md, "When your context fills up": "Claude Code compacts automatically as you approach the limit, so a
+# full context window doesn't end your session." So a boundary puts no compact question to ezexe and hands no line to
+# type. What no compaction keeps for a puppeteer is what its board lacks, so the notice names `note` and nothing else.
 
-def handed_chars(home, s):
-    """The characters p4-phi's hooks handed this session since its last compaction, from its own log."""
-    since = str(s.get("compactedAt") or "")
-    return sum(int(r.get("said") or 0) for r in PHI.read_rows(os.path.join(PHI.session_dir(home, s["sessionId"]),
-                                                                           "log.jsonl"))
-               if str(r.get("time") or "") >= since)
-
-
-def boundary(home, s, store=""):
+def boundary(home, s):
     """The notice a puppeteer is handed once at each boundary, and an empty string otherwise: a boundary is
     a controlled tree that has closed, or every controlled session idle with no request waiting. Never while a
-    controlled session waits on the puppeteer's answer. The caller saves what was told."""
+    controlled session waits on the puppeteer's answer. It says to keep what is not on the board with `note`, and
+    asks nothing of ezexe. The caller saves what was told."""
     rows = controlled(s)
     if not rows or requests_for(s):
         return ""
@@ -905,8 +894,7 @@ def boundary(home, s, store=""):
     fresh = [k for k in ready if k not in (told.get("ready") or [])]
     if not newly and not idle and not fresh:
         return ""
-    chars, top = handed_chars(home, s), ceiling(store)
-    key = hashlib.sha1(json.dumps([sorted(states), chars // top]).encode("utf-8")).hexdigest()[:12]
+    key = hashlib.sha1(json.dumps(sorted(states)).encode("utf-8")).hexdigest()[:12]
     if told.get("key") == key:
         return ""
     s["boundary"] = {"key": key, "closed": closed, "ready": ready, "time": PHI.now()}
@@ -916,21 +904,10 @@ def boundary(home, s, store=""):
     why = (f"the tree of \"{full_title(newly[0])}\" has closed" if newly else
            "every controlled session is idle and no request is waiting")
     path = board_path(home, s["sessionId"])
-    past = (f" p4-phi has handed this session {chars} characters since its last compaction, past the ceiling of {top}."
-            if chars >= top else "")
-    second = ("the app's `new_session` action, which starts the successor puppeteer from the board; its brief "
-              f"is the board's path and `{PHI.commands()} controls --from {s['sessionId']}`, and this session then runs "
-              f"`{PHI.commands()} controls --hand <its sessionId>`"
-              if int(s.get("compactions") or 0) >= COMPACTIONS else "\"Later\"")
     return ((pick + "\n\n" if pick else "") +
-            f"phi (p4-phi): a boundary: {why}.{past} When this turn's messages are sent, keep what is not yet on the "
-            f"board, {path}, with `{PHI.commands()} note`. Then read the context usage with "
-            f"`mcp__ccd_session_mgmt__get_usage` on `\"self\"` and end the turn with `mcp__ccd_turn__wrap_up` whose "
-            f"question is one short sentence with that usage, such as \"Context is at 71%, auto-compact starts at "
-            f"85%. Compact now?\", and whose buttons are \"Compact now\" and {second}. On \"Compact now\" answer "
-            f"with one line only, for ezexe to type, since a session cannot compact itself and no button sends a "
-            f"command: `/compact keep the path of the board, {path}, and read it first`. On "
-            f"\"Later\" say nothing more.")
+            f"phi (p4-phi): a boundary: {why}. When this turn's messages are sent, keep what is not yet on the "
+            f"board, {path}, with `{PHI.commands()} note`. Claude Code compacts this session by itself as its "
+            f"context fills, and the board's path is the first thing it is handed after that.")
 
 
 def complete_text(ready):
@@ -946,10 +923,9 @@ def complete_text(ready):
 
 
 def compacted(home, s):
-    """A puppeteer after a compaction: the count starts again, and its board's path comes first."""
-    s["compactedAt"] = PHI.now()
-    s["compactions"] = int(s.get("compactions") or 0) + 1
-    s.pop("boundary", None)
+    """A puppeteer after a compaction, typed or automatic: its board's path comes first. hooks-guide.md,
+    "Re-inject context after compaction": "Use a `SessionStart` hook with a `compact` matcher to re-inject critical
+    context after every compaction." """
     return (f"phi (p4-phi): this session is a puppeteer and its context was compacted. Read its board "
             f"before anything else: {board(home, s)}")
 

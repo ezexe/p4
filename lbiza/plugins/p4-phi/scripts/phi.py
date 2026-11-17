@@ -30,8 +30,8 @@ controls, with the watcher's commands from puppeteer.py; `--help` gives the argu
 Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `book`, `rules`,
 `background_chars`, `reports_chars`, `prompt_chars` and `wait_s`, and `puppeteer`, which puppeteer.on reads. The `phi`
 section of p4.json: `act_dont_wait`, `levels`, `top_orchestrates`, `file_sets` and `child_levels`, read from the
-session's own store, `home`, which names a shared store for the session tree, and `puppeteer_section` and
-`puppeteer_chars`, which controls.py reads. P4_PHI=0 turns the plugin off, P4_PHI_BOOK=0 the address book beside a
+session's own store, `home`, which names a shared store for the session tree, and `puppeteer_section`, which
+controls.py reads. P4_PHI=0 turns the plugin off, P4_PHI_BOOK=0 the address book beside a
 message and P4_PHI_RULES=0 the rules. P4_PHI_WAIT sets how long a first message waits for the app's
 record, and P4_PHI_APP_SESSIONS the folder of the app's records.
 """
@@ -1123,7 +1123,6 @@ CAPS = {"max_depth": ("phi", "MAX_DEPTH", 1, 20), "max_children": ("phi", "MAX_C
         "chain_max": ("phi", "CHAIN_MAX", 1, 50), "turn_steps": ("phi", "TURN_STEPS", 1, 100),
         "tree_checks": ("phi", "TREE_CHECKS", 0, 100),
         "keep_going_max": ("plans", "KEEP_GOING_MAX", 0, 7),       # under hooks.md's 8 consecutive continuations
-        "compactions": ("controls", "COMPACTIONS", 1, 100),
         "watch_s": ("puppeteer", "WATCH_S", 1.0, 600.0), "stale_s": ("puppeteer", "STALE_S", 60.0, 30 * 86400.0)}
 # Each cap's default is the one p4conf.py declares for the key, not whatever the constant holds when apply_caps first
 # runs, which a caller may have set.
@@ -1134,7 +1133,7 @@ def apply_caps(d):
     """Sets each cap from the `phi` section `d`, or back to its default where `d` holds no fitting value, one of the
     wrong type or out of range, whether p4.json or a P4_* variable gave it: a hook run in process keeps module
     globals, so a store that sets none gets the defaults again."""
-    mods = {"phi": sys.modules[__name__], "plans": plans, "controls": controls, "puppeteer": puppeteer}
+    mods = {"phi": sys.modules[__name__], "plans": plans, "puppeteer": puppeteer}
     for key, (mod, name, least, most) in CAPS.items():
         default = CAP_DEFAULTS[key]
         v = d.get(key, default) if isinstance(d, dict) else default
@@ -2267,7 +2266,7 @@ def pair_parts(me, s, req, changed="", notice=lambda text: text):
     if req:
         out += [p for p in (controls.requests_text(me.home, s), controls.route_down(s, req)) if p]
     out += [p for p in (controls.holders_text(s, req), controls.behalf_text(me.home, s)) if p]
-    edge = controls.boundary(me.home, s, me.store)
+    edge = controls.boundary(me.home, s)
     if edge:
         RAN["boundary"] = True
         pieces = edge.split("\n\n")               # the complete sessions, kept, and the boundary, which fits or is held

@@ -5,7 +5,7 @@ ezexe files an orchestrator in the sidebar section "puppeteers", which makes it 
 the orchestrators of other trees, in any store: p4-phi reads the filing from the app's own file, keeps the
 record of the sessions it controls, tells each controlled session, writes the puppeteer's board, leaves its
 waiting steps with it, names the sessions its records hold complete and leaves their archive to the app's approval
-card, names a boundary once as a question with two buttons,
+card, names a boundary once with the line that keeps what its board lacks and no compact question,
 and carries a controlled session's request for a new orchestrator to it. A start request stays with the session
 that filed it, which waits on ezexe by a button, and its puppeteer names that session as a link and is
 handed no start call for it; a start the puppeteer makes on another session's behalf is held under that
@@ -216,7 +216,7 @@ class Supervisor(unittest.TestCase):
         self.assertIn("which the app puts to ezexe on its approval card", ctx)
         self.assertNotIn("AskUserQuestion", ctx)
         self.assertNotIn("session_archives", ctx, "no text tells a session to set it")
-        self.assertIn("a boundary: every controlled session is idle", ctx, "the compaction question comes with it")
+        self.assertIn("a boundary: every controlled session is idle", ctx, "the boundary's line comes with it")
         self.assertEqual(self.archive(PUP, TOP), {}, "no refusal of p4-phi's own")
         self.assertEqual(self.archive(PUP, TOP3), {}, "not even for a session it does not control")
         self.assertEqual(self.archive(TOP, KID), {}, "nor for an orchestrator's call")
@@ -227,7 +227,7 @@ class Supervisor(unittest.TestCase):
     def test_one_complete_session_beside_a_working_one_is_named_once_and_is_no_boundary(self):
         t = self.t
         self.finish(TOP)
-        t.say(TOP2, "Build it", proj=self.other)       # mid-turn, so no boundary and no compaction question
+        t.say(TOP2, "Build it", proj=self.other)       # mid-turn, so no boundary
         t.say(PUP, "Control the trees")
         t.cli(PUP, "controls", TOP, TOP2)
         ctx = context(t.say(PUP, "a report came in"))
@@ -360,7 +360,9 @@ class Supervisor(unittest.TestCase):
         self.assertTrue(ctx.startswith("phi (p4-phi): this session is a puppeteer and its context was "
                                        "compacted. Read its board before anything else: " + board), ctx[:300])
         self.assertTrue(os.path.exists(board))
-        self.assertEqual(t.session(PUP)["compactions"], 1)
+        s = t.session(PUP)
+        for key in ("compactions", "compactedAt"):
+            self.assertNotIn(key, s, "p4-phi counts no compaction: the app decides when one runs")
         r = t.hook("session-start", TOP, {"hook_event_name": "SessionStart", "source": "compact"})
         self.assertNotIn("its board", context(r))
 
@@ -379,7 +381,14 @@ class Supervisor(unittest.TestCase):
         self.assertRegex(changed, r"^- tabs-not-spaces, \d{4}-\d\d-\d\d \d\d:\d\d\nEach is whole in .+/temportal/memory\.")
         self.assertEqual([x["name"] for x in t.session(PUP)["rulesChanged"]], ["tabs-not-spaces"])
 
-    def test_a_boundary_is_named_once_as_a_question_with_two_buttons(self):
+    def test_a_boundary_hands_no_compact_question_and_the_board_comes_first_after_a_compaction(self):
+        """ezexe/p4#219 and ezexe/p4#155. https://code.claude.com/docs/en/context-window.md, "When your context
+        fills up": "Claude Code compacts automatically as you approach the limit, so a full context window doesn't
+        end your session." So a boundary is named once with the one thing no compaction does for a puppeteer, keeping
+        what its board lacks with `note`, and it hands no compact question, no buttons, no usage read and no
+        `/compact` line to type. https://code.claude.com/docs/en/hooks-guide.md, "Re-inject context after
+        compaction": "Use a `SessionStart` hook with a `compact` matcher to re-inject critical context after every
+        compaction." That entry hands the board's path first, after a typed and an automatic compaction alike."""
         t = self.t
         t.say(PUP, "Control the two trees")
         t.say(TOP, "Build it")                      # mid-turn
@@ -388,24 +397,26 @@ class Supervisor(unittest.TestCase):
         t.cli(TOP, "done", "its suite ran green")
         t.stop(TOP, "Build it", report="Built.")
         ctx = context(t.say(PUP, "a report came in"))
-        self.assertIn("a boundary: every controlled session is idle and no request is waiting", ctx)
-        self.assertIn("`mcp__ccd_session_mgmt__get_usage` on `\"self\"`", ctx)
-        self.assertIn("end the turn with `mcp__ccd_turn__wrap_up`", ctx)
-        self.assertIn("\"Compact now\" and \"Later\"", ctx)
-        self.assertIn("/compact keep the path of the board", ctx)
-        self.assertNotIn("tell ezexe in one line", ctx, "a button, never a paragraph to pass on")
-        self.assertNotIn("past the ceiling", ctx)
+        board = os.path.join(t.dir(PUP), "board.md").replace("\\", "/")
+        line = next((x for x in ctx.split("\n") if "phi (p4-phi): a boundary: " in x), "")
+        self.assertIn("a boundary: every controlled session is idle and no request is waiting", line)
+        self.assertIn(f"keep what is not yet on the board, {board}, with `{phi.commands()} note`", line,
+                      "the part with no native counterpart stays")
+        for gone in ("Compact now", "Later", "/compact", "get_usage", "wrap_up", "button", "to type", "ceiling",
+                     "new_session", "successor"):
+            self.assertNotIn(gone, line, gone)
+        for gone in ("Compact now", "/compact", "auto-compact starts at"):
+            self.assertNotIn(gone, ctx, gone)
         self.assertNotIn("a boundary", context(t.say(PUP, "and now?")), "a second hook at the same boundary: nothing")
-        relay._write_json(os.path.join(t.p4, "p4.json"), {"phi": {"puppeteer_chars": 50}})
-        ctx = context(t.say(PUP, "and now?"))
-        self.assertIn("a boundary", ctx, "the count passed the ceiling")
-        self.assertRegex(ctx, r"p4-phi has handed this session \d+ characters since its last compaction, past the "
-                              r"ceiling of 50")
-        s = t.session(PUP)
-        relay._write_json(os.path.join(t.dir(PUP), "session.json"), {**s, "compactions": 3, "boundary": {}})
-        ctx = context(t.say(PUP, "and now?"))
-        self.assertIn("the app's `new_session` action, which starts the successor puppeteer from the board",
-                      ctx)
+        relay._write_json(os.path.join(t.p4, "p4.json"), {"phi": {"puppeteer_chars": 50, "compactions": 1}})
+        self.assertNotIn("a boundary", context(t.say(PUP, "and now?")), "no count of characters names it again")
+        for name in ("CHARS", "COMPACTIONS", "ceiling", "handed_chars"):
+            self.assertFalse(hasattr(controls, name), f"controls.{name} counts toward no question")
+        self.assertNotIn("compactions", phi.CAPS)
+        r = t.hook("session-start", PUP, {"hook_event_name": "SessionStart", "source": "compact"})
+        self.assertTrue(context(r).startswith("phi (p4-phi): this session is a puppeteer and its context was "
+                                              "compacted. Read its board before anything else: " + board),
+                        context(r)[:300])
 
     def test_a_controlled_tree_that_closed_is_a_boundary_named_once_while_another_still_works(self):
         t = self.t
@@ -418,7 +429,8 @@ class Supervisor(unittest.TestCase):
         write(app, json.dumps({**json.loads(read(app)), "isArchived": True}))      # ezexe archived it in the app
         ctx = context(t.say(PUP, "anything now?"))
         self.assertIn(f"a boundary: the tree of \"{self.TITLE}\" has closed.", ctx)
-        self.assertIn("\"Compact now\" and \"Later\"", ctx)
+        self.assertIn("keep what is not yet on the board", ctx)
+        self.assertNotIn("Compact now", ctx)
         self.assertNotIn("is complete", ctx, "an archived session is offered to nobody")
         board = read(os.path.join(t.dir(PUP), "board.md"))
         self.assertRegex(board, rf"- \"{self.TITLE}\" `{TOP}`, store .+: archived\.")

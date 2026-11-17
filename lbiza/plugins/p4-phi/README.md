@@ -68,7 +68,7 @@ A session narrows its write set with `phi.py files <path> ...` and empties it wi
 The plugin works in any project it is enabled in.
 It needs no key in `p4.json`, no entry in a project's `settings.json` or `settings.local.json`, no environment variable and no existing `.claude/p4` store, and it writes to no settings file.
 
-- The plugin's own SessionStart hook makes the store `.claude/p4/` at the first session of a project and writes `p4.json` with the defaults `p4conf.py` holds, which leave out `child_levels`, `puppeteer_section` and `puppeteer_chars`: those three are read when a project sets them. A value it wrote follows a later change of its default, and a value set by hand stays. A value set by hand moves only when it equals the value recorded as written, at the next generation, or, in a store from before the record, a past default.
+- The plugin's own SessionStart hook makes the store `.claude/p4/` at the first session of a project and writes `p4.json` with the defaults `p4conf.py` holds, which leave out `child_levels`, `puppeteer_section`, `context_window` and `clear_at`: those four are read when a project sets them. A value it wrote follows a later change of its default, and a value set by hand stays. A value set by hand moves only when it equals the value recorded as written, at the next generation, or, in a store from before the record, a past default.
 - Before the store exists, a session is given the built-in rules.
 - The plugin ships no `settings.json`, a file no plugin page of the docs describes.
 
@@ -85,7 +85,6 @@ Every key is optional.
 | `file_sets` | `true` | `false`: a session may be started by a brief that declares no write set |
 | `issues` | `true` | `false`: no issue loop: a worker takes no open issue its brief names, gets no line on a commit that closes no issue, runs no regression test at Stop and is given no push line |
 | `puppeteer_section` | `puppeteers` | another name for the sidebar section; an empty string makes no session a puppeteer |
-| `puppeteer_chars` | 200000 | the characters p4-phi may hand a puppeteer between compactions before its boundary notice says so |
 | `track` | `false` | `true`: the session tree is committed to the store |
 | `home` | none | a git remote: related repositories share one session tree |
 | `max_depth` | 3 | the depth, 1 to 20, at which a session starts no session of its own |
@@ -96,7 +95,6 @@ Every key is optional.
 | `turn_steps` | 12 | the steps and workers, 1 to 100, kept with a turn |
 | `tree_checks` | 6 | the read-only checks of its trees, 0 to 100, an orchestrator runs in one work step |
 | `keep_going_max` | 2 | the times, 0 to 7, one turn is sent back while it has open steps |
-| `compactions` | 3 | the compactions, 1 to 100, after which a puppeteer's notice offers a successor |
 | `watch_s` | 5.0 | the watcher's tick in seconds, 1 to 600 |
 | `stale_s` | 86400.0 | the seconds, 60 to 2,592,000, after which an orchestrator with open work and no turn is stale |
 

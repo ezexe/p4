@@ -73,7 +73,8 @@ A `Finding:` on a held file or an owned issue goes straight to its holder, named
 ## A puppeteer
 
 A puppeteer is a session nobody started that ezexe filed in the sidebar section "puppeteers", and it controls the orchestrators of other trees.
-Its rule is handed once, beside its first message after p4-phi sees the filing; its board, `board.md` in its session folder, says on its head how it is kept; and the line p4-phi hands at a boundary says what to do then.
+Its rule is handed once, beside its first message after p4-phi sees the filing; its board, `board.md` in its session folder, says on its head how it is kept; and the line p4-phi hands at a boundary, a controlled tree that closed or every controlled session idle with no request waiting, says to keep what the board lacks with `note`.
+Claude Code compacts a session by itself, so a boundary carries no compact question and no line for ezexe to type, and after a compaction, typed or automatic, the SessionStart entry hands a puppeteer its board's path first.
 A controlled session is told once when it comes to have a puppeteer, and once when that ends.
 Each request of ezexe's to a puppeteer is a row of its ledger, `asks.md` beside its board: a short topic, the session that holds it by full title and id, its state, and what waits on ezexe.
 Every message of ezexe's opens a row, whatever its words and also while another row waits on ezexe, unless it is a status question about existing work such as "where does it stand" or "did it land", or a reply with nothing after it.
@@ -113,5 +114,6 @@ A puppeteer, at a message carrying its worker's report, is handed the ids of the
 - Apart from retrieval, which ranks the corpus against each message, p4-phi finds no earlier turn by the words of a request: a session is given what the sessions linked to it kept, and of earlier topics only a registered route, a landed topic whose records back it, is scored against a message.
 - It does not start, stop or message sessions itself: the gate hands the exact call, and the session makes it.
 - It does not stop a session from filing itself in the section "puppeteers", since the app asks nobody: the rule rests on ezexe's filing, and p4-phi says once, in the session and on its record, that it saw the session there, and tells every session it lists who claims it.
-- It does not compact a session, start a successor or move a session between sections: those are the app's tools, and the puppeteer makes the calls p4-phi names.
+- It does not compact a session and hands no session a compact question: Claude Code compacts a session by itself as its context fills.
+- It does not start a successor or move a session between sections: those are the app's tools, and the puppeteer makes the calls.
 - It does not block a puppeteer's edits, and a start request a controlled tree filed for itself stays the tree's: only one addressed to the puppeteer is closed, when that session declines it.
