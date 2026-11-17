@@ -426,8 +426,6 @@ class Supervisor(unittest.TestCase):
         ctx = context(t.say(TOP, "what came in?"))
         self.assertIn(self.LONG, ctx, "the parent's line names it whole")
         self.assertIn(self.LONG, read(relay.ready_path(t.p4)), "the ready page names it whole")
-        opts = relay.offer(t.p4, TOP)
-        self.assertTrue(any(self.LONG in o["label"] or self.LONG in o["description"] for o in opts), opts)
 
     def test_the_reports_line_says_to_name_each_session_by_its_whole_title_as_a_link(self):   # ezexe/p4#233
         t = self.t

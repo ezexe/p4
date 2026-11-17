@@ -449,7 +449,7 @@ class P4Conf(unittest.TestCase):
         """DEFAULTS is pinned to its GEN: a change of a default fails here until GEN is raised, the old value added to
         HISTORY and the pin below updated."""
         import hashlib
-        pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca", 4: "857fe1fd14a29f6a", 5: "52f39f39f1f34c83"}                     # append only: one more line for each GEN
+        pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca", 4: "857fe1fd14a29f6a", 5: "52f39f39f1f34c83", 6: "80d9cae8899e4527"}                   # append only: one more line for each GEN
         got = hashlib.sha256(json.dumps(p4conf.DEFAULTS, sort_keys=True).encode()).hexdigest()[:16]
         self.assertEqual(p4conf.GEN, max(pins))
         self.assertEqual(p4conf.GEN, len(pins), "no generation is skipped or replaced")

@@ -129,8 +129,8 @@ class Tree_(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else {}
 
-    def test_a_finished_child_is_archived_by_no_session_and_ezexe_is_told_once(self):
-        """No session archives a session ezexe did not pick; p4-phi counts a finished one as archived at once."""
+    def test_a_finished_child_is_counted_as_archived_and_ezexe_is_told_once(self):
+        """p4-phi counts a finished session as archived at once, and leaves the archive call to the app's ask."""
         self.t.say(KID, "Fix the row in the exporter, report when done")
         self.assertTrue(relay._session(self.t.p4, KID).get("disposable"), "report when done marks it")
         said = self.t.cli(KID, "done", "test_flush.py: 3 tests OK").stdout
@@ -149,74 +149,25 @@ class Tree_(unittest.TestCase):
         self.assertIn(KID, page, "listed as ready to archive")
         ctx = context(self.t.say(TOP, "what next?"))
         self.assertNotIn("archive_session", ctx, "no archive call is handed out to any session")
-        self.assertIn("puts its finished sessions to ezexe as one multiple-choice question", ctx)
+        self.assertIn("the archive tool asks ezexe on the app's approval card before it runs", ctx)
         self.assertEqual(ctx.count(f"](#{KID})"), 1, "the notice names it once, as a link ezexe opens")
         again = context(self.t.say(TOP, "and then?"))
         self.assertNotIn("counts them as archived", again, "and only once")
         self.assertNotIn("archive_session", again)
-        # a session that calls the archive tool is refused, for itself and for another
-        mine = self.archive_call(KID, "self")
-        self.assertEqual(mine.get("permissionDecision"), "deny")
-        self.assertIn("this archive call is refused", mine.get("permissionDecisionReason", ""))
-        self.assertNotIn("wrap_up", mine.get("permissionDecisionReason", ""), "refused, and no button for a child")
-        other = self.archive_call(TOP, KID)
-        self.assertEqual(other.get("permissionDecision"), "deny")
-        self.assertIn(f"{KID} is not a finished session of this tree that ezexe picked",
-                      other.get("permissionDecisionReason", ""))
+        # the archive call is the app's to ask about: p4-phi neither refuses nor lets it through
+        self.assertEqual(self.archive_call(TOP, KID), {})
 
-    def test_a_done_top_level_session_gets_the_button_and_one_question_on_its_finished_tree(self):
-        """The button is for a top-level session, which offers the finished sessions of its tree as one
-        multiple-choice question and archives exactly the ones picked."""
-        kids = {KID: "the row fix", KID2: "the header fix", "local_kid00003": "the footer fix"}
-        self.t.record(KID2, TOP, title=kids[KID2])
-        self.t.record("local_kid00003", TOP, title=kids["local_kid00003"])
-        from test_phi import CLI
-        CLI.setdefault("local_kid00003", "abab3333-0000-4000-8000-000000000000")
-        for kid in kids:
-            self.t.say(kid, "Fix one row of the exporter, report when done")
-            self.t.cli(kid, "done", "its suite: 3 tests OK")
-            self.t.stop(kid, "Fix one row of the exporter, report when done", report="Fixed; 3 tests pass.")
-            self.assertTrue(relay._session(self.t.p4, kid).get("doneRetired"))
+    def test_a_done_top_level_session_gets_the_button_and_no_question_on_its_finished_tree(self):
+        """The button is for a top-level session; its finished children were each named once as they finished, and
+        an archive call on one is left to the app, which asks ezexe."""
+        self.t.say(KID, "Fix one row of the exporter, report when done")
+        self.t.cli(KID, "done", "its suite: 3 tests OK")
+        self.t.stop(KID, "Fix one row of the exporter, report when done", report="Fixed; 3 tests pass.")
+        self.assertTrue(relay._session(self.t.p4, KID).get("doneRetired"))
         said = self.t.cli(TOP, "done", "every fix landed and its suite passed").stdout
         self.assertIn("`mcp__ccd_turn__wrap_up` whose first action is the app's `archive`", said)
-        self.assertIn("one `AskUserQuestion` with `multiSelect` true", said)
-        labels = [relay._title(relay._session(self.t.p4, k)) for k in kids]
-        for label in labels:
-            self.assertIn(f"label \"{label}\"", said, "the three sessions as options of the question")
-        self.assertIn("Archive none of them before ezexe has answered", said)
-        self.assertEqual(self.archive_call(TOP, KID).get("permissionDecision"), "deny", "no archive before a pick")
-        answer = f"User has answered your questions: \"Which finished sessions to archive?\"=\"{labels[0]}, {labels[2]}\"."
-        path = transcript(os.path.join(self._tmp.name, "top-close.jsonl"), "wrap it up",
-                          [("AskUserQuestion", {"questions": []}, answer)], "Asked.")
-
-        def call(target):
-            r = self.t.hook("self-archive", TOP, {"hook_event_name": "PreToolUse", "transcript_path": path,
-                                                  "tool_name": "mcp__ccd_session_mgmt__archive_session",
-                                                  "tool_input": {"session_id": target}})
-            return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else {}
-        self.assertEqual(call(KID), {}, "a picked session's archive is let through")
-        self.assertEqual(call("local_kid00003"), {})
-        self.assertEqual(call(KID2).get("permissionDecision"), "deny", "the one ezexe left out is not archived")
-        self.assertEqual(self.archive_call(KID, KID2).get("permissionDecision"), "deny", "and never by a child")
-
-    def test_more_than_four_finished_sessions_are_offered_in_groups(self):
-        home = self.t.p4
-        self.t.say(TOP, "Build the exporter")
-        for k in range(6):
-            parent = TOP if k < 2 else "local_mid"
-            relay._write_json(os.path.join(relay._dir(home, f"local_f{k}"), "session.json"), {
-                "sessionId": f"local_f{k}", "title": f"fix {k}", "createdAt": f"2026-11-16 08:0{k}",
-                "spawnedFrom": {"sessionId": parent}, "doneRetired": {"time": "2026-11-16 09:00"}})
-        relay._write_json(os.path.join(relay._dir(home, "local_mid"), "session.json"), {
-            "sessionId": "local_mid", "title": "the middle", "spawnedFrom": {"sessionId": TOP}})
-        opts = relay.offer(home, TOP)
-        self.assertEqual(opts[0]["label"], "All 6 finished sessions")
-        self.assertEqual(len(opts[0]["ids"]), 6)
-        self.assertLessEqual(len(opts), relay.OFFER_MAX)
-        self.assertTrue(any(o["label"] == "Under the middle" and len(o["ids"]) == 4 for o in opts), opts)
-        self.assertIn("\"fix 2\"", next(o for o in opts if o["label"] == "Under the middle")["description"])
-        self.assertEqual(relay.picked(home, TOP, [{"name": "AskUserQuestion", "result": "=\"Under the middle\""}]),
-                         ["local_f2", "local_f3", "local_f4", "local_f5"])
+        self.assertNotIn("AskUserQuestion", said, "no question of p4-phi's own")
+        self.assertEqual(self.archive_call(TOP, KID), {}, "the app asks ezexe; p4-phi adds no refusal")
 
     def test_a_session_counted_as_archived_and_messaged_again_is_named_as_reopened(self):
         """The mark of a finished session does not hide live work."""
@@ -233,11 +184,6 @@ class Tree_(unittest.TestCase):
         self.assertIn(KID, ctx)
         self.assertNotIn(KID, open(relay.ready_path(self.t.p4), encoding="utf-8").read())
         self.assertNotIn("is reopened", context(self.t.say(TOP, "and after?")), "said once")
-
-    def test_a_project_can_let_sessions_archive_sessions(self):
-        relay._write_json(os.path.join(self.t.p4, "p4.json"), {"phi": {"session_archives": True}})
-        self.t.say(KID, "Fix the row")
-        self.assertEqual(self.archive_call(TOP, KID), {})
 
 
 class ArchiveLock(unittest.TestCase):

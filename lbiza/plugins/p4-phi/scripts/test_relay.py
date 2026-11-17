@@ -823,10 +823,9 @@ class ThreeSessions(unittest.TestCase):
         self.assertNotIn("phi (p4-phi): what", ctx)
         self.assertNotIn("stop before", ctx)
 
-    def test_a_child_a_sibling_supersedes_is_offered_to_ezexe_when_the_top_level_session_is_done(self):
+    def test_a_child_a_sibling_supersedes_is_listed_as_ready_to_archive(self):
         """A finished child whose work a sibling's newer note supersedes is counted as archived and listed on
-        ready-to-archive.md, and the done orchestrator puts it to ezexe as an option of its multiple-choice
-        question."""
+        ready-to-archive.md."""
         t = self.t
         t.cli(A, "shard", self.x("lib"))
         self.assertEqual(t.cli(A, "done", "test_layout.py: 3 tests OK").returncode, 0)
@@ -835,13 +834,10 @@ class ThreeSessions(unittest.TestCase):
         self.assertEqual(t.stop(B, "replace x", uuid="b1").returncode, 0)
         self.assertEqual(t.session(A)["stale"]["by"], B, "superseded by the sibling's newer note")
         self.assertIn(A, open(relay.ready_path(t.p4), encoding="utf-8").read(), "listed on ready-to-archive.md")
-        said = t.cli(TOP, "done", "both plugins built and their suites pass").stdout
-        self.assertIn(f"- label \"the layout work\", description \"Archive {A}.\"", said,
-                      "an option of the question the done orchestrator puts to ezexe")
 
-    def test_a_superseded_child_messaged_again_leaves_the_page_and_the_offer(self):
-        """A superseded session that is messaged again is live: it leaves ready-to-archive.md and its orchestrator's
-        archive offer at that message, and the Stop that clears its mark leaves a page without it."""
+    def test_a_superseded_child_messaged_again_leaves_the_page(self):
+        """A superseded session that is messaged again is live: it leaves ready-to-archive.md at that message, and
+        the Stop that clears its mark leaves a page without it."""
         t = self.t
         t.cli(A, "shard", self.x("lib"))
         self.assertEqual(t.cli(A, "done", "test_layout.py: 3 tests OK").returncode, 0)
@@ -851,7 +847,6 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn(A, open(relay.ready_path(t.p4), encoding="utf-8").read(), "superseded: listed")
         t.say(A, "go on with the layout")
         self.assertNotIn(A, open(relay.ready_path(t.p4), encoding="utf-8").read(), "messaged again: off the page")
-        self.assertNotIn(A, [i for o in relay.offer(t.p4, TOP) for i in o["ids"]], "and out of the offer")
         self.assertEqual(t.stop(A, "go on with the layout", report="Went on.", uuid="s3").returncode, 0)
         self.assertNotIn(A, open(relay.ready_path(t.p4), encoding="utf-8").read(), "the Stop leaves it off")
 
@@ -1210,57 +1205,6 @@ class GhSetting(unittest.TestCase):
                 else:
                     os.environ[k] = v
             shutil.rmtree(tmp, ignore_errors=True)
-
-
-class OfferPastFour(unittest.TestCase):
-    """Past OFFER_MAX finished sessions, every parent's sessions sit under an option of their own."""
-
-    def test_each_of_five_parents_has_an_option(self):
-        home = tempfile.mkdtemp(prefix="p4-phi-offer-")
-        try:
-            def put(sid, parent, done, n):
-                d = relay._dir(home, sid)
-                os.makedirs(d)
-                rec = {"sessionId": sid, "title": f"session {sid}", "createdAt": f"2026-11-17T00:00:{n:02d}"}
-                if parent:
-                    rec["spawnedFrom"] = {"sessionId": parent}
-                if done:
-                    rec["doneRetired"] = True
-                with open(os.path.join(d, "session.json"), "w", encoding="utf-8") as f:
-                    json.dump(rec, f)
-            put("top", "", False, 0)
-            for i in range(5):
-                put(f"p{i}", "top", False, 1 + i)
-                put(f"k{i}", f"p{i}", True, 10 + i)
-            opts = relay.offer(home, "top")
-            for i in range(5):
-                self.assertTrue(any(o["ids"] == [f"k{i}"] for o in opts), (i, [o["ids"] for o in opts]))
-            text = relay.offer_text(home, "top")
-            self.assertIn("Question 2:", text)
-            for q in text.split("Question ")[1:]:
-                self.assertLessEqual(q.count("- label"), relay.OFFER_MAX, q)
-        finally:
-            shutil.rmtree(home, ignore_errors=True)
-
-
-class PickedWholeLabel(unittest.TestCase):
-    """A stored offer label counts as picked only as a whole label of an answer, as names_answer reads it."""
-
-    def test_a_label_inside_a_longer_answer_is_no_pick(self):
-        home = tempfile.mkdtemp(prefix="p4-phi-picked-")
-        try:
-            d = relay._dir(home, "top")
-            os.makedirs(d)
-            with open(os.path.join(d, "session.json"), "w", encoding="utf-8") as f:
-                json.dump({"sessionId": "top", "archiveOffer": [{"label": "phi sweep", "ids": ["k1"]}]}, f)
-            ask = lambda answer: [{"name": "AskUserQuestion", "result": f'"Archive which?"="{answer}"'}]
-            self.assertEqual(relay.picked(home, "top", ask("phi sweep: the pruning core")), [])
-            self.assertEqual(relay.picked(home, "top", ask("phi sweep")), ["k1"])
-            self.assertEqual(relay.picked(home, "top", ask("other, phi sweep")), ["k1"])
-            echo = [{"name": "AskUserQuestion", "result": '"Archive phi sweep?"="None of them"'}]
-            self.assertEqual(relay.picked(home, "top", echo), [])   # the question's own text is no pick
-        finally:
-            shutil.rmtree(home, ignore_errors=True)
 
 
 class SharedHome(unittest.TestCase):

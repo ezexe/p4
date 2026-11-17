@@ -300,13 +300,12 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
     <div class="rule">
       <h3>ezexe archives</h3>
       <ul>
-        <li>No session archives a session on its own. p4-phi's hook refuses the archive call, for the session itself and for another, except for a session ezexe picked, below.</li>
+        <li>Every archive call is ezexe's to approve. p4-phi's settings keeper writes an ask rule on <code>mcp__ccd_session_mgmt__archive_session</code> into the project's local settings, so the app shows its approval card before the call in every permission mode, bypass included, and the tool itself refuses a session with live background work.</li>
         <li>A worker that is done shows no button and asks for nothing. It reports, and when its brief said “report when done” it is counted as archived once the issue it closes, if any, is proven, its outcome kept on its parent session as one <code>replaces:</code> note.</li>
         <li>An orchestrator that is done ends its turn with <code>mcp__ccd_turn__wrap_up</code> whose first action is the app's <code>archive</code>. ezexe archives it with one press.</li>
-        <li>In that closing turn the orchestrator puts the finished sessions of its tree to ezexe as one <code>AskUserQuestion</code> with <code>multiSelect</code>, and archives exactly the ones ezexe picks. Those calls, and a puppeteer's archive of a session ezexe picked, are the only archive calls the hook lets through.</li>
         <li><code>phi/ready-to-archive.md</code> lists the sessions counted as archived that the app has not archived yet.</li>
         <li>A session counted as archived that is messaged again is named to its parent session as reopened.</li>
-        <li>Setting <code>phi.session_archives</code> to true in <code>p4.json</code> lets sessions archive sessions with the app's tool.</li>
+        <li>A worker that archives itself has its last turn kept first, and p4-phi's hook refuses that archive while the issue it closes is open or unproven.</li>
       </ul>
     </div>
     <div class="rule wide">
@@ -316,7 +315,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
         <li>A start request is handed only to the session that filed it, at the next turn ezexe begins in that session, so the app nests the worker where p4-phi does.</li>
         <li>A session whose turn another session began shows the worker as a suggested task card first, the start call with <code>initiation</code> <code>own_initiative</code>. It writes a start request only where the card is refused too.</li>
         <li>An orchestrator that has a puppeteer starts no new orchestrator itself. It writes <code>phi.py request ... --to-puppeteer</code>, and its puppeteer starts the session, files it in that environment's section and takes it under control, or declines it.</li>
-        <li>A puppeteer may archive a session it controls, or one in such a session's tree, only when ezexe picked it in that turn and p4-phi's records hold it complete.</li>
+        <li>A puppeteer is told which sessions it controls p4-phi's records hold complete, which no tool of the app tells. Its archive of one goes through the app's approval card like any other.</li>
       </ul>
     </div>
   </section>
@@ -534,7 +533,7 @@ function copy(text,btn){
   function old(){var t=h("textarea");t.value=text;t.style.position="fixed";t.style.opacity="0";document.body.appendChild(t);t.select();try{document.execCommand("copy");ok()}catch(e){}t.remove()}
   try{if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(text).then(ok,old);else old()}catch(e){old()}
 }
-/* the lines phi.py and relay.py print: NEW_TOP_BRIEF with new_top_first_act, NO_ARCHIVE, BUTTON, CHILD_DONE and READY;
+/* the lines phi.py and relay.py print: NEW_TOP_BRIEF with new_top_first_act, BUTTON, CHILD_DONE and READY;
    PHI stands for phi.commands(), which prints the absolute path of the installed phi.py */
 /* plans.child_kind and plans.with_level: the model and effort a start call carries, said in one line of its brief */
 var DESIGNS=/^\W*(?:re-?)?(?:design|review|architect|audit|specif|spec\b|propos|investigat|decid|evaluat|assess|analy[sz]|research|plan\b)\w*/i;
@@ -546,23 +545,10 @@ function withLevel(c,marker){var l=LEVEL[workKind(c.title+"\n"+c.prompt)],out={}
   out.prompt=c.prompt+"\n\nModel and effort: "+(l.model==="inherit"?"the parent session's own model":l.model)+" at "+l.effort+" effort, since this is "+l.said+"."+(marker?"\n\n"+marker:"");
   out.effort=l.effort;if(l.model!=="inherit")out.model=l.model;return out}
 var NEWTOP='This session is a new top session, orchestrating its own topic. Its first act: `mcp__ccd_session_mgmt__detach_session` with `"self"`, so the app stops nesting it and its reports stop going to its parent session, then `'+PHI+' detach`.';
-var NO_ARCHIVE="phi (p4-phi): this archive call is refused: a session is archived by ezexe's own press or pick.";
 var BUTTON="This session is at the top level of its tree and it is done, so end this turn with `mcp__ccd_turn__wrap_up` whose first action is the app's `archive`, and a recap of one sentence naming what was done: that puts the button in this session's next-step box, and ezexe archives it with one press. Write no paragraph asking for it, and call no archive tool for this session.";
 var CHILD_DONE="This session has a parent session, so it shows no archive button and asks for nothing: report what was done and end the turn. Call no archive tool.";
-var READY="p4-phi counts them as archived from now. Call no archive tool for them: when the orchestrator of this tree is done, it puts its finished sessions to ezexe as one multiple-choice question and archives exactly the ones ezexe picks.";
+var READY="p4-phi counts them as archived from now. Archiving one in the app is ezexe's: the archive tool asks ezexe on the app's approval card before it runs.";
 var ARCHIVE="mcp__ccd_session_mgmt__archive_session";
-function cutTo(t,n){return t.length<=n?t:t.slice(0,n-4)+" ..."}
-/* relay.offer: one option a finished session while they fit one question, else one for all and one a parent */
-function offerOf(top){
-  var r=desc(top,"phi").filter(function(k){return N(k).retired});
-  if(!r.length)return [];
-  if(r.length<=4)return r.map(function(k){return{label:cutTo(N(k).title,44),description:"Archive "+k+"."}});
-  var opts=[{label:"All "+r.length+" finished sessions",description:"Archive every one of them."}],by={},ord=[];
-  r.forEach(function(k){var p=N(k).phi;if(!by[p]){by[p]=[];ord.push(p)}by[p].push(k)});
-  ord.slice(0,3).forEach(function(p){opts.push({label:cutTo("Under "+N(p).title,44),
-    description:"Archive "+by[p].slice(0,8).map(function(k){return q(cutTo(N(k).title,40))}).join("; ")+"."})});
-  return opts;
-}
 var EX={
   intro:function(){return{title:"Choose a move",why:"Each move you make on the tree shows here as the call or command that performs it, with what the app and p4-phi each write down. p4-phi starts, stops and messages no session itself. It hands a session the exact call, and the session makes it.",
     steps:[{side:"phi",by:"Print the tree from any session.",code:PHI+" tree"},
@@ -651,21 +637,16 @@ var EX={
       steps.push({side:"phi",by:"The parent session's next message carries this line.",
         out:'phi (p4-phi): finished, their outcome kept as a replaces: note on this session: ['+e.title+'](#'+e.id+'). '+READY});
     }else{
-      var n=e.count,lines=e.opts.map(function(o){return '- label "'+o.label+'", description "'+o.description+'"'}).join("\n");
       steps.push({side:"phi",by:"The session says what was run and what it showed.",code:PHI+' done "<what was run and what it showed>"',
-        out:"this turn will be kept as done\n"+BUTTON+(n?"\nphi (p4-phi): "+n+" session"+(n===1?"":"s")+" of this tree "+(n===1?"is":"are")+" finished and not yet archived. In this closing turn, before `mcp__ccd_turn__wrap_up`, put them to ezexe as one multiple-choice question: one `AskUserQuestion` with `multiSelect` true, the question saying that archiving all of them is the recommended choice, and exactly these options"+(e.opts.length===1?", with a last option \"None of them\"":"")+":\n"+lines+"\nArchive none of them before ezexe has answered. Then call `"+ARCHIVE+"` for exactly the sessions under the options ezexe picked, and for no other: the pick is ezexe's, and p4-phi lets those calls through.":"")});
-      if(n)steps.push({side:"app",by:"It puts the finished sessions of its tree to ezexe as one multiple-choice question.",
-        code:call("AskUserQuestion",{questions:[{question:"Which finished sessions should be archived? Archiving all of them is the recommended choice.",header:"Archive",multiSelect:true,
-          options:e.opts.concat(e.opts.length===1?[{label:"None of them",description:"Leave it open."}]:[])}]}),
-        note:"It then calls "+ARCHIVE+" for exactly the sessions ezexe picked, and for no other."});
+        out:"this turn will be kept as done\n"+BUTTON});
       steps.push({side:"app",by:"It ends the turn with the archive button.",
         code:call("mcp__ccd_turn__wrap_up",{recap:"<one sentence naming what was done>",ask:"Archive this session?",actions:[{action:"archive"}]})});
     }
     return{title:e.parentTitle?"Done, and counted as archived":"Done, in an orchestrator",
-      why:e.parentTitle?"The session's outcome moves to its parent session as one replaces: note. From that moment p4-phi hands it nothing more and hands nothing of it to other sessions, and it shows no archive button. It stays in the drawing until ezexe archives it.":"An orchestrator has no parent session. Its turn is kept as done, the tree prints it as done, and it closes with a button that archives it at one press."+(e.count?" Before that it puts the finished sessions of its tree to ezexe as one multiple-choice question.":""),
+      why:e.parentTitle?"The session's outcome moves to its parent session as one replaces: note. From that moment p4-phi hands it nothing more and hands nothing of it to other sessions, and it shows no archive button. It stays in the drawing until ezexe archives it.":"An orchestrator has no parent session. Its turn is kept as done, the tree prints it as done, and it closes with a button that archives it at one press.",
       steps:steps,
-      app:e.parentTitle?"Nothing. The session is still open in the sidebar, with no button.":"The archive button in the session's next-step box. Nothing is archived until ezexe presses it or picks a session.",
-      phi:e.parentTitle?"doneRetired in the worker's session.json, and the note in the parent session's notes.jsonl. Every session the parent session starts later is given that note. phi/ready-to-archive.md lists the worker until the app shows it archived.":"The turn's row in turns.jsonl is kept as done."+(e.count?" The labels of the offered options are kept as archiveOffer in the orchestrator's session.json, and the hook reads ezexe's picks by them.":"")}},
+      app:e.parentTitle?"Nothing. The session is still open in the sidebar, with no button.":"The archive button in the session's next-step box. Nothing is archived until ezexe presses it or approves an archive call on the app's card.",
+      phi:e.parentTitle?"doneRetired in the worker's session.json, and the note in the parent session's notes.jsonl. Every session the parent session starts later is given that note. phi/ready-to-archive.md lists the worker until the app shows it archived.":"The turn's row in turns.jsonl is kept as done."}},
   again:function(e){
     var steps=[{side:"you",by:"ezexe, or another session with SendMessage, writes to the session.",note:"There is no command to run. The session's next message does it."}];
     if(e.parentTitle)steps.push({side:"phi",by:q(e.parentTitle)+" is told once, beside its next message.",
@@ -678,16 +659,14 @@ var EX={
   archive:function(e){
     var steps=[];
     if(e.how==="button")steps.push({side:"you",by:"ezexe presses the archive button in the next-step box of "+q(e.title)+".",note:"The session put the button there with the wrap_up call that ended its closing turn."});
-    else if(e.how==="picked"){
-      steps.push({side:"you",by:"ezexe ticks "+q(e.title)+" in the multiple-choice question that "+q(e.topTitle)+" puts in its closing turn."});
-      steps.push({side:"app",by:q(e.topTitle)+" then archives exactly what ezexe picked.",code:call(ARCHIVE,{session_id:e.id}),
-        note:"p4-phi reads ezexe's picks from the answered question and lets this call through."});
+    else if(e.how==="approved"){
+      steps.push({side:"app",by:q(e.topTitle)+" calls the archive tool for it.",code:call(ARCHIVE,{session_id:e.id}),
+        note:"The ask rule p4-phi's settings keeper writes on the tool makes the app show its approval card first, in every permission mode."});
+      steps.push({side:"you",by:"ezexe approves the call on the app's approval card."});
     }else steps.push({side:"you",by:"ezexe archives "+q(e.title)+" by hand in the sidebar.",
-      note:e.retired?"p4-phi already counts it as archived. Until now it waited on phi/ready-to-archive.md, and its orchestrator would have offered it in a multiple-choice question when done.":"No session asked for this. ezexe can archive any session at any time."});
-    steps.push({side:"app",by:"A session that makes the call on its own is refused by p4-phi's hook.",code:call(ARCHIVE,{session_id:"self"}),err:true,
-      out:NO_ARCHIVE+(e.child?" This session's turn is kept. "+CHILD_DONE:" "+BUTTON)});
+      note:e.retired?"p4-phi already counts it as archived. Until now it waited on phi/ready-to-archive.md.":"No session asked for this. ezexe can archive any session at any time."});
     return{title:"Archived by ezexe",
-      why:"Archiving is ezexe's move. A done orchestrator offers it as a button. A finished worker waits for the multiple-choice question of its orchestrator. ezexe can also archive any session by hand in the sidebar. No session archives a session on its own: an orchestrator or a puppeteer archives only a session ezexe picked.",
+      why:"Archiving is ezexe's move. A done orchestrator offers it as a button. A session that calls the archive tool waits on the app's approval card, which ezexe answers. ezexe can also archive any session by hand in the sidebar.",
       steps:steps,
       app:"The session's record is marked archived. "+(e.count>1?(e.count-1)+" more session"+(e.count===2?"":"s")+" went with it on this page. ":"")+"The app also archives the sessions it nests under that session that have finished or that share its worktree.",
       phi:"p4-phi reads the archive from the app's record. phi.py tree prints neither the session nor anything under it."}}
@@ -743,9 +722,8 @@ var ACT={
     var n=N(S.sel),p=parentIn(n.id,"phi");
     n.state="done";n.turns=Math.max(1,n.turns);
     if(p){n.retired=true;N(p).notes++}
-    var opts=p?[]:offerOf(n.id),count=p?0:desc(n.id,"phi").filter(function(k){return N(k).retired}).length;
-    S.example={kind:"done",id:n.id,title:n.title,parentTitle:p?N(p).title:"",opts:opts,count:count};
-    say([cmd(PHI+' done "…"'),["out","this turn will be kept as done"]],p?"Its outcome went up to "+q(N(p).title)+" as a replaces: note, and p4-phi counts it as archived. It shows no archive button, and it stays in the drawing until ezexe archives it.":"The tree now prints it as done, and it ends its turn with the archive button."+(count?" First it puts the "+count+" finished session"+(count===1?"":"s")+" of its tree to ezexe as one multiple-choice question.":""));
+    S.example={kind:"done",id:n.id,title:n.title,parentTitle:p?N(p).title:""};
+    say([cmd(PHI+' done "…"'),["out","this turn will be kept as done"]],p?"Its outcome went up to "+q(N(p).title)+" as a replaces: note, and p4-phi counts it as archived. It shows no archive button, and it stays in the drawing until ezexe archives it.":"The tree now prints it as done, and it ends its turn with the archive button.");
     S.view="phi";S.after=p?function(){fly(n.id,p)}:null;
   },
   again:function(){
@@ -755,15 +733,15 @@ var ACT={
   },
   archive:function(){
     var n=N(S.sel),gone={},title=n.title,up=parentIn(n.id,S.view)||parentIn(n.id,"phi"),pp=parentIn(n.id,"phi"),top=N(rootOf(n.id,"phi"));
-    var how=!pp&&n.state==="done"?"button":n.retired&&pp&&top.state==="done"?"picked":"hand";
+    var how=!pp&&n.state==="done"?"button":n.retired&&pp&&top.state==="done"?"approved":"hand";
     gone[n.id]=1;desc(n.id,"phi").concat(desc(n.id,"app")).forEach(function(k){gone[k]=1});
     var count=Object.keys(gone).length;
     S.example={kind:"archive",id:n.id,title:title,count:count,how:how,topTitle:top.title,retired:n.retired,child:!!pp};
     S.order=S.order.filter(function(k){return !gone[k]});
     Object.keys(gone).forEach(function(k){delete S.nodes[k]});
     S.order.forEach(function(k){var x=N(k);if(x.phi&&!N(x.phi))x.phi=null;if(x.app&&!N(x.app))x.app=null});
-    say(how==="picked"?[["cmd",ARCHIVE+" {\"session_id\": \""+n.id+"\"}"]]:[],
-      (how==="button"?"ezexe pressed its archive button. ":how==="picked"?"ezexe picked it in the multiple-choice question, and its orchestrator archived it. ":"ezexe archived it by hand. ")+(count>1?"The sessions under it in either record went with it.":"Nothing else moved."));
+    say(how==="approved"?[["cmd",ARCHIVE+" {\"session_id\": \""+n.id+"\"}"]]:[],
+      (how==="button"?"ezexe pressed its archive button. ":how==="approved"?"Its orchestrator called the archive tool, and ezexe approved it on the app's card. ":"ezexe archived it by hand. ")+(count>1?"The sessions under it in either record went with it.":"Nothing else moved."));
     S.sel=up&&N(up)?up:(S.order[0]||null);
   }
 };

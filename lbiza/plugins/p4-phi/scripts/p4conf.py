@@ -58,7 +58,6 @@ DEFAULTS = {
         "top_orchestrates": True,        # false: an orchestrator works its task list itself, no worker unless asked
         "levels": True,                  # false: no delegation rule, and no line naming a long command's background
         "file_sets": True,               # false: a session may be started by a brief that declares no write set
-        "session_archives": False,       # true: a session may archive itself or another session
         "issues": True,                  # false: the issue loop is off: no open issue a brief names, no commit line
                                          # for it, no regression test at Stop and no push line
         # caps a project sets, ezexe/p4#125, read by phi.CAPS and apply_caps, which keep the default for a value of
@@ -155,10 +154,11 @@ READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.puppeteer_cha
 
 # Keys no plugin reads, top-level or dotted: never returned or called unknown, and dropped from p4.json when it is
 # rewritten for another reason. The memory section and the scratchpad tmp keys went with p4-temportal's move to the
-# app's own auto memory and scratchpad.
+# app's own auto memory and scratchpad, and phi.session_archives with the archive guard, which the app's approval card
+# on the archive tool replaced.
 RETIRED = ("plans", "version", "memory", "scratchpad.tmp_idle_days", "scratchpad.tmp_max_file_mb",
            "scratchpad.tmp_max_files", "scratchpad.tmp_empty_idle_hours", "scratchpad.scratch_sweep_minutes",
-           "scratchpad.tmp_skip_dirs")
+           "scratchpad.tmp_skip_dirs", "phi.session_archives")
 
 # Where each kind of file lives in the store, by plugin. p4-temportal keeps the auto memory, the notebook and saved
 # code in temportal/, and p4-phi keeps its session tree, the retrieval corpus and
@@ -779,7 +779,7 @@ def _write(p4, data):
 WRITTEN = "_written"
 # The generation of DEFAULTS: raised by one whenever a default changes, with the value it had added to HISTORY, so a
 # store's written values follow the change. test_p4conf.py pins DEFAULTS to this number.
-GEN = 5
+GEN = 6
 # Past defaults by dotted path: a store from before the record whose value equals one of these, or today's default,
 # counts that value as written by load, so it follows today's default.
 HISTORY = {"recall.teacher.model": ["claude-fable-5-1"], "recall.lookups.web": ["answer"], "scratchpad.tmp": [True],

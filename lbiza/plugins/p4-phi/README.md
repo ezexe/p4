@@ -85,7 +85,6 @@ Every key is optional.
 | `top_orchestrates` | `true` | `false`: an orchestrator does its own task list's work |
 | `file_sets` | `true` | `false`: a session may be started by a brief that declares no write set |
 | `issues` | `true` | `false`: no issue loop: a worker takes no open issue its brief names, gets no line on a commit that closes no issue, runs no regression test at Stop and is given no push line |
-| `session_archives` | `false` | `true`: sessions may archive sessions |
 | `puppeteer_section` | `puppeteers` | another name for the sidebar section; an empty string makes no session a puppeteer |
 | `puppeteer_chars` | 200000 | the characters p4-phi may hand a puppeteer between compactions before its boundary notice says so |
 | `track` | `false` | `true`: the session tree is committed to the store |

@@ -29,10 +29,10 @@ controls, with the watcher's commands from puppeteer.py; `--help` gives the argu
 
 Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `new_task`, `rules`,
 `background_chars`, `reports_chars`, `prompt_chars` and `wait_s`, and `puppeteer`, which puppeteer.on reads. The `phi`
-section of p4.json: `act_dont_wait`, `levels`, `top_orchestrates`, `file_sets`, `child_levels` and
-`session_archives`, read from the session's own store, `home`, which names a shared store for the session tree, and
-`puppeteer_section` and `puppeteer_chars`, which controls.py reads. P4_PHI=0 turns the plugin off, P4_PHI_NEW_TASK=0 the
-standing instruction and P4_PHI_RULES=0 the rules. P4_PHI_WAIT sets how long a first message waits for the app's
+section of p4.json: `act_dont_wait`, `levels`, `top_orchestrates`, `file_sets` and `child_levels`, read from the
+session's own store, `home`, which names a shared store for the session tree, and `puppeteer_section` and
+`puppeteer_chars`, which controls.py reads. P4_PHI=0 turns the plugin off, P4_PHI_NEW_TASK=0 the standing instruction
+and P4_PHI_RULES=0 the rules. P4_PHI_WAIT sets how long a first message waits for the app's
 record, and P4_PHI_APP_SESSIONS the folder of the app's records.
 """
 
@@ -456,7 +456,7 @@ def _save_session(home, s):
         if isinstance(disk.get(k), dict):
             s[k] = {**disk[k], **(s.get(k) or {})}
     for k in ("rootStep", "shard", "disposable", "doneRetired", "archived", "appRoot", "nudged", "issue",
-              "issueLooked", "findingsTold", "controls", "puppeteerArchives", "puppeteerSeen", "handedTo",
+              "issueLooked", "findingsTold", "controls", "puppeteerSeen", "handedTo",
               "handedFrom"):
         if k in disk and k not in s:
             s[k] = disk[k]
@@ -1115,8 +1115,7 @@ def project_conf(store):
 
 
 # The caps a project sets in p4.json's `phi` section: each key, the module and constant it sets, and the least and most
-# value it takes. OFFER_MAX is not among them: it is the app's own limit, the AskUserQuestion tool taking at most four
-# options to a question.
+# value it takes.
 CAPS = {"max_depth": ("phi", "MAX_DEPTH", 1, 20), "max_children": ("phi", "MAX_CHILDREN", 1, 50),
         "sibling_turns": ("phi", "OTHERS", 0, 50), "own_turns": ("phi", "OWN", 0, 50),
         "chain_max": ("phi", "CHAIN_MAX", 1, 50), "turn_steps": ("phi", "TURN_STEPS", 1, 100),
@@ -2003,75 +2002,19 @@ def h_memory_gap(payload):
 
 
 def h_self_archive(payload):
-    """PreToolUse on mcp__ccd_session_mgmt__archive_session. Unless p4.json sets phi.session_archives, the call is
-    denied, since archiving is ezexe's own action in the app: an orchestrator may archive only a finished session of
-    its own tree that ezexe picked this turn in the multiSelect question offering it, by an option's label naming it
-    by its full title or its id, and a puppeteer only a complete controlled session or a finished session of a
-    controlled tree that ezexe picked so. Where sessions may archive, a child's own archive is held while a background task it started has no end
-    recorded; where they may not, the refusal names those tasks. A child that
-    archives itself may never reach its Stop hook, so its turn and its last report are kept now, read from the
-    transcript, and it is counted as archived as at Stop."""
+    """PreToolUse on mcp__ccd_session_mgmt__archive_session. Whether the call runs is ezexe's: the settings keeper
+    writes an ask rule on the tool, which the app asks about in every permission mode, and the tool itself refuses a
+    session with live background work. What no native step does: a child that archives itself may never reach its Stop
+    hook, so its turn and its last report are kept now, read from the transcript, it is counted as archived as at
+    Stop, and an unproven or open issue keeps it from archiving."""
     me = Me(payload)
     if not me.home or not me.id:
         return None
     s = load_session(me.home, me.id)
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     target = str(inp.get("session_id") or inp.get("sessionId") or inp.get("id") or "self")
-    own = target in ("self", me.id, me.cli, me.id.removeprefix("local_"))
-    refuse = None
-    if not session_archives(me.store):             # archiving is ezexe's own action in the app
-        RAN["archive_refused"] = "self" if own else target[:40]
-        turn = last_turn(payload.get("transcript_path") or "") if not own and not spawned_from(s) else None
-        if not own and controls.is_puppeteer(s, me.store):
-            # a puppeteer archives only what ezexe picked this turn, and only a session p4-phi holds complete
-            offered = target in controls.offered_ids(me.home, s)
-            was = target in controls.picked(me.home, s, turn, {target: controls.names_of(target)} if offered else None)
-            left = controls.archive(me.home, s, target, str(inp.get("reason") or ""), picked=was)
-            RAN["archive_refused"] = "" if not left else target[:40]
-            RAN["puppeteer_archive"] = ("left " if left else "let ") + target[:40]
-            if was:
-                RAN["archive_picked"] = target[:40]
-            controls.board(me.home, load_session(me.home, me.id) or s)
-            if not left:
-                return None
-            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                           "permissionDecisionReason": (
-                                               f"phi (p4-phi): this puppeteer's archive of {target} is "
-                                               f"refused: {left}. Name it to ezexe as left, with that reason.")}}
-        if not own and not spawned_from(s):       # an orchestrator archiving what ezexe picked this turn
-            ready = {sid for sid, _, _ in relay.ready_in_tree(me.home, me.id)}   # its tree's finished sessions
-            mine = load_session(me.home, target) if target in ready else {}
-            named = {target: [controls.full_title(target, mine), title_of(mine)]} if mine else None
-            if target in relay.picked(me.home, me.id, (turn or {}).get("calls"), named):
-                RAN["archive_refused"] = ""
-                RAN["archive_picked"] = target[:40]
-                return None
-        why = relay.NO_ARCHIVE + (
-            " This session's turn is kept. " + relay.CHILD_DONE if own and spawned_from(s) else
-            " " + relay.BUTTON if own else
-            f" p4-phi already counts a finished or superseded session as archived. An orchestrator that is done "
-            f"offers its tree's finished sessions to ezexe as one multiple-choice question, `AskUserQuestion` with "
-            f"`multiSelect`, and archives only the ones ezexe picked there: {target} is not a finished session of "
-            f"this tree that ezexe picked in that question in this turn.")
-        running = puppeteer.held_tasks(me.home, me.id) if own else []
-        if running:                                # a live background task holds a session's own archive
-            why += (f" It also has {len(running)} background task{'s' if len(running) != 1 else ''} with no end "
-                    f"recorded: {'; '.join(running[:6])}. Wait for each one's completion notification or stop it "
-                    f"before this session ends.")
-        refuse = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                         "permissionDecisionReason": why}}
-    if not spawned_from(s) or not own:
-        return refuse
-    if refuse is None:                             # a project that lets sessions archive: still held by a live task
-        running = puppeteer.held_tasks(me.home, me.id)
-        if running:
-            RAN["archive_held"] = len(running)
-            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                           "permissionDecisionReason": (
-                                               f"phi (p4-phi): this session has {len(running)} background task"
-                                               f"{'s' if len(running) != 1 else ''} with no end recorded: "
-                                               f"{'; '.join(running[:6])}. Its archive is held until each one ends "
-                                               f"or is stopped.")}}
+    if target not in ("self", me.id, me.cli, me.id.removeprefix("local_")) or not spawned_from(s):
+        return None
     turn = last_turn(payload.get("transcript_path") or "")
     texts = [t for t in (turn or {}).get("texts") or [] if isinstance(t, str) and t.strip()]
     h_stop({**payload, "hook_event_name": "Stop", "last_assistant_message": texts[-1] if texts else "",
@@ -2081,7 +2024,7 @@ def h_self_archive(payload):
     if held:                                       # an unproven or open issue keeps the child from archiving
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                        "permissionDecisionReason": held}}
-    return refuse
+    return None
 
 
 def h_restart_check(payload):
@@ -2291,15 +2234,6 @@ def h_level(payload):
             f"`p4-phi:runner` subagent, then go on with other work or end the turn: its completion "
             f"notification brings the result, so never wait for it in the foreground, sleep or poll. Said once "
             f"for this step.")
-
-
-def session_archives(store):
-    """True only where the project's p4.json sets phi.session_archives: sessions may then archive sessions with the
-    app's archive tool."""
-    try:
-        return p4conf.section(store, "phi", write=False).get("session_archives") is True if store else False
-    except Exception:  # noqa: BLE001
-        return False
 
 
 def h_task(payload):
@@ -2715,7 +2649,7 @@ def pair_parts(me, s, req, changed="", notice=lambda text: text):
     edge = controls.boundary(me.home, s, me.store)
     if edge:
         RAN["boundary"] = True
-        pieces = edge.split("\n\n")               # the archive offer, kept, and the boundary, which fits or is held
+        pieces = edge.split("\n\n")               # the complete sessions, kept, and the boundary, which fits or is held
         if not pieces[0].startswith("phi (p4-phi): a boundary: "):
             pieces[0] = notice(pieces[0])
         out += pieces
@@ -3739,9 +3673,6 @@ def main(argv=None):
                 print(relay.CHILD_DONE)
             else:
                 print(relay.BUTTON)
-                listed = relay.offer_text(me.home, s["sessionId"])
-                if listed:
-                    print(listed)
             try:                                   # the issue it closes, and what that still owes
                 line = issues.done_text(me.home, s, os.getcwd()) if spawned_from(s) else ""
             except Exception:  # noqa: BLE001

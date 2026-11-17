@@ -2066,145 +2066,17 @@ def stale_text(pend):
 # A finished or superseded session is counted as archived by p4-phi at once: the replaces: note on its parent,
 # `doneRetired` or `stale` in its session.json, and `gone` true for routing, owned paths, the tree and what relay.py
 # hands other sessions from that moment. Its parent is told once, and the sessions the app has not archived yet are
-# listed on <home>/phi/ready-to-archive.md. A done orchestrator offers its tree's finished ones to ezexe, and
-# phi.py's archive hook, h_self_archive, says which session may call the archive tool.
+# listed on <home>/phi/ready-to-archive.md. Archiving one in the app is ezexe's: the settings keeper writes an ask
+# rule on the archive tool, so the app asks ezexe before every archive call in any permission mode.
 
-READY = ("p4-phi counts them as archived from now. Call no archive tool for them: when the orchestrator of this "
-         "tree is done, it puts its finished sessions to ezexe as one multiple-choice question and archives exactly "
-         "the ones ezexe picks.")
-NO_ARCHIVE = ("phi (p4-phi): this archive call is refused: a session is archived by ezexe's own press or pick.")
+READY = ("p4-phi counts them as archived from now. Archiving one in the app is ezexe's: the archive tool asks "
+         "ezexe on the app's approval card before it runs.")
 BUTTON = ("This session is at the top level of its tree and it is done, so end this turn with `mcp__ccd_turn__wrap_up` "
           "whose first action is the app's `archive`, and a recap of one sentence naming what was done: that puts the "
           "button in this session's next-step box, and ezexe archives it with one press. Write no paragraph asking "
           "for it, and call no archive tool for this session.")
 CHILD_DONE = ("This session has a parent session, so it shows no archive button and asks for nothing: report what "
               "was done and end the turn. Call no archive tool.")
-OFFER_MAX = 4                    # options one question of an AskUserQuestion holds
-QUESTIONS_MAX = 4                # questions one AskUserQuestion holds
-
-
-def ready_in_tree(home, top):
-    """The sessions under `top` that p4-phi holds as finished or superseded and the app has not archived, oldest
-    first, each as its sessionId, title and parent."""
-    every = _sessions(home)
-    out = []
-    for sid, s in sorted(every.items(), key=lambda kv: str(kv[1].get("createdAt") or "")):
-        if not _ready_mark(s) or s.get("archived") or archived_in_app(s):
-            continue
-        cur, seen = _parent(s), set()
-        while cur and cur != top and cur not in seen:
-            seen.add(cur)
-            cur = _parent(every.get(cur) or {})
-        if cur == top:
-            out.append((sid, _title(s), _parent(s)))
-    return out
-
-
-def offer(home, top):
-    """The options of the multiple-choice question a done orchestrator puts to ezexe, each with a label, a
-    description and the ids it archives: one option a finished session while they fit one question, else one option
-    for all of them and one for each parent, its children named, which offer_text splits over several questions. The
-    labels are what the archive hook reads ezexe's picks by, so they are kept on the orchestrator."""
-    ready = ready_in_tree(home, top)
-    if not ready:
-        return []
-    every = _sessions(home)
-    if len(ready) <= OFFER_MAX:
-        opts = [{"label": _short(t, 44), "description": f"Archive \"{t}\" {sid}." if _short(t, 44) != t
-                 else f"Archive {sid}.", "ids": [sid]}
-                for sid, t, _ in ready]           # a label has a limit of its length: a title it cuts is described
-    else:
-        groups = {}
-        for sid, t, parent in ready:
-            groups.setdefault(parent, []).append((sid, t))
-        opts = [{"label": f"All {len(ready)} finished sessions", "description": "Archive every one of them.",
-                 "ids": [sid for sid, _, _ in ready]}]
-        for parent, kids in groups.items():
-            opts.append({"label": _short(f"Under {_title(every.get(parent) or {'sessionId': parent})}", 44),
-                         "description": "Archive " + "; ".join(f"\"{t}\"" for _, t in kids[:8])
-                                        + (f" and {len(kids) - 8} more" if len(kids) > 8 else "") + ".",
-                         "ids": [sid for sid, _ in kids]})
-    seen = {}
-    for o in opts:                                 # a label is the key a pick is read by: each one once
-        seen[o["label"]] = seen.get(o["label"], 0) + 1
-        if seen[o["label"]] > 1:
-            o["label"] = _short(o["label"], 40) + f" ({seen[o['label']]})"
-    path = os.path.join(_dir(home, top), "session.json")
-    d = _read_json(path)
-    if d:
-        d["archiveOffer"] = [{"label": o["label"], "ids": o["ids"]} for o in opts]
-        _write_json(path, d)
-    return opts
-
-
-def offer_text(home, top):
-    """The line a done orchestrator is handed about the finished sessions of its tree, '' when there are none."""
-    opts = offer(home, top)
-    if not opts:
-        return ""
-    n = len({i for o in opts for i in o["ids"]})
-    asks = -(-len(opts) // OFFER_MAX)              # questions of at most OFFER_MAX options, as controls.offer_text
-    lines = "\n".join((f"Question {k + 1}:\n" if asks > 1 else "") + "\n".join(
-        f"- label \"{o['label']}\", description \"{o['description']}\""
-        for o in opts[k * len(opts) // asks:(k + 1) * len(opts) // asks]) for k in range(asks))
-    into = ("one `AskUserQuestion`" if asks <= QUESTIONS_MAX else
-            f"{-(-asks // QUESTIONS_MAX)} `AskUserQuestion` calls of at most {QUESTIONS_MAX} questions")
-    how = ("one multiple-choice question: one `AskUserQuestion` with `multiSelect` true, the question saying that "
-           "archiving all of them is the recommended choice" if asks == 1 else
-           f"{asks} multiple-choice questions in {into}, each with a text of its own and `multiSelect` true, the "
-           f"first saying that archiving all of them is the recommended choice")
-    return (f"phi (p4-phi): {n} session{'s' if n != 1 else ''} of this tree {'are' if n != 1 else 'is'} finished and "
-            f"not yet archived. In this closing turn, before `mcp__ccd_turn__wrap_up`, put them to ezexe as {how}, "
-            f"and exactly these options"
-            + (", with a last option \"None of them\"" if len(opts) == 1 else "")
-            + (" under these questions" if asks > 1 else "") + f":\n{lines}\n"
-            f"Archive none of them before ezexe has answered. Then call `mcp__ccd_session_mgmt__archive_session` for "
-            f"exactly the sessions under the options ezexe picked, and for no other: the pick is ezexe's, and p4-phi "
-            f"lets those calls through.")
-
-
-ANSWERED = re.compile(r'"((?:[^"\\]|\\.)*)"="((?:[^"\\]|\\.)*)"')
-
-
-def answers_of(said):
-    """The answers an AskUserQuestion result carries, each as the labels ezexe picked for one question, joined by
-    commas as the tool returns them; every quoted string where the result pairs no question with an answer."""
-    got = [a for _, a in ANSWERED.findall(said)]
-    return got or re.findall(r'"([^"]*)"', said)
-
-
-def names_answer(name, answer):
-    """True when `name` is one whole label of an answer: the answer itself, or one of its comma-joined labels."""
-    name = str(name or "").strip()
-    return bool(name) and bool(re.search(r"(?:^|,\s*)" + re.escape(name) + r"(?:\s*,|$)", answer.strip(), re.I))
-
-
-def picked(home, top, calls, named=None):
-    """The session ids ezexe picked in this turn's multiple-choice question: the ids under each offered option whose
-    label an answered AskUserQuestion of the turn carries, and each session of `named`, a map of a sessionId the gate
-    offers to the full titles it goes by, that one option of a multiSelect question names by one of those titles or
-    by its id and ezexe's answer to that question picked. The caller puts in `named` only sessions it offers."""
-    asks = [c for c in calls or [] if c.get("name") == "AskUserQuestion" and not c.get("failed")]
-    offer_ = [o for o in _session(home, top).get("archiveOffer") or [] if isinstance(o, dict)]
-    said = " \n ".join(str(c.get("result") or "") for c in asks)
-    answers = answers_of(said)
-    out = []
-    for o in offer_:                               # a whole label of an answer, never a label inside a longer one
-        if o.get("label") and any(names_answer(o["label"], a) for a in answers):
-            out += [i for i in o.get("ids") or [] if i not in out]
-    for c in asks if named else []:
-        inp = c.get("input") if isinstance(c.get("input"), dict) else {}
-        questions = {str(q.get("question") or "").strip(): q for q in inp.get("questions") or [] if isinstance(q, dict)}
-        for asked, answer in ANSWERED.findall(str(c.get("result") or "")):
-            q = questions.get(asked.strip())
-            if not q or q.get("multiSelect") is not True:
-                continue                           # only the answer to a multiSelect question is a pick
-            labels = [str(o.get("label") or "") for o in q.get("options") or [] if isinstance(o, dict)]
-            for sid, names in named.items():
-                if sid not in out and any(names_answer(n, x) and names_answer(x, answer)
-                                          for n in [sid, *names] for x in labels):
-                    out.append(sid)
-    return out
 
 
 def link_of(x):

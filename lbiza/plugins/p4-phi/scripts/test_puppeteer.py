@@ -716,15 +716,6 @@ class AtArchive(Base):
         self.assertFalse(any("process 4343 " in x for x in left), "the same session id in another store is not its")
         self.assertTrue(any("that it queued was never started" in x for x in left), left)
 
-    def test_a_self_archive_names_the_live_background_task_that_holds_it(self):
-        self.background(KID, "sh run-suites.sh", "bg33333333")
-        r = self.t.hook("self-archive", KID, {"hook_event_name": "PreToolUse",
-                                              "tool_name": "mcp__ccd_session_mgmt__archive_session",
-                                              "tool_input": {"session_id": "self"}})
-        out = json.loads(r.stdout)["hookSpecificOutput"]
-        self.assertEqual(out["permissionDecision"], "deny")
-        self.assertIn("bg33333333", out["permissionDecisionReason"])
-
 
 class Scorers(Base):
     """Routing's route and code owner picks go through the trained ranker when the store keeps a model, and through

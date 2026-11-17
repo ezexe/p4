@@ -1151,7 +1151,7 @@ class TopOrchestrates(unittest.TestCase):
         self.assertEqual(self.check(A, "Edit", {"file_path": f"{p}/src/export/flush.py"}, "toolu_n7"), "",
                          "a child is never nudged")
 
-    def test_a_child_marked_report_when_done_leaves_a_replaces_note_and_is_offered_to_ezexe(self):
+    def test_a_child_marked_report_when_done_leaves_a_replaces_note_and_is_named_to_its_parent(self):
         t, C = self.t, self.C
         t.record(C, TOP, title="the port child")
         t.say(C, HANDED_DISPOSABLE)
@@ -1170,7 +1170,7 @@ class TopOrchestrates(unittest.TestCase):
         self.assertNotIn(C, plans._children(t.p4, TOP), "out of the down-lines")
         self.assertNotIn(C, (relay._read_json(relay.anchor_path(t.p4, TOP)).get("nodes") or {}))
         line = context(t.say(TOP, "what next"))
-        self.assertIn("puts its finished sessions to ezexe as one multiple-choice question", line)
+        self.assertIn("the archive tool asks ezexe on the app's approval card", line)
         self.assertNotIn("archive_session", line, "no archive call is handed out")
         self.assertIn(C, line.split("finished, their outcome kept")[1])
         self.assertNotIn("finished, their outcome kept", context(t.say(TOP, "and then")), "said once")
