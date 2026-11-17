@@ -28,6 +28,15 @@
   },
   {
     "repo": "ezexe/p4",
+    "issue": 153,
+    "title": "wiring: a bin/ command in place of the long python line",
+    "behaviour": "Files in a plugin's top-level bin/ are on the Bash tool's PATH while the plugin is enabled, and claude.ai and Cowork don't install a plugin that has that directory.",
+    "source": "https://code.claude.com/docs/en/plugins/components#executables and https://code.claude.com/docs/en/plugins/manifest-reference#standard-layout",
+    "changes_when": "A plugin's executables reach the Bash tool's PATH without a top-level bin/, or claude.ai and Cowork install a plugin that has one; p4 then ships the short phi command kept on the branch parked/153-bin-phi.",
+    "terms": ["plugin executables", "bin/ directory", "top-level bin"]
+  },
+  {
+    "repo": "ezexe/p4",
     "issue": 154,
     "title": "wiring: phi.py never reads the parent session's effort",
     "behaviour": "start_session takes an effort at or below the starter's own and ignores a higher one, so p4 has to read effort.level from the hook input and cap the levels it hands out.",
