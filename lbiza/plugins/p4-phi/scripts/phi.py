@@ -1052,6 +1052,20 @@ def files_held_text(home, s, closing=None, pushed=None):
 
 MAX_DEPTH = 3                 # a session this deep in the tree starts no session of its own
 MAX_CHILDREN = 8              # nor one that has this many live children already
+# The act-don't-wait rule. How a question to ezexe is laid out is the app's own text, so the rule names the tools and
+# holds no sentence on it:
+# - tools-reference.md, "AskUserQuestion tool behavior": "Claude uses `AskUserQuestion` to ask you multiple-choice
+#   questions when it needs a decision or a clarification."
+# - the desktop app's turn-end tool, `mcp__ccd_turn__wrap_up`, whose own text puts a decision that waits on ezexe as
+#   one question with buttons, the pick first.
+# Every other sentence stays. Some are what that text lacks: the decisions file, the session tree as what settles a
+# next step, the push of green issue-closing commits, a child's question to its parent session, the go a project's
+# rules ask for, and a worker's closing line to a starter that waits on it, which works around the limit
+# claude_code_limits.json logs under ezexe/p4#157. The rest only the desktop app's text states, and no docs page
+# does for a session in its default style, so a session outside the app would lose it: that a question research can
+# settle is not asked, and that only a matter of ezexe's authority is. output-styles.md states the like for the
+# Proactive style alone, "It makes reasonable assumptions about routine decisions rather than stopping to ask", and
+# that style is ezexe's to choose.
 DECISIONS = "its decisions file, the one its brief names or decisions.md in the scratchpad directory the app names"
 DECIDE = ("A question that the code, the history, the issues or the current outside documentation can answer is "
           f"researched and decided by this session, which logs the decision with its source in {DECISIONS}; a "
@@ -1059,11 +1073,10 @@ DECIDE = ("A question that the code, the history, the issues or the current outs
 BUILT_IN = ("built-in, act-don't-wait: " + DECIDE + " A next step that the task, the parent's task list and notes, "
             "siblings' work and the project's rules can settle is decided and done, with one line saying what was "
             "chosen and why. "
-            "Only a matter of ezexe's authority goes to ezexe: permissions or security settings, credentials, "
-            "spending, and actions that cannot be undone or publish outward, but for the push of green issue-closing "
-            "commits, which p4-phi orders at once. It goes as a click, never as a paragraph to answer: a "
-            "`mcp__ccd_turn__wrap_up` question whose buttons are the answers, the go first, or an `AskUserQuestion` "
-            "with options; typed text only where no click can carry the answer, saying why. A child asks its parent "
+            "Only a matter of ezexe's authority goes to ezexe, by the app's own `mcp__ccd_turn__wrap_up` or "
+            "`AskUserQuestion`: permissions or security settings, credentials, spending, and actions that cannot be "
+            "undone or publish outward, but for the push of green issue-closing commits, which p4-phi orders at "
+            "once. A child asks its parent "
             "session with SendMessage, and never ends its turn waiting on a question the session tree can settle. "
             "A worker whose starter waits on it ends each turn with one SendMessage line to the starter, since a "
             "report reaches an idle session only beside its next message. "

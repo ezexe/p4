@@ -1009,6 +1009,31 @@ class NewTask(unittest.TestCase):
         self.assertIn("authority", phi.BUILT_IN)
         self.assertIn("ends each turn with one SendMessage line to the starter", phi.BUILT_IN, "ezexe/p4#157")
 
+    def test_the_built_in_rule_leaves_how_a_question_is_laid_out_to_the_apps_own_tools(self):
+        """tools-reference.md, "AskUserQuestion tool behavior": "Claude uses `AskUserQuestion` to ask you
+        multiple-choice questions when it needs a decision or a clarification.", and the desktop app's turn-end tool
+        puts a decision that waits on ezexe as one question with buttons. So the built-in rule names both tools and
+        holds no sentence of its own on how a question is laid out, and it keeps every sentence that text lacks or
+        that no docs page states: the decision by research with its decisions file, the session tree, the matters
+        of ezexe's authority with the push of green issue-closing commits excepted, a child's question to its
+        parent session, a worker's closing line to its waiting starter, and the go a project's rules ask for."""
+        for gone in ("It goes as a click", "never as a paragraph", "whose buttons are the answers", "the go first",
+                     "typed text only", "no click can carry"):
+            self.assertNotIn(gone, phi.BUILT_IN)
+        self.assertIn("goes to ezexe, by the app's own `mcp__ccd_turn__wrap_up` or `AskUserQuestion`:", phi.BUILT_IN)
+        for kept in (phi.DECIDE, "decisions.md in the scratchpad directory the app names",
+                     "a question reaches ezexe only once those cannot settle it",
+                     "the parent's task list and notes, siblings' work and the project's rules can settle",
+                     "permissions or security settings, credentials, spending",
+                     "but for the push of green issue-closing commits, which p4-phi orders at once",
+                     "A child asks its parent session with SendMessage",
+                     "ends each turn with one SendMessage line to the starter",
+                     "that go is ezexe's to give, by a button"):
+            self.assertIn(kept, phi.BUILT_IN)
+        with open(os.path.join(HERE, "claude_code_limits.json"), encoding="utf-8") as f:
+            logged = {row["issue"]: row for row in json.load(f)}
+        self.assertIn("SendMessage", logged[157]["terms"], "the limit behind the worker's closing line is logged")
+
     def test_a_started_sessions_task_is_its_brief(self):
         self.say(TOP, TASK)
         self.say(KID, HANDED)
