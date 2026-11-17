@@ -24,7 +24,7 @@ sys.path.insert(0, HERE)
 import phi  # noqa: E402
 import relay  # noqa: E402
 import starts  # noqa: E402
-from test_phi import CLI, KID, TOP, Tree, context  # noqa: E402
+from test_phi import CLI, KID, KID2, TOP, Tree, context  # noqa: E402
 
 TOP2, NEW = "local_top00002", "local_new00001"
 CLI.setdefault(TOP2, "eeee6666-0000-4000-8000-000000000000")
@@ -323,6 +323,19 @@ class StartRequests(unittest.TestCase):
         self.assertEqual(context(self.t.say(TOP2, "anything waiting?")).count("start requests from"), 0)
         rid2, _ = starts.add(home, KID, "a new child", BRIEF)
         self.assertEqual([r["id"] for r in starts.pending(home)], [rid2])
+
+    def test_a_request_s_background_quotes_no_prompt_of_the_session_that_filed_it(self):
+        """A start request's background names the filing session by its title and passes on no run of eight words of
+        that session's first prompt, which was sent to it and not to the child."""
+        long = "Port the legacy exporter flush path to the streaming writer and keep every row ordered"
+        self.t.record(KID2, TOP, title="the streaming port")
+        self.t.say(KID2, long)
+        starts.add(self.t.p4, KID2, "a flush check", BRIEF)
+        bg = starts.call_of(starts.pending(self.t.p4)[0], self.t.p4)["background"]
+        self.assertIn("the streaming port", bg)
+        words = long.split()
+        runs = [" ".join(words[i:i + 8]) for i in range(len(words) - 7)]
+        self.assertEqual([r for r in runs if r in bg], [], bg)
 
     def test_a_requested_new_top_level_session_stays_at_top_level(self):
         t = self.t

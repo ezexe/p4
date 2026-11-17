@@ -251,15 +251,14 @@ def _busy(home, sid):
 
 
 def background_of(home, requester, given=""):
-    """The background of a request's start call: the one given, else one built from the task of the session that
-    files it and the store's project, never shorter than BACKGROUND_MIN characters."""
+    """The background of a request's start call: the one given, else one that names the session that files it, by
+    its title, and the store's project, never shorter than BACKGROUND_MIN characters. It quotes no word of that
+    session's own prompt, which was sent to it and not to the child: the brief says what the child is to do."""
     text = " ".join(str(given or "").split())
     if not text:
         s = relay._session(home, requester)
-        task = relay._short(" ".join(str(s.get("task") or "").split()), 600)
         project = relay.norm(os.path.dirname(os.path.dirname(os.path.abspath(home))))
-        text = (f"Requested by the session \"{relay._title(s)}\" `{requester}` in the project {project}"
-                + (f", whose task is: {task}" if task else "") + ".")
+        text = f"Requested by the session \"{relay._title(s)}\" `{requester}` in the project {project}."
     if len(text) < BACKGROUND_MIN:
         text += (" phi (p4-phi) carried this start request through the store; the brief says what the child must "
                  "do and leave done.")
