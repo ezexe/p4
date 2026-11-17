@@ -638,6 +638,10 @@ SAID_LEVEL = re.compile(r"(?im)^[ \t>*-]*(?:\*\*)?(model|effort)(?:\*\*)?[ \t]*:
                         r"([A-Za-z0-9][\w.-]*?)`?[ \t.]*$")
 MODEL_ID = re.compile(r"^(?:claude-[a-z0-9][a-z0-9.-]*|fable|mythos|opus|sonnet|haiku|inherit)$", re.I)
 LEVEL_LINE = re.compile(r"(?im)^[ \t>*-]*Model and effort:")
+# the one line level_line writes and LEVEL_CARD asks for, `Model and effort: <model> at <effort> effort`, with or
+# without a reason after the effort; the parent session's own model is said in words
+ONE_LEVEL = re.compile(r"(?im)^[ \t>*-]*(?:\*\*)?Model and effort(?:\*\*)?:[ \t]*`?"
+                       r"(the parent session's own model|[A-Za-z0-9][\w.-]*?)`?[ \t]+at[ \t]+`?([a-z]+)`?[ \t]+effort\b")
 
 
 def child_levels(conf):
@@ -668,10 +672,13 @@ def child_kind(text):
 
 
 def said_level(brief):
-    """The `model` and `effort` a brief names itself, on lines `Model: <id>` and `Effort: <level>`: the parent
-    session's own choice, which wins over its kind's."""
+    """The `model` and `effort` a brief names itself, in the one line `Model and effort: <model> at <effort> effort`
+    or on lines `Model: <id>` and `Effort: <level>`: the parent session's own choice, which wins over its kind's."""
     out = {}
-    for key, value in SAID_LEVEL.findall(str(brief or "")):
+    said = []
+    for model, effort in ONE_LEVEL.findall(str(brief or "")):
+        said += [("model", "inherit" if model.lower().startswith("the parent") else model), ("effort", effort)]
+    for key, value in said + SAID_LEVEL.findall(str(brief or "")):
         key = key.lower()
         if key == "effort" and value.lower() not in EFFORTS:
             continue

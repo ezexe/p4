@@ -334,6 +334,23 @@ class StartRequests(unittest.TestCase):
         self.assertEqual(t.started_by(NEW)[0], "", "a requested new orchestrator stays at top level, never "
                                                    "under the filing session")
 
+    def test_a_brief_s_one_level_line_names_the_start_s_model_and_effort(self):
+        """The one line p4-phi asks a brief to say its level in, `Model and effort: <model> at <effort> effort`,
+        gives the start call that model and effort, and the line level_line writes reads back to what it says."""
+        import plans
+        row = {"id": "req-0123456789", "requester": TOP, "title": "the landed commits", "background": "",
+               "brief": "Check the landed commits and report.\nFiles: none\n"
+                        "Model and effort: claude-sonnet-5-5 at medium effort."}
+        call = starts.call_of(row)
+        self.assertEqual((call.get("model"), call.get("effort")), ("claude-sonnet-5-5", "medium"))
+        for level in ({"model": "claude-sonnet-5-5", "effort": "medium", "kind": "build", "said": True},
+                      {"model": "claude-opus-5-5", "effort": "high", "kind": "design"},
+                      {"model": "inherit", "effort": "low", "kind": "static"}):
+            got = plans.said_level(plans.level_line(level))
+            self.assertEqual((got.get("model"), got.get("effort")), (level["model"], level["effort"]),
+                             plans.level_line(level))
+        self.assertEqual(plans.said_level("Model and effort: ranker.pt at a guess"), {})
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
