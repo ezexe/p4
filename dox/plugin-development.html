@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Developing p4-phi · p4-phi dox</title>
+<meta name="description" content="How to develop p4-phi in a session while the installed copy is on the same machine: the flags that load a development copy, the settings that turn the installed copy off for one project, the data folders of each copy, and the release-time update, each a feature of Claude Code's own.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='1' width='14' height='14' rx='4' fill='%230b6b66'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#f5f3ec; --panel:#fffdf7; --sunk:#efece2; --ink:#1d1c19; --soft:#5d5a52; --line:#d9d4c6;
+  --phi:#0b6b66; --phi-bg:#dcefec;
+  --mono:ui-monospace,"Cascadia Code","SF Mono",Menlo,Consolas,monospace;
+  --sans:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#131418; --panel:#1b1d23; --sunk:#16171c; --ink:#e9e6dd; --soft:#a29e93; --line:#33363f;
+    --phi:#62d2c6; --phi-bg:#16312f;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#131418; --panel:#1b1d23; --sunk:#16171c; --ink:#e9e6dd; --soft:#a29e93; --line:#33363f;
+  --phi:#62d2c6; --phi-bg:#16312f;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 var(--sans)}
+.wrap{max-width:920px;margin:0 auto;padding:24px 16px 64px}
+a{color:var(--phi)}
+code{font:.88em var(--mono);background:var(--sunk);border-radius:4px;padding:1px 4px;overflow-wrap:anywhere}
+:focus-visible{outline:2px solid var(--phi);outline-offset:2px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.mark{font:600 13px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--phi);text-decoration:none}
+.mark:hover{text-decoration:underline}
+.pill{font:600 12px/1 var(--mono);color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:9px 13px;cursor:pointer;white-space:nowrap}
+.pill:hover{border-color:var(--phi)}
+h1{font-size:clamp(30px,5.4vw,44px);line-height:1.08;letter-spacing:-.02em;margin:16px 0 10px;text-wrap:balance}
+.lede{color:var(--soft);max-width:70ch;margin:0 0 18px}
+nav.toc{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}
+nav.toc a{font:600 13px/1 var(--sans);text-decoration:none;color:var(--soft);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:8px 12px}
+nav.toc a:hover{border-color:var(--phi);color:var(--ink)}
+section{margin:30px 0 0}
+h2{font-size:23px;letter-spacing:-.01em;margin:0 0 6px;scroll-margin-top:12px}
+p.intro{color:var(--soft);max-width:72ch;margin:0 0 12px}
+dl{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+dl>div{display:grid;grid-template-columns:minmax(0,220px) minmax(0,1fr);border-top:1px solid var(--line)}
+dl>div:first-child{border-top:0}
+dt{padding:11px 14px;font-weight:650;font-size:14.5px;background:var(--sunk);overflow-wrap:anywhere}
+dd{margin:0;padding:11px 14px;font-size:14.5px}
+dd p{margin:0 0 6px} dd p:last-child{margin:0}
+footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);font-size:14px;color:var(--soft)}
+@media (max-width:640px){dl>div{grid-template-columns:minmax(0,1fr)}dt{padding-bottom:4px}}
+table{border-collapse:collapse;width:100%;font-size:14px;background:var(--panel)}.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:14px;margin:0 0 12px}th,td{padding:9px 12px;border-top:1px solid var(--line);text-align:left;vertical-align:top;min-width:9ch}th{background:var(--sunk);border-top:0;font-weight:650}ul{padding-left:20px;max-width:76ch}li{margin:0 0 6px}h3{font-size:18px;margin:18px 0 6px}blockquote{margin:0 0 12px;padding:4px 14px;border-left:3px solid var(--phi);background:var(--panel)}
+pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--panel);white-space:pre}pre.file code{background:none;padding:0;font:inherit}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <a class="mark" href="index.html">← p4-phi · dox</a>
+    <button class="pill" id="theme" type="button" aria-label="Switch between light and dark">theme</button>
+  </div>
+  <h1>Developing p4-phi while it is installed</h1>
+<p class="lede">ezexe has p4-phi installed and also edits it. A session that works on its source runs with a copy of it active, and two copies on one machine write the same store. This page says how a development session loads the copy under edit, how one project turns the installed copy off for itself, what each copy keeps apart and what it shares, and when the installed copy moves. Each is a feature of Claude Code's own, configured or called, and p4-phi builds nothing in their place. Every page of the documentation named here is under <code>https://code.claude.com/docs/en/</code>, read on 2026-11-17.</p>
+<nav class="toc" aria-label="Sections"><a href="#two-copies">Two copies</a><a href="#the-setup-in-force">The setup in force</a><a href="#a-development-session">A development session</a><a href="#edits">Edits</a><a href="#the-installed-copy-off">The installed copy off</a><a href="#data-folders">Data folders</a><a href="#not-confirmed">Not confirmed</a></nav>
+
+<section id="two-copies" aria-labelledby="two-copies-h">
+<h2 id="two-copies-h">Two copies</h2>
+<ul>
+<li>The installed copy is the one <code>claude plugin install p4-phi@p4-marketplace</code> put on the machine. Its plugin id is <code>p4-phi@p4-marketplace</code>. The docs keep a copied marketplace plugin in <code>~/.claude/plugins/cache/&lt;marketplace&gt;/&lt;plugin&gt;/&lt;version&gt;/</code>, and on ezexe's machine <code>installed_plugins.json</code> names such a folder for p4-phi. Source, <code>plugins/loading.md</code>, "Find plugins on disk": "One directory per installed version of a marketplace plugin." and "<code>${CLAUDE_PLUGIN_ROOT}</code> points at this directory". For a marketplace added from a folder the same page says its plugins load in place, which <a href="#not-confirmed">Not confirmed</a> takes up.</li>
+<li>The development copy is a folder loaded for one session by <code>--plugin-dir</code>. Its plugin id is <code>p4-phi@inline</code>. Source, <code>plugins/loading.md</code>, "Find where a plugin came from": an id ending in <code>@inline</code> means "You started Claude Code with <code>--plugin-dir</code> or <code>--plugin-url</code>, set <code>CLAUDE_CODE_PLUGIN_DIRS</code>" and "It loads for that session only".</li>
+<li>The development copy replaces the installed one without a word in the session. Source, <code>plugins/loading.md</code>, "Name conflicts": an installed marketplace plugin is "replaced silently. <code>claude plugin list</code> still shows the marketplace row as enabled, because that row reflects your settings."</li>
+<li>Both copies write the project's store <code>.claude/p4/</code>, which no plugin variable keeps apart. A record one copy wrote is read by the other as if it were its own. That is how an older version's records were read back as current, and why development runs on a clone with the installed copies off, as the next section sets out.</li>
+<li>The feature request that asks Claude Code for a partition between development and use is <a href="https://github.com/anthropics/claude-code/issues/110694">anthropics/claude-code/issues/110694</a>, open on 2026-11-17. ezexe's own comment on it narrows it to what the docs do not cover: the silent override, state outside the plugin data folder, the desktop app, a scoped reset, and whether the two copies get separate data folders.</li>
+</ul>
+</section>
+
+<section id="the-setup-in-force" aria-labelledby="the-setup-in-force-h">
+<h2 id="the-setup-in-force-h">The setup in force</h2>
+<p class="intro">This is how the p4 development project runs, in four rules. Each rule names the docs it rests on, and the last section of this page names what they do not confirm.</p>
+<h3>1. The installed copies off for the development project only</h3>
+<ul>
+<li>The project's <code>.claude/settings.local.json</code> sets <code>p4-phi@p4-marketplace</code> and <code>p4-temportal@p4-marketplace</code> to <code>false</code> under <code>enabledPlugins</code>. ezexe wrote it; no session writes it. The section <a href="#the-installed-copy-off">The installed copy off for one project</a> quotes the docs.</li>
+<li>Every other project on the machine keeps the installed copies.</li>
+</ul>
+<p>The development project is <code>E:/projects/p4-phi</code>, the folder that holds the checkout <code>p4</code>. Its <code>.claude/settings.local.json</code>, as ezexe wrote it, read on 2026-11-17:</p>
+<div class="scroll"><pre class="file"><code>{
+  "enabledPlugins": {
+    "p4-phi@p4-marketplace": false,
+    "p4-temportal@p4-marketplace": false
+  },
+  "autoMemoryEnabled": false,
+  "autoMemoryDirectory": "E:/projects/p4-phi/.claude/p4/temportal/memory",
+  "attribution": {
+    "commit": "Co-Authored-By: Anthropics Connoisseur of Hallucinations &lt;noreply@anthropic.com&gt;"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(python -I -X utf8 \"E:/projects/p4-phi/p4/lbiza/plugins/p4-phi/scripts/phi.py\" *)",
+      "Bash(python -I -X utf8 \"E:/projects/p4-phi/p4/lbiza/plugins/p4-phi/scripts/p4.py\" sync *)",
+      "PowerShell(python -I -X utf8 \"E:/projects/p4-phi/p4/lbiza/plugins/p4-phi/scripts/phi.py\" *)",
+      "PowerShell(python -I -X utf8 \"E:/projects/p4-phi/p4/lbiza/plugins/p4-phi/scripts/p4.py\" sync *)"
+    ]
+  },
+  "disableAllHooks": false,
+  "disableSkillShellExecution": false
+}</code></pre></div>
+<div class="scroll"><table><thead><tr><th>Keys</th><th>Whose</th><th>What they do here</th></tr></thead><tbody>
+<tr><td><code>enabledPlugins</code>, with <code>p4-phi@p4-marketplace</code> and <code>p4-temportal@p4-marketplace</code> <code>false</code>, and <code>autoMemoryEnabled</code> <code>false</code></td><td>ezexe's own</td><td>The installed copies are off in this project only, and Claude Code's own auto memory is off here.</td></tr>
+<tr><td><code>autoMemoryDirectory</code> and <code>attribution.commit</code></td><td>The keys p4's settings keeper writes</td><td>The store's memory folder and the store's commit trailer, as the page <a href="claude-settings.html">Claude Code settings</a> sets out under "The keys p4 writes".</td></tr>
+<tr><td><code>permissions.allow</code></td><td>The two rules ezexe approved, each in its Bash and its PowerShell form</td><td>A session may run <code>phi.py</code> and <code>p4.py sync</code> of the checkout <code>E:/projects/p4-phi/p4</code> without a prompt. Each rule names that checkout's scripts, so a command a <code>--plugin-dir</code> copy prints with another clone's path is not one they name.</td></tr>
+<tr><td><code>disableAllHooks</code> <code>false</code> and <code>disableSkillShellExecution</code> <code>false</code></td><td>The defaults the work relies on, written out</td><td>Hooks run and skills may run their shell commands.</td></tr>
+</tbody></table></div>
+<ul>
+<li>Checked on 2026-11-17: the desktop app follows <code>attribution.commit</code> from the project's local settings file. Right after it was written to this file, the app's own attribution guidance for commits switched to the line <code>Co-Authored-By: Anthropics Connoisseur of Hallucinations &lt;noreply@anthropic.com&gt;</code>, seen in two running sessions with no restart.</li>
+<li>p4's own settings, if they come to be kept as <code>P4_*</code> entries under <code>env</code>, are listed on <a href="claude-settings.html">Claude Code settings</a>, not here.</li>
+</ul>
+<h3>2. No plugin update after each landing</h3>
+<ul>
+<li>A landing on <code>main</code> updates no installed plugin. The installed copy elsewhere moves only when a release is cut at the close of a body of work, with one update for each plugin:</li>
+</ul>
+<blockquote><code>claude plugin update p4-phi@p4-marketplace</code><br><code>claude plugin update p4-temportal@p4-marketplace</code></blockquote>
+<ul>
+<li>Source, <code>plugins/cli-reference.md</code>, "plugin update": "Update a plugin to the latest version its marketplace offers. The new version loads in your next session, or after you run <code>/reload-plugins</code> in a running one." Its form is <code>claude plugin update &lt;plugin&gt; [options]</code>, and "a <code>&lt;plugin&gt;</code> argument is a plugin <code>name</code> or <code>name@marketplace</code>".</li>
+<li>The release is the version string. Source, <code>plugins/loading.md</code>, "How Claude Code computes the version": "a manifest that pins <code>"version": "1.0.0"</code> keeps every user on the cached copy until its author changes the string, however many commits they push." Both manifests pin a version, so an update between releases prints that the plugin "is already at the latest version" and changes nothing.</li>
+</ul>
+<h3>3. Live hook behaviour checked only on a clone, from a shell</h3>
+<ul>
+<li>A live check runs in a scratch project outside the development project, so the installed copy is on there and the override happens:</li>
+</ul>
+<blockquote><code>claude -p --plugin-dir &lt;clone&gt;/lbiza/plugins/p4-phi --debug</code></blockquote>
+<ul>
+<li>The run shows the <code>@inline</code> id and the override line, and that output is kept as the proof. The override line is in the log under <code>~/.claude/debug/</code>, <code>Plugin "p4-phi" from --plugin-dir overrides installed version</code>, as <code>plugins/loading.md</code>, "Name conflicts", quotes it. The id is in the list the same flag gives, <code>claude --plugin-dir &lt;clone&gt;/lbiza/plugins/p4-phi plugin list</code>: source, <code>plugins/cli-reference.md</code>, "Flags that load a plugin for one session": "The plugin appears as <code>&lt;name&gt;@inline</code> under a heading that begins <code>Session-only plugins</code>".</li>
+<li>Source for the replacement, the same section: "When a session-only plugin shares a name with an installed plugin, Claude Code loads the session-only copy for that session and skips the installed one."</li>
+<li>No live check runs in the development project or against ezexe's real projects.</li>
+</ul>
+<h3>4. Each landing names its proof</h3>
+<ul>
+<li>A landing's commit or issue comment names the clone path and the commit its tests and live checks ran on, so the proof can be found again and is never mistaken for a run of the installed copy.</li>
+</ul>
+</section>
+
+<section id="a-development-session" aria-labelledby="a-development-session-h">
+<h2 id="a-development-session-h">A development session</h2>
+<p class="intro">A session that develops p4-phi is started from a shell on a clone of ezexe/p4, with the debug log on:</p>
+<blockquote><code>claude --plugin-dir &lt;clone&gt;/lbiza/plugins/p4-phi --debug</code></blockquote>
+<ul>
+<li><code>--plugin-dir</code> takes one plugin's own folder, the one holding <code>.claude-plugin/plugin.json</code>, never the marketplace folder <code>lbiza/</code>. Source, <code>plugins/create.md</code>, "<code>--plugin-dir</code> at a marketplace root doesn't load the plugins under <code>plugins/</code>": "Point the flag at one plugin's folder, or add the marketplace."</li>
+<li>With <code>--debug</code> the log names the override. Source, <code>plugins/loading.md</code>, "Name conflicts": "Only the log Claude Code writes under <code>~/.claude/debug/</code> when you start with <code>--debug</code> records <code>Plugin "&lt;name&gt;" from --plugin-dir overrides installed version</code>".</li>
+<li>The clone is one of its own, not the checkout the marketplace was added from. When a marketplace is added from a folder, the docs say its plugins load in place from that folder, so a development copy in the same folder could not be told from the installed one by its path. Source, <code>plugins/loading.md</code>, "In-place and copied plugins": "Relative-path plugins in a marketplace you added from a local path: the plugin loads in place from its path inside the marketplace folder."</li>
+<li>Where the flag cannot be added, the same copy loads from <code>CLAUDE_CODE_PLUGIN_DIRS</code>, a list of absolute paths in the environment. Source, <code>plugins/create.md</code>, "Load plugins from an environment variable": "Claude Code loads each path as it loads a <code>--plugin-dir</code> path." and "Project and local settings can't set this variable".</li>
+</ul>
+</section>
+
+<section id="edits" aria-labelledby="edits-h">
+<h2 id="edits-h">Edits</h2>
+<ul>
+<li>An edit to the clone reaches the running session at <code>/reload-plugins</code>, with no reinstall and no version bump. Source, <code>plugins/create.md</code>, "Load a plugin for one session": "When you edit the plugin's files during the session, run <code>/reload-plugins</code> to load the changes."</li>
+<li>The folder is read where it is. Source, <code>plugins/loading.md</code>, "In-place and copied plugins": "<code>--plugin-dir</code> and skills-directory plugins: the directory loads in place and is never copied."</li>
+</ul>
+</section>
+
+<section id="the-installed-copy-off" aria-labelledby="the-installed-copy-off-h">
+<h2 id="the-installed-copy-off-h">The installed copy off for one project</h2>
+<p class="intro">The p4 development project turns the installed copies off for itself only. ezexe writes this into that repository's <code>.claude/settings.local.json</code> by hand; no session writes it:</p>
+<blockquote><code>{"enabledPlugins": {"p4-phi@p4-marketplace": false, "p4-temportal@p4-marketplace": false}}</code></blockquote>
+<ul>
+<li>The local file reaches ezexe in that repository and nowhere else. Source, <code>plugins/loading.md</code>, "Find where a plugin is enabled", the row <code>local</code>: "<code>.claude/settings.local.json</code>" reaches "You, in this repository only".</li>
+<li>It wins over the user file and the project file. Source, the same section: "To opt out of a project-enabled plugin on your machine, set the id to <code>false</code> in <code>.claude/settings.local.json</code>, which has higher precedence than the project file."</li>
+<li>The development copy still loads there. Source, the table of origins: an <code>@inline</code> plugin is "On for the session unless the manifest sets <code>defaultEnabled: false</code> or a settings file sets <code>"&lt;name&gt;@inline": false</code>".</li>
+<li>In that project a session started without the flag runs with no p4-phi at all.</li>
+<li>p4-phi writes no settings file. Plugin settings stay ezexe's, as the page <a href="claude-settings.html">Claude Code settings</a> says.</li>
+</ul>
+</section>
+
+<section id="data-folders" aria-labelledby="data-folders-h">
+<h2 id="data-folders-h">Data folders</h2>
+<ul>
+<li>Each plugin id has a data folder, <code>${CLAUDE_PLUGIN_DATA}</code>. Source, <code>plugins/components.md</code>, "Reference plugin paths and store data": "It resolves to <code>~/.claude/plugins/data/&lt;id&gt;/</code>" and "<code>&lt;id&gt;</code> is the plugin identifier with every character other than letters, digits, <code>_</code>, and <code>-</code> replaced by <code>-</code>".</li>
+<li>By that rule the installed copy's folder is <code>p4-phi-p4-marketplace</code> and the development copy's is <code>p4-phi-inline</code>. No page of the docs says so in words, so check it on disk before relying on it: list <code>~/.claude/plugins/data/</code> after a development session's first hook.</li>
+<li>On ezexe's machine on 2026-11-17 the folder held <code>p4-phi-p4-marketplace</code>, <code>p4-temportal-p4-marketplace</code>, <code>p4-temportal-inline</code>, <code>p4-skillex-p4-marketplace</code> and <code>p4-skillex-inline</code>: each inline copy that had run had a folder apart from its installed one. <code>p4-phi-inline</code> was not there yet.</li>
+<li>The data folder is all that is kept apart. The store <code>.claude/p4/</code>, auto memory and the temp files a session writes are shared by both copies.</li>
+</ul>
+</section>
+<section id="not-confirmed" aria-labelledby="not-confirmed-h">
+<h2 id="not-confirmed-h">Not confirmed</h2>
+<ul>
+<li>That the development copy and the installed copy get separate data folders. The docs give the id rule and the <code>@inline</code> origin, and the disk showed it for p4-temportal and p4-skillex, but no page says it outright. ezexe asked the docs to confirm it in issue 110694.</li>
+<li>Whether an installed copy from a marketplace added from a folder runs in place or from the cache. <code>plugins/loading.md</code> says such a plugin "loads in place", while on ezexe's machine <code>installed_plugins.json</code> records p4-phi's <code>installPath</code> under the cache and the cache holds a folder for each of several versions. Rule 2 rests on the cache: if p4-marketplace's plugins loaded in place, each landing in the checkout the marketplace was added from would reach the installed copy at its next session start with no update at all. The <code>installPath</code> in <code>installed_plugins.json</code> and the <code>--debug</code> log of a session in another project are where to look.</li>
+<li>That a <code>claude -p</code> run loads a <code>--plugin-dir</code> copy, runs its SessionStart hooks and writes the override line is not stated by the pages read here, which describe the flags for "one session" with no word on <code>-p</code>. It was checked instead: the orchestrator's live run of 2026-11-17, a <code>claude -p --plugin-dir</code> session in a scratch project, ran the clone's SessionStart hook, and its debug log held <code>Plugin "p4-phi" from --plugin-dir overrides installed version</code>, the wording <code>plugins/loading.md</code> quotes.</li>
+<li>How to start a desktop app session with a development copy. <code>--plugin-dir</code> is a shell flag, and no page says how the app passes <code>CLAUDE_CODE_PLUGIN_DIRS</code> to a session; issue 110694 asks for it.</li>
+<li>Whether <code>/reload-plugins</code> runs the SessionStart hooks again. No page read here says so; <code>plugins/cli-reference.md</code> says only that it "reloads every active plugin".</li>
+<li>A way to clear one plugin's leftover state without uninstalling it. The docs name only the uninstall, and issue 110694 asks for one.</li>
+</ul>
+</section>
+<footer>Read from Claude Code's documentation, <code>plugins/loading.md</code>, <code>plugins/create.md</code>, <code>plugins/components.md</code> and <code>plugins/cli-reference.md</code> under <code>https://code.claude.com/docs/en/</code>, from <a href="https://github.com/anthropics/claude-code/issues/110694">anthropics/claude-code#110694</a> and from <code>~/.claude/plugins/</code> on ezexe's machine, and from the orchestrator's live run, on 2026-11-17. The page is in <a href="https://github.com/ezexe/p4">ezexe/p4</a> under <code>dox/</code>.</footer>
+</div>
+<script>
+(function(){
+  var root=document.documentElement,key="dox-theme",btn=document.getElementById("theme");
+  function stored(){try{return localStorage.getItem(key)}catch(e){return null}}
+  function current(){return root.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")}
+  function label(){btn.textContent=current()==="dark"?"light theme":"dark theme"}
+  var s=stored(); if(s==="dark"||s==="light")root.setAttribute("data-theme",s);
+  label();
+  try{matchMedia("(prefers-color-scheme: dark)").addEventListener("change",label)}catch(e){}
+  btn.addEventListener("click",function(){var n=current()==="dark"?"light":"dark";root.setAttribute("data-theme",n);try{localStorage.setItem(key,n)}catch(e){}label()});
+})();
+</script>
+</body>
+</html>

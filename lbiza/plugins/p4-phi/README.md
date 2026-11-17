@@ -142,6 +142,11 @@ Each is for one run, a test or one machine's unusual layout.
 | `P4_RECALL_SYNC` | a clean call's record is written behind the call | `1` waits for it |
 | `P4_AGENT_ALLOW` | no permission decision on a subagent's rewritten prompt | `1` adds `allow` |
 
+## Developing p4-phi while it is installed
+
+A session that edits p4-phi runs with Claude Code's own features, and p4-phi builds nothing in their place.
+The page `dox/plugin-development.html` in ezexe/p4 says how: a clone loaded with `claude --plugin-dir <clone>/lbiza/plugins/p4-phi --debug`, edits picked up by `/reload-plugins`, the installed copies off for the development project in a `.claude/settings.local.json` ezexe writes, each copy's `CLAUDE_PLUGIN_DATA` folder checked on disk, live checks run on a clone in a scratch project, and `claude plugin update` run only when a release is cut.
+
 ## What depends on the machine
 
 - `python` 3, `sh` and `git` must be on PATH. On Windows, `sh` comes with Git.
