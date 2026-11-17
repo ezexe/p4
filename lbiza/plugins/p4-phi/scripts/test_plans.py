@@ -226,9 +226,13 @@ class TreeOfPlans(unittest.TestCase):
                 "tool_use_id": "toolu_204", "tool_input": {"prompt": own, "description": "flush reads"}}),
                 capture_output=True, text=True, timeout=60, env=t.env(A, P4_RECALL_SYNC="1"))
             self.assertEqual(r.returncode, 0, r.stderr)
-            got = json.loads(r.stdout)["hookSpecificOutput"]["updatedInput"]["prompt"]    # what the subagent gets
-            self.assertIn(own, got)
-            text = got.replace(own, "")                   # what p4-phi added to the worker's own prompt
+            self.assertNotIn("updatedInput", r.stdout, "the subagent's prompt stays as written, ezexe/p4#243 row D2")
+            r = inproc.run(["sh", hook, "subagent-start"], input=json.dumps({
+                "session_id": CLI[A], "cwd": t.proj, "hook_event_name": "SubagentStart", "agent_id": "a204",
+                "agent_type": "general-purpose"}),
+                capture_output=True, text=True, timeout=60, env=t.env(A, P4_RECALL_SYNC="1"))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            text = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]   # what p4-phi adds at its start
             self.assertIn("subagent of \"the flush worker\"", text)
             self.assertIn("what the parent, \"the exporter orchestrator\"", text, "the slice ran, naming it by title")
             self.assertEqual(runs_of(sent, text), [], text)

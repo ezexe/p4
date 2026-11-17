@@ -36,7 +36,8 @@ COMMAND = re.compile(r'^sh "\$\{CLAUDE_PLUGIN_ROOT\}/hooks/(run-hook\.sh|recall-
 SESSION = "77770000-0000-4000-8000-000000000001"
 EVENTS = {"SessionStart": ("startup", "resume", "clear", "compact", "fork"),
           "UserPromptSubmit": None, "Stop": None, "PreToolUse": "tools", "PostToolUse": "tools",
-          "PostToolUseFailure": "tools", "SubagentStop": "agents"}
+          "PostToolUseFailure": "tools", "SubagentStop": "agents", "SubagentStart": "agents",
+          "ConfigChange": ("user_settings", "project_settings", "local_settings", "policy_settings", "skills")}
 
 
 def entries():
@@ -52,7 +53,8 @@ def handlers():
     try:
         import hook
         import phi
-        return {"run-hook.sh": set(phi.HOOKS), "recall-hook.sh": set(hook.HANDLERS)}
+        # recall-hook.sh runs lookup-record-async as lookup-record, in the background the async entry gives it
+        return {"run-hook.sh": set(phi.HOOKS), "recall-hook.sh": set(hook.HANDLERS) | {"lookup-record-async"}}
     finally:
         sys.path.remove(SCRIPTS)
 
