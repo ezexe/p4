@@ -751,6 +751,31 @@ class Supervisor(unittest.TestCase):
         out = json.loads(r.stdout).get("hookSpecificOutput", {}) if r.stdout.strip() else {}
         return out.get("permissionDecisionReason", "") + out.get("additionalContext", ""), out
 
+    def test_a_puppeteer_is_told_to_set_each_reporting_sessions_effort_and_never_its_model(self):    # 224
+        t = self.t
+        t.record(TOP4, title="Check the exporter's landing")
+        t.say(PUP, "Control the trees")
+        for sid in (TOP, TOP3, TOP4):
+            t.say(sid, "Build it")
+        t.cli(PUP, "controls", TOP, TOP3, TOP4)
+        t.stop(TOP, "Build it", report="The check came back with 3 faults in flush_rows; the fix starts again.")
+        t.stop(TOP3, "Build it", report="Landed 2 commits and relayed the suite result to the importer.")
+        self.finish(TOP4, report="Checked and closed.")
+        ctx = context(t.say(PUP, "what came in?"))
+        line = next((x for x in ctx.splitlines() if "set_session_effort" in x), "")
+        self.assertTrue(line, ctx)
+        lines = ctx[ctx.index(line):]
+        self.assertRegex(lines, rf"`{TOP}`[^\n]*raise")
+        self.assertRegex(lines, rf"`{TOP3}`[^\n]*lower")
+        self.assertRegex(lines, rf"`{TOP4}`[^\n]*low\b")
+        self.assertIn("note", lines, "logged on the board")
+        said, out = self.pre(PUP, "mcp__ccd_session_mgmt__set_session_model",
+                             {"session_id": TOP, "model": "claude-haiku-5-5"})
+        self.assertIn("model", said)
+        self.assertIn("chosen at its start", said)
+        self.assertIn("set_session_effort", controls.RULE)
+        self.assertIn("only on the start call", controls.RULE)
+
     def test_a_puppeteers_turns_hold_messages_and_its_standing_worker_does_the_rest(self):          # 211
         t = self.t
         t.say(PUP, "Control the trees")

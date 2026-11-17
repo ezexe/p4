@@ -267,9 +267,11 @@ RULE = (
     "coworker drafts and publishes, handing each number up for this session to record with `{cmd} note \"<the finding> "
     "as #N\" --source \"<the issue>\" --kind published`. Beside that worker it starts only new orchestrators, since "
     "the app nests a session under its starter for good, and names a session holding a start request to ezexe as a "
-    "link. It checks the orchestrators and its own worker for stalls and context. `Finding:` lines are listed on its "
-    "board under Findings. It archives a session only on ezexe's pick, by the button or the multiple-choice question "
-    "p4-phi hands it.")
+    "link. It checks the orchestrators and its own worker for stalls and context, and tunes their effort from their "
+    "reports, with no one asking, by `mcp__ccd_session_mgmt__set_session_effort`, logging each change on its board; a "
+    "model is passed only on the start call and never changed after. `Finding:` lines are listed on its board under "
+    "Findings. It archives a session only on ezexe's pick, by the button or the multiple-choice question p4-phi hands "
+    "it.")
 PAIR = (
     "This session is controlled by a puppeteer: \"{title}\" `{pid}`, which ezexe filed in the sidebar "
     "section \"{section}\", lists this one among the sessions it controls. This session stays at the top of its own "
@@ -650,9 +652,10 @@ def announce(home, s):
 
 # --- reports by reference -----------------------------------------------------------------------------------------------
 
-def reports(s):
+def reports(s, rows=None):
     """One line for each controlled session whose last turn ended since the puppeteer last looked, with
-    its page's path, never the report's text. The caller saves what was seen."""
+    its page's path, never the report's text. Each reporting session goes on `rows` too, as its sessionId, state
+    and first line. The caller saves what was seen."""
     seen = dict(s.get("controlSeen") or {}) if isinstance(s.get("controlSeen"), dict) else {}
     lines = []
     for e in controlled(s):
@@ -662,11 +665,46 @@ def reports(s):
             continue
         seen[sid] = when
         state, _ = standing(store, sid)
+        if rows is not None:
+            rows.append((sid, state, first))
         lines.append(f"- \"{full_title(sid)}\" `{sid}` ended a turn at {when}, {state}: {first} Its page: "
                      f"{page_of(store, sid)}")
     if lines:
         s["controlSeen"] = seen
     return lines
+
+
+RAISE = re.compile(r"\b(?:faults?|failed|fails|failing|again|stall(?:ed|s)?|stuck|refused)\b", re.I)
+LOWER = re.compile(r"\b(?:land(?:ed|ing|ings)?|relay(?:ed|s)?|pushed|rerun|reran|words-only|word commits?)\b", re.I)
+EFFORT = {"raise": "raise, its report names faults from a check, a fix started again or a stall",
+          "lower": "lower, its turn was routine relays, landings, word commits or reruns",
+          "low": "low, it is shown done with nothing open"}
+MODEL_FIXED = ("phi (p4-phi): a session's model was chosen at its start, from its work and the plan limits, and is "
+               "not changed after, since a change mid-run re-prices its turns. Tune its effort with "
+               "`mcp__ccd_session_mgmt__set_session_effort` instead.")
+
+
+def effort_of(state, first):
+    """`raise`, `lower` or `low` for a reporting session, read from its state and its report's first line; '' when
+    neither calls for a change."""
+    if state == "shown done":
+        return "low"
+    if RAISE.search(first or ""):
+        return "raise"
+    if LOWER.search(first or ""):
+        return "lower"
+    return ""
+
+
+def effort_text(rows):
+    """One line for the puppeteer, naming each reporting session whose work calls for another effort; '' for none."""
+    told = [f"- \"{full_title(sid)}\" `{sid}`: {EFFORT[k]}." for sid, state, first in rows
+            for k in [effort_of(state, first)] if k]
+    if not told:
+        return ""
+    return (f"phi (p4-phi): set these sessions' effort with `mcp__ccd_session_mgmt__set_session_effort` before each "
+            f"one's next turn, and log each change on the board with `{PHI.commands()} note \"<the change>\" --source "
+            f"\"<its report>\" --kind effort`. Their models stay as they were started:\n" + "\n".join(told))
 
 
 # --- the board ------------------------------------------------------------------------------------------------------------
