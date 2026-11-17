@@ -414,16 +414,44 @@ def _argv(cmd):
 
 
 def run_now(cmd, cwd, timeout):
-    """The exit code and the output's tail, or None and '' when it outlasted `timeout`."""
+    """The exit code and the output's tail, or None and '' when it outlasted `timeout`. Past the limit the test and
+    every process it started are stopped: on Windows stopping `sh` alone leaves the test holding the pipes, and
+    reading them would wait for its whole length."""
     argv, shell = _argv(cmd)
     try:
-        r = subprocess.run(argv, shell=shell, cwd=cwd or None, capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return None, ""
+        p = subprocess.Popen(argv, shell=shell, cwd=cwd or None, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
+                             start_new_session=os.name != "nt",
+                             creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0)
     except OSError as e:
         return 127, str(e)
-    return r.returncode, ((r.stdout or "") + (r.stderr or ""))[-TAIL_CHARS:]
+    try:
+        out, err = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        stop_tree(p)
+        return None, ""
+    return p.returncode, ((out or "") + (err or ""))[-TAIL_CHARS:]
+
+
+def stop_tree(p):
+    """Stops a process and every process it started, then reaps it without reading its pipes: on Windows a pipe a
+    stopped test's helper still holds would keep a read waiting, and communicate's reader threads end on their own."""
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True, timeout=10)
+        else:
+            import signal
+            os.killpg(p.pid, signal.SIGKILL)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        p.kill()
+    except OSError:
+        pass
+    try:
+        p.wait(timeout=2)
+    except subprocess.SubprocessError:
+        pass
 
 
 def run_background(home, sid, cmd, cwd, head):

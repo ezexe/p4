@@ -544,5 +544,24 @@ class Words(unittest.TestCase):
         self.assertEqual(issues.named_issue("Closes #9", "ezexe/p4"), 9)
 
 
+class RunNowLimit(unittest.TestCase):
+    """issues.run_now returns within its limit, with the test and what it started stopped."""
+
+    def test_a_test_past_the_limit_returns_within_it_and_is_stopped(self):
+        import issues
+        tmp = tempfile.mkdtemp(prefix="p4-phi-runnow-")
+        mark = os.path.join(tmp, "ran-on").replace("\\", "/")
+        try:
+            t = time.monotonic()
+            code, _ = issues.run_now(f"sleep 3; echo late > '{mark}'", tmp, 0.3)
+            took = time.monotonic() - t
+            self.assertIsNone(code)
+            self.assertLess(took, 0.3 + 1.0, took)
+            time.sleep(3.5)
+            self.assertFalse(os.path.exists(mark), "the test ran on past the limit")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
