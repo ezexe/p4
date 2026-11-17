@@ -61,6 +61,15 @@ A path on a brief's `Files:` line that is an ancestor of another listed path, or
 A puppeteer is a session nobody started that ezexe filed in the sidebar section "puppeteers", and it controls the orchestrators of other trees.
 Its rule is handed once, beside its first message after p4-phi sees the filing; its board, `board.md` in its session folder, says on its head how it is kept; and the line p4-phi hands at a boundary says what to do then.
 A controlled session is told once when it comes to have a puppeteer, and once when that ends.
+A puppeteer's turns hold messages only, and every other task goes to its one standing worker, which it starts under itself with the brief line `Standing worker of its puppeteer` and which splits its task groups into standing coworkers.
+A second such start is refused while the first is live, and a puppeteer's shell call or edit is answered with a line that sends the task to its worker.
+The worker's and each coworker's first message says what it is and that it keeps a state page.
+
+## State pages and clearing
+
+A session whose p4-phi task names a page by `State page: <path>`, and the standing worker and each coworker, is handed that page's path first after a compaction or a clear.
+At its `wrap_up`, such a session whose last call's context passes `phi.clear_at` percent of `phi.context_window` tokens, 60 and 200,000 by default in `.claude/p4/p4.json`, is told to bring the page up to date and make `clear_session` on `"self"` its turn's last call, after clearing each of its coworkers that is idle with an empty queue.
+A puppeteer, at a message carrying its worker's report, is handed the ids of the worker and its coworkers, to read each one's `get_usage`.
 
 ## What it does not do
 

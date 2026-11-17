@@ -1822,6 +1822,31 @@ def tree_checked(me, s, st):
             f"subagent `p4-phi:sweep`. Said once for this step.")
 
 
+def h_puppeteer_tool(payload):
+    """PreToolUse on a shell command or a file edit: a puppeteer's turns hold messages only, so the task goes to its
+    standing worker. A subagent's call and a call that runs phi.py itself, such as `note` or `controls`, get
+    nothing."""
+    me = Me(payload)
+    if not me.home or not me.id or payload.get("agent_id"):
+        return ""
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    if "phi.py" in str(inp.get("command") or ""):
+        return ""
+    line = controls.tool_line(load_session(me.home, me.id), me.store)
+    RAN["puppeteer_tool"] = bool(line)
+    return line
+
+
+def h_wrap_up(payload):
+    """PostToolUse on wrap_up: past the line, a session that keeps a state page is told to clear itself."""
+    me = Me(payload)
+    if not me.home or not me.id:
+        return ""
+    line = controls.clear_line(me.home, load_session(me.home, me.id), payload.get("transcript_path"), me.store)
+    RAN["clear"] = bool(line)
+    return line
+
+
 def h_nudge(payload):
     """PreToolUse on Edit, Write and shell commands in an orchestrator with a task list: one line, once per
     step, that the work goes to a worker. Never a block; reading, git's reading and landing commands are never
@@ -2267,6 +2292,8 @@ def h_session_start(payload):
     if source == "compact" and controls.is_puppeteer(s, me.store):
         first = controls.compacted(me.home, s)     # a puppeteer's board path before anything else
         RAN["pair"] = "compacted"
+    elif source in ("compact", "clear"):
+        first = controls.state_first(me.home, s)   # a standing worker's or coworker's state page first
     text = cut(text, HOOK_CHARS - len(first) - len(rule) - 6)    # the room the lines around it leave
     rules = rules_text(me.store, HOOK_CHARS - len(first) - len(text) - len(rule) - 6,
                        fork=bool(s.get("forked")), brief=source == "compact") if source != "resume" else ""
@@ -2453,9 +2480,18 @@ def h_user_prompt_submit(payload):
         RAN.update({"start_requests": asked.count("\n- ")} if began else {"start_waiting": True})
     if issue_line:
         parts.insert(0, notice(issue_line))
+    stand = (controls.worker_first(me.home, s, payload.get("prompt"), me.store)
+             if spawned_from(s) and not load_turns(me.home, s["sessionId"]) else "")
     first_split = first_split_text(me.home, s)
     if first_split:
         parts.insert(0, notice(first_split))
+    if stand:                                      # a puppeteer's standing worker or coworker: what it is
+        RAN["standing"] = s.get("standingKind")
+        parts.insert(0, notice(stand))
+    usage = controls.usage_line(me.home, s, payload.get("prompt"), me.store)
+    if usage:                                      # a puppeteer watches its worker's and coworkers' context
+        RAN["usage"] = True
+        parts.insert(0, notice(usage))
     research = research_text(me.home, s)
     if research:
         parts.insert(0, notice(research))
@@ -2524,6 +2560,7 @@ def pair_parts(me, s, req, changed=""):
         answers = controls.answers_text(me.home, s) if s.get("puppeteer") else ""
         return [p for p in (told, answers) if p]
     RAN["pair"] = "puppeteer"
+    controls.mark_puppeteer(me.store or me.home, me.cli)   # so the hook's gate hands phi.py each of its tool calls
     if not s.get("puppeteerSeen"):
         s["puppeteerSeen"] = now()                 # said once, and kept, so a filing is never silent
         out.append("phi (p4-phi): " + controls.rule_text(me.home, s))
@@ -2774,8 +2811,15 @@ def h_start_advice(payload):
         starts.claim(made[1], inp.get("prompt"), me.id)
         RAN["behalf"] = made[0]["id"]
         return controls.behalf_line(made[0])
+    why = controls.start_refused(me.home, load_session(me.home, me.id), inp.get("prompt"), me.store)
+    if why is None:                                 # a puppeteer's standing worker, the first one
+        RAN["standing_start"] = True
+        return None
+    if why:                                         # a second while the first is live
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                       "permissionDecisionReason": why}}
     if starts.claim(me.home, inp.get("prompt"), me.id):
-        RAN["claimed"] = True                       # a start request's call, given exactly: the asker decided it
+        RAN["claimed"] = True                      # a start request's call, given exactly: the asker decided it
         return None
     brief = str(inp.get("prompt") or "")
     if brief and NEW_TOP.search(brief):
@@ -3190,6 +3234,8 @@ HOOKS = {"session-start": ("SessionStart", h_session_start),
 ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "store-guard", "plan", "task", "memory-gap",
                                                      "self-archive")})
 ROUTED["nudge"] = ("PreToolUse", h_nudge)
+ROUTED["puppeteer-tool"] = ("PreToolUse", h_puppeteer_tool)
+ROUTED["wrap-up"] = ("PostToolUse", h_wrap_up)
 HOOKS["go-guard"] = ROUTED["go-guard"] = ("PreToolUse", h_go_guard)
 HOOKS["level"] = ROUTED["level"] = ("PreToolUse", h_level)
 HOOKS["restart-check"] = ROUTED["restart-check"] = ("PreToolUse", h_restart_check)

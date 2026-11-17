@@ -140,7 +140,8 @@ OPEN = ("temportal.cache",)
 
 # Keys read when a project sets them and never written by default, so a later change to the code's own value reaches
 # every store: kept as set, never called unknown.
-READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.puppeteer_chars")
+READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.puppeteer_chars", "phi.context_window",
+                 "phi.clear_at")
 
 # Top-level keys no plugin reads: never returned or called unknown, and dropped from p4.json when it is rewritten for
 # another reason.

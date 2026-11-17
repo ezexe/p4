@@ -1225,5 +1225,57 @@ class FixtureFolder(unittest.TestCase):
             self.assertTrue(os.path.normcase(r.stdout.strip()).startswith(os.path.normcase(folder)), r.stdout)
 
 
+class StatePage(unittest.TestCase):
+    """A session whose p4-phi task names a state page resumes from it after a clear, and is told to clear itself
+    at a turn's end once its context passes the line."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = t = Tree(self._tmp.name)
+        t.record(TOP, title="Build the narwhal exporter")
+        self.page = os.path.join(t.tmp, "tmp", "state.md").replace("\\", "/")
+        t.say(TOP, "Build the exporter")
+        t.cli(TOP, "task", f"Build the narwhal exporter. State page: {self.page}")
+        write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"context_window": 200000}}))
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def wrap_up(self, used, uuid):
+        t = self.t
+        path = os.path.join(t.tmp, f"wrap{uuid}.jsonl")
+        transcript(path, "Build the exporter", [], "Built.", uuid)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "assistant", "message": {"content": [], "usage": {
+                "input_tokens": 2000, "cache_creation_input_tokens": 8000,
+                "cache_read_input_tokens": used - 10000}}}) + "\n")
+        body = {"session_id": CLI.get(TOP, TOP), "cwd": t.proj, "hook_event_name": "PostToolUse",
+                "tool_name": "mcp__ccd_turn__wrap_up", "tool_input": {"recap": "Built."},
+                "tool_response": "Nothing is pending.", "transcript_path": path, "tool_use_id": f"toolu_wrap{uuid}"}
+        r = inproc.run(["sh", os.path.join(ROOT, "hooks", "recall-hook.sh"), "lookup-record"],
+                       input=json.dumps(body), capture_output=True, text=True, timeout=60, env=t.env(TOP))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return context(r)
+
+    def test_a_session_whose_task_names_a_state_page_gets_its_path_first_after_a_clear(self):
+        ctx = context(self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "clear"}))
+        self.assertTrue(ctx.startswith("phi (p4-phi): ") and self.page in ctx.split("\n", 1)[0], ctx[:300])
+
+    def test_past_the_line_a_wrap_up_is_answered_with_the_clear_and_below_it_with_nothing(self):
+        said = self.wrap_up(130000, "1")
+        self.assertIn(self.page, said)
+        self.assertIn("mcp__ccd_session_mgmt__clear_session", said)
+        self.assertIn('"self"', said)
+        self.assertNotIn("clear_session", self.wrap_up(100000, "2"))
+
+    def test_a_worker_past_the_line_is_told_to_clear_its_coworkers_first(self):
+        t = self.t
+        t.record(KID, started_by=TOP, title="the flush coworker")
+        t.say(KID, "Flush the rows.\nFiles: src/flush.py")
+        said = self.wrap_up(130000, "3")
+        self.assertIn(f"`{KID}`", said)
+        self.assertIn("idle with an empty queue", said)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

@@ -27,13 +27,15 @@ import inproc  # noqa: E402
 import phi  # noqa: E402
 import relay  # noqa: E402
 import starts  # noqa: E402
+import controls  # noqa: E402
 from test_phi import CLI, KID, KID2, TOP, Tree, context, memory, read, transcript, write  # noqa: E402
 from test_phi import START as SESSION_START  # noqa: E402
 
 PUP, PUP2, TOP2, TOP3, NEW = ("local_pup00001", "local_pup00002", "local_top00002", "local_top00003",
                               "local_new00001")
 TOP4, TOP5 = "local_top00004", "local_top00005"
-for k, sid in enumerate((PUP, PUP2, TOP2, TOP3, NEW, TOP4, TOP5)):
+WORKER, CO1, CO2 = "local_wrk00001", "local_cow00001", "local_cow00002"
+for k, sid in enumerate((PUP, PUP2, TOP2, TOP3, NEW, TOP4, TOP5, WORKER, CO1, CO2)):
     CLI.setdefault(sid, f"9999{k}000-0000-4000-8000-000000000000")
 ARCHIVE = "mcp__ccd_session_mgmt__archive_session"
 START = "mcp__ccd_session__start_session"
@@ -734,6 +736,65 @@ class Supervisor(unittest.TestCase):
         self.assertIn("holding " + phi.RESTATE, ctx, "the task restated, never ezexe's words quoted")
         self.assertNotIn("orchestrates. If so", context(t.say(PUP, "How is the weather on the moon today?")))
 
+
+    def pre(self, host, tool, inp, proj=None, **more):
+        """One PreToolUse call through `recall-hook.sh lookup-check`, as hooks.json runs it: the reason or the
+        context it hands, '' for none."""
+        t = self.t
+        self._pre = getattr(self, "_pre", 0) + 1
+        body = {"session_id": CLI[host], "cwd": proj or t.proj, "hook_event_name": "PreToolUse", "tool_name": tool,
+                "tool_input": inp, "tool_use_id": f"toolu_pre{self._pre:04d}", **more}
+        r = inproc.run(["sh", os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh"), "lookup-check"],
+                       input=json.dumps(body), capture_output=True, text=True, timeout=60, env=t.env(host, proj))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        print("PRE", tool, repr(r.stdout[:300]), repr(r.stderr[-500:]))
+        out = json.loads(r.stdout).get("hookSpecificOutput", {}) if r.stdout.strip() else {}
+        return out.get("permissionDecisionReason", "") + out.get("additionalContext", ""), out
+
+    def test_a_puppeteers_turns_hold_messages_and_its_standing_worker_does_the_rest(self):          # 211
+        t = self.t
+        t.say(PUP, "Control the trees")
+        rule = controls.RULE
+        self.assertIn("turns hold messages only", rule)
+        self.assertIn("one standing worker", rule)
+        self.assertNotIn("comms worker", rule)
+        self.assertNotIn("read-only checks of their results against git and GitHub", rule)
+        self.assertIn("relays none of these to ezexe", rule)
+        self.assertIn("checks the orchestrators and its own worker", rule)
+        brief = "Run the puppeteer's checks and counts.\n" + controls.WORKER_BRIEF
+        said, _ = self.pre(PUP, START, {"initiation": "user_asked", "title": "Standing worker", "prompt": brief})
+        self.assertNotIn("refused", said, "the first standing worker is let through")
+        t.record(WORKER, started_by=PUP, title="Puppeteer's standing worker")
+        ctx = context(t.say(WORKER, brief))
+        self.assertIn("standing coworker", ctx)
+        self.assertIn("Model and effort:", ctx)
+        self.assertIn("one closing message to the puppeteer", ctx)
+        self.assertIn(os.path.join(t.dir(WORKER), "state.md").replace("\\", "/"), ctx, "its state page")
+        said, out = self.pre(PUP, START, {"initiation": "user_asked", "title": "Standing worker again",
+                                          "prompt": brief})
+        self.assertEqual(out.get("permissionDecision"), "deny", "a second standing worker while the first is live")
+        self.assertIn(WORKER, said)
+        said, _ = self.pre(PUP, "Bash", {"command": "ls E:/x"})
+        self.assertIn(WORKER, said, "a shell call of the puppeteer is sent to its standing worker")
+        said, _ = self.pre(PUP, "Bash", {"command": f'{phi.commands()} note "the importer waits" --source "x"'})
+        self.assertNotIn(WORKER, said, "its own phi.py note call is its work")
+        said, _ = self.pre(PUP, "Bash", {"command": "ls E:/x"}, agent_id="agent_x1")
+        self.assertNotIn(WORKER, said, "a subagent of the puppeteer is not the puppeteer")
+        self.assertTrue(os.path.exists(os.path.join(t.p4, "phi", ".puppeteers", CLI[PUP])), "the marker the gate reads")
+        for sid in (CO1, CO2):
+            t.record(sid, started_by=WORKER, title="a standing coworker")
+            self.assertIn("standing coworker", context(t.say(sid, "Check the archives.\nFiles: none")))
+        ctx = context(t.say(PUP, f'<cross-session-message from="{WORKER}">Checked 4 archives; page: x.md'
+                                 f'</cross-session-message>'))
+        line = next((x for x in ctx.splitlines() if "get_usage" in x and WORKER in x), "")
+        for sid in (WORKER, CO1, CO2):
+            self.assertIn(sid, line)
+        self.assertIn(f"{controls.CLEAR_AT} percent", line)
+        self.assertNotIn(f"worker `{WORKER}` reported", context(t.say(PUP, "and now?")), "only at its report")
+        r = t.hook("session-start", CO1, {"hook_event_name": "SessionStart", "source": "compact"})
+        page = os.path.join(t.dir(CO1), "state.md").replace("\\", "/")
+        self.assertTrue(context(r).startswith("phi (p4-phi): ") and page in context(r).split("\n", 1)[0],
+                        context(r)[:300])
 
 class TreeAndClicks(unittest.TestCase):
     """The tree in the app is the true tree, and ezexe acts by click where one exists. A child's start request is

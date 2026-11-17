@@ -206,7 +206,7 @@ SHELLS = _tool("Bash", "PowerShell")
 OTHERS = [b"mcp__ccd_session_mgmt__archive_session", b"mcp__ccd_session__start_session"] + _tool("EnterWorktree")
 LONG = re.compile(rb"test_.*\.py|pytest|py\.test|unittest|npm.*test|npm.*build|cargo.*test|cargo.*build|go.*test|"
                   rb"go.*build|make.*test|make.*build", re.S)
-KEEP = re.compile(rb"mcp__ccd_turn__update_plan|temportal.*memory|PostToolUseFailure|Traceback|Error|Exception|"
+KEEP = re.compile(rb"mcp__ccd_turn__update_plan|mcp__ccd_turn__wrap_up|temportal.*memory|PostToolUseFailure|Traceback|Error|Exception|"
                   rb"not found|not recognized|No such file|fatal:|denied|ENAMETOOLONG|unexpected EOF|cannot access|"
                   rb"unterminated", re.S)
 
@@ -223,16 +223,17 @@ def gate(payload, project):
             sub = os.path.isdir(a) and bool(os.listdir(a))
         except OSError:
             sub = False
-    try:
-        marks = sorted(n for n in os.listdir(os.path.join(phi, ".nudge")) if not n.startswith("."))
-    except OSError:
-        marks = []
-    for n in marks:
-        if not os.path.exists(os.path.join(phi, ".nudge", n)):
-            break
-        if os.fsencode(n) in payload:
-            nudge = True
-            break
+    for folder in (".nudge", ".puppeteers"):        # a session owing a nudge, and a puppeteer
+        try:
+            marks = sorted(n for n in os.listdir(os.path.join(phi, folder)) if not n.startswith("."))
+        except OSError:
+            marks = []
+        for n in marks:
+            if not os.path.exists(os.path.join(phi, folder, n)):
+                break
+            if os.fsencode(n) in payload:
+                nudge = True
+                break
     if not sub:
         if _any(payload, EDITS):
             if not nudge:

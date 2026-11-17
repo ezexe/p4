@@ -31,6 +31,10 @@ if [ "$name" = lookup-check ]; then
     [ -e "$f" ] || break
     case "$payload" in *"${f##*/}"*) nudge=1; break ;; esac
   done
+  for f in "${CLAUDE_PROJECT_DIR:-.}/.claude/p4/phi/.puppeteers"/*; do   # a puppeteer: phi.py reads each tool call
+    [ -e "$f" ] || break
+    case "$payload" in *"${f##*/}"*) nudge=1; break ;; esac
+  done
   [ "$sub" = 1 ] || case "$payload" in
     *'"tool_name":"Edit"'*|*'"tool_name": "Edit"'*|*'"tool_name":"Write"'*|*'"tool_name": "Write"'*|    *'"tool_name":"MultiEdit"'*|*'"tool_name": "MultiEdit"'*|*'"tool_name":"NotebookEdit"'*|*'"tool_name": "NotebookEdit"'*)
       [ "$nudge" = 1 ] || exit 0 ;;
@@ -75,6 +79,7 @@ if [ "$name" = lookup-record ]; then
   if [ "${P4_RECALL_SYNC:-0}" != 1 ]; then
     case "$payload" in
       *mcp__ccd_turn__update_plan*) ;;            # phi.py's plan check answers beside the result
+      *mcp__ccd_turn__wrap_up*) ;;                # phi.py's clear check reads the turn's context
       *temportal*memory*) ;;                      # a memory written: phi.py's plugin-gap check answers
       *PostToolUseFailure*|*Traceback*|*Error*|*Exception*|*"not found"*|*"not recognized"*|*"No such file"*) ;;
       *fatal:*|*denied*|*ENAMETOOLONG*|*"unexpected EOF"*|*"cannot access"*|*unterminated*) ;;

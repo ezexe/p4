@@ -50,6 +50,7 @@ The watcher every orchestrator has is puppeteer.py's and is another thing.
 import hashlib
 import json
 import os
+import re
 import time
 
 import issues
@@ -251,23 +252,24 @@ def last_report(store, sid):
 
 RULE = (
     "This session is a puppeteer: ezexe filed it in the sidebar section \"{section}\", so it controls the "
-    "orchestrators of other trees, which stay at the top of their own trees, in their own sections, as its "
-    "siblings and never its children. Record them with `{cmd} controls <sessionId> ...`; `{cmd} controls` then "
-    "prints where each stands, to tell ezexe in one place, each by its full title. Its board is {board}, and what "
-    "p4-phi cannot see goes on it through `{cmd} note`. It sends the feedback and user memories ezexe changes to all "
-    "of them with SendMessage. It writes no plugin or project files. Work ezexe gives it on a topic a controlled "
-    "session orchestrates goes to that session in one SendMessage holding {restate}, and that session briefs and "
-    "starts a worker of its own for it; this session "
-    "neither does that work nor starts a child for it. A topic none covers gets a new orchestrator that this "
-    "puppeteer starts and then files in its environment's section with `mcp__ccd_sidebar__move_sessions`, "
-    "never in \"{section}\". It starts only new orchestrators: the app nests a session under the session that "
-    "calls the start tool and no tool moves it after, so a start request belongs under the session that filed it, "
-    "and this session never starts one for another session but names that session to ezexe as a link to open. "
-    "Waiting on their reports, and the few read-only checks of their results against git and "
-    "GitHub, are its own work and never a child's; its turn may end while it waits, with a line naming whom it "
-    "waits on. The `Finding:` lines the reports of their trees carry are listed on its board under Findings, and it "
-    "publishes the issues they need and places the session that resolves each, as the board says. It archives a "
-    "session only on ezexe's pick, by the button or the multiple-choice question p4-phi hands it.")
+    "orchestrators of other trees, which stay at the top of their own trees as its siblings. Record them with `{cmd} "
+    "controls <sessionId> ...`; `{cmd} controls` prints where each stands. Its board is {board}, and what p4-phi "
+    "cannot see goes on it through `{cmd} note`. Its turns hold messages only: ezexe's, which it answers directly "
+    "where it can, the decisions that are ezexe's, the archive calls on ezexe's picks and the start of each new "
+    "orchestrator. The app continues it with a short note when a session it started ends a turn, and p4-phi hands it "
+    "one line per controlled session's turn; it relays none of these to ezexe and acts only on what is ezexe's. Work "
+    "ezexe gives it on a controlled session's topic goes straight to that orchestrator in one SendMessage holding "
+    "{restate}, a `Files:` line and what done looks like, and that session briefs and starts a worker of its own for "
+    "it. A topic none covers gets a new orchestrator that this session starts and files in its environment's section "
+    "with `mcp__ccd_sidebar__move_sessions`, never in \"{section}\". Every other task goes to its one standing worker, "
+    "which it starts under itself with the line `{worker}` in the brief: archive checks, never the archiving, store "
+    "record corrections, landing checks, counts, audits, and the issues that flow up, which the worker's issues "
+    "coworker drafts and publishes, handing each number up for this session to record with `{cmd} note \"<the finding> "
+    "as #N\" --source \"<the issue>\" --kind published`. Beside that worker it starts only new orchestrators, since "
+    "the app nests a session under its starter for good, and names a session holding a start request to ezexe as a "
+    "link. It checks the orchestrators and its own worker for stalls and context. `Finding:` lines are listed on its "
+    "board under Findings. It archives a session only on ezexe's pick, by the button or the multiple-choice question "
+    "p4-phi hands it.")
 PAIR = (
     "This session is controlled by a puppeteer: \"{title}\" `{pid}`, which ezexe filed in the sidebar "
     "section \"{section}\", lists this one among the sessions it controls. This session stays at the top of its own "
@@ -281,13 +283,203 @@ ASK = ("phi (p4-phi): this session is controlled by a puppeteer, so where a line
        "one line to ezexe.")
 
 
+# --- the puppeteer's standing worker ----------------------------------------------------------------------------------
+#
+# A puppeteer's turns hold messages only. Every other task runs in one standing worker it starts under itself, which
+# splits its task groups into standing coworkers. The worker's brief holds one line naming it, so the start is let
+# through and a second is refused while the first is live.
+
+WORKER_BRIEF = "Standing worker of its puppeteer"
+WORKER_LINE = re.compile(r"(?m)^\s*Standing worker of its puppeteer\b")
+CLEAR_AT = 60                    # percent of a session's context past which it clears itself and resumes from its page
+STATE_PAGE = ("It keeps its task, its queue, its open items and the sessions it works with by id on a state page, "
+              "{page}, rewritten at each turn's end, so it resumes from that page after a compaction or a clear.")
+WORKER_FIRST = ("phi (p4-phi): this session is the standing worker of the puppeteer \"{title}\" `{pid}`. It does every "
+                "task of that puppeteer's that is not a message: archive checks, corrections of store records, "
+                "landing checks, counts, audits, and the issues that flow up, which its issues coworker drafts and "
+                "publishes. In this turn, since the app refuses starts in a turn another session's message began, it "
+                "starts a standing coworker for each group of its tasks, each brief with a line `Model and effort: "
+                "<model> at <effort> effort` naming the smallest model the group needs: Opus for judging work such as "
+                "issue writing, Sonnet for mechanical checks, Haiku for plain reads. Each coworker ends every turn "
+                "with one message to it, and it ends each turn with one closing message to the puppeteer holding "
+                "only what is ezexe's or what the puppeteer asked for. " + STATE_PAGE)
+COWORKER_FIRST = ("phi (p4-phi): this session is a standing coworker of \"{title}\" `{pid}`, the standing worker of a "
+                  "puppeteer. It ends every turn with one message to that worker. " + STATE_PAGE)
+
+
+def is_worker_brief(text):
+    """True for a brief that holds the standing worker's line."""
+    return bool(WORKER_LINE.search(str(text or "")))
+
+
+def worker_of(s):
+    """The sessionId of a puppeteer's standing worker, '' for none."""
+    w = s.get("standingWorker")
+    return w if isinstance(w, str) else ""
+
+
+def live(sid):
+    """True while the app holds a record of the session and has not archived it."""
+    rec = PHI.app_record(sid)
+    return bool(rec) and not rec.get("isArchived")
+
+
+def state_page(home, sid):
+    return os.path.join(PHI.session_dir(home, sid), "state.md").replace("\\", "/")
+
+
+def start_refused(home, s, brief, store):
+    """For a puppeteer's start of its standing worker: None to let it through, or the reason a second one is refused
+    while the first is live. '' for any other start."""
+    if not is_worker_brief(brief) or not is_puppeteer(s, store):
+        return ""
+    held = worker_of(s)
+    if held and live(held):
+        return (f"phi (p4-phi): this start is refused: this puppeteer's standing worker {link(held)} `{held}` is "
+                f"live, and a puppeteer has one. Send it the work with SendMessage.")
+    return None
+
+
+def worker_first(home, s, prompt, store):
+    """The standing worker's or a standing coworker's first message: what it is and how it hands up. It records the
+    worker on its puppeteer's session; the caller saves `s`. '' for any other session."""
+    pid = PHI.spawned_from(s)
+    if not pid:
+        return ""
+    up = PHI.load_session(home, pid)
+    page = state_page(home, s["sessionId"])
+    if is_worker_brief(prompt) and is_puppeteer(up, store):
+        up["standingWorker"] = s["sessionId"]
+        PHI.save_session(home, up)
+        s["standingKind"] = "worker"
+        return WORKER_FIRST.format(title=full_title(pid, up), pid=pid, page=page)
+    if up.get("standingKind") == "worker":
+        s["standingKind"] = "coworker"
+        return COWORKER_FIRST.format(title=full_title(pid, up), pid=pid, page=page)
+    return ""
+
+
+def mark_puppeteer(home, cli):
+    """A file named by the puppeteer's CLI session id, which `recall-hook.sh lookup-check` reads so each of its tool
+    calls reaches phi.py, not only the ones its gate lists."""
+    name = PHI.SAFE.sub("_", str(cli or ""))[:80]
+    if not home or not name:
+        return
+    path = os.path.join(home, "phi", ".puppeteers", name)
+    if not os.path.exists(path):
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            open(path, "a", encoding="utf-8").close()
+        except OSError:
+            pass
+
+
+def tool_line(s, store):
+    """A puppeteer's tool call that is no message: one line that sends the task to its standing worker. '' for any
+    other session."""
+    if not is_puppeteer(s, store):
+        return ""
+    held = worker_of(s)
+    if held and live(held):
+        return (f"phi (p4-phi): this session is a puppeteer and its turns hold messages only. Send this task to its "
+                f"standing worker {link(held)} `{held}` in one SendMessage, with a `Files:` line and what done looks "
+                f"like.")
+    return (f"phi (p4-phi): this session is a puppeteer and its turns hold messages only. Start its standing worker "
+            f"under itself, the brief holding the line `{WORKER_BRIEF}`, and send it this task.")
+
+
+def usage_line(home, s, prompt, store):
+    """A puppeteer, at a message carrying its standing worker's report: one line naming the worker and each of its
+    coworkers, to read each one's context and tell the worker which passed the line. '' otherwise."""
+    held = worker_of(s)
+    if not held or f'<cross-session-message from="{held}"' not in str(prompt or "") or not is_puppeteer(s, store):
+        return ""
+    every = relay._sessions(home)
+    ids = [held] + sorted(k for k, v in every.items() if PHI.spawned_from(v) == held and live(k))
+    return (f"phi (p4-phi): its standing worker `{held}` reported. Read `mcp__ccd_session_mgmt__get_usage` for each "
+            f"of {', '.join(f'`{k}`' for k in ids)}, and send the worker one line naming any whose context passes "
+            f"{CLEAR_AT} percent, so that session brings its state page up to date and calls "
+            f"`mcp__ccd_session_mgmt__clear_session` with `\"self\"` at its turn's end.")
+
+
+STATE_IN_TASK = re.compile(r"\bState page:\s*(\S+?)[.,;]?(?=\s|$)")
+WINDOW = 200000                  # p4.json phi.context_window: the tokens of a session's context window
+
+
+def page_of_task(home, s):
+    """The state page a session keeps: the one its p4-phi task names, else a standing worker's or coworker's own;
+    '' for none."""
+    m = STATE_IN_TASK.search(PHI.clean(s.get("task")))
+    if m:
+        return m.group(1).replace("\\", "/")
+    if s.get("standingKind") in ("worker", "coworker"):
+        return state_page(home, s["sessionId"])
+    return ""
+
+
+def state_first(home, s):
+    """A session that keeps a state page, after a compaction or a clear: that page's path comes first. '' for a
+    session that keeps none."""
+    page = page_of_task(home, s)
+    if not page:
+        return ""
+    return (f"phi (p4-phi): this session's context was compacted or cleared. Read its state page before anything "
+            f"else, and resume from it: {page}")
+
+
+def context_used(transcript):
+    """The tokens of the context of a transcript's last assistant call: its input, cache creation and cache read
+    together, from that row's `message.usage`; 0 when none is read."""
+    try:
+        with open(transcript, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 400000))
+            rows = f.read().decode("utf-8", "replace").splitlines()
+    except (OSError, TypeError, ValueError):
+        return 0
+    for line in reversed(rows):
+        if '"usage"' not in line:
+            continue
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        u = (d.get("message") or {}).get("usage") if isinstance(d.get("message"), dict) else None
+        if d.get("type") == "assistant" and isinstance(u, dict):
+            return sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens",
+                                                     "cache_read_input_tokens"))
+    return 0
+
+
+def clear_line(home, s, transcript, store):
+    """At a turn's `wrap_up`: past the share of its window p4.json names, a session that keeps a state page is told
+    to bring it up to date and clear itself as the turn's last call. '' below the line or with no page."""
+    page = page_of_task(home, s)
+    if not page:
+        return ""
+    window, at = _conf(store, "context_window"), _conf(store, "clear_at")
+    window = window if isinstance(window, int) and not isinstance(window, bool) and window > 0 else WINDOW
+    at = at if isinstance(at, (int, float)) and not isinstance(at, bool) and 0 < at <= 100 else CLEAR_AT
+    used = context_used(transcript)
+    if used * 100 < at * window:
+        return ""
+    kids = sorted(k for k, v in relay._sessions(home).items() if PHI.spawned_from(v) == s["sessionId"] and live(k))
+    first = (f" Before that, clear each of its coworkers that is idle with an empty queue, by "
+             f"`mcp__ccd_session_mgmt__clear_session` on its id, whatever its own context reads, so the family resets "
+             f"together: {', '.join(f'`{k}`' for k in kids)}." if kids else "")
+    return (f"phi (p4-phi): this session's context is at {used * 100 // window} percent, past the line of {at} "
+            f"percent. Bring its state page up to date at {page}, send what the turn still owes, and make "
+            f"`mcp__ccd_session_mgmt__clear_session` with `\"self\"` the last call of this turn; it resumes from the "
+            f"page in its next turn.{first} If the app refuses the clear, try again at the next turn's end.")
+
+
 def board_path(home, sid):
     return os.path.join(PHI.session_dir(home, sid), "board.md").replace("\\", "/")
 
 
 def rule_text(home, s):
     return RULE.format(section=section_of(s["sessionId"]), cmd=PHI.commands(), board=board_path(home, s["sessionId"]),
-                       restate=PHI.RESTATE)
+                       restate=PHI.RESTATE, worker=WORKER_BRIEF)
 
 
 def control(home, s, add=(), drop=()):
@@ -556,10 +748,11 @@ def board(home, s):
     lines += ["", "## Findings", ""]
     if found:
         lines += ["The `Finding:` lines of the reports of the controlled sessions and of the sessions of their trees. "
-                  "This puppeteer publishes each one that needs an issue, once it has checked the open issues "
-                  "and the running sessions, and places the session that resolves it: the controlled session whose "
-                  "tree holds its files is sent it in one SendMessage, and one no controlled session covers gets a "
-                  "new orchestrator.", ""]
+                  "The issues coworker of this puppeteer's standing worker publishes each one that needs an issue, "
+                  "once it has checked the open issues and the running sessions, and hands its number up; this "
+                  "puppeteer records it with `phi.py note \"<the finding> as #N\" --kind published`, and places the "
+                  "session that resolves it: the controlled session whose tree holds its files is sent it in one "
+                  "SendMessage, and one no controlled session covers gets a new orchestrator.", ""]
     lines += [f"- \"{full_title(sid, k)}\" `{sid}`: {line}" for sid, k, line in found] or ["None."]
     lines += ["", "## Parked", ""] + (of_kind("parked") or ["Nothing."])
     rules = [x for x in s.get("rulesChanged") or [] if isinstance(x, dict)]
@@ -589,7 +782,6 @@ def board(home, s):
 def rules_changed(s, text):
     """The feedback and user memories a `live_rules` text names as changed or added, kept for the board; the caller
     saves."""
-    import re
     names = re.findall(r"(?m)^- memory ([\w.-]+):", str(text or "").split("Removed, no longer rules:")[0])
     if names:
         kept = [x for x in s.get("rulesChanged") or [] if isinstance(x, dict)]

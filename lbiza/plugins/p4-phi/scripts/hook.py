@@ -574,10 +574,11 @@ def h_subagent_stop(payload):
 PHI_CHECK = {"mcp__ccd_session__start_session": "start-advice", "EnterWorktree": "branch-guard",
              "mcp__ccd_session_mgmt__archive_session": "self-archive",
              "SendMessage": "go-guard", "mcp__ccd_session_mgmt__send_message": "go-guard",
-             "Bash": ("branch-guard", "store-guard", "restart-check", "level", "nudge"),
-             "PowerShell": ("branch-guard", "store-guard", "restart-check", "level", "nudge"), "Edit": "nudge",
-             "Write": "nudge", "MultiEdit": "nudge", "NotebookEdit": "nudge"}
-PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "Bash": "task", "PowerShell": "task", "Monitor": "task",
+             "Bash": ("branch-guard", "store-guard", "restart-check", "level", "nudge", "puppeteer-tool"),
+             "PowerShell": ("branch-guard", "store-guard", "restart-check", "level", "nudge", "puppeteer-tool"),
+             "Edit": ("nudge", "puppeteer-tool"), "Write": ("nudge", "puppeteer-tool"),
+             "MultiEdit": ("nudge", "puppeteer-tool"), "NotebookEdit": ("nudge", "puppeteer-tool")}
+PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "mcp__ccd_turn__wrap_up": "wrap-up", "Bash": "task", "PowerShell": "task", "Monitor": "task",
               "Agent": "task",
               "Workflow": "task", "TaskStop": "task", "KillShell": "task", "Write": "memory-gap", "Edit": "memory-gap",
               "MultiEdit": "memory-gap"}
@@ -623,12 +624,13 @@ def h_lookup_check(payload):
 def h_lookup_record(payload):
     """After a tool ran or failed. A subagent's call binds its id to phi.py's record of the subagent. Then phi.py's
     records that PHI_RECORD names for the tool run, such as the task list with its step boundary and a background
-    task under its step; their answer is returned for `update_plan`, Write and Edit. Otherwise lookups.py writes the
+    task under its step; their answer is returned for `update_plan`, `wrap_up`, Write and Edit. Otherwise lookups.py writes the
     call's row, and a failure other sessions already met is told what they did about it."""
     if payload.get("agent_id"):
         phi_text("agent-post", payload)            # phi.py: the subagent's id bound to its record
     out = phi_route(payload, PHI_RECORD)
-    if out and str(payload.get("tool_name") or "") in ("mcp__ccd_turn__update_plan", "Write", "Edit", "MultiEdit"):
+    if out and str(payload.get("tool_name") or "") in ("mcp__ccd_turn__update_plan", "mcp__ccd_turn__wrap_up", "Write", "Edit",
+                                                             "MultiEdit"):
         return out
     import lookups
     p4 = ready(payload)
