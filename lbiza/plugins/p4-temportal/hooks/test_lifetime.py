@@ -230,7 +230,7 @@ class Lifetime(unittest.TestCase):
         self.assertNotIn("past due", line)
 
     def test_removing_a_link_into_the_store_keeps_the_store(self):
-        """A scratchpad path is a link into temportal/tmp/<session>/: removing the link leaves the files there."""
+        """A link into the store is removed as a link, and the files it reaches stay."""
         target = os.path.join(self.t, "tmp", "sid")
         kept = put(os.path.join(target, "kept.md"))
         link = os.path.join(self.root, "scratchpad", "sid")
@@ -422,8 +422,8 @@ class Lifetime(unittest.TestCase):
         self.assertIn("does not exist", missing.stderr)
 
     def test_no_cookie_on_tmp_or_on_the_folders_and_file_of_temportal_itself(self):
-        """A cookie on tmp/ or anything in it, or on scratchpad/, src/ or expires.json themselves, is refused, since
-        a session scratchpad directory is committed before it is removed and those are never cleared whole."""
+        """A cookie on tmp/ or anything in it, or on the notebook, src/ or expires.json themselves, is refused, since
+        tmp/ holds only what an earlier version kept for each session's scratchpad and those are never cleared whole."""
         put(os.path.join(self.t, "tmp", "s1", "probe", "out.txt"))
         put(os.path.join(self.t, "src", "kept.py"))
         lifetime.set_cookie(self.p4, put(os.path.join(self.t, "scratchpad", "page.html")), "1d")

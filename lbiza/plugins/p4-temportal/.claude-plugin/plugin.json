@@ -1,7 +1,7 @@
 {
   "name": "p4-temportal",
   "version": "0.3.9",
-  "description": "Stands in for three of Claude Code's own places inside the project: the auto memory directory, the session scratchpad directory and temporary files, with lifetimes that clear what is no longer relevant.",
+  "description": "Keeps the project's auto memory, notebook and saved code in its .claude/p4 store, where Claude Code writes the memory itself, with lifetimes that clear what is no longer relevant.",
   "author": {
     "name": "ezexe"
   },

@@ -3,10 +3,10 @@
 silently the first time, and seeded again, logs, build output and binaries move into it, and a clean tree prints
 nothing at a session start. With P4_SCRATCHPAD_ASKS=1 the PreToolUse ask fires, and never denies, before a code file
 goes to a temp location, the session's scratchpad path or the notebook, and repo-uses prints one line for each file
-under .claude/p4/temportal/src/ the repository names; with the switch off both are silent. Then the session's
-scratchpad directory: linked, staged, committed and removed, and restored, and the other sessions' scratchpad folders
-linked or removed. Run from anywhere: python3 hooks/test_scratchpad.py, and exit 0 is green; the git cases skip,
-saying so, without git on PATH."""
+under .claude/p4/temportal/src/ the repository names; with the switch off both are silent. Then each session's
+scratchpad, which is the app's: no start, turn end or session end links, stages, commits or removes one. Run from
+anywhere: python3 hooks/test_scratchpad.py, and exit 0 is green; the git cases skip, saying so, without git on
+PATH."""
 
 import json
 import os
@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -265,1059 +266,8 @@ def gate2_d():
     print("test_scratchpad.py: clean start green")
 
 
-def tmp_cases():
-    """tmp-link: the scratchpad path Claude Code gives, found under the temp directory by the session id, becomes
-    a link into .claude/p4/temportal/tmp/<session>/ with what it held moved in; a second start is silent; a write
-    through the scratchpad path lands in the store; a link elsewhere is left; P4_SCRATCHPAD_TMP=0 does nothing;
-    tmp-sweep links a scratchpad folder made after the start."""
-    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-tmp-")
-    temp = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-temp-")
-    sid = "d419de0b-c6f0-4894-899a-bdbe514efa5d"
-    tmp_env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp}
-    try:
-        harness = os.path.join(temp, "claude", "30ad6e18862a20e8", sid, "scratchpad")
-        target = os.path.join(root, ".claude", "p4", "temportal", "tmp", sid)
-        put(harness, "notes.md", "- a note\n")
-        put(harness, "sub/part.md", "part\n")
-        payload = {"cwd": root, "session_id": sid}
-
-        def run(sub, extra=None):
-            return run_sub(sub, payload, dict(tmp_env, **(extra or {})), CLAUDE_PROJECT_DIR=root)
-
-        assert run("tmp-link", {"P4_SCRATCHPAD_TMP": "0"}) == "", "the switch off still spoke"
-        assert not os.path.exists(target), "the switch off still made .claude/p4/temportal/tmp/"
-        out = run("tmp-link")
-        assert "is a link to" in out and "files it held moved: 2" in out, out
-        with open(os.path.join(target, "notes.md"), encoding="utf-8") as f:
-            assert f.read() == "- a note\n", "the scratchpad's note did not move"
-        assert os.path.isfile(os.path.join(target, "sub", "part.md")), "a subdirectory did not move"
-        put(harness, "later.md", "later\n")
-        assert os.path.isfile(os.path.join(target, "later.md")), "a write through the link did not land in the store"
-        assert run("tmp-link") == "", "a second start spoke"
-        assert run("tmp-sweep") == "", "tmp-sweep spoke"
-        assert run_sub("tmp-link", {"cwd": root}, tmp_env, CLAUDE_PROJECT_DIR=root) == "", "no session id spoke"
-
-        # a scratchpad folder made after the start, the link removed and a plain folder in its place, is linked at
-        # turn end
-        os.rmdir(harness) if os.name == "nt" else os.unlink(harness)
-        put(harness, "after.md", "after\n")
-        assert run("tmp-sweep") == "", "tmp-sweep spoke"
-        assert os.path.isfile(os.path.join(target, "after.md")), "tmp-sweep did not move a late file"
-        put(harness, "after2.md", "again\n")
-        assert os.path.isfile(os.path.join(target, "after2.md")), "tmp-sweep did not link the scratchpad again"
-
-        # a link elsewhere is ezexe's: left as it is
-        other = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-other-")
-        try:
-            os.rmdir(harness) if os.name == "nt" else os.unlink(harness)
-            if os.name == "nt":
-                import _winapi
-                _winapi.CreateJunction(other, harness)
-            else:
-                os.symlink(other, harness, target_is_directory=True)
-            assert "does not reach" in run("tmp-link"), "a foreign link was not named"
-            assert os.path.samefile(harness, other), "a foreign link was changed"
-        finally:
-            os.rmdir(harness) if os.name == "nt" else os.unlink(harness)
-            wipe(other)
-    finally:
-        wipe(root)
-        wipe(temp)
-    print("test_scratchpad.py: tmp cases green")
-
-
-def tmp_keep_cases():
-    """The scratchpad directory is staged at every turn end and removed only after it is committed: tmp-sweep
-    stages the session's files in the store, never an ignored file or one over the size cap, and says nothing; tmp-close
-    commits them alone, leaving what else is staged as it was, deletes what the commit holds, and commits the removal; a
-    file no commit holds stays on disk; the link still works; a session that starts again gets its files back; another
-    session's scratchpad directory left idle past the limit is committed and removed the same way at a start; without a
-    git repository nothing is deleted."""
-    if not shutil.which("git"):
-        print("test_scratchpad.py: tmp keep cases skipped, no git on PATH")
-        return
-    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-keep-")
-    temp = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-temp-")
-    sid, old, live = "aaaa1111-0000-4000-8000-000000000001", "bbbb2222-0000-4000-8000-000000000002", \
-        "cccc3333-0000-4000-8000-000000000003"
-    tmp_env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp}
-    p4 = os.path.join(root, ".claude", "p4")
-
-    def git(*args):
-        r = subprocess.run(["git", "-C", p4] + list(args), capture_output=True, text=True)
-        assert r.returncode == 0, (args, r.stderr)
-        return r.stdout
-
-    try:
-        harness = os.path.join(temp, "claude", "30ad6e18862a20e8", sid, "scratchpad")
-        target = os.path.join(p4, "temportal", "tmp", sid)
-        payload = {"cwd": root, "session_id": sid}
-
-        def run(sub, extra=None):
-            return run_sub(sub, payload, dict(tmp_env, **(extra or {})), CLAUDE_PROJECT_DIR=root)
-
-        # no git repository at .claude/p4: nothing is staged, nothing is deleted
-        put(harness, "notes.md", "- a note\n")
-        run("tmp-link")
-        assert run("tmp-sweep") == "" and run("tmp-close") == "", "no repository, and a hook spoke"
-        assert os.path.isfile(os.path.join(target, "notes.md")), "a file was deleted with no commit to hold it"
-
-        os.makedirs(p4, exist_ok=True)
-        subprocess.run(["git", "init", "-q", p4], check=True)
-        git("config", "user.name", "t")
-        git("config", "user.email", "t@t")
-        put(p4, ".gitignore", "*.pyc\n")
-        put(p4, "p4.json", json.dumps({"scratchpad": {"tmp_max_file_mb": 0.001}}))
-        put(p4, "store/first.md", "first\n")
-        git("add", ".gitignore", "store/first.md")
-        git("commit", "-q", "-m", "first")
-        put(p4, "store/other.md", "another session's work, staged\n")
-        git("add", "store/other.md")
-        put(harness, "sub/part.md", "part\n")
-        put(harness, "big.bin", "x" * 5000)                       # over the cap of 0.001 MB
-        put(harness, "mod.pyc", "ignored\n")
-
-        assert run("tmp-sweep") == "", "tmp-sweep spoke"
-        staged = set(git("diff", "--cached", "--name-only").split())
-        assert {f"temportal/tmp/{sid}/notes.md", f"temportal/tmp/{sid}/sub/part.md"} <= staged, staged
-        assert not any(n.endswith(("big.bin", "mod.pyc")) for n in staged), staged
-
-        commits = int(git("rev-list", "--count", "HEAD"))
-        assert run("tmp-close") == "", "tmp-close spoke"
-        assert int(git("rev-list", "--count", "HEAD")) == commits + 2, "not one commit to keep and one to remove"
-        kept = git("show", "--name-only", "--format=", "HEAD~1").split()
-        assert sorted(kept) == [f"temportal/tmp/{sid}/notes.md", f"temportal/tmp/{sid}/sub/part.md"], kept
-        assert git("show", f"HEAD~1:temportal/tmp/{sid}/notes.md") == "- a note\n", "the commit does not hold the note"
-        assert git("ls-files", "temportal/tmp").strip() == "", "the removal is not committed"
-        assert git("diff", "--cached", "--name-only").split() == ["store/other.md"], "another staged file was swept in"
-        assert not os.path.exists(os.path.join(target, "notes.md")), "the committed note is still on disk"
-        assert not os.path.exists(os.path.join(target, "sub")), "an emptied directory is still there"
-        for name in ("big.bin", "mod.pyc"):
-            assert os.path.isfile(os.path.join(target, name)), f"{name} was deleted though no commit holds it"
-        put(harness, "after.md", "after\n")
-        assert os.path.isfile(os.path.join(target, "after.md")), "the link does not reach the scratchpad directory"
-
-        # the session starts again: what tmp-close removed is back, and staged
-        out = run("tmp-link")
-        assert "restored" in out, out
-        with open(os.path.join(target, "notes.md"), encoding="utf-8") as f:
-            assert f.read() == "- a note\n", "the note did not come back"
-        assert os.path.isfile(os.path.join(target, "sub", "part.md")), "a subdirectory did not come back"
-        assert run("tmp-link") == "", "a second start spoke"
-
-        # another session's scratchpad directory, idle past the limit, is committed and removed at a start, and one
-        # written today is left
-        put(os.path.join(p4, "temportal", "tmp", old), "old.md", "old\n")
-        put(os.path.join(p4, "temportal", "tmp", live), "live.md", "live\n")
-        long_ago = os.path.getmtime(os.path.join(p4, "temportal", "tmp", old, "old.md")) - 30 * 86400
-        os.utime(os.path.join(p4, "temportal", "tmp", old, "old.md"), (long_ago, long_ago))
-        os.utime(os.path.join(p4, "temportal", "tmp", old), (long_ago, long_ago))
-        run("tmp-link")
-        assert not os.path.exists(os.path.join(p4, "temportal", "tmp", old, "old.md")), \
-            "an idle scratchpad directory was not removed"
-        assert "old\n" == git("show", f"HEAD~1:temportal/tmp/{old}/old.md"), \
-            "an idle scratchpad directory was removed without its commit"
-        assert os.path.isfile(os.path.join(p4, "temportal", "tmp", live, "live.md")), \
-            "a scratchpad directory written today was removed"
-        assert os.path.isfile(os.path.join(target, "notes.md")), \
-            "the session's own scratchpad directory was removed at its start"
-
-        with open(HOOKS_JSON, encoding="utf-8") as f:
-            ends = json.load(f)["hooks"]["SessionEnd"][0]["hooks"]
-        assert ends[0]["command"].split()[-1] == "tmp-close", ends
-    finally:
-        if os.path.lexists(harness):
-            try:
-                os.rmdir(harness) if os.name == "nt" else os.unlink(harness)
-            except OSError:
-                pass
-        wipe(root)
-        wipe(temp)
-    print("test_scratchpad.py: tmp keep cases green")
-
-
-def link(path, target):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    if os.name == "nt":
-        import _winapi
-        _winapi.CreateJunction(os.path.abspath(target), os.path.abspath(path))
-    else:
-        os.symlink(os.path.abspath(target), path, target_is_directory=True)
-
-
-def unlink(path):
-    os.rmdir(path) if os.name == "nt" else os.unlink(path)
-
-
 def is_link(path):
     return os.path.islink(path) or getattr(os.path, "isjunction", lambda p: False)(path)
-
-
-def points_at(path):
-    t = os.readlink(path)
-    return os.path.normcase(os.path.normpath(t[4:] if t.startswith("\\\\?\\") else t))
-
-
-def age(*paths, hours=2):
-    for p in paths:
-        t = os.path.getmtime(p) - hours * 3600
-        os.utime(p, (t, t))
-
-
-def sweep_cases():
-    """tmp-link links or removes the project's other scratchpad folders under the same temp directory: a real
-    empty one quiet past the limit is removed with a session folder it leaves empty, a fresh one or one whose transcript
-    is fresh is linked though it is empty, a real one with files is linked into the store with its files moved, a
-    dangling link with nothing in the store to point at is removed, a foreign link is left; this session's own
-    scratchpad is linked and named. The folder named after the project's path, where Claude Code put scratchpads before
-    it named the folder by a hash, is handled the same way. After the start no scratchpad folder of the project is a
-    plain folder, and one made after it, for an id that runs no hook, is linked at turn end, silently."""
-    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-sweep-")
-    temp = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-temp-")
-    cfg = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-cfg-")
-    other = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-other-")
-    sids = {k: f"{k * 8}-0000-4000-8000-00000000000{i}" for i, k in enumerate("sabcdfgh")}
-    tmp_env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp, "CLAUDE_CONFIG_DIR": cfg}
-    hashdir = os.path.join(temp, "claude", "ffccc31c49e17720")
-    p4 = os.path.join(root, ".claude", "p4")
-    legacy = os.path.join(temp, "claude", re.sub(r"[^A-Za-z0-9]", "-", os.path.normpath(root)))
-    sids.update(i="iiiiiiii-0000-4000-8000-000000000011", j="jjjjjjjj-0000-4000-8000-000000000012",
-                k="kkkkkkkk-0000-4000-8000-000000000013")
-    pad = {k: os.path.join(legacy if k in "ij" else hashdir, s, "scratchpad") for k, s in sids.items()}
-    new = {k: os.path.join(p4, "temportal", "tmp", s) for k, s in sids.items()}
-    old = {k: os.path.join(p4, "tmp", s) for k, s in sids.items()}
-    links = []
-    try:
-        # s: this session, a real empty scratchpad
-        os.makedirs(pad["s"])
-        # a: an app helper's real empty scratchpad, quiet two hours; its session folder holds nothing else
-        os.makedirs(pad["a"]); age(pad["a"], os.path.dirname(pad["a"]))
-        # b: the same, made a minute ago
-        os.makedirs(pad["b"])
-        # c: a real scratchpad with a note, quiet two hours
-        put(pad["c"], "note.md", "kept\n"); age(os.path.join(pad["c"], "note.md"), pad["c"], os.path.dirname(pad["c"]))
-        # d: a dangling link into the store, nothing in the store for it
-        os.makedirs(old["d"]); link(pad["d"], old["d"]); links.append(pad["d"]); os.rmdir(old["d"])
-        shutil.rmtree(os.path.join(p4, "tmp"))
-        # f: a link elsewhere, ezexe's
-        link(pad["f"], other); links.append(pad["f"])
-        # g: an empty real scratchpad quiet two hours whose transcript was written now
-        os.makedirs(pad["g"]); age(pad["g"], os.path.dirname(pad["g"]))
-        put(os.path.join(cfg, "projects", "E--x"), sids["g"] + ".jsonl", "{}\n")
-        # h: an empty real scratchpad beside Claude Code's tasks folder, quiet two hours
-        os.makedirs(pad["h"]); os.makedirs(os.path.join(os.path.dirname(pad["h"]), "tasks"))
-        age(pad["h"], os.path.dirname(pad["h"]))
-        # i, j: in the folder named after the project's path: one with a note written now, one empty and quiet two
-        # hours
-        put(pad["i"], "old.md", "old harness\n")
-        os.makedirs(pad["j"]); age(pad["j"], os.path.dirname(pad["j"]))
-
-        def real_folders():
-            return sorted(k for k in sids if os.path.isdir(pad[k]) and not is_link(pad[k]))
-
-        assert real_folders() == ["a", "b", "c", "g", "h", "i", "j", "s"], real_folders()
-        out = run_sub("tmp-link", {"cwd": root, "session_id": sids["s"]}, tmp_env, CLAUDE_PROJECT_DIR=root)
-        assert "this session's scratchpad" not in out, f"a new link with nothing moved was said: {out}"
-        assert "other sessions' scratchpads: 4 linked, 4 removed" in out, out
-        assert real_folders() == [], f"plain scratchpad folders left after a start: {real_folders()}"
-        assert points_at(pad["s"]) == os.path.normcase(new["s"]), "this session's scratchpad was not linked"
-        assert not os.path.exists(os.path.dirname(pad["a"])), "a quiet empty scratchpad was not removed"
-        for k in "bg":
-            assert points_at(pad[k]) == os.path.normcase(new[k]), "a fresh empty scratchpad was not linked"
-        with open(os.path.join(new["i"], "old.md"), encoding="utf-8") as f:
-            assert f.read() == "old harness\n", "a note in the path-named folder did not move into the store"
-        assert points_at(pad["i"]) == os.path.normcase(new["i"]), "a scratchpad in the path-named folder was not linked"
-        assert not os.path.exists(os.path.dirname(pad["j"])), "a quiet empty one in the path-named folder was left"
-        with open(os.path.join(new["c"], "note.md"), encoding="utf-8") as f:
-            assert f.read() == "kept\n", "a quiet scratchpad's note did not move into the store"
-        assert points_at(pad["c"]) == os.path.normcase(new["c"]), "a quiet scratchpad with files was not linked"
-        assert not os.path.lexists(pad["d"]), "a dangling link with nothing to point at was left"
-        assert os.path.samefile(pad["f"], other), "a foreign link was changed"
-        assert not os.path.exists(pad["h"]) and os.path.isdir(os.path.join(os.path.dirname(pad["h"]), "tasks")), \
-            "the empty scratchpad beside tasks/ was not removed alone"
-        assert run_sub("tmp-link", {"cwd": root, "session_id": sids["s"]}, tmp_env, CLAUDE_PROJECT_DIR=root) == "", \
-            "a second start spoke"
-        # k: made after the start for an id that runs no hook, with a file: linked at this session's turn end
-        put(pad["k"], "late.md", "late\n")
-        assert run_sub("tmp-sweep", {"cwd": root, "session_id": sids["s"]}, tmp_env, CLAUDE_PROJECT_DIR=root) == "", \
-            "turn end spoke"
-        assert points_at(pad["k"]) == os.path.normcase(new["k"]), "a scratchpad made after the start was not linked"
-        assert os.path.isfile(os.path.join(new["k"], "late.md")), "its file did not move into the store"
-        assert real_folders() == [], f"plain scratchpad folders left after turn end: {real_folders()}"
-        # the switch off leaves the folder alone
-        os.makedirs(pad["a"]); age(pad["a"], os.path.dirname(pad["a"]))
-        run_sub("tmp-link", {"cwd": root, "session_id": sids["s"]}, dict(tmp_env, P4_SCRATCHPAD_TMP="0"),
-                CLAUDE_PROJECT_DIR=root)
-        assert os.path.isdir(pad["a"]), "the switch off still swept"
-    finally:
-        for k in sids:
-            if os.path.lexists(pad[k]) and is_link(pad[k]):
-                unlink(pad[k])
-        for d in (root, temp, cfg, other):
-            wipe(d)
-    print("test_scratchpad.py: scratchpad link cases green")
-
-
-def tmp_empty_and_cap_cases():
-    """An empty scratchpad directory of another session, quiet past tmp_empty_idle_hours with its transcript, is
-    removed at a start with the scratchpad link that points at it, and comes back at that session's next turn end; an
-    empty one written now stays. A bare repository, a skipped folder, a clone of a store, a store copied alone and a git
-    work tree are never staged; an ordinary folder beside them is. A scratchpad directory over tmp_max_files has only
-    its tracked files' changes staged: a file staged earlier and deleted since leaves the index, and no new file is
-    added."""
-    if not shutil.which("git"):
-        print("test_scratchpad.py: tmp empty and cap cases skipped, no git on PATH")
-        return
-    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-empty-")
-    temp = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-temp-")
-    cfg = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-cfg-")
-    own, gone, fresh = ("1111aaaa-0000-4000-8000-000000000001", "2222bbbb-0000-4000-8000-000000000002",
-                        "3333cccc-0000-4000-8000-000000000003")
-    tmp_env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp, "CLAUDE_CONFIG_DIR": cfg}
-    hashdir = os.path.join(temp, "claude", "30ad6e18862a20e8")
-    p4 = os.path.join(root, ".claude", "p4")
-    tmp = os.path.join(p4, "temportal", "tmp")
-
-    def git(*args):
-        r = subprocess.run(["git", "-C", p4] + list(args), capture_output=True, text=True)
-        assert r.returncode == 0, (args, r.stderr)
-        return r.stdout
-
-    def run(sub, sid):
-        return run_sub(sub, {"cwd": root, "session_id": sid}, tmp_env, CLAUDE_PROJECT_DIR=root)
-
-    try:
-        os.makedirs(p4)
-        subprocess.run(["git", "init", "-q", p4], check=True)
-        git("config", "user.name", "t")
-        git("config", "user.email", "t@t")
-        put(p4, "p4.json", json.dumps({"scratchpad": {"tmp_max_files": 3}}))
-        put(p4, "first.md", "first\n")
-        git("add", "first.md")
-        git("commit", "-q", "-m", "first")
-        os.makedirs(os.path.join(hashdir, own, "scratchpad"))
-        for sid in (gone, fresh):
-            os.makedirs(os.path.join(tmp, sid))
-            link(os.path.join(hashdir, sid, "scratchpad"), os.path.join(tmp, sid))
-        age(os.path.join(tmp, gone))
-        run("tmp-link", own)
-        assert not os.path.exists(os.path.join(tmp, gone)), "a quiet empty scratchpad directory was not removed"
-        assert not os.path.lexists(os.path.join(hashdir, gone, "scratchpad")), \
-            "the link to a removed scratchpad directory was left"
-        assert os.path.isdir(os.path.join(tmp, fresh)), "an empty scratchpad directory written now was removed"
-        # that session, if it goes on, gets its scratchpad directory back at its turn end
-        run("tmp-sweep", gone)
-        assert os.path.isdir(os.path.join(tmp, gone)), "the scratchpad directory did not come back"
-
-        mine = os.path.join(tmp, own)
-        put(mine, "a.md", "a\n")
-        put(mine, "b.md", "b\n")
-        subprocess.run(["git", "init", "-q", "--bare", os.path.join(mine, "remote.git")], check=True)
-        put(os.path.join(mine, "suite", "pytest-of-someone", "t0"), "x.txt", "x\n")
-        put(os.path.join(mine, ".pytest_cache"), "v.txt", "v\n")
-        # a clone of the store holding .claude/p4 and no .git, a store copied alone with p4.json beside phi/, and a
-        # git work tree with a .git file are never staged; an ordinary folder beside them is
-        put(os.path.join(mine, "storeclone", ".claude", "p4", "phi"), "rules.md", "r\n")
-        put(os.path.join(mine, "storeclone"), "top.md", "t\n")
-        put(os.path.join(mine, "storecopy"), "p4.json", "{}\n")
-        put(os.path.join(mine, "storecopy", "phi"), "rules.md", "r\n")
-        put(os.path.join(mine, "worktree"), ".git", "gitdir: elsewhere\n")
-        put(os.path.join(mine, "worktree"), "w.md", "w\n")
-        put(os.path.join(mine, "plain"), "b.md", "b\n")
-        os.remove(os.path.join(mine, "b.md"))
-        run("tmp-sweep", own)
-        staged = git("diff", "--cached", "--name-only").split()
-        assert staged == [f"temportal/tmp/{own}/a.md", f"temportal/tmp/{own}/plain/b.md"], staged
-        for d in ("storeclone", "storecopy", "worktree"):
-            shutil.rmtree(os.path.join(mine, d))
-        git("rm", "-q", "--cached", f"temportal/tmp/{own}/plain/b.md")
-        shutil.rmtree(os.path.join(mine, "plain"))
-        put(mine, "b.md", "b\n")
-        run("tmp-sweep", own)
-        staged = git("diff", "--cached", "--name-only").split()
-        assert staged == [f"temportal/tmp/{own}/a.md", f"temportal/tmp/{own}/b.md"], staged
-        # over the cap: b.md is deleted and three files are added; b.md leaves the index, nothing new is added
-        os.remove(os.path.join(mine, "b.md"))
-        for n in ("c", "d", "e"):
-            put(mine, f"{n}.md", n + "\n")
-        run("tmp-sweep", own)
-        staged = git("diff", "--cached", "--name-only").split()
-        assert staged == [f"temportal/tmp/{own}/a.md"], staged
-    finally:
-        for sid in (own, gone, fresh):
-            p = os.path.join(hashdir, sid, "scratchpad")
-            if os.path.lexists(p) and not os.path.isdir(p) or os.path.islink(p) or \
-                    getattr(os.path, "isjunction", lambda q: False)(p):
-                unlink(p)
-        for d in (root, temp, cfg):
-            wipe(d)
-    print("test_scratchpad.py: tmp empty and cap cases green")
-
-
-def tmp_export_cases():
-    """A copy or export of a repository below the top of a scratchpad directory is never staged, so tmp-close never
-    commits or removes it: an export made by `git archive`, whose top holds the repository's .gitignore, a copy whose
-    top holds .gitattributes, and a copied plugin whose top holds .claude-plugin/. An ordinary folder of notes beside
-    each is staged, and so is a .gitignore at the scratchpad directory's own top, which keeps out only what it names."""
-    if not shutil.which("git"):
-        print("test_scratchpad.py: tmp export cases skipped, no git on PATH")
-        return
-    import zipfile
-    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-export-")
-    temp = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-temp-")
-    sid = "4444dddd-0000-4000-8000-000000000004"
-    tmp_env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp}
-    p4, repo = os.path.join(root, ".claude", "p4"), os.path.join(root, "repo")
-    mine, rel = os.path.join(p4, "temportal", "tmp", sid), f"temportal/tmp/{sid}"
-
-    def git(where, *args):
-        r = subprocess.run(["git", "-C", where, "-c", "user.name=t", "-c", "user.email=t@t"] + list(args),
-                           capture_output=True, text=True)
-        assert r.returncode == 0, (args, r.stderr)
-        return r.stdout
-
-    def run(sub):
-        return run_sub(sub, {"cwd": root, "session_id": sid}, tmp_env, CLAUDE_PROJECT_DIR=root)
-
-    try:
-        for d in (p4, repo):
-            os.makedirs(d)
-            git(d, "init", "-q")
-        put(p4, "first.md", "first\n")
-        git(p4, "add", "first.md")
-        git(p4, "commit", "-q", "-m", "first")
-        put(repo, ".gitignore", "__pycache__/\n*.pyc\n")
-        put(repo, "README.md", "a repository\n")
-        put(repo, "pkg/mod.py", "x = 1\n")
-        put(repo, "pkg/data.json", "{}\n")
-        git(repo, "add", "-A")
-        git(repo, "commit", "-q", "-m", "repo")
-        rev = git(repo, "rev-parse", "--short", "HEAD").strip()
-        git(repo, "archive", "--format=zip", "-o", os.path.join(root, "repo.zip"), "HEAD")
-        with zipfile.ZipFile(os.path.join(root, "repo.zip")) as z:
-            z.extractall(os.path.join(mine, "work", f"at-{rev}"))
-        put(mine, ".gitignore", "*.log\n")
-        put(mine, "plan.md", "- a plan\n")
-        put(mine, "run.log", "a log\n")
-        put(mine, "notes/findings.md", "- a finding\n")
-        put(mine, "notes/runs/r1.tsv", "a\t1\n")
-        put(mine, "work/summary.md", "what the export showed\n")
-        put(mine, "lfs/.gitattributes", "*.pt filter=lfs diff=lfs merge=lfs -text\n")
-        put(mine, "lfs/model.md", "a model card\n")
-        put(mine, "models/plugin/p4-x/.claude-plugin/plugin.json", json.dumps({"name": "p4-x"}))
-        put(mine, "models/plugin/p4-x/hooks/hooks.json", "{}\n")
-        put(mine, "models/plugin/p4-x/README.md", "a plugin\n")
-        put(mine, "models/notes.md", "- which model\n")
-        notes = [f"{rel}/{n}" for n in (".gitignore", "models/notes.md", "notes/findings.md", "notes/runs/r1.tsv",
-                                        "plan.md", "work/summary.md")]
-        copies = sorted(f"{rel}/{n}" for n in ("lfs/.gitattributes", "lfs/model.md", f"work/at-{rev}/.gitignore",
-                                              f"work/at-{rev}/README.md", f"work/at-{rev}/pkg/mod.py",
-                                              f"work/at-{rev}/pkg/data.json", "models/plugin/p4-x/README.md",
-                                              "models/plugin/p4-x/.claude-plugin/plugin.json",
-                                              "models/plugin/p4-x/hooks/hooks.json"))
-
-        assert run("tmp-sweep") == "", "tmp-sweep spoke"
-        staged = git(p4, "diff", "--cached", "--name-only").split()
-        print(f"test_scratchpad.py: staged after tmp-sweep: {len(staged)} paths, "
-              f"{len(set(staged) & set(copies))} of them files of a copy or export of a repository")
-        assert staged == notes, staged
-        # tmp-close commits the notes alone and removes them; the copies stay on disk, in no commit
-        assert run("tmp-close") == "", "tmp-close spoke"
-        assert sorted(git(p4, "show", "--name-only", "--format=", "HEAD~1").split()) == notes, "the kept commit"
-        assert all(os.path.isfile(os.path.join(p4, *c.split("/"))) for c in copies), "a copy was removed"
-        assert not os.path.exists(os.path.join(mine, "plan.md")), "a committed note is still on disk"
-    finally:
-        for d in (root, temp):
-            wipe(d)
-    print("test_scratchpad.py: tmp export cases green")
-
-
-def tmp_staged_copy_cases():
-    """Files of a copy or export of a repository that an earlier turn end staged leave the index again, so tmp-close
-    commits and removes the notes alone and the copy stays on disk in no commit. Before tmp-sweep left such a copy out
-    it staged the copy whole, and here the copy is what kept the scratchpad directory over tmp_max_files. The dry run of
-    ended-sweep counts the notes alone too. A file of a copy that a commit already holds stays in the index at a turn
-    end, so no deletion of it is staged."""
-    if not shutil.which("git"):
-        print("test_scratchpad.py: tmp staged copy cases skipped, no git on PATH")
-        return
-    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-staged-")
-    temp = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-temp-")
-    sid, other = "5555eeee-0000-4000-8000-000000000005", "6666ffff-0000-4000-8000-000000000006"
-    tmp_env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp, "CLAUDE_CONFIG_DIR": temp}
-    p4 = os.path.join(root, ".claude", "p4")
-    mine, rel = os.path.join(p4, "temportal", "tmp", sid), f"temportal/tmp/{sid}"
-    theirs, orel = os.path.join(p4, "temportal", "tmp", other), f"temportal/tmp/{other}"
-
-    def git(*args):
-        r = subprocess.run(["git", "-C", p4, "-c", "user.name=t", "-c", "user.email=t@t"] + list(args),
-                           capture_output=True, text=True)
-        assert r.returncode == 0, (args, r.stderr)
-        return r.stdout
-
-    def run(sub, s):
-        return run_sub(sub, {"cwd": root, "session_id": s}, tmp_env, CLAUDE_PROJECT_DIR=root)
-
-    try:
-        os.makedirs(p4)
-        git("init", "-q")
-        put(p4, "p4.json", json.dumps({"scratchpad": {"tmp_max_files": 3}}))
-        put(p4, "first.md", "first\n")
-        git("add", "first.md")
-        git("commit", "-q", "-m", "first")
-        # with the three files of the export the five files are over the cap of three, and the two notes are under it
-        put(mine, "plan.md", "- a plan\n")
-        put(mine, "notes/findings.md", "- a finding\n")
-        put(mine, "work/export/.gitignore", "__pycache__/\n")
-        put(mine, "work/export/README.md", "a repository\n")
-        put(mine, "work/export/pkg/mod.py", "x = 1\n")
-        notes = [f"{rel}/{n}" for n in ("notes/findings.md", "plan.md")]
-        copy = [f"{rel}/work/export/{n}" for n in (".gitignore", "README.md", "pkg/mod.py")]
-        git("add", "--", *copy)                 # an earlier turn end staged the export whole
-        # the session is archived and quiet, so the dry run of ended-sweep plans its close first
-        put(os.path.join(p4, "phi", "sessions", "local_5"), "session.json",
-            json.dumps({"sessionId": "local_5", "cliSessionIds": [sid], "archived": "2026-11-16 20:00"}))
-        for d, _dirs, names in os.walk(mine):
-            age(d, *[os.path.join(d, n) for n in names])
-        dry = subprocess.run([sys.executable, "-I", SCRIPT, "ended-sweep", "--dry-run", "--root", root],
-                             capture_output=True, stdin=subprocess.DEVNULL, timeout=120, env=env_with(tmp_env))
-        row = "".join(x for x in dry.stdout.decode("utf-8", "replace").splitlines() if x.startswith(f"- {rel}/ "))
-        planned = re.search(r"would commit \d+, would remove \d+", row)
-        shown = planned.group(0) if planned else f"no plan in {row!r}"
-        assert run("tmp-close", sid) == "", "tmp-close spoke"
-        kept = git("log", "--format=", "--name-only", "--grep", "kept before its removal").split()
-        print(f"test_scratchpad.py: ended-sweep --dry-run: {shown}; committed by tmp-close: {len(kept)} paths, "
-              f"{len(set(kept) & set(copy))} of them files of the copy an earlier turn end staged")
-        assert git("log", "--all", "--format=", "--name-only", "--", *copy).split() == [], "a commit holds the copy"
-        assert all(os.path.isfile(os.path.join(p4, *c.split("/"))) for c in copy), "a file of the copy was removed"
-        assert git("ls-files", "--", *copy) == "", "the copy is still in the index"
-        assert sorted(kept) == notes, kept
-        assert not os.path.exists(os.path.join(mine, "plan.md")), "a committed note is still on disk"
-        assert planned and planned.group(0) == "would commit 2, would remove 2", row
-
-        # a file of a copy that a commit holds keeps its place in the index, and only the staged ones leave it
-        put(theirs, "export/.gitattributes", "*.pt filter=lfs\n")
-        put(theirs, "export/held.md", "held by a commit\n")
-        git("add", "--", f"{orel}/export/held.md")
-        git("commit", "-q", "-m", "held")
-        put(theirs, "export/new.md", "staged by an earlier turn end\n")
-        git("add", "--", f"{orel}/export/.gitattributes", f"{orel}/export/new.md")
-        put(theirs, "note.md", "a note\n")
-        assert run("tmp-sweep", other) == "", "tmp-sweep spoke"
-        assert git("diff", "--cached", "--name-status", "--", orel).splitlines() == [f"A\t{orel}/note.md"], \
-            git("diff", "--cached", "--name-status", "--", orel)
-        assert git("ls-files", "--", f"{orel}/export").split() == [f"{orel}/export/held.md"], "held.md left the index"
-        # that held file edited on disk: tmp-close removes the note and commits no change to the file of the copy
-        put(theirs, "export/held.md", "edited on disk\n")
-        # the dry run of ended-sweep names the same removals the real close makes: the note alone
-        put(os.path.join(p4, "phi", "sessions", "local_6"), "session.json",
-            json.dumps({"sessionId": "local_6", "cliSessionIds": [other], "archived": "2026-11-16 20:00"}))
-        for d, _dirs, names in os.walk(theirs):
-            age(d, *[os.path.join(d, n) for n in names])
-        dry = subprocess.run([sys.executable, "-I", SCRIPT, "ended-sweep", "--dry-run", "--root", root],
-                             capture_output=True, stdin=subprocess.DEVNULL, timeout=120, env=env_with(tmp_env))
-        row = "".join(x for x in dry.stdout.decode("utf-8", "replace").splitlines() if x.startswith(f"- {orel}/ "))
-        on_disk = {n for n in os.listdir(theirs)} | {"export/" + n for n in os.listdir(os.path.join(theirs, "export"))}
-        assert run("tmp-close", other) == "", "tmp-close spoke"
-        gone = sorted(n for n in on_disk if not os.path.exists(os.path.join(theirs, *n.split("/"))))
-        assert f"would remove {len(gone)}" in row, f"the dry run planned {row!r}, the close removed {gone}"
-        changes = git("log", "--format=%s", "--", f"{orel}/export/held.md").splitlines()
-        assert changes == ["held"], f"tmp-close changed the copy's file in history: {changes}"
-        assert git("show", f"HEAD:{orel}/export/held.md") == "held by a commit\n", "tmp-close committed the edit"
-        assert not os.path.exists(os.path.join(theirs, "note.md")), "the note was not removed"
-    finally:
-        for d in (root, temp):
-            wipe(d)
-    print("test_scratchpad.py: tmp staged copy cases green")
-
-
-def tmp_close_bare_store_cases():
-    """tmp-close commits and removes a session's files in a store with no git identity and a pre-commit hook that
-    exits 1."""
-    if not shutil.which("git"):
-        print("test_scratchpad.py: bare store cases skipped, no git on PATH")
-        return
-    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-bare-")
-    temp = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-temp-")
-    sid = "7777aaaa-0000-4000-8000-000000000007"
-    empty = os.path.join(temp, "empty.gitconfig")
-    put(temp, "empty.gitconfig", "")
-    tmp_env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp, "CLAUDE_CONFIG_DIR": temp, "GIT_CONFIG_GLOBAL": empty,
-               "GIT_CONFIG_NOSYSTEM": "1"}
-    p4 = os.path.join(root, ".claude", "p4")
-    mine = os.path.join(p4, "temportal", "tmp", sid)
-    try:
-        os.makedirs(p4)
-        subprocess.run(["git", "-C", p4, "init", "-q"], check=True, capture_output=True)
-        put(p4, "first.md", "first\n")
-        subprocess.run(["git", "-C", p4, "add", "first.md"], check=True, capture_output=True)
-        subprocess.run(["git", "-C", p4, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "first"],
-                       check=True, capture_output=True)
-        put(os.path.join(p4, ".git", "hooks"), "pre-commit", "#!/bin/sh\nexit 1\n")
-        os.chmod(os.path.join(p4, ".git", "hooks", "pre-commit"), 0o755)
-        put(mine, "plan.md", "- a plan\n")
-        assert run_sub("tmp-close", {"cwd": root, "session_id": sid}, tmp_env, CLAUDE_PROJECT_DIR=root) == ""
-        log = subprocess.run(["git", "-C", p4, "log", "--format=%s"], capture_output=True, text=True).stdout
-        assert not os.path.exists(os.path.join(mine, "plan.md")), f"the note was not closed\n{log}"
-        assert "kept before its removal" in log, log
-    finally:
-        for d in (root, temp):
-            wipe(d)
-    print("test_scratchpad.py: bare store cases green")
-
-
-def tmp_close_no_gc_cases():
-    """tmp-close's two commits run no automatic git maintenance and no hook of the store, so a store over gc.auto's
-    loose-object threshold does not run `gc --auto`, nor Git LFS its `post-commit`, inside the 1.5-second SessionEnd
-    budget. The fixture sets gc.auto to 1 and keeps
-    maintenance in the foreground, so any automatic gc packs the store's loose objects before the hook returns."""
-    if not shutil.which("git"):
-        print("test_scratchpad.py: no gc close cases skipped, no git on PATH")
-        return
-    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-nogc-")
-    sid = "abab1212-0000-4000-8000-0000000000ab"
-    p4 = os.path.join(root, ".claude", "p4")
-    mine = os.path.join(p4, "temportal", "tmp", sid)
-    try:
-        os.makedirs(p4)
-        for args in (["init", "-q"], ["config", "user.name", "t"], ["config", "user.email", "t@t"],
-                     ["config", "gc.auto", "1"], ["config", "gc.autoDetach", "false"],
-                     ["config", "maintenance.autoDetach", "false"]):
-            subprocess.run(["git", "-C", p4] + args, check=True, capture_output=True)
-        put(p4, "first.md", "first\n")
-        subprocess.run(["git", "-C", p4, "add", "first.md"], check=True, capture_output=True)
-        subprocess.run(["git", "-C", p4, "-c", "gc.auto=0", "commit", "-q", "-m", "first"], check=True,
-                       capture_output=True)
-        # gc --auto counts loose objects in objects/17 alone, so these 2,000 blobs, the same every run, put enough there
-        blobs = os.path.join(root, "blobs")
-        names = [put(blobs, f"b{i}.txt", f"loose blob {i}\n") or os.path.join(blobs, f"b{i}.txt") for i in range(2000)]
-        subprocess.run(["git", "-C", p4, "hash-object", "-w", "--stdin-paths"], input="\n".join(names).encode(),
-                       check=True, capture_output=True)
-        assert len(os.listdir(os.path.join(p4, ".git", "objects", "17"))) >= 2, "the fixture is under gc.auto"
-        ran = os.path.join(root, "post-commit-ran")
-        put(os.path.join(p4, ".git", "hooks"), "post-commit", f"#!/bin/sh\necho ran > '{ran.replace(os.sep, '/')}'\n")
-        os.chmod(os.path.join(p4, ".git", "hooks", "post-commit"), 0o755)
-        put(mine, "plan.md", "- a plan\n")
-        assert run_sub("tmp-close", {"cwd": root, "session_id": sid}, CLAUDE_PROJECT_DIR=root) == ""
-        log = subprocess.run(["git", "-C", p4, "log", "--format=%s"], capture_output=True, text=True).stdout
-        assert "kept before its removal" in log and not os.path.exists(os.path.join(mine, "plan.md")), log
-        assert not os.path.exists(ran), "the close ran the store's post-commit hook"
-        packs = [n for n in os.listdir(os.path.join(p4, ".git", "objects", "pack")) if n.endswith(".pack")]
-        assert packs == [], f"the close ran an automatic gc, which packed the store: {packs}"
-    finally:
-        wipe(root)
-    print("test_scratchpad.py: no gc close cases green")
-
-
-def tmp_close_rename_cases():
-    """A committed file renamed inside the session folder is closed whole: no staged deletion of its old path is
-    left in the index for a later commit."""
-    if not shutil.which("git"):
-        print("test_scratchpad.py: rename close cases skipped, no git on PATH")
-        return
-    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-rename-")
-    sid = "eeee5555-0000-4000-8000-00000000000e"
-    p4 = os.path.join(root, ".claude", "p4")
-    mine, rel = os.path.join(p4, "temportal", "tmp", sid), f"temportal/tmp/{sid}"
-
-    def git(*args):
-        return subprocess.run(["git", "-C", p4] + list(args), check=True, capture_output=True, text=True).stdout
-
-    try:
-        os.makedirs(p4)
-        for args in (["init", "-q"], ["config", "user.name", "t"], ["config", "user.email", "t@t"]):
-            git(*args)
-        put(mine, "old.md", "a note long enough to be seen as the same file after its rename\n")
-        git("add", "-A")
-        git("commit", "-q", "-m", "an earlier turn end")
-        os.rename(os.path.join(mine, "old.md"), os.path.join(mine, "new.md"))
-        assert run_sub("tmp-close", {"cwd": root, "session_id": sid}, None, CLAUDE_PROJECT_DIR=root) == ""
-        left = git("diff", "--cached", "--name-status", "--no-renames")
-        assert left == "", f"the close left staged changes for a later commit:\n{left}"
-        assert git("ls-files", "--", rel) == "", "a path of the closed folder is still tracked"
-    finally:
-        wipe(root)
-    print("test_scratchpad.py: rename close cases green")
-
-
-def tmp_close_cut_cases():
-    """A close stopped between its commits, here in the middle of its deletions, leaves the next start of that
-    session every file the first commit holds."""
-    if not shutil.which("git"):
-        print("test_scratchpad.py: cut close cases skipped, no git on PATH")
-        return
-    sys.path.insert(0, os.path.dirname(SCRIPT))
-    import scratchpad
-    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-cut-")
-    sid = "8888bbbb-0000-4000-8000-000000000008"
-    p4 = os.path.join(root, ".claude", "p4")
-    mine = os.path.join(p4, "temportal", "tmp", sid)
-
-    class Cut(BaseException):
-        pass
-
-    real_remove, calls = os.remove, []
-
-    def cut_remove(path):
-        calls.append(path)
-        if len(calls) == 2:
-            raise Cut()
-        real_remove(path)
-
-    try:
-        os.makedirs(p4)
-        for args in (["init", "-q"], ["config", "user.name", "t"], ["config", "user.email", "t@t"]):
-            subprocess.run(["git", "-C", p4] + args, check=True, capture_output=True)
-        names = ("a.md", "b.md", "c.md")
-        for n in names:
-            put(mine, n, f"{n}\n")
-        scratchpad.os.remove = cut_remove
-        try:
-            scratchpad.close_tmp(p4, sid)
-            raise AssertionError("the close was not cut")
-        except Cut:
-            pass
-        finally:
-            scratchpad.os.remove = real_remove
-        scratchpad.restore_tmp(p4, sid)
-        back = [n for n in names if os.path.isfile(os.path.join(mine, n))]
-        assert back == list(names), f"after a cut close the next start got back {back} of {list(names)}"
-    finally:
-        wipe(root)
-    print("test_scratchpad.py: cut close cases green")
-
-
-def archived_by_phi_cases():
-    """A session p4-phi records as archived through its own code, phi.ensure_session and relay.gone, is read as
-    archived by archived_ids, its app id and its CLI id both, so a change of p4-phi's record format fails here."""
-    scripts = os.path.join(os.path.dirname(os.path.dirname(HERE)), "p4-phi", "scripts")
-    if not os.path.isfile(os.path.join(scripts, "phi.py")):
-        print("test_scratchpad.py: archived by p4-phi cases skipped, no p4-phi beside this plugin")
-        return
-    home = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-phi-")
-    saved = list(sys.path)
-    try:
-        sys.path[:0] = [scripts, HERE]
-        import phi
-        import relay
-        import scratchpad
-        sid, cli = "local_9999cccc-0000-4000-8000-000000000009", "9999cccc-0000-4000-8000-000000000009"
-        s = phi.ensure_session(home, sid, rec={}, cli=cli)
-        assert scratchpad.archived_ids(home) == set(), "a live session was read as archived"
-        real = relay.archived_in_app
-        relay.archived_in_app = lambda _s: True        # the app shows it archived
-        try:
-            assert relay.gone(home, s)
-        finally:
-            relay.archived_in_app = real
-        got = scratchpad.archived_ids(home)
-        assert {sid, cli} <= got, f"archived_ids read {got} from p4-phi's own record"
-    finally:
-        sys.path[:] = saved
-        wipe(home)
-    print("test_scratchpad.py: archived by p4-phi cases green")
-
-
-def archived_lists_live_cases():
-    """An archived record whose cliSessionIds also lists a live session's transcript id does not end that session: its
-    scratchpad directory, quiet for hours, is kept through tmp-link at a start and through ended-sweep, while the
-    archived session's own directory is closed by each."""
-    if not shutil.which("git") or not shutil.which("sh"):
-        print("test_scratchpad.py: archived lists live cases skipped, no git or sh on PATH")
-        return
-    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-listed-")
-    live, gone = "1a1a1a1a-0000-4000-8000-0000000001a1", "2b2b2b2b-0000-4000-8000-0000000002b2"
-    p4 = os.path.join(root, ".claude", "p4")
-    tmp = {k: os.path.join(p4, "temportal", "tmp", s) for k, s in (("live", live), ("gone", gone))}
-    temp, own = os.path.join(root, "temp"), "4d4d4d4d-0000-4000-8000-0000000004d4"
-    env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp, "CLAUDE_CONFIG_DIR": os.path.join(root, ".config")}
-
-    def git(*args):
-        subprocess.run(["git", "-C", p4] + list(args), check=True, capture_output=True)
-
-    def quiet():
-        for k in tmp:
-            put(tmp[k], "work.md", f"{k} work\n")
-            for d, _dirs, files in os.walk(tmp[k]):
-                age(d, *[os.path.join(d, n) for n in files], hours=3)
-
-    def kept(where):
-        assert os.path.isfile(os.path.join(tmp["live"], "work.md")), f"{where} closed the live session's folder"
-        assert not os.path.exists(os.path.join(tmp["gone"], "work.md")), f"{where} kept the archived session's folder"
-
-    try:
-        os.makedirs(p4)
-        for args in (["init", "-q"], ["config", "user.name", "t"], ["config", "user.email", "t@t"]):
-            git(*args)
-        put(p4, "first.md", "first\n")
-        git("add", "first.md")
-        git("commit", "-q", "-m", "first")
-        # the live session's own record, not archived, and an archived record that lists it beside its own id
-        put(os.path.join(p4, "phi", "sessions", live), "session.json",
-            json.dumps({"sessionId": live, "cliSessionIds": [live]}))
-        put(os.path.join(p4, "phi", "sessions", "local_3c3c3c3c-0000-4000-8000-0000000003c3"), "session.json",
-            json.dumps({"sessionId": "local_3c3c3c3c-0000-4000-8000-0000000003c3", "cliSessionIds": [gone, live],
-                        "archived": "2026-11-17 08:00"}))
-        quiet()
-        os.makedirs(os.path.join(temp, "claude", "30ad6e18862a20e8", own, "scratchpad"))
-        run_sub("tmp-link", {"cwd": root, "session_id": own}, env, CLAUDE_PROJECT_DIR=root)
-        kept("tmp-link at a start")
-        quiet()
-        r = subprocess.run([sys.executable, "-I", SCRIPT, "ended-sweep", "--root", root], capture_output=True,
-                           stdin=subprocess.DEVNULL, timeout=120, env=env_with(env))
-        assert r.returncode == 0, r
-        kept("ended-sweep")
-    finally:
-        wipe(root)
-    print("test_scratchpad.py: archived lists live cases green")
-
-
-def quiet_sweep_cases():
-    """A tmp-sweep with nothing new under the session's scratchpad directory since the last stage runs no `git add`,
-    while a new file, an edited one and a removed one are each staged by the next tmp-sweep."""
-    if not shutil.which("git"):
-        print("test_scratchpad.py: quiet stage cases skipped, no git on PATH")
-        return
-    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-quiet-")
-    sid = "6f6f6f6f-0000-4000-8000-0000000006f6"
-    p4 = os.path.join(root, ".claude", "p4")
-    mine, rel = os.path.join(p4, "temportal", "tmp", sid), f"temportal/tmp/{sid}"
-    trace = os.path.join(root, "git-trace.txt")
-    env = {"CLAUDE_CONFIG_DIR": os.path.join(root, ".config"), "GIT_TRACE": trace}
-
-    def git(*args):
-        return subprocess.run(["git", "-C", p4] + list(args), check=True, capture_output=True, text=True).stdout
-
-    def sweep():
-        if os.path.exists(trace):
-            os.remove(trace)
-        run_sub("tmp-sweep", {"cwd": root, "session_id": sid}, env, CLAUDE_PROJECT_DIR=root)
-        with open(trace, encoding="utf-8", errors="replace") as f:
-            return [x for x in f if "trace: built-in: git" in x and " add " in x]
-
-    def staged():
-        return sorted(git("diff", "--cached", "--name-only", "--", rel).split())
-
-    try:
-        os.makedirs(p4)
-        for args in (["init", "-q"], ["config", "user.name", "t"], ["config", "user.email", "t@t"]):
-            git(*args)
-        put(p4, "first.md", "first\n")
-        git("add", "first.md")
-        git("commit", "-q", "-m", "first")
-        put(mine, "a.md", "a\n")
-        put(mine, "sub/b.md", "b\n")
-        assert sweep(), "the first tmp-sweep staged nothing"
-        assert staged() == [f"{rel}/a.md", f"{rel}/sub/b.md"], staged()
-        adds = sweep()
-        assert adds == [], f"a quiet tmp-sweep ran git add:\n{''.join(adds)}"
-        put(mine, "sub/c.md", "c\n")
-        assert sweep() and f"{rel}/sub/c.md" in staged(), "a new file was not staged"
-        put(mine, "a.md", "a, longer now\n")
-        sweep()
-        assert git("show", f":{rel}/a.md") == "a, longer now\n", "an edited file was not staged"
-        os.remove(os.path.join(mine, "sub", "b.md"))
-        sweep()
-        assert f"{rel}/sub/b.md" not in staged(), "a removed file stayed staged"
-        assert sweep() == [], "a quiet tmp-sweep after the removal ran git add"
-        # a write under a folder tmp_files never stages, here a .venv, leaves the turn end quiet
-        put(mine, ".venv/lib/x.py", "x = 1\n")
-        assert sweep() == [], "a write under .venv made the turn end stage"
-        # a stage that failed, here on another process's index.lock, is tried again at the next quiet turn end
-        put(mine, "d.md", "d\n")
-        lock = os.path.join(p4, ".git", "index.lock")
-        put(os.path.dirname(lock), "index.lock", "")
-        sweep()
-        os.remove(lock)
-        assert f"{rel}/d.md" not in staged(), "the fixture's lock did not stop the stage"
-        sweep()
-        assert f"{rel}/d.md" in staged(), "after a failed stage a quiet turn end staged nothing"
-        # the folder taken out of the index, as the layout move's `git rm --cached` does, is staged again
-        git("rm", "-r", "-q", "--cached", "--", rel)
-        sweep()
-        assert f"{rel}/d.md" in staged(), "a folder taken out of the index was not staged again"
-        # a file the store's .gitignore or info/exclude stops ignoring is staged at the next turn end
-        for ignores, ext in ((os.path.join(p4, ".gitignore"), "ign"), (os.path.join(p4, ".git", "info", "exclude"),
-                                                                          "skip")):
-            put(os.path.dirname(ignores), os.path.basename(ignores), f"*.{ext}\n")
-            put(mine, f"e.{ext}", "e\n")
-            sweep()
-            assert f"{rel}/e.{ext}" not in staged(), f"*.{ext} was staged while ignored"
-            put(os.path.dirname(ignores), os.path.basename(ignores), "")
-            sweep()
-            assert f"{rel}/e.{ext}" in staged(), f"*.{ext} was not staged once {ignores} stopped ignoring it"
-        mark = os.path.join(p4, ".git", "p4-tmp-staged", sid)
-        assert os.path.isfile(mark) and os.path.getsize(mark) < 200, "the mark is missing or holds more than a digest"
-        run_sub("tmp-close", {"cwd": root, "session_id": sid}, env, CLAUDE_PROJECT_DIR=root)
-        assert not os.path.exists(mark), "the mark was left after the folder closed"
-    finally:
-        wipe(root)
-    print("test_scratchpad.py: quiet stage cases green")
-
-
-def quiet_sweep_mark_cases():
-    """tmp-sweep's mark goes with its folder: a close of an empty folder removes it, and so does a start that removes
-    another session's empty folder. A digest that could not read the index is never kept, so two such turn ends in a
-    row both stage. In a store that is a worktree, info/exclude is read from the common git folder."""
-    if not shutil.which("git"):
-        print("test_scratchpad.py: quiet stage mark cases skipped, no git on PATH")
-        return
-    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-mark-")
-    sid, other = "7a7a7a7a-0000-4000-8000-0000000007a7", "8b8b8b8b-0000-4000-8000-0000000008b8"
-    p4 = os.path.join(root, ".claude", "p4")
-    temp = os.path.join(root, "temp")
-    env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp, "CLAUDE_CONFIG_DIR": os.path.join(root, ".config")}
-
-    def git(where, *args):
-        return subprocess.run(["git", "-C", where] + list(args), check=True, capture_output=True, text=True).stdout
-
-    def mark(s, store=p4):
-        gd = git(store, "rev-parse", "--absolute-git-dir").strip()
-        return os.path.join(gd, "p4-tmp-staged", s)
-
-    def store(at):
-        os.makedirs(at)
-        for args in (["init", "-q"], ["config", "user.name", "t"], ["config", "user.email", "t@t"]):
-            git(at, *args)
-        put(at, "first.md", "first\n")
-        git(at, "add", "first.md")
-        git(at, "commit", "-q", "-m", "first")
-
-    saved, env_saved = list(sys.path), dict(os.environ)
-    try:
-        store(p4)
-        # a close of an empty folder removes its mark
-        put(os.path.join(p4, "temportal", "tmp", sid), "a.md", "a\n")
-        run_sub("tmp-sweep", {"cwd": root, "session_id": sid}, env, CLAUDE_PROJECT_DIR=root)
-        assert os.path.isfile(mark(sid)), "tmp-sweep kept no mark"
-        os.remove(os.path.join(p4, "temportal", "tmp", sid, "a.md"))
-        git(p4, "rm", "-q", "--cached", "--", f"temportal/tmp/{sid}/a.md")
-        run_sub("tmp-close", {"cwd": root, "session_id": sid}, env, CLAUDE_PROJECT_DIR=root)
-        assert not os.path.exists(mark(sid)), "the close of an empty folder left its mark"
-        # a start that removes another session's empty folder removes its mark
-        empty = os.path.join(p4, "temportal", "tmp", other)
-        os.makedirs(empty)
-        put(os.path.dirname(mark(other)), other, "a digest\n")
-        age(empty, hours=3)
-        os.makedirs(os.path.join(temp, "claude", "30ad6e18862a20e8", sid, "scratchpad"))
-        run_sub("tmp-link", {"cwd": root, "session_id": sid}, env, CLAUDE_PROJECT_DIR=root)
-        assert not os.path.exists(empty), "the start left another session's empty folder"
-        assert not os.path.exists(mark(other)), "the start removed the empty folder but left its mark"
-        # an index that cannot be read leaves no mark, so the next turn end stages again
-        sys.path[:0] = [os.path.join(os.path.dirname(os.path.dirname(HERE)), "p4-phi", "scripts"), HERE]
-        import scratchpad
-        os.environ.update(env, CLAUDE_PROJECT_DIR=root)
-        put(os.path.join(p4, "temportal", "tmp", sid), "b.md", "b\n")
-        real, adds = scratchpad.git_p4, []
-
-        def failing(store_dir, *args, **kw):
-            if args[:2] == ("ls-files", "-s"):
-                return None
-            if args[:1] == ("add",):
-                adds.append(args)
-            return real(store_dir, *args, **kw)
-        scratchpad.git_p4 = failing
-        try:
-            for turn in (1, 2):
-                scratchpad.cmd_tmp_sweep({"cwd": root, "session_id": sid})
-                assert not os.path.exists(mark(sid)), f"turn end {turn} kept a mark it could not read the index for"
-                assert adds, f"turn end {turn} skipped the stage with an unreadable index"
-                adds.clear()
-        finally:
-            scratchpad.git_p4 = real
-        # a store that is a worktree reads info/exclude from the common git folder
-        main = os.path.join(root, "main")
-        store(main)
-        wt = os.path.join(root, "wt", ".claude", "p4")
-        git(main, "worktree", "add", "-q", wt)
-        common = os.path.join(main, ".git", "info", "exclude")
-        put(os.path.dirname(common), "exclude", "*.wt\n")
-        mine = os.path.join(wt, "temportal", "tmp", sid)
-        put(mine, "e.wt", "e\n")
-        payload = {"cwd": os.path.join(root, "wt"), "session_id": sid}
-        run_sub("tmp-sweep", payload, env, CLAUDE_PROJECT_DIR=payload["cwd"])
-        listed = git(wt, "diff", "--cached", "--name-only")
-        assert "e.wt" not in listed, listed
-        put(os.path.dirname(common), "exclude", "")
-        run_sub("tmp-sweep", payload, env, CLAUDE_PROJECT_DIR=payload["cwd"])
-        listed = git(wt, "diff", "--cached", "--name-only")
-        assert f"temportal/tmp/{sid}/e.wt" in listed, f"the common info/exclude was not read: {listed!r}"
-    finally:
-        sys.path[:] = saved
-        os.environ.clear()
-        os.environ.update(env_saved)
-        wipe(root)
-    print("test_scratchpad.py: quiet stage mark cases green")
-
-
-def scratchpad_dir_cases():
-    """With `scratchpad_dir` on stdin pointing under a CLAUDE_CODE_TMPDIR tree, outside the system temp directory,
-    tmp-link links that path, even before its folder exists."""
-    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-dir-")
-    temp = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-temp-")
-    sid = "aaaa1111-0000-4000-8000-00000000000a"
-    moved = os.path.join(root, "moved-tmp")
-    harness = os.path.join(moved, "claude-0", "proj", sid, "scratchpad")
-    try:
-        env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp, "CLAUDE_CODE_TMPDIR": moved}
-        out = run_sub("tmp-link", {"cwd": root, "session_id": sid, "scratchpad_dir": harness}, env,
-                      CLAUDE_PROJECT_DIR=root)
-        put(harness, "note.md", "a note\n")
-        target = os.path.join(root, ".claude", "p4", "temportal", "tmp", sid, "note.md")
-        assert os.path.isfile(target), f"the scratchpad_dir path was not linked: {out!r}"
-        # a scratchpad_dir that is not <session>/scratchpad is never emptied into the store
-        for other in (os.path.join(root, "work"), os.path.join(root, "elsewhere", sid, "notes")):
-            put(other, "keep.md", "not the scratchpad\n")
-            run_sub("tmp-link", {"cwd": root, "session_id": sid, "scratchpad_dir": other}, env, CLAUDE_PROJECT_DIR=root)
-            assert os.path.isfile(os.path.join(other, "keep.md")) and not is_link(other), f"{other} was moved"
-    finally:
-        for d in (root, temp):
-            wipe(d)
-    print("test_scratchpad.py: scratchpad_dir cases green")
-
-
-def dangling_own_link_cases():
-    """A session whose scratchpad link dangles to `.claude/p4/tmp/<sid>`, the older layout's place, while
-    `temportal/tmp/<sid>` exists gets a working link at its start, not a foreign notice."""
-    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-dangling-")
-    sid = "cccc3333-0000-4000-8000-00000000000c"
-    harness = os.path.join(root, "harness", sid, "scratchpad")
-    old = os.path.join(root, ".claude", "p4", "tmp", sid)
-    target = os.path.join(root, ".claude", "p4", "temportal", "tmp", sid)
-    try:
-        os.makedirs(old)
-        link(harness, old)
-        shutil.rmtree(os.path.join(root, ".claude", "p4", "tmp"))
-        put(target, "kept.md", "kept\n")
-        out = run_sub("tmp-link", {"cwd": root, "session_id": sid, "scratchpad_dir": harness}, None,
-                      CLAUDE_PROJECT_DIR=root)
-        assert "does not reach" not in out, f"the session's own dangling link was called foreign: {out}"
-        assert os.path.isfile(os.path.join(harness, "kept.md")), f"the link was not repaired: {out}"
-    finally:
-        if is_link(harness):
-            unlink(harness)
-        wipe(root)
-    print("test_scratchpad.py: dangling own link cases green")
-
-
-def quiet_start_cases():
-    """An ordinary start, a new session whose scratchpad holds nothing yet, is linked without a word: the
-    SessionStart characters of tmp-link are counted and must be 0."""
-    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-quiet-")
-    sid = "dddd4444-0000-4000-8000-00000000000d"
-    harness = os.path.join(root, "harness", sid, "scratchpad")
-    try:
-        os.makedirs(harness)
-        out = run_sub("tmp-link", {"cwd": root, "session_id": sid, "scratchpad_dir": harness}, None,
-                      CLAUDE_PROJECT_DIR=root)
-        print(f"test_scratchpad.py: an ordinary start printed {len(out)} characters")
-        assert is_link(harness), "the scratchpad was not linked"
-        assert out == "", f"an ordinary start printed {len(out)} characters: {out}"
-    finally:
-        if is_link(harness):
-            unlink(harness)
-        wipe(root)
-    print("test_scratchpad.py: quiet start cases green")
 
 
 def event_hooks(event):
@@ -1326,19 +276,17 @@ def event_hooks(event):
 
 
 def parallel_hooks_cases():
-    """The five SessionStart hooks run at once, as Claude Code runs the hooks of one event, on a store with the older
-    layout leave one moved layout, no layout lock and one p4.json that parses; the two SessionEnd hooks run at once
-    on that small store finish within the 1.5-second budget of a SessionEnd."""
+    """The SessionStart hooks run at once, as Claude Code runs the hooks of one event, on a store with the older layout
+    leave one moved layout, no layout lock and one p4.json that parses; the SessionEnd hooks run at once on that small
+    store finish within the 1.5-second budget of a SessionEnd."""
     sh = shutil.which("sh")
     if not sh or not shutil.which("git"):
         print("test_scratchpad.py: parallel hooks cases skipped, no sh or git on PATH")
         return
-    import time
     root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-parallel-")
     sid = "bbbb2222-0000-4000-8000-00000000000b"
     p4 = os.path.join(root, ".claude", "p4")
-    old = {"memory/MEMORY.md": "- [a](a.md) — a\n", "scratchpad/plan.md": "- a plan\n",
-           f"tmp/{sid}/n.md": "a note\n", "src/probe.py": "print(1)\n"}
+    old = {"memory/MEMORY.md": "- [a](a.md) — a\n", "scratchpad/plan.md": "- a plan\n", "src/probe.py": "print(1)\n"}
     try:
         os.makedirs(p4)
         for args in (["init", "-q"], ["config", "user.name", "t"], ["config", "user.email", "t@t"]):
@@ -1366,7 +314,7 @@ def parallel_hooks_cases():
         assert not os.path.exists(os.path.join(p4, ".layout.lock")), "the layout lock was left"
         with open(os.path.join(p4, "p4.json"), encoding="utf-8") as f:
             json.load(f)
-        # the same runner started twice at once with a part that does nothing: what this machine's load costs a hook
+        # the same runner started as often at once with a part that does nothing: what this machine's load costs a hook
         idle = [c.rsplit(" ", 1)[0] + " nothing-here" for c in event_hooks("SessionEnd")]
         start = time.monotonic()
         procs = [subprocess.Popen([sh, "-c", c], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -1378,224 +326,12 @@ def parallel_hooks_cases():
         at_once("SessionEnd")
         took = time.monotonic() - start
         limit = max(1.5, 3 * floor)       # the 1.5 s budget, widened only when even an idle start is slow here
-        print(f"test_scratchpad.py: the two SessionEnd hooks at once took {took * 1000:.0f} ms, two idle starts "
+        print(f"test_scratchpad.py: the SessionEnd hooks at once took {took * 1000:.0f} ms, as many idle starts "
               f"{floor * 1000:.0f} ms, limit {limit * 1000:.0f} ms")
         assert took <= limit, f"the SessionEnd hooks took {took:.2f} s, over {limit:.2f} s"
     finally:
         wipe(root)
     print("test_scratchpad.py: parallel hooks cases green")
-
-
-def snapshot(root):
-    """Every file under a folder with its size, time and bytes, the git index and refs included."""
-    out = {}
-    for d, _dirs, names in os.walk(root):
-        for n in names:
-            p = os.path.join(d, n)
-            with open(p, "rb") as f:
-                out[os.path.relpath(p, root)] = (os.path.getmtime(p), f.read())
-    return out
-
-
-def ended_cases():
-    """The scratchpad directory of an ended session, one p4-phi's record says is archived or one idle past the
-    limit, is committed and removed as SessionEnd would, staged and untracked files alike: committed, then gone from the
-    work tree, every file readable from the commit; an ignored file is left alone. One over the file cap stays on disk
-    whole, and is named with its file count and size by ended-sweep and once at a start. A session written to recently
-    has not ended, archived or not. `ended-sweep --dry-run` changes nothing, the index and p4.json included, and lists
-    what it would commit and remove with the counts and the top folders. A start commits and removes an archived
-    session's scratchpad directory too."""
-    if not shutil.which("git"):
-        print("test_scratchpad.py: ended cases skipped, no git on PATH")
-        return
-    root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-ended-")
-    temp = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-temp-")
-    cfg = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-cfg-")
-    names = ("arch", "idle", "live", "busy", "big", "late", "own")
-    ids = {k: f"{i}{i}{i}{i}eeee-0000-4000-8000-00000000000{i}" for i, k in enumerate(names, 1)}
-    tmp_env = {"TEMP": temp, "TMP": temp, "TMPDIR": temp, "CLAUDE_CONFIG_DIR": cfg}
-    hashdir = os.path.join(temp, "claude", "30ad6e18862a20e8")
-    p4 = os.path.join(root, ".claude", "p4")
-    tmp = {k: os.path.join(p4, "temportal", "tmp", s) for k, s in ids.items()}
-    rel = {k: f"temportal/tmp/{s}" for k, s in ids.items()}
-
-    def git(*args):
-        r = subprocess.run(["git", "-C", p4] + list(args), capture_output=True, text=True)
-        assert r.returncode == 0, (args, r.stderr)
-        return r.stdout
-
-    def old(k, hours=2):
-        for d, _dirs, files in os.walk(tmp[k]):
-            age(d, *[os.path.join(d, n) for n in files], hours=hours)
-
-    def sweep(*args):
-        r = subprocess.run([sys.executable, "-I", SCRIPT, "ended-sweep", *args, "--root", root], capture_output=True,
-                           stdin=subprocess.DEVNULL, timeout=120, env=env_with(tmp_env))
-        assert r.returncode == 0, r
-        return r.stdout.decode("utf-8", "replace").strip().splitlines()
-
-    def row(lines, k):
-        hit = [x for x in lines if x.startswith(f"- {rel[k]}/ ")]
-        return hit[0] if hit else ""
-
-    try:
-        os.makedirs(p4)
-        subprocess.run(["git", "init", "-q", p4], check=True)
-        git("config", "user.name", "t")
-        git("config", "user.email", "t@t")
-        put(p4, ".gitignore", "*.pyc\n")
-        put(p4, "p4.json", json.dumps({"scratchpad": {"tmp_max_files": 6}}))
-        put(tmp["idle"], "held.md", "held already\n")
-        git("add", ".gitignore", rel["idle"] + "/held.md")
-        git("commit", "-q", "-m", "first")
-        put(p4, "store/other.md", "another session's work, staged\n")
-        git("add", "store/other.md")
-        # p4-phi's records: arch, busy, big and late are archived; idle and live have no record
-        for n, k in enumerate(("arch", "busy", "big", "late")):
-            put(os.path.join(p4, "phi", "sessions", f"local_{n}"), "session.json",
-                json.dumps({"sessionId": f"local_{n}", "cliSessionIds": [ids[k]], "archived": "2026-11-12 20:07"}))
-        # arch: a staged file, two untracked and one the repo ignores, quiet two hours
-        put(tmp["arch"], "s.md", "staged\n")
-        git("add", rel["arch"] + "/s.md")
-        put(tmp["arch"], "u.md", "untracked\n")
-        put(tmp["arch"], "sub/deep.md", "deep\n")
-        put(tmp["arch"], "mod.pyc", "ignored\n")
-        old("arch")
-        # idle: no record, nothing written for thirty days; one file committed, one staged, one untracked
-        put(tmp["idle"], "s.md", "idle staged\n")
-        git("add", rel["idle"] + "/s.md")
-        put(tmp["idle"], "u.md", "idle untracked\n")
-        old("idle", hours=30 * 24)
-        # live has no record and busy is archived, and both were written to now: neither has ended
-        put(tmp["live"], "now.md", "live\n")
-        put(tmp["busy"], "now.md", "busy\n")
-        # big: archived, ten files against a cap of six, its transcript quiet two hours
-        for n in range(8):
-            put(tmp["big"], f"runs/r{n}.md", "run\n")
-        for n in range(2):
-            put(tmp["big"], f"smoke/s{n}.md", "smoke\n")
-        old("big")
-        put(os.path.join(cfg, "projects", "E--x"), ids["big"] + ".jsonl", "{}\n")
-        age(os.path.join(cfg, "projects", "E--x", ids["big"] + ".jsonl"))
-
-        # the dry run changes nothing and lists what it would do
-        before, head = snapshot(root), git("rev-parse", "HEAD")
-        lines = sweep("--dry-run")
-        assert snapshot(root) == before and git("rev-parse", "HEAD") == head, "the dry run changed something"
-        assert "a dry run that changed nothing" in lines[0], lines[0]
-        assert "session folders ended: 3 of 5" in lines[0], lines[0]
-        assert "would commit files: 5, would remove: 6" in lines[0], lines[0]
-        assert "folders left on disk over the cap: 1, the cap being 6 files" in lines[0], lines[0]
-        assert len(lines) == 4 and lines[1] == row(lines, "big"), f"not the fullest folder first: {lines}"
-        line = row(lines, "arch")
-        assert " archived: would commit 3, would remove 3, would leave 1 that no commit would hold" in line, line
-        assert "4 files" in line and "top folders: its own files 3, sub/ 1" in line, line
-        line = row(lines, "idle")
-        assert re.search(r" idle (29|30) days: would commit 2, would remove 3, would leave 0 ", line), line
-        line = row(lines, "big")
-        assert " archived: over the cap" in line and "nothing removed" in line and "ezexe" in line, line
-        assert "10 files" in line and "top folders: runs/ 8, smoke/ 2" in line, line
-        assert not row(lines, "live") and not row(lines, "busy"), "a session written to now was listed as ended"
-
-        # ended-sweep: committed, then gone from the work tree, every file readable from the commit
-        lines = sweep()
-        assert ("session folders ended: 3 of 5; committed files: 5, removed: 6; folders left on disk over the cap: 1"
-                in lines[0]), lines[0]
-        want = {"arch": {"s.md": "staged\n", "u.md": "untracked\n", "sub/deep.md": "deep\n"},
-                "idle": {"held.md": "held already\n", "s.md": "idle staged\n", "u.md": "idle untracked\n"}}
-        for k, files in want.items():
-            kept = re.search(r"its files are in ([0-9a-f]{8})", row(lines, k))
-            assert kept, f"{k}: no commit named in {row(lines, k)!r}"
-            for name, text in files.items():
-                assert not os.path.exists(os.path.join(tmp[k], *name.split("/"))), f"{k}/{name} is still on disk"
-                assert git("show", f"{kept.group(1)}:{rel[k]}/{name}") == text, f"{k}/{name} is not in the commit"
-        assert sorted(os.listdir(tmp["arch"])) == ["mod.pyc"], "an ignored file was not left alone"
-        assert not os.path.exists(tmp["idle"]), "an emptied scratchpad directory was left"
-        assert git("ls-files", rel["arch"], rel["idle"]).strip() == "", "the removal is not committed"
-        assert git("diff", "--cached", "--name-only").split() == ["store/other.md"], "another staged file was swept in"
-        assert "over the cap" in row(lines, "big") and "10 files" in row(lines, "big"), row(lines, "big")
-        assert sum(len(f) for _d, _s, f in os.walk(tmp["big"])) == 10, "a folder over the cap lost a file"
-        assert git("ls-files", rel["big"]).strip() == "", "a folder over the cap was staged"
-        for k in ("live", "busy"):
-            assert os.path.isfile(os.path.join(tmp[k], "now.md")), f"{k}: a session written to now was swept"
-        assert "session folders ended: 1 of 4; would commit files: 0, would remove: 0" in sweep("--dry-run")[0], \
-            "after ended-sweep only the folder over the cap is left to name"
-        assert "does not know '--bogus'" in sweep("--bogus")[0], "an unknown argument was not refused"
-
-        # a start commits and removes an archived session's scratchpad directory too, and names the folder over the
-        # cap once
-        put(tmp["late"], "s.md", "late staged\n")
-        git("add", rel["late"] + "/s.md")
-        put(tmp["late"], "u.md", "late untracked\n")
-        old("late")
-        os.makedirs(os.path.join(hashdir, ids["own"], "scratchpad"))
-        payload = {"cwd": root, "session_id": ids["own"]}
-        out = run_sub("tmp-link", payload, tmp_env, CLAUDE_PROJECT_DIR=root)
-        assert not os.path.exists(tmp["late"]), "a start left an archived session's scratchpad directory"
-        assert git("show", f"HEAD~1:{rel['late']}/u.md") == "late untracked\n", "its untracked file is in no commit"
-        assert git("show", f"HEAD~1:{rel['late']}/s.md") == "late staged\n", "its staged file is in no commit"
-        assert out.count(rel["big"] + "/ of an ended session, archived, holds 10 files") == 1, out
-        assert "over the cap of 6 files" in out and "ezexe" in out and "runs/ 8, smoke/ 2" in out, out
-        again = run_sub("tmp-link", payload, tmp_env, CLAUDE_PROJECT_DIR=root)
-        assert rel["big"] not in again, f"a folder over the cap was named twice: {again}"
-        assert sum(len(f) for _d, _s, f in os.walk(tmp["big"])) == 10, "a start removed from a folder over the cap"
-    finally:
-        p = os.path.join(hashdir, ids["own"], "scratchpad")
-        if os.path.lexists(p) and is_link(p):
-            unlink(p)
-        for d in (root, temp, cfg):
-            wipe(d)
-    print("test_scratchpad.py: ended cases green")
-
-
-def move_cases():
-    """A folder that cannot be renamed into the scratchpad directory, as from the temp drive to the project's, is
-    copied and removed with its read-only files, so a scratchpad holding a clone still ends as the link; a copy that
-    fails is taken back and the folder stays where it was."""
-    import stat
-    sys.path.insert(0, HERE)
-    import scratchpad as sp
-    base = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-move-")
-    rename, copytree = os.rename, shutil.copytree
-
-    def no_rename(*_a, **_k):
-        raise OSError("another drive")
-
-    def half_copy(src, dest, **_k):
-        os.makedirs(dest)
-        raise shutil.Error("the copy stopped")
-
-    try:
-        harness, target = os.path.join(base, "temp", "sid", "scratchpad"), os.path.join(base, "p4", "tmp", "sid")
-        obj = os.path.join(harness, "clone", ".git", "objects", "08")
-        put(obj, "609f44", "object\n")
-        os.chmod(os.path.join(obj, "609f44"), stat.S_IREAD)
-        put(harness, "note.md", "a note\n")
-        os.makedirs(target)
-        os.rename = no_rename
-        try:
-            shutil.copytree = half_copy
-            assert sp.move_into(harness, target, "t") == ["note.md"], "a folder whose copy failed counted as moved"
-            assert os.path.isfile(os.path.join(obj, "609f44")), "a folder whose copy failed did not stay"
-            assert not os.path.exists(os.path.join(target, "clone")), \
-                "a failed copy was left in the scratchpad directory"
-            shutil.copytree = copytree
-            state, moved = sp.link_tmp(harness, target, "t")
-        finally:
-            os.rename, shutil.copytree = rename, copytree
-        assert (state, moved) == ("linked", ["clone"]), (state, moved)
-        with open(os.path.join(target, "clone", ".git", "objects", "08", "609f44"), encoding="utf-8") as f:
-            assert f.read() == "object\n", "a read-only file did not move"
-        assert is_link(harness) and os.path.samefile(harness, target), "a scratchpad holding a clone was not linked"
-        assert sorted(os.listdir(target)) == ["clone", "note.md"], os.listdir(target)
-    finally:
-        if os.path.lexists(harness) and is_link(harness):
-            unlink(harness)
-        for d, _dirs, names in os.walk(base):
-            for n in names:
-                os.chmod(os.path.join(d, n), stat.S_IWRITE)
-        wipe(base)
-    print("test_scratchpad.py: move cases green")
 
 
 class Cases(unittest.TestCase):
@@ -1610,69 +346,101 @@ class Cases(unittest.TestCase):
     def test_repo_uses(self):
         repo_uses()
 
-    def test_tmp_cases(self):
-        tmp_cases()
-
-    def test_tmp_keep_cases(self):
-        tmp_keep_cases()
-
-    def test_sweep_cases(self):
-        sweep_cases()
-
-    def test_move_cases(self):
-        move_cases()
-
-    def test_tmp_empty_and_cap_cases(self):
-        tmp_empty_and_cap_cases()
-
-    def test_tmp_export_cases(self):
-        tmp_export_cases()
-
-    def test_tmp_staged_copy_cases(self):
-        tmp_staged_copy_cases()
-
-    def test_tmp_close_bare_store_cases(self):
-        tmp_close_bare_store_cases()
-
-    def test_tmp_close_no_gc_cases(self):
-        tmp_close_no_gc_cases()
-
-    def test_tmp_close_cut_cases(self):
-        tmp_close_cut_cases()
-
-    def test_tmp_close_rename_cases(self):
-        tmp_close_rename_cases()
-
-    def test_archived_by_phi_cases(self):
-        archived_by_phi_cases()
-
-    def test_archived_lists_live_cases(self):
-        archived_lists_live_cases()
-
-    def test_quiet_sweep_cases(self):
-        quiet_sweep_cases()
-
-    def test_quiet_sweep_mark_cases(self):
-        quiet_sweep_mark_cases()
-
-    def test_scratchpad_dir_cases(self):
-        scratchpad_dir_cases()
-
     def test_parallel_hooks_cases(self):
         parallel_hooks_cases()
-
-    def test_dangling_own_link_cases(self):
-        dangling_own_link_cases()
-
-    def test_quiet_start_cases(self):
-        quiet_start_cases()
-
-    def test_ended_cases(self):
-        ended_cases()
 
     def test_gate2_d(self):
         gate2_d()
 
+
+
+class AppScratchpad(unittest.TestCase):
+    """ezexe/p4#131: each session's scratchpad is the app's. The hooks hooks.json lists for a start, a turn end and a
+    session end leave it a plain folder where Claude Code made it, link nothing into the store, stage nothing, commit
+    nothing, and close no folder an earlier version left under the store's temportal/tmp/."""
+
+    SID = "aaaa1111-0000-4000-8000-00000000000a"
+
+    def setUp(self):
+        if not shutil.which("sh") or not shutil.which("git"):
+            self.skipTest("no sh or git on PATH")
+        self.root = tempfile.mkdtemp(prefix="p4-temportal-app-scratchpad-")
+        self.temp = tempfile.mkdtemp(prefix="p4-temportal-app-temp-")
+        self.addCleanup(wipe, self.temp)
+        self.addCleanup(wipe, self.root)
+        self.p4 = os.path.join(self.root, ".claude", "p4")
+        os.makedirs(self.p4)
+        for args in (["init", "-q"], ["config", "user.name", "t"], ["config", "user.email", "t@t"],
+                     ["commit", "-q", "--allow-empty", "-m", "store"]):
+            subprocess.run(["git", "-C", self.p4] + args, check=True, capture_output=True)
+        self.hashdir = os.path.join(self.temp, "claude", "30ad6e18862a20e8")
+        self.pad = os.path.join(self.hashdir, self.SID, "scratchpad")
+        put(self.pad, "note.md", "a note\n")
+
+    def hooks(self, event, source="startup"):
+        """Every command hooks.json lists for the event, with the source as matcher, run one after another."""
+        with open(HOOKS_JSON, encoding="utf-8") as f:
+            groups = json.load(f)["hooks"].get(event, [])
+        cmds = [h["command"] for g in groups
+                if g.get("matcher", "") in ("", "*") or source in g["matcher"].split("|") for h in g["hooks"]]
+        env = env_with(None, CLAUDE_PLUGIN_ROOT=os.path.dirname(HERE), CLAUDE_PROJECT_DIR=self.root,
+                       CLAUDE_CONFIG_DIR=os.path.join(self.root, ".config"), TEMP=self.temp, TMP=self.temp,
+                       TMPDIR=self.temp)
+        stdin = json.dumps({"cwd": self.root, "session_id": self.SID, "scratchpad_dir": self.pad, "source": source,
+                            "hook_event_name": event}).encode()
+        for c in cmds:
+            r = subprocess.run([shutil.which("sh"), "-c", c], input=stdin, capture_output=True, timeout=120, env=env)
+            self.assertEqual(r.returncode, 0, r)
+
+    def git(self, *args):
+        return subprocess.run(["git", "-C", self.p4, *args], capture_output=True, check=True).stdout.decode().strip()
+
+    def test_a_start_leaves_the_apps_scratchpad_a_plain_folder_with_its_files(self):
+        self.hooks("SessionStart")
+        self.assertFalse(is_link(self.pad), "the app's scratchpad was made a link")
+        self.assertTrue(os.path.isfile(os.path.join(self.pad, "note.md")), "the note left the app's scratchpad")
+        self.assertFalse(os.path.exists(os.path.join(self.p4, "temportal", "tmp")), "the store got a tmp/ folder")
+
+    def test_a_start_leaves_another_sessions_scratchpad_as_the_app_made_it(self):
+        other = os.path.join(self.hashdir, "bbbb2222-0000-4000-8000-00000000000b", "scratchpad")
+        empty = os.path.join(self.hashdir, "cccc3333-0000-4000-8000-00000000000c", "scratchpad")
+        put(other, "probe.txt", "probe\n")
+        os.makedirs(empty)
+        quiet = time.time() - 2 * 3600
+        os.utime(empty, (quiet, quiet))
+        self.hooks("SessionStart")
+        for d in (other, empty):
+            self.assertTrue(os.path.isdir(d) and not is_link(d), f"{d} is no longer the app's plain folder")
+        self.assertTrue(os.path.isfile(os.path.join(other, "probe.txt")))
+
+    def test_a_turn_end_stages_nothing_in_the_store(self):
+        self.hooks("SessionStart")
+        self.hooks("Stop")
+        self.assertEqual(self.git("diff", "--cached", "--name-only"), "")
+
+    def test_a_session_end_commits_and_removes_nothing(self):
+        self.hooks("SessionStart")
+        self.hooks("Stop")
+        head = self.git("rev-parse", "HEAD")
+        self.hooks("SessionEnd", "other")
+        self.assertEqual(self.git("rev-parse", "HEAD"), head, "a session end made a commit in the store")
+        self.assertTrue(os.path.isfile(os.path.join(self.pad, "note.md")), "a session end removed the note")
+
+    def test_a_start_closes_no_folder_of_an_ended_session(self):
+        ended = "dddd4444-0000-4000-8000-00000000000d"
+        kept = os.path.join(self.p4, "temportal", "tmp", ended)
+        put(kept, "old.md", "old\n")
+        put(self.p4, f"phi/sessions/local_x/session.json", json.dumps({"sessionId": ended, "archived": True}))
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "an ended session's folder")
+        long_ago = time.time() - 8 * 86400
+        for d, _dirs, names in os.walk(kept):
+            for n in [d] + [os.path.join(d, x) for x in names]:
+                os.utime(n, (long_ago, long_ago))
+        head = self.git("rev-parse", "HEAD")
+        self.hooks("SessionStart")
+        self.assertTrue(os.path.isfile(os.path.join(kept, "old.md")), "an ended session's folder was closed")
+        self.assertEqual(self.git("rev-parse", "HEAD"), head, "a start made a commit in the store")
 
 
 class AskPaths(unittest.TestCase):

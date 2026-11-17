@@ -11,17 +11,16 @@ aside and gives the folder it lands in a new one, and neither folder is cleared 
 to any other place. A cookie is one file or folder with its own expiry, set by `lifetime.py set <path> <lifetime>`
 and kept in temportal/expires.json, and the lifetime `session` clears it when the session that set it ends. A cache
 rule whose path resolves to memory/, in any letter case, or to a folder outside temportal/ clears nothing. A cookie
-is refused inside memory/, on tmp/ or anything in it, and on scratchpad/, src/ or expires.json themselves: a session
-scratchpad directory in tmp/ is committed before it is removed, and the others are never cleared whole.
+is refused inside memory/, on tmp/ or anything in it, and on the notebook, src/ or expires.json themselves: tmp/ holds
+only the folders an earlier version kept for each session's scratchpad, and the others are never cleared whole.
 
 A file the store's git tracks is removed with its removal staged, so its last version stays in the history, and an
 ignored or untracked file is deleted. The retention sweep stages those removals and no other change, so an edit
 pending elsewhere in the store stays unstaged.
 
-A session scratchpad path Claude Code gives is a link into temportal/tmp/<session>/, and a delete of that path, by
-this retention sweep or by Claude Code's own cleanup of old sessions, removes the link and leaves the store's folder
-and its files: Node's recursive fs.rmSync, which Claude Code runs on, and Python's shutil.rmtree were both seen to do
-so on a Windows junction (Node 26.13, 2026-11-16), and `remove` here unlinks a link without entering it.
+A link under temportal/ is removed as a link: `remove` unlinks it without entering it, so the files it reaches stay.
+Each session's scratchpad directory is Claude Code's own, under the system temp directory, and no lifetime here
+clears it.
 
   sweep                    the retention sweep at SessionStart: clears what has expired and prints one line when it
                            cleared something. Before it, as every hook of a start does, it moves files left in an
@@ -57,7 +56,8 @@ import hookio  # noqa: E402 - the hook input and link helpers p4-temportal's scr
 
 EXPIRES = "expires.json"
 NEVER = ("memory",)                     # folders no lifetime ever clears
-WHOLE = ("scratchpad", "src", EXPIRES)  # the notebook, the saved code and the cookies, which no cookie clears whole
+NOTEBOOK = p4conf.rel("scratchpad").split("/", 1)[-1]    # the notebook's folder under temportal/
+WHOLE = (NOTEBOOK, "src", EXPIRES)      # the notebook, the saved code and the cookies, which no cookie clears whole
 # the other plugins' folders of the layout, where a layout move sets copies aside in a .layout-conflicts/ of their own
 ASIDE = sorted({place.split("/")[0] for place in p4conf.LAYOUT.values()} - {"temportal"})
 UNITS = {"m": 60, "h": 3600, "d": 86400, "w": 7 * 86400}
@@ -160,9 +160,9 @@ def refusal(p4, path):
     if never(rel):
         return rel, f"{rel} is in {rel.split('/')[0]}/, which is never cleared"
     if rel.split("/")[0].lower() == "tmp":
-        return rel, f"{rel} takes no cookie: a session scratchpad directory is committed before it is removed"
+        return rel, f"{rel} takes no cookie: tmp/ holds the folders an earlier version kept for each session's scratchpad"
     if rel.lower() in WHOLE:
-        return rel, f"{rel} takes no cookie: scratchpad/, src/ and {EXPIRES} are never cleared whole"
+        return rel, f"{rel} takes no cookie: {NOTEBOOK}/, src/ and {EXPIRES} are never cleared whole"
     return rel, None
 
 

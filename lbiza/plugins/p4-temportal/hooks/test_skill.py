@@ -37,7 +37,13 @@ class SkillCommands(unittest.TestCase):
         # lifetime.py set reads a relative path from the working folder and refuses a missing one.
         text = SKILL.read_text(encoding="utf-8")
         self.assertNotIn("<path under temportal/>", text)
-        self.assertIn('lifetime set ".claude/p4/temportal/tmp/<file>" 7d', text)
+        self.assertIn('lifetime set ".claude/p4/temportal/scratchpad/<file>" 7d', text)
+
+    def test_no_scratchpad_directory_is_named_in_the_store(self):
+        # ezexe/p4#131: each session's scratchpad is the app's, so the skill names no folder of the store as one.
+        text = SKILL.read_text(encoding="utf-8")
+        self.assertNotIn("temportal/tmp", text)
+        self.assertNotIn("ended-sweep", text)
 
 
 if __name__ == "__main__":
