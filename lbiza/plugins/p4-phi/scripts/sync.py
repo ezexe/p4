@@ -55,7 +55,7 @@ MODEL_PREFIX = ("models/ranker",)
 MODEL_EXT = (".pt", ".phid")
 INDEX_LINE = re.compile(rb"^- \[[^\]]+\]\([^)]+\)")        # `- [Title](file.md) ...`, as memory/MEMORY.md lists
 NAME, EMAIL = "p4-sync", "p4-sync@users.noreply.github.com"
-SEED = 16    # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
+SEED = 17    # the seeded files' version: a store's copy from a newer plugin is never replaced by an older plugin's
 
 
 def git(*args, check=True, cwd=None):
@@ -232,6 +232,79 @@ def merge_json(base, ours, theirs, dflt=None):
     return ours                                             # both changed it: ours (main's, in the workflow)
 
 
+def merge_settings(base, ours, theirs, dflt=None):
+    """p4.json: merge_json key by key, then each setting a side's `_written` record holds is settled by the records.
+    A side's value is written when it equals its record entry, or, on a side with no record, the seeded default;
+    unchanged when it equals the common ancestor's; and set by hand otherwise. Set by hand beats written, written
+    beats unchanged, and of two written values the higher generation's wins, so a newer machine's default moves an
+    older one's and not a person's setting, with the two limits load has: a value set by hand that equals the value
+    recorded as written moves at the next generation, and in a store from before the record a value set by hand that
+    equals a past default moves. A setting either side removed is left to merge_json. The merged record
+    keeps the winning side's written entries, and is left out when neither side had one, so load infers it."""
+    w = "_written"
+    strip = lambda d: {k: v for k, v in d.items() if k != w} if isinstance(d, dict) else d
+    out = merge_json(strip(base), strip(ours), strip(theirs), dflt)
+    if not (isinstance(out, dict) and isinstance(ours, dict) and isinstance(theirs, dict)):
+        return out
+    rec = lambda d: d.get(w) if isinstance(d, dict) and isinstance(d.get(w), dict) else None
+    ro, rt = rec(ours), rec(theirs)
+    if ro is None and rt is None:
+        return out
+
+    def get(d, dotted):
+        for part in dotted.split("."):
+            if not isinstance(d, dict) or part not in d:
+                return None, False
+            d = d[part]
+        return d, True
+
+    def put(d, dotted, value):
+        parts = dotted.split(".")
+        for part in parts[:-1]:
+            nxt = d.get(part) if isinstance(d, dict) else None
+            if not isinstance(nxt, dict):
+                return False                            # a parent that is no section: left as merge_json made it
+            d = nxt
+        d[parts[-1]] = value
+        return True
+
+    def state(r, side, p):
+        """('w', entry), ('u', None) or ('h', None), or None when the side lacks the setting."""
+        v, ok = get(side, p)
+        if not ok:
+            return None
+        e = (r or {}).get(p)
+        if isinstance(e, dict) and v == e.get("v"):
+            return "w", e
+        if r is None and isinstance(dflt, dict) and get(dflt, p) == (v, True):
+            return "w", {"v": v, "gen": -1}             # a side from before the record, holding the seeded default
+        if get(base, p) == (v, True):
+            return "u", None
+        return "h", None
+
+    rank = {"h": 2, "w": 1, "u": 0}
+    record = {}
+    for p in list(ro or {}) + [p for p in (rt or {}) if p not in (ro or {})]:
+        so, st = state(ro, ours, p), state(rt, theirs, p)
+        if so is None or st is None:
+            other = st if so is None else so
+            if other is not None and other[0] == "w" and not get(base, p)[1] and other[1].get("gen", 0) >= 0:
+                record[p] = other[1]                    # new on one side, as an older plugin never had it: written
+            continue                                    # otherwise removed on a side: merge_json decided
+        if so[0] == st[0] == "w":
+            pick = (theirs, st) if st[1].get("gen", 0) > so[1].get("gen", 0) else (ours, so)
+        elif rank[st[0]] > rank[so[0]]:
+            pick = (theirs, st)
+        elif rank[so[0]] > rank[st[0]]:
+            pick = (ours, so)
+        else:
+            continue                                    # both set by hand, or both unchanged: merge_json decided
+        if put(out, p, get(pick[0], p)[0]) and pick[1][0] == "w" and pick[1][1].get("gen", 0) >= 0:
+            record[p] = pick[1][1]
+    out[w] = record
+    return out
+
+
 def merge_log(base, ours, theirs):
     """A training log both machines appended to: every round of either, once, ordered by its time, the second
     column, under one header, the widest when a plugin that writes more columns met one that writes fewer."""
@@ -372,10 +445,11 @@ def settle(path, ref, model_side, sides=None):
             return got, "entries: field by field"
     if low.endswith(".json"):
         try:
-            got = merge_json(json.loads(base) if base else None, json.loads(ours), json.loads(theirs),
-                             seeded_defaults() if low == "p4.json" else None)
+            merge = merge_settings if low == "p4.json" else merge_json
+            got = merge(json.loads(base) if base else None, json.loads(ours), json.loads(theirs),
+                        seeded_defaults() if low == "p4.json" else None)
             return (json.dumps(got, indent=1, ensure_ascii=False) + "\n").encode("utf-8"), "settings: key by key"
-        except ValueError:
+        except (ValueError, AttributeError, TypeError):
             pass
     name = os.path.basename(low)
     prose = low.endswith(TEXT_EXT) or name in (".gitignore", ".gitattributes") or "." not in name.lstrip(".")

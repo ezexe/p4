@@ -318,6 +318,59 @@ class Sync(unittest.TestCase):
         self.assertIn(read(out, ".github/p4_sync.py"), ("# seeded\nA = 2\nB = 1\nC = 1\n", "# seeded\nA = 3\nB = 1\nC = 1\n"),
                       "a conflicted script is one machine's whole, never both sides' lines")
 
+    def test_merge_settings_settles_written_values_by_their_records(self):
+        """Of two machines' p4.json, a written value loses to one set by hand, the newer generation's written default
+        wins over an older one, and the merged record keeps only written values."""
+        m = sync.merge_settings
+        rec = lambda v, g: {"v": v, "gen": g}
+        base = {"q": {"n": 5, "k": 1}, "_written": {"q.n": rec(5, 1), "q.k": rec(1, 1)}}
+        newer = {"q": {"n": 9, "k": 1}, "_written": {"q.n": rec(9, 2), "q.k": rec(1, 2)}}
+        hand = {"q": {"n": 7, "k": 1}, "_written": {"q.k": rec(1, 1)}}
+        older = {"q": {"n": 5, "k": 1}, "_written": {"q.n": rec(5, 1), "q.k": rec(1, 1)}}
+        for ours, theirs in ((newer, hand), (hand, newer)):
+            got = m(base, ours, theirs)
+            self.assertEqual(got["q"]["n"], 7, "set by hand beats a newer written default")
+            self.assertNotIn("q.n", got["_written"])
+        for ours, theirs in ((newer, older), (older, newer)):
+            got = m(base, ours, theirs)
+            self.assertEqual(got["q"]["n"], 9, "the newer generation's default")
+            self.assertEqual(got["_written"]["q.n"], rec(9, 2))
+        pre = {"q": {"n": 5, "k": 1}}                       # a machine from before the record, at the seeded default
+        got = m(None, pre, newer, {"q": {"n": 5, "k": 1}})
+        self.assertEqual(got["q"]["n"], 9)
+
+    def test_merge_settings_reads_the_common_ancestor(self):
+        """A machine from before the record whose value is the ancestor's has not set it by hand, so the other
+        machine's written default wins and keeps its record entry, with or without seeded defaults; a setting one
+        side removed stays removed; a recorded path under a value that is no section raises nothing."""
+        m = sync.merge_settings
+        base = {"t": {"model": "fable-5-1"}, "q": {"n": 5}}
+        moved = {"t": {"model": "fable-5-2"}, "q": {"n": 5},
+                 "_written": {"t.model": {"v": "fable-5-2", "gen": 1}, "q.n": {"v": 5, "gen": 1}}}
+        pre = {"t": {"model": "fable-5-1"}, "q": {"n": 5}, "other": 1}
+        for ours, theirs in ((moved, pre), (pre, moved)):
+            for dflt in (None, {"t": {"model": "fable-5-2"}, "q": {"n": 5}}):
+                got = m(base, ours, theirs, dflt)
+                self.assertEqual(got["t"]["model"], "fable-5-2")
+                self.assertEqual(got["_written"]["t.model"], {"v": "fable-5-2", "gen": 1})
+                self.assertEqual(got["other"], 1)
+        gone = {"t": {"model": "fable-5-1"}, "q": {}}
+        self.assertNotIn("n", m(base, moved, gone)["q"], "removed on one side, unchanged on the other: removed")
+        odd = {"t": "not a section", "q": {"n": 5}, "_written": {"t.model": {"v": "x", "gen": 1}}}
+        m(base, odd, pre)
+        m(base, pre, odd)
+
+    def test_merge_settings_keeps_the_entry_of_a_setting_only_the_newer_side_has(self):
+        """A setting a newer plugin added, absent from the older side and from the ancestor, keeps its record entry."""
+        rec = lambda v, g: {"v": v, "gen": g}
+        base = {"q": {"n": 5}, "_written": {"q.n": rec(5, 1)}}
+        ours = {"q": {"n": 6}, "_written": {}}
+        theirs = {"q": {"n": 5, "x": 3}, "_written": {"q.n": rec(5, 2), "q.x": rec(3, 2)}}
+        for a, b in ((ours, theirs), (theirs, ours)):
+            got = sync.merge_settings(base, a, b)
+            self.assertEqual(got["q"], {"n": 6, "x": 3})
+            self.assertEqual(got["_written"], {"q.x": rec(3, 2)})
+
     def test_merge_json(self):
         m = sync.merge_json
         d = {"said": {"mode": "off"}}
@@ -373,7 +426,7 @@ class Sync(unittest.TestCase):
         import hashlib
         with open(os.path.join(HERE, "sync.py"), "rb") as f:
             text = f.read().replace(b"\r\n", b"\n")
-        self.assertEqual({sync.SEED: hashlib.sha1(text).hexdigest()[:12]}, {16: "cdb8a6fc4c5e"},
+        self.assertEqual({sync.SEED: hashlib.sha1(text).hexdigest()[:12]}, {17: "4c73defe651c"},
                          "sync.py changed: raise SEED and pin the new text")
         p4 = os.path.join(os.path.dirname(self.origin), "p4")
         os.makedirs(p4)

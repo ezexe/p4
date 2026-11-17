@@ -25,9 +25,13 @@ class P4Conf(unittest.TestCase):
         self.p4 = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.p4, True)
 
-    def read(self):
+    def read(self, record=False):
+        """p4.json as written, without load's record of the defaults it wrote unless `record`."""
         with open(p4conf.path(self.p4), encoding="utf-8") as f:
-            return json.load(f)
+            d = json.load(f)
+        if not record:
+            d.pop(p4conf.WRITTEN, None)
+        return d
 
     def test_every_plugin_carries_the_same_copy(self):
         src = (HERE / "p4conf.py").read_bytes()
@@ -260,6 +264,68 @@ class P4Conf(unittest.TestCase):
         p4conf.migrate_layout(wt)
         self.assertEqual(git("status", "--porcelain"), "")
         self.assertEqual(len(git("ls-files", "phi/archive").split()), 20)
+
+    def copy_of(self, gen, **query):
+        """A second copy of p4conf.py, as another installed plugin would carry, at generation `gen` with
+        recall.query defaults changed by `query`."""
+        import copy
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(f"p4conf_gen{gen}", HERE / "p4conf.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod.DEFAULTS = copy.deepcopy(mod.DEFAULTS)
+        mod.DEFAULTS["recall"]["query"].update(query)
+        mod.GEN = gen
+        return mod
+
+    def test_a_changed_default_reaches_a_store_load_wrote_it_into(self):
+        """A value load wrote follows a newer generation's default; a value set by hand stays as it is."""
+        p4conf.load(self.p4)
+        d = self.read(record=True)
+        d["recall"]["query"]["per_file"] = 7
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        s = self.copy_of(p4conf.GEN + 1, max_lines=9, per_file=4).load(self.p4)
+        self.assertEqual(s["recall"]["query"]["max_lines"], 9, "written by load: follows the new default")
+        self.assertEqual(s["recall"]["query"]["per_file"], 7, "set by hand: kept")
+        self.assertEqual(self.read()["recall"]["query"]["max_lines"], 9)
+
+    def test_two_copies_that_differ_on_a_default_settle_on_the_newer(self):
+        """Two copies, both with the record, that differ on a default write p4.json at most twice in turn and settle
+        on the newer generation's value."""
+        old, new = self.copy_of(1, max_lines=5), self.copy_of(2, max_lines=9)
+        writes = []
+        for c in (old, new):
+            real = c._write
+            c._write = lambda p4, data, real=real: (writes.append(1), real(p4, data))
+        for c in (old, new, old, new, old, new):
+            c.load(self.p4, warn=False)
+        self.assertLessEqual(len(writes), 2, "written by the first load, moved once by the newer")
+        self.assertEqual(self.read()["recall"]["query"]["max_lines"], 9)
+        self.assertEqual(old.load(self.p4)["recall"]["query"]["max_lines"], 9, "the older copy reads the newer value")
+
+    def test_a_store_from_before_the_record_follows_today_s_default(self):
+        """A store with no record, as this project's own, counts a value equal to a past default in HISTORY as
+        written, so it moves to today's; a value no default ever had stays."""
+        d = json.loads(json.dumps(p4conf.DEFAULTS))
+        d["recall"]["teacher"]["model"] = "claude-fable-5-1"
+        d["recall"]["query"]["per_file"] = 7
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        s = p4conf.load(self.p4)
+        self.assertEqual(s["recall"]["teacher"]["model"], p4conf.DEFAULTS["recall"]["teacher"]["model"])
+        self.assertEqual(s["recall"]["query"]["per_file"], 7)
+        self.assertNotIn("recall.query.per_file", self.read(record=True)[p4conf.WRITTEN])
+
+    def test_gen_is_raised_with_every_change_of_defaults(self):
+        """DEFAULTS is pinned to its GEN: a change of a default fails here until GEN is raised, the old value added to
+        HISTORY and the pin below updated."""
+        import hashlib
+        pins = {1: "cc7604892f2635f2"}                     # append only: one more line for each GEN
+        got = hashlib.sha256(json.dumps(p4conf.DEFAULTS, sort_keys=True).encode()).hexdigest()[:16]
+        self.assertEqual(p4conf.GEN, max(pins))
+        self.assertEqual(p4conf.GEN, len(pins), "no generation is skipped or replaced")
+        self.assertEqual(pins[p4conf.GEN], got, "DEFAULTS changed: raise GEN, add the old value to HISTORY, pin it")
 
     def test_a_missing_file_is_written_with_every_default(self):
         s = p4conf.load(self.p4)

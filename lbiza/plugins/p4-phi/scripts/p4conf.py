@@ -2,10 +2,12 @@
 p4conf.py: the settings of every p4 plugin, kept in one file of the store, `<project>/.claude/p4/p4.json`.
 
 Each plugin carries its own copy of this file, since an installed plugin cannot import another plugin's code, and
-test_p4conf.py holds the copies the same byte for byte. `load(p4)` returns DEFAULTS with the file merged over them.
-It writes the file when it is missing and when it lacks
-a key of DEFAULTS, keeping every value already there. A file that is not valid JSON is never overwritten: the defaults
-are used and a line goes to stderr. p4conf reads no environment variable: a plugin that lets one win over its
+test_p4conf.py holds the copies the same byte for byte. `load(p4)` returns DEFAULTS with the file merged over them. It
+writes the file when it is missing, when it lacks a key of DEFAULTS and when a default an older generation of this
+file wrote has changed, keeping every value set by hand: WRITTEN records what it wrote. Two limits: a value set by
+hand that equals the value load recorded as written moves at the next GEN, and in a store from before the record a
+value set by hand that equals a past default in HISTORY moves. A file that is not valid JSON is never overwritten: the
+defaults are used and a line goes to stderr. p4conf reads no environment variable: a plugin that lets one win over its
 section for a run reads it itself.
 
 It also holds the store's layout: each plugin writes in a folder of its own, `.claude/p4/<plugin>/`, beside p4.json
@@ -751,8 +753,73 @@ def _write(p4, data):
             os.remove(tmp)
 
 
+# The top-level key of p4.json where load keeps, for each default it wrote, the value and the GEN of the copy that
+# wrote it, by the setting's dotted path. A value still equal to its entry was never set by hand. Only a copy with a
+# higher GEN moves it to that copy's default, so two installed copies that differ on a default settle on the newer
+# one's and never rewrite the file in turn. A value that differs from its entry was set by hand and is never moved.
+WRITTEN = "_written"
+# The generation of DEFAULTS: raised by one whenever a default changes, with the value it had added to HISTORY, so a
+# store's written values follow the change. test_p4conf.py pins DEFAULTS to this number.
+GEN = 1
+# Past defaults by dotted path: a store from before the record whose value equals one of these, or today's default,
+# counts that value as written by load, so it follows today's default.
+HISTORY = {"recall.teacher.model": ["claude-fable-5-1"]}
+
+
+def _leaves(d, prefix=""):
+    """(dotted path, value) of every setting of DEFAULTS: a value that is no section, and each key of an OPEN
+    section, which ezexe chooses whole."""
+    for k, v in d.items():
+        p = prefix + k
+        if isinstance(v, dict) and v and p not in OPEN:
+            yield from _leaves(v, p + ".")
+        else:
+            yield p, v
+
+
+def _get(d, dotted):
+    for part in dotted.split("."):
+        if not isinstance(d, dict) or part not in d:
+            return _NONE
+        d = d[part]
+    return d
+
+
+def _put(d, dotted, value):
+    parts = dotted.split(".")
+    for part in parts[:-1]:
+        if not isinstance(d.get(part), dict):
+            d[part] = {}
+        d = d[part]
+    d[parts[-1]] = copy.deepcopy(value)
+
+
+_NONE = object()
+
+
+def _entry(e):
+    """A record entry as (value, gen), or None when it is not one."""
+    if isinstance(e, dict) and "v" in e and isinstance(e.get("gen", 0), int):
+        return e["v"], e.get("gen", 0)
+    return None
+
+
+def written_record(kept, record):
+    """The record load works from: the store's own, or, for a store from before it, every value equal to today's
+    default or to a past one in HISTORY, as written at generation 0."""
+    if isinstance(record, dict):
+        return record
+    out = {}
+    for p, v in _leaves(DEFAULTS):
+        have = _get(kept, p)
+        if have is not _NONE and (have == v or have in HISTORY.get(p, ())):
+            out[p] = {"v": have, "gen": 0}
+    return out
+
+
 def load(p4, write=True, warn=True):
-    """The merged settings. Writes p4.json when it is missing or lacks a default key, if `write` and `p4` exists."""
+    """The merged settings. Writes p4.json when it is missing, lacks a default key or holds a default an older
+    generation wrote, if `write` and `p4` exists. Under WRITTEN it records what it wrote and its GEN."""
     over, existed = {}, os.path.exists(path(p4))
     if existed:
         try:
@@ -764,17 +831,32 @@ def load(p4, write=True, warn=True):
             if warn:
                 print(f"p4: {path(p4)} unreadable: {e}; defaults used, the file left as it is", file=sys.stderr)
             return copy.deepcopy(DEFAULTS)
-    over = {k: v for k, v in over.items() if k not in RETIRED}
+    kept = {k: v for k, v in over.items() if k not in RETIRED}
+    record = written_record(kept, kept.pop(WRITTEN, None))
+    known = dict(_leaves(DEFAULTS))
+    now = {p: e for p, e in record.items() if p not in known and _entry(e)}   # another copy's, kept as it wrote it
+    for p, default in known.items():
+        have, e = _get(kept, p), _entry(record.get(p))
+        if have is _NONE:
+            now[p] = {"v": default, "gen": GEN}         # missing: written now
+        elif e and have == e[0]:
+            if e[1] < GEN:
+                _put(kept, p, default)                  # an older generation's default: this one's
+                now[p] = {"v": default, "gen": GEN}
+            else:
+                now[p] = record[p]                      # this generation's or a newer one's: left as it is
+        # else set by hand: no entry, never moved
     unknown = []
-    merged = _merge(DEFAULTS, over, unknown)
+    merged = _merge(DEFAULTS, kept, unknown)
     if warn and unknown:
         print(f"p4: {path(p4)} holds keys this plugin does not read, kept as they are: {', '.join(unknown)}",
               file=sys.stderr)
+    out = {**merged, WRITTEN: now}
     # a retired key alone never rewrites the file, since an older copy that still writes it would put it back at its
-    # own next load: it leaves the file at the next rewrite for a missing key
-    if write and os.path.isdir(p4) and (not existed or merged != over):
+    # own next load: it leaves the file at the next rewrite for another reason
+    if write and os.path.isdir(p4) and (not existed or out != {k: v for k, v in over.items() if k not in RETIRED}):
         try:
-            _write(p4, merged)
+            _write(p4, out)
         except OSError:
             pass
     return merged
