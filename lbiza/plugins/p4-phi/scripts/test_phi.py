@@ -1010,6 +1010,35 @@ class NewTask(unittest.TestCase):
                            capture_output=True, text=True, env=env, timeout=60)
             self.assertEqual(r.stdout.strip(), "")
 
+    def test_the_older_new_task_names_turn_the_book_off_and_book_wins(self):
+        """A store or a run that set `new_task` or P4_PHI_NEW_TASK before the rename keeps its address book off;
+        phi.json's `book` wins over `new_task`, and P4_PHI_BOOK over P4_PHI_NEW_TASK."""
+        env = {k: v for k, v in self.t.env(TOP).items() if k != "P4_PHI_BOOK"}
+
+        def said(prompt, **more):
+            r = inproc.run(["sh", RUN, PROMPT], input=json.dumps({"session_id": CLI[TOP], "cwd": self.t.proj,
+                                                                  "prompt": prompt}),
+                           capture_output=True, text=True, env={**env, **more}, timeout=60)
+            return r.stdout
+        conf = os.path.join(self.t.p4, "phi", "phi.json")
+        write(conf, json.dumps({"new_task": False}))
+        self.assertNotIn("address book", said(TASK))
+        write(conf, json.dumps({"new_task": False, "book": True}))
+        self.assertIn("address book", said(TASK + " again"), "book wins")
+        os.remove(conf)
+        held = {k: os.environ.get(k) for k in ("P4_PHI_BOOK", "P4_PHI_NEW_TASK")}
+        try:
+            for book, new_task, want in (("", "0", False), ("1", "0", True), ("0", "1", False)):
+                for k, v in (("P4_PHI_BOOK", book), ("P4_PHI_NEW_TASK", new_task)):
+                    os.environ.pop(k, None) if not v else os.environ.__setitem__(k, v)
+                phi.BOOK = not want
+                phi.configure(self.t.p4)
+                self.assertIs(phi.BOOK, want, (book, new_task))
+        finally:
+            phi.BOOK = True
+            for k, v in held.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+
 
 class NeverFails(unittest.TestCase):
     def test_broken_input_and_broken_files_end_quietly(self):

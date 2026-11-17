@@ -221,8 +221,12 @@ def configure(home):
             globals()[name] = d[key]
     if os.environ.get("P4_PHI_RULES") in ("0", "1"):
         globals()["RULES"] = os.environ["P4_PHI_RULES"] == "1"
-    if os.environ.get("P4_PHI_BOOK") in ("0", "1"):
-        globals()["BOOK"] = os.environ["P4_PHI_BOOK"] == "1"
+    if "book" not in d and isinstance(d.get("new_task"), bool):   # the key's name before book, read as an alias
+        globals()["BOOK"] = d["new_task"]
+    for name in ("P4_PHI_BOOK", "P4_PHI_NEW_TASK"):  # P4_PHI_BOOK first; the older name as its alias
+        if os.environ.get(name) in ("0", "1"):
+            globals()["BOOK"] = os.environ[name] == "1"
+            break
 
 
 # --- the app's records: which session started which ----------------------------------------------------------------
