@@ -1220,13 +1220,13 @@ WRITES = ("autoMemoryDirectory", "attribution.commit")
 ENV_KEY = "env"                  # where the P4_* variables go: each one p4 owns is the dotted key env.<name>
 # Raised by one whenever the keys this copy writes change, so a store's next start runs the whole check: the record
 # holds the KEEPER of the copy that last ran it.
-KEEPER = 3
+KEEPER = 4
 PAST_MAX = 5                     # texts kept per variable of those p4 wrote and later replaced or removed
 # The class of keys ezexe decides, by #246: every key of the topics "Permission settings", "Sandbox settings",
 # "Authentication and providers" and "Enterprise and managed settings" of settings-reference.md, the table
 # "Exceptions to managed settings precedence" of settings.md, and the keys named beside them. A dotted key under one
-# of these is in the class too. ezexe's yes covers only what the keeper writes of it: the two allow rules and p4's
-# own P4_* variables under env; a store's `claude` section naming any key of the
+# of these is in the class too. ezexe's yes covers only what the keeper writes of it: the two allow rules, the ask
+# rule on the archive tool and p4's own P4_* variables under env; a store's `claude` section naming any key of the
 # class is still told it is ezexe's to decide.
 SECURITY = (
     "permissions", "sandbox", "autoMode", "allowManagedPermissionRulesOnly", "disableAutoMode",
@@ -1283,6 +1283,8 @@ _PER_FILE = {
     "hand": _strs,
     "rules": lambda v: (isinstance(v, dict) and _strs(v.get("entries", [])) and _strs(v.get("hand", []))
                         and _int(v.get("gen", 0))),
+    "askRules": lambda v: (isinstance(v, dict) and _strs(v.get("entries", [])) and _strs(v.get("hand", []))
+                           and _int(v.get("gen", 0))),
     "unreadable": lambda v: v is None or (isinstance(v, (int, float)) and not isinstance(v, bool)),
 }
 
@@ -1551,20 +1553,31 @@ def allow_rules(platform, conf):
     return out
 
 
+# The ask rule ezexe approved for p4 to keep in the local file of every project where p4 runs: an explicit ask rule
+# prompts in every permission mode, bypassPermissions included, so the app shows its approval card before every
+# archive_session call, which replaced p4-phi's own archive guard. permission-modes.md, "Actions no mode
+# auto-approves". It is one entry of `permissions.ask` that p4 owns, kept by the same rule as the allow rules under
+# RECORD's `askRules`: an entry the user wrote is never taken over or removed, and one deleted by hand stays gone.
+# Both copies write it, since its text names no plugin folder.
+ASK_KEY = "permissions.ask"
+ASK_RULES = ("mcp__ccd_session_mgmt__archive_session",)
+
+
 def rule_identity(rule):
     """A rule of p4's without its folder: `Bash phi.py *`; the rule itself when it is not of p4's form."""
     m = _RULE.match(rule if isinstance(rule, str) else "")
     return f"{m.group(1)} {m.group(2)}{m.group(3)}" if m else rule
 
 
-def _keep_rules(new, rec, name, wanted, owned_only):
-    """p4's own entries of `permissions.allow` in `new` brought to `wanted`; the record's `rules` kept in step. At a
-    ConfigChange, `owned_only`, an entry gone from the file is recorded as deleted by hand and nothing else moves."""
-    rules = rec.setdefault("rules", {})
+def _keep_rules(new, rec, name, wanted, owned_only, key=ALLOW_KEY, part="rules"):
+    """p4's own entries of the list `key`, `permissions.allow` or `permissions.ask`, in `new` brought to `wanted`; the
+    record's `part` kept in step. At a ConfigChange, `owned_only`, an entry gone from the file is recorded as deleted by
+    hand and nothing else moves."""
+    rules = rec.setdefault(part, {})
     mine = dict(rules.get(name) or {})
     entries, hand = list(mine.get("entries") or []), list(mine.get("hand") or [])
     gen = mine.get("gen", 0) if isinstance(mine.get("gen", 0), int) else 0
-    cur = _get(new, ALLOW_KEY)
+    cur = _get(new, key)
     if cur is not _NONE and not isinstance(cur, list):
         return                                          # not a list: left as it is
     have = list(cur) if cur is not _NONE else []
@@ -1594,13 +1607,13 @@ def _keep_rules(new, rec, name, wanted, owned_only):
             entries.append(w)
         gen = max(gen, GEN)
     if have != (cur if cur is not _NONE else []):
-        _put(new, ALLOW_KEY, have)
+        _put(new, key, have)
     if entries or hand:
         rules[name] = {"entries": entries, "hand": list(dict.fromkeys(hand)), "gen": gen}
     else:
         rules.pop(name, None)
     if not rules:
-        rec.pop("rules", None)
+        rec.pop(part, None)
 
 
 def _take_lock(lock, wait_s=3.0, stale_s=60.0):
@@ -1687,8 +1700,8 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
     frozen = env_written(p4) is None                   # a malformed record: every P4_* entry left as it is
     p4env = None if frozen else {k.split(".", 1)[1]: v for k, v in want.items() if k.startswith(ENV_KEY + ".")}
     past = {n: list(t) for n, t in ((rec.get("p4past") or {}).get(name) or {}).items()}
-    # in the order of the reference file: the two keys, p4's allow rules, then the variables; then each key an
-    # earlier copy wrote that this one no longer owns, such as disableAllHooks, which goes
+    # in the order of the reference file: the two keys, p4's allow rules, its ask rule, then the variables; then each
+    # key an earlier copy wrote that this one no longer owns, such as disableAllHooks, which goes
     env = [k for k in want if k.startswith(ENV_KEY + ".")]
     env += [k for k in owned if k.startswith(ENV_KEY + ".") and k not in env]
     if frozen or not isinstance(new.get(ENV_KEY, {}), dict):
@@ -1699,6 +1712,7 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
     for k in WRITES:
         _keep_key(p4, project, new, k, want.get(k), owned, gone, owned_only)
     _keep_rules(new, rec, name, allow_rules(platform, conf), owned_only)
+    _keep_rules(new, rec, name, list(ASK_RULES), owned_only, ASK_KEY, "askRules")
     for k in env + dropped:
         _keep_key(p4, project, new, k, want.get(k), owned, gone, owned_only, past)
     cur_env = new.get(ENV_KEY) if isinstance(new.get(ENV_KEY), dict) else {}

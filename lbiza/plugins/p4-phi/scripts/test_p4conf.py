@@ -718,10 +718,65 @@ class ClaudeSettings(unittest.TestCase):
             p4conf.keep_settings(self.project, platform="win32")
         got = self.read(self.local())["permissions"]
         self.assertEqual(got["allow"], mine["allow"] + self.rules(HERE), "the user's rules first, each of p4's once")
-        self.assertEqual((got["ask"], got["deny"]), (mine["ask"], mine["deny"]))
+        self.assertEqual((got["ask"], got["deny"]), (mine["ask"] + list(p4conf.ASK_RULES), mine["deny"]))
         self.assertFalse([r for r in got["allow"] if "prune-cache" in r or "catchup.py" in r])
         rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
         self.assertEqual(sorted(list(rec["rules"].values())[0]["entries"]), sorted(self.rules(HERE)))
+
+    ARCHIVE_ASK = "mcp__ccd_session_mgmt__archive_session"
+
+    def test_the_ask_rule_on_archive_session_is_p4s_own_entry_once_beside_the_users(self):
+        """ezexe approved an ask rule on the archive tool, so the app shows its approval card before every archive in
+        every permission mode: after two checks it is in permissions.ask once, after the user's own ask rules, which
+        stay as they were and in order, and the record owns it."""
+        self.assertEqual(p4conf.ASK_RULES, (self.ARCHIVE_ASK,))
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        mine = ["Bash(git push *)", "mcp__ccd_session_mgmt__stop_session", "Edit(./secrets/**)"]
+        with open(self.local(), "w", encoding="utf-8") as f:
+            json.dump({"permissions": {"ask": list(mine)}}, f)
+        for _ in range(2):
+            p4conf.keep_settings(self.project, platform="win32")
+        ask = self.read(self.local())["permissions"]["ask"]
+        self.assertEqual(ask, mine + [self.ARCHIVE_ASK], "the user's own first and untouched, p4's once")
+        self.assertEqual(ask.count(self.ARCHIVE_ASK), 1)
+        rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
+        self.assertEqual(list(rec["askRules"].values())[0]["entries"], [self.ARCHIVE_ASK])
+        p4conf.keep_settings(self.project, platform="linux")
+        self.assertEqual(self.read(self.local())["permissions"]["ask"].count(self.ARCHIVE_ASK), 1, "on every platform")
+
+    def test_a_fresh_project_gets_the_ask_rule_and_one_deleted_by_hand_stays_gone(self):
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        p4conf.keep_settings(self.project, platform="linux")
+        d = self.read(self.local())
+        self.assertEqual(d["permissions"]["ask"], [self.ARCHIVE_ASK])
+        d["permissions"]["ask"].remove(self.ARCHIVE_ASK)
+        _write(self.local(), d)
+        for _ in range(2):
+            p4conf.keep_settings(self.project, platform="linux")
+        self.assertNotIn(self.ARCHIVE_ASK, self.read(self.local())["permissions"].get("ask", []),
+                         "deleted by hand: ezexe's choice, not written back")
+
+    def test_the_keeper_never_removes_an_ask_rule_it_did_not_write(self):
+        """A user who wrote the same rule first owns it: the keeper takes it over neither while it wants the rule nor
+        when a later copy wants it gone, and it removes only an entry it wrote itself."""
+        from unittest import mock
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        mine = [self.ARCHIVE_ASK, "Bash(git push *)"]
+        _write(self.local(), {"permissions": {"ask": list(mine)}})
+        p4conf.keep_settings(self.project, platform="linux")
+        self.assertEqual(self.read(self.local())["permissions"]["ask"], mine, "the user's own, left as it is")
+        self.assertNotIn("askRules", json.loads(Path(self.record()).read_text(encoding="utf-8")))
+        with mock.patch.object(p4conf, "ASK_RULES", ()):
+            p4conf.keep_settings(self.project, platform="linux")
+        self.assertEqual(self.read(self.local())["permissions"]["ask"], mine, "never removed: p4 did not write it")
+        other = os.path.join(self.tmp, "other")
+        os.makedirs(os.path.join(other, ".claude", "p4"))
+        _write(os.path.join(other, ".claude", "settings.local.json"), {"permissions": {"ask": ["Bash(git push *)"]}})
+        p4conf.keep_settings(other, platform="linux")
+        with mock.patch.object(p4conf, "ASK_RULES", ()):
+            p4conf.keep_settings(other, platform="linux")
+        got = json.loads(Path(other, ".claude", "settings.local.json").read_text(encoding="utf-8"))
+        self.assertEqual(got["permissions"]["ask"], ["Bash(git push *)"], "p4's own goes, the user's stays")
 
     def test_the_rules_follow_the_plugin_folder_and_an_entry_deleted_by_hand_stays_gone(self):
         from unittest import mock
@@ -1062,7 +1117,8 @@ REFERENCE = {
         'Bash(python -I -X utf8 "<scripts>/phi.py" *)',
         'Bash(python -I -X utf8 "<scripts>/p4.py" sync *)',
         'PowerShell(python -I -X utf8 "<scripts>/phi.py" *)',
-        'PowerShell(python -I -X utf8 "<scripts>/p4.py" sync *)']},
+        'PowerShell(python -I -X utf8 "<scripts>/p4.py" sync *)'],
+        "ask": ["mcp__ccd_session_mgmt__archive_session"]},
     "disableAllHooks": False,
     "disableSkillShellExecution": False,
 }
@@ -1224,9 +1280,9 @@ class SettingsVariables(unittest.TestCase):
         self.assertNotIn("env", self.read(self.local()))
 
     def test_ezexes_own_keys_and_variables_stay_untouched(self):
-        """enabledPlugins, autoMemoryEnabled, every permission key but p4's own allow entries, ezexe's own variables
-        and a P4_* variable set by hand are left as they are, and the record never names them; a variable p4 wrote
-        and ezexe changed leaves the record and is never touched again."""
+        """enabledPlugins, autoMemoryEnabled, every permission key but p4's own allow and ask entries, ezexe's own
+        variables and a P4_* variable set by hand are left as they are, and the record never names them; a variable
+        p4 wrote and ezexe changed leaves the record and is never touched again."""
         self.store({"phi": {"max_depth": 5, "max_children": 6, "chain_max": 4}})
         mine = {"enabledPlugins": {"p4-phi@p4-marketplace": False}, "autoMemoryEnabled": False,
                 "permissions": {"allow": ["Bash(npm test)"], "ask": ["Bash(git push *)"], "deny": ["Read(./.env)"],
@@ -1238,9 +1294,10 @@ class SettingsVariables(unittest.TestCase):
         got = self.read(self.local())
         for k in ("enabledPlugins", "autoMemoryEnabled"):
             self.assertEqual(got[k], mine[k])
-        self.assertEqual({k: v for k, v in got["permissions"].items() if k != "allow"},
-                         {k: v for k, v in mine["permissions"].items() if k != "allow"})
+        self.assertEqual({k: v for k, v in got["permissions"].items() if k not in ("allow", "ask")},
+                         {k: v for k, v in mine["permissions"].items() if k not in ("allow", "ask")})
         self.assertEqual(got["permissions"]["allow"][0], "Bash(npm test)")
+        self.assertEqual(got["permissions"]["ask"], mine["permissions"]["ask"] + list(p4conf.ASK_RULES))
         self.assertEqual(got["env"], {"FOO": "1", "P4_PHI_MAX_CHILDREN": "4", "P4_PHI_MAX_DEPTH": "5",
                                       "P4_PHI_CHAIN_MAX": "4"})
         rec = json.dumps(json.loads(Path(self.record()).read_text(encoding="utf-8"))["files"])

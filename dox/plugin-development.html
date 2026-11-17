@@ -101,6 +101,9 @@ pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--p
       "Bash(python -I -X utf8 \"E:/projects/p4-phi/p4/lbiza/plugins/p4-phi/scripts/p4.py\" sync *)",
       "PowerShell(python -I -X utf8 \"E:/projects/p4-phi/p4/lbiza/plugins/p4-phi/scripts/phi.py\" *)",
       "PowerShell(python -I -X utf8 \"E:/projects/p4-phi/p4/lbiza/plugins/p4-phi/scripts/p4.py\" sync *)"
+    ],
+    "ask": [
+      "mcp__ccd_session_mgmt__archive_session"
     ]
   },
   "disableAllHooks": false,
@@ -110,10 +113,12 @@ pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--p
 <tr><td><code>enabledPlugins</code>, with <code>p4-phi@p4-marketplace</code> and <code>p4-temportal@p4-marketplace</code> <code>false</code>, and <code>autoMemoryEnabled</code> <code>false</code></td><td>ezexe's own</td><td>The installed copies are off in this project only, and Claude Code's own auto memory is off here.</td></tr>
 <tr><td><code>autoMemoryDirectory</code> and <code>attribution.commit</code></td><td>Keys p4's settings keeper writes in a project where p4 runs</td><td>The store's memory folder and the store's commit trailer, as the page <a href="claude-settings.html">Claude Code settings</a> sets out. In the development project sessions start without <code>--plugin-dir</code> and the installed copies are off, so no hook of p4's runs there and they stand as ezexe wrote them.</td></tr>
 <tr><td><code>permissions.allow</code></td><td>The two rules ezexe approved, each in its Bash and its PowerShell form, which p4's keeper writes in a project where p4 runs, built from the running copy's own scripts folder</td><td>A session may run <code>phi.py</code> and <code>p4.py sync</code> of the checkout <code>E:/projects/p4-phi/p4</code> without a prompt. Here, where sessions start without <code>--plugin-dir</code> and the installed copies are off, no hook of p4's runs, so they stand as ezexe wrote them and name that checkout's scripts.</td></tr>
+<tr><td><code>permissions.ask</code></td><td>The ask rule ezexe approved on <code>mcp__ccd_session_mgmt__archive_session</code>, which p4's keeper writes in a project where p4 runs</td><td>The app shows its approval card before every archive call, in every permission mode.</td></tr>
 <tr><td><code>disableAllHooks</code> <code>false</code> and <code>disableSkillShellExecution</code> <code>false</code></td><td>The defaults the work relies on, written out</td><td>Hooks run and skills may run their shell commands.</td></tr>
 </tbody></table></div>
 <ul>
 <li>Checked on 2026-11-17: the desktop app follows <code>attribution.commit</code> from the project's local settings file. Right after it was written to this file, the app's own attribution guidance for commits switched to the line <code>Co-Authored-By: Anthropics Connoisseur of Hallucinations &lt;noreply@anthropic.com&gt;</code>, seen in two running sessions with no restart.</li>
+<li>Seen on 2026-11-17: with the ask rule on <code>mcp__ccd_session_mgmt__archive_session</code> in a project's local settings, the desktop app shows its approval card before <code>archive_session</code> even in bypass mode, when a session archives another. The <code>-p</code> proof, where an ask has nobody to answer and the call is refused in bypassPermissions, default and auto alike, is <code>C:/Users/ezexey/AppData/Local/Temp/claude/ffccc31c49e17720/bc6a0178-2907-48fe-9917-0a7cd70b6e09/scratchpad/w-live/proof/1-summary.txt</code>.</li>
 <li>p4's own settings, if they come to be kept as <code>P4_*</code> entries under <code>env</code>, are listed on <a href="claude-settings.html">Claude Code settings</a>, not here.</li>
 </ul>
 <h3>2. No plugin update after each landing</h3>
