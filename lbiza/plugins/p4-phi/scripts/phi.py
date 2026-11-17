@@ -2862,6 +2862,19 @@ def h_stop(payload):
     return None
 
 
+def h_turn_end(payload):
+    """A turn that ended with no Stop. Claude Code runs StopFailure in place of Stop when a turn ends on an API error,
+    by https://code.claude.com/docs/en/hooks#stopfailure, ezexe/p4#161. The hook logs one line as `stop`, with
+    the event and the error, so puppeteer.working reads the session as out of its turn. It keeps no turn row,
+    since the transcript Claude Code keeps holds the failed turn."""
+    me = Me(payload)
+    if not me.home or not me.id or not load_session(me.home, me.id).get("sessionId"):
+        return None
+    RAN.update(home=me.home, session=me.id, cli=me.cli, event=clean(payload.get("hook_event_name")),
+               ended=clean(payload.get("error") or payload.get("reason"))[:40])
+    return None
+
+
 def messaged(calls):
     """The sessions a turn's calls sent a message to."""
     out = []
@@ -3387,6 +3400,7 @@ def h_agent_stop(payload):
 HOOKS = {"session-start": ("SessionStart", h_session_start),
          "user-prompt-submit": ("UserPromptSubmit", h_user_prompt_submit),
          "stop": ("Stop", h_stop),
+         "stop-failure": ("StopFailure", h_turn_end),
          "start-advice": ("PreToolUse", h_start_advice),
          "branch-guard": ("PreToolUse", h_branch_guard),
          "store-guard": ("PreToolUse", h_store_guard),
@@ -3430,7 +3444,7 @@ def hook_main(name):
             log_run(name, json.dumps(text), started)
             sys.stdout.write(json.dumps(text))
             return 0
-        log_run(name, text, started)
+        log_run("stop" if fn is h_turn_end else name, text, started)   # a turn's end, as a Stop logs it
         if text:
             sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}))
     except Exception as e:  # noqa: BLE001

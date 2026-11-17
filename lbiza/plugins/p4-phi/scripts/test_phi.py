@@ -592,6 +592,33 @@ class Turns(unittest.TestCase):
         self.assertIn(f"started by `{KID}`", read(os.path.join(self.t.dir(GRAND), "session.md")))
 
 
+class TurnEnds(unittest.TestCase):
+    """A turn that ends with no Stop, read by puppeteer.working from the session's log."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP, title="Narwhal exporter")
+        self.t.say(TOP, TASK)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_a_turn_that_ends_on_an_api_error_is_ended(self):
+        """ezexe/p4#161: StopFailure runs in place of Stop when a turn ends on an API error, so its entry logs the
+        turn's end with the error, and keeps no turn row."""
+        import puppeteer
+        self.assertTrue(puppeteer.working(self.t.p4, TOP))
+        r = self.t.hook("stop-failure", TOP, {"hook_event_name": "StopFailure", "error": "rate_limit",
+                                              "error_details": "429 Too Many Requests",
+                                              "last_assistant_message": "API Error: Rate limit reached"})
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+        self.assertFalse(puppeteer.working(self.t.p4, TOP))
+        row = self.t.log(TOP)[-1]
+        self.assertEqual((row["hook"], row["event"], row["ended"]), ("stop", "StopFailure", "rate_limit"))
+        self.assertEqual(self.t.turns(TOP), [])
+
+
 class Background(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -1388,9 +1415,10 @@ class Wiring(unittest.TestCase):
         d = {ev: [g for g in gs if all("/hooks/run-hook.sh" in x["command"] for x in g["hooks"])]
              for ev, gs in jload(HOOKS_JSON)["hooks"].items()}
         d = {ev: gs for ev, gs in d.items() if gs}                  # phi.py's own; retrieval's run recall-hook.sh
-        self.assertEqual(sorted(d), ["SessionStart", "Stop", "UserPromptSubmit"],
+        self.assertEqual(sorted(d), ["SessionStart", "Stop", "StopFailure", "UserPromptSubmit"],
                          "frozen: the checks around a tool call ride on the retrieval hooks' entries")
-        for event, name in (("SessionStart", START), ("UserPromptSubmit", PROMPT), ("Stop", STOP)):
+        for event, name in (("SessionStart", START), ("UserPromptSubmit", PROMPT), ("Stop", STOP),
+                            ("StopFailure", "stop-failure")):
             cmd = d[event][0]["hooks"][0]["command"]
             self.assertIn("run-hook.sh", cmd)
             self.assertTrue(cmd.endswith(" " + name), cmd)

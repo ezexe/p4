@@ -35,7 +35,11 @@ SLASHED = ROOT.replace("\\", "/")
 COMMAND = re.compile(r'^sh "\$\{CLAUDE_PLUGIN_ROOT\}/hooks/(run-hook\.sh|recall-hook\.sh)" ([a-z-]+)$')
 SESSION = "77770000-0000-4000-8000-000000000001"
 EVENTS = {"SessionStart": ("startup", "resume", "clear", "compact", "fork"),
-          "UserPromptSubmit": None, "Stop": None, "PreToolUse": "tools", "PostToolUse": "tools",
+          "UserPromptSubmit": None, "Stop": None,
+          "StopFailure": ("rate_limit", "authentication_failed", "oauth_org_not_allowed", "account_on_hold",
+                          "billing_error", "invalid_request", "model_not_found", "server_error", "max_output_tokens",
+                          "cloud_credential_error", "unknown"),
+          "PreToolUse": "tools", "PostToolUse": "tools",
           "PostToolUseFailure": "tools", "SubagentStop": "agents", "SubagentStart": "agents",
           "ConfigChange": ("user_settings", "project_settings", "local_settings", "policy_settings", "skills")}
 
@@ -73,6 +77,9 @@ def payload(event, matcher, proj, tmp):
         body["prompt"] = "Make the exporter write its ports table"
     elif event == "Stop":
         body.update(stop_hook_active=False, last_assistant_message="done")
+    elif event == "StopFailure":
+        body.update(error="rate_limit", error_details="429 Too Many Requests",
+                    last_assistant_message="API Error: Rate limit reached")
     elif event in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
         tool = tool_for(matcher)
         body.update(tool_name=tool, tool_use_id="toolu_wiring1",
