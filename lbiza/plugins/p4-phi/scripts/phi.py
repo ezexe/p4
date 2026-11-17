@@ -959,7 +959,8 @@ def reports_text(home, s, room=None, store=""):
     found = findings_text(home, s, new, store)
     room -= (len(found) + 1) if found else 0
     out = ["phi (p4-phi): reports of this session's workers that finished a turn since it last looked, each "
-           "as kept or cut with ... where room runs short, with its page named under it."]
+           "as kept or cut with ... where room runs short, with its page named under it. Name each session to "
+           "ezexe by its whole title as a link, [its whole title](#its session id), as the sidebar lists it."]
     shown = list(reversed(new))[:max(1, (room - len(out[0])) // 700)]
     rest = [r for r in reversed(new) if r not in shown]
     each = max(500, (room - len(out[0]) - 110 * len(rest)) // len(shown) - 140)
@@ -968,7 +969,7 @@ def reports_text(home, s, room=None, store=""):
         out += [cut("\n".join(lines), each), f"  its page: {page_path(home, r['sessionId'])}"]
     if rest:
         out.append(f"Not shown here for want of room, {len(rest)} more, each on its page: " + ", ".join(
-            f"\"{cut(r.get('title') or r['sessionId'][:14], 40)}\" {page_path(home, r['sessionId'])}"
+            f"\"{r.get('title') or r['sessionId']}\" {page_path(home, r['sessionId'])}"
             for r in rest[:6]) + (f", and {len(rest) - 6} more listed on {page_path(home, s['sessionId'])}"
                                   if len(rest) > 6 else "") + ".")
     if found:

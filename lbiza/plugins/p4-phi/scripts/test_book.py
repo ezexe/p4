@@ -317,6 +317,34 @@ class Supervisor(unittest.TestCase):
         ctx = context(t.say(TOP3, f"please look at {os.path.join(t.proj, 'src', 'writer', 'rows.py')}"))
         self.assertIn(f"\"{long}\" `{KID3}`", ctx)
 
+    LONG = "Port the narwhal exporter's flush batching and its retry to the new writer"     # 74 characters
+
+    def test_a_title_of_70_characters_is_kept_whole_where_a_session_is_named(self):            # ezexe/p4#233
+        t = self.t
+        self.assertGreaterEqual(len(self.LONG), 70)
+        t.record(KID3, started_by=TOP, title=self.LONG)
+        t.say(TOP, "Build the narwhal exporter")
+        t.say(KID3, "Task:\nPort the flush batching. Report when done.\nFiles: src/batch.py")
+        self.assertEqual(t.cli(KID3, "done", "its suite ran green").returncode, 0)
+        t.stop(KID3, "Port the flush batching. Report when done.", report="Ported; its suite ran green.")
+        notes = " ".join(str(n.get("claim")) for n in phi.load_notes(t.p4, TOP))
+        self.assertIn(self.LONG, notes, "the replaces: note on its parent")
+        ctx = context(t.say(TOP, "what came in?"))
+        self.assertIn(self.LONG, ctx, "the parent's line names it whole")
+        self.assertIn(self.LONG, read(relay.ready_path(t.p4)), "the ready page names it whole")
+        opts = relay.offer(t.p4, TOP)
+        self.assertTrue(any(self.LONG in o["label"] or self.LONG in o["description"] for o in opts), opts)
+
+    def test_the_reports_line_says_to_name_each_session_by_its_whole_title_as_a_link(self):   # ezexe/p4#233
+        t = self.t
+        t.record(KID3, started_by=TOP, title=self.LONG)
+        t.say(TOP, "Build the narwhal exporter")
+        t.say(KID3, "Task:\nPort the flush batching.\nFiles: src/batch.py")
+        t.stop(KID3, "Port the flush batching.", report="Ported the batching; the retry is next.")
+        ctx = context(t.say(TOP, "what came in?"))
+        self.assertIn(self.LONG, ctx)
+        self.assertIn("Name each session to ezexe by its whole title as a link", ctx)
+
     def test_ezexes_words_are_read_without_links_and_paths_but_slash_joined_words_count(self):
         self.assertTrue(book.decides("Needs your approve/merge of the flush fix"))
         self.assertTrue(book.ezexes("The retry landed/pushed this morning"))

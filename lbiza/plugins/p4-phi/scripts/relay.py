@@ -163,7 +163,8 @@ def _sessions(home):
 
 
 def _title(s):
-    return str(s.get("title") or s.get("sessionId") or "")[:60]
+    """A session's whole title, as the app lists it, so ezexe finds it in the sidebar by it; its id where it has none."""
+    return " ".join(str(s.get("title") or s.get("sessionId") or "").split())
 
 
 RECORD = None                    # phi.app_record, set by phi.py at import; read lazily otherwise
@@ -2081,7 +2082,9 @@ def offer(home, top):
         return []
     every = _sessions(home)
     if len(ready) <= OFFER_MAX:
-        opts = [{"label": _short(t, 44), "description": f"Archive {sid}.", "ids": [sid]} for sid, t, _ in ready]
+        opts = [{"label": _short(t, 44), "description": f"Archive \"{t}\" {sid}." if _short(t, 44) != t
+                 else f"Archive {sid}.", "ids": [sid]}
+                for sid, t, _ in ready]           # a label has a limit of its length: a title it cuts is described
     else:
         groups = {}
         for sid, t, parent in ready:
@@ -2090,7 +2093,8 @@ def offer(home, top):
                  "ids": [sid for sid, _, _ in ready]}]
         for parent, kids in groups.items():
             opts.append({"label": _short(f"Under {_title(every.get(parent) or {'sessionId': parent})}", 44),
-                         "description": "Archive " + "; ".join(f"\"{_short(t, 40)}\"" for _, t in kids[:8]) + ".",
+                         "description": "Archive " + "; ".join(f"\"{t}\"" for _, t in kids[:8])
+                                        + (f" and {len(kids) - 8} more" if len(kids) > 8 else "") + ".",
                          "ids": [sid for sid, _ in kids]})
     seen = {}
     for o in opts:                                 # a label is the key a pick is read by: each one once
