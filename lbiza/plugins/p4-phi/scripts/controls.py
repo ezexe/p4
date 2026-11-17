@@ -27,7 +27,8 @@ The watcher every orchestrator has is puppeteer.py's and is another thing.
                `Finding:` line, and the puppeteer that controls the tree publishes what needs an issue and
                places the session that resolves it; where none controls the tree, its orchestrator does.
   a boundary   a controlled tree has closed, or every controlled session is idle with no request waiting. The
-               puppeteer is told once to end its turn on a question with two buttons. p4-phi speaks only
+               puppeteer is told once to keep what is not on its board with `note`. Claude Code compacts a
+               session by itself and p4-phi asks ezexe nothing about it. p4-phi speaks only
                when one of its hooks fires, so a boundary reached while the puppeteer is idle is told
                beside its next message: a command hook with `asyncRewake` could wake it at once, `SendMessage` with
                `notify_when_idle` could tell it when a controlled session goes idle, and p4-phi uses neither.
@@ -61,10 +62,6 @@ import starts
 PHI = None                       # phi.py's own module, handed over when phi.py imports this one
 
 SECTION = "puppeteers"           # p4.json phi.puppeteer_section; "" turns the rule off
-CHARS = 200000                   # p4.json phi.puppeteer_chars: once p4-phi has handed a puppeteer this many
-#                                  characters since its last compaction, its boundary notice says so, and each further
-#                                  multiple gives that notice again while a boundary holds
-COMPACTIONS = 3                  # after this many, the notice offers a successor in place of "Later"
 REASON_MIN = 12                  # characters of a reason that says something
 RECENT = 120                     # the app's newest records looked through for sessions a puppeteer started
 SHARE = 2                        # content words a message shares with a controlled session's topic to be sent there
@@ -87,11 +84,6 @@ def section_name(store):
     """The section's name for this project: p4.json phi.puppeteer_section when it is a string, else the default."""
     name = _conf(store, "puppeteer_section")
     return name.strip() if isinstance(name, str) else SECTION
-
-
-def ceiling(store):
-    n = _conf(store, "puppeteer_chars")
-    return n if isinstance(n, int) and not isinstance(n, bool) and n > 0 else CHARS
 
 
 def sections():
@@ -412,12 +404,11 @@ def usage_line(home, s, prompt, store):
     ids = [held] + sorted(k for k, v in every.items() if PHI.spawned_from(v) == held and live(k))
     return (f"phi (p4-phi): its standing worker `{held}` reported. Read `mcp__ccd_session_mgmt__get_usage` for each "
             f"of {', '.join(f'`{k}`' for k in ids)}, and send the worker one line naming any whose context passes "
-            f"{CLEAR_AT} percent, so that session brings its state page up to date and calls "
+            f"{clear_at(store)} percent, so that session brings its state page up to date and calls "
             f"`mcp__ccd_session_mgmt__clear_session` with `\"self\"` at its turn's end.")
 
 
 STATE_IN_TASK = re.compile(r"\bState page:\s*(\S+?)[.,;]?(?=\s|$)")
-WINDOW = 200000                  # p4.json phi.context_window: the tokens of a session's context window
 
 
 def page_of_task(home, s):
@@ -441,50 +432,58 @@ def state_first(home, s):
             f"else, and resume from it: {page}")
 
 
-def context_used(transcript):
-    """The tokens of the context of a transcript's last assistant call: its input, cache creation and cache read
-    together, from that row's `message.usage`; 0 when none is read."""
-    try:
-        with open(transcript, "rb") as f:
-            f.seek(0, 2)
-            f.seek(max(0, f.tell() - 400000))
-            rows = f.read().decode("utf-8", "replace").splitlines()
-    except (OSError, TypeError, ValueError):
-        return 0
-    for line in reversed(rows):
-        if '"usage"' not in line:
-            continue
-        try:
-            d = json.loads(line)
-        except ValueError:
-            continue
-        u = (d.get("message") or {}).get("usage") if isinstance(d.get("message"), dict) else None
-        if d.get("type") == "assistant" and isinstance(u, dict):
-            return sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens",
-                                                     "cache_read_input_tokens"))
-    return 0
+# The app counts a session's context itself. The description of `mcp__ccd_session_mgmt__get_usage` gives `context`
+# as "that session's window as the composer shows it — tokens used, percent, where auto-compact starts", "read from
+# the session's own process". So p4-phi sums no usage row of a transcript and holds no window size: a line that turns
+# on the share names that call on `"self"`, which the session makes while its own process runs.
+
+def clear_at(store):
+    """The percent of its context past which a session that keeps a state page clears itself: p4.json phi.clear_at
+    when it is a number above 0 and at most 100, else CLEAR_AT."""
+    at = _conf(store, "clear_at")
+    return at if isinstance(at, (int, float)) and not isinstance(at, bool) and 0 < at <= 100 else CLEAR_AT
 
 
-def clear_line(home, s, transcript, store):
-    """At a turn's `wrap_up`: past the share of its window p4.json names, a session that keeps a state page is told
-    to bring it up to date and clear itself as the turn's last call. '' below the line or with no page."""
+# A clear that resumes from a state page is p4's own rule. `/clear` starts one conversation over, sessions.md, "Manage
+# context within a session": "start fresh with an empty context. Claude Code saves the previous session". The
+# description of `mcp__ccd_session_mgmt__clear_session` takes one session a call, this one or "an idle session this
+# session started", and refuses one "the user has pinned, has open on screen, or that still holds a queued message
+# or other live work". No page and no tool clears a session together with the sessions it started, so the line below
+# names each call, the coworkers' ahead of the session's own.
+
+def idle_coworkers(home, s):
+    """The live sessions `s` started itself that p4-phi's records hold idle with an empty queue and a state page to
+    resume from: not inside a turn, no open plan step, no background task still running at its last turn's end, and
+    no report `s` has not been handed yet. A queued message, a pin, a session open on ezexe's screen and a turn begun
+    after this read are in none of p4-phi's records: the app's own refusal of the clear covers them."""
+    sid = s["sessionId"]
+    seen = s.get("reportsSeen") if isinstance(s.get("reportsSeen"), int) else 0
+    unread = {r["sessionId"] for r in PHI.latest_reports(PHI.load_reports(home, sid)[seen:])}
+    w = _watcher()
+    return [k for k, ks in sorted(plans._children(home, sid).items())
+            if page_of_task(home, ks) and k not in unread and not w.working(home, k)
+            and not plans.open_steps(home, k) and not w.held_tasks(home, k)]
+
+
+def clear_line(home, s, store):
+    """At a turn's `wrap_up`, for a session that keeps a state page: bring the page up to date, whatever its context
+    reads, so a clear loses nothing; then read its context share with the app's `get_usage` on `"self"` and, past the
+    share p4.json names, clear each coworker of `idle_coworkers` and itself, its own clear the turn's last call. ''
+    with no page."""
     page = page_of_task(home, s)
     if not page:
         return ""
-    window, at = _conf(store, "context_window"), _conf(store, "clear_at")
-    window = window if isinstance(window, int) and not isinstance(window, bool) and window > 0 else WINDOW
-    at = at if isinstance(at, (int, float)) and not isinstance(at, bool) and 0 < at <= 100 else CLEAR_AT
-    used = context_used(transcript)
-    if used * 100 < at * window:
-        return ""
-    kids = sorted(k for k, v in relay._sessions(home).items() if PHI.spawned_from(v) == s["sessionId"] and live(k))
-    first = (f" Before that, clear each of its coworkers that is idle with an empty queue, by "
+    kids = idle_coworkers(home, s)
+    whose = ", its own or one the session that started it makes," if PHI.spawned_from(s) else ""
+    first = (f", then clear each coworker p4-phi's records hold idle with an empty queue, by "
              f"`mcp__ccd_session_mgmt__clear_session` on its id, whatever its own context reads, so the family resets "
-             f"together: {', '.join(f'`{k}`' for k in kids)}." if kids else "")
-    return (f"phi (p4-phi): this session's context is at {used * 100 // window} percent, past the line of {at} "
-            f"percent. Bring its state page up to date at {page}, send what the turn still owes, and make "
+             f"together: {', '.join(f'`{k}`' for k in kids)}. A coworker clear the app refuses leaves that coworker "
+             f"as it is. After those, make" if kids else ", and make")
+    return (f"phi (p4-phi): bring this session's state page up to date at {page} before this turn ends, so a clear"
+            f"{whose} loses nothing. Then read its context with `mcp__ccd_session_mgmt__get_usage` on `\"self\"`. "
+            f"Where it reads past {clear_at(store)} percent, send what the turn still owes{first} "
             f"`mcp__ccd_session_mgmt__clear_session` with `\"self\"` the last call of this turn; it resumes from the "
-            f"page in its next turn.{first} If the app refuses the clear, try again at the next turn's end.")
+            f"page in its next turn. If the app refuses the clear of this session, try again at the next turn's end.")
 
 
 def board_path(home, sid):
@@ -872,20 +871,17 @@ def waited_on(s):
     return out
 
 
-# --- a boundary, and the notice that is a button -------------------------------------------------------------------------
+# --- a boundary, and its notice ------------------------------------------------------------------------------------------
+#
+# context-window.md, "When your context fills up": "Claude Code compacts automatically as you approach the limit, so a
+# full context window doesn't end your session." So a boundary puts no compact question to ezexe and hands no line to
+# type. What no compaction keeps for a puppeteer is what its board lacks, so the notice names `note` and nothing else.
 
-def handed_chars(home, s):
-    """The characters p4-phi's hooks handed this session since its last compaction, from its own log."""
-    since = str(s.get("compactedAt") or "")
-    return sum(int(r.get("said") or 0) for r in PHI.read_rows(os.path.join(PHI.session_dir(home, s["sessionId"]),
-                                                                           "log.jsonl"))
-               if str(r.get("time") or "") >= since)
-
-
-def boundary(home, s, store=""):
+def boundary(home, s):
     """The notice a puppeteer is handed once at each boundary, and an empty string otherwise: a boundary is
     a controlled tree that has closed, or every controlled session idle with no request waiting. Never while a
-    controlled session waits on the puppeteer's answer. The caller saves what was told."""
+    controlled session waits on the puppeteer's answer. It says to keep what is not on the board with `note`, and
+    asks nothing of ezexe. The caller saves what was told."""
     rows = controlled(s)
     if not rows or requests_for(s):
         return ""
@@ -905,8 +901,7 @@ def boundary(home, s, store=""):
     fresh = [k for k in ready if k not in (told.get("ready") or [])]
     if not newly and not idle and not fresh:
         return ""
-    chars, top = handed_chars(home, s), ceiling(store)
-    key = hashlib.sha1(json.dumps([sorted(states), chars // top]).encode("utf-8")).hexdigest()[:12]
+    key = hashlib.sha1(json.dumps(sorted(states)).encode("utf-8")).hexdigest()[:12]
     if told.get("key") == key:
         return ""
     s["boundary"] = {"key": key, "closed": closed, "ready": ready, "time": PHI.now()}
@@ -916,21 +911,10 @@ def boundary(home, s, store=""):
     why = (f"the tree of \"{full_title(newly[0])}\" has closed" if newly else
            "every controlled session is idle and no request is waiting")
     path = board_path(home, s["sessionId"])
-    past = (f" p4-phi has handed this session {chars} characters since its last compaction, past the ceiling of {top}."
-            if chars >= top else "")
-    second = ("the app's `new_session` action, which starts the successor puppeteer from the board; its brief "
-              f"is the board's path and `{PHI.commands()} controls --from {s['sessionId']}`, and this session then runs "
-              f"`{PHI.commands()} controls --hand <its sessionId>`"
-              if int(s.get("compactions") or 0) >= COMPACTIONS else "\"Later\"")
     return ((pick + "\n\n" if pick else "") +
-            f"phi (p4-phi): a boundary: {why}.{past} When this turn's messages are sent, keep what is not yet on the "
-            f"board, {path}, with `{PHI.commands()} note`. Then read the context usage with "
-            f"`mcp__ccd_session_mgmt__get_usage` on `\"self\"` and end the turn with `mcp__ccd_turn__wrap_up` whose "
-            f"question is one short sentence with that usage, such as \"Context is at 71%, auto-compact starts at "
-            f"85%. Compact now?\", and whose buttons are \"Compact now\" and {second}. On \"Compact now\" answer "
-            f"with one line only, for ezexe to type, since a session cannot compact itself and no button sends a "
-            f"command: `/compact keep the path of the board, {path}, and read it first`. On "
-            f"\"Later\" say nothing more.")
+            f"phi (p4-phi): a boundary: {why}. When this turn's messages are sent, keep what is not yet on the "
+            f"board, {path}, with `{PHI.commands()} note`. Claude Code compacts this session by itself as its "
+            f"context fills, and the board's path is the first thing it is handed after that.")
 
 
 def complete_text(ready):
@@ -946,10 +930,9 @@ def complete_text(ready):
 
 
 def compacted(home, s):
-    """A puppeteer after a compaction: the count starts again, and its board's path comes first."""
-    s["compactedAt"] = PHI.now()
-    s["compactions"] = int(s.get("compactions") or 0) + 1
-    s.pop("boundary", None)
+    """A puppeteer after a compaction, typed or automatic: its board's path comes first. hooks-guide.md,
+    "Re-inject context after compaction": "Use a `SessionStart` hook with a `compact` matcher to re-inject critical
+    context after every compaction." """
     return (f"phi (p4-phi): this session is a puppeteer and its context was compacted. Read its board "
             f"before anything else: {board(home, s)}")
 

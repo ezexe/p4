@@ -67,7 +67,8 @@ A path on a brief's `Files:` line that is an ancestor of another listed path, or
 
 ## The address book
 
-Beside its first message, after a compaction or a clear, and beside each later message where an entry changed, a session is handed its address book: the live sessions of its project's trees and of the trees its puppeteer controls, each by full title and id with its role, its parent, the files its `Files:` line holds, its owned paths, its open issue and its workers or coworkers.
+Beside its first message, after a clear, and beside each later message where an entry changed, a session is handed its address book: the live sessions of its project's trees and of the trees its puppeteer controls, each by full title and id with its role, its parent, the files its `Files:` line holds, its owned paths, its open issue and its workers or coworkers.
+After a compaction the summary keeps the conversation, the book among it, so the start hands only the entries that changed since the session last looked, with the path of `book.md`, and hands the session's own turns again only after a clear, which keeps nothing.
 It names the puppeteer as the one address for a decision of ezexe's authority, a press the app requires or an outcome ezexe should hear, and the session's parent as the address for work off its task.
 The book is whole on `book.md` in the session's folder, and a later line names only the entries that changed since the session last looked.
 A message about a file, an issue or a piece of work goes straight to the session that holds that file, owns that issue or started that work.
@@ -78,7 +79,8 @@ A `Finding:` on a held file or an owned issue goes straight to its holder, named
 ## A puppeteer
 
 A puppeteer is a session nobody started that ezexe filed in the sidebar section "puppeteers", and it controls the orchestrators of other trees.
-Its rule is handed once, beside its first message after p4-phi sees the filing; its board, `board.md` in its session folder, says on its head how it is kept; and the line p4-phi hands at a boundary says what to do then.
+Its rule is handed once, beside its first message after p4-phi sees the filing; its board, `board.md` in its session folder, says on its head how it is kept; and the line p4-phi hands at a boundary, a controlled tree that closed or every controlled session idle with no request waiting, says to keep what the board lacks with `note`.
+Claude Code compacts a session by itself, so a boundary carries no compact question and no line for ezexe to type, and after a compaction, typed or automatic, the SessionStart entry hands a puppeteer its board's path first.
 A controlled session is told once when it comes to have a puppeteer, and once when that ends.
 Each request of ezexe's to a puppeteer is a row of its ledger, `asks.md` beside its board: a short topic, the session that holds it by full title and id, its state, and what waits on ezexe.
 Every message of ezexe's opens a row, whatever its words and also while another row waits on ezexe, unless it is a status question about existing work such as "where does it stand" or "did it land", or a reply with nothing after it.
@@ -110,7 +112,10 @@ At a message carrying reports, a puppeteer is handed a line naming each reportin
 A session whose p4-phi task names a page by `State page: <path>`, and the standing worker and each coworker, is handed that page's path first after a compaction or a clear.
 No line p4-phi hands a session names a place under `.claude` to write, since every such write asks ezexe.
 A standing worker's or coworker's page stays where its first scratchpad put it, kept on its record, since a clear gives the session a new scratchpad.
-At its `wrap_up`, such a session whose last call's context passes `phi.clear_at` percent of `phi.context_window` tokens, 60 and 200,000 by default in `.claude/p4/p4.json`, is told to bring the page up to date and make `clear_session` on `"self"` its turn's last call, after clearing each of its coworkers that is idle with an empty queue.
+At every `wrap_up`, such a session is told to bring the page up to date, whatever its context reads, so a clear loses nothing, its own or one the session that started it makes.
+The app counts a session's context, so p4-phi measures none: the same line tells the session to read its share with `mcp__ccd_session_mgmt__get_usage` on `"self"` and, where it reads past `phi.clear_at` percent, 60 by default in `.claude/p4/p4.json`, to make `clear_session` on `"self"` its turn's last call.
+No tool clears a session together with the sessions it started, so ahead of its own clear the line names one `clear_session` call for each coworker p4-phi's records hold idle with an empty queue: a live session it started itself that keeps a state page, is not inside a turn, holds no open plan step and no background task, and whose last report it has been handed.
+A queued message, a pin and a session open on ezexe's screen are in none of p4-phi's records, so the app's own refusal of the clear covers them, and a coworker whose clear is refused stays as it is.
 A puppeteer, at a message carrying its worker's report, is handed the ids of the worker and its coworkers, to read each one's `get_usage`.
 
 ## What it does not do
@@ -118,5 +123,6 @@ A puppeteer, at a message carrying its worker's report, is handed the ids of the
 - Apart from retrieval, which ranks the corpus against each message, p4-phi finds no earlier turn by the words of a request: a session is given what the sessions linked to it kept, and of earlier topics only a registered route, a landed topic whose records back it, is scored against a message.
 - It does not start, stop or message sessions itself: the gate hands the exact call, and the session makes it.
 - It does not stop a session from filing itself in the section "puppeteers", since the app asks nobody: the rule rests on ezexe's filing, and p4-phi says once, in the session and on its record, that it saw the session there, and tells every session it lists who claims it.
-- It does not compact a session, start a successor or move a session between sections: those are the app's tools, and the puppeteer makes the calls p4-phi names.
+- It does not compact a session and hands no session a compact question: Claude Code compacts a session by itself as its context fills.
+- It does not start a successor or move a session between sections: those are the app's tools, and the puppeteer makes the calls.
 - It does not block a puppeteer's edits, and a start request a controlled tree filed for itself stays the tree's: only one addressed to the puppeteer is closed, when that session declines it.

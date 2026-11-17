@@ -55,15 +55,6 @@
   },
   {
     "repo": "ezexe/p4",
-    "issue": 219,
-    "title": "p4-phi: a puppeteer is told to ask ezexe to compact at every boundary, whatever its context holds",
-    "behaviour": "Compaction runs only for a typed /compact or for auto-compaction; a PreCompact hook can only block it or add instructions, and no tool, hook output or SDK call starts one.",
-    "source": "https://code.claude.com/docs/en/hooks#precompact; the rest undocumented, the app's session tools offer clear_session and no compact",
-    "changes_when": "A tool or a hook output starts a compaction of a session; p4 then compacts a puppeteer at its own ceiling and asks ezexe nothing.",
-    "terms": ["/compact", "PreCompact", "compact_session", "clear_session"]
-  },
-  {
-    "repo": "ezexe/p4",
     "issue": 220,
     "title": "p4-phi: a session holding a start request asks ezexe for the same press at every turn ezexe did not begin",
     "behaviour": "start_session with initiation user_asked is refused in a turn that another session's message, a background event or a handed task began, and whether a later turn without blocked clears the app's waiting mark is undocumented.",

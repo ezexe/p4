@@ -102,7 +102,6 @@ details.tt pre{margin:10px 0 2px;font-size:11.5px;line-height:1.55;white-space:p
 .field{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin:12px 0 0}
 .field label{font-size:13px;color:var(--soft)}
 .field select{flex:1;min-width:150px;border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:8px 9px;font-size:14px}
-.field label.ck{display:inline-flex;gap:6px;align-items:center;cursor:pointer;color:var(--ink)}
 .grp{font:600 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--soft);margin:14px 0 0}
 .acts{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;margin-top:8px}
 .act{min-width:0;display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:10px 11px;font-size:14px;font-weight:600;cursor:pointer;min-height:44px}
@@ -202,7 +201,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
   <ul class="facts">
     <li class="f-you"><b>The filing makes it one.</b>A puppeteer is an orchestrator that the app's own file shows in the section “puppeteers”. p4-phi reads that file each time it matters and keeps no copy of its own.</li>
     <li class="f-phi"><b>A record on each side.</b>The puppeteer records each orchestrator it controls with <code>phi.py controls</code>, as <code>controls</code> on its own session.json. A controlled session stays at the top of its own tree, in its own section, and keeps <code>puppeteer</code> on its own record.</li>
-    <li class="f-app"><b>Its state lives on a board.</b>A puppeteer's context only grows, so p4-phi keeps <code>board.md</code> for it, hands it each report as one line and a page, and names the point where compacting is safe.</li>
+    <li class="f-app"><b>Its state lives on a board.</b>Claude Code compacts a puppeteer's context by itself, so p4-phi keeps <code>board.md</code> for it, hands it each report as one line and a page, and hands it the board's path first after every compaction.</li>
   </ul>
 
   <div class="stage">
@@ -210,7 +209,6 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
       <div class="bar">
         <span class="chip" id="cfiled"></span>
         <span class="chip" id="cedge"></span>
-        <span class="chip" id="ccomp"></span>
         <span class="spacer"></span>
         <button type="button" class="ghostbtn" id="reset">Reset</button>
       </div>
@@ -248,6 +246,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
           <button type="button" class="act" data-act="behalf">Start this session's request itself <span class="tag app">app call</span></button>
           <button type="button" class="act" data-act="untie">Detach to top level <span class="tag app">app call</span></button>
           <button type="button" class="act" data-act="archive">Archive this session <span class="tag app">app call</span></button>
+          <button type="button" class="act" data-act="compacted">Claude Code compacts the puppeteer <span class="tag app">app</span></button>
         </div>
         <div class="field">
           <label for="hold">p4-phi's records of it also show</label>
@@ -257,7 +256,6 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
             <option value="task">a background task still running at its last turn's end</option>
             <option value="commit">a closing commit on no remote branch</option>
           </select>
-          <label class="ck"><input type="checkbox" id="past"> p4-phi has handed the puppeteer 200000 characters or more since its last compaction</label>
         </div>
 
         <p class="grp">The selected session</p>
@@ -267,8 +265,8 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
         </div>
       </section>
 
-      <section class="card sec" id="boxsec" hidden aria-label="What the puppeteer puts to ezexe">
-        <h2>What the puppeteer puts to ezexe</h2>
+      <section class="card sec" id="boxsec" hidden aria-label="What the app puts to ezexe">
+        <h2>What the app puts to ezexe</h2>
         <div class="box">
           <p class="q" id="boxq"></p>
           <p class="r" id="boxr"></p>
@@ -348,24 +346,21 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
       <div class="rule">
         <h3>What p4-phi does not do</h3>
         <ul>
-          <li>It does not compact a session, start a successor, move a session between sections or archive one. Those are the app's tools, and the session makes the calls p4-phi names.</li>
+          <li>It does not compact a session, and a boundary carries no compact question and no line for ezexe to type. The context window page says: “Claude Code compacts automatically as you approach the limit, so a full context window doesn't end your session.”</li>
+          <li>It does not start a successor, move a session between sections or archive one. Those are the app's tools, and the session makes the calls.</li>
           <li>It speaks only when one of its hooks fires, so a boundary reached while the puppeteer is idle is named beside its next message. A command hook with <code>asyncRewake</code> could wake it at once, and <code>SendMessage</code> with <code>notify_when_idle</code> could tell it when a session goes idle, and p4-phi uses neither.</li>
-          <li>The character count covers what p4-phi's own hooks handed, so it is a floor under the context's real size.</li>
           <li>It hands a start request only to the session that filed it. A puppeteer may decline only a request addressed to it, and the hook of the session that filed it then closes the row as withdrawn.</li>
           <li>It refuses no archive call. The settings keeper writes an ask rule on <code>mcp__ccd_session_mgmt__archive_session</code>, so the app shows its approval card before every archive call, bypass mode included, and the tool refuses a session with live background work itself.</li>
         </ul>
       </div>
       <div class="rule">
-        <h3>Two keys, both optional</h3>
+        <h3>One key, optional</h3>
         <ul>
           <li><code>phi.puppeteer_section</code> names the sidebar section. It is “puppeteers” when the key is absent, and an empty string turns the rule off.</li>
-          <li><code>phi.puppeteer_chars</code> is the number of characters p4-phi may hand a puppeteer between compactions before its boundary notice says so, and each further multiple names a boundary again while one holds. It is 200000 when the key is absent.</li>
-          <li>After three compactions the notice offers a successor in place of “Later”.</li>
         </ul>
         <pre>{
  "phi": {
-  "puppeteer_section": "puppeteers",
-  "puppeteer_chars": 200000
+  "puppeteer_section": "puppeteers"
  }
 }</pre>
       </div>
@@ -436,7 +431,7 @@ function copy(text,btn){
 }
 
 /* ---------- the model ---------- */
-var SECTION="puppeteers",COMPACTIONS=3,CEILING=200000,MAX=12;
+var SECTION="puppeteers",MAX=12;
 var ENVS={atlas:{section:"atlas",store:"<atlas>/.claude/p4"},harbor:{section:"",store:"<harbor>/.claude/p4"}};
 var HOME="<watch>/.claude/p4";
 var TITLES=["Search index rebuild","Importer rewrite","Nightly report fixes","Login flow cleanup","Queue worker timeouts"];
@@ -456,7 +451,7 @@ function mk(title,par,env,o){
 function tick(){S.clock++;var m=S.clock%60,hh=11+Math.floor(S.clock/60);return "2026-11-16 "+hh+":"+(m<10?"0":"")+m}
 function fresh(){
   S={n:{},order:[],seq:0,rid:0,salt:41,clock:38,filed:false,seen:"",sel:null,reqs:[],answers:[],notes:[],seenTurn:{},
-     edge:{key:"",closed:[],ready:[]},box:null,compactions:0,past:false,example:{kind:"intro"},con:null,board:"",titles:0,
+     edge:{key:"",closed:[],ready:[]},box:null,example:{kind:"intro"},con:null,board:"",titles:0,
      holdersKey:"",behalf:[],behalfTold:[]};
   S.p=mk("Cross-project watch",null,"");
   var a=mk("Release pipeline",null,"atlas",{working:true});
@@ -560,10 +555,8 @@ function reqCall(rid,t,from){return {initiation:"user_asked",title:t,context:"fr
 function puppCall(r){var from=N(r.from);return {initiation:"user_asked",title:r.title,context:"fresh",use_worktree:false,cwd:"<"+from.env+">",background:"<its start background>",
   prompt:BRIEF+"\n\n"+NEW_TOP_BRIEF+" "+FIRST_ACT()+"\n\n"+LEVEL+"\n\n"+marker(r.id,r.from),effort:"<effort>"}}
 function NOTICE(why){
-  var second=S.compactions>=COMPACTIONS?"the app's `new_session` action, which starts the successor puppeteer from the board; its brief is the board's path and `"+PHI+" controls --from "+S.p+"`, and this session then runs `"+PHI+" controls --hand <its sessionId>`":"\"Later\"";
-  return "phi (p4-phi): a boundary: "+why+"."+(S.past?" p4-phi has handed this session 214806 characters since its last compaction, past the ceiling of "+CEILING+".":"")+" When this turn's messages are sent, keep what is not yet on the board, "+boardPath()+", with `"+PHI+" note`. Then read the context usage with `mcp__ccd_session_mgmt__get_usage` on `\"self\"` and end the turn with `mcp__ccd_turn__wrap_up` whose question is one short sentence with that usage, such as \"Context is at 71%, auto-compact starts at 85%. Compact now?\", and whose buttons are \"Compact now\" and "+second+". On \"Compact now\" answer with one line only, for ezexe to type, since a session cannot compact itself and no button sends a command: `/compact keep the path of the board, "+boardPath()+", and read it first`. On \"Later\" say nothing more.";
+  return "phi (p4-phi): a boundary: "+why+". When this turn's messages are sent, keep what is not yet on the board, "+boardPath()+", with `"+PHI+" note`. Claude Code compacts this session by itself as its context fills, and the board's path is the first thing it is handed after that.";
 }
-function COMPACT_LINE(){return "/compact keep the path of the board, "+boardPath()+", and read it first"}
 
 /* controls.complete_text: the sessions p4-phi's records hold complete, which no tool of the app tells */
 function completeText(ready){
@@ -586,12 +579,11 @@ function boundary(){
   if(!S.filed||!rows.length||openReqs().length)return null;
   var ready=readyIds(),fresh_=ready.filter(function(k){return S.edge.ready.indexOf(k)<0});
   if(!b.newly.length&&!b.idle&&!fresh_.length)return null;
-  var key=JSON.stringify([rows.map(function(n){return [n.id,standing(n).state,n.last]}).sort(),S.past?1:0]);
+  var key=JSON.stringify(rows.map(function(n){return [n.id,standing(n).state,n.last]}).sort());
   if(S.edge.key===key)return null;
   S.edge={key:key,closed:b.closed,ready:ready};
-  var atEdge=!!(b.newly.length||b.idle),pick=completeText(ready),second=S.compactions>=COMPACTIONS?"new":"later";
+  var atEdge=!!(b.newly.length||b.idle),pick=completeText(ready);
   if(pick&&!atEdge)return{parts:[pick],why:"A controlled session is complete while another still works, so there is no boundary yet."};
-  S.box={kind:"compact",second:second};
   return{parts:(pick?[pick]:[]).concat([NOTICE(b.why)]),why:"A boundary, named once."};
 }
 
@@ -633,7 +625,7 @@ function hook(byEzexe,route){
         named.map(function(b){return "- "+link(N(b.kid))+", started for start request "+b.rid+" of "+link(N(b.req))+": call `mcp__ccd_session_mgmt__detach_session` with `"+b.kid+"`"}).join("\n")})}
   var edge=boundary();
   if(edge)edge.parts.forEach(function(p,i){out.push({side:"phi",by:i===edge.parts.length-1?edge.why:"The complete sessions it controls, named, which no tool of the app tells.",out:p,
-    note:i===edge.parts.length-1?"What the puppeteer puts to ezexe is in the box above.":""})});
+    note:i===edge.parts.length-1&&p.indexOf("a boundary: ")>=0?"The line ends in no question and no button. Claude Code compacts the session by itself, and the board's path comes first after that.":""})});
   S.board=boardText();
   return out;
 }
@@ -772,29 +764,12 @@ var EX={
     steps:[{side:"you",by:e.id?"ezexe approves the card for "+q(e.title)+".":"ezexe denies the card."}],
     app:e.id?"The session is archived.":"Nothing is archived.",
     phi:"Nothing of its own. The board shows the session as archived once the app's record does."}},
-  compact:function(){return{title:"Compact now",
-    why:"A session cannot compact itself, and no button sends a command. So the press cannot do the compaction, and the puppeteer answers with the one line ezexe types.",
-    steps:[{side:"you",by:"ezexe presses Compact now."},
-           {side:"app",by:"The puppeteer answers with one line only.",code:COMPACT_LINE(),
-            note:"The board was brought up to date before the buttons were shown, so either answer is safe."}],
-    app:"Nothing yet. The context is compacted when ezexe runs the command.",phi:"Nothing."}},
-  compacted:function(e){return{title:"After the compaction, the board comes first",
-    why:"The first thing a puppeteer is handed after a compaction is the path of its board, before the project's rules and everything else beside its prompt.",
-    steps:[{side:"you",by:"ezexe types the command in the puppeteer."},
-           {side:"phi",by:"The SessionStart hook runs with the source compact.",out:"phi (p4-phi): this session is a puppeteer and its context was compacted. Read its board before anything else: "+boardPath()}],
-    app:"The session's context is compacted.",
-    phi:"compactedAt holds the time, so the character count starts again. compactions is "+e.n+". The boundary that was named is forgotten, so the next one is named afresh."+(e.n>=COMPACTIONS?" The notice's second button starts a successor from here on.":"")}},
-  later:function(){return{title:"Later",
-    why:"On Later the puppeteer says nothing more. p4-phi does not repeat the notice at the same boundary. It names the next one when a controlled session's state or last report changes, or when the character count passes another multiple of the ceiling.",
-    steps:[{side:"you",by:"ezexe presses Later."}],
-    app:"Nothing.",phi:"boundary on the puppeteer's record keeps the key of what was told."}},
-  successor:function(e){return{title:"A successor takes over",
-    why:"After three compactions, compacting is not enough. The second button starts a fresh puppeteer from the board, which takes over the same controlled sessions; the old puppeteer is archived through the app's approval card.",
-    steps:[{side:"you",by:"ezexe presses the button, the app's new_session action.",note:"The successor's brief is the board's path and the command below. ezexe's filing puts it in the section "+q(SECTION)+"."},
-           {side:"phi",by:"The old puppeteer keeps its hand-over.",code:PHI+" controls --hand "+e.id,out:"handed over to \""+e.title+"\" `"+e.id+"`: it runs `controls --from "+e.old+"`, then keeps this session's outcome with `note`, and the app asks ezexe on its approval card before it archives this session"},
-           {side:"phi",by:"The successor takes over.",code:PHI+" controls --from "+e.old,out:"took over "+plural(e.n,"controlled session")+" and "+plural(e.notes,"note")+" from \""+e.oldTitle+"\" `"+e.old+"`"}],
-    app:"The successor is filed in "+q(SECTION)+". The old puppeteer stays until ezexe approves its archive on the app's card.",
-    phi:"handedTo on the old record and handedFrom on the new one. A puppeteer that has handed over counts as no session's puppeteer, so each controlled session is told once of the successor."}}
+  compacted:function(){return{title:"After a compaction, the board comes first",
+    why:"Claude Code compacts a session by itself as its context fills, and ezexe may type /compact at any time. p4-phi asks for neither. Its SessionStart entry matches the source compact, so the first thing a puppeteer is handed after any compaction is the path of its board, before the rules and everything else.",
+    steps:[{side:"app",by:"Claude Code compacts the puppeteer's context, then runs the SessionStart hooks that match the source compact and adds their output to the compacted context."},
+           {side:"phi",by:"p4-phi's SessionStart entry hands the board's path first.",out:"phi (p4-phi): this session is a puppeteer and its context was compacted. Read its board before anything else: "+boardPath()}],
+    app:"The conversation is a summary, with what the SessionStart hooks added.",
+    phi:"The board, rewritten when what it holds changed. p4-phi counts no compaction and no characters toward one."}}
 };
 
 /* ---------- moves ---------- */
@@ -911,6 +886,10 @@ var ACT={
     S.box={kind:"card",id:n.id,title:n.title};
     S.example={kind:"archive",id:n.id};
     say([["cmd",ARCHIVE+" {\"session_id\": \""+n.id+"\"}"]],"The app shows its approval card. ezexe answers it in the box above.");
+  },
+  compacted:function(){
+    S.board=boardText();S.example={kind:"compacted"};
+    say([],"The board's path is the first thing p4-phi hands the puppeteer after the compaction.");
   }
 };
 function boxPress(which){
@@ -918,19 +897,6 @@ function boxPress(which){
   if(which==="yes"){var n=N(b.id);S.box=null;if(n){n.archived=true;n.working=false}S.board=boardText();
     S.example={kind:"archived",id:b.id,title:b.title};say([["cmd","Approve"]],"The tool ran, and the session is archived.")}
   else if(which==="no"){S.box=null;S.example={kind:"archived",id:"",title:b.title};say([["cmd","Deny"]],"The tool did not run. The puppeteer leaves the session and says so.")}
-  else if(which==="compact"){S.box={kind:"typed"};S.example={kind:"compact"};say([],"The puppeteer answered with the one line for ezexe to type.")}
-  else if(which==="typed"){S.compactions++;S.edge={key:"",closed:[],ready:[]};S.box=null;S.past=false;S.board=boardText();
-    S.example={kind:"compacted",n:S.compactions};say([["cmd","/compact keep the path of the board, and read it first"]],"The board's path is the first thing p4-phi hands the puppeteer after the compaction.")}
-  else if(which==="later"){S.box=null;S.example={kind:"later"};say([],"The puppeteer says nothing more.")}
-  else if(which==="new"){
-    var old=N(S.p),oid=old.id,otitle=old.title;
-    delete S.n[oid];old.id="local_"+hex(++S.seq*7919+S.salt,8);old.title="Cross-project watch, second";S.n[old.id]=old;
-    S.order[S.order.indexOf(oid)]=old.id;if(S.sel===oid)S.sel=old.id;S.p=old.id;
-    S.compactions=0;S.box=null;S.edge={key:"",closed:[],ready:[]};S.seen="";
-    controlled().forEach(function(k){N(k).told=false});S.board=boardText();
-    S.example={kind:"successor",id:old.id,title:old.title,old:oid,oldTitle:otitle,n:controlled().length,notes:S.notes.length};
-    say([cmd(PHI+" controls --hand "+old.id),cmd(PHI+" controls --from "+oid)],"The successor controls the same sessions. Message it to see the rule it is given once.");
-  }
   render();
 }
 
@@ -996,13 +962,7 @@ function renderBox(){
   function add(label,which,go){var x=h("button",{type:"button",class:"btn"+(go?" go":""),text:label});x.addEventListener("click",function(){boxPress(which)});btns.appendChild(x)}
   if(b.kind==="card"){$("boxq").textContent="Allow archive_session on “"+b.title+"”?";
     $("boxr").textContent="The app's approval card, shown for the ask rule p4-phi's settings keeper writes on mcp__ccd_session_mgmt__archive_session, in every permission mode.";
-    add("Approve","yes",true);add("Deny","no",false);return}
-  if(b.kind==="typed"){$("boxq").textContent=COMPACT_LINE();
-    $("boxr").textContent="The puppeteer's whole answer is this one line, for ezexe to type.";add("ezexe types it","typed",true);return}
-  $("boxq").textContent="Context is at 71%, auto-compact starts at 85%. Compact now?";
-  $("boxr").textContent="The puppeteer read the context usage with mcp__ccd_session_mgmt__get_usage and ended its turn with mcp__ccd_turn__wrap_up.";
-  add("Compact now","compact",true);
-  if(b.second==="new")add("New session","new",false);else add("Later","later",false);
+    add("Approve","yes",true);add("Deny","no",false)}
 }
 function render(){
   if(!N(S.sel))S.sel=S.p;
@@ -1010,7 +970,6 @@ function render(){
   var n=N(S.sel),p=isP(n.id),st=standing(n),b=holds();
   $("cfiled").textContent=S.filed?"filed in “"+SECTION+"”":"not filed";$("cfiled").className="chip"+(S.filed?" on":"");
   $("cedge").textContent=b.on?"boundary: reached":"no boundary";$("cedge").className="chip"+(b.on?" edge":"");$("cedge").title=b.why;
-  $("ccomp").textContent=plural(S.compactions,"compaction");
   $("selname").textContent=n.title;
   $("selmeta").textContent=n.id+" · "+(p?(S.filed?"the puppeteer, in no project's tree":"an orchestrator, not filed in the section"):
     (n.par?"started by "+q(N(n.par).title):"an orchestrator")+" in <"+n.env+"> · "+st.state+(pair(n)?" · controlled":n.par&&inControlled(n)?" · in a controlled tree":""));
@@ -1026,20 +985,17 @@ function render(){
   set("behalf",live&&!!n.req&&inControlled(n));set("untie",live&&!!n.behalfOf&&!n.atTop);
   set("direct",live);set("controls",!n.archived);
   set("startreq",S.filed&&handed);set("decline",S.filed&&handed);
-  set("archive",live);set("turn",live&&!n.card&&!n.req);
+  set("archive",live);set("compacted",S.filed);set("turn",live&&!n.card&&!n.req);
   set("ask",live&&!n.par&&pair(n));
   var c=$("console");c.textContent="";
   ((S.con&&S.con.lines)||[]).forEach(function(l){c.appendChild(h("div",{class:l[0],text:l[1]}))});
   if(S.con&&S.con.say)c.appendChild(h("div",{class:"say",text:S.con.say}));
-  $("past").checked=S.past;
   $("board").textContent=S.board;
   renderBox();renderExample();
 }
 document.querySelectorAll("[data-act]").forEach(function(b){b.addEventListener("click",function(){ACT[b.getAttribute("data-act")]();render()})});
 $("hold").addEventListener("change",function(){var n=N(S.sel);if(isP(n.id))return;n.hold=this.value;S.board=boardText();
   say([],this.value==="none"?"p4-phi's records hold nothing more against "+q(n.title)+".":"The board shows it at the puppeteer's next hook, and an archive of "+q(n.title)+" is refused.");render()});
-$("past").addEventListener("change",function(){S.past=this.checked;
-  say([],this.checked?"The count has reached the ceiling, so the next boundary notice says so, and a boundary already named is named again.":"The count is under the ceiling again.");render()});
 $("reset").addEventListener("click",function(){fresh();render()});
 
 /* ---------- a stopped or archived session frees its files ---------- */

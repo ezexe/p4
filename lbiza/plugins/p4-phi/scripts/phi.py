@@ -12,8 +12,9 @@ but for a fresh child the app may write it only after the first message, so the 
 read first and the record corrects it. `detach` and `reparent` rewrite it in session.json.
 
 The hooks, each in its h_ function:
-- SessionStart gives the built-in rules, as rules_text says, and the start background to a fork, after a
-  compaction or a clear, and to a session no app runs.
+- SessionStart gives the built-in rules, as rules_text says, and the start background to a fork, after a clear,
+  with the session's own turns and the address book whole, and to a session no app runs. After a compaction the
+  summary keeps the conversation, so it gives the address book's changed entries with the path of book.md.
 - UserPromptSubmit keeps the first request as the task and gives the start background with the first message when
   the start did not, then the reports of the workers that finished a turn since the last look, the address book's
   changes and what the sessions beside it changed. A start and a first message pass whole, the lines that ask
@@ -30,8 +31,8 @@ controls, with the watcher's commands from puppeteer.py; `--help` gives the argu
 Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `book`, `rules`,
 `background_chars`, `reports_chars`, `prompt_chars` and `wait_s`, and `puppeteer`, which puppeteer.on reads. The `phi`
 section of p4.json: `act_dont_wait`, `levels`, `top_orchestrates`, `file_sets` and `child_levels`, read from the
-session's own store, `home`, which names a shared store for the session tree, and `puppeteer_section` and
-`puppeteer_chars`, which controls.py reads. P4_PHI=0 turns the plugin off, P4_PHI_BOOK=0 the address book beside a
+session's own store, `home`, which names a shared store for the session tree, and `puppeteer_section`, which
+controls.py reads. P4_PHI=0 turns the plugin off, P4_PHI_BOOK=0 the address book beside a
 message and P4_PHI_RULES=0 the rules. P4_PHI_WAIT sets how long a first message waits for the app's
 record, and P4_PHI_APP_SESSIONS the folder of the app's records.
 """
@@ -873,8 +874,9 @@ def commands():
 def background_text(home, s, own=False, slim=False):
     """The start background a session is given: the sessions above it by title, their notes, the last turn of
     each of its siblings, which for an orchestrator are the orchestrators before it, and with `own` its own
-    turns. With `slim` the notes and the siblings' turns are left out, for a fresh child whose slice of its parent's
-    anchor holds what bears on its paths, and after a compaction. '' when none of that exists. It quotes no prompt
+    turns, as after a clear, which keeps nothing of them. With `slim` the notes and the siblings' turns are left out,
+    for a fresh child whose slice of its parent's anchor holds what bears on its paths, and for a background first
+    given after a compaction. '' when none of that exists. It quotes no prompt
     of another session: a task above is named by its session's title, a sibling's turn by its steps and report, and
     the brief this session was handed says what it is to do."""
     sid, above = s["sessionId"], spawned_from(s)
@@ -1175,7 +1177,6 @@ CAPS = {"max_depth": ("phi", "MAX_DEPTH", 1, 20), "max_children": ("phi", "MAX_C
         "chain_max": ("phi", "CHAIN_MAX", 1, 50), "turn_steps": ("phi", "TURN_STEPS", 1, 100),
         "tree_checks": ("phi", "TREE_CHECKS", 0, 100),
         "keep_going_max": ("plans", "KEEP_GOING_MAX", 0, 7),       # under hooks.md's 8 consecutive continuations
-        "compactions": ("controls", "COMPACTIONS", 1, 100),
         "watch_s": ("puppeteer", "WATCH_S", 1.0, 600.0), "stale_s": ("puppeteer", "STALE_S", 60.0, 30 * 86400.0)}
 # Each cap's default is the one p4conf.py declares for the key, not whatever the constant holds when apply_caps first
 # runs, which a caller may have set.
@@ -1186,7 +1187,7 @@ def apply_caps(d):
     """Sets each cap from the `phi` section `d`, or back to its default where `d` holds no fitting value, one of the
     wrong type or out of range, whether p4.json or a P4_* variable gave it: a hook run in process keeps module
     globals, so a store that sets none gets the defaults again."""
-    mods = {"phi": sys.modules[__name__], "plans": plans, "controls": controls, "puppeteer": puppeteer}
+    mods = {"phi": sys.modules[__name__], "plans": plans, "puppeteer": puppeteer}
     for key, (mod, name, least, most) in CAPS.items():
         default = CAP_DEFAULTS[key]
         v = d.get(key, default) if isinstance(d, dict) else default
@@ -1378,14 +1379,15 @@ FEATURE_STEP = re.compile(r"\bnew feature\b|^\W*(?:build|implement|design|introd
                           r"lifecycle|mode|command|system|plugin|workflow)\b", re.I)
 
 
-def book_text(home, s, store, whole=False):
-    """The address book beside a message, as book.line gives it: whole after a compaction or a clear, since the
-    session remembers none of it, else the entries that changed since it last looked. '' with no task."""
+def book_text(home, s, store, whole=False, named=False):
+    """The address book beside a message, as book.line gives it: whole after a clear, since the session keeps none
+    of it, else the entries that changed since it last looked. With `named`, after a compaction, whose summary keeps
+    the conversation and no exact id or path, the page's path comes even when no entry changed. '' with no task."""
     if not BOOK or not clean(s.get("task")):
         return ""
     import book                                    # the address book: who holds each file, issue and piece of work
     try:
-        return book.line(home, s, store, whole=whole)
+        return book.line(home, s, store, whole=whole, named=named)
     except Exception:  # noqa: BLE001  a book it cannot write never costs the message its other lines
         return ""
 
@@ -1824,11 +1826,12 @@ def h_puppeteer_tool(payload):
 
 
 def h_wrap_up(payload):
-    """PostToolUse on wrap_up: past the line, a session that keeps a state page is told to clear itself."""
+    """PostToolUse on wrap_up: a session that keeps a state page is told to bring it up to date, to read its context
+    with the app's own count and, past the line, to clear its idle coworkers and then itself."""
     me = Me(payload)
     if not me.home or not me.id:
         return ""
-    line = controls.clear_line(me.home, load_session(me.home, me.id), payload.get("transcript_path"), me.store)
+    line = controls.clear_line(me.home, load_session(me.home, me.id), me.store)
     RAN["clear"] = bool(line)
     return line
 
@@ -1995,9 +1998,16 @@ def h_session_start(payload):
     if not (source == "startup" and not spawned_from(s) and not s.get("task")
             and os.environ.get("CLAUDE_CODE_HOST_SESSION_ID")):
         # with a host id and nothing recorded, the app has not yet written this session's parent session, and the
-        # first message tells
-        text = given(s, me, me.home, own=lost or len(s.get("cliSessionIds") or []) > 1, brief=source == "compact")
-        book_line = book_text(me.home, s, me.store, whole=True) if lost else ""
+        # first message tells.
+        # context-window.md, "What survives compaction": "When a long session compacts, Claude Code summarizes the
+        # conversation history to fit the context window", and "Context that hooks added earlier" is "Summarized with
+        # the rest of the conversation". So after a compaction the summary carries the session's own turns and the
+        # book it was handed: p4-phi hands neither again, only the book's entries that changed since, with the path
+        # of book.md, since a summary keeps no exact id or path. A clear keeps nothing, so it gets both whole.
+        cleared, compacted = source == "clear", source == "compact"
+        own = cleared or (not compacted and len(s.get("cliSessionIds") or []) > 1)
+        text = given(s, me, me.home, own=own, brief=compacted)
+        book_line = book_text(me.home, s, me.store, whole=cleared, named=compacted) if lost else ""
     if lost:
         s.pop("splitTold", None)                   # the split advice, said in full again at the next such turn
     pin = pin_of(me.home, s)
@@ -2321,7 +2331,7 @@ def pair_parts(me, s, req, changed="", notice=lambda text: text):
     if req:
         out += [p for p in (controls.requests_text(me.home, s), controls.route_down(s, req)) if p]
     out += [p for p in (controls.holders_text(s, req), controls.behalf_text(me.home, s)) if p]
-    edge = controls.boundary(me.home, s, me.store)
+    edge = controls.boundary(me.home, s)
     if edge:
         RAN["boundary"] = True
         pieces = edge.split("\n\n")               # the complete sessions, kept, and the boundary, which fits or is held

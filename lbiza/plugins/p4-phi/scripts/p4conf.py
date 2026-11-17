@@ -70,7 +70,6 @@ DEFAULTS = {
         "turn_steps": 12,                # the steps of one turn a report keeps
         "tree_checks": 6,                # the sessions of the tree checked at once for a stall
         "keep_going_max": 2,             # times the Stop hook sends a turn with open steps back
-        "compactions": 3,                # compactions of a puppeteer before it is asked to clear
         "watch_s": 5.0,                  # seconds between two looks of an orchestrator's watcher
         "stale_s": 86400.0,              # seconds a quiet session waits before it counts as stale
     },
@@ -149,16 +148,19 @@ OPEN = ("temportal.cache",)
 
 # Keys read when a project sets them and never written by default, so a later change to the code's own value reaches
 # every store: kept as set, never called unknown.
-READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.puppeteer_chars", "phi.context_window",
-                 "phi.clear_at", "claude")
+READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.clear_at", "claude")
 
 # Keys no plugin reads, top-level or dotted: never returned or called unknown, and dropped from p4.json when it is
 # rewritten for another reason. The memory section and the scratchpad tmp keys went with p4-temportal's move to the
 # app's own auto memory and scratchpad, and phi.session_archives with the archive guard, which the app's approval card
-# on the archive tool replaced.
+# on the archive tool replaced. phi.puppeteer_chars and phi.compactions steer nothing: Claude Code compacts a session
+# by itself, so a puppeteer's boundary notice carries no compact question to count characters or compactions for.
+# phi.context_window steers nothing either: the app counts a session's context, and a session reads its share with
+# the app's get_usage tool, so p4 holds no window size to count against.
 RETIRED = ("plans", "version", "memory", "scratchpad.tmp_idle_days", "scratchpad.tmp_max_file_mb",
            "scratchpad.tmp_max_files", "scratchpad.tmp_empty_idle_hours", "scratchpad.scratch_sweep_minutes",
-           "scratchpad.tmp_skip_dirs", "phi.session_archives")
+           "scratchpad.tmp_skip_dirs", "phi.session_archives", "phi.puppeteer_chars", "phi.compactions",
+           "phi.context_window")
 
 # Where each kind of file lives in the store, by plugin. p4-temportal keeps the auto memory, the notebook and saved
 # code in temportal/, and p4-phi keeps its session tree, the retrieval corpus and
@@ -779,7 +781,7 @@ def _write(p4, data):
 WRITTEN = "_written"
 # The generation of DEFAULTS: raised by one whenever a default changes, with the value it had added to HISTORY, so a
 # store's written values follow the change. test_p4conf.py pins DEFAULTS to this number.
-GEN = 6
+GEN = 7
 # Past defaults by dotted path: a store from before the record whose value equals one of these, or today's default,
 # counts that value as written by load, so it follows today's default.
 HISTORY = {"recall.teacher.model": ["claude-fable-5-1"], "recall.lookups.web": ["answer"], "scratchpad.tmp": [True],
@@ -973,8 +975,8 @@ ENV_NAMES = {"phi.watch_s": "P4_PHI_WATCH_SECONDS"}
 # lifetime rules of temportal.cache by folder, "levels" plans.child_levels' kinds, "inject" a bool or "rules-facts".
 ENV_SCHEMA = {
     "phi.home": str, "recall.lookups.threshold": "num", "recall.teacher.cutoff": str,
-    "phi.child_levels": "levels", "phi.puppeteer_section": str, "phi.puppeteer_chars": int,
-    "phi.context_window": int, "phi.clear_at": "num", "temportal.cache": "rules", "recall.inject": "inject",
+    "phi.child_levels": "levels", "phi.puppeteer_section": str,
+    "phi.clear_at": "num", "temportal.cache": "rules", "recall.inject": "inject",
 }
 # The strings a key's reader knows.
 ENV_CHOICES = {"recall.said.mode": ("off", "shadow", "on"), "recall.lookups.web": ("note", "answer", "shadow", "off"),

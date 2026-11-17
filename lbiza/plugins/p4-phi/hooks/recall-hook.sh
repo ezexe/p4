@@ -85,7 +85,7 @@ if [ "$name" = lookup-record ] || [ "$name" = lookup-record-async ]; then
   if [ "${P4_RECALL_SYNC:-0}" != 1 ]; then
     case "$payload" in
       *mcp__ccd_turn__update_plan*) ;;            # phi.py's plan check answers beside the result
-      *mcp__ccd_turn__wrap_up*) ;;                # phi.py's clear check reads the turn's context
+      *mcp__ccd_turn__wrap_up*) ;;                # phi.py's clear line answers beside the result
       *temportal*memory*) ;;                      # a memory written: phi.py's plugin-gap check answers
       *PostToolUseFailure*|*Traceback*|*Error*|*Exception*|*"not found"*|*"not recognized"*|*"No such file"*) ;;
       *fatal:*|*denied*|*ENAMETOOLONG*|*"unexpected EOF"*|*"cannot access"*|*unterminated*) ;;

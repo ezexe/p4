@@ -11,7 +11,7 @@ with no store of its own living in its parent session's store; every finished tu
 its report appended to the parent session's reports and given to that session at its next message, once; a
 worker given the tasks and notes of the sessions above it and the last turn of its siblings; an orchestrator
 given the last turns of the orchestrators before it, with no likeness of words involved; a note refused without
-a source; a session detached to top level, and reparented; a session's own turns after a compaction; silence where
+a source; a session detached to top level, and reparented; a session's own turns after a clear; silence where
 there is nothing to say; no standing instruction for a message about something else, which the app's own session
 tools carry; a feature step as a new topic; a turn another session began shown a suggested task card first and a
 start request second; the caps on depth and live children;
@@ -747,9 +747,20 @@ class Background(unittest.TestCase):
         self.assertIn("source", r.stderr)
         self.assertEqual(phi.load_notes(self.t.p4, TOP), [])
 
-    def test_a_session_is_given_its_own_turns_after_a_compaction(self):
+    def test_a_session_is_given_its_own_turns_after_a_clear_and_none_after_a_compaction(self):
+        """https://code.claude.com/docs/en/context-window.md, "What survives compaction": "When a long session
+        compacts, Claude Code summarizes the conversation history to fit the context window", and the row "Context
+        that hooks added earlier" reads "Summarized with the rest of the conversation". The summary carries the
+        session's own turns and the background it was handed, so a start after a compaction hands neither again. A
+        clear keeps nothing, so a start after it hands the background with the session's own turns."""
+        self.t.say(KID, HANDED)
         self.t.stop(KID, HANDED, [("Edit", {"file_path": "src/export/flush.py"}, "ok")], "Half done.")
         text = self.start(KID, "compact")
+        for gone in ("This session's own turns so far", "Half done.", "edited export/flush.py",
+                     "background for this session"):
+            self.assertNotIn(gone, text, gone)
+        self.assertIn("act-don't-wait", text, "the built-in rules still come")
+        text = self.start(KID, "clear")
         self.assertIn("This session's own turns so far", text)
         self.assertIn("Half done.", text)
         self.assertIn("edited export/flush.py", text)
@@ -941,20 +952,18 @@ class NewTask(unittest.TestCase):
     def test_a_project_sets_its_caps_in_p4_json(self):
         """ezexe/p4#125: the caps a project would decide are p4.json `phi` keys; a value of the wrong type or out of
         range keeps the default, and a store that sets none gets the defaults back."""
-        import controls
         import plans
         import puppeteer
         home = self.t.p4
         self.say(TOP, TASK)
         write(os.path.join(home, "p4.json"), json.dumps({"phi": {
             "max_depth": 1, "max_children": 2, "sibling_turns": 1, "own_turns": 1, "chain_max": 2, "turn_steps": 4,
-            "tree_checks": 2, "keep_going_max": 1, "compactions": 5, "watch_s": 10, "stale_s": 3600}}))
+            "tree_checks": 2, "keep_going_max": 1, "watch_s": 10, "stale_s": 3600}}))
         try:
             phi.project_conf(home)
             self.assertEqual((phi.MAX_DEPTH, phi.MAX_CHILDREN, phi.OTHERS, phi.OWN, phi.CHAIN_MAX, phi.TURN_STEPS,
                               phi.TREE_CHECKS), (1, 2, 1, 1, 2, 4, 2))
-            self.assertEqual((plans.KEEP_GOING_MAX, controls.COMPACTIONS, puppeteer.WATCH_S, puppeteer.STALE_S),
-                             (1, 5, 10.0, 3600.0))
+            self.assertEqual((plans.KEEP_GOING_MAX, puppeteer.WATCH_S, puppeteer.STALE_S), (1, 10.0, 3600.0))
             write(os.path.join(home, "phi", "sessions", KID, "session.json"),
                   json.dumps({"sessionId": KID, "spawnedFrom": {"sessionId": TOP}, "task": "t"}))
             self.assertIn("start no session", phi.caps_text(home, phi.load_session(home, KID)), "one deep is the most")
@@ -963,7 +972,7 @@ class NewTask(unittest.TestCase):
             phi.project_conf(home)
             self.assertEqual((phi.MAX_DEPTH, phi.MAX_CHILDREN, plans.KEEP_GOING_MAX, puppeteer.WATCH_S),
                              (3, 8, 2, 5.0), "a value that does not fit keeps the default")
-            self.assertEqual((phi.OTHERS, controls.COMPACTIONS, puppeteer.STALE_S), (5, 3, 86400.0), "and unset ones")
+            self.assertEqual((phi.OTHERS, puppeteer.STALE_S), (5, 86400.0), "and unset ones")
             for odd in ([1, 2], "deep", 4):            # a `phi` that is no section raises nothing and keeps the defaults
                 write(os.path.join(home, "p4.json"), json.dumps({"phi": odd}))
                 phi.MAX_DEPTH = 7
@@ -985,12 +994,18 @@ class NewTask(unittest.TestCase):
         self.say(KID, HANDED)
         self.assertIn(BRIEF, self.t.session(KID)["task"])
 
-    def test_the_address_book_comes_whole_after_a_compaction(self):
-        self.say(TOP, TASK)
+    def test_the_address_book_comes_by_its_page_after_a_compaction_and_whole_after_a_clear(self):
+        """A compaction's summary keeps the conversation, the book the session was handed among it, and no exact id
+        or path: the start after it names book.md and hands no entry that did not change. A clear keeps nothing."""
+        self.say(TOP, TASK)                          # its first look: the book whole
         r = self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "compact"}, P4_PHI_BOOK="1")
         text = context(r)
-        self.assertIn("this session's address book, whole on", text)
+        self.assertIn("this session's address book, unchanged since it last looked, is whole on", text)
+        self.assertIn("/book.md", text.replace("\\", "/"))
+        self.assertNotIn("this session's address book, whole on", text)
         self.assertNotIn("about something else", text)
+        r = self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "clear"}, P4_PHI_BOOK="1")
+        self.assertIn("this session's address book, whole on", context(r))
 
     def test_the_task_is_changed_by_its_command(self):
         self.say(TOP, TASK)
@@ -1224,8 +1239,9 @@ class Rules(unittest.TestCase):
     def test_the_start_text_carries_every_line_with_any_background(self):
         """A puppeteer whose p4.json names a shared store this machine has not seen, started again after a
         clear and after a compaction, with the default start background and with one set longer than the app's cap:
-        each start text carries the missing-home line, the rules and the address book, and stays within the app's
-        cap with the default background; after a compaction the line that names its board comes first."""
+        each start text carries the missing-home line, the rules and the address book, whole after a clear and by
+        its page after a compaction, and stays within the app's cap with the default background; after a compaction
+        the line that names its board comes first."""
         t = self.t
         write(os.path.join(t.tmp, "claude_desktop_config.json"), json.dumps({"preferences": {"epitaxyPrefs": {
             "dframe-group-scopes": {"acct/org": {"groups": [{"id": "cg-1", "name": "puppeteers"}],
@@ -1248,7 +1264,8 @@ class Rules(unittest.TestCase):
                 text = context(t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": source},
                                       P4_PHI_BOOK="1"))
                 sizes[f"{source}, background_chars {chars}"] = len(text)
-                self.assertIn("this session's address book, whole on", text, source)
+                self.assertIn("this session's address book, whole on" if source == "clear" else
+                              "this session's address book, unchanged since it last looked, is whole on", text, source)
                 self.assertIn("names the shared store git@example.com:team/elsewhere.git", text, source)
                 self.assertIn("act-don't-wait", text, "the built-in rules come with any background")
                 if source == "compact":
@@ -1554,8 +1571,8 @@ class FixtureFolder(unittest.TestCase):
 
 
 class StatePage(unittest.TestCase):
-    """A session whose p4-phi task names a state page resumes from it after a clear, and is told to clear itself
-    at a turn's end once its context passes the line."""
+    """A session whose p4-phi task names a state page resumes from it after a clear, and at a turn's end is told to
+    read its context share with the app's `get_usage` and to clear itself past the line."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -1564,12 +1581,13 @@ class StatePage(unittest.TestCase):
         self.page = os.path.join(t.tmp, "tmp", "state.md").replace("\\", "/")
         t.say(TOP, "Build the exporter")
         t.cli(TOP, "task", f"Build the narwhal exporter. State page: {self.page}")
-        write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"context_window": 200000}}))
 
     def tearDown(self):
         self._tmp.cleanup()
 
     def wrap_up(self, used, uuid):
+        """TOP's `wrap_up`, answered through `recall-hook.sh lookup-record`, with a transcript whose last assistant
+        row holds `used` tokens of usage, which p4-phi does not read."""
         t = self.t
         path = os.path.join(t.tmp, f"wrap{uuid}.jsonl")
         transcript(path, "Build the exporter", [], "Built.", uuid)
@@ -1589,20 +1607,128 @@ class StatePage(unittest.TestCase):
         ctx = context(self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "clear"}))
         self.assertTrue(ctx.startswith("phi (p4-phi): ") and self.page in ctx.split("\n", 1)[0], ctx[:300])
 
-    def test_past_the_line_a_wrap_up_is_answered_with_the_clear_and_below_it_with_nothing(self):
+    def test_a_wrap_up_names_the_apps_usage_read_whatever_the_transcript_holds(self):
+        """The app counts a session's context: the description of `mcp__ccd_session_mgmt__get_usage` gives `context`
+        as "that session's window as the composer shows it — tokens used, percent, where auto-compact starts". So
+        p4-phi sums no usage row of the transcript against a window of its own. The line at a `wrap_up` names that
+        call on `"self"` and the share phi.clear_at sets, and reads the same whatever the transcript's last row
+        holds and whatever a store's phi.context_window says."""
+        import controls
         said = self.wrap_up(130000, "1")
+        self.assertIn('`mcp__ccd_session_mgmt__get_usage` on `"self"`', said)
+        self.assertIn(f"past {controls.CLEAR_AT} percent", said)
         self.assertIn(self.page, said)
-        self.assertIn("mcp__ccd_session_mgmt__clear_session", said)
-        self.assertIn('"self"', said)
-        self.assertNotIn("clear_session", self.wrap_up(100000, "2"))
+        self.assertIn('`mcp__ccd_session_mgmt__clear_session` with `"self"`', said)
+        self.assertLess(said.index("get_usage"), said.index("clear_session"), "the read comes before the clear")
+        self.assertNotRegex(said, r"context is at \d+ percent", "p4-phi states no share of its own")
+        self.assertEqual(self.wrap_up(20000, "2"), said, "the transcript's usage row is not read")
+        write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"context_window": 1000, "clear_at": 40}}))
+        low = self.wrap_up(20000, "3")
+        self.assertIn("past 40 percent", low, "phi.clear_at sets the line")
+        self.assertEqual(low.replace("past 40 percent", f"past {controls.CLEAR_AT} percent"), said,
+                         "phi.context_window steers nothing")
+        for name in ("context_used", "WINDOW"):
+            self.assertFalse(hasattr(controls, name), f"controls.{name} measures no context")
 
-    def test_a_worker_past_the_line_is_told_to_clear_its_coworkers_first(self):
+
+class ClearFamily(unittest.TestCase):
+    """ezexe/p4#244. No page and no tool clears a session together with the sessions it started: `/clear` starts one
+    conversation over, and the app's `clear_session` takes one session a call, this one or an idle session this one
+    started. So a worker that keeps a state page is handed, at a turn's end, one `clear_session` call for each
+    coworker p4-phi's records hold idle with an empty queue, ahead of its own, to make where `get_usage` reads its
+    context past the line; and every session that keeps a state page is told at each turn's end to bring it up to
+    date, so a clear its worker makes loses nothing."""
+
+    KID3 = "local_kid00003"
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = t = Tree(self._tmp.name)
+        CLI.setdefault(self.KID3, "ffff6666-0000-4000-8000-000000000000")
+        self.page = {h: os.path.join(t.tmp, "pad", h, "state.md").replace("\\", "/")
+                     for h in (TOP, KID, KID2, self.KID3)}
+        t.record(TOP, title="Build the narwhal exporter")
+        t.say(TOP, "Build the exporter")
+        t.cli(TOP, "task", f"Build the narwhal exporter. State page: {self.page[TOP]}")
+        for host, part in ((KID, "flush"), (KID2, "ports"), (self.KID3, "retry")):
+            t.record(host, started_by=TOP, title=f"the {part} coworker")
+            t.say(host, handed(f"Build the {part} of the exporter.\nFiles: src/{part}.py\n"
+                               f"State page: {self.page[host]}"))
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def wrap_up(self, host, uuid):
+        """`host`'s `wrap_up`, answered through `recall-hook.sh lookup-record` as the app runs it, with
+        P4_RECALL_SYNC unset, so the gate's detach rule is part of what is tested."""
         t = self.t
-        t.record(KID, started_by=TOP, title="the flush coworker")
-        t.say(KID, "Flush the rows.\nFiles: src/flush.py")
-        said = self.wrap_up(130000, "3")
+        path = transcript(os.path.join(t.tmp, f"wrap-{host}-{uuid}.jsonl"), "Build it", [], "Built.", uuid)
+        body = {"session_id": CLI.get(host, host), "cwd": t.proj, "hook_event_name": "PostToolUse",
+                "tool_name": "mcp__ccd_turn__wrap_up", "tool_input": {"recap": "Built."},
+                "tool_response": "Nothing is pending.", "transcript_path": path,
+                "tool_use_id": f"toolu_wrap{host}{uuid}"}
+        env = t.env(host)
+        env.pop("P4_RECALL_SYNC", None)
+        r = inproc.run(["sh", os.path.join(ROOT, "hooks", "recall-hook.sh"), "lookup-record"],
+                       input=json.dumps(body), capture_output=True, text=True, timeout=60, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return context(r)
+
+    def plan(self, host, status):
+        return self.t.hook("plan", host, {"hook_event_name": "PostToolUse",
+                                          "tool_name": "mcp__ccd_turn__update_plan",
+                                          "tool_input": {"items": [{"content": "Build the part", "status": status}]},
+                                          "tool_response": "Plan shown."})
+
+    def test_a_worker_past_the_line_clears_its_idle_coworkers_before_itself(self):
+        t, kid3 = self.t, self.KID3
+        own = '`mcp__ccd_session_mgmt__clear_session` with `"self"`'
+        theirs = "`mcp__ccd_session_mgmt__clear_session` on its id"
+        for host in (KID, KID2):                    # a message, every plan step completed, a Stop, nothing running
+            self.plan(host, "completed")
+            t.stop(host, "Build the part", report="Built and checked.")
+        said = self.wrap_up(TOP, "1")               # KID3 has a message and no Stop yet: it is inside a turn
+        for host in (KID, KID2, kid3):
+            self.assertNotIn(host, said, "a report this session has not been handed yet holds its coworker")
+        self.assertNotIn(theirs, said)
+        t.say(TOP, "what came in?")                 # TOP is handed both reports
+        said = self.wrap_up(TOP, "2")
+        self.assertIn(f"bring this session's state page up to date at {self.page[TOP]}", said)
+        self.assertLess(said.index(self.page[TOP]), said.index("get_usage"), "the page first, whatever it reads")
+        self.assertIn('`mcp__ccd_session_mgmt__get_usage` on `"self"`', said)
+        self.assertIn(own, said)
+        for host in (KID, KID2):
+            self.assertIn(f"`{host}`", said)
+            self.assertLess(said.index(theirs), said.index(f"`{host}`"))
+            self.assertLess(said.index(f"`{host}`"), said.index(own), "a coworker's clear comes ahead of its own")
+        self.assertNotIn(kid3, said, "a coworker inside a turn is named nowhere")
+        self.assertIn("A coworker clear the app refuses leaves that coworker as it is", said)
+        self.assertIn("the last call of this turn", said.split(own, 1)[1])
+        mine = self.wrap_up(KID, "3")               # a coworker's own turn's end
+        self.assertIn(f"bring this session's state page up to date at {self.page[KID]}", mine)
+        self.assertIn("one the session that started it makes", mine)
+        self.assertLess(mine.index(self.page[KID]), mine.index("get_usage"), "whatever its context reads")
+        for other in (TOP, KID2, kid3):
+            self.assertNotIn(other, mine, "it names no other session")
+        self.assertNotIn(theirs, mine, "and no clear of another session")
+        self.plan(KID2, "in_progress")              # an open plan step
+        said = self.wrap_up(TOP, "4")
         self.assertIn(f"`{KID}`", said)
-        self.assertIn("idle with an empty queue", said)
+        self.assertNotIn(KID2, said, "a coworker that holds a step is named nowhere")
+        path = transcript(os.path.join(t.tmp, "kid-check.jsonl"), "Run the long check", [], "Started it.", "u1")
+        t.hook(STOP, KID, {"hook_event_name": "Stop", "transcript_path": path, "last_assistant_message": "Started it.",
+                           "background_tasks": [{"id": "bcheck001", "type": "shell", "status": "running",
+                                                 "command": "python -I tests/test_ports.py"}]})
+        t.record(GRAND, started_by=TOP, title="the docs coworker")       # a coworker whose task names no state page
+        t.say(GRAND, handed("Write the exporter's docs.\nFiles: docs/export.md"))
+        t.stop(GRAND, "Write the docs", report="Written.")
+        t.say(TOP, "and now?")                      # TOP is handed KID's and the docs coworker's reports
+        said = self.wrap_up(TOP, "5")
+        self.assertNotIn(KID, said, "a coworker with a background task still running is named nowhere")
+        self.assertNotIn(GRAND, said, "nor one with no state page to resume from, since a clear would lose its work")
+        self.assertNotIn(theirs, said)
+        self.assertIn(own, said, "its own clear stays")
+        self.assertEqual(self.wrap_up(GRAND, "6"), "", "a session that keeps no state page is handed nothing")
 
 
 ASKS_WRITE = re.compile(r"\b(?:writes?|written|keeps?|kept|saves?|saved|logs?|logged|rewrit\w*|puts?|records?|"
@@ -1643,7 +1769,6 @@ class NoWriteUnderClaude(unittest.TestCase):
         write(os.path.join(t.tmp, "claude_desktop_config.json"), json.dumps({"preferences": {"epitaxyPrefs": {
             "dframe-group-scopes": {"acct/org": {"groups": [{"id": "cg-1", "name": "puppeteers", "mode": "code"}],
                                                  "assignments": {"code:" + self.PUP: "cg-1"}}}}}}))
-        write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"context_window": 200000}}))
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -1657,10 +1782,7 @@ class NoWriteUnderClaude(unittest.TestCase):
     def wrap_up(self, host):
         t = self.t
         path = transcript(os.path.join(t.tmp, f"wrap-{host}.jsonl"), "Check the archives", [], "Checked.")
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"type": "assistant", "message": {"content": [], "usage": {
-                "input_tokens": 2000, "cache_creation_input_tokens": 8000, "cache_read_input_tokens": 120000}}}) + "\n")
-        body = {"session_id": CLI.get(host, host), "cwd": t.proj, "hook_event_name": "PostToolUse",
+        body ={"session_id": CLI.get(host, host), "cwd": t.proj, "hook_event_name": "PostToolUse",
                 "tool_name": "mcp__ccd_turn__wrap_up", "tool_input": {"recap": "Checked."},
                 "tool_response": "Nothing is pending.", "transcript_path": path, "tool_use_id": f"toolu_wrap{host}",
                 "scratchpad_dir": self.pad(host)}

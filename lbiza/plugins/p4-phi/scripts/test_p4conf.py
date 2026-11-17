@@ -59,19 +59,19 @@ class P4Conf(unittest.TestCase):
                 self.assertIn(key, p4conf.DEFAULTS["scratchpad"], key)
 
     def test_a_key_read_when_set_is_not_called_unknown(self):
-        """phi.child_levels, phi.puppeteer_section and phi.puppeteer_chars are read when a project sets them and are
+        """phi.child_levels, phi.puppeteer_section and phi.clear_at are read when a project sets them and are
         never written by default, so a later change to the code's values reaches every store."""
         import contextlib
         import io
-        for key in ("child_levels", "puppeteer_section", "puppeteer_chars"):
+        for key in ("child_levels", "puppeteer_section", "clear_at"):
             self.assertNotIn(key, p4conf.DEFAULTS["phi"])
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({"phi": {"puppeteer_section": "", "puppeteer_chars": 9, "child_levels": {}}}, f)
+            json.dump({"phi": {"puppeteer_section": "", "clear_at": 9, "child_levels": {}}}, f)
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             s = p4conf.load(self.p4)
         self.assertEqual(err.getvalue(), "")
-        self.assertEqual(s["phi"]["puppeteer_chars"], 9)
+        self.assertEqual(s["phi"]["clear_at"], 9)
 
     def test_every_query_setting_p4_reads_has_its_default(self):
         """Each key QUERY_SETTINGS in p4.py maps from recall.query is in DEFAULTS, at the constant's own value."""
@@ -417,6 +417,52 @@ class P4Conf(unittest.TestCase):
         self.assertEqual(err.getvalue(), "")
         self.assertNotIn("session_archives", s.get("phi", {}))
 
+    def test_the_retired_compact_keys_are_dropped_and_have_no_variable(self):
+        """Claude Code compacts a session by itself, by context-window.md, "When your context fills up", so a
+        puppeteer's boundary notice carries no compact question. phi.puppeteer_chars and phi.compactions, which would
+        count characters and compactions toward one, are neither read, written, called unknown nor mirrored as a P4_*
+        variable."""
+        import contextlib
+        import io
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump({"phi": {"puppeteer_chars": 9, "compactions": 5}}, f)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            s = p4conf.load(self.p4)
+        self.assertEqual(err.getvalue(), "")
+        for key in ("puppeteer_chars", "compactions"):
+            self.assertNotIn(key, s.get("phi", {}), key)
+            self.assertNotIn(key, self.read().get("phi", {}), key)
+            self.assertNotIn(key, p4conf.DEFAULTS["phi"], key)
+            self.assertIn("phi." + key, p4conf.RETIRED)
+            self.assertNotIn("phi." + key, p4conf.env_keys())
+
+    def test_the_retired_context_window_is_dropped_and_has_no_variable(self):
+        """The app counts a session's context and gives it through `mcp__ccd_session_mgmt__get_usage`, so p4 holds no
+        window size: phi.context_window is neither read, written, called unknown nor mirrored as
+        P4_PHI_CONTEXT_WINDOW, and a value of the variable changes nothing. phi.clear_at, the share past which a
+        session clears itself, stays a key read when a store sets it."""
+        import contextlib
+        import io
+        from unittest import mock
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump({"phi": {"context_window": 1000000, "clear_at": 45}}, f)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            s = p4conf.load(self.p4)
+        self.assertEqual(err.getvalue(), "")
+        self.assertNotIn("context_window", s["phi"])
+        self.assertNotIn("context_window", self.read()["phi"])
+        self.assertIn("phi.context_window", p4conf.RETIRED)
+        self.assertNotIn("phi.context_window", p4conf.env_keys())
+        self.assertNotIn("P4_PHI_CONTEXT_WINDOW", [p4conf.env_name(k) for k in p4conf.env_keys()])
+        self.assertEqual(s["phi"]["clear_at"], 45)
+        self.assertIn("phi.clear_at", p4conf.env_keys())
+        with mock.patch.dict(os.environ, {"P4_PHI_CONTEXT_WINDOW": "500000"}), contextlib.redirect_stderr(err):
+            again = p4conf.load(self.p4, write=False)
+        self.assertEqual(json.dumps(again, sort_keys=True), json.dumps(s, sort_keys=True))
+        self.assertEqual(err.getvalue(), "")
+
     def test_the_keeper_writes_and_keeps_scratchpad_tmp_false(self):
         """p4-temportal 0.3.9 links a session's scratchpad into temportal/tmp unless p4.json's scratchpad.tmp is false,
         so every store holds it false: a store that lacks it, one load wrote true into, and one from before the record
@@ -441,11 +487,10 @@ class P4Conf(unittest.TestCase):
         self.assertNotIn("scratchpad.tmp", p4conf.RETIRED)
 
     def test_a_store_gains_the_tree_caps_a_project_sets(self):
-        """ezexe/p4#125: the eleven caps of the session tree are phi keys of p4.json, written into a store that lacks
+        """ezexe/p4#125: the ten caps of the session tree are phi keys of p4.json, written into a store that lacks
         them with the values the code had, and a value set by hand stays."""
         caps = {"max_depth": 3, "max_children": 8, "sibling_turns": 5, "own_turns": 3, "chain_max": 8,
-                "turn_steps": 12, "tree_checks": 6, "keep_going_max": 2, "compactions": 3, "watch_s": 5.0,
-                "stale_s": 86400.0}
+                "turn_steps": 12, "tree_checks": 6, "keep_going_max": 2, "watch_s": 5.0, "stale_s": 86400.0}
         d = json.loads(json.dumps(p4conf.DEFAULTS))
         for k in caps:
             d["phi"].pop(k)
@@ -461,7 +506,7 @@ class P4Conf(unittest.TestCase):
         """DEFAULTS is pinned to its GEN: a change of a default fails here until GEN is raised, the old value added to
         HISTORY and the pin below updated."""
         import hashlib
-        pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca", 4: "857fe1fd14a29f6a", 5: "52f39f39f1f34c83", 6: "80d9cae8899e4527"}                   # append only: one more line for each GEN
+        pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca", 4: "857fe1fd14a29f6a", 5: "52f39f39f1f34c83", 6: "80d9cae8899e4527", 7: "58861a65cec942df"}   # append only: one more line for each GEN
         got = hashlib.sha256(json.dumps(p4conf.DEFAULTS, sort_keys=True).encode()).hexdigest()[:16]
         self.assertEqual(p4conf.GEN, max(pins))
         self.assertEqual(p4conf.GEN, len(pins), "no generation is skipped or replaced")
@@ -1479,9 +1524,8 @@ class SettingsVariables(unittest.TestCase):
         from unittest import mock
         p4 = self.store({})
         bad = {"P4_SCRATCHPAD_IGNORABLE_EXT": "[1,2]", "P4_RECALL_DEPS_ROOTS": '"x"',
-               "P4_PHI_CHILD_LEVELS": "[1]", "P4_PHI_CONTEXT_WINDOW": '"wide"', "P4_PHI_CLEAR_AT": "true",
+               "P4_PHI_CHILD_LEVELS": "[1]", "P4_PHI_CLEAR_AT": "true",
                "P4_RECALL_LOOKUPS_THRESHOLD": '"high"', "P4_RECALL_SAID_MODE": "loud",
-               "P4_PHI_PUPPETEER_CHARS": "1.5",
                "P4_RECALL_INJECT": "all", "P4_PHI_MAX_DEPTH": "[" * 20000,
                "P4_TEMPORTAL_CACHE": '{"x": {"max_age_days": "a"}}'}
         plain = json.dumps(p4conf.load(p4, write=False, env=False), sort_keys=True)
