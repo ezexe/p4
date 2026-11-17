@@ -402,12 +402,12 @@ LIMITS = os.path.join(HERE, "claude_code_limits.json")
 
 def settings_watch(project, payload):
     """p4conf.watch at a start or a settings change: the asks to show ezexe, and for a newer Claude Code the
-    changelog read started in a process of its own. A failure is one line on stderr, never the hook's."""
+    changelog read started in a process of its own. A failure of any kind is one line among the asks, which the layout
+    hook shows as its systemMessage, never the hook's own failure, so the rest of the layout handler runs."""
     try:
         got = p4conf.watch(project, payload)
-    except (OSError, ValueError) as e:
-        print(f"p4: the settings watcher failed: {e}", file=sys.stderr)
-        return []
+    except Exception as e:  # noqa: BLE001
+        return [f"the settings watcher failed: {type(e).__name__}: {e}"]
     if got["newer"]:
         start_changelog(os.path.join(p4conf.main_root(project)[0], ".claude", "p4"), *got["newer"])
     return got["asks"]

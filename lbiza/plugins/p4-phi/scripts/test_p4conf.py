@@ -1124,7 +1124,8 @@ class SettingsVariables(unittest.TestCase):
         cases = {"phi.max_depth": [5, 1], "phi.watch_s": [2.5, 10.0], "phi.levels": [False, True],
                  "recall.inject": [False, True, "rules-facts"], "recall.said.mode": ["shadow", "on"],
                  "phi.home": ["https://github.com/x/y.git", "5", "true", "[x"], "scratchpad.ignorable_ext": [[], ["a"]],
-                 "temportal.cache": [{"notebook/.out": {"max_age_days": 3}}], "phi.child_levels": [{"worker": {"model": "x"}}],
+                 "temportal.cache": [{"notebook/.out": {"max_age_days": 3}}],
+                 "phi.child_levels": [{"worker": {"model": "x"}}],
                  "recall.lookups.threshold": [0.7]}
         keys = p4conf.env_keys()
         for key, values in cases.items():
@@ -1264,8 +1265,8 @@ class SettingsVariables(unittest.TestCase):
 
     def test_a_fresh_projects_file_is_the_reference_file(self):
         """A fresh project whose store gives the co-author line: the keeper's file is the reference file, keys in
-        the same order, apart from ezexe's own keys, the defaults left to the app and the paths; after a setting changes it holds that variable
-        too, and nothing else moves."""
+        the same order, apart from ezexe's own keys, the defaults left to the app and the paths; after a setting
+        changes it holds that variable too, and nothing else moves."""
         self.store({"claude": {"attribution.commit": REFERENCE["attribution"]["commit"]}})
         p4conf.keep_settings(self.project, platform="win32")
         got = self.read(self.local())
@@ -1435,6 +1436,65 @@ class SettingsVariables(unittest.TestCase):
             with mock.patch.dict(os.environ, {"P4_PHI_MAX_DEPTH": "9"}):
                 self.assertEqual(p4conf.load(p4)["phi"]["max_depth"], 5, rec)
                 p4conf.keep_settings(self.project)
+
+    def test_a_record_part_of_any_other_shape_never_stops_the_keeper_or_the_watcher(self):
+        """Each part of the record edited by hand into another shape is dropped before the keeper or the watcher
+        reads it, so neither raises and the local file is still kept."""
+        from unittest import mock
+        self.store({"claude": {"permissions.allow": ["Bash(ls *)"]}})
+        f = os.path.abspath(self.local()).replace("\\", "/")
+        shapes = [{"hand": {f: 5}}, {"hand": [1]}, {"rules": {f: 5}}, {"rules": {f: {"entries": 5}}},
+                  {"rules": {f: {"hand": "x", "gen": "y"}}}, {"asked": [1]}, {"claude": [1]},
+                  {"claude": {"binaries": [1]}}, {"claude": {"binaries": {"x": 5}, "path": 3}},
+                  {"files": {f: 5}}, {"files": {f: {"autoMemoryDirectory": 5}}}, {"kept": {f: 5}},
+                  {"unreadable": {f: "x"}}, {"p4past": {f: 5}}]
+        start = {"source": "startup", "hook_event_name": "SessionStart"}
+        change = {"source": "local_settings", "hook_event_name": "ConfigChange"}
+        with mock.patch.object(p4conf, "claude_binary", lambda: (None, False)):
+            for shape in shapes:
+                if os.path.exists(self.local()):
+                    os.remove(self.local())
+                _write(self.record(), shape)
+                p4conf.keep_settings(self.project, platform="win32", tell=True)
+                self.assertEqual(self.read(self.local())["autoMemoryDirectory"], self.memory(), shape)
+                _write(self.record(), shape)
+                p4conf.watch(self.project, start)
+                _write(self.record(), shape)
+                p4conf.watch(self.project, change)
+
+    def test_a_failing_settings_check_is_one_line_and_the_layout_goes_on(self):
+        """A failure of any kind in the settings check is one line, among the asks the layout hook shows as its
+        systemMessage or among the lines migrate_layout returns, never the hook's own failure."""
+        from unittest import mock
+        import hook
+        p4 = self.store({})
+
+        def boom(*a, **k):
+            raise TypeError("a record of another shape")
+        with mock.patch.object(p4conf, "watch", boom):
+            got = hook.settings_watch(self.project, {"hook_event_name": "SessionStart"})
+        self.assertEqual(len(got), 1)
+        self.assertIn("TypeError", got[0])
+        with mock.patch.object(p4conf, "keep_settings", boom):
+            lines = p4conf.migrate_layout(p4, commit=False)
+        self.assertTrue(any("not kept" in x and "TypeError" in x for x in lines), lines)
+
+    def test_a_malformed_record_leaves_every_variable_as_it_is(self):
+        """While the record is malformed no variable can be told from p4's own, so the keeper adds and removes no
+        P4_* entry that run, even with p4's own text in the environment and p4.json changed."""
+        from unittest import mock
+        p4 = self.store({"phi": {"max_depth": 5}})
+        p4conf.keep_settings(self.project)
+        rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
+        rec["p4past"] = "x"
+        _write(self.record(), rec)
+        with mock.patch.dict(os.environ, {"P4_PHI_MAX_DEPTH": "5"}):
+            p4conf.keep_settings(self.project)
+            self.assertEqual(self.read(self.local())["env"], {"P4_PHI_MAX_DEPTH": "5"})
+            _write(self.record(), rec)
+            self.store({"phi": {"max_depth": 5, "chain_max": 4}})
+            p4conf.keep_settings(self.project)
+            self.assertEqual(self.read(self.local())["env"], {"P4_PHI_MAX_DEPTH": "5"}, "none added")
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

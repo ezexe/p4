@@ -405,8 +405,8 @@ def migrate_layout(p4, commit=True):
         if project:
             try:
                 keep_settings(project, p4=p4)
-            except (OSError, ValueError) as e:
-                print(f"p4: Claude Code's settings not kept: {e}", file=sys.stderr)
+            except Exception as e:  # noqa: BLE001 — the layout move stands whatever the settings check meets
+                lines = list(lines) + [f"Claude Code's settings not kept: {type(e).__name__}: {e}"]
     return lines
 
 
@@ -1173,12 +1173,15 @@ def env_wants(p4):
 
 
 def env_entries(p4, target, platform=None, environ=None):
-    """env_wants without each variable that is set elsewhere, which p4's entry in the local file would override: in
+    """None when the record is malformed, by env_written, so the keeper adds and removes no variable that run;
+    else env_wants without each variable that is set elsewhere, which p4's entry in the local file would override: in
     this process's environment with a text p4 did not write, as the shell or another settings file gives it, or in the
     user, project or managed settings file beside `target`, as _elsewhere reads them for autoMemoryDirectory."""
     platform = platform or sys.platform
     environ = os.environ if environ is None else environ
-    wrote = env_written(p4) or {}
+    wrote = env_written(p4)
+    if wrote is None:
+        return None                                     # a malformed record: no variable can be told from p4's
     here = env_applies(p4)
     out = {}
     for name, text in env_wants(p4).items():
@@ -1263,23 +1266,54 @@ def read_json(p):
     return d if isinstance(d, dict) else None
 
 
+def _strs(v):
+    return isinstance(v, list) and all(isinstance(x, str) for x in v)
+
+
+def _int(v):
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+# The shape of each part of RECORD the keeper and the watcher read, kept by settings file where the part is one:
+# a part, or one file's entry of it, of another shape is dropped by read_record.
+_PER_FILE = {
+    "files": lambda v: isinstance(v, dict),
+    "p4past": lambda v: isinstance(v, dict),
+    "kept": lambda v: isinstance(v, dict),
+    "hand": _strs,
+    "rules": lambda v: (isinstance(v, dict) and _strs(v.get("entries", [])) and _strs(v.get("hand", []))
+                        and _int(v.get("gen", 0))),
+    "unreadable": lambda v: v is None or (isinstance(v, (int, float)) and not isinstance(v, bool)),
+}
+
+
 def read_record(p4):
-    """The record, with each part the keeper reads that is not of its shape dropped, so a record edited by hand never
-    stops the keeper: p4 then owns none of what that part held."""
+    """The record, with every part of a shape the keeper does not write dropped, so a record edited by hand never
+    stops the keeper or the watcher: p4 then owns none of what that part held."""
     rec = read_json(record_path(p4)) or {}
-    for k in ("files", "p4past", "kept", "hand", "rules", "unreadable"):
-        if k in rec and not (isinstance(rec[k], dict) and all(isinstance(v, (dict, list, float, int, type(None)))
-                                                              for v in rec[k].values())):
+    for k, ok in _PER_FILE.items():
+        if k not in rec:
+            continue
+        if not isinstance(rec[k], dict):
             rec.pop(k)
-    for k in ("files", "p4past", "kept"):
-        for name in [n for n, v in (rec.get(k) or {}).items() if not isinstance(v, dict)]:
+            continue
+        for name in [n for n, v in rec[k].items() if not ok(v)]:
             rec[k].pop(name)
+    if "asked" in rec and not isinstance(rec["asked"], dict):
+        rec.pop("asked")
+    if "claude" in rec and not isinstance(rec["claude"], dict):
+        rec.pop("claude")
+    seen = rec.get("claude") or {}
+    if "binaries" in seen and not (isinstance(seen["binaries"], dict)
+                                   and all(isinstance(b, dict) for b in seen["binaries"].values())):
+        seen.pop("binaries")
+    if "path" in seen and not isinstance(seen["path"], str):
+        seen.pop("path")
     for owned in (rec.get("files") or {}).values():
         for key in [x for x, e in owned.items() if not _entry(e)]:
             owned.pop(key)
     for texts_of in (rec.get("p4past") or {}).values():
-        for name in [n for n, t in texts_of.items()
-                     if not (isinstance(t, list) and all(isinstance(x, str) for x in t))]:
+        for name in [n for n, t in texts_of.items() if not _strs(t)]:
             texts_of.pop(name)
     return rec
 
@@ -1445,7 +1479,7 @@ def wants(p4, target, platform=None):
     out["autoMemoryDirectory"] = mem if conf.get("autoMemoryDirectory", True) is not False and not other else None
     text = conf.get("attribution.commit")
     out["attribution.commit"] = text if isinstance(text, str) else None
-    for name, text in env_entries(p4, target, platform).items():
+    for name, text in (env_entries(p4, target, platform) or {}).items():
         out[f"{ENV_KEY}.{name}"] = text
     return out, {k: v for k, v in conf.items() if k not in WRITES and k not in OWN_KEYS}, conf, other
 
@@ -1650,13 +1684,14 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
     gone = list(hand.get(name) or [])
     want, others, conf, other = wants(p4, target, platform)
     new = copy.deepcopy(data)
-    p4env = {k.split(".", 1)[1]: v for k, v in want.items() if k.startswith(ENV_KEY + ".")}
+    frozen = env_written(p4) is None                   # a malformed record: every P4_* entry left as it is
+    p4env = None if frozen else {k.split(".", 1)[1]: v for k, v in want.items() if k.startswith(ENV_KEY + ".")}
     past = {n: list(t) for n, t in ((rec.get("p4past") or {}).get(name) or {}).items()}
     # in the order of the reference file: the two keys, p4's allow rules, then the variables; then each key an
     # earlier copy wrote that this one no longer owns, such as disableAllHooks, which goes
     env = [k for k in want if k.startswith(ENV_KEY + ".")]
     env += [k for k in owned if k.startswith(ENV_KEY + ".") and k not in env]
-    if not isinstance(new.get(ENV_KEY, {}), dict):
+    if frozen or not isinstance(new.get(ENV_KEY, {}), dict):
         env = []                                        # an `env` that is not an object: left as it is
     dropped = [k for k in owned if k not in WRITES and not k.startswith(ENV_KEY + ".")]
     rec.pop("keeper", None)                             # one KEEPER and P4_* record per store, before "kept"
@@ -1918,7 +1953,8 @@ def watch(project, payload):
     store's `claude` section, a local file left unread, the memory folder other files name, and, for this
     session's own local file, the KEEPER of the copy that last kept it and the P4_* variables p4.json asks for, with
     the record; any change runs keep_settings. Each binary is kept by its path, so the desktop app's copy and the
-    `claude` command used in turn are each read once. At a ConfigChange of a settings file: keep_settings on the keys the record owns.
+    `claude` command used in turn are each read once. At a ConfigChange of a settings file: keep_settings on the
+    keys the record owns.
     Returns {"asks": the lines for ezexe, "newer": (old, new) when a newer Claude Code runs, else None}."""
     out = {"asks": [], "newer": None}
     if os.environ.get(SETTINGS_ENV) == "0":
