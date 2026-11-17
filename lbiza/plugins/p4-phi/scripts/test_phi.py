@@ -966,6 +966,14 @@ class NewTask(unittest.TestCase):
             self.assertEqual((phi.MAX_DEPTH, phi.MAX_CHILDREN, plans.KEEP_GOING_MAX, puppeteer.WATCH_S),
                              (3, 8, 2, 5.0), "a value that does not fit keeps the default")
             self.assertEqual((phi.OTHERS, controls.COMPACTIONS, puppeteer.STALE_S), (5, 3, 86400.0), "and unset ones")
+            for odd in ([1, 2], "deep", 4):            # a `phi` that is no section raises nothing and keeps the defaults
+                write(os.path.join(home, "p4.json"), json.dumps({"phi": odd}))
+                phi.MAX_DEPTH = 7
+                phi.project_conf(home)
+                self.assertEqual((phi.MAX_DEPTH, phi.TURN_STEPS), (3, 12), odd)
+            import p4conf
+            self.assertEqual(phi.CAP_DEFAULTS, {k: p4conf.DEFAULTS["phi"][k] for k in phi.CAPS},
+                             "each default is the one p4conf.py declares, whatever a constant held before")
         finally:
             phi.project_conf("")
 

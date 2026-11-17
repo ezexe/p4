@@ -1094,6 +1094,8 @@ def project_conf(store):
         d = p4conf.section(store, "phi", write=False) if store else {}
     except Exception:  # noqa: BLE001
         d = {}
+    if not isinstance(d, dict):                    # a `phi` that is no section sets every key back to its default
+        d = {}
     ACT_DONT_WAIT = d.get("act_dont_wait") is not False
     TOP_ORCHESTRATES = d.get("top_orchestrates") is not False
     FILE_SETS = d.get("file_sets") is not False
@@ -1113,7 +1115,9 @@ CAPS = {"max_depth": ("phi", "MAX_DEPTH", 1, 20), "max_children": ("phi", "MAX_C
         "keep_going_max": ("plans", "KEEP_GOING_MAX", 0, 7),       # under hooks.md's 8 consecutive continuations
         "compactions": ("controls", "COMPACTIONS", 1, 100),
         "watch_s": ("puppeteer", "WATCH_S", 1.0, 600.0), "stale_s": ("puppeteer", "STALE_S", 60.0, 30 * 86400.0)}
-CAP_DEFAULTS = {}
+# Each cap's default is the one p4conf.py declares for the key, not whatever the constant holds when apply_caps first
+# runs, which a caller may have set.
+CAP_DEFAULTS = {k: p4conf.DEFAULTS["phi"][k] for k in CAPS}
 
 
 def apply_caps(d):
@@ -1121,7 +1125,7 @@ def apply_caps(d):
     in process keeps module globals, so a store that sets none gets the defaults again."""
     mods = {"phi": sys.modules[__name__], "plans": plans, "controls": controls, "puppeteer": puppeteer}
     for key, (mod, name, least, most) in CAPS.items():
-        default = CAP_DEFAULTS.setdefault(key, getattr(mods[mod], name))
+        default = CAP_DEFAULTS[key]
         v = d.get(key, default) if isinstance(d, dict) else default
         ok = setting_fits(v, default) and least <= v <= most
         setattr(mods[mod], name, type(default)(v) if ok else default)

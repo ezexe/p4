@@ -479,6 +479,25 @@ class TermsAndGuides(Base):
         self.assertNotIn(phi.RESEARCH_STEP_HEAD, ok, "a plan that researches first is advised nothing")
 
 
+class WatcherCaps(unittest.TestCase):
+    def test_a_watcher_reads_its_caps_from_the_orchestrators_own_store_not_the_shared_one(self):
+        """ezexe/p4#125: phi.project_conf reads the caps from the store where the session runs, so the watcher of a
+        tree kept in a shared store, which phi.home names, reads them from its orchestrator's own project too."""
+        tmp = tempfile.mkdtemp()
+        try:
+            shared, proj = os.path.join(tmp, "shared", ".claude", "p4"), os.path.join(tmp, "proj")
+            own = os.path.join(proj, ".claude", "p4")
+            os.makedirs(own)
+            write(os.path.join(shared, "phi", "sessions", "local_t", "session.json"),
+                  json.dumps({"sessionId": "local_t", "cwd": proj}))
+            write(os.path.join(shared, "phi", "sessions", "local_u", "session.json"),
+                  json.dumps({"sessionId": "local_u", "cwd": os.path.join(tmp, "bare")}))
+            self.assertEqual(puppeteer.conf_store(shared, "local_t"), own)
+            self.assertEqual(puppeteer.conf_store(shared, "local_u"), shared, "with no store of its own, the tree's")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class LeftProcesses(unittest.TestCase):
     def test_a_sessions_processes_are_found_by_its_apps_scratchpad(self):
         """ezexe/p4#131: a test run from the app's scratchpad of any of its CLI sessions, <id>/scratchpad, or from the

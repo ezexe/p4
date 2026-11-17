@@ -668,6 +668,14 @@ def tick(home, top, net=True):
     return changed
 
 
+def conf_store(home, top):
+    """The store whose p4.json sets an orchestrator's caps: its project's own, found from the folder it runs in, as
+    phi.Me reads them for its hooks; `home` when that folder holds none. `home` can be the shared store phi.home
+    names, whose p4.json is another project's."""
+    s = relay._session(home, top)
+    return _phi().store_at(str(s.get("cwd") or "")) or home
+
+
 def watch(home, top, once=False, max_s=None, interval=None):
     """The watcher's loop over one orchestrator's subtree, until the orchestrator is closed, another watcher took
     over, nothing changed for a day, or the plugin's own scripts changed under it: the marketplace runs from its
@@ -681,8 +689,8 @@ def watch(home, top, once=False, max_s=None, interval=None):
     os.environ.setdefault("GIT_TERMINAL_PROMPT", "0")      # no git or gh call of a watcher ever waits on a person
     os.environ.setdefault("GH_PROMPT_DISABLED", "1")
     began = now()
-    try:                                            # the project's caps, WATCH_S and STALE_S among them
-        _phi().project_conf(home)
+    try:                                            # the project's caps, WATCH_S and STALE_S among them, from the
+        _phi().project_conf(conf_store(home, top))  # orchestrator's own store, as its hooks read them
     except Exception:  # noqa: BLE001
         pass
     while True:
