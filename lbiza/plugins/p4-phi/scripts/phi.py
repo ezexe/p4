@@ -1548,69 +1548,19 @@ def built_in():
     return ([BUILT_IN] if ACT_DONT_WAIT else []) + ([LEVELS] if LEVELS_ON else [])
 
 
-def rules_text(home, room, fork=False, brief=False):
-    """The rules for a session's start, a line each, in at most `room` characters: the rules built into p4-phi, then
-    the store's feedback and user memories. The built-in rules alone in a project with no such memories, and for a
-    fork, whose inherited conversation already holds the memories. After a compaction, one line that names them
-    and the page that holds the memories."""
+def rules_text(home, fork=False):
+    """The rules p4-phi hands a session at its start: the rules built into p4-phi, whole. The store's feedback and
+    user memories are not handed again: the line of each in the memory index the app loads is the one form a session
+    is handed, and live_rules hands a line only for one that changes after the start. rules.md is kept current with
+    them whole, for the board and for a session that needs a memory's reason. A fork's inherited conversation holds
+    the same."""
     if not RULES:
         return ""
     rules = memory_rules(home) if home and not fork else []
-    if not rules or room < 600:
-        RAN["rules"] = 0
-        return builtin_text() if room >= len(builtin_text()) else ""     # '' when the project turned it off
-    page = rules_page(home, rules)
-    mem = p4conf.sub(home, "memory").replace("\\", "/")
-    if brief:                                      # handed in full at the start; after a compaction, its page
-        RAN["rules"] = "page"
-        head = (f"phi (p4-phi): the rules built into p4-phi and this project's feedback and user memories were "
-                f"handed to this session in full at its start and still hold: ")
-        tail = (f". The memories are whole, with their Why, on one page: {page}. Read that page when one of them "
-                f"bears on the next step.")
-        names = [x.split(": ", 1)[0].replace("built-in, ", "") for x in built_in()] + [n for n, _ in rules]
-        return cut(head + names_within(names, room - len(head) - len(tail)) + tail, room)
-    head = (f"phi (p4-phi): the rules built into p4-phi, then this project's feedback and user memories from {mem}, "
-            f"a line each. They are in your context now, as are CLAUDE.md and the memory index, so do not open the "
-            f"memory files or CLAUDE.md to learn the rules before the work. A memory cut short with ... is whole, "
-            f"with its Why, on one page: {page}. Read that page, not the files, when a memory's reason matters. A "
-            f"session you start with `mcp__ccd_session__start_session` is given these same rules, CLAUDE.md and the "
-            f"memory index at its start, so its brief does not "
-            f"tell it to read CLAUDE.md, MEMORY.md or any memory file: the brief names only what this task needs, "
-            f"such as a skill, a plan or source files.")
-    rules = [tuple(x.split(": ", 1)) for x in built_in()] + list(rules)
-    names = [f"- {name}: " for name, _ in rules]
-    left = room - len(head) - sum(len(x) + 1 for x in names)
-    RAN["rules"] = len(rules)
-    if left >= RULE_MIN * len(rules):             # a line each fits
-        return "\n".join([head] + [a + b for a, b in zip(names, fair_cut([rule_of(b) for _, b in rules], left))])
-    # too many for a line each: the built-in rules in half the room left, the memories by name in the rest
-    own = rules[:len(built_in())]
-    lead = "- the memories, by name, each whole on the page above: "
-    head = head.replace(", a line each.", ", the built-in rules a line each and the memories by name.")
-    if room - len(head) - len(lead) < NAMES_MIN:    # a room too small for the head: the page, then names
-        head = (f"phi (p4-phi): the rules built into p4-phi and this project's {len(rules) - len(own)} feedback and "
-                f"user memories are whole, with their Why, on one page: {page}. Read that page before the work.")
-    left = (room - len(head) - len(lead) - 2 - sum(len(x) + 1 for x in names[:len(own)])) // 2
-    lines = [a + b for a, b in zip(names, fair_cut([rule_of(b) for _, b in own], left))] \
-        if left >= RULE_MIN * len(own) else []
-    left = room - len("\n".join([head] + lines)) - len(lead) - 2
-    lines.append(lead + names_within([n for n, _ in rules[len(own):]], left) + ".")
-    return cut("\n".join([head] + lines), room)
-
-
-RULE_MIN = 40       # the fewest characters fair_cut cuts a rule's line to
-NAMES_MIN = 200     # the least room kept for the memories' names when they are given by name alone
-
-
-def names_within(names, room):
-    """`names` joined with commas in at most `room` characters: as many as fit, then how many more there are."""
-    out = []
-    for k, n in enumerate(names):
-        more = f", and {len(names) - k - 1} more" if k < len(names) - 1 else ""
-        if len(", ".join(out + [n])) + len(more) > room:
-            return ", ".join(out) + f", and {len(names) - k} more" if out else f"{len(names)} memories"
-        out.append(n)
-    return ", ".join(out)
+    if rules:
+        rules_page(home, rules)
+    RAN["rules"] = 0
+    return builtin_text()
 
 
 # --- rules that change mid-session ----------------------------------------------------------------------------------
@@ -2400,9 +2350,8 @@ def h_session_start(payload):
         RAN["pair"] = "compacted"
     elif source in ("compact", "clear"):
         first = controls.state_first(me.home, s)   # a standing worker's or coworker's state page first
-    text = cut(text, HOOK_CHARS - len(first) - len(rule) - 6)    # the room the lines around it leave
-    rules = rules_text(me.store, HOOK_CHARS - len(first) - len(text) - len(rule) - 6,
-                       fork=bool(s.get("forked")), brief=source == "compact") if source != "resume" else ""
+    rules = rules_text(me.store, fork=bool(s.get("forked"))) if source != "resume" else ""
+    text = cut(text, HOOK_CHARS - len(first) - len(rules) - len(rule) - 6)    # the room the lines around it leave
     save_session(me.home, s)
     return "\n\n".join(p for p in (first, rules, text, rule) if p) or None
 

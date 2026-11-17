@@ -15,8 +15,8 @@ a source; a session detached to top level, and reparented; a session's own turns
 there is nothing to say; the standing instruction for a message about something else, once in full and then in a
 line beside each of ezexe's messages, never beside Claude Code's; a feature request as a new topic; a turn another
 session began shown a suggested task card first and a start request second; the caps on depth and live children;
-the task changed by its command; the rules built into p4-phi and the store's feedback and user memories at a
-session's start, whole on their page, one line after a compaction, and a changed line given once; the pieces past
+the task changed by its command; the rules built into p4-phi at a session's start, the store's feedback and user
+memories never handed again as rule lines but whole on their page, and a changed line given once; the pieces past
 the prompt's cap held on a page; a hook never failing a call; hooks.json's shape and the words given to a session.
 """
 
@@ -110,7 +110,9 @@ class Tree:
         env.update({"CLAUDE_PLUGIN_ROOT": ROOT, "CLAUDE_PROJECT_DIR": proj or self.proj,
                     "P4_PHI_APP_SESSIONS": os.path.join(self.tmp, "app"), "P4_PHI_WAIT": "0",
                     "P4_PHI_STORES": os.path.join(self.tmp, "p4-stores.json"),
-                    "P4_PHI_NEW_TASK": "0", "P4_PHI_WATCH": "0", **more})
+                    "P4_PHI_NEW_TASK": "0", "P4_PHI_WATCH": "0",
+                    "CLAUDE_CONFIG_DIR": os.path.join(self.tmp, "claude-config"),   # never the machine's own settings
+                    **more})
         if host:
             env["CLAUDE_CODE_HOST_SESSION_ID"] = host
             env["CLAUDE_CODE_SESSION_ID"] = CLI.get(host, host)
@@ -1062,16 +1064,16 @@ class Rules(unittest.TestCase):
         self.assertNotIn("Call the user ezexe", got, "only what changed")
         self.assertNotIn("rules changed", self.live("and now", conf), "nothing repeats")
 
-    def test_every_session_starts_with_the_rules_and_not_the_projects_facts(self):
+    def test_each_memory_reaches_a_session_once(self):
+        """ezexe/p4#130: a memory's line in the index is the one form a session is handed at its start, so p4-phi
+        hands the built-in rules whole and no line of a feedback or user memory, at a start, a clear or a compaction."""
         for host in (TOP, KID):
-            text = self.start(host)
-            self.assertIn("feedback and user memories", text)
-            self.assertIn("- tabs-not-spaces: Indent with tabs in the exporter. **How to apply:** every file.", text)
-            self.assertNotIn("ezexe's editor", text)                    # the Why stays on the page
-            self.assertNotIn("out/Narwhal", text)                       # a project memory is no rule
-            self.assertLess(text.index("long-rule"), text.index("tabs-not-spaces"))     # the index's order
-            self.assertLessEqual(len(text), phi.HOOK_CHARS)
-            self.assertIn("...", text)
+            for source in ("startup", "clear", "compact"):
+                text = self.start(host, source)
+                self.assertIn("- " + phi.BUILT_IN, text, (host, source))
+                for word in ("tabs-not-spaces", "Indent with tabs", "long-rule", "Run the ports check", "out/Narwhal"):
+                    self.assertNotIn(word, text, (host, source))
+                self.assertLessEqual(len(text), phi.HOOK_CHARS)
 
     def test_the_page_holds_every_rule_in_full(self):
         self.start(TOP)
@@ -1082,17 +1084,8 @@ class Rules(unittest.TestCase):
 
     def test_a_resume_is_not_told_again_and_a_compaction_is(self):
         self.start(TOP)
-        self.assertNotIn("feedback and user memories", self.start(TOP, "resume"))
-        self.assertIn("feedback and user memories", self.start(TOP, "compact"))
-
-    def test_after_a_compaction_the_rules_are_a_line_with_their_page(self):
-        """A rule a session has been handed comes back after a compaction as one line with its page."""
-        full = self.start(TOP)
-        text = self.start(TOP, "compact")
-        self.assertIn("tabs-not-spaces", text)
-        self.assertIn("phi/rules.md", text)
-        self.assertNotIn("Indent with tabs", text, "not in full")
-        self.assertLess(len(text), len(full) // 2)
+        self.assertNotIn("act-don't-wait", self.start(TOP, "resume"))
+        self.assertIn("act-don't-wait", self.start(TOP, "compact"))
 
     def test_pieces_past_the_cap_are_held_on_a_page_and_named_by_count(self):
         """The text beside one prompt has a hard ceiling; what does not fit is named by count and page."""
@@ -1117,10 +1110,10 @@ class Rules(unittest.TestCase):
         self.assertIn("c" * 2500, held)
         self.assertEqual(phi.fit(["x", "y"], 100, home, TOP), "x\n\ny", "what fits is untouched")
 
-    def test_rules_and_background_share_the_hooks_room(self):
+    def test_the_built_in_rules_come_beside_the_background(self):
         self.t.say(TOP, TASK)
         text = self.start(KID)
-        self.assertIn("feedback and user memories", text)
+        self.assertIn("act-don't-wait", text)
         self.assertLessEqual(len(text), phi.HOOK_CHARS)
         first = context(self.t.say(KID, HANDED))                         # a fresh child's background: its first message
         self.assertIn("background for this session", first)
@@ -1155,8 +1148,7 @@ class Rules(unittest.TestCase):
                 sizes[f"{source}, background_chars {chars}"] = len(text)
                 self.assertIn("When a message from ezexe is about something else", text, source)
                 self.assertIn("names the shared store git@example.com:team/elsewhere.git", text, source)
-                if chars == phi.BACKGROUND_CHARS:
-                    self.assertIn("feedback and user memories", text, "the rules keep the room the others leave")
+                self.assertIn("act-don't-wait", text, "the built-in rules come with any background")
                 if source == "compact":
                     self.assertTrue(text.startswith("phi (p4-phi): this session is a puppeteer and its "
                                                     "context was compacted"), text[:200])
@@ -1176,20 +1168,15 @@ class Rules(unittest.TestCase):
         for word in ("code", "history", "issues", "documentation", "decisions file", "decisions.md", "source"):
             self.assertIn(word, line)
 
-    def test_the_rules_fit_their_room_however_many_memories_there_are(self):
-        """Names alone past the room: the start's context stays within HOOK_CHARS, and rules_text within its room."""
+    def test_many_memories_leave_the_start_text_as_it_is(self):
+        """However many memories the store holds, the start carries the built-in rules whole and none of them."""
         for k in range(400):
             memory(self.t.p4, f"a-rather-long-memory-name-number-{k:03d}", "feedback", f"Rule {k} of the many.")
         for source in ("startup", "clear", "compact"):
             got = self.start(KID, source)
-            self.assertLessEqual(len(got), phi.HOOK_CHARS, source)
-            self.assertIn("rules.md", got, source)
-        for room in (600, 700, 2000, 5000, 9000):
-            for brief in (False, True):
-                got = phi.rules_text(self.t.p4, room, brief=brief)
-                self.assertLessEqual(len(got), room, (room, brief))
-                self.assertIn("more", got, (room, brief))
-        self.assertIn("act-don't-wait: ", phi.rules_text(self.t.p4, 9000), "the built-in rules still come whole")
+            self.assertIn("- " + phi.BUILT_IN, got, source)
+            self.assertNotIn("a-rather-long-memory-name", got, source)
+        self.assertIn("Rule 399 of the many.", read(os.path.join(self.t.p4, "phi", "rules.md")), "the page holds them")
 
     def test_a_failed_first_commit_is_told_at_the_next_start_once(self):
         """ezexe/p4#218: a store whose index.lock fails the tree's first commit; the next start says so once."""
@@ -1208,10 +1195,10 @@ class Rules(unittest.TestCase):
         self.assertNotIn("the session tree's first commit in", self.start(TOP), "said once")
 
     def test_a_fork_gets_the_built_in_rules_alone(self):
-        """A fork's inherited conversation already holds the store's feedback and user memories."""
-        self.assertEqual(phi.rules_text(self.t.p4, 9000, fork=True), phi.builtin_text())
-        self.assertIn("act-don't-wait", phi.rules_text(self.t.p4, 9000))
-        self.assertGreater(len(phi.rules_text(self.t.p4, 9000)), len(phi.builtin_text()))
+        """A fork's inherited conversation already holds the store's feedback and user memories, and so does every
+        other session's start."""
+        self.assertEqual(phi.rules_text(self.t.p4, fork=True), phi.builtin_text())
+        self.assertEqual(phi.rules_text(self.t.p4), phi.builtin_text())
 
     def test_act_dont_wait_yields_to_a_projects_go_ahead(self):
         """A project rule that waits for ezexe's go makes that go ezexe's; p4.json can turn it off."""
@@ -1220,7 +1207,7 @@ class Rules(unittest.TestCase):
         write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"act_dont_wait": False}}))
         got = self.start(TOP)
         self.assertNotIn("act-don't-wait", got)
-        self.assertIn("tabs-not-spaces", got, "the project's own rules still come")
+        self.assertIn("built-in, levels", got, "the other built-in rule still comes")
         try:
             phi.project_conf(self.t.p4)
             self.assertNotIn("act-don't-wait", phi.builtin_text())
