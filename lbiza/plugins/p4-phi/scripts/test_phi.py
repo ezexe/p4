@@ -1398,6 +1398,17 @@ class Rules(unittest.TestCase):
         self.assertNotIn("sweep", phi.LEVELS)
         self.assertNotIn("p4-phi:sweep", self.start(TOP))
 
+    def test_the_levels_rule_names_the_read_of_the_plan_limits(self):
+        """The built-in rule `levels` handed at a session's start names the app's own `get_usage`, which reports the
+        account's plan limits, before a batch of starts or Agent calls, once, and names no stop or restart of a
+        running session."""
+        got = self.start(TOP)
+        self.assertIn("Before a batch of session starts or Agent calls, read the plan limits once with "
+                      "`mcp__ccd_session_mgmt__get_usage`", got)
+        self.assertEqual(phi.LEVELS.count("mcp__ccd_session_mgmt__get_usage"), 1)
+        for word in ("stop_session", "restart", "start it again", "set_session_model"):
+            self.assertNotIn(word, phi.LEVELS, word)
+
     def test_a_review_of_a_code_change_goes_to_the_bundled_code_review_skill_and_check_reads_the_rest(self):
         """code-review-local.md: "Claude can start `/code-review` on its own, without you typing the command" and
         "without `--fix`, the review's instructions ask Claude for a report only." Its target "can be a pull request

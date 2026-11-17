@@ -775,6 +775,27 @@ class Levels(unittest.TestCase):
         self.assertNotIn("model", call, "its kind's choice stands: a build inherits")
         self.assertEqual(call["effort"], "high")
 
+    def test_the_advice_for_a_batch_of_starts_names_the_read_of_the_plan_limits(self):
+        """The advice of plans.top_advice for two work steps names the app's own `get_usage`, which reports the
+        account's plan limits, once, and names no stop or restart of a running session. The advice a worker gets for
+        steps that can each run on their own carries the same line."""
+        s = relay._session(self.t.p4, TOP)
+        said = plans.top_advice(self.t.p4, {**s, "splitAdvised": []}, {"steps": [
+            {"addr": "1", "content": "Write the puppeteer pages under dox/", "status": "pending"},
+            {"addr": "2", "content": "Change how plans.py reads the address of a step", "status": "pending"}]}, True, "")
+        self.assertIn("Before a batch of session starts or Agent calls, read the plan limits once with "
+                      "`mcp__ccd_session_mgmt__get_usage`", said)
+        self.assertEqual(said.count("mcp__ccd_session_mgmt__get_usage"), 1)
+        self.assertLess(said.index("get_usage"), said.index("Each call carries the `model` and `effort`"),
+                        "the read comes before the levels are named")
+        for word in ("stop_session", "restart", "start it again", "set_session_model"):
+            self.assertNotIn(word, said, word)
+        self.assertEqual(plans.LEVEL_HOW.count("mcp__ccd_session_mgmt__get_usage"), 1)
+        p = self.t.proj
+        kid = self.plan(A, items(f"Edit {p}/src/export/flush.py to write through the new writer",
+                                 f"Rewrite the flush page in {p}/docs/flush.md with the new calls"))
+        self.assertEqual(kid.count("mcp__ccd_session_mgmt__get_usage"), 1, "a worker's split advice names it too")
+
     def test_a_child_session_is_started_with_a_model_and_an_effort_that_fit_its_step(self):
         """A child that writes static pages under dox/ starts on a cheaper model and a lower effort than its parent."""
         import puppeteer
