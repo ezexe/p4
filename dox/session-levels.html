@@ -3,8 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Session levels · p4-phi dox</title>
-<meta name="description" content="An interactive diagram of the levels p4-phi runs work at: a top session, child sessions, background subagents and background commands, and the path each result takes back.">
+<title>Delegation · p4-phi dox</title>
+<meta name="description" content="An interactive diagram of where p4-phi delegates each piece of work: an orchestrator, its workers, background subagents and background commands, the model and effort a worker starts with, and the path each result takes back.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='1' width='14' height='14' rx='4' fill='%230b6b66'/%3E%3C/svg%3E">
 <style>
 :root{
   --bg:#f5f3ec; --panel:#fffdf7; --sunk:#efece2; --ink:#1d1c19; --soft:#5d5a52; --line:#d9d4c6; --link:#a9a392;
@@ -180,31 +181,31 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
     <button class="pill" id="theme" type="button" aria-label="Switch between light and dark">theme</button>
   </div>
   <nav class="tabs" aria-label="Pages about sessions">
-    <a href="session-levels.html" aria-current="page">Session levels</a>
+    <a href="session-levels.html" aria-current="page">Delegation</a>
     <a href="session-tree.html">The session tree</a>
     <a href="puppeteer.html">The puppeteer</a>
   </nav>
-  <h1>Session levels</h1>
-  <p class="lede">Since version 0.9.0, p4-phi runs each piece of work at the level Claude Code gives it, so a session's own turn is never held by it. Choose a kind of task below, see the level it goes to, and step through the path its result takes back.</p>
+  <h1>Delegation</h1>
+  <p class="lede">p4-phi delegates each piece of work to where Claude Code runs it best, so a session's own turn is never held by it. Choose a kind of task below, see where it goes, and step through the path its result takes back.</p>
   <ul class="facts">
-    <li class="f-phi"><b>Sessions do the writing.</b>A top session orchestrates and lands. Each work step of its plan goes to a child session, which the <a href="session-tree.html">session tree</a> page shows. A <a href="puppeteer.html">puppeteer</a> is the exception: its steps stay with it.</li>
+    <li class="f-phi"><b>Workers do the writing.</b>An orchestrator plans and lands. Each work step of its task list goes to a worker, which the <a href="session-tree.html">session tree</a> page shows. A <a href="puppeteer.html">puppeteer</a> is the exception: its steps stay with it.</li>
     <li class="f-you"><b>Subagents run in the background.</b>The plugin ships three: <code>p4-phi:sweep</code>, <code>p4-phi:runner</code> and <code>p4-phi:check</code>. Any session can start one.</li>
     <li class="f-app"><b>Nobody waits in the foreground.</b>The session that asked goes on or ends its turn. A completion notification brings the result in a later turn.</li>
   </ul>
 
   <div class="stage">
-    <section class="card treecard" aria-label="The levels">
+    <section class="card treecard" aria-label="Where work is delegated">
       <div class="bar">
         <div class="seg" role="group" aria-label="The session that asks">
-          <button type="button" data-ask="top" aria-pressed="true">asked by the top session</button>
-          <button type="button" data-ask="child" aria-pressed="false">asked by a child session</button>
+          <button type="button" data-ask="top" aria-pressed="true">asked by the orchestrator</button>
+          <button type="button" data-ask="child" aria-pressed="false">asked by a worker</button>
         </div>
         <span class="spacer"></span>
         <span class="count" id="count"></span>
         <button type="button" class="ghostbtn" id="back">Back</button>
         <button type="button" class="ghostbtn" id="next">Next</button>
       </div>
-      <div class="svgwrap"><svg id="levels" role="group" aria-label="The levels and the path of the chosen task"></svg></div>
+      <div class="svgwrap"><svg id="levels" role="group" aria-label="Where work is delegated, and the path of the chosen task"></svg></div>
       <p class="hint"><span><i class="k-session"></i>session</span><span><i class="k-agent"></i>background subagent</span><span><i class="k-cmd"></i>background command</span><span><i class="l"></i>going down</span><span><i class="l up"></i>coming back</span></p>
       <div class="console" id="console" aria-live="polite"></div>
     </section>
@@ -214,10 +215,10 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
         <h2>The task</h2>
         <div class="acts" id="kinds"></div>
         <div class="field">
-          <label for="plan">Or a plan step</label>
+          <label for="plan">Or a step of a task list</label>
           <input id="plan" type="text" maxlength="90" autocomplete="off" placeholder="Find where p4.json is read">
         </div>
-        <p class="named" id="named">phi names each step of a top session's plan for its level. Write one to see which.</p>
+        <p class="named" id="named">p4-phi names where each step of an orchestrator's task list runs, and which steps the orchestrator keeps. Write one to see where.</p>
       </section>
       <section class="card sec ex" id="example" aria-label="Where the task goes and how its result comes back"></section>
     </div>
@@ -231,8 +232,8 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
         <h2>The call</h2>
         <div class="rwopts">
           <div class="seg" role="group" aria-label="Who makes the call" id="rwwho">
-            <button type="button" data-who="top" aria-pressed="true">a top session</button>
-            <button type="button" data-who="child">a child session</button>
+            <button type="button" data-who="top" aria-pressed="true">an orchestrator</button>
+            <button type="button" data-who="child">a worker</button>
             <button type="button" data-who="agent">a subagent</button>
           </div>
           <label><input type="checkbox" id="rwtimeout"> with its own <code>timeout</code></label>
@@ -246,19 +247,19 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
         <pre class="rwout" id="rwout"></pre>
       </div>
     </div>
-    <p class="after">A top session's call is moved only when it is the long command and nothing else. Parts before the command may go to a folder or set a variable, and its output may pass through filters such as <code>tail</code> or <code>grep</code>. A call with a later part runs as sent, since the later part needs the command finished. So does a call that carries a <code>timeout</code> of its own, since the caller chose to wait. A child session's call is never changed: it gets the line once per plan step. A call that already has <code>run_in_background: true</code> is passed over, and a command the session's own records show as still running is not started a second time.</p>
+    <p class="after">An orchestrator's call is moved only when it is the long command and nothing else. Parts before the command may go to a folder or set a variable, and its output may pass through filters such as <code>tail</code> or <code>grep</code>. A call with a later part runs as sent, since the later part needs the command finished. So does a call that carries a <code>timeout</code> of its own, since the caller chose to wait. The call of a session that has a parent session is never changed: it gets the line once per step of its task list, or once per kind of command while no step is in progress. A call that already has <code>run_in_background: true</code> is passed over. In a project with a store, a command the session's own records show as still running is refused once, with the id of the running copy, and a second try goes through as a repeat of it.</p>
   </section>
 
   <section class="block" aria-label="On by default">
     <h2>On by default</h2>
-    <p class="intro">Nothing has to be configured. The levels rule, the three agents and the rewrite work in any project the plugin is enabled in.</p>
+    <p class="intro">Nothing has to be configured. The delegation rule, the three agents and the rewrite work in any project the plugin is enabled in.</p>
     <div class="rules">
       <div class="rule">
         <h3>Nothing to set up</h3>
         <ul>
-          <li>Every session is given the levels rule at its start, beside the project's other standing rules.</li>
+          <li>Every session is given the delegation rule at its start, as one of p4-phi's built-in rules beside act-don't-wait and the project's feedback and user memories.</li>
           <li>The agents are files in the plugin's <code>agents/</code> folder, so they load with the plugin under the names <code>p4-phi:sweep</code>, <code>p4-phi:runner</code> and <code>p4-phi:check</code>.</li>
-          <li>The rewrite works in a project with no <code>.claude/p4</code> store. Top or child is then read from the app's record of the session.</li>
+          <li>The rewrite works in a project with no <code>.claude/p4</code> store. Whether the session has a parent session is then read from the app's record of it.</li>
           <li>Without a store, what a session was already told is kept in the plugin's data folder and removed after seven days unused.</li>
         </ul>
       </div>
@@ -266,7 +267,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
         <h3>One key turns it off</h3>
         <ul>
           <li>Set <code>phi.levels</code> to <code>false</code> in the project's <code>.claude/p4/p4.json</code>.</li>
-          <li>The levels rule is then left out, no long command is moved or remarked on, and plan steps are no longer named for a subagent.</li>
+          <li>The delegation rule is then left out, no long command is moved or remarked on, no step of a task list is named for a background subagent, and a worker is not told at its first message how to split its own work.</li>
           <li>No key turns it on. Any value but <code>false</code>, or no key at all, leaves it on.</li>
         </ul>
         <pre>{
@@ -278,20 +279,30 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
     </div>
   </section>
 
-  <section class="block" aria-label="The Claude Code docs each behaviour rests on">
-    <h2>What each behaviour rests on</h2>
-    <p class="intro">Each mechanism is Claude Code's own. The plugin only says when to use it. Every page below is part of the Claude Code docs.</p>
+  <section class="block" aria-label="The model and effort a worker starts with">
+    <h2>A worker's model and effort</h2>
+    <p class="intro">The start calls p4-phi's advice hands out carry an <code>effort</code>, and a <code>model</code> unless the worker keeps its parent session's. The kind of the step decides both, and the brief says them in one line, <code>Model and effort: &lt;model&gt; at &lt;effort&gt; effort</code>.</p>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>What the plugin does</th><th>The page</th><th>What the page gives</th></tr></thead>
-        <tbody id="docs"></tbody>
+        <thead><tr><th>Kind of step</th><th>Model</th><th>Effort</th></tr></thead>
+        <tbody>
+          <tr><td><code>static</code>: docs pages, a rename, a version bump and other mechanical work that names no code</td><td><code>claude-sonnet-5-5</code></td><td><code>medium</code></td></tr>
+          <tr><td><code>build</code>: every other step, such as a change to behaviour or anything that names code</td><td>the parent session's own</td><td><code>high</code></td></tr>
+          <tr><td><code>design</code>: a design or review step</td><td>the parent session's own</td><td><code>high</code></td></tr>
+        </tbody>
       </table>
     </div>
-    <p class="after">Two things the pages do not say in words were measured with CLI 2.1.322. A plugin hook's <code>updatedInput</code> that adds <code>run_in_background: true</code> reached the Bash tool, and the command ran as a background task. The agent <code>p4-phi:sweep</code> loaded under that name, ran on Haiku, and stayed in the background though the call asked for the foreground.</p>
+    <p class="after">A serial run takes the model and effort of its hardest step. A brief that names its own lines <code>Model:</code> and <code>Effort:</code> wins over its kind, and a fork takes neither, since the app gives a fork its parent session's. An effort above the parent session's own is not accepted, and <code>phi.child_levels</code> in <code>p4.json</code> sets each kind's defaults.</p>
+  </section>
+
+  <section class="block" aria-label="The Claude Code docs each behaviour rests on">
+    <h2>What each behaviour rests on</h2>
+    <p class="intro">Each mechanism is Claude Code's own, and the plugin only says when to use it. The sentence of the Claude Code docs that each behaviour rests on is in the Delegation table of <a href="https://github.com/ezexe/p4/blob/main/lbiza/plugins/p4-phi/README.md#delegation">p4-phi's README</a>.</p>
+    <p class="after">The docs do not say in words that a hook may add <code>run_in_background</code>. A plugin's command hook that adds it with no <code>permissionDecision</code> gets a PostToolUse whose result reads <code>Command running in background with ID</code>, as the comment above <code>long_kind</code> in <code>phi.py</code> records.</p>
   </section>
 
   <footer>
-    Every rule, call and line here is read from the plugin's source: <code>phi.py</code>, <code>plans.py</code>, the three files in <code>agents/</code> and the <code>phi</code> skill, in <a href="https://github.com/ezexe/p4">ezexe/p4</a> under <code>lbiza/plugins/p4-phi</code>. The diagram is a model in your browser. Nothing on this page reaches a real session.
+    Every rule, call and line here is read from the plugin's source: <code>phi.py</code>, <code>plans.py</code> and the three files in <code>agents/</code>, in <a href="https://github.com/ezexe/p4">ezexe/p4</a> under <code>lbiza/plugins/p4-phi</code>. The diagram is a model in your browser. Nothing on this page reaches a real session.
   </footer>
 </div>
 
@@ -322,8 +333,8 @@ function copy(text,btn){
 
 /* ---------- what the plugin's files state ---------- */
 var NODES={
-  top:{kind:"session",title:"Top session",meta:"orchestrates, lands"},
-  child:{kind:"session",title:"Child session",meta:"one work step"},
+  top:{kind:"session",title:"Orchestrator",meta:"plans, lands"},
+  child:{kind:"session",title:"Worker",meta:"its work steps"},
   sweep:{kind:"agent",title:"p4-phi:sweep",meta:"haiku · low"},
   runner:{kind:"agent",title:"p4-phi:runner",meta:"sonnet · low"},
   check:{kind:"agent",title:"p4-phi:check",meta:"inherit · high"},
@@ -331,47 +342,47 @@ var NODES={
   rcmd:{kind:"cmd",title:"Its command",meta:"the runner waits"}
 };
 var KINDS=[
-  {id:"work",label:"A work step",sub:"It writes, fixes or commits something.",dest:"child",tag:["phi","child session"]},
+  {id:"work",label:"A work step",sub:"It writes, fixes or commits something.",dest:"child",tag:["phi","worker"]},
   {id:"sweep",label:"A sweep across files",sub:"A search or a read across more than a couple of files.",dest:"sweep",tag:["you","p4-phi:sweep"]},
   {id:"bg",label:"A long command, started in the background",sub:"A test file, a test suite or a build.",dest:"cmd",tag:["app","run_in_background"]},
   {id:"runner",label:"A long command, handed to the runner",sub:"The same command, when a verdict is what is wanted.",dest:"runner",tag:["you","p4-phi:runner"]},
   {id:"check",label:"An unanchored read",sub:"A diff or a result, read without this session's own view.",dest:"check",tag:["you","p4-phi:check"]}
 ];
 var DEST={
-  child:{name:"A child session",why:"A work step goes to a fresh child session. The child works on the same branch in the same checkout, and writes only the files its brief names.",
-    spec:[["started by","mcp__ccd_session__start_session"],["context","fresh"],["use_worktree","false"],["brief","the step, a Files: line, what done means, \"report when done\""]]},
+  child:{name:"A worker",why:"A work step goes to a worker, a fresh session started under this one. The worker works on the same branch in the same checkout, and declares the files it writes on its brief's Files: line.",
+    spec:[["started by","mcp__ccd_session__start_session"],["context","fresh"],["use_worktree","false"],["model, effort","by the step's kind, as the table below says"],["brief","the step, a Files: line, what it must leave done, \"report when done\" and its model and effort"]]},
   sweep:{name:"p4-phi:sweep",why:"A read-only sweep across files. It has nothing that changes a file or runs a command.",
     spec:[["model","haiku"],["effort","low"],["tools","Read, Grep, Glob"],["maxTurns","25"],["background","true"]]},
   runner:{name:"p4-phi:runner",why:"It runs one long command exactly as given, changes no file, and reports pass or fail.",
     spec:[["model","sonnet"],["effort","low"],["tools","Bash, PowerShell, Read"],["maxTurns","15"],["background","true"]]},
   check:{name:"p4-phi:check",why:"A second reader of work another session made. It is read-only and takes no claim in its brief as true until the files show it.",
-    spec:[["model","inherit"],["effort","high"],["tools","Read, Grep, Glob"],["maxTurns","30"],["background","true"]]},
-  cmd:{name:"A background command",why:"The Bash or PowerShell tool's own background task. The command runs under the session that started it, and the session keeps its turn.",
+    spec:[["model","inherit"],["effort","high"],["tools","Read, Grep, Glob"],["maxTurns","60"],["background","true"]]},
+  cmd:{name:"A background command",why:"The Bash or PowerShell tool's own background task. The command runs under the session that called the tool, and that session keeps its turn.",
     spec:[["started by","Bash or PowerShell"],["field","run_in_background: true"]]}
 };
 var HOLD="It goes on with other work or ends its turn. It does not wait in the foreground, sleep or poll.";
-function who(ask){return ask==="top"?"The top session":"The child session"}
+function who(ask){return ask==="top"?"The orchestrator":"The worker"}
 
 function steps(kind,ask){
   var W=who(ask);
   if(kind==="work"){
     if(ask==="child")return [
-      {dir:"none",by:"The child session does the step",say:"The step is done at this level.",
-       html:"A child session is the level a work step runs at, so the step is done here, in the files the child's brief names. Its sweeps, long commands and checks go down from here. Switch the asking session to the top session to see how the step arrived."}
+      {dir:"none",by:"The worker does the step",say:"The step is done here.",
+       html:"A worker is where a work step runs, so the step is done here, in the files the worker's brief names. Its sweeps, long commands and checks go down from here. Switch the asking session to the orchestrator to see how the step arrived."}
     ];
     return [
-      {dir:"down",legs:["tc"],by:"The top session starts a child",say:"The start call carries the brief down.",
-       html:"The brief is the step's words, a line <code>Files:</code> with the paths the child may write, what it must leave done, and “report when done”. Steps that share a file go to one child as a serial run. Steps with disjoint files each get a child.",
-       code:call("mcp__ccd_session__start_session",{initiation:"user_asked",context:"fresh",use_worktree:false,title:"Fix the review findings in relay.py",
-         prompt:"Fix the ten review findings in relay.py.\nFiles: lbiza/plugins/p4-phi/scripts/relay.py\nDone means: test_relay.py passes and one commit is on main.\nReport when done."})},
-      {dir:"down",legs:["tc"],by:"Or it shows a proposal card",say:"A card, or a start request, carries the same brief down.",
-       html:"On a turn that another session began, the app refuses <code>user_asked</code>. The top session shows the child as a proposal card, the same call with <code>initiation</code> <code>own_initiative</code>, which ezexe presses in this session. Only where the card is refused too does it write the brief as a start request. The next turn ezexe begins in this session starts it, and no other session is handed it.",
-       code:call("mcp__ccd_session__start_session",{initiation:"own_initiative",context:"fresh",use_worktree:false,title:"Fix the review findings in relay.py",
-         prompt:"<the whole brief, with its Files: line>"})},
-      {dir:"hold",legs:["tc"],by:"The top session ends its turn",say:"The child works. The top session is free.",
-       html:"The top session keeps itself free for planning, relaying between sessions, decisions with ezexe, and landing. It does not do the step itself and it does not wait on the child."},
-      {dir:"up",legs:["tc"],by:"The child reports",say:"The report comes back up.",
-       html:"When the child ends its turn, its report reaches the session that started it. The child leaves its outcome there as a <code>replaces:</code> note and is treated as archived from then on. The top session lands the work, meaning merge and push."}
+      {dir:"down",legs:["tc"],by:"The orchestrator starts a worker",say:"The start call carries the brief down.",
+       html:"The brief is the step's words, a line <code>Files:</code> with the paths the worker may write, what it must leave done, “report when done”, and the line that says its model and effort. Steps that share a file go to one worker as a serial run. Steps with disjoint files each get a worker.",
+       code:call("mcp__ccd_session__start_session",{initiation:"user_asked",context:"fresh",use_worktree:false,title:"Fix the review findings in relay.py",effort:"high",
+         prompt:"Fix the ten review findings in relay.py.\nFiles: lbiza/plugins/p4-phi/scripts/relay.py\nDone looks like: test_relay.py passes and one commit is on main.\nReport when done.\n\nModel and effort: the parent session's own model at high effort, since this is a build that changes behaviour."})},
+      {dir:"down",legs:["tc"],by:"Or it shows a suggested task card",say:"A card, or a start request, carries the same brief down.",
+       html:"On a turn that another session began, the app refuses <code>user_asked</code>. The orchestrator shows the worker as a suggested task card, the same call with <code>initiation</code> <code>own_initiative</code>, which ezexe presses in this session. Only where the card is refused too does it write the brief as a start request. The next turn ezexe begins in this session starts it, and no other session is handed it.",
+       code:call("mcp__ccd_session__start_session",{initiation:"own_initiative",context:"fresh",use_worktree:false,title:"Fix the review findings in relay.py",effort:"high",
+         prompt:"<the whole brief, with its Files: line and its model and effort>"})},
+      {dir:"hold",legs:["tc"],by:"The orchestrator ends its turn",say:"The worker works. The orchestrator is free.",
+       html:"The orchestrator keeps itself free for orchestration: planning, messaging and managing sessions, decisions with ezexe, and landing the work. It does not do the step itself and it does not wait on the worker."},
+      {dir:"up",legs:["tc"],by:"The worker reports",say:"The report comes back up.",
+       html:"When the worker ends its turn, its report reaches its parent session beside that session's next message. The worker leaves its outcome there as a <code>replaces:</code> note and counts as archived from then on. The orchestrator lands the work, meaning merge and push."}
     ];
   }
   if(kind==="sweep")return [
@@ -385,7 +396,7 @@ function steps(kind,ask){
   ];
   if(kind==="bg")return [
     {dir:"down",legs:["ask"],by:W+" starts the command",say:"The shell call starts a background task.",
-     html:"The command goes on a call of its own with <code>run_in_background: true</code>. "+(ask==="top"?"When a top session sends such a command without the field, the plugin's hook adds it. The rewrite below shows which calls.":"A child session's foreground call is not changed. It runs as sent, and the session is told once per plan step to start such a command this way."),
+     html:"The command goes on a call of its own with <code>run_in_background: true</code>. "+(ask==="top"?"When the orchestrator sends such a command without the field, the plugin's hook adds it. The rewrite below shows which calls.":"A worker's foreground call is not changed. It runs as sent, and the worker is told once per step of its task list, or once per kind of command while no step is in progress, to start such a command this way."),
      code:call("Bash",{command:"python test_phi.py",run_in_background:true})},
     {dir:"hold",legs:["ask"],by:W+" goes on or ends its turn",say:"The command runs. The session keeps its turn.",
      html:HOLD},
@@ -414,11 +425,23 @@ function steps(kind,ask){
   ];
 }
 
-/* ---------- plan steps, as plans.level_of reads them ---------- */
+/* ---------- steps of a task list, as plans.level_of and plans.child_kind read them ---------- */
 var READS=/^\W*(?:find|search|look\s+(?:for|up|at|into|through)|read|grep|list|locate|survey|scan|map|inventory|explore|trace|identify|count|collect|gather|sweep)\b/i;
 var RUNS=/^\W*(?:run|re-?run|execute)\b/i;
 var WRITES=/\b(?:fix\w*|writ\w*|add\w*|chang\w*|edit\w*|implement\w*|updat\w*|remov\w*|renam\w*|creat\w*|mak\w+|mov\w+|commit\w*|refactor\w*|port\w*|delet\w*|migrat\w*|rewrit\w*|replac\w*|patch\w*|push\w*|merg\w*|land\w*|releas\w*|ship\w*|install\w*)\b/i;
 function levelOf(t){if(WRITES.test(t))return "session";if(READS.test(t))return "sweep";if(RUNS.test(t))return "runner";return "session"}
+var DESIGNS=/^\W*(?:re-?)?(?:design|review|architect|audit|specif|spec\b|propos|investigat|decid|evaluat|assess|analy[sz]|research|plan\b)\w*/i;
+var CODE=/\.(?:py|js|jsx|ts|tsx|rs|go|c|h|cc|cpp|cs|java|kt|rb|sh|ps1|sql|toml|ya?ml)\b(?!\.)|\b(?:scripts?|src|hooks?|lib)\/|\b(?:hook|script|function|module|class|api|test suite|behaviou?r)s?\b|\b(?:fix|implement|build|refactor|port|migrat)\w*\b/i;
+var STATIC=/\b(?:docs?|dox|documentation|readme|changelog|pages?|html|css|markdown|typos?|wording|comments?|renam\w*|version bump|bump\w*|format\w*|static|mechanical|copy\w*|mov\w+)\b|\.(?:md|html|css|txt|svg)\b/i;
+function kindOfWork(t){if(DESIGNS.test(t))return "design";if(STATIC.test(t)&&!CODE.test(t))return "static";return "build"}
+/* three of the reasons plans.top_stays keeps a step with the orchestrator; it has more, such as waiting on other sessions */
+var LANDS=/^\W*(?:run\b[^,.;]*\b(?:tests?|suites?|checks?)|report|wrap)\b|^\W*(?:tests?|verify|check|review)\b(?!\s*#?\d)(?=[^.;:]*\b(?:own (?:work|changes?|commits?|diff|steps?)|landed|merged|committed|pushed|work|changes?|diff|results?|commits?|suites?|tests?|build|outcome|fix(?:es)?|it|them)\b)|\b(?:commit|merge|push|ship|release|land|fast-forward)\b/i;
+var SYNCS=/^\W*(?:re-?)?sync(?:s|ed|ing|hronis\w+|hroniz\w+)?\b|\bsync(?:s|ed|ing)?\s+(?:[\w'’-]+\s+){0,3}?stores?\b|\bp4\.py\s+sync\b/i;
+var ORCHESTRATES=/^\W*(?:start|kick\s*off|launch)\s+(?!writing|adding|implementing|making)(?:[\w'’-]+\s+){0,5}?(?:checks?|tests?|sessions?)\b|^\W*(?:run|re-?run)\s+(?:[\w'’-]+\s+){0,5}?(?:sessions?|acceptance\s+(?:checks?|tests?|runs?))\b/i;
+function staysWhy(t){if(LANDS.test(t)||SYNCS.test(t))return "it checks or lands the work";if(ORCHESTRATES.test(t))return "it starts a check, test or session, which is orchestration";return ""}
+var KIND_WORDS={static:"static or mechanical work, so it starts on <code>claude-sonnet-5-5</code> at <code>medium</code> effort",
+  build:"a build that changes behaviour, so it starts on the parent session's own model at <code>high</code> effort",
+  design:"a design or review step, so it starts on the parent session's own model at <code>high</code> effort"};
 
 /* ---------- state ---------- */
 var S={kind:"sweep",ask:"top",step:0};
@@ -573,14 +596,16 @@ svg.addEventListener("click",nodeHit);
 svg.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();nodeHit(e)}});
 $("plan").addEventListener("input",function(){
   var t=$("plan").value.trim(),out=$("named");
-  if(!t){out.textContent="phi names each step of a top session's plan for its level. Write one to see which.";return}
+  if(!t){out.textContent="p4-phi names where each step of an orchestrator's task list runs, and which steps the orchestrator keeps. Write one to see where.";return}
+  var stay=staysWhy(t);
+  if(stay){out.innerHTML="The orchestrator keeps this step itself, since "+stay+".";S.ask="top";pick("work");return}
   var lv=levelOf(t);
-  if(lv==="sweep"){out.innerHTML="This step only reads or searches, so phi names it for <code>p4-phi:sweep</code>, not a session.";pick("sweep")}
-  else if(lv==="runner"){out.innerHTML="This step only runs a command, so phi names it for <code>p4-phi:runner</code>, not a session.";pick("runner")}
-  else{out.innerHTML="This step is work, so phi names it for a child session.";S.ask="top";pick("work")}
+  if(lv==="sweep"){out.innerHTML="This step only reads or searches, so p4-phi names it for <code>p4-phi:sweep</code>, a background subagent, not a session.";pick("sweep")}
+  else if(lv==="runner"){out.innerHTML="This step only runs a command, so p4-phi names it for <code>p4-phi:runner</code>, a background subagent, not a session.";pick("runner")}
+  else{out.innerHTML="This step is work, so p4-phi names it for a worker. It is "+KIND_WORDS[kindOfWork(t)]+".";S.ask="top";pick("work")}
 });
 
-/* ---------- the rewrite: each row is phi.long_read's own answer for that call ---------- */
+/* ---------- the rewrite: each row is phi.long_read's own answer for that call, and the lines are h_level's ---------- */
 var CALLS=[
   {c:"python test_phi.py",kind:"a test file",alone:true},
   {c:"cd scripts && python -m pytest -q",kind:"pytest",alone:true},
@@ -614,42 +639,22 @@ function rewrite(){
   if(R.who==="top"&&x.alone&&!R.timeout){
     var moved={};for(var k in inp)moved[k]=inp[k];moved.run_in_background=true;
     v.className="verdict moved";v.textContent="Moved to the background.";
-    why.textContent="The call is the long command and nothing else, and this is the top session. The hook returns the same input with one field added, and one line beside the result.";
+    why.textContent="The call is the long command and nothing else, and this is the orchestrator. The hook returns the same input with one field added, and one line beside the result.";
     out.textContent=JSON.stringify({hookSpecificOutput:{hookEventName:"PreToolUse",updatedInput:moved,
-      additionalContext:"phi (p4-phi): this call runs "+x.kind+", which runs long, and this is the top session, so p4-phi started it in the background by adding `run_in_background: true`. Go on with other work or end the turn, and read its result when its completion notification comes; do not wait, sleep or poll for it."}},null,2);
+      additionalContext:"phi (p4-phi): this call runs "+x.kind+", which runs long, and this is the orchestrator, so p4-phi started it in the background by adding `run_in_background: true`. Go on with other work or end the turn: its completion notification brings the result, so never wait for it, sleep or poll."}},null,2);
     return;
   }
   var reasons=[];
-  if(R.who==="child")reasons.push("Another session started this one, and only a top session's call is moved.");
+  if(R.who==="child")reasons.push("This session has a parent session, and only an orchestrator's call is moved.");
   if(!x.alone)reasons.push("The command is one part of a longer call, and nothing may be changed about how the other parts run.");
   if(R.timeout)reasons.push("The call carries a timeout of its own, so the caller chose to wait.");
   v.className="verdict sent";v.textContent="Runs as sent, with one line.";
-  why.textContent=reasons.join(" ")+" The line is said once per plan step.";
-  out.textContent="phi (p4-phi): this call runs "+x.kind+" in this session's foreground, and a command like it runs long. Start such a command on a call of its own with `run_in_background: true`, or hand it to the `p4-phi:runner` subagent, and go on with other work or end the turn until its completion notification; do not wait, sleep or poll for it. Said once for this step.";
+  why.textContent=reasons.join(" ")+" The line is said once per step of the session's task list, or once per kind of command while no step is in progress.";
+  out.textContent="phi (p4-phi): this call runs "+x.kind+" in this session's foreground, and a command like it runs long. Start such a command on a call of its own with `run_in_background: true`, or hand it to the `p4-phi:runner` subagent, then go on with other work or end the turn: its completion notification brings the result, so never wait for it in the foreground, sleep or poll. Said once for this step.";
 }
 CALLS.forEach(function(x,i){var b=h("button",{type:"button",text:x.c,"aria-pressed":"false"});b.addEventListener("click",function(){R.i=i;rewrite()});$("cmds").appendChild(b)});
 document.querySelectorAll("#rwwho button").forEach(function(b){b.addEventListener("click",function(){R.who=b.getAttribute("data-who");rewrite()})});
 $("rwtimeout").addEventListener("change",function(){R.timeout=$("rwtimeout").checked;rewrite()});
-
-/* ---------- the docs ---------- */
-var DOCS="https://code.claude.com/docs/en/";
-var PAGES=[
-  ["Ships three agents in <code>agents/</code>, named <code>p4-phi:sweep</code>, <code>p4-phi:runner</code> and <code>p4-phi:check</code>","plugins/components","Add components to a plugin","Each Markdown file under a plugin's <code>agents/</code> folder defines one agent, named by the plugin and the file."],
-  ["Sets <code>model</code>, <code>effort</code>, <code>maxTurns</code>, <code>tools</code> and <code>background</code> on each, and none of <code>hooks</code>, <code>mcpServers</code> or <code>permissionMode</code>","plugins/components","Add components to a plugin","The frontmatter fields a plugin's agent supports, and the ones it ignores."],
-  ["Keeps each agent in the background","sub-agents","Create custom subagents","The <code>background</code> field keeps a subagent in the background even when a call asks to wait for it."],
-  ["Tells a session to go on or end its turn, and never to wait, sleep or poll","sub-agents","Create custom subagents","A foreground subagent blocks the conversation and a background one runs beside it. A background subagent's report arrives inside a completion notification, marked as an automated event."],
-  ["Tells a session to start a long command with <code>run_in_background: true</code>","tools-reference","Tools reference","The field starts the command as a background task, and the session continues while it runs."],
-  ["Has the runner wait when its command moves to the background","tools-reference","Tools reference","A foreground command that reaches its timeout unfinished is moved to the background, not stopped."],
-  ["In a top session, returns a long foreground command with <code>updatedInput</code>: the same input plus one field","hooks","Hooks reference","A PreToolUse hook's <code>updatedInput</code> replaces the whole input before the tool runs, so unchanged fields are sent with the changed one."],
-  ["Says so in one line beside the result","hooks","Hooks reference","A PreToolUse hook's <code>additionalContext</code> is added to the context alongside the tool's result."],
-  ["Gives the sweep and the runner low effort","model-config","Model configuration","The effort levels, and the default level of each current model."],
-  ["Keeps what a session was told in the plugin's data folder when a project has no store","plugins-reference","Plugin manifest reference","The plugin's root folder changes at each update, and its data folder is kept across updates."]
-];
-PAGES.forEach(function(r){
-  var tr=h("tr");tr.appendChild(h("td",{html:r[0]}));
-  tr.appendChild(h("td",{class:"pg"},[h("a",{href:DOCS+r[1],text:r[2]}),h("small",{text:r[1]})]));
-  tr.appendChild(h("td",{html:r[3]}));$("docs").appendChild(tr);
-});
 
 var rw=0;
 if(window.ResizeObserver)new ResizeObserver(function(){var w=wrap.clientWidth;if(w!==rw){rw=w;draw(false)}}).observe(wrap);
