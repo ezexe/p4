@@ -41,7 +41,7 @@ The copies of `p4conf.py` in the two plugins are identical.
 Every hook of both plugins is a shell command that starts `sh`, which on Windows is Git Bash's.
 Without Git Bash, Claude Code runs the command in PowerShell, where `sh` is missing and the hook does not run.
 Installing Git for Windows, or setting `CLAUDE_CODE_GIT_BASH_PATH` to a Git Bash Claude Code does not find, lets the hooks run.
-p4-temportal's hooks set `onFailure` to `continue`, so one that cannot start never blocks a tool call.
+Each hook of both plugins on which `onFailure` acts sets it to `continue`, so a hook that cannot start never blocks a call.
 
 ## Tests
 
