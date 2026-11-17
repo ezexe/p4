@@ -35,23 +35,8 @@ import time
 FILE = "p4.json"
 
 DEFAULTS = {
-    "memory": {
-        "retries": 5,                    # attempts at deleting a file of the auto memory directory held open
-        "retry_wait_s": 1.0,             # seconds between those attempts
-    },
     "scratchpad": {
         "asks": False,                   # the two asks about where code belongs; P4_SCRATCHPAD_ASKS=1 or 0 wins
-        "tmp": True,                     # the session scratchpad directory in temportal/tmp/<session>, linked from
-                                         # the path Claude Code gives; P4_SCRATCHPAD_TMP=1 or 0 wins
-        "tmp_idle_days": 7,              # another session's quiet scratchpad directory is committed and removed
-        "tmp_max_file_mb": 20,           # a larger file in a scratchpad directory is never staged, so never removed
-        "tmp_max_files": 5000,           # a scratchpad directory with more files is never committed or removed,
-                                         # and only its tracked files' changes are staged
-        "tmp_empty_idle_hours": 1,       # another session's empty scratchpad directory quiet this long is removed
-        "scratch_sweep_minutes": 60,     # another session's empty scratchpad folder under the temp directory is
-                                         # removed once quiet this long, and one with files is linked at once
-        # folders a scratchpad directory never stages: caches and test trees, a trailing * matching a prefix
-        "tmp_skip_dirs": [".pytest_cache", "node_modules", ".venv", "venv", ".tox", ".mypy_cache", "pytest-of-*"],
         # the extensions and folder names the notebook moves into its .out/
         "ignorable_ext": ["log", "out", "tmp", "dump", "pid", "o", "obj", "pdb", "ilk", "exe", "dll", "lib", "so",
                           "dylib", "a", "class", "pyc", "pyo", "tlog", "binlog", "etl", "trace", "lastbuildstate"],
@@ -74,7 +59,7 @@ DEFAULTS = {
     },
     "temportal": {                       # lifetimes under .claude/p4/temportal/, read by p4-temportal's lifetime.py
         "cache": {                       # a rule per folder, relative to temportal/, and memory/ is never cleared
-            "scratchpad/.out": {"max_age_days": 14, "max_mb": 500},   # the logs, build output and binaries moved here
+            "notebook/.out": {"max_age_days": 14, "max_mb": 500},     # the logs, build output and binaries moved here
             ".layout-conflicts": {"max_age_days": 30},                 # the older copies a layout move set aside
         },
     },
@@ -150,18 +135,20 @@ OPEN = ("temportal.cache",)
 READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.puppeteer_chars", "phi.context_window",
                  "phi.clear_at", "claude")
 
-# Top-level keys no plugin reads: never returned or called unknown, and dropped from p4.json when it is rewritten for
-# another reason.
-RETIRED = ("plans", "version")
+# Keys no plugin reads, top-level or dotted: never returned or called unknown, and dropped from p4.json when it is
+# rewritten for another reason. The memory section and the scratchpad tmp keys went with p4-temportal's move to the
+# app's own auto memory and scratchpad.
+RETIRED = ("plans", "version", "memory", "scratchpad.tmp", "scratchpad.tmp_idle_days", "scratchpad.tmp_max_file_mb",
+           "scratchpad.tmp_max_files", "scratchpad.tmp_empty_idle_hours", "scratchpad.scratch_sweep_minutes",
+           "scratchpad.tmp_skip_dirs")
 
-# Where each kind of file lives in the store, by plugin. p4-temportal keeps the auto memory, the notebook, the session
-# scratchpad directories and saved code in temportal/, and p4-phi keeps its session tree, the retrieval corpus and
+# Where each kind of file lives in the store, by plugin. p4-temportal keeps the auto memory, the notebook and saved
+# code in temportal/, and p4-phi keeps its session tree, the retrieval corpus and
 # models, and the archive a migration from the per-session layout keeps verbatim in phi/. p4.json and the store's own
 # git files stay at the top: .git, .github, .gitignore and .gitattributes.
 LAYOUT = {
     "memory": "temportal/memory",
-    "scratchpad": "temportal/scratchpad",
-    "tmp": "temportal/tmp",
+    "scratchpad": "temportal/notebook",
     "src": "temportal/src",
     "store": "phi/store",
     "models": "phi/models",
@@ -172,9 +159,9 @@ LAYOUT = {
 OLDER = {k: [k] for k in LAYOUT}
 OLDER["store"].append("recall/store")
 OLDER["models"].append("recall/models")
+OLDER["scratchpad"].append("temportal/scratchpad")     # the notebook, before the session scratchpad left the store
 LAYOUT_LOCK = ".layout.lock"              # held while one hook moves the store; the others wait for it
 LAYOUT_CONFLICTS = ".layout-conflicts"    # inside the plugin's folder: the older of two differing copies
-TEMP_ROOTS = ("/tmp", "/private/tmp")     # beside tempfile.gettempdir(): where Claude Code makes its claude* folders
 
 
 def path(p4):
@@ -224,21 +211,6 @@ def _unlink(link):
         os.unlink(link)
     else:
         os.rmdir(link)                                  # a junction: RemoveDirectory drops the reparse point only
-
-
-def _harness_links(sid):
-    """The scratchpad paths Claude Code gave session `sid` that are links:
-    `<temp>/claude*/<project>/<sid>/scratchpad`."""
-    out, seen = [], set()
-    for r in (tempfile.gettempdir(), *TEMP_ROOTS):
-        key = os.path.normcase(os.path.realpath(r))
-        if key in seen or not os.path.isdir(r):
-            continue
-        seen.add(key)
-        for d in glob.glob(os.path.join(glob.escape(r), "claude*", "*", glob.escape(sid), "scratchpad")):
-            if is_link(d):
-                out.append(d)
-    return out
 
 
 # The files a move put in a new place in this process, so the layout commit holds those and nothing else.
@@ -334,36 +306,6 @@ def _move(src, dst, aside):
                 _LANDED.append(dst)
             return 0
     return _merge_tree(src, dst, aside)
-
-
-def _move_tmp(old, new, aside):
-    """tmp/ at the top of the store into temportal/tmp/, one session at a time. A session whose scratchpad path is a
-    link to its folder in tmp/ is linked to its new folder. Returns the count kept aside."""
-    os.makedirs(new, exist_ok=True)
-    n_aside = 0
-    for sid in sorted(os.listdir(old)):
-        o, n = os.path.join(old, sid), os.path.join(new, sid)
-        links = [l for l in _harness_links(sid) if _same(l, o)] if os.path.isdir(o) else []
-        for l in links:
-            try:
-                _unlink(l)
-            except OSError:
-                pass
-        if os.path.isdir(o) and not is_link(o):
-            n_aside += _move(o, n, os.path.join(aside, sid))
-        elif os.path.isfile(o):
-            n_aside += _move(o, n, aside)
-        for l in links:
-            if not os.path.lexists(l):
-                try:
-                    _make_link(l, n if os.path.isdir(n) else o)
-                except OSError:
-                    os.makedirs(l, exist_ok=True)       # Claude Code still finds a folder to write to
-    try:
-        os.rmdir(old)
-    except OSError:
-        pass
-    return n_aside
 
 
 def _rewrite_paths(p, moved):
@@ -716,7 +658,7 @@ def _moves(p4, places, lines, done):
         plugin = LAYOUT[k].split("/")[0]
         aside = os.path.join(p4, plugin, LAYOUT_CONFLICTS, k)
         try:
-            a = _move_tmp(src, dst, aside) if k == "tmp" and os.path.isdir(src) else _move(src, dst, aside)
+            a = _move(src, dst, aside)
         except OSError as e:
             lines.append(f"could not move {rel}/ to {LAYOUT[k]}/: {e}; tried again at the next start")
             continue
@@ -750,6 +692,8 @@ def _moves(p4, places, lines, done):
 def _merge(base, over, unknown, prefix=""):
     out = copy.deepcopy(base)
     for k, v in over.items():
+        if prefix + k in RETIRED:
+            continue
         if k not in base:
             if prefix + k not in READ_WHEN_SET:
                 unknown.append(prefix + k)
@@ -782,10 +726,12 @@ def _write(p4, data):
 WRITTEN = "_written"
 # The generation of DEFAULTS: raised by one whenever a default changes, with the value it had added to HISTORY, so a
 # store's written values follow the change. test_p4conf.py pins DEFAULTS to this number.
-GEN = 2
+GEN = 3
 # Past defaults by dotted path: a store from before the record whose value equals one of these, or today's default,
 # counts that value as written by load, so it follows today's default.
-HISTORY = {"recall.teacher.model": ["claude-fable-5-1"], "recall.lookups.web": ["answer"]}
+HISTORY = {"recall.teacher.model": ["claude-fable-5-1"], "recall.lookups.web": ["answer"],
+           "temportal.cache": [{"scratchpad/.out": {"max_age_days": 14, "max_mb": 500},
+                                ".layout-conflicts": {"max_age_days": 30}}]}
 
 
 def _leaves(d, prefix=""):
@@ -878,12 +824,18 @@ def load(p4, write=True, warn=True):
     out = {**merged, WRITTEN: now}
     # a retired key alone never rewrites the file, since an older copy that still writes it would put it back at its
     # own next load: it leaves the file at the next rewrite for another reason
-    if write and os.path.isdir(p4) and (not existed or out != {k: v for k, v in over.items() if k not in RETIRED}):
+    if write and os.path.isdir(p4) and (not existed or out != _without_retired(over)):
         try:
             _write(p4, out)
         except OSError:
             pass
     return merged
+
+
+def _without_retired(d, prefix=""):
+    """`d` with every key of RETIRED left out, at any depth."""
+    return {k: _without_retired(v, f"{prefix}{k}.") if isinstance(v, dict) else v for k, v in d.items()
+            if prefix + k not in RETIRED}
 
 
 def section(p4, name, write=True):

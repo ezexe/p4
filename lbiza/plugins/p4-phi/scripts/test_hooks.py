@@ -221,7 +221,7 @@ class Layout(Base):
         self.assertTrue(got.startswith(old), "what was there is untouched and in its order")
         tail = got[len(old):].splitlines()
         self.assertRegex(tail[0], r"^# seeded by p4-recall \d{4}-\d{2}-\d{2}$")
-        self.assertEqual(tail[1:], ["phi/models/deps.json", "phi/models/near.json", "phi/models/lookups.db*", "phi/models/view/", ".layout.lock",
+        self.assertEqual(tail[1:], ["temportal/notebook/.out/", "phi/models/deps.json", "phi/models/near.json", "phi/models/lookups.db*", "phi/models/view/", ".layout.lock",
                                     ".settings.lock", "claude-settings.json", "phi/claude-code-watch.pending.json*",
                                     "phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/sessions.md",
                                     "phi/rules.md", "phi/catchup.json", "phi/**/*.tmp", "phi/**/*.lock", "phi/sessions/*/.calls/", "phi/.agents/", "phi/.nudge/", "*.pyc",
@@ -234,7 +234,7 @@ class Layout(Base):
                              "ezexe's edits win.\n*.wav\nphi/models/index.json\nphi/models/repo.json\n")
         self.assertIn("\n# seeded by p4-recall ", got)
         self.assertTrue(got.endswith("phi/models/ranker.pt\n"))
-        self.assertIn("temportal/scratchpad/.out/\n", got)
+        self.assertIn("temportal/notebook/.out/\n", got)
         self.assertNotIn("*.pt\n", got, "the anchor and the chain are tracked in LFS: no blanket *.pt")
         for line in ("phi/models/index.json", "phi/models/repo.json"):
             self.assertEqual(got.count(line + "\n"), 1, f"{line}: a line the file already holds is never appended again")

@@ -89,7 +89,7 @@ SEED_MARKER = "# seeded by p4-recall"
 # stores this plugin inherits
 SEED_MARKER_RE = re.compile(r"(?i)^#\s*seeded (once )?by (p4-recall|the vlds plugin)\b")
 GITIGNORE = """# seeded once by p4-recall; your edits win
-temportal/scratchpad/.out/
+temportal/notebook/.out/
 phi/models/served/
 phi/models/index.json
 phi/models/repo.json

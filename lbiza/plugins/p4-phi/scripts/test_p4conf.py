@@ -47,9 +47,16 @@ class P4Conf(unittest.TestCase):
         tree = ast.parse(text)
         consts = {t.id: n.value for n in tree.body if isinstance(n, ast.Assign) for t in n.targets
                   if isinstance(t, ast.Name)}
-        for key in ("scratch_sweep_minutes", "tmp_empty_idle_hours", "tmp_skip_dirs"):
-            const = re.search(rf'"{key}": "(\w+)"', text).group(1)
-            self.assertEqual(p4conf.DEFAULTS["scratchpad"][key], ast.literal_eval(consts[const]), key)
+        pairs = re.findall(r'"(\w+)": "([A-Z_]+)"', text[text.index('p4conf.configure(globals(), p4, "scratchpad"'):])
+        mapped = dict(pairs[:len(pairs)])
+        self.assertTrue(mapped, "scratchpad.configure maps its keys")
+        for key, const in mapped.items():
+            if const in consts:
+                want = ast.literal_eval(consts[const])
+                have = p4conf.DEFAULTS["scratchpad"][key]
+                self.assertEqual(set(have) if isinstance(want, (set, frozenset)) else have, want, key)
+            else:
+                self.assertIn(key, p4conf.DEFAULTS["scratchpad"], key)
 
     def test_a_key_read_when_set_is_not_called_unknown(self):
         """phi.child_levels, phi.puppeteer_section and phi.puppeteer_chars are read when a project sets them and are
@@ -334,11 +341,45 @@ class P4Conf(unittest.TestCase):
             stores[name] = p4conf.load(p4)["recall"]["lookups"]["web"]
         self.assertEqual(stores, {"written": "note", "no record": "note", "by hand": "shadow"})
 
+    def test_the_notebook_moves_out_of_temportal_scratchpad(self):
+        """B8 of ezexe/p4#131: the notebook's place is temportal/notebook, so a store's temportal/scratchpad moves there
+        at its next start, its .gitignore line follows, and the cache rule a load wrote follows the new key."""
+        old = os.path.join(self.p4, "temportal", "scratchpad", "plan.md")
+        os.makedirs(os.path.dirname(old))
+        Path(old).write_text("the plan\n", encoding="utf-8")
+        Path(self.p4, ".gitignore").write_text("temportal/scratchpad/.out/\n", encoding="utf-8")
+        d = json.loads(json.dumps(p4conf.DEFAULTS))
+        d["temportal"]["cache"] = p4conf.HISTORY["temportal.cache"][0]
+        d[p4conf.WRITTEN] = {"temportal.cache": {"v": p4conf.HISTORY["temportal.cache"][0], "gen": 2}}
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        p4conf.migrate_layout(self.p4, commit=False)
+        self.assertEqual(Path(self.p4, "temportal", "notebook", "plan.md").read_text(encoding="utf-8"), "the plan\n")
+        self.assertFalse(os.path.exists(os.path.join(self.p4, "temportal", "scratchpad")))
+        self.assertEqual(Path(self.p4, ".gitignore").read_text(encoding="utf-8"), "temportal/notebook/.out/\n")
+        self.assertEqual(p4conf.rel("scratchpad"), "temportal/notebook")
+        cache = p4conf.load(self.p4)["temportal"]["cache"]
+        self.assertIn("notebook/.out", cache)
+        self.assertNotIn("scratchpad/.out", cache)
+
+    def test_the_keys_p4_temportal_stopped_reading_are_dropped_and_never_called_unknown(self):
+        import contextlib
+        import io
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump({"memory": {"retries": 5}, "scratchpad": {"tmp": True, "tmp_skip_dirs": [], "asks": True}}, f)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            s = p4conf.load(self.p4)
+        self.assertEqual(err.getvalue(), "")
+        self.assertNotIn("memory", s)
+        self.assertNotIn("tmp", s["scratchpad"])
+        self.assertIs(s["scratchpad"]["asks"], True)
+
     def test_gen_is_raised_with_every_change_of_defaults(self):
         """DEFAULTS is pinned to its GEN: a change of a default fails here until GEN is raised, the old value added to
         HISTORY and the pin below updated."""
         import hashlib
-        pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973"}                     # append only: one more line for each GEN
+        pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca"}                     # append only: one more line for each GEN
         got = hashlib.sha256(json.dumps(p4conf.DEFAULTS, sort_keys=True).encode()).hexdigest()[:16]
         self.assertEqual(p4conf.GEN, max(pins))
         self.assertEqual(p4conf.GEN, len(pins), "no generation is skipped or replaced")
@@ -348,7 +389,7 @@ class P4Conf(unittest.TestCase):
         s = p4conf.load(self.p4)
         self.assertEqual(s, p4conf.DEFAULTS)
         self.assertEqual(self.read(), p4conf.DEFAULTS)
-        self.assertEqual(set(s), {"memory", "scratchpad", "phi", "temportal", "recall"})
+        self.assertEqual(set(s), {"scratchpad", "phi", "temportal", "recall"})
 
     def test_the_retired_config_json_seeds_nothing(self):
         os.makedirs(p4conf.sub(self.p4, "models"))
@@ -365,7 +406,7 @@ class P4Conf(unittest.TestCase):
         self.assertEqual(on_disk["recall"]["pinned_chars"], 900)
         self.assertEqual(on_disk["recall"]["inject"], "rules-facts", "a missing key is added")
         self.assertEqual(on_disk["recall"]["once_was"], "kept", "an unknown key stays on disk, read by nothing")
-        self.assertEqual(on_disk["memory"], p4conf.DEFAULTS["memory"])
+        self.assertEqual(on_disk["phi"], p4conf.DEFAULTS["phi"])
         self.assertEqual(on_disk["extra"], 1, "an unknown key survives the rewrite")
         self.assertEqual(s["recall"]["pinned_chars"], 900)
 
@@ -390,7 +431,7 @@ class P4Conf(unittest.TestCase):
     def test_a_writer_holding_a_temp_file_does_not_block_another(self):
         """Two hooks of one event load at once: a temp file another writer still holds does not stop this write."""
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({"memory": p4conf.DEFAULTS["memory"]}, f)
+            json.dump({"phi": p4conf.DEFAULTS["phi"]}, f)
         os.mkdir(p4conf.path(self.p4) + ".tmp")          # the name the other writer would hold
         p4conf.load(self.p4, warn=False)
         self.assertEqual(self.read(), p4conf.DEFAULTS)
