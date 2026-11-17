@@ -1351,6 +1351,23 @@ class KeepGoing(unittest.TestCase):
         self.assertNotEqual((json.loads(r.stdout) if r.stdout.strip() else {}).get("decision"), "block")
         self.assertEqual(self.stop("Still porting.", uuid="u9").get("decision"), "block", "an empty list does not")
 
+    def test_only_a_running_background_task_lets_the_turn_end(self):
+        """ezexe/p4#147: each `background_tasks` entry carries a `status`, the task's current one; a task listed as
+        completed or failed wakes nothing, so it does not let the turn end."""
+        from test_phi import STOP, transcript
+        t = self.t
+
+        def stop(tasks, uuid):
+            path = transcript(os.path.join(t.tmp, TOP + uuid + ".jsonl"), "Build the two plugins", (), "Waiting.", uuid)
+            r = t.hook(STOP, TOP, {"hook_event_name": "Stop", "transcript_path": path, "last_assistant_message":
+                                   "Waiting.", "stop_hook_active": False, "background_tasks": tasks})
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return (json.loads(r.stdout) if r.stdout.strip() else {}).get("decision")
+
+        done = {"id": "task-002", "type": "shell", "status": "completed", "description": "the suite"}
+        self.assertEqual(stop([done, {**done, "id": "task-003", "status": "failed"}], "s1"), "block")
+        self.assertNotEqual(stop([done, {**done, "id": "task-004", "status": "running"}], "s2"), "block")
+
     def test_open_steps_send_the_turn_back_twice_then_let_it_end(self):
         out = self.stop("I ported half the hooks.")
         self.assertEqual(out.get("decision"), "block")

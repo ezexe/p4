@@ -1247,8 +1247,8 @@ def keep_going(home, s, report, calls, turn_id, active=False, waits=(), backgrou
         return ""                                  # the turn wrapped up: its recap says what is left and why
     if any(t.get("status") == "open" for _, t in _tasks(p)):
         return ""
-    if any(isinstance(t, dict) for t in background or ()):
-        return ""                                  # hooks.md, Stop input: in-flight work that wakes the session
+    if any(isinstance(t, dict) and str(t.get("status") or "running").lower() == "running" for t in background or ()):
+        return ""                                  # hooks.md, Stop input: a running task's end wakes the session
     nxt = next((x for x in steps if x.get("status") == "in_progress"), steps[0])
     if waits and (AWAITS.search(str(nxt.get("content") or "")) or awaits_sessions(nxt.get("content"))):
         return ""                                  # nothing can be done on it until a report arrives
