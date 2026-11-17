@@ -1060,8 +1060,8 @@ def slice_text(home, s):
     if not mine:
         return ""                                 # nothing to cut the anchor by: phi.background_text says the rest
     head = (f"phi (p4-phi): what the parent, \"{_title(ps)}\", has for this session's paths, "
-            f"{', '.join(show(p, base) for p in mine[:5])}, from its anchor v{ver}. Its task: \""
-            f"{_short(ps.get('task') or '', 300)}\".")
+            f"{', '.join(show(p, base) for p in mine[:5])}, from its anchor v{ver}.")   # by its title alone: no
+    # session is handed a run of the words of a prompt sent to another
     marks, heads, files = [], set(), []
     every = list((anchor.get("nodes") or {}).items()) + [(parent, anchor.get("parent") or {})]
     for nid, n in every:

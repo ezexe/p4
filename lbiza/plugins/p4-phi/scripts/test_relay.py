@@ -51,8 +51,28 @@ class Paths(unittest.TestCase):
                    "task": f"fix {tmp}/src/a.py"}
             text = relay.slice_text(home, kid)
             self.assertIn("paths, src/a.py, from", text)
-            self.assertNotIn(relay.norm(tmp), text.split("Its task")[0])
+            self.assertNotIn(relay.norm(tmp), text)
             self.assertEqual(relay.slice_text(home, dict(kid, task="no path here")), "", "no empty paths line")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_a_childs_slice_hands_on_no_run_of_its_parents_prompt(self):
+        """A session is handed what its parent wrote for it, never a run of eight words of the prompt the parent was
+        sent: the slice names the parent by its title alone."""
+        tmp = tempfile.mkdtemp()
+        try:
+            home = os.path.join(tmp, ".claude", "p4")
+            prompt = ("Resolve the open issues on the plugin repository and land each one with its deciding "
+                      "test before the weekly limit comes round again")
+            write(os.path.join(home, "phi", "sessions", "top", "session.json"),
+                  json.dumps({"sessionId": "top", "cwd": tmp, "task": prompt, "title": "the issues run"}))
+            kid = {"sessionId": "kid", "spawnedFrom": {"sessionId": "top"}, "cwd": tmp,
+                   "task": f"fix {tmp}/src/a.py"}
+            text = relay.slice_text(home, kid)
+            self.assertIn("\"the issues run\"", text)
+            words = prompt.split()
+            runs = [" ".join(words[k:k + 8]) for k in range(len(words) - 7)]
+            self.assertEqual([r for r in runs if r in text], [], "no eight-word run of the parent's prompt")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
