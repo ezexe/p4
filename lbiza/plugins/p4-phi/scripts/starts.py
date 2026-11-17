@@ -1,30 +1,32 @@
-"""starts.py: start requests, the children a session wants and cannot start, kept in the store.
+"""starts.py: the write set a brief declares, and the two starts the app's suggested task card cannot hold.
 
-The app refuses `mcp__ccd_session__start_session` with `initiation` `user_asked` in a turn ezexe did not begin, such
-as a child's turn that another session's message started or an app event, and anthropics/claude-code#109282 reports
-that refusal as a bug. Such a session shows the child as a suggested task card first, as phi._split_full says, and
-files a start request with `phi.py request "<title>" --brief "<brief>"` only when the card is refused too.
+A session with work it may not start itself proposes it as a suggested task card, `mcp__ccd_session__start_session`
+with `initiation` `own_initiative`, and p4-phi keeps no copy of that card. desktop.md, "Start a task that Claude
+suggests": "the suggestion is a card in the chat, and its buttons either start the task or keep it in this session",
+its **Start** "starts the task in another session", and "the sidebar lists the started session under the current
+session". The start tool's own text adds that "the user sees a card and nothing runs until they start it", and
+`mcp__ccd_session__dismiss_task` withdraws a card that went stale.
 
-At the next turn ezexe begins in the session that filed a request, that session is handed each of its pending
-requests, one line each with the exact call, and no other session is handed them. The app nests a child under the
-session that makes the start call, so the app's parent and p4-phi's agree. The brief's marker line tells p4-phi at the
-child's first message whose child it is: p4-phi records the session that filed the request as the child's parent, so
-the child's reports and its archive line go there. A request not started within EXPIRE_S is dropped.
+A start request is a start that card cannot hold. <home>/phi/start-requests.jsonl holds one row a change: `request`
+with the brief, `claimed` when a start_session call carrying its marker is about to run, with `card` when that call
+proposes the card, and `started` when the child's first message arrived. A withdrawn request is kept as a `started`
+row whose child is "withdrawn". A request not started within EXPIRE_S is dropped.
 
-Until then the session waits on ezexe by a click: each turn ezexe did not begin ends on a blocked wrap-up whose
-question names the requests it holds and whose first button starts them, so the app marks it as needing ezexe and
-the press of that button is the turn ezexe begins there. A puppeteer names such a session as a link and
-starts none of its requests, as controls.py says.
+  after   a start that waits behind a busy writer. The card's one condition is ezexe's press: its **Start all**
+          "starts each task in its own session without waiting for one task to finish before starting the next",
+          and no button of it holds a start until another session is done. The gate queues a start draft whose
+          files a running session holds as a request with `after`, that session's id. Once that session is not
+          busy, the session that queued the request is handed its exact call, and no other session is: a start
+          at a turn ezexe began there, the card at any other turn. The app nests the child under the session
+          that makes the call, so the app's parent and p4-phi's agree, and the card holds the request from then
+          on.
+  to      a start addressed to a puppeteer. A card is shown in the session that proposes it and its session is
+          listed under that session, so no card asks another session for an orchestrator at top level. A request
+          filed with `to`, a puppeteer's id, is never handed to the session that filed it, and the puppeteer's
+          hooks read it here.
 
-A request filed with `to`, a puppeteer's id, asks that puppeteer for a new orchestrator: it is
-never handed to the session that filed it, and the puppeteer's hooks read it here.
-
-<home>/phi/start-requests.jsonl holds one row a change: `request` with the brief, `claimed` when a start_session
-call carrying its marker is about to run, and `started` when the child's first message arrived. A withdrawn request
-is kept as a `started` row whose child is "withdrawn".
-
-A request can wait behind a busy writer: the gate queues a start draft whose files a running session holds as a
-request with `after`, that session's id, and the request is handed out only once that session is not busy.
+The brief's marker line tells p4-phi at the child's first message whose child it is: p4-phi records the session that
+filed the request as the child's parent, so the child's reports and its archive line go there.
 """
 
 import hashlib
@@ -35,8 +37,9 @@ import time
 
 import relay
 
-EXPIRE_S = 24 * 3600            # a request no turn of ezexe's has started by then is dropped
+EXPIRE_S = 24 * 3600            # a request not started by then is dropped
 CLAIM_S = 15 * 60               # a claimed request whose child never arrived is handed again after this
+CARDS = 3                       # the app shows at most this many suggested task cards a turn
 MARK_RE = re.compile(r"phi start request (req-[0-9a-f]{10}) for (\S+?)\.?(?:\s|$)")
 BACKGROUND_MIN = 80             # the app refuses a fresh start whose background is shorter
 
@@ -205,8 +208,9 @@ def marker(rid, requester):
 
 
 def state(home):
-    """Every request on file by its id: its request row, with its `claimed` row folded in as `by` and `at`, and its
-    `started` row as the child's id, which is "withdrawn" for a withdrawn request."""
+    """Every request on file by its id: its request row, with its `claimed` row folded in as `by`, `at` and, when the
+    call proposed the card, `card`, and its `started` row as the child's id, which is "withdrawn" for a withdrawn
+    request."""
     out = {}
     for r in relay._rows(path_of(home)):
         rid = r.get("id")
@@ -215,7 +219,7 @@ def state(home):
         if r.get("kind") == "request":
             out[rid] = dict(r)
         elif rid in out and r.get("kind") == "claimed":
-            out[rid]["claimed"] = {"by": r.get("by"), "at": r.get("at")}
+            out[rid]["claimed"] = {"by": r.get("by"), "at": r.get("at"), **({"card": True} if r.get("card") else {})}
         elif rid in out and r.get("kind") == "started":
             out[rid]["started"] = r.get("child")
     return out
@@ -230,15 +234,16 @@ def open_rows(home, at=None):
 
 
 def pending(home, at=None):
-    """The requests still to start, oldest first: not started, not past EXPIRE_S, and not claimed in the last
-    CLAIM_S. One addressed to a puppeteer is not among them: that puppeteer's hooks read it."""
+    """The requests free to go, oldest first: not started, not past EXPIRE_S, not claimed in the last CLAIM_S, not
+    proposed as a card, which holds a request from then on, and not behind a writer that is still busy. One addressed
+    to a puppeteer is not among them: that puppeteer's hooks read it."""
     at = time.time() if at is None else at
     out = []
     for r in state(home).values():
         if r.get("started") or r.get("to") or at - float(r.get("at") or 0) > EXPIRE_S:
             continue
         c = r.get("claimed") or {}
-        if c and at - float(c.get("at") or 0) < CLAIM_S:
+        if c and (c.get("card") or at - float(c.get("at") or 0) < CLAIM_S):
             continue
         if r.get("after") and _busy(home, r["after"]):
             continue                              # queued behind a writer that is still at work
@@ -262,8 +267,8 @@ def _handed(home, r, at):
         if child and child != "withdrawn":
             continue                              # its child arrived: writers() answers for it, live or not
         c = x.get("claimed") or {}
-        if not child and c and at - float(c.get("at") or 0) < CLAIM_S:
-            out.append(x)                         # handed out, its child not arrived yet
+        if not child and c and (c.get("card") or at - float(c.get("at") or 0) < CLAIM_S):
+            out.append(x)                         # handed out or shown as a card, its child not arrived yet
     return out
 
 
@@ -290,13 +295,21 @@ def background_of(home, requester, given=""):
     return text
 
 
+CARD = ("a start with no busy writer to wait behind and no puppeteer to ask is no start request: propose it as a "
+        "suggested task card, `mcp__ccd_session__start_session` with `initiation` `own_initiative`, which ezexe "
+        "starts in this session, and withdraw a card that went stale with `mcp__ccd_session__dismiss_task`")
+
+
 def add(home, requester, title, brief, context="fresh", at=None, background="", after="", declared=False,
         to=""):
     """Keeps a start request and returns its id and True when it is new. The same brief from the same session, still
     pending, is kept once. Its background is the one given or one built from the session that files it. With
     `after`, a session's id, it waits behind that session while that session is a busy writer. The write set its
     brief declares is kept on it; with `declared`, a brief that declares none is refused. With `to`, a
-    puppeteer's id, it asks that puppeteer for a new orchestrator."""
+    puppeteer's id, it asks that puppeteer for a new orchestrator. With neither it is refused with CARD, since the
+    app's suggested task card holds that start."""
+    if not after and not to:
+        raise ValueError(CARD)
     title, brief = " ".join(str(title or "").split()), str(brief or "").strip()
     if len(title) < 3:
         raise ValueError("a start request needs the child's title")
@@ -320,74 +333,48 @@ def add(home, requester, title, brief, context="fresh", at=None, background="", 
     return rid, True
 
 
-def call_of(r, home=""):
-    """The exact start_session input that starts a request: always `context` fresh, so the brief says all the child
-    needs. It carries the request's background, which the app requires: a row with none is given one built from the
-    session that filed it, and one shorter than BACKGROUND_MIN is made long enough, as background_of does."""
+def call_of(r, home="", card=False):
+    """The exact start_session input that starts a request, or with `card` proposes it as a suggested task card:
+    always `context` fresh, so the brief says all the child needs. It carries the request's background, which the
+    app requires: a row with none is given one built from the session that filed it, and one shorter than
+    BACKGROUND_MIN is made long enough, as background_of does."""
     bg = str(r.get("background") or "")
     if len(bg) < BACKGROUND_MIN:
         bg = background_of(home, r["requester"], bg) if home else (
             bg + " " + background_of("", r["requester"], "")).strip()
     import plans                                   # the model and effort its brief's kind of work gets
-    return plans.with_level({"initiation": "user_asked", "title": r["title"], "context": "fresh",
-                             "use_worktree": False, "background": bg,
+    return plans.with_level({"initiation": "own_initiative" if card else "user_asked", "title": r["title"],
+                             "context": "fresh", "use_worktree": False, "background": bg,
                              "prompt": r["brief"] + "\n\n" + marker(r["id"], r["requester"])},
                             r["title"] + "\n" + r["brief"])
 
 
-def hand_text(home, sid, at=None):
-    """The lines a session is handed at a turn ezexe began in it: each pending request it filed itself, with
-    its exact call; '' when none of its own is pending. No other session is handed a request, a puppeteer
-    included, so the app nests the child under the session that filed it."""
+def freed_text(home, sid, began, at=None):
+    """The line a session is handed once starts it queued behind a busy writer are free to go, each with its exact
+    call: a start at a turn ezexe began, and at any other turn the suggested task card, CARDS of them a turn, which
+    ezexe starts in this session. '' when none of its own is free. No other session is handed them, a puppeteer
+    included, so the app nests the child under the session that queued it. No turn is told to end on a question for
+    them: a proposed card holds its request, which is handed to no turn after it."""
     rows = [r for r in pending(home, at) if r.get("requester") == sid]
     if not rows:
         return ""
+    rows = rows if began else rows[:CARDS]
     lines = [f"- \"{r['title']}\": `mcp__ccd_session__start_session` with "
-             f"{json.dumps(call_of(r, home), ensure_ascii=False)}" for r in rows]
-    return ("phi (p4-phi): start requests this session filed in turns ezexe did not begin. "
-            "This turn ezexe began here, so start each now, with exactly the call given, before the rest of this "
-            "turn's work:\n" + "\n".join(lines) + "\n"
-            "Each is this session's own child, in the app's nesting and in p4-phi's.")
+             f"{json.dumps(call_of(r, home, card=not began), ensure_ascii=False)}" for r in rows]
+    how = ("This turn ezexe began here, so start each now, with exactly the call given, before the rest of this "
+           "turn's work" if began else
+           "ezexe did not begin this turn, so propose each as a suggested task card, with exactly the call given, "
+           "which ezexe starts in this session; the card holds it from then on, and "
+           "`mcp__ccd_session__dismiss_task` withdraws one that went stale")
+    return ("phi (p4-phi): starts this session queued behind a busy writer are free to go. " + how + ":\n"
+            + "\n".join(lines) + "\nEach is this session's own child, in the app's nesting and in p4-phi's.")
 
 
-BUTTONS = ("Start it", "Start them")   # the first reply button of the wrap-up a session holding requests ends on
-
-
-def wait_text(titles):
-    """How a session that holds start requests ends a turn ezexe did not begin: on a blocked wrap-up whose question
-    names them and whose first button starts them, so the app marks it as needing ezexe and one click in it is the
-    turn ezexe begins there."""
-    one = len(titles) == 1
-    ask = (f"Start \"{titles[0]}\" here?" if one else f"Start {len(titles)} sessions here: "
-           + ", ".join(f"\"{t}\"" for t in titles[:3]) + (" and more?" if len(titles) > 3 else "?"))
-    return (f"End this turn with `mcp__ccd_turn__wrap_up` with `blocked` true, the question \"{ask}\", cut to fit, "
-            f"and the reply button \"{BUTTONS[0] if one else BUTTONS[1]}\" first: the app marks this session as "
-            f"needing ezexe, and that one click is a turn ezexe began here, which starts {'it' if one else 'them'} "
-            f"with the exact call{'' if one else 's'} p4-phi hands then.")
-
-
-def requested_text(rid, new, home=""):
-    """What a session is told when it kept a start request: no other session is handed it, and it waits on ezexe by
-    the click wait_text names, its question naming every start request the session holds."""
-    asker = state(home).get(rid, {}).get("requester") if home else ""
-    titles = [r["title"] for r in open_rows(home) if asker and r.get("requester") == asker and not r.get("to")] \
-        if home else []
-    return ((f"kept as start request {rid}" if new else f"start request {rid} was already kept") +
-            ". No other session is handed it: it waits on ezexe's click in this session, since the app refuses this "
-            "start in a turn ezexe did not begin, and the next turn ezexe begins here starts it as this session's own "
-            "child. Carry on with the rest of the task. " + wait_text(titles or [rid]))
-
-
-def waiting_text(home, sid, at=None):
-    """The line a session is handed at a turn ezexe did not begin while it holds start requests that a turn of
-    ezexe's would start: it ends this turn on the click wait_text names too. '' when it holds none."""
-    titles = [r["title"] for r in pending(home, at) if r.get("requester") == sid]
-    if not titles:
-        return ""
-    n = len(titles)
-    return (f"phi (p4-phi): this session holds {n} start request{'s' if n != 1 else ''} that "
-            f"{'waits' if n == 1 else 'wait'} on ezexe's click here, since the app refuses a start in a turn ezexe "
-            f"did not begin. " + wait_text(titles))
+def queued_text(rid, new, behind):
+    """What a session is told when it queued a start behind a busy writer."""
+    return ((f"queued as start request {rid}" if new else f"start request {rid} was already kept")
+            + f" behind {behind}: once that writer is not busy, p4-phi hands this session its exact call, a start at "
+              f"a turn ezexe begins here and a suggested task card, which ezexe starts here, at any other.")
 
 
 def asked_text(rid, new, title, pid, ptitle):
@@ -402,13 +389,15 @@ def asked_text(rid, new, title, pid, ptitle):
             "task.")
 
 
-def claim(home, prompt, by, at=None):
+def claim(home, prompt, by, at=None, card=False):
     """A start_session call carrying a request's marker is about to run: the request is not handed again for
-    CLAIM_S. Returns the request id, '' when the prompt carries none."""
+    CLAIM_S, and with `card`, a call that proposes the suggested task card, not at all, since the card holds it.
+    Returns the request id, '' when the prompt carries none."""
     m = MARK_RE.search(str(prompt or ""))
     if not m or m.group(1) not in state(home):
         return ""
-    _append(home, {"kind": "claimed", "id": m.group(1), "by": by, "at": time.time() if at is None else at})
+    _append(home, {"kind": "claimed", "id": m.group(1), "by": by, "at": time.time() if at is None else at,
+                   **({"card": True} if card else {})})
     return m.group(1)
 
 
@@ -431,8 +420,9 @@ def started(home, rid, child, at=None, by=""):
 
 def withdraw(home, rid, by="", at=None):
     """Withdraws a pending start request by its id and returns the line to print. The withdrawal is kept as a row in
-    start-requests.jsonl, so `pending`, `open_rows` and `hand_text` leave the request out and its record stays. An
-    unknown id, or a request already started or withdrawn, is refused."""
+    start-requests.jsonl, so `pending`, `open_rows` and `freed_text` leave the request out and its record stays. An
+    unknown id, or a request already started or withdrawn, is refused. A request proposed as a card is named with
+    the tool that withdraws the card."""
     r = state(home).get(rid)
     if not r:
         raise ValueError(f"no start request {rid} is on file in this store")
@@ -443,4 +433,6 @@ def withdraw(home, rid, by="", at=None):
                          f"session instead")
     started(home, rid, "withdrawn", at, by)
     return (f"withdrawn: start request {rid} \"{r.get('title')}\", filed by \"{r.get('requesterTitle') or r.get('requester')}\", "
-            f"is handed to no session now. Its row stays in start-requests.jsonl.")
+            f"is handed to no session. Its row stays in start-requests.jsonl."
+            + (" It was proposed as a suggested task card: withdraw that card with `mcp__ccd_session__dismiss_task`."
+               if (r.get("claimed") or {}).get("card") else ""))

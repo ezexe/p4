@@ -51,7 +51,7 @@ import node as nd  # noqa: E402  a session's place in the tree, which retrieval 
 import p4conf  # noqa: E402  the store's layout, each plugin's files in .claude/p4/<plugin>/
 import plans  # noqa: E402  each session's task list with step addresses, which its parent's anchor holds
 import relay  # noqa: E402  owned paths, deltas and anchors, which keep linked sessions in step while they work
-import starts  # noqa: E402  start requests, the children a session wants but cannot start, carried by the store
+import starts  # noqa: E402  write sets, and the starts a card cannot hold: behind a busy writer, or to a puppeteer
 import issues  # noqa: E402  a writing child's issue, its Closes #N commit, regression test, push and archive
 import puppeteer  # noqa: E402  the watcher's ledger, routing, start drafts, the gate, routes, readings, meta pass
 
@@ -1172,8 +1172,7 @@ def new_top_route(owner_turn=True):
     how = ("Start it with `mcp__ccd_session__start_session`, `initiation` `user_asked`" if owner_turn else
            f"This turn was started by another session, so the app refuses `user_asked`: show it as a suggested task "
            f"card, `mcp__ccd_session__start_session` with `initiation` `own_initiative`, which ezexe presses in "
-           f"this session; only where the card is refused too, write it as a start request, {request_cmd()}, "
-           f"which the next turn ezexe begins in this session starts")
+           f"this session")
     return (f"{how}, `context` `fresh`, `use_worktree: false`, with the `model` and `effort` its kind of work gets, "
             f"said in one line of the brief; its brief: {RESTATE}, and "
             f"the lines \"{NEW_TOP_BRIEF} {new_top_first_act()}\" Both moves are needed: the app's detach to top "
@@ -1181,12 +1180,6 @@ def new_top_route(owner_turn=True):
             f"at the new session's first hook on that line. If it is still nested under this session at its first "
             f"report, call `mcp__ccd_session_mgmt__detach_session` with its id yourself. Orchestrators are "
             f"siblings, so each is told what the others change.")
-
-
-def request_cmd():
-    """The command that keeps a start request, as the lines that advise it give it."""
-    return (f'`{commands()} request "<title>" --brief "<the whole brief>"`, the brief declaring its write set on a '
-            f'line `Files: <paths>`')
 
 
 def depth_of(home, s):
@@ -1222,9 +1215,8 @@ FIRST_SPLIT = ("phi (p4-phi): this is this session's first message. In these ses
                "session. Subagents keep reads, "
                "searches, single command runs and independent checks, which return a result and hold no files. A "
                "part that writes files and comes up after this turn is shown as a suggested task card, the start "
-               "tool's `initiation` `own_initiative`, which ezexe presses in this session; only where the card is refused too is it kept as a start request, {request}, which the next "
-               "turn ezexe begins in this session starts. It never runs in a subagent. A task that is one part with "
-               "one set of files stays here whole.")
+               "tool's `initiation` `own_initiative`, which ezexe presses in this session. It never runs in a "
+               "subagent. A task that is one part with one set of files stays here whole.")
 
 
 RESEARCH = ("Before it creates anything new, such as a module, a page, a format or a kind of test, this session finds "
@@ -1283,7 +1275,7 @@ def first_split_text(home, s):
     if caps_text(home, s):
         return ""
     RAN["first_split"] = True
-    return FIRST_SPLIT.format(request=request_cmd())
+    return FIRST_SPLIT
 
 
 def split_text(home, s, prompt, cli=""):
@@ -1301,8 +1293,7 @@ def split_text(home, s, prompt, cli=""):
     if cli and told.get(cli):                      # said once in full, then a line
         RAN["split"] = "line"
         return ("phi (p4-phi): another session started this turn, so a task of its own in it is shown as a suggested "
-                "task card, and written as a start request only where the card is refused, as said before; do the "
-                "rest here.")
+                "task card, as said before; do the rest here.")
     if cli:
         told[cli] = now()
     return _split_full(home, s)
@@ -1317,9 +1308,8 @@ def _split_full(home, s):
             "`mcp__ccd_session__start_session` with `user_asked`. Work in it that is a task of its own, outside "
             "this session's task, is shown as a suggested task card, `mcp__ccd_session__start_session` with "
             "`initiation` `own_initiative`, which ezexe presses in this session, so the app's parent session and "
-            f"p4-phi's agree. {plans.LEVEL_CARD} Only where the card is refused too, write it as a start request, "
-            f"{request_cmd()}: the next "
-            "turn ezexe begins in this session starts it as this session's child. Do the rest here.")
+            f"p4-phi's agree. Its brief declares its write set on a line `Files: <paths>`. {plans.LEVEL_CARD} Do the "
+            "rest here.")
 
 
 FEATURE_STEP = re.compile(r"\bnew feature\b|^\W*(?:build|implement|design|introduce)\b[^.;]*\b(?:feature|loop|"
@@ -2138,10 +2128,10 @@ def h_user_prompt_submit(payload):
     if stale:
         parts.insert(0, notice(stale))
     began = bool(req) and not handed_over(payload.get("prompt"))     # ezexe began this turn
-    asked = starts.hand_text(me.home, s["sessionId"]) if began else starts.waiting_text(me.home, s["sessionId"])
-    if asked:                                      # ezexe's turn carries the session's start requests, and any other
-        parts.insert(0, notice(asked))             # turn says they wait on ezexe's click here
-        RAN.update({"start_requests": asked.count("\n- ")} if began else {"start_waiting": True})
+    freed = starts.freed_text(me.home, s["sessionId"], began)
+    if freed:                                      # the starts it queued behind a writer that is free: a start at
+        parts.insert(0, notice(freed))             # ezexe's turn, the app's suggested task card at any other
+        RAN["queued_starts"] = freed.count("\n- ")
     if issue_line:
         parts.insert(0, notice(issue_line))
     pad = str(payload.get("scratchpad_dir") or "").replace("\\", "/").rstrip("/")
@@ -2537,7 +2527,8 @@ def h_start_advice(payload):
     where `permissions.denyInsteadOfPrompting` is set, a call that would wait on a prompt is denied. The input is
     never rewritten with `updatedInput`, since a fresh start needs a brief and background only the caller can
     write. A puppeteer's start of another session's start request goes through, claimed as made on that
-    session's behalf, with the line that has the new session detached to top level."""
+    session's behalf, with the line that has the new session detached to top level. A call that proposes a start
+    request as a suggested task card claims it for good, since the card holds it from then on."""
     me = Me(payload)
     if not me.home or not me.id:
         return None
@@ -2556,8 +2547,9 @@ def h_start_advice(payload):
     if why:                                         # a second while the first is live
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                        "permissionDecisionReason": why}}
-    if starts.claim(me.home, inp.get("prompt"), me.id):
-        RAN["claimed"] = True                      # a start request's call, given exactly: the asker decided it
+    card = inp.get("initiation") == "own_initiative"
+    if starts.claim(me.home, inp.get("prompt"), me.id, card=card):
+        RAN["claimed"] = "card" if card else True   # a start request's call, given exactly: the asker decided it
         return None
     brief = str(inp.get("prompt") or "")
     if brief and NEW_TOP.search(brief):
@@ -3098,16 +3090,16 @@ def main(argv=None):
                                                     "write set; none shows it")
             p.add_argument("--release", action="store_true", help="hold no file any more")
         if name == "request":
-            p.add_argument("title", nargs="?", default="", help="the child's title")
+            p.add_argument("title", nargs="?", default="", help="the new orchestrator's title")
             p.add_argument("--withdraw", default="", metavar="REQUEST",
                            help="withdraw a pending start request by its id, so it is never handed out")
-            p.add_argument("--brief", default="", help="the child's whole brief")
+            p.add_argument("--brief", default="", help="the new orchestrator's whole brief")
             p.add_argument("--brief-file", default="", help="a file holding the brief")
-            p.add_argument("--context", default="fresh", choices=("fresh", "fork"))
-            p.add_argument("--background", default="", help="the child's start background, one built from this "
-                                                              "session's task and the project when left out")
+            p.add_argument("--background", default="", help="the start background, one built from this session's "
+                                                              "title and the project when left out")
             p.add_argument("--to-puppeteer", action="store_true",
-                           help="ask this session's puppeteer for a new orchestrator, and start none")
+                           help="ask this session's puppeteer for a new orchestrator, and start none; any other "
+                                "start this session may not make is a suggested task card, not a request")
         if name == "controls":
             p.add_argument("ids", nargs="*", help="orchestrators this puppeteer controls; none prints "
                                                   "where each stands")
@@ -3209,30 +3201,21 @@ def main(argv=None):
             print(starts.withdraw(me.home, a.withdraw.strip(), s["sessionId"]))
             return 0
         if a.cmd == "request":
+            if not a.to_puppeteer:                 # the app's suggested task card holds any other start
+                raise ValueError(starts.CARD + "; `request` keeps only a request to this session's puppeteer, "
+                                               "with `--to-puppeteer`")
             brief = a.brief
             if a.brief_file:
                 with open(a.brief_file, encoding="utf-8") as f:
                     brief = f.read()
             save_session(me.home, s)
-            if a.to_puppeteer:                     # a new orchestrator is asked of the puppeteer
-                pid, _ = controls.puppeteer_of(s, me.store)
-                if not pid:
-                    raise ValueError("this session has no puppeteer: no session filed in the sidebar "
-                                     "section lists it under `controls`")
-                rid, new = starts.add(me.home, s["sessionId"], a.title, brief, "fresh", background=a.background,
-                                      declared=True, to=pid)
-                print(starts.asked_text(rid, new, clean(a.title), pid, controls.full_title(pid)))
-                return 0
-            rid, new = starts.add(me.home, s["sessionId"], a.title, brief, a.context, background=a.background,
-                                  declared=True)
-            print(starts.requested_text(rid, new, me.home))
-            row = starts.state(me.home).get(rid) or {}
-            who, hit = starts.held_by(me.home, s["sessionId"], row.get("files") or [])
-            if who:                                # one writer per file
-                print(f"phi: it is held until {who} reports done, since both would write {', '.join(hit[:5])}.")
-            if a.context == "fork":
-                print("phi: a start request is always fresh: a fork would copy the conversation of the session that "
-                      "makes the start call, not this session's, so the brief must say all the child needs.")
+            pid, _ = controls.puppeteer_of(s, me.store)    # a new orchestrator is asked of the puppeteer
+            if not pid:
+                raise ValueError("this session has no puppeteer: no session filed in the sidebar "
+                                 "section lists it under `controls`")
+            rid, new = starts.add(me.home, s["sessionId"], a.title, brief, "fresh", background=a.background,
+                                  declared=True, to=pid)
+            print(starts.asked_text(rid, new, clean(a.title), pid, controls.full_title(pid)))
             return 0
         if a.cmd == "proof":
             if not isinstance(s.get("issue"), dict):

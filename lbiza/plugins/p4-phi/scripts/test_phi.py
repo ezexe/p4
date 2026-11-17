@@ -13,8 +13,8 @@ worker given the tasks and notes of the sessions above it and the last turn of i
 given the last turns of the orchestrators before it, with no likeness of words involved; a note refused without
 a source; a session detached to top level, and reparented; a session's own turns after a compaction; silence where
 there is nothing to say; no standing instruction for a message about something else, which the app's own session
-tools carry; a feature step as a new topic; a turn another session began shown a suggested task card first and a
-start request second; the caps on depth and live children;
+tools carry; a feature step as a new topic; a turn another session began shown a suggested task card and no start
+request; the caps on depth and live children;
 the task changed by its command; the rules built into p4-phi at a session's start, the store's feedback and user
 memories never handed again, which the app loads, and a memory changed mid-session given once; the pieces past
 the prompt's cap held on a page; a hook never failing a call; hooks.json's shape and the words given to a session.
@@ -898,14 +898,14 @@ class NewTask(unittest.TestCase):
         self.assertEqual(self.say(TOP, "<side-sessions-event>a session finished a turn</side-sessions-event>"), "")
         self.assertEqual(self.say(TOP, "<task-notification>done</task-notification>"), "")
 
-    def test_a_turn_another_session_started_is_told_to_split_by_a_card_then_a_start_request(self):
+    def test_a_turn_another_session_started_is_told_to_split_by_a_card_and_no_start_request(self):
         """The app refuses user_asked in a turn ezexe's words did not start: a split is a suggested task card ezexe
-        presses in this session, and a start request in the store only when the card is refused too."""
+        presses in this session, and p4-phi keeps no start request for it."""
         self.say(TOP, TASK)
         text = self.say(TOP, '<cross-session-message from="local_x">please also look at Y</cross-session-message>')
         self.assertIn("`initiation` `own_initiative`, which ezexe presses in this session", text)
-        self.assertIn(" request \"<title>\" --brief", text, "the request, where the card is refused too")
-        self.assertNotIn("any session of this store", text)
+        self.assertNotIn("start request", text, "the card holds a start this turn may not make")
+        self.assertNotIn(" request \"<title>\"", text)
         self.assertIn(phi.NEW_TOP_BRIEF, text)
         again = self.say(TOP, '<cross-session-message from="local_x">and Z as well</cross-session-message>')
         self.assertNotIn(phi.NEW_TOP_BRIEF, again, "said once in full, then a line")
@@ -918,7 +918,8 @@ class NewTask(unittest.TestCase):
         self.say(KID, HANDED)
         kid = self.say(KID, '<cross-session-message from="local_x">please also look at Y</cross-session-message>')
         self.assertIn("`initiation` `own_initiative`", kid, "a child's split is a card too")
-        self.assertIn(" request \"<title>\" --brief", kid)
+        self.assertIn("`Files: <paths>`", kid, "its brief declares its write set")
+        self.assertNotIn("start request", kid)
 
     def test_a_deep_or_full_session_starts_no_session(self):
         """The caps: three deep in the tree, or eight live children."""

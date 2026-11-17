@@ -6,7 +6,7 @@ the orchestrators of other trees, in any store: p4-phi reads the filing from the
 record of the sessions it controls, tells each controlled session, writes the puppeteer's board, leaves its
 waiting steps with it, names the sessions its records hold complete and leaves their archive to the app's approval
 card, names a boundary once as a question with two buttons,
-and carries a controlled session's request for a new orchestrator to it. A start request stays with the session
+and carries a controlled session's request for a new orchestrator to it. A queued start stays with the session
 that filed it, which waits on ezexe by a button, and its puppeteer names that session as a link and is
 handed no start call for it; a start the puppeteer makes on another session's behalf is held under that
 session and named for detaching to top level; and every ask of ezexe in the lines a session is handed offers a click.
@@ -482,7 +482,7 @@ class Supervisor(unittest.TestCase):
         row = next(iter(starts.state(self.store2).values()))
         self.assertEqual(row["to"], PUP, "kept in the store of the session that filed it")
         self.assertEqual(starts.state(t.p4), {}, "and nothing in the puppeteer's")
-        self.assertNotIn("start requests", context(t.say(TOP2, "and now?", proj=self.other)),
+        self.assertNotIn(row["id"], context(t.say(TOP2, "and now?", proj=self.other)),
                          "never handed back to the session that filed it")
         # the puppeteer reads it where it lies, at a turn ezexe began
         ctx = context(t.say(PUP, "what is waiting?"))
@@ -755,14 +755,15 @@ class Supervisor(unittest.TestCase):
                         context(r)[:300])
 
 class TreeAndClicks(unittest.TestCase):
-    """The tree in the app is the true tree, and ezexe acts by click where one exists. A child's start request is
-    started by the child itself, which waits on ezexe by a blocked wrap-up whose first button starts it; its
-    puppeteer names the child as a link with the count it holds and is handed no start call for it; a start
-    the puppeteer makes on the child's behalf anyway is held under the child in p4-phi, named for detaching
-    to top level and kept on the board as an exception; and every ask of ezexe in the lines the session modules hand
-    a session offers a click."""
+    """The tree in the app is the true tree, and ezexe acts by click where one exists. A start a child queued behind
+    a busy writer is made by the child itself once that writer is free: a turn ezexe did not begin hands it the
+    app's suggested task card and no blocked wrap-up; its puppeteer names the child as a link with the count it
+    holds and is handed no start call for it; a start the puppeteer makes on the child's behalf anyway is held
+    under the child in p4-phi, named for detaching to top level and kept on the board as an exception; and every
+    ask of ezexe in the lines the session modules hand a session offers a click."""
 
     FLUSH = "Port the exporter's flush to the new writer and run its suite. Report when done.\nFiles: src/flush.py"
+    FREE = "local_wrt00000"       # a writer the store holds no session of, so what is queued behind it is free to go
     CROSS = (f"<cross-session-message from=\"{TOP}\">Carry on with the port, and split the flush off into a session of "
              f"its own.</cross-session-message>")
     MODULES = ("starts.py", "puppeteer.py", "controls.py", "phi.py", "relay.py", "plans.py")
@@ -791,24 +792,20 @@ class TreeAndClicks(unittest.TestCase):
         t.cli(PUP, "controls", TOP)
         t.say(KID, "Port the exporter in pieces")
         t.say(KID, self.CROSS)                     # its parent session's message began this turn: no user_asked start
-        self.filed = t.cli(KID, "request", "the flush port", "--brief", self.FLUSH)
-        self.assertEqual(self.filed.returncode, 0, self.filed.stderr)
+        starts.add(t.p4, KID, "the flush port", self.FLUSH, after=self.FREE)
         self.row = starts.pending(t.p4)[0]
 
     def tearDown(self):
         self._tmp.cleanup()
 
-    def test_a_childs_start_request_waits_on_a_button_there_and_its_supervisor_session_gets_a_link_and_no_call(self):
+    def test_a_childs_queued_start_is_a_card_there_and_its_puppeteer_gets_a_link_and_no_call(self):
         t = self.t
-        with self.subTest("the child ends its turn on a blocked wrap-up whose first button starts the request"):
-            self.assertIn("No other session is handed it", self.filed.stdout)
-            self.assertIn("`mcp__ccd_turn__wrap_up` with `blocked` true", self.filed.stdout)
-            self.assertIn("the question \"Start \"the flush port\" here?\"", self.filed.stdout)
-            self.assertIn("the reply button \"Start it\" first", self.filed.stdout)
-            again = context(t.say(KID, self.CROSS))
-            self.assertIn("`mcp__ccd_turn__wrap_up` with `blocked` true", again, "and again at each turn ezexe did "
-                                                                              "not begin while it holds the request")
-            self.assertNotIn("`mcp__ccd_session__start_session` with", again)
+        with self.subTest("a turn ezexe did not begin hands the child the card's exact call and no blocked wrap-up"):
+            said = context(t.say(KID, self.CROSS))
+            self.assertIn("propose each as a suggested task card", said)
+            self.assertIn("\"initiation\": \"own_initiative\"", said)
+            self.assertNotIn("mcp__ccd_turn__wrap_up", said)
+            self.assertNotIn("`blocked`", said)
         ctx = context(t.say(PUP, "what is waiting?"))
         with self.subTest("its puppeteer's next turn names the child as a link with the count it holds"):
             self.assertIn(f"- [the flush child](#{KID}): 1 start request", ctx)
@@ -819,9 +816,11 @@ class TreeAndClicks(unittest.TestCase):
         with self.subTest("the board names the child as a link with the count it holds"):
             waiting = read(os.path.join(t.dir(PUP), "board.md")).split("## Waiting on")[1].split("\n## ")[0]
             self.assertIn(f"- [the flush child](#{KID}) holds 1 start request", waiting)
-        with self.subTest("the button's press is a turn ezexe began in the child, which hands it the exact call"):
-            line = context(t.say(KID, "Start it"))
+            self.assertIn("starts the suggested task card it shows", waiting)
+        with self.subTest("a turn ezexe begins in the child hands it the exact call of a start"):
+            line = context(t.say(KID, "How is the port coming?"))
             call = json.loads(line.split(f"`{START}` with ", 1)[1].split("\n", 1)[0])
+            self.assertEqual(call["initiation"], "user_asked")
             self.assertIn(starts.marker(self.row["id"], KID), call["prompt"])
 
     def test_a_supervisor_sessions_start_of_a_childs_request_is_held_under_the_child_and_named_for_detaching(self):

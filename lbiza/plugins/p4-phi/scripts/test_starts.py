@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""starts.py: start requests kept in the store, run through phi.py's hooks.
+"""starts.py: write sets, and the start requests a suggested task card cannot hold, run through phi.py's hooks.
 
     python3 -I lbiza/plugins/p4-phi/scripts/test_starts.py
 
-The tree: two orchestrators and a child of the first. The child's turn is started by its parent's message, so
-the app would refuse it `user_asked`: it is told to show a suggested task card first and to file a start request only
-if the card is refused too, and it files one. No other session is handed the request. At the next turn ezexe begins
-in the child, the child is handed the request with its exact call; its start_session call claims it; the session that
-call starts arrives with the marker and is recorded as the child's own child, so its reports and its archive line go
-there. Overlapping write sets hold a start, a withdrawn request is handed to no session, and a request is dropped
-after a day.
+The tree: two orchestrators and a child of the first. A start the child may not make is the app's suggested task
+card, desktop.md, "Start a task that Claude suggests", so `phi.py request` keeps none of it and no turn is told to
+end on a question for it. A start the child queued behind a busy writer is a start request: no session is handed it
+while the writer is busy, and no other session is handed it at all. Once the writer reports done, the child is handed
+its exact call, a start at a turn ezexe begins there and the card at any other; its start_session call claims it;
+the session that call starts arrives with the marker and is recorded as the child's own child, so its reports and
+its archive line go there. Overlapping write sets hold a start, a withdrawn request is handed to no session, and a
+request is dropped after a day.
 """
 
 import json
@@ -27,6 +28,7 @@ import starts  # noqa: E402
 from test_phi import CLI, KID, KID2, TOP, Tree, context  # noqa: E402
 
 TOP2, NEW = "local_top00002", "local_new00001"
+FREE = "local_wrt00000"           # a writer the store holds no session of, so what is queued behind it is free to go
 CLI.setdefault(TOP2, "eeee6666-0000-4000-8000-000000000000")
 CLI.setdefault(NEW, "ffff7777-0000-4000-8000-000000000000")
 BRIEF = ("Port the exporter's flush to the new writer and run its suite. This session is marked archive when done."
@@ -48,30 +50,69 @@ class StartRequests(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def test_a_turn_ezexe_did_not_begin_is_told_to_show_a_card_and_a_request_only_if_that_is_refused(self):
+    def test_a_turn_ezexe_did_not_begin_is_told_to_show_a_card_and_no_request(self):
         """A turn ezexe did not begin is told to show the child as a card, pressed in this session so the app's parent
-        and p4-phi's agree, and to file a request only if the card is refused too."""
+        and p4-phi's agree, its brief declaring its write set, and is told of no start request."""
         ctx = context(self.t.say(KID, CROSS, P4_PHI_BOOK="1"))
         self.assertIn("`initiation` `own_initiative`, which ezexe presses in this session", ctx)
-        self.assertIn("Only where the card is refused too", ctx)
-        self.assertIn(" request \"<title>\" --brief", ctx)
-        self.assertIn("the next turn ezexe begins in this session starts it", ctx)
-        self.assertNotIn("any session of this store", ctx)
+        self.assertIn("`Files: <paths>`", ctx)
+        self.assertNotIn("start request", ctx)
+        self.assertNotIn(" request \"<title>\"", ctx)
 
-    def test_a_request_is_started_at_ezexes_next_turn_in_the_session_that_filed_it(self):
+    def test_the_plain_start_request_is_gone_and_the_card_is_named_in_its_place(self):
+        """The app's suggested task card holds a start a session may not make, desktop.md, "Start a task that Claude
+        suggests", so p4-phi keeps no request for it: `phi.py request` with no `--to-puppeteer` is refused with the
+        card's call and the tool that withdraws a card, starts.add keeps no row with neither a writer to wait behind
+        nor a puppeteer to ask, and the functions that handed such a request and ordered the blocked wrap-up are
+        not there."""
         t = self.t
         r = t.cli(KID, "request", "the flush port", "--brief", BRIEF)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("kept as start request req-", r.stdout)
-        self.assertIn("No other session is handed it", r.stdout)
-        self.assertIn("was already kept", t.cli(KID, "request", "the flush port", "--brief", BRIEF).stdout)
-        self.assertEqual(context(t.say(KID, CROSS)).count("start requests this session filed"), 0,
-                         "a turn another session began carries no request")
-        self.assertNotIn("start requests", context(t.say(TOP2, "How are the docs coming?")),
-                         "a request filed by one session is not handed to another on ezexe's next turn there")
-        self.assertNotIn("start requests", context(t.say(TOP, "and the exporter?")), "nor to its own parent")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("`mcp__ccd_session__start_session` with `initiation` `own_initiative`", r.stderr)
+        self.assertIn("`mcp__ccd_session__dismiss_task`", r.stderr)
+        self.assertIn("`--to-puppeteer`", r.stderr)
+        with self.assertRaises(ValueError) as refused:
+            starts.add(t.p4, KID, "the flush port", BRIEF)
+        self.assertIn("suggested task card", str(refused.exception))
+        self.assertEqual(starts.state(t.p4), {}, "no row is kept")
+        for gone in ("hand_text", "waiting_text", "wait_text", "requested_text", "BUTTONS"):
+            self.assertFalse(hasattr(starts, gone), gone)
+        self.assertFalse(hasattr(phi, "request_cmd"))
+        with open(starts.__file__, encoding="utf-8") as f:
+            source = f.read()
+        self.assertNotIn("mcp__ccd_turn__wrap_up", source, "starts.py orders no wrap-up")
+        self.assertIn("`mcp__ccd_session__start_session`", source)
+
+    def writer(self, sid="local_wrt00009", files="src/flush.py"):
+        """A worker of the first orchestrator that writes `files` and is inside a turn, so it is a busy writer."""
+        CLI.setdefault(sid, sid.replace("local_wrt", "acac") + "-0000-4000-8000-000000000000")
+        self.t.record(sid, TOP, title="the flush writer")
+        self.t.say(sid, f"Task:\nRewrite the flush's writer. Report when done.\nFiles: {files}")
+        return sid
+
+    def freed(self, sid):
+        """The busy writer reports done and ends its turn, so what waits behind it is free to go."""
+        self.t.cli(sid, "done", "rewrote the writer; its suite passes")
+        self.t.stop(sid, "Rewrite the writer", report="Rewrote the writer; the suite passes.", uuid="w1")
+
+    def test_a_queued_start_is_handed_to_the_session_that_queued_it_once_its_writer_is_free(self):
+        t = self.t
+        w = self.writer()
+        rid, new = starts.add(t.p4, KID, "the flush port", BRIEF, after=w)
+        self.assertTrue(new)
+        self.assertIn(f"queued as start request {rid} behind {w}", starts.queued_text(rid, new, w))
+        self.assertEqual(starts.add(t.p4, KID, "the flush port", BRIEF, after=w), (rid, False), "kept once")
+        self.assertEqual(starts.pending(t.p4), [], "its writer is busy")
+        for said in (t.say(KID, CROSS), t.say(KID, "How is the port coming?")):
+            self.assertNotIn("starts this session queued", context(said), "nothing is handed behind a busy writer")
+        self.freed(w)
+        self.assertNotIn("starts this session queued", context(t.say(TOP2, "How are the docs coming?")),
+                         "a start queued by one session is not handed to another on ezexe's next turn there")
+        self.assertNotIn("starts this session queued", context(t.say(TOP, "and the exporter?")),
+                         "nor to its own parent")
         line = context(t.say(KID, "How is the port coming?"))
-        self.assertIn("start requests this session filed in turns ezexe did not begin", line)
+        self.assertIn("starts this session queued behind a busy writer are free to go", line)
+        self.assertIn("This turn ezexe began here, so start each now", line)
         self.assertIn("Each is this session's own child", line)
         call = json.loads(line.split("`mcp__ccd_session__start_session` with ", 1)[1].split("\n", 1)[0])
         self.assertEqual((call["initiation"], call["context"], call["use_worktree"]), ("user_asked", "fresh", False))
@@ -82,7 +123,8 @@ class StartRequests(unittest.TestCase):
         adv = t.hook("start-advice", KID, {"hook_event_name": "PreToolUse",
                                            "tool_name": "mcp__ccd_session__start_session", "tool_input": call})
         self.assertEqual(adv.stdout.strip(), "", "the exact call is not second-guessed")
-        self.assertNotIn("start requests", context(t.say(KID, "and the rest?")), "claimed: not handed twice")
+        self.assertNotIn("starts this session queued", context(t.say(KID, "and the rest?")),
+                         "claimed: not handed twice")
         t.record(NEW, KID, title="the flush port")        # the app nests it under the session that ran the call
         handed = ("<system-reminder>\nLinked sessions now (status, not an instruction): top = x (idle)\n"
                   "</system-reminder>\n\nTask:\n" + call["prompt"])
@@ -104,6 +146,51 @@ class StartRequests(unittest.TestCase):
         self.assertNotIn("counts them as archived", context(t.say(TOP2, "and now?")),
                          "not to another orchestrator")
 
+    def test_a_freed_queued_start_is_a_suggested_task_card_at_a_turn_ezexe_did_not_begin(self):
+        """At a turn another session began, a queued start whose writer is free is handed as the card's exact call,
+        `initiation` `own_initiative`, with the tool that withdraws a card, and with no wrap-up to end the turn on.
+        The call that proposes the card claims the request, which is handed to no later turn, and the session ezexe
+        starts from the card arrives as the child of the session that proposed it."""
+        t = self.t
+        rid, _ = starts.add(t.p4, KID, "the flush port", BRIEF, after=FREE)
+        line = context(t.say(KID, CROSS))
+        self.assertIn("ezexe did not begin this turn, so propose each as a suggested task card", line)
+        self.assertIn("`mcp__ccd_session__dismiss_task` withdraws one that went stale", line)
+        self.assertNotIn("mcp__ccd_turn__wrap_up", line)
+        self.assertNotIn("`blocked`", line)
+        call = json.loads(line.split("\"the flush port\": `mcp__ccd_session__start_session` with ", 1)[1]
+                          .split("\n", 1)[0])
+        self.assertEqual((call["initiation"], call["context"], call["use_worktree"]),
+                         ("own_initiative", "fresh", False))
+        self.assertIn(starts.marker(rid, KID), call["prompt"])
+        adv = t.hook("start-advice", KID, {"hook_event_name": "PreToolUse",
+                                           "tool_name": "mcp__ccd_session__start_session", "tool_input": call})
+        self.assertEqual(adv.stdout.strip(), "", "the card's exact call is not second-guessed")
+        self.assertEqual(starts.state(t.p4)[rid]["claimed"].get("card"), True)
+        late = time.time() + 2 * starts.CLAIM_S
+        self.assertEqual(starts.pending(t.p4, late), [], "the card holds it past the time a start's claim lasts")
+        for said in (t.say(KID, CROSS), t.say(KID, "How is the port coming?")):
+            self.assertNotIn("starts this session queued", context(said), "a proposed card is handed to no turn")
+        t.record(NEW, KID, title="the flush port")        # ezexe starts the card: the app nests it under its session
+        self.assertEqual(t.say(NEW, "Task:\n" + call["prompt"]).returncode, 0)
+        self.assertEqual(t.started_by(NEW)[0], KID, "the app's parent and p4-phi's agree")
+        self.assertEqual(starts.state(t.p4)[rid]["started"], NEW)
+        other, _ = starts.add(t.p4, KID, "the docs port", BRIEF.replace("src/flush.py", "docs/flush.md"), after=FREE)
+        starts.claim(t.p4, starts.call_of(starts.state(t.p4)[other], t.p4, card=True)["prompt"], KID, card=True)
+        gone = t.cli(KID, "request", "--withdraw", other)
+        self.assertEqual(gone.returncode, 0, gone.stderr)
+        self.assertIn("withdraw that card with `mcp__ccd_session__dismiss_task`", gone.stdout)
+
+    def test_at_most_three_cards_are_handed_a_turn(self):
+        """The app shows at most three suggested task cards a turn, so a turn ezexe did not begin is handed three of
+        the freed starts, and a turn ezexe began all of them."""
+        t = self.t
+        for k in range(5):
+            starts.add(t.p4, KID, f"the port, part {k}", BRIEF.replace("src/flush.py", f"src/part{k}.py"),
+                       after=FREE, at=time.time() - 60 + k)
+        self.assertEqual(context(t.say(KID, CROSS)).count("\n- \"the port, part "), starts.CARDS)
+        self.assertEqual(context(t.say(KID, "How is the port coming?")).count("\n- \"the port, part "), 5)
+
     def arrive(self, sid, row, starter=TOP2):
         """The child of a handed-out request arrives: the app nests it under the session that ran the call, and
         p4-phi under the session that filed the request."""
@@ -120,10 +207,8 @@ class StartRequests(unittest.TestCase):
         one = "Fix the flush's last row and run its suite. Report when done.\nFiles: src/flush.py, src/rows.py"
         two = "Add a retry to the flush and run its suite. Report when done.\nFiles: `src/flush.py`"
         three = "Write the exporter's user guide. Report when done.\nFiles: docs/guide.md"
-        self.assertEqual(t.cli(KID, "request", "the last row", "--brief", one).returncode, 0)
-        r = t.cli(KID, "request", "the retry", "--brief", two)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(t.cli(KID, "request", "the guide", "--brief", three).returncode, 0)
+        for k, (title, brief) in enumerate((("the last row", one), ("the retry", two), ("the guide", three))):
+            starts.add(t.p4, KID, title, brief, after=FREE, at=time.time() - 30 + k)
         titles = [r["title"] for r in starts.pending(t.p4)]
         self.assertEqual(titles, ["the last row", "the guide"], "disjoint: both handed out; overlapping: held")
         line = context(t.say(KID, "How is the port coming?"))
@@ -140,7 +225,6 @@ class StartRequests(unittest.TestCase):
         self.assertIn("src/flush.py", open(os.path.join(t.dir("local_new00011"), "session.json"),
                                            encoding="utf-8").read())
         self.assertEqual(starts.pending(t.p4), [], "its child is live and has not reported done")
-        self.assertIn("is held until", t.cli(KID, "request", "the retry again", "--brief", two + " Again.").stdout)
         t.cli("local_new00011", "done", "fixed the last row; its suite passes")
         t.stop("local_new00011", "Fix the last row", report="Fixed the last row; the suite passes.", uuid="f1")
         self.assertIn("## Files", open(os.path.join(t.dir("local_new00011"), "session.md"), encoding="utf-8").read())
@@ -150,12 +234,13 @@ class StartRequests(unittest.TestCase):
     def test_a_brief_with_no_write_set_is_refused_with_what_to_add(self):
         """Every brief declares its write set."""
         t = self.t
-        r = t.cli(KID, "request", "the flush port", "--brief", "Port the exporter's flush to the new writer.")
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("add a line `Files: <each path this session may write", r.stderr)
+        with self.assertRaises(ValueError) as refused:
+            starts.add(t.p4, KID, "the flush port", "Port the exporter's flush to the new writer.", after=FREE,
+                       declared=True)
+        self.assertIn("add a line `Files: <each path this session may write", str(refused.exception))
         self.assertEqual(starts.pending(t.p4), [])
-        self.assertEqual(t.cli(KID, "request", "the flush check", "--brief",
-                               "Check what the exporter's flush does and report it.\nFiles: none").returncode, 0)
+        starts.add(t.p4, KID, "the flush check", "Check what the exporter's flush does and report it.\nFiles: none",
+                   after=FREE, declared=True)
         call = {"initiation": "user_asked", "title": "the port", "context": "fresh", "use_worktree": False,
                 "prompt": "Port the exporter's flush to the new writer. Report when done.",
                 "background": "The exporter top holds the port; this child takes the flush alone. " * 2}
@@ -181,9 +266,9 @@ class StartRequests(unittest.TestCase):
         """The handed-out call carries a background of at least 80 characters, given or not."""
         t = self.t
         given = "The exporter's flush moved to the new writer in src/flush.py; the docs follow the same layout."
-        self.assertEqual(t.cli(KID, "request", "the docs port", "--brief", BRIEF, "--background", given).returncode, 0)
-        self.assertEqual(t.cli(KID, "request", "the short one", "--brief",
-                               BRIEF.replace("src/flush.py", "docs/short.md"), "--background", "Short.").returncode, 0)
+        starts.add(t.p4, KID, "the docs port", BRIEF, background=given, after=FREE)
+        starts.add(t.p4, KID, "the short one", BRIEF.replace("src/flush.py", "docs/short.md"), background="Short.",
+                   after=FREE)
         calls = {r["title"]: starts.call_of(r, t.p4) for r in starts.pending(t.p4)}
         self.assertEqual(calls["the docs port"]["background"], given)
         self.assertTrue(calls["the short one"]["background"].startswith("Short."))
@@ -327,10 +412,9 @@ class StartRequests(unittest.TestCase):
         be filed again."""
         t = self.t
         t.say(KID, CROSS)
-        r = t.cli(KID, "request", "the port's flush", "--brief", BRIEF)
-        self.assertEqual(r.returncode, 0, r.stderr)
+        starts.add(t.p4, KID, "the port's flush", BRIEF, after=FREE)
         rid = starts.pending(t.p4)[0]["id"]
-        keep, _ = starts.add(t.p4, KID, "the port's docs", BRIEF.replace("src/flush.py", "docs/flush.md"))
+        keep, _ = starts.add(t.p4, KID, "the port's docs", BRIEF.replace("src/flush.py", "docs/flush.md"), after=FREE)
         r = t.cli(TOP, "request", "--withdraw", rid)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn(f"withdrawn: start request {rid} \"the port's flush\"", r.stdout)
@@ -347,16 +431,16 @@ class StartRequests(unittest.TestCase):
         self.assertIn("withdrawn already", r.stderr)
         self.assertEqual(t.cli(TOP, "request", "--withdraw", "req-0000000000").returncode, 2, "an unknown id")
         self.assertEqual(t.cli(TOP, "request", "x title", "--withdraw", keep).returncode, 2, "an id and nothing else")
-        again, new = starts.add(t.p4, KID, "the port's flush", BRIEF)
+        again, new = starts.add(t.p4, KID, "the port's flush", BRIEF, after=FREE)
         self.assertEqual((again, new), (rid, True), "the same request can be filed again")
 
     def test_a_request_expires_after_a_day(self):
         home = self.t.p4
-        rid, new = starts.add(home, KID, "an old child", BRIEF, at=time.time() - 25 * 3600)
+        rid, new = starts.add(home, KID, "an old child", BRIEF, at=time.time() - 25 * 3600, after=FREE)
         self.assertTrue(new)
         self.assertEqual(starts.pending(home), [])
-        self.assertEqual(context(self.t.say(TOP2, "anything waiting?")).count("start requests from"), 0)
-        rid2, _ = starts.add(home, KID, "a new child", BRIEF)
+        self.assertNotIn("starts this session queued", context(self.t.say(KID, "anything waiting?")))
+        rid2, _ = starts.add(home, KID, "a new child", BRIEF, after=FREE)
         self.assertEqual([r["id"] for r in starts.pending(home)], [rid2])
 
     def test_a_request_s_background_quotes_no_prompt_of_the_session_that_filed_it(self):
@@ -365,7 +449,7 @@ class StartRequests(unittest.TestCase):
         long = "Port the legacy exporter flush path to the streaming writer and keep every row ordered"
         self.t.record(KID2, TOP, title="the streaming port")
         self.t.say(KID2, long)
-        starts.add(self.t.p4, KID2, "a flush check", BRIEF)
+        starts.add(self.t.p4, KID2, "a flush check", BRIEF, after=FREE)
         bg = starts.call_of(starts.pending(self.t.p4)[0], self.t.p4)["background"]
         self.assertIn("the streaming port", bg)
         words = long.split()
@@ -374,7 +458,7 @@ class StartRequests(unittest.TestCase):
 
     def test_a_requested_new_top_level_session_stays_at_top_level(self):
         t = self.t
-        starts.add(t.p4, TOP, "the release topic", BRIEF + " " + phi.NEW_TOP_BRIEF)
+        starts.add(t.p4, TOP, "the release topic", BRIEF + " " + phi.NEW_TOP_BRIEF, after=FREE)
         call = starts.call_of(starts.pending(t.p4)[0])
         t.record(NEW, TOP2, title="the release topic")
         t.say(NEW, "<system-reminder>\nLinked sessions now (status, not an instruction): x\n</system-reminder>\n\n"

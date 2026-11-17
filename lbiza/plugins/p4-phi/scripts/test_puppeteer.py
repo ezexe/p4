@@ -317,16 +317,18 @@ class Linear(Base):
         self.assertIn(f"pioneer {did}`", ctx)
         r = t.cli(TOP, "pioneer", did)
         self.assertIn("queued as start request req-", r.stdout + r.stderr)
+        self.assertIn("a suggested task card, which ezexe starts here, at any other", r.stdout)
+        self.assertNotIn("start button", ctx + r.stdout, "no turn is told to wait on a start button")
         self.assertEqual([x["after"] for x in starts.state(t.p4).values()], [KID])
-        self.assertNotIn("start requests", context(t.say(TOP, "How is the exporter coming along?")),
+        self.assertNotIn("starts this session queued", context(t.say(TOP, "How is the exporter coming along?")),
                          "not handed out while the writer is busy")
         text, _ = self.ledger()
         self.assertIn(f"waits behind \"the flush port\" `{KID}`", text)
         t.stop(KID, "Port the flush", report="Ported.")
-        self.assertNotIn("start requests", context(t.say(TOP2, "And how are the docs now?")),
+        self.assertNotIn("starts this session queued", context(t.say(TOP2, "And how are the docs now?")),
                          "never handed to a session that did not file it")
         line = context(t.say(TOP, "And how is the exporter now?"))
-        self.assertIn("start requests this session filed", line)
+        self.assertIn("starts this session queued behind a busy writer are free to go", line)
         self.assertIn("Rename the retry helper", call_in(line)["prompt"])
 
 
@@ -358,7 +360,7 @@ class WorkerSplit(Base):
         self.assertIn("one per disjoint set of files", first)
         self.assertIn("Subagents keep reads, searches, single command runs and independent checks", first)
         self.assertIn("is shown as a suggested task card", first, "a writing part that comes up later is a card")
-        self.assertIn("only where the card is refused too is it kept as a start request", first)
+        self.assertNotIn("start request", first, "the card holds it, and p4-phi keeps no request for it")
         t.stop(KID, "Port the flush", report="half way")
         self.assertNotIn("Plan its split now", context(t.say(KID, "carry on")), "said at the first message only")
         self.assertNotIn("Plan its split now", context(t.say(TOP, "and the exporter?")), "never to an orchestrator")
@@ -704,7 +706,7 @@ class AtArchive(Base):
                                        (4343, f"python phi.py watch --p4 /another/store --session {KID}"),
                                        (7, "python other.py")]
         try:
-            starts.add(self.t.p4, KID, "A follow-up nobody starts", "Do the follow-up in the exporter.")
+            starts.add(self.t.p4, KID, "A follow-up nobody starts", "Do the follow-up in the exporter.", after=TOP)
             left = puppeteer.unfinished(self.t.p4, KID)
         finally:
             puppeteer.PROCESSES = None
@@ -1091,11 +1093,10 @@ class Parallel(Base):
         self.assertTrue(call["title"].startswith("Reading 1: keep the table in the store"), call["title"])
         self.assertIn("change no tracked file and commit nothing", call["prompt"])
         did = puppeteer.DRAFT_RE.search(call["prompt"]).group(1)
-        kept = t.cli(TOP, "pioneer", did, "--request")       # the app refused the start in a turn ezexe did not begin
-        self.assertIn("kept as start request req-", kept.stdout)
-        held = list(starts.state(t.p4).values())
-        self.assertEqual([(x["requester"], x["title"]) for x in held], [(TOP, call["title"])])
-        self.assertIn("phi reading grp-", held[0]["brief"])
+        kept = t.cli(TOP, "pioneer", did, "--request")       # a clean draft has no request: its card holds it
+        self.assertEqual(kept.returncode, 2, "pioneer takes no --request")
+        self.assertEqual(starts.state(t.p4), {}, "no start request is kept for a draft no writer holds")
+        self.assertIn("`mcp__ccd_session__start_session` with ", t.cli(TOP, "pioneer", did).stdout)
         self.assertIn("message has two or more distinct readings", t.cli(TOP, "readings", "only one").stderr)
 
 

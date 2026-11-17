@@ -235,9 +235,9 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
           <button type="button" class="act" data-act="message">Message the puppeteer <span class="tag you">ezexe</span></button>
           <button type="button" class="act" data-act="route">Give it work on this topic <span class="tag you">ezexe</span></button>
           <button type="button" class="act" data-act="press">Press its card <span class="tag you">ezexe</span></button>
-          <button type="button" class="act" data-act="speak">Press its Start it button <span class="tag you">ezexe</span></button>
+          <button type="button" class="act" data-act="speak">Message it with a freed start <span class="tag you">ezexe</span></button>
           <button type="button" class="act" data-act="direct">Start an orchestrator beside it <span class="tag you">ezexe</span></button>
-          <button type="button" class="act" data-act="stopcard">Its card is refused <span class="tag app">app</span></button>
+          <button type="button" class="act" data-act="queue">A busy writer holds its files <span class="tag phi">p4-phi</span></button>
         </div>
 
         <p class="grp">The puppeteer</p>
@@ -490,7 +490,7 @@ function standing(n){
   if(n.hold==="steps")a.push("1 open plan step, the next \"Land the change and push main\"");
   if(n.hold==="task")a.push("1 background task still running at its last turn's end: b3k9x2qz \"python -I -X utf8 test_export.py\"");
   below(n.id).forEach(function(k){var c=N(k);if(!c.archived&&(c.working||c.hold==="steps"))a.push("\""+c.title+"\" under it is still working")});
-  if(n.req)a.push("1 start request of its own waiting, the first \""+n.req.title+"\", which it starts at a turn ezexe begins there: ezexe opens "+link(n)+" and presses the button its turn ended on");
+  if(n.req)a.push("1 start request of its own waiting, the first \""+n.req.title+"\", which it starts at a turn ezexe begins there or shows as a suggested task card at any other: ezexe opens "+link(n)+" and sends it one message, or starts its card");
   if(n.hold==="commit")a.push("commit 4c1d9e2, which closes #212, is on no remote branch, and no commit there closes the same issue or carries the same change");
   return{state:n.working?"working":a.length?"open":n.done?"shown done":"not shown done",against:a};
 }
@@ -518,7 +518,7 @@ function boardText(){
     L.push("- \""+n.title+"\" `"+n.id+"`, store "+storeOf(n)+": "+st.state+(st.against.length?": "+st.against.join("; "):"")+"."+(n.last?" Last report "+n.last+": "+firstLine(n):"")+" Page: "+pageOf(n))});
   if(!controlled().length)L.push("None yet.");
   function kind(k){return S.notes.filter(function(x){return k==="other"?["decision","waiting","parked"].indexOf(x.kind)<0:x.kind===k}).map(function(x){return "- "+x.claim+" Source: "+x.source+". Kept "+x.time+"."})}
-  var waits=holders().map(function(n){return "- "+link(n)+" holds 1 start request only it can start: ezexe opens it and presses the button its turn ended on, or sends it one message."}).concat(kind("decision"),kind("waiting"));
+  var waits=holders().map(function(n){return "- "+link(n)+" holds 1 start request only it can start: ezexe opens it and sends it one message, or starts the suggested task card it shows."}).concat(kind("decision"),kind("waiting"));
   L=L.concat(["","## Waiting on",""],waits.length?waits:["Nothing."]);
   L=L.concat(["","## Requests to this puppeteer",""]);
   openReqs().forEach(function(r){L.push("- "+r.id+" \""+r.title+"\" from \""+N(r.from).title+"\": open.")});
@@ -553,7 +553,6 @@ function ROUTE(n){return "phi (p4-phi): this message reads as work on the topic 
 function FIRST_ACT(){return "Its first act: `mcp__ccd_session_mgmt__detach_session` with `\"self\"`, so the app stops nesting it and its reports stop going to its parent session, then `"+PHI+" detach`."}
 function NOT_PUPPETEER(){return "phi: this session is not a puppeteer: that is an orchestrator ezexe filed in the sidebar section \""+SECTION+"\", and the app's file shows this one in no section"}
 function marker(rid,from){return "phi start request "+rid+" for "+from+"."}
-function wait1(t){return "End this turn with `mcp__ccd_turn__wrap_up` with `blocked` true, the question \"Start \""+t+"\" here?\", cut to fit, and the reply button \"Start it\" first: the app marks this session as needing ezexe, and that one click is a turn ezexe began here, which starts it with the exact call p4-phi hands then."}
 /* starts.call_of: the call a start request is started by */
 function reqCall(rid,t,from){return {initiation:"user_asked",title:t,context:"fresh",use_worktree:false,background:"<its start background>",prompt:BRIEF+"\n\n"+LEVEL+"\n\n"+marker(rid,from),effort:"<effort>"}}
 /* controls.request_call: a request addressed to the puppeteer, a new orchestrator in the environment of the session that filed it */
@@ -625,7 +624,7 @@ function hook(byEzexe,route){
   if(!hs.length)S.holdersKey="";
   else if(byEzexe||S.holdersKey!==hkey){S.holdersKey=hkey;
     out.push({side:"phi",by:"Sessions of its trees that hold start requests, each as a link. Handed at each turn ezexe begins, and at another turn when what is held has changed.",
-      out:"phi (p4-phi): sessions of the trees this puppeteer controls hold start requests that only they can start, each at a turn ezexe begins in it by the button its turn ended on, so the app nests each child under the session that asked for it. Start none of them here: a start request belongs under the session that filed it, and a start made here nests the child under this puppeteer, where no tool moves it from. End this turn with these lines as they are, each a link ezexe opens:\n"+hs.map(function(n){return "- "+link(n)+": 1 start request"}).join("\n")})}
+      out:"phi (p4-phi): sessions of the trees this puppeteer controls hold start requests that only they can start, each at a turn ezexe begins in it, or by the suggested task card it shows at any other turn, so the app nests each child under the session that asked for it. Start none of them here: a start request belongs under the session that filed it, and a start made here nests the child under this puppeteer, where no tool moves it from. End this turn with these lines as they are, each a link ezexe opens:\n"+hs.map(function(n){return "- "+link(n)+": 1 start request"}).join("\n")})}
   var named=S.behalf.filter(function(b){var k=N(b.kid);return k&&!k.atTop&&!k.archived&&S.behalfTold.indexOf(b.kid)<0});
   if(named.length){named.forEach(function(b){S.behalfTold.push(b.kid)});
     out.push({side:"phi",by:"Each session the puppeteer started on another session's behalf that the app still nests under it, named once.",
@@ -689,7 +688,7 @@ var EX={
       {side:"app",by:"The puppeteer sends "+q(e.title)+" one message.",code:call("SendMessage",{to:e.id,message:"<the task restated as your own instruction: what to do and why, from your side>\n\nFiles: <paths>\n\nDone looks like: <what must be true>\n\nBrief and start a worker of your own for it."})},
       {side:"phi",by:"The puppeteer keeps it on the board until the report comes.",code:PHI+' note "Sent the '+e.work+' work to '+e.title+'." --source "ezexe\'s message" --kind waiting',out:"kept"},
       {side:"app",by:"That message began a turn ezexe did not begin in "+q(e.title)+", so the app refuses its start with user_asked. It shows the worker as a suggested task card.",code:call("mcp__ccd_session__start_session",{initiation:"own_initiative",title:e.work,context:"fresh",use_worktree:false,prompt:"<the task and what done looks like>\n\nFiles: <paths>\n\n"+LEVEL+"\n\nReport when done.",effort:"<effort>"}),
-        note:"Select the session, then press its card as ezexe, or have the card refused."}]),
+        note:"Select the session, then press its card as ezexe, or have a busy writer hold the worker's files."}]),
     app:"A suggested task card in "+q(e.title)+". No session has started yet.",
     phi:"A note of kind waiting on the puppeteer's record, printed on the board under Waiting on."}},
   press:function(e){return{title:"The card pressed, in the session that showed it",
@@ -698,19 +697,19 @@ var EX={
            {side:"app",by:"The app starts "+q(e.title)+" as that session's worker."}],
     app:"The worker nests under "+q(e.parent)+".",
     phi:"spawnedFrom on the worker names the same session. Its reports go there in full, and the puppeteer is handed one line when "+q(e.parent)+" ends a turn."}},
-  stopcard:function(e){return{title:"The card refused too, so a start request",
-    why:"Only where the card is refused does the session keep a start request. It is handed only to the session that filed it, at the next turn ezexe begins there, so the app nests the worker where p4-phi does.",
-    steps:[{side:"phi",by:q(e.parent)+" keeps the request.",code:PHI+' request "'+e.title+'" --brief "'+BRIEF+'"',
-      out:"kept as start request "+e.rid+". No other session is handed it: it waits on ezexe's click in this session, since the app refuses this start in a turn ezexe did not begin, and the next turn ezexe begins here starts it as this session's own child. Carry on with the rest of the task. "+wait1(e.title)},
-      {side:"phi",by:"The puppeteer's board names where ezexe has to press.",out:"- "+e.link+" holds 1 start request only it can start: ezexe opens it and presses the button its turn ended on, or sends it one message.",
+  queue:function(e){return{title:"A busy writer holds its files, so a queued start",
+    why:"A suggested task card starts whenever ezexe presses it, whatever session holds its files. So a start whose files a busy writer holds is no card: the gate queues it as a start request behind that writer. It is handed only to the session that queued it, once the writer reports done, so the app nests the worker where p4-phi does.",
+    steps:[{side:"phi",by:q(e.parent)+" keeps the start as a request behind the writer.",code:PHI+" pioneer <draft id>",
+      out:"queued as start request "+e.rid+" behind <the writer's sessionId>: once that writer is not busy, p4-phi hands this session its exact call, a start at a turn ezexe begins here and a suggested task card, which ezexe starts here, at any other."},
+      {side:"phi",by:"Once that writer reports done, the puppeteer's board names where the freed start waits.",out:"- "+e.link+" holds 1 start request only it can start: ezexe opens it and sends it one message, or starts the suggested task card it shows.",
         note:"The line is under Waiting on, and the puppeteer is handed the session as a link at its next hook. The same request holds that session's archive."}],
-    app:"A blocked next-step box in "+q(e.parent)+", whose first button is Start it. No session has started.",
-    phi:"A request row in phi/start-requests.jsonl in the store of the session that filed it."}},
-  speak:function(e){return{title:"Handed to the session that filed it",
-    why:"ezexe opens the session and presses Start it, which is a turn ezexe began there, so p4-phi hands that session the exact call. The session starts its own worker, and the app nests it where p4-phi does.",
-    steps:[{side:"you",by:"ezexe opens "+q(e.parent)+" and presses Start it."},
-           {side:"phi",by:"p4-phi hands that session its own request, and no other session's.",
-            out:"phi (p4-phi): start requests this session filed in turns ezexe did not begin. This turn ezexe began here, so start each now, with exactly the call given, before the rest of this turn's work:\n- \""+e.title+"\": `mcp__ccd_session__start_session` with "+dumps(reqCall(e.rid,e.title,e.pid))+"\nEach is this session's own child, in the app's nesting and in p4-phi's."}],
+    app:"No card and no session yet in "+q(e.parent)+".",
+    phi:"A request row with after, the busy writer's id, in phi/start-requests.jsonl in the store of the session that queued it."}},
+  speak:function(e){return{title:"Handed to the session that queued it",
+    why:"Once the writer reports done, p4-phi hands the session that queued the start its exact call at its next turn. ezexe's own message begins a turn there, so the call is a start. At a turn another session began, the same call goes out as a suggested task card, which ezexe starts there. Either way that session makes the call, and the app nests the worker where p4-phi does.",
+    steps:[{side:"you",by:"ezexe opens "+q(e.parent)+" and sends it one message."},
+           {side:"phi",by:"p4-phi hands that session its own queued start, and no other session's.",
+            out:"phi (p4-phi): starts this session queued behind a busy writer are free to go. This turn ezexe began here, so start each now, with exactly the call given, before the rest of this turn's work:\n- \""+e.title+"\": `mcp__ccd_session__start_session` with "+dumps(reqCall(e.rid,e.title,e.pid))+"\nEach is this session's own child, in the app's nesting and in p4-phi's."}],
     app:"The worker nests under "+q(e.parent)+", which made the call.",
     phi:"spawnedFrom names the same session, and the request's row is marked started."}},
   behalf:function(e){return{title:"Started by the puppeteer on that session's behalf",
@@ -830,16 +829,16 @@ var ACT={
     S.example={kind:"press",title:t,parent:n.title};
     say([["cmd","mcp__ccd_session__start_session, own_initiative, pressed by ezexe"]],"The worker nests under the session that showed the card, in the app and in p4-phi.");
   },
-  stopcard:function(){
-    var n=N(S.sel),t=n.card.title,rid="req-"+hex(++S.rid*131+S.salt,10);n.card=null;n.req={rid:rid,title:t};n.working=false;n.last=tick();n.done=false;n.report="It holds a start request that waits on ezexe's click here.";
-    S.example={kind:"stopcard",title:t,parent:n.title,pid:n.id,rid:rid,link:link(n)};
-    say([cmd(PHI+' request "'+t+'" --brief "…"'),["out","kept as start request "+rid]],"The request waits for ezexe's click in "+q(n.title)+". The puppeteer is handed the session as a link, never the request.");
+  queue:function(){
+    var n=N(S.sel),t=n.card.title,rid="req-"+hex(++S.rid*131+S.salt,10);n.card=null;n.req={rid:rid,title:t};n.working=false;n.last=tick();n.done=false;n.report="It holds a queued start that its writer has freed.";
+    S.example={kind:"queue",title:t,parent:n.title,pid:n.id,rid:rid,link:link(n)};
+    say([cmd(PHI+" pioneer <draft id>"),["out","queued as start request "+rid]],"The start waited behind the writer, which has since reported done. The puppeteer is handed "+q(n.title)+" as a link, never the request.");
   },
   speak:function(){
     var n=N(S.sel),r=n.req;if(full())return;n.req=null;n.working=true;
     mk(r.title,n.id,n.env,{working:true});
     S.example={kind:"speak",title:r.title,parent:n.title,pid:n.id,rid:r.rid};
-    say([["cmd","mcp__ccd_session__start_session, user_asked, from "+n.id]],"The session that filed the request started its own worker.");
+    say([["cmd","mcp__ccd_session__start_session, user_asked, from "+n.id]],"The session that queued the start made it, as its own worker.");
   },
   behalf:function(){
     var n=N(S.sel),r=n.req;if(full())return;n.req=null;
@@ -1022,7 +1021,7 @@ function render(){
   var live=!p&&!n.archived,handed=openReqs().some(function(r){return r.handed});
   set("file",true);set("message",true);
   set("route",live&&!n.par&&pair(n)&&!n.card&&!n.req);
-  set("press",live&&!!n.card);set("stopcard",live&&!!n.card);set("speak",live&&!!n.req);
+  set("press",live&&!!n.card);set("queue",live&&!!n.card);set("speak",live&&!!n.req);
   set("behalf",live&&!!n.req&&inControlled(n));set("untie",live&&!!n.behalfOf&&!n.atTop);
   set("direct",live);set("controls",!n.archived);
   set("startreq",S.filed&&handed);set("decline",S.filed&&handed);
