@@ -689,6 +689,90 @@ class ClaudeSettings(unittest.TestCase):
         self.assertNotIn("autoMemoryEnabled", rec)
         self.assertIn("autoMemoryDirectory", rec)
 
+    def test_the_default_memory_folder_comes_along_before_the_first_write(self):
+        """What Claude Code wrote in its own memory folder is copied into the store's before autoMemoryDirectory points
+        there: nothing is deleted, and on a clash the store's copy stays and the other goes beside it."""
+        conf = os.environ["CLAUDE_CONFIG_DIR"]
+        src = p4conf.default_memory(self.project)
+        self.assertTrue(src.startswith(os.path.join(conf, "projects")), src)
+        _write(os.path.join(src, "MEMORY.md"), "- [Old](old.md) - from the app\n")
+        _write(os.path.join(src, "old.md"), "an old memory\n")
+        _write(os.path.join(src, "both.md"), "the app's copy\n")
+        mem = os.path.join(self.project, ".claude", "p4", "temportal", "memory")
+        _write(os.path.join(mem, "both.md"), "the store's copy\n")
+        p4conf.keep_settings(self.project)
+        self.assertEqual(Path(mem, "old.md").read_text(encoding="utf-8"), "an old memory\n")
+        self.assertEqual(Path(mem, "MEMORY.md").read_text(encoding="utf-8"), "- [Old](old.md) - from the app\n")
+        self.assertEqual(Path(mem, "both.md").read_text(encoding="utf-8"), "the store's copy\n")
+        self.assertEqual(Path(mem, "both.default.md").read_text(encoding="utf-8"), "the app's copy\n")
+        self.assertTrue(os.path.exists(os.path.join(src, "old.md")), "copied, never moved")
+        self.assertEqual(self.read(self.local())["autoMemoryDirectory"], self.memory())
+
+    def test_another_folder_named_elsewhere_is_said_once(self):
+        conf = os.environ["CLAUDE_CONFIG_DIR"]
+        _write(os.path.join(conf, "settings.json"), {"autoMemoryDirectory": "D:/mine"})
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        first = p4conf.keep_settings(self.project, tell=True)["asks"]
+        self.assertTrue(any("D:/mine" in a and "not from the store's" in a for a in first), first)
+        self.assertEqual(p4conf.keep_settings(self.project, tell=True)["asks"], [], "said once")
+
+    def test_an_older_copy_and_a_config_change_never_take_p4s_rules_away(self):
+        """Two plugin versions at once: a copy of a lower GEN whose folder differs leaves the newer copy's entries,
+        and a ConfigChange records and removes nothing."""
+        from unittest import mock
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        p4conf.keep_settings(self.project, platform="win32")
+        rules = self.read(self.local())["permissions"]["allow"]
+        older = os.path.join(self.tmp, "older", "p4-phi", "scripts")
+        os.makedirs(older)
+        Path(older, "phi.py").write_text("", encoding="utf-8")
+        with mock.patch.object(p4conf, "PHI_SCRIPTS", older), mock.patch.object(p4conf, "GEN", p4conf.GEN - 1):
+            p4conf.keep_settings(self.project, platform="win32")
+            self.assertEqual(self.read(self.local())["permissions"]["allow"], rules, "the older copy leaves them")
+        with mock.patch.object(p4conf, "PHI_SCRIPTS", older):
+            p4conf.keep_settings(self.project, platform="win32", owned_only=True)
+            self.assertEqual(self.read(self.local())["permissions"]["allow"], rules, "a ConfigChange moves none")
+
+    def test_a_rule_deleted_by_hand_stays_gone_when_the_plugin_folder_moves(self):
+        from unittest import mock
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        p4conf.keep_settings(self.project, platform="win32")
+        d = self.read(self.local())
+        gone = d["permissions"]["allow"].pop(0)
+        _write(self.local(), d)
+        p4conf.keep_settings(self.project, platform="win32")
+        moved = os.path.join(self.tmp, "moved", "p4-phi", "scripts")
+        os.makedirs(moved)
+        Path(moved, "phi.py").write_text("", encoding="utf-8")
+        with mock.patch.object(p4conf, "PHI_SCRIPTS", moved):
+            p4conf.keep_settings(self.project, platform="win32")
+        allow = self.read(self.local())["permissions"]["allow"]
+        self.assertFalse([r for r in allow if p4conf.rule_identity(r) == p4conf.rule_identity(gone)], allow)
+        self.assertEqual(len(allow), 3, "the other three moved with the folder")
+
+    def test_a_file_that_is_not_json_is_checked_again_only_once_it_changes(self):
+        from unittest import mock
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        with open(self.local(), "w", encoding="utf-8") as f:
+            f.write("{not json")
+        p4 = os.path.join(self.project, ".claude", "p4")
+        p4conf.migrate_layout(p4, commit=False)
+        self.assertTrue(os.path.exists(p4conf.record_path(p4)), "the failed state is recorded")
+        calls = []
+        real = p4conf.keep_settings
+        with mock.patch.object(p4conf, "keep_settings", lambda *a, **k: calls.append(1) or real(*a, **k)):
+            p4conf.migrate_layout(p4, commit=False)
+            p4conf.watch(self.project, {"source": "startup", "hook_event_name": "SessionStart"})
+            n = len(calls)
+            p4conf.watch(self.project, {"source": "startup", "hook_event_name": "SessionStart"})
+            self.assertEqual(len(calls), n, "unchanged: not checked again")
+            with open(self.local(), "w", encoding="utf-8") as f:
+                f.write("{}")
+            os.utime(self.local(), (1, 1))
+            p4conf.watch(self.project, {"source": "startup", "hook_event_name": "SessionStart"})
+            self.assertEqual(len(calls), n + 1, "changed: checked again")
+        self.assertEqual(self.read(self.local())["autoMemoryDirectory"], self.memory())
+
     def test_a_file_that_is_not_json_is_left_as_it_is(self):
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
         with open(self.local(), "w", encoding="utf-8") as f:
@@ -733,16 +817,16 @@ class Watcher(unittest.TestCase):
             return 0
 
     def test_a_new_claude_code_binary_runs_the_whole_check(self):
+        """A newer binary runs the whole check, which writes a key the record does not hold; a key p4 owned that was
+        deleted by hand is not written back; the same binary at the next start runs no --version."""
         from unittest import mock
         p4 = os.path.join(self.project, ".claude", "p4")
         os.makedirs(p4)
         local = os.path.join(self.project, ".claude", "settings.local.json")
         mem = os.path.abspath(os.path.join(p4, "temportal", "memory")).replace("\\", "/")
         stub = self.stub("2.1.400")
-        # a record from an earlier start: the key p4 owns, which is now missing from the file, and an older binary
-        _write(os.path.join(p4, "claude-settings.json"), {
-            "files": {os.path.abspath(local).replace("\\", "/"): {"autoMemoryDirectory": {"v": mem, "gen": 1}}},
-            "claude": {"path": stub, "size": 1, "mtime": 1.0, "version": "2.1.300"}})
+        _write(os.path.join(p4, "claude-settings.json"), {"claude": {"path": stub, "size": 1, "mtime": 1.0,
+                                                                       "version": "2.1.300"}})
         _write(local, {"spinnerTipsEnabled": False})
         env = {"CLAUDE_PID": "4242"}
         with mock.patch.dict(os.environ, env), \
@@ -751,12 +835,47 @@ class Watcher(unittest.TestCase):
             got = p4conf.watch(self.project, {"source": "resume", "hook_event_name": "SessionStart"})
             self.assertEqual(self.runs(), 1, "a changed binary is asked its version")
             with open(local, encoding="utf-8") as f:
-                self.assertEqual(json.load(f).get("autoMemoryDirectory"), mem, "the whole check wrote the key again")
+                d = json.load(f)
+            self.assertEqual(d.get("autoMemoryDirectory"), mem, "the whole check wrote the key")
             with open(os.path.join(p4, "claude-settings.json"), encoding="utf-8") as f:
                 self.assertEqual(json.load(f)["claude"]["version"], "2.1.400")
             self.assertEqual(got["newer"], ("2.1.300", "2.1.400"), "the changelog between the two is read")
             p4conf.watch(self.project, {"source": "startup", "hook_event_name": "SessionStart"})
             self.assertEqual(self.runs(), 1, "the same binary: no --version runs")
+            del d["autoMemoryDirectory"]
+            _write(local, d)
+            p4conf.keep_settings(self.project)
+            with open(local, encoding="utf-8") as f:
+                self.assertNotIn("autoMemoryDirectory", json.load(f), "deleted by hand: not written back")
+
+    def test_two_binaries_used_in_turn_are_each_asked_their_version_once(self):
+        """The desktop app's copy and the `claude` command, used in turn, are each read once, kept by their path."""
+        from unittest import mock
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        one = self.stub("2.1.325")
+        two = os.path.join(self.tmp, "cli", os.path.basename(one))
+        _write(two, Path(one).read_text(encoding="utf-8").replace("2.1.325", "2.1.322"))
+        if os.name != "nt":
+            os.chmod(two, 0o755)
+        for pid_exe in (one, two, one, two):
+            with mock.patch.dict(os.environ, {"CLAUDE_PID": "4242"}), \
+                    mock.patch.object(p4conf, "exe_of_pid", lambda pid, e=pid_exe: e):
+                p4conf.watch(self.project, {"source": "startup", "hook_event_name": "SessionStart"})
+        self.assertEqual(self.runs(), 2, "each binary once")
+        self.assertEqual(p4conf.read_record(os.path.join(self.project, ".claude", "p4"))["claude"]["version"],
+                         "2.1.325", "the newest version seen")
+        self.assertEqual(p4conf.VERSION_S, 2.0)
+
+    def test_a_claude_pid_that_names_another_program_is_never_run(self):
+        """An npm install runs Claude Code under node: that binary is not run with --version, and `claude` on the
+        PATH is read instead, as the weaker reading."""
+        from unittest import mock
+        node = os.path.join(self.tmp, "bin", "node.exe" if os.name == "nt" else "node")
+        _write(node, "")
+        with mock.patch.dict(os.environ, {"CLAUDE_PID": "4242"}), \
+                mock.patch.object(p4conf, "exe_of_pid", lambda pid: node), \
+                mock.patch("shutil.which", lambda name: "/usr/bin/claude" if name == "claude" else None):
+            self.assertEqual(p4conf.claude_binary(), ("/usr/bin/claude", True))
 
     def test_the_process_claude_pid_names_is_read_from_the_system(self):
         p = p4conf.exe_of_pid(os.getpid())

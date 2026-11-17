@@ -1064,43 +1064,84 @@ def _config_dir():
 
 
 def _elsewhere(key, target, platform):
-    """The values of `key` in the user, project and managed settings files, each a file Claude Code reads beside the
-    local one, so a local value would override the choice they hold."""
+    """[(file, value)] of `key` in the user, project and managed settings files, each a file Claude Code reads beside
+    the local one, so a local value would override the choice they hold."""
     files = [os.path.join(_config_dir(), "settings.json"), os.path.join(os.path.dirname(target), "settings.json")]
     files += next((v for k, v in MANAGED.items() if platform.startswith(k)), [])
     out = []
     for f in files:
         v = _get(read_json(f) or {}, key)
         if v is not _NONE and v is not None:
-            out.append(v)
+            out.append((f, v))
     return out
 
 
 def wants(p4, target, platform=None):
-    """({key: value or None}, {key: value}, the section): the keys of WRITES p4 keeps in `target`, None for one it
-    wants gone, the other keys the store's `claude` section names, which are never written, and the whole section."""
+    """({key: value or None}, {key: value}, the section, [(file, value)]): the keys of WRITES p4 keeps in `target`,
+    None for one it wants gone, the other keys the store's `claude` section names, which are never written, the
+    whole section, and each other file that names another memory folder."""
     platform = platform or sys.platform
     conf = _flat(load(p4, write=False, warn=False).get(SECTION) or {})
     out = {}
     mem = fwd(sub(p4, "memory"))
-    other = [v for v in _elsewhere("autoMemoryDirectory", target, platform)
+    other = [(f, v) for f, v in _elsewhere("autoMemoryDirectory", target, platform)
              if not _same_value("autoMemoryDirectory", v, mem)]
     out["autoMemoryDirectory"] = mem if conf.get("autoMemoryDirectory", True) is not False and not other else None
     text = conf.get("attribution.commit")
     out["attribution.commit"] = text if isinstance(text, str) else None
-    return out, {k: v for k, v in conf.items() if k not in WRITES and k not in OWN_KEYS}, conf
+    return out, {k: v for k, v in conf.items() if k not in WRITES and k not in OWN_KEYS}, conf, other
+
+
+def default_memory(project):
+    """Claude Code's own auto memory folder for `project`, `<config>/projects/<slug>/memory`, the slug made from the
+    main checkout's path as memory.md describes, or CLAUDE_CODE_PROJECT_DIR_NAME where CLAUDE_CONFIG_DIR is set."""
+    name = os.environ.get("CLAUDE_CODE_PROJECT_DIR_NAME") if os.environ.get("CLAUDE_CONFIG_DIR") else None
+    slug = name or re.sub(r"[^A-Za-z0-9]", "-", os.path.normpath(main_root(project)[0]))
+    return os.path.join(_config_dir(), "projects", slug, "memory")
+
+
+def carry_memory(src, dst):
+    """Copy each file of `src` that `dst` lacks into `dst`, before autoMemoryDirectory points Claude Code at `dst`.
+    Nothing is deleted. A file of the same name that differs keeps `dst`'s copy, and `src`'s copy goes beside it as
+    `<name>.default<ext>`. Returns the number of files copied or set aside."""
+    import shutil
+    n = 0
+    if not os.path.isdir(src) or _norm(src) == _norm(dst):
+        return 0
+    for d, _dirs, names in os.walk(src):
+        for name in names:
+            s = os.path.join(d, name)
+            t = os.path.join(dst, os.path.relpath(s, src))
+            try:
+                if os.path.exists(t):
+                    if filecmp.cmp(s, t, shallow=False):
+                        continue
+                    stem, ext = os.path.splitext(t)
+                    t = f"{stem}.default{ext}"
+                    if os.path.exists(t):
+                        continue
+                os.makedirs(os.path.dirname(t), exist_ok=True)
+                shutil.copy2(s, t)
+                n += 1
+            except OSError:
+                continue
+    return n
 
 
 # The two allow rules ezexe approved for p4 to keep in the local file, so a session runs the p4 commands its hook
 # text names without a prompt: phi.py with any arguments, and p4.py sync. On Windows the same two in the PowerShell
 # form too. catchup.py prune-cache deletes files and gets no rule. Each rule is one entry of `permissions.allow` that
-# p4 owns, recorded under RECORD's `rules`: p4 adds and removes only its own entries, never reorders or drops another,
-# rewrites them when the plugin folder moves, and never writes back an entry deleted by hand. Only p4-phi's copy, which
-# sits beside phi.py and so knows the path phi.py prints, writes them; the copy in p4-temportal leaves them as they are.
-# The store's `claude` section sets `allowRules` false to have p4 remove its entries.
+# p4 owns, recorded under RECORD's `rules` with the GEN of the copy that wrote it: p4 adds and removes only its own
+# entries, never reorders or drops another, and replaces one when the plugin folder moves, only on a start and only at
+# a GEN at least the entry's, so two plugin versions running at once never take each other's entries away. An entry
+# deleted by hand is recorded by its identity, the tool form, the script and its arguments without the folder, and
+# never written back, wherever the plugin folder moves. Only p4-phi's copy, which sits beside phi.py and so knows the
+# path phi.py prints, writes them; the copy in p4-temportal leaves them as they are. The store's `claude` section sets
+# `allowRules` false to have p4 remove its entries.
 ALLOW_KEY = "permissions.allow"
 OWN_KEYS = ("allowRules",)
 PHI_SCRIPTS = None               # the folder of phi.py the rules name; None: this file's own folder, when phi.py is there
+_RULE = re.compile(r'^(\w+)\(python -I -X utf8 "(?:.*/)?([^/"]+)"(.*)\)$')
 
 
 def allow_rules(platform, conf):
@@ -1118,31 +1159,52 @@ def allow_rules(platform, conf):
     return out
 
 
+def rule_identity(rule):
+    """A rule of p4's without its folder: `Bash phi.py *`; the rule itself when it is not of p4's form."""
+    m = _RULE.match(rule if isinstance(rule, str) else "")
+    return f"{m.group(1)} {m.group(2)}{m.group(3)}" if m else rule
+
+
 def _keep_rules(new, rec, name, wanted, owned_only):
-    """p4's own entries of `permissions.allow` in `new` brought to `wanted`; the record's `rules` kept in step."""
+    """p4's own entries of `permissions.allow` in `new` brought to `wanted`; the record's `rules` kept in step. At a
+    ConfigChange, `owned_only`, an entry gone from the file is recorded as deleted by hand and nothing else moves."""
     rules = rec.setdefault("rules", {})
     mine = dict(rules.get(name) or {})
     entries, hand = list(mine.get("entries") or []), list(mine.get("hand") or [])
+    gen = mine.get("gen", 0) if isinstance(mine.get("gen", 0), int) else 0
     cur = _get(new, ALLOW_KEY)
     if cur is not _NONE and not isinstance(cur, list):
         return                                          # not a list: left as it is
     have = list(cur) if cur is not _NONE else []
     for e in [e for e in entries if e not in have]:
-        entries.remove(e)                               # deleted by hand: never written back
-        hand.append(e)
-    if wanted is not None:
-        for e in [e for e in entries if e not in wanted]:
-            have.remove(e)                              # p4's own, no longer wanted: only that entry goes
-            entries.remove(e)
-        if not owned_only:
-            for e in wanted:
-                if e not in have and e not in hand:
-                    have.append(e)
-                    entries.append(e)
+        entries.remove(e)                               # deleted by hand: never written back, wherever it moves
+        hand.append(rule_identity(e))
+    if wanted is not None and not owned_only:
+        mine_now = {rule_identity(e): e for e in entries}
+        if GEN >= gen:
+            for e in [e for e in entries if e not in wanted and rule_identity(e) not in map(rule_identity, wanted)]:
+                have.remove(e)                          # p4's own, no longer wanted: only that entry goes
+                entries.remove(e)
+                mine_now.pop(rule_identity(e), None)
+        for w in wanted:
+            ident = rule_identity(w)
+            old = mine_now.get(ident)
+            if old == w or ident in hand:
+                continue
+            if old is not None:
+                if GEN >= gen:                          # the plugin folder moved: the entry in place, replaced
+                    have[have.index(old)] = w
+                    entries[entries.index(old)] = w
+                continue
+            if any(rule_identity(h) == ident for h in have):
+                continue                                # the user's own rule, or another copy's: left as it is
+            have.append(w)
+            entries.append(w)
+        gen = max(gen, GEN)
     if have != (cur if cur is not _NONE else []):
         _put(new, ALLOW_KEY, have)
     if entries or hand:
-        rules[name] = {"entries": entries, "hand": list(dict.fromkeys(hand)), "gen": GEN}
+        rules[name] = {"entries": entries, "hand": list(dict.fromkeys(hand)), "gen": gen}
     else:
         rules.pop(name, None)
     if not rules:
@@ -1173,8 +1235,8 @@ def keep_settings(project, platform=None, owned_only=False, p4=None, note=None, 
     """Bring the Claude Code settings p4 owns in the local file of a session started in `project` to what the store
     wants, under the store's SETTINGS_LOCK. `owned_only`, at a ConfigChange, looks only at the keys the record owns.
     `note`, such as the Claude Code binary the watcher saw, is merged into the record under the same lock. Returns
-    {"file": the local file, "wrote": True when it was written, "asks": with `tell`, the lines naming keys a store
-    wants that p4 never writes, each said once for one value and recorded as said}."""
+    {"file": the local file, "wrote": True when it was written, "asks": with `tell`, the lines for ezexe, each said
+    once and recorded as said: a key a store wants that p4 never writes, and another file's memory folder}."""
     platform = platform or sys.platform
     project = os.path.abspath(project)
     p4 = p4 or os.path.join(main_root(project)[0], ".claude", "p4")
@@ -1186,7 +1248,7 @@ def keep_settings(project, platform=None, owned_only=False, p4=None, note=None, 
     if not _take_lock(lock):
         return out
     try:
-        _keep(p4, target, platform, owned_only, out, note or {}, tell)
+        _keep(p4, project, target, platform, owned_only, out, note or {}, tell)
     finally:
         try:
             os.remove(lock)
@@ -1195,29 +1257,46 @@ def keep_settings(project, platform=None, owned_only=False, p4=None, note=None, 
     return out
 
 
-def _keep(p4, target, platform, owned_only, out, note, tell):
-    data = read_json(target)
-    if data is None:
-        print(f"p4: {target} is not a JSON object; p4's Claude Code settings left out, the file left as it is",
-              file=sys.stderr)
-        return
-    existed = os.path.exists(target)
+def _mtime(p):
+    try:
+        return os.path.getmtime(p)
+    except OSError:
+        return None
+
+
+def _keep(p4, project, target, platform, owned_only, out, note, tell):
     rec = read_record(p4)
     before = json.dumps(rec, sort_keys=True)
-    files = rec.setdefault("files", {})
     name = fwd(target)
+    data = read_json(target)
+    if data is None:
+        if (rec.get("unreadable") or {}).get(name) != _mtime(target):
+            print(f"p4: {target} is not a JSON object; p4's Claude Code settings left out, the file left as it is",
+                  file=sys.stderr)
+        # recorded with the file's time, so the check runs again only once the file changes
+        rec.setdefault("unreadable", {})[name] = _mtime(target)
+        rec.update(note)
+        if not owned_only:
+            rec["section"] = _flat(load(p4, write=False, warn=False).get(SECTION) or {})
+        if json.dumps(rec, sort_keys=True) != before or not os.path.exists(record_path(p4)):
+            write_record(p4, rec)
+        return
+    (rec.get("unreadable") or {}).pop(name, None)
+    if not rec.get("unreadable"):
+        rec.pop("unreadable", None)
+    existed = os.path.exists(target)
+    files = rec.setdefault("files", {})
     owned = dict(files.get(name) or {})
-    want, others, conf = wants(p4, target, platform)
+    hand = dict(rec.get("hand") or {})
+    gone = list(hand.get(name) or [])
+    want, others, conf, other = wants(p4, target, platform)
     new = copy.deepcopy(data)
     for k in WRITES:
         d, cur, e = want.get(k), _get(new, k), _entry(owned.get(k))
         if e:
             if cur is _NONE:
-                if d is None:
-                    owned.pop(k)
-                else:
-                    _put(new, k, d)                     # p4's, and gone from the file: written again
-                    owned[k] = {"v": d, "gen": GEN}
+                owned.pop(k)                            # deleted by hand: no longer p4's, never written back
+                gone.append(k)
             elif cur != e[0]:
                 owned.pop(k)                            # set by hand: no longer p4's, never touched again
             elif e[1] > GEN:
@@ -1228,8 +1307,10 @@ def _keep(p4, target, platform, owned_only, out, note, tell):
             elif not _same_value(k, cur, d):
                 _put(new, k, d)
                 owned[k] = {"v": d, "gen": GEN}
-        elif d is not None and not owned_only:
+        elif d is not None and not owned_only and k not in gone:
             if cur is _NONE:
+                if k == "autoMemoryDirectory":          # what Claude Code wrote in its own folder comes along first
+                    carry_memory(default_memory(project), sub(p4, "memory"))
                 _put(new, k, d)
                 owned[k] = {"v": d, "gen": GEN}
             elif _same_value(k, cur, d):
@@ -1243,11 +1324,14 @@ def _keep(p4, target, platform, owned_only, out, note, tell):
         back = read_json(target) or {}
         for k, e in owned.items():
             if _get(back, k) != e.get("v"):
-                print(f"p4: {target} lost {k} after p4 wrote it; written again at the next check", file=sys.stderr)
+                print(f"p4: {target} lost {k} after p4 wrote it", file=sys.stderr)
     if owned:
         files[name] = owned
     else:
         files.pop(name, None)
+    if gone:
+        hand[name] = list(dict.fromkeys(gone))
+        rec["hand"] = hand
     rec.update(note)
     if not owned_only:
         rec["section"] = conf
@@ -1263,6 +1347,15 @@ def _keep(p4, target, platform, owned_only, out, note, tell):
             rec["asked"] = others
         else:
             rec.pop("asked", None)
+        seen = [[fwd(f), v] for f, v in other]
+        if seen and rec.get("otherMemory") != seen:
+            f, v = other[0]
+            out["asks"].append(f"`autoMemoryDirectory` in {fwd(f)} names {v}, so Claude Code loads auto memory from "
+                               f"there and not from the store's {fwd(sub(p4, 'memory'))}")
+        if seen:
+            rec["otherMemory"] = seen
+        else:
+            rec.pop("otherMemory", None)
     if not files:
         rec.pop("files", None)
     if json.dumps(rec, sort_keys=True) != before or not os.path.exists(record_path(p4)):
@@ -1309,7 +1402,7 @@ def _version(v):
 
 
 SETTINGS_ENV = "P4_PHI_SETTINGS"          # 0 turns the settings watcher off
-VERSION_S = 5.0                           # what one `--version` may take
+VERSION_S = 2.0                           # what one `--version` may take, inside the layout hook's 15 s
 CHANGELOG_URL = "https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md"
 CHANGELOG_S = 20.0
 WATCH_PAGE = ("phi", "claude-code-watch.md")
@@ -1362,16 +1455,17 @@ def exe_of_pid(pid):
 
 
 def claude_binary():
-    """(path, weak) of the Claude Code binary running this session: the process CLAUDE_PID names, or, when it is
-    unset as before v2.1.214 or unreadable, `claude` on the PATH, a weaker reading since the desktop app runs its own
-    copy. (None, True) when neither is found."""
+    """(path, weak) of the Claude Code binary running this session: the process CLAUDE_PID names when it is a
+    `claude` executable, or `claude` on the PATH, a weaker reading since the desktop app runs its own copy. The PATH
+    serves when CLAUDE_PID is unset, as before v2.1.214, unreadable, or names another program, such as `node` for an
+    npm install, which is never run with --version. (None, True) when neither is found."""
     pid = os.environ.get("CLAUDE_PID")
     if pid and pid.isdigit():
         try:
             p = exe_of_pid(int(pid))
         except (OSError, ValueError, AttributeError):
             p = None
-        if p and os.path.isfile(p):
+        if p and os.path.isfile(p) and os.path.splitext(os.path.basename(p))[0].lower() == "claude":
             return p, False
     import shutil
     return shutil.which("claude"), True
@@ -1379,7 +1473,6 @@ def claude_binary():
 
 def read_version(path):
     """The version `<path> --version` prints, '' when it prints none in VERSION_S."""
-    import re
     try:
         r = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=VERSION_S,
                            stdin=subprocess.DEVNULL)
@@ -1413,11 +1506,20 @@ def section_of(p4):
     return _flat((read_json(path(p4)) or {}).get(SECTION) or {})
 
 
+def _binaries(seen):
+    """The record's binaries by path; a record from before they were kept by path holds one at its top."""
+    got = dict(seen.get("binaries") or {})
+    if seen.get("path") and seen["path"] not in got:
+        got[seen["path"]] = {k: seen.get(k) for k in ("size", "mtime", "version", "weak")}
+    return got
+
+
 def watch(project, payload):
-    """At every SessionStart: the cheap comparison of the running Claude Code binary, the p4 plugins' versions and
-    the store's `claude` section with the record; any change runs keep_settings. At a ConfigChange of a settings
-    file: keep_settings on the keys the record owns. Returns {"asks": the lines naming keys a store wants that p4
-    never writes, "newer": (old, new) when a newer Claude Code runs, else None}."""
+    """At every SessionStart: the cheap comparison of the running Claude Code binary, the p4 plugins' versions, the
+    store's `claude` section, a local file left unread and the memory folder other files name with the record; any
+    change runs keep_settings. Each binary is kept by its path, so the desktop app's copy and the `claude` command
+    used in turn are each read once. At a ConfigChange of a settings file: keep_settings on the keys the record owns.
+    Returns {"asks": the lines for ezexe, "newer": (old, new) when a newer Claude Code runs, else None}."""
     out = {"asks": [], "newer": None}
     if os.environ.get(SETTINGS_ENV) == "0":
         return out
@@ -1430,6 +1532,7 @@ def watch(project, payload):
         return out
     rec = read_record(p4)
     seen = rec.get("claude") or {}
+    binaries = _binaries(seen)
     note = {}
     binary, weak = claude_binary()
     if binary:
@@ -1437,16 +1540,23 @@ def watch(project, payload):
             st = os.stat(binary)
         except OSError:
             st = None
-        if st and (seen.get("path"), seen.get("size"), seen.get("mtime")) != (binary, st.st_size, st.st_mtime):
-            v = read_version(binary)
-            note["claude"] = {"path": binary, "size": st.st_size, "mtime": st.st_mtime,
-                              "version": v or seen.get("version") or "", "weak": weak}
-            if v and seen.get("version") and _version(v) > _version(seen["version"]):
-                out["newer"] = (seen["version"], v)
+        known = binaries.get(binary) or {}
+        if st and (known.get("size"), known.get("mtime")) != (st.st_size, st.st_mtime):
+            v = read_version(binary) or known.get("version") or ""
+            binaries[binary] = {"size": st.st_size, "mtime": st.st_mtime, "version": v, "weak": weak}
+            top = seen.get("version") or ""
+            note["claude"] = {"binaries": binaries, "version": max((top, v), key=_version), "path": binary}
+            if v and top and _version(v) > _version(top):
+                out["newer"] = (top, v)
     plugins = plugin_versions(project)
     if plugins != (rec.get("plugins") or {}):
         note["plugins"] = plugins
-    if not note and section_of(p4) == rec.get("section"):
+    target = settings_file(project)
+    unread = (rec.get("unreadable") or {}).get(fwd(target), "none")
+    other = [[fwd(f), v] for f, v in _elsewhere("autoMemoryDirectory", target, sys.platform)
+             if not _same_value("autoMemoryDirectory", v, fwd(sub(p4, "memory")))]
+    if (not note and section_of(p4) == rec.get("section") and unread in ("none", _mtime(target))
+            and other == (rec.get("otherMemory") or [])):
         return out
     out["asks"] = keep_settings(project, p4=p4, note=note, tell=True)["asks"]
     return out
