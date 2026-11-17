@@ -411,6 +411,10 @@ class Loop(unittest.TestCase):
                       index)
         self.assertIn("- [Other](other.md) — x", index)
         self.assertIn("- [A](a.md) — see [One lander](one-lander.md)\n", index, "a line whose first link is another's")
+        with open(os.path.join(mem, "MEMORY.md"), "rb") as f:
+            raw = f.read()
+        self.assertEqual(raw.count(b"\n"), raw.count(b"\r\n"), "its line endings are kept as found")
+        self.assertEqual(raw.count(b"\r\n"), 5)
         self.assertEqual(read(other), rule.replace("#7", "#9"), "a memory whose issue did not land is kept whole")
         self.land("m4")
         self.assertEqual(read(tied), body, "a second Stop leaves the pointer as it is")

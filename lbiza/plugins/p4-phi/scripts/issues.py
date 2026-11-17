@@ -916,10 +916,12 @@ def _reindex(folder, name, short):
     MEMORY.md, or no line of its own there, nothing is written."""
     p = os.path.join(folder, INDEX)
     try:
-        with open(p, encoding="utf-8") as f:
-            lines = f.read().replace("\r\n", "\n").split("\n")
+        with open(p, encoding="utf-8", newline="") as f:
+            text = f.read()
     except (OSError, UnicodeDecodeError):
         return
+    end = "\r\n" if "\r\n" in text else "\n"            # its line endings are kept as found
+    lines = text.replace("\r\n", "\n").split("\n")
     link =re.compile(r"^([^\[]*\[[^\]]*\]\(" + re.escape(name) + r"\))")
     changed = False
     for i, ln in enumerate(lines):
@@ -928,7 +930,7 @@ def _reindex(folder, name, short):
             lines[i] = f"{m.group(1)} — {short}"
             changed = True
     if changed:
-        _write(p, "\n".join(lines))
+        _write(p, end.join(lines))
 
 
 def landed(repo, sha, closes):
