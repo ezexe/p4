@@ -1585,6 +1585,9 @@ class NoWriteUnderClaude(unittest.TestCase):
         self.assertIn(page, said[self.WORKER, "clear"].split("\n", 1)[0], "and is handed it first after a clear")
         self.assertIn(page, said[self.WORKER, "wrap_up"], "and brings it up to date there before it clears")
         self.assertIn("decisions.md in the scratchpad directory the app names", said[TOP, "start"])
+        for source in ("compact", "clear"):              # the scan has the standing instruction and the book
+            self.assertIn("When a message from ezexe is about something else", said[TOP, source], source)
+            self.assertIn("address book", said[TOP, source], source)
 
 
 if __name__ == "__main__":
