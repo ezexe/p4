@@ -303,10 +303,35 @@ def refresh_index(p4, project, deadline_s=None):
         st.build_index(p4)
 
 
+def memory_texts(p4):
+    """The collapsed, lowercase text of each file of the store's memory folder, the index MEMORY.md among them,
+    which Claude Code loads itself at a session's start."""
+    import store as st
+    d = p4conf.sub(p4, "memory")
+    out = []
+    try:
+        names = sorted(n for n in os.listdir(d) if n.endswith(".md"))
+    except OSError:
+        return out
+    for n in names:
+        try:
+            with open(os.path.join(d, n), encoding="utf-8", errors="replace") as f:
+                out.append(st.collapse(f.read()).lower())
+        except OSError:
+            continue
+    return out
+
+
 def pinned_block(p4):
+    """The store's LIVE pinned rules, newest first, less any a memory already carries: a memory's index line is the
+    one form a session gets at its start, row A6 of the plugin defaults inventory, ezexe/p4#130."""
     import store as st
     rules = [e for e in st.load_store(p4).get("rules.md", [])
              if e.state == "LIVE" and (e.fields.get("pinned", "").strip().lower() in ("yes", "true", "1"))]
+    if rules:
+        carried = memory_texts(p4)
+        rules = [e for e in rules
+                 if not any(st.collapse(e.fields.get("plain") or e.value).lower() in m for m in carried)]
     if not rules:
         return ""
     rules.sort(key=lambda e: e.time, reverse=True)

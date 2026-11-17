@@ -262,6 +262,25 @@ class Layout(Base):
         self.assertIn("pinned rule number 19", ctx.split("\n")[1], "newest first")
 
 
+    def test_a_start_hands_no_pinned_rule_a_memory_already_carries(self):
+        """ezexe/p4#130, row A6: a pinned rule whose text a memory or its index line holds is not handed again at a
+        SessionStart; one no memory carries still is."""
+        rules = [[("ruling", "Indent with tabs in the exporter."), ("status", "LIVE"), ("pinned", "yes"),
+                  ("time", "2026-10-11 10:00")],
+                 [("ruling", "Run the ports check before a commit."), ("status", "LIVE"), ("pinned", "yes"),
+                  ("time", "2026-10-12 10:00")]]
+        write(p4conf.sub(self.p4, "store", "rules.md"), st.render("rules.md", rules))
+        write(p4conf.sub(self.p4, "memory", "MEMORY.md"), "# Memory index\n\n- [Tabs](tabs.md) — x\n")
+        write(p4conf.sub(self.p4, "memory", "tabs.md"), "---\nname: tabs\n---\n\nIndent with tabs in the exporter.\n")
+        o = self.out(run_hook("layout", {"source": "startup", "cwd": self.proj}, self.proj))
+        ctx = ((o or {}).get("hookSpecificOutput") or {}).get("additionalContext") or ""
+        self.assertNotIn("Indent with tabs", ctx, "a memory carries it")
+        self.assertIn("Run the ports check before a commit.", ctx)
+        write(p4conf.sub(self.p4, "memory", "ports.md"), "Run the ports check before a commit.\n")
+        o = self.out(run_hook("layout", {"source": "startup", "cwd": self.proj}, self.proj))
+        self.assertNotIn("hookSpecificOutput", o or {}, "every pinned rule is a memory: nothing is handed")
+
+
 class Recall(Base):
     def test_lines_shape_and_row(self):
         text = "does the quokka harness run the zebrafish plotter golden images on every push?"
