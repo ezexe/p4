@@ -1083,14 +1083,15 @@ ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves this bui
 #   takes a model alias, not a full model ID or `inherit`."
 # - plugins/components.md, "Agents": "The name form is `<plugin>:<name>`", so agents/check.md is `p4-phi:check`.
 # - tools-reference.md, "Background commands": "Claude can set `run_in_background: true` to start the command as a
-#   background task and continue working while it runs."
+#   background task and continue working while it runs." interactive-mode.md, "How backgrounding works": "Output is
+#   written to a file and Claude can retrieve it using the Read tool". So a long command needs no agent to run it.
 # - tools-reference.md, "Foreground commands that move to the background": "When a foreground command reaches its
 #   timeout without finishing, Claude Code moves it to the background instead of stopping it, unless the command
 #   starts with `sleep`." The default is `BASH_DEFAULT_TIMEOUT_MS`, "two minutes out of the box".
 LEVELS = ("built-in, levels: work is delegated to where Claude Code runs it best, so this session's own turn is "
           "never held by it. A search or a read across more than a couple of files goes to " + plans.EXPLORE + "; "
-          "a command expected to run long, such as a test file, a test suite or a build, goes to "
-          "`p4-phi:runner` or to a Bash or PowerShell call of its own with `run_in_background: true`; a read of a "
+          "a command expected to run long, such as a test file, a test suite or a build, goes to " + plans.BACKGROUND
+          + "; a read of a "
           "diff or a result that should not lean on this session's own view goes to `p4-phi:check`. A worker is "
           "started with a `model` and an `effort` that fit its step, as the advice that hands out each start call "
           "names them; an effort above this session's own is not accepted.")
@@ -1804,12 +1805,14 @@ def h_nudge(payload):
         if str(payload.get("tool_name") or "") in SHELL_TOOLS and TREE_CHECK.search(str(inp.get("command") or "")):
             return tree_checked(me, s, st)         # a few read-only checks of its trees are orchestration
         return None
+    level = plans.level_of(st.get("content")) if LEVELS_ON else "session"
+    if level == "run" and inp.get("run_in_background") is True:
+        return None                                # the step's command already runs where the rule sends it
     s["nudged"] = (list(s.get("nudged") or []) + [nudge_key(st)])[-50:]
     save_session(me.home, s)
     nudge_arm(me, s)
     RAN["nudge"] = st.get("addr")
-    level = plans.level_of(st.get("content")) if LEVELS_ON else "session"
-    if level != "session":                         # a step a subagent does needs no session
+    if level != "session":                         # a step that only reads or only runs a command needs no session
         return (f"phi (p4-phi): this is the orchestrator, kept free for orchestration, and step "
                 f"{st.get('addr')}, \"{cut(clean(st.get('content')), 120)}\", {plans.LEVEL_WHAT[level]}: hand it to "
                 f"{plans.LEVEL_WHERE[level]}. "

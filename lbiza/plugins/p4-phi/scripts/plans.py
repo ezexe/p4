@@ -442,7 +442,7 @@ def split_advice(home, s, plan, owner_turn, cap):
     """One line naming the steps that can each run as a worker, said once per set; '' when fewer than two."""
     free, kept = judge(plan, s.get("cwd") or "")
     subs = [st for st in free if LEVELS and level_of(st.get("content")) != "session"]
-    free = [st for st in free if st not in subs]   # a read or a run goes to its subagent, never a session
+    free = [st for st in free if st not in subs]   # a read goes to Explore and a run to the background, never a session
     if len(free) < 2:
         return ""
     path = os.path.join(relay._dir(home, s["sessionId"]), "session.json")
@@ -573,13 +573,15 @@ def top_groups(plan, cwd):
 
 # --- delegation: where a step runs --------------------------------------------------------------------------------
 #
-# A step that only reads or searches is the built-in Explore subagent's; one that only runs a command is
-# `p4-phi:runner`'s; the rest is a worker's. sub-agents.md says of Explore "A fast, read-only agent optimized for
-# searching and analyzing codebases." and gives its model as "the parent conversation's model", so the call names a
-# small one: "The per-invocation `model` parameter" is the first source in the page's model order, and "On an Agent
-# tool call, the parameter takes a model alias". The page also says "With nothing configured, a subagent that Claude
-# spawns from your main conversation starts in the background.", and plugins/components.md, under "Agents", names
-# a plugin's agent `<plugin>:<name>`.
+# A step that only reads or searches is the built-in Explore subagent's; one that only runs a command is a background
+# command of the session's own; the rest is a worker's. sub-agents.md says of Explore "A fast, read-only agent
+# optimized for searching and analyzing codebases." and gives its model as "the parent conversation's model", so the
+# call names a small one: "The per-invocation `model` parameter" is the first source in the page's model order, and
+# "On an Agent tool call, the parameter takes a model alias". The page also says "With nothing configured, a subagent
+# that Claude spawns from your main conversation starts in the background." tools-reference.md, "Background
+# commands", says "Claude can set `run_in_background: true` to start the command as a background task and continue
+# working while it runs.", and interactive-mode.md says "Output is written to a file and Claude can retrieve it using
+# the Read tool".
 
 READS = re.compile(r"^\W*(?:find|search|look\s+(?:for|up|at|into|through)|read|grep|list|locate|survey|scan|map|"
                    r"inventory|explore|trace|identify|count|collect|gather|sweep)\b", re.I)
@@ -588,20 +590,21 @@ WRITES = re.compile(r"\b(?:fix\w*|writ\w*|add\w*|chang\w*|edit\w*|implement\w*|u
                     r"mak\w+|mov\w+|commit\w*|refactor\w*|port\w*|delet\w*|migrat\w*|rewrit\w*|replac\w*|patch\w*|"
                     r"push\w*|merg\w*|land\w*|releas\w*|ship\w*|install\w*)\b", re.I)
 LEVELS = True                 # phi.project_conf sets it from p4.json phi.levels
-LEVEL_WHAT = {"read": "only reads or searches", "runner": "only runs a command"}
+LEVEL_WHAT = {"read": "only reads or searches", "run": "only runs a command"}
 EXPLORE = "the built-in subagent `Explore`, with `model` `haiku` on the Agent call"
-LEVEL_WHERE = {"read": EXPLORE, "runner": "the background subagent `p4-phi:runner`"}   # where each such step goes
+BACKGROUND = "a Bash or PowerShell call of its own with `run_in_background: true`"
+LEVEL_WHERE = {"read": EXPLORE, "run": BACKGROUND}                # where each such step goes
 
 
 def level_of(text):
-    """'read' for a step that only reads or searches, 'runner' for one that only runs a command, else 'session'."""
+    """'read' for a step that only reads or searches, 'run' for one that only runs a command, else 'session'."""
     text = str(text or "")
     if WRITES.search(text):
         return "session"
     if READS.search(text):
         return "read"
     if RUNS.search(text):
-        return "runner"
+        return "run"
     return "session"
 
 
@@ -755,8 +758,8 @@ LEVEL_HOW = ("Each call carries the `model` and `effort` named beside its steps,
 
 def top_advice(home, s, plan, owner_turn, cap, levels=None):
     """The orchestrator's line: each work step, or serial run, to one fresh child, and with delegation on each
-    step that only reads or only runs a command to a background subagent; said once per set. '' when no work step
-    is new."""
+    step that only reads to the built-in Explore subagent and each that only runs a command to a background
+    command; said once per set. '' when no work step is new."""
     groups, kept = top_groups(plan, s.get("cwd") or "")
     path = os.path.join(relay._dir(home, s["sessionId"]), "session.json")
     disk = relay._read_json(path)
@@ -790,7 +793,7 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
             "and push.")
     stay = ("; ".join(f"{a}, {why}" for a, why in kept)) or "none"
     subs = [g for g in new[:26] if level(g) != "session"]
-    agents = "" if subs else ""                    # the subagent's name beside its step says enough
+    agents = "" if subs else ""                    # where it goes, named beside its step, says enough
     if cap:
         return (f"{head} Its work steps would each go to a child: {named}. But {cap[0].lower() + cap[1:]} "
                 f"Staying here meanwhile: every step.{agents}")

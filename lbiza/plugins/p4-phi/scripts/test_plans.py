@@ -665,7 +665,7 @@ class TreeOfPlans(unittest.TestCase):
 
 class Levels(unittest.TestCase):
     """Delegation: a long foreground command runs as sent with no line, since the app moves it to the background at
-    its own timeout; a step is named for the subagent that does it."""
+    its own timeout; a step is named for where it runs."""
 
     LONG = {"command": "cd scripts && python -I -X utf8 test_flush.py 2>&1 | tail -3", "description": "Run the tests"}
 
@@ -721,7 +721,7 @@ class Levels(unittest.TestCase):
     def test_each_step_is_named_for_the_level_it_runs_at(self):
         for text, level in (("Find where the exporter is configured across src/", "read"),
                             ("Read the hooks docs and list what PreToolUse may return", "read"),
-                            ("Run test_flush.py", "runner"), ("Re-run the build", "runner"),
+                            ("Run test_flush.py", "run"), ("Re-run the build", "run"),
                             ("Run the tests and fix what fails", "session"),
                             ("Port the exporter to the new writer", "session"),
                             ("Find and remove the dead flags", "session")):
@@ -731,8 +731,8 @@ class Levels(unittest.TestCase):
                                    f"Port the exporter in {p}/src/export/flush.py to the new writer"))
         self.assertIn("which only reads or searches: it goes to the built-in subagent `Explore`, with `model` `haiku` "
                       "on the Agent call, not a session", ctx)
-        self.assertIn("which only runs a command: it goes to the background subagent `p4-phi:runner`, not a session",
-                      ctx)
+        self.assertIn("which only runs a command: it goes to a Bash or PowerShell call of its own with "
+                      "`run_in_background: true`, not a session", ctx)
         self.assertIn("mcp__ccd_session__start_session", ctx, "the step that writes still goes to a worker")
         self.assertIn("split by the files they write", ctx)
         s = relay._session(self.t.p4, TOP)
@@ -938,6 +938,25 @@ class TopOrchestrates(unittest.TestCase):
         self.plan(A, items(f"Port the exporter in {p}/src/export/flush.py to the new writer", "Commit it"))
         self.assertEqual(self.check(A, "Edit", {"file_path": f"{p}/src/export/flush.py"}, "toolu_n7"), "",
                          "a child is never nudged")
+
+    def test_a_step_that_only_runs_a_command_goes_to_a_background_command_and_the_plugin_ships_no_runner(self):
+        """tools-reference.md, "Background commands": "Claude can set `run_in_background: true` to start the command
+        as a background task and continue working while it runs.", and interactive-mode.md, "How backgrounding
+        works": "Output is written to a file and Claude can retrieve it using the Read tool". So the plugin ships no
+        agent that runs a command: an orchestrator's step that only runs one is nudged to a background call of its
+        own, and a call that is in the background already gets no line."""
+        self.assertFalse(os.path.exists(os.path.join(os.path.dirname(HERE), "agents", "runner.md")))
+        self.assertNotIn("runner", phi.LEVELS)
+        self.assertIn("goes to a Bash or PowerShell call of its own with `run_in_background: true`", phi.LEVELS)
+        self.plan(TOP, items("Run test_flush.py", "Commit and push"))
+        run = {"command": "python test_flush.py"}
+        self.assertEqual(self.check(TOP, "Bash", {**run, "run_in_background": True}, "toolu_b1"), "",
+                         "it runs where the rule sends it")
+        said = self.check(TOP, "Bash", run, "toolu_b2")
+        self.assertIn("only runs a command: hand it to a Bash or PowerShell call of its own with "
+                      "`run_in_background: true`", said)
+        self.assertNotIn("p4-phi:", said, "no agent of the plugin's own is named for a command")
+        self.assertEqual(self.check(TOP, "Bash", run, "toolu_b3"), "", "said once for the step")
 
     def test_a_child_marked_report_when_done_leaves_a_replaces_note_and_is_named_to_its_parent(self):
         t, C = self.t, self.C

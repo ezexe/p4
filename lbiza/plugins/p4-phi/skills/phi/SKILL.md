@@ -46,10 +46,10 @@ Run each with `python -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/phi.py"`, and pa
 
 ## Delegation
 
-The built-in rule `levels`, given at a session's start, says where work runs: Claude Code's built-in subagent `Explore` for a search or a read across files, called with `model` `haiku`, the plugin's background subagents `p4-phi:runner` and `p4-phi:check`, a background command, or a worker.
+The built-in rule `levels`, given at a session's start, says where work runs: Claude Code's built-in subagent `Explore` for a search or a read across files, called with `model` `haiku`, a Bash or PowerShell call with `run_in_background: true` for a long command, the plugin's background subagent `p4-phi:check`, or a worker.
 `phi.child_levels` in `.claude/p4/p4.json` sets the model and effort a worker starts with for each kind of step: by default `static` runs on `claude-sonnet-5-5` at `medium`, and `build` and `design` on the parent session's model at `high`.
 A worker splits at its first message: in these sessions the app has let a started session start others in its first turn and in the turns ezexe's own messages open, though no doc states it, so p4-phi tells it to plan its split then and start a session for every part that writes files or makes a decision, one per disjoint set of files, and where the app refuses that start to show the part as a suggested task card that ezexe presses.
-Subagents keep reads, searches, single command runs and independent checks.
+Subagents keep reads, searches and independent checks, and a single command run is a background command.
 A writing part that comes up later is shown as a suggested task card that ezexe presses, and kept as a start request only where the card is refused too.
 A subagent that wrote files is listed on the ledger under Level misses.
 Before a session creates anything new, such as a module, a page, a format or a kind of test, it finds the documented terms for it and a published implementation guide for that kind of work, logs both with their sources in its decisions file, and builds by them: a writing worker's first message and every start draft carry that line.

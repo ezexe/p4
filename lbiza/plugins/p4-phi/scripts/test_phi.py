@@ -1362,9 +1362,10 @@ class Rules(unittest.TestCase):
     def test_the_levels_rule_is_given_with_no_configuration_and_p4_json_turns_it_off(self):
         """On in every project, a store or none; only p4.json's phi.levels: false leaves it out."""
         got = self.start(TOP)
-        for word in ("built-in, levels", "the built-in subagent `Explore`", "`p4-phi:runner`", "`p4-phi:check`",
+        for word in ("built-in, levels", "the built-in subagent `Explore`", "`p4-phi:check`",
                      "`run_in_background: true`"):
             self.assertIn(word, got)
+        self.assertNotIn("p4-phi:runner", got)
         self.assertNotIn("ezexe", phi.LEVELS, "it addresses the session and names no person")
         self.assertIn("built-in, levels", phi.builtin_text())
         with tempfile.TemporaryDirectory() as tmp:

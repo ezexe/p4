@@ -178,7 +178,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
   <p class="lede">p4-phi delegates each piece of work to where Claude Code runs it best, so a session's own turn is never held by it. Choose a kind of task below, see where it goes, and step through the path its result takes back.</p>
   <ul class="facts">
     <li class="f-phi"><b>Workers do the writing.</b>An orchestrator plans and lands. Each work step of its task list goes to a worker, which the <a href="session-tree.html">session tree</a> page shows. A <a href="puppeteer.html">puppeteer</a> is the exception: its steps stay with it.</li>
-    <li class="f-you"><b>Subagents run in the background.</b>A read across files goes to Claude Code's built-in <code>Explore</code>, and the plugin ships two of its own: <code>p4-phi:runner</code> and <code>p4-phi:check</code>. Any session can start one.</li>
+    <li class="f-you"><b>Subagents run in the background.</b>A read across files goes to Claude Code's built-in <code>Explore</code>, and the plugin ships one of its own, <code>p4-phi:check</code>. Any session can start either.</li>
     <li class="f-app"><b>Nobody waits in the foreground.</b>The session that asked goes on or ends its turn. A completion notification brings the result in a later turn.</li>
   </ul>
 
@@ -215,14 +215,14 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
 
   <section class="block" aria-label="On by default">
     <h2>On by default</h2>
-    <p class="intro">Nothing has to be configured. The delegation rule and the plugin's agents work in any project the plugin is enabled in.</p>
+    <p class="intro">Nothing has to be configured. The delegation rule and the plugin's agent work in any project the plugin is enabled in.</p>
     <div class="rules">
       <div class="rule">
         <h3>Nothing to set up</h3>
         <ul>
           <li>Every session is given the delegation rule at its start, as one of p4-phi's built-in rules beside act-don't-wait.</li>
-          <li><code>Explore</code> is built into Claude Code, so the plugin ships no search agent.</li>
-          <li>The plugin's agents are files in its <code>agents/</code> folder, so they load with the plugin under the names <code>p4-phi:runner</code> and <code>p4-phi:check</code>.</li>
+          <li><code>Explore</code> and a background command are Claude Code's own, so the plugin ships no agent that searches and none that runs a command.</li>
+          <li>The plugin's agent is a file in its <code>agents/</code> folder, so it loads with the plugin under the name <code>p4-phi:check</code>.</li>
         </ul>
       </div>
       <div class="rule">
@@ -263,7 +263,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
   </section>
 
   <footer>
-    Every rule, call and line here is read from the plugin's source: <code>phi.py</code>, <code>plans.py</code> and the files in <code>agents/</code>, in <a href="https://github.com/ezexe/p4">ezexe/p4</a> under <code>lbiza/plugins/p4-phi</code>. The diagram is a model in your browser. Nothing on this page reaches a real session.
+    Every rule, call and line here is read from the plugin's source: <code>phi.py</code>, <code>plans.py</code> and the file in <code>agents/</code>, in <a href="https://github.com/ezexe/p4">ezexe/p4</a> under <code>lbiza/plugins/p4-phi</code>. The diagram is a model in your browser. Nothing on this page reaches a real session.
   </footer>
 </div>
 
@@ -297,16 +297,13 @@ var NODES={
   top:{kind:"session",title:"Orchestrator",meta:"plans, lands"},
   child:{kind:"session",title:"Worker",meta:"its work steps"},
   read:{kind:"agent",title:"Explore",meta:"built-in · haiku"},
-  runner:{kind:"agent",title:"p4-phi:runner",meta:"sonnet · low"},
   check:{kind:"agent",title:"p4-phi:check",meta:"inherit · high"},
-  cmd:{kind:"cmd",title:"Command",meta:"run_in_background"},
-  rcmd:{kind:"cmd",title:"Its command",meta:"the runner waits"}
+  cmd:{kind:"cmd",title:"Command",meta:"run_in_background"}
 };
 var KINDS=[
   {id:"work",label:"A work step",sub:"It writes, fixes or commits something.",dest:"child",tag:["phi","worker"]},
   {id:"read",label:"A read across files",sub:"A search or a read across more than a couple of files.",dest:"read",tag:["you","Explore"]},
   {id:"bg",label:"A long command, started in the background",sub:"A test file, a test suite or a build.",dest:"cmd",tag:["app","run_in_background"]},
-  {id:"runner",label:"A long command, handed to the runner",sub:"The same command, when a verdict is what is wanted.",dest:"runner",tag:["you","p4-phi:runner"]},
   {id:"check",label:"An unanchored read",sub:"A diff or a result, read without this session's own view.",dest:"check",tag:["you","p4-phi:check"]}
 ];
 var DEST={
@@ -314,12 +311,10 @@ var DEST={
     spec:[["started by","mcp__ccd_session__start_session"],["context","fresh"],["use_worktree","false"],["model, effort","by the step's kind, as the table below says"],["brief","the step, a Files: line, what it must leave done, \"report when done\" and its model and effort"]]},
   read:{name:"Explore",why:"Claude Code's built-in subagent for searching and analyzing codebases. It is read-only: Write and Edit are denied to it.",
     spec:[["built into","Claude Code"],["model","haiku, named on the Agent call"],["tools","read-only"],["runs","in the background"]]},
-  runner:{name:"p4-phi:runner",why:"It runs one long command exactly as given, changes no file, and reports pass or fail.",
-    spec:[["model","sonnet"],["effort","low"],["tools","Bash, PowerShell, Read"],["maxTurns","15"],["background","true"]]},
   check:{name:"p4-phi:check",why:"A second reader of work another session made. It is read-only and takes no claim in its brief as true until the files show it.",
     spec:[["model","inherit"],["effort","high"],["tools","Read, Grep, Glob"],["maxTurns","60"],["background","true"]]},
   cmd:{name:"A background command",why:"The Bash or PowerShell tool's own background task. The command runs under the session that called the tool, and that session keeps its turn.",
-    spec:[["started by","Bash or PowerShell"],["field","run_in_background: true"]]}
+    spec:[["started by","Bash or PowerShell"],["field","run_in_background: true"],["output","a file the session reads with Read"]]}
 };
 var HOLD="It goes on with other work or ends its turn. The app's own tools tell it that the result comes by a notification, so p4-phi's rule holds no line on waiting, sleeping or polling.";
 function who(ask){return ask==="top"?"The orchestrator":"The worker"}
@@ -362,18 +357,7 @@ function steps(kind,ask){
     {dir:"hold",legs:["ask"],by:W+" goes on or ends its turn",say:"The command runs. The session keeps its turn.",
      html:HOLD},
     {dir:"up",legs:["ask"],by:"A completion notification brings the result",say:"The completion notification comes back up.",
-     html:"When the command ends, the notification arrives in a later turn, and the session reads the command's result then."}
-  ];
-  if(kind==="runner")return [
-    {dir:"down",legs:["ask"],by:W+" hands the command to the runner",say:"The Agent call carries the command down.",
-     html:"The prompt gives the command and the folder to run it in.",
-     code:call("Agent",{subagent_type:"p4-phi:runner",description:"Run test_relay.py",prompt:"In lbiza/plugins/p4-phi/scripts, run: python test_relay.py"})},
-    {dir:"down",legs:["r2"],by:"The runner runs the command",say:"The runner starts the command and waits on it.",
-     html:"It runs the command exactly as given, with a <code>timeout</code> long enough for it. The plugin's hook leaves a subagent's call alone, since a runner's whole work is to wait on its command. When the command reaches its timeout, Claude Code moves it to the background, and the runner waits for its completion notification and reads its output file. It never reports before the command has ended."},
-    {dir:"hold",legs:["ask","r2"],by:W+" goes on or ends its turn",say:"The runner waits. The session keeps its turn.",
-     html:HOLD},
-    {dir:"up",legs:["ask","r2"],by:"The verdict comes back",say:"The verdict comes back up in a completion notification.",
-     html:"The first line is <code>PASS</code> or <code>FAIL</code>, the exit code, and how long the command ran. Then come the counts the command printed. On a failure the failing output follows word for word, and output that passed is left out."}
+     html:"When the command ends, the notification arrives in a later turn, and the session reads the part of the command's output file it needs with Read. No agent stands between the session and its command."}
   ];
   return [
     {dir:"down",legs:["ask"],by:W+" asks for a check",say:"The Agent call carries the diff down.",
@@ -390,7 +374,7 @@ function steps(kind,ask){
 var READS=/^\W*(?:find|search|look\s+(?:for|up|at|into|through)|read|grep|list|locate|survey|scan|map|inventory|explore|trace|identify|count|collect|gather|sweep)\b/i;
 var RUNS=/^\W*(?:run|re-?run|execute)\b/i;
 var WRITES=/\b(?:fix\w*|writ\w*|add\w*|chang\w*|edit\w*|implement\w*|updat\w*|remov\w*|renam\w*|creat\w*|mak\w+|mov\w+|commit\w*|refactor\w*|port\w*|delet\w*|migrat\w*|rewrit\w*|replac\w*|patch\w*|push\w*|merg\w*|land\w*|releas\w*|ship\w*|install\w*)\b/i;
-function levelOf(t){if(WRITES.test(t))return "session";if(READS.test(t))return "read";if(RUNS.test(t))return "runner";return "session"}
+function levelOf(t){if(WRITES.test(t))return "session";if(READS.test(t))return "read";if(RUNS.test(t))return "run";return "session"}
 var DESIGNS=/^\W*(?:re-?)?(?:design|review|architect|audit|specif|spec\b|propos|investigat|decid|evaluat|assess|analy[sz]|research|plan\b)\w*/i;
 var CODE=/\.(?:py|js|jsx|ts|tsx|rs|go|c|h|cc|cpp|cs|java|kt|rb|sh|ps1|sql|toml|ya?ml)\b(?!\.)|\b(?:scripts?|src|hooks?|lib)\/|\b(?:hook|script|function|module|class|api|test suite|behaviou?r)s?\b|\b(?:fix|implement|build|refactor|port|migrat)\w*\b/i;
 var STATIC=/\b(?:docs?|dox|documentation|readme|changelog|pages?|html|css|markdown|typos?|wording|comments?|renam\w*|version bump|bump\w*|format\w*|static|mechanical|copy\w*|mov\w+)\b|\.(?:md|html|css|txt|svg)\b/i;
@@ -414,18 +398,16 @@ function cur(){return steps(S.kind,S.ask)}
 function layout(){
   var narrow=wrap.clientWidth<600,L={narrow:narrow,n:{}};
   if(narrow){
-    L.W=360;L.H=436;
+    L.W=360;L.H=356;
     L.n.top={x:12,y:20,w:160,h:56};L.n.child={x:188,y:96,w:160,h:56};
     L.n.read={x:12,y:188,w:160,h:60};L.n.check={x:188,y:188,w:160,h:60};
-    L.n.runner={x:12,y:276,w:160,h:60};L.n.cmd={x:188,y:276,w:160,h:60};
-    L.n.rcmd={x:12,y:366,w:160,h:56};
-    L.bus=172;L.bus2=262;L.trunk=180;L.row2=["runner","cmd"];
+    L.n.cmd={x:100,y:276,w:160,h:60};
+    L.bus=172;L.bus2=262;L.trunk=180;L.row2=["cmd"];
   }else{
-    L.W=700;L.H=436;
+    L.W=700;L.H=334;
     L.n.top={x:30,y:30,w:200,h:56};L.n.child={x:300,y:126,w:200,h:56};
-    L.n.read={x:20,y:244,w:150,h:60};L.n.runner={x:190,y:244,w:150,h:60};
-    L.n.check={x:360,y:244,w:150,h:60};L.n.cmd={x:530,y:244,w:150,h:60};
-    L.n.rcmd={x:190,y:360,w:150,h:56};
+    L.n.read={x:50,y:244,w:180,h:60};L.n.check={x:260,y:244,w:180,h:60};
+    L.n.cmd={x:470,y:244,w:180,h:60};
     L.bus=220;L.row2=[];
   }
   return L;
@@ -434,7 +416,6 @@ function cx(b){return b.x+b.w/2}
 function leg(L,name,ask,dest){
   var n=L.n;
   if(name==="tc")return [[n.top.x+n.top.w,n.top.y+n.top.h/2],[cx(n.child),n.top.y+n.top.h/2],[cx(n.child),n.child.y]];
-  if(name==="r2")return [[cx(n.runner),n.runner.y+n.runner.h],[cx(n.rcmd),n.rcmd.y]];
   var a=n[ask],d=n[dest],ax=ask==="top"&&!L.narrow?130:cx(a),pts=[[ax,a.y+a.h],[ax,L.bus]];
   if(L.row2.indexOf(dest)>=0){pts.push([L.trunk,L.bus],[L.trunk,L.bus2],[cx(d),L.bus2])}
   else pts.push([cx(d),L.bus]);
@@ -466,8 +447,7 @@ function draw(animate){
   while(svg.firstChild)svg.removeChild(svg.firstChild);
   svg.setAttribute("viewBox","0 0 "+L.W+" "+L.H);
   svg.appendChild(s("path",{class:"link",d:pathOf(leg(L,"tc"))}));
-  ["read","runner","check","cmd"].forEach(function(id){svg.appendChild(s("path",{class:"link",d:pathOf(leg(L,"ask",S.ask,id))}))});
-  svg.appendChild(s("path",{class:"link",d:pathOf(leg(L,"r2"))}));
+  ["read","check","cmd"].forEach(function(id){svg.appendChild(s("path",{class:"link",d:pathOf(leg(L,"ask",S.ask,id))}))});
 
   var pts=null;
   if(st.legs){
@@ -478,9 +458,8 @@ function draw(animate){
     if(st.dir!=="hold"){pts=[];st.legs.forEach(function(name){pts=pts.concat(leg(L,name,S.ask,dest))});pts=tidy(pts);if(st.dir==="up")pts.reverse()}
   }
   var asker=S.kind==="work"?"top":S.ask;
-  var lit={};lit[dest]=1;if(S.kind==="runner"&&S.step>0)lit.rcmd=1;
-  var busy={};if(st.dir==="hold"){busy[dest]=1;if(S.kind==="runner")busy.rcmd=1}
-  if(S.kind==="runner"&&S.step===1)busy.rcmd=1;
+  var lit={};lit[dest]=1;
+  var busy={};if(st.dir==="hold")busy[dest]=1;
   Object.keys(NODES).forEach(function(id){
     var n=NODES[id],b=L.n[id],cls="node k-"+n.kind+(lit[id]?" dest":"")+(id===asker&&st.dir!=="none"?" ask":"")+(busy[id]?" busy":"");
     var g=s("g",{class:cls,"data-id":id,tabindex:"0",role:"button","aria-label":n.title+", "+n.meta,transform:"translate("+b.x+","+b.y+")"});
@@ -546,7 +525,7 @@ function pick(kind){S.kind=kind;S.step=0;render(true)}
 document.querySelectorAll("[data-ask]").forEach(function(b){b.addEventListener("click",function(){S.ask=b.getAttribute("data-ask");S.step=0;render(true)})});
 $("back").addEventListener("click",function(){if(S.step>0){S.step--;render(true)}});
 $("next").addEventListener("click",function(){if(S.step<cur().length-1){S.step++;render(true)}});
-var NODEKIND={child:"work",read:"read",runner:"runner",check:"check",cmd:"bg",rcmd:"runner"};
+var NODEKIND={child:"work",read:"read",check:"check",cmd:"bg"};
 function nodeHit(e){
   var g=e.target.closest&&e.target.closest("[data-id]");if(!g)return;var id=g.getAttribute("data-id");
   if(id==="top"){S.ask="top";S.step=0;render(true)}
@@ -562,7 +541,7 @@ $("plan").addEventListener("input",function(){
   if(stay){out.innerHTML="The orchestrator keeps this step itself, since "+stay+".";S.ask="top";pick("work");return}
   var lv=levelOf(t);
   if(lv==="read"){out.innerHTML="This step only reads or searches, so p4-phi names it for <code>Explore</code>, Claude Code's built-in subagent, with <code>model</code> <code>haiku</code> on the call, not a session.";pick("read")}
-  else if(lv==="runner"){out.innerHTML="This step only runs a command, so p4-phi names it for <code>p4-phi:runner</code>, a background subagent, not a session.";pick("runner")}
+  else if(lv==="run"){out.innerHTML="This step only runs a command, so p4-phi names it for a Bash or PowerShell call of its own with <code>run_in_background: true</code>, not a session.";pick("bg")}
   else{out.innerHTML="This step is work, so p4-phi names it for a worker. It is "+KIND_WORDS[kindOfWork(t)]+".";S.ask="top";pick("work")}
 });
 
