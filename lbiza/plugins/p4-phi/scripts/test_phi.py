@@ -289,6 +289,18 @@ class Sessions(unittest.TestCase):
         self.assertEqual(s["cliSessionIds"], [CLI[KID]])
         self.assertNotIn("spawnedFrom", self.t.session(TOP))       # an orchestrator: its record, started by none
 
+    def test_a_starters_process_never_adds_its_transcript_to_its_childs_record(self):
+        """ezexe/p4#191: a hook of the starter's process that handles its child's record, as when it reads the
+        child's report, reports the starter's transcript id; the child's cliSessionIds keep only the child's own."""
+        self.t.say(TOP, "start the fix")
+        self.t.hook(START, KID, {"hook_event_name": "SessionStart", "source": "startup"})
+        self.t.say(KID, "fix it", cli=CLI[TOP])                     # the starter's transcript handles the child
+        self.t.stop(KID, "fix it", report="Fixed.", cli=CLI[TOP])
+        self.assertEqual(self.t.session(KID)["cliSessionIds"], [CLI[KID]])
+        self.assertEqual(self.t.session(TOP)["cliSessionIds"], [CLI[TOP]])
+        self.t.say(KID, "and the rest", cli=KID + "-resumed")      # a transcript no record names is the child's own
+        self.assertEqual(self.t.session(KID)["cliSessionIds"], [CLI[KID], KID + "-resumed"])
+
     def test_a_deep_session_gets_every_session_above_it(self):
         self.t.say(GRAND, "bisect it")
         self.assertEqual(self.t.started_by(GRAND)[0], KID)

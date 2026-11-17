@@ -457,6 +457,19 @@ def _save_session(home, s):
                  json.dumps(s, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
 
 
+def own_clis(sid, rec, cli):
+    """The transcript a hook reports, as a list, unless the app's records give it to another session, as when a
+    starter's process handles its child's record; the app's record of this session itself is trusted. p4-temportal's
+    archived_ids reads every id on a record, so a stray one there closes the other session's folder when this one is
+    archived, ezexe/p4#191."""
+    if not cli:
+        return []
+    if isinstance(rec, dict) and rec.get("cliSessionId") == cli:
+        return [cli]
+    other = record_of_cli(cli).get("sessionId")
+    return [cli] if not other or safe_id(other) == sid else []
+
+
 def ensure_session(home, sid, rec=None, cli="", depth=0, hint=""):
     """session.json, made if new, with those of the sessions above it made too: a session this plugin never ran in
     gets its file from the app's record. `spawnedFrom` there is what the tree is read from: the record sets it for
@@ -502,9 +515,10 @@ def ensure_session(home, sid, rec=None, cli="", depth=0, hint=""):
         if rec.get("cwd") and rec.get("cwd") != s.get("cwd"):
             s["cwd"] = rec["cwd"]
             changed = True
-    if cli and cli not in s.setdefault("cliSessionIds", []):
-        s["cliSessionIds"].append(cli)
-        changed = True
+    for c in own_clis(sid, rec, cli):
+        if c not in s.setdefault("cliSessionIds", []):
+            s["cliSessionIds"].append(c)
+            changed = True
     if changed:
         save_session(home, s)
     above = spawned_from(s)
