@@ -11,8 +11,16 @@ transcript, and no command here moves, links, stages, commits or removes one.
                  removed. It prints one line when it seeded the file again or moved something, and the first seed of a
                  new notebook is silent.
 
-`tmp-link`, `tmp-sweep` and `tmp-close` were the commands that kept each session's scratchpad in the store. A session
-started before they were retired still runs them, so they exit 0 and print nothing.
+  tmp-unlink     at SessionStart, and by hand as `scratchpad.py tmp-unlink [project]`: every app scratchpad of the
+                 project, `<temp>/claude*/<project>/<session>/scratchpad`, that an earlier version made a junction or a
+                 symlink into the store's temportal/tmp/ becomes a real folder holding a copy of what the store folder
+                 holds, since a write through such a link is a write under .claude/ that asks ezexe in every mode. The
+                 link is removed as a link, the store's folder is left as it is, and a real folder is never touched.
+                 It prints one line when it unlinked something.
+
+`tmp-link` was the start command that made those links; a session started on 0.3.9 still runs it, and it now unlinks
+as tmp-unlink does. `tmp-sweep` and `tmp-close` kept each session's scratchpad in the store; a session started before
+they were retired still runs them, so they exit 0 and print nothing.
 
 The two asks are off unless p4.json's scratchpad.asks is true or P4_SCRATCHPAD_ASKS=1:
 
@@ -95,7 +103,7 @@ project_root = hookio.project_root
 ASKS = False                # p4.json scratchpad.asks; P4_SCRATCHPAD_ASKS=1 or 0 wins for one run
 # the commands that kept each session's scratchpad in the store, which a session started before they were retired
 # still runs at its start, its turn ends and its end
-RETIRED = ("tmp-link", "tmp-sweep", "tmp-close")
+RETIRED = ("tmp-sweep", "tmp-close")
 
 
 def configure(payload, write=True, root=None):
@@ -220,6 +228,103 @@ def cmd_notebook_out(payload):
                      + ", ".join(moved[:6]) + (", …" if len(moved) > 6 else "") + f", into {out}")
     if tracked:
         parts.append(f"{len(tracked)} of them were tracked by the store and show as deleted there")
+    if parts:
+        print("p4-temportal: " + "; ".join(parts) + ".")
+    return 0
+
+
+# ---- tmp-unlink: the links earlier versions made into the store ---------------------------------------------
+
+TEMP_ROOTS = ("/tmp", "/private/tmp")   # beside the system temp directory: where Claude Code makes its claude* folders
+
+
+def temp_roots(payload):
+    """The folders that hold Claude Code's claude* temp folders: the one above this session's scratchpad_dir, then
+    CLAUDE_CODE_TMPDIR, TMPDIR, TEMP, TMP, the system temp directory, /tmp and /private/tmp."""
+    import tempfile
+    out = []
+    given = payload.get("scratchpad_dir") if isinstance(payload, dict) else None
+    if isinstance(given, str) and os.path.isabs(given):
+        out.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.normpath(given))))))
+    out += [os.environ.get(k) for k in ("CLAUDE_CODE_TMPDIR", "TMPDIR", "TEMP", "TMP")]
+    out += [tempfile.gettempdir(), *TEMP_ROOTS]
+    seen, roots = set(), []
+    for r in out:
+        if not r or not os.path.isdir(r):
+            continue
+        key = os.path.normcase(os.path.realpath(r))
+        if key not in seen:
+            seen.add(key)
+            roots.append(r)
+    return roots
+
+
+def link_target(path):
+    """Where a link points, as written in it, or '' when it cannot be read."""
+    try:
+        t = os.readlink(path)
+    except (OSError, ValueError):
+        return ""
+    return os.path.normpath(t[4:] if t.startswith("\\\\?\\") else t)
+
+
+def into_store_tmp(target, root):
+    """True when `target` lies in this project's store under temportal/tmp/ or the older tmp/ at its top."""
+    store = os.path.normcase(os.path.normpath(os.path.join(root, ".claude", "p4")))
+    t = os.path.normcase(os.path.normpath(target))
+    return any(t.startswith(os.path.join(store, *place) + os.sep) for place in (("temportal", "tmp"), ("tmp",)))
+
+
+def unlink_scratchpad(link, target):
+    """Replace the link `link` by a real folder holding a copy of `target` -> True when done. The copy is made beside
+    the link first; the link is then removed as a link, never followed, and the copy takes its name. The store's
+    folder is never touched. On any failure the link stays as it was and the partial copy goes."""
+    import shutil
+    staging = f"{link}.p4-unlinking-{os.getpid()}"
+    try:
+        if os.path.isdir(target):
+            shutil.copytree(target, staging, symlinks=True)
+        else:
+            os.makedirs(staging)                       # the store folder is gone: an empty folder takes the link's place
+    except OSError:
+        shutil.rmtree(staging, ignore_errors=True)
+        return False
+    try:
+        if os.path.islink(link):
+            os.unlink(link)
+        else:
+            os.rmdir(link)                             # a junction: RemoveDirectory drops the reparse point only
+    except OSError:
+        shutil.rmtree(staging, ignore_errors=True)
+        return False
+    try:
+        os.rename(staging, link)
+    except OSError:
+        return False                                   # the copy stays beside the link's old name, with its files
+    return True
+
+
+def cmd_tmp_unlink(payload, root=None):
+    """Every app scratchpad, `<temp>/claude*/<project>/<session>/scratchpad`, that an earlier version made a junction
+    or a symlink into this project's store becomes a real folder with a copy of what the store folder holds. A real
+    folder is left as it is, and so is a link that points anywhere else."""
+    import glob
+    root = root or project_root(payload)
+    done, left = [], []
+    for r in temp_roots(payload):
+        for sp in sorted(glob.glob(os.path.join(glob.escape(r), "claude*", "*", "*", "scratchpad"))):
+            if not p4conf.is_link(sp):
+                continue
+            target = link_target(sp)
+            if not target or not into_store_tmp(target, root):
+                continue
+            (done if unlink_scratchpad(sp, target) else left).append(sp)
+    parts = []
+    if done:
+        parts.append(f"session scratchpads unlinked from the store: {len(done)}, each now a folder of its own with a "
+                     "copy of its files")
+    if left:
+        parts.append(f"{len(left)} could not be unlinked and are still links: " + ", ".join(left[:3]))
     if parts:
         print("p4-temportal: " + "; ".join(parts) + ".")
     return 0
@@ -378,6 +483,12 @@ def main():
     sub = sys.argv[1] if len(sys.argv) > 1 else ""
     if sub in RETIRED:
         return 0
+    if sub in ("tmp-unlink", "tmp-link") and (len(sys.argv) > 2 or sys.stdin is None or sys.stdin.isatty()):
+        try:                                           # run by hand: the project named or the working folder, no stdin
+            return cmd_tmp_unlink({}, os.path.abspath(sys.argv[2]) if len(sys.argv) > 2 else os.getcwd())
+        except Exception as e:  # noqa: BLE001
+            print(f"p4-temportal scratchpad {sub} degraded: {type(e).__name__}: {e}")
+            return 0
     payload = payload_from_stdin()
     try:
         configure(payload)
@@ -389,6 +500,8 @@ def main():
             return cmd_repo_uses(payload)
         if sub == "ask":
             return cmd_ask(payload)
+        if sub in ("tmp-unlink", "tmp-link"):          # tmp-link: what a session started on 0.3.9 still runs
+            return cmd_tmp_unlink(payload)
         print(json.dumps({"systemMessage": f"scratchpad.py: unknown subcommand {sub!r}"}))
         return 0
     except Exception as e:  # noqa: BLE001 — a hook degrades, never raises

@@ -514,6 +514,90 @@ class FailureNotice(unittest.TestCase):
             sp.cmd_ask, sys.argv, sys.stdin = old
 
 
+class Unlink(unittest.TestCase):
+    """ezexe/p4#131: a session started on 0.3.9 has its app scratchpad as a link into the store's temportal/tmp/, and
+    every write through it is a protected write under .claude/. tmp-unlink, at a start and by hand, makes each such
+    link a real folder holding a copy of the store folder's files, keeps the store folder, and leaves a real folder
+    and a link elsewhere as they are."""
+
+    def setUp(self):
+        if not shutil.which("sh"):
+            self.skipTest("no sh on PATH")
+        self.temp = tempfile.mkdtemp(prefix="p4-temportal-unlink-temp-")
+        self.root = tempfile.mkdtemp(prefix="p4-temportal-unlink-")
+        self.elsewhere = tempfile.mkdtemp(prefix="p4-temportal-unlink-else-")
+        for d in (self.temp, self.root, self.elsewhere):
+            self.addCleanup(wipe, d)
+        self.hashdir = os.path.join(self.temp, "claude", "30ad6e18862a20e8")
+        self.store_tmp = os.path.join(self.root, ".claude", "p4", "temportal", "tmp")
+
+    def linked(self, sid, files):
+        target = os.path.join(self.store_tmp, sid)
+        for rel, text in files.items():
+            put(target, rel, text)
+        sp = os.path.join(self.hashdir, sid, "scratchpad")
+        os.makedirs(os.path.dirname(sp), exist_ok=True)
+        make_link(sp, target)
+        self.addCleanup(lambda: is_link(sp) and unlink(sp))
+        return sp, target
+
+    def env(self):
+        return env_with(None, CLAUDE_PLUGIN_ROOT=os.path.dirname(HERE), CLAUDE_PROJECT_DIR=self.root,
+                        CLAUDE_CONFIG_DIR=os.path.join(self.root, ".config"), TEMP=self.temp, TMP=self.temp,
+                        TMPDIR=self.temp)
+
+    def assert_unlinked(self, sp, target, files):
+        self.assertFalse(is_link(sp), f"{sp} is still a link")
+        self.assertTrue(os.path.isdir(sp))
+        for rel, text in files.items():
+            with open(os.path.join(sp, *rel.split("/")), encoding="utf-8") as f:
+                self.assertEqual(f.read(), text, f"{rel} was not copied")
+            with open(os.path.join(target, *rel.split("/")), encoding="utf-8") as f:
+                self.assertEqual(f.read(), text, f"{rel} left the store")
+
+    def test_a_start_and_a_hand_run_unlink_and_leave_the_rest(self):
+        files = {"a.md": "a\n", "sub/b.md": "b\n"}
+        linked, target = self.linked("aaaa1111-0000-4000-8000-00000000000a", files)
+        real = os.path.join(self.hashdir, "bbbb2222-0000-4000-8000-00000000000b", "scratchpad")
+        put(real, "c.md", "c\n")
+        other = os.path.join(self.hashdir, "cccc3333-0000-4000-8000-00000000000c", "scratchpad")
+        os.makedirs(os.path.dirname(other))
+        make_link(other, self.elsewhere)
+        self.addCleanup(lambda: is_link(other) and unlink(other))
+        with open(HOOKS_JSON, encoding="utf-8") as f:
+            cmd = [h["command"] for g in json.load(f)["hooks"]["SessionStart"] for h in g["hooks"]
+                   if "scratchpad tmp-unlink" in h["command"]]
+        self.assertEqual(len(cmd), 1, "no SessionStart hook runs tmp-unlink")
+        stdin = json.dumps({"cwd": self.root, "session_id": "bbbb2222-0000-4000-8000-00000000000b",
+                            "scratchpad_dir": real, "source": "startup"}).encode()
+        r = subprocess.run([shutil.which("sh"), "-c", cmd[0]], input=stdin, capture_output=True, timeout=60,
+                           env=self.env())
+        self.assertEqual(r.returncode, 0, r)
+        self.assertIn("unlinked from the store: 1", r.stdout.decode("utf-8", "replace"))
+        self.assert_unlinked(linked, target, files)
+        self.assertEqual(os.listdir(real), ["c.md"], "a real scratchpad was touched")
+        self.assertTrue(is_link(other) and os.path.samefile(other, self.elsewhere), "a link elsewhere was touched")
+        # by hand, naming the project, for a link a session started on 0.3.9 still holds
+        late, late_target = self.linked("dddd4444-0000-4000-8000-00000000000d", {"n.md": "n\n"})
+        r = subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(HERE, "scratchpad.py"), "tmp-unlink",
+                            self.root], stdin=subprocess.DEVNULL, capture_output=True, timeout=60, env=self.env())
+        self.assertEqual(r.returncode, 0, r)
+        self.assert_unlinked(late, late_target, {"n.md": "n\n"})
+        self.assertTrue(is_link(other), "a hand run touched a link elsewhere")
+
+
+def make_link(link, target):
+    if os.name == "nt":
+        import _winapi
+        _winapi.CreateJunction(os.path.abspath(target), os.path.abspath(link))
+    else:
+        os.symlink(os.path.abspath(target), link, target_is_directory=True)
+
+
+def unlink(link):
+    os.unlink(link) if os.path.islink(link) else os.rmdir(link)
+
+
 class AskPaths(unittest.TestCase):
     """Which written paths the ask names, on scratchpad.py's own functions."""
 
