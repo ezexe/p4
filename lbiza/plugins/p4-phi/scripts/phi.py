@@ -2198,10 +2198,12 @@ def h_task(payload):
 
 
 def mark_fork(s, me, payload):
-    """A session the app records as a fork, or whose first message is a fork's, is kept as one."""
+    """A session the app records as a fork, that SessionStart says began as one, its `source` "fork" as hooks.md's
+    SessionStart input names it, or whose first message is a fork's, is kept as one."""
     if s.get("forked"):
         return
-    if (me.rec or {}).get("forkedFromSessionId") or FORK_HEAD.match(str(payload.get("prompt") or "")):
+    if (me.rec or {}).get("forkedFromSessionId") or payload.get("source") == "fork" \
+            or FORK_HEAD.match(str(payload.get("prompt") or "")):
         s["forked"] = True
 
 

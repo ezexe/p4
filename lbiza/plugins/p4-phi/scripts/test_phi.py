@@ -289,6 +289,15 @@ class Sessions(unittest.TestCase):
         self.assertEqual(s["cliSessionIds"], [CLI[KID]])
         self.assertNotIn("spawnedFrom", self.t.session(TOP))       # an orchestrator: its record, started by none
 
+    def test_a_fork_source_with_no_app_record_is_kept_as_a_fork(self):
+        """ezexe/p4#144: hooks.md, SessionStart input, `source` is "fork" for a new session forked from an existing
+        one, so a fork is known with no `forkedFromSessionId` in an app record."""
+        lone = "local_fork00001"
+        self.t.hook(START, lone, {"hook_event_name": "SessionStart", "source": "fork"})
+        self.assertTrue(self.t.session(lone).get("forked"))
+        self.t.hook(START, KID, {"hook_event_name": "SessionStart", "source": "startup"})
+        self.assertFalse(self.t.session(KID).get("forked"))
+
     def test_a_starters_process_never_adds_its_transcript_to_its_childs_record(self):
         """ezexe/p4#191: a hook of the starter's process that handles its child's record, as when it reads the
         child's report, reports the starter's transcript id; the child's cliSessionIds keep only the child's own."""
