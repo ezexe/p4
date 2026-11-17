@@ -2178,7 +2178,7 @@ def ready_path(home):
 
 def _ready_mark(s):
     """What makes a session ready to archive: its finished mark, or its superseded mark until it is messaged again,
-    which _rebase records as the mark's `told`, since a superseded session messaged again is live."""
+    which _rebase records as the superseded mark's `told`, since a superseded session messaged again is live."""
     st = s.get("stale")
     return s.get("doneRetired") or (st if isinstance(st, dict) and not st.get("told") else None)
 
