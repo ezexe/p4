@@ -1,5 +1,5 @@
 {
-  "description": "p4-phi's hooks. run-hook.sh runs scripts/phi.py at SessionStart, UserPromptSubmit, Stop and StopFailure. recall-hook.sh runs scripts/hook.py at every event here, ConfigChange among them, and hook.py hands phi.py its checks around a tool call and at a subagent's stop.",
+  "description": "p4-phi's hooks. run-hook.sh runs scripts/phi.py at SessionStart, UserPromptSubmit, Stop, StopFailure and SessionEnd, whose hooks share 1.5 seconds that a plugin's timeout does not raise. recall-hook.sh runs scripts/hook.py at every event here, ConfigChange among them, and hook.py hands phi.py its checks around a tool call and at a subagent's stop.",
   "hooks": {
     "SessionStart": [
       {
@@ -84,6 +84,16 @@
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" stop-failure",
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" session-end"
           }
         ]
       }

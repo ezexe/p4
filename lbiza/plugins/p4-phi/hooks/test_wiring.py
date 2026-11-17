@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -39,6 +40,7 @@ EVENTS = {"SessionStart": ("startup", "resume", "clear", "compact", "fork"),
           "StopFailure": ("rate_limit", "authentication_failed", "oauth_org_not_allowed", "account_on_hold",
                           "billing_error", "invalid_request", "model_not_found", "server_error", "max_output_tokens",
                           "cloud_credential_error", "unknown"),
+          "SessionEnd": ("clear", "resume", "logout", "prompt_input_exit", "other"),
           "PreToolUse": "tools", "PostToolUse": "tools",
           "PostToolUseFailure": "tools", "SubagentStop": "agents", "SubagentStart": "agents",
           "ConfigChange": ("user_settings", "project_settings", "local_settings", "policy_settings", "skills")}
@@ -80,6 +82,8 @@ def payload(event, matcher, proj, tmp):
     elif event == "StopFailure":
         body.update(error="rate_limit", error_details="429 Too Many Requests",
                     last_assistant_message="API Error: Rate limit reached")
+    elif event == "SessionEnd":
+        body["reason"] = "prompt_input_exit"
     elif event in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
         tool = tool_for(matcher)
         body.update(tool_name=tool, tool_use_id="toolu_wiring1",
@@ -193,6 +197,38 @@ class Wiring(unittest.TestCase):
                 shutil.copytree(seed, proj)
                 return proj
             self.run_all("a new store", make)
+
+
+class SessionEndBudget(unittest.TestCase):
+    """SessionEnd hooks share 1.5 seconds, and a plugin hook's timeout does not raise it, by
+    https://code.claude.com/docs/en/hooks#sessionend."""
+
+    BUDGET = 1.5
+
+    def test_the_session_end_entry_logs_the_end_and_its_reason_within_the_budget(self):
+        """ezexe/p4#151: the entry, run as Claude Code runs it, logs the end as a turn's end with its reason. Each run
+        is a cold interpreter, and the fastest of three is held to the budget, so a machine busy with the rest of the
+        suite does not decide it."""
+        e = {ev: (ev, m, x) for ev, m, x in entries() if x["command"].endswith((" user-prompt-submit", " session-end",
+                                                                                " layout"))}
+        self.assertNotIn("timeout", e["SessionEnd"][2], "a plugin's timeout does not raise the shared budget")
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            proj = os.path.join(tmp, "a new project")
+            os.makedirs(proj)
+            for ev in ("SessionStart", "UserPromptSubmit"):
+                r = run_entry(*e[ev], proj, tmp)
+                self.assertEqual((r.returncode, r.stderr.strip()), (0, ""), ev)
+            spent = []
+            for _ in range(3):
+                started = time.perf_counter()
+                r = run_entry(*e["SessionEnd"], proj, tmp)
+                spent.append(time.perf_counter() - started)
+                self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+            self.assertLess(min(spent), self.BUDGET, spent)
+            log = os.path.join(proj, ".claude", "p4", "phi", "sessions", SESSION, "log.jsonl")
+            with open(log, encoding="utf-8") as f:
+                row = json.loads(f.read().splitlines()[-1])
+            self.assertEqual((row["hook"], row["event"], row["ended"]), ("stop", "SessionEnd", "prompt_input_exit"))
 
 
 class Matchers(unittest.TestCase):

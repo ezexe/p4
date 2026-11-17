@@ -1415,10 +1415,10 @@ class Wiring(unittest.TestCase):
         d = {ev: [g for g in gs if all("/hooks/run-hook.sh" in x["command"] for x in g["hooks"])]
              for ev, gs in jload(HOOKS_JSON)["hooks"].items()}
         d = {ev: gs for ev, gs in d.items() if gs}                  # phi.py's own; retrieval's run recall-hook.sh
-        self.assertEqual(sorted(d), ["SessionStart", "Stop", "StopFailure", "UserPromptSubmit"],
+        self.assertEqual(sorted(d), ["SessionEnd", "SessionStart", "Stop", "StopFailure", "UserPromptSubmit"],
                          "frozen: the checks around a tool call ride on the retrieval hooks' entries")
         for event, name in (("SessionStart", START), ("UserPromptSubmit", PROMPT), ("Stop", STOP),
-                            ("StopFailure", "stop-failure")):
+                            ("StopFailure", "stop-failure"), ("SessionEnd", "session-end")):
             cmd = d[event][0]["hooks"][0]["command"]
             self.assertIn("run-hook.sh", cmd)
             self.assertTrue(cmd.endswith(" " + name), cmd)

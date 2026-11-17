@@ -2864,9 +2864,10 @@ def h_stop(payload):
 
 def h_turn_end(payload):
     """A turn that ended with no Stop. Claude Code runs StopFailure in place of Stop when a turn ends on an API error,
-    by https://code.claude.com/docs/en/hooks#stopfailure, ezexe/p4#161. The hook logs one line as `stop`, with
-    the event and the error, so puppeteer.working reads the session as out of its turn. It keeps no turn row,
-    since the transcript Claude Code keeps holds the failed turn."""
+    by https://code.claude.com/docs/en/hooks#stopfailure, ezexe/p4#161, and SessionEnd when the session ends, an
+    exit in a turn among them, ezexe/p4#151. The hook logs one line as `stop`, with the event and the error or the
+    reason, so puppeteer.working reads the session as out of its turn. It keeps no turn row, since the transcript
+    Claude Code keeps holds the turn, and it writes nothing more, since SessionEnd hooks share 1.5 seconds."""
     me = Me(payload)
     if not me.home or not me.id or not load_session(me.home, me.id).get("sessionId"):
         return None
@@ -3401,6 +3402,7 @@ HOOKS = {"session-start": ("SessionStart", h_session_start),
          "user-prompt-submit": ("UserPromptSubmit", h_user_prompt_submit),
          "stop": ("Stop", h_stop),
          "stop-failure": ("StopFailure", h_turn_end),
+         "session-end": ("SessionEnd", h_turn_end),
          "start-advice": ("PreToolUse", h_start_advice),
          "branch-guard": ("PreToolUse", h_branch_guard),
          "store-guard": ("PreToolUse", h_store_guard),
