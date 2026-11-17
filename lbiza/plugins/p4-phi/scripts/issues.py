@@ -20,6 +20,9 @@
   archive  a finished child, marked `disposable` or archiving itself, is counted as archived only with the issue
            closed and the test passed, its outcome note on the parent carrying the issue link, the commit and the test.
            A child that archives itself before it is finished is counted as archived at once, its open steps named.
+  memory   a memory that an `issue: owner/name#N` line in its front matter ties to an issue is cut back at the Stop
+           after that issue's closing commit reaches the remote default branch: one pointer line names the issue and
+           the code that carries its rule, and its line in MEMORY.md says the same.
 
 `gh` is P4_PHI_GH when set, and a .py file named there is run with this Python; else `gh` on PATH. P4_PHI_ISSUES
 set to 0 or false, read as p4conf reads it, or p4.json's phi.issues false turns the loop off. phi.py calls these from its hooks.
@@ -645,6 +648,133 @@ def _pushed(repo, sha):
     """True when a commit is on a remote branch."""
     out = git(repo, "branch", "-r", "--contains", sha)
     return bool(out.strip())
+
+
+# --- a behaviour memory tied to its issue, cut back to a pointer once that issue lands ---------------------------------
+
+FRONT = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?(.*)\Z", re.S)
+TIED = re.compile(r"(?mi)^issue:\s*(?:https?://github\.com/)?([\w.-]+/[\w.-]+?)(?:#|/issues/)(\d+)\s*$")
+LANDED_KEY = re.compile(r"(?mi)^landed:")
+INDEX = "MEMORY.md"
+
+
+def memory_dir(home):
+    try:
+        import p4conf
+        return p4conf.sub(home, "memory") if home else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def tied_memories(home):
+    """Each memory in the store's memory folder that an `issue: owner/name#N` line in its front matter ties to an
+    issue and that is not cut back yet, as its path, front matter, `owner/name` and number. Nothing runs git."""
+    d = memory_dir(home)
+    try:
+        names = sorted(os.listdir(d)) if d else []
+    except OSError:
+        return []
+    out = []
+    for f in names:
+        if not f.endswith(".md") or f.lower() == INDEX.lower():
+            continue
+        try:
+            with open(os.path.join(d, f), encoding="utf-8") as fh:
+                m = FRONT.match(fh.read().replace("\r\n", "\n"))
+        except (OSError, UnicodeDecodeError):
+            continue
+        t = TIED.search(m.group(1)) if m else None
+        if t and not LANDED_KEY.search(m.group(1)):
+            out.append((os.path.join(d, f), m.group(1), t.group(1), int(t.group(2))))
+    return out
+
+
+def default_ref(repo):
+    """The remote default branch as fetched, such as origin/main, '' for none."""
+    ref = git(repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    if ref:
+        return ref
+    return next((r for r in ("origin/main", "origin/master") if git(repo, "rev-parse", "--verify", "-q", r)), "")
+
+
+def closed_on_default(repo, n):
+    """The short sha and subject of the commit on the remote default branch whose message closes issue `n` of this
+    repository, as a bare `#N` or as its own `owner/name#N`; None when none is there."""
+    ref = default_ref(repo)
+    if not ref:
+        return None
+    here = github_of(repo)
+    whose = f"({here.replace('.', '[.]')})?" if here else ""
+    out = git(repo, "log", ref, "-E", "-i", "-n", "1", "--format=%h%x1f%s",
+              rf"--grep=(close[sd]?|fix(e[sd])?|resolve[sd]?) +{whose}#{n}([^0-9]|$)")
+    return tuple(out.split("\x1f", 1)) if "\x1f" in out else None
+
+
+def pointer(slug, n, sha, subj, files):
+    """The one line a memory is cut back to: the issue, and the commit and files that carry its rule."""
+    shown = ", ".join(f"`{f}`" for f in files[:4]) + (f" and {len(files) - 4} more" if len(files) > 4 else "")
+    return (f"Pointer: the plugin carries this rule since {slug}#{n} landed in commit {sha} \"{relay._short(subj, 80)}\""
+            + (f", in {shown}" if shown else "") + "; the rule lives there, not in this memory.")
+
+
+def cut_back(home, cwd=""):
+    """Each memory tied to an issue whose closing commit is on the remote default branch of a checkout at hand,
+    the cwd's repository or one nested under it, cut back to its pointer: the body becomes one line naming the
+    issue and the code that carries the rule, the front matter's description says the same and gains a `landed:`
+    line, and the memory's line in MEMORY.md is rewritten to match. Returns the paths cut back."""
+    if not on(home):
+        return []
+    tied = tied_memories(home)
+    if not tied:
+        return []
+    repos = {}
+    for repo in [relay.repo_of(cwd) if cwd else ""] + nested_repos(cwd):
+        slug = github_of(repo).lower() if repo else ""
+        if slug and slug not in repos:
+            repos[slug] = repo
+    out = []
+    for path, front, slug, n in tied:
+        repo = repos.get(slug.lower())
+        hit = closed_on_default(repo, n) if repo else None
+        if not hit:
+            continue
+        sha, subj = hit
+        files = [f for f in git(repo, "show", "--name-only", "--format=", sha).splitlines() if f.strip()]
+        line = pointer(slug, n, sha, subj, files)
+        short = f"carried by the plugin since {slug}#{n} landed in {sha}"
+        head = re.sub(r"(?mi)^description:.*$", lambda _: f"description: {short}", front)
+        if not re.search(r"(?mi)^description:", head):
+            head += f"\ndescription: {short}"
+        _write(path, f"---\n{head}\nlanded: {sha}\n---\n\n{line}\n")
+        _reindex(os.path.dirname(path), os.path.basename(path), short)
+        out.append(path)
+    return out
+
+
+def _write(path, text):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def _reindex(folder, name, short):
+    """The memory's line in MEMORY.md, its link kept and the rest made `short`."""
+    p = os.path.join(folder, INDEX)
+    try:
+        with open(p, encoding="utf-8") as f:
+            lines = f.read().replace("\r\n", "\n").split("\n")
+    except (OSError, UnicodeDecodeError):
+        return
+    link = re.compile(r"^(.*?\]\(" + re.escape(name) + r"\))")
+    changed = False
+    for i, ln in enumerate(lines):
+        m = link.match(ln)
+        if m and ln != f"{m.group(1)} — {short}":
+            lines[i] = f"{m.group(1)} — {short}"
+            changed = True
+    if changed:
+        _write(p, "\n".join(lines))
 
 
 def landed(repo, sha, closes):

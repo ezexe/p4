@@ -2825,6 +2825,10 @@ def h_stop(payload):
             RAN["anchor"] = a.get("version")
     render_page(me.home, s["sessionId"])
     render_page(me.home, above)
+    try:                                           # a memory whose issue landed is cut back to its pointer
+        RAN["memories_cut"] = len(issues.cut_back(me.home, payload.get("cwd") or s.get("cwd") or ""))
+    except Exception:  # noqa: BLE001
+        pass
     relay.track(me.home)                           # staged for the store's next commit, so it reaches the others
     RAN.update(turn=row["id"], done=bool(row["done"]))
     now_s = load_session(me.home, s["sessionId"]) or s

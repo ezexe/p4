@@ -346,6 +346,41 @@ class Loop(unittest.TestCase):
         with open(notes, encoding="utf-8") as f:
             self.assertIn("https://github.com/ezexe/demo/issues/7, closed", f.read())
 
+    def test_the_landing_that_closes_a_memorys_issue_cuts_it_to_a_pointer(self):
+        """ezexe/p4#226: a feedback memory tied to ezexe/demo#7 by an `issue:` line in its front matter is cut back at
+        the Stop that follows the landing of a `Closes #7` commit on the default branch: its body becomes one pointer
+        line naming the issue and the code that carries the rule, which the gap check reads as carried, and its line
+        in MEMORY.md says the same. Before the landing it is kept whole, and a memory tied to another issue is too."""
+        import gaps
+        import p4conf
+        mem = p4conf.sub(self.t.p4, "memory")
+        rule = ("---\nname: one lander\ndescription: only the orchestrator pushes\ntype: feedback\n"
+                "issue: ezexe/demo#7\n---\n\nOnly the tree's orchestrator pushes; a child commits and reports.\n")
+        tied, other = os.path.join(mem, "one-lander.md"), os.path.join(mem, "other.md")
+        write(tied, rule)
+        write(other, rule.replace("#7", "#9"))
+        write(os.path.join(mem, "MEMORY.md"), "# Memory index\n\n- [One lander](one-lander.md) — only the orchestrator "
+                                              "pushes\n- [Other](other.md) — x\n")
+        self.commit("lib: fix x\n\nCloses #7")
+        sha = self.git(self.work, "rev-parse", "--short", "HEAD").stdout.strip()
+        self.assertEqual(self.t.stop(TOP, "land it", report="Committed.", uuid="m1").returncode, 0)
+        self.assertEqual(read(tied), rule, "kept whole while the commit is on no remote default branch")
+        self.git(self.work, "push", "-q", "-u", "origin", "main")
+        r = self.t.stop(TOP, "land it", report="Pushed.", uuid="m2")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        body = read(tied)
+        self.assertNotIn("a child commits and reports", body)
+        self.assertIn(f"Pointer: the plugin carries this rule since ezexe/demo#7 landed in commit {sha} \"lib: fix x\""
+                      f", in `lib/x.py`", body)
+        self.assertIn(f"\nlanded: {sha}\n", body)
+        self.assertIn("issue: ezexe/demo#7", body, "it stays tied to its issue")
+        self.assertTrue(gaps.carried(gaps.body_of(body)), "the gap check reads the pointer as carried")
+        index = read(os.path.join(mem, "MEMORY.md"))
+        self.assertIn(f"- [One lander](one-lander.md) — carried by the plugin since ezexe/demo#7 landed in {sha}\n",
+                      index)
+        self.assertIn("- [Other](other.md) — x", index)
+        self.assertEqual(read(other), rule.replace("#7", "#9"), "a memory whose issue did not land is kept whole")
+
     def test_a_run_in_the_background_whose_process_is_gone_is_run_again_at_the_next_stop(self):
         """A regression test that outlasts P4_PHI_PROOF_S runs on in the background through the `proof-run` entry,
         which writes its result to proof.json. A run in the background that died leaves proof.json in state running
