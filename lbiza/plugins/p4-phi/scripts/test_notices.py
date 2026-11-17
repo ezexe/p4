@@ -67,6 +67,14 @@ class Notices(unittest.TestCase):
         with open(notices.path(self.p4, notices.RESOLVED), encoding="utf-8") as f:
             answers = [l.rstrip("\n").split("\t") for l in f if l.strip() and not l.startswith("#")]
         self.assertEqual([(a[3], a[4], a[6]) for a in answers], [("hook stop", "RuntimeError", "released p4-phi 0.11.6")])
+        # the same hook failing again under the new release, that same day, is a notice of its own, noted once
+        with mock.patch.object(notices, "plugin_version", return_value="0.11.6"):
+            self.assertTrue(notices.notify(self.p4, "hook stop", RuntimeError("boom"), "abcd1234", now="2026-11-09 11:00"))
+            self.assertFalse(notices.notify(self.p4, "hook stop", RuntimeError("boom"), "abcd1234", now="2026-11-09 12:00"))
+            self.assertEqual([(r["component"], r["time"]) for r in notices.open_notices(self.p4)],
+                             [("json ranker", "2026-11-09 10:00"), ("hook stop", "2026-11-09 11:00")])
+        with open(notices.path(self.p4), encoding="utf-8") as f:
+            self.assertTrue(f.readline().rstrip("\n").endswith("\terror\tversion"), "the header does not name the 7th field")
 
     def test_an_answer_closes_only_the_notice_of_its_kind(self):
         """Two notices of one minute and one component, each with a plain-string error and so an empty error field,

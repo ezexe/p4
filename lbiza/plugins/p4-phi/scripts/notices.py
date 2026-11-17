@@ -13,7 +13,8 @@ that is unreadable or not of its kind, or `hook <name>`, for a hook that raised,
 notice_family also files `pt ranker` and `ranker server` under the .pt ranker that ezexe/phi's p4-model trains, and
 `train` under a training round. A hook's notice is of the family `release`: no training fixes a hook, so p4-model
 owes none for it, and open_notices answers it once a later p4-phi release reads it. The same component and kind is
-noted once a day: a store whose model is broken for a week has seven rows, not one per message.
+noted once a day under one p4-phi version: a store whose model is broken for a week has seven rows, not one per
+message, and a hook that fails again under a newer release is noted that same day.
 
     notify(p4, "json ranker", ValueError("unreadable"), session)   -> True when a row was appended
     open_notices(p4)                                                -> the rows not yet answered
@@ -32,7 +33,7 @@ import p4conf  # noqa: E402
 
 NOTICES = "retrain-needed.tsv"
 RESOLVED = "retrain-resolved.tsv"
-HEAD = "# p4-phi retrain notices — time\tepoch\tsession\tcomponent\tkind\terror\n"
+HEAD = "# p4-phi retrain notices — time\tepoch\tsession\tcomponent\tkind\terror\tversion\n"
 FAMILIES = (("json ranker", "json"), ("pt ranker", "ranker"), ("ranker server", "ranker"), ("hook", "release"),
             ("train", "train"))
 PLUGIN_JSON = os.path.join(os.path.dirname(HERE), ".claude-plugin", "plugin.json")
@@ -90,16 +91,18 @@ def notify(p4, component, error, session="", now=None):
     stamp = now or time.strftime("%Y-%m-%d %H:%M")
     kind = type(error).__name__ if isinstance(error, BaseException) else str(error or "failure")
     text = " ".join(str(error).split())[:300] if isinstance(error, BaseException) else ""
-    p = path(p4)
+    p, version = path(p4), plugin_version()
     for r in _rows(p):
-        if r["component"] == component and r["kind"] == kind and r["time"][:10] == stamp[:10]:
+        # a release since the day's earlier notice may have answered it, so a failure under it is noted anew
+        if (r["component"] == component and r["kind"] == kind and r["time"][:10] == stamp[:10]
+                and r["version"] == version):
             return False
     os.makedirs(os.path.dirname(p), exist_ok=True)
     new = not os.path.exists(p)
     with open(p, "a", encoding="utf-8", newline="\n") as f:
         if new:
             f.write(HEAD)
-        f.write(f"{stamp}\t{time.time():.6f}\t{(session or '')[:8]}\t{component}\t{kind}\t{text}\t{plugin_version()}\n")
+        f.write(f"{stamp}\t{time.time():.6f}\t{(session or '')[:8]}\t{component}\t{kind}\t{text}\t{version}\n")
     return True
 
 
