@@ -1732,10 +1732,11 @@ def _open_pr(repo, branch):
     """True when gh lists an open pull request for the branch, False when it lists none, and None when gh is
     missing, fails or takes longer than GIT_S, so whether there is one could not be read."""
     import shutil
-    if not shutil.which("gh"):
+    exe = shutil.which("gh")              # on Windows it may be gh.cmd or gh.bat, which only its full path starts
+    if not exe:
         return None
     try:
-        r = subprocess.run(["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "number", "-q", "length"],
+        r = subprocess.run([exe, "pr", "list", "--head", branch, "--state", "open", "--json", "number", "-q", "length"],
                            cwd=repo, capture_output=True, text=True, timeout=GIT_S)
     except (OSError, subprocess.SubprocessError):
         return None

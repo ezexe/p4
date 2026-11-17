@@ -881,6 +881,24 @@ class MergedWorktrees(unittest.TestCase):
                                       "loose": "a detached checkout, no branch to judge"})
 
 
+class GhWrapper(unittest.TestCase):
+    """relay._open_pr runs the gh it found, so a gh installed as a .cmd wrapper answers as gh.exe would."""
+
+    @unittest.skipUnless(os.name == "nt", "a .cmd wrapper is a Windows install")
+    def test_a_gh_cmd_wrapper_is_run(self):
+        tmp = tempfile.mkdtemp(prefix="p4-phi-gh-")
+        old = os.environ.get("PATH", "")
+        try:
+            os.environ["PATH"] = tmp + os.pathsep + os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
+            for listed, want in (("1", True), ("0", False)):
+                with open(os.path.join(tmp, "gh.cmd"), "w") as f:
+                    f.write(f"@echo {listed}\n")
+                self.assertEqual(relay._open_pr(tmp, "topic"), want, listed)
+        finally:
+            os.environ["PATH"] = old
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class SharedHome(unittest.TestCase):
     """Two projects naming one store as `phi.home`: a session in one hears a session in the other."""
 
