@@ -161,6 +161,35 @@ class NativeMemory(unittest.TestCase):
                                         capture_output=True).returncode, 0)
 
 
+class OnceAtStart(unittest.TestCase):
+    """ezexe/p4#130, p4-temportal's half: Claude Code loads the memory index itself, so none of p4-temportal's
+    SessionStart hooks hands a line of it again, with autoMemoryDirectory naming the store or not, at a startup, a
+    clear or a compaction."""
+
+    def test_no_start_hook_hands_a_memory_line(self):
+        sh = shutil.which("sh")
+        if not sh:
+            self.skipTest("no sh on PATH")
+        base = tempfile.mkdtemp(prefix="p4-temportal-memory-once-")
+        self.addCleanup(wipe, base)
+        root = os.path.join(base, "proj")
+        store = os.path.join(root, ".claude", "p4", "temportal", "memory")
+        put(os.path.join(store, "MEMORY.md"), "- [Rule zq](rule-zq.md) — feedback rule zq-4417\n")
+        put(os.path.join(store, "rule-zq.md"), "---\nname: rule-zq\nmetadata:\n  type: feedback\n---\n\nzq-4417\n")
+        with open(os.path.join(HERE, "hooks.json"), encoding="utf-8") as f:
+            groups = json.load(f)["hooks"]["SessionStart"]
+        for source in ("startup", "clear", "compact"):
+            cmds = [h["command"] for g in groups
+                    if g.get("matcher", "") in ("", "*") or source in g["matcher"].split("|") for h in g["hooks"]]
+            for app in (os.path.join(base, "config", "projects", "slug", "memory"), store):
+                env = clean_env(CLAUDE_PLUGIN_ROOT=os.path.dirname(HERE), CLAUDE_PROJECT_DIR=root, P4_MEMORY_APPDATA=app,
+                                GIT_CEILING_DIRECTORIES=base)
+                stdin = json.dumps({"cwd": root, "source": source, "hook_event_name": "SessionStart"}).encode()
+                out = "".join(subprocess.run([sh, "-c", c], input=stdin, env=env, capture_output=True, timeout=60)
+                              .stdout.decode("utf-8", "replace") for c in cmds)
+                self.assertNotIn("zq-4417", out, f"{source}, auto memory directory {app}: a memory line was handed")
+
+
 class ChosenByUser(unittest.TestCase):
     """By permissions.md, a local settings file git does not track is the user's own, and a tracked one, one outside
     a git repository or one under a `.claude` that is a link is the repository's."""
