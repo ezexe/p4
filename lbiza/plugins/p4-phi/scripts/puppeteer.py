@@ -681,6 +681,10 @@ def watch(home, top, once=False, max_s=None, interval=None):
     os.environ.setdefault("GIT_TERMINAL_PROMPT", "0")      # no git or gh call of a watcher ever waits on a person
     os.environ.setdefault("GH_PROMPT_DISABLED", "1")
     began = now()
+    try:                                            # the project's caps, WATCH_S and STALE_S among them
+        _phi().project_conf(home)
+    except Exception:  # noqa: BLE001
+        pass
     while True:
         if not os.path.isdir(relay._dir(home, top)):
             return 0

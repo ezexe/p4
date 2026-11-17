@@ -88,6 +88,19 @@ Every key is optional.
 | `puppeteer_chars` | 200000 | the characters p4-phi may hand a puppeteer between compactions before its boundary notice says so |
 | `track` | `false` | `true`: the session tree is committed to the store |
 | `home` | none | a git remote: related repositories share one session tree |
+| `max_depth` | 3 | the depth, 1 to 20, at which a session starts no session of its own |
+| `max_children` | 8 | the live children, 1 to 50, past which a session starts none |
+| `sibling_turns` | 5 | the siblings' last turns, 0 to 50, a start background holds |
+| `own_turns` | 3 | a session's own turns, 0 to 50, its background holds after a compaction or a clear |
+| `chain_max` | 8 | the sessions, 1 to 50, followed upward from a session |
+| `turn_steps` | 12 | the steps and workers, 1 to 100, kept with a turn |
+| `tree_checks` | 6 | the read-only checks of its trees, 0 to 100, an orchestrator runs in one work step |
+| `keep_going_max` | 2 | the times, 0 to 7, one turn is sent back while it has open steps |
+| `compactions` | 3 | the compactions, 1 to 100, after which a puppeteer's notice offers a successor |
+| `watch_s` | 5.0 | the watcher's tick in seconds, 1 to 600 |
+| `stale_s` | 86400.0 | the seconds, 60 to 2,592,000, after which an orchestrator with open work and no turn is stale |
+
+A cap's value of another type or out of its range keeps the default.
 
 The `recall` section's keys and defaults are listed in `scripts/p4conf.py`, each beside its meaning.
 

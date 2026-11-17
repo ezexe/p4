@@ -1100,6 +1100,31 @@ def project_conf(store):
     LEVELS_ON = d.get("levels") is not False
     plans.LEVELS = LEVELS_ON
     plans.CHILD_LEVELS = plans.child_levels(d.get("child_levels"))   # one key sets each kind's model and effort
+    apply_caps(d)
+
+
+# The caps a project sets in p4.json's `phi` section: each key, the module and constant it sets, and the least and most
+# value it takes. OFFER_MAX is not among them: it is the app's own limit, the AskUserQuestion tool taking at most four
+# options to a question.
+CAPS = {"max_depth": ("phi", "MAX_DEPTH", 1, 20), "max_children": ("phi", "MAX_CHILDREN", 1, 50),
+        "sibling_turns": ("phi", "OTHERS", 0, 50), "own_turns": ("phi", "OWN", 0, 50),
+        "chain_max": ("phi", "CHAIN_MAX", 1, 50), "turn_steps": ("phi", "TURN_STEPS", 1, 100),
+        "tree_checks": ("phi", "TREE_CHECKS", 0, 100),
+        "keep_going_max": ("plans", "KEEP_GOING_MAX", 0, 7),       # under hooks.md's 8 consecutive continuations
+        "compactions": ("controls", "COMPACTIONS", 1, 100),
+        "watch_s": ("puppeteer", "WATCH_S", 1.0, 600.0), "stale_s": ("puppeteer", "STALE_S", 60.0, 30 * 86400.0)}
+CAP_DEFAULTS = {}
+
+
+def apply_caps(d):
+    """Sets each cap from the `phi` section `d`, or back to its default where `d` holds no fitting value: a hook run
+    in process keeps module globals, so a store that sets none gets the defaults again."""
+    mods = {"phi": sys.modules[__name__], "plans": plans, "controls": controls, "puppeteer": puppeteer}
+    for key, (mod, name, least, most) in CAPS.items():
+        default = CAP_DEFAULTS.setdefault(key, getattr(mods[mod], name))
+        v = d.get(key, default) if isinstance(d, dict) else default
+        ok = setting_fits(v, default) and least <= v <= most
+        setattr(mods[mod], name, type(default)(v) if ok else default)
 
 
 TOP_RULE = ("This is the orchestrator of its tree, so it keeps itself free for orchestration: planning, "
