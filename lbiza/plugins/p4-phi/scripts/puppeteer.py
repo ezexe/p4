@@ -1020,6 +1020,16 @@ def load_draft(home, sid, did):
     return relay._read_json(os.path.join(drafts_dir(home, sid), f"{did}.json")) if sid and did else {}
 
 
+RUN_WORDS = 8                    # words in a row of a message that a brief handed to another session may not hold
+
+
+def shares_run(sent, text, n=RUN_WORDS):
+    """True when `text` holds a run of `n` words of `sent`, compared word by word with case and punctuation dropped."""
+    words = lambda x: re.findall(r"[a-z0-9']+", str(x).lower())
+    have, w = " " + " ".join(words(text)) + " ", words(sent)
+    return any(" " + " ".join(w[k:k + n]) + " " in have for k in range(len(w) - n + 1))
+
+
 def topic_of(req):
     first = re.split(r"(?<=[.!?])\s+|\n+", " ".join(str(req).split()), maxsplit=1)[0]
     first = re.sub(r"^\W*(?:(?:please|now that|now|also|and|so|ok|okay|can you|could you)\s+)+", "", first, flags=re.I)
@@ -1037,8 +1047,11 @@ def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
     parent = sid if read["within"] or relay._parent(s) else ""
     route = read["routes"][0] if read["routes"] else None
     title = topic_of(reading["title"] if reading else req)
-    if reading:
+    own = bool(reading) and not shares_run(req, reading["text"])
+    if reading and own:                             # the session's own words for its reading
         title = f"Reading {reading['k']}: " + relay.clause_cut(reading["title"], 46).strip(" .,;:")
+    elif reading:                                   # cut from the message: named by number, quoting none of it
+        title = f"Reading {reading['k']} of {reading['n']}"
     repo = next(iter(issues.repos_named(req, base)), ("", ""))
     here = relay.repo_of(base) if base else ""
     slug = repo[1] or (issues.github_of(here) if here else "")
@@ -1048,8 +1061,9 @@ def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
         slug, named = full.group(1), int(full.group(2))
     lines = [f"# {title}", "", f"Task: {title}.", ""]
     if reading:
-        lines += [f"This session takes one reading of the task, reading {reading['k']} of {reading['n']}: "
-                  f"{reading['text']}",
+        lines += [f"This session takes one reading of the task, reading {reading['k']} of {reading['n']}"
+                  + (f": {reading['text']}" if own else ", which its parent session states below as its own "
+                     "instruction."),
                   "Work only that reading, and end your report with one line `Result: <what this reading comes to>`, "
                   "which its parent session merges with the other readings.", ""]
     if route:
@@ -1233,7 +1247,10 @@ def explore_text(home, s, g, drafts):
     return (f"phi (p4-phi): this message of ezexe's is under-determined, with {len(drafts)} distinct "
             f"readings, and one draft would have to guess between them. Start one child for each reading, siblings "
             f"under this session, each with exactly the call given; this session then merges their `Result:` lines "
-            f"as group {g['id']}, and only a fork that survives the merge goes to ezexe, as one `AskUserQuestion`:\n"
+            f"as group {g['id']}, and only a fork that survives the merge goes to ezexe, as one `AskUserQuestion`. "
+            f"A brief whose reading is cut from the message names it by number only: before that call, restate the "
+            f"reading under the brief as your own instruction to the child, what it is to try and why, quoting no "
+            f"message:\n"
             + "\n".join(lines))
 
 

@@ -58,6 +58,14 @@ def flat_(text):
     return " ".join(str(text or "").split())
 
 
+def runs_of(sent, text, n=8):
+    """The runs of `n` words of `sent` that `text` holds, compared word by word with case and punctuation dropped."""
+    words = lambda x: re.findall(r"[a-z0-9']+", str(x).lower())
+    have = " " + " ".join(words(text)) + " "
+    w = words(sent)
+    return [" ".join(w[k:k + n]) for k in range(len(w) - n + 1) if " " + " ".join(w[k:k + n]) + " " in have]
+
+
 def call_in(ctx, k=0):
     """The k-th exact start_session input a hook's text carries."""
     piece = ctx.split("`mcp__ccd_session__start_session` with ")[k + 1]
@@ -829,6 +837,7 @@ class Scorers(Base):
                if e["case"] == "others" and e["session"] == TOP and "retry" in e["message"]]
         self.assertEqual(got, [(KID, "relayed")])
 
+
 class Parallel(Base):
     EITHER = ("Fix the narwhal exporter's flush: either buffer the rows in memory until the table closes or write "
               "each row straight to the store")
@@ -841,8 +850,10 @@ class Parallel(Base):
         ctx = context(t.say(TOP, self.EITHER))
         self.assertIn("under-determined, with 2 distinct readings", ctx)
         calls = [call_in(ctx, 0), call_in(ctx, 1)]
-        self.assertIn("reading 1 of 2: buffer the rows in memory until the table closes", calls[0]["prompt"])
-        self.assertIn("reading 2 of 2: write each row straight to the store", calls[1]["prompt"])
+        self.assertIn("reading 1 of 2", calls[0]["prompt"])
+        self.assertIn("reading 2 of 2", calls[1]["prompt"])
+        for call in calls:                  # a reading's brief and title hand the child no run of the message's words
+            self.assertEqual(runs_of(self.EITHER, call["prompt"] + " " + call["title"]), [], call)
         self.assertIn("Result: <what this reading comes to>", calls[0]["prompt"])
         for kid, call in zip((KID, KID2), calls):
             t.say(kid, handed(call["prompt"]))
