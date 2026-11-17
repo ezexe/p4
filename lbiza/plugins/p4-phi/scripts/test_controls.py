@@ -752,6 +752,25 @@ class Supervisor(unittest.TestCase):
         self.assertIn("Indent with four spaces in the exporter, never tabs.", read(rules))
         self.assertNotIn("Indent with tabs in the exporter.", read(rules))
 
+    def test_a_finding_the_puppeteer_published_leaves_its_board(self):                          # 210
+        t = self.t
+        t.say(PUP, "Control the two trees")
+        t.say(TOP2, "Build the importer", proj=self.other)
+        t.cli(PUP, "controls", TOP2)
+        line = "the importer drops a row whose quote spans two lines"
+        t.cli(TOP2, "done", "its suite ran green", proj=self.other)
+        t.stop(TOP2, "Build the importer", report=f"Built.\nFinding: {line}", proj=self.other)
+        t.say(PUP, "what came in?")
+        board = os.path.join(t.dir(PUP), "board.md")
+        self.assertIn(line, read(board).split("## Findings")[1].split("\n## ")[0])
+        t.cli(PUP, "note", f"Published as ezexe/p4#301: {line}", "--source", "gh issue create", "--kind", "published")
+        t.say(PUP, "and the board?")
+        found = read(board).split("## Findings")[1].split("\n## ")[0]
+        self.assertNotIn(line, found)
+        self.assertIn("None.", found)
+
+    # --- shared by the #211, #224 and #226 drafts ---------------------------------------------------------------
+
     def pre(self, host, tool, inp, proj=None, **more):
         """One PreToolUse call through `recall-hook.sh lookup-check`, as hooks.json runs it: the reason or the
         context it hands, '' for none."""

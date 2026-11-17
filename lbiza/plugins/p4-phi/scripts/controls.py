@@ -269,9 +269,9 @@ RULE = (
     "the app nests a session under its starter for good, and names a session holding a start request to ezexe as a "
     "link. It checks the orchestrators and its own worker for stalls and context, and tunes their effort from their "
     "reports, with no one asking, by `mcp__ccd_session_mgmt__set_session_effort`, logging each change on its board; a "
-    "model is passed only on the start call and never changed after. `Finding:` lines are listed on its board under "
-    "Findings. It archives a session only on ezexe's pick, by the button or the multiple-choice question p4-phi hands "
-    "it.")
+    "model is passed only on the start call and never changed after. A `Finding:` line stays on its board until such a "
+    "note holds its text. It archives a session only on ezexe's pick, by the button or the multiple-choice question "
+    "p4-phi hands it.")
 PAIR = (
     "This session is controlled by a puppeteer: \"{title}\" `{pid}`, which ezexe filed in the sidebar "
     "section \"{section}\", lists this one among the sessions it controls. This session stays at the top of its own "
@@ -746,6 +746,13 @@ def findings(s):
     return out
 
 
+def published(line, notes):
+    """Whether a note of kind `published` names this `Finding:` line, so its issue exists and it leaves the board."""
+    said = " ".join(re.sub(r"^\s*Finding:\s*", "", str(line or "")).split())
+    return bool(said) and any(said in " ".join(PHI.clean(n.get("claim")).split())
+                              for n in notes if PHI.clean(n.get("kind")) == "published")
+
+
 def board(home, s):
     """Rewrites board.md when what it holds changed, and returns its path."""
     sid = s["sessionId"]
@@ -782,7 +789,7 @@ def board(home, s):
         lines.append("None.")
     lines += ["", "## Started on another session's behalf", ""]
     lines += [behalf_row(r) for r, _ in behalf_rows(home, s)] or ["None."]
-    found = findings(s)
+    found = [f for f in findings(s) if not published(f[2], notes)]
     lines += ["", "## Findings", ""]
     if found:
         lines += ["The `Finding:` lines of the reports of the controlled sessions and of the sessions of their trees. "
