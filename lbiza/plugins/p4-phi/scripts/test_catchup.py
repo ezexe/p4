@@ -16,7 +16,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import catchup  # noqa: E402
 
-M = catchup.MARKET
+M = "p4-marketplace"
 
 
 def write(path, data):
@@ -76,29 +76,23 @@ class Plugins(Base):
                      {"p4-phi": True, "p4-temportal": True, "p4-recall": False})
         self.assertEqual(catchup.run(self.project, os.path.join(self.project, ".claude", "p4")), "")
 
-    def test_old_cache_folders_are_counted_and_deleted_only_by_prune_cache(self):
+    def test_old_version_folders_are_claude_codes_own(self):
+        """Cleanup of previous versions, by https://code.claude.com/docs/en/plugins/loading.md: Claude Code "removes
+        that directory in a background cleanup 14 days later". catchup.py neither counts nor deletes them."""
+        for name in ("prune_cache", "old_cache", "size_text", "all_install_paths"):
+            self.assertFalse(hasattr(catchup, name), name)
         self.install([("p4-phi", "user", "0.7.0", None)], {"p4-phi": True})
-        cache = os.path.join(self.conf, "plugins", "cache", M)
-        write(os.path.join(cache, "p4-recall", "0.8.21", "scripts", "big.py"), "x" * 2048)
-        write(os.path.join(cache, "p4-phi", "0.6.0", "a.txt"), "y" * 1024)
-        n, size = catchup.old_cache()
-        self.assertEqual((n, size), (2, 3072))
-        line = catchup.run(self.project, os.path.join(self.project, ".claude", "p4"), sync=False)
-        self.assertIn("2 old version folder(s)", line)
-        self.assertIn("3.0 KB", line)
-        self.assertTrue(os.path.isdir(os.path.join(cache, "p4-recall", "0.8.21")), "nothing is deleted")
+        old = os.path.join(self.conf, "plugins", "cache", M, "p4-phi", "0.6.0")
+        write(os.path.join(old, "a.txt"), "y" * 1024)
         p4 = os.path.join(self.project, ".claude", "p4")
-        os.makedirs(p4, exist_ok=True)
-        self.assertIn("prune-cache", catchup.run(self.project, p4, sync=False))
-        self.assertEqual(catchup.run(self.project, p4, sync=False), "", "told once per count")
-        write(os.path.join(cache, "p4-phi", "0.5.0", "b.txt"), "z")
-        self.assertIn("3 old version folder(s)", catchup.run(self.project, p4, sync=False))
-        removed = catchup.prune_cache()
-        self.assertEqual(len(removed), 3)
-        self.assertTrue(os.path.isdir(os.path.join(cache, "p4-phi", "0.7.0")), "the folder an install uses stays")
-
-    def test_a_size_cut_short_is_a_floor(self):
-        self.assertEqual(catchup.size_text(-2048), "at least 2.0 KB")
+        os.makedirs(p4)
+        self.assertEqual(catchup.run(self.project, p4, sync=False), "")
+        self.assertTrue(os.path.isdir(old), "nothing is deleted")
+        self.assertFalse(os.path.exists(os.path.join(p4, "phi", "catchup.json")))
+        r = subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(HERE, "catchup.py"), "prune-cache"],
+                           capture_output=True, text=True, env=dict(os.environ, CLAUDE_CONFIG_DIR=self.conf))
+        self.assertEqual((r.returncode, r.stdout), (0, ""), "catchup.py runs nothing as a command")
+        self.assertTrue(os.path.isdir(old))
 
 
 class Branch(Base):

@@ -1180,7 +1180,7 @@ def carry_memory(src, dst):
 
 # The two allow rules ezexe approved for p4 to keep in the local file, so a session runs the p4 commands its hook
 # text names without a prompt: phi.py with any arguments, and p4.py sync. On Windows the same two in the PowerShell
-# form too. catchup.py prune-cache deletes files and gets no rule. Each rule is one entry of `permissions.allow` that
+# form too. Each rule is one entry of `permissions.allow` that
 # p4 owns, recorded under RECORD's `rules` with the GEN of the copy that wrote it: p4 adds and removes only its own
 # entries, never reorders or drops another, and replaces one when the plugin folder moves, only on a start and only at
 # a GEN at least the entry's, so two plugin versions running at once never take each other's entries away. An entry
