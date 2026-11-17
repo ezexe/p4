@@ -337,6 +337,42 @@ class Supervisor(unittest.TestCase):
         self.assertNotIn(KID3, book.holder_line(t.p4, t.session(KID2), "src/flush.py drops rows", "", ()) or "",
                          "the same path in another repository is another file")
 
+    def worktree(self, repo, folder, name):
+        """A linked worktree of `repo` at `folder`, as `git worktree add` leaves it: a `.git` file naming its gitdir,
+        whose `commondir` leads back to the main checkout's `.git`."""
+        gitdir = os.path.join(repo, ".git", "worktrees", name)
+        write(os.path.join(gitdir, "commondir"), "../..\n")
+        write(os.path.join(gitdir, "HEAD"), f"ref: refs/heads/{name}\n")
+        write(os.path.join(folder, ".git"), f"gitdir: {gitdir}\n")
+        return folder
+
+    def test_a_session_in_a_worktree_finds_the_holder_of_a_file_of_its_repository(self):
+        t = self.t
+        repo = os.path.join(t.tmp, "narwhal")
+        write(os.path.join(repo, ".git", "HEAD"), "ref: refs/heads/main\n")
+        beside = self.worktree(repo, os.path.join(t.tmp, "narwhal-retry"), "retry")
+        inside = self.worktree(repo, os.path.join(repo, ".claude", "worktrees", "batch"), "batch")
+        t.say(TOP, "Build the narwhal exporter")
+        t.say(PUP, "Control the trees")
+        self.assertEqual(t.cli(PUP, "controls", TOP).returncode, 0)
+        t.record(KID, started_by=TOP, title="the flush child", cwd=repo)
+        t.say(KID, "Task:\nBuild the flush's batching.\nFiles: src/flush.py", proj=repo)
+        t.record(KID3, started_by=TOP, title="the batch child", cwd=inside)
+        t.say(KID3, "Task:\nBuild the batch writer.\nFiles: src/batch.py", proj=inside)
+        t.record(KID2, started_by=TOP, title="the retry check", cwd=beside)
+        t.say(KID2, "Task:\nCheck the flush's retry and report.\nFiles: none", proj=beside)
+        t.say(TOP3, "Build the importer")
+        said, decision = self.pre(KID2, SEND, {"to": TOP3, "message": "Does src/flush.py still drop rows?"})
+        self.assertIn(KID, said, "a session in a worktree names a file of its repository's main checkout")
+        self.assertEqual(decision, "deny")
+        said, _ = self.pre(KID2, SEND, {"to": TOP3, "message": "Does src/batch.py write the last batch?"})
+        self.assertIn(KID3, said, "and a file a session in another worktree of it holds")
+        flush = os.path.join(inside, "src", "flush.py").replace("\\", "/")
+        self.assertIn(KID, book.holder_line(t.p4, t.session(KID3), f"Finding: {flush} drops rows", "", ()) or "",
+                      "a path inside a worktree is its repository's file")
+        self.assertNotIn(KID, book.holder_line(t.p4, t.session(KID2), "vendor/src/flush.py drops rows", "", ()) or "",
+                         "a longer path is still not the held one")
+
     def test_a_finding_on_an_issue_above_the_reporter_stays_with_its_tree(self):
         t = self.t
         self.tree()

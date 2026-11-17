@@ -27,6 +27,7 @@ import re
 
 import controls
 import issues
+import p4conf
 import relay
 import starts
 
@@ -185,19 +186,57 @@ def entries(home, sid, store=""):
     return out
 
 
-_ROOTS = {}                      # a session folder's repository root, normalized, kept for one process
+_ROOTS = {}                      # a folder or path -> the repository folder it lies in, kept for one process
+_MAINS = {}                      # a repository folder -> its main checkout, kept for one process
 
 
 def _root_of(base):
-    if base not in _ROOTS:
-        _ROOTS[base] = relay.norm(starts.repo_root(base)) if base else ""
+    """The repository folder a session folder or a path lies in, normalized: the nearest folder at or above it that
+    holds a `.git`, as starts.repo_root finds it, so a linked worktree's own folder for a path inside it. '' when
+    none does. Each folder walked is kept, so the paths of one repository cost one walk."""
+    if not base:
+        return ""
+    if base in _ROOTS:
+        return _ROOTS[base]
+    d, walked = os.path.abspath(base), []
+    while d not in _ROOTS:
+        walked.append(d)
+        if os.path.exists(os.path.join(d, ".git")):
+            _ROOTS[d] = relay.norm(d)
+            break
+        up = os.path.dirname(d)
+        if up == d:
+            _ROOTS[d] = ""
+            break
+        d = up
+    for w in walked + [base]:
+        _ROOTS[w] = _ROOTS[d]
     return _ROOTS[base]
 
 
+def _main_of(root):
+    """The main checkout of the repository a repository folder belongs to, normalized: a linked worktree's `.git`
+    file leads to it through its gitdir's `commondir`, as p4conf.main_root reads it, and a main checkout is its
+    own."""
+    if root not in _MAINS:
+        _MAINS[root] = relay.norm(p4conf.main_root(root)[0]) if root else ""
+    return _MAINS[root]
+
+
+def _one_repository(a, b):
+    """True when two repository folders hold the same repository's files: the same folder, a worktree and its main
+    checkout or two worktrees of one, or two clones, whose main checkouts have the same folder name."""
+    if a == b:
+        return True
+    ma, mb = _main_of(a), _main_of(b)
+    return ma == mb or ma.rsplit("/", 1)[-1] == mb.rsplit("/", 1)[-1]
+
+
 def _rel(path, base):
-    """A held path as its repository or session folder names it, else whole."""
+    """A held or named path as its own repository names it, else as its session's repository or folder does, else
+    whole."""
     p = str(path or "")
-    for r in (_root_of(base), relay.norm(base) if base else ""):
+    for r in (_root_of(p) if "/" in p else "", _root_of(base), relay.norm(base) if base else ""):
         if r and p.startswith(r + "/"):
             return p[len(r) + 1:]
     return p
@@ -357,20 +396,21 @@ def issues_named(text):
     return out
 
 
-def _same_file(named, rel_named, root_named, held, hbase):
+def _same_file(named, nbase, held, hbase):
     """True when a path a message names is a file or folder an entry holds: the same absolute path, a path inside a
     held folder, a held bare name that is its file name, or, within one repository, the held path from its root, a
     path inside it, or a shorter path of at least two parts that ends it, as `export/flush.py` ends
-    `src/export/flush.py`. One repository is the same root, or two clones' roots of the same folder name; a path
-    that is no repository's is read from its session folder."""
+    `src/export/flush.py`. Each path's repository is the one it lies in, so a path inside a worktree, or named from
+    a session whose folder is one, is its repository's; a path that is no repository's is read from its session
+    folder."""
     if "/" not in held:
         return named.rsplit("/", 1)[-1] == held
     if named == held or relay.covers(held, named):
         return True
-    root = _root_of(hbase)
-    if bool(root) != bool(root_named) or root and root.rsplit("/", 1)[-1] != root_named.rsplit("/", 1)[-1]:
+    rn, rh = _root_of(named), _root_of(held)
+    if bool(rn) != bool(rh) or rn and not _one_repository(rn, rh):
         return False                               # another repository: its paths name other files
-    a, b = rel_named, _rel(held, hbase)
+    a, b = _rel(named, nbase), _rel(held, hbase)
     return a == b or a.startswith(b + "/") or (a.count("/") >= 1 and b.endswith("/" + a))
 
 
@@ -399,15 +439,12 @@ def holders(home, s, text, store="", skip=(), book=None, below=True):
     book = book if book is not None else entries(home, sid, store)
     every = relay._sessions(home)
     away = {sid, *skip, *_chain(every, sid), *(_below(every, sid) if below else ())}
-    root_named = _root_of(base)
-    rels = [(n, _rel(n, base)) for n in named]
     out = []
     for e in book.values():
         if e["id"] in away:
             continue
-        hit = next((f for n, rn in rels for f in e["files"] + e["owned"]
-                    if not relay.names_nothing(f, e["home"], e["base"]) and _same_file(n, rn, root_named, f,
-                                                                                      e["base"])), "")
+        hit = next((f for n in named for f in e["files"] + e["owned"]
+                    if not relay.names_nothing(f, e["home"], e["base"]) and _same_file(n, base, f, e["base"])), "")
         if hit:
             out.append((e, _rel(hit, e["base"]), 0, -len(hit)))
             continue
