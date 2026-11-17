@@ -1849,7 +1849,8 @@ BUTTON = ("This session is at the top level of its tree and it is done, so end t
           "for it, and call no archive tool for this session.")
 CHILD_DONE = ("This session has a parent session, so it shows no archive button and asks for nothing: report what "
               "was done and end the turn. Call no archive tool.")
-OFFER_MAX = 4                    # options one AskUserQuestion holds
+OFFER_MAX = 4                    # options one question of an AskUserQuestion holds
+QUESTIONS_MAX = 4                # questions one AskUserQuestion holds
 
 
 def ready_in_tree(home, top):
@@ -1872,8 +1873,8 @@ def ready_in_tree(home, top):
 def offer(home, top):
     """The options of the multiple-choice question a done orchestrator puts to ezexe, each with a label, a
     description and the ids it archives: one option a finished session while they fit one question, else one option
-    for all of them and one for each of the first OFFER_MAX - 1 parents, its children named. The labels are what the archive hook reads ezexe's
-    picks by, so they are kept on the orchestrator."""
+    for all of them and one for each parent, its children named, which offer_text splits over several questions. The
+    labels are what the archive hook reads ezexe's picks by, so they are kept on the orchestrator."""
     ready = ready_in_tree(home, top)
     if not ready:
         return []
@@ -1886,7 +1887,7 @@ def offer(home, top):
             groups.setdefault(parent, []).append((sid, t))
         opts = [{"label": f"All {len(ready)} finished sessions", "description": "Archive every one of them.",
                  "ids": [sid for sid, _, _ in ready]}]
-        for parent, kids in list(groups.items())[:OFFER_MAX - 1]:
+        for parent, kids in groups.items():
             opts.append({"label": _short(f"Under {_title(every.get(parent) or {'sessionId': parent})}", 44),
                          "description": "Archive " + "; ".join(f"\"{_short(t, 40)}\"" for _, t in kids[:8]) + ".",
                          "ids": [sid for sid, _ in kids]})
@@ -1909,12 +1910,21 @@ def offer_text(home, top):
     if not opts:
         return ""
     n = len({i for o in opts for i in o["ids"]})
-    lines = "\n".join(f"- label \"{o['label']}\", description \"{o['description']}\"" for o in opts)
+    asks = -(-len(opts) // OFFER_MAX)              # questions of at most OFFER_MAX options, as controls.offer_text
+    lines = "\n".join((f"Question {k + 1}:\n" if asks > 1 else "") + "\n".join(
+        f"- label \"{o['label']}\", description \"{o['description']}\""
+        for o in opts[k * len(opts) // asks:(k + 1) * len(opts) // asks]) for k in range(asks))
+    into = ("one `AskUserQuestion`" if asks <= QUESTIONS_MAX else
+            f"{-(-asks // QUESTIONS_MAX)} `AskUserQuestion` calls of at most {QUESTIONS_MAX} questions")
+    how = ("one multiple-choice question: one `AskUserQuestion` with `multiSelect` true, the question saying that "
+           "archiving all of them is the recommended choice" if asks == 1 else
+           f"{asks} multiple-choice questions in {into}, each with a text of its own and `multiSelect` true, the "
+           f"first saying that archiving all of them is the recommended choice")
     return (f"phi (p4-phi): {n} session{'s' if n != 1 else ''} of this tree {'are' if n != 1 else 'is'} finished and "
-            f"not yet archived. In this closing turn, before `mcp__ccd_turn__wrap_up`, put them to ezexe as one "
-            f"multiple-choice question: one `AskUserQuestion` with `multiSelect` true, the question saying that "
-            f"archiving all of them is the recommended choice, and exactly these options"
-            + (", with a last option \"None of them\"" if len(opts) == 1 else "") + f":\n{lines}\n"
+            f"not yet archived. In this closing turn, before `mcp__ccd_turn__wrap_up`, put them to ezexe as {how}, "
+            f"and exactly these options"
+            + (", with a last option \"None of them\"" if len(opts) == 1 else "")
+            + (" under these questions" if asks > 1 else "") + f":\n{lines}\n"
             f"Archive none of them before ezexe has answered. Then call `mcp__ccd_session_mgmt__archive_session` for "
             f"exactly the sessions under the options ezexe picked, and for no other: the pick is ezexe's, and p4-phi "
             f"lets those calls through.")

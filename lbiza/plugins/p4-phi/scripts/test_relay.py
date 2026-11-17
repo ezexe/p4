@@ -899,6 +899,37 @@ class GhWrapper(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class OfferPastFour(unittest.TestCase):
+    """Past OFFER_MAX finished sessions, every parent's sessions sit under an option of their own."""
+
+    def test_each_of_five_parents_has_an_option(self):
+        home = tempfile.mkdtemp(prefix="p4-phi-offer-")
+        try:
+            def put(sid, parent, done, n):
+                d = relay._dir(home, sid)
+                os.makedirs(d)
+                rec = {"sessionId": sid, "title": f"session {sid}", "createdAt": f"2026-11-17T00:00:{n:02d}"}
+                if parent:
+                    rec["spawnedFrom"] = {"sessionId": parent}
+                if done:
+                    rec["doneRetired"] = True
+                with open(os.path.join(d, "session.json"), "w", encoding="utf-8") as f:
+                    json.dump(rec, f)
+            put("top", "", False, 0)
+            for i in range(5):
+                put(f"p{i}", "top", False, 1 + i)
+                put(f"k{i}", f"p{i}", True, 10 + i)
+            opts = relay.offer(home, "top")
+            for i in range(5):
+                self.assertTrue(any(o["ids"] == [f"k{i}"] for o in opts), (i, [o["ids"] for o in opts]))
+            text = relay.offer_text(home, "top")
+            self.assertIn("Question 2:", text)
+            for q in text.split("Question ")[1:]:
+                self.assertLessEqual(q.count("- label"), relay.OFFER_MAX, q)
+        finally:
+            shutil.rmtree(home, ignore_errors=True)
+
+
 class SharedHome(unittest.TestCase):
     """Two projects naming one store as `phi.home`: a session in one hears a session in the other."""
 
