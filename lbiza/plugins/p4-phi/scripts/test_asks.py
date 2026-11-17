@@ -47,6 +47,9 @@ class Routing(unittest.TestCase):
         self.assertFalse(issues.writing("Read phi.py under E:/work/land/ and say what it holds."))
         self.assertFalse(issues.writing("Say what https://example.com/build/fix holds."))
         self.assertTrue(issues.writing("Fix the flush in `E:/work/copy/phi.py`."))
+        self.assertTrue(issues.writing("Add/remove the retry flag on the exporter's flush."),
+                        "a slash-joined pair of words is no path")
+        self.assertTrue(issues.writing("Port/rename the retry helper of the exporter."))
 
 
 if __name__ == "__main__":
