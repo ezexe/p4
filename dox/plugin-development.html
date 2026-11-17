@@ -81,10 +81,10 @@ pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--p
 <p class="intro">This is how the p4 development project runs, in four rules. Each rule names the docs it rests on, and the last section of this page names what they do not confirm.</p>
 <h3>1. The installed copies off for the development project only</h3>
 <ul>
-<li>The project's <code>.claude/settings.local.json</code> sets <code>p4-phi@p4-marketplace</code> and <code>p4-temportal@p4-marketplace</code> to <code>false</code> under <code>enabledPlugins</code>. ezexe wrote it; no session writes it. The section <a href="#the-installed-copy-off">The installed copy off for one project</a> quotes the docs.</li>
+<li>The project's <code>.claude/settings.local.json</code> sets <code>p4-phi@p4-marketplace</code> and <code>p4-temportal@p4-marketplace</code> to <code>false</code> under <code>enabledPlugins</code>. ezexe wrote those two keys and <code>autoMemoryEnabled</code>; a session never writes the file with its own tools. The section <a href="#the-installed-copy-off">The installed copy off for one project</a> quotes the docs.</li>
 <li>Every other project on the machine keeps the installed copies.</li>
 </ul>
-<p>The development project is <code>E:/projects/p4-phi</code>, the folder that holds the checkout <code>p4</code>. Its <code>.claude/settings.local.json</code>, as ezexe wrote it, read on 2026-11-17:</p>
+<p>The development project is <code>E:/projects/p4-phi</code>, the folder that holds the checkout <code>p4</code>. Its <code>.claude/settings.local.json</code>, as it stood on 2026-11-17:</p>
 <div class="scroll"><pre class="file"><code>{
   "enabledPlugins": {
     "p4-phi@p4-marketplace": false,
@@ -108,8 +108,8 @@ pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--p
 }</code></pre></div>
 <div class="scroll"><table><thead><tr><th>Keys</th><th>Whose</th><th>What they do here</th></tr></thead><tbody>
 <tr><td><code>enabledPlugins</code>, with <code>p4-phi@p4-marketplace</code> and <code>p4-temportal@p4-marketplace</code> <code>false</code>, and <code>autoMemoryEnabled</code> <code>false</code></td><td>ezexe's own</td><td>The installed copies are off in this project only, and Claude Code's own auto memory is off here.</td></tr>
-<tr><td><code>autoMemoryDirectory</code> and <code>attribution.commit</code></td><td>The keys p4's settings keeper writes</td><td>The store's memory folder and the store's commit trailer, as the page <a href="claude-settings.html">Claude Code settings</a> sets out under "The keys p4 writes".</td></tr>
-<tr><td><code>permissions.allow</code></td><td>The two rules ezexe approved, each in its Bash and its PowerShell form</td><td>A session may run <code>phi.py</code> and <code>p4.py sync</code> of the checkout <code>E:/projects/p4-phi/p4</code> without a prompt. Each rule names that checkout's scripts, so a command a <code>--plugin-dir</code> copy prints with another clone's path is not one they name.</td></tr>
+<tr><td><code>autoMemoryDirectory</code> and <code>attribution.commit</code></td><td>Keys p4's settings keeper writes in a project where p4 runs</td><td>The store's memory folder and the store's commit trailer, as the page <a href="claude-settings.html">Claude Code settings</a> sets out. In the development project, where p4 is off, no hook of p4's runs, so they stand as ezexe wrote them.</td></tr>
+<tr><td><code>permissions.allow</code></td><td>The two rules ezexe approved, each in its Bash and its PowerShell form, which p4's keeper writes in a project where p4 runs, built from the running copy's own scripts folder</td><td>A session may run <code>phi.py</code> and <code>p4.py sync</code> of the checkout <code>E:/projects/p4-phi/p4</code> without a prompt. Here, where p4 is off, they stand as ezexe wrote them and name that checkout's scripts, so a command a <code>--plugin-dir</code> copy prints with another clone's path is not one they name.</td></tr>
 <tr><td><code>disableAllHooks</code> <code>false</code> and <code>disableSkillShellExecution</code> <code>false</code></td><td>The defaults the work relies on, written out</td><td>Hooks run and skills may run their shell commands.</td></tr>
 </tbody></table></div>
 <ul>
@@ -123,17 +123,17 @@ pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--p
 <blockquote><code>claude plugin update p4-phi@p4-marketplace</code><br><code>claude plugin update p4-temportal@p4-marketplace</code></blockquote>
 <ul>
 <li>Source, <code>plugins/cli-reference.md</code>, "plugin update": "Update a plugin to the latest version its marketplace offers. The new version loads in your next session, or after you run <code>/reload-plugins</code> in a running one." Its form is <code>claude plugin update &lt;plugin&gt; [options]</code>, and "a <code>&lt;plugin&gt;</code> argument is a plugin <code>name</code> or <code>name@marketplace</code>".</li>
-<li>The release is the version string. Source, <code>plugins/loading.md</code>, "How Claude Code computes the version": "a manifest that pins <code>"version": "1.0.0"</code> keeps every user on the cached copy until its author changes the string, however many commits they push." Both manifests pin a version, so an update between releases prints that the plugin "is already at the latest version" and changes nothing.</li>
+<li>The release is the version string. Source, <code>plugins/loading.md</code>, "How Claude Code computes the version": "a manifest that pins <code>"version": "1.0.0"</code> keeps every user on the cached copy until its author changes the string, however many commits they push." Both manifests pin a version, so an update between releases changes nothing. Source for what it prints then, <code>plugins/cli-reference.md</code>, "plugin update": "When nothing is newer, it prints <code>formatter is already at the latest version (1.0.0).</code> and exits <code>0</code>".</li>
 </ul>
 <h3>3. Live hook behaviour checked only on a clone, from a shell</h3>
 <ul>
-<li>A live check runs in a scratch project outside the development project, so the installed copy is on there and the override happens:</li>
+<li>A live check runs in a scratch project outside the development project, so the installed copy is on there and the override happens. The prompt goes on stdin, since <code>--debug</code> takes the argument after it as its own value, as the orchestrator's live run of 2026-11-17 showed:</li>
 </ul>
-<blockquote><code>claude -p --plugin-dir &lt;clone&gt;/lbiza/plugins/p4-phi --debug</code></blockquote>
+<blockquote><code>echo "&lt;prompt&gt;" | claude -p --plugin-dir &lt;clone&gt;/lbiza/plugins/p4-phi --debug</code></blockquote>
 <ul>
-<li>The run shows the <code>@inline</code> id and the override line, and that output is kept as the proof. The override line is in the log under <code>~/.claude/debug/</code>, <code>Plugin "p4-phi" from --plugin-dir overrides installed version</code>, as <code>plugins/loading.md</code>, "Name conflicts", quotes it. The id is in the list the same flag gives, <code>claude --plugin-dir &lt;clone&gt;/lbiza/plugins/p4-phi plugin list</code>: source, <code>plugins/cli-reference.md</code>, "Flags that load a plugin for one session": "The plugin appears as <code>&lt;name&gt;@inline</code> under a heading that begins <code>Session-only plugins</code>".</li>
+<li>The run shows the <code>@inline</code> id and the override line, and that output is kept as the proof. The override line is in the run's debug log, which <code>~/.claude/debug/latest</code> points at: <code>Plugin "p4-phi" from --plugin-dir overrides installed version</code>, as <code>plugins/loading.md</code>, "Name conflicts", quotes it. The id is in the list the same flag gives, <code>claude --plugin-dir &lt;clone&gt;/lbiza/plugins/p4-phi plugin list</code>: source, <code>plugins/cli-reference.md</code>, "Flags that load a plugin for one session": "The plugin appears as <code>&lt;name&gt;@inline</code> under a heading that begins <code>Session-only plugins</code>".</li>
 <li>Source for the replacement, the same section: "When a session-only plugin shares a name with an installed plugin, Claude Code loads the session-only copy for that session and skips the installed one."</li>
-<li>No live check runs in the development project or against ezexe's real projects.</li>
+<li>No live check runs in the development project or against ezexe's real projects. A development copy's own hooks keep the settings p4 keeps: run in a project, its keeper writes <code>autoMemoryDirectory</code>, <code>attribution.commit</code> and the allow rules into that project's local settings file, and it replaces an allow rule of its own when the plugin folder moves, so it could point the rules at the clone. Source, <code>p4conf.py</code>: <code>migrate_layout</code> calls <code>keep_settings</code> at a store's first start, and <code>allow_rules</code> builds the rules from its own folder. A scratch project is the one where that does no harm.</li>
 </ul>
 <h3>4. Each landing names its proof</h3>
 <ul>
@@ -163,14 +163,14 @@ pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--p
 
 <section id="the-installed-copy-off" aria-labelledby="the-installed-copy-off-h">
 <h2 id="the-installed-copy-off-h">The installed copy off for one project</h2>
-<p class="intro">The p4 development project turns the installed copies off for itself only. ezexe writes this into that repository's <code>.claude/settings.local.json</code> by hand; no session writes it:</p>
+<p class="intro">The p4 development project turns the installed copies off for itself only. ezexe writes this into that repository's <code>.claude/settings.local.json</code> by hand; a session never writes the file with its own tools:</p>
 <blockquote><code>{"enabledPlugins": {"p4-phi@p4-marketplace": false, "p4-temportal@p4-marketplace": false}}</code></blockquote>
 <ul>
 <li>The local file reaches ezexe in that repository and nowhere else. Source, <code>plugins/loading.md</code>, "Find where a plugin is enabled", the row <code>local</code>: "<code>.claude/settings.local.json</code>" reaches "You, in this repository only".</li>
 <li>It wins over the user file and the project file. Source, the same section: "To opt out of a project-enabled plugin on your machine, set the id to <code>false</code> in <code>.claude/settings.local.json</code>, which has higher precedence than the project file."</li>
 <li>The development copy still loads there. Source, the table of origins: an <code>@inline</code> plugin is "On for the session unless the manifest sets <code>defaultEnabled: false</code> or a settings file sets <code>"&lt;name&gt;@inline": false</code>".</li>
 <li>In that project a session started without the flag runs with no p4-phi at all.</li>
-<li>p4-phi writes no settings file. Plugin settings stay ezexe's, as the page <a href="claude-settings.html">Claude Code settings</a> says.</li>
+<li>Plugin settings stay ezexe's: p4 never writes <code>enabledPlugins</code>. In a project where p4 runs, its hooks keep <code>autoMemoryDirectory</code>, <code>attribution.commit</code> and the two allow rules in that project's local settings file, as the page <a href="claude-settings.html">Claude Code settings</a> sets out; in the development project, where p4 is off, nothing of p4's writes it.</li>
 </ul>
 </section>
 
@@ -178,16 +178,16 @@ pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--p
 <h2 id="data-folders-h">Data folders</h2>
 <ul>
 <li>Each plugin id has a data folder, <code>${CLAUDE_PLUGIN_DATA}</code>. Source, <code>plugins/components.md</code>, "Reference plugin paths and store data": "It resolves to <code>~/.claude/plugins/data/&lt;id&gt;/</code>" and "<code>&lt;id&gt;</code> is the plugin identifier with every character other than letters, digits, <code>_</code>, and <code>-</code> replaced by <code>-</code>".</li>
-<li>By that rule the installed copy's folder is <code>p4-phi-p4-marketplace</code> and the development copy's is <code>p4-phi-inline</code>. No page of the docs says so in words, so check it on disk before relying on it: list <code>~/.claude/plugins/data/</code> after a development session's first hook.</li>
-<li>On ezexe's machine on 2026-11-17 the folder held <code>p4-phi-p4-marketplace</code>, <code>p4-temportal-p4-marketplace</code>, <code>p4-temportal-inline</code>, <code>p4-skillex-p4-marketplace</code> and <code>p4-skillex-inline</code>: each inline copy that had run had a folder apart from its installed one. <code>p4-phi-inline</code> was not there yet.</li>
+<li>By that rule the installed copy's folder is <code>p4-phi-p4-marketplace</code> and the development copy's is <code>p4-phi-inline</code>. No page of the docs says so in words, so it is checked on disk: list <code>~/.claude/plugins/data/</code> after a development session's first hook.</li>
+<li>Confirmed on disk: on ezexe's machine at 18:24 on 2026-11-17, after the orchestrator's live run, the folder held <code>p4-phi-inline</code> beside <code>p4-phi-p4-marketplace</code>, <code>p4-temportal-inline</code> beside <code>p4-temportal-p4-marketplace</code>, and <code>p4-skillex-inline</code> beside <code>p4-skillex-p4-marketplace</code>: each inline copy that had run had a folder apart from its installed one.</li>
 <li>The data folder is all that is kept apart. The store <code>.claude/p4/</code>, auto memory and the temp files a session writes are shared by both copies.</li>
 </ul>
 </section>
 <section id="not-confirmed" aria-labelledby="not-confirmed-h">
 <h2 id="not-confirmed-h">Not confirmed</h2>
 <ul>
-<li>That the development copy and the installed copy get separate data folders. The docs give the id rule and the <code>@inline</code> origin, and the disk showed it for p4-temportal and p4-skillex, but no page says it outright. ezexe asked the docs to confirm it in issue 110694.</li>
-<li>Whether an installed copy from a marketplace added from a folder runs in place or from the cache. <code>plugins/loading.md</code> says such a plugin "loads in place", while on ezexe's machine <code>installed_plugins.json</code> records p4-phi's <code>installPath</code> under the cache and the cache holds a folder for each of several versions. Rule 2 rests on the cache: if p4-marketplace's plugins loaded in place, each landing in the checkout the marketplace was added from would reach the installed copy at its next session start with no update at all. The <code>installPath</code> in <code>installed_plugins.json</code> and the <code>--debug</code> log of a session in another project are where to look.</li>
+<li>That the development copy and the installed copy get separate data folders is not stated outright by any page; the docs give the id rule and the <code>@inline</code> origin, and ezexe asked them to confirm it in issue 110694. The disk confirms it, as <a href="#data-folders">Data folders</a> says.</li>
+<li>Whether an installed copy from a marketplace added from a folder runs in place or from the cache. <code>plugins/loading.md</code> says such a plugin "loads in place", while on ezexe's machine <code>installed_plugins.json</code> records p4-phi's <code>installPath</code> under the cache. At 18:24 on 2026-11-17 the installs in use were <code>p4-phi/0.11.22</code> and <code>p4-temportal/0.3.11</code>; the cache also held p4-phi 0.11.18 to 0.11.21 and p4-temportal 0.3.10, each with an <code>.orphaned_at</code> marker, which <code>plugins/loading.md</code> says Claude Code removes 14 days later. Rule 2 rests on the cache: if p4-marketplace's plugins loaded in place, each landing in the checkout the marketplace was added from would reach the installed copy at its next session start with no update at all. The <code>installPath</code> in <code>installed_plugins.json</code> and the <code>--debug</code> log of a session in another project are where to look.</li>
 <li>That a <code>claude -p</code> run loads a <code>--plugin-dir</code> copy, runs its SessionStart hooks and writes the override line is not stated by the pages read here, which describe the flags for "one session" with no word on <code>-p</code>. It was checked instead: the orchestrator's live run of 2026-11-17, a <code>claude -p --plugin-dir</code> session in a scratch project, ran the clone's SessionStart hook, and its debug log held <code>Plugin "p4-phi" from --plugin-dir overrides installed version</code>, the wording <code>plugins/loading.md</code> quotes.</li>
 <li>How to start a desktop app session with a development copy. <code>--plugin-dir</code> is a shell flag, and no page says how the app passes <code>CLAUDE_CODE_PLUGIN_DIRS</code> to a session; issue 110694 asks for it.</li>
 <li>Whether <code>/reload-plugins</code> runs the SessionStart hooks again. No page read here says so; <code>plugins/cli-reference.md</code> says only that it "reloads every active plugin".</li>
