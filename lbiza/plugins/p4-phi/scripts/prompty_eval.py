@@ -11,13 +11,14 @@ The labelled set. Each kept turn of a session whose prompt is ezexe's own messag
 is one example: the message, its time, and the session that received it. Its owner label is the session that ended
 up doing its work:
 
-  relayed   another session that was live at that time and whose later turn holds 60 characters or more of the
-            message: that session is the right owner. p4-phi asks a session that passes work on to restate the
-            task as its own instruction and quote no message, so a relay written that way is not found here.
-  new       a session started after the message whose brief holds 60 characters or more of it: the work went to a
-            new session, so no live session owned it and the right pick is none. A start draft's brief quotes no
-            sentence of the message, so a session started from one is found only when its brief restates it
-            closely.
+  relayed   another session that was live at that time and took the work: the owner of the route p4-phi's gate
+            kept for the message, when a later turn of the receiving session names that owner's title in its report,
+            as the gate asks it to; for history kept before drafts were, a session whose later turn holds 60
+            characters or more of the message. That session is the right owner. A route draft answered in the
+            receiving session is here.
+  new       a session started after the message for its work: the session whose brief names a start draft kept
+            for the message; for older history, one whose brief holds 60 characters or more of it. No live session
+            owned the work, so the right pick is none.
   here      neither: the receiving session did the work itself, so again no other live session owned it.
 
 A scorer is given the message and the tasks of the other sessions that existed then, as the routing step is, and
@@ -37,6 +38,7 @@ whose topic session did its work.
 """
 
 import argparse
+import glob
 import json
 import os
 import sys
@@ -74,6 +76,34 @@ def quotes(later, message):
     if len(m) < QUOTE:
         return False
     return any(m[k:k + QUOTE] in t for k in range(0, max(1, len(m) - QUOTE + 1), 20))
+
+
+def kept_words(kept, words):
+    """True when a kept prompt is a draft's message: the same words, or the kept prefix of words p4-phi cut to
+    TASK_CHARS with ' ...'."""
+    k, w = flat(kept), flat(words)
+    return k == w or (k.endswith(" ...") and len(k) > 4 and w.startswith(k[:-4].rstrip()))
+
+
+def kept_label(home, sid, msg, every, rows, born, when, above):
+    """The label p4-phi's own records give a message, None when no draft of the receiving session holds it, which
+    leaves the quote as the fallback. A draft that started a session gives ("", "new"). A route draft gives
+    (owner, "relayed") only on evidence the relay happened: a turn of the receiving session at or after the message
+    whose report or said names the owner's title, as the gate asks; a route draft answered here gives ("", "here")."""
+    for path in sorted(glob.glob(os.path.join(puppeteer.drafts_dir(home, sid), "*.json"))):
+        d = relay._read_json(path)
+        if not kept_words(msg, d.get("words")):
+            continue
+        if any(x.get("draft") == d.get("id") for x in every.values()):
+            return "", "new"
+        owner = d.get("owner") or {}
+        o, title = str(owner.get("sessionId") or ""), flat(owner.get("title"))
+        if d.get("verdict") == "route" and o in every and o not in above and born.get(o, "") <= when and title                 and any(str(u.get("time") or "") >= when
+                        and title.lower() in flat(f"{u.get('report') or ''} {u.get('said') or ''}").lower()
+                        for u in rows[sid]):
+            return o, "relayed"
+        return "", "here"
+    return None
 
 
 def closed_at(s, turns):
@@ -115,8 +145,8 @@ def examples(home):
             cands = [(o, flat(every[o].get("task"))) for o in every
                      if o not in above and born.get(o, "") and born[o] <= when and (not ended[o] or ended[o] > when)
                      and flat(every[o].get("task"))]
-            label, kind = "", "here"
-            for o in every:
+            label, kind = kept_label(home, sid, msg, every, rows, born, when, above) or ("", "here")
+            for o in (every if kind == "here" else ()):
                 if o in above:
                     continue
                 for j, u in enumerate(rows[o]):

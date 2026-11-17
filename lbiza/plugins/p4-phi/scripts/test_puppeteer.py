@@ -54,6 +54,10 @@ def handed(brief):
             "Task:\n" + brief)
 
 
+def flat_(text):
+    return " ".join(str(text or "").split())
+
+
 def call_in(ctx, k=0):
     """The k-th exact start_session input a hook's text carries."""
     piece = ctx.split("`mcp__ccd_session__start_session` with ")[k + 1]
@@ -210,6 +214,11 @@ class Linear(Base):
         self.assertEqual(jload(os.path.join(t.dir(TOP), "drafts", did + ".json"))["verdict"], "start")
         t.say(KID, handed(call["prompt"]))
         self.assertEqual(t.session(KID)["draft"], did, "the child knows the draft it came from")
+        import prompty_eval
+        t.stop(TOP, RETRY, report="Started a session for it.", uuid="u-retry")
+        got = [(e["label"], e["kind"]) for e in prompty_eval.examples(t.p4)
+               if e["case"] == "others" and e["session"] == TOP and flat_(e["message"]) == RETRY]
+        self.assertEqual(got, [("", "new")], "a session started from the message's draft labels it new")
         other = context(t.say(TOP, "Write a changelog generator for the billing dashboard's release notes"))
         self.assertIn("so it is a new orchestrator", other)
         self.assertIn(phi.NEW_TOP_BRIEF, call_in(other)["prompt"])
@@ -741,6 +750,44 @@ class Scorers(Base):
         self.assertEqual(sorted(os.listdir(os.path.join(t.p4, "phi"))), before)
         self.assertFalse(os.path.exists(puppeteer.scorer_path(t.p4)))
 
+    def test_a_relay_that_restates_the_task_is_labelled_by_the_route_p4_phi_kept(self):
+        import prompty_eval
+        t = self.t
+        t.say(TOP, TASK)
+        t.stop(TOP, TASK, report="planned")
+        t.say(TOP, RETRY + " in the store")
+        did = "drf-0123456789"
+        # the route the gate kept for the message: its owner is the live session that took it
+        write(os.path.join(puppeteer.drafts_dir(t.p4, TOP), f"{did}.json"),
+              json.dumps({"id": did, "words": RETRY + " in the store", "verdict": "route", "drafter": TOP,
+                          "owner": {"sessionId": KID, "title": "the flush port"}}))
+        t.stop(TOP, RETRY + " in the store", report="Sent it on: \"the flush port\" has it.", uuid="u1")
+        restated = ("<cross-session-message from=\"" + TOP + "\">Give the exporter a second attempt whenever "
+                    "saving rows fails, then report.</cross-session-message>")
+        self.assertFalse(prompty_eval.quotes(restated, RETRY + " in the store"))
+        t.say(KID, restated)
+        t.stop(KID, "Give the exporter a second attempt", report="done", uuid="u2")
+        got = [e for e in prompty_eval.examples(t.p4) if e["case"] == "others" and e["session"] == TOP
+               and "retry" in e["message"]]
+        self.assertEqual([(e["label"], e["kind"]) for e in got], [(KID, "relayed")], got)
+
+
+    def test_a_route_draft_answered_here_stays_here(self):
+        import prompty_eval
+        t = self.t
+        t.say(TOP, TASK)
+        t.stop(TOP, TASK, report="planned")
+        t.say(TOP, RETRY + " in the store")
+        did = "drf-0123456789"
+        write(os.path.join(puppeteer.drafts_dir(t.p4, TOP), f"{did}.json"),
+              json.dumps({"id": did, "words": RETRY + " in the store", "verdict": "route", "drafter": TOP,
+                          "owner": {"sessionId": KID, "title": "the flush port"}}))
+        t.stop(TOP, RETRY + " in the store", report="Added the retry here, with its test.", uuid="u1")
+        t.say(KID, handed("Port the flush to the new writer."))
+        t.stop(KID, "Port the flush", report="done", uuid="u2")
+        got = [(e["label"], e["kind"]) for e in prompty_eval.examples(t.p4)
+               if e["case"] == "others" and e["session"] == TOP and "retry" in e["message"]]
+        self.assertEqual(got, [("", "here")])
 
 class Parallel(Base):
     EITHER = ("Fix the narwhal exporter's flush: either buffer the rows in memory until the table closes or write "
