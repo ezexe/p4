@@ -4,9 +4,9 @@ silently the first time, and seeded again, logs, build output and binaries move 
 nothing at a session start. With P4_SCRATCHPAD_ASKS=1 the PreToolUse ask fires, and never denies, before a code file
 goes to a temp location, the session's scratchpad path or the notebook, and repo-uses prints one line for each file
 under .claude/p4/temportal/src/ the repository names; with the switch off both are silent. Then each session's
-scratchpad, which is the app's: no start, turn end or session end links, stages, commits or removes one. Run from
-anywhere: python3 hooks/test_scratchpad.py, and exit 0 is green; the git cases skip, saying so, without git on
-PATH."""
+scratchpad, which is the app's: no start, turn end or session end links, stages, commits or removes one. Run it as
+`python -I -X utf8 lbiza/plugins/p4-temportal/hooks/test_scratchpad.py` from the checkout, and exit 0 is green; the git
+cases skip, saying so, without git on PATH."""
 
 import json
 import os
@@ -20,7 +20,6 @@ import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SCRIPT = os.path.join(HERE, "scratchpad.py")
 HOOKS_JSON = os.path.join(HERE, "hooks.json")
 SCRATCH = "C:/Users/someone/AppData/Local/Temp/claude/30ad6e18862a20e8/abc123/scratchpad"
 MAC_SCRATCH = "/private/tmp/claude-501/-Users-ez-x/f27bc042/scratchpad"
@@ -50,10 +49,31 @@ def env_with(extra=None, **kw):
 
 
 def run_sub(sub, payload, extra=None, **kw):
-    r = subprocess.run([sys.executable, "-I", SCRIPT, sub], input=json.dumps(payload).encode("utf-8"),
-                       capture_output=True, timeout=60, env=env_with(extra, **kw))
-    assert r.returncode == 0, r
-    return r.stdout.decode("utf-8", "replace").strip()
+    """scratchpad.py's main() with that subcommand, run in this process the way its own process would run it: its
+    argv, the payload on its stdin and the environment given in place of this one -> its stdout, stripped. It saves a
+    python start per call, which over the ask cases is most of this file's time."""
+    import contextlib
+    import io
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)
+    import scratchpad
+    env = env_with(extra, **kw)                     # built from this environment before it is swapped out
+    saved = (dict(os.environ), os.getcwd(), sys.argv, sys.stdin)
+    out = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", newline="\n", write_through=True)
+    try:
+        os.environ.clear()
+        os.environ.update(env)
+        sys.argv = ["scratchpad.py", sub]
+        sys.stdin = io.TextIOWrapper(io.BytesIO(json.dumps(payload).encode("utf-8")), encoding="utf-8")
+        with contextlib.redirect_stdout(out):
+            code = scratchpad.main()
+    finally:
+        os.environ.clear()
+        os.environ.update(saved[0])
+        os.chdir(saved[1])
+        sys.argv, sys.stdin = saved[2], saved[3]
+    assert code == 0, code
+    return out.buffer.getvalue().decode("utf-8", "replace").strip()
 
 
 def ask(payload, extra=ON):
@@ -441,6 +461,25 @@ class AppScratchpad(unittest.TestCase):
         self.hooks("SessionStart")
         self.assertTrue(os.path.isfile(os.path.join(kept, "old.md")), "an ended session's folder was closed")
         self.assertEqual(self.git("rev-parse", "HEAD"), head, "a start made a commit in the store")
+
+
+class InProcess(unittest.TestCase):
+    """ezexe/p4#122: the ask cases, over a hundred runs of the hook, run its main() in this process, so they start no
+    process and take a fraction of the time one process a case took."""
+
+    def test_the_ask_cases_start_no_process(self):
+        import time as clock
+        real = (subprocess.run, subprocess.Popen)
+
+        def refuse(*a, **k):
+            raise AssertionError(f"a process was started: {a[0] if a else k}")
+        start = clock.monotonic()
+        try:
+            subprocess.run = subprocess.Popen = refuse
+            asks()
+        finally:
+            subprocess.run, subprocess.Popen = real
+        print(f"test_scratchpad.py: the ask cases took {(clock.monotonic() - start) * 1000:.0f} ms")
 
 
 class FailureNotice(unittest.TestCase):

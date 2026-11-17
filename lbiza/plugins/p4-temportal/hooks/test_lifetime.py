@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """test_lifetime.py — p4-temportal's cookie and cache lifetimes, and the layout move run at a start.
 
-    python3 -I lbiza/plugins/p4-temportal/hooks/test_lifetime.py
+    python -I -X utf8 lbiza/plugins/p4-temportal/hooks/test_lifetime.py
 """
 
 import json

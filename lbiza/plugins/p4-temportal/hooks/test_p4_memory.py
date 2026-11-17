@@ -3,8 +3,8 @@
 auto memory itself, in the store's .claude/p4/temportal/memory/ once `autoMemoryDirectory` names it, so a start moves
 no file, writes no pointer and prints no index, with the key or without it. What is left is the line a start prints
 when a write block would keep Claude Code from saving memory in the store, and `chosen_by_user`, which tells a
-folder ezexe chose from one a repository chose. Run from anywhere: python3 hooks/test_p4_memory.py, and exit 0 is
-green."""
+folder ezexe chose from one a repository chose. Run it as `python -I -X utf8
+lbiza/plugins/p4-temportal/hooks/test_p4_memory.py` from the checkout, and exit 0 is green."""
 
 import atexit
 import contextlib
