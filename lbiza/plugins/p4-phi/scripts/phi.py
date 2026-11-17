@@ -1072,8 +1072,11 @@ def reports_text(home, s, room=None, store=""):
 
 
 def now_exact():
-    """A time that orders two writes of one minute."""
-    return time.strftime("%Y-%m-%d %H:%M:%S") + f".{int(time.time() * 1000) % 1000:03d}"
+    """A time that orders two writes of one minute. Its seconds and its thousandths come from one read of the clock:
+    read apart, a stamp in a second's first thousandths took the second before and sorted almost a second early,
+    ezexe/p4#248."""
+    t = time.time()
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t)) + f".{int(t * 1000) % 1000:03d}"
 
 
 MAX_DEPTH = 3                 # a session this deep in the tree starts no session of its own

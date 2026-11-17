@@ -1927,5 +1927,25 @@ class UsageOnRecord(unittest.TestCase):
                       "the module's test and this one hold the same line")
 
 
+class Stamps(unittest.TestCase):
+    """ezexe/p4#248: phi.now_exact orders two writes of one minute, so its seconds and its thousandths come from one
+    read of the clock. Read apart, a stamp taken in a second's first thousandths kept the second before and sorted
+    almost a second early, and the later of two writes lost."""
+
+    def test_a_later_stamp_is_never_earlier_across_a_second_boundary(self):
+        real = time.time
+        base = float(int(real())) + 0.9996             # four ten-thousandths before a second ends
+        reads = iter([base, base + 0.0008, base + 0.5, base + 1.0])
+        phi.time.time = lambda: next(reads)
+        try:
+            stamps = [phi.now_exact() for _ in range(4)]
+        finally:
+            phi.time.time = real
+        self.assertEqual(stamps, sorted(stamps), "each stamp sorts at or after the one before it")
+        self.assertEqual(stamps[0][-4:], ".999")
+        self.assertEqual(stamps[1][-4:], ".000")
+        self.assertNotEqual(stamps[0][:19], stamps[1][:19], "the second moved with the thousandths")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
