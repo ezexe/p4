@@ -63,7 +63,7 @@ Its rule is handed once, beside its first message after p4-phi sees the filing; 
 A controlled session is told once when it comes to have a puppeteer, and once when that ends.
 A puppeteer's turns hold messages only, and every other task goes to its one standing worker, which it starts under itself with the brief line `Standing worker of its puppeteer` and which splits its task groups into standing coworkers.
 A second such start is refused while the first is live, and a puppeteer's shell call or edit is answered with a line that sends the task to its worker.
-The worker's and each coworker's first message says what it is and that it keeps a state page.
+The worker's and each coworker's first message says what it is, that it hands up a page's path and its counts and never publishes a result as an Artifact or a file unless ezexe asks, and that it keeps a state page.
 At a message carrying reports, a puppeteer is handed a line naming each reporting session whose effort to raise, lower or set low with `set_session_effort`; a call to `set_session_model` is refused, since a model is passed only on the start call.
 
 ## State pages and clearing

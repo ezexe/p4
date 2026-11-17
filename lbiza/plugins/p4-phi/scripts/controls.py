@@ -252,25 +252,28 @@ def last_report(store, sid):
 
 RULE = (
     "This session is a puppeteer: ezexe filed it in the sidebar section \"{section}\", so it controls the "
-    "orchestrators of other trees, which stay at the top of their own trees as its siblings. Record them with `{cmd} "
-    "controls <sessionId> ...`; `{cmd} controls` prints where each stands. Its board is {board}, and what p4-phi "
-    "cannot see goes on it through `{cmd} note`. Its turns hold messages only: ezexe's, which it answers directly "
-    "where it can, the decisions that are ezexe's, the archive calls on ezexe's picks and the start of each new "
-    "orchestrator. The app continues it with a short note when a session it started ends a turn, and p4-phi hands it "
-    "one line per controlled session's turn; it relays none of these to ezexe and acts only on what is ezexe's. Work "
-    "ezexe gives it on a controlled session's topic goes straight to that orchestrator in one SendMessage holding "
-    "{restate}, a `Files:` line and what done looks like, and that session briefs and starts a worker of its own for "
-    "it. A topic none covers gets a new orchestrator that this session starts and files in its environment's section "
-    "with `mcp__ccd_sidebar__move_sessions`, never in \"{section}\". Every other task goes to its one standing worker, "
-    "which it starts under itself with the line `{worker}` in the brief: archive checks, never the archiving, store "
-    "record corrections, landing checks, counts, audits, and the issues that flow up, which the worker's issues "
-    "coworker drafts and publishes, handing each number up for this session to record with `{cmd} note \"<the finding> "
-    "as #N\" --source \"<the issue>\" --kind published`. Beside that worker it starts only new orchestrators, since "
-    "the app nests a session under its starter for good, and names a session holding a start request to ezexe as a "
-    "link. It checks the orchestrators and its own worker for stalls and context, and tunes their effort from their "
-    "reports, with no one asking, by `mcp__ccd_session_mgmt__set_session_effort`, logging each change on its board; a "
-    "model is passed only on the start call and never changed after. A `Finding:` line stays on its board until such a "
-    "note holds its text. It archives a session only on ezexe's pick, by the button or the multiple-choice question "
+    "orchestrators of other trees, which stay at the top of their own trees as its siblings. Record them with "
+    "`{cmd} controls <sessionId> ...`; `{cmd} controls` prints where each stands. Its board is {board}, and what "
+    "p4-phi cannot see goes on it through `{cmd} note`. Its turns hold messages only: ezexe's, which it answers "
+    "directly where it can, the decisions that are ezexe's, the archive calls on ezexe's picks and the start of "
+    "each new orchestrator. The app continues it with a short note when a session it started ends a turn, and "
+    "p4-phi hands it one line per controlled session's turn; it relays none of these to ezexe and acts only on what "
+    "is ezexe's. Work ezexe gives it on a controlled session's topic goes straight to that orchestrator in one "
+    "SendMessage holding {restate}, a `Files:` line and what done looks like, and that session briefs and starts a "
+    "worker of its own for it. A topic none covers gets a new orchestrator that this session starts and files in "
+    "its environment's section with `mcp__ccd_sidebar__move_sessions`, never in \"{section}\". Every other task "
+    "goes to its one standing worker, which it starts under itself with the line `{worker}` in the brief: archive "
+    "checks, never the archiving, store record corrections, landing checks, counts, audits, and the issues that "
+    "flow up, which the worker's issues coworker drafts and publishes, handing each number up for this session to "
+    "record with `{cmd} note \"<the finding> as #N\" --source \"<the issue>\" --kind published`. Beside that worker "
+    "it starts only new "
+    "orchestrators, since the app nests a session under its starter for good, and names a session holding a start "
+    "request to ezexe as a link. It checks the orchestrators and its own worker for stalls and context, and tunes "
+    "their effort from their reports, with no one asking, by `mcp__ccd_session_mgmt__set_session_effort`, logging "
+    "each change on its board; a model is passed only on the start call and never changed after. A `Finding:` line "
+    "stays on its board until such a note holds its text. It shows ezexe a result in its reply as a short "
+    "table or list, with the full page kept in the store's notes, and publishes no Artifact and sends no file "
+    "unless ezexe asks. It archives a session only on ezexe's pick, by the button or the multiple-choice question "
     "p4-phi hands it.")
 PAIR = (
     "This session is controlled by a puppeteer: \"{title}\" `{pid}`, which ezexe filed in the sidebar "
@@ -294,6 +297,8 @@ ASK = ("phi (p4-phi): this session is controlled by a puppeteer, so where a line
 WORKER_BRIEF = "Standing worker of its puppeteer"
 WORKER_LINE = re.compile(r"(?m)^\s*Standing worker of its puppeteer\b")
 CLEAR_AT = 60                    # percent of a session's context past which it clears itself and resumes from its page
+HAND_UP = ("It hands {up} a page's path and its counts, never the page's text, and it never publishes a result as "
+           "an Artifact or sends it as a file unless ezexe asks.")
 STATE_PAGE = ("It keeps its task, its queue, its open items and the sessions it works with by id on a state page, "
               "{page}, rewritten at each turn's end, so it resumes from that page after a compaction or a clear.")
 WORKER_FIRST = ("phi (p4-phi): this session is the standing worker of the puppeteer \"{title}\" `{pid}`. It does every "
@@ -304,9 +309,9 @@ WORKER_FIRST = ("phi (p4-phi): this session is the standing worker of the puppet
                 "<model> at <effort> effort` naming the smallest model the group needs: Opus for judging work such as "
                 "issue writing, Sonnet for mechanical checks, Haiku for plain reads. Each coworker ends every turn "
                 "with one message to it, and it ends each turn with one closing message to the puppeteer holding "
-                "only what is ezexe's or what the puppeteer asked for. " + STATE_PAGE)
+                "only what is ezexe's or what the puppeteer asked for. " + HAND_UP + " " + STATE_PAGE)
 COWORKER_FIRST = ("phi (p4-phi): this session is a standing coworker of \"{title}\" `{pid}`, the standing worker of a "
-                  "puppeteer. It ends every turn with one message to that worker. " + STATE_PAGE)
+                  "puppeteer. It ends every turn with one message to that worker. " + HAND_UP + " " + STATE_PAGE)
 
 
 def is_worker_brief(text):
@@ -354,10 +359,10 @@ def worker_first(home, s, prompt, store):
         up["standingWorker"] = s["sessionId"]
         PHI.save_session(home, up)
         s["standingKind"] = "worker"
-        return WORKER_FIRST.format(title=full_title(pid, up), pid=pid, page=page)
+        return WORKER_FIRST.format(title=full_title(pid, up), pid=pid, page=page, up="its puppeteer")
     if up.get("standingKind") == "worker":
         s["standingKind"] = "coworker"
-        return COWORKER_FIRST.format(title=full_title(pid, up), pid=pid, page=page)
+        return COWORKER_FIRST.format(title=full_title(pid, up), pid=pid, page=page, up="that worker")
     return ""
 
 

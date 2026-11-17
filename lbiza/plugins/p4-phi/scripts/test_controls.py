@@ -810,6 +810,17 @@ class Supervisor(unittest.TestCase):
         self.assertIn("set_session_effort", controls.RULE)
         self.assertIn("only on the start call", controls.RULE)
 
+    def test_a_worker_under_a_puppeteer_hands_up_a_pages_path_and_counts_and_never_publishes(self):   # 226
+        t = self.t
+        t.say(PUP, "Control the trees")
+        self.assertIn("short table or list", controls.RULE)
+        t.record(NEW, started_by=PUP, title="Puppeteer's standing worker")
+        ctx = context(t.say(NEW, "Run the puppeteer's archive checks and counts.\n" + controls.WORKER_BRIEF))
+        self.assertIn("page's path and its counts", ctx)
+        self.assertIn("never the page's text", ctx)
+        self.assertIn("Artifact", ctx)
+        self.assertIn("unless ezexe asks", ctx)
+
     def test_a_puppeteers_turns_hold_messages_and_its_standing_worker_does_the_rest(self):          # 211
         t = self.t
         t.say(PUP, "Control the trees")
