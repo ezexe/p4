@@ -139,11 +139,9 @@ RULES_FACTS = re.compile(r"^- \S+ (rule|fact): ")
 
 
 def inject_mode(p4):
-    """"off", "rules-facts" or "all": which retrieval lines reach the main agent or a subagent. P4_RECALL_INJECT set
-    to 0, 1 or rules-facts overrides p4.json's recall.inject, which is false, "rules-facts" or true."""
-    env = os.environ.get("P4_RECALL_INJECT")
-    if env in ("0", "1", "rules-facts"):
-        return {"0": "off", "1": "all"}.get(env, env)
+    """"off", "rules-facts" or "all": which retrieval lines reach the main agent or a subagent, by p4.json's
+    recall.inject, which is false, "rules-facts" or true. P4_RECALL_INJECT set to 0, 1, true, false or rules-facts
+    overrides it as p4conf reads every variable: for the session's own store and only when a person set it."""
     v = p4conf.section(p4, "recall", write=False).get("inject", CONFIG["inject"])
     return "rules-facts" if v == "rules-facts" else ("all" if v is True else "off")
 

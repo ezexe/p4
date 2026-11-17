@@ -22,7 +22,7 @@ transcript, and no command here moves, links, stages, commits or removes one.
 as tmp-unlink does. `tmp-sweep` and `tmp-close` kept each session's scratchpad in the store; a session started before
 they were retired still runs them, so they exit 0 and print nothing.
 
-repo-uses is off unless p4.json's scratchpad.asks is true or P4_SCRATCHPAD_ASKS=1:
+repo-uses is off unless p4.json's scratchpad.asks is true or a person set P4_SCRATCHPAD_ASKS to 1 or true:
 
   repo-uses      at SessionStart, prints one line for each file under `.claude/p4/temportal/src/` that the project
                  repository's tracked code, build, docs or CI names: that file is code the repository uses, so it
@@ -76,7 +76,7 @@ payload_from_stdin = hookio.payload_from_stdin
 project_root = hookio.project_root
 
 
-ASKS = False                # p4.json scratchpad.asks; P4_SCRATCHPAD_ASKS=1 or 0 wins for one run
+ASKS = False                # p4.json scratchpad.asks, with P4_SCRATCHPAD_ASKS ahead of it by p4conf.configure
 # the commands a session started before they were retired still runs: the two that kept each session's scratchpad in
 # the store, at its start, its turn ends and its end, and the PreToolUse ask
 RETIRED = ("tmp-sweep", "tmp-close", "ask")
@@ -100,8 +100,9 @@ def layout(payload):
 
 
 def asks_on():
-    env = os.environ.get(ASKS_ENV, "").strip()
-    return env == "1" if env in ("0", "1") else bool(ASKS)
+    """ASKS as configure set it: P4_SCRATCHPAD_ASKS read as p4conf reads every variable, 1, 0, true and false alike,
+    for the session's own store and only when a person set it, ahead of p4.json."""
+    return bool(ASKS)
 
 
 def is_code(path):

@@ -21,8 +21,8 @@
            closed and the test passed, its outcome note on the parent carrying the issue link, the commit and the test.
            A child that archives itself before it is finished is counted as archived at once, its open steps named.
 
-`gh` is P4_PHI_GH when set, and a .py file named there is run with this Python; else `gh` on PATH. P4_PHI_ISSUES=0
-or p4.json's phi.issues false turns the loop off. phi.py calls these from its hooks.
+`gh` is P4_PHI_GH when set, and a .py file named there is run with this Python; else `gh` on PATH. P4_PHI_ISSUES
+set to 0 or false, read as p4conf reads it, or p4.json's phi.issues false turns the loop off. phi.py calls these from its hooks.
 """
 
 import glob
@@ -80,12 +80,13 @@ def findings(text):
 
 
 def on(home=""):
-    if os.environ.get("P4_PHI_ISSUES") == "0":
-        return False
+    """False when the issue loop is off: P4_PHI_ISSUES and p4.json's phi.issues read by p4conf, the variable ahead
+    of p4.json when a person set it, 1, 0, true and false alike."""
     try:
         import p4conf
-        store = home or ""
-        return p4conf.section(store, "phi", write=False).get("issues", True) is not False if store else True
+        if not home:
+            return p4conf.env_value("phi.issues", os.environ.get("P4_PHI_ISSUES"), True) is not False
+        return p4conf.section(home, "phi", write=False).get("issues", True) is not False
     except Exception:  # noqa: BLE001
         return True
 
