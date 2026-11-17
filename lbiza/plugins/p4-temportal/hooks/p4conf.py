@@ -100,8 +100,9 @@ DEFAULTS = {
         },
         "lookups": {                     # each tool call recorded and checked before the next like it, by lookups.py
             "on": True,
-            "web": "answer",             # what an earlier finding for the same question does: "answer" in place of
-            "shell": "shadow",           # the call, once, "note" beside the result, "shadow" logged only, or "off"
+            "web": "note",               # what an earlier finding for the same question does: "note" beside the
+            "shell": "shadow",           # call, which runs, "answer" in place of the call, once, "shadow" logged
+                                         # only, or "off"
             "after": True,               # a failure other sessions met is told what they did about it
             "threshold": None,           # None: the trained threshold, and 0.6 before a first round
             "min_precision": 0.85,       # how often an answered call must be right for a threshold to be taken
@@ -781,10 +782,10 @@ def _write(p4, data):
 WRITTEN = "_written"
 # The generation of DEFAULTS: raised by one whenever a default changes, with the value it had added to HISTORY, so a
 # store's written values follow the change. test_p4conf.py pins DEFAULTS to this number.
-GEN = 1
+GEN = 2
 # Past defaults by dotted path: a store from before the record whose value equals one of these, or today's default,
 # counts that value as written by load, so it follows today's default.
-HISTORY = {"recall.teacher.model": ["claude-fable-5-1"]}
+HISTORY = {"recall.teacher.model": ["claude-fable-5-1"], "recall.lookups.web": ["answer"]}
 
 
 def _leaves(d, prefix=""):

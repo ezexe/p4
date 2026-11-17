@@ -117,7 +117,7 @@ class HooksJson(unittest.TestCase):
     def test_events_matchers_timeouts(self):
         h = own_hooks(HOOKS_JSON, "/hooks/recall-hook.sh")
         self.assertEqual(set(h), {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop",
-                                  "SubagentStop", "ConfigChange"})
+                                  "SubagentStop", "ConfigChange", "SubagentStart"})
         # ezexe/p4#246: the settings watcher runs in the layout hook at every start, and here at a change of a
         # settings file, which it never blocks
         self.assertEqual(h["ConfigChange"][0]["matcher"], "local_settings|project_settings|user_settings")
@@ -345,24 +345,26 @@ class Agent(Base):
     INPUT = {"prompt": "check whether the quokka harness runs the zebrafish plotter golden images on every push",
              "description": "Check the harness", "subagent_type": "Explore", "model": "haiku"}
 
-    def test_updated_input_keeps_every_field(self):
+    def test_the_subagent_prompt_stays_and_its_lines_come_at_its_start(self):
+        """ezexe/p4#243, row D2: the Agent call runs with its prompt as written, and the retrieval lines reach the
+        subagent as context at its SubagentStart, once."""
         o = self.out(run_hook("agent", {"hook_event_name": "PreToolUse", "tool_name": "Agent",
                                         "tool_input": dict(self.INPUT), "tool_use_id": "toolu_1",
                                         "session_id": SESSION, "cwd": self.proj}, self.proj))
-        hso = o["hookSpecificOutput"]
-        self.assertEqual(hso["hookEventName"], "PreToolUse")
-        up = hso["updatedInput"]
-        self.assertEqual(set(up), set(self.INPUT))
-        for k in ("description", "subagent_type", "model"):
-            self.assertEqual(up[k], self.INPUT[k])
-        self.assertTrue(up["prompt"].startswith(self.INPUT["prompt"]))
-        notes = up["prompt"][len(self.INPUT["prompt"]):]
-        self.assertTrue(notes.startswith("\n\nNotes from this repo's memory:\n- "), notes)
-        self.assertLessEqual(notes.count("\n- "), 5)
-        self.assertNotIn("permissionDecision", hso, "no permission decision unless P4_AGENT_ALLOW=1")
+        self.assertNotIn("updatedInput", (o or {}).get("hookSpecificOutput") or {}, "the prompt stays as written")
+        start = {"hook_event_name": "SubagentStart", "agent_id": "a9", "agent_type": "Explore",
+                 "session_id": SESSION, "cwd": self.proj}
+        hso = self.out(run_hook("subagent-start", start, self.proj))["hookSpecificOutput"]
+        self.assertEqual(hso["hookEventName"], "SubagentStart")
+        self.assertTrue(hso["additionalContext"].startswith("Notes from this repo's memory:\n- "),
+                        hso["additionalContext"])
+        self.assertLessEqual(hso["additionalContext"].count("\n- "), 5)
+        self.assertIsNone(self.out(run_hook("subagent-start", dict(start, agent_id="a10"), self.proj)),
+                          "each launch's lines reach one subagent")
         o2 = self.out(run_hook("agent", {"tool_name": "Agent", "tool_input": dict(self.INPUT), "cwd": self.proj},
                                self.proj, {"P4_AGENT_ALLOW": "1"}))
-        self.assertEqual(o2["hookSpecificOutput"]["permissionDecision"], "allow")
+        self.assertEqual(o2, {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}},
+                         "P4_AGENT_ALLOW=1 adds allow and nothing else")
 
     def test_unrelated_task_untouched(self):
         r = run_hook("agent", {"tool_name": "Agent", "tool_input": {"prompt": "what is the weather like today",
@@ -563,7 +565,7 @@ class SubagentStop(Base):
     def test_usage_for_the_subagent(self):
         inp = dict(Agent.INPUT, prompt="look at the quokka harness")
         o = self.out(run_hook("agent", {"tool_name": "Agent", "tool_input": inp, "cwd": self.proj}, self.proj))
-        prompt = o["hookSpecificOutput"]["updatedInput"]["prompt"]
+        prompt = inp["prompt"]
         at = transcript(os.path.join(self.tmp.name, "agent-a1.jsonl"), prompt,
                         [("Read", {"file_path": os.path.join(self.proj, "docs", "zebrafish.md")}, "# z")],
                         "The quokka harness checks the zebrafish plotter's golden images.", self.proj,
@@ -587,7 +589,7 @@ class SubagentStop(Base):
         whitespace trimmed, so the agent hook keys it the same way."""
         inp = dict(Agent.INPUT, prompt="look at the quokka harness\n")
         o = self.out(run_hook("agent", {"tool_name": "Agent", "tool_input": inp, "cwd": self.proj}, self.proj))
-        prompt = o["hookSpecificOutput"]["updatedInput"]["prompt"]
+        prompt = inp["prompt"]
         reply = "The quokka harness checks the zebrafish plotter's golden images."
         at = transcript(os.path.join(self.tmp.name, "agent-a2.jsonl"), prompt,
                         [("Read", {"file_path": os.path.join(self.proj, "docs", "zebrafish.md")}, "# z")],

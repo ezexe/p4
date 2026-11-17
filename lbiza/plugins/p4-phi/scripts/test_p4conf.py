@@ -317,11 +317,28 @@ class P4Conf(unittest.TestCase):
         self.assertEqual(s["recall"]["query"]["per_file"], 7)
         self.assertNotIn("recall.query.per_file", self.read(record=True)[p4conf.WRITTEN])
 
+    def test_a_store_holding_the_old_web_default_moves_to_note(self):
+        """ezexe/p4#243, row D1: a store load wrote at GEN 1 and a store from before the record both move from
+        "answer" to "note"; a value set by hand stays."""
+        stores = {}
+        for name, value, record in (("written", "answer", True), ("no record", "answer", False),
+                                    ("by hand", "shadow", True)):
+            p4 = tempfile.mkdtemp()
+            self.addCleanup(shutil.rmtree, p4, True)
+            d = json.loads(json.dumps(p4conf.DEFAULTS))
+            d["recall"]["lookups"]["web"] = value
+            if record:
+                d[p4conf.WRITTEN] = {"recall.lookups.web": {"v": "answer", "gen": 1}}
+            with open(p4conf.path(p4), "w", encoding="utf-8") as f:
+                json.dump(d, f)
+            stores[name] = p4conf.load(p4)["recall"]["lookups"]["web"]
+        self.assertEqual(stores, {"written": "note", "no record": "note", "by hand": "shadow"})
+
     def test_gen_is_raised_with_every_change_of_defaults(self):
         """DEFAULTS is pinned to its GEN: a change of a default fails here until GEN is raised, the old value added to
         HISTORY and the pin below updated."""
         import hashlib
-        pins = {1: "cc7604892f2635f2"}                     # append only: one more line for each GEN
+        pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973"}                     # append only: one more line for each GEN
         got = hashlib.sha256(json.dumps(p4conf.DEFAULTS, sort_keys=True).encode()).hexdigest()[:16]
         self.assertEqual(p4conf.GEN, max(pins))
         self.assertEqual(p4conf.GEN, len(pins), "no generation is skipped or replaced")

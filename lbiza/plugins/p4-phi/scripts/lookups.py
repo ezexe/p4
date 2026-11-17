@@ -34,9 +34,9 @@ the PostToolUse and PostToolUseFailure hooks, and checks a call before it runs, 
            only when that model found a threshold. Every round appends its figures to phi/models/lookups-eval.tsv.
 
 The mode of a web call is p4.json's `recall.lookups.web`, and that of a shell command `recall.lookups.shell`:
+"note", a web call's default by ezexe/p4#243, lets the call run and puts the answer beside it as `additionalContext`;
 "answer" hands the answer back in place of the call as the reason of a PreToolUse deny, once, so the same call
-made again by the same session or subagent runs; "note" puts the answer beside the result and lets the call run;
-"shadow" only logs it; "off" does not look. `recall.lookups.on` false turns recording and checking off, and
+made again by the same session or subagent runs; "shadow" only logs it; "off" does not look. `recall.lookups.on` false turns recording and checking off, and
 `recall.lookups.after` false turns off only what a failure is told after it.
 
 A check goes by likeness and not by key, since the same command seldom runs twice: a key would answer almost
@@ -66,7 +66,7 @@ MODEL = "lookups-model.json"
 EVAL = "lookups-eval.tsv"
 MODEL_KIND = "p4 lookups model"
 ON = True
-WEB = "answer"
+WEB = "note"
 SHELL = "shadow"                 # logged only: a failure foreseen from a command's words is too often wrong to stop it
 AFTER = True                     # tell a failed call what earlier sessions did about the same error
 THRESHOLD = None                 # None: the threshold a training round set for the road in use, else FALLBACK
@@ -610,7 +610,7 @@ AGAIN = "\nIf that answers it, use it. Make the same call again unchanged to run
 
 
 def check(p4, payload, when):
-    """The hook output for a call about to run, or None: an earlier finding in place of a web call, an earlier
+    """The hook output for a call about to run, or None: an earlier finding beside a web call, an earlier
     failure before a command the model expects to fail, as the mode says. While `on`, every call that reaches it
     gets a row in `checks`, answered or not."""
     configure(p4)

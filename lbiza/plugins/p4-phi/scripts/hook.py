@@ -26,11 +26,12 @@ event and matcher hooks/hooks.json runs it on, and what it does.
                  retrieval lines that `injected` lets through as `additionalContext`, with said.py's handles and
                  instruction unless `recall.said.mode` is off, and nothing when it lets none through. It opens the
                  message's row and logs what retrieval found, shown or held back.
-  agent          PreToolUse, matcher `Agent`. `updatedInput`: the Agent call's input with its `prompt` extended by
-                 phi.py's text for the subagent and by the retrieval lines under "Notes from this repo's memory:";
-                 nothing when neither adds a line.
+  agent          PreToolUse, matcher `Agent`. Nothing: the call runs with its prompt as written. phi.py's text for
+                 the subagent and the retrieval lines under "Notes from this repo's memory:" wait for its start.
+  subagent-start SubagentStart. Those lines as `additionalContext`, the oldest launch of the agent's type first,
+                 nothing when there are none.
   lookup-check   PreToolUse, matcher `.*`. The first answer of phi.py's checks that PHI_CHECK names for the tool,
-                 or else lookups.py's check: an earlier finding in place of a web call, an earlier failure before a
+                 or else lookups.py's check: an earlier finding beside a web call, an earlier failure before a
                  command expected to fail. A subagent's call also gets phi.py's word of what changed since its
                  launch beside that answer, when there is one.
   lookup-record  PostToolUse and PostToolUseFailure, matcher `.*`. For a subagent's call, its id bound to phi.py's
@@ -50,13 +51,12 @@ What the hooks reference, https://code.claude.com/docs/en/hooks, says of the eve
   adds context beside the submitted prompt and cannot replace the prompt.
 - SessionStart: `hookSpecificOutput.additionalContext` adds context for Claude, and so does plain stdout, so a
   silent hook prints nothing at all.
-- PreToolUse: `updatedInput` replaces the whole input object, so the agent hook carries every field of the Agent
-  call unchanged beside the `prompt`; that input is `prompt`, `description`, `subagent_type` and `model`. The hook
-  sets no `permissionDecision` unless P4_AGENT_ALLOW=1 adds "allow", and in auto mode an `updatedInput` without a
-  `permissionDecision` can be denied. The live test experiments/p4-suite/test_live_subagent.py of ezexe/p4-phi, which
-  runs `claude -p`, checks that the subagent's first user message carries the appended lines. SubagentStart can add
-  context to a subagent before its first prompt without rewriting the Agent call, and hooks.json registers no handler
-  of this file on it.
+- PreToolUse: the agent hook rewrites nothing, so the Agent call runs as written, and sets no `permissionDecision`
+  unless P4_AGENT_ALLOW=1 adds "allow".
+- SubagentStart: the input adds `agent_id` and `agent_type`, and `additionalContext` is "added to the subagent's
+  context at the start of its conversation, before its first prompt", so the subagent-start hook gives the lines
+  there, ezexe/p4#243 row D2. The input carries no prompt, so a launch's lines are matched to a start by session and
+  agent type, oldest first.
 - PostToolUse and PostToolUseFailure: `additionalContext` adds context beside the call's result.
 - Stop: the close hook reads the reply from `last_assistant_message`, since `transcript_path` can lag the
   conversation, and prints nothing, since a `decision` to block or an `additionalContext` would continue the turn.
@@ -475,10 +475,11 @@ def agent_lines(p4, prompt):
 
 
 def agent_input(inp):
-    out = {"hookEventName": "PreToolUse", "updatedInput": inp}
+    """The Agent call's answer: none, since its input runs as written, or `permissionDecision: allow` when
+    P4_AGENT_ALLOW=1."""
     if os.environ.get("P4_AGENT_ALLOW") == "1":
-        out["permissionDecision"] = "allow"
-    return {"hookSpecificOutput": out}
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}
+    return None
 
 
 def phi_text(name, payload):
@@ -491,40 +492,88 @@ def phi_text(name, payload):
     return str(((out or {}).get("hookSpecificOutput") or {}).get("additionalContext") or "")
 
 
+PENDING_S = 600                  # a launch's lines no subagent start took within this long are dropped
+
+
+def pending_dir(payload):
+    """Where a launch's lines wait for its subagent's start: the store's served folder, which git ignores and the
+    layout hook sweeps, or a folder of the temp directory in a project with no store."""
+    import tempfile
+    p4 = p4_of(payload)
+    base = p4conf.sub(p4, "models", "served") if os.path.isdir(p4conf.sub(p4, "models")) else os.path.join(
+        tempfile.gettempdir(), "p4-phi-subagent-start")
+    return os.path.join(base, "start-" + re.sub(r"[^\w-]", "_", payload.get("session_id") or "none"))
+
+
+def hold_for_start(payload, kind, text, key):
+    d = pending_dir(payload)
+    try:
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, f"{time.time_ns()}-{sha8(kind)}.json"), "w", encoding="utf-8") as f:
+            json.dump({"type": kind, "text": text, "key": key, "time": time.time()}, f, ensure_ascii=False)
+    except OSError:
+        pass
+
+
 def h_agent(payload):
+    """The Agent call runs with its prompt as written. phi.py's text for the subagent and the retrieval lines wait
+    in pending_dir for its SubagentStart, which adds them as context, ezexe/p4#243 row D2."""
     import labels as lb
     inp = payload.get("tool_input")
     if not isinstance(inp, dict) or not isinstance(inp.get("prompt"), str):
         return None
+    kind = str(inp.get("subagent_type") or "general-purpose")
     # phi.py's text for the subagent: the plan step it serves, and what this session's parent holds for its paths
     node = phi_text("agent-launch", payload)
-    if node and node not in inp["prompt"]:
-        inp = dict(inp, prompt=inp["prompt"].rstrip() + "\n\n" + node)
-    else:
-        node = ""
-    p4 = ready(payload)
-    if not p4:
-        return agent_input(inp) if node else None
+    node = node if node and node not in inp["prompt"] else ""
     prompt = inp["prompt"]
-    if NOTES_HEAD in prompt:
-        return agent_input(inp) if node else None   # a retried call that already carries the notes
-    r = agent_lines(p4, prompt)
-    if not r["lines"]:
-        return agent_input(inp) if node else None
-    shown = injected(p4, r["lines"])
-    shadow = not shown
-    key = sha8(prompt.rstrip())           # the prompt before the notes, as h_subagent_stop rebuilds it
-    lb.write_served(p4, f"agent-{key}", {"ids": [i for i in r["ids"] if ":" in i], "text": prompt[:2000],
-                                         "task": f"agent:{key}", "time": now(),
-                                         "tool_use_id": payload.get("tool_use_id", ""), "shadow": shadow})
-    if shadow:
-        return agent_input(inp) if node else None
-    updated = dict(inp)                   # every original field unchanged: updatedInput replaces the whole input
-    updated["prompt"] = prompt.rstrip() + "\n\n" + NOTES_HEAD + "\n" + "\n".join(shown)
-    out = {"hookEventName": "PreToolUse", "updatedInput": updated}
-    if os.environ.get("P4_AGENT_ALLOW") == "1":
-        out["permissionDecision"] = "allow"
-    return {"hookSpecificOutput": out}
+    notes, key = "", sha8(prompt.rstrip())
+    p4 = ready(payload)
+    if p4 and NOTES_HEAD not in prompt:
+        r = agent_lines(p4, prompt)
+        if r["lines"]:
+            shown = injected(p4, r["lines"])
+            lb.write_served(p4, f"agent-{key}", {"ids": [i for i in r["ids"] if ":" in i], "text": prompt[:2000],
+                                                 "task": f"agent:{key}", "time": now(),
+                                                 "tool_use_id": payload.get("tool_use_id", ""), "shadow": not shown})
+            if shown:
+                notes = NOTES_HEAD + "\n" + "\n".join(shown)
+    text = "\n\n".join(x for x in (notes, node) if x)
+    if text or p4:
+        hold_for_start(payload, kind, text, key)
+    return agent_input(inp)
+
+
+def h_subagent_start(payload):
+    """SubagentStart: the oldest launch of this agent type in this session that no start has taken gives its lines
+    as `additionalContext`, and its served record is bound to the subagent's id for its SubagentStop."""
+    import labels as lb
+    d = pending_dir(payload)
+    kind = str(payload.get("agent_type") or "general-purpose")
+    try:
+        names = sorted(os.listdir(d))
+    except OSError:
+        return None
+    for name in names:
+        p = os.path.join(d, name)
+        try:
+            if time.time() - os.path.getmtime(p) > PENDING_S:
+                os.remove(p)
+                continue
+            with open(p, encoding="utf-8") as f:
+                row = json.load(f)
+            if row.get("type") != kind:
+                continue
+            os.remove(p)                                  # taken: a second start of the same type gets the next
+        except (OSError, ValueError):
+            continue
+        p4 = p4_of(payload)
+        if payload.get("agent_id") and row.get("key") and os.path.isdir(p4conf.sub(p4, "models")):
+            lb.write_served(p4, f"bind-{payload['agent_id']}", {"key": row["key"]})
+        if not row.get("text"):
+            return None
+        return {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": row["text"]}}
+    return None
 
 
 # --- `close` and `subagent-stop`, on Stop and SubagentStop -----------------------------------------------
@@ -626,7 +675,14 @@ def h_subagent_stop(payload):
                 first = c
                 break
     original = first.split("\n\n" + NOTES_HEAD, 1)[0]
-    key = f"agent-{sha8(original)}"
+    key = f"agent-{sha8(original.rstrip())}"
+    bind = lb.read_served(p4, f"bind-{payload.get('agent_id', '')}") if payload.get("agent_id") else None
+    if bind and bind.get("key"):
+        key = f"agent-{bind['key']}"                  # bound at its SubagentStart, whatever its first message reads
+        try:
+            os.remove(lb.served_path(p4, f"bind-{payload['agent_id']}"))
+        except OSError:
+            pass
     served = lb.read_served(p4, key)
     if not served:
         return None
@@ -636,7 +692,7 @@ def h_subagent_stop(payload):
     when = now()
     labels_for_turn(p4, project, idx, task_id, served, reply, turn, when)
     lb.add_tasks(p4, [{"id": task_id, "session": (payload.get("session_id") or "")[:8], "time": when,
-                       "text": st.collapse(original)[:2000], "kind": "agent"}])
+                       "text": st.collapse(served.get("text") or original)[:2000], "kind": "agent"}])
     try:
         os.remove(lb.served_path(p4, key))
     except OSError:
@@ -679,7 +735,7 @@ def phi_route(payload, table):
 
 def h_lookup_check(payload):
     """Before a tool runs. The first answer of phi.py's checks that PHI_CHECK names for the tool, or else
-    lookups.py's check: an earlier finding in place of a web call, an earlier failure before a command expected to
+    lookups.py's check: an earlier finding beside a web call, an earlier failure before a command expected to
     fail. A subagent's call also gets phi.py's word of what changed since its launch, when there is one, as
     additionalContext beside that answer."""
     out = phi_route(payload, PHI_CHECK)
@@ -743,7 +799,7 @@ def h_catch_up(payload):
     return catchup.hook(payload)
 
 
-HANDLERS = {"catch-up": h_catch_up, "settings": h_settings, "changelog": h_changelog, "layout": h_layout, "recall": h_recall, "agent": h_agent,
+HANDLERS = {"catch-up": h_catch_up, "settings": h_settings, "changelog": h_changelog, "layout": h_layout, "recall": h_recall, "agent": h_agent, "subagent-start": h_subagent_start,
             "close": h_close, "subagent-stop": h_subagent_stop, "train": h_train,
             "lookup-check": h_lookup_check, "lookup-record": h_lookup_record}
 

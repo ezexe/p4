@@ -108,6 +108,7 @@ class Base(unittest.TestCase):
     def conf(self, **kw):
         data = p4conf.load(self.p4)
         data["recall"]["lookups"].update(kw)
+        data[p4conf.WRITTEN] = {}                   # every value here is the test's own, as if set by hand
         p4conf._write(self.p4, data)
 
     def rows(self, where="1=1"):
@@ -243,7 +244,24 @@ class AfterOnce(Base):
         self.assertEqual(got, [True, False, True])
 
 
+class Default(Base):
+    def test_a_web_call_runs_with_the_earlier_finding_beside_it_by_default(self):
+        """ezexe/p4#243, row D1: with no lookups setting written, the call runs and the stored finding is context."""
+        self.record_fetch()
+        hso = self.out(run_hook("lookup-check", pre("WebFetch", {"url": URL, "prompt": ASK}, proj=self.proj),
+                                self.proj))["hookSpecificOutput"]
+        self.assertNotIn("permissionDecision", hso)
+        self.assertIn("30 seconds", hso["additionalContext"])
+        self.assertEqual(self.checks(), ["note"])
+
+
 class Check(Base):
+    """The "answer" mode, which a project sets: an earlier finding in place of the call, once."""
+
+    def setUp(self):
+        super().setUp()
+        self.conf(web="answer")
+
     def test_the_same_question_is_answered_once_then_runs(self):
         self.record_fetch()
         o = self.out(run_hook("lookup-check", pre("WebFetch", {"url": URL, "prompt": ASK + " exactly"}, proj=self.proj),
@@ -385,7 +403,7 @@ class Lines(Base):
         import plans
         self.record_fetch()
         web = self.out(run_hook("lookup-check", pre("WebFetch", {"url": URL, "prompt": ASK}, proj=self.proj),
-                                self.proj))["hookSpecificOutput"]["permissionDecisionReason"]
+                                self.proj))["hookSpecificOutput"]["additionalContext"]
         err = "Exit code 1\nModuleNotFoundError: No module named 'numpy'"
         self.out(run_hook("lookup-record", post("Bash", {"command": "python tools/probe.py"}, err, S1, self.proj, "t2",
                                                 "PostToolUseFailure"), self.proj))
