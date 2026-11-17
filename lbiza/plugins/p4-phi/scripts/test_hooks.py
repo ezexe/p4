@@ -118,7 +118,7 @@ class HooksJson(unittest.TestCase):
         h = own_hooks(HOOKS_JSON, "/hooks/recall-hook.sh")
         self.assertEqual(set(h), {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop",
                                   "SubagentStop"})
-        self.assertEqual(h["SessionStart"][0]["matcher"], "startup|resume|clear|compact")
+        self.assertEqual(h["SessionStart"][0]["matcher"], "startup|resume|clear|compact|fork")
         self.assertEqual(h["SessionStart"][0]["hooks"][0]["timeout"], 15)
         self.assertEqual(h["UserPromptSubmit"][0]["hooks"][0]["timeout"], 10)
         self.assertEqual(h["PreToolUse"][0]["matcher"], "Agent")

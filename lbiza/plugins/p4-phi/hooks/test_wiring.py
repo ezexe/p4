@@ -186,6 +186,27 @@ class Wiring(unittest.TestCase):
             self.run_all("a new store", make)
 
 
+class Matchers(unittest.TestCase):
+    """Each matcher read as the hooks page reads it: `*`, `""` or none take every value, a matcher of letters,
+    digits, `_`, `-`, spaces, `,` and `|` is a list of exact names, and any other is an unanchored regex."""
+
+    @staticmethod
+    def takes(matcher, value):
+        if matcher in (None, "", "*"):
+            return True
+        if re.fullmatch(r"[A-Za-z0-9_\- ,|]+", matcher):
+            return value in {x.strip() for x in re.split(r"[|,]", matcher)}
+        return re.search(matcher, value) is not None
+
+    def matcher_of(self, event, handler):
+        return next(m for ev, m, x in entries() if ev == event and x["command"].endswith(" " + handler))
+
+    def test_layout_runs_on_every_start_a_fork_included(self):
+        m = self.matcher_of("SessionStart", "layout")
+        for source in EVENTS["SessionStart"]:
+            self.assertTrue(self.takes(m, source), source)
+
+
 class Manifests(unittest.TestCase):
     """The marketplace's catalog against each plugin's own plugin.json: Claude Code warns when an entry's version and
     its plugin.json's differ, platform row P16."""
