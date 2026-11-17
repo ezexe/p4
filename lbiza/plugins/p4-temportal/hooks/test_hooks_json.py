@@ -34,6 +34,13 @@ class NativeMemoryTest(unittest.TestCase):
         moves = [c for c in every_command() if "memory mirror" in c or "memory sweep" in c]
         self.assertEqual(moves, [])
 
+    def test_a_write_or_an_edit_starts_no_hook(self):
+        """ezexe/p4#118: hook runs per Write or Edit, which the mirror made one each, are none now that Claude Code
+        writes the store's memory itself."""
+        on_write = [g for g in HOOKS.get("PostToolUse", [])
+                    if any(t in (g.get("matcher") or "*").split("|") for t in ("*", "Write", "Edit"))]
+        self.assertEqual(on_write, [])
+
 
 class AppScratchpadTest(unittest.TestCase):
     def test_no_event_runs_a_scratchpad_tmp_command(self):
