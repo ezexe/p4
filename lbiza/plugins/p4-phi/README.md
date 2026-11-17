@@ -4,6 +4,18 @@ What linked Claude Code sessions hand each other, and retrieval from the project
 The skill `skills/phi/SKILL.md` lists the commands a session runs and what p4-phi does not do.
 This page holds the docs sentences p4-phi's delegation rests on, the model and effort a child session starts with, what p4-phi does for a supervisor session, and the settings, none of which has to be set.
 
+## Install
+
+The marketplace `p4-marketplace` is the folder `lbiza/` of a checkout of ezexe/p4, so add it by that folder's path, then install each plugin by name from your shell:
+
+```bash
+claude plugin marketplace add ./p4/lbiza
+claude plugin install p4-phi@p4-marketplace
+claude plugin install p4-temportal@p4-marketplace
+```
+
+`./p4` is the checkout, and each install is at user scope unless `--scope project` or `--scope local` says otherwise.
+
 ## Delegation
 
 Every behaviour below rests on a sentence of the Claude Code docs at `https://code.claude.com/docs/en/<page>`.
@@ -70,7 +82,7 @@ Every key is optional.
 | `act_dont_wait` | `true` | `false`: the built-in act-don't-wait rule is left out |
 | `top_orchestrates` | `true` | `false`: a top-level session does its own task list's work |
 | `file_sets` | `true` | `false`: a session may be started by a brief that declares no write set |
-| `issues` | `true` | `false`: no GitHub issue is filed for a writing child's purpose |
+| `issues` | `true` | `false`: no issue loop: a worker takes no open issue its brief names, gets no line on a commit that closes no issue, runs no regression test at Stop and is given no push line |
 | `session_archives` | `false` | `true`: sessions may archive sessions |
 | `puppeteer_section` | `puppeteers` | another name for the sidebar section; an empty string makes no session a supervisor session |
 | `puppeteer_chars` | 200000 | the characters p4-phi may hand a supervisor session between compactions before its boundary notice says so |
@@ -105,7 +117,7 @@ Each is for one run, a test or one machine's unusual layout.
 | `P4_PHI_PUPPETEER` | as `puppeteer` in `phi.json` says | `0` or `1` for one run |
 | `P4_PHI_WATCH` | an orchestrator's watcher runs | `0` keeps it from starting |
 | `P4_PHI_WATCH_S`, `P4_PHI_WATCH_NET` | a look every 5 seconds, or every 30 once nothing has changed for 10 minutes, with GitHub read | a tick in seconds, `0` for no network |
-| `P4_PHI_ISSUES` | as `phi.issues` says | `0` files no issue |
+| `P4_PHI_ISSUES` | as `phi.issues` says | `0` turns the issue loop off for one run, as `phi.issues` false does |
 | `P4_PHI_GH` | the `gh` on PATH, and no issue loop without one | another `gh` |
 | `P4_PHI_PROOF_S` | a regression test has 15 seconds inside the Stop hook, then finishes behind it | another limit |
 | `P4_PHI_WAIT` | 2 seconds for the app's record of a new session | another wait |
