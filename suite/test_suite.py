@@ -355,6 +355,17 @@ class Command(Repo):
         self.assertEqual(code, run.OK, out + err)
         self.assertEqual(list(lines_of(out)), ["a/test_two.py::Two::test_named"])
 
+    def test_the_folder_a_caller_names_for_test_phis_fixtures_reaches_the_worker(self):
+        # test_phi.py makes the folder P4_PHI_TEST_TMP names when it is imported and sets tempfile.tempdir to it, so
+        # the folder exists after a run only when the variable reached the worker that imported the file
+        fixtures = os.path.join(self.root, "phi-fixtures")
+        test = "lbiza/plugins/p4-phi/scripts/test_phi.py::Background::test_a_note_needs_its_source"
+        code, out, err = command(os.path.dirname(HERE), "--workers", "1", test, P4_PHI_TEST_TMP=fixtures)
+        self.assertEqual(code, run.OK, out + err)
+        self.assertEqual(lines_of(out)[test][0], "ok", out)
+        self.assertTrue(os.path.isdir(fixtures),
+                        "test_phi.py's fixtures did not go to the folder P4_PHI_TEST_TMP names")
+
     def test_two_files_of_one_name_both_run_and_a_module_of_other_contents_by_one_name_fails_its_folder(self):
         pad = "# " + "x" * 60 + "\n"
         self.make({"a/test_same.py": "def test_from_a():\n    pass\n",

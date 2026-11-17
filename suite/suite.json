@@ -17,7 +17,7 @@
   },
   "environment": {
     "strip": ["CLAUDE", "ANTHROPIC", "P4_", "GH_TOKEN", "GITHUB_TOKEN"],
-    "keep": ["P4_FIXTURES", "P4_MAC_STORE"],
-    "why": "Each worker starts without every variable whose name starts with one of strip: a test run from a session sees none of that session's ids, the app's records, an API key or a GitHub token, and every P4_ switch is off, so a live test skips and a run spends nothing. The variables of keep only point a test at fixtures on the machine, so they pass through."
+    "keep": ["P4_FIXTURES", "P4_MAC_STORE", "P4_PHI_TEST_TMP"],
+    "why": "Each worker starts without every variable whose name starts with one of strip: a test run from a session sees none of that session's ids, the app's records, an API key or a GitHub token, and every P4_ switch is off, so a live test skips and a run spends nothing. The variables of keep only point a test at fixtures on the machine, or at the folder its caller chose for the fixtures a test makes, as P4_PHI_TEST_TMP does for test_phi.py, so they pass through."
   }
 }
