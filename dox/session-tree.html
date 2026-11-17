@@ -292,7 +292,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
         <li>p4-phi holds a start whose write set overlaps a live session's until that session reports done. A session above the parent session never holds it.</li>
         <li>An archived session holds nothing, and neither does a session the app shows as stopped, until its next turn.</li>
         <li>p4-phi keeps the set as <code>fileSet</code> in the worker's <code>session.json</code> and shows it under Files on the worker's page. <code>phi.py files &lt;path&gt; ...</code> replaces it with the paths given and <code>phi.py files --release</code> empties it, so a start request held on the freed paths is handed to the session that queued it at its next turn.</li>
-        <li>There is one work tree. p4-phi asks before a start that passes <code>use_worktree: true</code> or names a branch, and before a worker makes a worktree or a branch of its own or moves the checkout to another branch. It also asks before a worker lands work with a push, merge, rebase or pull, unless its brief hands it the landing or it works on an issue of its own.</li>
+        <li>A worker that writes works in a git worktree and on a branch of its own: each start p4-phi drafts for one passes <code>use_worktree: true</code>, a start for a session that only reads passes <code>false</code>, and so does a new orchestrator's, since it lands its tree's work in the checkout that holds the default branch. p4-phi asks before a worker makes a worktree or a branch of its own or moves the checkout to another branch. It also asks before a worker lands work with a push, merge, rebase or pull, unless its brief hands it the landing or it works on an issue of its own.</li>
         <li>Green work that closes an issue is pushed at once. A worker that took an issue is told to push its <code>Closes #N</code> commit itself once its regression test passes, and the orchestrator is told to push and sync the issue-closing commits of a finished worker that took none.</li>
         <li>Setting <code>phi.file_sets</code> to false in <code>p4.json</code> turns the check on a start call off. A request to a puppeteer still declares its write set, and a queued start that overlaps a live writer still waits.</li>
       </ul>
@@ -560,7 +560,7 @@ var EX={
     why:"An orchestrator is a session with no parent session. It orchestrates its own topic, and the orchestrators at the top are siblings: p4-phi hands each what the others change. ezexe can start one by hand in the app, and then no move is needed. When a session starts one, it begins nested under its parent session, so it must detach to top level on both sides.",
     steps:[
       {side:"app",by:q(e.starterTitle)+" starts it, in a turn ezexe began.",code:call("mcp__ccd_session__start_session",withLevel({initiation:"user_asked",title:e.title,context:"fresh",use_worktree:false,
-        background:"ezexe raised a topic outside this session's task. The new session orchestrates that topic in the same checkout, on the same branch, and reports to no other session.",
+        background:"ezexe raised a topic outside this session's task. The new session orchestrates that topic in this checkout, where it lands its own tree's work, and reports to no other session.",
         prompt:"<the topic, restated as the new session's own instruction>\n\n"+NEWTOP}))},
       {side:"app",by:"The new session's first act is the app's detach to top level.",code:call("mcp__ccd_session_mgmt__detach_session",{session_id:"self"})},
       {side:"phi",by:"Then it is detached to top level in p4-phi.",code:PHI+" detach",out:"already an orchestrator",
@@ -574,8 +574,8 @@ var EX={
   child:function(e){return{title:e.deep?"A coworker, started the same way":"A worker of "+q(e.parentTitle),
     why:"A session starts another with the app's own tool. The brief names the task, what done looks like and the files the new session may write, because p4-phi gives it the rest."+(e.deep?" A worker starts a coworker with the same call. When the app refuses it, the worker shows a suggested task card, which ezexe starts in that session.":""),
     steps:[
-      {side:"app",by:q(e.parentTitle)+" makes the call.",code:call("mcp__ccd_session__start_session",withLevel({initiation:"user_asked",title:e.title,context:"fresh",use_worktree:false,
-        background:"This is one step of the task list of \""+e.parentTitle+"\". It runs in the same checkout, on the same branch, and it reports to that session when done.",
+      {side:"app",by:q(e.parentTitle)+" makes the call.",code:call("mcp__ccd_session__start_session",withLevel({initiation:"user_asked",title:e.title,context:"fresh",use_worktree:true,
+        background:"This is one step of the task list of \""+e.parentTitle+"\". It runs in a git worktree of its own, on a branch of its own, and it reports to that session when done.",
         prompt:"<the task and what done looks like>\n\nFiles: <each path this session may write, comma separated, or none>\n\nReport when done."}))},
       {side:"phi",by:"A brief with no Files line never starts. p4-phi's hook on the call refuses it.",err:true,
         out:"phi (p4-phi): this start is refused: a brief declares its write set: add a line `Files: <each path this session may write, comma separated>`, or `Files: none` for a session that writes nothing. One writer per file: a start whose write set overlaps a live session's is held until that session reports done, tasks that share a file go to one child as a serial run, and tasks with disjoint files each get a child."}],
@@ -584,8 +584,8 @@ var EX={
   card:function(e){return{title:"A coworker by suggested task card",
     why:"The app refuses a start with user_asked in a turn ezexe did not begin. A worker's turn is usually begun by another session's message, so a worker that wants a coworker shows it as a suggested task card, which ezexe starts in that session. The card holds the start, and p4-phi keeps no request for it.",
     steps:[
-      {side:"app",by:q(e.reqTitle)+" shows the coworker as a suggested task card.",code:call("mcp__ccd_session__start_session",withLevel({initiation:"own_initiative",title:e.title,context:"fresh",use_worktree:false,
-        background:"This is one part of the task of \""+e.reqTitle+"\". It runs in the same checkout, on the same branch, and it reports to that session when done.",
+      {side:"app",by:q(e.reqTitle)+" shows the coworker as a suggested task card.",code:call("mcp__ccd_session__start_session",withLevel({initiation:"own_initiative",title:e.title,context:"fresh",use_worktree:true,
+        background:"This is one part of the task of \""+e.reqTitle+"\". It runs in a git worktree of its own, on a branch of its own, and it reports to that session when done.",
         prompt:"<the whole brief, with its Files line>"})),note:"When ezexe starts the card, the coworker starts. mcp__ccd_session__dismiss_task withdraws a card that went stale."},
       {side:"phi",by:"A card whose brief has no Files line is never shown. p4-phi's hook on the call refuses it, as it refuses a start.",err:true,
         out:"phi (p4-phi): this start is refused: a brief declares its write set: add a line `Files: <each path this session may write, comma separated>`, or `Files: none` for a session that writes nothing. One writer per file: a start whose write set overlaps a live session's is held until that session reports done, tasks that share a file go to one child as a serial run, and tasks with disjoint files each get a child."}],
@@ -612,8 +612,8 @@ var EX={
     e.groups.forEach(function(g){
       if(!g.clash&&!first)first=g;
       steps.push({side:"app",by:"One call for "+q(g.title)+(g.tasks.length>1?", a serial run of "+g.tasks.length+" tasks that share a file.":", a task whose files nobody else touches."),
-        code:call("mcp__ccd_session__start_session",withLevel({initiation:"user_asked",title:g.title,context:"fresh",use_worktree:false,
-          background:"One part of the queue of \""+e.parentTitle+"\", split by disjoint write sets. Everything stays in the one work tree, on the parent session's branch, with one writer for each file.",
+        code:call("mcp__ccd_session__start_session",withLevel({initiation:"user_asked",title:g.title,context:"fresh",use_worktree:true,
+          background:"One part of the queue of \""+e.parentTitle+"\", split by the files each part writes. Each part runs in a git worktree of its own, on a branch of its own, and the parent session merges each branch.",
           prompt:(g.tasks.length>1?"Do these in order, one commit each:\n"+g.tasks.map(function(t,i){return (i+1)+". "+t}).join("\n"):g.tasks[0])+"\n\nFiles: "+g.files.join(", ")+"\n\nReport when done."})),
         err:!!g.clash,
         out:g.clash?"phi (p4-phi): this start is held: its write set shares "+g.clash.hit.slice(0,5).join(", ")+" with \""+g.clash.title+"\" `"+g.clash.id+"`, which is live and has not reported done. Send this work to that session as the next task of its serial run, or start it once that session reports done.":"",

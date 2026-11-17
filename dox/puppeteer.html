@@ -549,7 +549,7 @@ function FIRST_ACT(){return "Its first act: `mcp__ccd_session_mgmt__detach_sessi
 function NOT_PUPPETEER(){return "phi: this session is not a puppeteer: that is an orchestrator ezexe filed in the sidebar section \""+SECTION+"\", and the app's file shows this one in no section"}
 function marker(rid,from){return "phi start request "+rid+" for "+from+"."}
 /* starts.call_of: the call a start request is started by */
-function reqCall(rid,t,from){return {initiation:"user_asked",title:t,context:"fresh",use_worktree:false,background:"<its start background>",prompt:BRIEF+"\n\n"+LEVEL+"\n\n"+marker(rid,from),effort:"<effort>"}}
+function reqCall(rid,t,from){return {initiation:"user_asked",title:t,context:"fresh",use_worktree:true,background:"<its start background>",prompt:BRIEF+"\n\n"+LEVEL+"\n\n"+marker(rid,from),effort:"<effort>"}}
 /* controls.request_call: a request addressed to the puppeteer, a new orchestrator in the environment of the session that filed it */
 function puppCall(r){var from=N(r.from);return {initiation:"user_asked",title:r.title,context:"fresh",use_worktree:false,cwd:"<"+from.env+">",background:"<its start background>",
   prompt:BRIEF+"\n\n"+NEW_TOP_BRIEF+" "+FIRST_ACT()+"\n\n"+LEVEL+"\n\n"+marker(r.id,r.from),effort:"<effort>"}}
@@ -679,7 +679,7 @@ var EX={
     steps:e.steps.concat([
       {side:"app",by:"The puppeteer sends "+q(e.title)+" one message.",code:call("SendMessage",{to:e.id,message:"<the task restated as your own instruction: what to do and why, from your side>\n\nFiles: <paths>\n\nDone looks like: <what must be true>\n\nBrief and start a worker of your own for it."})},
       {side:"phi",by:"The puppeteer keeps it on the board until the report comes.",code:PHI+' note "Sent the '+e.work+' work to '+e.title+'." --source "ezexe\'s message" --kind waiting',out:"kept"},
-      {side:"app",by:"That message began a turn ezexe did not begin in "+q(e.title)+", so the app refuses its start with user_asked. It shows the worker as a suggested task card.",code:call("mcp__ccd_session__start_session",{initiation:"own_initiative",title:e.work,context:"fresh",use_worktree:false,prompt:"<the task and what done looks like>\n\nFiles: <paths>\n\n"+LEVEL+"\n\nReport when done.",effort:"<effort>"}),
+      {side:"app",by:"That message began a turn ezexe did not begin in "+q(e.title)+", so the app refuses its start with user_asked. It shows the worker as a suggested task card.",code:call("mcp__ccd_session__start_session",{initiation:"own_initiative",title:e.work,context:"fresh",use_worktree:true,prompt:"<the task and what done looks like>\n\nFiles: <paths>\n\n"+LEVEL+"\n\nReport when done.",effort:"<effort>"}),
         note:"Select the session, then press its card as ezexe, or have a busy writer hold the worker's files."}]),
     app:"A suggested task card in "+q(e.title)+". No session has started yet.",
     phi:"A note of kind waiting on the puppeteer's record, printed on the board under Waiting on."}},

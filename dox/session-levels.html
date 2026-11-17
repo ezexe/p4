@@ -310,8 +310,8 @@ var KINDS=[
   {id:"check",label:"An unanchored read of a result",sub:"A finding, a plan or a page that is no code change.",dest:"check",tag:["you","p4-phi:check"]}
 ];
 var DEST={
-  child:{name:"A worker",why:"A work step goes to a worker, a fresh session started under this one. The worker works on the same branch in the same checkout, and declares the files it writes on its brief's Files: line.",
-    spec:[["started by","mcp__ccd_session__start_session"],["context","fresh"],["use_worktree","false"],["model, effort","by the step's kind, as the table below says"],["brief","the step, a Files: line, what it must leave done, \"report when done\" and its model and effort"]]},
+  child:{name:"A worker",why:"A work step goes to a worker, a fresh session started under this one. The worker works in a git worktree of its own, on a branch of its own, and commits there, and its brief names the files it writes on its Files: line.",
+    spec:[["started by","mcp__ccd_session__start_session"],["context","fresh"],["use_worktree","true"],["model, effort","by the step's kind, as the table below says"],["brief","the step, a Files: line, what it must leave done, \"report when done\" and its model and effort"]]},
   read:{name:"Explore",why:"Claude Code's built-in subagent for searching and analyzing codebases. It is read-only: Write and Edit are denied to it.",
     spec:[["built into","Claude Code"],["model","haiku, named on the Agent call"],["tools","read-only"],["runs","in the background"]]},
   review:{name:"code-review",why:"Claude Code's bundled review skill. It looks for correctness bugs in a code change and, run without --fix, reports and changes no file.",
@@ -334,11 +334,11 @@ function steps(kind,ask){
     return [
       {dir:"down",legs:["tc"],by:"The orchestrator starts a worker",say:"The start call carries the brief down.",
        html:"The brief is the step's words, a line <code>Files:</code> with the paths the worker may write, what it must leave done, “report when done”, and the line that says its model and effort. Steps that share a file go to one worker as a serial run. Steps with disjoint files each get a worker.",
-       code:call("mcp__ccd_session__start_session",{initiation:"user_asked",context:"fresh",use_worktree:false,title:"Fix the review findings in relay.py",effort:"high",
-         prompt:"Fix the ten review findings in relay.py.\nFiles: lbiza/plugins/p4-phi/scripts/relay.py\nDone looks like: test_relay.py passes and one commit is on main.\nReport when done.\n\nModel and effort: the parent session's own model at high effort, since this is a build that changes behaviour."})},
+       code:call("mcp__ccd_session__start_session",{initiation:"user_asked",context:"fresh",use_worktree:true,title:"Fix the review findings in relay.py",effort:"high",
+         prompt:"Fix the ten review findings in relay.py.\nFiles: lbiza/plugins/p4-phi/scripts/relay.py\nDone looks like: test_relay.py passes and one commit is on this session's own branch.\nReport when done.\n\nModel and effort: the parent session's own model at high effort, since this is a build that changes behaviour."})},
       {dir:"down",legs:["tc"],by:"Or it shows a suggested task card",say:"A card carries the same brief down.",
        html:"On a turn that another session began, the app refuses <code>user_asked</code>. The orchestrator shows the worker as a suggested task card, the same call with <code>initiation</code> <code>own_initiative</code>, which ezexe starts in this session. The app nests the worker under the session that showed the card, and p4-phi keeps no request for it.",
-       code:call("mcp__ccd_session__start_session",{initiation:"own_initiative",context:"fresh",use_worktree:false,title:"Fix the review findings in relay.py",effort:"high",
+       code:call("mcp__ccd_session__start_session",{initiation:"own_initiative",context:"fresh",use_worktree:true,title:"Fix the review findings in relay.py",effort:"high",
          prompt:"<the whole brief, with its Files: line and its model and effort>"})},
       {dir:"hold",legs:["tc"],by:"The orchestrator ends its turn",say:"The worker works. The orchestrator is free.",
        html:"The orchestrator keeps itself free for orchestration: planning, messaging and managing sessions, decisions with ezexe, and landing the work. It does not do the step itself and it does not wait on the worker."},

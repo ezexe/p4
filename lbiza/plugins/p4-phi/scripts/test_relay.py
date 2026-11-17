@@ -853,14 +853,15 @@ class ThreeSessions(unittest.TestCase):
 class ForkOrFresh(ThreeSessions):
     """The advice on start_session, a fork's pinned agenda, and a fresh child's slice of the parent's anchor."""
 
-    def advise(self, host, context_, prompt, size):
+    def advise(self, host, context_, prompt, size, **more):
         path = os.path.join(self._tmp.name, host + "-transcript.jsonl")
         with open(path, "w", encoding="utf-8") as f:
             f.write("x" * size)
         r = self.t.hook("start-advice", host, {"hook_event_name": "PreToolUse",
                                                "tool_name": "mcp__ccd_session__start_session",
                                                "tool_input": {"initiation": "user_asked", "context": context_,
-                                                              "title": "a child", "prompt": prompt + "\nFiles: none"},
+                                                              "title": "a child", "prompt": prompt + "\nFiles: none",
+                                                              **more},
                                                "transcript_path": path})
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
@@ -887,17 +888,32 @@ class ForkOrFresh(ThreeSessions):
         out = self.advise(TOP, "fresh", f"Rework `{self.x('lib')}`", 10 * 1024)
         self.assertIn('advises context "fork"', out["permissionDecisionReason"])
 
-    def test_a_start_with_its_own_worktree_or_branch_is_asked(self):
+    def test_a_start_with_its_own_worktree_or_branch_is_not_asked(self):
+        """A session that writes gets a git worktree and a branch of its own, worktrees.md, "Running each Claude Code
+        session in its own worktree gives it a separate copy of the files to edit", so p4-phi asks about neither,
+        and its own word for a new worker's call is `use_worktree: true`. A fresh start in a worktree is not
+        advised to fork either: the start tool's text gives `use_worktree` as rejected with a fork."""
         self.t.cli(TOP, "shard", self.x("lib"))
         path = os.path.join(self._tmp.name, "short.jsonl")
         with open(path, "w", encoding="utf-8") as f:
             f.write("x")
-        for extra in ({"use_worktree": True}, {"branch_name": "my-branch"}):
+        for extra in ({"use_worktree": True}, {"use_worktree": True, "branch_name": "my-branch"},
+                      {"use_worktree": True, "source_branch": "main"}):
             r = self.t.hook("start-advice", TOP, {"tool_name": "mcp__ccd_session__start_session", "transcript_path": path,
                                                   "tool_input": {"context": "fresh", "prompt": "write docs\nFiles: none", **extra}})
-            out = json.loads(r.stdout)["hookSpecificOutput"]
-            self.assertEqual(out["permissionDecision"], "ask")
-            self.assertIn("use_worktree: false", out["permissionDecisionReason"])
+            self.assertEqual(r.stdout.strip(), "", f"not asked: {extra}")
+        self.assertIsNone(self.advise(TOP, "fresh", f"Rework `{self.x('lib')}`", 10 * 1024, use_worktree=True),
+                          "a fork is not advised over a worktree of its own")
+        self.assertIn('advises context "fork"', self.advise(TOP, "fresh", f"Rework `{self.x('lib')}`", 10 * 1024,
+                                                            use_worktree=False)["permissionDecisionReason"])
+        import phi
+        import plans
+        with open(phi.__file__, encoding="utf-8") as f:
+            source = f.read()
+        self.assertNotIn("pass `use_worktree: false`", source, "no line tells a session to drop the worktree")
+        self.assertNotIn("no worktree or", source)
+        for line in (plans.CARD_EACH, phi.FIRST_SPLIT):
+            self.assertIn("`use_worktree: true`, so it works in a git worktree and on a branch of its own", line)
 
     def test_a_child_making_its_own_branch_is_asked_and_the_top_level_session_is_not(self):
         def guard(host, cmd, tool="Bash"):

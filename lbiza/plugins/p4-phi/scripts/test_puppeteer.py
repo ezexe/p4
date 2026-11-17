@@ -157,7 +157,9 @@ class Linear(Base):
         self.assertIn("no running writer holds its files", ctx)
         self.assertIn("its parent is this session", ctx)
         call = call_in(ctx)
-        self.assertEqual((call["initiation"], call["context"], call["use_worktree"]), ("user_asked", "fresh", False))
+        self.assertEqual((call["initiation"], call["context"], call["use_worktree"]), ("user_asked", "fresh", True),
+                         "a worker's draft writes, so it gets a git worktree and a branch of its own")
+        self.assertIn(puppeteer.WORKTREE_LINE, call["prompt"], "its brief says where it works and who lands it")
         self.assertNotIn(RETRY, call["prompt"], "the brief quotes no sentence of the message")
         self.assertIn("Report when done.", call["prompt"])
         self.assertGreaterEqual(len(call["background"]), 80)
@@ -174,6 +176,8 @@ class Linear(Base):
         other = context(t.say(TOP, "Write a changelog generator for the billing dashboard's release notes"))
         self.assertIn("so it is a new orchestrator", other)
         self.assertIn(phi.NEW_TOP_BRIEF, call_in(other)["prompt"])
+        self.assertIs(call_in(other)["use_worktree"], False, "a new orchestrator lands in this checkout")
+        self.assertNotIn(puppeteer.WORKTREE_LINE, call_in(other)["prompt"])
 
     def test_a_draft_whose_area_has_a_live_owner_is_routed_there(self):
         t = self.t

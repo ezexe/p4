@@ -505,6 +505,7 @@ class Supervisor(unittest.TestCase):
                          os.path.normcase(os.path.normpath(self.other)), "in the environment of the session that filed it")
         self.assertIn(phi.NEW_TOP_BRIEF, call["prompt"])
         self.assertIn(f"for {TOP2}.", call["prompt"])
+        self.assertIs(call["use_worktree"], False, "a new orchestrator lands in its project's own checkout")
         self.assertIn("## Requests to this puppeteer", read(os.path.join(t.dir(PUP), "board.md")))
         self.assertNotIn("a boundary", ctx, "never while a controlled session waits on the puppeteer's answer")
         # it starts it: the new session arrives in the store of the session that filed the request, an

@@ -14,8 +14,9 @@
            a backticked command or a test file in a step that speaks of a test, or `phi.py proof "<command>"`. p4-phi
            runs it again at Stop on the final head and comments the result on the issue; a failing test keeps the
            child open.
-  push     only the tree's orchestrator lands and pushes: the child commits on its parent's branch and is told its
-           proven work waits on that push, while the orchestrator gets relay.push_text with what the change still
+  push     only the tree's orchestrator lands and pushes: the child commits on its own branch, in its own worktree,
+           and is told its proven work waits on that push, while the orchestrator gets relay.push_text with what the
+           change still
            owes; the `Closes #N` commit closes the issue once it reaches the default branch. A child's own push asks.
   archive  a finished child, marked `disposable` or archiving itself, is counted as archived only with the issue
            closed and the test passed, its outcome note on the parent carrying the issue link, the commit and the test.
@@ -770,7 +771,8 @@ def gate(home, s, cwd=""):
     top = f"\"{top_title}\" `{top_id}`" if top_id else "the top session of this tree"
     if not closing:
         why = (f"phi (p4-phi): the regression test passed on {head}, but no commit of this session says "
-               f"`Closes #{n}`. Commit the work on its parent's branch with `Closes #{n}` in its message and report; "
+               f"`Closes #{n}`. Commit the work on this session's own branch, in its own worktree, with `Closes #{n}` "
+               f"in its message and report; "
                f"this session does not push it, since only the tree's orchestrator, {top}, lands and pushes.")
         return False, ("" if _told(iss, f"no-close:{head}") else why), ""
     if not pushed:

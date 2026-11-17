@@ -203,6 +203,48 @@ def held_by(home, requester, files, earlier=()):
     return "", []
 
 
+# --- the checkout a started session works in ---------------------------------------------------------------------------
+#
+# A session that writes gets a git worktree and a branch of its own, which is Claude Code's own answer to parallel
+# writers. worktrees.md: "Running each Claude Code session in its own worktree gives it a separate copy of the files
+# to edit, so one session can build a feature while a second fixes a bug." desktop.md, "Run a session in its own
+# worktree": "Worktrees are stored in `<project-root>/.claude/worktrees/` by default." The app's start tool takes it
+# as `use_worktree`, in its own text: "use_worktree false = shares this checkout and can edit it", "true = its own
+# worktree". So every start call p4-phi drafts for a worker that writes passes `use_worktree: true`, and one for a
+# session that only reads passes `false`.
+#
+# That text also says `use_worktree` is "\"fresh\" only (rejected with \"fork\")", and of a fork that "from a plain
+# checkout it shares the folder", so a start drafted for a writer is always `fresh`.
+#
+# A new orchestrator is started with `false`. It lands its tree's work in the checkout that holds the default branch
+# and syncs the store under that checkout, and worktrees.md, "How Claude Code enforces isolation", refuses both from
+# inside a worktree: "Claude Code blocks a Bash, PowerShell, or Monitor command whose working directory resolves to
+# the main checkout", and "blocks a Bash or Monitor command that redirects git into the main checkout". Its own work
+# steps go to workers, each in a worktree.
+
+NEW_TOP = re.compile(r"\b(?:this|it) (?:session )?is a new top session\b", re.I)   # a new orchestrator's brief line
+
+
+def writes(brief, base=""):
+    """True for the brief of a session that writes: its `Files:` line names a path, or it has no such line, or one
+    that names no file, and its words ask for changes, as issues.writing reads them. False for `Files: none` and for
+    a check, an audit, a question or a message to pass on."""
+    if files_of(brief, base):
+        return True
+    m = FILES_LINE.search(str(brief or ""))
+    if m and NO_FILES.match(LIST_END.split(m.group(1).strip(), 1)[0].strip()):
+        return False
+    import issues                                 # issues.py reads relay.py alone, so nothing circles back here
+    return issues.writing(brief)
+
+
+def use_worktree(brief, base=""):
+    """What a start call drafted for `brief` passes as `use_worktree`: True for a worker that writes, which works in
+    a git worktree and on a branch of its own, False for a session that only reads, which shares its starter's
+    checkout, and False for a new orchestrator, which lands in the checkout that holds the default branch."""
+    return not NEW_TOP.search(str(brief or "")) and writes(brief, base)
+
+
 def marker(rid, requester):
     return f"phi start request {rid} for {requester}."
 
@@ -335,16 +377,17 @@ def add(home, requester, title, brief, context="fresh", at=None, background="", 
 
 def call_of(r, home="", card=False):
     """The exact start_session input that starts a request, or with `card` proposes it as a suggested task card:
-    always `context` fresh, so the brief says all the child needs. It carries the request's background, which the
-    app requires: a row with none is given one built from the session that filed it, and one shorter than
-    BACKGROUND_MIN is made long enough, as background_of does."""
+    always `context` fresh, so the brief says all the child needs, with `use_worktree` true when its brief writes,
+    as use_worktree reads it. It carries the request's background, which the app requires: a row with none is given
+    one built from the session that filed it, and one shorter than BACKGROUND_MIN is made long enough, as
+    background_of does."""
     bg = str(r.get("background") or "")
     if len(bg) < BACKGROUND_MIN:
         bg = background_of(home, r["requester"], bg) if home else (
             bg + " " + background_of("", r["requester"], "")).strip()
     import plans                                   # the model and effort its brief's kind of work gets
     return plans.with_level({"initiation": "own_initiative" if card else "user_asked", "title": r["title"],
-                             "context": "fresh", "use_worktree": False, "background": bg,
+                             "context": "fresh", "use_worktree": use_worktree(r["brief"]), "background": bg,
                              "prompt": r["brief"] + "\n\n" + marker(r["id"], r["requester"])},
                             r["title"] + "\n" + r["brief"])
 

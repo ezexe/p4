@@ -1103,7 +1103,8 @@ def behalf_text(home, s):
 
 def request_call(r):
     """The exact start_session input for a request addressed to a puppeteer: a new orchestrator in
-    the environment of the session that filed the request."""
+    the environment of the session that filed the request, in that project's own checkout, where it lands its
+    tree's work, so `use_worktree` is false, as starts.use_worktree gives a new orchestrator."""
     project = os.path.dirname(os.path.dirname(os.path.abspath(r["store"]))).replace("\\", "/")
     bg = str(r.get("background") or "")
     if len(bg) < starts.BACKGROUND_MIN:
@@ -1112,7 +1113,7 @@ def request_call(r):
     if not PHI.NEW_TOP.search(brief):
         brief += "\n\n" + PHI.NEW_TOP_BRIEF + " " + PHI.new_top_first_act()
     return plans.with_level({"initiation": "user_asked", "title": r["title"], "context": "fresh",
-                             "use_worktree": False, "cwd": project, "background": bg,
+                             "use_worktree": starts.use_worktree(brief), "cwd": project, "background": bg,
                              "prompt": brief + "\n\n" + starts.marker(r["id"], r["requester"])},
                             r["title"] + "\n" + r["brief"])     # a fresh start names its model and effort
 

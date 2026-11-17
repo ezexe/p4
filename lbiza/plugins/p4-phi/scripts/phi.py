@@ -1252,7 +1252,7 @@ def apply_caps(d):
         setattr(mods[mod], name, type(default)(v) if ok else default)
 
 
-NEW_TOP = re.compile(r"\b(?:this|it) (?:session )?is a new top session\b", re.I)
+NEW_TOP = starts.NEW_TOP       # a new orchestrator's brief line, which starts.use_worktree reads too
 NEW_TOP_BRIEF = "This session is a new top session, orchestrating its own topic."
 RESTATE = ("the task restated as your own instruction to the session that receives it: what it is to do and why, "
            "from its side, a line `Files: <paths>` and what done looks like, with no message quoted and nothing "
@@ -1279,12 +1279,12 @@ def new_top_route(owner_turn=True):
     """How an orchestrator starts a new orchestrator for a topic outside its task: what the start tool's own text
     lacks, the write set on the brief's `Files:` line and the two moves that detach the session to top level. In a
     turn ezexe did not begin it names no `initiation`: what such a turn may start, and the card it proposes, are that
-    tool's own text."""
+    tool's own text. It passes `use_worktree: false`, as starts.use_worktree gives a new orchestrator."""
     if ASK_ROUTE:
         return ASK_ROUTE
     how = ("Start it with `mcp__ccd_session__start_session`, `initiation` `user_asked`" if owner_turn else
            "Give it to `mcp__ccd_session__start_session`")
-    return (f"{how}, `context` `fresh`, `use_worktree: false`, with the `model` and `effort` its kind of work gets, "
+    return (f"{how}, `context` `fresh`, {plans.TOP_TREE}, with the `model` and `effort` its kind of work gets, "
             f"said in one line of the brief; its brief: {RESTATE}, and "
             f"the lines \"{NEW_TOP_BRIEF} {new_top_first_act()}\" Both moves are needed: the app's detach to top "
             f"level, else it stays nested under this session and reports here, and p4-phi's, which p4-phi also makes "
@@ -1320,7 +1320,8 @@ FIRST_SPLIT = ("phi (p4-phi): this is this session's first message. In these ses
                "session start others in its first turn and in the turns ezexe's own messages open, though no doc "
                "states it. Plan its split now, before other work: every part of its task that writes files or makes a "
                "decision gets a session of its own, one per disjoint set of files, started in this turn with "
-               "`mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, `use_worktree: false`, "
+               "`mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, " + plans.OWN_TREE
+               + " for a part that writes files and `use_worktree: false` for one that only reads, "
                "each brief holding its `Files:` line; where the app refuses that start, the part is shown as a "
                "suggested task card, the start tool's `initiation` `own_initiative`, which ezexe presses in this "
                "session. Subagents keep reads, "
@@ -1405,7 +1406,8 @@ def split_text(home, s, prompt):
 def _split_full(home, s):
     """What a brief written in a turn another session began holds beyond what the start tool asks of it: a
     child's, its `Files:` line and its level line; a new orchestrator's, those and the line on which it is detached
-    to top level, or for a controlled orchestrator the request to its puppeteer."""
+    to top level, or for a controlled orchestrator the request to its puppeteer. A new orchestrator's start passes
+    `use_worktree: false`, for the reason new_top_route's line gives."""
     if spawned_from(s):
         return ("phi (p4-phi): a task of its own in this turn, outside this session's task, goes out by "
                 "`mcp__ccd_session__start_session` with a brief that declares its write set on a line "
@@ -1917,7 +1919,7 @@ def h_nudge(payload):
                 f"Said once for this step.")
     return (f"phi (p4-phi): this is the orchestrator, kept free for orchestration, and step {st.get('addr')}, "
             f"\"{cut(clean(st.get('content')), 120)}\", is work: hand it to a worker with "
-            f"`mcp__ccd_session__start_session`, `context` `fresh`, `use_worktree: false`, "
+            f"`mcp__ccd_session__start_session`, `context` `fresh`, {plans.OWN_TREE}, "
             f"{plans.level_words(st.get('content'))}, its brief that step, a "
             f"line `Files: <the paths it may write>`, the line `{plans.level_line(plans.child_level(st.get('content')))}` "
             f"and \"report when done\", and keep this session for planning, messaging and landing. Said once for this "
@@ -2292,11 +2294,7 @@ def h_user_prompt_submit(payload):
     pup = verdict = ""
     if ezexes:
         try:                                       # meta pass and ledger, then routing, start draft and gate
-            size = os.path.getsize(payload.get("transcript_path") or "")
-        except OSError:
-            size = 0
-        try:
-            pup, verdict = puppeteer.on_prompt(me.home, s, req, s.get("cwd") or payload.get("cwd") or "", size)
+            pup, verdict = puppeteer.on_prompt(me.home, s, req, s.get("cwd") or payload.get("cwd") or "")
         except Exception:  # noqa: BLE001
             pup = verdict = ""
         RAN["puppeteer"] = verdict or bool(pup)
@@ -2628,9 +2626,11 @@ def h_start_advice(payload):
     """PreToolUse on mcp__ccd_session__start_session. It denies three starts: a controlled session's new
     orchestrator, which its puppeteer starts instead; a start whose brief declares no write set; and a start
     whose write set a live session holds. For the rest it advises fork or fresh by relay.advise_start, from the
-    parent's transcript size and how much of the parent's scope the brief's paths cover, and asks before a worktree
-    or a branch of the child's own: silent when the call already does what is advised, else a permission `ask` with
-    the reason, so ezexe sees it and decides. A PreToolUse `permissionDecision` is `allow`, `deny`, `ask` or `defer`;
+    parent's transcript size and how much of the parent's scope the brief's paths cover: silent when the call
+    already does what is advised, and for a fresh start that passes `use_worktree: true`, which a fork cannot
+    take, else a permission `ask` with the reason, so ezexe sees it and decides. A start in a worktree or on a
+    branch of the child's own is never asked about: a session that writes gets both, as starts.use_worktree
+    says. A PreToolUse `permissionDecision` is `allow`, `deny`, `ask` or `defer`;
     where `permissions.denyInsteadOfPrompting` is set, a call that would wait on a prompt is denied. The input is
     never rewritten with `updatedInput`, since a fresh start needs a brief and background only the caller can
     write. A start of another session's start request, a puppeteer's or any other session's, goes through, claimed
@@ -2692,17 +2692,13 @@ def h_start_advice(payload):
         size = 0
     advised, why = relay.advise_start(me.home, me.id, inp, size)
     RAN.update(advice=advised, wanted=wanted, transcript=size)
-    reasons = []
-    if advised != wanted:
-        reasons.append(f"phi (p4-phi) advises context \"{advised}\" here, not \"{wanted}\": {why}.")
-    if inp.get("use_worktree") is True or inp.get("branch_name") or inp.get("source_branch"):
-        reasons.append("phi (p4-phi): a child works on this session's branch in this checkout, with no worktree or "
-                       "branch of its own: pass `use_worktree: false` and leave out branch_name and "
-                       "source_branch.")
-    if not reasons:
+    # a fresh start in a worktree of its own is never advised to fork: the start tool's own text says `use_worktree`
+    # is "rejected with \"fork\"", and of a fork that "from a plain checkout it shares the folder"
+    if advised == wanted or (advised == "fork" and inp.get("use_worktree") is True):
         return None
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
-                                   "permissionDecisionReason": " ".join(reasons)}}
+                                   "permissionDecisionReason": f"phi (p4-phi) advises context \"{advised}\" here, "
+                                                               f"not \"{wanted}\": {why}."}}
 
 
 QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
@@ -2737,10 +2733,11 @@ def h_branch_guard(payload):
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
                                        "permissionDecisionReason": f"phi (p4-phi): this session is a child, and `"
                                                                    f"{verb}` lands work, which only the tree's "
-                                                                   f"orchestrator does: a child commits on its "
-                                                                   f"parent's branch and reports, a `Closes #N` "
-                                                                   f"commit included, and the tree's orchestrator "
-                                                                   f"merges and pushes. Ask its parent session, "
+                                                                   f"orchestrator does: a child that writes works "
+                                                                   f"in its own worktree, commits there on its own "
+                                                                   f"branch and reports, a `Closes #N` commit "
+                                                                   f"included, and the tree's orchestrator merges "
+                                                                   f"and pushes. Ask its parent session, "
                                                                    f"{spawned_from(s)}, with SendMessage instead."}}
     else:
         return None

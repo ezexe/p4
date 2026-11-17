@@ -491,7 +491,9 @@ class TreeOfPlans(unittest.TestCase):
         for a in ("2.1", "2.2", "2.3"):
             self.assertIn(a, ctx.split("can each run")[0])
         self.assertIn("`initiation` `user_asked`", ctx)
-        self.assertIn("use_worktree: false", ctx)
+        self.assertIn("`use_worktree: true`, so it works in a git worktree and on a branch of its own", ctx)
+        self.assertNotIn("use_worktree: false", ctx, "a step that writes shares no checkout")
+        self.assertNotIn("on this session's branch", ctx)
         self.assertIn("Judged by", ctx)
         self.assertNotIn("can each run", self.plan(B, {"advance": True}) or "", "said once per set")
         done = self.three()

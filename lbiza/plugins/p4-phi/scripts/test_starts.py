@@ -82,6 +82,32 @@ class StartRequests(unittest.TestCase):
         self.assertNotIn("mcp__ccd_turn__wrap_up", source, "starts.py orders no wrap-up")
         self.assertIn("`mcp__ccd_session__start_session`", source)
 
+    def test_a_start_drafted_for_a_writer_passes_use_worktree_true_and_one_for_a_reader_false(self):
+        """A session that writes gets a git worktree and a branch of its own, worktrees.md, "Running each Claude Code
+        session in its own worktree gives it a separate copy of the files to edit". So the call drafted for a brief
+        that writes passes `use_worktree: true`, one for a brief that only reads passes false and shares the
+        checkout, and one for a new orchestrator passes false, since it lands in the checkout that holds the default
+        branch."""
+        port = "Port the exporter's flush to the new writer and run its suite. Report when done."
+        check = "Check what the exporter's flush does and report it."
+        for brief, want in ((port + "\nFiles: src/flush.py", True), (port, True), (port + "\nFiles: none", False),
+                            (check + "\nFiles: none", False), (check, False), (check + "\nFiles: src/flush.py", True),
+                            (port + "\nFiles: the tests only", True), (port + "\nFiles: read-only", False),
+                            (port + "\nFiles: src/flush.py\n" + phi.NEW_TOP_BRIEF, False)):
+            self.assertIs(starts.use_worktree(brief), want, brief)
+            row = {"id": "req-0123456789", "requester": TOP, "title": "the flush", "background": "", "brief": brief}
+            self.assertIs(starts.call_of(row)["use_worktree"], want, brief)
+        import plans
+        import puppeteer
+        for line in (plans.CARD_EACH, phi.FIRST_SPLIT, puppeteer.WORKTREE_LINE):
+            self.assertIn("a git worktree", line)
+        self.assertIn("`use_worktree: true`", plans.OWN_TREE)
+        self.assertIn("`use_worktree: false`", phi.new_top_route())
+        draft = {"title": "the flush", "context": "fresh", "brief": port, "background": "x" * 90, "parent": TOP}
+        self.assertIs(puppeteer.call_of(draft)["use_worktree"], True, "a worker's draft")
+        self.assertIs(puppeteer.call_of({**draft, "reading": {"k": 1}})["use_worktree"], False, "a reading")
+        self.assertIs(puppeteer.call_of({**draft, "parent": ""})["use_worktree"], False, "a new orchestrator")
+
     def writer(self, sid="local_wrt00009", files="src/flush.py"):
         """A worker of the first orchestrator that writes `files` and is inside a turn, so it is a busy writer."""
         CLI.setdefault(sid, sid.replace("local_wrt", "acac") + "-0000-4000-8000-000000000000")
@@ -114,7 +140,7 @@ class StartRequests(unittest.TestCase):
         self.assertIn("This turn ezexe began here, so start each now", line)
         self.assertIn("Each is this session's own child", line)
         call = json.loads(line.split("`mcp__ccd_session__start_session` with ", 1)[1].split("\n", 1)[0])
-        self.assertEqual((call["initiation"], call["context"], call["use_worktree"]), ("user_asked", "fresh", False))
+        self.assertEqual((call["initiation"], call["context"], call["use_worktree"]), ("user_asked", "fresh", True))
         self.assertIn(BRIEF, call["prompt"])
         self.assertGreaterEqual(len(call["background"]), 80, "the app refuses a shorter background")
         self.assertIn(KID, call["background"], "built from the session that filed it")
@@ -160,7 +186,7 @@ class StartRequests(unittest.TestCase):
         call = json.loads(line.split("\"the flush port\": `mcp__ccd_session__start_session` with ", 1)[1]
                           .split("\n", 1)[0])
         self.assertEqual((call["initiation"], call["context"], call["use_worktree"]),
-                         ("own_initiative", "fresh", False))
+                         ("own_initiative", "fresh", True))
         self.assertIn(starts.marker(rid, KID), call["prompt"])
         adv = t.hook("start-advice", KID, {"hook_event_name": "PreToolUse",
                                            "tool_name": "mcp__ccd_session__start_session", "tool_input": call})

@@ -6,8 +6,8 @@ start draft, the gate and the watcher, which the functions `prompty`, `prompter`
 
   linear     Routing reads ezexe's message against the records the ledger is built from: the area it names, the
              live session that is that area's code owner, the running writer that holds its files. The start draft
-             is the exact next session: its topic, a brief written as its own instruction, its parent session, fork or
-             fresh, the issue it closes. The gate checks the draft: the issue it names is open, or it names none,
+             is the exact next session: its topic, a brief written as its own instruction, its parent session and
+             the issue it closes, started fresh, a worker in a git worktree of its own. The gate checks the draft: the issue it names is open, or it names none,
              p4-phi files none and the child's findings go up in its report; no running writer holds the same files;
              the parent session is the right orchestrator. A clean draft is handed as
              the exact start_session call; one whose area has a live code owner is routed there with SendMessage;
@@ -1071,6 +1071,9 @@ def load_draft(home, sid, did):
 
 
 RUN_WORDS = 8                    # words in a row of a message that a brief handed to another session may not hold
+# the line a worker's brief carries, since its start passes `use_worktree: true`: where it works and who lands it
+WORKTREE_LINE = ("This session works in a git worktree of its own, on a branch of its own: commit there. Its tree's "
+                 "orchestrator merges that branch into the default branch and pushes, and this session does neither.")
 
 
 def shares_run(sent, text, n=RUN_WORDS):
@@ -1086,12 +1089,13 @@ def topic_of(req):
     return relay.clause_cut(first, 58).strip(" .,;:")
 
 
-def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
+def prompter(home, s, req, read, base, reading=None):
     """The start draft for a message, the exact next session: its topic, a brief written as an instruction to that
-    session, its parent session, fork or fresh, and the issue it closes when the message names one. The brief states
-    the task by its title, its files, what done looks like, and the model and effort the call adds; it quotes no
-    sentence of the message and says nothing of who asked or how the request travelled. A close registered route
-    gives the starting shape."""
+    session, its parent session and the issue it closes when the message names one. The brief states the task by
+    its title, its files, what done looks like, and the model and effort the call adds; it quotes no sentence of the
+    message and says nothing of who asked or how the request travelled. A close registered route gives the starting
+    shape. Every draft is `fresh`: a worker's draft writes, so its call passes `use_worktree: true`, which the start
+    tool's own text gives as "\"fresh\" only (rejected with \"fork\")"."""
     phi = _phi()
     sid = s["sessionId"]
     parent = sid if read["within"] or relay._parent(s) else ""
@@ -1135,15 +1139,14 @@ def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
         elif slug:
             lines += [f"It names no issue in {slug}, and p4-phi files none: each finding goes into the report as one "
                       f"`Finding:` line, which the parent session passes up unchanged.", ""]
+        if parent:
+            lines += [WORKTREE_LINE, ""]
         lines += [phi.RESEARCH, "", phi.DECIDE, "",
                   "Done looks like: the change made, its regression test passing, committed and reported.",
                   "Report when done."]
     if not parent:
         lines += ["", f"{phi.NEW_TOP_BRIEF} {phi.new_top_first_act()}"]
     context = "fresh"
-    if parent and not reading:
-        context = (route or {}).get("context") or relay.advise_start(home, sid, {"prompt": "\n".join(lines)},
-                                                                     transcript_bytes)[0]
     did = "drf-" + hashlib.sha1(f"{sid}\n{req}\n{(reading or {}).get('text', '')}".encode("utf-8", "replace")
                                 ).hexdigest()[:10]
     lines += ["", f"phi draft {did} for {parent or 'root'}."]
@@ -1158,10 +1161,12 @@ def prompter(home, s, req, read, base, transcript_bytes=0, reading=None):
 
 
 def call_of(d):
-    """The exact start_session input that starts a draft."""
+    """The exact start_session input that starts a draft. A worker's draft writes, so it passes `use_worktree: true`
+    and the worker gets a git worktree and a branch of its own. A reading changes no file and shares this checkout,
+    and a new orchestrator lands in it, so each passes false, as starts.use_worktree says."""
     call = {"initiation": "user_asked", "title": d["title"], "context": d["context"], "prompt": d["brief"]}
     if d["context"] == "fresh":
-        call.update(use_worktree=False, background=d["background"])
+        call.update(use_worktree=bool(d.get("parent")) and not d.get("reading"), background=d["background"])
     # a fresh draft names its model and effort, judged by the message it came from as well as its brief; the
     # decide-by-research line every brief carries is no word of its kind of work
     brief = d["brief"].replace(_phi().DECIDE, "")
@@ -1261,7 +1266,7 @@ def save_group(home, g):
     _write_json(os.path.join(groups_dir(home, g["parent"]), f"{g['id']}.json"), g)
 
 
-def explore(home, s, req, texts, base, transcript_bytes=0):
+def explore(home, s, req, texts, base):
     """Drafts an under-determined message as one sibling child for each distinct reading, and returns the group and
     its drafts. The depth and count caps hold: no more readings than this session may still start."""
     phi = _phi()
@@ -1280,8 +1285,7 @@ def explore(home, s, req, texts, base, transcript_bytes=0):
     read["owner"] = None                            # the readings are this orchestrator's to merge: none is routed away
     drafts = []
     for k, t in enumerate(texts, 1):
-        d = prompter(home, s, req, read, base, transcript_bytes,
-                     reading={"group": gid, "k": k, "n": len(texts), "text": t, "title": t})
+        d = prompter(home, s, req, read, base, reading={"group": gid, "k": k, "n": len(texts), "text": t, "title": t})
         d["parent"] = sid
         drafts.append(pioneer(home, s, d, read, net=False))
     g = {"id": gid, "parent": sid, "time": now(), "words": req, "state": "open",
@@ -1772,7 +1776,7 @@ def meta_text(home, s, found):
 
 # --- the prompt hook ----------------------------------------------------------------------------------------------------
 
-def on_prompt(home, s, req, base, transcript_bytes=0):
+def on_prompt(home, s, req, base):
     """A message of ezexe's in an orchestrator: the meta pass when it is an orchestrator, its ledger made
     current, then routing, the start draft and the gate. Returns the text for the session and the verdict, which is
     empty when no draft was made. It changes `s` and never saves it."""
@@ -1791,12 +1795,12 @@ def on_prompt(home, s, req, base, transcript_bytes=0):
         return "\n\n".join(p for p in parts if p), ""
     if len(read["readings"]) >= 2 and not read["owner"]:
         try:
-            g, drafts = explore(home, s, req, read["readings"], base, transcript_bytes)
+            g, drafts = explore(home, s, req, read["readings"], base)
             parts.append(explore_text(home, s, g, drafts))
             return "\n\n".join(p for p in parts if p), "explore"
         except ValueError:
             pass
-    d = pioneer(home, s, prompter(home, s, req, read, base, transcript_bytes), read)
+    d = pioneer(home, s, prompter(home, s, req, read, base), read)
     parts.append(verdict_text(home, s, d))
     if d["verdict"] == "start":
         parts.append(f"If one draft would have to guess between distinct readings of the message, start none of it: "
