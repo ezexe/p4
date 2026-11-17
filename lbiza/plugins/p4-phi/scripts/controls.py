@@ -819,12 +819,10 @@ def board(home, s):
     lines += [f"- \"{full_title(sid, k)}\" `{sid}`: {line}" for sid, k, line in found] or ["None."]
     lines += ["", "## Parked", ""] + (of_kind("parked") or ["Nothing."])
     rules = [x for x in s.get("rulesChanged") or [] if isinstance(x, dict)]
-    if rules:                                      # the page the board sends a session to holds the new wording
-        PHI.rules_page(home, PHI.memory_rules(home))
     lines += ["", "## Feedback and user memories ezexe changed during the run", ""]
     lines += [f"- {x.get('name')}, {x.get('time', '')}" for x in rules] or ["None."]
     if rules:
-        lines.append(f"Each is whole on {os.path.join(home, 'phi', 'rules.md').replace(chr(92), '/')}.")
+        lines.append(f"Each is whole in {PHI.p4conf.sub(home, 'memory').replace(chr(92), '/')}.")
     other = [f"- {PHI.clean(n.get('claim'))} Source: {PHI.clean(n.get('source'))}. Kept {n.get('time', '')}."
              for n in notes if PHI.clean(n.get("kind")) not in ("decision", "parked", "waiting")]
     lines += ["", "## Notes", ""] + (other or ["None."])

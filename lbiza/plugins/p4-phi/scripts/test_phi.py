@@ -16,7 +16,7 @@ there is nothing to say; no standing instruction for a message about something e
 tools carry; a feature step as a new topic; a turn another session began shown a suggested task card first and a
 start request second; the caps on depth and live children;
 the task changed by its command; the rules built into p4-phi at a session's start, the store's feedback and user
-memories never handed again as rule lines but whole on their page, and a changed line given once; the pieces past
+memories never handed again, which the app loads, and a memory changed mid-session given once; the pieces past
 the prompt's cap held on a page; a hook never failing a call; hooks.json's shape and the words given to a session.
 """
 
@@ -1081,29 +1081,27 @@ class Rules(unittest.TestCase):
         return context(self.t.say(TOP, prompt, CLAUDE_CONFIG_DIR=conf))
 
     def test_a_reworded_memory_reaches_an_open_session_once(self):
-        """Rules that change mid-session reach sessions already open."""
+        """A memory another session changes mid-session reaches sessions already open."""
         conf = os.path.join(self._tmp.name, "conf")
         os.makedirs(conf)
         self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"}, CLAUDE_CONFIG_DIR=conf)
-        self.assertNotIn("rules changed", self.live("Build the exporter", conf))
+        self.assertNotIn("memories changed", self.live("Build the exporter", conf))
         memory(self.t.p4, "tabs-not-spaces", "feedback", "Indent with four spaces in the exporter, never tabs.")
         got = self.live("carry on", conf)
-        self.assertIn("the rules changed since this session last looked", got)
+        self.assertIn("feedback and user memories changed since this session last looked", got)
         self.assertIn("four spaces in the exporter", got)
         self.assertIn("Removed, no longer rules", got)
         self.assertIn("Indent with tabs in the exporter", got)
-        self.assertNotIn("rules changed", self.live("and now", conf), "nothing repeats")
+        self.assertNotIn("memories changed", self.live("and now", conf), "nothing repeats")
 
-    def test_a_line_added_to_the_global_claude_md_reaches_an_open_session(self):
+    def test_a_line_added_to_the_global_claude_md_is_left_to_the_app(self):
+        """memory.md: the app reads CLAUDE.md again after a compaction, so p4-phi hands no line of it."""
         conf = os.path.join(self._tmp.name, "conf")
         write(os.path.join(conf, "CLAUDE.md"), "# Global\n\n- Call the user ezexe.\n")
         self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"}, CLAUDE_CONFIG_DIR=conf)
-        self.assertNotIn("rules changed", self.live("Build the exporter", conf))
+        self.live("Build the exporter", conf)
         write(os.path.join(conf, "CLAUDE.md"), "# Global\n\n- Call the user ezexe.\n- Never write parentheticals.\n")
-        got = self.live("carry on", conf)
-        self.assertIn("global CLAUDE.md: - Never write parentheticals.", got)
-        self.assertNotIn("Call the user ezexe", got, "only what changed")
-        self.assertNotIn("rules changed", self.live("and now", conf), "nothing repeats")
+        self.assertNotIn("parentheticals", self.live("carry on", conf))
 
     def test_each_memory_reaches_a_session_once(self):
         """ezexe/p4#130: a memory's line in the index is the one form a session is handed at its start, so p4-phi
@@ -1116,12 +1114,6 @@ class Rules(unittest.TestCase):
                     self.assertNotIn(word, text, (host, source))
                 self.assertLessEqual(len(text), APP_CAP)
 
-    def test_the_page_holds_every_rule_in_full(self):
-        self.start(TOP)
-        page = read(os.path.join(self.t.p4, "phi", "rules.md"))
-        self.assertIn("**Why:** ezexe's editor.", page)
-        self.assertEqual(page.count("Run the ports check"), 200)
-        self.assertNotIn("out/Narwhal", page)
 
     def test_a_resume_is_not_told_again_and_a_compaction_is(self):
         self.start(TOP)
@@ -1297,7 +1289,7 @@ class Rules(unittest.TestCase):
             got = self.start(KID, source)
             self.assertIn("- " + phi.BUILT_IN, got, source)
             self.assertNotIn("a-rather-long-memory-name", got, source)
-        self.assertIn("Rule 399 of the many.", read(os.path.join(self.t.p4, "phi", "rules.md")), "the page holds them")
+        self.assertFalse(os.path.exists(os.path.join(self.t.p4, "phi", "rules.md")), "no page copies them")
 
     def test_a_failed_first_commit_is_told_at_the_next_start_once(self):
         """ezexe/p4#218: a store whose index.lock fails the tree's first commit; the next start says so once."""
@@ -1318,8 +1310,7 @@ class Rules(unittest.TestCase):
     def test_a_fork_gets_the_built_in_rules_alone(self):
         """A fork's inherited conversation already holds the store's feedback and user memories, and so does every
         other session's start."""
-        self.assertEqual(phi.rules_text(self.t.p4, fork=True), phi.builtin_text())
-        self.assertEqual(phi.rules_text(self.t.p4), phi.builtin_text())
+        self.assertEqual(phi.rules_text(), phi.builtin_text())
 
     def test_act_dont_wait_yields_to_a_projects_go_ahead(self):
         """A project rule that waits for ezexe's go makes that go ezexe's; p4.json can turn it off."""

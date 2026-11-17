@@ -1007,23 +1007,15 @@ STARTUP = re.compile(r"\b(?:standing rules?|start-?up rules?|rules? from (?:the 
 RULE_LINE = re.compile(r"^\s*[-*]\s*(?:built-in,\s*)?([a-z0-9][a-z0-9']*(?:-[a-z0-9']+)*):\s")
 BUILT_IN_LINE = re.compile(r"^\s*[-*]\s*built-in,\s*[a-z0-9'-]+:\s")
 BUILT_INS = ()                # phi.py sets it to the names of the rules it carries itself
-_RULES = {}                   # a store -> its rules page's mtime and the rule names on it
+MEMORY_RULES = None           # phi.py sets it to phi.memory_rules: the store's feedback and user memories by name
 
 
 def rule_names(home=""):
-    """The names of the rules p4-phi hands out at a session's start: its built-in ones, and the store's, read from
-    the page p4-phi writes them on, <home>/phi/rules.md, so the list stays true as memories change."""
+    """The names of the rules a session starts with: p4-phi's built-in ones, and the store's feedback and user
+    memories, read from the memory folder, so the list stays true as memories change."""
     names = set(BUILT_INS)
-    if home:
-        path = os.path.join(home, "phi", "rules.md")
-        try:
-            at = os.path.getmtime(path)
-            if _RULES.get(home, (None, ()))[0] != at:
-                with open(path, encoding="utf-8") as f:
-                    _RULES[home] = (at, tuple(re.findall(r"(?m)^## +(\S.*?)\s*$", f.read())))
-            names.update(_RULES[home][1])
-        except OSError:
-            pass
+    if home and MEMORY_RULES:
+        names.update(name for name, _ in MEMORY_RULES(home))
     return {n.lower() for n in names if n}
 
 

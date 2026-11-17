@@ -12,8 +12,8 @@ but for a fresh child the app may write it only after the first message, so the 
 read first and the record corrects it. `detach` and `reparent` rewrite it in session.json.
 
 The hooks, each in its h_ function:
-- SessionStart gives the rules, as rules_text says, and the start background to a fork, after a compaction or a
-  clear, and to a session no app runs.
+- SessionStart gives the built-in rules, as rules_text says, and the start background to a fork, after a
+  compaction or a clear, and to a session no app runs.
 - UserPromptSubmit keeps the first request as the task and gives the start background with the first message when
   the start did not, then the reports of the workers that finished a turn since the last look, the address book's
   changes and what the sessions beside it changed. A start and a first message pass whole, the lines that ask
@@ -1393,7 +1393,7 @@ def render_page(home, sid):
     write_atomic(page_path(home, sid), "\n".join(out))
 
 
-# --- the store's rules -----------------------------------------------------------------------------------------------
+# --- the store's feedback and user memories ---------------------------------------------------------------------------
 
 FRONT = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?(.*)\Z", re.S)
 INDEX_LINK = re.compile(r"\]\(([^)]+\.md)\)")
@@ -1428,6 +1428,9 @@ def memory_rules(home):
     return out
 
 
+plans.MEMORY_RULES = memory_rules   # the names plans.rule_names reads, for reports that recite them
+
+
 def rule_of(body):
     """A rule on one line: its body without the **Why:** paragraph."""
     return clean(" ".join(p for p in re.split(r"\n\s*\n|\n(?=\*\*)", body) if p.strip() and not WHY.match(p)))
@@ -1442,24 +1445,6 @@ def fair_cut(texts, room):
         left -= len(out[k])
         n -= 1
     return [out[k] for k in range(len(texts))]
-
-
-def rules_page(home, rules):
-    """<home>/phi/rules.md: every feedback and user memory in full on one page, written only when a memory
-    changed."""
-    path = os.path.join(home, "phi", "rules.md")
-    mem = p4conf.sub(home, "memory").replace("\\", "/")
-    text = "\n".join([f"# The store's rules, in full", "",
-                      f"Written by p4-phi from the feedback and user memories in {mem}. Edit those files, not this "
-                      f"page.", ""] + [f"## {name}\n\n{body}\n" for name, body in rules])
-    try:
-        with open(path, encoding="utf-8") as f:
-            same = f.read() == text
-    except (OSError, UnicodeDecodeError):
-        same = False
-    if not same:
-        write_atomic(path, text)
-    return path.replace("\\", "/")
 
 
 def builtin_text():
@@ -1477,60 +1462,42 @@ def built_in():
     return ([BUILT_IN] if ACT_DONT_WAIT else []) + ([LEVELS] if LEVELS_ON else [])
 
 
-def rules_text(home, fork=False):
+def rules_text():
     """The rules p4-phi hands a session at its start: the rules built into p4-phi, whole. The store's feedback and
-    user memories are not handed again: the line of each in the memory index the app loads is the one form a session
-    is handed, and live_rules hands a line only for one that changes after the start. rules.md is kept current with
-    them whole, for the board and for a session that needs a memory's reason. A fork's inherited conversation holds
-    the same."""
+    user memories are not handed: memory.md, "Auto memory", says the app loads the first 200 lines of MEMORY.md at
+    the start of every conversation, and CLAUDE.md is read again after a compaction, so live_rules hands a line only
+    for a memory that changes after the start."""
     if not RULES:
         return ""
-    rules = memory_rules(home) if home and not fork else []
-    if rules:
-        rules_page(home, rules)
     RAN["rules"] = 0
     return builtin_text()
 
 
-# --- rules that change mid-session ----------------------------------------------------------------------------------
+# --- a memory another session changes mid-session ---------------------------------------------------------------------
 #
-# The store's feedback and user memories reach a session at its start, and the global and project CLAUDE.md through
-# Claude Code at its start too. A rule ezexe changes during the day must reach the sessions already working, or they
-# keep writing the old wording into notes, issues and code. So each message compares what the session last saw with
-# what is on disk now, and gives the changed or added lines once and the removed ones as a list.
+# memory.md: the app loads the memory index at the start of every conversation and reads CLAUDE.md again after a
+# compaction, and no page says a memory written during a session reaches the other sessions already working. A
+# feedback or user memory ezexe or another session changes during the day must reach them, or they keep writing the
+# old wording into notes, issues and code. So each message compares the memories the session last saw with what is
+# on disk now, and gives the changed or added ones once and the removed ones as a list. CLAUDE.md is left to the app.
 
 LIVE_RULES_CHARS = 3000          # of the changes given at one message
 LIVE_RULES_LINES = 400           # kept of what a session last saw
 
 
-def rule_sources(store, project):
-    """The lines of the store's feedback and user memories, a line each, of the global CLAUDE.md and of the project's
-    CLAUDE.md, each with its source."""
-    out = [(f"memory {name}", f"{name}: {rule_of(body)}") for name, body in (memory_rules(store) if store else [])]
-    conf = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-    for label, path in (("global CLAUDE.md", os.path.join(conf, "CLAUDE.md")),
-                        ("project CLAUDE.md", os.path.join(project, "CLAUDE.md") if project else ""),
-                        ("project CLAUDE.md", os.path.join(project, ".claude", "CLAUDE.md") if project else "")):
-        try:
-            with open(path, encoding="utf-8") as f:
-                out += [(label, ln.strip()) for ln in f.read().splitlines() if ln.strip()]
-        except (OSError, UnicodeDecodeError):
-            continue
-    return out[:LIVE_RULES_LINES]
-
-
-def live_rules(s, store, project):
-    """The lines that changed since this session last looked, once; '' when nothing changed or nothing was seen
-    before. Records what is on disk now in `s`."""
+def live_rules(s, store):
+    """The store's feedback and user memories that changed since this session last looked, a line each, once; ''
+    when nothing changed or nothing was seen before. Records what is on disk now in `s`."""
     if not RULES:
         return ""
-    new = [f"{a}\t{b}" for a, b in rule_sources(store, project)]
+    new = [f"memory {name}\t{name}: {rule_of(body)}"
+           for name, body in (memory_rules(store) if store else [])][:LIVE_RULES_LINES]
     key = hashlib.sha1("\n".join(new).encode("utf-8", "replace")).hexdigest()[:16]
     seen = s.get("rulesSeen") if isinstance(s.get("rulesSeen"), dict) else {}
     s["rulesSeen"] = {"hash": key, "lines": new}
     if not seen or seen.get("hash") == key:
         return ""
-    old = list(seen.get("lines") or [])
+    old = [x for x in seen.get("lines") or [] if str(x).startswith("memory ")]   # an earlier copy kept CLAUDE.md's too
     added = [x for x in new if x not in set(old)]
     gone = [x for x in old if x not in set(new)]
     if not added and not gone:
@@ -1541,7 +1508,8 @@ def live_rules(s, store, project):
         src, _, line = x.partition("\t")
         return f"- {src}: {line}"
 
-    parts = ["phi (p4-phi): the rules changed since this session last looked; these hold from now on."]
+    parts = ["phi (p4-phi): the store's feedback and user memories changed since this session last looked; these "
+             "hold from now on."]
     if added:
         parts.append("Changed or added:\n" + "\n".join(shown(x) for x in added))
     if gone:
@@ -1968,7 +1936,7 @@ def h_session_start(payload):
         s.pop("splitTold", None)                   # the split advice, said in full again at the next such turn
     pin = pin_of(me.home, s)
     text = "\n\n".join(p for p in (pin, text) if p)
-    live_rules(s, me.store, os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or "")   # what it starts with
+    live_rules(s, me.store)                        # what it starts with
     relay.remember_store(me.store)
     notices = []
     if tracked(me.home):                           # a failed first commit, said once; no git call while untracked
@@ -1982,7 +1950,7 @@ def h_session_start(payload):
         RAN["pair"] = "compacted"
     elif source in ("compact", "clear"):
         first = controls.state_first(me.home, s)   # a standing worker's or coworker's state page first
-    rules = rules_text(me.store, fork=bool(s.get("forked"))) if source != "resume" else ""
+    rules = rules_text() if source != "resume" else ""
     save_session(me.home, s)
     # past the app's cap of 10,000 characters Claude sees a preview of the first 2,000 and the file's path, so what
     # asks the session to act comes first: the page to resume from and the notices, then the built-in rules and the
@@ -2134,7 +2102,7 @@ def h_user_prompt_submit(payload):
         RAN["issue"] = (s.get("issue") or {}).get("number", "")
     handed = given(s, me, me.home)
     room = None if handed else PROMPT_CHARS       # the first message passes whole, past the app's cap to its file
-    parts = [live_rules(s, me.store, os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or ""),
+    parts = [live_rules(s, me.store),
              pin_of(me.home, s), handed]
     if REPORTS:
         text, seen = reports_text(me.home, s, room * 3 // 5 if room else None, me.store)

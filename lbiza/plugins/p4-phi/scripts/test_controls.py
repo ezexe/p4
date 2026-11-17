@@ -376,7 +376,7 @@ class Supervisor(unittest.TestCase):
         memory(t.p4, "tabs-not-spaces", "feedback", "Indent with four spaces in the exporter, never tabs.")
         t.say(PUP, "carry on", CLAUDE_CONFIG_DIR=conf)
         changed = read(board).split(section, 1)[1].split("\n## ", 1)[0]
-        self.assertRegex(changed, r"^- tabs-not-spaces, \d{4}-\d\d-\d\d \d\d:\d\d\nEach is whole on .+/phi/rules\.md\.")
+        self.assertRegex(changed, r"^- tabs-not-spaces, \d{4}-\d\d-\d\d \d\d:\d\d\nEach is whole in .+/temportal/memory\.")
         self.assertEqual([x["name"] for x in t.session(PUP)["rulesChanged"]], ["tabs-not-spaces"])
 
     def test_a_boundary_is_named_once_as_a_question_with_two_buttons(self):
@@ -616,20 +616,18 @@ class Supervisor(unittest.TestCase):
         self.assertNotIn("orchestrates. If so", context(t.say(PUP, "How is the weather on the moon today?")))
 
 
-    def test_rules_md_holds_a_memorys_new_wording_once_the_board_names_its_change(self):       # 200
+    def test_no_rules_page_copies_a_memory_the_board_names(self):       # 200
+        """The memory file itself holds its new wording, so p4-phi writes no phi/rules.md copy of it."""
         t = self.t
         conf = os.path.join(t.tmp, "conf")
         os.makedirs(conf)
         memory(t.p4, "tabs-not-spaces", "feedback", "Indent with tabs in the exporter.")
         t.hook("session-start", PUP, {"hook_event_name": "SessionStart", "source": "startup"}, CLAUDE_CONFIG_DIR=conf)
         t.say(PUP, "Control the trees", CLAUDE_CONFIG_DIR=conf)
-        rules = os.path.join(t.p4, "phi", "rules.md")
-        self.assertIn("Indent with tabs in the exporter.", read(rules))
         memory(t.p4, "tabs-not-spaces", "feedback", "Indent with four spaces in the exporter, never tabs.")
         t.say(PUP, "carry on", CLAUDE_CONFIG_DIR=conf)
         self.assertIn("- tabs-not-spaces, ", read(os.path.join(t.dir(PUP), "board.md")))
-        self.assertIn("Indent with four spaces in the exporter, never tabs.", read(rules))
-        self.assertNotIn("Indent with tabs in the exporter.", read(rules))
+        self.assertFalse(os.path.exists(os.path.join(t.p4, "phi", "rules.md")))
 
     def test_a_finding_the_puppeteer_published_leaves_its_board(self):                          # 210
         t = self.t

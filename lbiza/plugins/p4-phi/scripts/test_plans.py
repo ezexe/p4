@@ -1437,13 +1437,14 @@ class OwnLines(unittest.TestCase):
         self.assertEqual([st["addr"] for st, _ in plans.matches(real, steps, [], "")], ["6.4"],
                          "words that are about the step still bear on it")
 
-    def test_the_rule_names_are_read_from_the_rules_phi_hands_out(self):
-        """The rule names come from the rules page p4-phi writes, so they follow the memories as they change."""
+    def test_the_rule_names_are_read_from_the_stores_memories(self):
+        """The rule names come from the store's feedback and user memories, so they follow them as they change."""
+        from test_phi import memory
         home = tempfile.mkdtemp(prefix="p4-phi-rules-")
         try:
-            os.makedirs(os.path.join(home, "phi"))
-            with open(os.path.join(home, "phi", "rules.md"), "w", encoding="utf-8") as f:
-                f.write("# The store's rules, in full\n\n## tree-records-stay\n\nKeep them.\n\n## records\n\nOne.\n")
+            memory(home, "tree-records-stay", "feedback", "Keep them.")
+            memory(home, "records", "user", "One.")
+            memory(home, "a-project-note", "project", "Not a rule.")
             self.assertEqual(plans.rule_names(home) - set(plans.BUILT_INS), {"tree-records-stay", "records"})
             self.assertIn("act-don't-wait", plans.rule_names(), "the built-in ones are p4-phi's own")
             steps = [{"addr": "6.4", "content": "Read phi session records for this session tree check",
