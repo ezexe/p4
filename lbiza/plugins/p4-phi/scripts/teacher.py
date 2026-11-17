@@ -369,7 +369,7 @@ EDIT_SCHEMA = {
 
 def edit_system(cutoff):
     return (
-        "You review the training labels of a recall model that is trained on one software repository and "
+        "You review the training labels of a retrieval model that is trained on one software repository and "
         "ezexe's history. A task is a message ezexe sent on a given date. The stored picks are the entries a "
         "mechanical labeler marked as bearing on it; the candidates are other entries a search found. An entry "
         "bears on the task when an assistant answering that message on that date is better off for having it in "

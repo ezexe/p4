@@ -59,7 +59,7 @@ DEFAULTS = {
         "home": None,                    # the git remote of a store whose session tree this project shares
         "track": False,                  # true: the session tree in phi/ is committed; false: git ignores it
         "act_dont_wait": True,           # false: p4-phi's act-don't-wait rule is left out in this project
-        "top_orchestrates": True,        # false: a top-level session does its plan itself, no child unless asked
+        "top_orchestrates": True,        # false: an orchestrator works its task list itself, no worker unless asked
         "levels": True,                  # false: no delegation rule, and no long command moved to the background
         "file_sets": True,               # false: a session may be started by a brief that declares no write set
         "session_archives": False,       # true: a session may archive itself or another session
@@ -437,7 +437,7 @@ def migrate_layout(p4, commit=True):
 
 def _take(lock, wait_s=5.0, stale_s=120.0):
     """The layout lock, or False once another hook held it for `wait_s`, since the hooks of a start run at once.
-    The wait stays well under the 10-second timeout of the shortest hook that reaches it, recall's, so that hook
+    The wait stays well under the 10-second timeout of the shortest hook that reaches it, retrieval's, so that hook
     still has time for its own work."""
     end, waited = time.monotonic() + wait_s, False
     while True:
@@ -715,8 +715,8 @@ def _moves(p4, places, lines, done):
             os.rmdir(g)
         except OSError:
             pass
-    # a move keeps each file's own time, so a set-aside copy older than its cache rule would be cleared by the sweep
-    # of the same start, unreported: every file landed in a set-aside folder takes the move's time
+    # a move keeps each file's own time, so a set-aside copy older than its cache rule would be cleared by the
+    # retention sweep of the same start, unreported: every file landed in a set-aside folder takes the move's time
     for p in _LANDED:
         if LAYOUT_CONFLICTS in p.replace("\\", "/").split("/"):
             try:

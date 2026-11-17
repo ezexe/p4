@@ -87,9 +87,10 @@ def kept_words(kept, words):
 
 def kept_label(home, sid, msg, every, rows, born, when, above):
     """The label p4-phi's own records give a message, None when no draft of the receiving session holds it, which
-    leaves the quote as the fallback. A draft that started a session gives ("", "new"). A route draft gives
-    (owner, "relayed") only on evidence the relay happened: a turn of the receiving session at or after the message
-    whose report or said names the owner's title, as the gate asks; a route draft answered here gives ("", "here")."""
+    leaves the quote as the fallback. A draft that started a session gives ("", "new"). A route draft gives (owner,
+    "relayed") only on evidence the message reached that session: a turn of the receiving session at or after the
+    message whose report or said names the owner's title, as the gate asks; a route draft answered here gives ("",
+    "here")."""
     for path in sorted(glob.glob(os.path.join(puppeteer.drafts_dir(home, sid), "*.json"))):
         d = relay._read_json(path)
         if not kept_words(msg, d.get("words")):
