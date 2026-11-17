@@ -2618,7 +2618,8 @@ def h_user_prompt_submit(payload):
                         "its siblings."))
     if not spawned_from(s):
         try:                                       # a puppeteer and the sessions it controls
-            parts[0:0] = pair_parts(me, s, req if req and not handed_over(payload.get("prompt")) else "", parts[0])
+            parts[0:0] = pair_parts(me, s, req if req and not handed_over(payload.get("prompt")) else "", parts[0],
+                                    notice)
         except Exception:  # noqa: BLE001
             pass
     unsent = [u for u in s.pop("unsentRelay", None) or [] if isinstance(u, dict)]
@@ -2660,13 +2661,14 @@ def h_user_prompt_submit(payload):
     return fit([text, last] + parts, room, me.home, s["sessionId"], keep)
 
 
-def pair_parts(me, s, req, changed=""):
+def pair_parts(me, s, req, changed="", notice=lambda text: text):
     """Beside an orchestrator's message. A puppeteer gets what it is, once; the orchestrators it
     started, now controlled; an orchestrator ezexe started beside them; the controlled sessions' reports by reference; at a
     turn ezexe began, the requests addressed to it and where ezexe's message belongs; the sessions of the controlled
     trees that hold start requests, as links; each start it made on another session's behalf, to detach to top
     level; a boundary; and its board rewritten. Any other orchestrator gets its puppeteer, once, and
-    what became of the requests it sent it."""
+    what became of the requests it sent it. The archive offer asks the puppeteer to put a question to ezexe at this
+    message, so it goes through `notice` and is never the piece held."""
     out = []
     if not controls.is_puppeteer(s, me.store):
         told = controls.pair_text(s, me.store)
@@ -2700,7 +2702,10 @@ def pair_parts(me, s, req, changed=""):
     edge = controls.boundary(me.home, s, me.store)
     if edge:
         RAN["boundary"] = True
-        out += edge.split("\n\n")                 # the archive offer and the boundary each fit or are held whole
+        pieces = edge.split("\n\n")               # the archive offer, kept, and the boundary, which fits or is held
+        if not pieces[0].startswith("phi (p4-phi): a boundary: "):
+            pieces[0] = notice(pieces[0])
+        out += pieces
     controls.board(me.home, s)
     return out
 

@@ -345,6 +345,29 @@ class Supervisor(unittest.TestCase):
         self.assertEqual(self.archive(PUP, TOP4, picks=["Build the moon format reader"]).get("permissionDecision"),
                          "deny", "and no session ezexe did not pick")
 
+    def test_the_archive_offer_is_never_the_piece_held_when_the_ended_turn_lines_fill_the_room(self):
+        """ezexe/p4#68, by 8bf3e26: a notice that asks a session to act now is never held, and the archive offer asks
+        the puppeteer to put a question to ezexe at this message. Five reports whose first lines run to the 200
+        characters a line quotes overflow the default 4000 however short the checkout and temp paths are, and longer
+        paths only add to it; the offer is there whole, and an informational piece goes to held.md."""
+        t = self.t
+        t.record(TOP4, title="Build the ports table")
+        t.record(TOP5, title="Build the moon format reader")
+        five = [TOP, TOP2, TOP3, TOP4, TOP5]
+        for sid in five:
+            self.finish(sid, proj=self.other if sid == TOP2 else None, report="Built. " + "the suite ran green " * 12)
+        t.say(PUP, "Control the five trees")
+        t.cli(PUP, "controls", *five)
+        ctx = context(t.say(PUP, "five reports came in"))
+        self.assertIn("did not fit in its 4000 beside one prompt", ctx, "the room overflows")
+        self.assertIn("5 sessions this puppeteer controls are complete", ctx)
+        self.assertIn("put them to ezexe as 2 multiple-choice questions in one `AskUserQuestion`", ctx)
+        self.assertIn("Name each one archived and each one left.", ctx, "the offer whole")
+        with open(relay.held_path(t.p4, PUP), encoding="utf-8") as f:
+            held = f.read()
+        self.assertNotIn("this puppeteer controls are complete", held, "the offer is not held")
+        self.assertTrue(any(m in held for m in ("ended turns. Each is one line", "set these sessions' effort")), held)
+
     def test_a_supervisor_session_is_refused_what_it_does_not_control_and_what_is_not_complete(self):
         t = self.t
         self.finish(TOP3)
