@@ -11,7 +11,7 @@ p4-phi keeps each session's files in `<project>/.claude/p4/phi/sessions/<session
 
 ## What reaches a session without a command
 
-- At its start: the store's feedback and user memories, a line each. A line cut with ... is whole on `<project>/.claude/p4/phi/rules.md`.
+- At its start: the rules built into p4-phi, whole. The store's feedback and user memories reach it once, as their lines in the memory index, and each is whole on `<project>/.claude/p4/phi/rules.md`; a memory that changes later is handed once at the next message.
 - Beside its first message, when the sessions linked to it left any: its start background, whose first and last lines say what it holds and how to keep a finding or say the task is done.
 - Beside its next message: the reports of the workers or coworkers it started that finished a turn since.
 - In a subagent it starts: the step the subagent serves and retrieval's lines, appended to the Agent call's prompt, and before a tool call of the subagent a warning of what changed beside its parent session since its launch, when anything did.

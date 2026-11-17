@@ -934,10 +934,9 @@ def names_nothing(p, home, base=""):
 
 
 def owners(home, sid, text, base):
-    """The other live sessions whose owned paths, or the files their brief declared and still hold, hold a path the
-    message names, owned paths first and the deepest first, each as its sessionId, title and pattern: the sessions
-    the message belongs to. A session that is not live owns nothing, and a path naming the whole project names no
-    session's owned paths."""
+    """The other live sessions whose owned paths hold a path the message names, the deepest first, each as its
+    sessionId, title and pattern: the sessions the message belongs to. A session that is not live owns nothing, and
+    a path naming the whole project names no session's owned paths."""
     named = [n for n in paths_in(text, base) if not names_nothing(n, home, base)]
     if not named:
         return []
@@ -962,16 +961,7 @@ def owners(home, sid, text, base):
             if any(covers(pat, n) or covers(n, pat) for n in named):
                 out.append((oid, _title(s), pat))
                 break
-        else:
-            import book                            # the files a brief declared and its session still holds
-            for pat in book.held_files(home, s):
-                if "/" in pat and names_nothing(pat, home, base):
-                    continue
-                if any(n.rsplit("/", 1)[-1] == pat if "/" not in pat else covers(pat, n) for n in named):
-                    out.append((oid, _title(s), pat))
-                    break
-    shards = {oid: shard_of(every[oid]) for oid, _, _ in out}
-    return sorted(out, key=lambda x: (x[2] not in shards[x[0]], -len(_root(x[2]))))
+    return sorted(out, key=lambda x: -len(_root(x[2])))
 
 
 def route_text(home, sid, text, base):
@@ -979,8 +969,7 @@ def route_text(home, sid, text, base):
     if not got:
         return ""
     oid, title, pat = got[0]
-    kind = "the owned paths" if pat in shard_of(_session(home, oid)) else "the files its brief declared"
-    return (f"phi (p4-phi): this message names {pat}, among {kind} of \"{title}\" `{oid}`. Send it there "
+    return (f"phi (p4-phi): this message names {pat}, among the owned paths of \"{title}\" `{oid}`. Send it there "
             f"with SendMessage to {oid} instead of working on it here.")
 
 
@@ -995,7 +984,7 @@ def shards_line(home, sid):
             continue
         held = shard_of(s) + [f for f in book.held_files(home, s) if f not in shard_of(s)]
         if held:
-            out.append(f"\"{_title(s)}\" `{oid}`: {', '.join(held[:3])}")
+            out.append(f"\"{book.title(oid, s)}\" `{oid}`: {', '.join(held[:3])}")
     return "; ".join(out[:8])
 
 

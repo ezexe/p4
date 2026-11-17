@@ -889,7 +889,7 @@ def findings_text(home, s, new, store=""):
     them itself. A finding on a file or an issue another live session holds goes straight to that session, named
     beside it by the address book, book.py; only the rest go up for an issue."""
     import book
-    found, held = [], []
+    found, held, bk = [], [], {}
     for r in reversed(new):
         t = r.get("turn") if isinstance(r.get("turn"), dict) else {}
         by = str(r.get("sessionId") or "")
@@ -897,7 +897,10 @@ def findings_text(home, s, new, store=""):
             if line in found or any(line == h[0] for h in held):
                 continue
             try:                                   # the reporter and those above it hold nothing it found
-                who = book.holder_line(home, s, line, store, skip=[by, *chain_of(home, by)] if by else ())
+                if "all" not in bk:
+                    bk["all"] = book.entries(home, s["sessionId"], store)
+                who = book.holder_line(home, s, line, store, skip=[by, *chain_of(home, by)] if by else (),
+                                       book=bk["all"])
             except Exception:  # noqa: BLE001
                 who = ""
             if who:
@@ -909,7 +912,9 @@ def findings_text(home, s, new, store=""):
     straight = ("phi (p4-phi): these reports carry `Finding:` lines on a file or an issue a live session holds. "
                 "Send each one straight to the session named under it with SendMessage, and nowhere else; it "
                 "goes up for no issue:\n" + "\n".join(f"- {cut(x, 400)}\n  to {who}" for x, who in
-                                                     held[:FINDINGS_SHOWN])) if held else ""
+                                                     held[:FINDINGS_SHOWN])
+                + (f"\n- and {len(held) - FINDINGS_SHOWN} more, each whole in its session's report"
+                   if len(held) > FINDINGS_SHOWN else "")) if held else ""
     if not found:
         return straight
     n = len(found)
@@ -1336,7 +1341,11 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
     import book                                    # the address book: who holds each file, issue and piece of work
 
     def plus(text, whole=False):
-        handed = book.line(home, s, me.store, whole=whole)
+        try:
+            handed = book.line(home, s, me.store, whole=whole)
+        except Exception:  # noqa: BLE001  a book it cannot write never costs the message its other lines
+            handed = ""
+        RAN["book_line"] = handed                  # kept when the gate's verdict drops the standing line
         return "\n\n".join(x for x in (text, handed) if x)
     if brief and told.get(me.cli) and os.path.isfile(standing_path(home, s["sessionId"])):
         RAN["new_task"] = "page"                   # after a compaction, a line with its page, not in full
@@ -2621,10 +2630,12 @@ def h_user_prompt_submit(payload):
     watch_over(me.home, s)
     route = relay.route_text(me.home, s["sessionId"], req, s.get("cwd") or "") if req and not verdict else ""
     rule = "" if route else new_task_text(me.home, s, me, user=bool(req), req=req)
+    book_line = RAN.pop("book_line", "")
     if verdict and RAN.get("new_task") in ("line", "feature"):
-        rule = ""                                  # the gate's verdict says where the message goes
+        rule = book_line                           # the gate's verdict says where the message goes; the book stays
     parts.append(pup)
-    last = route or rule or split_text(me.home, s, payload.get("prompt"), me.cli)
+    # the standing line, which carries the address book's changes, and a cross-session turn's split advice, both
+    last = route or "\n\n".join(x for x in (rule, split_text(me.home, s, payload.get("prompt"), me.cli)) if x)
     save_session(me.home, s)
     # the rebase check, on every message: what the sessions beside this one changed, and the warnings, first
     used = sum(len(p) + 2 for p in parts + [last] if p)

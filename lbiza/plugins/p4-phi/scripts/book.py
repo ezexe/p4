@@ -38,13 +38,30 @@ PATHS_SHOWN = 4                  # of one entry's files or owned paths, in the l
 ISSUE_RE = re.compile(r"(?<![\w/#])(?:([A-Za-z0-9][\w.-]*/[\w.-]+))?#(\d{1,6})\b")
 ISSUE_URL = re.compile(r"github\.com/([\w.-]+/[\w.-]+)/(?:issues|pull)/(\d+)", re.I)
 # a decision of ezexe's authority, a press the app requires, or an outcome ezexe should hear
-EZEXE = re.compile(r"\bezexe\b|\b(?:approv|authori[sz]|permission|decision|decide|push|merg|publish|deploy|"
-                   r"release|credential|secret|password|token|archiv|press|click|button|spend|pay|purchase|"
-                   r"billing|delet|install|sign[ -]?in|log[ -]?in)\w*", re.I)
+EZEXE = re.compile(r"\bezexe(?:'s)?\b|\b(?:approv\w*|authori[sz]\w*|permissions?|decisions?|decid\w*|"
+                   r"push(?:es|ed|ing)?|merg(?:e|es|ed|ing)|publish\w*|deploy\w*|releas(?:e|es|ed|ing)|"
+                   r"credentials?|secrets?|passwords?|archiv\w*|press(?:es|ed)?|click\w*|buttons?|spend\w*|"
+                   r"purchas\w*|billing|delet\w*|install\w*|sign[ -]?in|log[ -]?in|done|land(?:s|ed)?|"
+                   r"clos(?:e|es|ed)|finish(?:es|ed)?|block(?:s|ed)?|stuck|fail(?:s|ed|ing|ure)?|green|"
+                   r"pass(?:es|ed)|outcomes?|pay(?:s|ing|ments?)?)\b", re.I)
 
 
 def _phi():
     return controls.PHI
+
+
+def title(sid, s=None):
+    """A session's whole title: the app's, else the one p4-phi holds, else its id. Never its task, which quotes the
+    request that began it."""
+    phi = _phi()
+    got = phi.clean(phi.app_record(sid).get("title")) if phi and sid else ""
+    return got or str((s or {}).get("title") or "").strip() or str(sid or "")
+
+
+def ezexes(text):
+    """True when a message's own words name a matter of ezexe's: a decision of ezexe's authority, a press the app
+    requires or an outcome ezexe should hear. Links, paths and repository names such as ezexe/p4 are no words."""
+    return bool(EZEXE.search(issues.PATH_WORDS.sub(" ", ISSUE_RE.sub(" ", str(text or "")))))
 
 
 # --- the entries -------------------------------------------------------------------------------------------------------
@@ -96,7 +113,7 @@ def held_files(home, s):
 def _issue(s):
     i = s.get("issue") if isinstance(s.get("issue"), dict) else {}
     n = i.get("number")
-    return (str(i.get("repo") or ""), int(n)) if isinstance(n, int) and n > 0 else ("", 0)
+    return (str(i.get("repo") or ""), n) if type(n) is int and n > 0 else ("", 0)
 
 
 def _entry(home, s, every, pid):
@@ -105,7 +122,7 @@ def _entry(home, s, every, pid):
     role = ("puppeteer" if sid == pid else "orchestrator" if depth == 0 else "worker" if depth == 1
             else "coworker")
     slug, n = _issue(s)
-    return {"id": sid, "title": controls.full_title(sid, s), "role": role, "parent": relay._parent(s),
+    return {"id": sid, "title": title(sid, s), "role": role, "parent": relay._parent(s),
             "files": held_files(home, s), "owned": relay.shard_of(s), "slug": slug, "number": n, "kids": [],
             "base": str(s.get("cwd") or ""), "home": home}
 
@@ -120,20 +137,24 @@ def entries(home, sid, store=""):
     for k, v in every.items():
         if not relay.gone(home, v):
             out[k] = _entry(home, v, every, pid)
+    # another project's store is read without writing to it, as controls.out_of_tree reads it
     if pid and pid not in out and pstore:
         p = relay._session(pstore, pid)
-        if p.get("sessionId") and not relay.gone(pstore, p):
+        if p.get("sessionId") and not controls.out_of_tree(p):
             out[pid] = _entry(pstore, p, relay._sessions(pstore), pid)
     if pid and pstore:
         p = relay._session(pstore, pid)
+        seen = {relay.norm(home)}
+        tops = {}
         for e in controls.controlled(p):
             st = str(e.get("store") or "")
-            if not st or relay.norm(st) == relay.norm(home):
-                continue
+            if st and relay.norm(st) not in seen:
+                tops.setdefault(relay.norm(st), (st, set()))[1].add(e["sessionId"])
+        for st, want in tops.values():             # each store read once, however many trees it holds
             theirs = relay._sessions(st)
             for k, v in theirs.items():
                 chain = _chain(theirs, k)
-                if k in out or relay.gone(st, v) or (chain[-1] if chain else k) != e["sessionId"]:
+                if k in out or (chain[-1] if chain else k) not in want or controls.out_of_tree(v):
                     continue
                 out[k] = _entry(st, v, theirs, pid)
     for e in out.values():                         # its workers or coworkers: the live sessions it started
@@ -141,11 +162,19 @@ def entries(home, sid, store=""):
     return out
 
 
+_ROOTS = {}                      # a session folder's repository root, normalized, kept for one process
+
+
+def _root_of(base):
+    if base not in _ROOTS:
+        _ROOTS[base] = relay.norm(starts.repo_root(base)) if base else ""
+    return _ROOTS[base]
+
+
 def _rel(path, base):
     """A held path as its repository or session folder names it, else whole."""
     p = str(path or "")
-    for root in (starts.repo_root(base) if base else "", base):
-        r = relay.norm(root) if root else ""
+    for r in (_root_of(base), relay.norm(base) if base else ""):
         if r and p.startswith(r + "/"):
             return p[len(r) + 1:]
     return p
@@ -191,8 +220,8 @@ def addresses(home, s, book, store=""):
     elif pid == sid:
         out.append("this session is the puppeteer, the one address for a decision of ezexe's")
     if parent:
-        title = book[parent]["title"] if parent in book else controls.full_title(parent)
-        out.append(f"work off this session's task goes to its parent \"{title}\" `{parent}`")
+        ptitle = book[parent]["title"] if parent in book else title(parent)
+        out.append(f"work off this session's task goes to its parent \"{ptitle}\" `{parent}`")
     out.append("a message about a file, an issue or a piece of work goes straight to the session that holds that "
                "file, owns that issue or started that work, named here, never through another session")
     return "; ".join(out) + "."
@@ -224,7 +253,7 @@ def _load_state(home, sid):
 def write_page(home, s, book, store=""):
     """book.md, the book whole, written only when it changed."""
     sid = s["sessionId"]
-    lines = [f"# Address book of \"{controls.full_title(sid, s)}\"", "",
+    lines = [f"# Address book of \"{title(sid, s)}\"", "",
              f"Session `{sid}`. The live sessions it can message, each by full title and id with what it holds. "
              + addresses(home, s, book, store), "", "## Sessions", ""]
     lines += [f"- {entry_text(e, n=50)}" for e in _order(book, s)] or ["- No other live session."]
@@ -303,33 +332,55 @@ def issues_named(text):
     return out
 
 
-def _same_file(named, base, held, hbase):
+def _same_file(named, rel_named, root_named, held, hbase):
     """True when a path a message names is a file or folder an entry holds: the same absolute path, a path inside a
-    held folder, the same path from the root of each one's repository, or a held bare name that is its file name."""
+    held folder, the same path from the root of a repository of the same name, as two clones of one repository are,
+    or a held bare name that is its file name."""
     if "/" not in held:
         return named.rsplit("/", 1)[-1] == held
     if named == held or relay.covers(held, named):
         return True
-    a, b = _rel(named, base), _rel(held, hbase)
-    return "/" in a and "/" in b and (a == b or b.endswith("/" + a) or a.endswith("/" + b))
+    root = _root_of(hbase)
+    if not root or not root_named or root.rsplit("/", 1)[-1] != root_named.rsplit("/", 1)[-1]:
+        return False
+    b = _rel(held, hbase)
+    return "/" in rel_named and (rel_named == b or rel_named.startswith(b + "/"))
 
 
-def holders(home, s, text, store="", skip=(), book=None):
+def _below(every, sid):
+    """The sessions a session started, and theirs, in one store's records."""
+    out, grow = set(), {sid}
+    while grow:
+        grow = {k for k, v in every.items() if relay._parent(v) in grow and k not in out and k != sid}
+        out |= grow
+    return out
+
+
+def holders(home, s, text, store="", skip=(), book=None, below=True):
     """The live sessions a message's paths and issues belong to, files and owned paths first, each as (entry,
-    what it names). The session and those above it are left out, since a parent's files cover its children's,
-    and so is every id in `skip`."""
+    what it names). The session, those above it and those below it are left out: a parent's files cover its
+    children's, and a session speaks for its own workers. So is every id in `skip`, and an issue the session owns
+    itself, which its whole tree shares."""
     sid = s["sessionId"]
-    book = book if book is not None else entries(home, sid, store)
     base = str(s.get("cwd") or "")
-    away = {sid, *skip, *_chain(relay._sessions(home), sid)}
     named = [n for n in relay.paths_in(text, base) if not relay.names_nothing(n, home, base)]
     asked = issues_named(text)
+    own = _issue(s)
+    asked = [(slug, n) for slug, n in asked if not (n == own[1] and (not slug or not own[0] or slug == own[0].lower()))]
+    if not named and not asked:
+        return []
+    book = book if book is not None else entries(home, sid, store)
+    every = relay._sessions(home)
+    away = {sid, *skip, *_chain(every, sid), *(_below(every, sid) if below else ())}
+    root_named = _root_of(base)
+    rels = [(n, _rel(n, base)) for n in named]
     out = []
     for e in book.values():
         if e["id"] in away:
             continue
-        hit = next((f for n in named for f in e["files"] + e["owned"]
-                    if not relay.names_nothing(f, e["home"], e["base"]) and _same_file(n, base, f, e["base"])), "")
+        hit = next((f for n, rn in rels for f in e["files"] + e["owned"]
+                    if not relay.names_nothing(f, e["home"], e["base"]) and _same_file(n, rn, root_named, f,
+                                                                                      e["base"])), "")
         if hit:
             out.append((e, _rel(hit, e["base"]), 0, -len(hit)))
             continue
@@ -349,30 +400,34 @@ def flag(home, s, target, message, store=""):
     text = str(message or "")
     if not sid or not target or target == sid or not text.strip():
         return ""
+    # a `Files:` line declares the recipient's write set, which controls.go_text reads; it names no other's file
+    read = starts.FILES_LINE.sub(" ", text)
+    pid = puppeteer(home, s, store)[0]
+    to_pup = target == pid and sid != pid and relay._parent(s) != pid
+    if not to_pup and not issues_named(read) and not relay.paths_in(read, str(s.get("cwd") or "")):
+        return ""                                 # names no path and no issue: nothing to read against the book
     book = entries(home, sid, store)
     if target not in book:
         return ""                                 # a name p4-phi cannot find may be the holder itself
-    pid = next((k for k, e in book.items() if e["role"] == "puppeteer"), "")
-    to_pup = target == pid and sid != pid and relay._parent(s) != pid
-    if to_pup and EZEXE.search(text):
-        return ""                                 # ezexe's: the puppeteer is its address
-    # a `Files:` line declares the recipient's write set, which controls.go_text reads; it names no other's file
-    got = holders(home, s, starts.FILES_LINE.sub(" ", text), store, book=book)
+    got = holders(home, s, read, store, book=book)
     reason = ""
     if got:
+        if any(target in (e["id"], e["parent"]) for e, _ in got):
+            return ""                             # a holder, or the session that started one
         e, what = got[0]
-        if target in (e["id"], e["parent"]):
-            return ""                             # the holder, or the session that started it
         starter = (f", started by \"{book[e['parent']]['title']}\" `{e['parent']}`"
                    if e["parent"] in book and e["parent"] != sid else "")
-        reason = (f"phi (p4-phi): this message names {what}, which \"{e['title']}\" `{e['id']}` holds{starter}, "
-                  f"so it belongs to that session and not to \"{book[target]['title']}\" `{target}`. Send it to "
-                  f"`{e['id']}` with SendMessage instead.")
+        more = "".join(f"; it also names {w}, which \"{x['title']}\" `{x['id']}` holds" for x, w in got[1:3])
+        reason = (f"phi (p4-phi): this message names {what}, which \"{e['title']}\" `{e['id']}` holds{starter}"
+                  f"{more}, so it belongs to that session and not to \"{book[target]['title']}\" `{target}`. Send "
+                  f"it to `{e['id']}` with SendMessage instead.")
     elif to_pup:
+        if ezexes(text):
+            return ""                             # ezexe's: the puppeteer is its address
         if any(not holders(home, s, f, store, book=book) for f in issues.findings(text)):
             return ""                             # a finding no live session covers goes up for an issue
         parent = relay._parent(s)
-        ptitle = book[parent]["title"] if parent in book else controls.full_title(parent) if parent else ""
+        ptitle = book[parent]["title"] if parent in book else title(parent) if parent else ""
         where = (f"work off this session's task goes to its parent \"{ptitle}\" `{parent}`" if parent
                  else "this session's own work stays in its own tree, with its own workers")
         reason = (f"phi (p4-phi): this message names no decision of ezexe's, no press the app requires and no "
@@ -391,11 +446,13 @@ def flag(home, s, target, message, store=""):
     return reason + " Said once for this message and recipient, so sending it again as it is goes through."
 
 
-def holder_line(home, s, finding, store="", skip=()):
+def holder_line(home, s, finding, store="", skip=(), book=None):
     """The session a `Finding:` line belongs to, as "title" `id` and what it names, '' when no live session holds
-    its file or owns its issue."""
-    got = holders(home, s, finding, store, skip=skip)
+    its file or owns its issue, or when more than one live session owns the issue it names, as a tree shares one."""
+    got = holders(home, s, finding, store, skip=skip, book=book, below=False)   # a session's own workers count
     if not got:
         return ""
     e, what = got[0]
+    if not e["files"] and not e["owned"] and sum(1 for x, w in got if w == what) > 1:
+        return ""
     return f"\"{e['title']}\" `{e['id']}`, which holds {what}"

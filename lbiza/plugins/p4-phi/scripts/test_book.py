@@ -130,6 +130,9 @@ class Supervisor(unittest.TestCase):
     def test_a_session_that_left_is_named_as_no_longer_live(self):
         t = self.t
         self.tree()
+        t.say(TOP3, "Build the importer")
+        self.assertIn(KID, self.pre(KID2, SEND, {"to": TOP3, "message": "Is src/flush.py ready?"})[0],
+                      "held while KID is live")
         rec = os.path.join(t.app, KID + ".json")
         d = json.loads(read(rec))
         d["isArchived"] = True
@@ -138,6 +141,55 @@ class Supervisor(unittest.TestCase):
         self.assertIn(f"no longer live: `{KID}`", changed)
         self.assertEqual(self.pre(KID2, SEND, {"to": TOP3, "message": FINDING}), ("", ""),
                          "an archived session holds nothing")
+
+    def test_a_finding_naming_its_issue_by_slug_to_the_puppeteer_is_still_held(self):
+        t = self.t
+        self.tree()
+        s = t.session(KID)
+        s["issue"] = {"repo": "ezexe/p4", "number": 245}
+        relay._write_json(os.path.join(t.dir(KID), "session.json"), s)
+        said, decision = self.pre(KID2, SEND, {"to": PUP, "message": "Finding: ezexe/p4#245 src/flush.py drops the "
+                                                                    "last batch; source: https://github.com/ezexe/p4"
+                                                                    "/issues/245; files: src/flush.py"})
+        self.assertEqual(decision, "deny", "a repository name or a link is no matter of ezexe's")
+        self.assertIn(KID, said)
+
+    def test_an_untitled_session_is_named_by_its_id_and_never_by_its_brief(self):
+        t = self.t
+        self.tree()
+        t.record(KID3, started_by=TOP, title="")
+        d = json.loads(read(os.path.join(t.app, KID3 + ".json")))
+        d.pop("title", None)
+        write(os.path.join(t.app, KID3 + ".json"), json.dumps(d))
+        t.say(KID3, "Task:\nPort the secret writer of the narwhal exporter.\nFiles: src/writer.py")
+        t.say(KID2, "and now?", P4_PHI_NEW_TASK="1")
+        page = read(book.page_path(t.p4, KID2))
+        self.assertIn(f"\"{KID3}\" `{KID3}`", page)
+        self.assertNotIn("secret writer", page)
+
+    def test_a_brief_naming_a_siblings_file_is_not_routed_away(self):
+        t = self.t
+        self.tree()
+        t.record(KID3, started_by=TOP, title="the flush reviewer")
+        first = context(t.say(KID3, "Task:\nReview src/flush.py and report what it drops.\nFiles: none"))
+        self.assertNotIn("Send it there", first, "a worker's brief is its own work, not a message to route")
+
+    def test_a_controlled_tree_in_another_store_is_in_the_book(self):
+        t = self.t
+        other = os.path.join(t.tmp, "other")
+        os.makedirs(os.path.join(other, ".claude", "p4"))
+        TOP2, KID4 = "local_top00002", "local_kid00004"
+        CLI.setdefault(TOP2, "66660000-0000-4000-8000-000000000000")
+        CLI.setdefault(KID4, "66661000-0000-4000-8000-000000000000")
+        t.record(TOP2, title="Build the importer elsewhere", cwd=other)
+        t.record(KID4, started_by=TOP2, title="the parser child", cwd=other)
+        t.say(TOP2, "Build the importer", proj=other)
+        t.say(KID4, "Task:\nBuild the quote parser.\nFiles: src/parse.py", proj=other)
+        self.tree()
+        self.assertEqual(t.cli(PUP, "controls", TOP, TOP2).returncode, 0)
+        t.say(KID2, "and now?", P4_PHI_NEW_TASK="1")
+        page = read(book.page_path(t.p4, KID2))
+        self.assertIn(f"\"the parser child\" `{KID4}`, worker under `{TOP2}`: files src/parse.py", page)
 
     def test_a_flag_is_said_once_for_one_message_and_target(self):
         self.tree()
@@ -185,6 +237,33 @@ class Supervisor(unittest.TestCase):
         self.assertIn("Send each one straight to the session named under it", ctx)
         self.assertIn(f"to \"the flush child\" `{KID}`, which holds src/flush.py", ctx)
         self.assertNotIn("go up to the puppeteer", ctx, "a held finding goes up for no issue")
+
+    def test_a_session_speaks_for_its_own_workers_and_a_holder_among_several_takes_the_message(self):
+        t = self.t
+        self.tree()
+        t.say(TOP3, "Build the importer")
+        self.assertEqual(self.pre(TOP, SEND, {"to": TOP3, "message": "My worker is changing src/flush.py, so hold "
+                                                                    "off on it."}), ("", ""),
+                         "an orchestrator's message about its own worker's file is its own")
+        t.record(KID3, started_by=TOP3, title="the writer child")
+        t.say(KID3, "Task:\nBuild the writer.\nFiles: src/writer.py")
+        self.assertEqual(self.pre(KID2, SEND, {"to": KID3, "message": "src/flush.py now calls src/writer.py, "
+                                                                     "whose rows it reads."}), ("", ""),
+                         "the target holds one of the files the message names")
+
+    def test_an_issue_the_senders_tree_shares_and_an_outcome_for_the_puppeteer_go(self):
+        t = self.t
+        self.tree()
+        t.say(TOP3, "Build the importer")
+        for k in (KID, KID2):
+            s = t.session(k)
+            s["issue"] = {"repo": "ezexe/p4", "number": 245}
+            relay._write_json(os.path.join(t.dir(k), "session.json"), s)
+        self.assertEqual(self.pre(KID2, SEND, {"to": TOP3, "message": "ezexe/p4#245 step 3 is green."}), ("", ""),
+                         "the sender's own issue is its tree's")
+        self.assertEqual(self.pre(TOP, SEND, {"to": PUP, "message": "The flush batching is done and its suite "
+                                                                   "ran green."}), ("", ""),
+                         "an outcome ezexe should hear goes to the puppeteer")
 
     def test_issues_named_reads_slugs_bare_numbers_and_links_and_no_path_or_anchor(self):
         self.assertEqual(book.issues_named("ezexe/p4#245 and #236, https://github.com/ezexe/phi/issues/12 and "
