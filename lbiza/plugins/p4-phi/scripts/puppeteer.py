@@ -969,34 +969,25 @@ def readings_of(req):
     return [a, b] if a and b and a.lower() != b.lower() else []
 
 
-OWN_LEAD = re.compile(r"^\W*(?:go\b|go ahead\b|landed\b|pushed\b|merged\b|closed\b|done\b|finished\b|shipped\b|"
-                      r"relay(?:ed)?\b|forward(?:ed)?\b|sent\b|reported\b|report from\b|reports? of\b|status\b|recap\b|"
-                      r"summary\b)", re.I)
-OWN_SHARE = 0.6                  # of a message's content words that its last report holds, for it to be that report
+# the app's marks of a message that is not ezexe's: another session's message, a side-sessions event, a task
+# notification, a system notification, or a hook's words given back to the session
+SESSION_MARK = re.compile(r"<cross-session-message\b|<side-sessions-event\b|<task-notification\b|"
+                          r"\[SYSTEM NOTIFICATION\b|^\s*(?:Stop|SubagentStop|UserPromptSubmit) hook (?:feedback|blocking)",
+                          re.I | re.M)
+
+
+def from_session(prompt):
+    """True when the app marks a message as another session's or its own: a cross-session message, a side-sessions
+    event, a task notification, a system notification or a hook's feedback. Every other message a puppeteer is
+    given is ezexe's, and only those are read for work or kept as requests."""
+    return bool(SESSION_MARK.search(str(prompt or "")[:4000]))
 
 
 def own_message(home, s, req):
-    """True for a message to a puppeteer that is its own orchestration rather than a request for new work: one
-    controls.route_down sends to a controlled session's topic (#230), one that names a controlled session by its id
-    or its full title, as a go or a relay does, one that opens with an outcome, a go, a relay or a report, or one
-    whose words are mostly its own last report coming back. Such a message is drafted no start."""
-    phi = _phi()
-    ctl = phi.controls
-    text = str(req or "")
-    if ctl.route_down(s, text):
-        return True
-    low = " ".join(text.split()).lower()
-    for e in ctl.controlled(s):
-        k = e["sessionId"]
-        name = " ".join(str(ctl.full_title(k) or "").split()).lower()
-        if k.lower() in low or (len(name) >= 12 and name in low):
-            return True
-    if OWN_LEAD.search(text):
-        return True
-    said = words(text)
-    turns = phi.load_turns(home, s["sessionId"])
-    last = words(turns[-1].get("report")) if turns else set()
-    return bool(said and last and len(said & last) >= max(QUICK_WORDS, OWN_SHARE * len(said)))
+    """True for a message of ezexe's to a puppeteer that controls.route_down sends to a controlled session's topic:
+    the puppeteer sends it there, and drafts no start for it (#230). Its own orchestration and wrap-up reach it as
+    other sessions' messages, which from_session tells by the app's marks, never by ezexe's words."""
+    return bool(_phi().controls.route_down(s, str(req or "")))
 
 
 def prompty(home, s, req, base):

@@ -20,7 +20,7 @@ import phi  # noqa: E402,F401  sets controls.PHI, which asks.py reads
 from test_phi import CLI, KID, TOP, Tree, context, read, write  # noqa: E402
 
 TASK = "Make the narwhal exporter write its ports table to the store"
-DRAFT = "its start draft is"
+DRAFT = "its start draft"             # whole beside the prompt, or the opening of the piece held for want of room
 
 
 class Routing(unittest.TestCase):
@@ -98,9 +98,23 @@ class Trees(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
 
 
+
+
+def marked(text, sender="local_other001"):
+    """A message the app marks as another session's, as this app gives it."""
+    return (f"Another Claude session sent a message:\n<cross-session-message from=\"{sender}\" from-name=\"a session\">"
+            f"\n{text}\n</cross-session-message>")
+
+
+BILLING = "Build a billing dashboard with charts for the monthly invoices of each customer account"
+ACCOUNT = "Give me a short account of where the exporter and importer requests stand today"
+
+
 class Ledger(Trees):
-    """ezexe sends the puppeteer three requests: the first it routes to `TOP`, the second to `TOP3`, and the third it
-    asks ezexe about."""
+    """ezexe's requests to the puppeteer, a row each, with their holders, states and waits."""
+
+    def page(self):
+        return read(asks.page_path(self.t.p4, PUP))
 
     def test_three_requests_are_three_rows_with_their_holders_and_states_and_the_turn_names_the_page(self):  # 247
         t = self.t
@@ -112,50 +126,99 @@ class Ledger(Trees):
         t.stop(PUP, ASK2, report="Sent to the importer's orchestrator.", uuid="a2")
         t.say(PUP, ASK3)
         t.stop(PUP, ASK3, report="The notes are ready. " + WAIT, uuid="a3")
-        ctx = context(t.say(PUP, "Give me a short account of where the exporter and importer requests stand today"))
-        page = asks.page_path(t.p4, PUP)
-        self.assertIn(f"Whole on {page}", ctx, "the turn names the page")
+        ctx = context(t.say(PUP, marked("The importer's parser is in review.")))   # before ezexe answers
+        self.assertIn(f"Whole on {asks.page_path(t.p4, PUP)}", ctx, "the turn names the page")
         got = {r["id"]: r for r in asks.rows(t.p4, PUP)}
-        self.assertEqual(sorted(got), ["ask-1", "ask-2", "ask-3"], "a status question is no request")
+        self.assertEqual(sorted(got), ["ask-1", "ask-2", "ask-3"], "an account asked for is no request")
         self.assertEqual((got["ask-1"]["holder"], got["ask-2"]["holder"], got["ask-3"]["holder"]), (TOP, TOP3, ""))
         self.assertEqual(got["ask-3"]["waits"], "The notes are ready. " + WAIT)
-        text = read(page)
-        self.assertIn(f"ask-1, ", text)
+        self.assertTrue(all(len(r["topic"]) <= asks.TOPIC_CHARS for r in got.values()), "a short topic each")
+        text = self.page()
         self.assertIn(f"held by \"Build the narwhal exporter\" `{TOP}` | routed", text)
         self.assertIn(f"held by \"Build the importer\" `{TOP3}` | routed", text)
         self.assertIn(f"held by no session yet | waits on ezexe: The notes are ready. {WAIT}", text)
         self.assertIn("1 waits on ezexe", ctx)
         t.stop(TOP, "Build the narwhal exporter", report="The retry is in and its suite ran green.", uuid="b1")
-        context(t.say(PUP, "Go ahead and publish the notes"))
-        text = read(page)
+        t.say(PUP, "Yes, publish the release notes now; the retry can follow in the next release once it lands")
+        text = self.page()
         self.assertIn(f"`{TOP}` | reported", text, "the holder's turn since the row was routed")
-        self.assertNotIn("waits on ezexe:", text, "ezexe's answer clears the wait")
+        self.assertNotIn("waits on ezexe:", text, "a long answer of ezexe's clears the wait too")
+        self.assertEqual(len(asks.rows(t.p4, PUP)), 3, "the answer opens no row of its own")
 
-    def test_a_quick_message_or_a_status_question_opens_no_row(self):
+    def test_a_question_or_another_sessions_message_opens_no_row(self):
         t = self.t
         t.say(PUP, "yes")
-        t.say(PUP, "How are the exporter and importer coming along at the moment overall")
+        t.say(PUP, "Where does the exporter's flush fix stand, and has it landed?")
+        t.say(PUP, marked("Landed the flush retry for the narwhal exporter and pushed main"))
+        t.say(PUP, "<task-notification>\n<summary>Agent \"Build the retry\" finished</summary>\n</task-notification>")
         self.assertEqual(asks.rows(t.p4, PUP), [])
         self.assertNotIn("ezexe's requests to this puppeteer", context(t.say(PUP, "and now?")))
 
+    def test_a_request_answered_in_its_own_turn_closes_as_answered(self):
+        t = self.t
+        t.say(PUP, ASK2)
+        t.stop(PUP, ASK2, report="The importer's parser already reads quoted rows over two lines, so nothing is "
+                                 "needed.", uuid="n1")
+        t.say(PUP, ACCOUNT)
+        self.assertIn("held by no session yet | answered", self.page())
 
-CLOSING = ("Landed the flush retry for the narwhal exporter and pushed main; the importer's quote parser is next in "
-           "its queue, and nothing waits on ezexe.")
+    def test_a_send_is_credited_by_its_words_and_states_follow_the_holder(self):
+        t = self.t
+        t.say(PUP, ASK1)
+        self.send(PUP, "local_wrk00001", "Check the board and each coworker's context, and report the counts.")
+        self.assertEqual(asks.rows(t.p4, PUP)[0]["holder"], "", "a message on no request's topic holds none")
+        self.send(PUP, TOP, ASK1 + ", as the exporter's next step.")
+        t.stop(PUP, ASK1, report="Sent to the exporter's orchestrator.", uuid="w1")
+        t.say(TOP, "Add the retry to the flush")
+        t.say(PUP, ACCOUNT)
+        self.assertIn(f"`{TOP}` | working", self.page(), "mid-turn")
+        self.assertEqual(t.cli(TOP, "done", "the retry landed and its suite ran green").returncode, 0)
+        t.stop(TOP, "Add the retry to the flush", report="The retry landed; its suite ran green.", uuid="w2")
+        t.say(PUP, ACCOUNT)
+        self.assertIn(f"`{TOP}` | done", self.page())
+        t.say(PUP, ASK2)
+        self.send(PUP, TOP3, ASK2 + ", as the importer's next step.")
+        rec = os.path.join(t.app, TOP3 + ".json")
+        d = json.loads(read(rec))
+        d["isArchived"] = True
+        write(rec, json.dumps(d))
+        t.say(PUP, ACCOUNT)
+        self.assertIn(f"`{TOP3}` | closed", self.page())
+
+    def test_an_orchestrator_started_for_a_request_holds_it(self):
+        t = self.t
+        new = "local_new00009"
+        CLI.setdefault(new, "77779000-0000-4000-8000-000000000000")
+        t.say(PUP, BILLING)
+        t.record(new, title="Billing dashboard with monthly invoice charts")
+        t.say(new, BILLING)
+        self.assertEqual(t.cli(PUP, "controls", new).returncode, 0)
+        t.stop(PUP, BILLING, report="Started the billing dashboard's orchestrator.", uuid="o1")
+        t.say(PUP, ACCOUNT)
+        got = asks.rows(t.p4, PUP)
+        self.assertEqual((got[0]["holder"], got[0]["how"]), (new, "started"))
 
 
 class PuppeteerRouting(Trees):
-    """The puppeteer's own wrap-up and orchestration are read as such, never as a request for a new orchestrator."""
+    """A puppeteer's message is ezexe's unless the app marks it as another session's; only route_down sends one on."""
 
     def test_the_puppeteers_closing_report_and_its_go_to_a_controlled_session_draw_no_start_draft(self):  # 247
         t = self.t
-        t.stop(PUP, "Control the exporter and the importer trees", report=CLOSING, uuid="c1")
-        self.assertNotIn(DRAFT, context(t.say(PUP, CLOSING)), "its own closing report, come back")
-        self.assertNotIn(DRAFT, context(t.say(PUP, f"Go: `{TOP}` can now build the retry writer for the flush "
-                                                   f"batches and land it")), "a go to a controlled session")
-        self.assertNotIn(DRAFT, context(t.say(PUP, "Relay to \"Build the importer\": add the quote handling to "
-                                                   "the parser of the input rows")), "a relay to a controlled session")
-        self.assertIn(DRAFT, context(t.say(PUP, "Build a billing dashboard with charts for the monthly invoices of "
-                                                "each customer account")), "a new topic is still drafted")
+        for text in ("Landed the flush retry for the narwhal exporter and pushed main; the importer's quote parser "
+                     "is next.", f"Go: `{TOP}` can now build the retry writer for the flush batches and land it",
+                     "Relay to \"Build the importer\": add the quote handling to the parser of the input rows"):
+            self.assertNotIn(DRAFT, context(t.say(PUP, marked(text))), text)
+        self.assertEqual(asks.rows(t.p4, PUP), [], "no row for another session's message")
+        self.assertIn(DRAFT, context(t.say(PUP, BILLING)), "a new topic of ezexe's is drafted")
+
+    def test_ezexes_own_words_never_cost_a_request_its_draft(self):
+        t = self.t
+        self.assertIn(DRAFT, context(t.say(PUP, "Go ahead and build a billing dashboard for the monthly invoices of "
+                                                "each customer account")), "a request opening with go ahead")
+        t.stop(PUP, "Control the trees", report="Shall I build the payroll export with a monthly summary for each "
+                                               "employee record?", uuid="e1")
+        self.assertIn(DRAFT, context(t.say(PUP, "Build the payroll export with a monthly summary for each employee "
+                                                "record")), "ezexe taking the puppeteer's offer")
 
     def test_a_message_route_down_sends_to_a_controlled_topic_draws_no_start_draft(self):              # 230
         ctx = context(self.t.say(PUP, "Write a page about the narwhal exporter's ports table and its rows"))
