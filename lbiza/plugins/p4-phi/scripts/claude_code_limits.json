@@ -1,0 +1,83 @@
+[
+  {
+    "repo": "ezexe/p4",
+    "issue": 66,
+    "title": "p4-phi: a started session's effort is capped at its starter's, and workflow agents take no level",
+    "behaviour": "start_session takes an effort at or below the starter's own and ignores a higher one, and a started session's first turn runs on the starter's model when a higher one is asked. No docs page or tool schema states either cap.",
+    "source": "undocumented; observed in the app's records on 2026-11-16 and 2026-11-17, https://github.com/ezexe/p4/issues/66#issuecomment-6948535788",
+    "changes_when": "start_session starts a session at the model and effort asked above the starter's, or a documented field does; p4 then drops the read-back and set_session_effort step.",
+    "terms": ["start_session", "set_session_effort", "set_session_model", "effort"]
+  },
+  {
+    "repo": "ezexe/p4",
+    "issue": 148,
+    "title": "wiring: the agent entry rewrites the Agent call where SubagentStart adds context",
+    "behaviour": "Auto mode can deny an Agent call whose input a PreToolUse hook changed with no permissionDecision, and SubagentStart input carries only agent_id and agent_type, with neither the Agent call's prompt nor its tool_use_id.",
+    "source": "https://code.claude.com/docs/en/hooks#pretooluse-updatedinput-in-auto-mode and https://code.claude.com/docs/en/hooks#subagentstart",
+    "changes_when": "SubagentStart input carries the Agent call's prompt or tool_use_id, or the Agent tool joins the calls a hook may change in auto mode; p4 then ranks at SubagentStart and drops the PreToolUse record and the bind by type.",
+    "terms": ["SubagentStart", "updatedInput", "tool_use_id", "auto mode"]
+  },
+  {
+    "repo": "ezexe/p4",
+    "issue": 151,
+    "title": "wiring: no entry registers SessionEnd",
+    "behaviour": "SessionEnd hooks share a budget of 1.5 seconds, and timeouts set on plugin-provided hooks don't raise it.",
+    "source": "https://code.claude.com/docs/en/hooks#sessionend",
+    "changes_when": "A plugin hook's timeout raises the SessionEnd budget, or a plugin can set it; p4 then records the end and its reason at SessionEnd and stops reading the app's records for it.",
+    "terms": ["SessionEnd", "CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS", "plugin-provided hooks"]
+  },
+  {
+    "repo": "ezexe/p4",
+    "issue": 154,
+    "title": "wiring: phi.py never reads the parent session's effort",
+    "behaviour": "start_session takes an effort at or below the starter's own and ignores a higher one, so p4 has to read effort.level from the hook input and cap the levels it hands out.",
+    "source": "undocumented cap, observed on 2026-11-16 as #66 records; effort.level documented at https://code.claude.com/docs/en/hooks#common-input-fields",
+    "changes_when": "start_session honours an effort above the starter's, or the cap is documented for a start to read; p4 then needs no cap of its own.",
+    "terms": ["start_session", "effort", "set_session_effort"]
+  },
+  {
+    "repo": "ezexe/p4",
+    "issue": 157,
+    "title": "wiring: notify_when_idle is named nowhere",
+    "behaviour": "notify_when_idle makes no subscription to a session reached through Claude Desktop's session messaging, and the app's side-sessions-event continuation stops reaching a starter after many automated messages in a row.",
+    "source": "undocumented; observed on 2026-11-17, https://github.com/ezexe/p4/issues/157#issuecomment-6940830224 and https://github.com/ezexe/p4/issues/157#issuecomment-6940711420",
+    "changes_when": "notify_when_idle subscribes between desktop sessions, or a starter is always continued when a session it started ends a turn; p4 then drops the closing SendMessage it asks of a finished worker.",
+    "terms": ["notify_when_idle", "side-sessions-event", "SendMessage", "send_message"]
+  },
+  {
+    "repo": "ezexe/p4",
+    "issue": 219,
+    "title": "p4-phi: a puppeteer is told to ask ezexe to compact at every boundary, whatever its context holds",
+    "behaviour": "Compaction runs only for a typed /compact or for auto-compaction; a PreCompact hook can only block it or add instructions, and no tool, hook output or SDK call starts one.",
+    "source": "https://code.claude.com/docs/en/hooks#precompact; the rest undocumented, the app's session tools offer clear_session and no compact",
+    "changes_when": "A tool or a hook output starts a compaction of a session; p4 then compacts a puppeteer at its own ceiling and asks ezexe nothing.",
+    "terms": ["/compact", "PreCompact", "compact_session", "clear_session"]
+  },
+  {
+    "repo": "ezexe/p4",
+    "issue": 220,
+    "title": "p4-phi: a session holding a start request asks ezexe for the same press at every turn ezexe did not begin",
+    "behaviour": "start_session with initiation user_asked is refused in a turn that another session's message, a background event or a handed task began, and whether a later turn without blocked clears the app's waiting mark is undocumented.",
+    "source": "undocumented; the app's refusal is filed as https://github.com/anthropics/claude-code/issues/109282",
+    "changes_when": "start_session accepts a start in a turn ezexe did not begin, such as under a standing approval, or the waiting mark is documented; p4 then drops its start requests and the held press.",
+    "terms": ["start_session", "user_asked", "initiation", "blocked", "wrap_up"]
+  },
+  {
+    "repo": "ezexe/p4",
+    "issue": 229,
+    "title": "p4-phi: a session that is no puppeteer and starts another session's request gets no line, and the ledger names nothing",
+    "behaviour": "The app nests a started session under the session that called start_session, no tool moves it under another parent, and a session detached to top level cannot be nested again.",
+    "source": "undocumented; observed in the app's sidebar and records, asked of the app in https://github.com/anthropics/claude-code/issues/109282",
+    "changes_when": "start_session takes the parent to nest the new session under, or a tool reparents a session; p4 then drops the detach, its own reparent and the exception named to ezexe.",
+    "terms": ["start_session", "detach_session", "reparent", "spawnedFrom"]
+  },
+  {
+    "repo": "ezexe/p4",
+    "issue": 246,
+    "title": "p4: no plugin writes the Claude Code settings it relies on, so autoMemoryDirectory is set by hand in each checkout",
+    "behaviour": "autoMemoryDirectory must be an absolute path or start with ~/, a plugin's userConfig goes only to pluginConfigs in the user's settings, and no common hook input field carries the Claude Code version.",
+    "source": "https://code.claude.com/docs/en/memory#storage-location, https://code.claude.com/docs/en/plugins-reference#user-configuration and https://code.claude.com/docs/en/hooks#common-input-fields",
+    "changes_when": "autoMemoryDirectory takes a project-relative path, a plugin can supply a project setting, or hooks receive the version; p4 then commits one setting for every checkout and drops the per-checkout writer and the binary read.",
+    "terms": ["autoMemoryDirectory", "CLAUDE_PROJECT_DIR", "pluginConfigs", "userConfig", "CLAUDE_PID"]
+  }
+]
