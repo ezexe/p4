@@ -37,6 +37,8 @@ FILE = "p4.json"
 DEFAULTS = {
     "scratchpad": {
         "asks": False,                   # the two asks about where code belongs; P4_SCRATCHPAD_ASKS=1 or 0 wins
+        "tmp": False,                    # no link from a session's scratchpad to temportal/tmp: p4-temportal 0.3.9
+                                         # and older read it and link when it is missing or true, so it is kept false
         # the extensions and folder names the notebook moves into its .out/
         "ignorable_ext": ["log", "out", "tmp", "dump", "pid", "o", "obj", "pdb", "ilk", "exe", "dll", "lib", "so",
                           "dylib", "a", "class", "pyc", "pyo", "tlog", "binlog", "etl", "trace", "lastbuildstate"],
@@ -138,7 +140,7 @@ READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.puppeteer_cha
 # Keys no plugin reads, top-level or dotted: never returned or called unknown, and dropped from p4.json when it is
 # rewritten for another reason. The memory section and the scratchpad tmp keys went with p4-temportal's move to the
 # app's own auto memory and scratchpad.
-RETIRED = ("plans", "version", "memory", "scratchpad.tmp", "scratchpad.tmp_idle_days", "scratchpad.tmp_max_file_mb",
+RETIRED = ("plans", "version", "memory", "scratchpad.tmp_idle_days", "scratchpad.tmp_max_file_mb",
            "scratchpad.tmp_max_files", "scratchpad.tmp_empty_idle_hours", "scratchpad.scratch_sweep_minutes",
            "scratchpad.tmp_skip_dirs")
 
@@ -761,10 +763,10 @@ def _write(p4, data):
 WRITTEN = "_written"
 # The generation of DEFAULTS: raised by one whenever a default changes, with the value it had added to HISTORY, so a
 # store's written values follow the change. test_p4conf.py pins DEFAULTS to this number.
-GEN = 3
+GEN = 4
 # Past defaults by dotted path: a store from before the record whose value equals one of these, or today's default,
 # counts that value as written by load, so it follows today's default.
-HISTORY = {"recall.teacher.model": ["claude-fable-5-1"], "recall.lookups.web": ["answer"],
+HISTORY = {"recall.teacher.model": ["claude-fable-5-1"], "recall.lookups.web": ["answer"], "scratchpad.tmp": [True],
            "temportal.cache": [{"scratchpad/.out": {"max_age_days": 14, "max_mb": 500},
                                 ".layout-conflicts": {"max_age_days": 30}}]}
 

@@ -396,20 +396,43 @@ class P4Conf(unittest.TestCase):
         import contextlib
         import io
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({"memory": {"retries": 5}, "scratchpad": {"tmp": True, "tmp_skip_dirs": [], "asks": True}}, f)
+            json.dump({"memory": {"retries": 5}, "scratchpad": {"tmp_skip_dirs": [], "asks": True}}, f)
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             s = p4conf.load(self.p4)
         self.assertEqual(err.getvalue(), "")
         self.assertNotIn("memory", s)
-        self.assertNotIn("tmp", s["scratchpad"])
+        self.assertNotIn("tmp_skip_dirs", s["scratchpad"])
         self.assertIs(s["scratchpad"]["asks"], True)
+
+    def test_the_keeper_writes_and_keeps_scratchpad_tmp_false(self):
+        """p4-temportal 0.3.9 links a session's scratchpad into temportal/tmp unless p4.json's scratchpad.tmp is false,
+        so every store holds it false: a store that lacks it, one load wrote true into, and one from before the record
+        that holds the old default."""
+        cases = {}
+        for name, value, record in (("missing", None, True), ("written", True, True), ("no record", True, False)):
+            p4 = tempfile.mkdtemp()
+            self.addCleanup(shutil.rmtree, p4, True)
+            d = json.loads(json.dumps(p4conf.DEFAULTS))
+            d["scratchpad"].pop("tmp")
+            if value is not None:
+                d["scratchpad"]["tmp"] = value
+            if record:
+                d[p4conf.WRITTEN] = {"scratchpad.tmp": {"v": True, "gen": 1}} if value is not None else {}
+            with open(p4conf.path(p4), "w", encoding="utf-8") as f:
+                json.dump(d, f)
+            p4conf.load(p4)
+            p4conf.load(p4)
+            with open(p4conf.path(p4), encoding="utf-8") as f:
+                cases[name] = json.load(f)["scratchpad"]["tmp"]
+        self.assertEqual(cases, {"missing": False, "written": False, "no record": False})
+        self.assertNotIn("scratchpad.tmp", p4conf.RETIRED)
 
     def test_gen_is_raised_with_every_change_of_defaults(self):
         """DEFAULTS is pinned to its GEN: a change of a default fails here until GEN is raised, the old value added to
         HISTORY and the pin below updated."""
         import hashlib
-        pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca"}                     # append only: one more line for each GEN
+        pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca", 4: "857fe1fd14a29f6a"}                     # append only: one more line for each GEN
         got = hashlib.sha256(json.dumps(p4conf.DEFAULTS, sort_keys=True).encode()).hexdigest()[:16]
         self.assertEqual(p4conf.GEN, max(pins))
         self.assertEqual(p4conf.GEN, len(pins), "no generation is skipped or replaced")
