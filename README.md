@@ -88,3 +88,11 @@ The script installs ezexe/phi editable from a checkout beside this one, `../phi`
 Where PyTorch publishes no build for the machine, `.venv` is finished without torch: retrieval and `phi_model check` run, and the `.pt` ranker and the ensemble of shard models are off.
 An Intel Mac always takes that route, since ezexe/phi needs torch 2.4.1 or newer and PyPI's last torch for macOS on x86_64 is 2.2.2.
 The script stops before it makes or tops up `.venv` when the Python that will run ezexe/phi is older than the lower bound of `requires-python` in ezexe/phi's `pyproject.toml`, with Python 3.11 in its place for an ezexe/phi from GitHub whose file cannot be read or sets no lower bound.
+
+## Releasing a change to a plugin
+
+Claude Code copies a plugin installed from a marketplace it clones into its plugin cache, `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`, so a change to the plugin's code or its `hooks/hooks.json` reaches such an install only with a new version.
+Each such change bumps the version in two files together: the plugin's own `lbiza/plugins/<plugin>/.claude-plugin/plugin.json` and its entry in the catalog `lbiza/.claude-plugin/marketplace.json`.
+`test_wiring.py` in `lbiza/plugins/p4-phi/hooks/` holds the two equal for every plugin of the catalog, and `claude plugin validate` warns when they differ.
+A marketplace added from a local folder, as [p4-phi's README](lbiza/plugins/p4-phi/README.md#install) installs it, runs the plugins in place, so the machine that holds that folder sees a change at its next session start or `/reload-plugins` without a version change.
+The rules are on Anthropic's [plugin loading page](https://code.claude.com/docs/en/plugins/loading.md).
