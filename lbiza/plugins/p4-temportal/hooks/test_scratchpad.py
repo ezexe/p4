@@ -443,6 +443,36 @@ class AppScratchpad(unittest.TestCase):
         self.assertEqual(self.git("rev-parse", "HEAD"), head, "a start made a commit in the store")
 
 
+class FailureNotice(unittest.TestCase):
+    """ezexe/p4#114: a failure of the ask on PreToolUse, where plain stdout reaches nobody, and an unknown subcommand
+    print a systemMessage, which Claude Code shows ezexe on every event."""
+
+    def test_a_degraded_or_unknown_subcommand_prints_a_system_message(self):
+        import contextlib
+        import io
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        import scratchpad as sp
+        root = tempfile.mkdtemp(prefix="p4-temportal-scratchpad-fail-")
+        self.addCleanup(wipe, root)
+        old = (sp.cmd_ask, sys.argv, sys.stdin)
+
+        def broken(*a, **k):
+            raise OSError("disk gone")
+        try:
+            sp.cmd_ask = broken
+            for sub, want in (("ask", "scratchpad ask degraded: OSError: disk gone"), ("nope", "unknown subcommand")):
+                sys.argv = ["scratchpad.py", sub]
+                sys.stdin = io.TextIOWrapper(io.BytesIO(json.dumps(
+                    {"cwd": root, "hook_event_name": "PreToolUse"}).encode()), encoding="utf-8")
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    self.assertEqual(sp.main(), 0)
+                self.assertIn(want, json.loads(out.getvalue())["systemMessage"])
+        finally:
+            sp.cmd_ask, sys.argv, sys.stdin = old
+
+
 class AskPaths(unittest.TestCase):
     """Which written paths the ask names, on scratchpad.py's own functions."""
 

@@ -28,7 +28,7 @@ The two asks are off unless p4.json's scratchpad.asks is true or P4_SCRATCHPAD_A
                  notebook is where p4-temportal keeps notebooks. It never denies, and it is silent inside a subagent,
                  whose writer ezexe cannot redirect from the prompt.
 
-Every failure prints a one-line notice and exits 0."""
+Every failure prints a one-line systemMessage and exits 0."""
 
 import json
 import os
@@ -389,10 +389,11 @@ def main():
             return cmd_repo_uses(payload)
         if sub == "ask":
             return cmd_ask(payload)
-        print(f"scratchpad.py: unknown subcommand {sub!r}")
+        print(json.dumps({"systemMessage": f"scratchpad.py: unknown subcommand {sub!r}"}))
         return 0
     except Exception as e:  # noqa: BLE001 — a hook degrades, never raises
-        print(f"p4-temportal scratchpad {sub} degraded: {type(e).__name__}: {e}")
+        # a systemMessage reaches ezexe whatever the event, where the ask's plain stdout on PreToolUse reaches nobody
+        print(json.dumps({"systemMessage": f"p4-temportal scratchpad {sub} degraded: {type(e).__name__}: {e}"}))
         return 0
 
 
