@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """relay.py: owned paths, deltas, anchors, the rebase check and routing, on a tree of three sessions run through
-phi.py's hooks, with fork or fresh, tracking in the store, a shared store and merged worktrees beside them.
+phi.py's hooks, with fork or fresh, tracking in the store and a shared store beside them.
 
     python3 -I lbiza/plugins/p4-phi/scripts/test_relay.py
 
@@ -1053,9 +1053,10 @@ class ForkOrFresh(ThreeSessions):
 
 
 class MergedWorktrees(unittest.TestCase):
-    """Merged worktrees and their branches are named for removal; the others are kept with why."""
+    """The app removes a session's worktree itself and `clean_up_worktrees` removes inactive ones, desktop.md, "Keep
+    uncommitted changes when a session is archived", so an orchestrator is never told to remove one."""
 
-    def test_merged_clean_worktrees_are_named_and_the_rest_kept(self):
+    def test_a_merged_clean_worktree_is_not_named_at_a_step_boundary(self):
         if not shutil.which("git"):
             self.skipTest("no git")
         with tempfile.TemporaryDirectory() as tmp:
@@ -1066,87 +1067,17 @@ class MergedWorktrees(unittest.TestCase):
             subprocess.run(["git", "init", "-q", "-b", "main", repo], check=True, capture_output=True)
             g(repo, "add", "-A")
             g(repo, "commit", "-qm", "one")
-            wts = {n: os.path.join(tmp, ".claude", "worktrees", n) for n in ("done", "dirty", "open")}
-            for n, p in wts.items():
-                g(repo, "worktree", "add", "-q", "-b", n, p)
-                write(os.path.join(p, n + ".txt"), n + "\n")
-                g(p, "add", "-A")
-                g(p, "commit", "-qm", n)
-            g(repo, "merge", "-q", "--no-edit", "done", "dirty")
-            write(os.path.join(wts["dirty"], "left.txt"), "left\n")
-            gone, kept = relay.merged_worktrees(relay.repo_of(repo))
-            self.assertEqual([(b, base) for _, b, base in gone], [("done", "main")])
-            why = {os.path.basename(p.rstrip("/\\")): w for p, w in kept}
-            self.assertEqual(why, {"dirty": "uncommitted or untracked files", "open": "open is not merged"})
-            home = os.path.join(tmp, "home")
-            os.makedirs(relay._dir(home, "local_top"))
-            relay._write_json(os.path.join(relay._dir(home, "local_top"), "session.json"), {"sessionId": "local_top"})
-            text = relay.worktrees_text(home, "local_top", relay.repo_of(repo))
-            self.assertIn("git branch -d done", text)
-            self.assertIn("Kept:", text)
-            self.assertEqual(relay.worktrees_text(home, "local_top", relay.repo_of(repo)), "", "said once per set")
-
-    def test_a_worktree_is_kept_for_a_stash_unpushed_commits_no_branch_or_pull_requests_gh_could_not_read(self):
-        """At an orchestrator's step boundary, with no gh on PATH and with a gh that fails, a merged worktree
-        whose branch has an upstream is kept as one whose pull requests could not be read, never named for removal
-        as one with none. One with a stash, one with commits its upstream lacks and a detached checkout are kept with
-        theirs, and a merged one that holds nothing else is named."""
-        git = shutil.which("git")
-        if not git:
-            self.skipTest("no git")
-        with tempfile.TemporaryDirectory() as tmp:
-            repo, origin = os.path.join(tmp, "repo"), os.path.join(tmp, "origin.git").replace("\\", "/")
-            g = lambda cwd, *a: subprocess.run(["git", "-C", cwd, "-c", "user.name=t", "-c", "user.email=t@t", *a],
-                                               check=True, capture_output=True, text=True)
-            write(os.path.join(repo, "a.txt"), "a\n")
-            write(os.path.join(repo, "s.txt"), "s\n")
-            subprocess.run(["git", "init", "-q", "-b", "main", repo], check=True, capture_output=True)
-            subprocess.run(["git", "init", "-q", "--bare", origin], check=True, capture_output=True)
-            g(repo, "add", "-A")
-            g(repo, "commit", "-qm", "one")
-            g(repo, "remote", "add", "origin", origin)
-            wts = {n: os.path.join(tmp, ".claude", "worktrees", n) for n in ("done", "pr", "stashed", "ahead", "loose")}
-            for n in ("done", "pr", "stashed", "ahead"):     # each branch starts at main's commit, so it is merged
-                g(repo, "worktree", "add", "-q", "-b", n, wts[n])
-            g(repo, "worktree", "add", "-q", "--detach", wts["loose"])
-            g(repo, "push", "-q", "-u", "origin", "pr", "ahead")
-            write(os.path.join(wts["ahead"], "a.txt"), "a, then more\n")
-            g(wts["ahead"], "commit", "-qam", "more")
-            g(repo, "merge", "-q", "--ff-only", "ahead")      # merged, and a commit ahead of its upstream
-            write(os.path.join(wts["stashed"], "s.txt"), "s, put aside\n")
-            g(wts["stashed"], "stash", "-q")
-            fails = os.path.join(tmp, "gh-fails")
-            if os.name == "nt":                               # found on PATH, and `gh` cannot start a .cmd
-                write(os.path.join(fails, "gh.cmd"), "@exit /b 1\n")
-            else:
-                write(os.path.join(fails, "gh"), "#!/bin/sh\nexit 1\n")
-                os.chmod(os.path.join(fails, "gh"), 0o755)
-            git_dir = os.path.dirname(git)
-            for label, path in (("no gh", git_dir), ("a gh that fails", os.pathsep.join([fails, git_dir]))):
-                with self.subTest(label):
-                    if label == "no gh" and shutil.which("gh", path=git_dir):
-                        self.skipTest("gh sits beside git, so no PATH holds git without it")
-                    t = Tree(os.path.join(tmp, label.replace(" ", "-")))
-                    t.record(TOP, title="top", cwd=repo)
-                    r = t.hook("plan", TOP, {"hook_event_name": "PostToolUse",
-                                             "tool_name": "mcp__ccd_turn__update_plan",
-                                             "tool_input": {"advance": True}, "tool_response": "Plan updated."},
-                               PATH=path)
-                    self.assertEqual(r.returncode, 0, r.stderr)
-                    line = next((x for x in context(r).split("\n") if "worktrees whose branch is merged" in x), "")
-                    self.assertIn("`git branch -d done`, merged into main", line)
-                    self.assertNotIn("git branch -d pr", line, "pull requests gh could not read are not none")
-                    self.assertIn(" Kept: ", line)
-                    kept = dict(x.split(": ", 1) for x in line.split(" Kept: ", 1)[1].rstrip(".").split("; "))
-                    self.assertEqual({os.path.basename(p.rstrip("/\\")): why for p, why in kept.items()},
-                                     {"pr": "its pull requests could not be read",
-                                      "stashed": "a stash on its branch",
-                                      "ahead": "commits its upstream lacks",
-                                      "loose": "a detached checkout, no branch to judge"})
+            g(repo, "worktree", "add", "-q", "-b", "done", os.path.join(tmp, ".claude", "worktrees", "done"))
+            t = Tree(os.path.join(tmp, "t"))
+            t.record(TOP, title="top", cwd=repo)
+            r = t.hook("plan", TOP, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                                     "tool_input": {"advance": True}, "tool_response": "Plan updated."})
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertNotIn("git worktree remove", r.stdout)
 
 
 class GhWrapper(unittest.TestCase):
-    """relay._open_pr runs the gh it found, so a gh installed as a .cmd wrapper answers as gh.exe would."""
+    """relay.gh runs the gh it found, so a gh installed as a .cmd wrapper answers as gh.exe would."""
 
     @unittest.skipUnless(os.name == "nt", "a .cmd wrapper is a Windows install")
     def test_a_gh_cmd_wrapper_is_run(self):
@@ -1158,13 +1089,13 @@ class GhWrapper(unittest.TestCase):
             for listed, want in (("1", True), ("0", False)):
                 with open(os.path.join(tmp, "gh.cmd"), "w") as f:
                     f.write(f"@echo {listed}\n")
-                self.assertEqual(relay._open_pr(tmp, "topic"), want, listed)
+                r = relay.gh(["pr", "list", "--head", "topic"], cwd=tmp)
+                self.assertEqual(r.stdout.strip() == "1", want, listed)
             # cmd.exe reads a .cmd wrapper's arguments again: a branch named x&... must run no second command
             mark = os.path.join(tmp, "ran.txt")
             for name in ("x&echo.>ran.txt", "x|echo.>ran.txt"):     # no space, so no quotes guard it
-                relay._open_pr(tmp, name)
-                self.assertFalse(os.path.exists(mark), name)
                 r = relay.gh(["pr", "list", "--head", name], cwd=tmp)
+                self.assertFalse(os.path.exists(mark), name)
                 self.assertEqual(r.returncode, 1)
                 self.assertIn("'&'" if "&" in name else "'|'", r.stderr, "the refusal names what cmd.exe would act on")
             # a comment's body, with lines and parentheses, reaches the wrapper whole as a --body-file
@@ -1185,9 +1116,9 @@ class GhWrapper(unittest.TestCase):
 
 
 class GhSetting(unittest.TestCase):
-    """P4_PHI_GH names the gh every p4-phi call runs, the worktree check's as well as the issue loop's."""
+    """P4_PHI_GH names the gh every p4-phi call runs."""
 
-    def test_open_pr_runs_the_gh_p4_phi_gh_names(self):
+    def test_gh_runs_the_gh_p4_phi_gh_names(self):
         tmp = tempfile.mkdtemp(prefix="p4-phi-ghset-")
         stand_in = os.path.join(tmp, "gh_stand_in.py")
         with open(stand_in, "w", encoding="utf-8") as f:
@@ -1196,7 +1127,7 @@ class GhSetting(unittest.TestCase):
         try:
             os.environ["PATH"] = tmp                         # no gh on PATH
             os.environ["P4_PHI_GH"] = stand_in
-            self.assertIs(relay._open_pr(tmp, "topic"), True)
+            self.assertEqual(relay.gh(["pr", "list", "--head", "topic"], cwd=tmp).stdout.strip(), "1")
         finally:
             for k, v in old.items():
                 if v is None:

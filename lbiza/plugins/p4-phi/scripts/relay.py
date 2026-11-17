@@ -28,8 +28,8 @@ plans.py, issues.py, puppeteer.py, controls.py, starts.py, gaps.py and prompty_e
 
 The rest of the module keeps phi/ in the store's git, maps a shared store's remote to this machine's folder, advises
 fork or fresh for a start, cuts a title at a clause, fences off a finished child whose work a newer note supersedes,
-counts a finished child as archived with its outcome kept as a note on its parent, names merged worktrees for
-removal, and offers a done orchestrator's finished sessions to ezexe to archive.
+counts a finished child as archived with its outcome kept as a note on its parent, and offers a done
+orchestrator's finished sessions to ezexe to archive.
 """
 
 import glob
@@ -1870,29 +1870,11 @@ def retire_done(home, parent, sid, now, extra="", archived=False):
     return True
 
 
-# --- merged worktrees named for removal -------------------------------------------------------------------------------
+# --- gh ---------------------------------------------------------------------------------------------------------------
 #
-# A leftover checkout under .claude/worktrees holds disk and misleads the orchestrator. When an orchestrator
-# is told a child is counted as archived, and at its step boundary, the project's worktrees whose branch is already in
-# the branch it came from, and that hold nothing else, are named for removal.
-
-def worktrees(repo):
-    """A repository's linked worktrees, each as its path and branch, the main checkout left out."""
-    r = _git(repo, "worktree", "list", "--porcelain")
-    if not r or r.returncode != 0:
-        return []
-    out, cur = [], {}
-    for line in r.stdout.splitlines() + [""]:
-        if not line.strip():
-            if cur.get("worktree"):
-                out.append((cur["worktree"], cur.get("branch", "")))
-            cur = {}
-        elif line.startswith("worktree "):
-            cur["worktree"] = line[9:].strip()
-        elif line.startswith("branch "):
-            cur["branch"] = line[7:].strip().removeprefix("refs/heads/")
-    return out[1:]
-
+# The app removes a session's worktree itself, at archive or about 30 days after, and `clean_up_worktrees` removes
+# the inactive ones on ezexe's approval, desktop.md, "Keep uncommitted changes when a session is archived", so p4-phi
+# names no worktree for removal. gh is run here for the issue loop.
 
 CMD_META = set('&|<>^%!"()\r\n')         # what cmd.exe reads in a .cmd or .bat file's arguments; no quoting stops it
 
@@ -1935,86 +1917,6 @@ def gh(args, cwd=None, timeout=GIT_S):
                 os.remove(body)
             except OSError:
                 pass
-
-
-def _open_pr(repo, branch):
-    """True when gh lists an open pull request for the branch, False when it lists none, and None when gh is
-    missing, fails, takes longer than GIT_S, or is a gh.cmd wrapper the branch name holds a character cmd.exe acts
-    on for, so whether there is one could not be read."""
-    r = gh(["pr", "list", "--head", branch, "--state", "open", "--json", "number", "-q", "length"], cwd=repo,
-           timeout=GIT_S)
-    if r is None:
-        return None
-    n = r.stdout.strip()
-    return n != "0" if r.returncode == 0 and n.isdigit() else None
-
-
-def merged_worktrees(repo):
-    """A repository's worktrees to remove, each as its path, branch and base, and those kept, each as its path and
-    reason. One is removed when its branch is an ancestor of the main checkout's branch or of the default branch,
-    and it holds no uncommitted, untracked or stashed work, no commit its upstream lacks and no open pull request. A
-    branch with an upstream whose pull requests gh could not read is kept."""
-    if not repo:
-        return [], []
-    head = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
-    bases = [head.stdout.strip()] if head and head.returncode == 0 else []
-    d = _git(repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
-    if d and d.returncode == 0 and d.stdout.strip():
-        bases.append(d.stdout.strip())
-    stashes = _git(repo, "stash", "list")
-    stash_text = stashes.stdout if stashes and stashes.returncode == 0 else ""
-    gone, kept = [], []
-    for path, branch in worktrees(repo):
-        if not branch:
-            kept.append((path, "a detached checkout, no branch to judge"))
-            continue
-        base = next((b for b in bases if b and b != branch and b != "HEAD" and
-                     (_git(repo, "merge-base", "--is-ancestor", branch, b) or subprocess.CompletedProcess([], 1))
-                     .returncode == 0), "")
-        if not base:
-            kept.append((path, f"{branch} is not merged"))
-            continue
-        st = _git(path, "status", "--porcelain")
-        if st is None or st.returncode != 0:
-            kept.append((path, "its status could not be read"))
-            continue
-        if st.stdout.strip():
-            kept.append((path, "uncommitted or untracked files"))
-            continue
-        if re.search(rf"(?m)^stash@\{{\d+\}}: (?:WIP on|On) {re.escape(branch)}:", stash_text):
-            kept.append((path, "a stash on its branch"))
-            continue
-        up = _git(repo, "rev-list", "--count", f"{branch}@{{u}}..{branch}")
-        if up and up.returncode == 0 and up.stdout.strip() not in ("", "0"):
-            kept.append((path, "commits its upstream lacks"))
-            continue
-        pr = _open_pr(repo, branch) if up and up.returncode == 0 else False
-        if pr is not False:
-            kept.append((path, "an open pull request" if pr else "its pull requests could not be read"))
-            continue
-        gone.append((path, branch, base))
-    return gone, kept
-
-
-def worktrees_text(home, sid, repo):
-    """The orchestrator's line naming the merged worktrees to remove and the ones kept with why, said once per
-    set; '' when there is nothing new to say."""
-    gone, kept = merged_worktrees(repo)
-    if not gone:
-        return ""
-    path = os.path.join(_dir(home, sid), "session.json")
-    disk = _read_json(path)
-    told = [x for x in disk.get("worktreesTold") or [] if isinstance(x, str)]
-    keys = [f"{p}|{b}" for p, b, _ in gone]
-    if disk and all(k in told for k in keys):
-        return ""
-    if disk:
-        disk["worktreesTold"] = (told + [k for k in keys if k not in told])[-100:]
-        _write_json(path, disk)
-    rm = "; ".join(f"`git worktree remove \"{p}\"` then `git branch -d {b}`, merged into {b0}" for p, b, b0 in gone)
-    keep = "; ".join(f"{p}: {why}" for p, why in kept)
-    return (f"phi (p4-phi): worktrees whose branch is merged and that hold nothing else, so remove them now: {rm}."
-            + (f" Kept: {keep}." if keep else ""))
 
 
 def stale_text(pend):
