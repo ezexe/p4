@@ -75,8 +75,9 @@ fi
 # A call that worked and printed nothing like an error has nothing to be told, so only its lookup row is written by
 # the `lookup-record-async` entry, which hooks.json marks `async`: the app runs it in the background and the call
 # does not wait for it, ezexe/p4#150. phi.py's records of a clean call stay with the `lookup-record` entry the call
-# waits on: a subagent's call, bound to its record before its next call is checked, and the tools PHI_RECORD of
-# hook.py names, whose plan records and memory checks a later check reads. That entry answers every other call whole.
+# waits on: the tools PHI_RECORD of hook.py names, whose plan records and memory checks a later check reads. A
+# subagent's clean call waits on nothing, since its id is bound at its SubagentStart. That entry answers every other
+# call whole.
 # P4_RECALL_SYNC=1, which the tests set, has `lookup-record` do all of it and the async entry nothing.
 clean=0
 if [ "$name" = lookup-record ] || [ "$name" = lookup-record-async ]; then
@@ -94,7 +95,6 @@ if [ "$name" = lookup-record ] || [ "$name" = lookup-record-async ]; then
   fi
   if [ "$name" = lookup-record ] && [ "$clean" = 1 ]; then
     case "$payload" in
-      *'"agent_id"'*) ;;                          # a subagent's call: bound to its record now
       *'"tool_name":"Write"'*|*'"tool_name": "Write"'*) ;;
       *'"tool_name":"TaskStop"'*|*'"tool_name": "TaskStop"'*|*'"tool_name":"KillShell"'*|*'"tool_name": "KillShell"'*) ;;
       *'"tool_name":"Edit"'*|*'"tool_name": "Edit"'*|*'"tool_name":"MultiEdit"'*|*'"tool_name": "MultiEdit"'*) ;;

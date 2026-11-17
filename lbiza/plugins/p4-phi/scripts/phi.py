@@ -2894,8 +2894,8 @@ def agent_marker(me, agent_id):
 
 
 def h_agent_launch(payload):
-    """PreToolUse on Agent, from the retrieval hook's entry: a pending entry under the step in progress. Returns its
-    slice, for its prompt."""
+    """PreToolUse on Agent, from the retrieval hook's entry: the text for the subagent's start, its step and its
+    slice. It keeps no record of the launch."""
     me = Me(payload)
     if not me.home or not me.id:
         return ""
@@ -2903,14 +2903,51 @@ def h_agent_launch(payload):
     if not s:
         return ""
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
-    text = plans.agent_launch(me.home, s, payload.get("tool_use_id"), inp)
+    text = plans.agent_launch(me.home, s, inp)
     RAN["agent"] = "launch"
     return text
 
 
+def h_agent_start(payload):
+    """SubagentStart, from the retrieval hook's entry: the subagent bound by the `agent_id` the input carries to the
+    launching session's step in progress, and its marker opened under phi/.agents/ for recall-hook.sh's gate. An
+    input with no `agent_type` is no subagent the Agent tool started and is left alone."""
+    agent_id = str(payload.get("agent_id") or "")
+    me = Me(payload)
+    if not agent_id or not payload.get("agent_type") or not me.home or not me.id:
+        return None
+    s = load_session(me.home, me.id)
+    if not s or not plans.agent_bind(me.home, s, agent_id, str(payload.get("agent_type"))):
+        return None
+    try:
+        os.makedirs(os.path.dirname(agent_marker(me, agent_id)), exist_ok=True)
+        with open(agent_marker(me, agent_id), "w", encoding="utf-8") as f:
+            f.write(me.id + "\n")
+    except OSError:
+        pass
+    RAN["agent"] = "bound"
+    return None
+
+
+def agent_transcript(payload):
+    """The path of a subagent's own transcript, from a hook input inside the subagent, '' when the input leads to
+    none. The input's `transcript_path` is the session's, and sub-agents.md puts the subagent's beside it, in
+    "`~/.claude/projects/{project}/{sessionId}/subagents/`. Each transcript is stored as `agent-{agentId}.jsonl`"."""
+    main, agent_id = str(payload.get("transcript_path") or ""), str(payload.get("agent_id") or "")
+    if not main or not agent_id:
+        return ""
+    main, name = os.path.expanduser(main), f"agent-{agent_id}.jsonl"
+    if os.path.basename(main) == name:
+        return main
+    under = [os.path.join(os.path.dirname(main), str(payload.get("session_id") or ""), "subagents", name),
+             os.path.join(os.path.splitext(main)[0], "subagents", name)]
+    return next((x for x in under if os.path.isfile(x)), under[-1])
+
+
 def h_agent_call(payload):
-    """A subagent's tool call, routed from the retrieval hooks: bound to its entry after the call, warned before it.
-    recall-hook.sh lets a subagent's check through only while phi/.agents/ names an open subagent."""
+    """A subagent's tool call, before it runs, routed from the retrieval hook's check: warned of what changed beside
+    the launching session, held against its own transcript for when it started and what it has heard already.
+    recall-hook.sh lets a subagent's check through only while phi/.agents/ names it."""
     agent_id = str(payload.get("agent_id") or "")
     me = Me(payload)
     if not agent_id or not me.home or not me.id:
@@ -2918,23 +2955,9 @@ def h_agent_call(payload):
     s = load_session(me.home, me.id)
     if not s:
         return None
-    if payload.get("hook_event_name") == "PreToolUse":
-        text = plans.agent_warn(me.home, s, agent_id)
-        RAN["agent"] = "warned" if text else "checked"
-        return text or None
-    bound = plans.agent_bind(me.home, s, agent_id)
-    wrote = agent_writes([{"name": payload.get("tool_name"), "input": payload.get("tool_input")}])
-    if wrote and plans.agent_wrote(me.home, me.id, agent_id, wrote):
-        RAN["agent_wrote"] = len(wrote)
-    if bound:
-        try:
-            os.makedirs(os.path.dirname(agent_marker(me, agent_id)), exist_ok=True)
-            with open(agent_marker(me, agent_id), "w", encoding="utf-8") as f:
-                f.write(me.id + "\n")
-        except OSError:
-            pass
-        RAN["agent"] = "bound"
-    return None
+    text = plans.agent_warn(me.home, s, agent_id, agent_transcript(payload))
+    RAN["agent"] = "warned" if text else "checked"
+    return text or None
 
 
 WRITE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
@@ -2963,13 +2986,14 @@ def agent_writes(calls):
 
 
 def h_agent_stop(payload):
-    """SubagentStop, from the retrieval hook's entry: the subagent's entry closed with its last message."""
+    """SubagentStop, from the retrieval hook's entry: the subagent's entry closed, and the files its own transcript
+    shows it wrote kept on it for the ledger. The input names that transcript as `agent_transcript_path`."""
     agent_id = str(payload.get("agent_id") or "")
     me = Me(payload)
     if not agent_id or not me.home or not me.id:
         return None
     s = load_session(me.home, me.id)
-    if s and plans.agent_stop(me.home, s, agent_id, payload.get("last_assistant_message") or ""):
+    if s and plans.agent_stop(me.home, s, agent_id):
         RAN["agent"] = "stopped"
     wrote = agent_writes(transcript_calls(payload.get("agent_transcript_path") or ""))
     if s and wrote and plans.agent_wrote(me.home, me.id, agent_id, wrote):
@@ -3000,8 +3024,8 @@ ROUTED["puppeteer-tool"] = ("PreToolUse", h_puppeteer_tool)
 ROUTED["wrap-up"] = ("PostToolUse", h_wrap_up)
 HOOKS["go-guard"] = ROUTED["go-guard"] = ("PreToolUse", h_go_guard)
 HOOKS["restart-check"] = ROUTED["restart-check"] = ("PreToolUse", h_restart_check)
-ROUTED.update({"agent-launch": ("PreToolUse", h_agent_launch), "agent-pre": ("PreToolUse", h_agent_call),
-               "agent-post": ("PostToolUse", h_agent_call), "agent-stop": ("SubagentStop", h_agent_stop)})
+ROUTED.update({"agent-launch": ("PreToolUse", h_agent_launch), "agent-start": ("SubagentStart", h_agent_start),
+               "agent-pre": ("PreToolUse", h_agent_call), "agent-stop": ("SubagentStop", h_agent_stop)})
 
 
 def hook_main(name):

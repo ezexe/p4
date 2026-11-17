@@ -223,12 +223,12 @@ def gate(payload, project):
     working folder."""
     phi = os.path.join(project, ".claude", "p4", "phi")
     sub = nudge = False
-    if b'"agent_id"' in payload:
-        a = os.path.join(phi, ".agents")
+    if b'"agent_id"' in payload:                    # a subagent's call: only its own marker, left at its start
         try:
-            sub = os.path.isdir(a) and bool(os.listdir(a))
+            own = [os.fsencode(n) for n in os.listdir(os.path.join(phi, ".agents")) if not n.startswith(".")]
         except OSError:
-            sub = False
+            own = []
+        sub = any(b'"agent_id":"' + n + b'"' in payload or b'"agent_id": "' + n + b'"' in payload for n in own)
     for folder in (".nudge", ".puppeteers"):        # a session owing a nudge, and a puppeteer
         try:
             marks = sorted(n for n in os.listdir(os.path.join(phi, folder)) if not n.startswith("."))

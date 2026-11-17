@@ -168,8 +168,8 @@ def summary(home, sid):
         return {}
     return {"root": p.get("root", ""), "current": p.get("current", ""), "version": p.get("version", 0),
             "steps": [{"addr": x["addr"], "content": x.get("content", "")[:200], "status": x.get("status", ""),
-                       "tasks": [{"id": t.get("id"), "tool": t.get("tool", ""), "what": t.get("what", "")[:120],
-                                  "status": t.get("status"), "heads": t.get("heads") or []} for t in x.get("tasks") or []
+                       "tasks": [{"id": t.get("id"), "tool": t.get("tool", ""), "status": t.get("status"),
+                                  "heads": t.get("heads") or []} for t in x.get("tasks") or []
                                  if t.get("status") == "open"]}
                       for x in p["steps"]]}
 
@@ -838,80 +838,128 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
 
 # --- subagents as tasks of the step that launched them -------------------------------------------------------------
 #
-# A subagent's hook input carries the launching session's `session_id` and its own `agent_id`, as the hooks reference
-# documents for every hook inside a subagent. At the Agent call it is a pending task under the step in progress,
-# given that step's slice in its prompt; its first tool call binds its id to the task; each later call is warned of
-# what changed beside the launching session since; its stop attaches its result. As a task of the step, the anchor
-# carries it to the parent like any background task.
-
-PENDING_S = 3600              # a launch no tool call bound within this long is dropped
+# The hook inputs carry the subagent's id, so its task is bound by that id and nothing is guessed. hooks.md,
+# "SubagentStart input": "SubagentStart hooks receive `agent_id` with the unique identifier for the subagent and
+# `agent_type` with the agent name that the matcher filters on", beside the launching session's `session_id`. So at
+# its start the subagent is a task of the step in progress then, with the version the parent's anchor has then. Each
+# tool call of the subagent carries the same `agent_id` and is warned of what changed beside the launching session
+# since, and its SubagentStop, which carries it too, closes the task. As a task of the step, the anchor carries it
+# to the parent. The Agent call itself makes no record here: agent_launch only writes the text for the subagent's
+# start, which hook.py hands over by the one order rule it keeps.
+#
+# The task holds what no record of Claude Code's holds: the step the subagent serves, with its words at the launch,
+# and the version the parent's anchor had then. Claude Code keeps the rest, so the task holds no copy of it:
+#   description  `tool_input.description` of the Agent call, and `description` of the subagent's entry in the Stop
+#                input's `background_tasks`, which turn_relay reads from the list keep_in_flight kept
+#   start        the first row of the subagent's own transcript, `subagents/agent-<agent_id>.jsonl`
+#   result       `last_assistant_message` of the SubagentStop input, and that transcript's last message
+#   files        the Edit, Write, MultiEdit and NotebookEdit calls of that transcript, which the SubagentStop input
+#                names as `agent_transcript_path`
+# Two things stay beside them. `status` says whether the SubagentStop has come: summary reads it when an anchor is
+# made, with no hook input and no transcript at hand. `wrote` is the files a stopped subagent's transcript shows it
+# wrote, read once at its stop: the ledger reads it with no transcript path at hand.
 
 
 def _agent(p, agent_id):
     return next((t for _, t in _tasks(p) if t.get("id") == agent_id), None)
 
 
-def agent_launch(home, s, tool_use_id, inp):
-    """The Agent call, before it runs: a pending task under the step in progress -> the text for its prompt."""
-    import time as _t
-    sid = s["sessionId"]
-    p = load(home, sid)
+def agent_launch(home, s, inp):
+    """The Agent call, before it runs -> the text for the subagent's start: the step in progress it is launched for
+    and what the parent's anchor holds for its paths; '' with no step in progress. It writes nothing."""
+    p = load(home, s["sessionId"])
     st = step_of(p, p.get("current") or "") if p.get("steps") else None
-    parent = relay._parent(s)
-    seen = int(relay._read_json(relay.anchor_path(home, parent)).get("version") or 0)
-    prompt = str(inp.get("prompt") or "")
-    pend = {k: v for k, v in (p.get("agentsPending") or {}).items()
-            if _t.time() - int(v.get("epoch") or 0) < PENDING_S}
-    pend[str(tool_use_id or len(pend))] = {"step": (st or {}).get("addr", ""), "stepText": (st or {}).get("content", ""),
-                                           "anchorSeen": seen, "epoch": int(_t.time()),
-                                           "what": relay._short(inp.get("description") or prompt, 200)}
-    p["agentsPending"] = pend
-    relay._write_json(_path(home, sid), p)
     if not st:
         return ""
+    parent = relay._parent(s)
     head = (f"phi (p4-phi): you are a subagent of \"{relay._title(s)}\", launched for its step {st['addr']}, "
             f"\"{relay._short(st.get('content'), 200)}\". Keep to that step; what you find goes back in your result.")
-    piece = relay.slice_text(home, {"sessionId": "agent", "spawnedFrom": {"sessionId": parent}, "task": prompt,
-                                    "cwd": s.get("cwd") or ""}) if parent else ""
+    piece = relay.slice_text(home, {"sessionId": "agent", "spawnedFrom": {"sessionId": parent},
+                                    "task": str(inp.get("prompt") or ""), "cwd": s.get("cwd") or ""}) if parent else ""
     return "\n".join(x for x in (head, piece) if x)
 
 
-def agent_bind(home, s, agent_id):
-    """A subagent's tool call: its id bound to the oldest pending launch -> True when newly bound."""
-    import time as _t
+def agent_bind(home, s, agent_id, kind=""):
+    """The subagent's start: the `agent_id` its SubagentStart input carries, made a task of the step in progress,
+    with the version the parent's anchor has -> True when the task is made. `kind` is the input's `agent_type`,
+    which the line for the parent names. An id that has its task already, as at a resume, makes none."""
     sid = s["sessionId"]
     p = load(home, sid)
     if not agent_id or _agent(p, agent_id):
         return False
-    pend = p.get("agentsPending") or {}
-    key = min(pend, key=lambda k: int(pend[k].get("epoch") or 0)) if pend else None
-    got = pend.pop(key) if key else {"step": p.get("current") or "", "anchorSeen": 0, "what": "a subagent"}
-    if not pend:
-        p.pop("agentsPending", None)
-    epoch = int(got.get("epoch") or _t.time())
-    task = {"id": agent_id, "tool": "Agent", "agent": True, "what": got.get("what", ""), "status": "open",
-            "anchorSeen": int(got.get("anchorSeen") or 0), "stepText": got.get("stepText", ""), "heads": [],
-            "paths": [], "epoch": epoch, "at": _t.strftime("%Y-%m-%d %H:%M", _t.localtime(epoch))}
-    st = step_of(p, got.get("step") or "")
+    p.pop("agentsPending", None)                  # the launches an earlier copy kept until a tool call took one
+    parent = relay._parent(s)
+    st = step_of(p, p.get("current") or "") if p.get("steps") else None
+    task = {"id": agent_id, "tool": "Agent", "agent": True, "status": "open",
+            "anchorSeen": int(relay._read_json(relay.anchor_path(home, parent)).get("version") or 0),
+            "stepText": (st or {}).get("content", "")}
     if st is None:
         p.setdefault("loose", []).append(task)
     else:
         st.setdefault("tasks", []).append(task)
-    relay._write_json(_path(home, sid), p)
-    parent = relay._parent(s)                     # the anchors carry it, and the parent is told its id
+    relay._write_json(_path(home, sid), p)        # the anchors carry it, and the parent is told its id
     relay.make_anchor(home, parent, _now())
     relay.make_anchor(home, sid, _now())
     if parent:
         where = f"its step {st['addr']}" if st else "no step of its task list"
         relay.warn(home, parent, f"agent:{sid}:{agent_id}",
                    f"down: \"{relay._title(s)}\" launched subagent {agent_id} for {where}"
-                   + (f", \"{relay._short(task['what'], 120)}\"" if task.get("what") else "") + ".")
+                   + (f", agent type `{relay._short(kind, 80)}`" if kind else "") + ".")
     return True
 
 
-def agent_warn(home, s, agent_id):
+HEARD_TAIL = 4 * 1024 * 1024  # bytes of a subagent's transcript, from its end, read for what hooks told it
+HEARD_ROWS = 5                # rows from its top looked through for the first one that carries a time
+
+
+def agent_heard(path):
+    """What a subagent's own transcript says of it -> its start, as the minute a note carries, and each line a hook
+    added to its context within the file's last HEARD_TAIL bytes; None when the file cannot be read or dates no row.
+    hooks.md, "Add context for Claude": "Claude Code saves the injected text in the session transcript", and
+    claude-directory.md keeps a subagent's transcript "in the same format as the session transcript": a row of type
+    `attachment` whose attachment has the type `hook_additional_context` and the text under `content`."""
+    import time as _t
+    from datetime import datetime
+    start = None
+    try:
+        with open(path, "rb") as f:
+            for _ in range(HEARD_ROWS):
+                try:
+                    stamp = str(json.loads(f.readline()).get("timestamp")).replace("Z", "+00:00")
+                    start = datetime.fromisoformat(stamp).timestamp()
+                    break
+                except (ValueError, AttributeError, TypeError):
+                    continue
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - HEARD_TAIL))
+            tail = f.read().split(b"\n")[1 if size > HEARD_TAIL else 0:]
+    except OSError:
+        return None
+    if start is None:
+        return None
+    told = set()
+    for raw in tail:
+        if b"hook_additional_context" not in raw:
+            continue
+        try:
+            a = json.loads(raw).get("attachment")
+        except (ValueError, AttributeError):
+            continue
+        if isinstance(a, dict) and a.get("type") == "hook_additional_context":
+            content = a.get("content")
+            for item in content if isinstance(content, list) else [content]:
+                told.update(x.strip() for x in str(item or "").splitlines())
+    return _t.strftime("%Y-%m-%d %H:%M", _t.localtime(start)), told
+
+
+def agent_warn(home, s, agent_id, transcript=""):
     """A subagent's next tool call: what changed beside the launching session since it was launched or last told,
-    and its step revised or gone; '' when nothing did."""
+    and its step revised or gone; '' when nothing did. `transcript` is the subagent's own, which says when it
+    started and what it has heard, so the task keeps neither: a sibling's note is told when it was written after the
+    start, a note carrying its minute and one of the start's own minute counting as there before it, and a line is
+    told when the transcript does not hold it already, so a sibling's files are said once and again when the line
+    names other files. While the transcript cannot be read, what the siblings changed waits."""
     sid = s["sessionId"]
     p = load(home, sid)
     t = _agent(p, agent_id)
@@ -921,28 +969,29 @@ def agent_warn(home, s, agent_id):
     v = int(anchor.get("version") or 0)
     lines = []
     seen = int(t.get("anchorSeen") or 0)
-    given = t.setdefault("marksGiven", [])
-    if v > seen:
+    heard = agent_heard(transcript) if v > seen else None
+    if heard:
+        since, told = heard
         for nid, at in sorted((anchor.get("changedAt") or {}).items()):
             if nid == sid or int(at or 0) <= seen:
                 continue
             n = (anchor.get("nodes") or {}).get(nid) or {}
-            new = [m for m in n.get("marks") or [] if relay.mark_key(nid, m) not in given]
-            given.extend(relay.mark_key(nid, m) for m in new)    # each note told once, however often its session changes
-            marks = [m.get("claim") for m in new][-2:]
             files = [] if n.get("marks") else (n.get("files") or [])[:4]
-            said = "; ".join(relay._short(x, 200) for x in marks) or (
-                "changed " + ", ".join(relay.show(f, s.get("cwd") or "") for f in files) if files else "")
-            if said:
-                lines.append(f"\"{n.get('title') or nid}\": {said}")
+            said = [relay._short(m.get("claim"), 200) for m in n.get("marks") or [] if str(m.get("time") or "") > since]
+            if files:
+                said = ["changed " + ", ".join(relay.show(f, s.get("cwd") or "") for f in files)]
+            said = [f"\"{n.get('title') or nid}\": {x}" for x in said]
+            lines += [x for x in said if f"- {x}" not in told][-2:]     # the two newest it has not heard
     step = next((st for st in p.get("steps") or [] for x in st.get("tasks") or [] if x is t), None)
     if t.get("stepText") and step is None:
         lines.append("the step you were launched for is no longer in the launching session's task list")
     elif step is not None and t.get("stepText") and step.get("content") != t["stepText"]:
         lines.append(f"the step you were launched for now reads \"{relay._short(step.get('content'), 160)}\"")
         t["stepText"] = step.get("content")
-    if v > seen or lines:
-        t["anchorSeen"] = v
+    if heard or lines:
+        if heard:
+            t["anchorSeen"] = v
+        t.pop("marksGiven", None)                 # what an earlier copy kept of the notes it had told
         relay._write_json(_path(home, sid), p)
     if not lines:
         return ""
@@ -951,7 +1000,8 @@ def agent_warn(home, s, agent_id):
 
 
 def agent_wrote(home, sid, agent_id, paths):
-    """A subagent wrote files: its task keeps them, so the ledger names it a level miss -> True when one is new."""
+    """The files a stopped subagent's transcript shows it wrote: its task keeps them, so the ledger names it a level
+    miss -> True when one is new."""
     p = load(home, sid)
     t = _agent(p, agent_id)
     if not t:
@@ -965,15 +1015,16 @@ def agent_wrote(home, sid, agent_id, paths):
     return True
 
 
-def agent_stop(home, s, agent_id, result):
-    """The subagent stopped: its task closed with its result -> True when a task was closed."""
+def agent_stop(home, s, agent_id):
+    """The subagent stopped: its task closed -> True when a task was closed. Its result stays where Claude Code keeps
+    it, in the SubagentStop input's `last_assistant_message` and the subagent's transcript. An id no start bound has
+    no task and gets none here."""
     sid = s["sessionId"]
-    agent_bind(home, s, agent_id)                 # one that made no tool call is bound now
     p = load(home, sid)
     t = _agent(p, agent_id)
     if not t or t.get("status") != "open":
         return False
-    t["status"], t["result"] = "completed", relay._short(str(result or ""), 300)
+    t["status"] = "completed"
     relay._write_json(_path(home, sid), p)
     return True
 
@@ -1102,8 +1153,7 @@ ADDR_RE = re.compile(r"\b(?:step\s+)?(\d+(?:\.\d+)+|(?<=step )\d+)\b", re.I)
 
 
 def open_steps(home, sid):
-    """The steps of a session's task list not yet completed, each as stored, with its background tasks of every
-    status."""
+    """The steps of a session's task list not yet completed, each as stored, with its subagents of every status."""
     p = load(home, sid)
     return [x for x in p.get("steps") or [] if x.get("status") != "completed"]
 
@@ -1120,15 +1170,17 @@ def prose(text, home=""):
     return "\n".join(ln for ln in text.splitlines() if not DRAWN.search(ln) and not rule_bullet(ln, names))
 
 
-def matches(text, steps, shard, base, loose=True, bear=None, home=""):
+def matches(text, steps, shard, base, loose=True, bear=None, home="", flying=()):
     """Each step that `text` bears on, with the sentences of `text` that bear on it: a step is matched by its
     address, by a path among the session's owned paths, or by sharing SHARE content words with a sentence. Code blocks
-    and drawn trees are left out."""
+    and drawn trees are left out. `flying` is the descriptions of the session's subagents still running, as the Stop
+    input lists them: a sentence that bears on one counts for the step in progress, or the first step when none is."""
     text = prose(text, home)
     bear = bear or bears
     names = rule_names(home)
     sents = [x.strip() for x in SENTENCE.split(str(text or "")) if x.strip() and not recites(x, names)]
     named = set(ADDR_RE.findall(str(text or "")))
+    serves = next((st for st in steps if st.get("status") == "in_progress"), steps[0] if steps else None)
     out = []
     for st in steps:
         hit = []
@@ -1136,9 +1188,8 @@ def matches(text, steps, shard, base, loose=True, bear=None, home=""):
             if st["addr"] in set(ADDR_RE.findall(x)) or (loose and bear(x, st.get("content"))) or any(
                     relay.overlap(p, sh) for p in relay.paths_in(x, base) for sh in shard):
                 hit.append(x)
-            for t in st.get("tasks") or []:
-                if loose and t.get("status") == "open" and bear(x, t.get("what")) and x not in hit:
-                    hit.append(x)
+            elif loose and st is serves and any(bear(x, d) for d in flying):
+                hit.append(x)
         if st["addr"] in named and not hit:
             hit = [x for x in sents if st["addr"] in x][:2]
         if hit:
@@ -1189,7 +1240,7 @@ def turn_relay(home, s, row, calls):
         if os_.get("stale"):
             continue
         got = matches(text, open_steps(home, oid), relay.shard_of(os_), os_.get("cwd") or s.get("cwd") or "",
-                      bear=relay_bears if way == "down" else relay_bears_sibling, home=home)
+                      bear=relay_bears if way == "down" else relay_bears_sibling, home=home, flying=flying(os_))
         if not got:
             continue
         lines = [f"{st['addr']} \"{relay._short(st.get('content'), 100)}\": " +
@@ -1341,6 +1392,12 @@ def in_flight(s):
     tasks = s.get("backgroundTasks") if isinstance(s, dict) else None
     return [t for t in tasks or [] if isinstance(t, dict) and t.get("id")
             and str(t.get("status") or "running").lower() == "running"]
+
+
+def flying(s):
+    """The descriptions of a session's subagents its last Stop input listed as still running: hooks.md, "Stop
+    input", gives each `subagent` entry of `background_tasks` its `description`."""
+    return [str(t["description"]) for t in in_flight(s) if t.get("type") == "subagent" and t.get("description")]
 
 
 def _tasks(p):

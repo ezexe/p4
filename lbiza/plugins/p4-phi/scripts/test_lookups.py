@@ -539,8 +539,8 @@ class HooksJson(unittest.TestCase):
             self.assertEqual(ran("lookup-record", "Bash", clean), [], "a clean shell call: p4-phi keeps no record")
             self.assertEqual(ran("lookup-record", "Write", clean), ["lookup-phi"], "phi's memory-gap check waits")
             self.assertEqual(ran("lookup-record", "TaskStop", clean), ["lookup-phi"], "a stop ends a saved entry")
-            self.assertEqual(ran("lookup-record", "Read", dict(clean, agent_id="a1")), ["lookup-phi"],
-                             "a subagent's binding waits")
+            self.assertEqual(ran("lookup-record", "Read", dict(clean, agent_id="a1")), [],
+                             "a subagent's clean read: nothing waits, since its id is bound at its SubagentStart")
             self.assertEqual(ran("lookup-record-async", "Bash", clean), ["lookup-row"], "the row alone, behind")
             failed = {"hook_event_name": "PostToolUseFailure", "error": "Exit code 1"}
             self.assertEqual(ran("lookup-record", "Bash", failed), ["lookup-record"], "a failure is answered whole")
