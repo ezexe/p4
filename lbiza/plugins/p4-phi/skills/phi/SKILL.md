@@ -15,7 +15,7 @@ p4-phi keeps each session's files in `<project>/.claude/p4/phi/sessions/<session
 - Beside its first message, when the sessions linked to it left any: its start background, whose first and last lines say what it holds and how to keep a finding or say the task is done.
 - Beside its next message: the reports of the workers or coworkers it started that finished a turn since.
 - In a subagent it starts: the step the subagent serves and retrieval's lines, appended to the Agent call's prompt, and before a tool call of the subagent a warning of what changed beside its parent session since its launch, when anything did.
-- At the moment each applies: ezexe's standing instruction for a message about something else, in full at the first message and kept on the session's `standing.md`; the advice on where each work step of an orchestrator's task list goes; a writing child's issue line, which says its loop; the push line, which goes only to the tree's orchestrator, the one session that lands and pushes, a worker's `Closes #N` commit included; the refusal of a start whose brief declares no write set; and the line `done` prints, which says what follows.
+- At the moment each applies: the advice on where each work step of an orchestrator's task list goes; a writing child's issue line, which says its loop; the push line, which goes only to the tree's orchestrator, the one session that lands and pushes, a worker's `Closes #N` commit included; the refusal of a start whose brief declares no write set; and the line `done` prints, which says what follows.
 
 A feedback memory whose rule an open issue will build into the plugin is tied to that issue by one line in the memory's own front matter, `issue: owner/name#N`.
 Once a commit that closes that issue is on the remote default branch, the next Stop whose turn ran a push, pull, fetch or merge cuts the memory back to one pointer line naming the issue and the code that carries its rule, and rewrites the memory's own line in the memory index to match.
@@ -62,7 +62,7 @@ A path on a brief's `Files:` line that is an ancestor of another listed path, or
 
 ## The address book
 
-Beside the standing instruction, and beside each later message where an entry changed, a session is handed its address book: the live sessions of its project's trees and of the trees its puppeteer controls, each by full title and id with its role, its parent, the files its `Files:` line holds, its owned paths, its open issue and its workers or coworkers.
+Beside its first message, after a compaction or a clear, and beside each later message where an entry changed, a session is handed its address book: the live sessions of its project's trees and of the trees its puppeteer controls, each by full title and id with its role, its parent, the files its `Files:` line holds, its owned paths, its open issue and its workers or coworkers.
 It names the puppeteer as the one address for a decision of ezexe's authority, a press the app requires or an outcome ezexe should hear, and the session's parent as the address for work off its task.
 The book is whole on `book.md` in the session's folder, and a later line names only the entries that changed since the session last looked.
 A message about a file, an issue or a piece of work goes straight to the session that holds that file, owns that issue or started that work.

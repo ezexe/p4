@@ -55,7 +55,7 @@ class Supervisor(unittest.TestCase):
                 "groups": [{"id": "cg-1", "name": section, "mode": "code"}],
                 "assignments": {"code:" + s: "cg-1" for s in sids}}}}}}))
 
-    def tree(self, standing="1"):
+    def tree(self, handed="1"):
         """The puppeteer over TOP, KID holding src/flush.py, and KID2's first message, whose context is returned."""
         t = self.t
         t.say(TOP, "Build the narwhal exporter")
@@ -63,7 +63,7 @@ class Supervisor(unittest.TestCase):
         self.assertEqual(t.cli(PUP, "controls", TOP).returncode, 0)
         t.say(KID, "Task:\nBuild the flush's batching.\nFiles: src/flush.py")
         return context(t.say(KID2, "Task:\nCheck the flush's retry and report.\nFiles: none",
-                             P4_PHI_NEW_TASK=standing))
+                             P4_PHI_BOOK=handed))
 
     def pre(self, host, tool, inp):
         """One PreToolUse call through `recall-hook.sh lookup-check`, as hooks.json runs it: the reason or the
@@ -105,7 +105,7 @@ class Supervisor(unittest.TestCase):
         s = t.session(KID)
         s["issue"] = {"repo": "ezexe/p4", "number": 245, "url": "https://github.com/ezexe/p4/issues/245"}
         relay._write_json(os.path.join(t.dir(KID), "session.json"), s)
-        t.say(KID2, "and now?", P4_PHI_NEW_TASK="1")
+        t.say(KID2, "and now?", P4_PHI_BOOK="1")
         page = read(book.page_path(t.p4, KID2))
         self.assertIn(f"\"the flush child\" `{KID}`, worker under `{TOP}`: files src/flush.py; issue ezexe/p4#245",
                       page)
@@ -117,11 +117,11 @@ class Supervisor(unittest.TestCase):
     def test_a_later_message_is_handed_only_the_entries_that_changed_and_the_page(self):
         t = self.t
         self.tree()
-        again = context(t.say(KID2, "carry on", P4_PHI_NEW_TASK="1"))
+        again = context(t.say(KID2, "carry on", P4_PHI_BOOK="1"))
         self.assertNotIn("address book", again, "nothing changed: nothing said")
         t.record(KID3, started_by=TOP, title="the writer child")
         t.say(KID3, "Task:\nBuild the writer.\nFiles: src/writer.py")
-        changed = context(t.say(KID2, "and now?", P4_PHI_NEW_TASK="1"))
+        changed = context(t.say(KID2, "and now?", P4_PHI_BOOK="1"))
         self.assertIn(f"the address book on {book.page_path(t.p4, KID2)} changed", changed)
         self.assertIn(f"`{KID3}`", changed)
         self.assertIn("writer.py", changed)
@@ -137,7 +137,7 @@ class Supervisor(unittest.TestCase):
         d = json.loads(read(rec))
         d["isArchived"] = True
         write(rec, json.dumps(d))
-        changed = context(t.say(KID2, "and now?", P4_PHI_NEW_TASK="1"))
+        changed = context(t.say(KID2, "and now?", P4_PHI_BOOK="1"))
         self.assertIn(f"no longer live: `{KID}`", changed)
         self.assertEqual(self.pre(KID2, SEND, {"to": TOP3, "message": FINDING}), ("", ""),
                          "an archived session holds nothing")
@@ -162,7 +162,7 @@ class Supervisor(unittest.TestCase):
         d.pop("title", None)
         write(os.path.join(t.app, KID3 + ".json"), json.dumps(d))
         t.say(KID3, "Task:\nPort the secret writer of the narwhal exporter.\nFiles: src/writer.py")
-        t.say(KID2, "and now?", P4_PHI_NEW_TASK="1")
+        t.say(KID2, "and now?", P4_PHI_BOOK="1")
         page = read(book.page_path(t.p4, KID2))
         self.assertIn(f"\"{KID3}\" `{KID3}`", page)
         self.assertNotIn("secret writer", page)
@@ -187,7 +187,7 @@ class Supervisor(unittest.TestCase):
         t.say(KID4, "Task:\nBuild the quote parser.\nFiles: src/parse.py", proj=other)
         self.tree()
         self.assertEqual(t.cli(PUP, "controls", TOP, TOP2).returncode, 0)
-        t.say(KID2, "and now?", P4_PHI_NEW_TASK="1")
+        t.say(KID2, "and now?", P4_PHI_BOOK="1")
         page = read(book.page_path(t.p4, KID2))
         self.assertIn(f"\"the parser child\" `{KID4}`, worker under `{TOP2}`: files src/parse.py", page)
 
@@ -303,9 +303,9 @@ class Supervisor(unittest.TestCase):
         self.tree()
         for source in ("compact", "clear"):          # a start after which the standing instruction is handed again
             r = t.hook("session-start", KID2, {"hook_event_name": "SessionStart", "source": source},
-                       P4_PHI_NEW_TASK="1")
+                       P4_PHI_BOOK="1")
             self.assertEqual(r.returncode, 0, r.stderr)
-        t.say(KID2, "and now?", P4_PHI_NEW_TASK="1")
+        t.say(KID2, "and now?", P4_PHI_BOOK="1")
         rows = read(os.path.join(t.dir(KID2), "log.jsonl"))
         self.assertIn("session-start", rows, "the starts ran and were logged")
         self.assertNotIn("address book", rows)
@@ -316,7 +316,7 @@ class Supervisor(unittest.TestCase):
         self.tree()
         for source in ("clear", "compact"):         # the session remembers none of the entries it was handed
             r = t.hook("session-start", KID2, {"hook_event_name": "SessionStart", "source": source},
-                       P4_PHI_NEW_TASK="1")
+                       P4_PHI_BOOK="1")
             ctx = context(r)
             self.assertIn(f"`{KID}`", ctx, source)
             self.assertIn("flush.py", ctx, source)
@@ -445,7 +445,7 @@ class Supervisor(unittest.TestCase):
         self.assertFalse(book.ezexes("See ezexe/p4#245 and https://github.com/ezexe/p4/issues/245 about the flush"))
         self.assertFalse(book.ezexes("Read E:/work/push/flush.py and src/merge/rows.py about the rows"))
 
-    def test_the_owned_paths_list_and_a_starts_book_line_keep_to_their_caps(self):
+    def test_a_starts_book_line_keeps_to_its_cap(self):
         t = self.t
         self.tree()
         for k in range(12):
@@ -453,9 +453,6 @@ class Supervisor(unittest.TestCase):
             CLI.setdefault(sid, f"4444{k:04d}-0000-4000-8000-000000000000")
             t.record(sid, started_by=TOP, title=f"the capped writer number {k} of the narwhal exporter's batches")
             t.say(sid, f"Task:\nWrite batch {k}.\nFiles: src/batch{k}/rows.py, src/batch{k}/flush.py")
-        listed = relay.shards_line(t.p4, KID2)
-        self.assertLessEqual(len(listed), relay.SHARDS_CHARS + 200)
-        self.assertIn(f"more on {book.page_path(t.p4, KID2)}", listed, "the rest are on the page")
         self.assertLessEqual(len(book.line(t.p4, t.session(KID2))), book.LINE_CHARS + 200)
         again = book.line(t.p4, t.session(KID2), named=True)
         self.assertIn(f"unchanged since it last looked, is whole on {book.page_path(t.p4, KID2)}", again,

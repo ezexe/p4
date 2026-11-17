@@ -15,8 +15,8 @@ The hooks, each in its h_ function:
 - SessionStart gives the rules, as rules_text says, and the start background to a fork, after a compaction or a
   clear, and to a session no app runs.
 - UserPromptSubmit keeps the first request as the task and gives the start background with the first message when
-  the start did not, then the reports of the workers that finished a turn since the last look, the standing
-  instruction and what the sessions beside it changed. A start and a first message pass whole, the lines that ask
+  the start did not, then the reports of the workers that finished a turn since the last look, the address book's
+  changes and what the sessions beside it changed. A start and a first message pass whole, the lines that ask
   the session to act first, past the app's cap to its own file; at a later message what does not fit in PROMPT_CHARS
   is held whole on held.md.
 - Stop keeps the turn and appends it to the parent session's reports, sends the turn back while steps the session
@@ -27,12 +27,12 @@ The hooks, each in its h_ function:
 Commands: note, done, task, shard, files, show, tree, background, detach, reparent, disposable, request, proof and
 controls, with the watcher's commands from puppeteer.py; `--help` gives the arguments of each.
 
-Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `new_task`, `rules`,
+Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `book`, `rules`,
 `background_chars`, `reports_chars`, `prompt_chars` and `wait_s`, and `puppeteer`, which puppeteer.on reads. The `phi`
 section of p4.json: `act_dont_wait`, `levels`, `top_orchestrates`, `file_sets` and `child_levels`, read from the
 session's own store, `home`, which names a shared store for the session tree, and `puppeteer_section` and
-`puppeteer_chars`, which controls.py reads. P4_PHI=0 turns the plugin off, P4_PHI_NEW_TASK=0 the standing instruction
-and P4_PHI_RULES=0 the rules. P4_PHI_WAIT sets how long a first message waits for the app's
+`puppeteer_chars`, which controls.py reads. P4_PHI=0 turns the plugin off, P4_PHI_BOOK=0 the address book beside a
+message and P4_PHI_RULES=0 the rules. P4_PHI_WAIT sets how long a first message waits for the app's
 record, and P4_PHI_APP_SESSIONS the folder of the app's records.
 """
 
@@ -63,7 +63,7 @@ controls.PHI = sys.modules[__name__]
 BACKGROUND = True
 REPORTS = True
 TURNS = True
-NEW_TASK = True
+BOOK = True
 RULES = True
 # hooks.md, "additionalContext": a hook's text past 10,000 characters is written "to a file in the session directory"
 # and Claude is passed "the file path with a preview of up to the first 2,000 characters instead". p4-phi leaves
@@ -78,8 +78,6 @@ REPORTS_CHARS = 6000
 REPORT_CHARS = 4000              # of one report, kept
 FINDINGS_SHOWN = 12              # `Finding:` lines listed under a session's child reports
 TASK_CHARS = 1200
-RULE_TASK = 400                  # of the task, in the standing instruction
-LINE_TASK = 160                  # of the task, in the line beside a message
 TURN_STEPS = 12
 CHAIN_MAX = 8                    # sessions followed upward from a session
 OTHERS = 5
@@ -88,7 +86,7 @@ TAIL_BYTES = 256 * 1024          # of a reports file, for a start background
 TRANSCRIPT_BYTES = 8 * 1024 * 1024
 WAIT_S = 2.0                     # how long a handed-over first message waits for the app's record
 SCAN_RECORDS = 60                # the newest records searched for a CLI session id, when the host id is missing
-SETTINGS = {"background": "BACKGROUND", "reports": "REPORTS", "turns": "TURNS", "new_task": "NEW_TASK",
+SETTINGS = {"background": "BACKGROUND", "reports": "REPORTS", "turns": "TURNS", "book": "BOOK",
             "rules": "RULES", "background_chars": "BACKGROUND_CHARS", "reports_chars": "REPORTS_CHARS", "wait_s": "WAIT_S",
             "prompt_chars": "PROMPT_CHARS"}
 SHELL_TOOLS = ("Bash", "PowerShell")
@@ -223,8 +221,8 @@ def configure(home):
             globals()[name] = d[key]
     if os.environ.get("P4_PHI_RULES") in ("0", "1"):
         globals()["RULES"] = os.environ["P4_PHI_RULES"] == "1"
-    if os.environ.get("P4_PHI_NEW_TASK") in ("0", "1"):
-        globals()["NEW_TASK"] = os.environ["P4_PHI_NEW_TASK"] == "1"
+    if os.environ.get("P4_PHI_BOOK") in ("0", "1"):
+        globals()["BOOK"] = os.environ["P4_PHI_BOOK"] == "1"
 
 
 # --- the app's records: which session started which ----------------------------------------------------------------
@@ -1140,12 +1138,6 @@ def apply_caps(d):
         setattr(mods[mod], name, type(default)(v) if ok else default)
 
 
-TOP_RULE = ("This is the orchestrator of its tree, so it keeps itself free for orchestration: planning, "
-            "messaging between sessions, decisions with ezexe, and landing the work, meaning merge and push. "
-            "Its work steps go to fresh workers, a serial run to one child, each brief saying \"report "
-            "when done\"; the steps that test-and-commit, merge, push or release stay here.")
-
-
 NEW_TOP = re.compile(r"\b(?:this|it) (?:session )?is a new top session\b", re.I)
 NEW_TOP_BRIEF = "This session is a new top session, orchestrating its own topic."
 RESTATE = ("the task restated as your own instruction to the session that receives it: what it is to do and why, "
@@ -1305,33 +1297,11 @@ def split_text(home, s, prompt, cli=""):
     if cli and told.get(cli):                      # said once in full, then a line
         RAN["split"] = "line"
         return ("phi (p4-phi): another session started this turn, so a task of its own in it is shown as a suggested "
-                "task card, and written as a start request only where the card is refused, as said "
-                f"before and kept whole on {standing_path(home, s['sessionId'])}; do the rest here.")
+                "task card, and written as a start request only where the card is refused, as said before; do the "
+                "rest here.")
     if cli:
         told[cli] = now()
-    text = _split_full(home, s)
-    keep_standing(home, s["sessionId"], "A turn another session started", text)
-    return text
-
-
-def standing_path(home, sid):
-    return os.path.join(session_dir(home, sid), "standing.md").replace("\\", "/")
-
-
-def keep_standing(home, sid, name, text):
-    """A standing instruction kept whole on the session's standing.md, so a later prompt or a compaction names the
-    page and does not say it again."""
-    path = standing_path(home, sid)
-    try:
-        with open(path, encoding="utf-8") as f:
-            old = f.read()
-    except (OSError, UnicodeDecodeError):
-        old = ""
-    parts = dict(re.findall(r"(?ms)^## (.+?)\n\n(.*?)(?=^## |\Z)", old))
-    parts[name] = text.strip()
-    write_atomic(path, "# What p4-phi has told this session to do, in full\n\n" + "".join(
-        f"## {k}\n\n{v.strip()}\n\n" for k, v in parts.items()))
-    return path
+    return _split_full(home, s)
 
 
 def _split_full(home, s):
@@ -1348,20 +1318,20 @@ def _split_full(home, s):
             "turn ezexe begins in this session starts it as this session's child. Do the rest here.")
 
 
-FEATURE = re.compile(r"^\W*(?:please\s+|now\s+|also\s+|and\s+|can you\s+|could you\s+)*(?:build|add|make|implement|"
-                     r"create|design|introduce)\b|\bnew feature\b|\bfeature request\b|\bit should\b", re.I)
 FEATURE_STEP = re.compile(r"\bnew feature\b|^\W*(?:build|implement|design|introduce)\b[^.;]*\b(?:feature|loop|"
                           r"lifecycle|mode|command|system|plugin|workflow)\b", re.I)
 
 
-def feature_request(home, s, req):
-    """True when a message asks for something new that is not yet in the session's task list: a feature is a new
-    topic even within a broad task. A message that bears on an open step of the task list is that step's."""
-    text = clean(req)
-    if not text or not FEATURE.search(text):
-        return False
-    steps = plans.open_steps(home, s["sessionId"])
-    return not any(plans.bears(text, st.get("content")) for st in steps)
+def book_text(home, s, store, whole=False):
+    """The address book beside a message, as book.line gives it: whole after a compaction or a clear, since the
+    session remembers none of it, else the entries that changed since it last looked. '' with no task."""
+    if not BOOK or not clean(s.get("task")):
+        return ""
+    import book                                    # the address book: who holds each file, issue and piece of work
+    try:
+        return book.line(home, s, store, whole=whole)
+    except Exception:  # noqa: BLE001  a book it cannot write never costs the message its other lines
+        return ""
 
 
 def feature_steps_text(home, s, plan, owner_turn):
@@ -1381,97 +1351,6 @@ def feature_steps_text(home, s, plan, owner_turn):
     named = "; ".join(f"step {st.get('addr')} \"{cut(clean(st.get('content')), 90)}\"" for st in new)
     return (f"phi (p4-phi): {named} is a new feature, and a feature is a new topic even within this task: it gets a "
             f"new orchestrator of its own, not a child or a step here. {new_top_route(owner_turn)}")
-
-
-def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
-    """The standing instruction for a message about something else: once in full for a CLI session that has a task,
-    then a line with the task beside each of ezexe's messages. After a compaction a session told before gets one
-    line that names standing.md, where the instruction is whole; after a clear it gets the instruction in full again.
-    Either way the address book comes whole, since the session remembers none of it. '' with no task, and beside
-    Claude Code's messages."""
-    task = clean(s.get("task"))
-    if not NEW_TASK or not task:
-        return ""
-    told = s.setdefault("newTaskToldAt", {})
-    if not isinstance(told, dict):
-        told = s["newTaskToldAt"] = {}
-    import book                                    # the address book: who holds each file, issue and piece of work
-
-    def plus(text, named=False, whole=False):
-        try:
-            handed = book.line(home, s, me.store, whole=whole, named=named)
-        except Exception:  # noqa: BLE001  a book it cannot write never costs the message its other lines
-            handed = ""
-        new_task_text.book_line = handed           # kept when the gate's verdict drops the standing line; never
-        # in RAN, whose every key goes into log.jsonl
-        return "\n\n".join(x for x in (text, handed) if x)
-    if brief and told.get(me.cli) and os.path.isfile(standing_path(home, s["sessionId"])):
-        RAN["new_task"] = "page"                   # after a compaction, a line with its page, not in full
-        up = spawned_from(s)
-        where = (f"hand it up to {up} with SendMessage, holding {RESTATE}" if up else
-                 f"start a new orchestrator for it, its brief ending \"{NEW_TOP_BRIEF}\"")
-        return plus(f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" When a message from ezexe is "
-                    f"about something else, {where}, and stay with the task. The standing instruction, handed in full "
-                    f"before the compaction, is whole on {standing_path(home, s['sessionId'])}.", whole=True)
-    if again or not told.get(me.cli):
-        told[me.cli] = now()
-        listed = relay.shards_line(home, s["sessionId"])
-        shards = f"; the owned paths now: {listed}" if listed else ""
-        RAN["new_task"] = "instruction"
-        parent = spawned_from(s)
-        if parent:
-            elsewhere = (f"do not turn this session to it, and start no session for it: hand it up to your parent "
-                         f"session, {parent}, with SendMessage, holding {RESTATE}; tell "
-                         f"ezexe in one line that it went up, and stay with the task. Only an orchestrator starts "
-                         f"a session for a new topic. A message about a path among another session's owned paths is "
-                         f"that session's: send it there with SendMessage instead{shards}. "
-                         f"A quick thing, such as a ")
-        else:
-            elsewhere = (f"do not turn this session to it. A new topic gets a new orchestrator of its own, a "
-                         f"sibling of this one, so this session stays orchestrating its topic. {new_top_route(True)} "
-                         f"Tell ezexe in one line which session has it, and stay with the task. A message about a path "
-                         f"among another session's owned paths is that session's: send it there with SendMessage "
-                         f"instead, and start a new session only for what no owned paths cover{shards}. This "
-                         f"instruction holds in this project, so the session is started, not offered as a suggested "
-                         f"task card. "
-                         + (f"This session's ledger is "
-                            f"{puppeteer.ledger_path(home, s['sessionId'])}. "
-                            if puppeteer.on(home) else "") + "A quick thing, such as a ")
-        full = (f"phi (p4-phi): this session's task: \"{cut(task, RULE_TASK)}\" When a message from ezexe is "
-                f"about something else, " + elsewhere +
-                f"question or a few tool calls, stays here. When ezexe says the task itself has changed: "
-                f"`{commands()} task \"<the new task>\"`. This session's page: {page_path(home, s['sessionId'])}."
-                + (" " + TOP_RULE if not spawned_from(s) and TOP_ORCHESTRATES
-                   and not controls.is_puppeteer(s, me.store) else "")
-                + (" " + caps_text(home, s) if caps_text(home, s) else ""))
-        keep_standing(home, s["sessionId"], "A message about something else", full)
-        # after a clear or a compaction the session remembers no entry: the book whole, cut to its line's caps;
-        # else the changes since it last looked, or the page alone
-        return plus(full, named=True, whole=again)
-    if not user:
-        RAN["new_task"] = "book"                   # the book's changes alone: no standing line in this message
-        return plus("")
-    RAN["new_task"] = "line"
-    parent = spawned_from(s)
-    if req and feature_request(home, s, req):
-        RAN["new_task"] = "feature"
-        if parent:
-            return plus(f"phi (p4-phi): this message asks for something new that is not in this session's task "
-                        f"list, and a feature is a new topic even within a broad task: hand it up to {parent} with "
-                        f"SendMessage, holding {RESTATE}, as a new topic for a new orchestrator, and stay with the "
-                        f"task.")
-        return plus(f"phi (p4-phi): this message asks for something new that is not in this session's task list. A "
-                    f"feature is a new topic even within a broad task like \"{cut(task, LINE_TASK)}\", so it gets a "
-                    f"new orchestrator of its own, a sibling of this one. "
-                    f"{new_top_route(s.get('turnBy', 'user') == 'user')} Tell ezexe in one line which session has "
-                    f"it, and stay with the task.")
-    if parent:
-        return plus(f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" If this message is about "
-                    f"something else, hand it up to {parent} with SendMessage, holding {RESTATE}, and stay with the "
-                    f"task; otherwise carry on.")
-    return plus(f"phi (p4-phi): this session's task is \"{cut(task, LINE_TASK)}\" If this message is about something "
-                f"else, start a new orchestrator for it as the standing instruction says, its brief ending "
-                f"\"{NEW_TOP_BRIEF}\", and stay with the task; otherwise carry on.")
 
 
 def render_page(home, sid):
@@ -2299,19 +2178,15 @@ def h_session_start(payload):
     RAN["start"] = source
     asks(s)
     lost = source in ("compact", "clear")
-    text = rule = book_line = ""
+    text = book_line = ""
     if not (source == "startup" and not spawned_from(s) and not s.get("task")
             and os.environ.get("CLAUDE_CODE_HOST_SESSION_ID")):
         # with a host id and nothing recorded, the app has not yet written this session's parent session, and the
         # first message tells
         text = given(s, me, me.home, own=lost or len(s.get("cliSessionIds") or []) > 1, brief=source == "compact")
-        new_task_text.book_line = ""
-        rule = new_task_text(me.home, s, me, user=False, again=lost, brief=source == "compact") if lost else ""
-        book_line = getattr(new_task_text, "book_line", "") or ""
-        if book_line and rule.endswith(book_line):    # the address book goes last, whole on its page as well
-            rule = rule[:-len(book_line)].rstrip("\n")
-        else:
-            book_line = ""
+        book_line = book_text(me.home, s, me.store, whole=True) if lost else ""
+    if lost:
+        s.pop("splitTold", None)                   # the split advice, said in full again at the next such turn
     pin = pin_of(me.home, s)
     text = "\n\n".join(p for p in (pin, text) if p)
     live_rules(s, me.store, os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or "")   # what it starts with
@@ -2331,9 +2206,9 @@ def h_session_start(payload):
     rules = rules_text(me.store, fork=bool(s.get("forked"))) if source != "resume" else ""
     save_session(me.home, s)
     # past the app's cap of 10,000 characters Claude sees a preview of the first 2,000 and the file's path, so what
-    # asks the session to act comes first: the page to resume from, the notices and the standing instruction, then
-    # the built-in rules and the background, and last the address book, which is whole on its page as well
-    return "\n\n".join(p for p in (first, *notices, rule, rules, text, book_line) if p) or None
+    # asks the session to act comes first: the page to resume from and the notices, then the built-in rules and the
+    # background, and last the address book, which is whole on its page as well
+    return "\n\n".join(p for p in (first, *notices, rules, text, book_line) if p) or None
 
 
 def watch_over(home, s):
@@ -2576,18 +2451,10 @@ def h_user_prompt_submit(payload):
         route = relay.route_text(me.home, s["sessionId"], req, s.get("cwd") or "") if req and not verdict else ""
     except Exception:  # noqa: BLE001
         route = ""
-    RAN.pop("new_task", None)
-    new_task_text.book_line = ""
-    rule = "" if route else new_task_text(me.home, s, me, user=bool(req), req=req)
-    book_line, new_task_text.book_line = getattr(new_task_text, "book_line", ""), ""
-    if verdict and RAN.get("new_task") in ("line", "feature"):
-        rule = book_line                           # the gate's verdict says where the message goes; the book stays
+    book_line = "" if route else book_text(me.home, s, me.store)
     parts.append(pup)
-    # a standing line in this message stands in for a cross-session turn's split advice, which comes at the next
-    # such turn; the address book's changes alone never do
-    split = split_text(me.home, s, payload.get("prompt"), me.cli) \
-        if not route and RAN.get("new_task") in (None, "book") else ""
-    last = route or "\n\n".join(x for x in (rule, split) if x)
+    split = split_text(me.home, s, payload.get("prompt"), me.cli) if not route else ""
+    last = route or "\n\n".join(x for x in (book_line, split) if x)
     save_session(me.home, s)
     # the rebase check, on every message: what the sessions beside this one changed, and the warnings, first
     used = sum(len(p) + 2 for p in parts + [last] if p)
@@ -3685,7 +3552,6 @@ def main(argv=None):
             if s.get("task"):
                 s.setdefault("earlierTasks", []).append({"task": s["task"], "until": now()})
             s["task"], s["taskAt"] = task, now()
-            s.pop("newTaskToldAt", None)
             save_session(me.home, s)
             render_page(me.home, s["sessionId"])
             print("this session's task is changed; the task before it is kept in session.json")

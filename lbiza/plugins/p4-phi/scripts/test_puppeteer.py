@@ -287,7 +287,7 @@ class Linear(Base):
     def test_no_line_handed_to_a_session_tells_it_to_quote_a_prompt(self):
         """Every road that tells a session to pass work on asks for the task restated as its own instruction."""
         t = self.t
-        said = [context(t.say(host, words, P4_PHI_NEW_TASK="1")) for host, words in (
+        said = [context(t.say(host, words, P4_PHI_BOOK="1")) for host, words in (
             (TOP, TASK), (TOP, "also, what colour should the fence be?"),
             (KID, handed("Port the flush to the new writer. Archive when done.")), (KID, "and what about the fence?"),
             (KID, "Add a dark mode toggle to the billing dashboard's settings page"))]
@@ -295,9 +295,6 @@ class Linear(Base):
                           r"ezexe's words:", re.I)
         for text in said:
             self.assertIsNone(asks.search(text), text)
-        self.assertIn(phi.RESTATE, said[0], "an orchestrator's new topic")
-        self.assertIn(phi.RESTATE, said[2], "a worker's new topic, handed up")
-        self.assertIn(phi.RESTATE, said[3])
         import ast
         for name in ("phi.py", "controls.py", "puppeteer.py", "issues.py"):
             tree = ast.parse(read(os.path.join(HERE, name)))

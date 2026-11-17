@@ -24,7 +24,7 @@ plans.py, issues.py, puppeteer.py, controls.py, starts.py, gaps.py and prompty_e
           uncommitted files inside another session's owned paths: stop that work and message that session. Nothing
           when nothing changed; a warning is given once.
   route   a message that names a path inside another session's owned paths belongs to that session: the session is
-          told to send it there with SendMessage. phi.new_task_text says where a message no owned path covers goes.
+          told to send it there with SendMessage.
 
 The rest of the module keeps phi/ in the store's git, maps a shared store's remote to this machine's folder, advises
 fork or fresh for a start, cuts a title at a clause, fences off a finished child whose work a newer note supersedes,
@@ -997,32 +997,6 @@ def route_text(home, sid, text, base):
             f"with SendMessage to {oid} instead of working on it here.")
 
 
-def shards_line(home, sid):
-    """The other live sessions' owned paths and the files their briefs declared and still hold, in a few words, for
-    the standing instruction, at most SHARDS_CHARS, with the count of the sessions left out and the address book's
-    page, which lists every session whole; '' when none holds any."""
-    import book
-    every = _sessions(home)
-    out = []
-    for oid, s in sorted(every.items()):
-        if oid == sid or gone(home, s):
-            continue
-        held = shard_of(s) + [f for f in book.held_files(home, s) if f not in shard_of(s)]
-        if held:
-            out.append(f"\"{book.title(oid, s)}\" `{oid}`: {', '.join(held[:3])}")
-    shown, used = [], 0
-    for x in out:
-        if used + len(x) + 2 > SHARDS_CHARS and shown:
-            break
-        shown.append(x)
-        used += len(x) + 2
-    left = len(out) - len(shown)
-    return "; ".join(shown) + (f"; and {left} more on {book.page_path(home, sid)}" if left else "")
-
-
-SHARDS_CHARS = 600               # of the owned-paths list in the standing instruction; the address book holds the rest
-
-
 # --- fork or fresh -----------------------------------------------------------------------------------------------------
 #
 # On this machine's app records, 84 children with a parent transcript on disk: the parent's transcript held a median
@@ -1166,7 +1140,8 @@ IGNORED = ("phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/session
            # the watcher's pages are made again from the records; routes.jsonl is kept
            "phi/sessions/*/ledger.md", "phi/sessions/*/ledger.json", "phi/sessions/*/ledger.sig",
            "phi/sessions/*/watcher.json", "phi/meta-ledger.md", "phi/.issue-states.json", "phi/.routes-checked",
-           # what did not fit beside a prompt, and the standing instructions in full: pages of this machine
+           # what did not fit beside a prompt, and the standing instructions an earlier p4-phi wrote: pages of this
+           # machine
            "phi/sessions/*/held.md", "phi/sessions/*/standing.md",
            # the sessions waiting to be archived, made again from the records
            "phi/ready-to-archive.md",

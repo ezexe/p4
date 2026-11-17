@@ -787,16 +787,15 @@ class ThreeSessions(unittest.TestCase):
                          "a parent's owned paths cover its children's: the parent is not routed down")
 
     def test_an_archived_session_owns_no_paths_and_is_not_listed(self):
-        """An archived session owns no paths a message is routed by, and is left out of the owned-paths line."""
+        """An archived session owns no paths a message is routed by."""
         t = self.t
         t.cli(A, "shard", self.x("lib"))
-        self.assertIn(A, relay.shards_line(t.p4, B))
+        self.assertEqual(relay.owners(t.p4, B, f"please fix {self.x('lib', 'y.py')}", t.proj)[0][0], A)
         rec = os.path.join(t.app, A + ".json")
         d = json.loads(open(rec, encoding="utf-8").read())
         d["isArchived"] = True
         write(rec, json.dumps(d))
         self.assertEqual(relay.owners(t.p4, B, f"please fix {self.x('lib', 'y.py')}", t.proj), [])
-        self.assertNotIn(A, relay.shards_line(t.p4, B))
         self.assertNotIn("Send it there", context(t.say(B, f"please fix {self.x('lib', 'y.py')} too")))
 
     def test_the_project_root_the_store_and_a_drive_name_no_owned_paths(self):

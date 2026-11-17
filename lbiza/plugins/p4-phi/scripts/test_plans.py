@@ -1114,7 +1114,7 @@ class TopOrchestrates(unittest.TestCase):
         self.assertEqual(self.check(TOP, "Edit", {"file_path": f"{p}/src/export/flush.py"}, "tk1"), "",
                          "no nudge to hand the step to a child")
         self.assertNotIn("keeps itself free for orchestration",
-                         context(self.t.say(TOP, "carry on", P4_PHI_NEW_TASK="1")))
+                         context(self.t.say(TOP, "carry on", P4_PHI_BOOK="1")))
 
     def test_a_serial_pair_of_work_steps_becomes_one_child(self):
         p = self.t.proj

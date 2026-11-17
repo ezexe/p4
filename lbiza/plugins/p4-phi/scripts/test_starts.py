@@ -51,8 +51,7 @@ class StartRequests(unittest.TestCase):
     def test_a_turn_ezexe_did_not_begin_is_told_to_show_a_card_and_a_request_only_if_that_is_refused(self):
         """A turn ezexe did not begin is told to show the child as a card, pressed in this session so the app's parent
         and p4-phi's agree, and to file a request only if the card is refused too."""
-        self.t.say(KID, CROSS, P4_PHI_NEW_TASK="1")       # the standing instruction first, once
-        ctx = context(self.t.say(KID, CROSS, P4_PHI_NEW_TASK="1"))
+        ctx = context(self.t.say(KID, CROSS, P4_PHI_BOOK="1"))
         self.assertIn("`initiation` `own_initiative`, which ezexe presses in this session", ctx)
         self.assertIn("Only where the card is refused too", ctx)
         self.assertIn(" request \"<title>\" --brief", ctx)

@@ -111,7 +111,7 @@ Every key is optional, and the file need not exist.
 
 | Key | Default |
 | :- | :- |
-| `background`, `reports`, `turns`, `new_task`, `rules`, `puppeteer` | `true` |
+| `background`, `reports`, `turns`, `book`, `rules`, `puppeteer` | `true` |
 | `background_chars` | 3000 |
 | `reports_chars` | 6000 |
 | `prompt_chars` | 4000 |
@@ -127,7 +127,7 @@ Each is for one run, a test or one machine's unusual layout.
 | Variable | Unset means | Set |
 | :- | :- | :- |
 | `P4_PHI` | phi.py's hooks run | `0` turns off phi.py's three hook commands and the checks hook.py hands it, while retrieval goes on |
-| `P4_PHI_RULES`, `P4_PHI_NEW_TASK` | as `phi.json` says | `0` or `1` for one run |
+| `P4_PHI_RULES`, `P4_PHI_BOOK` | as `phi.json` says | `0` or `1` for one run |
 | `P4_PHI_PUPPETEER` | as `puppeteer` in `phi.json` says | `0` or `1` for one run |
 | `P4_PHI_WATCH` | an orchestrator's watcher runs | `0` keeps it from starting |
 | `P4_PHI_WATCH_S`, `P4_PHI_WATCH_NET` | a look every 5 seconds, or every 30 once nothing has changed for 10 minutes, with GitHub read | a tick in seconds, `0` for no network |

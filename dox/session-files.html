@@ -77,7 +77,6 @@ footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);font-si
       <div><dt><code>log.jsonl</code></dt><dd><p>One row for each hook call: <code>time</code>, <code>hook</code>, <code>said</code>, the length of the text the hook returned, <code>ms</code>, and what the hook did. A hook of <code>phi.py</code>'s that raised leaves a row with its <code>error</code> instead, while a check routed through the retrieval hooks that raises is passed over without a row.</p></dd></div>
       <div><dt><code>session.md</code></dt><dd><p>The session as one page: its title, files, notes, turns and workers' turns, each turn by its steps and report. It quotes no prompt, since a worker is pointed to its parent session's page and a parent to each worker's. <code>phi/sessions.md</code> is the same page for the orchestrators of the project, with their latest reports, and git ignores it.</p></dd></div>
       <div><dt><code>held.md</code></dt><dd><p>What did not fit beside a later prompt, whole, each piece under a <code>## &lt;time&gt;</code> heading, up to 256 KB, after which the older half goes.</p></dd></div>
-      <div><dt><code>standing.md</code></dt><dd><p>The standing instruction a session was handed in full, one <code>## &lt;name&gt;</code> section each, so that after a compaction one line can name it.</p></dd></div>
       <div><dt><code>plan.json</code></dt><dd><p>The session's task list as the app's <code>update_plan</code> calls leave it, kept below.</p></dd></div>
       <div><dt><code>.calls/</code></dt><dd><p>One empty file per check and tool call, <code>&lt;kind&gt;-&lt;tool_use_id&gt;</code>, so each check runs once for a call; files older than a day are removed. Git ignores the folder.</p></dd></div>
     </dl>
@@ -87,7 +86,7 @@ footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);font-si
     <dl>
       <div><dt>The cap</dt><dd><p>Claude Code shows a hook's added context up to 10,000 characters; past that it saves the text to a file and passes the session the file's path and a preview of its first 2,000. p4-phi cuts nothing of its own at a session's start or at its first message, which hands it its start background: the lines that ask the session to act come first, so they fall inside the app's preview, and the rest follows whole. At every later message the room is 4,000 characters.</p></dd></div>
       <div><dt>What does not fit</dt><dd><p>Beside a later prompt each part that fits is kept whole, and the rest goes whole to <code>held.md</code>, with one line saying how many pieces and characters it holds and naming the first three by their opening words.</p></dd></div>
-      <div><dt>After a compaction</dt><dd><p>A session that was told its standing instruction gets one line instead, <code>phi (p4-phi): this session's task is "…"</code>, ending with the path of <code>standing.md</code>; the rules built into p4-phi come again whole. After a clear the whole instruction comes again.</p></dd></div>
+      <div><dt>After a compaction</dt><dd><p>The rules built into p4-phi come again whole, and the address book comes whole. Where a message about something else goes is said by the app's own <code>hand_off_to_session</code> and <code>start_session</code> tools, so p4-phi hands no instruction of its own for it.</p></dd></div>
     </dl>
   </section>
   <section id="between" aria-labelledby="between-h">
@@ -112,7 +111,7 @@ footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);font-si
     <h2 id="checks-h">Checks and limits</h2>
     <dl>
       <div><dt>Checks before a tool</dt><dd><p>p4-phi's checks ride on the retrieval hooks' entries: a start call passes the start advice, a worktree or a shell command the branch guard, an archive call the archive check, a message to another session the go guard, a shell command also the store guard, the restart check, the delegation check and the nudge, and an edit the nudge. The first check that answers decides, and one that raises is passed over.</p></dd></div>
-      <div><dt>The caps</dt><dd><p>A session three deep in the session tree, or one with eight live sessions of its own, is told to start no more. The caps are advice, said in the standing instruction and the task-list advice, and only the readings of an under-determined message refuse past them.</p></dd></div>
+      <div><dt>The caps</dt><dd><p>A session three deep in the session tree, or one with eight live sessions of its own, is told to start no more. The caps are advice, said in the task-list advice and the split advice, and only the readings of an under-determined message refuse past them.</p></dd></div>
       <div><dt><code>pathfilter.py</code></dt><dd><p>With <code>phi.track</code> on in <code>p4.json</code>, the session tree is committed to the store, and a git clean and smudge filter on <code>phi/**</code> writes this project's root as <code>{project}</code> in the committed files and back on checkout, in its slash, backslash, Git Bash and WSL forms.</p></dd></div>
     </dl>
   </section>

@@ -455,19 +455,12 @@ class Supervisor(unittest.TestCase):
     def test_a_controlled_top_session_asks_its_supervisor_session_and_its_own_start_is_refused(self):
         t = self.t
         t.say(PUP, "Control the two trees")
-        t.say(TOP2, "Build the importer", proj=self.other, P4_PHI_NEW_TASK="1")
+        t.say(TOP2, "Build the importer", proj=self.other, P4_PHI_BOOK="1")
         t.cli(PUP, "controls", TOP2)
         t.stop(TOP2, "Build the importer", report="Started.", proj=self.other)
-        relay._write_json(os.path.join(self.store2, "phi", "sessions", TOP2, "session.json"),
-                          {k: v for k, v in relay._read_json(os.path.join(
-                              self.store2, "phi", "sessions", TOP2, "session.json")).items()
-                           if k != "newTaskToldAt"})
         ctx = context(t.say(TOP2, "Also, what about a new exporter for the moon format?", proj=self.other,
-                            P4_PHI_NEW_TASK="1"))
+                            P4_PHI_BOOK="1"))
         self.assertIn("This session is controlled by a puppeteer", ctx)
-        self.assertIn("--to-puppeteer", ctx)
-        self.assertIn(phi.RESTATE, ctx, "the request's brief restates the task")
-        self.assertNotIn("start_session", ctx, "handed a new-topic line, it is given no start call")
         new_top = BRIEF + "\n" + phi.NEW_TOP_BRIEF
         r = t.hook("start-advice", TOP2, {"hook_event_name": "PreToolUse", "tool_name": START,
                                           "tool_input": {"initiation": "user_asked", "title": "the retry",

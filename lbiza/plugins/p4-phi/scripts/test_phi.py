@@ -12,9 +12,9 @@ its report appended to the parent session's reports and given to that session at
 worker given the tasks and notes of the sessions above it and the last turn of its siblings; an orchestrator
 given the last turns of the orchestrators before it, with no likeness of words involved; a note refused without
 a source; a session detached to top level, and reparented; a session's own turns after a compaction; silence where
-there is nothing to say; the standing instruction for a message about something else, once in full and then in a
-line beside each of ezexe's messages, never beside Claude Code's; a feature request as a new topic; a turn another
-session began shown a suggested task card first and a start request second; the caps on depth and live children;
+there is nothing to say; no standing instruction for a message about something else, which the app's own session
+tools carry; a feature step as a new topic; a turn another session began shown a suggested task card first and a
+start request second; the caps on depth and live children;
 the task changed by its command; the rules built into p4-phi at a session's start, the store's feedback and user
 memories never handed again as rule lines but whole on their page, and a changed line given once; the pieces past
 the prompt's cap held on a page; a hook never failing a call; hooks.json's shape and the words given to a session.
@@ -110,7 +110,7 @@ class Tree:
         env.update({"CLAUDE_PLUGIN_ROOT": ROOT, "CLAUDE_PROJECT_DIR": proj or self.proj,
                     "P4_PHI_APP_SESSIONS": os.path.join(self.tmp, "app"), "P4_PHI_WAIT": "0",
                     "P4_PHI_STORES": os.path.join(self.tmp, "p4-stores.json"),
-                    "P4_PHI_NEW_TASK": "0", "P4_PHI_WATCH": "0",
+                    "P4_PHI_BOOK": "0", "P4_PHI_WATCH": "0",
                     "CLAUDE_CONFIG_DIR": os.path.join(self.tmp, "claude-config"),   # never the machine's own settings
                     **more})
         if host:
@@ -807,36 +807,22 @@ class NewTask(unittest.TestCase):
         self._tmp.cleanup()
 
     def say(self, host, prompt, **more):
-        return context(self.t.say(host, prompt, P4_PHI_NEW_TASK="1", **more))
+        return context(self.t.say(host, prompt, P4_PHI_BOOK="1", **more))
 
-    def test_the_instruction_comes_once_with_the_task_and_then_a_line(self):
-        first = self.say(TOP, TASK)
-        self.assertIn(TASK, first)
-        self.assertIn("this session's task", first)
-        self.assertIn("about something else", first)
-        self.assertIn("start_session", first)
-        self.assertIn("new orchestrator", first)
-        self.assertIn("`context` `fresh`", first)
-        self.assertIn("stay with the task", first)
-        self.assertIn("ezexe", first)
-        second = self.say(TOP, "also, what colour should the fence be?")
-        self.assertIn(TASK, second)
-        self.assertLess(len(second), 400)
-        self.assertNotIn("start_session", second)
-        self.assertNotIn("fence", second)                 # the task is the first request, not the newest words
-        self.assertEqual([r.get("new_task") for r in self.t.log(TOP)], ["instruction", "line"])
+    def test_no_standing_instruction_is_handed_for_a_message_about_something_else(self):
+        """The app's own `hand_off_to_session` and `start_session` with `initiation` `offer` say in their tool
+        descriptions when a message about something else goes to another session, so p4-phi hands no instruction of
+        its own and keeps no standing.md."""
+        for host, words in ((TOP, TASK), (TOP, "also, what colour should the fence be?"), (KID, HANDED),
+                            (KID, "and what about the fence?")):
+            said = self.say(host, words)
+            self.assertNotIn("about something else", said, words)
+            self.assertNotIn("stay with the task", said, words)
+        for host in (TOP, KID):
+            self.assertFalse(os.path.exists(os.path.join(self.t.dir(host), "standing.md")))
 
     def test_a_top_level_sessions_new_topic_is_a_new_top_level_session_detached_to_top_level(self):
-        first = self.say(TOP, TASK)
-        self.assertIn("A new topic gets a new orchestrator of its own", first)
-        self.assertIn("`initiation` `user_asked`", first)
-        self.assertIn("`use_worktree: false`", first)
-        self.assertIn(phi.NEW_TOP_BRIEF, first)
-        self.assertIn("Its first act: `mcp__ccd_session_mgmt__detach_session` with `\"self\"`", first)
-        self.assertIn("phi.py\" detach`", first, "the brief names phi.py's detach too")
-        self.assertIn("call `mcp__ccd_session_mgmt__detach_session` with its id yourself", first,
-                      "the parent session's line names the app's move")
-        self.assertIn("start a new orchestrator", self.say(TOP, "also, the fence colour?"))
+        self.say(TOP, TASK)
         told = self.say(KID, "Task:\nPick the fence colour. ezexe's words: \"the fence colour?\" "
                         + phi.NEW_TOP_BRIEF + " " + phi.new_top_first_act())
         self.assertIn("p4-phi detached it to top level at this first message", told)
@@ -857,24 +843,17 @@ class NewTask(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID2)), "", "phi.py detach with no id: itself")
 
-    def test_a_feature_request_in_a_broadly_tasked_top_is_a_new_topic(self):
-        """A broad task does not swallow every feature."""
+    def test_a_feature_step_in_a_broadly_tasked_top_is_a_new_topic(self):
+        """A broad task does not swallow every feature step of its task list."""
         self.say(TOP, "Sort out the claude dev desktop app files in appdata or temp, and the plugins around them")
-        got = self.say(TOP, "build the issue loop")
-        self.assertIn("asks for something new that is not in this session's task list", got)
-        self.assertIn(phi.NEW_TOP_BRIEF, got)
-        for plain in ("fix this typo", "check that the scratchpad link works"):
-            self.assertNotIn("something new", self.say(TOP, plain), plain)
         r = self.t.hook("plan", TOP, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
                                       "tool_input": {"items": [{"content": "Build the child-session issue loop feature",
                                                                 "status": "pending"},
                                                                {"content": "Move the tmp folders", "status": "pending"}]},
-                                      "tool_response": "Plan updated."}, P4_PHI_NEW_TASK="1")
+                                      "tool_response": "Plan updated."}, P4_PHI_BOOK="1")
         ctx = context(r)
         self.assertIn("step 1 \"Build the child-session issue loop feature\" is a new feature", ctx)
         self.assertNotIn("step 2 \"Move", ctx.split("is a new feature")[0])
-        self.assertNotIn("something new", self.say(TOP, "add the issue loop's tests"),
-                         "a message on an open step of the task list is that step's")
 
     def test_a_detached_top_level_session_is_never_counted_as_archived_on_its_former_parent(self):
         """Counting as archived, the archive lines and parent steps read spawnedFrom.sessionId, never its `from`."""
@@ -914,16 +893,6 @@ class NewTask(unittest.TestCase):
                       "`mcp__ccd_session_mgmt__detach_session` with `\"self\"` before anything else", told)
         self.assertLessEqual(len(told), phi.PROMPT_CHARS)
 
-    def test_a_childs_new_topic_is_handed_up(self):
-        self.say(TOP, TASK)
-        first = self.say(KID, HANDED)
-        self.assertIn(f"hand it up to your parent session, {TOP}, with SendMessage, holding {phi.RESTATE}", first)
-        self.assertIn("start no session for it", first)
-        self.assertNotIn("new orchestrator of its own", first)
-        line = self.say(KID, "and what about the fence?")
-        self.assertIn(f"hand it up to {TOP}", line)
-        self.assertNotIn("forked", line)
-
     def test_the_harness_speaking_gets_no_line(self):
         self.say(TOP, TASK)
         self.assertEqual(self.say(TOP, "<side-sessions-event>a session finished a turn</side-sessions-event>"), "")
@@ -939,10 +908,12 @@ class NewTask(unittest.TestCase):
         self.assertNotIn("any session of this store", text)
         self.assertIn(phi.NEW_TOP_BRIEF, text)
         again = self.say(TOP, '<cross-session-message from="local_x">and Z as well</cross-session-message>')
-        self.assertNotIn(phi.NEW_TOP_BRIEF, again, "said once in full, then a line with its page")
-        self.assertIn("standing.md", again)
+        self.assertNotIn(phi.NEW_TOP_BRIEF, again, "said once in full, then a line")
+        self.assertIn("as said before", again)
         self.assertLess(len(again), 400)
-        self.assertIn(phi.NEW_TOP_BRIEF, read(os.path.join(self.t.dir(TOP), "standing.md")))
+        self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "compact"}, P4_PHI_BOOK="1")
+        whole = self.say(TOP, '<cross-session-message from="local_x">and W</cross-session-message>')
+        self.assertIn(phi.NEW_TOP_BRIEF, whole, "after a compaction it is said in full again")
         self.assertEqual(self.say(TOP, "<side-sessions-event>a session finished</side-sessions-event>"), "")
         self.say(KID, HANDED)
         kid = self.say(KID, '<cross-session-message from="local_x">please also look at Y</cross-session-message>')
@@ -1011,20 +982,15 @@ class NewTask(unittest.TestCase):
 
     def test_a_started_sessions_task_is_its_brief(self):
         self.say(TOP, TASK)
-        text = self.say(KID, HANDED)
-        self.assertIn(BRIEF, text)
-        self.assertIn("hand it up", text)
+        self.say(KID, HANDED)
+        self.assertIn(BRIEF, self.t.session(KID)["task"])
 
-    def test_the_instruction_comes_again_after_a_compaction(self):
+    def test_the_address_book_comes_whole_after_a_compaction(self):
         self.say(TOP, TASK)
-        r = self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "compact"}, P4_PHI_NEW_TASK="1")
+        r = self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "compact"}, P4_PHI_BOOK="1")
         text = context(r)
-        self.assertIn(TASK, text)
-        self.assertIn("start a new orchestrator", text)
-        page = os.path.join(self.t.dir(TOP), "standing.md").replace("\\", "/")
-        self.assertIn(page, text, "after a compaction, a line with its page, not the instruction in full")
-        self.assertNotIn("start_session", text)
-        self.assertIn("start_session", read(page), "the page holds it whole")
+        self.assertIn("this session's address book, whole on", text)
+        self.assertNotIn("about something else", text)
 
     def test_the_task_is_changed_by_its_command(self):
         self.say(TOP, TASK)
@@ -1033,12 +999,11 @@ class NewTask(unittest.TestCase):
         s = self.t.session(TOP)
         self.assertEqual(s["task"], "Make the narwhal importer read the ports table back")
         self.assertEqual(s["earlierTasks"][0]["task"], TASK)        # the task before it is kept
-        self.assertIn("importer", self.say(TOP, "go on"))
         self.assertNotEqual(self.t.cli(TOP, "task", "x").returncode, 0)
 
     def test_off_in_the_stores_settings(self):
-        write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"new_task": False}))
-        env = {k: v for k, v in self.t.env(TOP).items() if k != "P4_PHI_NEW_TASK"}
+        write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"book": False}))
+        env = {k: v for k, v in self.t.env(TOP).items() if k != "P4_PHI_BOOK"}
         for prompt in (TASK, "and the next part"):
             r = inproc.run(["sh", RUN, PROMPT], input=json.dumps({"session_id": CLI[TOP], "cwd": self.t.proj,
                                                                   "prompt": prompt}),
@@ -1215,12 +1180,10 @@ class Rules(unittest.TestCase):
         self.assertLess(first.index("phi (p4-phi): this is this session's first message"),
                         first.index("background for this session"), "the act line leads, inside the app's preview")
         self.assertLessEqual(len(context(t.say(KID, "go on"))), phi.PROMPT_CHARS, "a later prompt keeps its room")
-        start = context(t.hook(START, KID, {"hook_event_name": "SessionStart", "source": "clear"}, P4_PHI_NEW_TASK="1"))
+        start = context(t.hook(START, KID, {"hook_event_name": "SessionStart", "source": "clear"}, P4_PHI_BOOK="1"))
         self.assertGreater(len(start), 9500)
         self.assertIn("Each turn's report is kept either way", start, "the background's last line, whole")
-        act = start.index("When a message from ezexe is about something else")
-        self.assertLess(act, 2000, "inside the app's 2,000-character preview")
-        self.assertLess(act, start.index("act-don't-wait"), "what asks it to act comes before the rules")
+        self.assertLess(start.index("act-don't-wait"), 2000, "the rules inside the app's 2,000-character preview")
         self.assertLess(start.index("act-don't-wait"), start.index("background for this session"))
 
     def test_an_orchestrators_long_command_runs_as_sent(self):
@@ -1243,14 +1206,14 @@ class Rules(unittest.TestCase):
     def test_the_start_text_carries_every_line_with_any_background(self):
         """A puppeteer whose p4.json names a shared store this machine has not seen, started again after a
         clear and after a compaction, with the default start background and with one set longer than the app's cap:
-        each start text carries the standing instruction, the missing-home line and the rules, and stays within the
-        app's cap with the default background; after a compaction the line that names its board comes first."""
+        each start text carries the missing-home line, the rules and the address book, and stays within the app's
+        cap with the default background; after a compaction the line that names its board comes first."""
         t = self.t
         write(os.path.join(t.tmp, "claude_desktop_config.json"), json.dumps({"preferences": {"epitaxyPrefs": {
             "dframe-group-scopes": {"acct/org": {"groups": [{"id": "cg-1", "name": "puppeteers"}],
                                                  "assignments": {"code:" + TOP: "cg-1"}}}}}}))
         write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"home": "git@example.com:team/elsewhere.git"}}))
-        t.say(TOP, TASK, P4_PHI_NEW_TASK="1")
+        t.say(TOP, TASK, P4_PHI_BOOK="1")
         calls = ([("Edit", {"file_path": f"src/export/flush_part_{k}.py"}, "ok") for k in range(14)]
                  + [("Bash", {"command": f"python -I tests/test_part_{k}.py"}, f"No module named 'part{k}'", 1)
                     for k in range(4)])
@@ -1265,9 +1228,9 @@ class Rules(unittest.TestCase):
             write(os.path.join(t.p4, "phi", "phi.json"), json.dumps({"background_chars": chars}))
             for source in ("clear", "compact"):
                 text = context(t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": source},
-                                      P4_PHI_NEW_TASK="1"))
+                                      P4_PHI_BOOK="1"))
                 sizes[f"{source}, background_chars {chars}"] = len(text)
-                self.assertIn("When a message from ezexe is about something else", text, source)
+                self.assertIn("this session's address book, whole on", text, source)
                 self.assertIn("names the shared store git@example.com:team/elsewhere.git", text, source)
                 self.assertIn("act-don't-wait", text, "the built-in rules come with any background")
                 if source == "compact":
@@ -1275,10 +1238,10 @@ class Rules(unittest.TestCase):
                                                     "context was compacted"), text[:200])
         self.assertLessEqual(max(v for k, v in sizes.items() if k.endswith(str(phi.BACKGROUND_CHARS))), APP_CAP, sizes)
 
-    def test_past_the_apps_cap_the_act_lines_and_notices_lead_and_the_address_book_comes_last(self):
+    def test_past_the_apps_cap_the_notices_lead_and_the_address_book_comes_last(self):
         """ezexe/p4#243 D9: past 10,000 characters the app hands Claude a preview of the first 2,000 and the file's
-        path. A clear's start text with a long background and a long address book keeps the notices and the
-        standing instruction inside that preview, the built-in rules before the background, and the book last."""
+        path. A clear's start text with a long background and a long address book keeps the notices inside that
+        preview, the built-in rules before the background, and the book last."""
         t = self.t
         subprocess.run(["git", "init", "-q", t.p4], check=True, capture_output=True)
         gd = subprocess.run(["git", "-C", t.p4, "rev-parse", "--absolute-git-dir"], capture_output=True,
@@ -1288,7 +1251,7 @@ class Rules(unittest.TestCase):
         write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"track": True,
                                                                   "home": "git@example.com:team/elsewhere.git"}}))
         write(os.path.join(t.p4, "phi", "phi.json"), json.dumps({"background_chars": 2 * APP_CAP}))
-        t.say(TOP, TASK, P4_PHI_NEW_TASK="1")
+        t.say(TOP, TASK, P4_PHI_BOOK="1")
         for k in range(24):
             host = f"local_wkr{k:05d}"
             t.record(host, TOP, f"Port part {k} of the narwhal exporter's flush to the new writer")
@@ -1298,11 +1261,16 @@ class Rules(unittest.TestCase):
             t.stop(TOP, "Build the next part of the narwhal tools and check it. " * 5, calls,
                    "Built and checked: " + "the part reads the ports table back and its check passes. " * 8,
                    uuid=f"u{n}")
+        for k in range(2, 6):                                       # orchestrators before it, past the app's cap
+            host = f"local_top0000{k}"
+            t.record(host, title=f"Narwhal importer, part {k}")
+            t.stop(host, "Build the next part of the narwhal tools and check it. " * 5, calls,
+                   "Built and checked: " + "the part reads the ports table back and its check passes. " * 8,
+                   uuid=f"o{k}")
         text = context(t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "clear"},
-                              P4_PHI_NEW_TASK="1"))
+                              P4_PHI_BOOK="1"))
         self.assertGreater(len(text), APP_CAP, "past the app's cap, so only the preview is seen whole")
-        for line in ("the session tree's first commit in", "names the shared store git@example.com:team/elsewhere.git",
-                     "When a message from ezexe is about something else"):
+        for line in ("the session tree's first commit in", "names the shared store git@example.com:team/elsewhere.git"):
             self.assertIn(line, text)
             self.assertLessEqual(text.index(line) + len(line), 2000, f"inside the app's preview: {line}")
         book = text.index("this session's address book")
@@ -1576,7 +1544,7 @@ class NoWriteUnderClaude(unittest.TestCase):
         return os.path.join(self.t.tmp, "temp", CLI.get(host, host), "scratchpad").replace("\\", "/")
 
     def run_hook(self, name, host, payload):
-        return context(self.t.hook(name, host, {"scratchpad_dir": self.pad(host), **payload}, P4_PHI_NEW_TASK="1"))
+        return context(self.t.hook(name, host, {"scratchpad_dir": self.pad(host), **payload}, P4_PHI_BOOK="1"))
 
     def wrap_up(self, host):
         t = self.t
@@ -1613,8 +1581,7 @@ class NoWriteUnderClaude(unittest.TestCase):
         self.assertIn(page, said[self.WORKER, "clear"].split("\n", 1)[0], "and is handed it first after a clear")
         self.assertIn(page, said[self.WORKER, "wrap_up"], "and brings it up to date there before it clears")
         self.assertIn("decisions.md in the scratchpad directory the app names", said[TOP, "start"])
-        for source in ("compact", "clear"):              # the scan has the standing instruction and the book
-            self.assertIn("When a message from ezexe is about something else", said[TOP, source], source)
+        for source in ("compact", "clear"):              # the scan has the address book
             self.assertIn("address book", said[TOP, source], source)
 
 
