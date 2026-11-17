@@ -493,7 +493,7 @@ function boardText(){
   if(!openReqs().length&&!S.answers.length)L.push("None.");
   var found=[];controlled().forEach(function(k){[k].concat(below(k)).forEach(function(x){var n=N(x);n.report.split("\n").forEach(function(l){if(/^Finding:/.test(l))found.push("- \""+n.title+"\" `"+n.id+"`: "+l)})})});
   L=L.concat(["","## Findings",""]);
-  if(found.length)L=L.concat(["The `Finding:` lines of the reports of the controlled sessions and of the sessions of their trees. This puppeteer publishes each one that needs an issue, once it has checked the open issues and the running sessions, and places the session that resolves it: the controlled session whose tree holds its files is sent it in one SendMessage, and one no controlled session covers gets a new orchestrator.",""],found);else L.push("None.");
+  if(found.length)L=L.concat(["The `Finding:` lines of the reports of the controlled sessions and of the sessions of their trees. The session that publishes for the tree publishes each one that needs an issue, once the open issues and the running sessions are checked, and this puppeteer places the session that resolves it: the controlled session whose tree holds its files is sent it in one SendMessage, and one no controlled session covers gets a new orchestrator.",""],found);else L.push("None.");
   L=L.concat(["","## Parked",""],kind("parked").length?kind("parked"):["Nothing."]);
   L=L.concat(["","## Feedback and user memories ezexe changed during the run","","None."]);
   L=L.concat(["","## Notes",""],kind("other").length?kind("other"):["None."]);

@@ -404,8 +404,11 @@ def open_path(home, sid):
 def held_issues(home, s):
     """Each issue a live session's record holds as `issue`, as `owner/name#N` in lower case, over a puppeteer's own
     store and the stores of the sessions it controls."""
-    c, held = _phi().controls, set()
-    for store in c.stores(home, s):
+    c, held, stores = _phi().controls, set(), {}
+    for where in [home] + [str(e.get("store") or "") for e in c.controlled(s)]:
+        if where:                                  # each store once, however its path is spelled
+            stores.setdefault(os.path.normcase(os.path.abspath(where)), where)
+    for store in stores.values():
         for k in relay._sessions(store).values():
             iss = k.get("issue") if isinstance(k.get("issue"), dict) else {}
             if iss.get("repo") and str(iss.get("number") or "").isdigit() and not c.out_of_tree(k):
