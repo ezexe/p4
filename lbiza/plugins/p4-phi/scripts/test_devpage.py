@@ -52,6 +52,13 @@ class Page(unittest.TestCase):
         self.assertIn('Plugin "p4-phi" from --plugin-dir overrides installed version', page)
         self.assertIn("~/.claude/debug/latest", page)
 
+    def test_a_plugin_dir_session_runs_only_from_a_scratch_project(self):
+        page = read(PAGE)
+        self.assertIn("A development copy, which is any session started with <code>--plugin-dir</code>, runs only from a "
+                      "scratch project: never in the development project, and never in a project where p4 is used.", page)
+        self.assertIn("Sessions in the development project start without the flag, so no p4 hook runs there.", page)
+        self.assertIn("ConfigChange", page)
+
     def test_both_installed_plugins_are_off_in_the_development_project(self):
         page = read(PAGE)
         for plugin in ("p4-phi", "p4-temportal"):
