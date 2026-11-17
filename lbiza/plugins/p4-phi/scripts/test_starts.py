@@ -50,12 +50,11 @@ class StartRequests(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def test_a_turn_ezexe_did_not_begin_is_told_to_show_a_card_and_no_request(self):
-        """A turn ezexe did not begin is told to show the child as a card, pressed in this session so the app's parent
-        and p4-phi's agree, its brief declaring its write set, and is told of no start request."""
+    def test_a_turn_ezexe_did_not_begin_is_told_what_its_brief_holds_and_no_request(self):
+        """A turn ezexe did not begin is told what a brief it writes holds, its write set on a `Files:` line, and is
+        told of no start request: the card such a turn proposes is the start tool's own text."""
         ctx = context(self.t.say(KID, CROSS, P4_PHI_BOOK="1"))
-        self.assertIn("`initiation` `own_initiative`, which ezexe presses in this session", ctx)
-        self.assertIn("`Files: <paths>`", ctx)
+        self.assertIn("a brief that declares its write set on a line `Files: <paths>`", ctx)
         self.assertNotIn("start request", ctx)
         self.assertNotIn(" request \"<title>\"", ctx)
 

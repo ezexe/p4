@@ -1166,13 +1166,14 @@ def asks(s):
 
 
 def new_top_route(owner_turn=True):
-    """How an orchestrator starts a new orchestrator for a topic outside its task."""
+    """How an orchestrator starts a new orchestrator for a topic outside its task: what the start tool's own text
+    lacks, the write set on the brief's `Files:` line and the two moves that detach the session to top level. In a
+    turn ezexe did not begin it names no `initiation`: what such a turn may start, and the card it proposes, are that
+    tool's own text."""
     if ASK_ROUTE:
         return ASK_ROUTE
     how = ("Start it with `mcp__ccd_session__start_session`, `initiation` `user_asked`" if owner_turn else
-           f"This turn was started by another session, so the app refuses `user_asked`: show it as a suggested task "
-           f"card, `mcp__ccd_session__start_session` with `initiation` `own_initiative`, which ezexe presses in "
-           f"this session")
+           "Give it to `mcp__ccd_session__start_session`")
     return (f"{how}, `context` `fresh`, `use_worktree: false`, with the `model` and `effort` its kind of work gets, "
             f"said in one line of the brief; its brief: {RESTATE}, and "
             f"the lines \"{NEW_TOP_BRIEF} {new_top_first_act()}\" Both moves are needed: the app's detach to top "
@@ -1278,38 +1279,37 @@ def first_split_text(home, s):
     return FIRST_SPLIT
 
 
-def split_text(home, s, prompt, cli=""):
-    """A turn another session's message started: the app refuses `user_asked` there, so a split is a suggested task
-    card ezexe starts. '' for ezexe's own turns, the app's events and a session with no task."""
+def split_text(home, s, prompt):
+    """A turn another session's message started. What such a turn may start, and the card it proposes, are the start
+    tool's own text, so this line holds only what that text lacks: the caps, the write set a brief declares, and
+    for an orchestrator the brief line that detaches a new orchestrator to top level. It is short and keeps no
+    state, so every such turn carries it whole. '' for ezexe's own turns, the app's events and a session with no
+    task."""
     if not clean(s.get("task")) or not re.search(r"<cross-session-message\b", str(prompt or "")):
         return ""
     cap = caps_text(home, s)
-    RAN["split"] = "cap" if cap else "card"
-    if cap:
-        return "phi (p4-phi): this turn was started by another session, not ezexe. " + cap
-    told = s.setdefault("splitTold", {})
-    if not isinstance(told, dict):
-        told = s["splitTold"] = {}
-    if cli and told.get(cli):                      # said once in full, then a line
-        RAN["split"] = "line"
-        return ("phi (p4-phi): another session started this turn, so a task of its own in it is shown as a suggested "
-                "task card, as said before; do the rest here.")
-    if cli:
-        told[cli] = now()
-    return _split_full(home, s)
+    RAN["split"] = "cap" if cap else "brief"
+    return "phi (p4-phi): " + cap if cap else _split_full(home, s)
 
 
 def _split_full(home, s):
-    if not spawned_from(s):
-        return ("phi (p4-phi): this turn was started by another session, not ezexe, so the app refuses "
-                "`mcp__ccd_session__start_session` with `user_asked`. A topic in it outside this orchestrator's "
-                "task gets a new orchestrator of its own. " + new_top_route(False) + " Do the rest here.")
-    return ("phi (p4-phi): this turn was started by another session, not ezexe, so the app refuses "
-            "`mcp__ccd_session__start_session` with `user_asked`. Work in it that is a task of its own, outside "
-            "this session's task, is shown as a suggested task card, `mcp__ccd_session__start_session` with "
-            "`initiation` `own_initiative`, which ezexe presses in this session, so the app's parent session and "
-            f"p4-phi's agree. Its brief declares its write set on a line `Files: <paths>`. {plans.LEVEL_CARD} Do the "
-            "rest here.")
+    """What a brief written in a turn another session began holds beyond what the start tool asks of it: a
+    child's, its `Files:` line and its level line; a new orchestrator's, those and the line on which it is detached
+    to top level, or for a controlled orchestrator the request to its puppeteer."""
+    if spawned_from(s):
+        return ("phi (p4-phi): a task of its own in this turn, outside this session's task, goes out by "
+                "`mcp__ccd_session__start_session` with a brief that declares its write set on a line "
+                f"`Files: <paths>`. {plans.LEVEL_CARD}")
+    head = "phi (p4-phi): a topic in this turn outside this orchestrator's task gets a new orchestrator of its own. "
+    if ASK_ROUTE:
+        ask = PHI_LEAD.sub("", controls.ask_text(s))
+        return head + ask[:1].upper() + ask[1:]
+    return (head + "It goes out by `mcp__ccd_session__start_session`, `context` `fresh`, `use_worktree: false`, "
+            "with the `model` and `effort` its kind of work gets, said in one line of its brief, which declares "
+            f"its write set on a line `Files: <paths>` and carries the line \"{NEW_TOP_BRIEF}\": on that line "
+            "p4-phi detaches it to top level at its first message and has it call "
+            "`mcp__ccd_session_mgmt__detach_session` with `\"self\"`, so the app stops nesting it under this "
+            "session.")
 
 
 FEATURE_STEP = re.compile(r"\bnew feature\b|^\W*(?:build|implement|design|introduce)\b[^.;]*\b(?:feature|loop|"
@@ -1934,8 +1934,6 @@ def h_session_start(payload):
         # first message tells
         text = given(s, me, me.home, own=lost or len(s.get("cliSessionIds") or []) > 1, brief=source == "compact")
         book_line = book_text(me.home, s, me.store, whole=True) if lost else ""
-    if lost:
-        s.pop("splitTold", None)                   # the split advice, said in full again at the next such turn
     pin = pin_of(me.home, s)
     text = "\n\n".join(p for p in (pin, text) if p)
     live_rules(s, me.store)                        # what it starts with
@@ -2198,7 +2196,7 @@ def h_user_prompt_submit(payload):
         route = ""
     book_line = "" if route else book_text(me.home, s, me.store)
     parts.append(pup)
-    split = split_text(me.home, s, payload.get("prompt"), me.cli) if not route else ""
+    split = split_text(me.home, s, payload.get("prompt")) if not route else ""
     last = route or "\n\n".join(x for x in (book_line, split) if x)
     save_session(me.home, s)
     # the rebase check, on every message: what the sessions beside this one changed, and the warnings, first
