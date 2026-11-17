@@ -250,13 +250,21 @@ def _merge_tree(src, dst, aside):
                     _note(s, None)
                     os.remove(s)
                 elif _ignored(t):
-                    # a cache git ignores: the newer stays, the older goes, and nothing is set aside to be committed
-                    if os.path.getmtime(s) > os.path.getmtime(t):
+                    # a file git ignores: the newer stays and the older is set aside as a tracked one is, but left out
+                    # of the layout commit, which holds no ignored file
+                    old = t if os.path.getmtime(s) > os.path.getmtime(t) else s
+                    a = os.path.join(aside, r)
+                    os.makedirs(os.path.dirname(a), exist_ok=True)
+                    if os.path.lexists(a):
+                        a += time.strftime(".%Y%m%d-%H%M%S")
+                    if old is s:
+                        _note(s, None)                  # gone from its earlier place, as the commit sees it
+                    os.replace(old, a)
+                    _LANDED.append(a)
+                    if old is t:
                         _note(s, t)
                         os.replace(s, t)
-                    else:
-                        _note(s, None)
-                        os.remove(s)
+                    aside_n += 1
                 else:
                     old = t if os.path.getmtime(s) > os.path.getmtime(t) else s
                     a = os.path.join(aside, r)
@@ -669,7 +677,8 @@ def _moves(p4, places, lines, done):
         if os.path.lexists(src):
             line += ", some files left for the next start"
         lines.append(line)
-    for top in sorted({r.split("/")[0] for r in done if "/" in r}):    # recall/, once store/ and models/ left it
+    plugins = {v.split("/")[0] for v in LAYOUT.values()}
+    for top in sorted({r.split("/")[0] for r in done if "/" in r} - plugins):   # recall/, once store/ and models/ left
         g = os.path.join(p4, top)
         kept = os.path.join(g, LAYOUT_CONFLICTS)
         if os.path.isdir(kept):
@@ -679,6 +688,9 @@ def _moves(p4, places, lines, done):
             os.rmdir(g)
         except OSError:
             pass
+    if any(LAYOUT.get(k) == "temportal/notebook" and r == "temportal/scratchpad" for k, olds in OLDER.items()
+           for r in olds if r in done):
+        _carry_notebook(p4)
     # a move keeps each file's own time, so a set-aside copy older than its cache rule would be cleared by the
     # retention sweep of the same start, unreported: every file landed in a set-aside folder takes the move's time
     for p in _LANDED:
@@ -687,6 +699,29 @@ def _moves(p4, places, lines, done):
                 os.utime(p)
             except OSError:
                 pass
+
+
+def _carry_notebook(p4):
+    """After the notebook moved from temportal/scratchpad to temportal/notebook: each cookie of
+    temportal/expires.json and each cache rule of p4.json's temportal.cache set on a scratchpad/ path is set on
+    the same notebook/ path."""
+    old, new = "scratchpad", "notebook"
+
+    def moved(k):
+        return new + k[len(old):] if isinstance(k, str) and (k == old or k.startswith(old + "/")) else k
+    exp = os.path.join(p4, "temportal", "expires.json")
+    d = read_json(exp)
+    if d and any(moved(k) != k for k in d):
+        replace_text(exp, json.dumps({moved(k): v for k, v in d.items()}, indent=1, sort_keys=True,
+                                     ensure_ascii=False) + "\n")
+    conf = read_json(path(p4))
+    cache = ((conf or {}).get("temportal") or {}).get("cache")
+    if isinstance(cache, dict) and any(moved(k) != k for k in cache):
+        conf["temportal"]["cache"] = {moved(k): v for k, v in cache.items()}
+        e = (conf.get(WRITTEN) or {}).get("temportal.cache")
+        if isinstance(e, dict) and e.get("v") == cache:
+            e["v"] = conf["temportal"]["cache"]         # written by load: still load's
+        _write(p4, conf)
 
 
 def _merge(base, over, unknown, prefix=""):

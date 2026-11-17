@@ -362,6 +362,36 @@ class P4Conf(unittest.TestCase):
         self.assertIn("notebook/.out", cache)
         self.assertNotIn("scratchpad/.out", cache)
 
+    def test_the_notebook_move_sets_aside_an_ignored_file_and_carries_its_lifetimes(self):
+        """An ignored file of the same name in both places is set aside, never deleted; the cookies and cache rules set
+        on scratchpad/ paths are set on notebook/ ones; temportal/'s own set-aside folder stays where it is."""
+        import subprocess
+        subprocess.run(["git", "-C", self.p4, "init", "-q"], capture_output=True)
+        Path(self.p4, ".gitignore").write_text("*.log\n", encoding="utf-8")
+        old = os.path.join(self.p4, "temportal", "scratchpad")
+        new = os.path.join(self.p4, "temportal", "notebook")
+        for d, text, when in ((old, "the old log\n", 1000000), (new, "the new log\n", 2000000)):
+            os.makedirs(d, exist_ok=True)
+            Path(d, "run.log").write_text(text, encoding="utf-8")
+            os.utime(os.path.join(d, "run.log"), (when, when))
+        Path(old, "plan.md").write_text("the plan\n", encoding="utf-8")
+        kept = os.path.join(self.p4, "temportal", p4conf.LAYOUT_CONFLICTS, "memory", "x.md")
+        os.makedirs(os.path.dirname(kept))
+        Path(kept).write_text("set aside before\n", encoding="utf-8")
+        Path(self.p4, "temportal", "expires.json").write_text(json.dumps({"scratchpad/plan.md": "2030-01-01"}),
+                                                               encoding="utf-8")
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump({"temportal": {"cache": {"scratchpad/big": {"max_mb": 10}}}}, f)
+        p4conf.migrate_layout(self.p4, commit=False)
+        self.assertEqual(Path(new, "run.log").read_text(encoding="utf-8"), "the new log\n", "the newer stays")
+        aside = [os.path.join(d, n) for d, _, ns in os.walk(os.path.join(self.p4, "temportal",
+                                                                          p4conf.LAYOUT_CONFLICTS)) for n in ns]
+        self.assertTrue([a for a in aside if Path(a).read_text(encoding="utf-8") == "the old log\n"], aside)
+        self.assertTrue(os.path.isfile(kept), "temportal's own set-aside folder stays in temportal/")
+        self.assertEqual(json.loads(Path(self.p4, "temportal", "expires.json").read_text(encoding="utf-8")),
+                         {"notebook/plan.md": "2030-01-01"})
+        self.assertIn("notebook/big", p4conf.load(self.p4)["temportal"]["cache"])
+
     def test_the_keys_p4_temportal_stopped_reading_are_dropped_and_never_called_unknown(self):
         import contextlib
         import io
