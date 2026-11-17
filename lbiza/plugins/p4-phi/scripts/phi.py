@@ -1129,6 +1129,12 @@ ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves this bui
 #   starts with `sleep`." The default is `BASH_DEFAULT_TIMEOUT_MS`, "two minutes out of the box".
 REVIEW = ("the bundled skill `code-review`, run with the Skill tool on that change's commits or paths and without "
           "`--fix`, so it reports and changes no file")
+# workflows.md, "Cost": "Claude Code picks each workflow agent's model in the same order it uses for subagents. A
+# model the script names for a stage counts as the per-invocation model in that order. When nothing else assigns one,
+# the agent runs on your session's model." No line of that page gives a workflow agent an effort of its own.
+WORKFLOW = ("A Workflow script names a model for each stage, since by the workflows page of the Claude Code docs \"A "
+            "model the script names for a stage counts as the per-invocation model\" and an agent with none \"runs "
+            "on your session's model\".")
 LEVELS = ("built-in, levels: work is delegated to where Claude Code runs it best, so this session's own turn is "
           "never held by it. A search or a read across more than a couple of files goes to " + plans.EXPLORE + "; "
           "a command expected to run long, such as a test file, a test suite or a build, goes to " + plans.BACKGROUND
@@ -1136,7 +1142,7 @@ LEVELS = ("built-in, levels: work is delegated to where Claude Code runs it best
           "such a read of a result that is no code change goes to the subagent `p4-phi:check`. "
           + plans.LIMITS_FIRST + " A worker is "
           "started with a `model` and an `effort` that fit its step, as the advice that hands out each start call "
-          "names them; an effort above this session's own is not accepted.")
+          "names them; an effort above this session's own is not accepted. " + WORKFLOW)
 plans.BUILT_INS = tuple(x.split(": ", 1)[0].replace("built-in, ", "") for x in (BUILT_IN, LEVELS))   # plans.py's names
 LEVELS_ON = True              # p4.json phi.levels: false leaves the delegation rule and its checks out
 TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps an orchestrator's work in it

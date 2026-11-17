@@ -1409,6 +1409,22 @@ class Rules(unittest.TestCase):
         for word in ("stop_session", "restart", "start it again", "set_session_model"):
             self.assertNotIn(word, phi.LEVELS, word)
 
+    def test_the_levels_rule_says_a_workflow_script_names_a_model_for_each_stage(self):
+        """workflows.md, "Cost": "A model the script names for a stage counts as the per-invocation model in that
+        order. When nothing else assigns one, the agent runs on your session's model." So the rule handed at a
+        session's start tells it to name a model for each stage, in the page's words, and the skill quotes both
+        sentences with the page."""
+        got = self.start(TOP)
+        self.assertIn("A Workflow script names a model for each stage", got)
+        for quote in ("\"A model the script names for a stage counts as the per-invocation model\"",
+                      "\"runs on your session's model\""):
+            self.assertIn(quote, phi.LEVELS)
+        with open(os.path.join(ROOT, "skills", "phi", "SKILL.md"), encoding="utf-8") as f:
+            skill = f.read()
+        self.assertIn("A Workflow script names a model for each stage: https://code.claude.com/docs/en/workflows.md "
+                      "says \"A model the script names for a stage counts as the per-invocation model in that order.\" "
+                      "and \"When nothing else assigns one, the agent runs on your session's model.\"", skill)
+
     def test_a_review_of_a_code_change_goes_to_the_bundled_code_review_skill_and_check_reads_the_rest(self):
         """code-review-local.md: "Claude can start `/code-review` on its own, without you typing the command" and
         "without `--fix`, the review's instructions ask Claude for a report only." Its target "can be a pull request
