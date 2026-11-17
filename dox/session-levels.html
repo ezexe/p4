@@ -254,7 +254,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
         </tbody>
       </table>
     </div>
-    <p class="after">A serial run takes the model and effort of its hardest step. A brief that names its own lines <code>Model:</code> and <code>Effort:</code> wins over its kind, and a fork takes neither, since the app gives a fork its parent session's. An effort above the parent session's own is not accepted, and <code>phi.child_levels</code> in <code>p4.json</code> sets each kind's defaults.</p>
+    <p class="after">A serial run takes the model and effort of its hardest step. A brief that names its own lines <code>Model:</code> and <code>Effort:</code> wins over its kind, and a fork takes neither, since the app gives a fork its parent session's. No effort is named above the parent session's own, which p4-phi reads from the hook input's <code>effort.level</code> or from <code>CLAUDE_EFFORT</code> and keeps on the session's record, since the app starts no session above its starter's effort. <code>phi.child_levels</code> in <code>p4.json</code> sets each kind's defaults.</p>
   </section>
 
   <section class="block" aria-label="The Claude Code docs each behaviour rests on">

@@ -407,6 +407,35 @@ class Me:
         if self.title and self.id:
             GIVEN_TITLES[self.id] = self.title
         project_conf(self.store)
+        plans.PARENT_EFFORT = own_effort(self, payload, other=bool(session))
+
+
+def own_effort(me, payload, other=False):
+    """The effort level the session of this hook or command runs at, which plans.child_level holds every start's
+    effort to: the hook input's `effort.level`, else CLAUDE_EFFORT, which Claude Code sets for hook commands and
+    Bash subprocesses, else the last level the session's record kept. hooks.md, "Common input fields": `effort` is
+    an "Object whose `level` is the effort level setting when the hook runs, including a skill's, subagent's, or
+    `ultrathink` level", so a subagent's call names the subagent's level and is not read, and a command run for
+    another session names its caller's. A level that differs from the record's is kept there. '' where nothing
+    names one."""
+    level = ""
+    if not other and not payload.get("agent_id"):
+        given = payload.get("effort")
+        level = str((given.get("level") if isinstance(given, dict) else "") or os.environ.get("CLAUDE_EFFORT") or "")
+        level = level.strip().lower()
+        level = level if level in plans.EFFORTS else ""
+    if not me.home or not me.id:
+        return level
+    held = load_session(me.home, me.id)
+    kept = str(held.get("effort") or "")
+    if level and level != kept and held.get("sessionId"):   # a session with no record yet keeps none: a later hook does
+        path = os.path.join(session_dir(me.home, me.id), "session.json")
+        with relay.locked(path):
+            s = load_session(me.home, me.id)
+            if s.get("sessionId"):
+                s["effort"] = level
+                _save_session(me.home, s)
+    return level or (kept if kept in plans.EFFORTS else "")
 
 
 # --- sessions --------------------------------------------------------------------------------------------------------
@@ -459,7 +488,7 @@ def _save_session(home, s):
             s[k] = {**disk[k], **(s.get(k) or {})}
     for k in ("rootStep", "shard", "disposable", "doneRetired", "archived", "appRoot", "nudged", "issue",
               "issueLooked", "findingsTold", "controls", "puppeteerSeen", "handedTo",
-              "handedFrom"):
+              "handedFrom", "effort"):
         if k in disk and k not in s:
             s[k] = disk[k]
     if not s.pop("_controlsSet", None) and isinstance(disk.get("controls"), list):

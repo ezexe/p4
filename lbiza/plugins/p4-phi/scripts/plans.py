@@ -614,7 +614,10 @@ def level_of(text):
 # carries an `effort`, and a `model` unless it keeps the parent session's. `mcp__ccd_session__start_session` takes
 # `model`, the same family or cheaper than the caller's, and `effort`, at or below the caller's, both for a `fresh`
 # start only, as its schema says. The kind of a step picks its entry of CHILD_LEVELS, which p4.json's
-# phi.child_levels can set; LEVEL_HOW says the rule to the session that makes the call.
+# phi.child_levels can set; LEVEL_HOW says the rule to the session that makes the call. The caller's own effort is
+# the hook input's `effort.level`, "the effort level setting when the hook runs" by hooks.md, "Common input fields",
+# where "`$CLAUDE_EFFORT` holds the same level.": phi.own_effort reads it into PARENT_EFFORT, and child_level names
+# no effort above it.
 
 CHILD_LEVELS = {"static": {"model": "claude-sonnet-5-5", "effort": "medium"},
                 "build": {"model": "inherit", "effort": "high"},
@@ -686,14 +689,28 @@ def said_level(brief):
     return out
 
 
+PARENT_EFFORT = ""            # phi.Me sets it: the effort the session of this hook runs at, '' where nothing names it
+
+
+def capped(effort):
+    """`effort`, or PARENT_EFFORT when that is the lower of the two: the app starts no session above its starter's
+    effort, a limit no docs page states and scripts/claude_code_limits.json logs."""
+    if PARENT_EFFORT in EFFORTS and effort in EFFORTS and EFFORTS.index(effort) > EFFORTS.index(PARENT_EFFORT):
+        return PARENT_EFFORT
+    return effort
+
+
 def child_level(text, brief=""):
     """{"model", "effort", "kind"} a worker is started with for a step or a brief: its kind's entry of
-    CHILD_LEVELS, with what the brief itself names laid over it. `model` is 'inherit' for the parent session's own."""
+    CHILD_LEVELS, with what the brief itself names laid over it, and the effort held to PARENT_EFFORT. `model` is
+    'inherit' for the parent session's own."""
     kind = child_kind(text if str(text or "").strip() else brief)
     out = {**CHILD_LEVELS.get(kind, CHILD_LEVELS_DEFAULT[kind]), "kind": kind}
     said = said_level(brief or text)
     if said:
         out.update(said, said=True)
+    if capped(out["effort"]) != out["effort"]:
+        out.update(effort=capped(out["effort"]), capped=True)
     return out
 
 
@@ -711,6 +728,8 @@ def level_line(level):
     model = ("the parent session's own model" if str(level.get("model") or "inherit").lower() == "inherit"
              else level["model"])
     why = "named by the parent session" if level.get("said") else f"since this is {CHILD_KINDS[level['kind']]}"
+    if level.get("capped"):
+        why += ", held to the parent session's own effort"
     return f"Model and effort: {model} at {level['effort']} effort, {why}."
 
 

@@ -835,6 +835,89 @@ class Levels(unittest.TestCase):
             plans.CHILD_LEVELS = old
 
 
+class ParentEffort(unittest.TestCase):
+    """The app starts no session above its starter's effort, a limit no docs page states and
+    scripts/claude_code_limits.json logs. hooks.md, "Common input fields", gives every hook with a tool-use context
+    `effort`, an "Object whose `level` is the effort level setting when the hook runs", and says "`$CLAUDE_EFFORT`
+    holds the same level." So p4-phi reads the starter's level there, keeps the last one seen on the session's record,
+    and names no start's effort above it."""
+
+    BUILD = "Change how plans.py reads the address of a step"
+    DOCS = "Write the puppeteer pages under dox/"
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP, title="top")
+        self.t.say(TOP, "Build the exporter")
+        self.env = os.environ.pop("CLAUDE_EFFORT", None)     # a run from a session's shell carries that session's own
+        self.me = type("Me", (), {"home": self.t.p4, "id": TOP})()
+
+    def tearDown(self):
+        plans.PARENT_EFFORT = ""
+        os.environ.pop("CLAUDE_EFFORT", None)
+        if self.env is not None:
+            os.environ["CLAUDE_EFFORT"] = self.env
+        self._tmp.cleanup()
+
+    def plan(self, host, inp, **payload):
+        r = self.t.hook("plan", host, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                                       "tool_input": inp, "tool_response": "Plan updated.", **payload})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
+
+    def test_a_start_call_for_a_build_step_from_a_starter_at_medium_names_no_effort_above_medium(self):
+        p = self.t.proj
+        ctx = self.plan(TOP, items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
+                                   f"Rewrite the parser in {p}/src/parse.py for the new grammar", "Commit and push"),
+                        effort={"level": "medium"})
+        self.assertIn("with no `model`, so it inherits this session's, `effort` `medium`", ctx)
+        for above in ("high", "xhigh", "max"):
+            self.assertNotIn(f"`effort` `{above}`", ctx, "no start is named above its starter's effort")
+        self.assertEqual(relay._session(self.t.p4, TOP).get("effort"), "medium", "the level seen is kept on the record")
+        plans.PARENT_EFFORT = "medium"
+        self.assertEqual(plans.child_level(self.BUILD),
+                         {"model": "inherit", "effort": "medium", "kind": "build", "capped": True})
+        call = plans.with_level({"context": "fresh", "title": "the step address",
+                                 "prompt": "Change how plans.py reads the address of a step.\nFiles: scripts/plans.py"})
+        self.assertEqual(call["effort"], "medium")
+        self.assertIn("Model and effort: the parent session's own model at medium effort, since this is a build that "
+                      "changes behaviour, held to the parent session's own effort.", call["prompt"])
+        own = plans.with_level({"context": "fresh", "title": "x", "prompt": "Fix relay.py.\nEffort: max"})
+        self.assertEqual(own["effort"], "medium", "an effort the brief names itself is held to the starter's too")
+
+    def test_an_effort_at_or_below_the_starters_is_named_as_its_kind_gives_it(self):
+        for mine, docs, build in (("", "medium", "high"), ("low", "low", "low"), ("medium", "medium", "medium"),
+                                  ("high", "medium", "high"), ("xhigh", "medium", "high"), ("max", "medium", "high")):
+            plans.PARENT_EFFORT = mine
+            self.assertEqual((plans.child_level(self.DOCS)["effort"], plans.child_level(self.BUILD)["effort"]),
+                             (docs, build), mine or "no level seen")
+        plans.PARENT_EFFORT = "high"
+        self.assertNotIn("capped", plans.child_level(self.BUILD), "an effort its starter can give is not marked")
+        self.assertNotIn("held to", plans.level_line(plans.child_level(self.BUILD)))
+
+    def test_the_level_is_read_from_the_hook_input_or_the_variable_and_the_last_one_seen_is_kept(self):
+        me = self.me
+        self.assertEqual(phi.own_effort(me, {}), "", "nothing names one")
+        self.assertEqual(phi.own_effort(me, {"effort": {"level": "medium"}}), "medium")
+        self.assertEqual(relay._session(self.t.p4, TOP)["effort"], "medium")
+        self.assertEqual(phi.own_effort(me, {}), "medium", "a hook input with no effort: the record's last level")
+        self.assertEqual(phi.own_effort(me, {"effort": {"level": "max"}, "agent_id": "a1"}), "medium",
+                         "a subagent's call names the subagent's level")
+        self.assertEqual(phi.own_effort(me, {"effort": {"level": "max"}}, other=True), "medium",
+                         "a command run for another session names its caller's level")
+        self.assertEqual(phi.own_effort(me, {"effort": {"level": "loud"}}), "medium", "no level the app has")
+        self.assertEqual(phi.own_effort(me, {"effort": "high"}), "medium", "no object with a level")
+        os.environ["CLAUDE_EFFORT"] = "low"
+        self.assertEqual(phi.own_effort(me, {}), "low", "CLAUDE_EFFORT holds the same level")
+        self.assertEqual(phi.own_effort(me, {"effort": {"level": "xhigh"}}), "xhigh", "the hook input comes first")
+        self.assertEqual(relay._session(self.t.p4, TOP)["effort"], "xhigh")
+        gone = type("Me", (), {"home": self.t.p4, "id": "local_norecord"})()
+        self.assertEqual(phi.own_effort(gone, {"effort": {"level": "high"}}), "high")
+        self.assertFalse(os.path.exists(os.path.join(self.t.p4, "phi", "sessions", "local_norecord")),
+                         "a session with no record yet gets none made")
+
+
 class TopOrchestrates(unittest.TestCase):
     """An orchestrator keeps itself free for orchestration. A child whose brief says "report when done" leaves
     its outcome on its parent as a replaces: note and counts as archived, and the parent's line offers it to ezexe

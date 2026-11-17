@@ -47,6 +47,11 @@ These are the defaults:
 | `build`: every other step, such as a change to behaviour or anything that names code | the parent session's own | `high` |
 | `design`: a design or review step | the parent session's own | `high` |
 
+No start is named above the effort of the session that makes it.
+p4-phi reads that session's level from the hook input's `effort.level`, or from `CLAUDE_EFFORT`, keeps the last level seen on the session's record, and holds each start's `effort` to it.
+The level is Claude Code's own: `hooks.md`, "Common input fields", calls `effort` an "Object whose `level` is the effort level setting when the hook runs" and says "`$CLAUDE_EFFORT` holds the same level."
+The limit is the app's and no docs page states it: a started session's effort is at most its starter's, which `scripts/claude_code_limits.json` logs.
+
 ## A puppeteer and the sessions it controls
 
 A puppeteer is the orchestrator ezexe files in the sidebar section "puppeteers", which controls the orchestrators of other trees.
