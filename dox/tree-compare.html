@@ -3,8 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Two trees · p4-phi dox</title>
-<meta name="description" content="p4-phi's session tree beside the node tree of the phi repository: what a node is, what a link means, how each tree is made, and where the two are the same idea.">
+<title>Two trees that share a name · p4-phi dox</title>
+<meta name="description" content="p4-phi's session tree beside the two trees of ezexe/phi, the call tree its Zeckendorf register page draws and the ensemble of shard models phi_rank/tree.py builds: what each is made of, what a link means, how each grows, and where they are the same idea.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='1' width='14' height='14' rx='4' fill='%230b6b66'/%3E%3C/svg%3E">
 <style>
 :root{
   --bg:#f5f3ec; --panel:#fffdf7; --sunk:#efece2; --ink:#1d1c19; --soft:#5d5a52; --line:#d9d4c6; --link:#a9a392;
@@ -126,21 +127,21 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
   </div>
   <nav class="tabs" aria-label="Pages about the tree">
     <a href="session-tree.html">The session tree</a>
-    <a href="tree-compare.html" aria-current="page">Compared with phi's node tree</a>
+    <a href="tree-compare.html" aria-current="page">Two trees that share a name</a>
   </nav>
   <h1>Two trees that share a name</h1>
-  <p class="lede">p4-phi links Claude desktop sessions into a tree. The phi repository has a tree of its own, which its <a href="https://ezexe.github.io/phi/docs/phi/phi.jsx.html">Phi Register page</a> draws on the TREE tab and which <code>phi_rank/tree.py</code> builds out of small rankers. Change each tree below, then read the two side by side.</p>
+  <p class="lede">p4-phi keeps a tree of Claude desktop sessions. ezexe/phi has two trees of its own: the recursive Fibonacci call tree its <a href="https://ezexe.github.io/phi/docs/phi/phi.html">Zeckendorf register page</a> draws on its Tree tab, and the ensemble of shard models that <code>phi_rank/tree.py</code> builds out of small rankers. Change each tree below, then read the three side by side.</p>
 
   <div class="pair">
     <section class="card s" aria-label="The session tree of p4-phi">
       <div class="head">
         <p class="kick">p4-phi · ezexe/p4</p>
         <h2>The session tree</h2>
-        <p>A node is a session. You make the tree one move at a time, and phi writes each move down.</p>
+        <p>Each place in it is a session. You make the tree one move at a time, and p4-phi writes each move down.</p>
       </div>
       <div class="bar">
-        <button type="button" class="btn" id="sChild">Start a child</button>
-        <button type="button" class="btn" id="sDetach">Detach in phi</button>
+        <button type="button" class="btn" id="sChild">Start a worker</button>
+        <button type="button" class="btn" id="sDetach">Detach to top level</button>
         <button type="button" class="btn" id="sDone">Mark done</button>
         <button type="button" class="btn" id="sReset">Reset</button>
       </div>
@@ -149,69 +150,69 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
       <div class="con" id="sCon"></div>
     </section>
 
-    <section class="card p" aria-label="The node tree of phi">
+    <section class="card p" aria-label="The two trees of ezexe/phi">
       <div class="head">
-        <p class="kick">phi · ezexe/phi</p>
-        <h2>The node tree</h2>
-        <p>A node is a call or an address. You choose one number, and the whole tree follows from it.</p>
+        <p class="kick">ezexe/phi</p>
+        <h2>The call tree and the ensemble</h2>
+        <p>Each place is a call or a store address. You choose one number, and the whole tree follows from it.</p>
       </div>
       <div class="bar">
-        <div class="seg" role="group" aria-label="Which tree of phi to draw">
+        <div class="seg" role="group" aria-label="Which tree of ezexe/phi to draw">
           <button type="button" data-kind="call" aria-pressed="true">The call tree the page draws</button>
-          <button type="button" data-kind="addr" aria-pressed="false">The node tree phi_rank builds</button>
+          <button type="button" data-kind="addr" aria-pressed="false">The ensemble phi_rank builds</button>
         </div>
         <label class="slide"><span id="pName">n</span><input id="pNum" type="range" min="2" max="6" value="5" aria-label="The number the tree follows from"><b id="pVal">5</b></label>
       </div>
-      <div class="svgwrap"><svg id="ptree" role="group" aria-label="Nodes and their links"></svg></div>
+      <div class="svgwrap"><svg id="ptree" role="group" aria-label="Calls or store addresses and their links"></svg></div>
       <p class="said" id="pSaid" aria-live="polite"></p>
       <div class="con" id="pCon"></div>
     </section>
   </div>
 
   <h2 class="sect">Side by side</h2>
-  <p class="under">The first column is p4-phi. The other two are the phi repository: the tree its page draws, and the tree its code builds and keeps.</p>
+  <p class="under">The first column is p4-phi. The other two are ezexe/phi: the tree its page draws, and the ensemble its code builds and keeps.</p>
   <div class="rows">
     <div class="row">
-      <h3>What a node is</h3>
-      <div class="cs"><b>Session tree</b>One session of the Claude desktop app, with a task, turns, notes and a page.</div>
-      <div class="cp"><b>Call tree, drawn</b>One call of <code>fib(k)</code>. The page keeps it as an object with <code>n</code>, <code>left</code>, <code>right</code>, <code>leafCount</code> and a random <code>id</code>.</div>
-      <div class="cp"><b>Node tree, built</b>One small ranker at a store address. An address is a string of 1 for <code>p4</code> and 0 for <code>.claude</code>. It starts and ends with 1 and never holds two 1s in a row.</div>
+      <h3>What the tree is made of</h3>
+      <div class="cs"><b>Session tree</b>Sessions of the Claude desktop app, each with a task, turns, notes and a page.</div>
+      <div class="cp"><b>Call tree, drawn</b>Calls of <code>fib(k)</code>. The page keeps each as an object with <code>n</code>, <code>left</code>, <code>right</code>, <code>leafCount</code> and a random <code>id</code>.</div>
+      <div class="cp"><b>Ensemble, built</b>Small rankers, its members, one at each store address. An address is a string of 1 for <code>p4</code> and 0 for <code>.claude</code> that starts and ends with 1 and never holds two 1s in a row.</div>
     </div>
     <div class="row">
       <h3>What a link means</h3>
-      <div class="cs"><b>Session tree</b>This session started that one. phi hands tasks and notes down the link, and reports and <code>replaces:</code> notes up it.</div>
+      <div class="cs"><b>Session tree</b>This session started that one. p4-phi hands tasks and notes down the link, and reports and <code>replaces:</code> notes up it.</div>
       <div class="cp"><b>Call tree, drawn</b>This call made that call. The left link goes to <code>fib(k-1)</code> and the right link to <code>fib(k-2)</code>.</div>
-      <div class="cp"><b>Node tree, built</b>The store at this address was grown under that one. A node with children starts its training from the mean of their weights.</div>
+      <div class="cp"><b>Ensemble, built</b>The store at this address is grown under that one. A member with children starts its training from the mean of their weights as they stood before their fine-tuning.</div>
     </div>
     <div class="row">
-      <h3>How a node is created</h3>
-      <div class="cs"><b>Session tree</b>A session calls <code>mcp__ccd_session__start_session</code>. When the app refuses the call it shows a proposal card for ezexe to press, or keeps a start request with <code>phi.py request</code> that ezexe's next turn in that same session starts.</div>
+      <h3>How the tree grows</h3>
+      <div class="cs"><b>Session tree</b>A session calls <code>mcp__ccd_session__start_session</code>. When the app refuses the call, the session shows a suggested task card for ezexe to press, or keeps a start request with <code>phi.py request</code> that the next turn ezexe begins in that session starts.</div>
       <div class="cp"><b>Call tree, drawn</b>You move the slider. <code>buildTree(n)</code> makes every node of the tree at once, by recursion.</div>
-      <div class="cp"><b>Node tree, built</b>You run <code>python -m phi_rank.tree train</code> with <code>--k</code>. It trains the first K addresses, the deepest first, each on one shard of the store's tracked text.</div>
+      <div class="cp"><b>Ensemble, built</b>You run <code>python -m phi_rank.tree train</code> with <code>--k</code>. It trains the first K addresses, the deepest first, and fine-tunes each member on every labelled pool. Pretraining each member on one shard of the store's tracked text is off unless <code>--minutes</code> turns it on.</div>
     </div>
     <div class="row">
-      <h3>How a node is moved</h3>
-      <div class="cs"><b>Session tree</b><code>phi.py detach</code> makes it a top session. <code>phi.py reparent</code> puts it, with every session it started, under another.</div>
-      <div class="cp"><b>Call tree, drawn</b>It is never moved. A node's place follows from its number.</div>
-      <div class="cp"><b>Node tree, built</b>It is never moved. <code>parent(a)</code> computes a node's parent from its address alone.</div>
+      <h3>How a part of it moves</h3>
+      <div class="cs"><b>Session tree</b>With <code>phi.py detach</code> a session is detached to top level, which makes it an orchestrator. <code>phi.py reparent</code> puts it, with every session below it, under another. Both rewrite <code>spawnedFrom</code> in its <code>session.json</code>, and the app's own nesting does not follow.</div>
+      <div class="cp"><b>Call tree, drawn</b>It never moves. A call's place follows from its number.</div>
+      <div class="cp"><b>Ensemble, built</b>It never moves. <code>parent(a)</code> computes a member's parent from its address alone.</div>
     </div>
     <div class="row">
-      <h3>How a node is retired</h3>
-      <div class="cs"><b>Session tree</b>One at a time. A done child leaves its outcome on its parent as a <code>replaces:</code> note, and ezexe archives it. A <a href="puppeteer.html">puppeteer</a> may archive a complete session it controls. A message brings it back.</div>
+      <h3>How a part of it leaves</h3>
+      <div class="cs"><b>Session tree</b>One at a time. A worker whose brief says “report when done” is counted as archived at the end of the turn that shows its work done, once the issue it closes, if any, is proven. Its outcome stays on its parent session as a <code>replaces:</code> note. ezexe archives it in the app with a press, or by picking it in the one multiple-choice question its orchestrator puts, and the orchestrator then archives exactly the sessions picked. Any other archive call from a session is refused unless <code>phi.session_archives</code> in <code>p4.json</code> allows it. A message to it makes it a live session once more.</div>
       <div class="cp"><b>Call tree, drawn</b>All at once. A new <code>n</code> replaces the whole tree with a new one.</div>
-      <div class="cp"><b>Node tree, built</b>All at once. A new training run writes <code>tree.json</code> again, and the tree is loaded from the addresses that file lists.</div>
+      <div class="cp"><b>Ensemble, built</b>All at once. A new training run writes <code>tree.json</code> again, and only the addresses that file lists are loaded. Training deletes no file, so the <code>.pt</code> files of a larger earlier run stay on disk unread.</div>
     </div>
     <div class="row">
       <h3>What is stored, and where</h3>
-      <div class="cs"><b>Session tree</b><code>spawnedFrom</code> in each <code>session.json</code>, under <code>&lt;project&gt;/.claude/p4/phi/sessions/&lt;sessionId&gt;/</code>. The app keeps its own record of the nesting.</div>
+      <div class="cs"><b>Session tree</b><code>spawnedFrom</code> in each <code>session.json</code>, under <code>&lt;project&gt;/.claude/p4/phi/sessions/&lt;sessionId&gt;/</code>, or under the shared store that <code>phi.home</code> in <code>p4.json</code> names. The app keeps its own record of the nesting, which p4-phi reads it from.</div>
       <div class="cp"><b>Call tree, drawn</b>Nothing. The tree lives in the page's memory and is built again each time.</div>
-      <div class="cp"><b>Node tree, built</b><code>tree/&lt;address&gt;.pt</code> for each node, <code>tree.json</code> and <code>tree-oof.json</code>, in the store's <code>models/</code>. No file holds a link.</div>
+      <div class="cp"><b>Ensemble, built</b><code>tree/&lt;address&gt;.pt</code> for each member, <code>tree.json</code> and <code>tree-oof.json</code>, in the store's models folder, <code>phi/models/</code> in the current layout. No file holds a link.</div>
     </div>
     <div class="row">
       <h3>What the tree is for</h3>
-      <div class="cs"><b>Session tree</b>Deciding who is given a session's background, notes and reports.</div>
+      <div class="cs"><b>Session tree</b>Deciding who is given a session's start background, notes and reports.</div>
       <div class="cp"><b>Call tree, drawn</b>Showing that <code>fib(n)</code> holds a whole <code>fib(n-1)</code> and a whole <code>fib(n-2)</code>.</div>
-      <div class="cp"><b>Node tree, built</b>Answering by effort. At medium one node answers, the one the task is routed to. At high every node answers and the scores are averaged.</div>
+      <div class="cp"><b>Ensemble, built</b>Answering by effort. At medium one member answers, the one whose rows carry the most weight on the task's features. At high every member answers, and their scores are z-scored and averaged.</div>
     </div>
   </div>
 
@@ -220,38 +221,36 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
     <div class="box2">
       <h3>Where they are the same idea</h3>
       <ol>
-        <li><b>A child exists because its parent made it.</b> A call makes two calls, a store is grown under a store, and a session starts a session.</li>
-        <li><b>Results travel up the link.</b> A call returns its sum to its caller. A parent ranker starts from the mean of its children's weights. A session's reports and its <code>replaces:</code> note go to the session that started it.</li>
-        <li><b>A subtree is one whole thing.</b> <code>fib(6)</code> holds a complete <code>fib(5)</code>. A reparent moves a session with every session it started, and <code>phi.py tree</code> stops printing everything under an archived session.</li>
-        <li><b>The work is at the leaves.</b> The call tree's value is its count of base cases. A leaf ranker is trained from scratch. In p4-phi a leaf is one issue, one file set, one proving test and one commit, and a top session keeps itself for orchestration.</li>
+        <li><b>Each part exists because the one above it made it.</b> A call makes two calls, a store is grown under a store, and a session starts a session.</li>
+        <li><b>Results travel up the link.</b> A call returns its sum to its caller, and a session's reports and its <code>replaces:</code> note go to its parent session. The ensemble only half does: a parent member starts from the mean of its children's weights as they stood before their fine-tuning, so with pretraining off, as it is by default, nothing a child member learned travels up.</li>
+        <li><b>A subtree is one whole thing.</b> <code>fib(6)</code> holds a complete <code>fib(5)</code>. A reparent moves a session with every session below it, and <code>phi.py tree</code> prints nothing under a session archived in the app.</li>
+        <li><b>The work is at the leaves.</b> The call tree's value is its count of base cases. In p4-phi an orchestrator hands each work step to a worker that declares the files it writes, and keeps itself for orchestration, while <code>phi.top_orchestrates</code> is on, as it is by default.</li>
       </ol>
     </div>
     <div class="box2">
       <h3>Where they differ</h3>
       <ol>
-        <li><b>A computed parent against a recorded one.</b> In phi a node's parent follows from its number or its address. In p4-phi the parent is written in <code>spawnedFrom</code>, so it can be rewritten, and the app's record can disagree with it.</li>
-        <li><b>One number against many moves.</b> <code>n</code> or <code>K</code> fixes the whole shape of a phi tree. The session tree has no shape until you start, detach, reparent and retire sessions.</li>
+        <li><b>A computed parent against a recorded one.</b> In ezexe/phi a parent follows from a call's number or a member's address. In p4-phi the parent is written in <code>spawnedFrom</code>, so it can be rewritten, and the app's record can disagree with it.</li>
+        <li><b>One number against many moves.</b> <code>n</code> or <code>K</code> fixes the whole shape of each tree of ezexe/phi. The session tree has no shape until sessions are started, detached to top level, reparented and archived.</li>
         <li><b>Sides against no sides.</b> Left and right mean different things in the call tree. Sessions under one parent have no order beyond when they were created.</li>
         <li><b>Repeats against one of each.</b> The same subtree appears many times in the call tree. Each session appears once.</li>
-        <li><b>One root against several.</b> A phi tree has one root, <code>fib(n)</code> or the address <code>1</code>. A p4-phi store has many top sessions, which relay to each other as siblings.</li>
-        <li><b>Retired whole against retired one by one.</b> A phi tree is replaced as a whole. A session leaves alone, and its outcome stays behind as a note.</li>
+        <li><b>One root against several.</b> Each tree of ezexe/phi has one root, <code>fib(n)</code> or the address <code>1</code>. A p4-phi store holds many orchestrators, siblings at the top, which message each other with <code>SendMessage</code>.</li>
+        <li><b>Replaced whole against archived one by one.</b> A tree of ezexe/phi is replaced as a whole. A session leaves alone, and its outcome stays behind as a <code>replaces:</code> note.</li>
       </ol>
     </div>
     <div class="box2 open">
       <h3>What the two sources do not say</h3>
       <ul>
-        <li>Neither tree names the other. <code>phi.jsx</code> calls its drawing the recursive Fibonacci call tree, and <code>tree.py</code> calls its tree the node tree. This page cannot tell you that one was drawn to explain the other.</li>
-        <li>The two phi trees do not have the same shape. The call tree is binary. In the address tree the root <code>1</code> gains a child at every address length, as the drawing above shows from K = 4 on.</li>
-        <li>Nothing in either repository says that p4-phi's session tree was modelled on phi's tree. The shared name is all the sources show.</li>
-        <li>The Phi Register page prints 13 as the value of <code>fib(6)</code>, which is the tree's leaf count. The function in <code>phi.md</code> returns 0 for <code>fib(0)</code>, so the leaves of that tree sum to 8. This page cannot tell you which reading the page intends.</li>
-        <li><code>build</code> in <code>tree.py</code> deletes no file. This page cannot tell you what happens to the files of a larger tree when you train a smaller one.</li>
-        <li>No trained tree was found in the store of either checkout this page was written from, so the address drawing follows <code>addresses(k)</code> and <code>parent(a)</code>, not a <code>tree.json</code> on disk.</li>
+        <li>Neither tree of ezexe/phi names the other. The Zeckendorf register page calls its drawing the call tree of the naive recursive fib(n), and the docstring of <code>tree.py</code> opens with <code>The node tree</code>. This page cannot tell you that one was drawn to explain the other.</li>
+        <li>The two trees of ezexe/phi do not have the same shape. The call tree is binary. In the ensemble the root <code>1</code> gains a child at every address length from 3 on, since no address of length 2 exists, as the drawing above shows from K = 4 on.</li>
+        <li>Nothing in either repository says that p4-phi's session tree was modelled on a tree of ezexe/phi. The shared word tree is all the sources show.</li>
+        <li>No <code>tree.json</code> was in the store this page was written against, so the address drawing follows <code>addresses(k)</code> and <code>parent(a)</code>, not a trained ensemble on disk.</li>
       </ul>
     </div>
   </div>
 
   <footer>
-    The p4-phi column is read from <code>phi.py</code>, <code>relay.py</code>, <code>starts.py</code> and the <code>phi</code> skill in <a href="https://github.com/ezexe/p4">ezexe/p4</a>. The phi columns are read from <a href="https://github.com/ezexe/phi/blob/main/.docs/phi/phi.jsx"><code>.docs/phi/phi.jsx</code></a>, <code>.docs/phi/phi.md</code> and <a href="https://github.com/ezexe/phi/blob/main/phi_rank/tree.py"><code>phi_rank/tree.py</code></a> in <a href="https://github.com/ezexe/phi">ezexe/phi</a>. Both drawings are models in your browser. Open the <a href="https://ezexe.github.io/phi/docs/phi/phi.jsx.html">Phi Register page</a> for phi's own drawing, with zoom, pan and the trees up to <code>fib(9)</code>.
+    The session tree column is read from <code>phi.py</code>, <code>relay.py</code> and <code>starts.py</code> of p4-phi in <a href="https://github.com/ezexe/p4">ezexe/p4</a>. The other two columns are read from <a href="https://github.com/ezexe/phi/blob/main/docs/phi/phi.html"><code>docs/phi/phi.html</code></a> and <a href="https://github.com/ezexe/phi/blob/main/phi_rank/tree.py"><code>phi_rank/tree.py</code></a> in <a href="https://github.com/ezexe/phi">ezexe/phi</a>. Both drawings are models in your browser. Open the <a href="https://ezexe.github.io/phi/docs/phi/phi.html">Zeckendorf register page</a> for ezexe/phi's own drawing, with zoom, pan and the trees up to <code>fib(9)</code>.
   </footer>
 </div>
 
@@ -275,14 +274,14 @@ function fit(t,text,max){t.textContent=text;if(t.getComputedTextLength()<=max)re
 function key(g,fn){g.addEventListener("click",fn);g.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();fn()}})}
 
 /* ---------- the session tree: made by moves, the parent recorded ---------- */
-var PHI="phi.py",TITLES=["Build the parser","Write the proving test","Check the fix against the issue","Trace the slow start","Audit the hook timeouts"];
+var PHI="phi.py",TITLES=["Build the parser","Write the regression test","Check the fix against the issue","Trace the slow start","Audit the hook timeouts"];
 var S,stree=$("stree");
 function sLoad(){
   S={n:{},order:[],seq:0,sel:null,t:0};
   var a=sMk("Plan the release",null,"not shown done"),b=sMk("Build the changelog writer",a,"not shown done");
   sMk("Check the version bump",a,"done");sMk("Docs site upkeep",null,"not shown done");
   S.sel=b;
-  sSay("Select a session, then make a move. Each move changes one link, and phi writes it down.","phi.py tree");
+  sSay("Select a session, then make a move. Each move changes one link, and p4-phi writes it down.","phi.py tree");
 }
 function sMk(title,par,state){var id="s"+(++S.seq);S.n[id]={id:id,title:title,par:par||null,state:state||"no turn yet",retired:false};S.order.push(id);return id}
 function sKids(id){return S.order.filter(function(k){return S.n[k].par===id})}
@@ -292,7 +291,7 @@ function sDraw(){
   var rows=[];(function walk(ids,d){ids.forEach(function(id){rows.push({id:id,d:d});walk(sKids(id),d+1)})})(sKids(null),0);
   var Ht=TOP+rows.length*(H+GAP)+2;
   stree.setAttribute("viewBox","0 0 "+W+" "+Ht);wipe(stree);
-  stree.appendChild(s("text",{class:"rootlabel",x:6,y:15},"ROOT · top sessions are siblings"));
+  stree.appendChild(s("text",{class:"rootlabel",x:6,y:15},"ORCHESTRATORS · siblings at the top"));
   var pos={};rows.forEach(function(r,i){var x=X0+r.d*IND;pos[r.id]={x:x,y:TOP+i*(H+GAP),w:W-4-x}});
   var tops=sKids(null);
   if(tops.length){var dd="M10 22 V"+(pos[tops[tops.length-1]].y+H/2);tops.forEach(function(k){dd+=" M10 "+(pos[k].y+H/2)+" H"+X0});stree.appendChild(s("path",{class:"rail",d:dd}))}
@@ -300,7 +299,7 @@ function sDraw(){
     stree.appendChild(s("path",{class:"link",d:"M"+sx+" "+(p.y+H)+" V"+(ey-8)+" Q"+sx+" "+ey+" "+(sx+8)+" "+ey+" H"+c.x}))});
   rows.forEach(function(r){
     var n=S.n[r.id],p=pos[r.id],g=s("g",{class:"node"+(S.sel===r.id?" sel":"")+(n.retired?" retired":""),transform:"translate("+p.x+","+p.y+")",tabindex:0,role:"button"});
-    var meta=(n.retired?"done, retired to its parent":n.state)+(n.par?"":" · a top session");
+    var meta=(n.retired?"done, counted as archived":n.state)+(n.par?"":" · an orchestrator");
     g.setAttribute("aria-label",n.title+", "+meta);
     g.appendChild(s("rect",{class:"box",width:p.w,height:H,rx:10}));
     var t=s("text",{class:"t",x:12,y:19}),m=s("text",{class:"m",x:12,y:34});g.appendChild(t);g.appendChild(m);
@@ -313,17 +312,17 @@ function sDraw(){
 }
 $("sChild").addEventListener("click",function(){var p=S.n[S.sel],title=TITLES[(S.t++)%TITLES.length];
   if(p.state==="no turn yet")p.state="not shown done";sMk(title,p.id);
-  sSay("\""+p.title+"\" started \""+title+"\". phi wrote the parent's id into the child's spawnedFrom.","mcp__ccd_session__start_session {\"title\": \""+title+"\", \"context\": \"fresh\", …}",true);sDraw()});
+  sSay("\""+p.title+"\" started \""+title+"\". The app records who started it, and p4-phi keeps that as spawnedFrom in the worker's session.json.","mcp__ccd_session__start_session {\"title\": \""+title+"\", \"context\": \"fresh\", …}",true);sDraw()});
 $("sDetach").addEventListener("click",function(){var n=S.n[S.sel];n.par=null;
-  sSay("\""+n.title+"\" is a top session now, with every session it started still under it. phi rewrote its spawnedFrom.",PHI+" detach <sessionId>");sDraw()});
+  sSay("\""+n.title+"\" is detached to top level: it is an orchestrator now, with every session below it still under it. p4-phi rewrote spawnedFrom in its session.json, and the app's sidebar keeps its own nesting.",PHI+" detach <sessionId>");sDraw()});
 $("sDone").addEventListener("click",function(){var n=S.n[S.sel];n.state="done";
-  if(n.par){n.retired=true;sSay("\""+n.title+"\" retired alone. Its outcome stays on \""+S.n[n.par].title+"\" as a replaces: note, and the node waits for ezexe to archive it.",PHI+" done \"<what was run and what it showed>\"")}
-  else sSay("\""+n.title+"\" is done. A top session has no parent to retire to, so it closes with an archive button for ezexe.",PHI+" done \"<what was run and what it showed>\"");sDraw()});
+  if(n.par){n.retired=true;sSay("\""+n.title+"\" is shown done. Its brief said report when done, so at the end of this turn p4-phi counts it as archived, alone: its outcome stays on \""+S.n[n.par].title+"\" as a replaces: note, and ezexe archives it in the app.",PHI+" done \"<what was run and what it showed>\"")}
+  else sSay("\""+n.title+"\" is done. An orchestrator has no parent session, so it ends its turn with the app's archive button for ezexe to press.",PHI+" done \"<what was run and what it showed>\"");sDraw()});
 $("sReset").addEventListener("click",function(){sLoad();sDraw()});
 
-/* ---------- phi's trees: one number, the parent computed ---------- */
+/* ---------- the trees of ezexe/phi: one number, the parent computed ---------- */
 var P={kind:"call",num:{call:5,addr:5},sel:null},ptree=$("ptree");
-/* the call tree, as buildTree in .docs/phi/phi.jsx makes it: fib(k) calls fib(k-1) on the left, fib(k-2) on the right */
+/* the call tree, as buildTree in docs/phi/phi.html of ezexe/phi makes it: fib(k) calls fib(k-1) on the left, fib(k-2) on the right */
 function callTree(n,path){var o={n:n,id:path,label:n<=1?String(n):"("+n+")",kids:[]};if(n>1)o.kids=[callTree(n-1,path+"L"),callTree(n-2,path+"R")];return o}
 /* the address tree, as addresses(k) and parent(a) in phi_rank/tree.py make it */
 function addresses(k){var out=[],m=1;while(out.length<k){var row=[];for(var i=0;i<(1<<m);i++){var a=(i.toString(2)+"").padStart(m,"0");if(a[0]==="1"&&a[m-1]==="1"&&a.indexOf("11")<0)row.push(a)}row.sort();out=out.concat(row);m++}return out.slice(0,k)}
@@ -350,14 +349,14 @@ function pDraw(){
   });
   var leaves=all.filter(function(x){return !x.kids.length}).length,ones=all.filter(function(x){return x.n===1}).length,said;
   if(call){
-    if(sel&&sel.n>1){var u=Object.keys(lit).length;said="This fib("+sel.n+") holds a whole fib("+(sel.n-1)+") on its left and a whole fib("+(sel.n-2)+") on its right: "+u+" nodes in all. Nobody put them there. They follow from the number "+sel.n+".";}
+    if(sel&&sel.n>1){var u=Object.keys(lit).length;said="This fib("+sel.n+") holds a whole fib("+(sel.n-1)+") on its left and a whole fib("+(sel.n-2)+") on its right: "+u+" calls in all. Nobody put them there. They follow from the number "+sel.n+".";}
     else if(sel)said="This is a base case, fib("+sel.n+"). It makes no call, so it is a leaf.";
-    else said="fib("+num+") makes "+all.length+" calls. "+leaves+" of them are leaves: "+ones+(ones===1?" one":" ones")+" and "+(leaves-ones)+(leaves-ones===1?" zero":" zeros")+". Select a node to see the smaller tree it holds.";
+    else said="fib("+num+") makes "+all.length+" calls. "+leaves+" of them are leaves: "+ones+(ones===1?" one":" ones")+" and "+(leaves-ones)+(leaves-ones===1?" zero":" zeros")+". Select a call to see the smaller tree it holds.";
     $("pCon").textContent="buildTree("+num+")";$("pCon").className="con call";
   }else{
-    if(sel){var p=parentOf(sel.id);said="The node "+sel.id+(p?" was grown under "+p+", which parent(a) reads from the address alone.":" is the root, the store itself.")+" It is trained "+nth(sel.shard)+" of "+num+", "+(sel.kids.length?"starting from the mean of its children's weights.":"starting from scratch.")+" Its file is models/tree/"+sel.id+".pt.";}
-    else said="K = "+num+" gives the first "+num+" address"+(num===1?"":"es")+", shortest first. The deepest node is trained first, on the oldest shard of the store's tracked text. Select a node to see where it starts from.";
-    $("pCon").textContent="python -m phi_rank.tree train --p4 <p4 root> --pairs pairs.jsonl --k "+num;$("pCon").className="con";
+    if(sel){var p=parentOf(sel.id);said="The member at "+sel.id+(p?" is grown under "+p+", which parent(a) reads from the address alone.":" is the root, the store itself.")+" It is trained "+nth(sel.shard)+" of "+num+", "+(sel.kids.length?"starting from the mean of its children's weights before their fine-tuning.":"starting from scratch.")+" Its file is phi/models/tree/"+sel.id+".pt.";}
+    else said="K = "+num+" gives the first "+num+" address"+(num===1?"":"es")+", shortest first. The deepest member is trained first, and every member is fine-tuned on every labelled pool. Select an address to see where its training starts.";
+    $("pCon").textContent="python -m phi_rank.tree train --p4 <store> --pairs pairs.jsonl --k "+num;$("pCon").className="con";
   }
   $("pSaid").textContent=said;
 }
