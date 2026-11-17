@@ -987,7 +987,8 @@ def route_text(home, sid, text, base):
 
 def shards_line(home, sid):
     """The other live sessions' owned paths and the files their briefs declared and still hold, in a few words, for
-    the standing instruction; '' when none holds any. The address book, book.py, lists every session whole."""
+    the standing instruction, at most SHARDS_CHARS, with the count of the sessions left out and the address book's
+    page, which lists every session whole; '' when none holds any."""
     import book
     every = _sessions(home)
     out = []
@@ -997,7 +998,17 @@ def shards_line(home, sid):
         held = shard_of(s) + [f for f in book.held_files(home, s) if f not in shard_of(s)]
         if held:
             out.append(f"\"{book.title(oid, s)}\" `{oid}`: {', '.join(held[:3])}")
-    return "; ".join(out[:8])
+    shown, used = [], 0
+    for x in out:
+        if used + len(x) + 2 > SHARDS_CHARS and shown:
+            break
+        shown.append(x)
+        used += len(x) + 2
+    left = len(out) - len(shown)
+    return "; ".join(shown) + (f"; and {left} more on {book.page_path(home, sid)}" if left else "")
+
+
+SHARDS_CHARS = 600               # of the owned-paths list in the standing instruction; the address book holds the rest
 
 
 # --- fork or fresh -----------------------------------------------------------------------------------------------------

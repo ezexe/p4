@@ -398,6 +398,22 @@ class Supervisor(unittest.TestCase):
         self.assertFalse(book.ezexes("See ezexe/p4#245 and https://github.com/ezexe/p4/issues/245 about the flush"))
         self.assertFalse(book.ezexes("Read E:/work/push/flush.py and src/merge/rows.py about the rows"))
 
+    def test_the_owned_paths_list_and_a_starts_book_line_keep_to_their_caps(self):
+        t = self.t
+        self.tree()
+        for k in range(12):
+            sid = f"local_cap{k:05d}"
+            CLI.setdefault(sid, f"4444{k:04d}-0000-4000-8000-000000000000")
+            t.record(sid, started_by=TOP, title=f"the capped writer number {k} of the narwhal exporter's batches")
+            t.say(sid, f"Task:\nWrite batch {k}.\nFiles: src/batch{k}/rows.py, src/batch{k}/flush.py")
+        listed = relay.shards_line(t.p4, KID2)
+        self.assertLessEqual(len(listed), relay.SHARDS_CHARS + 200)
+        self.assertIn(f"more on {book.page_path(t.p4, KID2)}", listed, "the rest are on the page")
+        self.assertLessEqual(len(book.line(t.p4, t.session(KID2))), book.LINE_CHARS + 200)
+        again = book.line(t.p4, t.session(KID2), named=True)
+        self.assertIn(f"unchanged since it last looked, is whole on {book.page_path(t.p4, KID2)}", again,
+                      "a start names the page even with nothing changed")
+
     def test_issues_named_reads_slugs_bare_numbers_and_links_and_no_path_or_anchor(self):
         self.assertEqual(book.issues_named("ezexe/p4#245 and #236, https://github.com/ezexe/phi/issues/12 and "
                                            "[a](#local_x) and C#"), [("ezexe/phi", 12), ("ezexe/p4", 245), ("", 236)])

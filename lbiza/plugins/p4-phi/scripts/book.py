@@ -32,8 +32,8 @@ import starts
 
 PAGE = "book.md"
 STATE = "book.json"
-SHOWN = 12                       # entries in the line at a session's first look; the rest are on the page
-LINE_CHARS = 2600                # of the line beside a message
+SHOWN = 8                        # entries in the line at a session's first look; the rest are on the page
+LINE_CHARS = 1500                # of the line beside a message or a start; the page holds the rest
 PATHS_SHOWN = 4                  # of one entry's files or owned paths, in the line
 ISSUE_RE = re.compile(r"(?<![\w/#])(?:([A-Za-z0-9][\w.-]*/[\w.-]+))?#(\d{1,6})\b")
 ISSUE_URL = re.compile(r"github\.com/([\w.-]+/[\w.-]+)/(?:issues|pull)/(\d+)", re.I)
@@ -294,10 +294,11 @@ def write_page(home, s, book, store=""):
     return path
 
 
-def line(home, s, store="", whole=False):
+def line(home, s, store="", whole=False, named=False):
     """The book beside a message: at the session's first look, or with `whole`, its addresses and entries, cut to
     SHOWN with the rest on the page; after that only the entries that changed or left since it last looked, and ''
-    when none did. Each time it names the page."""
+    when none did, or with `named`, as beside a start's standing instruction, the page alone. Each time it names
+    the page."""
     sid = str(s.get("sessionId") or "") if isinstance(s, dict) else ""
     if not sid or not home:
         return ""
@@ -316,7 +317,8 @@ def line(home, s, store="", whole=False):
     state["seen"] = now
     relay._write_json(_state_path(home, sid), state)
     if not first and not shown and not left:
-        return ""
+        return (f"phi (p4-phi): this session's address book, unchanged since it last looked, is whole on {page}: "
+                + addresses(home, s, book, store)) if named else ""
     if first:
         head = (f"phi (p4-phi): this session's address book, whole on {page} and rewritten when an entry changes: "
                 + addresses(home, s, book, store))

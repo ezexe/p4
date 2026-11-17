@@ -1387,9 +1387,9 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
         told = s["newTaskToldAt"] = {}
     import book                                    # the address book: who holds each file, issue and piece of work
 
-    def plus(text, whole=False):
+    def plus(text, named=False):
         try:
-            handed = book.line(home, s, me.store, whole=whole)
+            handed = book.line(home, s, me.store, named=named)
         except Exception:  # noqa: BLE001  a book it cannot write never costs the message its other lines
             handed = ""
         new_task_text.book_line = handed           # kept when the gate's verdict drops the standing line; never
@@ -1436,7 +1436,7 @@ def new_task_text(home, s, me, user=True, again=False, req="", brief=False):
                    and not controls.is_puppeteer(s, me.store) else "")
                 + (" " + caps_text(home, s) if caps_text(home, s) else ""))
         keep_standing(home, s["sessionId"], "A message about something else", full)
-        return plus(full, whole=True)
+        return plus(full, named=True)  # the changes since the session last looked, or the page alone
     if not user:
         RAN["new_task"] = "book"                   # the book's changes alone: no standing line in this message
         return plus("")
