@@ -1760,7 +1760,8 @@ def closing_commits(home, sid, s):
             parts = rec.strip().split("\x1f")
             if len(parts) < 3:
                 continue
-            issues = list(dict.fromkeys(CLOSES.findall(parts[2])))
+            import issues as issues_mod             # its closing keywords: whole words, never after a negation
+            issues = issues_mod.closing_refs(parts[2])
             if issues:
                 out.append((path, parts[0], parts[1], issues))
     return out

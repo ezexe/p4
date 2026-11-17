@@ -324,9 +324,11 @@ class ThreeSessions(unittest.TestCase):
         g = ["git", "-C", self.work, "-c", "user.name=t", "-c", "user.email=t@t"]
         subprocess.run(g + ["commit", "-qam", "lib: fix x\n\nCloses #5"], check=True, capture_output=True)
         self.edit_uncommitted(A, ("lib", "y.py"), "c2")
-        subprocess.run(g + ["commit", "-qam", "lib: tidy y"], check=True, capture_output=True)
+        subprocess.run(g + ["commit", "-qam", "lib: tidy y\n\nThis does not close #6, and a prefix #7 is no keyword."],
+                       check=True, capture_output=True)
+        self.edit_uncommitted(A, ("lib", "x.py"), "c2b")             # a turn whose head is past both commits
         self.assertEqual([c[3] for c in relay.closing_commits(t.p4, A, relay._session(t.p4, A))], [["#5"]],
-                         "the commit is there to be named")
+                         "the closing commit is there to be named, and a negated or prefixed keyword closes nothing")
         self.assertEqual(t.cli(A, "done", "test_x.py: 3 tests OK").returncode, 0)
         self.assertEqual(t.stop(A, "finish", report="Fixed x; suites green.", uuid="c3").returncode, 0)
         self.assertNotIn("close issues", context(t.say(TOP, "what next?")))
@@ -954,7 +956,11 @@ class ForkOrFresh(ThreeSessions):
                     "gh api repos/o/r/merges -f base=main -f head=fix", "gh api -X PUT repos/o/r/pulls/3/merge",
                     'bash -lc "git push"', 'iex "git push"', "{ git push; }", "if x; then git push; fi",
                     "sudo -u x git push", "gh api -XDELETE repos/o/r/git/refs/heads/x",
-                    "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"P\"}) { a } }'"):
+                    "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"P\"}) { a } }'",
+                    "gh api graphql -f query='\nmutation {\n  mergePullRequest(input: {pullRequestId: \"P\"}) {\n"
+                    "    clientMutationId\n  }\n}'",
+                    'git -C "C:/Users/a b/repo" push', 'git -c "user.name=a b" push', "cmd /c git push",
+                    'Invoke-Expression "git push"', 'git commit -qm "x" && git push'):
             out = guard(B, cmd)
             self.assertIsNotNone(out, cmd)
             self.assertEqual(out["permissionDecision"], "ask", cmd)
@@ -964,7 +970,8 @@ class ForkOrFresh(ThreeSessions):
         self.assertEqual(json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"], "ask", "a PowerShell push")
         gate = os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh")
         for k, cmd in enumerate(("gh pr merge 12", "gh api -X PATCH repos/o/r/git/refs/heads/main -f sha=abc",
-                                 "/usr/bin/git push")):
+                                 "/usr/bin/git push", "/usr/bin/git pull", "/usr/bin/git rebase main",
+                                 "C:\\Git\\bin\\git rebase main")):
             body = {"session_id": CLI[B], "cwd": self.t.proj, "hook_event_name": "PreToolUse", "tool_name": "Bash",
                     "tool_input": {"command": cmd}, "tool_use_id": f"toolu_gate000{k}"}
             self.assertTrue(inproc.gate(json.dumps(body).encode(), self.t.proj), f"the in-process gate: {cmd}")
@@ -978,6 +985,11 @@ class ForkOrFresh(ThreeSessions):
         self.assertIsNone(guard(B, "git status"), "a status reads")
         self.assertIsNone(guard(B, "echo push"), "an echo lands nothing")
         self.assertIsNone(guard(B, 'git commit -qm "say git push to land it"'), "a message naming a push")
+        self.assertIsNone(guard(B, 'git commit -q --message="then git push"'), "a --message= value is data")
+        self.assertIsNone(guard(B, 'grep -rn "git push" docs/'), "a quoted pattern is data")
+        self.assertIsNone(guard(B, 'echo "then git pull"'), "a quoted echo is data")
+        self.assertIsNone(guard(B, 'rg "gh pr merge"'), "a quoted search is data")
+        self.assertIsNone(guard(B, "cat > n.md <<'EOF'\nrun git push, then gh pr merge 3\nEOF"), "a heredoc is data")
         self.assertIsNone(guard(B, "gh api graphql -f query='query { repository(name: \"x\") { id } }'"), "a query")
         self.assertIsNone(guard(B, "gh pr view 12"), "a view lands nothing")
         self.assertIsNone(guard(B, "gh api repos/o/r/git/refs/heads/main"), "reading a ref lands nothing")

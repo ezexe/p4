@@ -142,70 +142,95 @@ def writing(text):
 
 LANDS = ("push", "merge", "rebase", "pull")
 MOVES = LANDS + ("fetch",)                         # what may bring a closing commit onto the default branch here
-WORDS = re.compile(r"\"[^\"]*\"|'[^']*'|[^\s\"']+")
-BREAKS = re.compile(r"([;{}()&|`]+)")
 GIT_VALUED = {"-c", "-C", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"}
-MESSAGE = re.compile(r"-[A-Za-z]*m|--message|-[A-Za-z]*F|--file")
-GH = r"(?<![\w.-])gh(?:\.exe)?[\"']?\s+"
-GH_MERGE = re.compile(GH + r"pr\s+merge\b", re.I)
-GH_API = re.compile(GH + r"api\b([^\n;&|]*(?:'[^']*'|\"[^\"]*\")?[^\n;&|]*)", re.I)
+SEPS = {";", "&", "&&", "|", "||", "(", ")", ";;", "|&", "{", "}", "\n"}
+HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)([A-Za-z_][\w.-]*)\1([^\n]*)\n.*?\n[ \t]*\2[ \t]*(?=\n|$)", re.S)
+SH_LIKE = {"bash", "sh", "zsh", "dash", "ksh", "pwsh", "powershell"}
+EVALS = {"iex", "invoke-expression"}
 
 
-def _words(cmd, depth=0):
-    """The words of a shell line, anywhere in it: a quoted span's words are read as words of the line, so `bash -lc
-    "git push"` and `iex "git push"` read git push; a separator, brace or paren becomes ";". A commit's or tag's
-    message, the word after -m or --message, stays one opaque word, so a message that names a push lands nothing."""
-    out, msg = [], False
-    for m in WORDS.finditer(str(cmd or "")):
-        tok = m.group(0)
-        if tok[0] in "\"'":
-            inner = tok[1:-1]
-            out += [inner] if msg or depth >= 3 else _words(inner, depth + 1)
-            msg = False
-            continue
-        for part in BREAKS.split(tok):
-            if part:
-                out.append(";" if BREAKS.fullmatch(part) else part)
-        msg = bool(MESSAGE.fullmatch(tok)) and any(w.lower() in ("commit", "tag") for w in out[-8:])
-    return out
+def _tokens(cmd):
+    """A shell line's tokens with each quoted string kept whole and its quotes taken off, as shlex reads it in posix
+    mode, with no escape character, so a Windows path keeps its backslashes, and no comment character. Operators
+    stand as tokens of their own. A heredoc's body is data and is left out. Unbalanced quotes fall back to the line
+    split at whitespace."""
+    import shlex
+    text = HEREDOC.sub(lambda m: " " + m.group(3), str(cmd or "")).replace("`", " ; ")
+    try:
+        lex = shlex.shlex(text, posix=True, punctuation_chars=";&|()")
+        lex.whitespace_split, lex.escape, lex.commenters = True, "", ""
+        return list(lex)
+    except ValueError:
+        return text.split()
 
 
 def _exe(tok):
     """A program's own name, the last part of its path, lowercased, without `.exe`."""
-    base = re.split(r"[\\/]", tok.strip())[-1].lower()
+    base = re.split(r"[\\/]", str(tok).strip())[-1].lower()
     return base[:-4] if base.endswith(".exe") else base
 
 
-def landing(cmd, verbs=LANDS):
-    """What a shell line runs that lands work, '' for none: any place in it where git or git.exe, by the last part
-    of its path, is followed past its own options by one of `verbs`; `gh pr merge`; a `gh api` call with a method
-    other than GET; or a graphql mutation that names a merge or a ref. Wrappers, shells, braces and conditionals need
-    no case of their own, since the words are read wherever they stand: `git status`, `git log --grep push` and `echo
-    push` land nothing."""
-    words = _words(cmd)
-    for i, w in enumerate(words):
-        if _exe(w) != "git":
-            continue
-        k = i + 1
-        while k < len(words) and words[k].startswith("-"):
-            k += 2 if words[k] in GIT_VALUED else 1
-        if k < len(words) and words[k].lower() in verbs:
-            return f"git {words[k].lower()}"
-    if "merge" not in verbs:
+def _gh_api(args):
+    """'gh api' when a `gh api` call's arguments, up to the end of its command, land work, else ''."""
+    if args[:1] and args[0].lower() == "graphql":
+        if any(re.search(r"\bmutation\b", a, re.I) and re.search(r"merge|ref", a, re.I) for a in args[1:]):
+            return "gh api graphql"
         return ""
-    text = str(cmd or "")
-    if GH_MERGE.search(text):
-        return "gh pr merge"
-    for m in GH_API.finditer(text):
-        rest = m.group(1)
-        if re.match(r"\s*[\"']?graphql\b", rest, re.I):
-            if re.search(r"\bmutation\b", rest, re.I) and re.search(r"merge|ref", rest, re.I):
-                return "gh api graphql"
-            continue
-        said = re.search(r"(?:^|\s)(?:-X|--method)(?:\s+|=)?[\"']?([A-Za-z]+)", rest)
-        fields = re.search(r"(?:^|\s)(?:-[fF]|--field|--raw-field|--input)(?:\s|=)", rest)
-        if (said.group(1).upper() if said else "POST" if fields else "GET") != "GET":
-            return "gh api"
+    method, fields = "", False
+    for k, a in enumerate(args):
+        m = re.match(r"^(?:-X|--method=?)(\w*)$", a)
+        if m:
+            method = (m.group(1) or (args[k + 1] if k + 1 < len(args) else "")).upper()
+        elif re.match(r"^(?:-[fF]|--field|--raw-field|--input)(?:=|$)", a):
+            fields = True
+    return "gh api" if (method or ("POST" if fields else "GET")) != "GET" else ""
+
+
+def landing(cmd, verbs=LANDS, depth=0):
+    """What a shell line runs that lands work, '' for none. Its tokens are read with each quoted string whole, so a
+    quoted argument such as a commit message, a grep pattern or a path with spaces is data: git or git.exe, by the
+    last part of its path, followed past its own options by one of `verbs`; `gh pr merge`; a `gh api` call with a
+    method other than GET; or a graphql mutation that names a merge or a ref. A quoted string is read again as a
+    command only where it is the script of bash, sh, zsh, pwsh or powershell after -c, -lc or -Command, of cmd after
+    /c or /k, or of iex or Invoke-Expression."""
+    toks = _tokens(cmd)
+    for i, w in enumerate(toks):
+        exe, nxt = _exe(w), toks[i + 1:]
+        if depth < 3 and exe in SH_LIKE:
+            for k, a in enumerate(nxt[:4]):
+                if re.fullmatch(r"-[a-z]*c|-command|-c(?:ommand)?", a, re.I) and k + 1 < len(nxt):
+                    hit = landing(nxt[k + 1], verbs, depth + 1)
+                    if hit:
+                        return hit
+        elif depth < 3 and exe == "cmd":
+            for k, a in enumerate(nxt[:4]):
+                if a.lower() in ("/c", "/k"):
+                    hit = landing(" ".join(nxt[k + 1:]), verbs, depth + 1)
+                    if hit:
+                        return hit
+        elif depth < 3 and exe in EVALS and nxt:
+            hit = landing(nxt[0], verbs, depth + 1)
+            if hit:
+                return hit
+        elif exe == "git":
+            k = 0
+            while k < len(nxt) and nxt[k].startswith("-") and nxt[k] not in SEPS:
+                k += 2 if nxt[k] in GIT_VALUED else 1
+            if k < len(nxt) and nxt[k].lower() in verbs:
+                return f"git {nxt[k].lower()}"
+        elif exe == "gh" and "merge" in verbs:
+            args = []
+            for a in nxt:
+                if a in SEPS:
+                    break
+                args.append(a)
+            low = [a.lower() for a in args]
+            if low[:2] == ["pr", "merge"]:
+                return "gh pr merge"
+            if low[:1] == ["api"]:
+                hit = _gh_api(args[1:])
+                if hit:
+                    return hit
     return ""
 
 
