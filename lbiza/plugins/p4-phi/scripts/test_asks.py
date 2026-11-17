@@ -67,9 +67,8 @@ ASK3 = "Publish the exporter's release notes on the releases page once the flush
 WAIT = "Shall I publish the notes now, or wait for the retry to land first?"
 
 
-class Ledger(unittest.TestCase):
-    """A puppeteer `PUP` controls `TOP` and `TOP3`. ezexe sends it three requests: the first it routes to `TOP`, the
-    second to `TOP3`, and the third it asks ezexe about."""
+class Trees(unittest.TestCase):
+    """A puppeteer `PUP` controls `TOP` and `TOP3`, each of which ended its first turn."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -97,6 +96,11 @@ class Ledger(unittest.TestCase):
         r = inproc.run(["sh", os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh"), "lookup-check"],
                        input=json.dumps(body), capture_output=True, text=True, timeout=60, env=t.env(host))
         self.assertEqual(r.returncode, 0, r.stderr)
+
+
+class Ledger(Trees):
+    """ezexe sends the puppeteer three requests: the first it routes to `TOP`, the second to `TOP3`, and the third it
+    asks ezexe about."""
 
     def test_three_requests_are_three_rows_with_their_holders_and_states_and_the_turn_names_the_page(self):  # 247
         t = self.t
@@ -133,6 +137,30 @@ class Ledger(unittest.TestCase):
         t.say(PUP, "How are the exporter and importer coming along at the moment overall")
         self.assertEqual(asks.rows(t.p4, PUP), [])
         self.assertNotIn("ezexe's requests to this puppeteer", context(t.say(PUP, "and now?")))
+
+
+CLOSING = ("Landed the flush retry for the narwhal exporter and pushed main; the importer's quote parser is next in "
+           "its queue, and nothing waits on ezexe.")
+
+
+class PuppeteerRouting(Trees):
+    """The puppeteer's own wrap-up and orchestration are read as such, never as a request for a new orchestrator."""
+
+    def test_the_puppeteers_closing_report_and_its_go_to_a_controlled_session_draw_no_start_draft(self):  # 247
+        t = self.t
+        t.stop(PUP, "Control the exporter and the importer trees", report=CLOSING, uuid="c1")
+        self.assertNotIn(DRAFT, context(t.say(PUP, CLOSING)), "its own closing report, come back")
+        self.assertNotIn(DRAFT, context(t.say(PUP, f"Go: `{TOP}` can now build the retry writer for the flush "
+                                                   f"batches and land it")), "a go to a controlled session")
+        self.assertNotIn(DRAFT, context(t.say(PUP, "Relay to \"Build the importer\": add the quote handling to "
+                                                   "the parser of the input rows")), "a relay to a controlled session")
+        self.assertIn(DRAFT, context(t.say(PUP, "Build a billing dashboard with charts for the monthly invoices of "
+                                                "each customer account")), "a new topic is still drafted")
+
+    def test_a_message_route_down_sends_to_a_controlled_topic_draws_no_start_draft(self):              # 230
+        ctx = context(self.t.say(PUP, "Write a page about the narwhal exporter's ports table and its rows"))
+        self.assertIn("reads as work on the topic \"Build the narwhal exporter\"", ctx)
+        self.assertNotIn(DRAFT, ctx)
 
 
 if __name__ == "__main__":

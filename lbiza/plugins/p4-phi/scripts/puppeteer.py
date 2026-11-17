@@ -969,6 +969,36 @@ def readings_of(req):
     return [a, b] if a and b and a.lower() != b.lower() else []
 
 
+OWN_LEAD = re.compile(r"^\W*(?:go\b|go ahead\b|landed\b|pushed\b|merged\b|closed\b|done\b|finished\b|shipped\b|"
+                      r"relay(?:ed)?\b|forward(?:ed)?\b|sent\b|reported\b|report from\b|reports? of\b|status\b|recap\b|"
+                      r"summary\b)", re.I)
+OWN_SHARE = 0.6                  # of a message's content words that its last report holds, for it to be that report
+
+
+def own_message(home, s, req):
+    """True for a message to a puppeteer that is its own orchestration rather than a request for new work: one
+    controls.route_down sends to a controlled session's topic (#230), one that names a controlled session by its id
+    or its full title, as a go or a relay does, one that opens with an outcome, a go, a relay or a report, or one
+    whose words are mostly its own last report coming back. Such a message is drafted no start."""
+    phi = _phi()
+    ctl = phi.controls
+    text = str(req or "")
+    if ctl.route_down(s, text):
+        return True
+    low = " ".join(text.split()).lower()
+    for e in ctl.controlled(s):
+        k = e["sessionId"]
+        name = " ".join(str(ctl.full_title(k) or "").split()).lower()
+        if k.lower() in low or (len(name) >= 12 and name in low):
+            return True
+    if OWN_LEAD.search(text):
+        return True
+    said = words(text)
+    turns = phi.load_turns(home, s["sessionId"])
+    last = words(turns[-1].get("report")) if turns else set()
+    return bool(said and last and len(said & last) >= max(QUICK_WORDS, OWN_SHARE * len(said)))
+
+
 def prompty(home, s, req, base):
     """Routing: ezexe's message read against the records the ledger is built from. It returns the paths and words
     the message carries, whether it is work at all, the live session that is its area's code owner, the running
@@ -1752,6 +1782,8 @@ def on_prompt(home, s, req, base, transcript_bytes=0):
         _, found, _ = meta_pass(home)
         parts.append(meta_text(home, s, found))
     refresh(home, s["sessionId"])
+    if _phi().controls.controlled(s) and own_message(home, s, req):
+        return "\n\n".join(p for p in parts if p), ""   # the puppeteer's own orchestration: no start draft
     read = prompty(home, s, req, base)
     if not read["work"] or (read["own"] and not read["owner"] and not read["readings"]) \
             or (relay._parent(s) and not read["within"]):       # a child hands another topic up; it drafts none
