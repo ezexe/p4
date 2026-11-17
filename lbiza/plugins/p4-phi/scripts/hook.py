@@ -15,9 +15,16 @@ event and matcher hooks/hooks.json runs it on, and what it does.
                  index up to date.
                  It prints nothing unless ezexe pinned rules, and then the block `Standing rules from ezexe:` of
                  at most PINNED_CHARS characters as `additionalContext`.
-  recall         UserPromptSubmit. The retrieval lines that `injected` lets through as `additionalContext`, with
-                 said.py's handles and instruction unless `recall.said.mode` is off, and nothing when it lets none
-                 through. It opens the message's row and logs what retrieval found, shown or held back.
+  settings       SessionStart, every source, and ConfigChange, matcher `local_settings|project_settings|user_settings`.
+                 catchup.settings_hook: at a start the cheap comparison of the running Claude Code binary, the p4
+                 plugins' versions and the store's `claude` section with p4conf's record, and on any change
+                 p4conf.keep_settings and, for a newer Claude Code, the changelog read in a process of its own; at
+                 a ConfigChange keep_settings on the keys the record owns, never a block. One `systemMessage`
+                 naming a key a store wants that p4 never writes; nothing otherwise.
+  recall         UserPromptSubmit. A line for each change of Claude Code the changelog read found, once, then the
+                 retrieval lines that `injected` lets through as `additionalContext`, with said.py's handles and
+                 instruction unless `recall.said.mode` is off, and nothing when it lets none through. It opens the
+                 message's row and logs what retrieval found, shown or held back.
   agent          PreToolUse, matcher `Agent`. `updatedInput`: the Agent call's input with its `prompt` extended by
                  phi.py's text for the subagent and by the retrieval lines under "Notes from this repo's memory:";
                  nothing when neither adds a line.
@@ -91,6 +98,9 @@ phi/models/lookups.db*
 phi/models/view/
 phi/models/*.tmp
 .layout.lock
+.settings.lock
+claude-settings.json
+phi/claude-code-watch.pending.json*
 phi/sessions/*/log.jsonl
 phi/sessions/*/session.md
 phi/sessions.md
@@ -352,6 +362,21 @@ def h_layout(payload):
 # --- `recall`, on UserPromptSubmit -----------------------------------------------------------------------
 
 def h_recall(payload):
+    """The retrieval lines, and before them a line for each change the changelog read found, taken once."""
+    out = _recall(payload)
+    p4 = p4_of(payload)
+    if not os.path.exists(os.path.join(p4, "phi", "claude-code-watch.pending.json")):
+        return out
+    import catchup
+    watch = catchup.claim_watch(p4)
+    if not watch:
+        return out
+    hso = dict((out or {}).get("hookSpecificOutput") or {"hookEventName": "UserPromptSubmit"})
+    hso["additionalContext"] = "\n".join(watch + [x for x in (hso.get("additionalContext"),) if x])
+    return {**(out or {}), "hookSpecificOutput": hso}
+
+
+def _recall(payload):
     """The retrieval lines for the submitted message, beside it. The hook runs on every message, so its budget is
     300 ms from the start of `sh hooks/recall-hook.sh recall` to its answer, on an index of about 5,000 documents whose
     index is fresh; RecallLatency in test_hooks.py asserts it."""
@@ -668,7 +693,12 @@ def h_catch_up(payload):
     return catchup.hook(payload)
 
 
-HANDLERS = {"catch-up": h_catch_up, "layout": h_layout, "recall": h_recall, "agent": h_agent,
+def h_settings(payload):
+    import catchup
+    return catchup.settings_hook(payload)
+
+
+HANDLERS = {"catch-up": h_catch_up, "settings": h_settings, "layout": h_layout, "recall": h_recall, "agent": h_agent,
             "close": h_close, "subagent-stop": h_subagent_stop, "train": h_train,
             "lookup-check": h_lookup_check, "lookup-record": h_lookup_record}
 

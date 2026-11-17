@@ -1,5 +1,5 @@
 {
-  "description": "p4-phi's hooks. run-hook.sh runs scripts/phi.py at SessionStart, UserPromptSubmit and Stop. recall-hook.sh runs scripts/hook.py at every event here, and hook.py hands phi.py its checks around a tool call and at a subagent's stop.",
+  "description": "p4-phi's hooks. run-hook.sh runs scripts/phi.py at SessionStart, UserPromptSubmit and Stop. recall-hook.sh runs scripts/hook.py at every event here, ConfigChange among them, and hook.py hands phi.py its checks around a tool call and at a subagent's stop.",
   "hooks": {
     "SessionStart": [
       {
@@ -28,6 +28,15 @@
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/recall-hook.sh\" catch-up",
             "timeout": 20
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/recall-hook.sh\" settings",
+            "timeout": 15
           }
         ]
       }
@@ -131,6 +140,18 @@
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/recall-hook.sh\" subagent-stop",
             "timeout": 30
+          }
+        ]
+      }
+    ],
+    "ConfigChange": [
+      {
+        "matcher": "local_settings|project_settings|user_settings",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/recall-hook.sh\" settings",
+            "timeout": 10
           }
         ]
       }

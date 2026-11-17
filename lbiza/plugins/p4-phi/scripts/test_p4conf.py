@@ -454,5 +454,135 @@ class P4Conf(unittest.TestCase):
         self.assertEqual(g["IGNORABLE_EXT"], {"log"})
 
 
+def _git(cwd, *args):
+    import subprocess
+    return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=60)
+
+
+class ClaudeSettings(unittest.TestCase):
+    """ezexe/p4#246: the store keeps the Claude Code settings it relies on in the project's local settings file."""
+
+    def setUp(self):
+        from unittest import mock
+        self.tmp = tempfile.mkdtemp(prefix="p4-settings-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.project = os.path.join(self.tmp, "proj")
+        os.makedirs(self.project)
+        env = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": os.path.join(self.tmp, "config")})
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        os.environ.pop("CLAUDE_PID", None)
+
+    def local(self, root=None):
+        return os.path.join(root or self.project, ".claude", "settings.local.json")
+
+    def read(self, p):
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+
+    def memory(self, root=None):
+        return os.path.abspath(os.path.join(root or self.project, ".claude", "p4", "temportal", "memory")).replace(
+            "\\", "/")
+
+    def record(self, root=None):
+        return os.path.join(root or self.project, ".claude", "p4", "claude-settings.json")
+
+    def test_a_stores_first_start_writes_autoMemoryDirectory_and_leaves_a_users_key(self):
+        """A fresh git repository whose local file holds only a key of the user's: the layout hook's first start
+        adds autoMemoryDirectory naming the store's memory folder after it, keeps the user's key, and records only
+        its own key in the store's ignored record."""
+        import hook
+        _git(self.project, "init", "-q")
+        os.makedirs(os.path.dirname(self.local()))
+        with open(self.local(), "w", encoding="utf-8") as f:
+            json.dump({"spinnerTipsEnabled": False}, f)
+        hook.init_layout(self.project)
+        got = self.read(self.local())
+        self.assertEqual(got, {"spinnerTipsEnabled": False, "autoMemoryDirectory": self.memory()})
+        self.assertEqual(list(got), ["spinnerTipsEnabled", "autoMemoryDirectory"], "the user's keys keep their order")
+        self.assertTrue(os.path.isfile(self.record()), "the record is .claude/p4/claude-settings.json")
+        rec = Path(self.record()).read_text(encoding="utf-8")
+        self.assertIn("autoMemoryDirectory", rec)
+        self.assertNotIn("spinnerTipsEnabled", rec)
+        gi = Path(self.project, ".claude", "p4", ".gitignore").read_text(encoding="utf-8").splitlines()
+        self.assertIn("claude-settings.json", gi, "the record stays on this machine")
+        before = (Path(self.local()).read_bytes(), os.stat(self.local()).st_mtime_ns)
+        p4conf.keep_settings(self.project)
+        self.assertEqual((Path(self.local()).read_bytes(), os.stat(self.local()).st_mtime_ns), before,
+                         "a check that changes nothing writes nothing")
+
+    def test_a_key_changed_by_hand_leaves_the_record_and_is_never_written_again(self):
+        import hook
+        hook.init_layout(self.project)
+        self.assertEqual(self.read(self.local())["autoMemoryDirectory"], self.memory())
+        d = self.read(self.local())
+        d["autoMemoryDirectory"] = "D:/elsewhere/memory"
+        with open(self.local(), "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        p4conf.keep_settings(self.project)
+        p4conf.keep_settings(self.project)
+        self.assertEqual(self.read(self.local())["autoMemoryDirectory"], "D:/elsewhere/memory")
+        self.assertNotIn("autoMemoryDirectory", Path(self.record()).read_text(encoding="utf-8"))
+
+    def test_the_local_file_is_written_beside_the_project_file_on_windows(self):
+        """On Windows Claude Code reads the local file in the session's own folder, so a session started in a
+        worktree gets the key in that worktree's file, naming the main checkout's store."""
+        main = self.project
+        _git(main, "init", "-q")
+        with open(os.path.join(main, "a.txt"), "w", encoding="utf-8") as f:
+            f.write("a\n")
+        _git(main, "add", "a.txt")
+        _git(main, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "a")
+        wt = os.path.join(self.tmp, "wt")
+        self.assertEqual(_git(main, "worktree", "add", "-q", wt, "-b", "wt").returncode, 0)
+        os.makedirs(os.path.join(main, ".claude", "p4"))
+        p4conf.keep_settings(wt, platform="win32")
+        self.assertEqual(self.read(self.local(wt))["autoMemoryDirectory"], self.memory(main))
+        self.assertFalse(os.path.exists(self.local(main)), "the main checkout's file is not the one Windows reads")
+        self.assertEqual(_git(wt, "check-ignore", "-q", ".claude/settings.local.json").returncode, 0,
+                         "the file p4 created is kept out of git")
+        p4conf.keep_settings(wt, platform="linux")
+        self.assertEqual(self.read(self.local(main))["autoMemoryDirectory"], self.memory(main),
+                         "elsewhere the main checkout's root holds it")
+
+    def test_another_folder_named_by_the_user_is_left_to_win(self):
+        """A user file naming another folder: no local key, which would override that choice."""
+        conf = os.environ["CLAUDE_CONFIG_DIR"]
+        os.makedirs(conf)
+        with open(os.path.join(conf, "settings.json"), "w", encoding="utf-8") as f:
+            json.dump({"autoMemoryDirectory": "D:/mine"}, f)
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        p4conf.keep_settings(self.project)
+        self.assertFalse(os.path.exists(self.local()))
+
+    def test_a_key_of_the_security_class_is_named_and_never_written(self):
+        """ezexe/p4#246: a permission key a store wants is named with its value and not written; the commit
+        attribution is written only when the store gives a text."""
+        p4 = os.path.join(self.project, ".claude", "p4")
+        os.makedirs(p4)
+        with open(p4conf.path(p4), "w", encoding="utf-8") as f:
+            json.dump({"claude": {"attribution.commit": "Co-Authored-By: x <x@x>",
+                                  "permissions.allow": ["Bash(ls *)"]}}, f)
+        out = p4conf.keep_settings(self.project, tell=True)
+        got = self.read(self.local())
+        self.assertEqual(got["attribution"], {"commit": "Co-Authored-By: x <x@x>"})
+        self.assertNotIn("permissions", got)
+        self.assertTrue(any("permissions.allow" in a and "Bash(ls *)" in a for a in out["asks"]), out)
+        self.assertEqual(p4conf.keep_settings(self.project, tell=True)["asks"], [], "named once for one value")
+
+    def test_a_file_that_is_not_json_is_left_as_it_is(self):
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        with open(self.local(), "w", encoding="utf-8") as f:
+            f.write("{not json")
+        import contextlib
+        import io
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            p4conf.keep_settings(self.project)
+        self.assertEqual(Path(self.local()).read_text(encoding="utf-8"), "{not json")
+        self.assertIn("settings.local.json", err.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

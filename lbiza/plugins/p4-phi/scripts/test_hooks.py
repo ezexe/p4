@@ -117,7 +117,11 @@ class HooksJson(unittest.TestCase):
     def test_events_matchers_timeouts(self):
         h = own_hooks(HOOKS_JSON, "/hooks/recall-hook.sh")
         self.assertEqual(set(h), {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop",
-                                  "SubagentStop"})
+                                  "SubagentStop", "ConfigChange"})
+        # ezexe/p4#246: the settings watcher at every start and at a change of a settings file, which it never blocks
+        self.assertEqual([m.get("matcher") for m in h["SessionStart"]
+                          if m["hooks"][0]["command"].split()[-1] == "settings"], [None])
+        self.assertEqual(h["ConfigChange"][0]["matcher"], "local_settings|project_settings|user_settings")
         self.assertEqual(h["SessionStart"][0]["matcher"], "startup|resume|clear|compact|fork")
         self.assertEqual(h["SessionStart"][0]["hooks"][0]["timeout"], 15)
         self.assertEqual(h["UserPromptSubmit"][0]["hooks"][0]["timeout"], 10)
@@ -219,6 +223,7 @@ class Layout(Base):
         tail = got[len(old):].splitlines()
         self.assertRegex(tail[0], r"^# seeded by p4-recall \d{4}-\d{2}-\d{2}$")
         self.assertEqual(tail[1:], ["phi/models/deps.json", "phi/models/near.json", "phi/models/lookups.db*", "phi/models/view/", ".layout.lock",
+                                    ".settings.lock", "claude-settings.json", "phi/claude-code-watch.pending.json*",
                                     "phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/sessions.md",
                                     "phi/rules.md", "phi/catchup.json", "phi/**/*.tmp", "phi/**/*.lock", "phi/sessions/*/.calls/", "phi/.agents/", "phi/.nudge/", "*.pyc",
                                     "phi/models/ranker.pt"])

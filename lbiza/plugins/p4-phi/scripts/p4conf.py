@@ -7,13 +7,18 @@ writes the file when it is missing, when it lacks a key of DEFAULTS and when a d
 file wrote has changed, keeping every value set by hand: WRITTEN records what it wrote. Two limits: a value set by
 hand that equals the value load recorded as written moves at the next GEN, and in a store from before the record a
 value set by hand that equals a past default in HISTORY moves. A file that is not valid JSON is never overwritten: the
-defaults are used and a line goes to stderr. p4conf reads no environment variable: a plugin that lets one win over its
-section for a run reads it itself.
+defaults are used and a line goes to stderr. p4conf lets no environment variable win over a setting: a plugin that
+lets one win over its section for a run reads it itself. The settings keeper below reads CLAUDE_PROJECT_DIR and
+CLAUDE_CONFIG_DIR, as Claude Code sets them.
 
 It also holds the store's layout: each plugin writes in a folder of its own, `.claude/p4/<plugin>/`, beside p4.json
 and the store's own git files. `sub(p4, name, ...)` is where a kind of file lives and `rel(name, ...)` the same path
 as git names it. `migrate_layout(p4)` moves files from an earlier place of the layout into their plugin's folder.
 Every plugin calls it at its start, so whichever plugin runs first moves them.
+
+It also keeps the Claude Code settings p4 relies on, ezexe/p4#246: `keep_settings(project)` writes
+`autoMemoryDirectory`, and `attribution.commit` when the store gives a text, into the project's
+`.claude/settings.local.json`, merged with what is there, and records what it owns in the store's RECORD.
 """
 
 import copy
@@ -141,7 +146,7 @@ OPEN = ("temportal.cache",)
 # Keys read when a project sets them and never written by default, so a later change to the code's own value reaches
 # every store: kept as set, never called unknown.
 READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.puppeteer_chars", "phi.context_window",
-                 "phi.clear_at")
+                 "phi.clear_at", "claude")
 
 # Top-level keys no plugin reads: never returned or called unknown, and dropped from p4.json when it is rewritten for
 # another reason.
@@ -420,8 +425,22 @@ def migrate_layout(p4, commit=True):
     """Move what lies in an earlier place of the layout into its plugin's folder: memory/, scratchpad/, tmp/ and src/
     into temportal/, and store/ and models/, at the top or under recall/, and archive/ into phi/. .gitignore and
     .gitattributes are rewritten to match, and when `p4` is a git repository of its own the move is committed alone.
-    Returns the lines to print, none when there was nothing to move. Cheap when there is nothing: one lstat call per
-    earlier place in OLDER, and one more for a move an earlier start renamed and did not commit."""
+    After a move, and at a store's first start, when it has no RECORD yet, keep_settings brings Claude Code's settings
+    in the project's local file to what the store wants. Returns the lines to print, none when there was nothing to
+    move. Cheap when there is nothing: one lstat call per earlier place in OLDER, one more for a move an earlier start
+    renamed and did not commit, and one for the record."""
+    lines = _migrate_layout(p4, commit)
+    if (lines or not os.path.exists(record_path(p4))) and os.path.isdir(p4):
+        project = session_project(p4)
+        if project:
+            try:
+                keep_settings(project, p4=p4)
+            except (OSError, ValueError) as e:
+                print(f"p4: Claude Code's settings not kept: {e}", file=sys.stderr)
+    return lines
+
+
+def _migrate_layout(p4, commit):
     if not _olds(p4) and not os.path.isfile(_pending_path(p4)):
         return []
     lock = os.path.join(p4, LAYOUT_LOCK)
@@ -893,3 +912,370 @@ def configure(module_globals, p4, dotted, names, write=True):
     values = _at(load(p4, write=write), dotted)
     apply(module_globals, values, names, _at(DEFAULTS, dotted))
     return values
+
+
+# --- Claude Code's own settings, ezexe/p4#246 ---------------------------------------------------------------------
+# p4 keeps the Claude Code settings it relies on in the project's `.claude/settings.local.json`, merged with what is
+# there. What a store wants is the `claude` section of p4.json, read when set and never written by default:
+# `autoMemoryDirectory` names the store's temportal/memory unless the section sets it false, and `attribution.commit`
+# is written only when the section gives a text. Any other key the section names is never written: it is named with
+# its value for ezexe, and a key of SECURITY is said to be ezexe's to decide. RECORD, in the store and kept out of its
+# git by the seeded .gitignore, holds what p4 wrote into which file with the GEN of the copy that wrote it: a key still
+# equal to its entry is p4's and may change at a higher GEN or go, a key that differs was set by hand and leaves the
+# record, and a key the record owns that is missing from the file is written again. RECORD also holds what the
+# watcher in p4-phi's catchup.py last saw of Claude Code and the p4 plugins.
+SECTION = "claude"
+RECORD = "claude-settings.json"
+SETTINGS_LOCK = ".settings.lock"
+LOCAL = "settings.local.json"
+WRITES = ("autoMemoryDirectory", "attribution.commit")
+# The class of keys ezexe decides, by #246: every key of the topics "Permission settings", "Sandbox settings",
+# "Authentication and providers" and "Enterprise and managed settings" of settings-reference.md, the table
+# "Exceptions to managed settings precedence" of settings.md, and the keys named beside them. A dotted key under one
+# of these is in the class too.
+SECURITY = (
+    "permissions", "sandbox", "autoMode", "allowManagedPermissionRulesOnly", "disableAutoMode",
+    "useAutoModeDuringPlan", "skipAutoPermissionPrompt", "skipDangerousModePermissionPrompt",
+    "allowedProviders", "apiKeyHelper", "awsAuthRefresh", "awsCredentialExport", "forceLoginMethod",
+    "forceLoginGatewayUrl", "forceLoginOrgUUID", "gatewayInternalNetworks", "gcpAuthRefresh", "otelHeadersHelper",
+    "disableSideloadFlags", "forceRemoteSettingsRefresh", "managedSourcesBehavior", "parentSettingsBehavior",
+    "policyHelper", "wslInheritsWindowsSettings",
+    "disableClaudeAiConnectors", "enableArtifact", "isolatePeerMachines", "remoteControlAtStartup",
+    "crossSessionInbound", "syncClaudeAiSkills", "syncClaudeAiPlugins", "maxEffortLevel",
+    "extraKnownMarketplaces", "env", "hooks", "disableAllHooks",
+)
+# Where the managed settings file sits on each platform, by the managed settings documentation.
+MANAGED = {"win": ["C:/Program Files/ClaudeCode/managed-settings.json"],
+           "darwin": ["/Library/Application Support/ClaudeCode/managed-settings.json"],
+           "linux": ["/etc/claude-code/managed-settings.json"]}
+
+
+def security(key):
+    """True when `key`, dotted, is in the class of keys ezexe decides."""
+    return any(key == s or key.startswith(s + ".") for s in SECURITY)
+
+
+def record_path(p4):
+    return os.path.join(p4, RECORD)
+
+
+def read_json(p):
+    """The JSON object at `p`; {} when it is missing; None when it is there and is not a JSON object."""
+    try:
+        with open(p, encoding="utf-8") as f:
+            d = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def read_record(p4):
+    return read_json(record_path(p4)) or {}
+
+
+def replace_text(p, text, tries=5):
+    """Write `text` to `p` through a temp file in the same folder and os.replace, retried while another process holds
+    the file on Windows."""
+    d = os.path.dirname(p)
+    os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(p) + ".", suffix=".tmp", dir=d)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        for i in range(tries):
+            try:
+                os.replace(tmp, p)
+                break
+            except PermissionError:
+                if i == tries - 1:
+                    raise
+                time.sleep(0.05 * (i + 1))
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+def write_record(p4, rec):
+    replace_text(record_path(p4), json.dumps(rec, indent=1, ensure_ascii=False) + "\n")
+
+
+def _norm(p):
+    return os.path.normcase(os.path.normpath(os.path.abspath(p))) if p else ""
+
+
+def fwd(p):
+    return os.path.abspath(p).replace("\\", "/")
+
+
+def main_root(project):
+    """(the main checkout of the git repository holding `project`, True), read from the `.git` files without running
+    git: a worktree's `.git` file names its gitdir, whose `commondir` leads to the main `.git`. (project, False)
+    outside a repository."""
+    d = os.path.abspath(project)
+    while True:
+        dot = os.path.join(d, ".git")
+        if os.path.isdir(dot):
+            return d, True
+        if os.path.isfile(dot):
+            try:
+                with open(dot, encoding="utf-8", errors="replace") as f:
+                    gitdir = f.read().strip().split("gitdir:", 1)[1].strip()
+                gitdir = os.path.normpath(os.path.join(d, gitdir))
+                common = os.path.join(gitdir, "commondir")
+                if not os.path.isfile(common):
+                    return d, True                      # a submodule: its own root
+                with open(common, encoding="utf-8", errors="replace") as f:
+                    return os.path.dirname(os.path.normpath(os.path.join(gitdir, f.read().strip()))), True
+            except (OSError, IndexError):
+                return d, True
+        up = os.path.dirname(d)
+        if up == d:
+            return os.path.abspath(project), False
+        d = up
+
+
+def _mine(p):
+    uid = getattr(os, "getuid", None)
+    if uid is None or not os.path.lexists(p):
+        return True
+    try:
+        return os.lstat(p).st_uid == uid()
+    except OSError:
+        return True
+
+
+def settings_file(project, platform=None):
+    """The `.claude/settings.local.json` Claude Code reads for a session started in `project`: beside the project's
+    own `.claude/settings.json` on Windows, outside a git repository, when the repository root is the home folder or
+    when the root, its `.git` or its `.claude` is not the user's; otherwise at the main checkout's root, which a
+    worktree session shares. settings.md, "Where Claude Code keeps the local file in a git repository"."""
+    platform = platform or sys.platform
+    project = os.path.abspath(project)
+    root, in_git = main_root(project)
+    here = os.path.join(project, ".claude", LOCAL)
+    if platform.startswith("win") or not in_git or _norm(root) == _norm(os.path.expanduser("~")):
+        return here
+    if not all(_mine(os.path.join(root, *p)) for p in ((), (".git",), (".claude",))):
+        return here
+    return os.path.join(root, ".claude", LOCAL)
+
+
+def session_project(p4):
+    """The folder a session holding store `p4` started in: CLAUDE_PROJECT_DIR when it is in the same repository as
+    the store, else the folder that holds the store's `.claude`. None when `p4` is not a `<project>/.claude/p4`."""
+    p4 = os.path.abspath(p4)
+    if os.path.basename(p4) != "p4" or os.path.basename(os.path.dirname(p4)) != ".claude":
+        return None
+    home = os.path.dirname(os.path.dirname(p4))
+    env = os.environ.get("CLAUDE_PROJECT_DIR")
+    if env and os.path.isdir(env) and _norm(main_root(env)[0]) == _norm(home):
+        return os.path.abspath(env)
+    return home
+
+
+def _flat(d, prefix=""):
+    out = {}
+    for k, v in (d or {}).items():
+        if isinstance(v, dict) and v:
+            out.update(_flat(v, f"{prefix}{k}."))
+        else:
+            out[prefix + k] = v
+    return out
+
+
+def _del(d, dotted):
+    parts = dotted.split(".")
+    chain = [d]
+    for part in parts[:-1]:
+        d = d.get(part) if isinstance(d, dict) else None
+        if not isinstance(d, dict):
+            return
+        chain.append(d)
+    chain[-1].pop(parts[-1], None)
+    for parent, part in zip(reversed(chain[:-1]), reversed(parts[:-1])):
+        if parent.get(part) == {}:
+            parent.pop(part)                            # a section p4 emptied goes with its last key
+
+
+def _same_value(key, a, b):
+    if key == "autoMemoryDirectory" and isinstance(a, str) and isinstance(b, str):
+        return _norm(os.path.expanduser(a)) == _norm(os.path.expanduser(b))
+    return a == b
+
+
+def _config_dir():
+    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+
+
+def _elsewhere(key, target, platform):
+    """The values of `key` in the user, project and managed settings files, each a file Claude Code reads beside the
+    local one, so a local value would override the choice they hold."""
+    files = [os.path.join(_config_dir(), "settings.json"), os.path.join(os.path.dirname(target), "settings.json")]
+    files += next((v for k, v in MANAGED.items() if platform.startswith(k)), [])
+    out = []
+    for f in files:
+        v = _get(read_json(f) or {}, key)
+        if v is not _NONE and v is not None:
+            out.append(v)
+    return out
+
+
+def wants(p4, target, platform=None):
+    """({key: value or None}, {key: value}, the section): the keys of WRITES p4 keeps in `target`, None for one it
+    wants gone, the other keys the store's `claude` section names, which are never written, and the whole section."""
+    platform = platform or sys.platform
+    conf = _flat(load(p4, write=False, warn=False).get(SECTION) or {})
+    out = {}
+    mem = fwd(sub(p4, "memory"))
+    other = [v for v in _elsewhere("autoMemoryDirectory", target, platform)
+             if not _same_value("autoMemoryDirectory", v, mem)]
+    out["autoMemoryDirectory"] = mem if conf.get("autoMemoryDirectory", True) is not False and not other else None
+    text = conf.get("attribution.commit")
+    out["attribution.commit"] = text if isinstance(text, str) else None
+    return out, {k: v for k, v in conf.items() if k not in WRITES}, conf
+
+
+def _take_lock(lock, wait_s=3.0, stale_s=60.0):
+    end = time.monotonic() + wait_s
+    while True:
+        try:
+            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            return True
+        except FileExistsError:
+            try:
+                if time.time() - os.path.getmtime(lock) > stale_s:
+                    os.remove(lock)
+                    continue
+            except OSError:
+                continue
+        except OSError:
+            return False
+        if time.monotonic() > end:
+            return False
+        time.sleep(0.05)
+
+
+def keep_settings(project, platform=None, owned_only=False, p4=None, note=None, tell=False):
+    """Bring the Claude Code settings p4 owns in the local file of a session started in `project` to what the store
+    wants, under the store's SETTINGS_LOCK. `owned_only`, at a ConfigChange, looks only at the keys the record owns.
+    `note`, such as the Claude Code binary the watcher saw, is merged into the record under the same lock. Returns
+    {"file": the local file, "wrote": True when it was written, "asks": with `tell`, the lines naming keys a store
+    wants that p4 never writes, each said once for one value and recorded as said}."""
+    platform = platform or sys.platform
+    project = os.path.abspath(project)
+    p4 = p4 or os.path.join(main_root(project)[0], ".claude", "p4")
+    target = settings_file(project, platform)
+    out = {"file": target, "wrote": False, "asks": []}
+    if not os.path.isdir(p4):
+        return out
+    lock = os.path.join(p4, SETTINGS_LOCK)
+    if not _take_lock(lock):
+        return out
+    try:
+        _keep(p4, target, platform, owned_only, out, note or {}, tell)
+    finally:
+        try:
+            os.remove(lock)
+        except OSError:
+            pass
+    return out
+
+
+def _keep(p4, target, platform, owned_only, out, note, tell):
+    data = read_json(target)
+    if data is None:
+        print(f"p4: {target} is not a JSON object; p4's Claude Code settings left out, the file left as it is",
+              file=sys.stderr)
+        return
+    existed = os.path.exists(target)
+    rec = read_record(p4)
+    before = json.dumps(rec, sort_keys=True)
+    files = rec.setdefault("files", {})
+    name = fwd(target)
+    owned = dict(files.get(name) or {})
+    want, others, conf = wants(p4, target, platform)
+    new = copy.deepcopy(data)
+    for k in WRITES:
+        d, cur, e = want.get(k), _get(new, k), _entry(owned.get(k))
+        if e:
+            if cur is _NONE:
+                if d is None:
+                    owned.pop(k)
+                else:
+                    _put(new, k, d)                     # p4's, and gone from the file: written again
+                    owned[k] = {"v": d, "gen": GEN}
+            elif cur != e[0]:
+                owned.pop(k)                            # set by hand: no longer p4's, never touched again
+            elif e[1] > GEN:
+                pass                                    # a newer copy wrote it: left to that copy
+            elif d is None:
+                _del(new, k)
+                owned.pop(k)
+            elif not _same_value(k, cur, d):
+                _put(new, k, d)
+                owned[k] = {"v": d, "gen": GEN}
+        elif d is not None and not owned_only:
+            if cur is _NONE:
+                _put(new, k, d)
+                owned[k] = {"v": d, "gen": GEN}
+            elif _same_value(k, cur, d):
+                owned[k] = {"v": cur, "gen": GEN}      # the value p4 would write: p4's from now
+    if new != data:
+        replace_text(target, json.dumps(new, indent=2, ensure_ascii=False) + "\n")
+        out["wrote"] = True
+        if not existed:
+            exclude_local(target)
+        back = read_json(target) or {}
+        for k, e in owned.items():
+            if _get(back, k) != e.get("v"):
+                print(f"p4: {target} lost {k} after p4 wrote it; written again at the next check", file=sys.stderr)
+    if owned:
+        files[name] = owned
+    else:
+        files.pop(name, None)
+    rec.update(note)
+    if not owned_only:
+        rec["section"] = conf
+    if tell:
+        told = rec.get("asked") or {}
+        for k, v in others.items():
+            if told.get(k) != v:
+                out["asks"].append(
+                    f"`{k}` set to {json.dumps(v, ensure_ascii=False)} in the store's p4.json is left unwritten: "
+                    + ("it is a permission or security key, which ezexe decides" if security(k)
+                       else "p4 writes only " + " and ".join(f"`{w}`" for w in WRITES)))
+        if others:
+            rec["asked"] = others
+        else:
+            rec.pop("asked", None)
+    if not files:
+        rec.pop("files", None)
+    if json.dumps(rec, sort_keys=True) != before or not os.path.exists(record_path(p4)):
+        write_record(p4, rec)
+
+
+def exclude_local(target):
+    """Add `.claude/settings.local.json` to the repository's info/exclude when git does not already ignore the file
+    p4 created, as settings.md asks of a file made by hand."""
+    root = os.path.dirname(os.path.dirname(target))
+    r = _git(root, "check-ignore", "-q", target)
+    if r is None or r.returncode != 1:
+        return False                                    # ignored already, or not in a repository
+    r = _git(root, "rev-parse", "--git-path", "info/exclude")
+    if not (r and r.returncode == 0 and r.stdout.strip()):
+        return False
+    path = r.stdout.decode("utf-8", "replace").strip()
+    path = path if os.path.isabs(path) else os.path.join(root, path)
+    try:
+        text = ""
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8", newline="\n") as f:
+            f.write(("" if not text or text.endswith("\n") else "\n") + ".claude/settings.local.json\n")
+    except OSError:
+        return False
+    return True
