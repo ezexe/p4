@@ -613,7 +613,9 @@ class AtArchive(Base):
         self.assertTrue(any("started 2 times" in x and "while bg11111111 was still running" in x for x in left), left)
 
     def test_processes_it_left_and_requests_nobody_started_are_named(self):
-        puppeteer.PROCESSES = lambda: [(4242, f"python phi.py watch --p4 x --session {KID}"), (7, "python other.py")]
+        puppeteer.PROCESSES = lambda: [(4242, f"python phi.py watch --p4 {self.t.p4} --session {KID}"),
+                                       (4343, f"python phi.py watch --p4 /another/store --session {KID}"),
+                                       (7, "python other.py")]
         try:
             starts.add(self.t.p4, KID, "A follow-up nobody starts", "Do the follow-up in the exporter.")
             left = puppeteer.unfinished(self.t.p4, KID)
@@ -621,6 +623,7 @@ class AtArchive(Base):
             puppeteer.PROCESSES = None
         self.assertTrue(any(x.startswith("process 4242 it started is still alive") for x in left), left)
         self.assertFalse(any("process 7 " in x for x in left))
+        self.assertFalse(any("process 4343 " in x for x in left), "the same session id in another store is not its")
         self.assertTrue(any("that it queued was never started" in x for x in left), left)
 
     def test_a_self_archive_names_the_live_background_task_that_holds_it(self):

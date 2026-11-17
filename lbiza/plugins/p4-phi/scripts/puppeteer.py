@@ -1430,19 +1430,22 @@ def process_rows():
 
 
 def left_processes(home, s):
-    """The live processes a session started, told by its marks in their command lines: its id, as its watcher
-    carries it, and its session scratchpad directory under temportal/tmp/, where its test runs live."""
+    """The live processes a session started, told by its marks in their command lines: its id beside its own store,
+    as its watcher carries both, and its session scratchpad directory under temportal/tmp/, where its test runs live.
+    The id alone is no mark, since a session of another store, such as a test's, can carry the same id."""
     sid = str(s.get("sessionId") or "")
-    marks = [sid] if sid else []
+    store = os.path.abspath(home).replace("\\", "/").lower() if home else ""
+    marks = []
     for cli in s.get("cliSessionIds") or []:
         if isinstance(cli, str) and len(cli) >= 8:
             marks.append(f"temportal/tmp/{cli}".lower())
-    if not marks:
+    if not marks and not (sid and store):
         return []
     out = []
     for pid, cmd in process_rows():
         low = cmd.replace("\\", "/").lower()
-        if pid != os.getpid() and any(m.lower() in low for m in marks) and "win32_process" not in low:
+        own = (sid and store and sid.lower() in low and store in low) or any(m in low for m in marks)
+        if pid != os.getpid() and own and "win32_process" not in low:
             out.append((pid, _short(cmd, 140)))
     return out[:12]
 
