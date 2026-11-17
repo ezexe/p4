@@ -1425,6 +1425,30 @@ class Rules(unittest.TestCase):
                       "says \"A model the script names for a stage counts as the per-invocation model in that order.\" "
                       "and \"When nothing else assigns one, the agent runs on your session's model.\"", skill)
 
+    def test_no_p4_setting_names_a_subagents_model_and_the_pages_name_claude_codes_own_routes(self):
+        """sub-agents.md, "Choose a model": "When more than one source sets a model, Claude Code uses the first in
+        this order", the call's `model`, the definition's `model` field, `CLAUDE_CODE_SUBAGENT_MODEL`, the main
+        conversation's model. So p4.json holds no key for a subagent's model or effort, `phi.child_levels` takes a
+        worker's kinds only, and the skill and the README name the native routes with the page."""
+        import p4conf
+        plans = phi.plans
+        for key in p4conf.DEFAULTS["phi"]:
+            self.assertNotIn("agent", key, "no key of p4.json's phi section names a subagent")
+        self.assertEqual(sorted(plans.CHILD_LEVELS_DEFAULT), ["build", "design", "static"])
+        given = plans.child_levels({"check": {"model": "claude-haiku-5-5", "effort": "low"},
+                                    "Explore": {"model": "opus"}})
+        self.assertEqual(given, plans.CHILD_LEVELS_DEFAULT, "a subagent's name is no kind of worker")
+        with open(os.path.join(ROOT, "skills", "phi", "SKILL.md"), encoding="utf-8") as f:
+            skill = f.read()
+        with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as f:
+            readme = f.read()
+        for page in (skill, readme):
+            for word in ("sub-agents.md", "\"Choose a model\"", "`CLAUDE_CODE_SUBAGENT_MODEL`",
+                         "`CLAUDE_CODE_SUBAGENT_MODEL_FORCE`", "`Explore`", "`p4-phi:check`"):
+                self.assertIn(word, page, word)
+        self.assertIn("No p4 setting names a subagent's model or effort, since Claude Code sets both", skill)
+        self.assertIn("p4-phi has no setting for a subagent's model or effort, since Claude Code sets both.", readme)
+
     def test_a_review_of_a_code_change_goes_to_the_bundled_code_review_skill_and_check_reads_the_rest(self):
         """code-review-local.md: "Claude can start `/code-review` on its own, without you typing the command" and
         "without `--fix`, the review's instructions ask Claude for a report only." Its target "can be a pull request
