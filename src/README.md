@@ -1,3 +1,3 @@
 <div align="center">
-<img width="384" height="237" alt="SpongebobImaginationGIF" src="https://github.com/user-attachments/assets/d81f1516-d668-4e8c-9a6b-52e551effea6" />
+<img width="480" height="270" alt="HappySeason2GIFbyRickandMorty" src="https://github.com/user-attachments/assets/4addb8cf-d699-46fb-97ce-4e7b997ad7f7" />
 </div>
