@@ -475,6 +475,32 @@ def switched_off():
     print("test_p4_memory.py: switched off green")
 
 
+class FailureNotice(unittest.TestCase):
+    """A failure on Stop, PreToolUse or PostToolUse, where plain stdout reaches nobody, is a systemMessage."""
+
+    def test_a_degraded_or_unknown_subcommand_prints_a_system_message(self):
+        import contextlib
+        import io
+        sys.path.insert(0, HERE)
+        import p4_memory
+        root = tempfile.mkdtemp(prefix="p4-temportal-memory-fail-")
+        old = (p4_memory.cmd_sweep, p4_memory.auto_memory_off, sys.argv, sys.stdin)
+        def broken(*a, **k):
+            raise OSError("disk gone")
+        try:
+            p4_memory.cmd_sweep, p4_memory.auto_memory_off = broken, lambda *a: False
+            for sub, want in (("sweep", "memory sweep degraded: OSError: disk gone"), ("nope", "unknown subcommand")):
+                sys.argv = ["p4_memory.py", sub]
+                sys.stdin = io.TextIOWrapper(io.BytesIO(json.dumps({"cwd": root, "hook_event_name": "Stop"}).encode()))
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    self.assertEqual(p4_memory.main(), 0)
+                self.assertIn(want, json.loads(out.getvalue())["systemMessage"])
+        finally:
+            p4_memory.cmd_sweep, p4_memory.auto_memory_off, sys.argv, sys.stdin = old
+            wipe(root)
+
+
 class Cases(unittest.TestCase):
     """Each case group a test method, so unittest and pytest collect them."""
 

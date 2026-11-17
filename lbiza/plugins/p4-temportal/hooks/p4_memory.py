@@ -504,10 +504,11 @@ def main():
             return cmd_mirror(payload)
         if sub == "sweep":
             return cmd_sweep(payload)
-        print(f"p4_memory.py: unknown subcommand {sub!r}")
+        print(json.dumps({"systemMessage": f"p4_memory.py: unknown subcommand {sub!r}"}))
         return 0
     except Exception as e:  # noqa: BLE001 — a hook degrades, never raises
-        print(f"p4-temportal memory {sub} degraded: {type(e).__name__}: {e}")
+        # a systemMessage reaches ezexe on Stop, PreToolUse and PostToolUse too, where plain stdout reaches nobody
+        print(json.dumps({"systemMessage": f"p4-temportal memory {sub} degraded: {type(e).__name__}: {e}"}))
         return 0
 
 
