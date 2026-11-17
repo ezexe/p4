@@ -267,13 +267,12 @@ class P4Conf(unittest.TestCase):
         self.assertEqual(self.read(), p4conf.DEFAULTS)
         self.assertEqual(set(s), {"memory", "scratchpad", "phi", "temportal", "recall"})
 
-    def test_the_retired_config_json_seeds_it(self):
+    def test_the_retired_config_json_seeds_nothing(self):
         os.makedirs(p4conf.sub(self.p4, "models"))
         with open(p4conf.sub(self.p4, "models", "config.json"), "w", encoding="utf-8") as f:
             json.dump({"teacher-model": "claude-opus-5-5", "inject": False, "teacher-cutoff": "2026-06"}, f)
-        t = p4conf.load(self.p4)["recall"]
-        self.assertEqual((t["teacher"]["model"], t["teacher"]["cutoff"], t["inject"]), ("claude-opus-5-5", "2026-06", False))
-        self.assertEqual(self.read()["recall"]["teacher"]["model"], "claude-opus-5-5")
+        self.assertEqual(p4conf.load(self.p4), p4conf.DEFAULTS)
+        self.assertEqual(self.read(), p4conf.DEFAULTS)
 
     def test_missing_keys_are_added_and_set_values_kept(self):
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:

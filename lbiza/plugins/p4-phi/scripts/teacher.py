@@ -119,8 +119,7 @@ def cost(model, usage):
 
 def read_config(p4):
     """Set this module's constants from p4.json's `recall.teacher` and return its `model` and `cutoff` under the
-    keys `teacher-model` and `teacher-cutoff`. Nothing is written; in a store without p4.json, p4conf.load places
-    the retired models/config.json's values there."""
+    keys `teacher-model` and `teacher-cutoff`. Nothing is written."""
     import p4conf
     t = p4conf.configure(globals(), p4, "recall.teacher", {"second_opinion": "SECOND_OPINION", "effort": "EFFORT", "max_tokens": "MAX_TOKENS",
                                 "agree_min": "AGREE_MIN", "newer_max": "NEWER_MAX", "cand_k": "CAND_K",

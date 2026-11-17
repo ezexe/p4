@@ -18,7 +18,7 @@ A session scratchpad link that pointed at the older place is pointed at the move
 ## Settings
 
 Both plugins read their settings from `<project>/.claude/p4/p4.json`, one section each for `memory`, `scratchpad`, `temportal`, `recall` and `phi`.
-The first plugin to run in a project writes it with the defaults of `p4conf.py`, seeded from a `models/config.json` an older store left, and a newer plugin adds the keys it brings, keeping every value already set.
+The first plugin to run in a project writes it with the defaults of `p4conf.py`, and a newer plugin adds the keys it brings, keeping every value already set.
 p4-phi also reads `phi/phi.json`, and some environment variables set a value for one run.
 The copies of `p4conf.py` in the two plugins are identical.
 

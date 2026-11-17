@@ -3,7 +3,7 @@ p4conf.py: the settings of every p4 plugin, kept in one file of the store, `<pro
 
 Each plugin carries its own copy of this file, since an installed plugin cannot import another plugin's code, and
 test_p4conf.py holds the copies the same byte for byte. `load(p4)` returns DEFAULTS with the file merged over them.
-It writes the file when it is missing, seeded from `phi/models/config.json` when that file exists, and when it lacks
+It writes the file when it is missing and when it lacks
 a key of DEFAULTS, keeping every value already there. A file that is not valid JSON is never overwritten: the defaults
 are used and a line goes to stderr. p4conf reads no environment variable: a plugin that lets one win over its
 section for a run reads it itself.
@@ -143,11 +143,6 @@ READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.puppeteer_cha
 # Top-level keys no plugin reads: never returned or called unknown, and dropped from p4.json when it is rewritten for
 # another reason.
 RETIRED = ("plans", "version")
-
-# The keys of phi/models/config.json, a settings file nothing writes, and where p4.json keeps each value.
-LEGACY = {"teacher-model": ("recall", "teacher", "model"), "teacher-cutoff": ("recall", "teacher", "cutoff"),
-          "inject": ("recall", "inject")}
-
 
 # Where each kind of file lives in the store, by plugin. p4-temportal keeps the auto memory, the notebook, the session
 # scratchpad directories and saved code in temportal/, and p4-phi keeps its session tree, the retrieval corpus and
@@ -744,23 +739,6 @@ def _merge(base, over, unknown, prefix=""):
     return out
 
 
-def _legacy(p4):
-    """The values of phi/models/config.json, placed where p4.json keeps them."""
-    try:
-        with open(sub(p4, "models", "config.json"), encoding="utf-8") as f:
-            old = json.load(f)
-    except (OSError, ValueError):
-        return {}
-    over = {}
-    for key, where in LEGACY.items():
-        if isinstance(old, dict) and key in old:
-            d = over
-            for part in where[:-1]:
-                d = d.setdefault(part, {})
-            d[where[-1]] = old[key]
-    return over
-
-
 def _write(p4, data):
     """Write p4.json through a temp file of this call's own, since the hooks of one event load at once."""
     fd, tmp = tempfile.mkstemp(prefix=FILE + ".", suffix=".tmp", dir=p4)
@@ -786,8 +764,6 @@ def load(p4, write=True, warn=True):
             if warn:
                 print(f"p4: {path(p4)} unreadable: {e}; defaults used, the file left as it is", file=sys.stderr)
             return copy.deepcopy(DEFAULTS)
-    else:
-        over = _legacy(p4)
     over = {k: v for k, v in over.items() if k not in RETIRED}
     unknown = []
     merged = _merge(DEFAULTS, over, unknown)
