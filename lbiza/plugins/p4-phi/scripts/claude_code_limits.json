@@ -20,10 +20,10 @@
   {
     "repo": "ezexe/p4",
     "issue": 151,
-    "title": "wiring: no entry registers SessionEnd",
+    "title": "wiring: the SessionEnd entry logs the end inside a shared 1.5 seconds",
     "behaviour": "SessionEnd hooks share a budget of 1.5 seconds, and timeouts set on plugin-provided hooks don't raise it.",
     "source": "https://code.claude.com/docs/en/hooks#sessionend",
-    "changes_when": "A plugin hook's timeout raises the SessionEnd budget, or a plugin can set it; p4 then records the end and its reason at SessionEnd and stops reading the app's records for it.",
+    "changes_when": "A plugin hook's timeout raises the SessionEnd budget, or a plugin can set it; p4 then does more at SessionEnd than log the end and its reason, and stops reading the app's records for it.",
     "terms": ["SessionEnd", "CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS", "plugin-provided hooks"]
   },
   {
