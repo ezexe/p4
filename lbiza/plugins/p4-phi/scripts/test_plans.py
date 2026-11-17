@@ -47,89 +47,47 @@ class Apply(unittest.TestCase):
 
 
 class Tasks(unittest.TestCase):
-    """Background tasks stay with their step's words, and an old task is unknown."""
+    """hooks.md, "Stop input": `background_tasks` lists the work in flight, so p4-phi records no launch of its own and
+    keeps that list on session.json for the checks that run between turns."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.t = Tree(self._tmp.name)
         self.t.record(TOP, title="top")
         self.t.say(TOP, "Build it")
-        self.s = relay._session(self.t.p4, TOP)
 
     def tearDown(self):
         self._tmp.cleanup()
 
-    def test_a_task_follows_its_steps_words_across_a_rewrite(self):
-        home = self.t.p4
-        plans.record(home, self.s, items("Run the smoke check", "Write the report"))
-        plans.register(home, self.s, "Bash", {"command": "sh smoke.sh", "run_in_background": True},
-                       "Command running in background with ID: bsmoke001.", "")
-        plans.record(home, self.s, items("Plan the layout", "Run the smoke check", "Write the report"))
-        p = plans.load(home, TOP)
-        self.assertEqual([st["addr"] for st in p["steps"] if st.get("tasks")], ["2"], "with its words, now step 2")
-        plans.record(home, self.s, items("Plan the layout", "Write the report"))
-        p = plans.load(home, TOP)
-        self.assertFalse(any(st.get("tasks") for st in p["steps"]))
-        self.assertEqual([t["id"] for t in p["loose"]], ["bsmoke001"], "its step is gone: loose, not on another step")
-
-    def test_a_task_long_past_with_no_notice_is_unknown_and_never_flagged(self):
-        import time as _t
-        home = self.t.p4
-        plans.record(home, self.s, items("Run the smoke check", "Write the report"))
-        plans.register(home, self.s, "Bash", {"command": "sh smoke.sh", "run_in_background": True},
-                       "Command running in background with ID: bold00001.", "", at_epoch=int(_t.time()) - 86400)
-        lines, _ = plans.check_tasks(home, self.s, plans.load(home, TOP))
-        self.assertEqual(lines, [])
-        p = plans.load(home, TOP)
-        self.assertEqual(p["steps"][0]["tasks"][0]["status"], "open", "check_tasks reads; the boundary writes")
-
-    def test_a_stopped_task_closes_and_a_foreground_agent_is_no_task(self):
-        """TaskStop sends no notice, so its call closes the task, and a finished agent whose words mention background
-        tasks is no task itself."""
-        home = self.t.p4
-        plans.record(home, self.s, items("Watch the build", "Write the report"))
-        plans.register(home, self.s, "Monitor", {"command": "tail -f log", "timeout_ms": 300000},
-                       "Monitor started (task bwatch001, timeout 300000ms).", "")
-        task = plans.load(home, TOP)["steps"][0]["tasks"][0]
-        self.assertEqual(task["timeoutS"], 300)
-        raw = '{"type":"tool_use","id":"toolu_1","name":"TaskStop","input":{"task_id":"bwatch001"}}'
-        self.assertEqual(plans.pickup(home, TOP, raw), ["bwatch001"])
-        self.assertEqual(plans.load(home, TOP)["steps"][0]["tasks"][0]["status"], "stopped")
-        self.assertIsNone(plans.register(home, self.s, "Agent", {"prompt": "look"},
-                                         "Done. The background tasks agentId: abec142e99 were fine.", ""))
-
-    def test_loose_tasks_are_never_flagged_and_any_task_past_its_budget_is_unknown(self):
-        import time as _t
-        home = self.t.p4
-        plans.register(home, self.s, "Bash", {"command": f"sh {home}/x.sh", "run_in_background": True},
-                       "Command running in background with ID: bloose001.", "")
-        p = plans.load(home, TOP)
-        self.assertEqual([t["id"] for t in p["loose"]], ["bloose001"])
-        p["loose"][0]["heads"] = ["somewhere@0000000"]
-        lines, _ = plans.check_tasks(home, self.s, p)
-        self.assertEqual(lines, [], "a loose task has no step to be checked against")
-        p["loose"][0]["epoch"] = int(_t.time()) - plans.JOB_GAP_S - 60
-        plans.check_tasks(home, self.s, p)
-        self.assertEqual(p["loose"][0]["status"], "unknown")
-
-    def test_a_background_tasks_timeout_is_read_as_milliseconds(self):
-        """Bash and PowerShell take `timeout` in milliseconds and Monitor takes `timeout_ms` in milliseconds, so a
-        launch of each with 60000 through the `lookup-record` hook is a background task of 60 seconds."""
+    def test_a_background_launch_writes_no_record_of_p4_phis_own(self):
         hook = os.path.join(os.path.dirname(HERE), "hooks", "recall-hook.sh")
+        plans.record(self.t.p4, relay._session(self.t.p4, TOP), items("Run the smoke check", "Write the report"))
         for k, (tool, inp, response) in enumerate((
-                ("Bash", {"command": "sh smoke.sh", "run_in_background": True, "timeout": 60000},
-                 {"stdout": "", "backgroundTaskId": "bsixty001"}),
-                ("PowerShell", {"command": "pwsh smoke.ps1", "run_in_background": True, "timeout": 60000},
-                 {"stdout": "", "backgroundTaskId": "bsixty002"}),
-                ("Monitor", {"command": "tail -f smoke.log", "description": "smoke log", "timeout_ms": 60000},
-                 "Monitor started (task bsixty003, timeout 60000ms)."))):
+                ("Bash", {"command": "sh smoke.sh", "run_in_background": True}, {"backgroundTaskId": "bsmoke001"}),
+                ("Monitor", {"command": "tail -f smoke.log", "timeout_ms": 60000}, "Monitor started (task bwatch001)."),
+                ("TaskStop", {"task_id": "bwatch001"}, "stopped"))):
             body = {"session_id": CLI[TOP], "cwd": self.t.proj, "hook_event_name": "PostToolUse", "tool_name": tool,
-                    "tool_input": inp, "tool_response": response, "tool_use_id": f"toolu_sixty{k}"}
+                    "tool_input": inp, "tool_response": response, "tool_use_id": f"toolu_bg{k}"}
             r = inproc.run(["sh", hook, "lookup-record"], input=json.dumps(body), capture_output=True, text=True,
                            timeout=60, env=self.t.env(TOP, P4_RECALL_SYNC="1"))
             self.assertEqual(r.returncode, 0, r.stderr)
-        got = {t["tool"]: t.get("timeoutS") for t in plans.load(self.t.p4, TOP).get("loose") or []}
-        self.assertEqual(got, {"Bash": 60, "PowerShell": 60, "Monitor": 60})
+        p = plans.load(self.t.p4, TOP)
+        self.assertFalse(p.get("loose") or any(st.get("tasks") for st in p.get("steps") or []))
+
+    def test_the_stop_inputs_list_is_kept_until_a_stop_lists_again(self):
+        s = {}
+        plans.keep_in_flight(s, {"background_tasks": [
+            {"id": "bsmoke001", "type": "shell", "status": "running", "description": "smoke", "command": "sh smoke.sh",
+             "extra": 1},
+            {"id": "a8ed9430d359ce61d", "type": "subagent", "status": "running", "description": "sweep",
+             "agent_type": "p4-phi:sweep"}]})
+        self.assertEqual([t["id"] for t in plans.in_flight(s)], ["bsmoke001", "a8ed9430d359ce61d"])
+        self.assertNotIn("extra", s["backgroundTasks"][0])
+        self.assertTrue(s["backgroundAt"])
+        plans.keep_in_flight(s, {})
+        self.assertEqual(len(plans.in_flight(s)), 2, "no list: the last one read stands")
+        plans.keep_in_flight(s, {"background_tasks": []})
+        self.assertEqual(plans.in_flight(s), [], "nothing in flight")
 
 
 class TreeOfPlans(unittest.TestCase):
@@ -516,11 +474,6 @@ class TreeOfPlans(unittest.TestCase):
         self.assertEqual(plans.load(t.p4, A)["current"], "2.2", "advanced once")
         logged = [x.get("hook") for x in t.log(A)]
         self.assertIn("plan", logged, "the routed check writes its log line")
-        self.lookup(A, "lookup-record", {"tool_name": "Monitor", "tool_input": {"command": "tail -f x.log"},
-                                         "tool_response": "Monitor started (task bz4dv0pvj, expires in 30m)",
-                                         "tool_use_id": "toolu_route02"}, wait=True)   # a clean call runs detached
-        self.assertEqual(plans.load(t.p4, A)["steps"][1]["tasks"][0]["id"], "bz4dv0pvj",
-                         "a Monitor is recorded by the id its result gives")
 
     def test_a_session_whose_hook_list_lacks_the_route_gets_its_plan_from_its_transcript(self):
         """A session whose loaded hooks lack the `lookup-record` route, as before `/reload-plugins` loads a newer
@@ -553,9 +506,9 @@ class TreeOfPlans(unittest.TestCase):
                                          "tool_response": "Plan updated.", "tool_use_id": "toolu_rp1"})
         self.assertEqual(plans.load(t.p4, A)["current"], "2.2", "a replayed call is not applied again by a hook")
 
-    def test_a_replayed_command_is_a_task_only_by_the_apps_own_result(self):
-        """The transcript replay records a foreground call as a background task only when its result opens with the
-        app's sentence, as a command the app moved at its timeout does, never when the output merely quotes it."""
+    def test_a_replayed_command_is_no_task_of_p4_phis_own(self):
+        """The transcript replay reads task-list calls alone: a command the app moved to the background at its
+        timeout is in the Stop input's `background_tasks`, hooks.md, so it is no record of p4-phi's own."""
         t = self.t
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/"))
         path = os.path.join(self._tmp.name, "c-transcript.jsonl")
@@ -574,7 +527,7 @@ class TreeOfPlans(unittest.TestCase):
             f.write("".join(json.dumps(r) + chr(10) for r in rows))
         t.hook("user-prompt-submit", A, {"hook_event_name": "UserPromptSubmit", "prompt": "go on",
                                          "transcript_path": path})
-        self.assertEqual([x["id"] for _, x in plans._tasks(plans.load(t.p4, A))], ["bg7moved01"])
+        self.assertEqual(list(plans._tasks(plans.load(t.p4, A))), [])
 
     def test_the_transcript_is_read_on_from_where_the_last_replay_stopped(self):
         """Each message and each Stop read the transcript on from the place kept, the first call still without a
@@ -588,14 +541,14 @@ class TreeOfPlans(unittest.TestCase):
             with open(path, "w", encoding="utf-8", newline="\n") as f:
                 f.write("".join(json.dumps(r) + chr(10) for r in rows))
 
-        def call(k, inp, name="mcp__ccd_turn__update_plan"):
+        def call(k, inp):
             rows.append({"type": "assistant", "message": {"content": [
-                {"type": "tool_use", "id": f"toolu_ro{k}", "name": name, "input": inp}]}})
+                {"type": "tool_use", "id": f"toolu_ro{k}", "name": "mcp__ccd_turn__update_plan", "input": inp}]}})
             put()
 
-        def result(k, text="Plan updated."):
+        def result(k):
             rows.append({"type": "user", "message": {"content": [
-                {"type": "tool_result", "tool_use_id": f"toolu_ro{k}", "content": text}]}})
+                {"type": "tool_result", "tool_use_id": f"toolu_ro{k}", "content": "Plan updated."}]}})
             put()
 
         def message(text):
@@ -616,12 +569,9 @@ class TreeOfPlans(unittest.TestCase):
         self.assertEqual(plans.load(t.p4, A)["current"], "2.1", "a call with no result yet is not applied")
         self.assertEqual(offset(), before, "and holds the place, so it is read again")
         result(1)
-        call(2, {"command": "python build.py", "run_in_background": True}, name="Bash")
-        result(2, "Command running in background with ID: bg7offset1. Output is being written to: x")
         message("and now")
         p = plans.load(t.p4, A)
         self.assertEqual(p["current"], "2.2", "applied once its result is in")
-        self.assertEqual([x["id"] for _, x in plans._tasks(p)], ["bg7offset1"], "a launch after the place is read too")
         self.assertEqual(offset(), os.path.getsize(path))
         before = os.path.getsize(path)
         call(3, {"advance": True})
@@ -639,50 +589,6 @@ class TreeOfPlans(unittest.TestCase):
         self.assertEqual(phi.resume_at([100, 900], 1000, hold=500), 900, "a call cut off long ago holds nothing")
         self.assertEqual(phi.resume_at([100], 1000, hold=500), 1000)
         self.assertEqual(phi.resume_at([], 1000), 1000)
-
-    def task(self, host, command, task_id):
-        r = self.t.hook("task", host, {"hook_event_name": "PostToolUse", "tool_name": "Bash",
-                                       "tool_input": {"command": command, "run_in_background": True},
-                                       "tool_response": f"Command running in background with ID: {task_id}. Output"})
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout.strip(), "", "registering prints nothing")
-
-    def test_a_background_task_whose_feature_a_sibling_replaces_is_told_to_stop(self):
-        t = self.t
-        if not shutil.which("git"):
-            self.skipTest("no git")
-        work = os.path.join(t.proj, "work")
-        os.makedirs(os.path.join(work, "lib"))
-        with open(os.path.join(work, "lib", "x.py"), "w", encoding="utf-8") as f:
-            f.write("x = 1\n")
-        for args in (("init", "-q"), ("add", "-A"), ("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "A")):
-            subprocess.run(["git", "-C", work, *args], check=True, capture_output=True)
-        t.say(B, "Write the docs, step 3 of the parent's plan")
-        self.plan(B, items("Check the notes relay against lib", "Write the docs"))
-        x = os.path.join(work, "lib", "x.py").replace("\\", "/")
-        self.task(B, f"python -I check_relay.py {x}", "bgcheck01")
-        p = plans.load(t.p4, B)
-        self.assertEqual(p["steps"][0]["tasks"][0]["id"], "bgcheck01")
-        self.assertTrue(p["steps"][0]["tasks"][0]["heads"], "the head it runs against is kept")
-        self.plan(A, items("Replace the notes relay", "Commit it"))
-        t.cli(A, "note", f"replaces: the notes relay in `{x}` with plan steps", "--source", "commit hhh888")
-        t.stop(A, "replace it", uuid="a1")
-        ctx = self.plan(B, {"advance": True})
-        self.assertIn("task bgcheck01", ctx)
-        self.assertIn("`TaskStop bgcheck01`", ctx)
-        self.assertIn("step 3.1 was marked done while background task bgcheck01 under it is flagged and still "
-                      "open", ctx)
-        notice = ("<task-notification>\n<task-id>bgcheck01</task-id>\n<status>completed</status>\n"
-                  "<summary>Background command finished</summary>\n</task-notification>")
-        t.say(B, notice)
-        self.assertEqual(plans.load(t.p4, B)["steps"][0]["tasks"][0]["status"], "completed",
-                         "a completion read from the message closes the task")
-
-    def test_a_foreground_command_is_no_task(self):
-        r = self.t.hook("task", B, {"tool_name": "Bash", "tool_input": {"command": "git status"},
-                                    "tool_response": "On branch main"})
-        self.assertEqual(r.stdout.strip(), "")
-        self.assertFalse(any(st.get("tasks") for st in plans.load(self.t.p4, B).get("steps") or []))
 
     def test_a_finished_child_a_newer_note_supersedes_is_counted_as_archived(self):
         t = self.t
@@ -784,39 +690,20 @@ class Levels(unittest.TestCase):
                 self.assertEqual(self.pre(host, dict(self.LONG), tool=tool), {}, (host, tool))
 
     def test_a_command_already_running_is_not_started_again(self):
-        """restart-check reads `run_in_background`: a second background start of the same command is refused once,
-        and the shell gate lets every background start through to it."""
-        r = self.t.hook("task", TOP, {"hook_event_name": "PostToolUse", "tool_name": "Bash",
-                                      "tool_input": {**self.LONG, "run_in_background": True},
-                                      "tool_response": {"stdout": "", "backgroundTaskId": "bg7level01"}})
-        self.assertEqual((r.returncode, r.stdout.strip()), (0, ""))
+        """restart-check reads `run_in_background`: a second background start of a command the Stop input listed as
+        still running is refused once, and the shell gate lets every background start through to it."""
+        from test_phi import STOP, transcript
+        path = transcript(os.path.join(self.t.tmp, TOP + "rs.jsonl"), "Build the exporter", (), "Running.", "rs")
+        r = self.t.hook(STOP, TOP, {"hook_event_name": "Stop", "transcript_path": path,
+                                    "last_assistant_message": "Running.",
+                                    "background_tasks": [{"id": "bg7level01", "type": "shell", "status": "running",
+                                                          "description": "the tests", "command": self.LONG["command"]}]})
+        self.assertEqual(r.returncode, 0, r.stderr)
         out = self.pre(TOP, {**self.LONG, "run_in_background": True})
         self.assertEqual(out.get("permissionDecision"), "deny")
         self.assertIn("bg7level01", out["permissionDecisionReason"])
-
-    def test_a_launch_the_transcript_shows_without_the_field_is_still_recorded(self):
-        """A call sent without `run_in_background` that runs in the background is known by its result: started there,
-        or moved there by the app at its timeout, as a string or as a dict's field."""
-        s = relay._session(self.t.p4, TOP)
-        got = plans.register(self.t.p4, s, "Bash", dict(self.LONG),
-                             "Command running in background with ID: bg7level02. Output is being written to: x", "")
-        self.assertEqual(got["id"], "bg7level02")
-        moved = ("Command did not complete within its 120s timeout and was moved to the background with ID: "
-                 "bg7level03. Output is being written to: C:/tmp/tasks/bg7level03.output")
-        self.assertEqual(plans.register(self.t.p4, s, "Bash", dict(self.LONG), moved, "")["id"], "bg7level03")
-        got = plans.register(self.t.p4, s, "PowerShell", dict(self.LONG),
-                             {"stdout": "", "stderr": moved.replace("bg7level03", "bg7level04")}, "")
-        self.assertEqual(got["id"], "bg7level04", "a dict result is read whole")
-        self.assertIsNone(plans.register(self.t.p4, s, "Bash", dict(self.LONG), {"stdout": "14 tests OK"}, ""),
-                          "a finished foreground command is no task")
-        quoted = ('scripts/test_plans.py:889:  "Command running in background with ID: bg7level02. Output is being '
-                  'written to: x", "")\nscripts/plans.py:600: Command did not complete within its 120s timeout and '
-                  'was moved to the background')
-        grep = {"command": 'grep -rn "background with ID" scripts/'}
-        for response in (quoted, {"stdout": quoted, "stderr": ""}, "14 tests OK\n" + moved):
-            self.assertIsNone(plans.register(self.t.p4, s, "Bash", grep, response, ""),
-                              "output that quotes the app's sentence is no task")
-        self.assertIsNone(plans.register(self.t.p4, s, "PowerShell", {"command": "Get-Item x"}, "ID: notatask1", ""))
+        self.assertEqual(self.pre(TOP, {**self.LONG, "run_in_background": True}), {}, "a second try goes through")
+        self.assertEqual(self.pre(TOP, {"command": "python other.py", "run_in_background": True}), {})
 
     def test_each_step_is_named_for_the_level_it_runs_at(self):
         for text, level in (("Find where the exporter is configured across src/", "sweep"),
@@ -1419,13 +1306,9 @@ class KeepGoing(unittest.TestCase):
         self.assertEqual(self.stop("Still porting."), {}, "a turn is sent back at most twice")
         self.assertEqual(self.stop("New turn.", uuid="u2").get("decision"), "block", "a new turn counts afresh")
 
-    def test_authority_a_wrap_up_or_a_background_task_lets_the_turn_end(self):
+    def test_authority_or_a_wrap_up_lets_the_turn_end(self):
         self.assertEqual(self.stop("Shall I push main to origin now?"), {}, "a push asked of ezexe")
         self.assertEqual(self.stop("Done for now.", [("mcp__ccd_turn__wrap_up", {"recap": "x"}, "ok")], uuid="u3"), {})
-        plans.register(self.t.p4, relay._session(self.t.p4, TOP), "Bash",
-                       {"command": "sh run.sh", "run_in_background": True},
-                       "Command running in background with ID: bkeep0001.", "")
-        self.assertEqual(self.stop("Waiting on the suite.", uuid="u4"), {}, "its notice starts the next turn")
 
     def test_no_open_step_lets_the_turn_end(self):
         r = self.t.hook("plan", TOP, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",

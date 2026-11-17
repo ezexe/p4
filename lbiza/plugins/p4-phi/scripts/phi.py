@@ -1603,7 +1603,7 @@ def h_plan(payload):
     s = ensure_session(me.home, me.id, me.rec, me.cli)
     save_session(me.home, s)
     asks(s)
-    text = plans.record(me.home, s, inp, payload.get("transcript_path") or "")
+    text = plans.record(me.home, s, inp)
     if isinstance(inp.get("items"), list):        # the task list's first whole list, or a revision of it
         s = load_session(me.home, me.id) or s
         cap = caps_text(me.home, s)
@@ -1915,27 +1915,6 @@ def h_restart_check(payload):
                                    "permissionDecisionReason": why}}
 
 
-def h_task(payload):
-    """PostToolUse on Bash, PowerShell, Monitor, Agent and Workflow: a background task recorded under the step in
-    progress by plans.register, with the heads, paths and words it runs against. On TaskStop, or KillShell in an older
-    transcript, the stopped task is closed. Prints nothing."""
-    me = Me(payload)
-    if not me.home or not me.id:
-        return None
-    s = load_session(me.home, me.id)
-    if not s:
-        return None
-    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
-    if str(payload.get("tool_name") or "") in ("TaskStop", "KillShell"):
-        tid = inp.get("task_id") or inp.get("shell_id") or inp.get("id")
-        RAN["task"] = ",".join(plans.pickup(me.home, me.id, json.dumps({"name": "TaskStop", "input": {"task_id": tid}})))
-        return None
-    t = plans.register(me.home, s, str(payload.get("tool_name") or ""), inp, payload.get("tool_response") or "",
-                       s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or "")
-    RAN["task"] = (t or {}).get("id", "")
-    return None
-
-
 def mark_fork(s, me, payload):
     """A session the app records as a fork, that SessionStart says began as one, its `source` "fork" as hooks.md's
     SessionStart input names it, or whose first message is a fork's, is kept as one."""
@@ -2127,7 +2106,6 @@ def h_user_prompt_submit(payload):
     req = request_of(payload.get("prompt"))
     s["turnBy"] ="user" if req else (
         "session" if re.search(r"<cross-session-message\b", str(payload.get("prompt") or "")) else "event")
-    plans.pickup(me.home, s["sessionId"], payload.get("prompt") or "")
     mark_fork(s, me, payload)
     if not s.get("disposable") and relay.DISPOSABLE.search(str(payload.get("prompt") or "")) \
             and not load_turns(me.home, s["sessionId"]):
@@ -2372,7 +2350,7 @@ def h_stop(payload):
     watch_over(me.home, s)
     replay(me, s, payload.get("transcript_path") or "")
     s = load_session(me.home, s["sessionId"]) or s
-    plans.pickup(me.home, s["sessionId"], plans.transcript_tail(payload.get("transcript_path") or ""))
+    plans.keep_in_flight(s, payload)              # hooks.md, Stop input: the work still in flight, for the checks
     if isinstance(s.get("stale"), dict) and s["stale"].get("told"):
         s.pop("stale", None)                       # told what superseded it, and a turn of its own ended since
         s["unstaled"] = now()
@@ -2776,17 +2754,6 @@ def once(home, sid, kind, payload):
 ROUTED = {}
 
 
-def epoch_of(stamp):
-    """Epoch seconds of a transcript timestamp, None when there is none."""
-    if not stamp:
-        return None
-    try:
-        from datetime import datetime
-        return int(datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).timestamp())
-    except ValueError:
-        return None
-
-
 REPLAY_HOLD = 2 * 1024 * 1024    # how far behind the transcript's end a call with no result still holds the place
 
 
@@ -2800,8 +2767,8 @@ def resume_at(waiting, end, hold=None):
 
 
 def replay(me, s, transcript):
-    """The task-list calls and background task launches of the transcript that no hook handled, applied in order,
-    at each message and each Stop, each once by its tool_use_id. Returns the step boundary text of the last one, ''
+    """The task-list calls of the transcript that no hook handled, applied in order, at each message and each Stop,
+    each once by its tool_use_id. Returns the step boundary text of the last one, ''
     for none. A session takes a plugin's hooks when it loads the plugin, and `/reload-plugins` applies later edits,
     so a session whose hook list lacks the retrieval hooks' entries has only phi.py's own, and its calls are read
     back here."""
@@ -2821,21 +2788,15 @@ def replay(me, s, transcript):
     if not known:
         start = max(0, size - TRANSCRIPT_BYTES)
     rows, end = read_from(transcript, start, partial=not known and start > 0)
-    calls, results, notices, when, stops, where = [], {}, [], {}, [], {}
+    calls, results, where = [], {}, {}
     for at, d in rows:
         c = (d.get("message") or {}).get("content")
-        if d.get("type") == "user" and "<task-notification>" in json.dumps(c, default=str):
-            notices.append(json.dumps(c, default=str))
         for b in c if isinstance(c, list) else []:
             if not isinstance(b, dict):
                 continue
-            if d.get("type") == "assistant" and b.get("type") == "tool_use" and b.get("name") in ("TaskStop",
-                                                                                                "KillShell"):
-                stops.append(json.dumps({"name": "TaskStop", "input": b.get("input") or {}}))
-            elif d.get("type") == "assistant" and b.get("type") == "tool_use" and b.get("name") in (
-                    "mcp__ccd_turn__update_plan", "Bash", "PowerShell", "Monitor", "Agent", "Workflow"):
+            if d.get("type") == "assistant" and b.get("type") == "tool_use" \
+                    and b.get("name") == "mcp__ccd_turn__update_plan":
                 calls.append(b)
-                when[b.get("id")] = str(d.get("timestamp") or "")
                 where[b.get("id")] = at
             elif d.get("type") == "user" and b.get("type") == "tool_result":
                 results[b.get("tool_use_id")] = result_text(b)
@@ -2852,23 +2813,11 @@ def replay(me, s, transcript):
         tid = b.get("id")
         if tid not in results:
             continue                                # still running, or its result not written yet
-        name = "plan" if b["name"] == "mcp__ccd_turn__update_plan" else "task"
         payload = {"tool_name": b["name"], "tool_input": b.get("input") or {}, "tool_response": results[tid],
                    "tool_use_id": tid, "transcript_path": transcript}
-        if name == "task" and b["name"] in SHELL_TOOLS and not (b.get("input") or {}).get("run_in_background") \
-                and not plans.launched(results[tid]):
-            continue                                # a foreground command; one the app moved is known by its result
-        if not once(me.home, me.id, name, payload):
+        if not once(me.home, me.id, "plan", payload):
             continue
-        if name == "plan":
-            text = plans.record(me.home, load_session(me.home, me.id) or s, payload["tool_input"], transcript) or text
-        else:
-            plans.register(me.home, load_session(me.home, me.id) or s, b["name"], payload["tool_input"],
-                           payload["tool_response"], s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or "",
-                           at_epoch=epoch_of(when.get(tid)))
-    notices += stops                               # a stop sends no notice; its call closes the background task
-    if notices:                                    # every completion notification of the transcript, not its tail only
-        plans.pickup(me.home, me.id, "\n".join(notices))
+        text = plans.record(me.home, load_session(me.home, me.id) or s, payload["tool_input"]) or text
     RAN["replayed"] = len(calls)
     return text
 
@@ -2994,10 +2943,9 @@ HOOKS = {"session-start": ("SessionStart", h_session_start),
          "store-guard": ("PreToolUse", h_store_guard),
          "plan": ("PostToolUse", h_plan),
          "memory-gap": ("PostToolUse", h_memory_gap),
-         "self-archive": ("PreToolUse", h_self_archive),
-         "task": ("PostToolUse", h_task)}
-ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "store-guard", "plan", "task", "memory-gap",
-                                                     "self-archive")})
+         "self-archive": ("PreToolUse", h_self_archive)}
+ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "store-guard", "plan", "memory-gap",
+                                     "self-archive")})
 ROUTED["nudge"] = ("PreToolUse", h_nudge)
 ROUTED["puppeteer-tool"] = ("PreToolUse", h_puppeteer_tool)
 ROUTED["model-fixed"] = ("PreToolUse", h_model_fixed)

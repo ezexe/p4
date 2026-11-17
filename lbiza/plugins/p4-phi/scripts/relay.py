@@ -1699,8 +1699,8 @@ def outcome(home, sid, s):
     p = plans.load(home, sid)
     still = [f"step {x['addr']} \"{_short(x.get('content'), 80)}\" {x.get('status') or 'pending'}"
              for x in p.get("steps") or [] if x.get("status") != "completed"]
-    still += [f"background task {t.get('id')}, {_short(t.get('what'), 60)}, open" for _, t in plans._tasks(p)
-              if t.get("status") == "open"]
+    still += [f"background task {t.get('id')}, {_short(t.get('description') or t.get('command'), 60)}, running"
+              for t in plans.in_flight(s)]
     dirty = uncommitted(files)
     if dirty:
         still.append("uncommitted: " + ", ".join(show(f, base) for f in dirty[:8]))

@@ -468,10 +468,10 @@ def build(home, top, net=False):
             if t.get("agent") and t.get("wrote"):
                 misses.append({"id": str(t.get("id")), "sessionId": sid, "title": title,
                                "step": (st or {}).get("addr", ""), "wrote": list(t["wrote"])[:8]})
-            if t.get("status") == "open":
-                tasks.append({"id": str(t.get("id")), "tool": str(t.get("tool") or ""), "sessionId": sid,
-                              "title": title, "step": (st or {}).get("addr", ""), "what": _short(t.get("what"), 120),
-                              "at": str(t.get("at") or "")})
+        for t in plans.in_flight(s):               # hooks.md, Stop input: still running at its last turn's end
+            tasks.append({"id": str(t.get("id")), "tool": str(t.get("type") or ""), "sessionId": sid,
+                          "title": title, "step": "", "what": _short(t.get("description") or t.get("command"), 120),
+                          "at": str(s.get("backgroundAt") or "")})
     live = {r["sessionId"] for r in rows}
     for aid, rec in sorted(app.items()):
         if rec["parent"] in live and not rec["archived"] and aid not in every:
@@ -541,7 +541,7 @@ def render(m):
     if m["tasks"]:
         out += ["", "## Background tasks", ""]
         out += [f"- {t['id']}, {t['tool'] or 'a task'} of \"{t['title']}\""
-                + (f" under step {t['step']}" if t["step"] else "") + f", open since {t['at']}: {t['what']}"
+                + (f" under step {t['step']}" if t["step"] else "") + f", running at {t['at']}: {t['what']}"
                 for t in m["tasks"]]
     if m.get("misses"):
         out += ["", "## Level misses", ""]
@@ -1532,22 +1532,10 @@ def unfinished(home, sid, procs=True):
     if not s:
         return []
     items = []
-    plan = plans.load(home, sid)
-    tasks = list(plans._tasks(plan))
-    for _, t in tasks:
-        if t.get("status") == "open":
-            items.append(f"background task {t.get('id')}, {t.get('tool') or 'a task'} \"{_short(t.get('what'), 100)}\", "
-                         f"started {t.get('at') or 'earlier'}, has no end recorded and may still be running")
-        elif not str(t.get("result") or "").strip() and t.get("status") not in ("stopped",):
-            items.append(f"background task {t.get('id')} \"{_short(t.get('what'), 100)}\" ended as "
-                         f"{t.get('status')} and its result was never read")
-    again = {}
-    for _, t in tasks:
-        if t.get("repeatOf"):
-            again.setdefault(str(t["repeatOf"]), []).append(t)
-    for first, more in again.items():
-        items.append(f"the command \"{_short(more[0].get('what'), 100)}\" was started {len(more) + 1} times, "
-                     f"{', '.join(str(t.get('id')) for t in more)} while {first} was still running")
+    for t in plans.in_flight(s):
+        items.append(f"background task {t.get('id')}, {t.get('type') or 'a task'} "
+                     f"\"{_short(t.get('description') or t.get('command'), 100)}\", was still running at its last "
+                     f"turn's end, {s.get('backgroundAt') or 'earlier'}, and may still be running")
     if procs:
         for pid, cmd in left_processes(home, s):
             items.append(f"process {pid} it started is still alive: {cmd}")
@@ -1631,29 +1619,33 @@ def archive_checks(home, top):
 
 
 def held_tasks(home, sid):
-    """The open background tasks that hold a session's own archive, each as its id and its quoted words."""
-    return [f"{t.get('id')} \"{_short(t.get('what'), 80)}\"" for _, t in plans._tasks(plans.load(home, sid))
-            if t.get("status") == "open"]
+    """The background tasks still running at a session's last turn's end, by the Stop input, that hold its own
+    archive, each as its id and its quoted words."""
+    return [f"{t.get('id')} \"{_short(t.get('description') or t.get('command'), 80)}\""
+            for t in plans.in_flight(relay._session(home, sid))]
 
 
 def restart_text(home, sid, command):
-    """The line for a session about to start a background command its own records show as still running, and an
-    empty string when none runs or it was told of this copy already; a second try goes through and is flagged on
-    the background task."""
-    first = plans.running(plans.load(home, sid), command)
-    if not first:
-        return ""
+    """The line for a session about to start a background command that the Stop input at its last turn's end listed
+    as still running, and an empty string when none runs or it was told of this copy already; a second try goes
+    through. PreToolUse input lists no running task, hooks.md, so the list the Stop hook kept is read."""
     path = os.path.join(relay._dir(home, sid), "session.json")
     s = relay._read_json(path)
+    said = " ".join(str(command or "").split())
+    first = next((t for t in plans.in_flight(s) if t.get("type") == "shell" and (
+        " ".join(str(t.get("command") or "").split()) == said
+        or len(str(t.get("command") or "")) >= 1000 and said.startswith(" ".join(str(t["command"]).split())))), None)
+    if not first:
+        return ""
     told = [x for x in s.get("restartTold") or [] if isinstance(x, str)]
     if not s or first["id"] in told:
         return ""
     s["restartTold"] = (told + [first["id"]])[-50:]
     relay._write_json(path, s)
-    return (f"phi (p4-phi): this command is still running in the background as {first['id']}, started "
-            f"{first.get('at') or 'earlier'}, by this session's own records, so a second copy is not started. Wait for "
-            f"the completion notification of {first['id']}, or read its output. If it has ended and its notification "
-            f"was missed, start it again: p4-phi lets the next start through and keeps it as a repeat of {first['id']}.")
+    return (f"phi (p4-phi): this command was still running in the background as {first['id']} at this session's "
+            f"last turn's end, {s.get('backgroundAt') or 'earlier'}, by the app's own list, so a second copy is not "
+            f"started. Wait for the completion notification of {first['id']}, or read its output. If it has ended and "
+            f"its notification was missed, start it again: p4-phi lets the next start through.")
 
 
 # --- meta: the orchestrators' ledgers reconciled -----------------------------------------------------------------

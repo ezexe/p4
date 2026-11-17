@@ -536,7 +536,8 @@ class HooksJson(unittest.TestCase):
                 return __import__("pathlib").Path(log).read_text().split() if os.path.exists(log) else []
             clean = {"hook_event_name": "PostToolUse", "tool_response": {"stdout": "a.txt"}}
             self.assertEqual(ran("lookup-record", "Read", clean), [], "a clean read: nothing waits")
-            self.assertEqual(ran("lookup-record", "Bash", clean), ["lookup-phi"], "phi's task record waits")
+            self.assertEqual(ran("lookup-record", "Bash", clean), [], "a clean shell call: p4-phi keeps no record")
+            self.assertEqual(ran("lookup-record", "Write", clean), ["lookup-phi"], "phi's memory-gap check waits")
             self.assertEqual(ran("lookup-record", "Read", dict(clean, agent_id="a1")), ["lookup-phi"],
                              "a subagent's binding waits")
             self.assertEqual(ran("lookup-record-async", "Bash", clean), ["lookup-row"], "the row alone, behind")

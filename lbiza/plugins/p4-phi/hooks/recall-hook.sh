@@ -77,7 +77,7 @@ fi
 # the `lookup-record-async` entry, which hooks.json marks `async`: the app runs it in the background and the call
 # does not wait for it, ezexe/p4#150. phi.py's records of a clean call stay with the `lookup-record` entry the call
 # waits on: a subagent's call, bound to its record before its next call is checked, and the tools PHI_RECORD of
-# hook.py names, whose task and plan records a later check reads. That entry answers every other call whole.
+# hook.py names, whose plan records and memory checks a later check reads. That entry answers every other call whole.
 # P4_RECALL_SYNC=1, which the tests set, has `lookup-record` do all of it and the async entry nothing.
 clean=0
 if [ "$name" = lookup-record ] || [ "$name" = lookup-record-async ]; then
@@ -96,10 +96,7 @@ if [ "$name" = lookup-record ] || [ "$name" = lookup-record-async ]; then
   if [ "$name" = lookup-record ] && [ "$clean" = 1 ]; then
     case "$payload" in
       *'"agent_id"'*) ;;                          # a subagent's call: bound to its record now
-      *'"tool_name":"Bash"'*|*'"tool_name": "Bash"'*|*'"tool_name":"PowerShell"'*|*'"tool_name": "PowerShell"'*) ;;
-      *'"tool_name":"Monitor"'*|*'"tool_name": "Monitor"'*|*'"tool_name":"Agent"'*|*'"tool_name": "Agent"'*) ;;
-      *'"tool_name":"Workflow"'*|*'"tool_name": "Workflow"'*|*'"tool_name":"TaskStop"'*|*'"tool_name": "TaskStop"'*) ;;
-      *'"tool_name":"KillShell"'*|*'"tool_name": "KillShell"'*|*'"tool_name":"Write"'*|*'"tool_name": "Write"'*) ;;
+      *'"tool_name":"Write"'*|*'"tool_name": "Write"'*) ;;
       *'"tool_name":"Edit"'*|*'"tool_name": "Edit"'*|*'"tool_name":"MultiEdit"'*|*'"tool_name": "MultiEdit"'*) ;;
       *) exit 0 ;;
     esac

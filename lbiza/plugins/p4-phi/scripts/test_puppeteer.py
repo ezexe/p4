@@ -647,9 +647,12 @@ class AtArchive(Base):
         t.say(KID, handed("Port the flush to the new writer. Report when done."))
 
     def background(self, host, command, task_id):
-        r = self.t.hook("task", host, {"hook_event_name": "PostToolUse", "tool_name": "Bash",
-                                       "tool_input": {"command": command, "run_in_background": True},
-                                       "tool_response": f"Command running in background with ID: {task_id}."})
+        """A turn that ends with the command still running, as the Stop input's `background_tasks` lists it."""
+        path = transcript(os.path.join(self.t.tmp, host + task_id + ".jsonl"), "port it", (), "Running.", task_id)
+        r = self.t.hook("stop", host, {"hook_event_name": "Stop", "transcript_path": path,
+                                       "last_assistant_message": "Running.",
+                                       "background_tasks": [{"id": task_id, "type": "shell", "status": "running",
+                                                             "description": command, "command": command}]})
         self.assertEqual(r.returncode, 0, r.stderr)
 
     def finish(self, host=KID):
@@ -661,7 +664,8 @@ class AtArchive(Base):
         self.background(KID, "sh run-suites.sh", "bg12345678")
         self.finish()
         left = self.t.session(KID)["unfinishedAtArchive"]["items"]
-        self.assertTrue(any("background task bg12345678" in x and "no end recorded" in x for x in left), left)
+        self.assertTrue(any("background task bg12345678" in x and "still running at its last turn's end" in x
+                            for x in left), left)
         page = self.ledger()[0]
         self.assertIn("## Unfinished at archive", page)
         self.assertLess(page.index("## Unfinished at archive"), page.index("## Reconcile"), "at the head of the page")
@@ -682,22 +686,18 @@ class AtArchive(Base):
         self.assertNotIn("Unfinished at archive", self.ledger()[0])
         self.assertNotIn("unfinished", context(self.t.say(TOP, "And?")))
 
-    def test_a_second_start_of_a_running_command_is_held_then_flagged_with_the_first_copys_id(self):
+    def test_a_second_start_of_a_running_command_is_held_once(self):
         self.background(KID, "sh run-suites.sh", "bg11111111")
         call = {"hook_event_name": "PreToolUse", "tool_name": "Bash",
                 "tool_input": {"command": "sh  run-suites.sh", "run_in_background": True}}
         out = json.loads(self.t.hook("restart-check", KID, dict(call, tool_use_id="tu1")).stdout)["hookSpecificOutput"]
         self.assertEqual(out["permissionDecision"], "deny")
         self.assertIn("still running in the background as bg11111111", out["permissionDecisionReason"])
+        self.assertIn("by the app's own list", out["permissionDecisionReason"])
         self.assertEqual(self.t.hook("restart-check", KID, dict(call, tool_use_id="tu2")).stdout.strip(), "",
                          "told once for that copy: the next start goes through")
         other = dict(call, tool_input={"command": "sh other.sh", "run_in_background": True}, tool_use_id="tu3")
         self.assertEqual(self.t.hook("restart-check", KID, other).stdout.strip(), "", "another command is no restart")
-        self.background(KID, "sh run-suites.sh", "bg22222222")
-        tasks = [t for _, t in puppeteer.plans._tasks(puppeteer.plans.load(self.t.p4, KID))]
-        self.assertEqual(tasks[-1].get("repeatOf"), "bg11111111")
-        left = puppeteer.unfinished(self.t.p4, KID, procs=False)
-        self.assertTrue(any("started 2 times" in x and "while bg11111111 was still running" in x for x in left), left)
 
     def test_processes_it_left_and_requests_nobody_started_are_named(self):
         puppeteer.PROCESSES = lambda: [(4242, f"python phi.py watch --p4 {self.t.p4} --session {KID}"),

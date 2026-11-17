@@ -197,7 +197,8 @@ def standing(store, sid):
                        f"\"{PHI.cut(PHI.clean(steps[0].get('content')), 80)}\"")
     tasks = _watcher().held_tasks(store, sid)
     if tasks:
-        against.append(f"{len(tasks)} background task{'s' if len(tasks) != 1 else ''} with no end recorded: "
+        against.append(f"{len(tasks)} background task{'s' if len(tasks) != 1 else ''} still running at its last "
+                       f"turn's end: "
                        + "; ".join(tasks[:3]))
     for kid, k in sorted(relay._sessions(store).items()):
         if kid == sid or out_of_tree(k) or sid not in PHI.chain_of(store, kid):

@@ -14,7 +14,6 @@ advice and checks that ride on them.
                up      its parent step was revised, removed or passed
                across  a sibling's step in progress shares its words, or touches its owned paths
                down    its children's progress on their steps, when it moved since the last check
-               task    a background task something moved under, or a step marked done over a flagged open task
              and the warnings kept for it. Nothing when nothing bears on it.
   revision   a session that replaces its list revises its task list. A changed or removed step is told on the next
              message, through relay.warn, to the children it is the parent step of, down, to the siblings whose step
@@ -27,8 +26,8 @@ advice and checks that ride on them.
   turns      at Stop, a turn's report is matched against the open steps of the session's children and siblings and
              delivered to those it bears on, and a turn that ends with open steps the session tree can settle is
              sent back to its next step.
-  tasks      a background task is recorded under the step that started it and checked at each step boundary against
-             what moved since it started.
+  in flight  the Stop input's list of background tasks still running, kept on session.json for the checks that
+             run between turns.
 """
 
 import hashlib
@@ -175,7 +174,7 @@ def summary(home, sid):
                       for x in p["steps"]]}
 
 
-def record(home, s, inp, transcript=""):
+def record(home, s, inp):
     """The work for one update_plan call, at its PostToolUse or read back from the transcript -> the
     additionalContext text, '' for none."""
     sid = s["sessionId"]
@@ -214,7 +213,7 @@ def record(home, s, inp, transcript=""):
     relay.make_anchor(home, sid, _now())
     if revision:
         relay_revision(home, s, plan, revision)
-    return boundary(home, s, plan, started, transcript) if started else ""
+    return boundary(home, s, plan, started) if started else ""
 
 
 def _now():
@@ -271,26 +270,12 @@ def relay_revision(home, s, plan, rev):
                    + ", ".join(f"{a} {'removed' if a in rev['removed'] else 'changed'}" for a in touched) + ".")
 
 
-def boundary(home, s, plan, started, transcript=""):
-    """What bears on the step that starts now: up, across, down, the background tasks something moved under, and
-    the warnings kept for this session."""
+def boundary(home, s, plan, started):
+    """What bears on the step that starts now: up, across, down, and the warnings kept for this session."""
     sid = s["sessionId"]
-    if transcript:
-        pickup(home, sid, transcript_tail(transcript))
-        plan = load(home, sid) or plan
     step = step_of(plan, started) or {}
     text = step.get("content", "")
-    task_lines, moved = check_tasks(home, s, plan)     # flagged first, so a step just closed over one is caught
-    lines = [f"task: {x}" for x in task_lines]
-    for st in plan.get("steps") or []:
-        if st.get("status") == "completed" and st["addr"] != started:
-            for t in flagged_open(plan, st["addr"]):
-                if not t.get("doneSaid"):
-                    t["doneSaid"] = True
-                    lines.append(f"step {st['addr']} was marked done while background task {t['id']} under it is "
-                                 f"flagged and still open; say so in that step's report, or stop the task.")
-    if moved or any(t.get("doneSaid") for _, t in _tasks(plan)):
-        relay._write_json(_path(home, sid), plan)
+    lines = []
     path = os.path.join(relay._dir(home, sid), "session.json")
     with relay.locked(path) as lk:                # emptied under the lock relay.warn holds
         return _boundary(home, s, plan, started, text, lines, path, lk.held)
@@ -600,14 +585,6 @@ WRITES = re.compile(r"\b(?:fix\w*|writ\w*|add\w*|chang\w*|edit\w*|implement\w*|u
                     r"push\w*|merg\w*|land\w*|releas\w*|ship\w*|install\w*)\b", re.I)
 LEVELS = True                 # phi.project_conf sets it from p4.json phi.levels
 LEVEL_WHAT = {"sweep": "only reads or searches", "runner": "only runs a command"}
-# A shell call's result once its command runs in the background: started there, or moved there by the app at its
-# timeout, which tools-reference.md, "Foreground commands that move to the background", words as "Command did not
-# complete within its 120s timeout and was moved to the background", the seconds those of the timeout that applied,
-# "followed by the task ID and the path of the file the output is being written to". Only the app's own shapes
-# count, a result that opens with one of the two sentences, so a command whose output merely quotes one, such as
-# a grep of these lines, is no task.
-LAUNCHED = re.compile(r"Command running in background with ID|Command did not complete within its \d+s timeout "
-                      r"and was moved to the background", re.I)
 
 
 def level_of(text):
@@ -1254,8 +1231,8 @@ def waiting_step(home, sid):
 
 def keep_going(home, s, report, calls, turn_id, active=False, waits=(), background=()):
     """The Stop hook's reason to send the session back to its next open step; '' when the turn may end: no open
-    step, the turn wrapped up or asked ezexe a matter of authority, the next step is one, a background task is
-    still open, since its notice starts the next turn, this turn was sent back KEEP_GOING_MAX times already, or the
+    step, the turn wrapped up or asked ezexe a matter of authority, the next step is one, the Stop input lists a
+    background task still running, since its notice starts the next turn, this turn was sent back KEEP_GOING_MAX times already, or the
     next step waits on other sessions' reports while `waits` names sessions not yet complete."""
     p = load(home, s["sessionId"])
     steps = [x for x in p.get("steps") or [] if x.get("status") != "completed"]
@@ -1264,8 +1241,6 @@ def keep_going(home, s, report, calls, turn_id, active=False, waits=(), backgrou
     names = {str(c.get("name") or "") for c in calls or [] if isinstance(c, dict)}
     if "mcp__ccd_turn__wrap_up" in names:
         return ""                                  # the turn wrapped up: its recap says what is left and why
-    if any(t.get("status") == "open" for _, t in _tasks(p)):
-        return ""
     if any(isinstance(t, dict) and str(t.get("status") or "running").lower() == "running" for t in background or ()):
         return ""                                  # hooks.md, Stop input: a running task's end wakes the session
     nxt = next((x for x in steps if x.get("status") == "in_progress"), steps[0])
@@ -1295,172 +1270,39 @@ def keep_going(home, s, report, calls, turn_id, active=False, waits=(), backgrou
             "task list.")
 
 
-# --- background tasks under a step -------------------------------------------------------------------------------------
+# --- the work in flight, as the Stop input lists it -------------------------------------------------------------------
 #
-# A step's background tasks, a Bash command run in the background, a Monitor, an Agent or a Workflow, are recorded
-# under the step in progress with what each ran against: the heads of the repositories its command names, its paths
-# and its words. At each step boundary an open task is checked against what moved since it started. A completion
-# notice that arrives while the session is idle starts a turn, and UserPromptSubmit fires with the notice as its
-# prompt; the Stop hook's input also lists the work still in flight as `background_tasks`, which this module does not
-# read. Completions are read from the message at UserPromptSubmit, and from the transcript's tail at Stop and at each
-# step boundary.
+# hooks.md, "Stop input": `background_tasks` lists each task still in flight, with its `id`, `type`, `status`,
+# `description` and, for a shell task, its `command`, and is present when the task registry is reachable. p4-phi
+# records no launch of its own: the Stop hook keeps that list on session.json, and the checks that run between turns,
+# such as the restart check and the archive checks, read it there, since PreToolUse input lists no running task.
+# A step's subagents stay in its task list, as agent_bind puts them, so _tasks reads them.
 
-TASK_ID = re.compile(r"(?:background with ID|task[_ -]?id|agentId|ID)[\"':\s=]+([A-Za-z0-9_-]{6,})"
-                     r"|\(task\s+([A-Za-z0-9_-]{6,})", re.I)      # the Monitor's "(task bz4dv0pvj, ..."
-NOTICE = re.compile(r"<task-id>\s*([^<\s]+)\s*</task-id>.*?<status>\s*([^<\s]+)\s*</status>"
-                    r"(?:.*?<summary>(.*?)</summary>)?", re.S)
-NEAR_DONE_S = 600             # a task older than this may be near done: finish and record rather than stop
-JOB_GAP_S = 3600              # the job-gap budget: an open task this far past its own timeout with no notice read is
-                              # taken as unknown, never flagged: a stopped task, an expired Monitor or a lost notice
-STOPPED = re.compile(r'"name"\s*:\s*"(?:TaskStop|KillShell)"\s*,\s*"input"\s*:\s*\{[^{}]*?'
-                     r'"(?:task_id|shell_id|id)"\s*:\s*"([A-Za-z0-9_-]{6,})"')
-BACKGROUND_AGENT = re.compile(r"(?:launched|running|runs) in the background|async agent|run_in_background", re.I)
+IN_FLIGHT_FIELDS = ("id", "type", "status", "description", "command")
 
 
-def launched(response):
-    """True when a shell call's result is the app's own for a command in the background: a dict with a
-    backgroundTaskId, or a result string, or a dict's stdout, stderr or output, that opens with LAUNCHED."""
-    if isinstance(response, dict):
-        if response.get("backgroundTaskId"):
-            return True
-        texts = [response.get(k) for k in ("stdout", "stderr", "output")]
-    else:
-        texts = [response]
-    return any(isinstance(t, str) and LAUNCHED.match(t.lstrip()) for t in texts)
+def keep_in_flight(s, payload):
+    """The Stop input's `background_tasks` kept on the session as `backgroundTasks`, with the time they were read.
+    An input with no list, as when the registry was not reachable or the call is the Stop a self-archive makes, leaves
+    the last list read as it was."""
+    tasks = payload.get("background_tasks") if isinstance(payload, dict) else None
+    if not isinstance(tasks, list):
+        return
+    s["backgroundTasks"] = [{k: t[k] for k in IN_FLIGHT_FIELDS if k in t} for t in tasks if isinstance(t, dict)][:50]
+    s["backgroundAt"] = _now()
 
 
-def register(home, s, tool, inp, response, cwd, at_epoch=None):
-    """Record a background task under the step in progress -> the task, or None when the call ran in the
-    foreground or names no task id."""
-    if tool in ("Bash", "PowerShell") and not inp.get("run_in_background") and not launched(response):
-        return None                               # a foreground command; one the app moved shows it in its result
-    if tool == "Agent" and not inp.get("run_in_background") and not BACKGROUND_AGENT.search(str(response)):
-        return None                               # a foreground agent has finished by its result
-    text = response if isinstance(response, str) else json.dumps(response, default=str)
-    m = TASK_ID.search(text)
-    if not m:
-        return None
-    what = str(inp.get("command") or inp.get("prompt") or inp.get("description") or inp.get("name") or tool)
-    paths = relay.paths_in(what, cwd)
-    repos = {relay.repo_of(p) for p in paths} | ({relay.repo_of(cwd)} if cwd else set())
-    task = {"id": m.group(1) or m.group(2), "tool": tool, "what": relay._short(what, 200), "heads": relay.heads(repos),
-            "paths": paths, "status": "open"}
-    limit = inp.get("timeout_ms") or inp.get("timeout")      # milliseconds in Bash and PowerShell as in Monitor
-    if isinstance(limit, (int, float)) and limit > 0:
-        task["timeoutS"] = int(limit / 1000)
-    import time as _t
-    epoch = int(at_epoch or _t.time())
-    task["epoch"], task["at"] = epoch, _t.strftime("%Y-%m-%d %H:%M", _t.localtime(epoch))
-    if any(t.get("id") == task["id"] for _, t in _tasks(load(home, s["sessionId"]))):
-        return None                               # the same launch read twice
-    sid = s["sessionId"]
-    p = load(home, sid)
-    first = running(p, task["what"])
-    if first:
-        task["repeatOf"] = first["id"]             # started again while an earlier copy is still running
-    st = step_of(p, p.get("current") or "") if p.get("steps") else None
-    if st is None:
-        p.setdefault("loose", []).append(task)
-    else:
-        st.setdefault("tasks", []).append(task)
-    relay._write_json(_path(home, sid), p)
-    return task
-
-
-def same_command(a, b):
-    return " ".join(str(a or "").split()) == " ".join(str(b or "").split())
-
-
-def running(p, what):
-    """The earliest open background task of a task list that runs the same command, None for none."""
-    what = relay._short(what, 200)
-    return next((t for _, t in _tasks(p) if t.get("status") == "open" and t.get("tool") != "Agent"
-                 and same_command(t.get("what"), what)), None)
+def in_flight(s):
+    """The background tasks a session's last Stop input listed as still running, each with its id."""
+    tasks = s.get("backgroundTasks") if isinstance(s, dict) else None
+    return [t for t in tasks or [] if isinstance(t, dict) and t.get("id")
+            and str(t.get("status") or "running").lower() == "running"]
 
 
 def _tasks(p):
+    """The subagent tasks of a task list, each with its step, None for a loose one."""
     for st in p.get("steps") or []:
         for t in st.get("tasks") or []:
             yield st, t
     for t in p.get("loose") or []:
         yield None, t
-
-
-def pickup(home, sid, text):
-    """Completion notices in `text`, a message or a transcript's tail, closed on their tasks -> the ids closed."""
-    p = load(home, sid)
-    closed = []
-    found = {m.group(1): (m.group(2).lower(), (m.group(3) or "").strip()) for m in NOTICE.finditer(str(text or ""))}
-    for m in STOPPED.finditer(str(text or "")):   # a TaskStop sends no notice; its call closes the task
-        found.setdefault(m.group(1), ("stopped", "stopped by TaskStop"))
-    if not found:
-        return closed
-    for st, t in _tasks(p):
-        if t.get("id") in found and t.get("status") == "open":
-            t["status"], t["result"] = found[t["id"]][0], relay._short(found[t["id"]][1], 300)
-            closed.append(t["id"])
-    if closed:
-        relay._write_json(_path(home, sid), p)
-    return closed
-
-
-def transcript_tail(path, size=200000):
-    try:
-        with open(path, "rb") as f:
-            f.seek(0, 2)
-            n = f.tell()
-            f.seek(max(0, n - size))
-            return f.read().decode("utf-8", "replace")
-    except OSError:
-        return ""
-
-
-def check_tasks(home, s, plan):
-    """The open background tasks something moved under since they started -> lines with the id and what to do."""
-    import time as _t
-    lines, changed = [], False
-    parent = relay._parent(s)
-    anchor = relay._read_json(relay.anchor_path(home, parent)) if parent else {}
-    marks = [(nid, n.get("title") or nid, m) for nid, n in (anchor.get("nodes") or {}).items()
-             if nid != s["sessionId"] for m in n.get("marks") or []]
-    for st, t in _tasks(plan):
-        if t.get("status") != "open":
-            continue
-        if _t.time() - int(t.get("epoch") or 0) > int(t.get("timeoutS") or 0) + JOB_GAP_S:
-            t["status"] = "unknown"               # past its budget with no notice read: finished, stopped or expired
-            changed = True
-            continue
-        if st is None:
-            continue                              # a loose task has no step to be checked against
-        why = []
-        for h in t.get("heads") or []:
-            repo, _, rest = h.partition("@")
-            now_h = next(iter(relay.heads({repo})), "")
-            if now_h and now_h != h:
-                why.append(f"the head it ran against moved: {relay.show_head(h, s.get('cwd') or '')} is now "
-                           f"{relay.show_head(now_h, s.get('cwd') or '')}")
-        for nid, title, m in marks:
-            if str(m.get("time") or "") < str(t.get("at") or ""):
-                continue
-            if any(relay.overlap(a, b) for a in m.get("paths") or [] for b in t.get("paths") or []) or \
-                    bears(m.get("claim"), t.get("what")):
-                why.append(f"\"{title}\" wrote \"{relay._short(m.get('claim'), 200)}\"")
-        if not why:
-            continue
-        key = hashlib.sha1("|".join(why).encode()).hexdigest()[:10]
-        if key in (t.get("flags") or []):
-            continue
-        t.setdefault("flags", []).append(key)
-        changed = True
-        age = _t.time() - int(t.get("epoch") or 0)
-        advice = (f"it has run {int(age // 60)} min and may be near done: let it finish and record its result as "
-                  f"against the old head" if age > NEAR_DONE_S else
-                  f"`TaskStop {t['id']}`, then re-run it against the new head if it is still wanted")
-        lines.append(f"background task {t['id']}, the {t.get('tool')} call \"{relay._short(t.get('what'), 80)}\": "
-                     + "; ".join(why) + f". {advice}.")
-    return lines, changed
-
-
-def flagged_open(plan, addr):
-    st = step_of(plan, addr) or {}
-    return [t for t in st.get("tasks") or [] if t.get("status") == "open" and t.get("flags")]

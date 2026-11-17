@@ -254,7 +254,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
           <select id="hold">
             <option value="none">nothing more</option>
             <option value="steps">an open plan step</option>
-            <option value="task">a background task with no end recorded</option>
+            <option value="task">a background task still running at its last turn's end</option>
             <option value="commit">a closing commit on no remote branch</option>
           </select>
           <label class="ck"><input type="checkbox" id="past"> p4-phi has handed the puppeteer 200000 characters or more since its last compaction</label>
@@ -488,7 +488,7 @@ function standing(n){
   var a=[];
   if(n.working)a.push("its last message has no turn's end recorded after it, so it is mid-turn");
   if(n.hold==="steps")a.push("1 open plan step, the next \"Land the change and push main\"");
-  if(n.hold==="task")a.push("1 background task with no end recorded: b3k9x2qz \"python -I -X utf8 test_export.py\"");
+  if(n.hold==="task")a.push("1 background task still running at its last turn's end: b3k9x2qz \"python -I -X utf8 test_export.py\"");
   below(n.id).forEach(function(k){var c=N(k);if(!c.archived&&(c.working||c.hold==="steps"))a.push("\""+c.title+"\" under it is still working")});
   if(n.req)a.push("1 start request of its own waiting, the first \""+n.req.title+"\", which it starts at a turn ezexe begins there: ezexe opens "+link(n)+" and presses the button its turn ended on");
   if(n.hold==="commit")a.push("commit 4c1d9e2, which closes #212, is on no remote branch, and no commit there closes the same issue or carries the same change");
