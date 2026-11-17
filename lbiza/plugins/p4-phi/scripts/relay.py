@@ -1738,24 +1738,47 @@ CMD_META = set('&|<>^%!"()\r\n')         # what cmd.exe reads in a .cmd or .bat 
 def gh(args, cwd=None, timeout=GIT_S):
     """gh's CompletedProcess, None when there is no gh or it failed to start or finish. It is the one way p4-phi
     runs gh: the gh P4_PHI_GH names, a `.py` file there run with this Python, else the gh on PATH by the full path
-    shutil.which found, so a gh.cmd or gh.bat wrapper on Windows runs as gh.exe would."""
+    shutil.which found. A gh.cmd or gh.bat wrapper on Windows is started through cmd.exe, which reads its arguments
+    again: a `--body` text goes to it as a `--body-file`, and a call with any other argument holding one of the
+    characters cmd.exe acts on is not run, and comes back with exit code 1 and a reason naming them on stderr."""
     import shutil
+    import tempfile
     cmd = os.environ.get("P4_PHI_GH") or shutil.which("gh")
     if not cmd:
         return None
     argv = [sys.executable, "-I", "-X", "utf8", cmd] if cmd.endswith(".py") else [cmd]
-    if cmd.lower().endswith((".cmd", ".bat")) and any(set(str(a)) & CMD_META for a in args):
-        return None                         # cmd.exe reads a wrapper's arguments again, & and | as commands
+    args, body = [str(a) for a in args], None
+    if cmd.lower().endswith((".cmd", ".bat")):
+        if "--body" in args[:-1]:
+            k = args.index("--body")
+            fd, body = tempfile.mkstemp(prefix="p4-phi-gh-body-", suffix=".md")
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+                f.write(args[k + 1])
+            args[k:k + 2] = ["--body-file", body]
+        bad = sorted({c for a in args for c in a} & CMD_META)
+        if bad:
+            if body:
+                os.remove(body)
+            shown = " ".join(repr(c) for c in bad)
+            return subprocess.CompletedProcess(argv + args, 1, "", f"p4-phi: not run, since gh is the wrapper {cmd} "
+                                               f"and cmd.exe would act on {shown} in its arguments")
     try:
-        return subprocess.run(argv + list(args), capture_output=True, text=True, encoding="utf-8", errors="replace",
+        return subprocess.run(argv + args, capture_output=True, text=True, encoding="utf-8", errors="replace",
                               timeout=timeout, cwd=cwd or None)
     except (OSError, subprocess.SubprocessError):
         return None
+    finally:
+        if body:
+            try:
+                os.remove(body)
+            except OSError:
+                pass
 
 
 def _open_pr(repo, branch):
     """True when gh lists an open pull request for the branch, False when it lists none, and None when gh is
-    missing, fails or takes longer than GIT_S, so whether there is one could not be read."""
+    missing, fails, takes longer than GIT_S, or is a gh.cmd wrapper the branch name holds a character cmd.exe acts
+    on for, so whether there is one could not be read."""
     r = gh(["pr", "list", "--head", branch, "--state", "open", "--json", "number", "-q", "length"], cwd=repo,
            timeout=GIT_S)
     if r is None:

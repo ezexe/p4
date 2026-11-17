@@ -900,6 +900,17 @@ class GhWrapper(unittest.TestCase):
             for name in ("x&echo.>ran.txt", "x|echo.>ran.txt"):     # no space, so no quotes guard it
                 relay._open_pr(tmp, name)
                 self.assertFalse(os.path.exists(mark), name)
+                r = relay.gh(["pr", "list", "--head", name], cwd=tmp)
+                self.assertEqual(r.returncode, 1)
+                self.assertIn("'&'" if "&" in name else "'|'", r.stderr, "the refusal names what cmd.exe would act on")
+            # a comment's body, with lines and parentheses, reaches the wrapper whole as a --body-file
+            with open(os.path.join(tmp, "gh.cmd"), "w") as f:
+                f.write('@copy /y %7 "%~dp0got.md" >nul\n@echo ok\n')
+            body = "p4-phi re-ran it: **passed** (exit code 0).\n\n```\nRan 3 tests\nOK & done | (all)\n```"
+            r = relay.gh(["issue", "comment", "7", "-R", "o/r", "--body", body], cwd=tmp)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with open(os.path.join(tmp, "got.md"), encoding="utf-8") as f:
+                self.assertEqual(f.read(), body)
         finally:
             for k, v in old.items():
                 if v is None:
