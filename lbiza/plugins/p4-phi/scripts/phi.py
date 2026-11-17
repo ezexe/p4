@@ -2604,8 +2604,7 @@ def pair_parts(me, s, req, changed="", notice=lambda text: text):
     turn ezexe began, the requests addressed to it and where ezexe's message belongs; the sessions of the controlled
     trees that hold start requests, as links; each start it made on another session's behalf, to detach to top
     level; a boundary; and its board rewritten. Any other orchestrator gets its puppeteer, once, and
-    what became of the requests it sent it. The archive offer asks the puppeteer to put a question to ezexe at this
-    message, so it goes through `notice` and is never the piece held."""
+    what became of the requests it sent it."""
     out = []
     if not controls.is_puppeteer(s, me.store):
         told = controls.pair_text(s, me.store)

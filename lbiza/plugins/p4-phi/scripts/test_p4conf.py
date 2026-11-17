@@ -405,6 +405,18 @@ class P4Conf(unittest.TestCase):
         self.assertNotIn("tmp_skip_dirs", s["scratchpad"])
         self.assertIs(s["scratchpad"]["asks"], True)
 
+    def test_the_retired_archive_switch_is_dropped_and_never_called_unknown(self):
+        """phi.session_archives went with the archive guard, for the ask rule on archive_session."""
+        import contextlib
+        import io
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump({"phi": {"session_archives": True}}, f)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            s = p4conf.load(self.p4)
+        self.assertEqual(err.getvalue(), "")
+        self.assertNotIn("session_archives", s.get("phi", {}))
+
     def test_the_keeper_writes_and_keeps_scratchpad_tmp_false(self):
         """p4-temportal 0.3.9 links a session's scratchpad into temportal/tmp unless p4.json's scratchpad.tmp is false,
         so every store holds it false: a store that lacks it, one load wrote true into, and one from before the record

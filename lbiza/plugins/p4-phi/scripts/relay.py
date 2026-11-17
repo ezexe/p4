@@ -749,7 +749,7 @@ def _rebase(home, sid, room, fair_cut, touches, path, held):
         st["told"] = True
         s["anchorSeen"] = max(int(s.get("anchorSeen") or 0), int(st.get("anchorVersion") or 0))
         _write_json(path, s)
-        ready_page(home)                          # messaged again, it is live: off the page and the offer
+        ready_page(home)                          # messaged again, it is live: off the page
         return (f"phi (p4-phi): this session's work is superseded and it is stale in the session tree: "
                 f"\"{st.get('note')}\". Re-base onto that before going on; its outcome is kept as a note on its "
                 f"parent session."), True
