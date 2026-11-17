@@ -127,7 +127,7 @@ class HooksJson(unittest.TestCase):
         self.assertEqual([x["command"].split()[-1] for x in stop], ["close", "train"])
         self.assertEqual(stop[0]["timeout"], 30)
         self.assertIs(stop[1]["async"], True)
-        self.assertEqual(h["SubagentStop"][0]["matcher"], ".*")
+        self.assertEqual(h["SubagentStop"][0]["matcher"], ".+")
         for ev in h.values():
             for m in ev:
                 for x in m["hooks"]:

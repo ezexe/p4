@@ -206,6 +206,12 @@ class Matchers(unittest.TestCase):
         for source in EVENTS["SessionStart"]:
             self.assertTrue(self.takes(m, source), source)
 
+    def test_subagent_stop_leaves_out_an_empty_agent_type(self):
+        m = self.matcher_of("SubagentStop", "subagent-stop")
+        self.assertFalse(self.takes(m, ""), m)
+        for name in ("Explore", "general-purpose", "p4-phi:sweep"):
+            self.assertTrue(self.takes(m, name), name)
+
 
 class Manifests(unittest.TestCase):
     """The marketplace's catalog against each plugin's own plugin.json: Claude Code warns when an entry's version and
