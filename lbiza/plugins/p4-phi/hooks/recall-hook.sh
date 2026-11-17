@@ -71,10 +71,12 @@ if [ "$name" = lookup-check ]; then
       case "$line" in *'"shell":{"w":{}'*) exit 0 ;; esac ;;
   esac
 fi
-# A call that worked and printed nothing like an error has nothing to be told: its row is written by a python left
-# running behind, and the call does not wait for it. P4_RECALL_SYNC=1, which the tests set, waits for it.
-detach=0
-if [ "$name" = lookup-record ]; then
+# A call that worked and printed nothing like an error has nothing to be told, so its row is written by the
+# `lookup-record-async` entry, which hooks.json marks `async`: the app runs it in the background and the call does
+# not wait for it, ezexe/p4#150. The `lookup-record` entry answers every other call at once and ends here for a
+# clean one. P4_RECALL_SYNC=1, which the tests set, has `lookup-record` write every row and the async entry none.
+clean=0
+if [ "$name" = lookup-record ] || [ "$name" = lookup-record-async ]; then
   payload=$(cat)
   piped=1
   if [ "${P4_RECALL_SYNC:-0}" != 1 ]; then
@@ -84,17 +86,20 @@ if [ "$name" = lookup-record ]; then
       *temportal*memory*) ;;                      # a memory written: phi.py's plugin-gap check answers
       *PostToolUseFailure*|*Traceback*|*Error*|*Exception*|*"not found"*|*"not recognized"*|*"No such file"*) ;;
       *fatal:*|*denied*|*ENAMETOOLONG*|*"unexpected EOF"*|*"cannot access"*|*unterminated*) ;;
-      *) detach=1 ;;
+      *) clean=1 ;;
     esac
+  fi
+  if [ "$name" = lookup-record ] && [ "$clean" = 1 ]; then exit 0; fi
+  if [ "$name" = lookup-record-async ]; then
+    [ "$clean" = 1 ] || exit 0
+    name=lookup-record                            # the same handler, in the background the app gives it
   fi
 fi
 
 run() {
   py="$1"
   shift
-  if [ "$detach" = 1 ]; then
-    ( printf '%s' "$payload" | "$py" -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/hook.py" "$@" >/dev/null 2>&1 & )
-  elif [ "$piped" = 1 ]; then
+  if [ "$piped" = 1 ]; then
     printf '%s' "$payload" | "$py" -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/hook.py" "$@" || true
   else
     "$py" -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/hook.py" "$@" || true

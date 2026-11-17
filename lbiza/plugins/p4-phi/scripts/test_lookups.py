@@ -149,17 +149,6 @@ class Record(Base):
             kept = [json.loads(l) for l in f]
         self.assertEqual([k["tool"] for k in kept], ["WebFetch"])     # the tracked file: findings, not every call
 
-    def test_a_clean_call_is_recorded_behind_the_call(self):
-        import time
-        r = run_hook("lookup-record", post("Bash", {"command": "ls src"}, {"stdout": "narwhal_port.py"}, S1, self.proj,
-                                           "t7"), self.proj, {"P4_RECALL_SYNC": "0"})
-        self.assertEqual((r.returncode, r.stdout), (0, ""))
-        for _ in range(100):                                  # the python left behind writes the row
-            if os.path.exists(lk.db_path(self.p4)) and self.rows("id='t7'"):
-                break
-            time.sleep(0.1)
-        self.assertEqual([x["tool"] for x in self.rows("id='t7'")], ["Bash"])
-
     def test_tools_with_nothing_to_check_never_start_python(self):
         r = run_hook("lookup-check", pre("Read", {"file_path": "README.md"}, proj=self.proj), self.proj)
         self.assertEqual((r.returncode, r.stdout), (0, ""))
@@ -517,6 +506,43 @@ class HooksJson(unittest.TestCase):
             self.assertEqual(h[ev][0]["matcher"], ".*")
             self.assertEqual(h[ev][0]["hooks"][0]["command"].split()[-1], "lookup-record")
             self.assertEqual(h[ev][0]["hooks"][0]["timeout"], 10)
+        # ezexe/p4#150: a clean call's row is written by an entry the app runs in the background
+        self.assertEqual([(x["command"].split()[-1], x.get("async")) for x in h["PostToolUse"][0]["hooks"]],
+                         [("lookup-record", None), ("lookup-record-async", True)])
+
+    def test_a_clean_call_waits_on_nothing_and_its_row_is_written_in_the_background(self):
+        """ezexe/p4#150: the entry the call waits on ends at once for a clean call and writes no row; the async entry
+        writes it, and a failure is still answered by the entry the call waits on."""
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = make_project(tmp)
+            env = {k: v for k, v in os.environ.items() if not k.startswith(("P4_", "CLAUDE_"))}
+            env.update({"CLAUDE_PLUGIN_ROOT": os.path.dirname(os.path.dirname(os.path.abspath(HOOKS_JSON))), "CLAUDE_PROJECT_DIR": proj})
+            runner = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(HOOKS_JSON))), "hooks", "recall-hook.sh")
+            clean = json.dumps(post("Read", {"file_path": "README.md"}, "a clean read", S1, proj, "t9"))
+
+            def rows():
+                db = lk.db_path(os.path.join(proj, ".claude", "p4"))
+                if not os.path.exists(db):
+                    return 0
+                con = sqlite3.connect(db)
+                try:
+                    return con.execute("SELECT count(*) FROM calls").fetchone()[0]
+                finally:
+                    con.close()
+            r = subprocess.run(["sh", runner, "lookup-record"], input=clean, capture_output=True, text=True, env=env)
+            self.assertEqual((r.returncode, r.stdout), (0, ""))
+            self.assertEqual(rows(), 0, "the entry the call waits on writes no row for a clean call")
+            r = subprocess.run(["sh", runner, "lookup-record-async"], input=clean, capture_output=True, text=True,
+                               env=env)
+            self.assertEqual(r.returncode, 0)
+            self.assertEqual(rows(), 1, "the async entry writes it")
+            failed = json.dumps(post("Bash", {"command": "python x.py"}, "Exit code 1\nTraceback: boom", S1, proj,
+                                     "t10", "PostToolUseFailure"))
+            subprocess.run(["sh", runner, "lookup-record-async"], input=failed, capture_output=True, text=True,
+                           env=env)
+            self.assertEqual(rows(), 1, "the async entry leaves a failure to the entry the call waits on")
 
 
 if __name__ == "__main__":
