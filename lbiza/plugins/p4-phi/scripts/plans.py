@@ -1213,7 +1213,7 @@ def waiting_on(report):
 # would cost ezexe a message just to restart agreed work, so at Stop it is sent back with its next open step, at most
 # KEEP_GOING_MAX times a turn.
 
-KEEP_GOING_MAX = 2             # times one turn is sent back
+KEEP_GOING_MAX = 2             # times one turn is sent back, under hooks.md's 8-consecutive-continuation cap
 WAITS_ON_OWNER = re.compile(r"\b(?:wait\w*|blocked|need\w*|until)\b[^.\n]{0,80}\b(?:user|owner|boss|ezexe|your|you)\b|"
                             r"\b(?:your|ezexe's|the (?:user|owner)'s?) (?:go|ok|okay|approval|answer|decision|sign-?off)\b", re.I)
 
@@ -1233,7 +1233,7 @@ def waiting_step(home, sid):
     return nxt if awaits_sessions(nxt.get("content")) or AWAITS.search(str(nxt.get("content") or "")) else None
 
 
-def keep_going(home, s, report, calls, turn_id, active=False, waits=()):
+def keep_going(home, s, report, calls, turn_id, active=False, waits=(), background=()):
     """The Stop hook's reason to send the session back to its next open step; '' when the turn may end: no open
     step, the turn wrapped up or asked ezexe a matter of authority, the next step is one, a background task is
     still open, since its notice starts the next turn, this turn was sent back KEEP_GOING_MAX times already, or the
@@ -1247,6 +1247,8 @@ def keep_going(home, s, report, calls, turn_id, active=False, waits=()):
         return ""                                  # the turn wrapped up: its recap says what is left and why
     if any(t.get("status") == "open" for _, t in _tasks(p)):
         return ""
+    if any(isinstance(t, dict) for t in background or ()):
+        return ""                                  # hooks.md, Stop input: in-flight work that wakes the session
     nxt = next((x for x in steps if x.get("status") == "in_progress"), steps[0])
     if waits and (AWAITS.search(str(nxt.get("content") or "")) or awaits_sessions(nxt.get("content"))):
         return ""                                  # nothing can be done on it until a report arrives

@@ -2671,7 +2671,9 @@ def h_stop(payload):
                      + (f" and {len(waits) - 6} more" if len(waits) > 6 else "")
                      + ": the turn is not sent back, and a report's arrival starts the next one.")
     why = plans.keep_going(me.home, now_s, row["report"], turn.get("calls") or [], row["id"],
-                           bool(payload.get("stop_hook_active")), waits=waits)
+                           bool(payload.get("stop_hook_active")), waits=waits,
+                           background=payload.get("background_tasks") if isinstance(payload.get("background_tasks"),
+                                                                                     list) else ())
     why = "\n\n".join(p for p in (held, why) if p)   # the regression test's verdict, then the open steps
     if why:                                        # open steps the session tree can settle send the turn back
         RAN["kept_going"] = True

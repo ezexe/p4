@@ -1336,6 +1336,21 @@ class KeepGoing(unittest.TestCase):
         r = self.t.stop(TOP, "Build the two plugins", calls, report=report, uuid=uuid)
         return json.loads(r.stdout) if r.stdout.strip() else {}
 
+    def test_a_background_task_the_stop_input_lists_lets_the_turn_end(self):
+        """ezexe/p4#147: hooks.md, Stop input, `background_tasks` tells "session is done" from "session is paused
+        waiting for background work to wake it back up"; a running task listed there lets the turn end."""
+        from test_phi import STOP, transcript
+        t = self.t
+        path = transcript(os.path.join(t.tmp, TOP + "bg.jsonl"), "Build the two plugins", (), "Waiting on the suite.",
+                          "bg")
+        r = t.hook(STOP, TOP, {"hook_event_name": "Stop", "transcript_path": path,
+                               "last_assistant_message": "Waiting on the suite.", "stop_hook_active": False,
+                               "background_tasks": [{"id": "task-001", "type": "shell", "status": "running",
+                                                     "description": "the suite", "command": "pytest"}]})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotEqual((json.loads(r.stdout) if r.stdout.strip() else {}).get("decision"), "block")
+        self.assertEqual(self.stop("Still porting.", uuid="u9").get("decision"), "block", "an empty list does not")
+
     def test_open_steps_send_the_turn_back_twice_then_let_it_end(self):
         out = self.stop("I ported half the hooks.")
         self.assertEqual(out.get("decision"), "block")
