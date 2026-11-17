@@ -2442,7 +2442,9 @@ def h_stop(payload):
             relay.warn(me.home, top, "push:" + s["sessionId"] + ":" + ",".join(c[1] for c in new),
                        relay.push_text(title_of(cur), s["sessionId"], new,
                                        relay.owed(list(dict.fromkeys(c[0] for c in new))),   # what each still owes
-                                       relay.worktree_branches(s["sessionId"], cur, new)))   # the branch to merge
+                                       relay.worktree_branches(s["sessionId"], cur, new),    # the branch to merge
+                                       relay.green_notes(me.home, [s["sessionId"]] + chain_of(me.home, s["sessionId"]),
+                                                         new)))                               # a verdict kept by hash
             RAN["push_owes"] = True
             cur["closesTold"] = (told + [c[1] for c in new])[-100:]
             save_session(me.home, cur)

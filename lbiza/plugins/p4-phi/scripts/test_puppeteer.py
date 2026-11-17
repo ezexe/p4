@@ -191,6 +191,26 @@ class Linear(Base):
         self.assertIn(phi.RESTATE, ctx, "the route asks for the task restated, never the message quoted")
         self.assertNotIn("`mcp__ccd_session__start_session` with {", ctx, "no session is started for it")
 
+    def test_a_draft_names_the_test_files_of_its_files_line(self):
+        """ezexe/p4#234: a draft names the test files of the paths on its `Files:` line, the one beside each python
+        file and the ones of its folder that import it, and never a whole suite, so its worker runs the tests its
+        change touches."""
+        t = self.t
+        for name, text in (("x.py", "x = 1\n"), ("test_x.py", "import unittest\n"), ("test_y.py", "from x import x\n"),
+                           ("test_z.py", "import os\n")):
+            write(os.path.join(t.proj, "lib", name), text)
+        self.assertEqual(puppeteer.test_files(t.proj, ["lib/x.py"]), ["lib/test_x.py", "lib/test_y.py"])
+        self.assertEqual(puppeteer.test_files(t.proj, ["lib/test_x.py", "docs/a.md", "lib/gone.py"]), [],
+                         "a test file, a page and a file with no test beside it name none")
+        t.say(TOP, TASK)
+        t.stop(TOP, TASK, report="planned")
+        prompt = call_in(context(t.say(TOP, RETRY + ", in `lib/x.py`")))["prompt"]
+        at = re.search(r"Files: `([^`]+)/x\.py`", prompt).group(1)      # the folder as the Files line spells it
+        self.assertIn(f"Run these test files, and no whole suite: `{at}/test_x.py`, `{at}/test_y.py`.", prompt)
+        self.assertIn("Done looks like: the change made, those test files passing, committed and reported.", prompt)
+        self.assertNotIn("test_z.py", prompt)
+        self.assertNotIn("its regression test passing", prompt)
+
     def test_a_start_draft_is_an_instruction_that_quotes_no_sentence_of_the_message(self):
         """The draft's brief states the task, its files, what done looks like and the model and effort as an
         instruction to the session it starts: no sentence of the message beyond the title, and no line on who asked

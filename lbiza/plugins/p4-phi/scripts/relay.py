@@ -1826,8 +1826,34 @@ def worktree_branches(sid, s, commits):
     return out
 
 
-def push_text(child_title, child, commits, owes=(), branches=()):
-    """The orchestrator's line: land a finished child's issue-closing commits now, without asking. With `branches`,
+GREEN = re.compile(r"\b(green|passed|passes)\b", re.I)
+
+
+def green_notes(home, sids, commits):
+    """[(sha, claim)] for each of `commits` that a note of one of the sessions `sids` holds green: a note whose
+    claim names the commit's hash, by its first seven characters or more, with the word green or passed. Such a note
+    is the suite's verdict for that commit, kept where a parent, a checker or a later session reads it, so the
+    suite is not run again for a hash it names, ezexe/p4#234."""
+    out, seen = [], set()
+    claims = [str(n.get("claim") or "") for sid in sids if sid
+              for n in _rows(os.path.join(_dir(home, sid), "notes.jsonl"))]
+    for _, sha, _, _ in commits:
+        short = str(sha or "")[:7].lower()
+        if len(short) < 7 or short in seen:
+            continue
+        for claim in claims:
+            if short in claim.lower() and GREEN.search(claim):
+                seen.add(short)
+                out.append((sha, claim))
+                break
+    return out
+
+
+def push_text(child_title, child, commits, owes=(), branches=(), green=()):
+    """The orchestrator's line: land a finished child's issue-closing commits now, without asking. It has the full
+    suite run once, on the commit being pushed, by the orchestrator, as one background command, with the verdict
+    kept by `phi.py note` under that commit's hash; with `green`, what green_notes found, it names the note and has
+    the suite not run again for that hash, ezexe/p4#234. With `branches`,
     the worktrees those commits lie in and the branch of each, as worktree_branches gives them, it has each branch
     merged into the default branch first, since the commits are on the child's own branch and not in the
     orchestrator's checkout. The line is ezexe's standing word to land green work that closes an issue and says
@@ -1851,9 +1877,17 @@ def push_text(child_title, child, commits, owes=(), branches=()):
                  f"This line is ezexe's standing word to land green work that closes an issue, so it stands in "
                  f"place of the app's default, by which a session merges a branch of a session it started only "
                  f"when ezexe says so.")
+    green = [(sha, claim) for sha, claim in green if sha]
+    if green:
+        suite = ("A note holds " + "; ".join(f"{str(sha)[:12]} green, \"{_short(claim, 120)}\"" for sha, claim in green)
+                 + ": do not run the suite again for that hash. Push")
+    else:
+        suite = ("Run the full suite once, on the commit being pushed, in this session, as one background command, "
+                 "and keep its verdict under that commit's hash with `phi.py note \"suite green at <hash>\" --source "
+                 "\"<the command>\"`, so no session runs it again for that hash. Once it passes, push")
     return (f"phi (p4-phi): \"{child_title}\" `{child}` finished with commits that close issues: {named}. "
             f"Green work that closes an issue is landed at once.{merge} "
-            f"Once its suites pass, push that repository's main and sync each store it touches with "
+            f"{suite} that repository's main and sync each store it touches with "
             f"`p4.py sync --push`, without asking ezexe, and say in one line what was "
             f"{'merged and ' if merge else ''}pushed.{first} A force-push, a "
             f"history rewrite or a deletion still waits on ezexe's go, asked as a `mcp__ccd_turn__wrap_up` question "

@@ -1173,6 +1173,44 @@ def topic_of(req):
     return relay.clause_cut(first, 58).strip(" .,;:")
 
 
+TESTS_MOST = 6                   # the test files one brief names
+TESTS_SCANNED = 60               # the test files of one folder read for an import
+TEST_BYTES = 64 * 1024           # of each, the part read
+
+
+def test_files(base, paths):
+    """The test files of the paths a brief covers, TESTS_MOST at most, each as the brief's own path spells its
+    folder: for a python file, `test_<name>.py` beside it and the test files of its folder that import it. A brief
+    names these, and never a whole suite, so its worker runs the tests its change touches, ezexe/p4#234."""
+    out = []
+    for p in paths:
+        p = str(p).replace("\\", "/")
+        folder, name = os.path.split(p)
+        stem, ext = os.path.splitext(name)
+        if ext != ".py" or name.startswith("test_"):
+            continue
+        at = folder if os.path.isabs(folder) else os.path.join(base or "", folder)
+        try:
+            beside = sorted(n for n in os.listdir(at) if n.startswith("test_") and n.endswith(".py"))
+        except OSError:
+            continue
+        imports = re.compile(rf"^\s*(?:import|from)\s+{re.escape(stem)}\b", re.M)
+        for n in beside[:TESTS_SCANNED]:
+            hit = n == f"test_{stem}.py"
+            if not hit:
+                try:
+                    with open(os.path.join(at, n), encoding="utf-8", errors="replace") as f:
+                        hit = bool(imports.search(f.read(TEST_BYTES)))
+                except OSError:
+                    hit = False
+            named = f"{folder}/{n}" if folder else n
+            if hit and named not in out:
+                out.append(named)
+            if len(out) >= TESTS_MOST:
+                return out
+    return out
+
+
 def prompter(home, s, req, read, base, reading=None):
     """The start draft for a message, the exact next session: its topic, a brief written as an instruction to that
     session, its parent session and the issue it closes when the message names one. The brief states the task by
@@ -1228,9 +1266,15 @@ def prompter(home, s, req, read, base, reading=None):
                       f"`Finding:` line, which the parent session passes up unchanged.", ""]
         if parent:
             lines += [WORKTREE_LINE, ""]
-        lines += [phi.RESEARCH, "", phi.DECIDE, "",
-                  "Done looks like: the change made, its regression test passing, committed and reported.",
-                  "Report when done."]
+        tests = test_files(base, paths)
+        lines += [phi.RESEARCH, "", phi.DECIDE, ""]
+        if tests:                                   # the tests the change touches, and no whole suite
+            lines += ["Run these test files, and no whole suite: " + ", ".join(f"`{t}`" for t in tests) + ".",
+                      "Done looks like: the change made, those test files passing, committed and reported.",
+                      "Report when done."]
+        else:
+            lines += ["Done looks like: the change made, its regression test passing, committed and reported.",
+                      "Report when done."]
     if not parent:
         lines += ["", f"{phi.NEW_TOP_BRIEF} {phi.new_top_first_act()}"]
     context = "fresh"

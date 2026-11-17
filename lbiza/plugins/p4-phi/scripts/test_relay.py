@@ -350,6 +350,38 @@ class ThreeSessions(unittest.TestCase):
         self.assertNotIn("owes", plain, "with nothing owed, the line has no owed part")
         self.assertIn("without asking ezexe", plain)
 
+    def test_the_push_line_runs_the_suite_once_on_the_pushed_commit_and_keeps_its_verdict(self):
+        """ezexe/p4#234: the push line has the full suite run once, on the commit being pushed, by the orchestrator, as
+        one background command, and has its verdict kept with `phi.py note` under that commit's hash."""
+        line = relay.push_text("the child", A, [(self.work, "abc1234def0", "lib: fix x", ["#5"])])
+        self.assertIn("abc1234def0", line, "the closing commit, by its hash")
+        self.assertIn("Run the full suite once, on the commit being pushed, in this session, as one background "
+                      "command", line)
+        self.assertIn("`phi.py note \"suite green at <hash>\" --source \"<the command>\"`", line)
+        self.assertIn("so no session runs it again for that hash", line)
+        self.assertIn("Once it passes, push that repository's main", line)
+        self.assertNotIn("its suites pass", line, "no count, no commit and no record left to each reader")
+
+    def test_a_push_line_for_a_hash_noted_green_says_not_to_run_again(self):
+        """ezexe/p4#234: once a note of the tree names the closing commit's hash as green, the push line names the note
+        and has the suite not run again for that hash. A note names one hash and holds no other green."""
+        t = self.t
+        commits = [(self.work, "abc1234def0", "lib: fix x", ["#5"])]
+        self.assertEqual(relay.green_notes(t.p4, [A, TOP], commits), [], "no note yet")
+        self.assertEqual(t.cli(TOP, "note", "suite green at abc1234: 1006 passed and 1 skipped", "--source",
+                               "python -X utf8 suite/run.py").returncode, 0)
+        green = relay.green_notes(t.p4, [A, TOP], commits)
+        self.assertEqual([sha for sha, _ in green], ["abc1234def0"])
+        line = relay.push_text("the child", A, commits, green=green)
+        self.assertIn("A note holds abc1234def0 green, \"suite green at abc1234: 1006 passed and 1 skipped\"", line)
+        self.assertIn("do not run the suite again for that hash. Push that repository's main", line)
+        self.assertNotIn("Run the full suite once", line)
+        self.assertEqual(relay.green_notes(t.p4, [A, TOP], [(self.work, "fff0000aaa1", "lib: other", ["#6"])]), [])
+        self.assertEqual(t.cli(TOP, "note", "the run at fff0000 stopped at two failures", "--source",
+                               "python -X utf8 suite/run.py").returncode, 0)
+        self.assertEqual(relay.green_notes(t.p4, [A, TOP], [(self.work, "fff0000aaa1", "lib: other", ["#6"])]), [],
+                         "a note that names the hash without a green verdict holds nothing green")
+
     def test_a_machine_branch_of_the_store_behind_main_is_owed(self):
         """The other machine's pull is owed when its branch of the store is behind main."""
         store = os.path.join(self.t.tmp, "solo", ".claude", "p4")

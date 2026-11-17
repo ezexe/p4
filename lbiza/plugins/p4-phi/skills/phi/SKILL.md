@@ -20,6 +20,10 @@ p4-phi keeps each session's files in `<project>/.claude/p4/phi/sessions/<session
 A feedback memory whose rule an open issue will build into the plugin is tied to that issue by one line in the memory's own front matter, `issue: owner/name#N`.
 Once a commit that closes that issue is on the remote default branch, the next Stop whose turn ran a push, pull, fetch or merge cuts the memory back to one pointer line naming the issue and the code that carries its rule, and rewrites the memory's own line in the memory index to match.
 
+The push line has the orchestrator run the full suite once, on the commit being pushed, as one background command, and keep the verdict with `note "suite green at <hash>"`.
+Where a note of the tree holds that commit's hash green, the line names the note and the suite is not run again for that hash.
+A start draft names the test files of the paths its brief covers, the one beside each python file and those of its folder that import it, and never a whole suite.
+
 A store moves only by `python -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/p4.py" sync --push --p4 "<store>"`.
 A hand `git pull` or `git push` inside a store is asked first with that command named, ahead of every other check on the call, and a session another session started is told that its tree's orchestrator runs the sync.
 
