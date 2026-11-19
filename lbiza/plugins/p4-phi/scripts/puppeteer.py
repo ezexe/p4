@@ -1085,7 +1085,8 @@ def readings_of(req):
     return [a, b] if a and b and a.lower() != b.lower() else []
 
 
-# the app's marks of a message that is not ezexe's, at the start of its body once the leading reminders are off:
+# the app's marks of a message that is not ezexe's, for a prompt whose origin does not say whose it is, rows.whose,
+# at the start of its body once the leading reminders are off:
 # another session's message, a side-sessions event, a task notification, a system notification, a hook's words
 # given back to the session, or a slash command's wrapper, which rows.HARNESS_RE takes for the harness's too, and
 # the prompt of a turn the plugin's hooks module started, which opens with plans.WAKE_MARK. A paste that holds such
@@ -1099,11 +1100,16 @@ SESSION_MARK = re.compile(r"\A\s*(?:" + re.escape(plans.WAKE_MARK) + "|" + re.es
                           r"(?:Stop|SubagentStop|UserPromptSubmit) hook (?:feedback|blocking))", re.I)
 
 
-def from_session(prompt):
-    """True when the app marks a message as another session's or its own: the body, past its leading reminders,
-    opens with a cross-session message, a side-sessions event, a task notification, a system notification, a
-    hook's feedback or a slash command's wrapper. Every other message a puppeteer is given is ezexe's, and only those are read for work or kept
-    as requests."""
+def from_session(prompt, by=""):
+    """True for a message that is not ezexe's own. `by` is whose words it is by the origin Claude Code stamped on
+    the prompt, rows.whose, and it settles the answer where it says: another session's message, a plugin's prompt
+    and a background task's notification are not ezexe's, and ezexe's own message is, whatever it opens with.
+    Where the origin does not say, the app's marks tell: the body, past its leading reminders, opens with a
+    cross-session message, a side-sessions event, a task notification, a system notification, a hook's feedback or
+    a slash command's wrapper. Every other message a puppeteer is given is ezexe's, and only those are read for
+    work or kept as requests."""
+    if by:
+        return by != "user"
     text = str(prompt or "")
     reminder = _phi().REMINDER
     while reminder.match(text):

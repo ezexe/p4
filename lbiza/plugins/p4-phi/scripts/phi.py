@@ -56,6 +56,7 @@ import relay  # noqa: E402  owned paths, deltas and anchors, which keep linked s
 import starts  # noqa: E402  the files a brief covers, a start's checkout, and a start request to a puppeteer
 import issues  # noqa: E402  a writing child's issue, its Closes #N commit, regression test, push and archive
 import puppeteer  # noqa: E402  the watcher's ledger, routing, start drafts, the gate, routes, the meta pass
+import rows  # noqa: E402  whose message a prompt is, by the origin the hooks module kept of it
 
 puppeteer.PHI = sys.modules[__name__]   # phi.py runs as a script, so puppeteer.py is handed this module, not a copy
 import controls  # noqa: E402  a puppeteer filed in the sidebar section, and the sessions it controls
@@ -390,12 +391,12 @@ def same_store(a, b):
 class Me:
     """The session a hook or a command is running for: its sessionId, its CLI session, the app's record, its home."""
 
-    def __init__(self, payload=None, session="", p4="", hint=""):
+    def __init__(self, payload=None, session="", p4="", hint="", host=None):
         payload = payload or {}
         self.hint = ""
         self.cli = str(payload.get("session_id") or os.environ.get("CLAUDE_CODE_SESSION_ID") or "")
         self.title = clean(payload.get("session_title"))[:120]
-        host = os.environ.get("CLAUDE_CODE_HOST_SESSION_ID") or ""
+        host = (os.environ.get("CLAUDE_CODE_HOST_SESSION_ID") or "") if host is None else host
         # A CLI id equal to the host id without "local_" is normal: the app gives many workers that pair of
         # ids, so it is no stray id.
         self.rec = app_record(session or host) if (session or host) else record_of_cli(self.cli)
@@ -416,8 +417,33 @@ class Me:
         self.store = self.store or self.home
         if self.title and self.id:
             GIVEN_TITLES[self.id] = self.title
+        if host and not session and not own_host(self, host, payload):
+            RAN["host"] = "inherited"
+            self.__init__(payload, session, p4, hint, host="")     # the session this process is, by its CLI id
+            return
         project_conf(self.store)
         plans.PARENT_EFFORT = own_effort(self, payload, other=bool(session))
+
+
+def own_host(me, host, payload):
+    """Does the host session id of the environment name this process. The desktop app sets
+    CLAUDE_CODE_HOST_SESSION_ID for the Claude Code process it starts, and every process that one starts inherits
+    it: a scripted run, `claude -p` from a session's shell, carries its starter's id and is no such session. The
+    app's record of a session names its CLI session, `cliSessionId`, so a host id is the process's own where that
+    record names this process's CLI id, where the record names none to hold it against, or where the CLI id is the
+    host id without its prefix. A session goes on under a new CLI id after a /clear or a resume, and the
+    SessionStart that says so is the host's own; phi's record of the session, which keeps every CLI id it ran
+    under, then answers for each hook after it while the app's record is behind. A scripted run starts with the
+    source `startup` under an id neither record names, so it is the CLI session it is and no session of the app."""
+    cli = me.cli
+    if not cli or safe_id(host) == "local_" + cli:
+        return True
+    named = {str(me.rec.get(k) or "") for k in ("cliSessionId", "lastAssistantCliSessionId")} - {""}
+    if not named or cli in named:
+        return True
+    if payload.get("hook_event_name") == "SessionStart" and payload.get("source") in ("clear", "resume"):
+        return True
+    return bool(me.home) and cli in (load_session(me.home, host).get("cliSessionIds") or [])
 
 
 def own_effort(me, payload, other=False):
@@ -686,12 +712,14 @@ def latest_reports(rows, skip=""):
 
 # --- requests and turns ----------------------------------------------------------------------------------------------
 
-def request_of(prompt):
+def request_of(prompt, by=""):
     """The request inside a message. A worker gets its task under leading <system-reminder> blocks and a
     `Background ... Task:` wrapper, and a forked one under the app's line `Task (from the session that started this
     one):`; this takes those off. A `<pasted_content id="..">` block is what a person pasted, so its inner text is
     the request, also when the message is nothing but the block. '' when nothing is left or what is left is Claude
-    Code speaking."""
+    Code speaking. `by` is whose words the prompt is by its origin, rows.whose: a background task's notification
+    and a plugin's prompt hold no request, ezexe's own message is one whatever it opens with, and where the origin
+    does not say, the opening of the text tells."""
     text = prompt if isinstance(prompt, str) else ""
     while REMINDER.match(text):
         text = REMINDER.sub("", text, count=1)
@@ -700,12 +728,15 @@ def request_of(prompt):
         text = text[m.end():]
     text = FORK_HEAD.sub("", text, count=1)
     text = NOTES_TAIL.sub("", text).strip()
-    if text.startswith("<") and not PASTED.match(text):
-        return ""                                  # Claude Code speaking, whatever its body quotes
-    if plans.woken(text):
-        return ""                                  # the plugin's hooks module speaking: the prompt of a turn it started
-    if plans.app_notice(text):
-        return ""                                  # the app speaking: its notice about a message this session sent
+    if by in ("event", "plugin"):
+        return ""                                  # Claude Code or a plugin's hooks module speaking, by the origin
+    if by != "user":
+        if text.startswith("<") and not PASTED.match(text):
+            return ""                              # Claude Code speaking, whatever its body quotes
+        if plans.woken(text):
+            return ""                              # the plugin's hooks module speaking: the prompt of a turn it started
+        if plans.app_notice(text):
+            return ""                              # the app speaking: its notice about a message this session sent
     # A paste is the person's message whatever it holds, but only where the message itself begins with the block or
     # with their own words: a notification or another session's message that quotes a pasted block stays Claude Code's.
     return PASTED.sub(lambda m: m.group(1), text).strip()
@@ -1372,13 +1403,19 @@ def first_split_text(home, s):
     return FIRST_SPLIT
 
 
-def split_text(home, s, prompt):
+def from_peer(prompt, by=""):
+    """True for another session's message: by its origin, rows.whose, and where the origin does not say, by the
+    wrapper Claude Code puts around one."""
+    return by == "session" or (not by and bool(re.search(r"<cross-session-message\b", str(prompt or ""))))
+
+
+def split_text(home, s, prompt, by=""):
     """A turn another session's message started. What such a turn may start, and the card it proposes, are the start
     tool's own text, so this line holds only what that text lacks: the caps, the files a brief names, and
     for an orchestrator the brief line that detaches a new orchestrator to top level. It is short and keeps no
     state, so every such turn carries it whole. '' for ezexe's own turns, the app's events and a session with no
     task."""
-    if not clean(s.get("task")) or not re.search(r"<cross-session-message\b", str(prompt or "")):
+    if not clean(s.get("task")) or not from_peer(prompt, by):
         return ""
     cap = caps_text(home, s)
     RAN["split"] = "cap" if cap else "brief"
@@ -2218,9 +2255,13 @@ def h_user_prompt_submit(payload):
         starts.started(me.home, rid, s["sessionId"])
     if not load_turns(me.home, s["sessionId"]) and puppeteer.arrived(s, payload.get("prompt")):
         RAN["drafted"] = s.get("draft")             # its start draft
-    req = request_of(payload.get("prompt"))
-    s["turnBy"] ="user" if req else (
-        "session" if re.search(r"<cross-session-message\b", str(payload.get("prompt") or "")) else "event")
+    # whose words the prompt is, by the origin Claude Code stamped on it, which the hooks module kept for this hook
+    by = rows.whose(rows.origin_of(payload, session_dir(me.home, s["sessionId"])))
+    RAN["origin"] = by
+    req = request_of(payload.get("prompt"), by)
+    s["turnBy"] = "session" if by == "session" else "user" if req or by == "user" else (
+        "session" if from_peer(payload.get("prompt"), by) else "event")
+    s["toldBy"] = by                               # '' where the origin did not say and the text's opening told
     s.pop("waitEnded", None)                       # the wait the turn before ended on: this turn's end says anew
     if not plans.woken(payload.get("prompt")):
         s.pop("woke", None)                        # a turn no wake started: the hooks module's count starts over
@@ -2295,7 +2336,7 @@ def h_user_prompt_submit(payload):
     if stand:                                      # a puppeteer's standing worker or coworker: what it is
         RAN["standing"] = s.get("standingKind")
         parts.insert(0, notice(stand))
-    usage = controls.usage_line(me.home, s, payload.get("prompt"), me.store)
+    usage = controls.usage_line(me.home, s, payload.get("prompt"), me.store, by)
     if usage:                                      # a puppeteer watches its worker's and coworkers' context
         RAN["usage"] = True
         parts.insert(0, notice(usage))
@@ -2311,7 +2352,7 @@ def h_user_prompt_submit(payload):
     # ezexe's own message: a handed-over task is none, and to a puppeteer, neither is one the app marks as another
     # session's; an orchestrator's routing still reads the work another session hands it
     ezexes = req if req and not handed_over(payload.get("prompt")) else ""
-    if ezexes and puppeteer.from_session(payload.get("prompt")) and controls.is_puppeteer(s, me.store):
+    if ezexes and puppeteer.from_session(payload.get("prompt"), by) and controls.is_puppeteer(s, me.store):
         ezexes = ""
     if not spawned_from(s):
         try:                                       # a puppeteer and the sessions it controls
@@ -2337,7 +2378,7 @@ def h_user_prompt_submit(payload):
         route = ""
     book_line = "" if route else book_text(me.home, s, me.store)
     parts.append(pup)
-    split = split_text(me.home, s, payload.get("prompt")) if not route else ""
+    split = split_text(me.home, s, payload.get("prompt"), by) if not route else ""
     last = route or "\n\n".join(x for x in (book_line, split) if x)
     save_session(me.home, s)
     # the rebase check, on every message: its warnings lead, then the notices, then what the sessions beside this
@@ -2443,6 +2484,8 @@ def h_stop(payload):
     done = s.get("done") if isinstance(s.get("done"), dict) else None
     if done and clean(done.get("text")):
         row["done"] = clean(done["text"])[:400]
+    if s.get("toldBy"):
+        row["by"] = s["toldBy"]                    # whose words began the turn, where the prompt's origin said
     if UPKEEP and spawned_from(s):                 # the row keeps a report cut to REPORT_CHARS, and a list of what
         left = upkeep.left_of(report if isinstance(report, str) else "")   # is left often ends a long one
         if left:

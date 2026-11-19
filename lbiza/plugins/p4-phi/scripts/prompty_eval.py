@@ -63,9 +63,13 @@ def turns_of(home, sid):
     return relay._rows(os.path.join(relay._dir(home, sid), "turns.jsonl"))
 
 
-def own_words(prompt):
-    """True when a kept prompt is ezexe's own typing: not a handed brief, a cross-session message or an app event."""
+def own_words(prompt, by=""):
+    """True when a kept prompt is ezexe's own typing: not a handed brief, a cross-session message or an app event.
+    `by` is what the turn's row keeps of the prompt's origin, rows.whose, and it settles the answer where the row
+    has it. A row with none, of a turn whose origin did not say, is read by how its prompt opens."""
     p = str(prompt or "").lstrip()
+    if by:
+        return bool(p) and by == "user"
     return bool(p) and not p.startswith("<") and "cross-session-message" not in p and "task-notification" not in p \
         and "phi draft drf-" not in p and "phi reading grp-" not in p and "phi start request req-" not in p \
         and not p.startswith("phi (p4-phi): the turn before this one ended on") \
@@ -135,7 +139,7 @@ def examples(home):
         orchestrates = not relay._parent(s) or sid in kids     # routing reads a message only in an orchestrator
         for k, t in enumerate(rows[sid]):
             msg = str(t.get("prompt") or "")
-            if not own_words(msg) or (k == 0 and relay._parent(s)) or (sid, flat(msg)) in seen:
+            if not own_words(msg, str(t.get("by") or "")) or (k == 0 and relay._parent(s)) or (sid, flat(msg)) in seen:
                 continue                           # a child's first prompt is its brief, not ezexe's message
             seen.add((sid, flat(msg)))
             if not (issues.writing(msg) and len(puppeteer.words(msg)) >= puppeteer.QUICK_WORDS):

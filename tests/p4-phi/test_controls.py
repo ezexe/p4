@@ -779,6 +779,16 @@ class Supervisor(unittest.TestCase):
         measured(CO1, controls.CLEAR_AT - 1)
         line = next((x for x in context(t.say(PUP, report)).splitlines() if f"worker `{WORKER}` reported" in x), "")
         self.assertIn(f"`{WORKER}` at {controls.CLEAR_AT + 12} percent", line, "past the line, by its own measure")
+        # the report the worker's hooks module sends at its turn's end names the worker as `from-session`, beside
+        # the socket it came over, as the transcripts of the desktop app show it
+        sent = (f'<cross-session-message from="uds:\\\\.\\pipe\\LOCAL\\cc-msg-001111dc" from-session="{WORKER}" '
+                f'from-name="worker" from-mode="bypass">phi (p4-phi): this session ended a turn. Its report follows, '
+                f'and needs no reply.\n\nChecked 6 archives.</cross-session-message>')
+        self.assertIn(f"worker `{WORKER}` reported", context(t.say(PUP, sent)))
+        other = sent.replace(WORKER, CO1)
+        self.assertNotIn(f"worker `{WORKER}` reported", context(t.say(PUP, other)), "a coworker's report is not its")
+        self.assertEqual(controls.usage_line(t.p4, t.session(PUP), sent, t.p4, "user"), "",
+                         "ezexe's own message that quotes a report is none")
         self.assertIn("usage.json", line)
         self.assertNotIn(CO1, line, "a coworker measured under the line is not named")
         self.assertRegex(line, rf"No measure is kept of `{CO2}`: read `mcp__ccd_session_mgmt__get_usage`")

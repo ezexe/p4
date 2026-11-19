@@ -56,6 +56,9 @@ type Machine = {
   usage?: SessionUsage
   // Why a message to an address is not delivered there, where it is not.
   refuses?: (to: string) => string | undefined
+  // What the engine does with a prompt beneath every plugin, before it enters: it raises the UserPromptSubmit
+  // hooks there.
+  enters?: (text: string) => Promise<void>
 }
 
 // What the module read, the pythons it tried, each look it ran and each other phi.py command it asked, every one
@@ -114,8 +117,9 @@ function machine(on: On, has: Machine): Seen {
 
     return reason === undefined ? { isDelivered: true } : { isDelivered: false, reason }
   })
-  on('prompt.submit', (_, e) => {
+  on('prompt.submit', async (_, e) => {
     seen.submitted.push(e.text)
+    await has.enters?.(e.text)
 
     return { text: e.text }
   })
@@ -965,4 +969,141 @@ test('a spawn no Agent call launched and a project with no store are bound to no
   await $.agent.spawn({ ...LAUNCH, tool_use_id: CALL } as never)
   await clock.settle()
   expect(seen.wrote).toEqual([])
+})
+
+// A prompt's id, as a UserPromptSubmit hook's input carries it, and where its origin is kept in a project with a
+// store, beside a launch's lines.
+const PROMPT_ID = 'ddebe1c3-8147-4a9b-add9-e5f50ecc08f5'
+const ORIGIN_IN = `${BOUND_IN}/origin.json`
+
+test("a prompt's origin is written with the prompt's id before its UserPromptSubmit hooks run", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const read: (string | undefined)[] = []
+  const seen = machine(on, {
+    files: { ...STORE },
+    enters: async text => {
+      await $.classic.UserPromptSubmit({ prompt: text, prompt_id: PROMPT_ID, session_id: 'cli-0001' })
+    },
+  })
+  on('classic.UserPromptSubmit', () => {
+    read.push(seen.files[ORIGIN_IN])
+
+    return {}
+  })
+
+  await $.prompt.submit({ text: 'port the flush', origin: { kind: 'peer' }, wait: false } as never)
+  await clock.settle()
+
+  expect(read).toEqual([`{"promptId":"${PROMPT_ID}","kind":"peer"}
+`])
+  expect(seen.submitted).toEqual(['port the flush'])
+  // The origin is the engine's own word, so no python runs for it.
+  expect(seen.calls).toEqual([])
+})
+
+
+test('each prompt in flight keeps its own origin, with what the kind carries', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const ids: Record<string, string> = { 'port the flush': 'p-typed', [MOVE]: 'p-woken' }
+  const seen = machine(on, {
+    files: { ...STORE },
+    enters: async text => {
+      // The typed prompt is still entering when the plugin's own arrives.
+      if (text === 'port the flush') await clock.sleep(50)
+      await $.classic.UserPromptSubmit({ prompt: text, prompt_id: ids[text], session_id: 'cli-0001' })
+    },
+  })
+  on('classic.UserPromptSubmit', () => ({}))
+
+  const typed = $.prompt.submit({ text: 'port the flush', origin: { kind: 'composer' }, wait: false } as never)
+  const woken = $.prompt.submit({ text: MOVE, origin: { kind: 'plugin', name: 'p4-phi' }, wait: false } as never)
+  await clock.advance(50)
+  await Promise.all([typed, woken])
+
+  expect(seen.wrote.map(write => write.text)).toEqual([
+    '{"promptId":"p-woken","kind":"plugin","name":"p4-phi"}\n',
+    '{"promptId":"p-typed","kind":"composer"}\n',
+  ])
+})
+
+test('a project with no store keeps the origin in the session folder, once a look has answered where it is', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, {
+    look: () => WORKER,
+    enters: async text => {
+      await $.classic.UserPromptSubmit({ prompt: text, prompt_id: PROMPT_ID, session_id: 'cli-0001' })
+    },
+  })
+  on('classic.UserPromptSubmit', () => ({}))
+  const origin = (): string[] => seen.wrote.filter(write => write.path.endsWith('/origin.json')).map(write => write.path)
+
+  // No prompt waits for python: before a look answered, the folder is unknown and nothing is kept.
+  await $.prompt.submit({ text: 'port the flush', origin: { kind: 'composer' }, wait: false } as never)
+  expect(origin()).toEqual([])
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.prompt.submit({ text: 'and the rest', origin: { kind: 'composer' }, wait: false } as never)
+
+  expect(origin()).toEqual([`${FOLDER}/origin.json`])
+})
+
+test('P4_PHI=0 keeps no origin in the session folder, and a store keeps it still', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA, P4_PHI: '0' })
+  const clock = mock.clock(on)
+  const seen = machine(on, {
+    look: () => WORKER,
+    enters: async text => {
+      await $.classic.UserPromptSubmit({ prompt: text, prompt_id: PROMPT_ID, session_id: 'cli-0001' })
+    },
+  })
+  on('classic.UserPromptSubmit', () => ({}))
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.prompt.submit({ text: 'port the flush', origin: { kind: 'composer' }, wait: false } as never)
+  expect(seen.wrote).toEqual([])
+
+  // Retrieval's hook reads the origin too, and P4_PHI=0 does not turn retrieval off.
+  seen.files['/work/project/.claude/p4/phi/models/index.json'] = '{}'
+  await $.prompt.submit({ text: 'port the flush', origin: { kind: 'composer' }, wait: false } as never)
+  expect(seen.wrote.map(write => write.path)).toEqual([ORIGIN_IN])
+})
+
+test('a prompt with no id, one no prompt.submit carried and a write that fails keep nothing and block nothing', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let promptId: string | undefined
+  let isDiskFull = false
+  const hooked: string[] = []
+  const seen = machine(on, {
+    files: { ...STORE },
+    write: async () => {
+      if (isDiskFull) throw new Error('ENOSPC')
+    },
+    enters: async text => {
+      await $.classic.UserPromptSubmit({ prompt: text, prompt_id: promptId, session_id: 'cli-0001' })
+    },
+  })
+  on('classic.UserPromptSubmit', (_, e) => {
+    hooked.push(e.prompt)
+
+    return {}
+  })
+
+  await $.prompt.submit({ text: 'no id yet', origin: { kind: 'sdk' }, wait: false } as never)
+  await $.classic.UserPromptSubmit({ prompt: 'raised alone', prompt_id: PROMPT_ID, session_id: 'cli-0001' })
+  promptId = PROMPT_ID
+  isDiskFull = true
+  const entered = await $.prompt.submit({ text: 'disk full', origin: { kind: 'sdk' }, wait: false } as never)
+  await clock.settle()
+
+  expect(seen.wrote).toEqual([])
+  expect(hooked).toEqual(['no id yet', 'raised alone', 'disk full'])
+  expect(entered).toEqual({ text: 'disk full' })
+  // The failed write is said to the debug log once, and the prompt entered all the same.
+  expect(seen.logged.map(line => line.split(':')[0])).toEqual(["a prompt's origin was not kept"])
 })

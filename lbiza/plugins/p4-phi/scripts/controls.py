@@ -64,6 +64,7 @@ import issues
 import p4conf
 import plans
 import relay
+import rows
 import starts
 
 PHI = None                       # phi.py's own module, handed over when phi.py imports this one
@@ -479,14 +480,17 @@ def tool_line(s, store):
             f"under itself, the brief holding the line `{WORKER_BRIEF}`, and send it this task.")
 
 
-def usage_line(home, s, prompt, store):
+def usage_line(home, s, prompt, store, by=""):
     """A puppeteer, at a message carrying its standing worker's report: one line naming those of the worker and its
     coworkers whose context passed the line, for the puppeteer to name to the worker. Each one's share is Claude
     Code's last measure of it, which the plugin's hooks module keeps in usage.json in the session's folder and
     phi.usage_of reads, so no session is asked for it. A session with no measure kept, which no hooks module wrote
-    for, is still named for one `get_usage` read. '' otherwise, and where every measure reads under the line."""
+    for, is still named for one `get_usage` read. '' otherwise, and where every measure reads under the line.
+    `by` is whose words the prompt is by its origin, rows.whose, and the sender is the one the message's wrapper
+    names, rows.sender_of: a report the worker's hooks module sent names the worker as `from-session`, beside the
+    socket it came over, and a message the worker's model sent names it as `from`."""
     held = worker_of(s)
-    if not held or f'<cross-session-message from="{held}"' not in str(prompt or "") or not is_puppeteer(s, store):
+    if not held or by not in ("", "session") or rows.sender_of(prompt) != held or not is_puppeteer(s, store):
         return ""
     every = relay._sessions(home)
     ids = [held] + sorted(k for k, v in every.items() if PHI.spawned_from(v) == held and live(k))

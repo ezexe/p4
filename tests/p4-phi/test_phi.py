@@ -483,7 +483,9 @@ class Sessions(unittest.TestCase):
         self.t.stop(KID, "fix it", report="Fixed.", cli=CLI[TOP])
         self.assertEqual(self.t.session(KID)["cliSessionIds"], [CLI[KID]])
         self.assertEqual(self.t.session(TOP)["cliSessionIds"], [CLI[TOP]])
-        self.t.say(KID, "and the rest", cli=KID + "-resumed")      # a transcript no record names is the child's own
+        # a transcript no record names is the child's own, once its start says the session was resumed under it
+        self.t.hook(START, KID, {"hook_event_name": "SessionStart", "source": "resume"}, cli=KID + "-resumed")
+        self.t.say(KID, "and the rest", cli=KID + "-resumed")
         self.assertEqual(self.t.session(KID)["cliSessionIds"], [CLI[KID], KID + "-resumed"])
 
     def test_a_deep_session_gets_every_session_above_it(self):
@@ -2225,6 +2227,216 @@ class Stamps(unittest.TestCase):
         self.assertEqual(stamps[0][-4:], ".999")
         self.assertEqual(stamps[1][-4:], ".000")
         self.assertNotEqual(stamps[0][:19], stamps[1][:19], "the second moved with the thousandths")
+
+
+class Origins(unittest.TestCase):
+    """Whose message a prompt is, by the origin Claude Code stamps on it: the plugin's hooks module is given the
+    origin at `prompt.submit` and writes it to origin.json with the prompt's id, and the UserPromptSubmit hooks read
+    it back. The types of `claude-code` call PromptOrigin "a closed set, never a text prefix"."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP)
+        self.t.say(TOP, TASK)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def keep(self, host, prompt_id, **origin):
+        """What the hooks module writes for a project with no models folder: origin.json in the session's folder."""
+        write(os.path.join(self.t.dir(host), "origin.json"), json.dumps({"promptId": prompt_id, **origin}))
+
+    def said(self, host, prompt, prompt_id):
+        return self.t.hook(PROMPT, host, {"hook_event_name": "UserPromptSubmit", "prompt": prompt,
+                                          "prompt_id": prompt_id})
+
+    def test_each_kind_names_whose_words_a_prompt_is(self):
+        import rows
+        for kind in ("composer", "bridge", "slack-ping"):
+            self.assertEqual(rows.whose({"kind": kind}), "user", kind)
+        for kind in ("peer", "peer-send-message", "coordinator", "projects-relay"):
+            self.assertEqual(rows.whose({"kind": kind}), "session", kind)
+        self.assertEqual(rows.whose({"kind": "plugin", "name": "p4-phi"}), "plugin")
+        self.assertEqual(rows.whose({"kind": "plugin", "name": "notes", "asUser": True}), "user")
+        self.assertEqual(rows.whose({"kind": "task-notification"}), "event")
+        # the kinds that do not say whose words they carry are left to the head of the text
+        for kind in ("sdk", "unclassified", "scheduled-trigger", "auto-continuation", "channel", "observer",
+                     "observer-activity", "a-kind-of-a-later-release"):
+            self.assertEqual(rows.whose({"kind": kind}), "", kind)
+        self.assertEqual(rows.whose({}), "")
+        self.assertEqual(rows.whose(None), "")
+
+    def test_the_origin_settles_what_the_head_of_a_text_can_only_suggest(self):
+        import prompty_eval
+        import puppeteer
+        import rows
+        markup = "<b>bold</b> is wrong in the exporter's page, make it plain"
+        self.assertEqual(phi.request_of(markup), "", "by its opening alone it reads as Claude Code speaking")
+        self.assertEqual(phi.request_of(markup, "user"), markup)
+        self.assertFalse(puppeteer.from_session(markup, "user"))
+        quoted = "[Cross-session idle notice] is what it said, why?"
+        self.assertEqual(phi.request_of(quoted, "user"), quoted)
+        self.assertFalse(puppeteer.from_session("<task-notification> pasted by hand", "user"))
+        self.assertTrue(prompty_eval.own_words(markup, "user"))
+        bare = "The flush is ported and pushed as 4f1c2aa."
+        self.assertEqual(phi.request_of(bare, "event"), "")
+        self.assertEqual(phi.request_of(bare, "plugin"), "")
+        for by in ("session", "plugin", "event"):
+            self.assertTrue(puppeteer.from_session(bare, by), by)
+            self.assertFalse(prompty_eval.own_words(bare, by), by)
+        self.assertTrue(phi.from_peer(bare, "session"))
+        self.assertFalse(phi.from_peer('<cross-session-message from="local_x">hm</cross-session-message>', "user"))
+        self.assertTrue(rows.harness(bare, "event"))
+        self.assertFalse(rows.harness("<task-notification> pasted by hand", "user"))
+        # with no origin every reader goes by the text, as before
+        self.assertTrue(rows.harness("<task-notification>x</task-notification>"))
+        self.assertTrue(puppeteer.from_session("<task-notification>x</task-notification>"))
+        self.assertTrue(phi.from_peer('<cross-session-message from="local_x">hm</cross-session-message>'))
+
+    def test_the_hook_reads_the_origin_kept_for_its_prompt(self):
+        markup = "<b>bold</b> is wrong in the exporter's page, make it plain"
+        self.keep(TOP, "p-1", kind="composer")
+        self.said(TOP, markup, "p-1")
+        s = self.t.session(TOP)
+        self.assertEqual((s["turnBy"], s["toldBy"]), ("user", "user"))
+        bare = "The flush is ported and pushed as 4f1c2aa."
+        self.keep(TOP, "p-2", kind="peer")
+        self.said(TOP, bare, "p-2")
+        s = self.t.session(TOP)
+        self.assertEqual((s["turnBy"], s["toldBy"]), ("session", "session"), "no wrapper, and still a session's")
+        self.keep(TOP, "p-3", kind="task-notification")
+        self.said(TOP, bare, "p-3")
+        self.assertEqual(self.t.session(TOP)["turnBy"], "event")
+        self.keep(TOP, "p-4", kind="plugin", name="p4-phi")
+        self.said(TOP, bare, "p-4")
+        self.assertEqual(self.t.session(TOP)["turnBy"], "event", "a plugin's prompt is no message of ezexe's")
+        self.assertEqual(self.t.session(TOP)["task"], TASK)
+
+    def test_a_record_of_another_prompt_or_of_a_kind_that_does_not_say_leaves_the_text_to_tell(self):
+        bare = "The flush is ported and pushed as 4f1c2aa."
+        self.keep(TOP, "p-old", kind="peer")
+        self.said(TOP, bare, "p-new")                 # the record is of an earlier prompt
+        s = self.t.session(TOP)
+        self.assertEqual((s["turnBy"], s["toldBy"]), ("user", ""))
+        self.t.say(TOP, bare)                          # a hook input with no prompt_id
+        self.assertEqual(self.t.session(TOP)["turnBy"], "user")
+        self.keep(TOP, "p-5", kind="sdk")              # the desktop app's unstamped deliveries, and a scripted run's
+        self.said(TOP, '<cross-session-message from="local_x">look</cross-session-message>', "p-5")
+        s = self.t.session(TOP)
+        self.assertEqual((s["turnBy"], s["toldBy"]), ("session", ""), "the wrapper tells, as before")
+        self.said(TOP, "<side-sessions-event>a session ended a turn</side-sessions-event>", "p-5")
+        self.assertEqual(self.t.session(TOP)["turnBy"], "event")
+
+    def test_a_project_with_a_store_keeps_the_origin_beside_a_launchs_lines(self):
+        """The record of a project that has a models folder is in the session's folder under `served`, where the
+        retrieval hook reads it too, and it is read ahead of the session folder's."""
+        import rows
+        cli = CLI[TOP]
+        served = os.path.join(self.t.p4, "phi", "models", "served", "start-" + cli)
+        os.makedirs(served)
+        write(os.path.join(served, "origin.json"), json.dumps({"promptId": "p-1", "kind": "peer"}))
+        payload = {"session_id": cli, "cwd": self.t.proj, "prompt_id": "p-1"}
+        old = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        try:
+            self.assertEqual(rows.origin_dir(self.t.proj, cli), served)
+            self.assertEqual(rows.origin_of(payload), {"promptId": "p-1", "kind": "peer"})
+            self.assertEqual(rows.origin_of({**payload, "prompt_id": "p-2"}), {})
+            self.assertEqual(rows.origin_of({**payload, "prompt_id": ""}), {})
+        finally:
+            if old is not None:
+                os.environ["CLAUDE_PROJECT_DIR"] = old
+        self.keep(TOP, "p-1", kind="composer")
+        self.said(TOP, "The flush is ported.", "p-1")
+        self.assertEqual(self.t.session(TOP)["turnBy"], "session")
+
+    def test_the_turns_row_keeps_whose_words_began_it(self):
+        self.keep(TOP, "p-1", kind="composer")
+        self.said(TOP, "and the rest of the port", "p-1")
+        self.t.stop(TOP, "and the rest of the port", report="Ported.")
+        self.assertEqual(phi.load_turns(self.t.p4, TOP)[-1].get("by"), "user")
+        self.t.say(TOP, "one more row")
+        self.t.stop(TOP, "one more row", report="Added.", uuid="u1")
+        self.assertNotIn("by", phi.load_turns(self.t.p4, TOP)[-1], "the origin did not say, so the row keeps none")
+
+    def test_the_sender_of_a_message_is_the_one_its_wrapper_names(self):
+        import rows
+        model = '<cross-session-message from="local_wrk00001" from-name="worker">Checked.</cross-session-message>'
+        module = ('<cross-session-message from="uds:\\\\.\\pipe\\LOCAL\\cc-msg-00" from-session="local_wrk00001" '
+                  'from-name="worker" from-mode="bypass">phi (p4-phi): this session ended a turn.</cross-session-message>')
+        self.assertEqual(rows.sender_of(model), "local_wrk00001")
+        self.assertEqual(rows.sender_of(module), "local_wrk00001", "the socket is no session's id")
+        self.assertEqual(rows.sender_of("<system-reminder>x</system-reminder>\n" + module), "local_wrk00001")
+        self.assertEqual(rows.sender_of("Another Claude session sent a message: " + model), "local_wrk00001")
+        self.assertEqual(rows.sender_of("it said " + model), "", "a wrapper quoted further in names no sender")
+        self.assertEqual(rows.sender_of(""), "")
+
+
+class ScriptedRuns(unittest.TestCase):
+    """A scripted run, `claude -p` started from a desktop session's shell, inherits that session's
+    CLAUDE_CODE_HOST_SESSION_ID. Its hooks reported under a CLI id the app's record of that session does not name,
+    and the run was recorded as that session: its prompt became a turn of the session, and the hooks module sent its
+    reply to the session's starter."""
+
+    SCRIPTED = "cccc3333-0000-4000-8000-000000000000"
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP)
+        self.t.record(KID, started_by=TOP)
+        self.t.say(TOP, TASK)
+        self.t.hook(START, KID, {"hook_event_name": "SessionStart", "source": "startup"})
+        self.t.say(KID, BRIEF)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_a_scripted_run_is_the_cli_session_it_is(self):
+        before = json.dumps(self.t.session(KID), sort_keys=True)
+        self.t.hook(START, KID, {"hook_event_name": "SessionStart", "source": "startup"}, cli=self.SCRIPTED)
+        self.t.say(KID, "Two questions, answered from your context alone.", cli=self.SCRIPTED)
+        self.t.stop(KID, "Two questions, answered from your context alone.", report="done", cli=self.SCRIPTED)
+        self.assertEqual(json.dumps(self.t.session(KID), sort_keys=True), before, "the session's record is untouched")
+        self.assertEqual(phi.load_turns(self.t.p4, KID), [], "and it has no turn of the run's")
+        self.assertEqual(phi.load_reports(self.t.p4, TOP), [], "and its starter no report of it")
+        run = self.t.session(self.SCRIPTED)
+        self.assertEqual(run.get("cliSessionIds"), [self.SCRIPTED])
+        self.assertFalse(phi.spawned_from(run), "the run is no child of the session's starter")
+
+    def test_the_modules_look_of_a_scripted_run_names_no_starter(self):
+        """The hooks module runs `phi.py look --folder` with the process's own CLI id in CLAUDE_CODE_SESSION_ID, and
+        sends a turn's report to the starter that answer names."""
+        own = json.loads(inproc.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "look",
+                                     "--folder"], capture_output=True, text=True, env=self.t.env(KID),
+                                    cwd=self.t.proj, timeout=60).stdout.strip().splitlines()[-1])
+        self.assertTrue(own.get("starter"), "the session itself has one")
+        env = {**self.t.env(KID), "CLAUDE_CODE_SESSION_ID": self.SCRIPTED}
+        ran = json.loads(inproc.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "look",
+                                     "--folder"], capture_output=True, text=True, env=env, cwd=self.t.proj,
+                                    timeout=60).stdout.strip().splitlines()[-1])
+        self.assertFalse(ran.get("starter"))
+        self.assertNotEqual(ran.get("dir"), own.get("dir"))
+
+    def test_a_session_that_goes_on_under_a_new_cli_id_is_still_itself(self):
+        cleared = "dddd4444-0000-4000-8000-000000000000"
+        self.t.hook(START, KID, {"hook_event_name": "SessionStart", "source": "clear"}, cli=cleared)
+        self.t.say(KID, "and the rest", cli=cleared)
+        self.assertEqual(self.t.session(KID)["cliSessionIds"], [CLI[KID], cleared])
+        self.assertFalse(os.path.isdir(self.t.dir(cleared)), "no session of its own was made for the new id")
+        # the app's record catches up, and names the new id
+        d = json.loads(open(os.path.join(self.t.app, KID + ".json"), encoding="utf-8").read())
+        d["cliSessionId"] = cleared
+        write(os.path.join(self.t.app, KID + ".json"), json.dumps(d))
+        self.t.say(KID, "one more", cli=cleared)
+        self.assertEqual(self.t.session(KID)["cliSessionIds"], [CLI[KID], cleared])
+
+    def test_a_record_that_names_no_cli_session_holds_nothing_against_the_host_id(self):
+        new = "local_new00001"
+        write(os.path.join(self.t.app, new + ".json"), json.dumps(
+            {"sessionId": new, "cwd": self.t.proj, "originCwd": self.t.proj, "title": "new"}))
+        self.t.hook(PROMPT, new, {"hook_event_name": "UserPromptSubmit", "prompt": TASK}, cli="eeee5555-0000")
+        self.assertEqual(self.t.session(new)["task"], TASK)
 
 
 if __name__ == "__main__":

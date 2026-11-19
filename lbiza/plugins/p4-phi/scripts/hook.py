@@ -327,7 +327,8 @@ def sweep_served(p4, now_s=None):
                 os.remove(p)
                 n += 1
             elif name.startswith("start-") and os.path.isdir(p):
-                # a session's launches no SubagentStart took: gone once PENDING_S old, and the folder once empty
+                # a session's launches no SubagentStart took, and the origin of a prompt long since entered: gone
+                # once PENDING_S old, and the folder once empty
                 for f in os.listdir(p):
                     q = os.path.join(p, f)
                     if os.path.getmtime(q) < (now_s or time.time()) - PENDING_S:
@@ -409,12 +410,13 @@ def _recall(payload):
         return None
     prompt = payload.get("prompt") or ""
     session = payload.get("session_id") or ""
-    if rows.HARNESS_RE.match(prompt):
-        rows.row_open(p4, session, prompt, now())     # a notification: its row, complete on arrival, no retrieval
+    by = rows.whose(rows.origin_of(payload))          # whose words it is, by the origin the hooks module kept
+    if rows.harness(prompt, by):
+        rows.row_open(p4, session, prompt, now(), by=by)   # a notification: its row, complete on arrival, no retrieval
         return None
     node, node_ids = cli.live_node(p4, session)
     r = cli.query(p4, prompt, session[:8] if session else None, now(), node=node, node_ids=node_ids)
-    rid = rows.row_open(p4, session, prompt, now())
+    rid = rows.row_open(p4, session, prompt, now(), by=by)
     ids = [i for i in r["ids"] if not i.startswith(("history:", "repeat"))]
     shown = injected(p4, r["lines"])
     shadow = not shown
@@ -468,7 +470,9 @@ PENDING_S = 600                  # a launch's lines no subagent start took withi
 
 def pending_dir(payload):
     """Where a launch's lines wait for its subagent's start: the store's served folder, which git ignores and the
-    layout hook sweeps, or a folder of the temp directory in a project with no store."""
+    layout hook sweeps, or a folder of the temp directory in a project with no store. The plugin's hooks module
+    writes into the store's one too: a subagent's binding to its launch, and the origin of the session's latest
+    prompt, origin.json, which rows.origin_of reads."""
     import tempfile
     p4 = p4_of(payload)
     base = p4conf.sub(p4, "models", "served") if os.path.isdir(p4conf.sub(p4, "models")) else os.path.join(

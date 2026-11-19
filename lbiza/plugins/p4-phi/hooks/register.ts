@@ -6,12 +6,14 @@
 // hook can: at a worker's turn end it sends the worker's report to the session that started it, and where a look
 // answers work that a turn's wait left unmoved, or upkeep that is due while every session it started is idle, it
 // starts a turn of the session's own for it. And it sets the rules built into p4-phi as a section of the system
-// prompt, where a command hook can only hand text beside a start.
+// prompt, where a command hook can only hand text beside a start. And it keeps the origin Claude Code stamps on
+// each prompt, which no command hook is given, for the UserPromptSubmit hooks of that prompt to read.
 
 import type {
   AgentSpawnInput,
   EngineInterface,
   PromptComposeResult,
+  PromptOrigin,
   Register,
   SessionContextUsage,
   SessionRateLimit,
@@ -47,6 +49,12 @@ const BOUND = 'bound-'
 const SPAWN_WAIT_MS = 500
 // The subagents kept in mind, at most: a session starts far fewer at a time.
 const MOST_SPAWNED = 256
+
+// The file that holds the origin of the session's latest prompt, with the prompt's id: rows.ORIGIN_FILE in python,
+// where rows.origin_of reads it for a UserPromptSubmit hook whose input carries the same `prompt_id`.
+const ORIGIN_FILE = 'origin.json'
+// The prompts kept in mind for their origin, at most: one is in flight at a time, and a few arrive inside a turn.
+const MOST_SUBMITTED = 16
 
 // What `phi.py look` prints, as puppeteer.look answers it: the times are seconds. `starter` is the session that
 // started this one, as the address `$.session.send` takes, and `move` the prompt that starts a turn here. `upkeep`
@@ -110,6 +118,11 @@ let writing: Promise<void> = Promise.resolve()
 // what a SubagentStart raised ahead of that answer waits on.
 const spawned = new Map<string, Promise<void>>()
 const awaited = new Map<string, () => void>()
+
+// The prompts `prompt.submit` was raised for, the newest last, each with the origin Claude Code stamped on it. The
+// UserPromptSubmit command hooks of a prompt run inside that event's `next(e)`, so the prompt in flight is theirs.
+type Submitted = { text: string; origin: PromptOrigin; isInFlight: boolean }
+const submitted: Submitted[] = []
 
 // What was said to the debug log, each line once.
 const said = new Set<string>()
@@ -476,6 +489,45 @@ async function withRules($: EngineInterface, composed: PromptComposeResult): Pro
   }
 }
 
+// The origin of the prompt a UserPromptSubmit event carries: that of the prompt in flight with the same text, else
+// of the one prompt in flight, else of the newest prompt kept with that text.
+function originOf(prompt: string): PromptOrigin | undefined {
+  const flying = submitted.filter(kept => kept.isInFlight)
+  const sameText = (kept: Submitted): boolean => kept.text === prompt
+  const found =
+    flying.filter(sameText).at(-1) ?? (flying.length === 1 ? flying[0] : undefined) ?? submitted.filter(sameText).at(-1)
+
+  return found?.origin
+}
+
+// Where a prompt's origin is kept for the command hooks: in the session's folder under the store's served folder,
+// rows.origin_dir in python, for a project that has a store, and in the session's folder in the tree's store for
+// one that has none, where phi.py alone reads it. No prompt waits for python to say where that folder is: until a
+// look has answered it, a project with no store keeps no origin, and the hooks read the prompt's text as before.
+async function originFile($: EngineInterface, sessionId: string): Promise<string | undefined> {
+  const models = `${slashed(await $.session.root())}/${MODELS}`
+  if (await $.fs.exists(models)) return `${models}/served/start-${named(sessionId)}/${ORIGIN_FILE}`
+  switches ??= readSwitches($)
+  if ((await switches).isPhiOff || folder === undefined) return undefined
+
+  return `${folder}/${ORIGIN_FILE}`
+}
+
+// Writes the origin of a prompt for its UserPromptSubmit command hooks, which run beneath: the kind, and what else
+// the kind carries, with the prompt's id, which the hooks' input holds too. A prompt with no id, or one no
+// `prompt.submit` was raised for, keeps none, and a hook then finds no record of its prompt's id.
+async function keepOrigin($: EngineInterface, prompt: string, promptId: string | undefined, sessionId: string): Promise<void> {
+  try {
+    const origin = originOf(prompt)
+    if (!promptId || origin === undefined) return
+    const file = await originFile($, sessionId)
+    if (file === undefined) return
+    await $.fs.write(file, `${JSON.stringify({ promptId, ...origin })}\n`)
+  } catch (error) {
+    note($, `a prompt's origin was not kept: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
+  }
+}
+
 // A name as hook.py writes it into a file's name: every character but a letter, a digit, `_` and `-` as `_`.
 function named(id: string): string {
   return id.replace(/[^\w-]/g, '_')
@@ -582,12 +634,34 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // A message's arrival is a child's report or another session's word, which an orchestrator's ledger shows.
+  // A message's arrival is a child's report or another session's word, which an orchestrator's ledger shows. The
+  // delivery is queued whatever becomes of the look.
   on('session.receive', ($, e, next) => {
     if (isWatching) void look($, true)
 
     return next(e)
-  })
+  }).catch(($, e, next) => next(e))
+
+  // A prompt is submitted: the user's own, another session's, a background task's notice or a plugin's. The event
+  // carries its origin, a closed set the engine stamps, which the UserPromptSubmit command hooks are not given.
+  // It is kept while the prompt is in flight, and the prompt enters whatever becomes of that.
+  on('prompt.submit', async ($, e, next) => {
+    const mine: Submitted = { text: e.text, origin: e.origin, isInFlight: true }
+    submitted.push(mine)
+    if (submitted.length > MOST_SUBMITTED) submitted.shift()
+    try {
+      return await next(e)
+    } finally {
+      mine.isInFlight = false
+    }
+  }).catch(($, e, next) => next(e))
+
+  // The UserPromptSubmit command hooks run beneath this hook, so they run once the prompt's origin is written.
+  on('classic.UserPromptSubmit', async ($, e, next) => {
+    await keepOrigin($, e.prompt, e.prompt_id, e.session_id)
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
   // Claude Code raises this when it renders a system prompt. A hook that fails here is skipped, and the prompt goes
   // out as composed beneath.

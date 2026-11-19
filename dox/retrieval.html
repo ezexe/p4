@@ -109,7 +109,7 @@ footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);font-si
   <section id="messages" aria-labelledby="messages-h">
     <h2 id="messages-h">Message rows</h2>
     <dl>
-      <div><dt>A row</dt><dd><p>Each message opens a row in its session's file with <code>fingerprint:</code>, the message cut to 300 characters, <code>time:</code> and <code>arrival:</code>, which is <code>turn</code>, <code>notification</code> or <code>agent message</code>. A turn's row names in <code>resembles:</code> the newest answered row it resembles.</p></dd></div>
+      <div><dt>A row</dt><dd><p>Each message opens a row in its session's file with <code>fingerprint:</code>, the message cut to 300 characters, <code>time:</code> and <code>arrival:</code>, which is <code>turn</code>, <code>notification</code> or <code>agent message</code>. The arrival is read from the origin Claude Code stamps on the prompt where the plugin's hooks module kept it, and from how the message opens otherwise. A turn's row names in <code>resembles:</code> the newest answered row it resembles.</p></dd></div>
       <div><dt>Completed from the reply</dt><dd><p>When the turn ends, the row takes <code>addressed:</code>, the reply's first paragraph, and <code>recommended:</code>, its first recommending sentence. A row that resembled an earlier one is <code>ECHO</code> when the answers resemble each other too and <code>SUPERSEDED</code> when they do not, and a new one is <code>FRESH</code>. A notification's row is complete when it arrives.</p></dd></div>
     </dl>
   </section>
@@ -174,7 +174,7 @@ footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);font-si
     <h2 id="files-h">Files and the migration</h2>
     <dl>
       <div><dt><code>phi/models/</code></dt><dd><p><code>index.json</code>, <code>ranker.json</code>, <code>eval.tsv</code>, the label files, <code>teacher-batches.json</code>, <code>label-edits.md</code>, <code>spend.json</code>, <code>retrain-needed.tsv</code>, and the indexes of the repository and its dependencies. ezexe/phi's p4-model skill writes the <code>.pt</code> ranker beside them.</p></dd></div>
-      <div><dt>Served records</dt><dd><p><code>phi/models/served/</code> holds one record of what retrieval served for each message, <code>turn-&lt;session&gt;</code>, and for each subagent's task, <code>agent-&lt;8 hex digits&gt;</code>, which the turn's end reads and removes. Records older than a day are removed at a session's start, and git ignores the folder.</p></dd></div>
+      <div><dt>Served records</dt><dd><p><code>phi/models/served/</code> holds one record of what retrieval served for each message, <code>turn-&lt;session&gt;</code>, and for each subagent's task, <code>agent-&lt;8 hex digits&gt;</code>, which the turn's end reads and removes. A session's folder there, <code>start-&lt;session&gt;</code>, holds <code>origin.json</code>, the origin of the session's latest prompt, which the plugin's hooks module writes before that prompt's hooks run. Records older than a day are removed at a session's start, and git ignores the folder.</p></dd></div>
       <div><dt><code>p4.py migrate</code></dt><dd><p>Moves a store of the older layout into this one. It is a dry run unless <code>--apply</code>, writes its report to <code>phi/archive/migration-&lt;date&gt;.md</code>, and exits 1 on a failed check or an entry it could not place.</p></dd></div>
     </dl>
   </section>
