@@ -19,7 +19,8 @@ class OptionsTest(unittest.TestCase):
         strict object whose `type` is one of `string`, `number`, `boolean`, `directory` or `file`, with a `title` and
         a `description`, and `default` is the "value used when the user provides nothing"."""
         options = MANIFEST["userConfig"]
-        self.assertEqual(sorted(options), ["push", "status"])
+        self.assertEqual(sorted(options), ["hints", "push", "status"])
+        self.assertIs(options.pop("hints")["default"], True, "the one option that is on: it turns the lines at a miss off")
         for name, option in options.items():
             self.assertEqual(option["type"], "boolean", name)
             self.assertIs(option["default"], False, name)
@@ -29,8 +30,9 @@ class OptionsTest(unittest.TestCase):
 
     def test_the_module_reads_the_options_at_its_load_and_does_nothing_for_one_that_is_off(self):
         self.assertIn("export const register: Register = (on, options) => {", MODULE)
-        self.assertIn("wants = { push: options.push === true, status: options.status === true }", MODULE)
-        self.assertIn("let wants = { push: false, status: false }", MODULE)
+        self.assertIn("wants = { push: options.push === true, status: options.status === true, hints: options.hints !== false }",
+                      MODULE)
+        self.assertIn("let wants = { push: false, status: false, hints: true }", MODULE)
         self.assertEqual(MODULE.count("wants.push"), 1)
         self.assertEqual(MODULE.count("wants.status"), 1)
 

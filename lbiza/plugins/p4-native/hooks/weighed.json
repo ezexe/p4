@@ -1559,6 +1559,7 @@
   "PostToolUse": {
    "kind": "hook",
    "used": [
+    "p4-native",
     "p4-phi"
    ]
   },
@@ -2042,7 +2043,10 @@
    "kind": "tool",
    "declined": {
     "p4-phi": "p4-phi restores, deletes and exports nothing."
-   }
+   },
+   "used": [
+    "p4-native"
+   ]
   },
   "mcp__ccd_session_mgmt__get_session": {
    "kind": "tool",
@@ -2076,6 +2080,7 @@
   "mcp__ccd_session_mgmt__search_session_transcripts": {
    "kind": "tool",
    "used": [
+    "p4-native",
     "p4-phi"
    ]
   },

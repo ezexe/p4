@@ -31,6 +31,11 @@
 // `userConfig` that is off unless ezexe turns it on, and each a call of Claude Code's own: a push notification by
 // the `PushNotification` tool when a turn of a session ezexe is at ends, and a status line that names the host.
 // The module wraps neither.
+//
+// And it hands one line at the moment of a miss, a situation of misses.ts in which a session does by hand what a
+// tool of this host does: after the tool call that shows it, as context beside that call's result, or with the
+// next prompt for a miss a turn's end shows. Each situation is told once in a session, a line names only a tool
+// the map says answers here, no call is refused, and the option `hints` turns it off.
 
 import type { EngineInterface, Register, ToolCallResult } from 'claude-code'
 
@@ -51,6 +56,7 @@ import {
 } from './probes'
 import type { Answer, Called, Host, Probe, Said } from './probes'
 import { counted, recordOf, unweighed } from './inventory'
+import { MISSES, TERMINAL, WATCHED, atCall, atEnd, isNotice, isWake, isWorker, scriptOf } from './misses'
 import type { Record_ } from './inventory'
 
 // The project's store, and the map's file inside it.
@@ -159,12 +165,22 @@ let origin: string | undefined
 let turnOf: string | undefined
 
 // The options ezexe turned on, read at each load of the module. Each is off by default.
-let wants = { push: false, status: false }
+let wants = { push: false, status: false, hints: true }
 // In the desktop app: the session id this was asked for, whether that session was started by another, and its
 // title.
 let askedFor: string | undefined
 let isChild = false
 let title = ''
+
+// What this session's own calls showed: a scripted worker started in a Terminal tab, a notice asked for another
+// session's exit, something set that wakes this session, and the plugin's own tool or command asked.
+let isWorkerOut = false
+let isNoticed = false
+let isWoken = false
+let hasAsked = false
+// The situations a line was handed for in this session, and the lines a turn's end made for the next prompt.
+const hinted = new Set<string>()
+let waiting: string[] = []
 
 // What was said to the debug log, each line once.
 const said = new Set<string>()
@@ -574,6 +590,51 @@ async function push($: EngineInterface, answer: string): Promise<void> {
   }
 }
 
+// Whether a tool answers in this session, by the map: one of Claude Code's own, one of the desktop app's, or one of
+// a server the session holds tools of.
+function answersHere(host: Host, name: string): boolean {
+  if (host.tools.native.includes(name) || host.tools.app.includes(name)) return true
+  const server = /^mcp__(.+?)__/.exec(name)?.[1]
+
+  return server !== undefined && (host.tools.servers[server] ?? 0) > 0
+}
+
+// The lines for the situations given: each once in a session, and only where a tool the line names answers here.
+function hints(ids: readonly string[]): string[] {
+  const host = kept
+  if (host === undefined) return []
+  const lines: string[] = []
+  for (const id of ids) {
+    const miss = MISSES.find(one => one.id === id)
+    if (miss === undefined || hinted.has(id)) continue
+    const here = miss.names.filter(name => answersHere(host, name))
+    if (miss.names.length > 0 && here.length === 0) continue
+    hinted.add(id)
+    lines.push(miss.line.replace('{names}', here.map(name => `\`${name}\``).join(', ')))
+  }
+
+  return lines
+}
+
+// What one call of this session showed: what it set for later, and the lines for the misses it shows. A command
+// typed into a Terminal tab is read for a scripted run, in its own line or in the one script file it runs.
+async function called($: EngineInterface, tool: string, input: unknown): Promise<string[]> {
+  const given = typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
+  if (isNotice(tool, given)) isNoticed = true
+  if (isWake(tool, given)) isWoken = true
+  if (tool === TERMINAL) {
+    const command = typeof given.command === 'string' ? given.command : ''
+    const script = scriptOf(command)
+    const source = script === undefined ? '' : await $.fs.read(script).catch(() => '')
+    if (isWorker(command) || isWorker(source)) isWorkerOut = true
+
+    return []
+  }
+  await starting?.catch(() => undefined)
+
+  return hints(atCall(tool, given, keptFor ?? ''))
+}
+
 // The notices of the file, taken out of it: each is told once, by whichever session's prompt comes first.
 async function take($: EngineInterface): Promise<string[]> {
   hasNotices = false
@@ -702,7 +763,7 @@ function field(e: unknown, name: string): string {
 }
 
 export const register: Register = (on, options) => {
-  wants = { push: options.push === true, status: options.status === true }
+  wants = { push: options.push === true, status: options.status === true, hints: options.hints !== false }
 
   // The session does not wait for the map, and it does wait for the command and the tool, which are then listed
   // from the first prompt.
@@ -711,6 +772,12 @@ export const register: Register = (on, options) => {
     startKeys = Object.keys(e)
     keptFor = undefined
     turnOf = undefined
+    isWorkerOut = false
+    isNoticed = false
+    isWoken = false
+    hasAsked = false
+    hinted.clear()
+    waiting = []
     starting = look($).then(() => check($))
     await offer($)
 
@@ -721,11 +788,12 @@ export const register: Register = (on, options) => {
   // told once.
   on('prompt.submit', async ($, e, next) => {
     origin = e.origin?.kind
-    if (!hasNotices) return next(e)
-    const notices = await take($).catch(() => [])
-    if (notices.length === 0) return next(e)
+    const notices = hasNotices ? await take($).catch(() => []) : []
+    const lines = [...notices, ...waiting]
+    waiting = []
+    if (lines.length === 0) return next(e)
 
-    return next({ ...e, context: [...(e.context ?? []), notices.join('\n')] })
+    return next({ ...e, context: [...(e.context ?? []), lines.join('\n')] })
   })
 
   // The first turn of the main conversation under a session id reads the map again, without the turn waiting for
@@ -751,6 +819,11 @@ export const register: Register = (on, options) => {
     const out = await next(e)
     if (e.agentId === undefined && owed.length > 0) await pay($)
     if (e.agentId === undefined && wants.push && !e.isAborted) void push($, e.answer)
+    if (e.agentId === undefined && wants.hints && !e.isAborted) {
+      const lines = hints(atEnd({ isWorkerOut, isNoticed, isWoken, hasAsked }, e.answer))
+      for (const line of lines) $.ui.log(line)
+      waiting.push(...lines)
+    }
 
     return out
   })
@@ -767,11 +840,28 @@ export const register: Register = (on, options) => {
     return out
   }).catch(($, e, next) => next(e))
 
-  on('command.run', { command: 'native' }, async ($, e) => ({ text: await answer($, e.args) }))
+  // After a tool call of the session: the hooks beneath answer first and their answer is passed on whole, and a
+  // line for a miss the call shows is added to its context. A call a hooks module made itself is no miss.
+  on('classic.PostToolUse', async ($, e, next) => {
+    const out = await next(e)
+    const isOwn = String(e.tool_use_id ?? '').startsWith('toolu_plugin_')
+    if (!wants.hints || isOwn || !WATCHED.has(e.tool_name)) return out
+    const lines = await called($, e.tool_name, e.tool_input)
+
+    return lines.length === 0 ? out : { ...out, additionalContext: [...(out.additionalContext ?? []), ...lines] }
+  }).catch(($, e, next) => next(e))
+
+  on('command.run', { command: 'native' }, async ($, e) => {
+    hasAsked = true
+
+    return { text: await answer($, e.args) }
+  })
 
   // A call of the tool. It is served ahead of the permission check, as the docs serve a tool, since it reads the
   // host and changes nothing. Nothing runs beneath, since the tool is nothing but that command.
-  on('tool.call', { tool: TOOL_ID }, async ($, e): Promise<ToolCallResult> => ({
-    result: await answer($, field(e, 'command')),
-  })).catch(() => ({ deny: 'p4-native could not read the host.' }))
+  on('tool.call', { tool: TOOL_ID }, async ($, e): Promise<ToolCallResult> => {
+    hasAsked = true
+
+    return { result: await answer($, field(e, 'command')) }
+  }).catch(() => ({ deny: 'p4-native could not read the host.' }))
 }

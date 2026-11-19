@@ -138,6 +138,34 @@ A test holds the record to the three plugins' own files, so an event a module ho
 Seen in the desktop app on Claude Code 2.1.326: every tool of the session had a row, and seven slash commands had none, `/motion`, `/artifact-design`, `/whiteboard`, `/keybindings-help`, `/__remote-workflow`, `/workflow-launch-exec` and `/extra-usage`.
 Not seen live: the notice at a change of version.
 
+## One line at a miss
+
+A session sometimes does by hand what a tool of this host does.
+`hooks/misses.ts` is a short table of such situations, each with the tool to name, and a row is in it only with a miss seen live behind it.
+The module checks the table after a tool call of the session and at the end of a turn, and hands one line of context that names the tool.
+
+- It refuses no call: after a tool call the hooks beneath answer first, their answer is passed on whole, and the line is added to its context.
+- A situation is told once in a session.
+- A line names only a tool the capability map says answers in this session, and a row whose tools are all missing here hands nothing.
+- It starts no process and asks no model: a row is a pattern over a call's own input or a turn's own answer.
+- The option `hints` turns it off, and it is on unless ezexe turns it off.
+
+A miss a tool call shows is told beside that call's result, by the `additionalContext` of the classic event `PostToolUse`.
+A miss a turn's end shows is a line of the transcript for ezexe at once and context of the session's next prompt.
+
+- `worker-with-no-exit-notice`, at a turn's end: a `claude -p` worker was started in a Terminal tab and no notice was asked for its exit, where `SendMessage` with `notify_when_idle` gives one.
+- `turn-ended-with-a-worker-out`, at a turn's end: such a worker is out and nothing is set to wake the session, where `CronCreate` schedules a prompt.
+- `gh-run-polled-in-a-loop`, after a call: a shell command polls `gh run` and sleeps, where `gh run watch` run in the background ends by itself.
+- `gh-run-list-short-commit`, after a call: `gh run list --commit` is given a short hash, which matches no run.
+- `transcript-read-from-disk`, after a call: another session's transcript file is read from disk, where `mcp__ccd_session_mgmt__list_events`, `search_session_transcripts` and `export_transcript` exist.
+- `host-limit-from-memory`, at a turn's end: the answer states a limit of the host in a session that never asked the plugin, where the map and the probes hold what was measured.
+
+A worker in a Terminal tab is known by `claude -p` in the line typed or in the one script file that line runs, which the module reads.
+The last row reads the answer for a sentence that says the desktop app, Claude Code, this host or a scripted run cannot do a thing, so it can fire on a sentence that is right.
+
+Seen in the desktop app on Claude Code 2.1.326, with a development copy: a Bash call of `gh run list --commit` with a hash of seven characters came back with its result and the line of `gh-run-list-short-commit` as `PostToolUse:Bash hook additional context`.
+Not seen live: the other five rows, and a line carried by a next prompt.
+
 ## ezexe's own choices
 
 These were declined by choice and not by a block, so each stays a setting of Claude Code or of the desktop app, and p4-native writes none of them and probes none.
@@ -152,10 +180,11 @@ These were declined by choice and not by a block, so each stays a setting of Cla
 
 Two features of Claude Code that fit neither p4-phi nor p4-temportal are here.
 Each is an option of the plugin's `userConfig`, off until ezexe turns it on, and each is one call of Claude Code's own that the module makes and does not wrap.
+The third option, `hints`, is on by default and belongs to the lines at a miss above.
 The options are rows of `/config` in a terminal session, and they are kept under `pluginConfigs` in `~/.claude/settings.json`, by https://code.claude.com/docs/en/plugins/manifest-reference.md, "User configuration".
 
 ```json
-{"pluginConfigs": {"p4-native@p4-marketplace": {"options": {"push": true, "status": true}}}}
+{"pluginConfigs": {"p4-native@p4-marketplace": {"options": {"push": true, "status": true, "hints": false}}}}
 ```
 
 - `push`: ezexe hears on the desktop, and on the phone where Remote Control is connected, that a session ezexe is at ended its turn, so it waits or is done.

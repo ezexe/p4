@@ -43,9 +43,15 @@ It builds no copy of anything Claude Code or the desktop app does: it asks the e
 - A line that begins `p4-native: Claude Code` and says `no p4 plugin has weighed` names what is new in this build, and it is told once: tell ezexe the names, and add no row by yourself.
 - Before building something by hand, look the native command or tool up in the record: a row that says declined gives the reason, and one that says nobody means it was never weighed.
 
+## A line at a miss
+
+- A line that begins `p4-native:` beside a tool's result, or as context of a prompt, names a tool of this host for something the session just did by hand.
+- Take the tool it names for the rest of the task, and say nothing of the line to ezexe unless it matters.
+- Each situation is told once in a session, no call is refused, and `hooks/misses.ts` holds the table.
+
 ## Options
 
-- `push` and `status` are options of the plugin that are off until ezexe turns them on, and a session turns on neither.
+- `push` and `status` are options of the plugin that are off until ezexe turns them on, `hints` is on until ezexe turns it off, and a session changes none.
 - With `push` on, the plugin itself calls `PushNotification` at the end of a turn of a session ezexe is at, so send no second notification for the same turn.
 
 ## What to do with it

@@ -171,8 +171,10 @@ class ToldOnceTest(unittest.TestCase):
         take = MODULE.split("async function take(", 1)[1].split("\n}\n", 1)[0]
         self.assertIn("notices: []", take)
         prompt = MODULE.split("on('prompt.submit'", 1)[1].split("\n  })", 1)[0]
-        self.assertIn("if (!hasNotices) return next(e)", prompt, "a prompt reads no file where no notice waits")
-        self.assertIn("context: [...(e.context ?? []), notices.join('\\n')]", prompt)
+        self.assertIn("const notices = hasNotices ? await take($).catch(() => []) : []", prompt,
+                      "a prompt reads no file where no notice waits")
+        self.assertIn("if (lines.length === 0) return next(e)", prompt)
+        self.assertIn("context: [...(e.context ?? []), lines.join('\\n')]", prompt)
 
     def test_the_skill_says_what_a_session_does_with_a_notice(self):
         self.assertIn("p4-native: the watched condition ${probe.id} changed on", MODULE)

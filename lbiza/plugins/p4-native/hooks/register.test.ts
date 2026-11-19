@@ -134,6 +134,8 @@ function machine(on: On, has: Machine): Seen {
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
+  // What the settings hooks beneath the module answer after a tool call.
+  on('classic.PostToolUse', () => ({ additionalContext: ['a settings hook said this'] }))
   on('prompt.submit', (_, e) => {
     seen.prompts.push({ text: e.text, context: e.context })
 
@@ -1023,5 +1025,137 @@ test('a row is found by its own key, by a server\'s key and by a stem, and comes
   expect(verdictOf({ kind: 'tool', nobody: true })).toBe('nobody')
   expect(recordOf('not json')).toEqual({ claude: '', rows: {} })
   expect(counted(recordOf(JSON.stringify(RECORD))).length).toBe(5)
+})
+
+// A tool call of the session, as the classic event after it carries it.
+function after(name: string, input: Record<string, unknown>, id = 'toolu_01'): Record<string, unknown> {
+  return { tool_name: name, tool_input: input, tool_response: '', tool_use_id: id }
+}
+const POLL = 'while true; do gh run list --limit 3; sleep 30; done'
+const OTHERS = '/home/u/.claude/projects/-work-project/9f3a0000-0000-4000-8000-000000000000.jsonl'
+
+test('a shell loop that polls gh run gets one line beside its result, once, and the hooks beneath keep their say', async ($, on) => {
+  const clock = mock.clock(on)
+  machine(on, { files: { [BOOK]: ranOn('terminal/scripted', '2.1.326') } })
+  await $.session.start(HOSTED)
+  await clock.settle()
+
+  const first = await $.classic.PostToolUse(after('Bash', { command: POLL }) as never)
+  expect(first.additionalContext?.[0]).toBe('a settings hook said this')
+  expect(first.additionalContext?.[1]).toContain('`gh run watch <run id> --exit-status` ends by itself')
+  expect(first.additionalContext?.length).toBe(2)
+
+  // The same situation again in this session, a call that shows none, and a call the module made itself.
+  expect((await $.classic.PostToolUse(after('Bash', { command: POLL }) as never)).additionalContext).toEqual(['a settings hook said this'])
+  expect((await $.classic.PostToolUse(after('Bash', { command: 'gh run watch 7 --exit-status' }) as never)).additionalContext?.length).toBe(1)
+  const own = after('Bash', { command: 'gh run list --commit 81eae97' }, 'toolu_plugin_1')
+  expect((await $.classic.PostToolUse(own as never)).additionalContext?.length).toBe(1)
+
+  const short = await $.classic.PostToolUse(after('PowerShell', { command: 'gh run list --repo ezexe/p4 --commit 81eae97' }) as never)
+  expect(short.additionalContext?.[1]).toContain('takes the full 40 characters of a commit hash')
+  const full = after('Bash', { command: 'gh run list --commit 81eae97e0e0b6c0d6a7d2f1b9c3a4d5e6f708192' })
+  expect((await $.classic.PostToolUse(full as never)).additionalContext?.length).toBe(1)
+})
+
+test('with hints off no line is handed, and what the hooks beneath answered is passed on', { options: { hints: false } }, async ($, on) => {
+  const clock = mock.clock(on)
+  const seen = machine(on, {})
+  await $.session.start(HOSTED)
+  await clock.settle()
+
+  const out = await $.classic.PostToolUse(after('Bash', { command: POLL }) as never)
+  expect(out.additionalContext).toEqual(['a settings hook said this'])
+  await $.turn.complete({ ...TURN, answer: 'The desktop app cannot start a session here.' })
+  await $.prompt.submit({ text: 'next', origin: { kind: 'sdk' }, wait: false } as never)
+  expect(seen.prompts[0]?.context).toBeUndefined()
+})
+
+test('a read of another session\'s transcript file names the app\'s tools that answer here, and none where none does', async ($, on) => {
+  const clock = mock.clock(on)
+  let tools = [...OWN, tool('mcp__ccd_session_mgmt__list_events'), tool('mcp__ccd_session_mgmt__export_transcript')]
+  machine(on, { tools: () => tools, files: { [BOOK]: ranOn('desktop/interactive', '2.1.326') } })
+  await $.session.start(HOSTED)
+  await clock.settle()
+
+  // This session's own transcript file is its own to read.
+  const mine = after('Read', { file_path: '/home/u/.claude/projects/-work-project/cli-0001.jsonl' })
+  expect((await $.classic.PostToolUse(mine as never)).additionalContext?.length).toBe(1)
+
+  const out = await $.classic.PostToolUse(after('Read', { file_path: OTHERS }) as never)
+  const line = out.additionalContext?.[1] ?? ''
+  expect(line).toContain("The desktop app's own tools read a session: `mcp__ccd_session_mgmt__list_events`, `mcp__ccd_session_mgmt__export_transcript`.")
+  expect(line).not.toContain('search_session_transcripts')
+
+  // In a session with none of those tools the line would name nothing, so none is handed.
+  tools = OWN
+  await $.session.start(HOSTED)
+  await clock.settle()
+  const bare = await $.classic.PostToolUse(after('Bash', { command: `tail -5 ${OTHERS}` }) as never)
+  expect(bare.additionalContext).toEqual(['a settings hook said this'])
+})
+
+test('a worker started in a Terminal tab with nothing asked for its exit is told at the next prompt, once', async ($, on) => {
+  const clock = mock.clock(on)
+  const script = '/notes/terminal-workers/start-upkeep-1.ps1'
+  const seen = machine(on, {
+    tools: () => [...OWN, tool('SendMessage'), tool('CronCreate'), tool('mcp__terminal__run_in_terminal')],
+    files: { [BOOK]: ranOn('terminal/scripted', '2.1.326'), [script]: "Set-Location 'E:/p'\nclaude -p '/goal do it' --worktree upkeep-1\n" },
+  })
+  await $.session.start(HOSTED)
+  await clock.settle()
+
+  await $.classic.PostToolUse(after('mcp__terminal__run_in_terminal', { command: `& '${script}'`, title: 'upkeep-1' }) as never)
+  await $.turn.complete(TURN)
+  expect(seen.shown.length).toBe(2)
+  await $.prompt.submit({ text: 'next', origin: { kind: 'sdk' }, wait: false } as never)
+  const context = seen.prompts[0]?.context?.[0] ?? ''
+  expect(context).toContain('`SendMessage` with `notify_when_idle` set to true')
+  expect(context).toContain('`CronCreate` schedules a prompt that looks in on the worker.')
+
+  await $.turn.complete(TURN)
+  await $.prompt.submit({ text: 'again', origin: { kind: 'sdk' }, wait: false } as never)
+  expect(seen.prompts[1]?.context).toBeUndefined()
+})
+
+test('a worker whose exit was asked for, and a tab that runs no scripted session, start no line', async ($, on) => {
+  const clock = mock.clock(on)
+  const seen = machine(on, {
+    tools: () => [...OWN, tool('SendMessage'), tool('CronCreate'), tool('mcp__terminal__run_in_terminal')],
+    files: { [BOOK]: ranOn('terminal/scripted', '2.1.326') },
+  })
+  await $.session.start(HOSTED)
+  await clock.settle()
+
+  await $.classic.PostToolUse(after('mcp__terminal__run_in_terminal', { command: 'npm run dev' }) as never)
+  await $.turn.complete(TURN)
+  await $.classic.PostToolUse(after('mcp__terminal__run_in_terminal', { command: "claude -p 'do it' --worktree w1" }) as never)
+  await $.classic.PostToolUse(after('SendMessage', { to: 'w1', notify_when_idle: true }) as never)
+  await $.turn.complete(TURN)
+  await $.prompt.submit({ text: 'next', origin: { kind: 'sdk' }, wait: false } as never)
+
+  expect(seen.shown).toEqual([])
+  expect(seen.prompts[0]?.context).toBeUndefined()
+})
+
+test('an answer that states a limit of the host is told of the map, unless the session asked the plugin', async ($, on) => {
+  const clock = mock.clock(on)
+  const seen = machine(on, {
+    tools: () => [...OWN, tool('mcp__p4-native__native')],
+    files: { [BOOK]: ranOn('terminal/scripted', '2.1.326') },
+  })
+  await $.session.start(HOSTED)
+  await clock.settle()
+
+  await $.turn.complete({ ...TURN, answer: 'The flush is ported and its tests pass.' })
+  await $.turn.complete({ ...TURN, answer: 'I left the pane out, since the desktop app does not support a pane that opens unasked.' })
+  await $.prompt.submit({ text: 'next', origin: { kind: 'sdk' }, wait: false } as never)
+  expect(seen.prompts[0]?.context?.[0]).toContain('call `mcp__p4-native__native` with `map` or `probes` before stating one')
+
+  await $.session.start(HOSTED)
+  await clock.settle()
+  await $.tool.call({ tool: TOOL, command: 'map' } as never)
+  await $.turn.complete({ ...TURN, answer: 'Claude Code cannot list its own hook events from a module.' })
+  await $.prompt.submit({ text: 'next', origin: { kind: 'sdk' }, wait: false } as never)
+  expect(seen.prompts[1]?.context).toBeUndefined()
 })
 
