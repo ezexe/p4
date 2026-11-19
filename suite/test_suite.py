@@ -482,12 +482,14 @@ class Command(Repo):
             def test_runs_after_the_hung_one():
                 pass
         '''})
-        code, out, err = command(self.root, "--workers", "1", "--timeout", "1")
+        # the worker writes its stack a quarter of the timeout before the stop: a second, which a worker that a busy
+        # machine starts late on its test still keeps, where the quarter second of a timeout of 1 was lost on a runner
+        code, out, err = command(self.root, "--workers", "1", "--timeout", "4")
         self.assertEqual(code, run.FAILED, out + err)
         got = lines_of(out)
         self.assertEqual(got["a/test_hangs.py::Hangs::test_hangs"][0], "TIMEOUT", out)
         self.assertEqual(got["b/test_after.py::test_runs_after_the_hung_one"][0], "ok", out)
-        self.assertIn("was stopped after 1 s on this test", out)
+        self.assertIn("was stopped after 4 s on this test", out)
         self.assertIn('in test_hangs', out, "the stack written shortly before the stop")
 
 
