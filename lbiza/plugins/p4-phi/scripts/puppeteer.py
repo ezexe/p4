@@ -1116,7 +1116,11 @@ def own_message(home, s, req):
 def prompty(home, s, req, base):
     """Routing: ezexe's message read against the records the ledger is built from. It returns the paths and words
     the message carries, whether it is work at all, the live session that is its area's code owner, the registered
-    routes it matches, and the readings it leaves open."""
+    routes it matches, and the readings it leaves open. Whether the message is within this session's own topic is
+    read against its own scope, relay.scope_of, which holds no other session's path. The owner by path is found by
+    the address book, book.holders, over the owned paths of every live session that is not this one or above it:
+    it reads each path from its own repository's root and so finds a worker in a git worktree of its own, where the
+    absolute path a message names and the one a worker owns never meet."""
     phi = _phi()
     sid = s["sessionId"]
     every = relay._sessions(home)
@@ -1137,12 +1141,17 @@ def prompty(home, s, req, base):
               for oid, o in every.items()
               if not (oid == sid or oid in above or closed(o) or relay.gone(home, o))]
     ranked = rank_texts(home, "owners", req, [text for _, _, text in others])       # None: shared words decide
+    try:                                            # it reads the app's records: a failure costs the path arm alone
+        import book
+        owned = {e["id"]: what for e, what in book.holders(home, s if s.get("cwd") else {**s, "cwd": base}, req,
+                                                           conf_store(home, sid), below=False, owned=True)}
+    except Exception:  # noqa: BLE001
+        owned = {}
     for k, (oid, o, text) in enumerate(others):
-        shard = [p for p in relay.shard_of(o) if not relay.names_nothing(p, home, base)]
-        hit = next((p for p in shard if any(relay.covers(p, n) or relay.covers(n, p) for n in named)), "")
+        hit = owned.get(oid, "")
         n, _ = share(req, text)
         if hit:
-            cand = (2, len(relay._root(hit)), oid, f"its owned paths hold {hit}")
+            cand = (2, len(hit), oid, f"its owned paths hold {hit}")
         elif ranked is not None:
             cand = (1, ranked[0][k], oid, f"the trained owner model scores its task {ranked[0][k]:.2f} for the "
                                          f"message") if ranked[0][k] >= ranked[1] else None

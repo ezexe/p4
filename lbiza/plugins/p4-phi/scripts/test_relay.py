@@ -971,6 +971,38 @@ class ThreeSessions(unittest.TestCase):
         self.assertEqual(t.stop(A, "go on with the layout", report="Went on.", uuid="s3").returncode, 0)
         self.assertNotIn(A, open(relay.ready_path(t.p4), encoding="utf-8").read(), "the Stop leaves it off")
 
+    def test_ezexes_message_is_routed_to_the_worker_that_owns_its_path_in_a_worktree(self):
+        """puppeteer.prompty picked a message's code owner by holding the paths it names against each other
+        session's owned paths as absolute paths, which never meet once the owner works in a git worktree of its
+        own. The pick now reads the address book, which reads each path from its own repository's root. Whether a
+        message is within the session's own topic still reads relay.scope_of, the session's own paths alone."""
+        import phi
+        import puppeteer
+        from unittest import mock
+        t = self.t
+        own = self.worktree_worker()
+        self.assertEqual(t.cli(GRAND, "shard", own + "/docs").returncode, 0)
+        named = self.x("docs", "d.md")
+        self.assertFalse(relay.covers(relay.norm(own + "/docs"), relay.norm(named)),
+                         "the worker's owned path and the main checkout's file never meet as paths")
+        message = f"Fix the off-by-one in `{named}` that drops the last row of the ports table"
+        with mock.patch.dict(os.environ, t.env(TOP)), mock.patch.dict(phi.RECORDS, clear=True):
+            read = puppeteer.prompty(t.p4, t.session(TOP), message, t.proj)
+            self.assertTrue(read["work"])
+            self.assertEqual((read["owner"] or {}).get("sessionId"), GRAND, read["owner"])
+            self.assertEqual(read["owner"]["why"], "its owned paths hold docs")
+            other = puppeteer.prompty(t.p4, t.session(TOP), message.replace("docs/d.md", "lib/y.py"), t.proj)
+            self.assertNotEqual((other["owner"] or {}).get("sessionId"), GRAND, "a path it does not own")
+            t.cli(TOP, "shard", self.x("lib"))
+            above = puppeteer.prompty(t.p4, t.session(GRAND), f"Fix the layout in `{self.x('lib', 'x.py')}` of the "
+                                      f"ports table rows", own)
+            self.assertNotEqual((above["owner"] or {}).get("sessionId"), TOP, "the session above it is never its owner")
+            t.stop(TOP, "its own edit", [("Edit", {"file_path": self.x("lib", "y.py")}, "ok")], uuid="t1")
+            self.assertEqual(relay.scope_of(t.p4, TOP), [relay.norm(self.x("lib"))])
+            mine = puppeteer.prompty(t.p4, t.session(TOP), f"Rewrite `{self.x('lib', 'y.py')}` for the zebra "
+                                     f"importer's nightly quota", t.proj)
+            self.assertTrue(mine["within"], "a path in its own scope is within its topic")
+
 class ForkOrFresh(ThreeSessions):
     """The advice on start_session, a fork's pinned agenda, and a fresh child's slice of the parent's anchor."""
 
