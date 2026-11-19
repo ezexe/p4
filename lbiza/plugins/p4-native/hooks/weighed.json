@@ -1544,7 +1544,7 @@
   "/tasks": {
    "kind": "command",
    "declined": {
-    "p4-phi": "background tasks are read from `TaskStop` and the completion notices.",
+    "p4-phi": "a view for a person, which no hook reads and no tool returns: p4-phi keeps the Stop input's `background_tasks`, less what a completion notice or `TaskStop` ended, and checks a second background copy against that, since nothing of Claude Code refuses one.",
     "p4-temportal": "background work."
    }
   },
