@@ -126,6 +126,49 @@ class Page(unittest.TestCase):
                      "no entry for the session", "ask their own interpreter", "written after the start hooks ran"):
             self.assertIn(said, row, said)
 
+    def test_each_thing_once_not_seen_live_is_seen_or_says_why_it_is_not(self):
+        """Eight things p4-temportal built had been seen in no real session. The page names each one where it keeps
+        such results: as seen, with what was seen, or as still not seen, with what stands in the way."""
+        text = page()
+        found = rows(text)
+        open_still = text.split('id="not-confirmed"', 1)[1].split("</section>", 1)[0]
+        seen = {
+            "the plugin's own compaction at a quiet moment": (found["compaction"], (
+                "<code>temportal.compact_at</code> to 1", "a minute after a turn ended", "<code>manual</code>",
+                "50,068 tokens to 9,549", "No second compaction followed")),
+            "a compaction Claude Code starts by itself": (found["compaction"], (
+                "a compaction Claude Code starts by itself", "<code>CLAUDE_CODE_AUTO_COMPACT_WINDOW</code>",
+                "each read <code>auto</code>", "carried from list to list")),
+            "the compaction of a subagent's transcript": (found["compaction"], (
+                "the compaction of a subagent's transcript", "with the subagent's id",
+                "The main conversation was not compacted")),
+            "the ask before a call of the lifetime tool": (found["lifetimes"], (
+                "put to the host as an ask before anything ran", "with no command of <code>lifetime.py</code> run",
+                "an allowed one ran <code>list</code>")),
+            "plansDirectory from the keeper to a plan": (found["plans"], (
+                "as one chain", "the first session's start wrote the key", "neither asked about nor refused",
+                "the session after the one whose start wrote it")),
+            "an older build": (open_still, (
+                "Seen on Claude Code 2.1.322", "does not load there at all", "<code>tool.run</code> is no event")),
+        }
+        for what, (where, words) in seen.items():
+            for said in words:
+                self.assertIn(said, where, f"{what}: {said}")
+        unseen = {
+            "how the app draws the message": (open_still, (
+                "Still not seen live: how the app draws the message", "A scripted run draws nothing")),
+            "whether the cleanup reaches a plansDirectory": (open_still, (
+                "It is still not seen", "A scripted start on Claude Code 2.1.328 ran no cleanup at all",
+                "dated sixty days back", "whether the folder is trusted")),
+            "the plan chain in the desktop app and off Windows": (found["plans"], (
+                "Still not seen: the chain in the desktop app", "anywhere but on Windows",
+                "a machine that is not this one")),
+        }
+        for what, (where, words) in unseen.items():
+            for said in words:
+                self.assertIn(said, where, f"{what}: {said}")
+        self.assertNotIn("Not seen live: a compaction Claude Code starts by itself", text)
+
     def test_the_page_says_what_was_set_out_and_what_the_docs_do_not_confirm(self):
         text = page()
         set_out = text.split('id="set-out"', 1)[1].split("</section>", 1)[0]
