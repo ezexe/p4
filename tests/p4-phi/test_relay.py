@@ -17,6 +17,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 # the folder of the code these tests run
 SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
@@ -40,7 +41,35 @@ class Paths(unittest.TestCase):
         self.assertTrue(relay.covers("e:/w/lib/*.py", "e:/w/lib/x.py"))
         self.assertTrue(relay.overlap("e:/w/lib/**", "e:/w/lib/x.py"))
         self.assertFalse(relay.overlap("e:/w/lib", "e:/w/docs"))
-        self.assertEqual(relay.norm("/e/projects/x/", ""), relay.norm("E:/projects/x", ""))
+        with mock.patch.object(relay, "DRIVES", True):     # Git Bash's spelling, which a machine with drive letters has
+            self.assertEqual(relay.norm("/e/projects/x/", ""), relay.norm("E:/projects/x", ""))
+
+    def test_a_one_letter_folder_is_a_drive_only_where_the_machine_has_drive_letters(self):
+        """https://docs.python.org/3/library/os.path.html, os.path.splitdrive: "On systems which do not use drive
+        specifications, drive will always be the empty string." Git Bash writes E:/x as /e/x and runs on Windows
+        alone, so relay.norm reads /w/lib as the drive W: only on a machine that has drive letters. On macOS and
+        Linux it is the folder lib in /w and stays that path, where it was read as a drive the machine lacks and
+        relay.paths_in dropped it. WSL's /mnt/e/x names a drive on every system, as it did. Each rule is held on
+        every system by setting relay.DRIVES, and the machine's own rule by what relay.DRIVES is."""
+        self.assertEqual(relay.DRIVES, bool(os.path.splitdrive("C:/x")[0]))
+        self.assertEqual(relay.DRIVES, os.name == "nt")
+        with mock.patch.object(relay, "DRIVES", False):     # macOS and Linux: no drive letters
+            for path in ("/w/lib/x.py", "/w/lib/", "/w", "/e/projects/x", "/W/Lib"):
+                self.assertEqual(relay.norm(path).lower(), path.rstrip("/").lower(), path)
+            self.assertEqual(relay.paths_in("see /w/lib/x.py and `/e/notes.md`"),
+                             [relay.norm("/w/lib/x.py"), relay.norm("/e/notes.md")], "neither is dropped as a drive")
+            self.assertTrue(relay.covers(relay.norm("/w/lib"), relay.norm("/w/lib/x.py")))
+            self.assertEqual(relay.norm("/mnt/e/projects/x"), relay.norm("E:/projects/x"), "WSL's spelling of a drive")
+            self.assertNotEqual(relay.norm("/e/projects/x"), relay.norm("E:/projects/x"))
+        with mock.patch.object(relay, "DRIVES", True):      # Windows: what it did
+            self.assertEqual(relay.norm("/w/lib/x.py").lower(), "w:/lib/x.py")
+            self.assertEqual(relay.norm("/w").lower(), "w:")
+            self.assertEqual(relay.norm("/e/projects/x/"), relay.norm("E:/projects/x"))
+            self.assertEqual(relay.norm("/mnt/e/projects/x"), relay.norm("E:/projects/x"))
+            for path in ("/work/lib", "/wsl/lib", "/1/lib"):
+                self.assertEqual(relay.norm(path), path, "a first part that is no single letter was never a drive")
+        native = relay.norm("/w/lib/x.py")                  # this machine's own rule, with nothing set
+        self.assertEqual(native, "w:/lib/x.py" if os.name == "nt" else "/w/lib/x.py")
 
     def test_a_childs_slice_names_its_paths_relative_and_no_scratchpad_in_the_store(self):
         """The slice's paths as the project names them. No line names a scratchpad under .claude: the app names each

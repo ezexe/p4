@@ -221,6 +221,13 @@ def gone(home, s):
 
 # --- paths -----------------------------------------------------------------------------------------------------------
 
+# A letter names a drive only on a machine that has drive letters. os.path.splitdrive, by
+# https://docs.python.org/3/library/os.path.html: "On systems which do not use drive specifications, drive will always
+# be the empty string." Git Bash, which writes E:/x as /e/x, runs on Windows alone, so on macOS and Linux /w/lib is the
+# folder lib in /w.
+DRIVES = bool(os.path.splitdrive("C:/x")[0])
+
+
 def norm(p, base=""):
     """A path or glob as one form: absolute when a base is given, forward slashes, no trailing slash, case folded
     on Windows."""
@@ -228,10 +235,12 @@ def norm(p, base=""):
     if not p:
         return ""
     p = p.replace("\\", "/")
-    # /e/x as Git Bash writes E:/x, and /mnt/e/x as WSL does, before the absolute test: on Windows, Python 3.13 and
-    # later take a path with one leading slash as not absolute, and would join /e/x onto the base
+    # /e/x as Git Bash writes E:/x, where the machine has drive letters, and /mnt/e/x as WSL does, before the
+    # absolute test: on Windows, Python 3.13 and later take a path with one leading slash as not absolute, and would
+    # join /e/x onto the base
     p = re.sub(r"^/mnt/([a-zA-Z])(?=/|$)", lambda m: m.group(1).upper() + ":", p)
-    p = re.sub(r"^/([a-zA-Z])(?=/|$)", lambda m: m.group(1).upper() + ":", p)
+    if DRIVES:
+        p = re.sub(r"^/([a-zA-Z])(?=/|$)", lambda m: m.group(1).upper() + ":", p)
     if base and not os.path.isabs(p) and not re.match(r"^[A-Za-z]:", p):
         p = os.path.join(base, p).replace("\\", "/")
     p = re.sub(r"/+", "/", p).rstrip("/")
