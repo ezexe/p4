@@ -128,7 +128,9 @@ class Page(unittest.TestCase):
 
     def test_each_thing_once_not_seen_live_is_seen_or_says_why_it_is_not(self):
         """Eight things p4-temportal built had been seen in no real session. The page names each one where it keeps
-        such results: as seen, with what was seen, or as still not seen, with what stands in the way."""
+        such results: as seen, with what was seen, or as still not seen, with what stands in the way. Three of them
+        were seen later in the desktop app: the message behind a summary, the cleanup and a project's plans folder,
+        and where a plan-mode session's plan lands."""
         text = page()
         found = rows(text)
         open_still = text.split('id="not-confirmed"', 1)[1].split("</section>", 1)[0]
@@ -152,18 +154,26 @@ class Page(unittest.TestCase):
                 "Seen on Claude Code 2.1.322 and 2.1.311", "<code>tool.run</code> is no event on either",
                 "<code>hooks module p4-temportal@inline loaded</code>", "names the glob <code>tool.*</code>",
                 "registers no tool there", "was seen on those builds")),
+            "how the app draws the message": (open_still, (
+                "Seen in the desktop app on Claude Code 2.1.326, in a session in plan mode whose worktree's own",
+                "91,362 tokens to 18,383",
+                "with the plugin as its origin", "the session's last prompt", "The plugin's list was not drawn in view", "was not the first one due", "was not seen itself")),
+            "whether the cleanup reaches a plansDirectory": (open_still, (
+                "Seen in the desktop app on Claude Code 2.1.326, one sweep did not", "at most once per session",
+                "ten minutes and six or seven seconds", "in the session's own plans folder stayed",
+                "read from that timing alone", "it may have been skipped",
+                "Not seen: the sweep of a terminal session")),
+            "the plan chain in the desktop app": (found["plans"], (
+                "Seen in the desktop app on Claude Code 2.1.326, in two sessions in plan mode",
+                "under its own worktree", "copied when the worktree is made", "was not told apart",
+                "a <code>.claude/p4</code> of its own", "both worktrees still stand")),
         }
         for what, (where, words) in seen.items():
             for said in words:
                 self.assertIn(said, where, f"{what}: {said}")
         unseen = {
-            "how the app draws the message": (open_still, (
-                "Still not seen live: how the app draws the message", "A scripted run draws nothing")),
-            "whether the cleanup reaches a plansDirectory": (open_still, (
-                "It is still not seen", "showed no cleanup to watch",
-                "dated sixty days back", "whether the folder is trusted")),
-            "the plan chain in the desktop app and off Windows": (found["plans"], (
-                "Still not seen: the chain in the desktop app", "anywhere but on Windows",
+            "a first session of the desktop app and a worktree off Windows": (found["plans"], (
+                "Still not seen: a first session of the desktop app", "anywhere but on Windows",
                 "a machine that is not this one")),
         }
         for what, (where, words) in unseen.items():
