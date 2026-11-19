@@ -1152,6 +1152,93 @@ def leftover_acts(home, s, d, hand):
     return out
 
 
+# --- the sweep of a session tree, by Claude Code's own /loop ----------------------------------------------------------
+# An orchestrator keeps the sessions it started by a sweep that runs again and again while any of them is live. The
+# sweep is Claude Code's own `/loop`, and p4-phi builds no schedule of its own. scheduled-tasks.md, "Run a prompt
+# repeatedly with /loop": with a prompt and no interval "Your prompt runs at an interval Claude chooses each
+# iteration", and "Let Claude choose the interval": "After each iteration it picks a delay between one minute and one
+# hour based on what it observed". "Stop a loop": "Claude calls the `ScheduleWakeup` tool with `stop: true`, which
+# cancels the pending wakeup immediately. If an iteration ends without either rescheduling or stopping, Claude Code
+# schedules one fallback wakeup about 20 minutes later and ends the loop when that iteration doesn't reschedule
+# either." The tool's own text asks for "a long fallback (1200s+)" where something else is the main wake-up, and here
+# that is the app's note of a started session's turn end. So the loop is the fallback: for a session that stalls
+# without ending a turn, and for a worker in the Terminal panel, of which the app sends no note.
+# The sweep's words are SWEEP, kept here and nowhere else, so no orchestrator writes them by hand. p4-phi hands one
+# line, once, to start the loop where a session has a live worker and no loop of its own, and one line, once, to end
+# it where a loop runs and nothing of the tree is live. Whether a loop runs is read off the session's own calls at
+# each turn's end, keep_loop: a call of the skill `loop` or of `ScheduleWakeup` with a delay starts or renews it,
+# until that delay and the fallback wakeup have passed, and `ScheduleWakeup` with `stop` ends it.
+LOOP_SKILL = "loop"
+WAKEUP = "ScheduleWakeup"
+FALLBACK_S = 1500                # the fallback wakeup Claude Code schedules, "about 20 minutes later", with room
+SWEEP = ("Sweep the sessions this one started, as p4-phi's upkeep has it. Read each live session with "
+         "`mcp__ccd_session_mgmt__list_sessions` and `linked` true, and each worker in the Terminal panel with `"
+         + "mcp__terminal__list_terminal_tabs" + "`. Send on one that stopped with work left, by SendMessage to its "
+         "id. Verify one that reports done, on its repository's default branch and on the run of its workflow, "
+         "before it counts as done. Do each act p4-phi hands beside this prompt. The app's note of a started "
+         "session's turn end is the main wake-up, so wait long between sweeps, 1200 seconds or more. End the loop "
+         "with `ScheduleWakeup` and `stop` true once no session and no terminal worker is live.")
+
+
+def keep_loop(s, calls, at=None):
+    """Keeps on a session whether a loop of its own runs, from the calls of the turn that just ended: `loop` with
+    `until`, the time by which its next wakeup and Claude Code's fallback have passed. The last call that says so
+    decides, and a turn with none leaves what is kept. Returns True when it changed."""
+    at = time.time() if at is None else at
+    before = repr(s.get("loop"))
+    for c in calls or []:
+        name, inp = c.get("name"), c.get("input") if isinstance(c.get("input"), dict) else {}
+        if name == "Skill" and str(inp.get("skill") or "").lstrip("/") == LOOP_SKILL:
+            s["loop"] = {"until": at + 3600 + FALLBACK_S}
+        elif name == WAKEUP and inp.get("stop") is True:
+            s.pop("loop", None)
+        elif name == WAKEUP:
+            try:
+                wait = min(3600.0, max(60.0, float(inp.get("delaySeconds") or 0)))
+            except (TypeError, ValueError):
+                wait = 3600.0
+            s["loop"] = {"until": at + wait + FALLBACK_S}
+    return repr(s.get("loop")) != before
+
+
+def loop_runs(s, at=None):
+    """True while a loop of the session's own is kept as running, by keep_loop."""
+    kept = s.get("loop") if isinstance(s, dict) else None
+    until = kept.get("until") if isinstance(kept, dict) else None
+    return isinstance(until, (int, float)) and until > (time.time() if at is None else at)
+
+
+def loop_acts(home, s, d, hand):
+    """The line that starts the sweep's loop, handed once where the session has a live worker and no loop of its
+    own, and the line that ends it, handed once where a loop runs and nothing of the tree is live. A worker is live
+    while it is a started session that is not finished, or a worker in the Terminal panel not yet removed."""
+    sid = s["sessionId"]
+    live = [k for k, ks in started(home, sid).items() if not finished(home, k, ks)]
+    tabs = [t for t in d["terminals"] if not t.get("removed")]
+    runs = loop_runs(s)
+    out = []
+    if runs:
+        d.pop("loopTold", None)                    # a loop that ends while a worker is live is asked for anew
+    else:
+        d.pop("loopEndTold", None)
+    if (live or tabs) and not runs and not d.get("loopTold"):
+        if hand:
+            d["loopTold"] = now()
+        n = len(live) + len(tabs)
+        out.append((f"loop:{sid}", "loop", False,
+                    f"loop: this session has {n} live worker{'s' * (n != 1)} and no loop of its own running. Start "
+                    f"Claude Code's own `/loop` once, with no interval, so that each sweep picks its own wait: call "
+                    f"the Skill tool with `skill` `{LOOP_SKILL}` and, as `args`, these words as they stand: "
+                    f"\"{SWEEP}\""))
+    if not live and not tabs and runs and not d.get("loopEndTold"):
+        if hand:
+            d["loopEndTold"] = now()
+        out.append((f"loop-end:{sid}", "loop", False,
+                    f"end the loop: no session this one started and no terminal worker is live, and its `/loop` "
+                    f"still runs. Call `{WAKEUP}` with `stop` true."))
+    return out
+
+
 def acts(home, s, by="user", store="", hand=False, d=None):
     """Every act due for the sessions `s` started, each as (key, kind, whether it is worth a turn, its line). With
     `hand`, what is handed is marked in `d`, which the caller saves."""
@@ -1162,7 +1249,7 @@ def acts(home, s, by="user", store="", hand=False, d=None):
     out = []
     for part in (lambda: archive_acts(home, s, d, hand), lambda: item_acts(home, s, d, by, store, hand),
                  lambda: wait_acts(home, s, d, by, store, hand), lambda: leftover_acts(home, s, d, hand),
-                 lambda: terminal_acts(home, s, d, hand)):
+                 lambda: terminal_acts(home, s, d, hand), lambda: loop_acts(home, s, d, hand)):
         try:
             out += part()
         except Exception:  # noqa: BLE001  one act that cannot be read never costs a message the others

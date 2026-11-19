@@ -2667,6 +2667,8 @@ def h_stop(payload):
     done = s.get("done") if isinstance(s.get("done"), dict) else None
     if done and clean(done.get("text")):
         row["done"] = clean(done["text"])[:400]
+    if upkeep.keep_loop(s, turn.get("calls")):     # a loop of its own, begun, renewed or ended in this turn
+        RAN["loop"] = upkeep.loop_runs(s)
     if s.get("toldBy"):
         row["by"] = s["toldBy"]                    # whose words began the turn, where the prompt's origin said
         if s.get("toldFrom"):

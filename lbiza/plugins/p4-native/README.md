@@ -136,8 +136,8 @@ A key that ends in `__` stands for every tool of that server, and one that ends 
 
 What the record comes to, by kind, as `/native weighed` prints it.
 
-- `command`: 131 rows, 19 used, 0 open, 112 declined, 0 weighed by nobody
-- `tool`: 122 rows, 46 used, 1 open, 75 declined, 0 weighed by nobody
+- `command`: 131 rows, 20 used, 0 open, 111 declined, 0 weighed by nobody
+- `tool`: 122 rows, 47 used, 1 open, 74 declined, 0 weighed by nobody
 - `hook`: 33 rows, 13 used, 2 open, 18 declined, 0 weighed by nobody
 - `event`: 51 rows, 15 used, 2 open, 34 declined, 0 weighed by nobody
 - `method`: 93 rows, 32 used, 2 open, 59 declined, 0 weighed by nobody

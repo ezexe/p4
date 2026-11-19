@@ -1199,8 +1199,10 @@
   },
   "/loop": {
    "kind": "command",
+   "used": [
+    "p4-phi"
+   ],
    "declined": {
-    "p4-phi": "the watcher runs on the module's timer and starts no turn.",
     "p4-temportal": "the sweep runs on the module's timer and starts no turn."
    }
   },
@@ -1749,7 +1751,7 @@
   "CronCreate": {
    "kind": "tool",
    "declined": {
-    "p4-phi": "prompts on a schedule inside one session, and the watcher is the module's timer.",
+    "p4-phi": "an orchestrator's sweep runs by `/loop` with no interval, which paces itself by `ScheduleWakeup`, so p4-phi asks for no job on a fixed schedule, and the watcher is the module's timer.",
     "p4-temportal": "each fires a prompt in a session, and the sweep is no turn."
    }
   },
@@ -2086,8 +2088,10 @@
   },
   "ScheduleWakeup": {
    "kind": "tool",
+   "used": [
+    "p4-phi"
+   ],
    "declined": {
-    "p4-phi": "part of `/loop`.",
     "p4-temportal": "each fires a prompt in a session, and the sweep is no turn."
    }
   },

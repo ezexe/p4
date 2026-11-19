@@ -20,6 +20,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -269,6 +270,72 @@ class Archive(Base):
         seen = [len(self.lines(self.said(), "archive:")) for _ in range(4)]
         self.assertEqual(seen, [1, 1, 1, 0])
         self.assertIn(f"archive:{KID}", self.t.cli(TOP, "upkeep").stdout)
+
+
+class Loop(Base):
+    """The orchestrator's sweep of its sessions runs by Claude Code's own `/loop` with no interval, which p4-phi
+    asks for once and ends once, in words it keeps in one place."""
+
+    def test_the_line_that_starts_the_sweeps_loop_is_handed_once_while_a_worker_is_live(self):
+        """An orchestrator kept its sessions by a `CronCreate` job it wrote by hand, prompt and all. scheduled-tasks.md,
+        "Run a prompt repeatedly with /loop": a prompt with no interval "runs at an interval Claude chooses each
+        iteration". With a live worker and no loop of its own, the session is handed the line once: the Skill tool
+        with the skill `loop` and the sweep's words, upkeep.SWEEP."""
+        self.turn_on()
+        got = self.said()
+        line = self.lines(got, "loop:")
+        self.assertEqual(len(line), 1, got)
+        self.assertIn("1 live worker and no loop of its own running", line[0])
+        self.assertIn("the Skill tool with `skill` `loop`", line[0])
+        self.assertIn("with no interval", line[0])
+        self.assertIn(upkeep.SWEEP, line[0], "the sweep's words come from one place")
+        for words in ("`mcp__ccd_session_mgmt__list_sessions`", "`mcp__terminal__list_terminal_tabs`",
+                      "Send on one that stopped with work left", "Verify one that reports done",
+                      "1200 seconds or more", "`ScheduleWakeup` and `stop` true"):
+            self.assertIn(words, upkeep.SWEEP)
+        self.assertEqual(self.lines(self.said(), "loop:"), [], "handed once")
+        self.assertEqual(self.lines(self.said(), "end the loop:"), [], "and no loop runs to end")
+
+    def test_it_is_not_handed_while_a_loop_runs_and_is_handed_anew_once_that_loop_is_over(self):
+        """Whether a loop runs is read off the session's own calls at each turn's end: the skill `loop` and a
+        `ScheduleWakeup` with a delay start or renew it, until the delay and Claude Code's fallback wakeup of about
+        twenty minutes have passed."""
+        self.turn_on()
+        calls = [("Skill", {"skill": "loop", "args": upkeep.SWEEP}, "ok"),
+                 ("ScheduleWakeup", {"delaySeconds": 1200, "prompt": upkeep.SWEEP, "reason": "the fallback"}, "ok")]
+        self.t.stop(TOP, TASK, calls, report="The sweep's loop is started.", uuid="l1")
+        kept = self.t.session(TOP).get("loop") or {}
+        self.assertAlmostEqual(kept.get("until", 0) - time.time(), 1200 + upkeep.FALLBACK_S, delta=60)
+        self.assertTrue(upkeep.loop_runs(self.t.session(TOP)))
+        self.assertEqual(self.lines(self.said(), "loop:"), [], "a loop of its own runs")
+        self.assertFalse(upkeep.loop_runs(self.t.session(TOP), at=time.time() + 1200 + upkeep.FALLBACK_S + 5))
+        s = self.t.session(TOP)
+        s["loop"] = {"until": time.time() - 5}             # the wakeup and the fallback both passed unanswered
+        write(os.path.join(self.t.dir(TOP), "session.json"), json.dumps(s))
+        self.assertEqual(len(self.lines(self.said(), "loop:")), 1, "its loop is over and a worker is live: once more")
+        self.assertEqual(self.lines(self.said(), "loop:"), [])
+
+    def test_the_stop_is_handed_once_when_nothing_of_the_tree_is_live(self):
+        """scheduled-tasks.md, "Stop a loop": "Claude calls the `ScheduleWakeup` tool with `stop: true`, which cancels
+        the pending wakeup immediately." With a loop running and no started session live, the session is handed that
+        call once, and a turn that made it leaves no loop kept."""
+        self.turn_on()
+        self.t.stop(TOP, TASK, [("ScheduleWakeup", {"delaySeconds": 1800, "prompt": upkeep.SWEEP}, "ok")],
+                    report="Waiting on the worker.", uuid="l1")
+        self.commit()
+        self.finish(report="The last row is written now.")
+        got = self.said()                                   # a finished worker is no live one, archived or not
+        end = self.lines(got, "end the loop:")
+        self.assertEqual(len(end), 1, got)
+        self.assertIn("Call `ScheduleWakeup` with `stop` true", end[0])
+        self.assertEqual(self.lines(got, "loop:"), [])
+        self.assertEqual(self.lines(self.said(), "end the loop:"), [], "handed once")
+        self.t.stop(TOP, TASK, [("ScheduleWakeup", {"stop": True}, "ok")], report="The loop is ended.", uuid="l2")
+        self.assertNotIn("loop", self.t.session(TOP))
+        self.assertFalse(upkeep.loop_runs(self.t.session(TOP)))
+
+    def test_with_upkeep_off_no_line_of_the_loop_is_handed(self):
+        self.assertEqual(self.lines(self.said(), "loop:"), [])
 
 
 class FollowThrough(Base):
