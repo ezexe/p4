@@ -534,6 +534,56 @@ def keep_plans(root, made, edited=()):
             f"folder into {p4conf.PLANS}/, where plansDirectory keeps this project's plans from the next session on."]
 
 
+CARRIED = (PLANS, NOTEBOOK, "src")      # what a worktree's store keeps for the project: plans, notebook, saved code
+OUT = ".out"                            # the notebook's own folder of logs and build output, which is not carried
+
+
+def carry_over(root):
+    """Copy what a session in a git worktree kept for the project into the main checkout's store -> the lines saying
+    so. A worktree session's store is `<worktree>/.claude/p4`, since the start hooks take the store from the
+    session's root, and a new worktree holds the main checkout's settings file, whose `plansDirectory` is a path
+    from the project root. So its plans, its notebook and its saved code lie in the worktree and go when the
+    worktree is removed. settings-reference.md, `plansDirectory`: Claude Code stores plans in `~/.claude/plans`
+    instead where "the path resolves outside the project root", so the key cannot name the main checkout's folder
+    from a worktree, and the files are carried instead.
+
+    Every sweep carries, the one at a session's start, the timer's and the last one, so a session that is killed has
+    lost at most what it wrote since the sweep before. A file is copied where the main checkout's store holds none
+    of its name or an older one, and nothing is ever removed on either side. Links, the notebook's `.out` and a
+    folder's own git are left where they are. Nothing is carried where the main checkout has no store."""
+    main, in_git = p4conf.main_root(root)
+    if not in_git or os.path.normcase(os.path.realpath(main)) == os.path.normcase(os.path.realpath(root)):
+        return []
+    here, there = os.path.join(store_of(root), "temportal"), os.path.join(store_of(main), "temportal")
+    if not os.path.isdir(store_of(main)) or p4conf.is_link(here) or not os.path.isdir(here):
+        return []
+    carried = 0
+    for name in CARRIED:
+        top = os.path.join(here, name)
+        if p4conf.is_link(top) or not os.path.isdir(top):
+            continue
+        for folder, dirs, files in os.walk(top):
+            dirs[:] = [d for d in dirs if d not in (OUT, ".git") and not p4conf.is_link(os.path.join(folder, d))]
+            for file in files:
+                path = os.path.join(folder, file)
+                kept = os.path.join(there, os.path.relpath(path, here))
+                try:
+                    if p4conf.is_link(path) or not os.path.isfile(path) or p4conf.is_link(kept):
+                        continue
+                    if os.path.lexists(kept) and (not os.path.isfile(kept)
+                                                  or os.path.getmtime(path) <= os.path.getmtime(kept)):
+                        continue                        # the main checkout's file is no older: it stays as it is
+                    os.makedirs(os.path.dirname(kept), exist_ok=True)
+                    shutil.copy2(path, kept)
+                except OSError:
+                    continue                            # this file stays in the worktree, and the sweep goes on
+                carried += 1
+    if not carried:
+        return []
+    return [f"carried {carried} file{'s' if carried > 1 else ''} of this worktree's plans, notebook and saved code "
+            "into the main checkout's store, where they stay when the worktree is removed."]
+
+
 def tick(root, to_let_go=False, made=(), edited=()):
     """The module's sweep for the project at `root` -> what it prints as one JSON line. With `to_let_go` the sweep
     runs in a process let go of, and here only when none could be started. `made` and `edited` are the plan files
@@ -546,6 +596,7 @@ def tick(root, to_let_go=False, made=(), edited=()):
     p4 = store_of(root)
     try:
         said = keep_plans(root, made, edited)
+        said += carry_over(root)
         said += [line[len(NAME):] if line.startswith(NAME) else line for line in start_sweep(p4)]
         return {"said": said, "wait_s": round(next_wait(p4), 3), "compact_at": compact_at(p4)}
     except Exception as e:  # noqa: BLE001 — a sweep degrades, never raises

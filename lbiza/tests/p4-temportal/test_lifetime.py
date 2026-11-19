@@ -273,6 +273,79 @@ class Tick(unittest.TestCase):
         self.assertEqual((answer["said"], os.path.exists(due)), (["cleared expired files: 1, notebook/due.md."], False))
 
 
+def git(root, *args):
+    """Run git in `root` as a person with a name, and fail the test on an error."""
+    who = ["-c", "user.name=p4", "-c", "user.email=p4@example.invalid", "-c", "commit.gpgsign=false"]
+    subprocess.run(["git", "-C", root, *who, *args], check=True, capture_output=True)
+
+
+class CarriedOver(unittest.TestCase):
+    """What a session in a git worktree keeps for the project lies in the worktree's own store, since the store is
+    taken from the session's root and `plansDirectory` is a path from the project root. Each sweep copies its plans,
+    its notebook and its saved code into the main checkout's store, so they are there when the worktree is gone."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="p4-temportal-carry-")
+        self.addCleanup(wipe, self.base)
+        self.main = os.path.join(self.base, "proj")
+        os.makedirs(os.path.join(self.main, ".claude", "p4", "temportal"))
+        put(os.path.join(self.main, ".gitignore"), ".claude/\n")
+        git(self.main, "init", "-q")
+        git(self.main, "add", ".gitignore")
+        git(self.main, "commit", "-q", "-m", "start")
+        self.tree = os.path.join(self.base, "tree")
+        git(self.main, "worktree", "add", "-q", self.tree, "-b", "work")
+        self.here = os.path.join(self.tree, ".claude", "p4", "temportal")
+        self.there = os.path.join(self.main, ".claude", "p4", "temportal")
+
+    def test_a_plan_of_a_session_in_a_worktree_is_in_the_main_checkouts_store_once_the_worktree_is_removed(self):
+        plan = put(os.path.join(self.here, "plans", "quick-plan-brave-otter.md"), "# the plan\n")
+        said = lifetime.tick(self.tree, made=[plan])["said"]
+        self.assertEqual(read(plan), "# the plan\n", "the worktree's own file stays for the session that wrote it")
+        git(self.main, "worktree", "remove", "--force", self.tree)
+        self.assertFalse(os.path.exists(self.tree))
+        self.assertEqual(read(os.path.join(self.there, "plans", "quick-plan-brave-otter.md")), "# the plan\n")
+        self.assertEqual([line for line in said if "carried" in line],
+                         ["carried 1 file of this worktree's plans, notebook and saved code into the main "
+                          "checkout's store, where they stay when the worktree is removed."])
+
+    def test_the_notebook_and_saved_code_are_carried_and_the_notebooks_out_folder_is_not(self):
+        put(os.path.join(self.here, "notebook", "finding.md"), "a finding\n")
+        put(os.path.join(self.here, "notebook", "deep", "page.html"), "<p>a page</p>\n")
+        put(os.path.join(self.here, "notebook", ".out", "run.log"), "noise\n")
+        put(os.path.join(self.here, "src", "tool.py"), "print(1)\n")
+        put(os.path.join(self.here, "expires.json"), "{}")
+        said = lifetime.carry_over(self.tree)
+        self.assertEqual(read(os.path.join(self.there, "notebook", "finding.md")), "a finding\n")
+        self.assertEqual(read(os.path.join(self.there, "notebook", "deep", "page.html")), "<p>a page</p>\n")
+        self.assertEqual(read(os.path.join(self.there, "src", "tool.py")), "print(1)\n")
+        self.assertFalse(os.path.exists(os.path.join(self.there, "notebook", ".out")))
+        self.assertFalse(os.path.exists(os.path.join(self.there, "expires.json")), "a cookie is the worktree's own")
+        self.assertIn("carried 3 files", said[0])
+
+    def test_a_newer_file_of_the_main_checkout_stays_and_an_older_one_takes_the_worktrees(self):
+        put(os.path.join(self.here, "notebook", "kept.md"), "the worktree's, older\n", age_days=2)
+        put(os.path.join(self.there, "notebook", "kept.md"), "the main checkout's, newer\n")
+        put(os.path.join(self.here, "notebook", "edited.md"), "the worktree's, newer\n")
+        put(os.path.join(self.there, "notebook", "edited.md"), "the main checkout's, older\n", age_days=2)
+        said = lifetime.carry_over(self.tree)
+        self.assertEqual(read(os.path.join(self.there, "notebook", "kept.md")), "the main checkout's, newer\n")
+        self.assertEqual(read(os.path.join(self.there, "notebook", "edited.md")), "the worktree's, newer\n")
+        self.assertIn("carried 1 file ", said[0])
+        self.assertEqual(lifetime.carry_over(self.tree), [], "a second sweep finds nothing newer to carry")
+
+    def test_nothing_is_carried_in_the_main_checkout_or_where_it_has_no_store(self):
+        put(os.path.join(self.there, "notebook", "own.md"), "its own\n")
+        self.assertEqual(lifetime.carry_over(self.main), [], "the main checkout carries nothing into itself")
+        put(os.path.join(self.here, "notebook", "finding.md"), "a finding\n")
+        shutil.rmtree(os.path.join(self.main, ".claude", "p4"))
+        self.assertEqual(lifetime.carry_over(self.tree), [], "a project with no store gets none made for it")
+        self.assertFalse(os.path.exists(os.path.join(self.main, ".claude", "p4")))
+        outside = os.path.join(self.base, "plain")
+        put(os.path.join(outside, ".claude", "p4", "temportal", "notebook", "a.md"), "a\n")
+        self.assertEqual(lifetime.carry_over(outside), [], "a folder outside a repository has no main checkout")
+
+
 class KeptPlans(unittest.TestCase):
     """`plansDirectory` holds from the session after the one whose start wrote it, so that session's plan file is in
     Claude Code's own plans folder. The last sweep copies it into the store and leaves the original, since a session

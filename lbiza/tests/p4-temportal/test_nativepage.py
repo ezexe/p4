@@ -167,7 +167,10 @@ class Page(unittest.TestCase):
             "the plan chain in the desktop app": (found["plans"], (
                 "Seen in the desktop app on Claude Code 2.1.326, in two sessions in plan mode",
                 "under its own worktree", "copied when the worktree is made", "was not told apart",
-                "a <code>.claude/p4</code> of its own", "both worktrees still stand")),
+                "a <code>.claude/p4</code> of its own",
+                "copies its plans, its notebook and its saved code into the main checkout's store",
+                "the path resolves outside the project root", "still there after the worktree was removed",
+                "Not seen in the desktop app")),
         }
         for what, (where, words) in seen.items():
             for said in words:
