@@ -1850,7 +1850,7 @@
   "GetGoal": {
    "kind": "tool",
    "declined": {
-    "p4-phi": "no session of this host has the tool, and p4-phi keeps the goal it set by `/goal` itself.",
+    "p4-phi": "no session has the tool, in the desktop app, in a terminal session at its prompt or in a scripted run, where a module's `$.tool.call` of it is rejected with \"no tool named\", and p4-phi keeps the goal it set by `/goal` itself.",
     "p4-temportal": "it sets and reads no goal.",
     "p4-native": "it sets and reads no goal."
    }
@@ -1958,7 +1958,7 @@
   "PauseGoal": {
    "kind": "tool",
    "declined": {
-    "p4-phi": "no session of this host has the tool, and a blocked worker asks its starter by SendMessage.",
+    "p4-phi": "no session has the tool, in the desktop app, in a terminal session at its prompt or in a scripted run, where a module's `$.tool.call` of it is rejected with \"no tool named\", and a blocked worker asks its starter by SendMessage.",
     "p4-temportal": "it sets and reads no goal.",
     "p4-native": "it sets and reads no goal."
    }
@@ -2151,7 +2151,7 @@
     "p4-phi"
    ],
    "would": {
-    "p4-phi": "replace the `/goal` its hooks module runs through `$.command.run` with a call of the tool, once a session of this host has it, which the probe `set-goal-tool` watches."
+    "p4-phi": "replace the `/goal` its hooks module runs through `$.command.run` with a call of the tool, once a session has it, which the probe `set-goal-tool` watches: none has it in the desktop app, in a terminal session at its prompt or in a scripted run."
    },
    "declined": {
     "p4-temportal": "it sets and reads no goal.",

@@ -105,6 +105,20 @@ class RecordTest(unittest.TestCase):
         hooks module or its scripts: one is a legacy name and the other a previous name of `TaskStop`."""
         self.assertEqual(ROWS["SetGoal"]["open"], ["p4-phi"])
         self.assertIn("`set-goal-tool`", ROWS["SetGoal"]["would"]["p4-phi"])
+        # each of the three was tried through a module and looked for in a tool list on every kind of host
+        hosts = "in the desktop app, in a terminal session at its prompt or in a scripted run"
+        self.assertIn(hosts, ROWS["SetGoal"]["would"]["p4-phi"])
+        for key in ("GetGoal", "PauseGoal"):
+            self.assertIn(hosts, ROWS[key]["declined"]["p4-phi"], key)
+            self.assertIn('rejected with "no tool named"', ROWS[key]["declined"]["p4-phi"], key)
+        probes = (PLUGIN / "hooks" / "probes.ts").read_text(encoding="utf-8")
+        fault = probes.split("id: 'set-goal-tool'", 1)[1].split("was:", 1)[0]
+        for word in ("`SetGoal`", "`GetGoal`", "`PauseGoal`", "a terminal session at its prompt", "2.1.328"):
+            self.assertIn(word, fault, word)
+        goal = README.split("`SetGoal`, `GetGoal` and `PauseGoal` are in the build's types file", 1)[1].split("\n\n", 1)[0]
+        for word in ("Terminal panel", "`--plugin-dir`", "Not tested: `GetGoal` and `PauseGoal` through `$.tool.call` "
+                     "in the desktop app"):
+            self.assertIn(word, goal, word)
         for key in ("GetGoal", "PauseGoal", "TaskCreate", "TaskList", "TaskUpdate", "TodoWrite"):
             self.assertEqual(verdict(ROWS[key]), "declined", key)
             self.assertEqual(sorted(ROWS[key]["declined"]), PLUGIN_NAMES, key)

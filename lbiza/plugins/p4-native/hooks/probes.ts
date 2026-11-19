@@ -148,8 +148,9 @@ export const PROBES: readonly Probe[] = [
     decision:
       "p4-phi sets a worker's goal by running `/goal` with `$.command.run`, since a session has no `SetGoal` tool.",
     fault:
-      'A module\'s `$.tool.call` of `SetGoal` was rejected with "no tool named", in the desktop app on Claude ' +
-      'Code 2.1.326 and in a scripted run on 2.1.328.',
+      'A module\'s `$.tool.call` of `SetGoal`, of `GetGoal` and of `PauseGoal` was rejected with "no tool ' +
+      'named", in a scripted run and in a terminal session at its prompt on Claude Code 2.1.328, and of ' +
+      '`SetGoal` in the desktop app on 2.1.326.',
     was: 'blocked',
     fits: anywhere,
     kind: 'asked',
