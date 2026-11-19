@@ -596,6 +596,32 @@ class Lifetime(unittest.TestCase):
         self.assertEqual((r.returncode, lifetime.read_expires(self.p4)), (2, {}))
         self.assertIn("is not under", r.stderr)
 
+    def test_plan_files_come_under_lifetimes_and_the_plans_folder_is_never_cleared_whole(self):
+        """temportal/plans/ is where plansDirectory points Claude Code. A plan file takes a cookie and is cleared when
+        it is due, a cache rule on `plans` clears the plans past its age, a plan with neither stays however old, and
+        the folder itself takes no cookie, as the notebook and src/ take none."""
+        old = put(os.path.join(self.t, "plans", "old-plan.md"), age_days=400)
+        due = put(os.path.join(self.t, "plans", "due-plan.md"))
+        kept = put(os.path.join(self.t, "plans", "kept-plan.md"))
+        s = run("--p4", self.p4, "set", "plans/due-plan.md", "7d", cwd=self.root)
+        self.assertEqual((s.returncode, s.stderr, sorted(lifetime.read_expires(self.p4))), (0, "", ["plans/due-plan.md"]))
+        whole = run("--p4", self.p4, "set", "plans", "7d", cwd=self.root)
+        self.assertEqual((whole.returncode, whole.stdout), (2, ""))
+        self.assertIn("plans takes no cookie: notebook/, src/, plans/ and expires.json are never cleared whole",
+                      whole.stderr)
+        self.assertEqual(lifetime.sweep(self.p4), "", "a plan with no lifetime stays, however old")
+        self.assertEqual([os.path.exists(p) for p in (old, due, kept)], [True, True, True])
+        self.assertEqual(lifetime.sweep(self.p4, now=time.time() + 8 * DAY),
+                         "p4-temportal: cleared expired files: 1, plans/due-plan.md.")
+        self.assertEqual([os.path.exists(p) for p in (old, due, kept)], [True, False, True])
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as fh:
+            json.dump({"temportal": {"cache": {"plans": {"max_age_days": 90}}}}, fh)
+        swept = lifetime.sweep(self.p4)
+        self.assertIn("plans", swept)
+        self.assertEqual([os.path.exists(p) for p in (old, kept)], [False, True])
+        self.assertTrue(os.path.isdir(os.path.join(self.t, "plans")))
+        self.assertEqual(os.path.join(self.p4, *p4conf.PLANS.split("/")), os.path.join(self.t, lifetime.PLANS))
+
     def test_no_cookie_on_tmp_or_on_the_folders_and_file_of_temportal_itself(self):
         """A cookie on tmp/ or anything in it, or on the notebook, src/ or expires.json themselves, is refused, since
         tmp/ holds only what an earlier version kept for each session's scratchpad and those are never cleared whole."""

@@ -19,9 +19,9 @@ as git names it. `migrate_layout(p4)` moves files from an earlier place of the l
 Every plugin calls it at its start, so whichever plugin runs first moves them.
 
 It also keeps the Claude Code settings p4 relies on, ezexe/p4#246: `keep_settings(project)` writes
-`autoMemoryDirectory`, `attribution.commit` when the store gives a text, and the `P4_*` variables that mirror the
-settings p4.json changes under `env` into the project's `.claude/settings.local.json`, merged with what is there,
-and records what it owns in the store's RECORD.
+`autoMemoryDirectory`, `plansDirectory`, `attribution.commit` when the store gives a text, and the `P4_*` variables
+that mirror the settings p4.json changes under `env` into the project's `.claude/settings.local.json`, merged with
+what is there, and records what it owns in the store's RECORD.
 """
 
 import copy
@@ -784,8 +784,10 @@ def _write(p4, data):
 # one's and never rewrite the file in turn. A value that differs from its entry was set by hand and is never moved.
 WRITTEN = "_written"
 # The generation of DEFAULTS: raised by one whenever a default changes, with the value it had added to HISTORY, so a
-# store's written values follow the change. test_p4conf.py pins DEFAULTS to this number.
-GEN = 10
+# store's written values follow the change. test_p4conf.py pins DEFAULTS to this number. It is raised too when the
+# settings keeper gains a key, as at 11 for plansDirectory: an installed copy of a lower GEN then leaves the key to
+# the copy that wrote it, where it would otherwise remove it at each of its starts.
+GEN = 11
 # Past defaults by dotted path: a store from before the record whose value equals one of these, or today's default,
 # counts that value as written by load, so it follows today's default.
 HISTORY = {"recall.teacher.model": ["claude-fable-5-1"], "recall.lookups.web": ["answer"], "scratchpad.tmp": [True],
@@ -1227,8 +1229,13 @@ def _equal(a, b):
 # --- Claude Code's own settings, ezexe/p4#246 ---------------------------------------------------------------------
 # p4 keeps the Claude Code settings it relies on in the project's `.claude/settings.local.json`, merged with what is
 # there. What a store wants is the `claude` section of p4.json, read when set and never written by default:
-# `autoMemoryDirectory` names the store's temportal/memory unless the section sets it false, and `attribution.commit`
-# is written only when the section gives a text. Any other key the section names is never written: it is named with
+# `autoMemoryDirectory` names the store's temportal/memory unless the section sets it false, `plansDirectory` names
+# the store's temportal/plans unless the section sets it false, and `attribution.commit` is written only when the
+# section gives a text. settings-reference.md gives `plansDirectory` as "a path relative to the project root", so
+# it is written as one, and never where the store lies outside the project, as in a worktree whose store is the
+# main checkout's: a path that resolves outside the project root falls back to `~/.claude/plans`, by the same page.
+# It is not written either where a user, project or managed settings file already names a folder for plans, whose
+# choice a local value would override. Any other key the section names is never written: it is named with
 # its value for ezexe, and a key of SECURITY is said to be ezexe's to decide. RECORD, in the store and kept out of its
 # git by the seeded .gitignore, holds what p4 wrote into which file with the GEN of the copy that wrote it: a key still
 # equal to its entry is p4's and may change at a higher GEN or go, a key that differs was set by hand and leaves the
@@ -1238,14 +1245,15 @@ SECTION = "claude"
 RECORD = "claude-settings.json"
 SETTINGS_LOCK = ".settings.lock"
 LOCAL = "settings.local.json"
-WRITES = ("autoMemoryDirectory", "attribution.commit")
+WRITES = ("autoMemoryDirectory", "plansDirectory", "attribution.commit")
+PLANS = "temportal/plans"        # the store's folder of plan files, from the store's root
 # disableAllHooks and disableSkillShellExecution are never written: they are defaults, writing them changes nothing,
 # and a local false would override a true ezexe later sets in user or project settings. A key an earlier copy wrote
 # and this one no longer owns is removed while it still holds the value written.
 ENV_KEY = "env"                  # where the P4_* variables go: each one p4 owns is the dotted key env.<name>
 # Raised by one whenever the keys this copy writes change, so a store's next start runs the whole check: the record
 # holds the KEEPER of the copy that last ran it.
-KEEPER = 6
+KEEPER = 7
 PAST_MAX = 5                     # texts kept per variable of those p4 wrote and later replaced or removed
 # The class of keys ezexe decides, by #246: every key of the topics "Permission settings", "Sandbox settings",
 # "Authentication and providers" and "Enterprise and managed settings" of settings-reference.md, the table
@@ -1478,7 +1486,22 @@ def _del(d, dotted):
 def _same_value(key, a, b):
     if key == "autoMemoryDirectory" and isinstance(a, str) and isinstance(b, str):
         return _norm(os.path.expanduser(a)) == _norm(os.path.expanduser(b))
+    if key == "plansDirectory" and isinstance(a, str) and isinstance(b, str):
+        return os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
     return a == b
+
+
+def plans_dir(p4, target):
+    """The store's folder of plan files as `plansDirectory` takes it in the settings file `target`: a path relative
+    to the project root, with forward slashes. None where the folder resolves outside that root, as for a worktree
+    whose store is the main checkout's or a store that is a link to another place."""
+    root = os.path.realpath(os.path.dirname(os.path.dirname(os.path.abspath(target))))
+    plans = os.path.realpath(os.path.join(p4, *PLANS.split("/")))
+    try:
+        rel = os.path.relpath(plans, root)
+    except ValueError:                                  # another drive
+        return None
+    return None if rel.split(os.sep)[0] == os.pardir or os.path.isabs(rel) else rel.replace(os.sep, "/")
 
 
 def _config_dir():
@@ -1510,6 +1533,9 @@ def wants(p4, target, platform=None):
     other = [(f, v) for f, v in _elsewhere("autoMemoryDirectory", target, platform)
              if not _same_value("autoMemoryDirectory", v, mem)]
     out["autoMemoryDirectory"] = mem if conf.get("autoMemoryDirectory", True) is not False and not other else None
+    plans = plans_dir(p4, target)
+    held = conf.get("plansDirectory", True) is False or _elsewhere("plansDirectory", target, platform)
+    out["plansDirectory"] = plans if plans and not held else None
     text = conf.get("attribution.commit")
     out["attribution.commit"] = text if isinstance(text, str) else None
     for name, text in (env_entries(p4, target, platform) or {}).items():
@@ -1931,7 +1957,7 @@ WATCH_PENDING = ("phi", "claude-code-watch.pending.json")
 CONFIG_SOURCES = ("local_settings", "project_settings", "user_settings")
 # The documented defaults p4 relies on, each with the issue to act on when the changelog names it.
 WATCHED = {
-    "autoMemoryDirectory": "ezexe/p4#246", "autoMemoryEnabled": "ezexe/p4#246",
+    "autoMemoryDirectory": "ezexe/p4#246", "autoMemoryEnabled": "ezexe/p4#246", "plansDirectory": "ezexe/p4#246",
     "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "ezexe/p4#246", "MEMORY.md": "ezexe/p4#92",
     "blockReadsOutsideWorkingDirectories": "ezexe/p4#246", "blockWritesOutsideWorkingDirectories": "ezexe/p4#246",
     "additionalDirectories": "ezexe/p4#246", "settings.local.json": "ezexe/p4#246", "attribution": "ezexe/p4#246",

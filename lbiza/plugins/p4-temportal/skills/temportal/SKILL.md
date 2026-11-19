@@ -25,7 +25,7 @@ Reach for Claude Code's own command or setting before building a copy by hand.
 - **A file as it was before an edit:** Claude Code takes a checkpoint before each prompt that starts a turn, and `/rewind` restores the code, the conversation or both, so make no backup copy before an edit. A checkpoint holds what the file tools changed and not what a shell command changed.
 - **The whole conversation:** the transcript stays on disk for `cleanupPeriodDays`, 30 days unless set, `/resume` opens a session again and `/export` writes one out, so the store keeps no copy of a conversation.
 - **The context:** `/context` shows what fills it, `/compact` with words after it compacts at once and tells the summary those words, and `/autocompact` moves the line of the automatic compaction.
-- **Plans:** a plan file is Claude Code's own, under `~/.claude/plans/` unless the project's settings name a `plansDirectory`.
+- **Plans:** a plan file is Claude Code's own, written in plan mode. Once `plansDirectory` in `.claude/settings.local.json` names the store's `temportal/plans/`, the project's plans are kept there, tracked with the store and under lifetimes as the notebook is, and until then they are under `~/.claude/plans/`, where Claude Code clears them after `cleanupPeriodDays`.
 - **Worktrees:** Claude Code removes the worktree of an unnamed session by itself and sweeps the worktrees of subagents once they are older than `cleanupPeriodDays`, so no lifetime is set on one.
 - **Standing instructions:** `CLAUDE.md` and the unscoped rules files load at each start and again after a compaction, so an instruction that must hold in every session goes there and not in the notebook.
 

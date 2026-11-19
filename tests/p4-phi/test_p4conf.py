@@ -18,6 +18,9 @@ sys.path.insert(0, str(SRC))
 import p4conf  # noqa: E402
 
 PLUGINS = SRC.parents[1]
+# What the keeper writes as plansDirectory in a project that holds its own store: the store's folder of plan files,
+# from the project's root.
+PLANS = ".claude/p4/temportal/plans"
 COPIES = [PLUGINS / "p4-temportal" / "hooks" / "p4conf.py", PLUGINS / "p4-phi" / "scripts" / "p4conf.py"]
 
 
@@ -532,7 +535,8 @@ class P4Conf(unittest.TestCase):
         """DEFAULTS is pinned to its GEN: a change of a default fails here until GEN is raised, the old value added to
         HISTORY and the pin below updated."""
         import hashlib
-        pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca", 4: "857fe1fd14a29f6a", 5: "52f39f39f1f34c83", 6: "80d9cae8899e4527", 7: "58861a65cec942df", 8: "aac06d8c3ca8f985", 9: "a3effadd1ed36009", 10: "909dddd3e3552f7c"}   # append only: one more line for each GEN
+        pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca", 4: "857fe1fd14a29f6a", 5: "52f39f39f1f34c83", 6: "80d9cae8899e4527", 7: "58861a65cec942df", 8: "aac06d8c3ca8f985", 9: "a3effadd1ed36009", 10: "909dddd3e3552f7c",
+                11: "909dddd3e3552f7c"}   # append only: one more for each GEN. 11 came with a key of the keeper
         got = hashlib.sha256(json.dumps(p4conf.DEFAULTS, sort_keys=True).encode()).hexdigest()[:16]
         self.assertEqual(p4conf.GEN, max(pins))
         self.assertEqual(p4conf.GEN, len(pins), "no generation is skipped or replaced")
@@ -722,8 +726,8 @@ class ClaudeSettings(unittest.TestCase):
 
     def test_a_stores_first_start_writes_autoMemoryDirectory_and_leaves_a_users_key(self):
         """A fresh git repository whose local file holds only a key of the user's: the layout hook's first start
-        adds autoMemoryDirectory naming the store's memory folder after it, keeps the user's key, and records only
-        its own key in the store's ignored record."""
+        adds autoMemoryDirectory naming the store's memory folder after it, and plansDirectory naming the store's
+        plans folder, keeps the user's key, and records only its own keys in the store's ignored record."""
         import hook
         _git(self.project, "init", "-q")
         os.makedirs(os.path.dirname(self.local()))
@@ -731,9 +735,10 @@ class ClaudeSettings(unittest.TestCase):
             json.dump({"spinnerTipsEnabled": False}, f)
         hook.init_layout(self.project)
         got = self.read(self.local())
-        self.assertEqual({k: got[k] for k in ("spinnerTipsEnabled", "autoMemoryDirectory")},
-                         {"spinnerTipsEnabled": False, "autoMemoryDirectory": self.memory()})
-        self.assertEqual(list(got), ["spinnerTipsEnabled", "autoMemoryDirectory", "permissions"],
+        self.assertEqual({k: got[k] for k in ("spinnerTipsEnabled", "autoMemoryDirectory", "plansDirectory")},
+                         {"spinnerTipsEnabled": False, "autoMemoryDirectory": self.memory(),
+                          "plansDirectory": PLANS})
+        self.assertEqual(list(got), ["spinnerTipsEnabled", "autoMemoryDirectory", "plansDirectory", "permissions"],
                          "the user's keys keep their order")
         self.assertTrue(os.path.isfile(self.record()), "the record is .claude/p4/claude-settings.json")
         rec = Path(self.record()).read_text(encoding="utf-8")
@@ -779,6 +784,101 @@ class ClaudeSettings(unittest.TestCase):
         p4conf.keep_settings(wt, platform="linux")
         self.assertEqual(self.read(self.local(main))["autoMemoryDirectory"], self.memory(main),
                          "elsewhere the main checkout's root holds it")
+
+    def owned(self):
+        """The keys the record holds as p4's, for every local file it kept."""
+        rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
+        return {k for keys in (rec.get("files") or {}).values() for k in keys}
+
+    def test_plansDirectory_names_the_stores_plans_folder_from_the_project_root(self):
+        """settings-reference.md gives plansDirectory as "a path relative to the project root", so the keeper writes
+        the store's temportal/plans as one, with forward slashes, after autoMemoryDirectory, and records it as its
+        own. A store whose claude section sets it false gets none, and one that had it loses it."""
+        p4 = os.path.join(self.project, ".claude", "p4")
+        os.makedirs(p4)
+        p4conf.keep_settings(self.project)
+        got = self.read(self.local())
+        self.assertEqual(got["plansDirectory"], PLANS)
+        self.assertEqual(PLANS, ".claude/p4/" + p4conf.PLANS)
+        self.assertEqual(list(got)[:2], ["autoMemoryDirectory", "plansDirectory"])
+        self.assertIn("plansDirectory", self.owned())
+        _write(p4conf.path(p4), {"claude": {"plansDirectory": False}})
+        p4conf.keep_settings(self.project)
+        self.assertNotIn("plansDirectory", self.read(self.local()))
+        self.assertNotIn("plansDirectory", self.owned())
+        self.assertIn("autoMemoryDirectory", self.read(self.local()), "the other key stays")
+
+    def test_plansDirectory_is_left_where_a_choice_is_made_elsewhere_or_by_hand(self):
+        """A user settings file that names a folder for plans keeps its choice, which a local value would override,
+        and a local value set by hand leaves the record and is never written again."""
+        conf = os.environ["CLAUDE_CONFIG_DIR"]
+        _write(os.path.join(conf, "settings.json"), {"plansDirectory": "plans"})
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        p4conf.keep_settings(self.project)
+        self.assertNotIn("plansDirectory", self.read(self.local()))
+        os.remove(os.path.join(conf, "settings.json"))
+        p4conf.keep_settings(self.project)
+        self.assertEqual(self.read(self.local())["plansDirectory"], PLANS)
+        d = self.read(self.local())
+        d["plansDirectory"] = "docs/plans"
+        _write(self.local(), d)
+        p4conf.keep_settings(self.project)
+        p4conf.keep_settings(self.project)
+        self.assertEqual(self.read(self.local())["plansDirectory"], "docs/plans")
+        self.assertNotIn("plansDirectory", self.owned())
+
+    def test_plansDirectory_is_not_written_for_a_store_outside_the_project(self):
+        """A session started in a worktree on Windows has a local file of its own and the main checkout's store,
+        which lies outside the worktree. settings-reference.md says a plansDirectory that resolves outside the project
+        root falls back to ~/.claude/plans, so the worktree's file gets no such key, and the main checkout's gets it."""
+        main = self.project
+        _git(main, "init", "-q")
+        with open(os.path.join(main, "a.txt"), "w", encoding="utf-8") as f:
+            f.write("a\n")
+        _git(main, "add", "a.txt")
+        _git(main, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "a")
+        wt = os.path.join(self.tmp, "wt")
+        self.assertEqual(_git(main, "worktree", "add", "-q", wt, "-b", "wt").returncode, 0)
+        p4 = os.path.join(main, ".claude", "p4")
+        os.makedirs(p4)
+        p4conf.keep_settings(wt, platform="win32")
+        self.assertEqual((self.read(self.local(wt)).get("plansDirectory"), self.read(self.local(wt))["autoMemoryDirectory"]),
+                         (None, self.memory(main)))
+        self.assertIsNone(p4conf.plans_dir(p4, self.local(wt)))
+        self.assertEqual(p4conf.plans_dir(p4, self.local(main)), PLANS)
+        p4conf.keep_settings(main, platform="win32")
+        self.assertEqual(self.read(self.local(main))["plansDirectory"], PLANS)
+
+    def test_an_older_copy_leaves_plansDirectory_to_the_copy_that_wrote_it(self):
+        """Two installed copies at once: one from before the key, of a lower GEN, does not write plansDirectory and
+        removes a key of the record it no longer owns. It leaves this one, which a copy of a higher GEN wrote, so
+        the two copies never rewrite the file in turn. GEN was raised to 11 with the key for that."""
+        from unittest import mock
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        p4conf.keep_settings(self.project)
+        before = self.read(self.local())
+        self.assertEqual(before["plansDirectory"], PLANS)
+        self.assertGreaterEqual(p4conf.GEN, 11)
+        with mock.patch.object(p4conf, "WRITES", ("autoMemoryDirectory", "attribution.commit")), \
+                mock.patch.object(p4conf, "plans_dir", lambda *a: None), \
+                mock.patch.object(p4conf, "GEN", p4conf.GEN - 1):
+            p4conf.keep_settings(self.project)
+            self.assertEqual(self.read(self.local()), before, "the older copy leaves the key")
+        p4conf.keep_settings(self.project)
+        self.assertEqual(self.read(self.local()), before)
+        self.assertIn("plansDirectory", self.owned())
+
+    def test_the_settings_page_says_which_keys_the_keeper_writes(self):
+        """dox/claude-settings.html holds a row for each key of WRITES in its table of the keys p4 writes, and its
+        row for plansDirectory in the table of every key says p4 writes it."""
+        page = (PLUGINS.parents[1] / "dox" / "claude-settings.html").read_text(encoding="utf-8")
+        written = page.split("<th>Why it is p4's</th>", 1)[1].split("</table>", 1)[0]
+        for key in p4conf.WRITES:
+            self.assertIn(f"<tr><td><code>{key}</code></td>", written, key)
+        every = page.split("<th>p4 writes it</th>", 1)[1].split("</table>", 1)[0]
+        row = every.split("<tr><td><code>plansDirectory</code></td>", 1)[1].split("</tr>", 1)[0]
+        self.assertIn("<td>Yes", row)
+        self.assertNotIn("no plugin moves a plan", page)
 
     def test_another_folder_named_by_the_user_is_left_to_win(self):
         """A user file naming another folder: no local key, which would override that choice."""
@@ -1522,6 +1622,9 @@ EZEXES_OWN = ("enabledPlugins", "autoMemoryEnabled")
 # Defaults the reference holds as ezexe wrote them and the keeper never writes: writing them changes nothing, and a
 # local false would override a true ezexe later sets in user or project settings.
 LEFT_TO_THE_APP = ("disableAllHooks", "disableSkillShellExecution")
+# What the keeper writes that the reference file does not hold, each after the key named: plansDirectory, written
+# since p4-temportal keeps a project's plan files in its store. The reference file is left as ezexe set it.
+WRITTEN_BESIDE_IT = {"autoMemoryDirectory": {"plansDirectory": PLANS}}
 
 
 class SettingsVariables(unittest.TestCase):
@@ -1711,7 +1814,12 @@ class SettingsVariables(unittest.TestCase):
 
     def reference(self, env=None):
         scripts = os.path.abspath(SRC).replace("\\", "/")
-        text = json.dumps({k: v for k, v in REFERENCE.items() if k not in EZEXES_OWN + LEFT_TO_THE_APP})
+        kept = {}
+        for k, v in REFERENCE.items():
+            if k not in EZEXES_OWN + LEFT_TO_THE_APP:
+                kept[k] = v
+                kept.update(WRITTEN_BESIDE_IT.get(k, {}))
+        text = json.dumps(kept)
         out = json.loads(text.replace("<memory>", self.memory()).replace("<scripts>", scripts))
         if env:
             out["env"] = env
