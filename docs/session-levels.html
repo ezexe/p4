@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Delegation · p4-phi dox</title>
+<title>Delegation · p4-phi docs</title>
 <meta name="description" content="An interactive diagram of where p4-phi delegates each piece of work: an orchestrator, its workers, background subagents and background commands, the model and effort a worker starts with, and the path each result takes back.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='1' width='14' height='14' rx='4' fill='%230b6b66'/%3E%3C/svg%3E">
 <style>
@@ -166,7 +166,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
 <body>
 <div class="wrap">
   <div class="top">
-    <a class="mark" href="index.html">← p4-phi · dox</a>
+    <a class="mark" href="index.html">← p4-phi · docs</a>
     <button class="pill" id="theme" type="button" aria-label="Switch between light and dark">theme</button>
   </div>
   <nav class="tabs" aria-label="Pages about sessions">
@@ -376,7 +376,7 @@ function steps(kind,ask){
   return [
     {dir:"down",legs:["ask"],by:W+" asks for a check",say:"The Agent call carries the result down.",
      html:"The prompt names the files to read and what the result is meant to show. A check is asked for before a result that is no code change is reported as done.",
-     code:call("Agent",{subagent_type:"p4-phi:check",description:"Check the settings page",prompt:"Read dox/claude-settings.html against lbiza/plugins/p4-phi/scripts/p4conf.py. The page is meant to list every P4_* variable with its default. Say what is wrong or missing."})},
+     code:call("Agent",{subagent_type:"p4-phi:check",description:"Check the settings page",prompt:"Read docs/claude-settings.html against lbiza/plugins/p4-phi/scripts/p4conf.py. The page is meant to list every P4_* variable with its default. Say what is wrong or missing."})},
     {dir:"hold",legs:["ask"],by:W+" goes on or ends its turn",say:"The check reads. The session keeps its turn.",
      html:HOLD+" The check runs on the asking session's model at high effort, and reads around the result: the sources it rests on, what else states the same thing, and what it leaves out."},
     {dir:"up",legs:["ask"],by:"A completion notification brings the findings",say:"The findings come back up.",

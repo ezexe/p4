@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""dox/plugin-development.html: the page on developing p4-phi while it is installed.
+"""docs/plugin-development.html: the page on developing p4-phi while it is installed.
 
     python -m pytest tests/p4-phi/test_devpage.py
 
@@ -20,7 +20,7 @@ import unittest
 SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
                                     "plugins", "p4-phi", "scripts"))
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(SRC))))
-PAGE = os.path.join(REPO, "dox", "plugin-development.html")
+PAGE = os.path.join(REPO, "docs", "plugin-development.html")
 
 
 def read(path):
@@ -36,8 +36,8 @@ def phi_settings():
 
 class Page(unittest.TestCase):
     def test_the_page_is_linked_from_the_index_and_the_readme(self):
-        self.assertIn('href="plugin-development.html"', read(os.path.join(REPO, "dox", "index.html")))
-        self.assertIn("dox/plugin-development.html", read(os.path.join(os.path.dirname(SRC), "README.md")))
+        self.assertIn('href="plugin-development.html"', read(os.path.join(REPO, "docs", "index.html")))
+        self.assertIn("docs/plugin-development.html", read(os.path.join(os.path.dirname(SRC), "README.md")))
 
     def test_the_page_says_the_native_commands_and_settings_and_their_sources(self):
         page = read(PAGE)
@@ -147,7 +147,7 @@ class Page(unittest.TestCase):
                      "Whether an installed copy from a marketplace added from a folder runs in place or from the "
                      "cache", "which <a href=\"#not-confirmed\">Not confirmed</a> takes up"):
             self.assertNotIn(gone, page, gone)
-        self.assertNotIn("only when a release is cut", read(os.path.join(REPO, "dox", "index.html")))
+        self.assertNotIn("only when a release is cut", read(os.path.join(REPO, "docs", "index.html")))
         self.assertNotIn("only when a release is cut", read(os.path.join(os.path.dirname(SRC), "README.md")))
 
     def test_the_auto_update_pass_is_set_out_as_seen_and_no_longer_as_not_confirmed(self):
@@ -333,10 +333,10 @@ class Page(unittest.TestCase):
                 continue
             target, _, frag = href.partition("#")
             if target:
-                self.assertTrue(os.path.isfile(os.path.join(REPO, "dox", target)), href)
+                self.assertTrue(os.path.isfile(os.path.join(REPO, "docs", target)), href)
             if frag:
                 self.assertIn(frag, ids if not target else set(re.findall(
-                    r'\bid="([^"]+)"', read(os.path.join(REPO, "dox", target)))), href)
+                    r'\bid="([^"]+)"', read(os.path.join(REPO, "docs", target)))), href)
 
 
 if __name__ == "__main__":

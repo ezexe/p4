@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""dox/temportal-native.html: the one table of what a project keeps over time, with what was set out for p4-temportal,
+"""docs/temportal-native.html: the one table of what a project keeps over time, with what was set out for p4-temportal,
 what Claude Code does and the docs page that says so, what the plugin does today, what it only configures, what the
 native feature lacks, and the part of the work each row belongs to.
 
@@ -15,7 +15,7 @@ import re
 import unittest
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
-DOX = REPO / "dox"
+DOX = REPO / "docs"
 PAGE = DOX / "temportal-native.html"
 
 ROWS = ("compaction", "memory", "consolidation", "rules", "checkpoints", "transcripts", "scratchpad", "worktrees",

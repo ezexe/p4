@@ -878,9 +878,9 @@ class ClaudeSettings(unittest.TestCase):
         self.assertIn("plansDirectory", self.owned())
 
     def test_the_settings_page_says_which_keys_the_keeper_writes(self):
-        """dox/claude-settings.html holds a row for each key of WRITES in its table of the keys p4 writes, and its
+        """docs/claude-settings.html holds a row for each key of WRITES in its table of the keys p4 writes, and its
         row for plansDirectory in the table of every key says p4 writes it."""
-        page = (PLUGINS.parents[1] / "dox" / "claude-settings.html").read_text(encoding="utf-8")
+        page = (PLUGINS.parents[1] / "docs" / "claude-settings.html").read_text(encoding="utf-8")
         written = page.split("<th>Why it is p4's</th>", 1)[1].split("</table>", 1)[0]
         for key in p4conf.WRITES:
             self.assertIn(f"<tr><td><code>{key}</code></td>", written, key)
@@ -1672,9 +1672,9 @@ class SettingsVariables(unittest.TestCase):
         self.assertEqual(p4conf.env_name("phi.watch_s"), "P4_PHI_WATCH_SECONDS", "P4_PHI_WATCH_S is puppeteer's tick")
 
     def test_the_settings_page_lists_every_variable_with_its_default(self):
-        """dox/claude-settings.html has a row for each variable: its name, its setting and its default as written."""
+        """docs/claude-settings.html has a row for each variable: its name, its setting and its default as written."""
         import html
-        page = (PLUGINS.parents[1] / "dox" / "claude-settings.html").read_text(encoding="utf-8")
+        page = (PLUGINS.parents[1] / "docs" / "claude-settings.html").read_text(encoding="utf-8")
         for key, default in p4conf.env_keys().items():
             row = f"<tr><td><code>{p4conf.env_name(key)}</code></td><td><code>{key}</code></td><td>"
             self.assertIn(row, page, key)

@@ -111,7 +111,7 @@ While the goal is set the Stop hook sends no turn back for an open step, since t
 The evaluator "does not call tools, so it can only judge what Claude has already surfaced in the conversation", by `goal.md`, so the checks a script makes stay in the Stop hook: the regression test of a worker's issue, the commits on the default branch and the open issue.
 Claude Code writes a goal's verdict to the transcript after the Stop hooks have answered, so the look that follows a turn's end reads it: a goal met marks the turn done with the evaluator's reason, and a goal met, judged impossible or cleared is over, so the send-back is back.
 With `goal` unset or false none of this happens, and `phi.py goal` prints how a session's goal stands.
-The page `dox/plugin-development.html` holds what the live probes behind this showed.
+The page `docs/plugin-development.html` holds what the live probes behind this showed.
 
 The module declares three tools with `$.tool.register`, at a session's start and at each reload of the module: `mcp__p4-phi__note`, `mcp__p4-phi__done` and `mcp__p4-phi__tree`.
 `note` requires `claim` and `source` and takes `kind`, `done` requires `text`, and `tree` takes nothing.
@@ -295,7 +295,7 @@ Where no prompt hook saw a worker's brief, as when the plugin was loaded after t
 `phi.py` then reads a session's title, folders, archive state, permission mode, branch and named starter from that file while it is under five minutes old, and from the app's record file for a session the file does not hold and for everything the tools do not answer: the CLI session ids, a session with no starter named, and the worktree path.
 With it unset no tool of the app is called and the record files are read as before.
 `phi.py app_tools on` and `phi.py app_tools off` write the key as `goal on` writes its own, and `phi.py app_tools` alone prints how it stands.
-Seen in the desktop app on Claude Code 2.1.326: the calls reach the four tools from the module, mid-turn and idle, leave no row in the transcript and move no token count, and the page [`dox/plugin-development.html`](../../../dox/plugin-development.html) holds what each answered.
+Seen in the desktop app on Claude Code 2.1.326: the calls reach the four tools from the module, mid-turn and idle, leave no row in the transcript and move no token count, and the page [`docs/plugin-development.html`](../../../docs/plugin-development.html) holds what each answered.
 That the module's call reaches those tools in a desktop session is not yet seen, which is why the setting is off unless a project turns it on.
 
 ### Environment variables
@@ -325,7 +325,7 @@ Each is for one run, a test or one machine's unusual layout.
 ## Developing p4-phi while it is installed
 
 A session that edits p4-phi runs with Claude Code's own features, and p4-phi builds nothing in their place.
-The page `dox/plugin-development.html` in ezexe/p4 says how: a clone loaded with `claude --plugin-dir <clone>/lbiza/plugins/p4-phi --debug`, edits picked up by `/reload-plugins`, the installed copies off for the development project in a `.claude/settings.local.json` ezexe writes, each copy's `CLAUDE_PLUGIN_DATA` folder checked on disk, and the installed copy moved by Claude Code's own auto-update after a landing bumps a version, with `claude plugin update` as the move by hand.
+The page `docs/plugin-development.html` in ezexe/p4 says how: a clone loaded with `claude --plugin-dir <clone>/lbiza/plugins/p4-phi --debug`, edits picked up by `/reload-plugins`, the installed copies off for the development project in a `.claude/settings.local.json` ezexe writes, each copy's `CLAUDE_PLUGIN_DATA` folder checked on disk, and the installed copy moved by Claude Code's own auto-update after a landing bumps a version, with `claude plugin update` as the move by hand.
 What the plugin makes a model do is checked by the cases in `evals/`, run by hand from this folder with `claude plugin eval . --scaffold --trust-plugin --model claude-sonnet-5-5 --judge-model claude-haiku-5-5 --no-publish --max-cost-usd 5`, which gates no landing.
 
 ## What depends on the machine

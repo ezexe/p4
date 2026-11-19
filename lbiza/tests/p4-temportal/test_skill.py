@@ -57,7 +57,7 @@ class SkillCommands(unittest.TestCase):
 
     def test_the_page_names_what_claude_code_keeps_by_itself(self):
         """The rule "Native first" of CONTRIBUTING.md: a session reaches for Claude Code's own command or setting and
-        builds no copy by hand. The page names each one the table of dox/temportal-native.html gives, in a section of
+        builds no copy by hand. The page names each one the table of docs/temportal-native.html gives, in a section of
         its own that hands no shell line."""
         text = SKILL.read_text(encoding="utf-8")
         section = text.split("## What Claude Code keeps by itself", 1)[1].split("\n## ", 1)[0]

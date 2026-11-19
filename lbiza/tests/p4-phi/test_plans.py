@@ -1004,7 +1004,7 @@ class Levels(unittest.TestCase):
         stop or restart of a running session either, and a worker's split advice is the same."""
         s = relay._session(self.t.p4, TOP)
         said = plans.top_advice(self.t.p4, {**s, "splitAdvised": []}, {"steps": [
-            {"addr": "1", "content": "Write the puppeteer pages under dox/", "status": "pending"},
+            {"addr": "1", "content": "Write the puppeteer pages under docs/", "status": "pending"},
             {"addr": "2", "content": "Change how plans.py reads the address of a step", "status": "pending"}]}, True, "")
         self.assertIn("Each call carries the `model` and `effort`", said)
         for word in ("get_usage", "plan limits", "stop_session", "restart", "start it again", "set_session_model"):
@@ -1017,10 +1017,10 @@ class Levels(unittest.TestCase):
         self.assertNotIn("get_usage", kid, "a worker's split advice names no read either")
 
     def test_a_child_session_is_started_with_a_model_and_an_effort_that_fit_its_step(self):
-        """A child that writes static pages under dox/ starts on a cheaper model and a lower effort than its parent."""
+        """A child that writes static pages under docs/ starts on a cheaper model and a lower effort than its parent."""
         import puppeteer
         import starts
-        docs, script = "Write the puppeteer pages under dox/", "Change how plans.py reads the address of a step"
+        docs, script = "Write the puppeteer pages under docs/", "Change how plans.py reads the address of a step"
         self.assertEqual(plans.child_level(docs), {"model": "claude-sonnet-5-5", "effort": "medium", "kind": "static"})
         self.assertEqual(plans.child_level(script), {"model": "inherit", "effort": "high", "kind": "build"})
         self.assertEqual(plans.child_level("Review the relay's design")["kind"], "design")
@@ -1033,14 +1033,14 @@ class Levels(unittest.TestCase):
         self.assertIn(f"\"{docs}\", with `model` `claude-sonnet-5-5`, `effort` `medium`", said)
         self.assertIn(f"\"{script}\", with no `model`, so it inherits this session's, `effort` `high`", said)
         self.assertIn("Each brief says them in one line, `Model and effort: ", said)
-        brief = "Write the puppeteer pages. Report when done.\nFiles: dox/puppeteer.html"
+        brief = "Write the puppeteer pages. Report when done.\nFiles: docs/puppeteer.html"
 
         def requested(title, text):
             """The call of a start request, as controls.request_call makes it: the brief, then the request's marker."""
             rid, _ = starts.add(self.t.p4, TOP, title, text, to="local_pup00009")
             return rid, plans.with_level({"context": "fresh", "title": title,
                                           "prompt": text + "\n\n" + starts.marker(rid, TOP)}, title + "\n" + text)
-        rid, call = requested("dox: the puppeteer pages", brief)
+        rid, call = requested("docs: the puppeteer pages", brief)
         self.assertEqual((call["model"], call["effort"]), ("claude-sonnet-5-5", "medium"), "cheaper and lower")
         self.assertIn("\n\nModel and effort: claude-sonnet-5-5 at medium effort, since this is static or mechanical "
                       "work.\n\n" + starts.marker(rid, TOP), call["prompt"])
@@ -1056,7 +1056,7 @@ class Levels(unittest.TestCase):
         self.assertEqual((call["model"], call["effort"]), ("claude-haiku-5-5", "low"),
                          "the parent session's choice wins")
         self.assertIn("named by the parent session", call["prompt"])
-        draft = {"title": "dox: the levels page", "context": "fresh", "brief": brief, "background": "b" * 90}
+        draft = {"title": "docs: the levels page", "context": "fresh", "brief": brief, "background": "b" * 90}
         call = puppeteer.call_of(draft)
         self.assertEqual((call["model"], call["effort"]), ("claude-sonnet-5-5", "medium"), "the start draft's call")
         fork = puppeteer.call_of({**draft, "context": "fork"})
@@ -1087,7 +1087,7 @@ class ParentEffort(unittest.TestCase):
     and names no start's effort above it."""
 
     BUILD = "Change how plans.py reads the address of a step"
-    DOCS = "Write the puppeteer pages under dox/"
+    DOCS = "Write the puppeteer pages under docs/"
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -2029,11 +2029,11 @@ class WaitsOnReports(unittest.TestCase):
         """ezexe/p4#193: an open step that is plain work depends on no wait, so the turn the module starts names it.
         The same step handed to a child that is still at work depends on that child and is not named."""
         t = self.t
-        self.plan(TOP, items(*self.STEPS, "Write the flow page in dox/flow.html"))
+        self.plan(TOP, items(*self.STEPS, "Write the flow page in docs/flow.html"))
         t.say(A, "Move the layout")                 # A is inside a turn
         self.assertNotIn("decision", self.stop("Waiting on A.", uuid="h1"))
         move = self.look().get("move", "")
-        self.assertIn("- step 3, \"Write the flow page in dox/flow.html\", depends on no wait: do it", move)
+        self.assertIn("- step 3, \"Write the flow page in docs/flow.html\", depends on no wait: do it", move)
         self.assertNotIn("step 2,", move, "a step that checks other sessions' results waits with them")
         t.record(B, TOP, title="B, the flow page child")
         t.say(B, "Write the flow page")             # B is at work on step 3
@@ -2052,7 +2052,7 @@ class WaitsOnReports(unittest.TestCase):
         """The wait is kept only for the turn the Stop hook let end on it. A turn that ended on an error ran no Stop
         hook, so the wait a turn before it ended on is not answered for it."""
         t = self.t
-        self.plan(TOP, items(*self.STEPS, "Write the flow page in dox/flow.html"))
+        self.plan(TOP, items(*self.STEPS, "Write the flow page in docs/flow.html"))
         self.assertEqual(self.stop("Nothing is in yet.", uuid="n1").get("decision"), "block", "nobody is waited on")
         self.assertNotIn("waitEnded", t.session(TOP))
         self.assertNotIn("move", self.look())
@@ -2091,7 +2091,7 @@ class WaitsOnReports(unittest.TestCase):
         for stays in self.STEPS + ("Collect the children's reports", "Wait until every tree reports",
                                    "Check the acceptance session's results", "Read the reports from the fixers"):
             self.assertEqual(plans.top_stays(stays), plans.AWAITS_WHY, stays)
-        for work in ("Fix session report truncation", "Write the children's reports page in dox/reports.html",
+        for work in ("Fix session report truncation", "Write the children's reports page in docs/reports.html",
                      "Add the trees' results to the board in controls.py",
                      "Collect the timings of the build in out/t.csv", "Verify phi's session tree matches the app",
                      "Check 1: nothing hidden in AppData", "Write the report of the run in docs/run.md"):

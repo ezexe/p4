@@ -245,14 +245,14 @@ class StartRequests(unittest.TestCase):
         base = self.t.proj
         os.makedirs(os.path.join(base, "p4", ".git"))
         root = relay.norm(os.path.join(base, "p4"))
-        a = relay.norm("dox/a.html", base)
-        got = starts.files_of("Write the page.\nFiles: `dox/a.html`. The live checkout is `" + root + "`, never "
+        a = relay.norm("docs/a.html", base)
+        got = starts.files_of("Write the page.\nFiles: `docs/a.html`. The live checkout is `" + root + "`, never "
                               "edit it.\nReport when done.", base)
         self.assertEqual(got, [a], "a sentence after the list names no file to write")
-        got = starts.files_of("Files: dox/a.html, in the checkout `" + root + "`", base)
+        got = starts.files_of("Files: docs/a.html, in the checkout `" + root + "`", base)
         self.assertEqual(got, [a], "a repository root beside another path is context")
-        got = starts.files_of("Files: `p4/dox/a.html`, `p4/dox`, `p4`", base)
-        self.assertEqual(got, [relay.norm("p4/dox/a.html", base)], "an ancestor of a listed path is left out")
+        got = starts.files_of("Files: `p4/docs/a.html`, `p4/docs`, `p4`", base)
+        self.assertEqual(got, [relay.norm("p4/docs/a.html", base)], "an ancestor of a listed path is left out")
         self.assertEqual(starts.files_of("Files: `" + root + "`", base), [root], "the only path on the line is kept")
         self.assertEqual(starts.files_of("Files: src/a.py, src/b.py and README.md.", base),
                          [relay.norm("src/a.py", base), relay.norm("src/b.py", base), "readme.md"])
@@ -292,7 +292,7 @@ class StartRequests(unittest.TestCase):
         self.assertEqual(in_a, starts.files_of("Files: `README.md`", a))
         sub = os.path.join(a, "docs")
         os.makedirs(sub)
-        self.assertEqual(starts.files_of("Files: dox/x.html", sub), [relay.norm("dox/x.html", a)],
+        self.assertEqual(starts.files_of("Files: docs/x.html", sub), [relay.norm("docs/x.html", a)],
                          "a relative path is read from the repository's root")
 
     def test_a_request_to_a_puppeteer_is_kept_with_its_background(self):

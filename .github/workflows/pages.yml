@@ -1,10 +1,13 @@
-name: Publish dox to GitHub Pages
+name: pages
+
+# The pages at https://ezexe.github.io/p4/: the files under docs/, published as they are, so docs/index.html is the
+# site's first page. Needs Settings → Pages → Source: GitHub Actions.
 
 on:
   push:
     branches: [main]
     paths:
-      - "dox/**"
+      - "docs/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -24,10 +27,9 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/checkout@v7
+      - uses: actions/upload-pages-artifact@v5
         with:
-          path: dox
+          path: docs
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
