@@ -3246,7 +3246,8 @@ def h_start_advice(payload):
     mine = load_session(me.home, me.id)
     parent, on = spawned_from(mine), cards_on(me)
     if on and parent:                               # the step before a start: nothing left for its session to ask
-        why = cards.before_start(inp, upkeep.mode_of(me.id), parent, issues.lander(me.home, mine))
+        why = cards.before_start(inp, upkeep.mode_of(me.id), parent, issues.lander(me.home, mine),
+                                 str(payload.get("cwd") or mine.get("cwd") or ""))
         if why:
             RAN["before_start"] = True
             return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
@@ -3358,8 +3359,16 @@ def h_branch_guard(payload):
     if name not in SHELL_TOOLS:
         return None
     on, parent = cards_on(me), spawned_from(s)
-    own = own_checkout(me.home, s, str(payload.get("cwd") or s.get("cwd") or ""))
-    if BRANCH_MOVE.search(QUOTED.sub("''", str(inp.get("command") or ""))) and not own:
+    moves = BRANCH_MOVE.search(QUOTED.sub("''", str(inp.get("command") or "")))
+    if not moves and not issues.landing(inp.get("command")):
+        return None
+    # a worktree of its own is judged where the command runs: the hook's folder, and each folder the line names
+    # with `cd` or `git -C`, so a line aimed at a checkout the session shares is never read as its own
+    here = str(payload.get("cwd") or s.get("cwd") or "")
+    line = str(inp.get("command") or "")
+    named = [m.group(1).strip("'" + '"') for m in list(CD.finditer(line)) + list(DASH_C.finditer(line))]
+    own = all(own_checkout(me.home, s, relay.norm(p, relay.norm(here)) if here else p) for p in [here] + named)
+    if moves and not own:
         what = "moving the checkout to another branch, which in a shared checkout moves the parent's too"
     elif issues.landing(inp.get("command")):
         verbs = issues.landings(inp.get("command"))

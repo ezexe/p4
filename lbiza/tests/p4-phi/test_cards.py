@@ -243,6 +243,11 @@ class Guards(unittest.TestCase):
             self.assertIsNone(self.guard("branch-guard", self.pusher, cmd, cwd=self.own), cmd)
         for cmd in ("git rebase origin/main", "git pull", "git merge origin/main"):
             self.assertIsNone(self.guard("branch-guard", self.keeper, cmd, cwd=self.own), f"its own branch: {cmd}")
+        # a line aimed at a checkout the session shares is judged there, whatever folder the hook runs in
+        main = self.work.replace(chr(92), "/")
+        for cmd in (f"git -C {main} pull", f"cd {main} && git push origin HEAD:main", f'git -C "{main}" rebase main'):
+            out = self.guard("branch-guard", self.pusher, cmd, cwd=self.own)
+            self.assertEqual(out["permissionDecision"], "deny", cmd)
 
     def test_with_the_set_in_force_what_the_brief_does_not_cover_is_refused_with_the_session_to_ask(self):
         """The `refusal` part: no card is raised in a session another session started. A push its brief does not
@@ -337,6 +342,7 @@ class Guards(unittest.TestCase):
             self.assertEqual(out["permissionDecision"], "deny", inp)
             self.assertIn(f"\"top\" `{TOP}` with SendMessage", out["permissionDecisionReason"])
         self.assertIsNone(self.start(A, target="local"))
+        self.assertIsNone(self.start(A, cwd=self.t.proj), "the project's own folder, named, is no start elsewhere")
         self.mode(TOP, "bypassPermissions")
         self.assertIsNone(self.start(TOP, permission_mode="plan"), "the top session's start is ezexe's to see")
         self.assertIsNone(self.start(TOP, cwd="C:/elsewhere"))
@@ -362,9 +368,13 @@ class Guards(unittest.TestCase):
         import hook
         for tool in ("Bash", "PowerShell"):
             self.assertEqual(hook.PHI_CHECK[tool][0], "cards-guard", "ahead of every other check of a shell call")
+        spaced = f'python "x/phi.py"      cards    on  {sid}'
+        self.assertEqual(self.guard("cards-guard", TOP, spaced)["permissionDecision"], "ask", "however it is spaced")
         module = os.path.join(os.path.dirname(SRC), "hooks", "register.ts")
         with open(module, encoding="utf-8") as f:
-            self.assertIn("CARDS_ON.test(text)", f.read(), "the hooks module passes the call to python's check")
+            source = f.read()
+        self.assertIn("CARDS_ON.test(text)", source, "the hooks module passes the call to python's check")
+        self.assertIn("]+cards[^A-Za-z0-9]+on[", source, "by a pattern that takes any run of separators, as python's")
         # the command itself: refused in a started session, refused for another set's id, and read back
         r = self.t.cli(A, "cards", "on", sid)
         self.assertEqual(r.returncode, 2)

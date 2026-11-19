@@ -134,7 +134,7 @@ def mode_class(mode):
 ELSEWHERE = ("cwd", "host", "preset", "environment", "repository")
 
 
-def before_start(inp, own_mode, parent, top):
+def before_start(inp, own_mode, parent, top, here=""):
     """The step before a start, for a session that `parent` started and with the set in force: why this start is
     refused, or '' for a start that leaves nothing to ask. `inp` is the start call's input, `own_mode` the starter's
     permission mode as the app records it, and `top` the tree's top session, as (its id, its title)."""
@@ -148,6 +148,8 @@ def before_start(inp, own_mode, parent, top):
                 f"out, so the session inherits this one's.")
     there = [k for k in ELSEWHERE if inp.get(k)] + (["target"] if str(inp.get("target") or "local") != "local"
                                                     else [])
+    if there == ["cwd"] and here and _same(inp.get("cwd"), here):
+        there = []                                 # the project's own folder, named: no start elsewhere
     if there:
         tid, title = top
         return (f"phi (p4-phi): this start is refused before it runs: it names {' and '.join(f'`{k}`' for k in there)}"
@@ -155,6 +157,13 @@ def before_start(inp, own_mode, parent, top):
                 f"session settles. Send the exact call to the top session \"{title}\" `{tid}` with SendMessage: it "
                 f"makes the start in a turn of ezexe's.")
     return ""
+
+
+def _same(a, b):
+    """Whether two paths name one folder, by their normal form without case on a machine that has none."""
+    import os
+    one, two = (os.path.normcase(os.path.normpath(str(x))) for x in (a, b))
+    return one == two
 
 
 # `phi.py cards on <id>` as a shell line holds it: the script's name, past its closing quote the word `cards`, then

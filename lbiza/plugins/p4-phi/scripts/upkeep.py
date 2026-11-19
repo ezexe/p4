@@ -759,17 +759,21 @@ def driver(home, sid, s):
     return ""
 
 
+COMMITS = ("commit", "cherry-pick", "revert", "merge")   # what the reflog says of a move that made a commit
+
+
 def made_commits(trees):
     """True when a session made a commit of its own, so that its work can be read as landed or not: in a worktree
-    of its own the reflog of `HEAD` holds more than the commit the worktree was made at, and in a checkout it
+    of its own the reflog of `HEAD` names a commit, a cherry-pick, a revert or a merge, where a rebase or a pull
+    onto a default branch that moved names none, and in a checkout it
     shares its first and latest turn read different heads. A worktree that is gone, or that git cannot read, counts
     as one with work in it."""
     for t in trees:
         if not t["there"]:
             return True
         if t["linked"]:
-            log = _out(t["path"], "reflog", "show", "--format=%H", "HEAD")
-            if log is None or len(set(log.split())) != 1:
+            log = _out(t["path"], "reflog", "show", "--format=%gs", "HEAD")
+            if log is None or any(x.startswith(COMMITS) for x in log.splitlines()):
                 return True
         elif t.get("first") and t.get("last") and t["first"] != t["last"]:
             return True

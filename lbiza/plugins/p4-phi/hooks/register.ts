@@ -112,7 +112,7 @@ const IN_BACKGROUND = /"run_in_background":\s?true/
 // `phi.py cards on`, which puts in force the set of what p4-phi settles with no approval card: phi.py's guard
 // raises the one approval card the set has, so the yes is ezexe's own. Between the script's name and the word
 // stand the closing quote, as the call's JSON text escapes it, and a space.
-const CARDS_ON = /phi\.py[^A-Za-z0-9]{1,4}cards[^A-Za-z0-9]{1,4}on[^A-Za-z0-9]/
+const CARDS_ON = /phi\.py[^A-Za-z0-9]+cards[^A-Za-z0-9]+on[^A-Za-z0-9]/
 // Where a store keeps the failure model a plain shell call is checked by, newest layout first, and how long what
 // its first line said is believed: a training round's new model is read within this long.
 const SHELL_MODELS = ['phi/models', 'recall/models', 'models']
