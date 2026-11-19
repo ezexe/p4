@@ -233,13 +233,19 @@ class Page(unittest.TestCase):
         for said in ("<code>permission_mode</code>", "<code>permission-modes.md</code>",
                      "\"edits stay blocked until you approve the plan\"", "Claude Code 2.1.326",
                      "<code>User has approved your plan.</code>", "3.7 seconds", "<code>plan_mode_exit</code>",
-                     "<code>\"source\":\"user_temporary\"</code>", "The transcript does not tell who approved.",
+                     "Who answers. ezexe does, by an approval card, and the app answers nothing itself.",
+                     "<code>approver</code> <code>person</code>", "<code>classic.PermissionRequest</code>",
+                     "<code>LocalSessions.respondToToolPermission</code>", "4.4 and 44.5 seconds",
                      "<code>cross-session-messaging.md</code>", "\"holds each message for your approval\"",
                      "every report of the worker was held by its starter",
-                     "<code>set_session_permission_mode</code>", "<code>--permission-mode plan</code>",
+                     "<code>set_session_permission_mode</code>", "the answer <code>once</code> ten seconds later",
+                     "\"This session isn't open in any window right now, so its view was left alone\"",
+                     "<code>--permission-mode plan</code>",
                      "Claude Code 2.1.328", "<code>No matching deferred tools found</code>",
-                     "So the start draft hands no <code>permission_mode</code>",
-                     "A terminal worker cannot leave plan mode at all.", "Not seen: whether the Plan pane drew"):
+                     "So nothing is built for a worker in plan mode",
+                     "the start draft hands no <code>permission_mode</code>",
+                     "<code>cards.before_start</code>",
+                     "A terminal worker cannot leave plan mode at all.", "Not seen: a starter in <code>auto</code>"):
             self.assertIn(said, plan, said)
         self.assertNotIn('"permission_mode"', read(os.path.join(SRC, "puppeteer.py")),
                          "the draft's call is built with no permission mode, as the page says")

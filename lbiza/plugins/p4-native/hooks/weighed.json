@@ -1830,7 +1830,7 @@
   "ExitPlanMode": {
    "kind": "tool",
    "declined": {
-    "p4-phi": "permission modes are ezexe's.",
+    "p4-phi": "permission modes are ezexe's: a started session's call is an approval card that ezexe answers, and the session comes out in `auto` whatever its starter's mode is, so no worker is started in plan mode.",
     "p4-temportal": "permission modes."
    }
   },
@@ -2661,7 +2661,7 @@
   "mcp__ccd_session_mgmt__set_session_permission_mode": {
    "kind": "tool",
    "declined": {
-    "p4-phi": "each is ezexe's setting or the start call's."
+    "p4-phi": "each is ezexe's setting or the start call's: a raise of another session's mode shows ezexe an approval card in a session that bypasses permission prompts too, so p4-phi restores no worker's mode."
    }
   },
   "mcp__ccd_session_mgmt__set_session_title": {
