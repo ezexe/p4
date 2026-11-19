@@ -424,15 +424,16 @@ def _below(every, sid):
     return out
 
 
-def holders(home, s, text, store="", skip=(), book=None, below=True):
+def holders(home, s, text, store="", skip=(), book=None, below=True, owned=False):
     """The live sessions a message's paths and issues belong to, files and owned paths first, each as (entry,
     what it names). The session, those above it and those below it are left out: a parent's files cover its
     children's, and a session speaks for its own workers. So is every id in `skip`, and an issue the session owns
-    itself, which its whole tree shares."""
+    itself, which its whole tree shares. With `owned`, only a session's owned paths count, neither the files its
+    brief covers nor its issue: what relay.route_text sends a message by."""
     sid = s["sessionId"]
     base = str(s.get("cwd") or "")
     named = [n for n in relay.paths_in(text, base) if not relay.names_nothing(n, home, base)]
-    asked = issues_named(text)
+    asked = [] if owned else issues_named(text)
     own = _issue(s)
     asked = [(slug, n) for slug, n in asked if not (n == own[1] and (not slug or not own[0] or slug == own[0].lower()))]
     if not named and not asked:
@@ -444,7 +445,7 @@ def holders(home, s, text, store="", skip=(), book=None, below=True):
     for e in book.values():
         if e["id"] in away:
             continue
-        hit = next((f for n in named for f in e["files"] + e["owned"]
+        hit = next((f for n in named for f in ([] if owned else e["files"]) + e["owned"]
                     if not relay.names_nothing(f, e["home"], e["base"]) and _same_file(n, base, f, e["base"])), "")
         if hit:
             out.append((e, _rel(hit, e["base"]), 0, -len(hit)))

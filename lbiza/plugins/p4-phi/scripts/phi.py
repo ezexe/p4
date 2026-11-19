@@ -488,7 +488,7 @@ def _save_session(home, s):
     for k in ("relayWarned", "marksGiven", "upTold", "splitAdvised"):
         if isinstance(disk.get(k), list):
             s[k] = list(s.get(k) or []) + [x for x in disk[k] if x not in (s.get(k) or [])]
-    for k in ("othersGiven", "plansSeen", "requestAnswers"):
+    for k in ("plansSeen", "requestAnswers"):
         if isinstance(disk.get(k), dict):
             s[k] = {**disk[k], **(s.get(k) or {})}
     for k in ("rootStep", "shard", "disposable", "doneRetired", "archived", "appRoot", "nudged", "issue",
@@ -2291,7 +2291,7 @@ def h_user_prompt_submit(payload):
             pup = verdict = ""
         RAN["puppeteer"] = verdict or bool(pup)
     try:                                           # it reads the app's records: a failure costs only its own line
-        route = relay.route_text(me.home, s["sessionId"], req, s.get("cwd") or "") if req and not verdict else ""
+        route = relay.route_text(me.home, s, req, me.store) if req and not verdict else ""
     except Exception:  # noqa: BLE001
         route = ""
     book_line = "" if route else book_text(me.home, s, me.store)
@@ -2770,7 +2770,9 @@ def h_start_advice(payload):
     for the files its brief names and none waits on another session's files: each session that writes has a git
     worktree of its own, so no two share a file on disk. For the rest it advises fork or fresh by
     relay.advise_start, from the parent's transcript size and how much of the parent's scope the brief's paths
-    cover: silent when the call already does what is advised, and for a fresh start that passes
+    cover, and never a fork for a brief that writes unless fork_apart says the fork gets a worktree of its own, so
+    a call that forks a writer from a plain checkout is asked about: silent when the call already does what is
+    advised, and for a fresh start that passes
     `use_worktree: true`, which a fork cannot take, else a permission `ask` with the reason, so ezexe sees it and
     decides. A start in a worktree or on a branch of the child's own is never asked about: a session that writes
     gets both, as starts.use_worktree says. A PreToolUse `permissionDecision` is `allow`, `deny`, `ask` or `defer`;
@@ -2808,7 +2810,8 @@ def h_start_advice(payload):
         size = os.path.getsize(payload.get("transcript_path") or "")
     except OSError:
         size = 0
-    advised, why = relay.advise_start(me.home, me.id, inp, size)
+    here = str(payload.get("cwd") or load_session(me.home, me.id).get("cwd") or "")
+    advised, why = relay.advise_start(me.home, me.id, inp, size, apart=fork_apart(here))
     RAN.update(advice=advised, wanted=wanted, transcript=size)
     # a fresh start in a worktree of its own is never advised to fork: the start tool's own text says `use_worktree`
     # is "rejected with \"fork\"", and of a fork that "from a plain checkout it shares the folder"
@@ -2825,6 +2828,19 @@ QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
 # neither does `git branch <name>` or `git worktree add`.
 BRANCH_MOVE = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b[^\n|;&]*?\b(switch\b|checkout\s+-[bB]\b|"
                          r"checkout\s+(?!-)(?![\w./-]*\.\w{1,6}\s*$)[\w./-]+\s*$)")
+
+
+def fork_apart(cwd):
+    """True when a fork of the session working in `cwd` gets a git worktree of its own. The start tool's own text on
+    `context`: a fork "from a worktree session gets a fresh worktree, normally cut from your branch tip", and "from
+    a plain checkout it shares the folder". So `cwd` is read as own_checkout reads it: a linked worktree, by its
+    `.git` file, is a worktree session's folder, and the main checkout or a folder of no repository is a plain
+    one."""
+    here = relay.repo_of(cwd) if cwd else ""
+    if not here:
+        return False
+    main, found = p4conf.main_root(here)
+    return bool(found) and relay.norm(os.path.realpath(main)) != here
 
 
 def own_checkout(home, s, cwd):
@@ -3437,11 +3453,9 @@ def main(argv=None):
             if not a.paths:
                 print("\n".join(relay.shard_of(s)) or "this session declared no owned paths")
                 return 0
-            lines = relay.set_shard(me.home, s["sessionId"], a.paths, os.getcwd())
+            relay.set_shard(me.home, s["sessionId"], a.paths, os.getcwd())
             print("kept as this session's owned paths: "
                   + ", ".join(relay.shard_of(load_session(me.home, s["sessionId"]))))
-            for line in lines:
-                print("phi: " + line)
             return 0
         if a.cmd == "controls":
             if not controls.is_puppeteer(s, me.store):

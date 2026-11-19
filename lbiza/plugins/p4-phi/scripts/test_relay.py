@@ -37,25 +37,6 @@ class Paths(unittest.TestCase):
         self.assertFalse(relay.overlap("e:/w/lib", "e:/w/docs"))
         self.assertEqual(relay.norm("/e/projects/x/", ""), relay.norm("E:/projects/x", ""))
 
-    def test_a_file_in_the_apps_scratchpad_of_the_session_is_scratch_and_never_a_conflict(self):
-        """ezexe/p4#131: a session's clones and probes live in the app's scratchpad, so a file there, by any of its
-        CLI sessions' <id>/scratchpad or by the scratchpadDir phi keeps, is scratch, as one under the store's
-        temportal/tmp of an older session still is; a file of the project is not."""
-        tmp = tempfile.mkdtemp()
-        try:
-            home = os.path.join(tmp, "proj", ".claude", "p4")
-            cli = "aaaa1111-0000-4000-8000-000000000000"
-            write(os.path.join(home, "phi", "sessions", "local_x", "session.json"), json.dumps(
-                {"sessionId": "local_x", "cliSessionIds": [cli], "scratchpadDir": "D:/pads/first-turn"}))
-            n = lambda p: relay.norm(p, os.path.join(tmp, "proj"))                        # noqa: E731
-            for f in (f"C:/Users/u/AppData/Local/Temp/claude/h/{cli}/scratchpad/p4/x.py",
-                      "D:/pads/first-turn/w/p4/x.py", os.path.join(home, "temportal", "tmp", cli, "x.py")):
-                self.assertTrue(relay.scratch(home, "local_x", n(f)), f)
-            for f in (os.path.join(tmp, "proj", "src", "x.py"), "C:/Users/u/AppData/Local/Temp/claude/h/other/x.py"):
-                self.assertFalse(relay.scratch(home, "local_x", n(f)), f)
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-
     def test_a_childs_slice_names_its_paths_relative_and_no_scratchpad_in_the_store(self):
         """The slice's paths as the project names them. No line names a scratchpad under .claude: the app names each
         session's scratchpad itself, and every write under .claude asks ezexe."""
@@ -401,9 +382,13 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn("the machine branch `mac` of the store ", got[0])
         self.assertIn("is 1 commit behind main", got[0])
 
-    def test_a_deprecation_warns_the_sibling_with_uncommitted_edits_before_any_tool(self):
+    def test_a_deprecation_is_handed_to_a_sibling_whole_and_stops_none_of_its_uncommitted_work(self):
+        """Each session that writes has a git worktree of its own, so a sibling's note and this session's files never
+        name one file on disk: the stop that held a session's uncommitted file against a note's path is gone, here
+        with both sessions in one folder, where the two paths did meet. The note is still handed on in full, once,
+        and the anchor holds the note's paths and no heads or files of the sibling's."""
         t = self.t
-        mine = self.edit_uncommitted(B, ("lib", "x.py"), "b1")
+        self.edit_uncommitted(B, ("lib", "x.py"), "b1")
         self.assertEqual(t.cli(A, "note", f"deprecates: `{self.x('lib', 'x.py')}`; the layout lives in p4conf now",
                                "--source", "commit abc123").returncode, 0)
         self.assertEqual(t.stop(A, "deprecate x", [("Edit", {"file_path": self.x("docs", "d.md")}, "ok")],
@@ -411,19 +396,22 @@ class ThreeSessions(unittest.TestCase):
         anchor = json.load(open(relay.anchor_path(t.p4, TOP), encoding="utf-8"))
         self.assertGreaterEqual(anchor["version"], 1)
         self.assertEqual(anchor["nodes"][A]["marks"][0]["paths"], [relay.norm(self.x("lib", "x.py"))])
-        self.assertTrue(any(h.startswith(relay.norm(self.work) + "@") for h in anchor["nodes"][A]["heads"]))
-        r = t.say(B, "<side-sessions-event>a session finished a turn</side-sessions-event>")
-        ctx = context(r)
-        first = ctx.split("\n\n")[0]
-        self.assertTrue(first.startswith("phi (p4-phi): stop before any tool runs."), ctx[:300])
-        self.assertIn("this session has work/lib/x.py there", first, "paths relative to the project, once")
-        self.assertEqual(first.count(A), 1, "a session's id once")
-        self.assertIn("message " + A, first)
+        for node in anchor["nodes"].values():
+            self.assertEqual(set(node), {"title", "time", "marks", "shard", "plan", "root"}, "no heads and no files")
+        last = [r for r in relay._rows(os.path.join(relay._dir(t.p4, A), "turns.jsonl")) if r.get("delta")][-1]
+        self.assertTrue(any(h.startswith(relay.norm(self.work) + "@") for h in last["delta"]["heads"]),
+                        "the turn's own row keeps its heads, which its outcome and the push line read")
+        self.assertEqual(last["delta"]["files"], [relay.norm(self.x("docs", "d.md"))])
+        ctx = context(t.say(B, "<side-sessions-event>a session finished a turn</side-sessions-event>"))
+        self.assertNotIn("stop before any tool runs", ctx, "no path of B's is held against A's note")
+        self.assertNotIn("this session has", ctx)
         self.assertIn("deprecates: `", ctx)
         self.assertIn("; source: commit abc123", ctx, "a deprecation is given in full, with its source")
+        self.assertNotIn("what else changed beside this session", ctx, "no heads or files of a sibling's")
+        self.assertNotIn("files changed", ctx)
         self.assertEqual(t.session(B)["anchorSeen"], anchor["version"])
+        self.assertNotIn("othersGiven", t.session(B))
         again = context(t.say(B, "carry on"))
-        self.assertNotIn("stop before any tool runs", again, "a warning is given once")
         self.assertNotIn("deprecated or replaced", again, "nothing changed since: quiet")
 
     def test_a_deprecation_of_nothing_this_session_holds_is_handed_on_without_a_warning(self):
@@ -796,44 +784,88 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn('"a": "E:/projects/x/lib/a.py"', pathfilter.smudge(out, root))
         self.assertEqual(pathfilter.project_of("E:/projects/x/.claude/p4"), root)
 
-    def test_overlapping_owned_paths_are_told_on_both_sides(self):
+    def worktree_worker(self, name="the-flush"):
+        """GRAND as a worker the app started in a git worktree of its own, and that worktree's folder."""
+        own = os.path.join(self.work, ".claude", "worktrees", name).replace("\\", "/")
+        subprocess.run(["git", "-C", self.work, "worktree", "add", "-q", "-b", "claude/" + name, own],
+                       check=True, capture_output=True)
+        self.t.record(GRAND, TOP, title="the flush worker", cwd=own)
+        self.assertEqual(self.t.say(GRAND, "Task:\nPort the flush in lib.").returncode, 0)
+        return own
+
+    def holders(self, host, text):
+        """Whom the address book gives a message of `host`'s to, as ids."""
+        import book
+        import phi
+        from unittest import mock
+        with mock.patch.dict(os.environ, self.t.env(host)), mock.patch.dict(phi.RECORDS, clear=True):
+            return [e["id"] for e, _ in book.holders(self.t.p4, self.t.session(host), text)]
+
+    def test_owned_paths_are_kept_for_the_address_book_and_no_sibling_is_told_of_an_overlap(self):
+        """`phi.py shard` keeps a session's owned paths, which the address book lists and routes by. The warning to
+        both sides of an overlap is gone: two sessions' owned paths lie in two worktrees and name different files."""
         t = self.t
         r = t.cli(A, "shard", self.x("lib"))
         self.assertIn("kept as this session's owned paths", r.stdout)
         r = t.cli(B, "shard", self.x("lib", "x.py"), self.x("docs"))
-        self.assertIn("overlaps the owned paths of \"the layout work\"", r.stdout)
-        ctx = context(t.say(A, "next"))
-        self.assertIn(f"the session \"the recall work\" `{B}` declared owned paths that overlap yours", ctx)
-        self.assertNotIn("overlap yours", context(t.say(A, "and next")), "told once")
+        self.assertIn("kept as this session's owned paths", r.stdout)
+        self.assertNotIn("overlap", r.stdout)
+        self.assertNotIn("overlap", context(t.say(A, "next")), "the sibling is told nothing")
+        self.assertEqual(relay.shard_of(t.session(B)), [relay.norm(self.x("lib", "x.py")), relay.norm(self.x("docs"))])
+        anchor = json.load(open(relay.anchor_path(t.p4, TOP), encoding="utf-8"))
+        self.assertEqual(anchor["nodes"][A]["shard"], [relay.norm(self.x("lib"))], "the anchor still holds them")
+        self.assertIsNone(relay.set_shard(t.p4, A, [self.x("lib")], t.proj))
 
-    def test_uncommitted_edits_in_another_sessions_owned_paths_are_stopped(self):
+    def test_uncommitted_edits_in_another_sessions_owned_paths_are_stopped_by_nothing(self):
         t = self.t
         t.cli(A, "shard", self.x("lib"))
         self.edit_uncommitted(B, ("lib", "y.py"), "b1")
         ctx = context(t.say(B, "next"))
-        self.assertIn("inside the owned paths of \"the layout work\"", ctx)
-        self.assertTrue(ctx.startswith("phi (p4-phi): stop before any tool runs."))
+        self.assertNotIn("inside the owned paths of", ctx)
+        self.assertNotIn("stop before any tool runs", ctx)
 
-    def test_a_message_about_another_sessions_owned_paths_is_routed_there(self):
+    def test_a_message_about_another_sessions_owned_paths_is_routed_there_by_the_address_book(self):
+        """relay.owners held the paths a message names against the other sessions' owned paths as absolute paths,
+        which never meet once the owner works in a git worktree of its own. So that compare is gone, and the route
+        line reads the address book, which reads each path from its own repository's root: a message naming a file
+        of the main checkout is sent to the worker that owns it in its worktree."""
         t = self.t
+        for name in ("owners", "touching", "scratch"):
+            self.assertFalse(hasattr(relay, name), name)
         t.cli(A, "shard", self.x("lib"))
         ctx = context(t.say(B, f"please fix {self.x('lib', 'y.py')} too"))
-        self.assertIn(f"among the owned paths of \"the layout work\" `{A}`. Send it there with SendMessage", ctx)
+        self.assertIn(f"among the owned paths of \"the layout work\" `{A}`. Send it there with SendMessage to {A}", ctx)
         self.assertNotIn("Send it there", context(t.say(B, f"please fix {self.x('docs', 'd.md')}")),
                          "a path no session owns stays here")
         self.assertNotIn("Send it there", context(t.say(TOP, f"look at {self.x('lib', 'y.py')}")),
                          "a parent's owned paths cover its children's: the parent is not routed down")
+        own = self.worktree_worker()
+        self.assertEqual(t.cli(GRAND, "shard", own + "/docs").returncode, 0)
+        named = f"please fix {self.x('docs', 'd.md')} too"
+        self.assertFalse(relay.overlap(relay.norm(self.x("docs", "d.md")), relay.norm(own + "/docs")),
+                         "the main checkout's path and the worktree's never meet as paths")
+        self.assertEqual(self.holders(B, named), [GRAND], "the address book finds the worker in its worktree")
+        ctx = context(t.say(B, named))
+        self.assertIn(f"this message names docs, among the owned paths of \"the flush worker\" `{GRAND}`. Send it "
+                      f"there with SendMessage to {GRAND}", ctx)
+        import book
+        import phi
+        from unittest import mock
+        with mock.patch.dict(os.environ, t.env(B)), mock.patch.dict(phi.RECORDS, clear=True):
+            s = t.session(B)
+            self.assertEqual(book.holders(t.p4, s, "Port the flush in lib/x.py", owned=True), [],
+                             "the files a brief covers route no message beside a prompt")
 
     def test_an_archived_session_owns_no_paths_and_is_not_listed(self):
         """An archived session owns no paths a message is routed by."""
         t = self.t
         t.cli(A, "shard", self.x("lib"))
-        self.assertEqual(relay.owners(t.p4, B, f"please fix {self.x('lib', 'y.py')}", t.proj)[0][0], A)
+        self.assertEqual(self.holders(B, f"please fix {self.x('lib', 'y.py')}"), [A])
         rec = os.path.join(t.app, A + ".json")
         d = json.loads(open(rec, encoding="utf-8").read())
         d["isArchived"] = True
         write(rec, json.dumps(d))
-        self.assertEqual(relay.owners(t.p4, B, f"please fix {self.x('lib', 'y.py')}", t.proj), [])
+        self.assertEqual(self.holders(B, f"please fix {self.x('lib', 'y.py')}"), [])
         self.assertNotIn("Send it there", context(t.say(B, f"please fix {self.x('lib', 'y.py')} too")))
 
     def test_the_project_root_the_store_and_a_drive_name_no_owned_paths(self):
@@ -842,8 +874,8 @@ class ThreeSessions(unittest.TestCase):
         t = self.t
         t.cli(A, "shard", self.x("lib"))
         for whole in (t.proj, t.p4, os.path.dirname(t.proj), os.path.splitdrive(t.proj)[0] + "/"):
-            self.assertEqual(relay.owners(t.p4, B, f"work in `{whole}` on the docs", t.proj), [], whole)
-        self.assertEqual(len(relay.owners(t.p4, B, f"work in `{t.proj}` on `{self.x('lib', 'y.py')}`", t.proj)), 1,
+            self.assertEqual(self.holders(B, f"work in `{whole}` on the docs"), [], whole)
+        self.assertEqual(self.holders(B, f"work in `{t.proj}` on `{self.x('lib', 'y.py')}`"), [A],
                          "a real path beside the root is still routed")
         t.cli(TOP, "shard", self.x("docs"))
         advised, why = relay.advise_start(t.p4, TOP, {"prompt": f"Check one thing in `{t.proj}`, read-only"}, 10 * 1024)
@@ -851,6 +883,17 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn("names no path", why)
         self.assertTrue(relay.names_nothing(relay.norm(t.proj), t.p4, t.proj))
         self.assertFalse(relay.names_nothing(self.x("lib"), t.p4, t.proj))
+
+    def test_a_sessions_scope_is_its_own_files_and_none_of_its_childrens(self):
+        """relay.scope_of gave a start's advice and a puppeteer's routing the files of a session's children from its
+        anchor. A child's files lie in its own worktree, where no path a brief or a message names from the parent's
+        folder leads, so the scope is the session's owned paths, else the files of its own latest delta."""
+        t = self.t
+        t.stop(TOP, "its own edit", [("Edit", {"file_path": self.x("docs", "d.md")}, "ok")], uuid="t1")
+        t.stop(A, "a child's edit", [("Edit", {"file_path": self.x("lib", "x.py")}, "ok")], uuid="a1")
+        self.assertEqual(relay.scope_of(t.p4, TOP), [relay.norm(self.x("docs", "d.md"))])
+        t.cli(TOP, "shard", self.x("lib"))
+        self.assertEqual(relay.scope_of(t.p4, TOP), [relay.norm(self.x("lib"))])
 
     def test_nothing_new_is_quiet(self):
         t = self.t
@@ -925,6 +968,58 @@ class ForkOrFresh(ThreeSessions):
         self.t.cli(TOP, "shard", self.x("lib"))
         out = self.advise(TOP, "fresh", f"Rework `{self.x('lib')}`", 10 * 1024)
         self.assertIn('advises context "fork"', out["permissionDecisionReason"])
+
+    def writer(self, host, context_, size=10 * 1024, cwd=None, **more):
+        """The start-advice hook for a call whose brief writes `lib/x.py`, from `host` working in `cwd`."""
+        path = os.path.join(self._tmp.name, host + "-writer.jsonl")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("x" * size)
+        r = self.t.hook("start-advice", host, {
+            "hook_event_name": "PreToolUse", "tool_name": "mcp__ccd_session__start_session", "transcript_path": path,
+            **({"cwd": cwd} if cwd else {}),
+            "tool_input": {"initiation": "user_asked", "context": context_, "title": "the lib rework",
+                           "prompt": f"Rework `{self.x('lib')}` and commit it.\nFiles: {self.x('lib', 'x.py')}",
+                           **more}})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
+
+    def test_a_writer_is_never_advised_to_fork_from_a_plain_checkout_and_a_fork_of_one_is_asked_about(self):
+        """The case the move to worktrees left open. The start tool's own text: `use_worktree` is "\"fresh\" only
+        (rejected with \"fork\")", and a fork "from a worktree session gets a fresh worktree" and "from a plain
+        checkout it shares the folder". So a fork cannot be given a worktree, and from a plain checkout a forked
+        session that writes shares its starter's files. p4-phi never advises that fork, where size and paths would
+        have, and asks about a call that makes it. A fork of a session that works in a worktree gets its own, so
+        there the advice goes by size and paths as before, and a brief that only reads forks as before."""
+        import phi
+        import starts
+        t = self.t
+        t.cli(TOP, "shard", self.x("lib"))
+        brief = f"Rework `{self.x('lib')}` and commit it.\nFiles: {self.x('lib', 'x.py')}"
+        self.assertTrue(starts.writes(brief, t.proj))
+        self.assertEqual(relay.advise_start(t.p4, TOP, {"prompt": brief}, 10 * 1024)[0], "fresh", "a plain checkout")
+        self.assertEqual(relay.advise_start(t.p4, TOP, {"prompt": brief}, 10 * 1024, apart=True)[0], "fork")
+        self.assertFalse(phi.fork_apart(self.work), "the main checkout is a plain one")
+        self.assertFalse(phi.fork_apart(self._tmp.name), "and so is a folder of no repository")
+        for extra in ({}, {"use_worktree": True}, {"use_worktree": False}):
+            self.assertIsNone(self.writer(TOP, "fresh", cwd=self.work, **extra), f"never advised to fork: {extra}")
+        out = self.writer(TOP, "fork", cwd=self.work)
+        self.assertEqual(out["permissionDecision"], "ask", "asked, never blocked")
+        why = out["permissionDecisionReason"]
+        self.assertIn('advises context "fresh" here, not "fork"', why)
+        self.assertIn("a fork from a plain checkout shares its starter's folder", why)
+        self.assertIn("`use_worktree: true`", why)
+        own = os.path.join(self.work, ".claude", "worktrees", "the-top").replace("\\", "/")
+        subprocess.run(["git", "-C", self.work, "worktree", "add", "-q", "-b", "claude/the-top", own],
+                       check=True, capture_output=True)
+        self.assertTrue(phi.fork_apart(own), "a linked worktree: its fork gets a fresh one")
+        self.assertIsNone(self.writer(TOP, "fork", cwd=own), "a fork of a worktree session is its own to make")
+        self.assertIn("3.0 MB", self.writer(TOP, "fork", size=3 * 1024 * 1024, cwd=own)["permissionDecisionReason"],
+                      "and is still advised fresh by its parent's size")
+        self.assertIsNone(self.advise(TOP, "fork", f"Rework `{self.x('lib')}`", 200 * 1024),
+                          "a brief that only reads forks from a plain checkout as before")
+        import puppeteer
+        import inspect
+        self.assertIn('context = "fresh"', inspect.getsource(puppeteer.prompter), "every drafted start is fresh")
 
     def test_a_start_with_its_own_worktree_or_branch_is_not_asked(self):
         """A session that writes gets a git worktree and a branch of its own, worktrees.md, "Running each Claude Code
@@ -1142,7 +1237,8 @@ class ForkOrFresh(ThreeSessions):
         self.assertIn("deprecates: `", ctx)
         self.assertIn("; source: commit aaa111", ctx)
         self.assertNotIn("bbb222", ctx, "what does not touch the child's paths is left out")
-        self.assertIn("Heads to build on:", ctx)
+        for gone in ("Heads to build on:", "Changed there:"):
+            self.assertNotIn(gone, ctx, "a sibling's files and heads lie in its own worktree: nothing to build on")
 
     def test_a_fresh_childs_start_waits_for_its_brief_and_replaces_the_parents_background(self):
         """No slice before the brief, and the slice holds the parent's notes on the child's paths and no sibling's last

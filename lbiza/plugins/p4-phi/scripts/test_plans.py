@@ -446,16 +446,15 @@ class TreeOfPlans(unittest.TestCase):
             task = plans._agent(plans.load(t.p4, A), agent_id)
             self.assertEqual(set(task), {"id", "tool", "agent", "status", "anchorSeen", "stepText"}, "no field added")
 
-    def test_a_subagent_hears_a_siblings_unchanged_files_once(self):
-        """ezexe/p4#196: a sibling of the launching session with no notes changes its entry in the parent's anchor
-        twice more with the same files, and the subagent's tool calls, through `lookup-check`, give the files line
-        once; files that differ are said again. The line already given is found in the subagent's own transcript,
-        where Claude Code keeps the context a PreToolUse hook added."""
+    def test_a_subagent_is_told_no_file_a_sibling_changed(self):
+        """A sibling of the launching session works in a git worktree of its own, so a file it changed is not under
+        the subagent's hands: the anchor holds no files, and the subagent's tool calls, through `lookup-check`, give
+        no files line however often the sibling's entry changes. A sibling's note still reaches it."""
         t = self.t
         docs = f"{t.proj}/docs/layout.md".replace("\\", "/")
         t.say(B, "Write the layout docs")
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
-        self.subagent("agente196")
+        self.subagent("agente196", started=time.time() - 120)
         n = iter(range(100))
 
         def call():
@@ -466,15 +465,16 @@ class TreeOfPlans(unittest.TestCase):
                report="Wrote the layout page.")
         steps = ("Write the layout docs", "Check the docs build", "Commit the docs")
         told = [call()]
-        for at in range(2):                       # its entry changes twice more, its files the same
+        for at in range(2):                       # its entry changes twice more
             self.plan(B, items(*steps, at=at))
             told.append(call())
-        self.assertEqual(["changed docs/layout.md" in x for x in told], [True, False, False], told)
-        self.assertIn("\"the docs child\": changed docs/layout.md", told[0])
-        more = f"{t.proj}/docs/build.md".replace("\\", "/")
-        t.stop(B, "Write the layout docs", calls=[("Write", {"file_path": more, "content": "x"}, "ok")],
-               report="Wrote the build page.", uuid="u1")
-        self.assertIn("docs/build.md", call(), "files that differ are said")
+        self.assertEqual([x for x in told if "changed" in x or "layout.md" in x], [], told)
+        anchor = relay._read_json(relay.anchor_path(t.p4, TOP))
+        self.assertNotIn("files", anchor["nodes"][B])
+        self.assertNotIn("heads", anchor["nodes"][B])
+        t.cli(B, "note", "replaces: the old docs layout in docs/layout.md", "--source", "test")
+        self.plan(B, items(*steps, at=2))
+        self.assertIn("\"the docs child\": replaces: the old docs layout", call(), "its note is still told")
         task = plans._agent(plans.load(t.p4, A), "agente196")
         self.assertEqual(set(task), {"id", "tool", "agent", "status", "anchorSeen", "stepText"}, "no field added")
 

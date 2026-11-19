@@ -5,26 +5,26 @@ The functions that read the store take its home and session ids. phi.py calls th
 plans.py, issues.py, puppeteer.py, controls.py, starts.py, gaps.py and prompty_eval.py call them too.
 
   owned paths  what a session alone may change: paths or globs, set by `phi.py shard <paths>` and kept in its
-          session.json as `shard`. A parent's owned paths cover its children's. When two sessions under the same
-          parent declare owned paths that overlap, both are told: the one declaring in the command's output, the
-          other at its next message.
+          session.json as `shard`. The address book lists them and routes a message by them, as book.py says, and a
+          start's advice and a puppeteer's routing read them as a session's scope. No session is held against
+          another's: each session that writes works in a git worktree of its own, so two sessions' paths name
+          different files on disk and never meet.
   delta   a turn's change, kept on its row in turns.jsonl at Stop: the branch heads of the repositories it edited
           in, the files it changed, and its `deprecates:` and `replaces:` notes written since its last turn, with
-          the paths they name.
-  anchor  <parent's folder>/anchor.json: each child's latest delta, its marked notes, owned paths, task list and
-          parent step, and the parent's own marked notes, owned paths and task list, under a version that goes up
-          when any of that changes. The orchestrators share phi/anchor.json, which holds no heads or files. It is
-          made again at Stop, at `phi.py shard`, at each update_plan call and when a subagent is bound.
-  rebase  at every message a session is given, including the app's side-session events: when its parent's anchor
-          is newer than the version it last saw, the other sessions' deprecations and replacements that touch its
-          task, owned paths or open steps, in full, the rest by count and the pages that hold them, then their other
-          deltas, cut evenly to the room phi.py gives this text. A first look takes what is there as seen, and a
-          fork that declared owned paths is given only what touches them. Before any tool runs, a warning for each
-          of its uncommitted files or owned paths that a newer deprecation or replacement names, and for each of its
-          uncommitted files inside another session's owned paths: stop that work and message that session. Nothing
-          when nothing changed; a warning is given once.
+          the paths they name. The heads and files are the session's own record, which its outcome, its closing
+          commits and the push line read.
+  anchor  <parent's folder>/anchor.json: each child's marked notes, owned paths, task list and parent step, and the
+          parent's own marked notes, owned paths and task list, under a version that goes up when any of that
+          changes. It holds no heads and no files: another session's lie in another worktree, nothing to build on
+          before the tree's orchestrator merges its branch. The orchestrators share phi/anchor.json. It is made
+          again at Stop, at `phi.py shard`, at each update_plan call and when a subagent is bound.
   route   a message that names a path inside another session's owned paths belongs to that session: the session is
-          told to send it there with SendMessage.
+          told to send it there with SendMessage. The address book finds the owner, as book.holders says.
+  rebase  at every message a session is given, including the app's side-session events: first the warnings other
+          code kept for it with relay.warn, each once. Then, when its parent's anchor is newer than the version it
+          last saw, the other sessions' deprecations and replacements whose words touch its task or open steps, in
+          full, the rest by count and the pages that hold them, cut to the room phi.py gives this text. A first look
+          takes what is there as seen. Nothing when nothing changed.
 
 The rest of the module keeps phi/ in the store's git, maps a shared store's remote to this machine's folder, advises
 fork or fresh for a start, cuts a title at a clause, fences off a finished child whose work a newer note supersedes,
@@ -280,8 +280,9 @@ def shard_of(s):
 
 
 def set_shard(home, sid, paths, base):
-    """Keeps `paths` as the session's owned paths and returns the lines to print, one per sibling whose owned paths
-    overlap them. The sibling is told at its next message too."""
+    """Keeps `paths` as the session's owned paths, which the address book lists and routes a message by, and makes
+    its parent's anchor again. No sibling is told of an overlap: each session that writes works in a git worktree
+    of its own, so two sessions' owned paths name different files on disk."""
     path = os.path.join(_dir(home, sid), "session.json")
     s = _read_json(path)
     if not s:
@@ -291,19 +292,7 @@ def set_shard(home, sid, paths, base):
         raise ValueError("name the paths or globs this session alone may change")
     s["shard"] = shard
     _write_json(path, s)
-    # the siblings see these owned paths at their next message
     make_anchor(home, _parent(s), time.strftime("%Y-%m-%d %H:%M"))
-    lines = []
-    for o, os_ in _siblings(home, s).items():
-        hits = sorted({f"{a} and {b}" for a in shard for b in shard_of(os_) if overlap(a, b)})
-        if not hits:
-            continue
-        lines.append(f"overlaps the owned paths of \"{_title(os_)}\" `{o}`: {'; '.join(hits[:5])}. Agree with that "
-                     f"session, by SendMessage to {o}, who changes what, before either edits it.")
-        warn(home, o, f"shard:{sid}:{','.join(shard)}",
-             f"the session \"{_title(s)}\" `{sid}` declared owned paths that overlap yours: {'; '.join(hits[:5])}. "
-             f"Agree with it, by SendMessage to {sid}, who changes what, before either edits it.")
-    return lines
 
 
 def _siblings(home, s):
@@ -523,12 +512,13 @@ def anchor_path(home, parent):
 
 
 def make_anchor(home, parent, now):
-    """Makes <parent>/anchor.json again from each child's latest delta, marked notes, owned paths, task list and
-    parent step and from the parent's own marked notes, owned paths and task list; with no parent, phi/anchor.json
-    from the orchestrators' marked notes, owned paths and task lists. A finished child that a newer note
-    supersedes is fenced off here. Its version goes up only when that content changed. Returns the anchor."""
+    """Makes <parent>/anchor.json again from each child's marked notes, owned paths, task list and parent step and
+    from the parent's own marked notes, owned paths and task list; with no parent, phi/anchor.json from the
+    orchestrators' marked notes, owned paths and task lists. A child's node carries the time of its latest delta
+    and none of that delta's heads or files, which lie in the child's own worktree. A finished child that a newer
+    note supersedes is fenced off here. Its version goes up only when that content changed. Returns the anchor."""
     import plans                                  # the task lists: each session's steps, statuses and current step
-    root = not parent                             # the orchestrators: never heads or files
+    root = not parent                             # the orchestrators, which nobody started
     every = _sessions(home)
     nodes = {}
     for sid, s in every.items():
@@ -542,10 +532,7 @@ def make_anchor(home, parent, now):
         marks = _all_marks(home, sid)
         plan = plans.summary(home, sid)
         if last or marks or shard_of(s) or plan:
-            d = (last or {}).get("delta") or {}
-            nodes[sid] = {"title": _title(s), "time": str((last or {}).get("time") or ""),
-                          "heads": [] if root else d.get("heads") or [], "files": [] if root else d.get("files") or [],
-                          "marks": marks,
+            nodes[sid] = {"title": _title(s), "time": str((last or {}).get("time") or ""), "marks": marks,
                           "shard": shard_of(s), "plan": plan, "root": str(s.get("rootStep") or "")}
     own = {} if root else {"title": _title(every.get(parent, {})), "marks": _all_marks(home, parent),
                            "shard": shard_of(every.get(parent, {})), "plan": plans.summary(home, parent)}
@@ -665,22 +652,6 @@ def too_broad(p, home):
     return bool(repo_of(p) == p and os.path.isdir(p))
 
 
-def scratch(home, sid, f):
-    """True for a file in one of the session's scratchpads: the app's scratchpad directory of any of its CLI sessions,
-    `<id>/scratchpad` under the temp folder, the one hooks get as `scratchpad_dir` and phi keeps as `scratchpadDir`,
-    or the store's temportal/tmp, where a session started before p4-temportal 0.3.10 had its scratchpad linked. Such
-    a file, a clone's among them, is never a conflict, so another session's note warns of no scratch file."""
-    if covers(norm(os.path.join(home, "temportal", "tmp")), f):
-        return True
-    s = _session(home, sid)
-    pad = norm(s.get("scratchpadDir")) if isinstance(s.get("scratchpadDir"), str) else ""
-    if pad and covers(pad, f):
-        return True
-    low = "/" + str(f).replace("\\", "/").lower() + "/"
-    return any(f"/{c.lower()}/scratchpad/" in low for c in s.get("cliSessionIds") or []
-               if isinstance(c, str) and len(c) >= 8)
-
-
 FAR_WHOLE = 400                  # notes that do not touch a session are still shown when all of them are this short
 STOP_HEAD = "phi (p4-phi): stop before any tool runs. "      # the head of the warnings, which lead a session's text
 
@@ -697,22 +668,14 @@ def page_of(home, nid):
     return os.path.join(_dir(home, nid), "session.md").replace("\\", "/")
 
 
-def touching(s, m, touches, edited=()):
-    """True when a sibling's mark bears on this session: a path it names lies in the session's owned paths or among
-    the files it changed, or `touches` finds its words in the session's task or open steps."""
-    own = list(shard_of(s)) + list(edited)
-    if any(overlap(p, o) for p in m.get("paths") or [] for o in own):
-        return True
-    return bool(touches and touches(str(m.get("claim") or "")))
-
-
 def rebase(home, sid, room, fair_cut, touches=None):
     """Returns the text a session is given at this message, '' when nothing changed, and whether its session.json
-    changed. With `touches`, a sibling's deprecation or replacement is given in full only when it touches this
-    session's task, owned paths or open steps; the rest is a count and the pages that hold them. The warnings are
-    given whole, each once, since a hook's text past the app's cap goes to the app's own file. What the other
-    sessions changed is cut to `room`, the rest named by count and by their sessions' pages, and none of it comes
-    again."""
+    changed. With `touches`, a sibling's deprecation or replacement is given in full only when its words touch this
+    session's task or open steps; the rest is a count and the pages that hold them. The warnings other code kept
+    with relay.warn are given whole, each once, since a hook's text past the app's cap goes to the app's own file.
+    The notes are cut to `room`, the rest named by count and by their sessions' pages, and none of it comes again.
+    No path of this session is held against another's notes or owned paths: each session that writes works in a
+    git worktree of its own, so the two never name one file on disk."""
     path = os.path.join(_dir(home, sid), "session.json")
     with locked(path) as lk:                      # the warnings are emptied under the lock relay.warn holds
         return _rebase(home, sid, room, fair_cut, touches, path, lk.held)
@@ -722,7 +685,6 @@ def _rebase(home, sid, room, fair_cut, touches, path, held):
     s = _read_json(path)
     if not s:
         return "", False
-    base = s.get("cwd") or ""
     if s.get("stale"):
         st = s["stale"]
         if st.get("told"):
@@ -735,7 +697,6 @@ def _rebase(home, sid, room, fair_cut, touches, path, held):
                 f"\"{st.get('note')}\". Re-base onto that before going on; its outcome is kept as a note on its "
                 f"parent session."), True
     warnings = take_warnings(home, sid, s) if held else []     # not held: they wait for the next message
-    told = s.setdefault("relayWarned", [])
     parent = _parent(s)
     anchor = _read_json(anchor_path(home, parent))
     if "anchorSeen" not in s:                     # the first look takes what is there as seen and hands none of it
@@ -745,7 +706,7 @@ def _rebase(home, sid, room, fair_cut, touches, path, held):
     given = s.setdefault("marksGiven", [])
     version = int(anchor.get("version") or 0)
     fresh = version > seen
-    marks, others = [], []
+    marks = []
     if fresh:
         changed = anchor.get("changedAt") or {}
         nodes = sorted((anchor.get("nodes") or {}).items())
@@ -758,62 +719,9 @@ def _rebase(home, sid, room, fair_cut, touches, path, held):
                 if key not in given:
                     given.append(key)
                     marks.append((nid, n.get("title") or nid, m))
-            if nid == parent:
-                continue
-            bits = []
-            if n.get("heads"):
-                bits.append("heads " + ", ".join(show_head(h, base) for h in n["heads"]))
-            if n.get("files"):
-                bits.append(f"files changed, {len(n['files'])} in all: "
-                            + ", ".join(show(f, base) for f in n["files"][:12])
-                            + (" ..." if len(n["files"]) > 12 else ""))
-            mark = hashlib.sha1(json.dumps([n.get("heads"), n.get("files")]).encode()).hexdigest()[:10]
-            if bits and (s.setdefault("othersGiven", {}).get(nid) != mark):
-                s["othersGiven"][nid] = mark
-                others.append(f"- \"{n.get('title') or nid}\" `{nid}`: " + "; ".join(bits))
         s["anchorSeen"] = version
         del given[:-400]                               # the newest keys are enough to tell a mark already given
-        if s.get("forked") and shard_of(s):          # a fork keeps its own agenda: only what touches its owned paths
-            own = shard_of(s)
-            marks = [x for x in marks if any(overlap(p, o) for p in x[2].get("paths") or [] for o in own)]
-            others = [line for line in others if any(show(o, base) in line for o in own)]
-    # the direct warnings: uncommitted files and owned paths against what is deprecated, and against other sessions'
-    # owned paths. git is asked only when a mark or owned paths are there to hold them against, which saves two
-    # `git status` runs a message
-    held = []
-
-    def mine_now():
-        if not held:
-            held.append([f for f in uncommitted(edited_files(home, sid)) if not scratch(home, sid, f)])
-        return held[0]
-    shard = shard_of(s)
-    every_mark = [(nid, n.get("title") or nid, m) for nid, n in (anchor.get("nodes") or {}).items() if nid != sid
-                  for m in n.get("marks") or []]
-    every_mark += [(parent, (anchor.get("parent") or {}).get("title") or parent, m)
-                   for m in (anchor.get("parent") or {}).get("marks") or []]
-    for nid, title, m in every_mark:
-        for p in m.get("paths") or []:
-            key = f"mark:{nid}:{m.get('time')}:{p}"
-            if key in told or too_broad(p, home):
-                continue
-            hit = sorted({f for f in mine_now() if covers(p, f) or covers(f, p)} | {x for x in shard if overlap(x, p)})
-            if hit and key not in told:
-                told.append(key)
-                warnings.append(f"\"{title}\" wrote \"{_short(m.get('claim'), 300)}\", which names {show(p, base)}; "
-                                f"this session has {', '.join(show(h, base) for h in hit[:5])} there. Stop that work "
-                                f"and message {nid} by SendMessage before going on.")
-    for nid, n in (anchor.get("nodes") or {}).items():
-        if nid == sid:
-            continue
-        for pat in n.get("shard") or []:
-            hit = sorted({f for f in mine_now() if covers(pat, f)})
-            key = f"shard-edit:{nid}:{pat}:{','.join(hit)}"
-            if hit and key not in told:
-                told.append(key)
-                warnings.append(f"this session has uncommitted changes to {', '.join(show(h, base) for h in hit[:5])}, "
-                                f"inside the owned paths of \"{n.get('title') or nid}\", {show(pat, base)}. Stop that "
-                                f"work and message {nid} by SendMessage; that session alone changes it.")
-    if not (warnings or marks or others):
+    if not (warnings or marks):
         _write_json(path, s)
         return "", fresh
     parts, used = [], 0
@@ -822,8 +730,7 @@ def _rebase(home, sid, room, fair_cut, touches, path, held):
         parts.append(line)
         used += len(line) + 2
     if marks:
-        edited = edited_files(home, sid) if touches is not None else []
-        near = [x for x in marks if touches is None or touching(s, x[2], touches, edited)]
+        near = [x for x in marks if touches is None or touches(str(x[2].get("claim") or ""))]
         far = [x for x in marks if x not in near]
         if far and sum(len(str(m.get("claim"))) + len(str(m.get("source"))) + len(str(tt)) + 60
                        for _, tt, m in far) <= FAR_WHOLE:
@@ -852,19 +759,10 @@ def _rebase(home, sid, room, fair_cut, touches, path, held):
                     f"{os.path.dirname(_dir(home, sid)).replace(chr(92), '/')}") \
                 if len(by) > 3 else ""
             bits.append(f"phi (p4-phi): deprecation or replacement notes not shown: {len(far)}, from the sessions "
-                        f"beside this one at anchor v{version}. They do not touch this session's task, owned paths or "
-                        f"open steps, or did not fit, and are whole on their sessions' pages: {named}{more}.")
+                        f"beside this one at anchor v{version}. They do not touch this session's task or open "
+                        f"steps, or did not fit, and are whole on their sessions' pages: {named}{more}.")
         parts += bits
         used += sum(len(x) + 2 for x in bits)
-    if others:
-        left = max(0, room - used - 200)
-        keep = others[:max(0, left // 160)]
-        cut = fair_cut(keep, left) if left and keep else []
-        if cut:
-            more = f"\n- and {len(others) - len(cut)} more did not fit here." \
-                if len(others) > len(cut) else ""
-            parts.append("phi (p4-phi): what else changed beside this session since it last looked:\n"
-                         + "\n".join(cut) + more)
     _write_json(path, s)
     return "\n\n".join(parts), True
 
@@ -924,46 +822,19 @@ def names_nothing(p, home, base=""):
     return any(covers(p, r) for r in roots)
 
 
-def owners(home, sid, text, base):
-    """The other live sessions whose owned paths hold a path the message names, the deepest first, each as its
-    sessionId, title and pattern: the sessions the message belongs to. A session that is not live owns nothing, and
-    a path naming the whole project names no session's owned paths."""
-    named = [n for n in paths_in(text, base) if not names_nothing(n, home, base)]
-    if not named:
-        return []
-    every = _sessions(home)
-    me = every.get(sid, {})
-    above = set()
-    p = _parent(me)
-    while p and p not in above:
-        above.add(p)
-        p = _parent(every.get(p, {}))
-    below, grow = set(), {sid}                    # a parent's owned paths cover its children's: never routed down
-    while grow:
-        grow = {k for k, v in every.items() if _parent(v) in grow and k not in below and k != sid}
-        below |= grow
-    out = []
-    for oid, s in every.items():
-        if oid == sid or oid in above or oid in below or gone(home, s):
-            continue
-        for pat in shard_of(s):
-            if names_nothing(pat, home, base):
-                continue
-            if any(covers(pat, n) or covers(n, pat) for n in named):
-                out.append((oid, _title(s), pat))
-                break
-    return sorted(out, key=lambda x: -len(_root(x[2])))
-
-
-def route_text(home, sid, text, base):
-    got = owners(home, sid, text, base)
+def route_text(home, s, text, store=""):
+    """The line beside a message that names a path among another live session's owned paths: the message belongs
+    to that session, so this one is told to send it there with SendMessage. The owner is found by the address
+    book, book.holders, which reads each path from its own repository's root and so finds a worker in a git
+    worktree of its own, where one absolute path held against another never meets. The files a brief covers and
+    an issue route nothing here: the address book reads those before a message is sent."""
+    import book
+    got = book.holders(home, s, text, store, owned=True)
     if not got:
         return ""
-    oid, _, pat = got[0]
-    import book                                    # the session by its whole title
-    return (f"phi (p4-phi): this message names {pat}, among the owned paths of \"{book.title(oid, _session(home, oid))}\" "
-            f"`{oid}`. Send it there "
-            f"with SendMessage to {oid} instead of working on it here.")
+    e, what = got[0]
+    return (f"phi (p4-phi): this message names {what}, among the owned paths of \"{e['title']}\" `{e['id']}`. Send "
+            f"it there with SendMessage to {e['id']} instead of working on it here.")
 
 
 # --- fork or fresh -----------------------------------------------------------------------------------------------------
@@ -975,13 +846,19 @@ def route_text(home, sid, text, base):
 # needs. Under 1 MB, 17 of 22 children were fresh and the parent held little. So a fork is advised only from a parent
 # whose transcript is at most FORK_MAX_BYTES, for a child whose paths cover at least FORK_SHARE of the parent's
 # scope; otherwise a fresh session.
+#
+# A session that writes is never advised to fork where the fork would share its starter's folder. The start tool's
+# own text gives `use_worktree` as "\"fresh\" only (rejected with \"fork\")", and says of `context` that a fork
+# "from a worktree session gets a fresh worktree" and "from a plain checkout it shares the folder". So a fork cannot
+# be given a worktree, and only a fork of a session that works in one gets its own.
 
 FORK_MAX_BYTES = 1024 * 1024
 FORK_SHARE = 0.5
 
 
 def scope_of(home, sid):
-    """What a session covers: its owned paths, else the files its latest delta and its children's anchor name."""
+    """What a session covers: its owned paths, else the files its latest delta names. Its children's files are no
+    part of it: each lies in the child's own worktree, where no path a message or a brief names from here leads."""
     s = _session(home, sid)
     if shard_of(s):
         return shard_of(s)
@@ -990,15 +867,21 @@ def scope_of(home, sid):
         if isinstance(r.get("delta"), dict):
             files.update(r["delta"].get("files") or [])
             break
-    for n in (_read_json(anchor_path(home, sid)).get("nodes") or {}).values():
-        files.update(n.get("files") or [])
     return sorted(files)
 
 
-def advise_start(home, parent, tool_input, transcript_bytes):
-    """What is advised for a start_session call from `parent`, "fork" or "fresh", and why."""
+def advise_start(home, parent, tool_input, transcript_bytes, apart=False):
+    """What is advised for a start_session call from `parent`, "fork" or "fresh", and why. `apart` says a fork of
+    `parent` gets a git worktree of its own, as a fork of a session that works in one does. Without it a fork shares
+    `parent`'s folder, so a brief that writes, as starts.writes reads it, is advised fresh whatever its size and
+    paths."""
     s = _session(home, parent)
     base = s.get("cwd") or ""
+    import starts                                 # starts.py reads relay.py at its import, so it is read here
+    if not apart and starts.writes(str(tool_input.get("prompt") or ""), base):
+        return "fresh", ("the brief is of a session that writes, and a fork from a plain checkout shares its "
+                         "starter's folder, where the start tool rejects `use_worktree` with a fork. A fresh session "
+                         "started with `use_worktree: true` works in a git worktree and on a branch of its own")
     brief = " ".join(str(tool_input.get(k) or "") for k in ("prompt", "background", "title"))
     child = [c for c in paths_in(brief, base) if not names_nothing(c, home, base)]
     scope = [p for p in scope_of(home, parent) if not names_nothing(p, home, base)]
@@ -1032,8 +915,10 @@ def pin_text(s):
 
 
 def slice_text(home, s):
-    """A fresh child's start: what its parent's anchor holds for the child's paths, its owned paths or those its
-    task names, and nothing else. One line when the parent has nothing for them."""
+    """A fresh child's start: what its parent's anchor and notes hold for the child's paths, its owned paths or
+    those its task names, and nothing else: the deprecations and replacements that name them and the parent's notes
+    about them. It names no file another session changed and no head to build on, since those lie in the other
+    sessions' worktrees. One line when the parent has nothing for them."""
     parent = _parent(s)
     if not parent:
         return ""
@@ -1047,7 +932,7 @@ def slice_text(home, s):
     head = (f"phi (p4-phi): what the parent, \"{_title(ps)}\", has for this session's paths, "
             f"{', '.join(show(p, base) for p in mine[:5])}, from its anchor v{ver}.")   # by its title alone: no
     # session is handed a run of the words of a prompt sent to another
-    marks, heads, files = [], set(), []
+    marks = []
     every = list((anchor.get("nodes") or {}).items()) + [(parent, anchor.get("parent") or {})]
     for nid, n in every:
         if nid == s.get("sessionId"):
@@ -1055,23 +940,17 @@ def slice_text(home, s):
         for m in n.get("marks") or []:
             if any(overlap(p, x) for p in m.get("paths") or [] for x in mine):
                 marks.append(f"- \"{n.get('title') or nid}\": {m.get('claim')}; source: {m.get('source')}")
-        touched = [f for f in n.get("files") or [] if any(covers(x, f) for x in mine)]
-        if touched:
-            files.append(f"- \"{n.get('title') or nid}\" changed {', '.join(touched[:8])}")
-            heads.update(n.get("heads") or [])
     notes = [f"- {_short(r.get('claim'), 300)}; source: {_short(r.get('source'), 120)}"
              for r in _rows(os.path.join(_dir(home, parent), "notes.jsonl"))
              if not str(r.get("claim") or "").lower().startswith(MARKS)
              and any(overlap(p, x) for p in paths_in(r.get("claim"), base) for x in mine)]
-    if not (marks or files or notes):
+    if not (marks or notes):
         return head + " It has nothing for them yet."
     out = [head]
     if marks:
         out += ["Deprecated or replaced there, in full:"] + marks
     if notes:
         out += ["Notes about them:"] + notes
-    if files:
-        out += ["Changed there:"] + files + (["Heads to build on: " + ", ".join(sorted(heads))] if heads else [])
     return "\n".join(out)
 
 

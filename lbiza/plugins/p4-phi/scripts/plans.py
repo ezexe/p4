@@ -954,8 +954,9 @@ def agent_warn(home, s, agent_id, transcript=""):
     and its step revised or gone; '' when nothing did. `transcript` is the subagent's own, which says when it
     started and what it has heard, so the task keeps neither: a sibling's note is told when it was written after the
     start, a note carrying its minute and one of the start's own minute counting as there before it, and a line is
-    told when the transcript does not hold it already, so a sibling's files are said once and again when the line
-    names other files. While the transcript cannot be read, what the siblings changed waits."""
+    told when the transcript does not hold it already. No file a sibling changed is named: the anchor holds none,
+    since a sibling's files lie in its own worktree and not under the subagent's hands. While the transcript cannot
+    be read, the siblings' notes wait."""
     sid = s["sessionId"]
     p = load(home, sid)
     t = _agent(p, agent_id)
@@ -972,10 +973,7 @@ def agent_warn(home, s, agent_id, transcript=""):
             if nid == sid or int(at or 0) <= seen:
                 continue
             n = (anchor.get("nodes") or {}).get(nid) or {}
-            files = [] if n.get("marks") else (n.get("files") or [])[:4]
             said = [relay._short(m.get("claim"), 200) for m in n.get("marks") or [] if str(m.get("time") or "") > since]
-            if files:
-                said = ["changed " + ", ".join(relay.show(f, s.get("cwd") or "") for f in files)]
             said = [f"\"{n.get('title') or nid}\": {x}" for x in said]
             lines += [x for x in said if f"- {x}" not in told][-2:]     # the two newest it has not heard
     step = next((st for st in p.get("steps") or [] for x in st.get("tasks") or [] if x is t), None)
