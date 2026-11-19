@@ -876,8 +876,9 @@ class ThreeSessions(unittest.TestCase):
         self.assertEqual(self.holders(B, f"work in `{t.proj}` on `{self.x('lib', 'y.py')}`"), [A],
                          "a real path beside the root is still routed")
         t.cli(TOP, "shard", self.x("docs"))
-        advised, why = relay.advise_start(t.p4, TOP, {"prompt": f"Check one thing in `{t.proj}`, read-only"}, 10 * 1024)
-        self.assertEqual(advised, "fresh", why)
+        advised, why, own_tree = relay.advise_start(t.p4, TOP, {"prompt": f"Check one thing in `{t.proj}`, read-only"},
+                                                    10 * 1024)
+        self.assertEqual((advised, own_tree), ("fresh", False), why)
         self.assertIn("names no path", why)
         self.assertTrue(relay.names_nothing(relay.norm(t.proj), t.p4, t.proj))
         self.assertFalse(relay.names_nothing(self.x("lib"), t.p4, t.proj))
@@ -1072,8 +1073,10 @@ class ForkOrFresh(ThreeSessions):
         self.assertEqual(relay.advise_start(t.p4, TOP, {"prompt": brief}, 10 * 1024, apart=True)[0], "fork")
         self.assertFalse(phi.fork_apart(self.work), "the main checkout is a plain one")
         self.assertFalse(phi.fork_apart(self._tmp.name), "and so is a folder of no repository")
-        for extra in ({}, {"use_worktree": True}, {"use_worktree": False}):
+        for extra in ({"use_worktree": True}, {"use_worktree": False}):
             self.assertIsNone(self.writer(TOP, "fresh", cwd=self.work, **extra), f"never advised to fork: {extra}")
+        self.assertNotIn("fork", self.writer(TOP, "fresh", cwd=self.work)["permissionDecisionReason"].split(":")[0],
+                         "nor with `use_worktree` left out, which is asked about for the folder it would share")
         out = self.writer(TOP, "fork", cwd=self.work)
         self.assertEqual(out["permissionDecision"], "ask", "asked, never blocked")
         why = out["permissionDecisionReason"]
@@ -1092,6 +1095,47 @@ class ForkOrFresh(ThreeSessions):
         import puppeteer
         import inspect
         self.assertIn('context = "fresh"', inspect.getsource(puppeteer.prompter), "every drafted start is fresh")
+
+    def test_a_fresh_start_of_a_writer_that_names_no_worktree_from_a_plain_folder_is_asked_about(self):
+        """The start tool's own text on `use_worktree`: "Omitted: the same folder when this session works in a plain
+        folder and has never had a worktree (its own, a shared one, or one it will enter later); otherwise its own
+        worktree." So a fresh start of a worker that writes, made from a plain folder with `use_worktree` left out,
+        would write in its starter's files, and p4-phi asks about that call as it asks about a fork of a writer.
+        It asks about no other: one that passes `true`, one that passes `false` and so chose the folder, one from a
+        session in a worktree, a brief that only reads, a new orchestrator, which lands in this folder, and a start
+        that names another place."""
+        import phi
+        t = self.t
+        brief = f"Rework `{self.x('lib')}` and commit it.\nFiles: {self.x('lib', 'x.py')}"
+        self.assertEqual(relay.advise_start(t.p4, TOP, {"prompt": brief}, 10 * 1024)[2], True)
+        out = self.writer(TOP, "fresh", cwd=self.work)
+        self.assertEqual(out["permissionDecision"], "ask", "asked, never blocked")
+        why = out["permissionDecisionReason"]
+        self.assertTrue(why.startswith("phi (p4-phi) advises `use_worktree: true` here: "), why)
+        self.assertIn("a fresh start that leaves `use_worktree` out from a plain folder shares that folder", why)
+        self.assertIn("a git worktree and on a branch of its own", why)
+        self.assertEqual(self.writer(TOP, "fresh", cwd=self.work, initiation="own_initiative")["permissionDecision"],
+                         "ask", "a suggested task card starts the same call")
+        for extra in ({"use_worktree": True}, {"use_worktree": False}, {"cwd": "D:/another/project"},
+                      {"target": "cloud"}, {"preset": "the api repo"}, {"host": "devbox"}):
+            path = os.path.join(self._tmp.name, "short.jsonl")
+            write(path, "x")
+            r = t.hook("start-advice", TOP, {
+                "hook_event_name": "PreToolUse", "tool_name": "mcp__ccd_session__start_session", "cwd": self.work,
+                "transcript_path": path, "tool_input": {"initiation": "user_asked", "context": "fresh",
+                                                        "title": "the lib rework", "prompt": brief, **extra}})
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, ""), f"not asked: {extra}")
+            self.assertIs(relay.advise_start(t.p4, TOP, {"prompt": brief, **extra}, 10 * 1024)[2], False, extra)
+        own = os.path.join(self.work, ".claude", "worktrees", "the-top").replace("\\", "/")
+        subprocess.run(["git", "-C", self.work, "worktree", "add", "-q", "-b", "claude/the-top", own],
+                       check=True, capture_output=True)
+        self.assertIsNone(self.writer(TOP, "fresh", cwd=own), "from a worktree it gets a worktree of its own")
+        self.assertIs(relay.advise_start(t.p4, TOP, {"prompt": brief}, 10 * 1024, apart=True)[2], False)
+        for reads in ("Check the layout of `lib` and report.\nFiles: none",
+                      "Build the importer's nightly run and commit it. " + phi.NEW_TOP_BRIEF):
+            self.assertIs(relay.advise_start(t.p4, TOP, {"prompt": reads}, 3 * 1024 * 1024)[2], False, reads[:40])
+        self.assertIsNone(self.advise(TOP, "fresh", "Write the docs", 3 * 1024 * 1024),
+                          "a brief that only reads names no worktree and is asked nothing")
 
     def test_a_start_with_its_own_worktree_or_branch_is_not_asked(self):
         """A session that writes gets a git worktree and a branch of its own, worktrees.md, "Running each Claude Code

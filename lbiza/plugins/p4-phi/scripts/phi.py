@@ -2771,8 +2771,9 @@ def h_start_advice(payload):
     worktree of its own, so no two share a file on disk. For the rest it advises fork or fresh by
     relay.advise_start, from the parent's transcript size and how much of the parent's scope the brief's paths
     cover, and never a fork for a brief that writes unless fork_apart says the fork gets a worktree of its own, so
-    a call that forks a writer from a plain checkout is asked about: silent when the call already does what is
-    advised, and for a fresh start that passes
+    a call that forks a writer from a plain checkout is asked about. So is a fresh start of a worker that writes,
+    made from a plain folder with `use_worktree` left out, which shares that folder by the start tool's own text.
+    It is silent when the call already does what is advised, and for a fresh start that passes
     `use_worktree: true`, which a fork cannot take, else a permission `ask` with the reason, so ezexe sees it and
     decides. A start in a worktree or on a branch of the child's own is never asked about: a session that writes
     gets both, as starts.use_worktree says. A PreToolUse `permissionDecision` is `allow`, `deny`, `ask` or `defer`;
@@ -2811,8 +2812,12 @@ def h_start_advice(payload):
     except OSError:
         size = 0
     here = str(payload.get("cwd") or load_session(me.home, me.id).get("cwd") or "")
-    advised, why = relay.advise_start(me.home, me.id, inp, size, apart=fork_apart(here))
-    RAN.update(advice=advised, wanted=wanted, transcript=size)
+    advised, why, own_tree = relay.advise_start(me.home, me.id, inp, size, apart=fork_apart(here))
+    RAN.update(advice=advised, wanted=wanted, transcript=size, own_tree=own_tree)
+    if own_tree:                                    # a fresh start of a writer that would share this plain folder
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
+                                       "permissionDecisionReason": f"phi (p4-phi) advises `use_worktree: true` "
+                                                                   f"here: {why}."}}
     # a fresh start in a worktree of its own is never advised to fork: the start tool's own text says `use_worktree`
     # is "rejected with \"fork\"", and of a fork that "from a plain checkout it shares the folder"
     if advised == wanted or (advised == "fork" and inp.get("use_worktree") is True):
