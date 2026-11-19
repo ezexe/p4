@@ -619,14 +619,91 @@ class TreeOfPlans(unittest.TestCase):
                                                  {"content": "Tell the docs child", "status": "in_progress"}]}).count(
             "was revised"), 0, "a warning is given once")
 
-    def test_a_removed_parent_step_tells_the_child_before_its_next_tool(self):
+    def test_a_parent_that_replaces_its_whole_list_tells_its_worker_nothing(self):
+        """A worker is bound to its parent's step by the step's number. A parent that keeps the app's task list for
+        the turn it is in sends a new list at each request, so the number then names another step or none, while
+        the worker's task stands. Seen in three workers of one orchestrator: each was told `your root step 5 ... was
+        removed`, `Stop before the next tool`, and that the parent `revised your root step 5` to a step that was
+        never theirs. A list that was replaced tells a worker nothing, at its next message, at its next step and
+        at each list after, and its record keeps that the step left the list, as `rootLeft`."""
         t = self.t
+        t.say(B, "Write the docs, step 3 of the parent's plan")
+        self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move"))
+        self.plan(B, items("Draft the layout table docs for p4conf", "Publish the layout table docs"))
+        self.assertEqual((t.session(A)["rootStep"], t.session(B)["rootStep"]), ("2", "3"))
+        # the next request: four steps that share no words with the three before them
+        self.plan(TOP, items("Read each report of the sessions", "Archive whatever landed", "Save the lessons as "
+                             "memories", "Answer the question about usage"))
+        for kid, step in ((A, "2"), (B, "3")):
+            ctx = context(t.say(kid, "carry on"))
+            self.assertNotIn("stop before any tool runs", ctx, kid)
+            self.assertNotIn("root step", ctx, kid)
+            self.assertNotIn("this session is for step", ctx, "no slice of a list that holds its step no more")
+            self.assertEqual(t.session(kid)["rootLeft"]["step"], step)
+            ctx = self.plan(kid, {"advance": True})
+            self.assertNotIn("up: ", ctx, kid)
+            self.assertNotIn("root step", ctx, kid)
+        self.assertIn("Move the store layout into phi", t.session(A)["task"], "its task stands")
+        # a shorter list, in which the number is gone, and the same list sent again, as after a compaction
+        self.plan(TOP, items("Answer the question about usage"))
+        self.plan(TOP, items("Answer the question about usage"))
+        for kid in (A, B):
+            ctx = context(t.say(kid, "carry on")) + self.plan(kid, {"advance": True})
+            self.assertNotIn("root step", ctx, kid)
+            self.assertNotIn("Stop before the next tool", ctx, kid)
+
+    def test_a_step_the_parent_drops_in_words_tells_its_worker_to_stop(self):
+        """Only the parent's word stops a worker: a step of the new list that says the worker's step is dropped,
+        plans.DROPPED, at the step's own number or anywhere in the list in words that bear on it."""
+        t = self.t
+        t.say(B, "Write the docs, step 3 of the parent's plan")
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/"))
-        self.plan(TOP, items("Port the hooks", "Write the layout docs", at=1))
+        self.plan(B, items("Draft the layout table docs for p4conf", "Publish the layout table docs"))
+        self.plan(TOP, items("Port the hooks", "Dropped: move the store layout into phi", "Write the layout docs",
+                             at=0))
         ctx = context(t.say(A, "carry on"))
         self.assertTrue(ctx.startswith("phi (p4-phi): stop before any tool runs."), ctx[:200])
-        self.assertIn("your root step 2", ctx)
-        self.assertIn("was removed from the task list", ctx)
+        self.assertIn("your root step 2, \"Move the store layout into phi\", was dropped from the task list of \"top\"",
+                      ctx)
+        self.assertIn("which now says \"Dropped: move the store layout into phi\"", ctx)
+        self.assertIn(f"Stop before the next tool and message {TOP}", ctx)
+        self.assertNotIn("rootLeft", t.session(A))
+        self.assertNotIn("root step", context(t.say(B, "carry on")), "its own step stands as it was")
+        # the docs step is gone from its number, and another step of the list says in words that it is cancelled
+        self.plan(TOP, items("Port the hooks", "The layout docs are cancelled, write none"))
+        ctx = context(t.say(B, "carry on"))
+        self.assertIn("your root step 3, \"Write the layout docs\", was dropped from the task list", ctx)
+        self.assertIn("which now says \"The layout docs are cancelled, write none\"", ctx)
+        for said, was, now_, hit in (
+                ("a word at the step's own number that says nothing else", "Move the store layout", "Dropped", True),
+                ("a new step that only names something dropped", "Move the store layout",
+                 "Remove the dropped column from the ports table", False),
+                ("a step reworded and still wanted", "Move the store layout", "Move the store layout today", False)):
+            self.assertEqual(bool(plans.dropped(was, now_, {"2": now_})), hit, said)
+
+    def test_a_worker_follows_its_step_to_the_steps_new_number(self):
+        """A step removed above a worker's step moves that step up one number with its words unchanged. The worker
+        is told the new number and follows it, in its record and in the addresses of its own list, so the next
+        revision is read against the step that is its own, and the worker of the step that left is told nothing."""
+        t = self.t
+        t.say(B, "Write the docs, step 3 of the parent's plan")
+        self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/"))
+        self.plan(B, items("Draft the layout table docs for p4conf", "Publish the layout table docs"))
+        self.assertEqual([x["addr"] for x in plans.load(t.p4, B)["steps"]], ["3.1", "3.2"])
+        self.plan(TOP, items("Port the hooks", "Write the layout docs", at=1))
+        self.assertEqual(t.session(B)["rootStep"], "2")
+        moved = plans.load(t.p4, B)
+        self.assertEqual((moved["root"], moved["current"], [x["addr"] for x in moved["steps"]]),
+                         ("2", "2.1", ["2.1", "2.2"]))
+        ctx = context(t.say(B, "carry on"))
+        self.assertIn("your root step 3 in the task list of \"top\" is now numbered 2; the step itself is unchanged.", ctx)
+        self.assertNotIn("Stop before the next tool", ctx)
+        self.assertNotIn("root step", context(t.say(A, "carry on")), "the step that left the list says nothing")
+        self.assertEqual(t.session(A)["rootLeft"]["step"], "2")
+        self.plan(TOP, items("Port the hooks", "Write the layout docs for the store", at=1))
+        ctx = context(t.say(B, "carry on"))
+        self.assertIn("your root step 2 in the task list of \"top\" was revised from \"Write the layout docs\"", ctx)
+        self.assertNotIn("root step", context(t.say(A, "carry on")))
 
     def test_a_siblings_step_that_changes_the_next_step_is_relayed_across(self):
         t = self.t

@@ -229,27 +229,88 @@ def _children(home, sid):
     return {k: v for k, v in relay._sessions(home).items() if relay._parent(v) == sid and not relay.gone(home, v)}
 
 
+# The words by which a step of a task list says it is dropped. A worker is bound to its parent's step by that step's
+# number, and a parent that sends a new list for a new request, or the same list again after a compaction, moves and
+# replaces numbers with no word on the worker's task. So only these words, in the step that was the worker's or in a
+# step that bears on it, tell a worker to stop; a number that went away or now names another step tells it nothing.
+DROPPED = re.compile(r"\b(dropped|cancell?ed|withdrawn|abandoned|scrapped|called off|no longer wanted|not wanted)\b",
+                     re.I)
+DROP_WORDS = frozenset("dropped cancelled canceled withdrawn abandoned scrapped called off longer wanted".split())
+
+
+def dropped(was, at, new):
+    """The words of the new list that say the step `was` is dropped, or '': the step now at its address, where
+    that says so of it or says nothing else, and else a step anywhere in the list that says so and bears on it."""
+    if at and DROPPED.search(at) and (bears(was, at) or len(words(at) - DROP_WORDS) <= 1):
+        return at
+    return next((c for c in new.values() if DROPPED.search(c) and bears(was, c)), "")
+
+
+def renumber(home, sid, old, new, depth=0):
+    """A worker follows its parent's step to the step's new number: its `rootStep`, the root of its own task list
+    and each address under it, and the same in the sessions it started, which are bound to its steps."""
+    def swap(a):
+        a = str(a or "")
+        return new + a[len(old):] if a == old or a.startswith(old + ".") else a
+    spath = os.path.join(relay._dir(home, sid), "session.json")
+    disk = relay._read_json(spath)
+    if disk and disk.get("rootStep") and swap(disk["rootStep"]) != disk["rootStep"]:
+        disk["rootStep"] = swap(disk["rootStep"])
+        relay._write_json(spath, disk)
+    p = load(home, sid)
+    if p.get("steps"):
+        p["root"], p["current"] = swap(p.get("root")), swap(p.get("current"))
+        for st in p["steps"]:
+            st["addr"] = swap(st.get("addr"))
+        relay._write_json(_path(home, sid), p)
+    for kid in _children(home, sid) if depth < 8 else ():
+        renumber(home, kid, old, new, depth + 1)
+
+
+def leave(home, kid, r, was):
+    """Marks a worker whose parent step is in its parent's list no more, with no word that it was dropped: its task
+    stands as its brief gave it, and from here nothing of its parent's list is read as that step."""
+    spath = os.path.join(relay._dir(home, kid), "session.json")
+    disk = relay._read_json(spath)
+    if disk and not disk.get("rootLeft"):
+        disk["rootLeft"] = {"step": r, "was": str(was or "")[:300], "time": _now()}
+        relay._write_json(spath, disk)
+
+
 def relay_revision(home, s, plan, rev):
-    """A revised task list, told on the next message to whoever serves or uses what changed."""
+    """A revised task list, told on the next message to whoever serves or uses what changed. A worker whose step
+    was renumbered is told its new number and follows it. One whose step was reworded is told the new words. One
+    whose step the list drops in words, DROPPED, is told to stop. One whose step is gone or now holds other words,
+    as when the parent sent a new list for a new request, is told nothing, leave: its task stands."""
     sid, title = s["sessionId"], relay._title(s)
     stamp = hashlib.sha1(json.dumps(rev, sort_keys=True).encode()).hexdigest()[:10]
     new = {x["addr"]: x["content"] for x in plan.get("steps") or []}
     for kid, ks in _children(home, sid).items():
         r = str(ks.get("rootStep") or "")
+        if not r or ks.get("rootLeft"):
+            continue
         if r in (rev.get("moved") or {}):
             relay.warn(home, kid, f"plan:{sid}:{stamp}:moved",
                        f"your root step {r} in the task list of \"{title}\" is now numbered {rev['moved'][r]}; the "
                        f"step itself is unchanged.")
-        if r in rev["removed"]:
+            renumber(home, kid, r, rev["moved"][r])
+        if r not in rev["removed"] and r not in rev["changed"]:
+            continue
+        was = rev["was"][r]
+        at = new.get(r, "") if r in rev["changed"] else ""
+        said = dropped(was, at, new)
+        if said:
             relay.warn(home, kid, f"plan:{sid}:{stamp}:gone",
-                       f"your root step {r}, \"{relay._short(rev['was'][r], 160)}\", was removed from the task list "
-                       f"of \"{title}\", your parent session. Stop before the next tool and message {sid}: "
-                       f"your work may no longer be wanted.")
-        elif r in rev["changed"]:
-            was, now_ = relay._short(rev["was"][r], 160), relay._short(new[r], 160)
+                       f"your root step {r}, \"{relay._short(was, 160)}\", was dropped from the task list of "
+                       f"\"{title}\", your parent session, which now says \"{relay._short(said, 160)}\". Stop before "
+                       f"the next tool and message {sid}: your work may no longer be wanted.")
+        elif at and bears(was, at):
             relay.warn(home, kid, f"plan:{sid}:{stamp}:{r}",
-                       f"your root step {r} in the task list of \"{title}\" was revised from \"{was}\" to "
-                       f"\"{now_}\". Check whether your steps still serve it.")
+                       f"your root step {r} in the task list of \"{title}\" was revised from "
+                       f"\"{relay._short(was, 160)}\" to \"{relay._short(at, 160)}\". Check whether your steps still "
+                       f"serve it.")
+        else:
+            leave(home, kid, r, was)
     touched = rev["changed"] + rev["removed"]
     for oid, os_ in _siblings(home, s).items() if touched else []:
         cur = step_of(load(home, oid), load(home, oid).get("current") or "")
@@ -288,7 +349,7 @@ def _boundary(home, s, plan, started, text, lines, path, held):
         lines.extend(relay.take_warnings(home, sid, disk))
     parent = relay._parent(s)
     root = plan.get("root") or ""
-    if parent and root:
+    if parent and root and not (disk or s).get("rootLeft"):   # a step its parent's list holds no more says nothing
         pp = load(home, parent)
         ps = step_of(pp, root)
         if ps is None and pp.get("steps"):
@@ -1035,7 +1096,7 @@ def slice_for(home, s):
     steps in progress that share its words. '' when the child has no parent step."""
     root = root_of(home, s)
     parent = relay._parent(s)
-    if not root or not parent:
+    if not root or not parent or s.get("rootLeft"):
         return ""
     pp = load(home, parent)
     steps = pp.get("steps") or []

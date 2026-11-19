@@ -1424,7 +1424,8 @@ def superseded(home, sid, s, others_marks):
     root = str(s.get("rootStep") or "")
     root_text = ""
     if root and _parent(s):
-        st = plans.step_of(plans.load(home, _parent(s)), root)
+        # a step its parent's list holds no more, plans.leave, is read from the words the worker started on
+        st = None if s.get("rootLeft") else plans.step_of(plans.load(home, _parent(s)), root)
         root_text = (st or {}).get("content", "") or plans.load(home, sid).get("rootText", "")
     if not root_text:
         return None

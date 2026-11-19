@@ -682,7 +682,7 @@ def _save_session(home, s):
     for k in ("plansSeen", "requestAnswers"):
         if isinstance(disk.get(k), dict):
             s[k] = {**disk[k], **(s.get(k) or {})}
-    for k in ("rootStep", "shard", "disposable", "doneRetired", "archived", "appRoot", "nudged", "issue",
+    for k in ("rootStep", "rootLeft", "shard", "disposable", "doneRetired", "archived", "appRoot", "nudged", "issue",
               "issueLooked", "findingsTold", "controls", "puppeteerSeen", "handedTo",
               "handedFrom", "effort", "kidCommits"):
         if k in disk and k not in s:
@@ -3081,7 +3081,8 @@ def movable_besides(home, s, step, waited):
     sid, out = s["sessionId"], []
     kids = [(k, ks) for k, ks in relay._sessions(home).items()
             if relay._parent(ks) == sid and not ks.get("stale") and not relay.archived_in_app(ks)]
-    held = {str(ks.get("rootStep") or "") for _, ks in kids if not relay.gone(home, ks)} - {""}
+    held = {str(ks.get("rootStep") or "") for _, ks in kids
+            if not relay.gone(home, ks) and not ks.get("rootLeft")} - {""}
     kept = dict(s.get("kidCommits") or {}) if isinstance(s.get("kidCommits"), dict) else {}
     seen = dict(kept)
     for k, ks in kids:                             # a child counted as finished may still hold unlanded work
