@@ -10,7 +10,9 @@
 // each prompt, which no command hook is given, for the UserPromptSubmit hooks of that prompt to read. And it is the
 // guard around a tool call: it tells by plain tests which calls python has a check for, and starts python for
 // those alone, so no process starts before a call that has none. And where a project turns `goal` on it gives a
-// worker Claude Code's own goal, which no command hook and no other session can.
+// worker Claude Code's own goal, which no command hook and no other session can. And it gives a session three of
+// phi.py's commands as tools, `note`, `done` and `tree`, which it runs itself, so a session keeps a finding with
+// no shell line.
 
 import type {
   AgentSpawnInput,
@@ -21,6 +23,7 @@ import type {
   SessionContextUsage,
   SessionRateLimit,
   Timer,
+  ToolCallResult,
   ToolCheckInput,
   ToolCheckResult,
   TurnCompleteReason,
@@ -99,6 +102,40 @@ const SHELL_MODELS = ['phi/models', 'recall/models', 'models']
 const MODEL_MS = 60_000
 // The calls whose check left words for the model, at most, each until its PostToolUse hooks run.
 const MOST_TOLD = 256
+
+// The commands of phi.py a session calls as tools, each `mcp__p4-phi__<name>`: what the model reads of it, and the
+// input it takes. `note` and `done` are in a session's tool list from its start, since every session is asked for
+// both, and `tree` waits behind ToolSearch as an MCP server's tool does.
+const TOOLS = [
+  {
+    name: 'note',
+    description:
+      'p4-phi: keep a finding for every session below this one, as `phi.py note` does. `claim` is the finding in a ' +
+      'sentence. `source` is what showed it: the file and line, the command or the measurement. `kind` labels it ' +
+      'with a free word, such as decision, waiting, parked, ruled-out, machine or code.',
+    inputSchema: {
+      type: 'object',
+      properties: { claim: { type: 'string' }, source: { type: 'string' }, kind: { type: 'string' } },
+      required: ['claim', 'source'],
+    },
+    isDeferred: false,
+  },
+  {
+    name: 'done',
+    description:
+      'p4-phi: keep this turn as done, as `phi.py done` does. `text` says what was run and what it showed.',
+    inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
+    isDeferred: false,
+  },
+  {
+    name: 'tree',
+    description:
+      'p4-phi: every session of this tree that is not archived, with its state, as `phi.py tree` prints it.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+] as const
+// How long one of those commands may run.
+const TOOL_MS = 30_000
 
 // What `phi.py look` prints, as puppeteer.look answers it: the times are seconds. `starter` is the session that
 // started this one, as the address `$.session.send` takes, and `move` the prompt that starts a turn here. `upkeep`
@@ -739,6 +776,43 @@ function toldOf(toolUseId: string): string[] {
   return words === undefined ? [] : [words]
 }
 
+// Declares the three tools, at a session's start and at each reload of the module. A session with P4_PHI=0 gets
+// none, since phi.py keeps nothing for it.
+async function offer($: EngineInterface): Promise<void> {
+  try {
+    switches ??= readSwitches($)
+    if ((await switches).isPhiOff) return
+    for (const tool of TOOLS) await $.tool.register(tool)
+  } catch (error) {
+    note($, `p4-phi's tools were not declared: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
+  }
+}
+
+// One text field of a tool call's input, trimmed, and '' for one left out.
+function field(e: unknown, name: string): string {
+  const value = (e as Record<string, unknown>)[name]
+
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+// Runs one command of phi.py for a tool call, for this session, in the session's working folder as a shell line
+// ran it. What it prints is the tool's result, and what it says on a failure is the call's error. The words of
+// the call come after `--`, so a finding that opens with a dash is no option.
+async function served($: EngineInterface, args: readonly string[]): Promise<ToolCallResult> {
+  try {
+    const python = await findPython($)
+    if (python === undefined) return { deny: 'p4-phi found no working python to run phi.py with.' }
+    const script = `${slashed($.plugin.root)}/scripts/phi.py`
+    const env = { CLAUDE_CODE_SESSION_ID: await $.session.id(), CLAUDE_PROJECT_DIR: await $.session.root() }
+    const ran = await $.process.run([python, '-I', '-X', 'utf8', script, ...args], { env, timeoutMs: TOOL_MS })
+    if (ran.exitCode !== 0) return { deny: (ran.stderr.trim() || ran.stdout.trim() || 'phi.py failed').slice(0, 4_000) }
+
+    return { result: ran.stdout.trim() }
+  } catch (error) {
+    return { deny: `phi.py did not run: ${String((error as Error)?.message ?? error).slice(0, 200)}` }
+  }
+}
+
 // A name as hook.py writes it into a file's name: every character but a letter, a digit, `_` and `-` as `_`.
 function named(id: string): string {
   return id.replace(/[^\w-]/g, '_')
@@ -800,8 +874,9 @@ async function begin($: EngineInterface): Promise<void> {
 }
 
 export const register: Register = on => {
-  // The session does not wait for its first look.
+  // The session does not wait for its first look, nor for its tools to be declared.
   on('session.start', ($, e, next) => {
+    void offer($)
     void begin($)
 
     return next(e)
@@ -866,6 +941,25 @@ export const register: Register = on => {
       mine.isInFlight = false
     }
   }).catch(($, e, next) => next(e))
+
+  // A call of one of the plugin's own tools, once it is allowed: the command of phi.py it stands for is run, and
+  // nothing runs beneath, since the tool is nothing but that command.
+  on('tool.run', { tool: 'mcp__p4-phi__note' }, ($, e) => {
+    const options = [
+      ...(field(e, 'source') ? ['--source', field(e, 'source')] : []),
+      ...(field(e, 'kind') ? ['--kind', field(e, 'kind')] : []),
+    ]
+
+    return served($, ['note', ...options, '--', field(e, 'claim')])
+  }).catch(() => ({ deny: 'p4-phi could not run `phi.py note`.' }))
+
+  on('tool.run', { tool: 'mcp__p4-phi__done' }, ($, e) => served($, ['done', '--', field(e, 'text')])).catch(() => ({
+    deny: 'p4-phi could not run `phi.py done`.',
+  }))
+
+  on('tool.run', { tool: 'mcp__p4-phi__tree' }, $ => served($, ['tree'])).catch(() => ({
+    deny: 'p4-phi could not run `phi.py tree`.',
+  }))
 
   // The engine decides whether a tool call may run, after the PreToolUse hooks. The event carries the tool, its
   // input, the call's id and a subagent's id, which `classic.PreToolUse` does not hand a function, and no hook

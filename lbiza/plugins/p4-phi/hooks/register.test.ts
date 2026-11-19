@@ -60,6 +60,8 @@ type Machine = {
   // What the engine does with a prompt beneath every plugin, before it enters: it raises the UserPromptSubmit
   // hooks there.
   enters?: (text: string) => Promise<void>
+  // How a command of phi.py that a tool stands for ends: what it prints, and its exit code where it fails.
+  runs?: (args: readonly string[]) => { stdout?: string; stderr?: string; exitCode?: number }
   // What `hook.py lookup-check` prints for a call's input: a PreToolUse command hook's output, or nothing.
   check?: (payload: Record<string, unknown>) => unknown
   // What the goal command prints for a condition, where it is not `Goal set: <condition>`.
@@ -79,6 +81,8 @@ type Seen = {
   logged: string[]
   sent: { to: string; text: string }[]
   submitted: string[]
+  // The tools the module declared, each as it was given to the engine.
+  tools: { name: string; description: string; inputSchema?: Record<string, unknown>; isDeferred?: boolean }[]
   // Each run of `hook.py lookup-check`: its command line past the script, its environment and its input.
   checks: { args: string[]; env: Readonly<Record<string, string>> | undefined; payload: Record<string, unknown> }[]
   // The slash commands it ran, each as a person would type it.
@@ -103,6 +107,7 @@ function machine(on: On, has: Machine): Seen {
     logged: [],
     sent: [],
     submitted: [],
+    tools: [],
     checks: [],
     ran: [],
   }
@@ -172,10 +177,17 @@ function machine(on: On, has: Machine): Seen {
     return { value: Object.keys(files).some(file => file === path || file.startsWith(`${path}/`)) }
   })
   on('session.info', () => ({ value: { transcriptPath: TRANSCRIPT } }))
+  on('tool.register', (_, e) => {
+    seen.tools.push({ name: e.name, description: e.description, inputSchema: e.inputSchema, isDeferred: e.isDeferred as never })
+
+    return { value: { tool: `mcp__p4-phi__${e.name}` } }
+  })
   on('process.run', async (_, e) => {
     const at = e.argv.findIndex(arg => arg.endsWith('/scripts/phi.py'))
     const hook = e.argv.findIndex(arg => arg.endsWith('/scripts/hook.py'))
     let stdout = ''
+    let stderr = ''
+    let exitCode = 0
     if (hook >= 0) {
       const payload = JSON.parse(e.init?.stdin ?? '{}') as Record<string, unknown>
       seen.checks.push({ args: e.argv.slice(hook + 1), env: e.init?.env, payload })
@@ -190,6 +202,12 @@ function machine(on: On, has: Machine): Seen {
       } else if (args[0] === 'goal') {
         seen.asked.push([...args])
         stdout = `${JSON.stringify({ set: true })}\n`
+      } else if (args[0] === 'note' || args[0] === 'done' || args[0] === 'tree') {
+        seen.asked.push([...args])
+        const ended = has.runs?.(args) ?? {}
+        stdout = ended.stdout ?? ''
+        stderr = ended.stderr ?? ''
+        exitCode = ended.exitCode ?? 0
       } else {
         seen.looks.push([...args])
         stdout = `${JSON.stringify(has.look === undefined ? ORCHESTRATOR : await has.look(args))}\n`
@@ -201,7 +219,7 @@ function machine(on: On, has: Machine): Seen {
       stdout = `${path}\n`
     }
 
-    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    return { value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false } }
   })
 
   return seen
@@ -1520,4 +1538,84 @@ test('with no python found a call goes on unjudged', async ($, on) => {
   expect(await $.tool.check(call('WebSearch', { query: 'flush' }))).toEqual(ALLOW)
   expect(seen.checks).toEqual([])
   expect(seen.logged).toEqual(['no working python found, so no look runs'])
+})
+
+test("note, done and tree are declared as tools at a session's start, and P4_PHI=0 declares none", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, {})
+
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(seen.tools.map(tool => [tool.name, tool.isDeferred])).toEqual([
+    ['note', false],
+    ['done', false],
+    ['tree', undefined],
+  ])
+  expect(seen.tools.map(tool => (tool.inputSchema as { required?: string[] }).required)).toEqual([['claim', 'source'], ['text'], undefined])
+  expect(seen.logged).toEqual([])
+})
+
+test('P4_PHI=0 declares no tool', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA, P4_PHI: '0' })
+  const clock = mock.clock(on)
+  const seen = machine(on, {})
+
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(seen.tools).toEqual([])
+})
+
+test('a call of the note tool runs phi.py note for this session, its words after the options', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  mock.clock(on)
+  const seen = machine(on, { runs: () => ({ stdout: 'kept\n' }) })
+
+  // A finding that opens with a dash is still the finding, not an option of the command.
+  const claim = '-x is no flag of flush.py'
+  const kept = await $.tool.run({ tool: 'mcp__p4-phi__note', claim, source: ' flush.py:12 ', kind: 'decision' } as never)
+  expect(kept).toEqual({ result: 'kept' })
+  expect(seen.asked).toEqual([['note', '--source', 'flush.py:12', '--kind', 'decision', '--', claim]])
+  expect(seen.calls[0]?.argv.slice(0, 4)).toEqual([KEPT, '-I', '-X', 'utf8'])
+  expect(seen.calls[0]?.env).toEqual({ CLAUDE_CODE_SESSION_ID: 'cli-0001', CLAUDE_PROJECT_DIR: '/work/project' })
+
+  // With no kind the command gets none, and phi.py itself refuses a finding with no source.
+  await $.tool.run({ tool: 'mcp__p4-phi__note', claim: 'the flush is ported', source: 'git log -1' } as never)
+  expect(seen.asked[1]).toEqual(['note', '--source', 'git log -1', '--', 'the flush is ported'])
+})
+
+test('done and tree run their commands, and what phi.py says on a failure is the call\'s error', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  mock.clock(on)
+  const short = 'phi: say what was run and what it showed'
+  const seen = machine(on, {
+    runs: args => {
+      if (args[0] === 'tree') return { stdout: 'local_top00001  working  port the flush\n' }
+      if (args.at(-1) === 'ok') return { exitCode: 2, stderr: `${short}\n` }
+
+      return { stdout: 'this turn will be kept as done\n' }
+    },
+  })
+
+  expect(await $.tool.run({ tool: 'mcp__p4-phi__done', text: 'pytest -q passed, 12 of 12' } as never)).toEqual({
+    result: 'this turn will be kept as done',
+  })
+  expect(await $.tool.run({ tool: 'mcp__p4-phi__tree' } as never)).toEqual({
+    result: 'local_top00001  working  port the flush',
+  })
+  expect(await $.tool.run({ tool: 'mcp__p4-phi__done', text: 'ok' } as never)).toEqual({ deny: short })
+  expect(seen.asked).toEqual([['done', '--', 'pytest -q passed, 12 of 12'], ['tree'], ['done', '--', 'ok']])
+})
+
+test('with no python found a tool says so, and starts nothing', async ($, on) => {
+  mock.env(on, {})
+  mock.clock(on)
+  const seen = machine(on, { files: {} })
+
+  expect(await $.tool.run({ tool: 'mcp__p4-phi__tree' } as never)).toEqual({
+    deny: 'p4-phi found no working python to run phi.py with.',
+  })
+  expect(seen.asked).toEqual([])
 })

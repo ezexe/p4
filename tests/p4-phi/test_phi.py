@@ -2447,5 +2447,46 @@ class ScriptedRuns(unittest.TestCase):
         self.assertEqual(self.t.session(new)["task"], TASK)
 
 
+class ToolCommands(unittest.TestCase):
+    """The command lines the plugin's hooks module runs for its three tools, `mcp__p4-phi__note`, `mcp__p4-phi__done`
+    and `mcp__p4-phi__tree`: the options first, then `--`, then the words of the call, so a finding that opens with a
+    dash is the finding and no option. hooks/register.test.ts holds the module to these lines."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP)
+        self.t.say(TOP, TASK)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_note_keeps_a_finding_that_opens_with_a_dash(self):
+        claim = "-v is the flag that prints the flush table"
+        r = self.t.cli(TOP, "note", "--source", "flush.py:12", "--kind", "decision", "--", claim)
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "kept"), r.stderr)
+        kept = phi.load_notes(self.t.p4, TOP)[-1]
+        self.assertEqual((kept["claim"], kept["source"], kept["kind"]), (claim, "flush.py:12", "decision"))
+        again = self.t.cli(TOP, "note", "--source", "flush.py:12", "--", claim)
+        self.assertEqual(again.stdout.strip(), "already kept")
+        # a finding with no source is refused, and the tool hands that back as the call's error
+        r = self.t.cli(TOP, "note", "--", "The ports table is written by flush_rows")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("a note needs its source", r.stderr)
+
+    def test_done_takes_its_text_after_the_separator_and_refuses_a_short_one(self):
+        r = self.t.cli(TOP, "done", "--", "-q run of pytest passed, 12 of 12")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("this turn will be kept as done", r.stdout)
+        self.assertEqual(self.t.session(TOP)["done"]["text"], "-q run of pytest passed, 12 of 12")
+        r = self.t.cli(TOP, "done", "--", "ok")
+        self.assertEqual((r.returncode, r.stderr.strip()), (2, "phi: say what was run and what it showed"))
+
+    def test_tree_prints_the_session(self):
+        r = self.t.cli(TOP, "tree")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(TOP, r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
