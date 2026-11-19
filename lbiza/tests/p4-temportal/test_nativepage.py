@@ -157,7 +157,8 @@ class Page(unittest.TestCase):
             "how the app draws the message": (open_still, (
                 "Seen in the desktop app on Claude Code 2.1.326, in a session in plan mode whose worktree's own",
                 "91,362 tokens to 18,383",
-                "with the plugin as its origin", "the session's last prompt", "The plugin's list was not drawn in view", "was not the first one due", "was not seen itself")),
+                "with the plugin as its origin", "the session's last prompt", "The plugin's list was not drawn in view", "was not the first one due", "was not seen itself",
+                "keeps the end of the last turn in the session's state", "no live session has shown it")),
             "whether the cleanup reaches a plansDirectory": (open_still, (
                 "Seen in the desktop app on Claude Code 2.1.326, one sweep did not", "at most once per session",
                 "ten minutes and six or seven seconds", "in the session's own plans folder stayed",

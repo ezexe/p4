@@ -165,7 +165,7 @@ class RecordTest(unittest.TestCase):
         found = uses()
         self.assertIn(("method", "$.state.get", "p4-phi"), found)
         self.assertIn(("method", "$.state.set", "p4-phi"), found)
-        self.assertEqual(ROWS["$.state.set"]["used"], ["p4-phi"])
+        self.assertEqual(ROWS["$.state.set"]["used"], ["p4-phi", "p4-temportal"])
 
     def test_a_glob_counts_as_the_events_its_hook_tests(self):
         """p4-temportal names `tool.*` and answers where `next.event` is `tool.run`, so it loads on a Claude Code
@@ -176,6 +176,14 @@ class RecordTest(unittest.TestCase):
         self.assertIn(("method", "$.session.version", "p4-temportal"), found)
         self.assertEqual(ROWS["tool.run"]["used"], ["p4-phi", "p4-temportal"])
         self.assertEqual(ROWS["$.session.version"]["used"], ["p4-native", "p4-temportal"])
+
+    def test_the_state_p4_temportal_keeps_for_a_reload_is_in_the_record(self):
+        """p4-temportal's module keeps the end of the last turn in the session's state, so a module loaded anew
+        inside the quiet minute still compacts, and it reads the time for it."""
+        found = uses()
+        for method in ("$.state.get", "$.state.set", "$.clock.now"):
+            self.assertIn(("method", method, "p4-temportal"), found)
+            self.assertIn("p4-temportal", ROWS[method]["used"], method)
 
     def test_an_open_row_names_a_plugin_and_what_it_would_replace_or_add_there(self):
         """`open` lists plugins of this repository, and `would` holds one sentence for each of them and for no

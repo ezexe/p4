@@ -217,6 +217,27 @@ class ModuleTest(unittest.TestCase):
         caught = text.split("on('tool.*'", 1)[1].split("\n\n", 1)[0]
         self.assertIn("next.event === 'tool.run' ? { deny: 'p4-temportal could not run lifetime.py.' } : next(e)", caught)
 
+    def test_a_module_loaded_anew_inside_the_quiet_minute_takes_it_up_again(self):
+        """https://code.claude.com/docs/en/plugins/mods/reference.md says of a reload that `register` runs again in
+        a fresh environment and that the old environment's `after` waits end, and that `$.state` is the session's.
+        So the module keeps the end of the main conversation's last turn there, under a key its contract declares,
+        and a start of the module arms the timer for what is left of the minute. Seen in the desktop app on Claude
+        Code 2.1.326 before this: a plugin update arrived inside the minute and no compaction followed."""
+        text = (SRC / "register.ts").read_text(encoding="utf-8")
+        self.assertIn("const ENDED = { plugin: 'p4-temportal', key: 'turnEnded' } as const", text)
+        start = text.split("on('session.start'", 1)[1].split("\n  })", 1)[0]
+        self.assertIn("await resume($)", start)
+        resume = text.split("async function resume(", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("await $.state.get(ENDED)", resume)
+        self.assertIn("Math.min(Math.max(left, 0), QUIET_MS)", resume)
+        self.assertEqual(text.count("await mark($, 0)"), 2, "a turn that begins, and a minute that was looked at")
+        manifest = json.loads((SRC.parent / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["types"], "./types/index.d.ts")
+        contract = (SRC.parent / "types" / "index.d.ts").read_text(encoding="utf-8")
+        self.assertIn("'p4-temportal': { turnEnded: TurnEnded }", contract)
+        test = (SRC / "register.test.ts").read_text(encoding="utf-8")
+        self.assertIn("a module loaded anew one second after a turn ended still compacts when the minute is over", test)
+
     def test_the_module_names_no_event_an_older_claude_code_lacks(self):
         """A module that names an event its Claude Code does not know is refused whole, and `tool.run` is no event on
         2.1.311 and 2.1.322. The API types say of `on`: "To span versions, ... hook a glob such as `prompt.*` and

@@ -76,7 +76,8 @@
    "kind": "method",
    "used": [
     "p4-native",
-    "p4-phi"
+    "p4-phi",
+    "p4-temportal"
    ]
   },
   "$.clock.sleep": {
@@ -460,13 +461,15 @@
   "$.state.get": {
    "kind": "method",
    "used": [
-    "p4-phi"
+    "p4-phi",
+    "p4-temportal"
    ]
   },
   "$.state.set": {
    "kind": "method",
    "used": [
-    "p4-phi"
+    "p4-phi",
+    "p4-temportal"
    ]
   },
   "$.store.delete": {

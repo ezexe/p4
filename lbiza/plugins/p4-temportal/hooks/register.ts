@@ -141,6 +141,14 @@ const COMPACT_AT = 70
 // minutes a prompt cache entry lives, so the summary's request reads the conversation from the cache.
 const QUIET_MS = 60_000
 
+// When the main conversation's last turn ended, in the session's state, and 0 while a turn runs or none has ended
+// or the quiet minute has been looked at. A reload of the module starts its variables over and ends its timers:
+// plugins/mods/reference.md says of a reload that "`register` runs again in a fresh environment" and that the old
+// environment's `after` waits end. `$.state` is the session's and stays, so the module started anew reads this and
+// waits out what is left of the minute. Seen in the desktop app on Claude Code 2.1.326: a plugin update arrived
+// inside the quiet minute, and no compaction followed that turn's end.
+const ENDED = { plugin: 'p4-temportal', key: 'turnEnded' } as const
+
 // The field of a SessionStart hook's input that holds the settings this module read, which is p4conf.py's
 // HANDED_KEY, and the sources it reads, which are p4conf.py's HANDED_SOURCES. `flag`, what `--settings` carries, is
 // one run's and is left out.
@@ -481,6 +489,31 @@ async function hasRun($: EngineInterface): Promise<boolean> {
   }
 }
 
+// Keeps when the main conversation's last turn ended, or 0 for none. A state that cannot be written is said and
+// left: the timer of this copy of the module runs all the same.
+async function mark($: EngineInterface, at: number): Promise<void> {
+  try {
+    await $.state.set(ENDED, at)
+  } catch (error) {
+    note($, `the end of the turn was not kept for a reload: ${reason(error)}`)
+  }
+}
+
+// At a start of the module: where a turn ended before this copy was loaded and no timer of this copy waits, the
+// quiet minute goes on from that end, and a minute that is already over is looked at at once.
+async function resume($: EngineInterface): Promise<void> {
+  try {
+    const ended = (await $.state.get(ENDED)).value
+    if (quiet !== undefined || typeof ended !== 'number' || !(ended > 0)) return
+    const left = QUIET_MS - ((await $.clock.now()) - ended)
+    quiet = $.clock.after(Math.min(Math.max(left, 0), QUIET_MS), () => {
+      void compactWhenDue($)
+    })
+  } catch (error) {
+    note($, `the quiet minute was not taken up after a reload: ${reason(error)}`)
+  }
+}
+
 // The slash command and the tool, registered at each start of the module. A name that is taken is refused with a
 // throw, and each is registered whatever became of the other. The tool is left out on a Claude Code with no
 // `tool.run`, where a call of it would find nothing to answer.
@@ -558,6 +591,7 @@ function ledger(messages: readonly SessionMessage[]): SessionMessage | undefined
 // compaction reads as nothing and starts none.
 async function compactWhenDue($: EngineInterface): Promise<void> {
   quiet = undefined
+  await mark($, 0)
   if (isCompacting || !(line > 0)) return
   try {
     const { percent, tokens, breakdown } = (await $.session.usage({ breakdown: 'summary' })).context
@@ -659,6 +693,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     void sweep($)
     await offer($)
+    await resume($)
 
     return next(e)
   })
@@ -691,6 +726,7 @@ export const register: Register = on => {
     if (e.agentId === undefined) {
       quiet?.cancel()
       quiet = undefined
+      await mark($, 0)
     }
 
     return next(e)
@@ -703,6 +739,7 @@ export const register: Register = on => {
       quiet = $.clock.after(QUIET_MS, () => {
         void compactWhenDue($)
       })
+      await mark($, await $.clock.now().catch(() => 0))
     }
 
     return out

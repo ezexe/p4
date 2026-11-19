@@ -91,6 +91,9 @@ type Machine = {
   isTaken?: boolean
   // Whether the name of the tool lifetime is taken.
   isToolTaken?: boolean
+  // What the session's state holds of the last turn's end as this copy of the module starts: what the copy before
+  // a reload wrote. With none given the state is the kit's own, empty at the start.
+  ended?: () => number
   // The version of Claude Code and the release it is built from, or none where the read is refused.
   version?: () => { version: string; base?: string } | undefined
   // What the session's context reads at this moment.
@@ -119,6 +122,8 @@ type Seen = {
   summarized: { trigger: string; instructions: string | undefined; agentId: string | undefined }[]
   commands: { command: string; args: string }[]
   measured: unknown[]
+  // What the module wrote into the session's state of the last turn's end, in order.
+  ends: unknown[]
   // The sources of the settings the module read, and the input each SessionStart command hook would get on stdin.
   sources: (string | undefined)[]
   starts: Record<string, unknown>[]
@@ -143,6 +148,7 @@ function machine(on: On, has: Machine): Seen {
     summarized: [],
     commands: [],
     measured: [],
+    ends: [],
     sources: [],
     starts: [],
   }
@@ -198,6 +204,17 @@ function machine(on: On, has: Machine): Seen {
 
     return version === undefined ? { deny: 'the version is closed to this plugin' } : { value: version }
   })
+  // The session's state beneath the plugin: what was written is noted, and a reading is what the copy of the
+  // module before a reload left, where the test gives one.
+  on('state.set', (_, e, next) => {
+    seen.ends.push(e.value)
+
+    return next(e)
+  })
+  if (has.ended !== undefined) {
+    const ended = has.ended
+    on('state.get', () => ({ value: { value: ended(), version: 1 } }))
+  }
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
   on('session.root', () => ({ value: '/work/project' }))
   on('session.id', () => ({ value: 'cli-0001' }))
@@ -731,6 +748,65 @@ test('a quiet minute after a turn, a context at or past the line compacts by /co
   expect(seen.measured).toEqual([{ breakdown: 'summary' }])
   expect(seen.shown).toEqual([WHY(72, 70)])
   expect(seen.debugged).toEqual([])
+})
+
+test('a module loaded anew one second after a turn ended still compacts when the minute is over', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on, { now: 1_700_000_000_000 })
+  // The copy before the reload wrote the turn's end, and its timer ended with it: this copy has none.
+  let ended = 0
+  const seen = machine(on, { usage: () => usageAt(72), ended: () => ended })
+  ended = clock.now() - 1_000
+
+  await $.session.start(START)
+  await clock.settle()
+  await clock.advance(58_999)
+  const early = [...seen.commands]
+  await clock.advance(1)
+  await clock.settle()
+
+  expect(early).toEqual([])
+  expect(seen.commands).toEqual([{ command: 'compact', args: KEEP }])
+  expect(seen.shown).toEqual([WHY(72, 70)])
+  expect(seen.ends).toEqual([0])
+  expect(seen.debugged).toEqual([])
+})
+
+test('a module loaded anew after the minute was over looks at the context at once, and one loaded with no turn ended does not', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on, { now: 1_700_000_000_000 })
+  let ended = 0
+  const seen = machine(on, { usage: () => usageAt(72), ended: () => ended })
+
+  await $.session.start(START)
+  await clock.settle()
+  await clock.advance(120_000)
+  const none = [...seen.commands]
+
+  ended = clock.now() - 300_000
+  await $.session.start(START)
+  await clock.settle()
+  await clock.advance(1)
+  await clock.settle()
+
+  expect(none).toEqual([])
+  expect(seen.commands).toEqual([{ command: 'compact', args: KEEP }])
+})
+
+test('the end of a turn is kept in the state of the session, and a turn that begins takes it out again', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on, { now: 1_700_000_000_000 })
+  const seen = machine(on, { usage: () => usageAt(10) })
+  await $.session.start(START)
+  await clock.settle()
+
+  const at = clock.now()
+  await $.turn.complete(TURN)
+  await $.turn.complete({ ...TURN, agentId: 'a1' })
+  await $.turn.start({ text: 'next', turnId: 't2' })
+  await $.turn.start({ text: 'next', turnId: 't3', agentId: 'a1' })
+
+  expect(seen.ends).toEqual([at, 0])
 })
 
 test('a turn that begins inside the minute ends the quiet, and a turn of a subagent neither ends nor starts it', async ($, on) => {
