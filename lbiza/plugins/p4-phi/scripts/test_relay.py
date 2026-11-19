@@ -26,6 +26,9 @@ from test_phi import CLI, GRAND, KID, KID2, START, TOP, Tree, context, write  # 
 import inproc  # noqa: E402
 
 A, B = KID, KID2
+# The letter of a drive this machine has, the one this checkout is on, and E on a machine without drive letters:
+# relay.paths_in drops a path on a drive the machine lacks, and a GitHub runner has C: and D: and no E:.
+DRIVE = os.path.splitdrive(HERE)[0][:1].upper() if os.path.splitdrive(HERE)[0].endswith(":") else "E"
 
 
 class Paths(unittest.TestCase):
@@ -134,8 +137,9 @@ class Paths(unittest.TestCase):
 
     def test_git_bash_and_wsl_paths_are_absolute(self):
         """/e/x as Git Bash writes it is E:/x, not a path under the base."""
-        self.assertEqual(relay.paths_in("cat /e/projects/p4-phi/x/a1.txt", "E:/projects/p4-phi"),
-                         [relay.norm("E:/projects/p4-phi/x/a1.txt")])
+        d = DRIVE
+        self.assertEqual(relay.paths_in(f"cat /{d.lower()}/projects/p4-phi/x/a1.txt", f"{d}:/projects/p4-phi"),
+                         [relay.norm(f"{d}:/projects/p4-phi/x/a1.txt")])
         self.assertEqual(relay.norm("/mnt/e/projects/x"), relay.norm("E:/projects/x"))
 
     def test_a_path_on_a_missing_drive_never_hangs(self):
@@ -163,8 +167,8 @@ class Paths(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
     def test_the_paths_a_note_names(self):
-        got = relay.paths_in("deprecates: `lib/x.py` and docs/old.md, see https://example.com/a", "E:/w")
-        self.assertEqual(got, [relay.norm("E:/w/lib/x.py"), relay.norm("E:/w/docs/old.md")])
+        got = relay.paths_in("deprecates: `lib/x.py` and docs/old.md, see https://example.com/a", f"{DRIVE}:/w")
+        self.assertEqual(got, [relay.norm(f"{DRIVE}:/w/lib/x.py"), relay.norm(f"{DRIVE}:/w/docs/old.md")])
 
     def test_a_repository_is_found_without_starting_git(self):
         """A path's repository is found from the `.git` folders above it, with no git process started."""
