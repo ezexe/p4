@@ -12,15 +12,13 @@ _prompts that build prompts to prompter prompts into pioneer prompts that puppet
 prompty → prompter → pioneer → puppeteer
 ```
 
-The four names are the four steps p4-phi takes when ezexe sends a message to an orchestrator, or to any session that started sessions: routing, the start draft, the gate and the watcher, run by the functions `prompty`, `prompter`, `pioneer` and `look` of [`puppeteer.py`](lbiza/plugins/p4-phi/scripts/puppeteer.py).
-Routing reads the message against the records the orchestrator's ledger is built from: the area it names and the live session that is that area's code owner.
-The start draft is the exact next session: its topic, a brief written as its own instruction, its parent session and the issue it closes, started fresh.
-A worker's draft passes `use_worktree: true`, so the worker writes in a git worktree and on a branch of its own, which is Claude Code's own answer to parallel writers: no draft waits on a running writer's files, and p4-phi keeps no lock on a file.
-The gate checks the draft: it reads the state of the issue the draft names, and names the parent session the start draft chose, this orchestrator or none for a new orchestrator.
-A draft that names no issue tells the worker that p4-phi files none, so its findings go up in its report.
-The gate's verdict is what the session is handed: the exact `start_session` call for a clean draft, the `SendMessage` that routes it to its area's live code owner, or no start where the depth or count cap holds.
-The watcher is the plugin's hooks module, which runs one look for an orchestrator inside Claude Code at a turn's end, at a message's arrival and on its timer.
-It rewrites `ledger.md` in that session's folder under the store's `phi/sessions/` from p4-phi's records and the app's session records when one of them changes, with a reconcile line where the two disagree about a live session.
+- The four names are the four steps p4-phi takes when you send a message to a session that has started other sessions.
+- **prompty** routes the message: it finds the area the message is about and the live session that already owns that area.
+- **prompter** drafts the next session exactly: its topic, its brief, its parent session and the issue it closes.
+- **pioneer** checks the draft and hands the session one thing to do: start it, send it to the session that owns the area, or start nothing.
+- **puppeteer** watches: it keeps a ledger of the sessions that were started and brings it up to date as they work.
+- A worker that writes gets a git worktree and a branch of its own, so no session waits on another's files.
+- [How it works](https://github.com/ezexe/p4/wiki/How-it-works#linear-progression) has each step in full.
 
 ## Recursive Refinement
 
@@ -30,11 +28,12 @@ puppeteer → prompty → prompter → pioneer → puppeteer
     └──────────────────────────────────────────┘
 ```
 
-Here the watcher feeds routing again through registered routes.
-When a topic's work lands, its route is registered in `routes.jsonl` beside the ledger: the words that asked for it, the topic, the session shape that worked, the brief's slice, fork or fresh, and the issue.
-A route is registered only when the records back what the reports claimed: the issue is closed, a pushed commit closes it, and the session and its workers are archived with their outcome kept.
-Routing scores each next message against the registered routes, and a close match gives the start draft its shape: the steps that worked, and the files when the message names none.
-A route whose issue was reopened or whose commit was reverted is withdrawn.
+- Here the watcher feeds routing again.
+- When a topic's work lands, the route that got it there is kept: the words that asked for it, the session shape that worked and the issue it closed.
+- A route is kept only when the records back what the reports claimed: the issue is closed, a pushed commit closes it, and the sessions are archived.
+- Each next message is scored against the kept routes, and a close match gives its draft the shape that worked.
+- A route is withdrawn when its issue is reopened or its commit is reverted.
+- [How it works](https://github.com/ezexe/p4/wiki/How-it-works#recursive-refinement) has the detail.
 
 ## Parallel Exploration
 
@@ -44,13 +43,12 @@ prompty → prompter ─┼─ pioneer_b ─┼─ puppeteer
                     └─ pioneer_c ─┘
 ```
 
-Here the message is under-determined, and one draft would have to guess between distinct readings of it.
-Routing finds a message that names its readings itself, as in "either A or B", when no code owner matches, and writes the readings.
-p4-phi starts no session for a reading: it hands the orchestrator one line that names the workflow the plugin ships, `/p4-phi:readings`, with the readings as its `args`, and the session names the readings itself the same way.
-Claude Code runs that workflow: one agent for each reading, a reading that writes files in a git worktree of its own, and a script that compares what they came to.
-The run returns `collapsed` with the one result the readings came to, or `forked` with an option for each reading and a default.
-A run takes no input from a person, so a reading that cannot go on without ezexe returns its question as data.
-Only a fork goes to ezexe, as one `AskUserQuestion` the session asks after the run, and the chosen reading then goes on as an ordinary worker session.
+- Here a message leaves two or more readings open, and one draft would have to guess between them.
+- p4-phi starts no session for a reading: it names the workflow the plugin ships, `/p4-phi:readings`, and Claude Code runs one agent for each reading.
+- A reading that writes files works in a git worktree of its own.
+- The run returns one result where the readings came to the same thing, or a fork with an option for each reading.
+- Only a fork comes to you, as one question, and the reading you choose goes on as an ordinary worker session.
+- [How it works](https://github.com/ezexe/p4/wiki/How-it-works#parallel-exploration) has the detail.
 
 ## Meta-Prompting
 
@@ -60,13 +58,12 @@ puppeteer_b ──┼── meta_puppeteer ── prompty (new generation)
 puppeteer_c ──┘
 ```
 
-Here each of `puppeteer_a`, `puppeteer_b` and `puppeteer_c` is an orchestrator.
-Whichever orchestrator receives ezexe's message runs the meta pass over every orchestrator's ledger before routing, and writes `meta-ledger.md` in the store's `phi/` folder.
-The pass finds duplicate topics, orchestrators in conflict over the same files or issue, and topics that are stale or have landed, and it seeds the next generation of topics from what is left open.
-An orchestrator told of a finding settles a duplicate or a conflict with the other orchestrator through `SendMessage` and names a session whose work is over to ezexe as a link to open and archive, and only a conflict the two cannot settle goes to ezexe as a question.
-
-The marketplace's three plugins, p4-phi, p4-temportal and p4-native, and where each keeps its files are described in [`lbiza/README.md`](lbiza/README.md), and [Install](https://github.com/ezexe/p4/wiki/Install) gives the commands that install them.
-The interactive docs are published at [ezexe.github.io/p4](https://ezexe.github.io/p4/), where [the session tree](https://ezexe.github.io/p4/session-tree.html) lets you make each move on a live tree.
+- Here each of `puppeteer_a`, `puppeteer_b` and `puppeteer_c` is an orchestrator, a session that started other sessions.
+- Whichever orchestrator receives your message reads every orchestrator's ledger before it routes.
+- That pass finds duplicate topics, orchestrators in conflict over the same files or issue, and topics that are stale or have landed.
+- It seeds the next generation of topics from what is left open.
+- Two orchestrators settle a duplicate or a conflict between themselves, and only one they cannot settle comes to you as a question.
+- [How it works](https://github.com/ezexe/p4/wiki/How-it-works#meta-prompting) has the detail.
 
 <div align="center">
 
@@ -77,7 +74,9 @@ _"Puppeteer... the final frontier. These are the operations of Prompty Enterpris
 ## The repository
 
 - Ask a question in the [discussions](https://github.com/ezexe/p4/discussions) of this repository, and report a problem in its [issues](https://github.com/ezexe/p4/issues).
-- The [wiki](https://github.com/ezexe/p4/wiki) holds the readable documentation: how to [install](https://github.com/ezexe/p4/wiki/Install), how to [contribute](https://github.com/ezexe/p4/wiki/Contributing) and how a [release](https://github.com/ezexe/p4/wiki/Releasing) is cut.
+- The [wiki](https://github.com/ezexe/p4/wiki) holds the readable documentation: [how it works](https://github.com/ezexe/p4/wiki/How-it-works), how to [install](https://github.com/ezexe/p4/wiki/Install), how to [contribute](https://github.com/ezexe/p4/wiki/Contributing) and how a [release](https://github.com/ezexe/p4/wiki/Releasing) is cut.
+- [`lbiza/README.md`](lbiza/README.md) describes the marketplace's three plugins, p4-phi, p4-temportal and p4-native, and where each keeps its files.
+- The interactive docs are published at [ezexe.github.io/p4](https://ezexe.github.io/p4/), where [the session tree](https://ezexe.github.io/p4/session-tree.html) lets you make each move on a live tree.
 - [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 - [CITATION.cff](CITATION.cff), which GitHub shows as "Cite this repository".
 - [LICENSE](LICENSE): MIT.
