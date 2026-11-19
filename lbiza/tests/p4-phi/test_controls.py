@@ -1501,7 +1501,7 @@ class NativeCalls(unittest.TestCase):
 
 
 class SidebarTools(unittest.TestCase):
-    """Where phi.json turns `app_tools` on, the plugin's hooks module asks the desktop app's own tools and leaves
+    """Unless phi.json turns `app_tools` off, the plugin's hooks module asks the desktop app's own tools and leaves
     the answers in app.json: the sidebar group of the session and of each session linked to it, from `get_session`
     and `list_sessions`, and for a puppeteer the sections with their ids, from `list_sections` or `list_groups`.
     The filing is read from those answers first, and from the app's own file, `claude_desktop_config.json`, for a
@@ -1566,17 +1566,18 @@ class SidebarTools(unittest.TestCase):
         self.assertEqual(t.cli(TOP2, "controls", proj=self.other).returncode, 2,
                          "and a session of another CLI id reads no answer of this one's")
 
-    def test_a_look_asks_for_the_sections_only_for_a_puppeteer_with_the_setting_on(self):
+    def test_a_look_asks_for_the_sections_only_for_a_puppeteer_and_not_with_the_setting_off(self):
         t = self.t
         self.file(**{PUP: "puppeteers"})
         t.say(PUP, "Run the trees")
         t.record(TOP, title="top")
         t.say(TOP, "Build the exporter")
-        on = {"P4_PHI_APP_TOOLS": "1"}
-        self.assertNotIn("app_sections", self.look(PUP))
-        self.assertIs(self.look(PUP, **on).get("app_sections"), True)
-        self.assertIs(self.look(TOP, **on).get("app_tools"), True)
-        self.assertNotIn("app_sections", self.look(TOP, **on), "an orchestrator filed nowhere")
+        off = {"P4_PHI_APP_TOOLS": "0"}
+        self.assertIs(self.look(PUP).get("app_sections"), True, "the setting is on where a store sets nothing")
+        self.assertNotIn("app_sections", self.look(PUP, **off))
+        self.assertNotIn("app_tools", self.look(PUP, **off))
+        self.assertIs(self.look(TOP).get("app_tools"), True)
+        self.assertNotIn("app_sections", self.look(TOP), "an orchestrator filed nowhere")
 
     def started(self):
         """The puppeteer controls an orchestrator of the other project and starts a new one there -> its lines."""

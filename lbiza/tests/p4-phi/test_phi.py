@@ -2489,10 +2489,11 @@ class ToolCommands(unittest.TestCase):
 
 
 class AppTools(unittest.TestCase):
-    """Where phi.json turns `app_tools` on, the plugin's hooks module asks the desktop app's own tools for sessions,
+    """Unless phi.json turns `app_tools` off, the plugin's hooks module asks the desktop app's own tools for sessions,
     `get_session` and `list_sessions`, and leaves what they answered in app.json. A session is read from that file
     first, and from the app's record file, which no docs page describes, where the file is absent, stale or does not
-    hold the session, and for a key the tools do not answer. With the setting off no look asks for the tools."""
+    hold the session, and for a key the tools do not answer. The setting is on unless a store turns it off, and
+    with it off no look asks for the tools."""
 
     ON = {"P4_PHI_APP_TOOLS": "1"}
 
@@ -2534,26 +2535,53 @@ class AppTools(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout.strip().splitlines()[-1])
 
-    def test_a_look_asks_for_the_tools_only_where_the_setting_is_on(self):
-        self.assertNotIn("app_tools", self.look())
+    def test_a_look_asks_for_the_tools_unless_the_setting_is_off(self):
+        """On is the default: a store that sets nothing has a look ask for the tools, `app_tools` false in its
+        phi.json or P4_PHI_APP_TOOLS=0 for one run has it ask for none, and the variable set to 1 stands over a
+        store's false."""
+        self.assertIs(phi.APP_TOOLS, True, "on unless a project turns it off")
+        self.assertIs(self.look().get("app_tools"), True, "the store sets nothing")
+        self.assertNotIn("app_tools", self.look("--folder"), "the folder question asks for nothing")
+        self.assertNotIn("app_tools", self.look(P4_PHI_APP_TOOLS="0"))
+        write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"app_tools": False}))
+        self.assertNotIn("app_tools", self.look(), "the store turned it off")
         self.assertIs(self.look(**self.ON).get("app_tools"), True)
-        self.assertNotIn("app_tools", self.look("--folder", **self.ON), "the folder question asks for nothing")
         write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"app_tools": True}))
         self.assertIs(self.look().get("app_tools"), True)
         self.assertNotIn("app_tools", self.look(P4_PHI_APP_TOOLS="0"))
-        self.assertIs(phi.APP_TOOLS, False, "off unless a project turns it on")
+        write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"app_tools": "yes"}))
+        self.assertIs(self.look().get("app_tools"), True, "a value that is no true or false leaves the default")
+
+    def test_the_readme_the_skill_and_the_pages_say_the_default_the_code_holds(self):
+        root = os.path.dirname(SRC)
+        self.assertIs(phi.APP_TOOLS, True)
+        readme = read(os.path.join(root, "README.md"))
+        self.assertIn("| `background`, `reports`, `turns`, `book`, `rules`, `puppeteer`, `app_tools` | `true` |", readme)
+        self.assertNotIn("| `app_tools` | `false` |", readme)
+        self.assertIn("`app_tools`, which is on unless a store sets it to `false`,", readme)
+        self.assertIn("`phi.py app_tools off` is the way out", readme)
+        self.assertIn("It is on unless a store sets it off", read(os.path.join(root, "skills", "phi", "SKILL.md")))
+        docs = os.path.join(root, "..", "..", "..", "docs")
+        self.assertIn("so the setting is on unless a project turns it off with <code>phi.py app_tools off</code>",
+                      read(os.path.join(docs, "puppeteer.html")))
+        self.assertIn("the key is on by default", read(os.path.join(docs, "plugin-development.html")))
 
     def test_app_tools_on_and_off_write_the_key_a_look_reads_and_say_how_it_stands(self):
         """A session writes nothing under `.claude` with its own tools, so `phi.py app_tools on` and `app_tools off`
         set the key in the store's phi/phi.json, as `goal on` sets its own: the file's other keys are kept, the line
-        says how the key stands as read back, and a look answers `app_tools` from then on. With neither word the
-        command writes nothing and says how the key stands, and a file that does not parse is left as it is."""
+        says how the key stands as read back, and a look answers `app_tools` until `off` and from `on`. With neither
+        word the command writes nothing and says how the key stands, which is on for a store that has not set it,
+        and a file that does not parse is left as it is."""
         path = os.path.join(self.t.p4, "phi", "phi.json")
         write(path, json.dumps({"goal": True}))
         r = self.t.cli(TOP, "app_tools")
-        self.assertEqual((r.returncode, r.stdout.strip().split(" in ")[0]), (0, "app_tools is off"), r.stderr)
+        self.assertEqual((r.returncode, r.stdout.strip().split(" in ")[0]), (0, "app_tools is on"), r.stderr)
         with open(path, encoding="utf-8") as f:
             self.assertEqual(json.load(f), {"goal": True}, "asking how it stands writes nothing")
+        r = self.t.cli(TOP, "app_tools", "off")
+        self.assertTrue(r.stdout.strip().startswith("app_tools is off in "), r.stdout)
+        self.assertNotIn("app_tools", self.look(), "the way out: the store's own key turns it off")
+        self.assertEqual(self.t.cli(TOP, "app_tools").stdout.strip(), r.stdout.strip())
         r = self.t.cli(TOP, "app_tools", "on")
         self.assertEqual(r.returncode, 0, r.stderr)
         said = r.stdout.strip()

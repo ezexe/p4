@@ -738,7 +738,7 @@ PHI_TIE = {"Bash": "issue-tie", "PowerShell": "issue-tie"}
 # on Claude Code 2.1.326 in the desktop app and on 2.1.328 in a scripted run: the PreToolUse and PostToolUse command
 # hooks run for it as for a session's own call, it leaves no row in the transcript and no model reads its result. So
 # it is no lookup of the session's: the record hooks write no row for it and phi.py keeps nothing of it. p4-phi's own
-# module makes such calls where a store turns `app_tools` on, once a minute at most.
+# module makes such calls unless a store turns `app_tools` off, once a minute at most.
 PLUGIN_CALL = "toolu_plugin_"
 
 

@@ -15,7 +15,7 @@
 // no shell line. And it is a pane beside the chat, which no command hook can draw: a puppeteer's board, the ledger
 // of ezexe's requests and an orchestrator's ledger of its sessions, as python wrote them into the session's
 // folder, opened by the command `/phi-pane` and read anew after each look while it is open.
-// And where a project turns `app_tools` on it asks the desktop app's own tools for the session and the sessions
+// And unless a project turns `app_tools` off it asks the desktop app's own tools for the session and the sessions
 // linked to it, which no command hook can call, and keeps the answers for python.
 
 import { atom, read, update } from 'claude-code'
@@ -162,8 +162,8 @@ const PAGE_CHARS = 24_000
 // what another version of this module stored, which outlives a reload.
 const shown = atom({ plugin: 'p4-phi', key: 'pages' } as const, [], { shape: 'pages-1' })
 
-// The desktop app's own tools for sessions, which a session of the app has and no other session does. Where a
-// store's phi.json turns `app_tools` on, the module asks them what phi.py otherwise reads from the app's record
+// The desktop app's own tools for sessions, which a session of the app has and no other session does. Unless a
+// store's phi.json turns `app_tools` off, the module asks them what phi.py otherwise reads from the app's record
 // files, which no docs page describes, and keeps the answers in this file for python: phi.APP_FILE. `get_session`
 // answers this session, and `list_sessions` the sessions linked to it, the archived ones too.
 const APP_FILE = 'app.json'
@@ -186,7 +186,7 @@ const APP_CALL_MS = 5_000
 // `phi.upkeep` on, every one of those sessions is idle and python's count of such turns is inside its budget.
 // `rules` is what `phi.py rules` prints alone: the text of the system prompt's section. `goal` is the condition of
 // the native goal this session is to be given, answered once and only where a store's phi.json turns `goal` on.
-// `app_tools` is true where that file turns `app_tools` on: the app's own tools are asked after such a look.
+// `app_tools` is true unless that file turns `app_tools` off: the app's own tools are asked after such a look.
 // `app_sections` is true with it for a puppeteer: the sidebar's sections are asked for too.
 type Answer = {
   app_tools?: boolean
@@ -498,7 +498,7 @@ async function look($: EngineInterface, isEvent: boolean): Promise<void> {
     const prompt = answer?.move || answer?.upkeep
     if (answer?.goal) setGoal($, answer.goal)
     else if (prompt) wake($, prompt)
-    // The app's own tools are asked after a look that starts no turn, where the store turns them on.
+    // The app's own tools are asked after a look that starts no turn, unless the store turns them off.
     if (answer?.app_tools === true && !answer.goal && !prompt) void askApp($, answer.app_sections === true)
     arm($, dueAfter() - ((await $.clock.now()) - now))
   } catch (error) {

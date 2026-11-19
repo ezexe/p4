@@ -10,7 +10,7 @@ The watcher every orchestrator has is puppeteer.py's and is another thing.
                preferences.epitaxyPrefs["dframe-group-scopes"], each scope with `groups`, each group an `id` and a
                `name`, and `assignments`, which maps `code:<sessionId>` to a group id. p4-phi reads the filing there
                each time it matters and keeps no copy of its own. A file that is missing or shaped otherwise makes
-               nobody a puppeteer. Where phi.json turns `app_tools` on, the plugin's hooks module asks the app's own
+               nobody a puppeteer. Unless phi.json turns `app_tools` off, the plugin's hooks module asks the app's own
                tools, and a session's section is read first from what they answered: phi.app_group, from `group` of
                `get_session` and `list_sessions`, and phi.section_id, from `list_sections` or `list_groups`. The file
                is read for a session they did not answer. Nothing stops a session from filing itself, since the app asks nobody:

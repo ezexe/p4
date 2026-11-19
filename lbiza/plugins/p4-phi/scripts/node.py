@@ -23,7 +23,7 @@ own id for the session. `record_tree` reads the session records the desktop app 
 it was made and the session that started or forked it. Claude Code's documentation names neither that variable nor
 these records. A training round joins the two trees, so a task of a session phi.py kept no files for still finds
 the sessions above it. The desktop app's own tools for sessions, which phi.py reads ahead of a record file where
-phi.json turns `app_tools` on, do not serve here: they name no CLI session, which is how a task finds its session,
+phi.json leaves `app_tools` on, do not serve here: they name no CLI session, which is how a task finds its session,
 and they answer the sessions linked to the asking one, where a round reads every session of the machine.
 
 Only what existed before the message counts: `at(..., when)` drops a task, a note or a session dated after it.

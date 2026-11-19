@@ -76,7 +76,7 @@ TURNS = True
 BOOK = True
 RULES = True
 GOAL = False                     # phi.json `goal`: true has a worker's line `Done looks like:` set as its native goal
-APP_TOOLS = False                # phi.json `app_tools`: true has the hooks module ask the app's own tools for sessions
+APP_TOOLS = True                 # phi.json `app_tools`: false keeps the hooks module from asking the app's own tools for sessions
 # hooks.md, "JSON output": "A hook's `additionalContext`, `systemMessage`, and `initialUserMessage` strings, and its
 # plain stdout, are capped at 10,000 characters", each string "measured separately", and over the limit "Claude Code
 # saves the output to a file in the session directory. It replaces the output with the file path and a preview of up
@@ -285,7 +285,7 @@ def app_roots():
 #
 # The record files below are the desktop app's own, and no docs page describes them. The app has tools that answer a
 # session, `mcp__ccd_session_mgmt__get_session` and `mcp__ccd_session_mgmt__list_sessions`, which a command hook
-# cannot call and the plugin's hooks module can, by `$.tool.call`. Where phi.json turns `app_tools` on, the module
+# cannot call and the plugin's hooks module can, by `$.tool.call`. Unless phi.json turns `app_tools` off, the module
 # asks both after a look and writes what they answered to APP_FILE: `self`, the session's own answer, and
 # `sessions`, the sessions linked to it. A session is read from that file first, and from its record file where the
 # file is absent, older than APP_FRESH_S or does not hold the session: a session the app did not start has no such
@@ -2943,7 +2943,7 @@ def goal_verdict(home, sid):
 
 
 def goal_look(a, me):
-    """`phi.py look` where phi.json turns `goal` or `app_tools` on: puppeteer.look's answer, and with it `goal`, the
+    """`phi.py look` where phi.json turns `goal` on or leaves `app_tools` on: puppeteer.look's answer, and with it `goal`, the
     condition the hooks module sets as the session's native goal, where one is due, and `app_tools`, which has the
     module ask the app's own tools for sessions, with `app_sections` for a puppeteer, which has it ask the sidebar's
     sections too. The verdict of a goal already set is read first, at every look."""
@@ -2991,10 +2991,11 @@ def switch(home, key, on):
 def app_tools_switch(home, on=None):
     """`phi.py app_tools on` and `app_tools off`: writes `app_tools` in the store's phi/phi.json, as `goal on` writes
     its key, and returns the line that says how it stands as read back. With neither it writes nothing and says how
-    the key stands, and whether P4_PHI_APP_TOOLS sets it for this run."""
+    the key stands, which is on for a file that does not set it false, and whether P4_PHI_APP_TOOLS sets it for this
+    run."""
     path = os.path.join(home, "phi", "phi.json")
     if on is None:
-        stands, path = "on" if read_json(path).get("app_tools") is True else "off", path.replace(chr(92), "/")
+        stands, path = "off" if read_json(path).get("app_tools") is False else "on", path.replace(chr(92), "/")
     else:
         stands, path = switch(home, "app_tools", on)
     run = os.environ.get("P4_PHI_APP_TOOLS")
@@ -3777,8 +3778,9 @@ def main(argv=None):
                                 "stands")
         if name == "app_tools":
             p.add_argument("act", nargs="?", default="", choices=("", "on", "off"),
-                           help="on and off write `app_tools` in the store's phi.json, which has the hooks module "
-                                "ask the desktop app's own tools for sessions; none prints how the key stands")
+                           help="on and off write `app_tools` in the store's phi.json, which is on unless set off "
+                                "and has the hooks module ask the desktop app's own tools for sessions; none "
+                                "prints how the key stands")
         if name == "detach":
             p.add_argument("moved", nargs="?", default="", help="the session to detach to top level, this one when "
                                                                 "left out")
