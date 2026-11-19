@@ -91,6 +91,47 @@ class ModuleTest(unittest.TestCase):
         self.assertIn(f"const LEAST_WAIT_MS = {int(lifetime.LEAST_WAIT_S * 1000):_}", text)
         self.assertIn(f"const MOST_WAIT_MS = {int(lifetime.MOST_WAIT_S * 1000):_}", text)
 
+    def test_the_module_hooks_every_compaction_and_starts_one_by_the_slash_command(self):
+        """The types of Claude Code 2.1.326 give `session.compact` as the event of every compaction, whose `next`
+        takes the instructions and resolves to the messages the conversation reads afterwards. Seen in the desktop
+        app on that build, `$.session.compact` is refused in a session a program started, and `/compact` run by
+        `$.command.run` compacts there with the module's own hook hearing it. So the module starts a compaction by
+        the command alone, and the line of the two files agrees."""
+        import re
+        import sys
+        if str(SRC) not in sys.path:
+            sys.path.insert(0, str(SRC))
+        import lifetime
+        text = (SRC / "register.ts").read_text(encoding="utf-8")
+        hooked = re.findall(r"(?m)^  on\('([\w.]+)'", text)
+        for event in ("session.compact", "turn.start", "turn.complete"):
+            self.assertEqual(hooked.count(event), 1, event)
+        self.assertIn("await $.command.run({ command: 'compact', args: KEEP })", text)
+        self.assertNotIn("$.session.compact(", text)
+        self.assertRegex(text, rf"(?m)^const COMPACT_AT = {lifetime.COMPACT_AT}$")
+        self.assertIn("$.session.usage({ breakdown: 'summary' })", text)
+        self.assertIn("$.clock.after(QUIET_MS,", text)
+
+    def test_the_keep_list_names_what_a_session_needs_after_a_compaction(self):
+        import re
+        text = (SRC / "register.ts").read_text(encoding="utf-8")
+        said = re.search(r"(?m)^const KEEP =\n((?:  .+\n)+)", text).group(1).rstrip()
+        keep = "".join(re.findall(r"'([^']*)'", said))
+        for kept in ("every session id", "every file path", "every branch", "every commit hash",
+                     "every decision with its source", "every open item",
+                     "the path of every state page and hand-over note"):
+            self.assertIn(kept, keep)
+        test = (SRC / "register.test.ts").read_text(encoding="utf-8")
+        self.assertIn(said, test, "the module's test holds the list word for word")
+
+    def test_the_memory_start_after_a_compaction_is_kept(self):
+        """`session.compact` hands a hook no summary string and no way to read what the summary kept, and a hooks
+        module does not load in a session started with `--safe-mode` or `--bare`. So the SessionStart command hook
+        with the source `compact` stays, which runs the memory start again in the compacted context."""
+        self.assertEqual(sum("memory migrate" in c for c in runs("SessionStart", "compact")), 1)
+        for word in ("session.compact", "/compact", "temportal.compact_at"):
+            self.assertIn(word, FILE["description"])
+
     def test_the_slash_command_runs_the_commands_lifetime_py_takes(self):
         """`/lifetime` hands lifetime.py the word typed after it, so each of the module's four is a command of
         lifetime.py's own parser, and the command is registered and answered by one literal name. By

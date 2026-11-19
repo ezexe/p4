@@ -19,10 +19,11 @@ DOX = REPO / "dox"
 PAGE = DOX / "temportal-native.html"
 
 ROWS = ("compaction", "memory", "consolidation", "rules", "checkpoints", "transcripts", "scratchpad", "worktrees",
-        "plans", "notebook", "lifetimes", "commands")
+        "plans", "notebook", "lifetimes", "commands", "tools")
 COLUMNS = ("What is kept", "Set out for the plugin", "What Claude Code does, and the page", "p4-temportal today",
            "What it only configures", "What the native feature lacks, which the plugin adds", "Part")
 NO_PART = ("none", "built", "left")
+LANDED = ("1",)                         # the parts of the order that are on main
 
 
 def page():
@@ -72,6 +73,15 @@ class Page(unittest.TestCase):
             named.add(part)
         self.assertEqual(parts - named, set(), "a part of the order no row belongs to")
         self.assertEqual(rows(text)["compaction"].count('<td class="n">1</td>'), 1, "compaction is the first part")
+
+    def test_each_part_that_landed_says_the_version_it_landed_in(self):
+        text = page()
+        said = {part: re.search(r"It landed in p4-temportal \d+[.]\d+[.]\d+[.]</li>", item) is not None
+                for part, item in re.findall(r'<li id="part-(\d+)">(.*?</li>)', text)}
+        self.assertEqual({part for part, landed in said.items() if landed}, set(LANDED))
+        today = rows(text)["compaction"]
+        for word in ("session.compact", "temportal.compact_at", "$.command.run", "2.1.326"):
+            self.assertIn(word, today, word)
 
     def test_the_page_says_what_was_set_out_and_what_the_docs_do_not_confirm(self):
         text = page()

@@ -149,7 +149,7 @@ OPEN = ("temportal.cache",)
 
 # Keys read when a project sets them and never written by default, so a later change to the code's own value reaches
 # every store: kept as set, never called unknown.
-READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.clear_at", "claude")
+READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.clear_at", "temportal.compact_at", "claude")
 
 # Keys no plugin reads, top-level or dotted: never returned or called unknown, and dropped from p4.json when it is
 # rewritten for another reason. The memory section and the scratchpad tmp keys went with p4-temportal's move to the

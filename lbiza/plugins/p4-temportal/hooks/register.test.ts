@@ -1,7 +1,7 @@
 // p4-temportal's hooks module under `claude plugin test`: each hook here stands for the engine, beneath the plugin.
 
 import { expect, mock, test } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import type { On, SessionCompactResult, SessionMessage, SessionUsage } from 'claude-code'
 
 const DATA = '/home/u/.claude/plugins/data/p4-temportal-inline'
 const KEPT = '/opt/python/bin/python3'
@@ -9,6 +9,66 @@ const START = { cwd: '/', surface: 'desktop', isInteractive: true } as const
 const EXIT = { reason: 'prompt_input_exit', sessionId: 'cli-0001', resume: { id: 'cli-0001' } } as const
 // What the engine stamps on a command a person types: Enter at the prompt, on the main screen at 80 columns.
 const TYPED = { origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
+// A turn of the main conversation, as the engine starts one and ends it.
+const BEGUN = { text: 'go on', turnId: 't1' } as const
+const TURN = { answer: 'done', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as const
+
+// The keep list, word for word as the module adds it to what a summary is told.
+const KEEP =
+  'Keep each of these verbatim in the summary, one to a line: every session id, every file path, every branch, ' +
+  'every commit hash, every decision with its source, every open item, and the path of every state page and ' +
+  'hand-over note.'
+// The two lines a ledger opens with, and the line that counts what it left out.
+const LEDGER =
+  'p4-temportal kept this list across a compaction. Nobody typed it: the plugin built it from the tool calls of ' +
+  'the session.\nFiles this session wrote or edited, the latest last:'
+const LEFT_OUT = 'Older paths left out of this list: '
+// The line of the transcript that says why the session compacts.
+const WHY = (percent: number, line: number): string =>
+  `The context is at ${percent} percent, at or past temportal.compact_at ${line}, so the session compacts.`
+
+// What Claude Code's own compaction leaves: the summary as a message of the user's, the engine's own.
+const SUMMARY: SessionMessage = {
+  role: 'user',
+  text: 'This session is being continued from a previous conversation that ran out of context.',
+  toolUses: [],
+  handle: 'h-summary',
+}
+
+// What a person asked, as a message of the transcript: a compaction runs over one message at least.
+const ASKED: SessionMessage = { role: 'user', text: 'Port the flush.', toolUses: [], handle: 'h-asked' }
+
+// A message of the transcript in which the model called one tool.
+function called(tool: string, input: Record<string, unknown>, isError?: true): SessionMessage {
+  const use = { tool_use_id: `u-${tool}-${JSON.stringify(input)}`, tool, input, ...(isError ? { isError } : {}) }
+
+  return { role: 'assistant', text: '', toolUses: [use], handle: `h-${use.tool_use_id}` }
+}
+
+// A ledger as the module writes one: its two opening lines, a line for each path, and the count of those left out.
+function ledger(paths: readonly string[], left = 0): SessionMessage {
+  const lines = [LEDGER, ...paths.map(path => `- ${path}`), ...(left > 0 ? [`${LEFT_OUT}${left}.`] : [])]
+
+  return { role: 'user', text: lines.join('\n'), toolUses: [] }
+}
+
+// What `$.session.usage` answers with the context at `percent` of a window of a million tokens. A live probe in the
+// desktop app on Claude Code 2.1.326 read auto-compaction on, at 967000 tokens. No percent is a context not measured
+// since a compaction.
+function usageAt(percent: number | undefined, more: { isOn?: boolean; threshold?: number | null } = {}): SessionUsage {
+  const breakdown = {
+    isAutoCompactEnabled: more.isOn ?? true,
+    ...(more.threshold === null ? {} : { autoCompactThreshold: more.threshold ?? 967_000 }),
+  }
+  const measured = percent === undefined ? {} : { tokens: percent * 10_000, percent }
+
+  return {
+    startedAt: 0,
+    context: { ...measured, window: 1_000_000, breakdown },
+    rateLimits: [],
+    cost: { usd: 0 },
+  } as unknown as SessionUsage
+}
 
 // What `lifetime.py tick` prints.
 type Answer = Record<string, unknown>
@@ -27,6 +87,12 @@ type Machine = {
   tick?: (args: readonly string[]) => Answer | string | Promise<Answer | string>
   says?: (args: readonly string[]) => Said
   isTaken?: boolean
+  // What the session's context reads at this moment.
+  usage?: () => SessionUsage
+  // What the engine's own compaction answers, where it is not the summary alone.
+  compacted?: SessionCompactResult
+  // What a slash command the module runs waits on before it answers, or why the engine rejects it.
+  command?: () => Promise<void>
 }
 
 // What the module read, the pythons it tried, the commands it registered, each lifetime.py command it ran with its
@@ -40,6 +106,11 @@ type Seen = {
   calls: { argv: readonly string[]; env: Readonly<Record<string, string>> | undefined; timeoutMs: number | undefined }[]
   shown: string[]
   debugged: string[]
+  // What each compaction told the summarizer, the slash commands run beneath the plugin, and what each reading of
+  // the context asked for.
+  summarized: { trigger: string; instructions: string | undefined; agentId: string | undefined }[]
+  commands: { command: string; args: string }[]
+  measured: unknown[]
 }
 
 // A path as the test wrote it: the engine hands a hook the path resolved on the machine the test runs on.
@@ -49,8 +120,39 @@ function plain(path: string): string {
 
 function machine(on: On, has: Machine): Seen {
   const files = has.files ?? { [`${DATA}/.python`]: `${KEPT}\n`, [KEPT]: '' }
-  const seen: Seen = { read: [], tried: [], offered: [], tools: [], ran: [], calls: [], shown: [], debugged: [] }
+  const seen: Seen = {
+    read: [],
+    tried: [],
+    offered: [],
+    tools: [],
+    ran: [],
+    calls: [],
+    shown: [],
+    debugged: [],
+    summarized: [],
+    commands: [],
+    measured: [],
+  }
   on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: '' }))
+  on('session.usage', (_, e) => {
+    seen.measured.push(e)
+
+    return { value: (has.usage ?? (() => usageAt(10)))() }
+  })
+  on('session.compact', (_, e) => {
+    seen.summarized.push({ trigger: e.trigger, instructions: e.instructions, agentId: e.agentId })
+
+    return has.compacted ?? { messages: [SUMMARY], tokensBefore: 194_336, tokensAfter: 30_108 }
+  })
+  // A slash command the module runs. Its own `command.run` hook answers /lifetime above this one.
+  on('command.run', async (_, e) => {
+    seen.commands.push({ command: e.command, args: e.args })
+    await has.command?.()
+
+    return { text: 'Compacted' }
+  })
   on('command.register', (_, e) => {
     if (has.isTaken === true) return { deny: '"/lifetime" refused: it is the built-in /lifetime' }
     seen.offered.push({ name: e.name, description: e.description, argumentHint: e.argumentHint })
@@ -475,6 +577,311 @@ test('where the name /lifetime is taken the debug log says so, and the session s
   expect(seen.ran).toEqual([['tick']])
   expect(seen.debugged.length).toBe(1)
   expect(seen.debugged[0]?.startsWith('/lifetime was not registered: ')).toBe(true)
+})
+
+test('every compaction tells the summary the keep list, after what it was told already and once', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const seen = machine(on, {})
+
+  await $.session.compact({ trigger: 'manual', instructions: 'Stress the flush.', messages: [ASKED] })
+  await $.session.compact({ trigger: 'auto', messages: [ASKED] })
+  await $.session.compact({ trigger: 'manual', instructions: KEEP, messages: [ASKED] })
+  await $.session.compact({ trigger: 'auto', agentId: 'a1', messages: [ASKED] })
+  await $.session.compact({ trigger: 'precompute', messages: [ASKED] })
+
+  expect(seen.summarized).toEqual([
+    { trigger: 'manual', instructions: `Stress the flush.\n\n${KEEP}`, agentId: undefined },
+    { trigger: 'auto', instructions: KEEP, agentId: undefined },
+    { trigger: 'manual', instructions: KEEP, agentId: undefined },
+    { trigger: 'auto', instructions: KEEP, agentId: 'a1' },
+    { trigger: 'precompute', instructions: KEEP, agentId: undefined },
+  ])
+  for (const kept of ['session id', 'file path', 'branch', 'commit hash', 'decision with its source', 'open item']) {
+    expect(KEEP.includes(`every ${kept}`)).toBe(true)
+  }
+  expect(KEEP.includes('the path of every state page and hand-over note')).toBe(true)
+})
+
+test('after a compaction the ledger lists the files the session wrote or edited, each once, the latest last', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  machine(on, {})
+  const messages = [
+    ASKED,
+    called('Read', { file_path: '/work/project/README.md' }),
+    called('Write', { file_path: '/work/project/src/flush.ts', content: 'x' }),
+    called('Edit', { file_path: 'C:\\work\\notes\\state.md', old_string: 'a', new_string: 'b' }),
+    called('Bash', { command: 'git status' }),
+    called('NotebookEdit', { notebook_path: '/work/project/run.ipynb', new_source: '1' }),
+    called('Edit', { file_path: '/work/project/refused.ts', old_string: 'a', new_string: 'b' }, true),
+    called('Write', { file_path: '/work/project/src/flush.ts', content: 'y' }),
+    called('Edit', { file_path: 'C:/work/notes/state.md', old_string: 'b', new_string: 'c' }),
+  ] satisfies SessionMessage[]
+
+  const out = await $.session.compact({ trigger: 'manual', messages })
+
+  expect(out.messages).toEqual([
+    SUMMARY,
+    ledger(['/work/project/run.ipynb', '/work/project/src/flush.ts', 'C:/work/notes/state.md']),
+  ])
+  expect(out.skip === undefined ? out.tokensAfter : undefined).toBe(30_108)
+})
+
+test('a ledger of the compaction before gives its paths to the next, and the result never holds two', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const before = { ...ledger(['/p/a.md', '/p/b.md']), handle: 'h-ledger' }
+  machine(on, { compacted: { messages: [SUMMARY, before] } })
+  const messages = [SUMMARY, before, called('Edit', { file_path: '/p/a.md' }), called('Write', { file_path: '/p/c.md' })]
+
+  const out = await $.session.compact({ trigger: 'auto', messages })
+
+  expect(out.messages).toEqual([SUMMARY, ledger(['/p/b.md', '/p/a.md', '/p/c.md'])])
+})
+
+test('a ledger lists the last sixty paths and counts the ones left out, across compactions', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  machine(on, {})
+  const paths = Array.from({ length: 65 }, (_, at) => `/p/${at}.md`)
+
+  const first = await $.session.compact({
+    trigger: 'manual',
+    messages: paths.map(path => called('Write', { file_path: path })),
+  })
+  const kept = first.messages?.at(-1)
+  const second = await $.session.compact({
+    trigger: 'manual',
+    messages: [SUMMARY, { ...ledger(paths.slice(5), 5), handle: 'h-ledger' }, called('Write', { file_path: '/p/new.md' })],
+  })
+
+  expect(kept).toEqual(ledger(paths.slice(5), 5))
+  expect(second.messages?.at(-1)).toEqual(ledger([...paths.slice(6), '/p/new.md'], 6))
+})
+
+test('a compaction that wrote no file adds no message, and neither does a skip or a precompute', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  machine(on, {})
+  const wrote = [called('Write', { file_path: '/p/a.md' })]
+
+  const read = await $.session.compact({ trigger: 'manual', messages: [called('Read', { file_path: '/p/a.md' })] })
+  const ahead = await $.session.compact({ trigger: 'precompute', messages: wrote })
+  const after = await $.session.compact({ trigger: 'auto', messages: wrote })
+
+  expect(read.messages).toEqual([SUMMARY])
+  expect(ahead.messages).toEqual([SUMMARY])
+  expect(after.messages).toEqual([SUMMARY, ledger(['/p/a.md'])])
+})
+
+test('a compaction that was skipped stays skipped', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  machine(on, { compacted: { skip: 'a PreCompact hook blocked it' } })
+
+  const out = await $.session.compact({ trigger: 'manual', messages: [called('Write', { file_path: '/p/a.md' })] })
+
+  expect(out).toEqual({ skip: 'a PreCompact hook blocked it' })
+})
+
+test('a quiet minute after a turn, a context at or past the line compacts by /compact with the keep list', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { usage: () => usageAt(72) })
+  await $.session.start(START)
+  await clock.settle()
+
+  await $.turn.complete(TURN)
+  await clock.advance(59_999)
+  const early = [...seen.commands]
+  await clock.advance(1)
+  await clock.settle()
+
+  expect(early).toEqual([])
+  expect(seen.commands).toEqual([{ command: 'compact', args: KEEP }])
+  expect(seen.measured).toEqual([{ breakdown: 'summary' }])
+  expect(seen.shown).toEqual([WHY(72, 70)])
+  expect(seen.debugged).toEqual([])
+})
+
+test('a turn that begins inside the minute ends the quiet, and a turn of a subagent neither ends nor starts it', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { usage: () => usageAt(72) })
+  await $.session.start(START)
+  await clock.settle()
+
+  await $.turn.complete(TURN)
+  await clock.advance(30_000)
+  await $.turn.start(BEGUN)
+  await clock.advance(600_000)
+  const whileBusy = seen.measured.length
+  await $.turn.complete(TURN)
+  await clock.advance(30_000)
+  await $.turn.start({ ...BEGUN, agentId: 'a1' })
+  await $.turn.complete({ ...TURN, agentId: 'a1' })
+  await clock.advance(29_999)
+  const early = [...seen.commands]
+  await clock.advance(1)
+  await clock.settle()
+
+  expect(whileBusy).toBe(0)
+  expect(early).toEqual([])
+  expect(seen.commands).toEqual([{ command: 'compact', args: KEEP }])
+})
+
+test('the line is the one the sweep answered, 70 until then, and under it nothing compacts', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let now = usageAt(69)
+  let line: number | undefined
+  const seen = machine(on, {
+    usage: () => now,
+    tick: () => (line === undefined ? QUIET : { ...QUIET, compact_at: line }),
+  })
+  await $.session.start(START)
+  await clock.settle()
+
+  await $.turn.complete(TURN)
+  await clock.advance(60_000)
+  const underSeventy = [...seen.commands]
+  line = 40
+  await clock.advance(3_600_000)
+  now = usageAt(39)
+  await $.turn.complete(TURN)
+  await clock.advance(60_000)
+  const underForty = [...seen.commands]
+  now = usageAt(45)
+  await $.turn.complete(TURN)
+  await clock.advance(60_000)
+  await clock.settle()
+
+  expect(underSeventy).toEqual([])
+  expect(underForty).toEqual([])
+  expect(seen.commands).toEqual([{ command: 'compact', args: KEEP }])
+  expect(seen.shown).toEqual([WHY(45, 40)])
+})
+
+test('a line of 0 starts no compaction and reads no context, and a line the sweep cannot give is left as it was', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let line: unknown = 0
+  const seen = machine(on, { usage: () => usageAt(90), tick: () => ({ ...QUIET, compact_at: line }) })
+  await $.session.start(START)
+  await clock.settle()
+
+  await $.turn.complete(TURN)
+  await clock.advance(60_000)
+  const off = { commands: [...seen.commands], measured: seen.measured.length }
+  line = 'soon'
+  await clock.advance(3_600_000)
+  await $.turn.complete(TURN)
+  await clock.advance(60_000)
+  const unread = [...seen.commands]
+  line = 100
+  await clock.advance(3_600_000)
+  await $.turn.complete(TURN)
+  await clock.advance(60_000)
+  await clock.settle()
+
+  expect(off).toEqual({ commands: [], measured: 0 })
+  expect(unread).toEqual([])
+  expect(seen.commands).toEqual([])
+})
+
+test("no compaction starts where Claude Code's own is off, at the point of its own, or with no context measured", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let now = usageAt(80, { isOn: false, threshold: null })
+  const seen = machine(on, { usage: () => now })
+  await $.session.start(START)
+  await clock.settle()
+  const quiet = async (): Promise<number> => {
+    await $.turn.complete(TURN)
+    await clock.advance(60_000)
+    await clock.settle()
+
+    return seen.commands.length
+  }
+
+  const whileOff = await quiet()
+  now = usageAt(97)
+  const atItsOwn = await quiet()
+  now = usageAt(undefined)
+  const unmeasured = await quiet()
+  now = usageAt(80)
+  const due = await quiet()
+
+  expect([whileOff, atItsOwn, unmeasured, due]).toEqual([0, 0, 0, 1])
+  expect(seen.shown).toEqual([WHY(80, 70)])
+})
+
+test('a context at or past the line right after a compaction starts none, until Claude Code compacts again', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let now = usageAt(75)
+  const seen = machine(on, { usage: () => now })
+  await $.session.start(START)
+  await clock.settle()
+  const quiet = async (): Promise<number> => {
+    await $.turn.complete(TURN)
+    await clock.advance(60_000)
+    await clock.settle()
+
+    return seen.commands.length
+  }
+
+  const first = await quiet()
+  await $.session.compact({ trigger: 'manual', instructions: KEEP, messages: [ASKED] })
+  const rightAfter = await quiet()
+  now = usageAt(90)
+  const later = await quiet()
+  await $.session.compact({ trigger: 'auto', messages: [ASKED] })
+  now = usageAt(20)
+  const under = await quiet()
+  now = usageAt(71)
+  const again = await quiet()
+
+  expect([first, rightAfter, later, under, again]).toEqual([1, 1, 1, 1, 2])
+  expect(seen.debugged).toEqual([
+    'the context is at 75 percent right after a compaction, so temportal.compact_at 70 starts none',
+  ])
+})
+
+test('the compaction of a subagent gets its own ledger and does not hold the main conversation', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { usage: () => usageAt(75) })
+  await $.session.start(START)
+  await clock.settle()
+
+  const out = await $.session.compact({
+    trigger: 'auto',
+    agentId: 'a1',
+    messages: [called('Write', { file_path: '/p/child.md' })],
+  })
+  await $.turn.complete(TURN)
+  await clock.advance(60_000)
+  await clock.settle()
+
+  expect(out.messages).toEqual([SUMMARY, ledger(['/p/child.md'])])
+  expect(seen.commands).toEqual([{ command: 'compact', args: KEEP }])
+})
+
+test('while a compaction the module started runs it starts no second', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { usage: () => usageAt(75), command: () => clock.sleep(130_000) })
+  await $.session.start(START)
+  await clock.settle()
+
+  await $.turn.complete(TURN)
+  await clock.advance(60_000)
+  await $.turn.complete(TURN)
+  await clock.advance(60_000)
+  const inFlight = seen.commands.length
+  await clock.advance(70_000)
+  await $.turn.complete(TURN)
+  await clock.advance(60_000)
+  await clock.advance(130_000)
+
+  expect(inFlight).toBe(1)
+  expect(seen.commands.length).toBe(2)
 })
 
 test('the module registers no tool for the model, whose call would run with no permission check', async ($, on) => {

@@ -10,7 +10,7 @@
     {
       "name": "p4-temportal",
       "source": "./lbiza/plugins/p4-temportal",
-      "description": "Keeps the project's auto memory, notebook and saved code in its .claude/p4 store, where Claude Code writes the memory itself by autoMemoryDirectory, leaves each session's scratchpad to the app, and clears what is no longer relevant by lifetimes.",
+      "description": "Keeps the project's auto memory, notebook and saved code in its .claude/p4 store, where Claude Code writes the memory itself by autoMemoryDirectory, leaves each session's scratchpad to the app, clears what is no longer relevant by lifetimes, and keeps a compaction from losing what a session needs.",
       "category": "productivity",
       "keywords": [
         "memory",

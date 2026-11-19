@@ -35,8 +35,10 @@ the session runs, and at the session's end.
   tick                     the retention sweep as the module runs it. Before it, as every hook of a start does, it
                            moves files left in an earlier place of the store's layout. It prints one JSON line:
                            `said`, the line of the move when this run made it and the line of what the sweep
-                           cleared, and `wait_s`, the seconds until the next sweep is due, which is the next
-                           cookie's expiry, a minute at least and an hour at most.
+                           cleared, `wait_s`, the seconds until the next sweep is due, which is the next
+                           cookie's expiry, a minute at least and an hour at most, and `compact_at`, the percent
+                           of a session's context at which the module compacts it in a quiet moment, which is the
+                           p4.json setting `temportal.compact_at`, 70 where it is unset and 0 for none.
   tick --let-go            starts that sweep in a process of its own and returns at once. The module runs it at a
                            session's end, where the `session.end` hooks share 1.5 seconds and, as the API's types
                            say of SessionEndInput, "only a process a command let go of outlives it".
@@ -86,6 +88,7 @@ FRESH_S = 3600                          # a set-aside copy this young came with 
 NAME = "p4-temportal: "                 # what a line printed for a command hook starts with
 LEAST_WAIT_S = 60.0                     # the module's timer never sweeps sooner after a sweep than this
 MOST_WAIT_S = 3600.0                    # nor later: a cache rule counts days, so an hour is soon enough for one
+COMPACT_AT = 70                         # percent of a session's context at which the module compacts it when quiet
 
 
 payload_from_stdin = hookio.payload_from_stdin
@@ -444,6 +447,18 @@ def next_wait(p4, now=None):
     return max(LEAST_WAIT_S, min(waits))
 
 
+def compact_at(p4):
+    """The percent of a session's context at which the module compacts it in a quiet moment: p4.json
+    temportal.compact_at when it is a number above 0 and under 100, 0 when it is 0 or false, which starts no
+    compaction, and COMPACT_AT when it is unset or anything else. Claude Code's own compaction stays as it is."""
+    at = p4conf.section(p4, "temportal").get("compact_at")
+    if at is False:
+        return 0
+    if not isinstance(at, (int, float)) or isinstance(at, bool):
+        return COMPACT_AT
+    return at if 0 <= at < 100 else COMPACT_AT
+
+
 def let_go(args):
     """Start this script with `args` in a process of its own and return at once -> True when it started. The process
     outlives the one that asked and holds none of its handles: on Windows it has a console of its own that shows no
@@ -467,7 +482,7 @@ def tick(root, to_let_go=False):
     p4 = store_of(root)
     try:
         said = [line[len(NAME):] if line.startswith(NAME) else line for line in start_sweep(p4)]
-        return {"said": said, "wait_s": round(next_wait(p4), 3)}
+        return {"said": said, "wait_s": round(next_wait(p4), 3), "compact_at": compact_at(p4)}
     except Exception as e:  # noqa: BLE001 — a sweep degrades, never raises
         return {"said": [f"the retention sweep degraded: {type(e).__name__}: {e}"], "wait_s": MOST_WAIT_S}
 

@@ -183,7 +183,39 @@ class Tick(unittest.TestCase):
         bare = os.path.join(self.root, "bare")
         os.makedirs(bare)
         r = run("tick", CLAUDE_PROJECT_DIR=bare)
-        self.assertEqual((json.loads(r.stdout), os.listdir(bare)), ({"said": [], "wait_s": 3600.0}, []))
+        self.assertEqual((json.loads(r.stdout), os.listdir(bare)),
+                         ({"said": [], "wait_s": 3600.0, "compact_at": 70}, []))
+
+    def test_a_tick_says_the_line_at_which_the_module_compacts_a_quiet_session(self):
+        """`compact_at` of the JSON line is the p4.json setting temportal.compact_at: a number from 0 to under 100 as
+        it is set, 0 for false, and 70 where it is unset or anything else. The module reads it at each sweep."""
+        lines = {}
+        for name, value in (("unset", None), ("fifty-five", 55), ("a fraction", 62.5), ("zero", 0), ("false", False),
+                            ("true", True), ("a word", "soon"), ("a hundred", 100), ("under zero", -5)):
+            with open(p4conf.path(self.p4), "w", encoding="utf-8") as fh:
+                json.dump({"temportal": {} if value is None else {"compact_at": value}}, fh)
+            lines[name] = json.loads(run("tick", CLAUDE_PROJECT_DIR=self.root).stdout)["compact_at"]
+        self.assertEqual(lines, {"unset": 70, "fifty-five": 55, "a fraction": 62.5, "zero": 0, "false": 0, "true": 70,
+                                 "a word": 70, "a hundred": 70, "under zero": 70})
+        self.assertEqual(lifetime.COMPACT_AT, 70)
+
+    def test_the_line_is_read_when_set_and_never_written_by_default(self):
+        """temportal.compact_at is no default of p4.json, so a later change to the code's own 70 reaches every store,
+        and a store that sets it keeps it and is told of no unknown key."""
+        import contextlib
+        import io
+        self.assertNotIn("compact_at", p4conf.DEFAULTS["temportal"])
+        self.assertIn("temportal.compact_at", p4conf.READ_WHEN_SET)
+        run("tick", CLAUDE_PROJECT_DIR=self.root)
+        self.assertNotIn("compact_at", read(p4conf.path(self.p4)))
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as fh:
+            json.dump({"temportal": {"compact_at": 55}}, fh)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            loaded = p4conf.load(self.p4)
+        self.assertEqual((err.getvalue(), loaded["temportal"]["compact_at"]), ("", 55))
+        self.assertEqual(json.load(open(p4conf.path(self.p4), encoding="utf-8"))["temportal"]["compact_at"], 55)
+        self.assertNotIn("temportal.compact_at", p4conf.env_keys())
 
     def test_a_tick_that_fails_says_so_in_its_json_line(self):
         old = lifetime.sweep

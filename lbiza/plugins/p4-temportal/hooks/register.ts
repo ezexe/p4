@@ -9,8 +9,18 @@
 // where an answer skips the permission check, and `set`, `clear` and `now` end in deleted files. The event that
 // fires once a call is allowed, `tool.run`, is in the API types of Claude Code 2.1.326 and is no event on 2.1.322,
 // where a module that hooks it does not load.
+//
+// It also keeps a compaction from losing what a session needs afterwards, at `session.compact`, the event of every
+// compaction, whoever started it. On the way down it adds the keep list to what the summary is told. On the way up
+// it adds one message after the summary, the ledger: the paths of the files the session wrote or edited, read from
+// the transcript's own tool calls with no model, an earlier ledger's paths among them. And it starts a compaction
+// itself in a quiet moment, a minute after a turn of the main conversation ended with none begun since, once the
+// context is at or past the line `temportal.compact_at`: 70 percent unless the store's p4.json sets it, and 0 for
+// none. It starts one as the slash command `/compact`, by `$.command.run`. Seen in the desktop app on Claude Code
+// 2.1.326: `$.session.compact` is refused in a session a program started, "compaction here runs inside a turn (a
+// /compact prompt)", and the command compacts there, with this module's own `session.compact` hook hearing it.
 
-import type { EngineInterface, ProcessRunResult, Register, Timer } from 'claude-code'
+import type { EngineInterface, ProcessRunResult, Register, SessionMessage, Timer } from 'claude-code'
 
 // What find-python.sh runs to prove an interpreter: the interpreter prints its own path.
 const PROOF = "import sys; print(sys.executable.replace(chr(92), '/'))"
@@ -46,8 +56,40 @@ const USAGE =
   'the file. now runs the retention sweep, which deletes what is past its lifetime. A path is read from the ' +
   'working folder, or from temportal/ as list prints it, and one with a space goes in quotes.'
 
-// What `lifetime.py tick` prints: the lines of what it moved and cleared, and the seconds until the next sweep.
-type Answer = { said?: unknown; wait_s?: unknown; let_go?: unknown }
+// What a summary is told to keep, added to the instructions of every compaction.
+const KEEP =
+  'Keep each of these verbatim in the summary, one to a line: every session id, every file path, every branch, ' +
+  'every commit hash, every decision with its source, every open item, and the path of every state page and ' +
+  'hand-over note.'
+
+// The ledger: its first line, by which the next compaction finds it, the line above its paths, and the line that
+// counts the paths it left out.
+const LEDGER =
+  'p4-temportal kept this list across a compaction. Nobody typed it: the plugin built it from the tool calls of ' +
+  'the session.'
+const LEDGER_FILES = 'Files this session wrote or edited, the latest last:'
+const LEFT_OUT = 'Older paths left out of this list: '
+
+// The tools whose call writes a file, each with the argument that names the file.
+const WRITES = new Map([
+  ['Write', 'file_path'],
+  ['Edit', 'file_path'],
+  ['NotebookEdit', 'notebook_path'],
+])
+
+// The most paths a ledger lists.
+const MOST_PATHS = 60
+
+// The line until a sweep answered the store's own, which is lifetime.py's COMPACT_AT.
+const COMPACT_AT = 70
+
+// How long the main conversation is quiet before the module looks at the context. It is well inside the five
+// minutes a prompt cache entry lives, so the summary's request reads the conversation from the cache.
+const QUIET_MS = 60_000
+
+// What `lifetime.py tick` prints: the lines of what it moved and cleared, the seconds until the next sweep, and
+// the line `temportal.compact_at`.
+type Answer = { said?: unknown; wait_s?: unknown; let_go?: unknown; compact_at?: unknown }
 
 // The python that runs the plugin's scripts, searched for once. A reload of the module starts all of this over.
 let finding: Promise<string | undefined> | undefined
@@ -57,6 +99,17 @@ let isSweeping = false
 // A sweep was asked for while one ran.
 let isAsked = false
 let timer: Timer | undefined
+
+// The percent of the context at which the module compacts a quiet session, and 0 for none.
+let line = COMPACT_AT
+// The wait that runs while the main conversation is quiet.
+let quiet: Timer | undefined
+// A compaction this module started is in flight.
+let isCompacting = false
+// The main conversation was compacted and its context has not been read since.
+let isFresh = false
+// The first reading after a compaction was already at or past the line, so compacting does not reach under it.
+let isHeld = false
 
 // What was said to the debug log, each line once.
 const said = new Set<string>()
@@ -196,6 +249,13 @@ function waitOf(answer: Answer | undefined): number {
   return Math.min(Math.max(Math.round(seconds * 1000), LEAST_WAIT_MS), MOST_WAIT_MS)
 }
 
+// The line a sweep answered, and the line as it was where the sweep answered none.
+function lineOf(answer: Answer | undefined): number {
+  const at = answer?.compact_at
+
+  return typeof at === 'number' && at >= 0 && at < 100 ? at : line
+}
+
 // The timer, set anew to fire `wait` milliseconds from this moment. No timer runs while a sweep does.
 function arm($: EngineInterface, wait: number): void {
   timer?.cancel()
@@ -219,8 +279,9 @@ async function sweep($: EngineInterface): Promise<void> {
   try {
     const answer = await ask($, ['tick'], SWEEP_MS)
     const lines = Array.isArray(answer?.said) ? answer.said : []
-    for (const line of lines) if (typeof line === 'string' && line) $.ui.log(line)
+    for (const text of lines) if (typeof text === 'string' && text) $.ui.log(text)
     wait = waitOf(answer)
+    line = lineOf(answer)
   } catch (error) {
     note($, `the retention sweep failed: ${reason(error)}`)
   } finally {
@@ -274,6 +335,81 @@ async function offer($: EngineInterface): Promise<void> {
   }
 }
 
+// What the summarizer is told: what it was told already, and the keep list after it once.
+function told(instructions: string | undefined): string {
+  if (!instructions) return KEEP
+
+  return instructions.includes(KEEP) ? instructions : `${instructions}\n\n${KEEP}`
+}
+
+function isLedger(message: SessionMessage): boolean {
+  return message.role === 'user' && message.text.startsWith(LEDGER)
+}
+
+// The ledger of a transcript: one message that lists the files it wrote or edited, each once in the order of its
+// last write, or none where it wrote no file. An earlier ledger among the messages gives its paths first, since a
+// compaction leaves only the messages after the one before it. A call that reported an error wrote nothing.
+function ledger(messages: readonly SessionMessage[]): SessionMessage | undefined {
+  const paths = new Map<string, string>()
+  let left = 0
+  const add = (path: unknown): void => {
+    if (typeof path !== 'string' || !path.trim() || path.includes('\n')) return
+    const key = path.trim().replaceAll('\\', '/')
+    paths.delete(key)
+    paths.set(key, path.trim())
+  }
+  for (const message of messages) {
+    if (isLedger(message)) {
+      for (const text of message.text.split('\n')) {
+        if (text.startsWith('- ')) add(text.slice(2))
+        else if (text.startsWith(LEFT_OUT)) left += Number.parseInt(text.slice(LEFT_OUT.length), 10) || 0
+      }
+    }
+    for (const use of message.toolUses ?? []) {
+      const named = WRITES.get(use.tool)
+      if (named !== undefined && use.isError !== true) add(use.input[named])
+    }
+  }
+  if (paths.size === 0) return undefined
+  const all = [...paths.values()]
+  const kept = all.slice(-MOST_PATHS)
+  const out = left + all.length - kept.length
+  const lines = [LEDGER, LEDGER_FILES, ...kept.map(path => `- ${path}`)]
+  if (out > 0) lines.push(`${LEFT_OUT}${out}.`)
+
+  return { role: 'user', text: lines.join('\n'), toolUses: [] }
+}
+
+// Runs when the main conversation was quiet for QUIET_MS: it compacts the session where its context is at or past
+// the line. It starts none where ezexe turned Claude Code's own compaction off, none at the point where Claude Code
+// compacts by itself, and none where the first reading after a compaction is already at or past the line, since a
+// compaction then does not reach under it: Claude Code's own is the next one. A context not measured since the last
+// compaction reads as nothing and starts none.
+async function compactWhenDue($: EngineInterface): Promise<void> {
+  quiet = undefined
+  if (isCompacting || !(line > 0)) return
+  try {
+    const { percent, tokens, breakdown } = (await $.session.usage({ breakdown: 'summary' })).context
+    if (percent === undefined || tokens === undefined || breakdown === undefined) return
+    const isFirst = isFresh
+    isFresh = false
+    if (percent < line) return
+    if (isFirst) {
+      isHeld = true
+      note($, `the context is at ${percent} percent right after a compaction, so temportal.compact_at ${line} starts none`)
+    }
+    const isNear = breakdown.autoCompactThreshold !== undefined && tokens >= breakdown.autoCompactThreshold
+    if (isHeld || !breakdown.isAutoCompactEnabled || isNear) return
+    isCompacting = true
+    $.ui.log(`The context is at ${percent} percent, at or past temportal.compact_at ${line}, so the session compacts.`)
+    await $.command.run({ command: 'compact', args: KEEP })
+  } catch (error) {
+    note($, `the compaction at a quiet moment did not run: ${reason(error)}`)
+  } finally {
+    isCompacting = false
+  }
+}
+
 export const register: Register = on => {
   // The session does not wait for its first sweep, and it does wait for the command, which is then listed from the
   // first prompt.
@@ -282,6 +418,51 @@ export const register: Register = on => {
     await offer($)
 
     return next(e)
+  })
+
+  // Every compaction, of the main conversation and of a subagent's own transcript. A `precompute` installs
+  // nothing, and its result is kept for the compaction that follows, so the ledger is added at that one. A ledger
+  // the result already holds is replaced, so there is never a second. A ledger that cannot be built is left out
+  // and said, and the compaction stands as Claude Code made it.
+  on('session.compact', async ($, e, next) => {
+    const out = await next({ ...e, instructions: told(e.instructions) })
+    if (out.skip !== undefined || e.trigger === 'precompute') return out
+    if (e.agentId === undefined) {
+      isFresh = true
+      isHeld = false
+    }
+    try {
+      const kept = ledger(e.messages)
+      if (kept === undefined) return out
+
+      return { ...out, messages: [...out.messages.filter(message => !isLedger(message)), kept] }
+    } catch (error) {
+      note($, `the list of written files was not added after a compaction: ${reason(error)}`)
+
+      return out
+    }
+  })
+
+  // A turn of the main conversation ends the quiet, and the end of one starts it.
+  on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined) {
+      quiet?.cancel()
+      quiet = undefined
+    }
+
+    return next(e)
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    const out = await next(e)
+    if (e.agentId === undefined) {
+      quiet?.cancel()
+      quiet = $.clock.after(QUIET_MS, () => {
+        void compactWhenDue($)
+      })
+    }
+
+    return out
   })
 
   on('command.run', { command: 'lifetime' }, async ($, e) => ({ text: await lifetime($, e.args) }))

@@ -17,6 +17,16 @@ Transcripts, plans, file history and subagent memory stay where Claude Code puts
 - Logs, build output and binaries in the notebook are moved into its `.out/`, which git ignores.
 - `temportal/src/` holds code kept for reuse that the project's repository does not use.
 
+## Compaction
+
+Claude Code compacts a conversation by itself when its context fills, and p4-temportal's hooks module keeps a compaction from losing what the session needs afterwards.
+
+- Every summary is told to keep, word for word, every session id, file path, branch, commit hash, decision with its source and open item, and the path of every state page and hand-over note.
+- Behind the summary comes one message that opens with "p4-temportal kept this list across a compaction": the files this session wrote or edited, the latest last, built from the session's tool calls and carried from one compaction to the next.
+- After a compaction, read the state page or hand-over note that list names before going on, and trust the list over the summary for where a file is.
+- A minute after a turn ended with none begun since, the module compacts the session itself once its context is at or past `temportal.compact_at` in `.claude/p4/p4.json`, which is 70 percent unless set, and 0 starts none.
+- What must outlast any summary belongs in a file: a state page in this session's scratchpad, or a finding kept with `phi.py note`.
+
 ## Lifetimes
 
 Two kinds of lifetime clear what is no longer relevant, the way a browser handles its cache and its cookies.
