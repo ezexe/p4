@@ -1400,6 +1400,68 @@ class ClaudeSettings(unittest.TestCase):
         rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
         self.assertEqual(sorted(list(rec["rules"].values())[0]["entries"]), sorted(self.rules(new)))
 
+    def test_a_rule_of_p4s_shape_for_a_copy_that_does_not_run_is_taken_out(self):
+        """Seen on 2026-11-19 in E:/projects/p4-phi/.claude/settings.local.json: four allow rules named a checkout's
+        phi.py and p4.py, the record of them was lost with a store started anew, and the keeper left them as a
+        person's, so they allowed a script that is not the plugin and kept the running copy's rules unwritten. A
+        rule exactly of p4's shape whose folder is not a copy that runs is taken out by a step of its own, which
+        only takes out. A person's rule of another shape stays, in its place, and at a ConfigChange nothing moves."""
+        from unittest import mock
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        checkout = os.path.join(self.tmp, "repo", "lbiza", "plugins", "p4-phi", "scripts")
+        os.makedirs(checkout)
+        Path(checkout, "phi.py").write_text("", encoding="utf-8")
+        gone = os.path.join(self.tmp, "gone", "scripts")
+        old, new = self.cached("0.11.96", "0.11.97")
+        there = p4conf.fwd(checkout)
+        mine = ["Bash(npm test)", f'Bash(python -I -X utf8 "{there}/phi.py" tree)', f'Bash(python "{there}/phi.py" *)',
+                f'Bash(python -I -X utf8 "{there}/p4.py" *)']
+        strays = self.rules(checkout) + self.rules(gone)[:1]
+        before = mine[:1] + strays[:4] + mine[1:3] + strays[4:] + mine[3:]
+        wanted = self.rules(new) + self.rules(old)
+        self.assertEqual(p4conf.stray_rules(before, wanted), strays, "the checkout's four, and one for a folder gone")
+        self.assertEqual(p4conf.stray_rules(before + wanted, wanted), strays, "no rule of a copy that runs")
+        data = {"permissions": {"allow": list(before), "deny": ["Bash(rm *)"]}}
+        self.assertEqual(p4conf._drop_strays(data, {}, "f", wanted), strays)
+        self.assertEqual(data, {"permissions": {"allow": mine, "deny": ["Bash(rm *)"]}}, "the step only takes out")
+        only = {"permissions": {"allow": list(strays), "deny": ["Bash(rm *)"]}}
+        p4conf._drop_strays(only, {}, "f", wanted)
+        self.assertEqual(only, {"permissions": {"deny": ["Bash(rm *)"]}}, "a list of nothing else goes with its key")
+        same = {"permissions": {"allow": list(before)}}
+        self.assertEqual(p4conf._drop_strays(same, {}, "f", None), [], "a copy that cannot tell moves nothing")
+        self.assertEqual(same["permissions"]["allow"], before)
+        _write(self.local(), {"permissions": {"allow": list(before)}})
+        with mock.patch.object(p4conf, "PHI_SCRIPTS", new):
+            p4conf.keep_settings(self.project, platform="win32", owned_only=True)
+            self.assertEqual(self.read(self.local())["permissions"]["allow"], before, "a ConfigChange moves nothing")
+            for _ in range(2):
+                p4conf.keep_settings(self.project, platform="win32")
+        allow = self.read(self.local())["permissions"]["allow"]
+        self.assertEqual(allow[:len(mine)], mine, "the person's rules, in their order")
+        self.assertFalse([r for r in allow if r in strays], "no rule names the checkout or the folder that is gone")
+        self.assertEqual(allow[len(mine):], wanted, "and the keeper's standing step writes the running copies' own")
+        self.temportal().keep_settings(self.project, platform="win32")
+        self.assertEqual(self.read(self.local())["permissions"]["allow"], allow)
+
+    def test_a_copy_that_cannot_tell_and_a_checkout_leave_an_installed_versions_rules(self):
+        """p4-temportal's copy cannot tell which copy of p4-phi runs, so it takes no rule out. A checkout loaded by
+        `--plugin-dir` leaves the rules of an installed version folder that is still on disk, which a session that
+        loaded that version runs from, and takes out those of a folder that is gone."""
+        from unittest import mock
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        installed, = self.cached("0.11.97")
+        checkout = os.path.join(self.tmp, "repo", "lbiza", "plugins", "p4-phi", "scripts")
+        os.makedirs(checkout)
+        Path(checkout, "phi.py").write_text("", encoding="utf-8")
+        gone = os.path.join(self.tmp, "plugins", "cache", "p4-marketplace", "p4-phi", "0.11.01", "scripts")
+        before = self.rules(installed) + self.rules(gone) + self.rules(checkout)
+        _write(self.local(), {"permissions": {"allow": list(before)}})
+        self.temportal().keep_settings(self.project, platform="win32")
+        self.assertEqual(self.read(self.local())["permissions"]["allow"], before, "p4-temportal's copy: left")
+        with mock.patch.object(p4conf, "PHI_SCRIPTS", checkout):
+            p4conf.keep_settings(self.project, platform="win32")
+        self.assertEqual(self.read(self.local())["permissions"]["allow"], self.rules(installed) + self.rules(checkout))
+
     def test_a_copy_outside_the_plugin_cache_keeps_one_folders_rules(self):
         """A checkout is no version folder: its rules follow it, and no folder beside it is read as a version."""
         beside = os.path.join(self.tmp, "repo", "lbiza", "plugins", "other", "scripts")

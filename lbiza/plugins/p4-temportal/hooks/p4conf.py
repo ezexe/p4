@@ -1258,8 +1258,9 @@ PLANS = "temportal/plans"        # the store's folder of plan files, from the st
 # and this one no longer owns is removed while it still holds the value written.
 ENV_KEY = "env"                  # where the P4_* variables go: each one p4 owns is the dotted key env.<name>
 # Raised by one whenever the keys this copy writes change, so a store's next start runs the whole check: the record
-# holds the KEEPER of the copy that last ran it. 9 came with LISTS, so a list an earlier keeper emptied is looked at.
-KEEPER = 9
+# holds the KEEPER of the copy that last ran it. 9 came with LISTS, so a list an earlier keeper emptied is looked at,
+# and 10 with _drop_strays, so a rule for a copy that does not run is.
+KEEPER = 10
 PAST_MAX = 5                     # texts kept per variable of those p4 wrote and later replaced or removed
 # The class of keys ezexe decides, by #246: every key of the topics "Permission settings", "Sandbox settings",
 # "Authentication and providers" and "Enterprise and managed settings" of settings-reference.md, the table
@@ -1941,6 +1942,48 @@ def _keep_rules(new, rec, name, wanted, owned_only, key=ALLOW_KEY, part="rules")
         rec.pop(part, None)
 
 
+# A rule exactly as allow_rules writes one, for any scripts folder: the tool, the fixed words, the folder, the script
+# and its tail. A rule a person wrote another way, such as one that names a command of phi.py, is not of this shape.
+_OWN_RULE = re.compile(r'^(?:Bash|PowerShell)\(python -I -X utf8 "(.+)/(?:phi\.py" \*|p4\.py" sync \*)\)$')
+
+
+def stray_rules(have, wanted, entries=()):
+    """The allow rules of `have` that are of p4's own shape, by _OWN_RULE, and name a copy of p4-phi that does not
+    run: the rule is none of `wanted`, which holds the running copy's rules and those of each version folder beside
+    it, the record does not hold it among `entries`, which _keep_rules moves itself, and its folder is no version
+    folder of a plugin cache that still holds phi.py, which a session that loaded that version runs from. Such a
+    rule allows a script that is not the plugin: a checkout whose record was lost, or a folder that is gone."""
+    out = []
+    for r in have:
+        m = _OWN_RULE.match(r) if isinstance(r, str) else None
+        if not m or r in wanted or r in entries:
+            continue
+        if _CACHED.match(m.group(1)) and os.path.isfile(os.path.join(m.group(1), "phi.py")):
+            continue
+        out.append(r)
+    return out
+
+
+def _drop_strays(new, rec, name, wanted):
+    """The allow rules stray_rules names, taken out of `new`. Seen on 2026-11-19: a store started anew lost the
+    record of the four rules a checkout of p4-phi wrote, so the keeper left them as a person's, they allowed the
+    checkout's phi.py and p4.py, and by their identity they kept the running copy's own rules from being written.
+    This step only takes rules out: it writes none and widens none. A list it empties held nothing but p4's own
+    rules, so it goes with its key and _keep_rules makes the next one. With `wanted` None, as in a copy that cannot
+    tell which copy of p4-phi runs, nothing moves."""
+    cur = _get(new, ALLOW_KEY)
+    if wanted is None or not isinstance(cur, list):
+        return []
+    strays = stray_rules(cur, wanted, ((rec.get("rules") or {}).get(name) or {}).get("entries") or [])
+    if strays:
+        left = [r for r in cur if r not in strays]
+        if left:
+            _put(new, ALLOW_KEY, left)
+        else:
+            _del(new, ALLOW_KEY)
+    return strays
+
+
 def _take_lock(lock, wait_s=3.0, stale_s=60.0):
     end = time.monotonic() + wait_s
     while True:
@@ -2036,7 +2079,10 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
     rec.pop("p4env", None)
     for k in WRITES:
         _keep_key(p4, project, new, k, want.get(k), owned, gone, owned_only)
-    _keep_rules(new, rec, name, allow_rules(platform, conf), owned_only)
+    allow = allow_rules(platform, conf)
+    if not owned_only:
+        _drop_strays(new, rec, name, allow)             # a rule of p4's shape for a copy that does not run
+    _keep_rules(new, rec, name, allow, owned_only)
     phi = phi_on(project, target, platform, rec)        # None: this copy cannot tell, and leaves both rules
     ask = list(ASK_RULES) if phi and not upkeep_on(p4) else []
     if phi and not ask and not owned_only and cards_on(p4):
