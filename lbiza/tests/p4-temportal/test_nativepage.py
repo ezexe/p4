@@ -54,7 +54,7 @@ class Page(unittest.TestCase):
     def test_each_docs_page_the_page_quotes_is_named_in_its_footer(self):
         text = page()
         body, footer = text.split("<footer>", 1)
-        quoted = set(re.findall(r"<code>([a-z/-]+\.md)</code>", body)) - {"CONTRIBUTING.md"}
+        quoted = set(re.findall(r"<code>([a-z/-]+\.md)</code>", body))
         listed = set(re.findall(r"<code>([a-z/-]+\.md)</code>", footer))
         self.assertTrue(quoted)
         self.assertEqual(quoted - listed, set())

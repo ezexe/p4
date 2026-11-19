@@ -323,16 +323,20 @@ class Manifests(unittest.TestCase):
             if os.path.isfile(os.path.join(folder, ".claude-plugin", "plugin.json")):
                 self.assertIn(os.path.normcase(os.path.normpath(folder)), listed, name)
 
-    def test_each_readme_gives_the_commands_that_install_from_the_repository(self):
-        """The repository's README, the marketplace folder's and p4-phi's each give the line that adds the marketplace
-        by the repository's name and one install line for each plugin of the catalog, and none adds it by a folder's
-        path: `lbiza/` holds no catalog, and an install from GitHub is a copy in Claude Code's cache."""
+    def test_each_readme_under_lbiza_gives_the_commands_that_install_from_the_repository(self):
+        """The marketplace folder's README and p4-phi's each give the line that adds the marketplace by the
+        repository's name and one install line for each plugin of the catalog, and neither adds it by a folder's
+        path: `lbiza/` holds no catalog, and an install from GitHub is a copy in Claude Code's cache. The
+        repository's README gives no command: it names the wiki's Install page, which holds them."""
         lbiza = os.path.dirname(os.path.dirname(ROOT))
         repo = os.path.dirname(lbiza)
         with open(os.path.join(repo, ".claude-plugin", "marketplace.json"), encoding="utf-8") as f:
             market = json.load(f)
-        for readme in (os.path.join(repo, "README.md"), os.path.join(lbiza, "README.md"),
-                       os.path.join(ROOT, "README.md")):
+        with open(os.path.join(repo, "README.md"), encoding="utf-8") as f:
+            top = f.read()
+        self.assertIn("https://github.com/ezexe/p4/wiki/Install", top)
+        self.assertNotIn("claude plugin marketplace add ", top)
+        for readme in (os.path.join(lbiza, "README.md"), os.path.join(ROOT, "README.md")):
             with open(readme, encoding="utf-8") as f:
                 lines = [line.strip() for line in f]
             self.assertIn("claude plugin marketplace add ezexe/p4", lines, readme)

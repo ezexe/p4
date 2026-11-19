@@ -65,9 +65,8 @@ Whichever orchestrator receives ezexe's message runs the meta pass over every or
 The pass finds duplicate topics, orchestrators in conflict over the same files or issue, and topics that are stale or have landed, and it seeds the next generation of topics from what is left open.
 An orchestrator told of a finding settles a duplicate or a conflict with the other orchestrator through `SendMessage` and names a session whose work is over to ezexe as a link to open and archive, and only a conflict the two cannot settle goes to ezexe as a question.
 
-The marketplace's two plugins, p4-phi and p4-temportal, and where each keeps its files are described in [`lbiza/README.md`](lbiza/README.md), and [Install](#install) gives the commands that install them.
+The marketplace's two plugins, p4-phi and p4-temportal, and where each keeps its files are described in [`lbiza/README.md`](lbiza/README.md), and [Install](https://github.com/ezexe/p4/wiki/Install) gives the commands that install them.
 The interactive docs are published at [ezexe.github.io/p4](https://ezexe.github.io/p4/), where [the session tree](https://ezexe.github.io/p4/session-tree.html) lets you make each move on a live tree.
-Ask a question or report a problem in [the repository's issues](https://github.com/ezexe/p4/issues).
 
 <div align="center">
 
@@ -75,46 +74,10 @@ _"Puppeteer... the final frontier. These are the operations of Prompty Enterpris
 
 </div>
 
-## Install
+## The repository
 
-The repository's root holds the marketplace's catalog, [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json), so the marketplace is added by the repository's name and each plugin is installed by its own, from your shell:
-
-```bash
-claude plugin marketplace add ezexe/p4
-claude plugin install p4-phi@p4-marketplace
-claude plugin install p4-temportal@p4-marketplace
-```
-
-Each install is a copy in Claude Code's plugin cache, at user scope unless `--scope project` or `--scope local` says otherwise.
-
-## Python environment
-
-The plugins' hooks need only the system `python3` and its standard library.
-ezexe/phi's packages `phi_prune`, `phi_rank`, `phi_store` and `phi_model`, which the p4-model skill runs, the `.pt` ranker and the ensemble of shard models of `phi_rank/tree.py`, and the teacher model's `anthropic` SDK run from this checkout's own `.venv/`, built by one script:
-
-```bash
-python3 lbiza/scripts/make_venv.py            # create or top up .venv: torch from the CPU wheels, ezexe/phi, anthropic
-python3 lbiza/scripts/make_venv.py --check    # only report which modules .venv lacks
-.venv/bin/python -m phi_model check --project <repository>     # Windows: .venv\Scripts\python.exe
-```
-
-The script installs ezexe/phi editable from a checkout beside this one, `../phi`, when there is one, and from [GitHub](https://github.com/ezexe/phi) otherwise, and `--phi <path>` names another checkout.
-`--cuda` takes PyPI's default torch build in place of the CPU wheels.
-Where PyTorch publishes no build for the machine, `.venv` is finished without torch: retrieval and `phi_model check` run, and the `.pt` ranker and the ensemble of shard models are off.
-An Intel Mac always takes that route, since ezexe/phi needs torch 2.4.1 or newer and PyPI's last torch for macOS on x86_64 is 2.2.2.
-The script stops before it makes or tops up `.venv` when the Python that will run ezexe/phi is older than the lower bound of `requires-python` in ezexe/phi's `pyproject.toml`, with Python 3.11 in its place for an ezexe/phi from GitHub whose file cannot be read or sets no lower bound.
-
-## Releasing a change to a plugin
-
-Claude Code copies a plugin installed from a marketplace it clones into its plugin cache, `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`, so a change to the plugin's code or its `hooks/hooks.json` reaches such an install only with a new version.
-A plugin's version lives in one file, its own `lbiza/plugins/<plugin>/.claude-plugin/plugin.json`, and each such change bumps it there.
-No entry of the catalog `.claude-plugin/marketplace.json` carries a version, since the manifest's version comes first when Claude Code computes one, and `lbiza/tests/p4-phi/test_wiring.py` holds every entry of the catalog to that.
-The `tests` workflow of [`.github/workflows/tests.yml`](.github/workflows/tests.yml) runs on every pull request and every push to `main`: every test under `lbiza/tests/` through `python -m pytest`, `claude plugin validate --strict` on the catalog and on each plugin, and `claude plugin test` on each plugin's hooks module.
-[CONTRIBUTING.md](CONTRIBUTING.md#tests) says how to run the tests in a checkout.
-The `release` workflow of [`.github/workflows/release.yml`](.github/workflows/release.yml) runs on every push to `main`, and releases each plugin whose version has no tag yet.
-It runs the tests, publishes the plugin as the npm package `@ezexe/<plugin>` on GitHub Packages, tags the commit `<plugin>--v<version>` with `claude plugin tag`, and makes a [GitHub release](https://github.com/ezexe/p4/releases) of that tag, which holds a zip of the plugin's folder.
-A push that raises no plugin's version releases nothing.
-An install takes the new version at Claude Code's next auto-update pass where auto-update is on for `p4-marketplace`, and at `claude plugin update <plugin>@p4-marketplace` where it is off, as it is by default for a marketplace like this one.
-A session that is running keeps the version it loaded until `/reload-plugins` or its next start.
-A marketplace added from a local folder, by `claude plugin marketplace add` with the path of a checkout's root, runs the plugins in place, so the machine that holds that folder sees a change at its next session start or `/reload-plugins` without a version change.
-The rules are on Anthropic's [plugin loading page](https://code.claude.com/docs/en/plugins/loading.md).
+- Ask a question in the [discussions](https://github.com/ezexe/p4/discussions) of this repository, and report a problem in its [issues](https://github.com/ezexe/p4/issues).
+- The [wiki](https://github.com/ezexe/p4/wiki) holds the readable documentation: how to [install](https://github.com/ezexe/p4/wiki/Install), how to [contribute](https://github.com/ezexe/p4/wiki/Contributing) and how a [release](https://github.com/ezexe/p4/wiki/Releasing) is cut.
+- [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+- [CITATION.cff](CITATION.cff), which GitHub shows as "Cite this repository".
+- [LICENSE](LICENSE): MIT.
