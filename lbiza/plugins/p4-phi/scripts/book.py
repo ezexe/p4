@@ -5,7 +5,8 @@ live session by its id, and the yellow pages, what each holds. For one session i
 project's trees and of the trees its puppeteer controls, each by full title and id, with its role, its parent, the
 files its brief names on a `Files:` line while it is at work on them, its owned paths, its open issue and
 its workers and coworkers. It names the puppeteer as the one address for a decision of ezexe's, and the session's
-parent as the address for work off its task.
+parent as the address for work off its task. A session the reader started itself is listed by its id alone with
+what it holds, and left out while it holds nothing, since the app's own note gives the reader its name and state.
 
   page    <session folder>/book.md, the book whole, rewritten when an entry changes.
   state   <session folder>/book.json: a digest of each entry as the session last saw it, and the flags said.
@@ -243,16 +244,42 @@ def _rel(path, base):
     return p
 
 
-def _digest(e):
-    keep = {k: e[k] for k in ("title", "role", "parent", "files", "owned", "slug", "number", "kids")}
-    return hashlib.sha1(json.dumps(keep, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+# A session the reader started itself is in the app's own note, so its entry holds only what that note lacks. The
+# app's text to a session that started others: "the app keeps a "Linked sessions now" note current here with every
+# one's name, id and state, and `mcp__ccd_session_mgmt__list_sessions` {"linked": true} lists them", and that tool's
+# description gives a linked session's `name` and `startedBy` beside its title, folder and branch. desktop.md, "Work
+# across sessions", has "Claude can list your other Code tab sessions" and no word of the note, nor of what a started
+# session is shown of the session that started it and of its siblings, so those entries stay whole.
+STARTED = "s:"                   # opens the digest of an entry the reader started; alone, for one that holds nothing
 
 
-def entry_text(e, every=None, n=PATHS_SHOWN):
-    """One entry in a line: "title" `id`, its role and parent, and what it holds."""
+def _started(e, reader):
+    """True for the entry of a session the reader started itself."""
+    return bool(reader) and e["parent"] == reader
+
+
+def _bare(e, reader):
+    """True for a session the reader started that holds nothing: the app's note says all the book would."""
+    return _started(e, reader) and not (e["files"] or e["owned"] or e["number"] or e["kids"])
+
+
+def _digest(e, reader=""):
+    if _bare(e, reader):
+        return STARTED
+    mine = _started(e, reader)                     # what its entry shows, so a new title of its own changes nothing
+    keys = (() if mine else ("title", "role", "parent")) + ("files", "owned", "slug", "number", "kids")
+    keep = {k: e[k] for k in keys}
+    return (STARTED if mine else "") + hashlib.sha1(json.dumps(keep, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+
+
+def entry_text(e, every=None, n=PATHS_SHOWN, reader=""):
+    """One entry in a line: "title" `id`, its role and parent, and what it holds. For a session `reader` started
+    itself, its id alone and what it holds."""
     head = f"\"{e['title']}\" `{e['id']}`, {e['role']}"
     if e["parent"]:
         head += f" under `{e['parent']}`"
+    if _started(e, reader):
+        head = f"`{e['id']}`"
     held = []
     if e["files"]:
         files = [_rel(f, e["base"]) for f in e["files"]]
@@ -313,13 +340,23 @@ def _load_state(home, sid):
     return d if isinstance(d, dict) else {}
 
 
+STARTED_LINE = ("by its id alone with what it holds, since the app's own \"Linked sessions now\" note gives its name "
+                "and state")
+STARTED_PAGE = ("A session this one started is listed by its id alone with what it holds, and left out while it "
+                "holds nothing: the app's own \"Linked sessions now\" note gives its name and state, and "
+                "`mcp__ccd_session_mgmt__list_sessions` with `linked` true its title, folder and branch. ")
+
+
 def write_page(home, s, book, store=""):
     """book.md, the book whole, written only when it changed."""
     sid = s["sessionId"]
+    rest = _order(book, s)
     lines = [f"# Address book of \"{title(sid, s)}\"", "",
              f"Session `{sid}`. The live sessions it can message, each by full title and id with what it holds. "
+             + (STARTED_PAGE if any(_started(e, sid) for e in rest) else "")
              + addresses(home, s, book, store), "", "## Sessions", ""]
-    lines += [f"- {entry_text(e, n=50)}" for e in _order(book, s)] or ["- No other live session."]
+    lines += ([f"- {entry_text(e, n=50, reader=sid)}" for e in rest if not _bare(e, sid)]
+              or ["- The sessions this session started hold nothing yet." if rest else "- No other live session."])
     if sid in book:
         lines += ["", "## This session", "", f"- {entry_text(book[sid], n=50)}"]
     text = "\n".join(lines) + "\n"
@@ -346,15 +383,20 @@ def line(home, s, store="", whole=False, named=False):
     page = write_page(home, s, book, store)
     state = _load_state(home, sid)
     seen = state.get("seen") if isinstance(state.get("seen"), dict) else None
-    now = {k: _digest(e) for k, e in book.items() if k != sid}
+    now = {k: _digest(e, sid) for k, e in book.items() if k != sid}
     ordered = _order(book, s)
     first = whole or seen is None
     if first:
-        shown = ordered
-    else:
-        shown = [e for e in ordered if seen.get(e["id"]) != now[e["id"]]]
+        shown = [e for e in ordered if not _bare(e, sid)]
+    else:                                          # one it started that holds nothing: only once it held something
+        shown = [e for e in ordered if seen.get(e["id"]) != now[e["id"]]
+                 and (not _bare(e, sid) or str(seen.get(e["id"]) or "").startswith(STARTED))]
     left = [] if first else [k for k in seen if k not in now]
+    # why such an entry has no title: said at a first look, and once after it
+    why = any(_started(e, sid) for e in shown[:SHOWN]) and (first or not state.get("startedSaid"))
     state["seen"] = now
+    if why:
+        state["startedSaid"] = True
     relay._write_json(_state_path(home, sid), state)
     if not first and not shown and not left:
         return (f"phi (p4-phi): this session's address book, unchanged since it last looked, is whole on {page}: "
@@ -364,10 +406,12 @@ def line(home, s, store="", whole=False, named=False):
                 + addresses(home, s, book, store))
         if not shown:
             return head + " No other live session holds anything yet."
+        if why:
+            head += f" A session this one started is listed {STARTED_LINE}."
     else:
         head = f"phi (p4-phi): the address book on {page} changed since this session last looked"
-        head += ":" if shown else "."
-    out = [f"- {entry_text(e)}" for e in shown[:SHOWN]]
+        head += (f", a session this one started {STARTED_LINE}" if why else "") + (":" if shown else ".")
+    out = [f"- {entry_text(e, reader=sid)}" for e in shown[:SHOWN]]
     if left:
         out.append("- no longer live: " + ", ".join(f"`{k}`" for k in left[:8])
                    + (f" and {len(left) - 8} more" if len(left) > 8 else ""))

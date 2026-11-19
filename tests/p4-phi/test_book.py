@@ -116,6 +116,71 @@ class Supervisor(unittest.TestCase):
         self.assertIn(f"work off this session's task goes to its parent \"Build the narwhal exporter\" `{TOP}`", page)
         self.assertIn(f"\"the retry check\" `{KID2}`", page.split("## This session")[1])
 
+    def book_of(self, host, prompt):
+        """The address book line `host` is handed beside `prompt`, '' for none."""
+        ctx = context(self.t.say(host, prompt, P4_PHI_BOOK="1"))
+        at = [k for k in (ctx.find("this session's address book"), ctx.find("phi (p4-phi): the address book on"))
+              if k >= 0]
+        return ctx[min(at):].split("\n\nphi (p4-phi): ", 1)[0] if at else ""
+
+    def test_a_session_the_reader_started_is_listed_by_its_id_with_what_the_apps_note_lacks(self):
+        """The app's own text to a session that started others: "the app keeps a "Linked sessions now" note current
+        here with every one's name, id and state, and `mcp__ccd_session_mgmt__list_sessions` {"linked": true} lists
+        them", and that tool's description gives a linked session's `name` and `startedBy` beside its title, folder
+        and branch. https://code.claude.com/docs/en/desktop.md, "Work across sessions", has "Claude can list your
+        other Code tab sessions, read what each has been doing, and send messages between them." and no word of the
+        note. So TOP's book hands, for a session TOP started, its id and what the note lacks, the files it holds,
+        its owned paths, its issue and its own workers, and no entry while it holds nothing. The page does not say
+        what a started session is shown of the session that started it and of its siblings, so a worker's book keeps
+        those entries whole, as a puppeteer's book keeps the sessions of the trees it controls."""
+        t = self.t
+        worker = self.tree()                         # KID2's first look: a worker's book
+        self.assertIn(f"\"the flush child\" `{KID}`, worker under `{TOP}`: files src/flush.py", worker,
+                      "a sibling keeps its title, its role and its parent")
+        self.assertIn(f"\"Build the narwhal exporter\" `{TOP}`, orchestrator: workers `{KID}`, `{KID2}`", worker,
+                      "and so does its parent")
+        self.assertNotIn("Linked sessions now", worker, "it started none of them")
+        first = self.book_of(TOP, "what came in?")   # TOP's first look: it started KID and KID2
+        self.assertIn(f"\n- `{KID}`: files src/flush.py", first)
+        self.assertIn("A session this one started is listed by its id alone with what it holds, since the app's "
+                      "own \"Linked sessions now\" note gives its name and state.", first)
+        for gone in ("the flush child", "the retry check", "worker under", f"`{KID2}`"):
+            self.assertNotIn(gone, first, "no title, role or parent of one it started, and none that holds nothing")
+        self.assertIn(f"`{PUP}`, puppeteer", first, "a session it did not start keeps its entry whole")
+        page = read(book.page_path(t.p4, TOP))
+        self.assertIn(f"\n- `{KID}`: files src/flush.py\n", page)
+        self.assertIn("`mcp__ccd_session_mgmt__list_sessions` with `linked` true its title, folder and branch", page)
+        for gone in ("the flush child", "the retry check", f"\n- `{KID2}`"):
+            self.assertNotIn(gone, page)
+        self.assertIn(f"orchestrator: workers `{KID}`, `{KID2}`", page.split("## This session")[1],
+                      "its own entry still names the sessions it started, by id")
+        self.assertEqual(self.book_of(TOP, "carry on"), "", "nothing changed: nothing said")
+        self.assertEqual(t.cli(KID2, "shard", "src/retry.py").returncode, 0)     # KID2 holds something now
+        changed = self.book_of(TOP, "and now?")
+        self.assertIn(f"\n- `{KID2}`: owned paths src/retry.py", changed)
+        self.assertEqual(changed.count("\n- "), 1, "only the entry that changed")
+        self.assertNotIn("Linked sessions now", changed, "why an entry has no title is said once")
+        rec = os.path.join(t.app, KID + ".json")     # the app renames KID: its name is the note's to give
+        d = json.loads(read(rec))
+        d["title"] = "the flush and batch child"
+        write(rec, json.dumps(d))
+        self.assertEqual(self.book_of(TOP, "anything new?"), "", "a new title of one it started changes nothing")
+        self.assertIn(f"\"the flush and batch child\" `{KID}`, worker under `{TOP}`", self.book_of(KID2, "and now?"),
+                      "and its sibling is handed the new title")
+        s = t.session(KID)
+        s["fileSet"] = []
+        relay._write_json(os.path.join(t.dir(KID), "session.json"), s)
+        self.assertIn(f"\n- `{KID}`: holds nothing yet", self.book_of(TOP, "and now?"),
+                      "a session it started that held a file and holds none is said once")
+        t.record(KID3, started_by=TOP, title="the writer child")
+        t.say(KID3, "Task:\nRead the writer and report.\nFiles: none")
+        self.assertEqual(self.book_of(TOP, "who is new?"), "", "a new one it started that holds nothing is the note's")
+        self.assertIn(f"\"the writer child\" `{KID3}`, worker under `{TOP}`", self.book_of(KID2, "who is new?"),
+                      "and a sibling's book names it whole")
+        pup = self.book_of(PUP, "where does each tree stand?")
+        self.assertIn(f"\"Build the narwhal exporter\" `{TOP}`, orchestrator", pup, "a tree it controls, not started")
+        self.assertIn(f"\"the flush and batch child\" `{KID}`, worker under `{TOP}`", pup)
+
     def test_a_later_message_is_handed_only_the_entries_that_changed_and_the_page(self):
         t = self.t
         self.tree()
