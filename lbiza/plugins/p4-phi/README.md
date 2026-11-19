@@ -244,6 +244,23 @@ p4-phi keeps the line on the session's record and page and in the address book, 
 The line holds no start and no edit: a session that writes works in a git worktree of its own, so p4-phi keeps no lock on a file.
 No start is refused for the files its brief names, held while a live session covers one of them or queued behind a busy writer, no command narrows or releases the line, and a puppeteer's message is warned about for no file.
 
+## Kept beside a native feature
+
+Each passage names a thing of p4-phi that stands beside a thing Claude Code or the desktop app does, and what the native thing lacks for p4-phi to stand on it alone.
+
+### Findings in `notes.jsonl`, beside the app's shared notes folder
+
+The desktop app names one folder to the sessions of a group of linked sessions, in the first message it writes for a started session: `Shared notes folder for this group of sessions`, a folder `side-session-notes/<the starting session's id>` in the app's own data folder.
+p4-phi keeps a finding in `notes.jsonl` in its writer's folder in the store, by `phi.py note` and the tool `mcp__p4-phi__note`, and moves none into that folder.
+
+- No page of the Claude Code docs states the folder. `desktop.md` and `cross-session-messaging.md` hold no sentence on it, as read on 2026-11-19, so where it is, how long it stays and who clears it rest on the words of the app's message alone.
+- It is named in a message the app writes for a session of the desktop app. A scripted `claude -p` worker, a session in a terminal and a subagent are handed no such message.
+- It is a folder on one machine, outside the repository and outside the store, so the store's sync carries nothing of it to another machine.
+- A file in it is free text. A row of `notes.jsonl` holds its claim, its source, its kind, its time and its writer, a finding with no source is refused, and a claim may open with `deprecates:` or `replaces:`, the marks a tree's anchors are made from and by which a newer note supersedes a finished child's work.
+- Nothing hands a file in it to a session. A row of `notes.jsonl` reaches every session below its writer in the background beside that session's first message.
+
+p4-phi uses the folder for what it gives: the id in its path names a started session's starter before the app's record does, and a terminal worker's brief, script and report are files in its `terminal-workers` folder.
+
 ## No setup
 
 The plugin works in any project it is enabled in.
