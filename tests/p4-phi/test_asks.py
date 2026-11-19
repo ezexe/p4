@@ -96,7 +96,7 @@ class Trees(unittest.TestCase):
                 os.remove(path)                     # with an empty ledger
 
     def send(self, host, to, message):
-        """The PreToolUse of a SendMessage, through `recall-hook.sh lookup-check` as hooks.json runs it."""
+        """The check of a SendMessage, through `recall-hook.sh lookup-check`: the hooks module runs `hook.py lookup-check` for a checked call, and this runner stands in for it."""
         t = self.t
         self._n = getattr(self, "_n", 0) + 1
         body = {"session_id": CLI[host], "cwd": t.proj, "hook_event_name": "PreToolUse", "tool_name": "SendMessage",

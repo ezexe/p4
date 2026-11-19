@@ -533,7 +533,7 @@ class Supervisor(unittest.TestCase):
                                                                                           proj=self.other)))
 
     def test_a_controlled_sessions_refused_start_says_this_session_is_controlled_by_a_supervisor_session(self):
-        """Run through `recall-hook.sh lookup-check`, the entry hooks.json runs before every tool call."""
+        """Run through `recall-hook.sh lookup-check`, which runs what the hooks module runs for a checked call."""
         t = self.t
         t.say(TOP, "Build the exporter")
         t.cli(PUP, "controls", TOP)
@@ -668,7 +668,7 @@ class Supervisor(unittest.TestCase):
     # --- shared by the #211, #224 and #226 drafts ---------------------------------------------------------------
 
     def pre(self, host, tool, inp, proj=None, **more):
-        """One PreToolUse call through `recall-hook.sh lookup-check`, as hooks.json runs it: the reason or the
+        """One call's check through `recall-hook.sh lookup-check`, which runs what the hooks module runs: the reason or the
         context it hands, '' for none."""
         t = self.t
         self._pre = getattr(self, "_pre", 0) + 1

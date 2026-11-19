@@ -1182,7 +1182,7 @@ class TopOrchestrates(unittest.TestCase):
     plan = TreeOfPlans.plan
 
     def check(self, host, tool, inp, tid):
-        """A tool call's PreToolUse through the `lookup-check` hook, which hooks.json runs before every tool call."""
+        """A tool call's check through `lookup-check`, which the hooks module runs for a checked call."""
         root = os.path.dirname(SRC)
         body = {"session_id": CLI[host], "cwd": self.t.proj, "hook_event_name": "PreToolUse", "tool_name": tool,
                 "tool_input": inp, "tool_use_id": tid}

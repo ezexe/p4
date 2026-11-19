@@ -47,7 +47,7 @@ MARKS = ("deprecates:", "replaces:")
 PATH_RE = re.compile(r"`([^`\s]+)`|((?:[A-Za-z]:)?[\w.~-]*[\\/][\w.\\/*~-]+)")
 GIT_S = 5                        # what one git call may take inside a hook
 TRACK_HOOK_S = 6                 # all of relay.track's git calls inside a hook: SessionStart has 20 s, Stop 30 s, and
-                                 # the self-archive PreToolUse 10 s
+                                 # the self-archive check before its call 10 s
 TRACK_S = 300                    # one git call of the tree's first commit, run in a process of its own outside the
                                  # hooks: the path filter runs a python per file of the tree
 

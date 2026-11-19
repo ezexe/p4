@@ -3,7 +3,8 @@
 
 A session starts knowing nothing of what earlier sessions looked up or ran into, so it looks the same page up again
 and walks into the same failing command. This module records the tool calls hook.py hands it after they ran, from
-the PostToolUse and PostToolUseFailure hooks, and checks a call before it runs, from the PreToolUse hook:
+the PostToolUse and PostToolUseFailure hooks, and checks a call before it runs, from `hook.py lookup-check`, which
+the plugin's hooks module runs at `tool.check`:
 
   record   one row per tool_use id in phi/models/lookups.db, this machine's sqlite database, which the store's
            .gitignore leaves out: the tool, the call's question and target, whether it worked, the error's
@@ -21,8 +22,9 @@ the PostToolUse and PostToolUseFailure hooks, and checks a call before it runs, 
            findings that reach the threshold, the best first and at most `SHOWN_ROWS`, are the answer. Before a
            shell command, the failure model scores it, and for a command it expects to fail the answer is the
            nearest earlier failure of the same program and its fix, if any. A call of any other tool that reaches
-           `check` is logged and never stopped. hooks/recall-hook.sh ends the check of most calls before python
-           starts, so they leave no row, and runs a clean call's record in a python the call does not wait for.
+           `check` is logged and never stopped. The plugin's hooks module starts python only for a call python
+           has a check for, so most calls leave no row, and hooks/recall-hook.sh runs a clean call's record in a
+           python the call does not wait for.
   train    `lookups.py train`, run by hand, measures the matcher, an idf-weighted cosine of the two questions,
            against a fitted model on calls held out by session, with the labels the history gives for free: a
            pair is positive when the later call's own result is like the earlier finding. The failure model is
@@ -35,7 +37,7 @@ the PostToolUse and PostToolUseFailure hooks, and checks a call before it runs, 
 
 The mode of a web call is p4.json's `recall.lookups.web`, and that of a shell command `recall.lookups.shell`:
 "note", a web call's default by ezexe/p4#243, lets the call run and puts the answer beside it as `additionalContext`;
-"answer" hands the answer back in place of the call as the reason of a PreToolUse deny, once, so the same call
+"answer" hands the answer back in place of the call as the reason of a deny, once, so the same call
 made again by the same session or subagent runs; "shadow" only logs it; "off" does not look. `recall.lookups.on` false turns recording and checking off, and
 `recall.lookups.after` false turns off only what a failure is told after it.
 
@@ -460,7 +462,7 @@ def after_text(con, row):
     return out
 
 
-# --- check: PreToolUse --------------------------------------------------------------------------------------
+# --- check: before a tool call ------------------------------------------------------------------------------
 
 def load_model(p4):
     try:

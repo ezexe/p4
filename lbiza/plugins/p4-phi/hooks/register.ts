@@ -7,7 +7,9 @@
 // answers work that a turn's wait left unmoved, or upkeep that is due while every session it started is idle, it
 // starts a turn of the session's own for it. And it sets the rules built into p4-phi as a section of the system
 // prompt, where a command hook can only hand text beside a start. And it keeps the origin Claude Code stamps on
-// each prompt, which no command hook is given, for the UserPromptSubmit hooks of that prompt to read.
+// each prompt, which no command hook is given, for the UserPromptSubmit hooks of that prompt to read. And it is the
+// guard around a tool call: it tells by plain tests which calls python has a check for, and starts python for
+// those alone, so no process starts before a call that has none.
 
 import type {
   AgentSpawnInput,
@@ -18,6 +20,8 @@ import type {
   SessionContextUsage,
   SessionRateLimit,
   Timer,
+  ToolCheckInput,
+  ToolCheckResult,
   TurnCompleteReason,
 } from 'claude-code'
 
@@ -55,6 +59,45 @@ const MOST_SPAWNED = 256
 const ORIGIN_FILE = 'origin.json'
 // The prompts kept in mind for their origin, at most: one is in flight at a time, and a few arrive inside a turn.
 const MOST_SUBMITTED = 16
+
+// How long python may take over one call's check.
+const CHECK_MS = 10_000
+// The tools hook.py has a check for, as its PHI_CHECK and lookups.py read them. An edit is checked only for a
+// session that owes a nudge or is a puppeteer, a shell call only where a filter below passes it, and the rest
+// always: a web call, a message to another session, a session archiving itself and a session's start.
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
+const SHELL_TOOLS = new Set(['Bash', 'PowerShell'])
+const CHECKED_TOOLS = new Set([
+  'WebFetch',
+  'WebSearch',
+  'SendMessage',
+  'mcp__ccd_session_mgmt__send_message',
+  'mcp__ccd_session_mgmt__archive_session',
+  'mcp__ccd_session__start_session',
+])
+// A shell call phi.py's branch guard reads: `git` as a word of the call's JSON text, where a newline, tab or
+// return beside it is the escape \n, \t or \r, so `cd a && git push` and `cd repo\ngit push` count, a `.` or `-`
+// after it counts, as in git.exe and git-lfs, and so does git after a path separator, as in /usr/bin/git and in
+// quotes. A path that holds `github` or `.gitignore` does not.
+const GIT_WORD = [
+  /[^A-Za-z0-9_./\\-]git[^A-Za-z0-9_/\\]/,
+  /\\[ntr]git[^A-Za-z0-9_/\\]/,
+  /[^A-Za-z0-9_./\\-]git\\[ntr]/,
+  /\\[ntr]git\\[ntr]/,
+  /[^A-Za-z0-9_.-]git[.-]/,
+  /\/git[\\ "';).]/,
+  /\\git[\\ "';).]/,
+]
+// What may land work however git or gh is called, such as /usr/bin/git push, gh pr merge or a gh api ref update.
+const LANDS = /push|merge|[^A-Za-z0-9_.-]gh[^A-Za-z0-9_-]|\\[ntr]gh[^A-Za-z0-9_-]/
+// A command started in the background, which phi.py's restart check reads.
+const IN_BACKGROUND = /"run_in_background":\s?true/
+// Where a store keeps the failure model a plain shell call is checked by, newest layout first, and how long what
+// its first line said is believed: a training round's new model is read within this long.
+const SHELL_MODELS = ['phi/models', 'recall/models', 'models']
+const MODEL_MS = 60_000
+// The calls whose check left words for the model, at most, each until its PostToolUse hooks run.
+const MOST_TOLD = 256
 
 // What `phi.py look` prints, as puppeteer.look answers it: the times are seconds. `starter` is the session that
 // started this one, as the address `$.session.send` takes, and `move` the prompt that starts a turn here. `upkeep`
@@ -123,6 +166,11 @@ const awaited = new Map<string, () => void>()
 // UserPromptSubmit command hooks of a prompt run inside that event's `next(e)`, so the prompt in flight is theirs.
 type Submitted = { text: string; origin: PromptOrigin; isInFlight: boolean }
 const submitted: Submitted[] = []
+
+// What a check said beside a call that runs, by the call's id, until a PostToolUse hook hands it to the model.
+const told = new Map<string, string>()
+// Whether the store's failure model weighs shell calls, as its first line said when it was last read.
+let shellModel: { at: number; isWeighted: boolean } | undefined
 
 // What was said to the debug log, each line once.
 const said = new Set<string>()
@@ -528,6 +576,148 @@ async function keepOrigin($: EngineInterface, prompt: string, promptId: string |
   }
 }
 
+// A session's or a subagent's id as phi.py writes it into a marker's name: phi.SAFE, cut to 80 characters.
+function safe(id: string): string {
+  return id.replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 80)
+}
+
+// Whether phi.py left a marker of this name in a folder of the project's store.
+async function isMarked($: EngineInterface, folder: string, id: string): Promise<boolean> {
+  return id !== '' && (await $.fs.exists(`${folder}/${safe(id)}`).catch(() => false))
+}
+
+// Whether the store has a failure model that weighs shell calls: a store has one only once a training round passed
+// it, and one whose first line holds no shell weight checks nothing.
+async function weighsShell($: EngineInterface, root: string): Promise<boolean> {
+  const now = await $.clock.now()
+  if (shellModel !== undefined && now - shellModel.at < MODEL_MS) return shellModel.isWeighted
+  let isWeighted = false
+  for (const models of SHELL_MODELS) {
+    const file = `${root}/.claude/p4/${models}/lookups-model.json`
+    if (!(await $.fs.exists(file).catch(() => false))) continue
+    const first = (await $.fs.read(file).catch(() => '')).split('\n')[0] ?? ''
+    isWeighted = !first.includes('"shell":{"w":{}')
+    break
+  }
+  shellModel = { at: now, isWeighted }
+
+  return isWeighted
+}
+
+// Whether python has a check for a call, by tests that start no process. A
+// subagent phi.py marked open is checked at each call, for phi.py's word of what changed since its launch. `text`
+// is the call's tool and input as JSON, which the shell filters read.
+async function isChecked(
+  $: EngineInterface,
+  e: ToolCheckInput,
+  root: string,
+  sessionId: string,
+  text: string,
+): Promise<boolean> {
+  const tool = String(e.tool)
+  const isEdit = EDIT_TOOLS.has(tool)
+  const isShell = SHELL_TOOLS.has(tool)
+  const isListed = isEdit || isShell || CHECKED_TOOLS.has(tool)
+  if (!isListed && e.agentId === undefined) return false
+  const phi = `${root}/.claude/p4/phi`
+  if (e.agentId !== undefined && (await isMarked($, `${phi}/.agents`, e.agentId))) return true
+  if (!isListed) return false
+  if (!isEdit && !isShell) return true
+  if (isShell && (GIT_WORD.some(word => word.test(text)) || LANDS.test(text) || IN_BACKGROUND.test(text))) return true
+  // A top-level session that owes a nudge, and a puppeteer, whose every edit and shell call phi.py reads.
+  if ((await isMarked($, `${phi}/.nudge`, sessionId)) || (await isMarked($, `${phi}/.puppeteers`, sessionId))) return true
+
+  return isShell && (await weighsShell($, root))
+}
+
+// What python said of a call: a refusal, a question for the person, and words for the model beside the result.
+type Said = { deny?: string; ask?: string; context?: string }
+
+// What hook.py printed, read as a PreToolUse command hook's output is.
+function saidBy($: EngineInterface, printed: string): Said {
+  let out: unknown
+  try {
+    out = JSON.parse(printed.trim() || 'null')
+  } catch {
+    return {}
+  }
+  if (typeof out !== 'object' || out === null) return {}
+  const { hookSpecificOutput: specific, systemMessage } = out as Record<string, unknown>
+  if (typeof systemMessage === 'string' && systemMessage !== '') note($, systemMessage.slice(0, 300))
+  const { permissionDecision: decision, permissionDecisionReason: reason, additionalContext: context } = (
+    typeof specific === 'object' && specific !== null ? specific : {}
+  ) as Record<string, unknown>
+  const why = typeof reason === 'string' ? reason : ''
+
+  return {
+    deny: decision === 'deny' ? why : undefined,
+    ask: decision === 'ask' ? why : undefined,
+    context: typeof context === 'string' && context !== '' ? context : undefined,
+  }
+}
+
+// One call's check: `hook.py lookup-check`, run only for a call python has a check for, with the input a
+// PreToolUse command hook is given on stdin. Retrieval's check does not obey P4_PHI=0, and phi.py's own checks
+// read the switch themselves. Whatever fails here, the call goes on unjudged.
+async function check($: EngineInterface, e: ToolCheckInput): Promise<Said> {
+  try {
+    const root = slashed(await $.session.root())
+    const sessionId = await $.session.id()
+    const call = { tool_name: String(e.tool), tool_input: e.input }
+    if (!(await isChecked($, e, root, sessionId, JSON.stringify(call)))) return {}
+    const python = await findPython($)
+    if (python === undefined) return {}
+    const plugin = slashed($.plugin.root)
+    const payload = {
+      session_id: sessionId,
+      transcript_path: (await $.session.info()).transcriptPath,
+      cwd: root,
+      hook_event_name: 'PreToolUse',
+      ...call,
+      tool_use_id: e.tool_use_id,
+      ...(e.agentId === undefined ? {} : { agent_id: e.agentId }),
+    }
+    const env = { CLAUDE_CODE_SESSION_ID: sessionId, CLAUDE_PROJECT_DIR: root, CLAUDE_PLUGIN_ROOT: plugin }
+    const argv = [python, '-I', '-X', 'utf8', `${plugin}/scripts/hook.py`, 'lookup-check']
+    const ran = await $.process.run(argv, { env, stdin: JSON.stringify(payload), timeoutMs: CHECK_MS })
+
+    return saidBy($, ran.stdout)
+  } catch (error) {
+    note($, `a tool call was not checked: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
+
+    return {}
+  }
+}
+
+// The verdict on a call the engine is about to run, with python's check laid over the engine's own. A refusal is
+// the call's error and a question goes to the person. Words for the model wait for the call's PostToolUse hooks,
+// since a verdict carries none, and go into the reason of a refusal, which has no such hooks. A question a plugin
+// asks of a call nobody made carries no call id and is passed on, and so is a call the engine refused already.
+async function judged($: EngineInterface, e: ToolCheckInput, verdict: ToolCheckResult): Promise<ToolCheckResult> {
+  if (!e.tool_use_id || verdict.decision === 'deny') return verdict
+  const said = await check($, e)
+  if (said.deny !== undefined) {
+    return { decision: 'deny', reason: [said.deny, said.context].filter(Boolean).join('\n\n') }
+  }
+  if (said.context !== undefined) {
+    told.set(e.tool_use_id, said.context)
+    for (const oldest of told.keys()) {
+      if (told.size <= MOST_TOLD) break
+      told.delete(oldest)
+    }
+  }
+
+  return said.ask === undefined ? verdict : { decision: 'ask', reason: said.ask }
+}
+
+// What a check said beside a call, taken once the call has run or failed.
+function toldOf(toolUseId: string): string[] {
+  const words = told.get(toolUseId)
+  told.delete(toolUseId)
+
+  return words === undefined ? [] : [words]
+}
+
 // A name as hook.py writes it into a file's name: every character but a letter, a digit, `_` and `-` as `_`.
 function named(id: string): string {
   return id.replace(/[^\w-]/g, '_')
@@ -654,6 +844,28 @@ export const register: Register = on => {
     } finally {
       mine.isInFlight = false
     }
+  }).catch(($, e, next) => next(e))
+
+  // The engine decides whether a tool call may run, after the PreToolUse hooks. The event carries the tool, its
+  // input, the call's id and a subagent's id, which `classic.PreToolUse` does not hand a function, and no hook
+  // here stands on `tool.call`, where one turns off a tool's move to the background and its live output. A check
+  // that fails judges nothing, and the engine's verdict stands.
+  on('tool.check', async ($, e, next) => judged($, e, await next(e))).catch(($, e, next) => next(e))
+
+  // What a check said beside a call that ran, handed to the model with the call's result as a PreToolUse command
+  // hook's context is. The PostToolUse command hooks run beneath, and their own context comes first.
+  on('classic.PostToolUse', async ($, e, next) => {
+    const out = await next(e)
+    const words = toldOf(e.tool_use_id)
+
+    return words.length === 0 ? out : { ...out, additionalContext: [...(out.additionalContext ?? []), ...words] }
+  }).catch(($, e, next) => next(e))
+
+  on('classic.PostToolUseFailure', async ($, e, next) => {
+    const out = await next(e)
+    const words = toldOf(e.tool_use_id)
+
+    return words.length === 0 ? out : { ...out, additionalContext: [...(out.additionalContext ?? []), ...words] }
   }).catch(($, e, next) => next(e))
 
   // The UserPromptSubmit command hooks run beneath this hook, so they run once the prompt's origin is written.

@@ -342,13 +342,10 @@ class Manifests(unittest.TestCase):
                              ["claude plugin marketplace add ezexe/p4"], readme)
 
 
-def marker_name(agent_id):
-    """The name phi.py gives an open subagent's marker, `agent_marker` in phi.py."""
-    return re.sub(r"[^A-Za-z0-9_.-]", "_", str(agent_id))[:80]
-
-
-class Gate(unittest.TestCase):
-    """recall-hook.sh's lookup-check gate, against a stand-in python that only says it ran and with what."""
+class CheckRunner(unittest.TestCase):
+    """recall-hook.sh as a runner of `hook.py lookup-check`, against a stand-in python that only says it ran and with
+    what. The script holds no gate: the plugin's hooks module tells which calls python has a check for, and
+    hooks/register.test.ts holds the tests of that."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
@@ -382,70 +379,39 @@ class Gate(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         return r.stdout.strip()
 
-    def modelled(self, tool, tool_input, **more):
-        """inproc.gate, the tests' model of this gate, on the payload check() sends -> True when python runs."""
-        sys.path.insert(0, SCRIPTS)
-        try:
-            import inproc
-        finally:
-            sys.path.remove(SCRIPTS)
-        payload = json.dumps({"session_id": SESSION, "hook_event_name": "PreToolUse", "tool_name": tool,
-                              "tool_input": tool_input, "cwd": self.proj, **more})
-        return inproc.gate(payload.encode(), self.proj)
-
-    def test_a_message_to_another_session_reaches_phis_go_guard(self):
-        """hook.py hands SendMessage and the app's send_message to phi.py's go-guard, so the gate lets both through."""
-        for tool in ("SendMessage", "mcp__ccd_session_mgmt__send_message"):
-            out = self.check(tool, {"to": "local_x", "message": "go ahead"})
+    def test_the_runner_starts_hook_py_for_whatever_call_it_is_handed(self):
+        """A message to another session, which hook.py hands to phi.py's go-guard, and a read alike: the script
+        tests nothing of the call."""
+        for tool, tool_input in (("SendMessage", {"to": "local_x", "message": "go ahead"}),
+                                 ("mcp__ccd_session_mgmt__send_message", {"session_id": "local_x", "message": "go"}),
+                                 ("Read", {"file_path": "a.py"}), ("Bash", {"command": "ls"})):
+            out = self.check(tool, tool_input)
             self.assertTrue(out.startswith("RAN ") and out.endswith("scripts/hook.py lookup-check"), (tool, out))
-
-    def test_only_a_subagents_own_marker_opens_the_gate_for_it(self):
-        """phi.py marks an open subagent, at its SubagentStart, with a file named after its id; a marker another
-        subagent left behind, when no SubagentStop removed it, opens the gate for no other subagent. inproc.gate,
-        the model the other tests run, answers as the script does."""
-        agents = os.path.join(self.proj, ".claude", "p4", "phi", ".agents")
-        os.makedirs(agents)
-        old, new = "a5f0c2d9e8b7a6f41", "a389c1db97089b3bf"           # ids as the Agent tool gives them
-        open(os.path.join(agents, marker_name(old)), "w").close()
-        self.assertEqual(self.check("Read", {"file_path": "a.py"}, agent_id=new), "")
-        self.assertFalse(self.modelled("Read", {"file_path": "a.py"}, agent_id=new))
-        open(os.path.join(agents, marker_name(new)), "w").close()
-        self.assertTrue(self.check("Read", {"file_path": "a.py"}, agent_id=new).startswith("RAN "))
-        self.assertTrue(self.modelled("Read", {"file_path": "a.py"}, agent_id=new))
-
-    def test_entering_a_worktree_ends_in_the_gate_with_no_python(self):
-        """hook.PHI_CHECK routed EnterWorktree to phi.py's branch guard, which has answered nothing for the tool since
-        each session that writes has a worktree of its own. So the entry, the gate's line and the model's are gone:
-        the call ends in the shell, as a Read does, while a start_session call beside it still reaches hook.py."""
-        for tool_input in ({"name": "the-flush"}, {"path": "../wt"}, {}):
-            self.assertEqual(self.check("EnterWorktree", tool_input), "", tool_input)
-            self.assertFalse(self.modelled("EnterWorktree", tool_input), tool_input)
-        self.assertTrue(self.check("mcp__ccd_session__start_session", {"title": "x"}).startswith("RAN "))
-        self.assertTrue(self.modelled("mcp__ccd_session__start_session", {"title": "x"}))
         with open(RECALL, encoding="utf-8") as f:
-            self.assertNotIn("EnterWorktree", f.read())
+            text = f.read()
+        self.assertNotIn("lookup-check", text.split("set -u", 1)[1], "the script tests nothing of a check's call")
+        self.assertNotIn("EnterWorktree", text)
+
+    def test_no_pretooluse_entry_runs_for_every_tool(self):
+        """hooks.json starts no shell before a tool call but the Agent call's: the check before any other call is
+        the hooks module's, at `tool.check`."""
+        with open(os.path.join(ROOT, "hooks", "hooks.json"), encoding="utf-8") as f:
+            entries = json.load(f)["hooks"]["PreToolUse"]
+        self.assertEqual([e.get("matcher") for e in entries], ["Agent"])
+        self.assertNotIn("lookup-check", json.dumps(entries))
+
+    def test_entering_a_worktree_has_no_check(self):
+        """hook.PHI_CHECK routed EnterWorktree to phi.py's branch guard, which has answered nothing for the tool since
+        each session that writes has a worktree of its own. So the entry is gone, and the hooks module lists no such
+        tool either."""
         sys.path.insert(0, SCRIPTS)
         try:
             import hook
-            import inproc
         finally:
             sys.path.remove(SCRIPTS)
         self.assertNotIn("EnterWorktree", hook.PHI_CHECK)
-        self.assertFalse(any(b"EnterWorktree" in w for w in inproc.OTHERS))
-
-    def test_a_read_ends_in_the_gate_and_a_web_call_reaches_hook_py(self):
-        self.assertEqual(self.check("Read", {"file_path": "a.py"}), "")
-        self.assertTrue(self.check("WebFetch", {"url": "https://example.com"}).startswith("RAN "))
-
-    def test_git_opens_the_gate_only_as_a_word_of_the_command(self):
-        """A path holding `github` starts no python for a plain shell call; a git command still reaches hook.py."""
-        where = {"transcript_path": "C:/Users/x/github/proj/s.jsonl"}
-        for cmd in ("ls", "ls github", "cat .gitignore", "ls ~/git/x", "digit"):
-            self.assertEqual(self.check("Bash", {"command": cmd, "description": "list github"}, **where), "", cmd)
-        for cmd in ("git status", "cd a && git log", "ls; git diff", "cd repo\ngit push", "cd repo\tgit push",
-                    "cd repo\r\ngit push", "git\npush", "git.exe push", "cd a && C:/Git/bin/git.exe push",
-                    "git-lfs push", "git.cmd push", "cd a && git-lfs push", "cd repo\ngit.cmd push"):
-            self.assertTrue(self.check("Bash", {"command": cmd}, **where).startswith("RAN "), cmd)
+        with open(os.path.join(ROOT, "hooks", "register.ts"), encoding="utf-8") as f:
+            self.assertNotIn("EnterWorktree", f.read())
 
 
 class SharedProbe(unittest.TestCase):

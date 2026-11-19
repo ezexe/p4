@@ -1275,7 +1275,7 @@ class ForkOrFresh(ThreeSessions):
         self.assertIsNone(guard(TOP, f"git -C {p4} status"), "reading a store is never asked")
 
     def test_a_started_sessions_hand_pull_in_a_store_through_lookup_check_names_p4_sync(self):
-        """ezexe/p4#240: through `recall-hook.sh lookup-check`, the entry hooks.json wires before every tool call, a
+        """ezexe/p4#240: through `recall-hook.sh lookup-check`, which runs what the hooks module runs for a checked call, a
         started session's hand pull or push inside a store is asked by the store guard, which runs ahead of the
         branch guard: its reason names `p4.py sync --push --p4 <store>` and the tree's orchestrator as the session
         that runs it. The same session's pull in the project's own checkout keeps the branch guard's ask."""
@@ -1349,11 +1349,10 @@ class ForkOrFresh(ThreeSessions):
                                  '"/usr/bin/git" rebase main')):
             body = {"session_id": CLI[B], "cwd": self.t.proj, "hook_event_name": "PreToolUse", "tool_name": "Bash",
                     "tool_input": {"command": cmd}, "tool_use_id": f"toolu_gate000{k}"}
-            self.assertTrue(inproc.gate(json.dumps(body).encode(), self.t.proj), f"the in-process gate: {cmd}")
             r = subprocess.run(["sh", gate, "lookup-check"], input=json.dumps(body), capture_output=True,
                                text=True, encoding="utf-8", timeout=60, env=self.t.env(B))   # the script itself
             out = json.loads(r.stdout).get("hookSpecificOutput", {}) if r.stdout.strip() else {}
-            self.assertEqual(out.get("permissionDecision"), "ask", f"through the hook gate: {cmd}")
+            self.assertEqual(out.get("permissionDecision"), "ask", f"through the runner: {cmd}")
         self.assertIsNone(guard(B, "git merge-base --is-ancestor a b"), "merge-base lands nothing")
         self.assertIsNone(guard(B, "git log --grep 'push'"), "quoted words are not a command")
         self.assertIsNone(guard(B, "git log --grep push"), "a log reads")

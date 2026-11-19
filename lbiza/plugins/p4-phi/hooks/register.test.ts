@@ -9,6 +9,7 @@ const FOLDER = '/work/project/.claude/p4/phi/sessions/local_top00001'
 const START = { cwd: '/', surface: 'desktop', isInteractive: true } as const
 const TURN = { answer: 'done', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as const
 const WORD = { origin: { kind: 'peer' }, text: 'the flush is ported' } as const
+const TRANSCRIPT = '/home/u/.claude/projects/-work-project/cli-0001.jsonl'
 
 // What `phi.py look` prints.
 type Answer = Record<string, string | number | boolean>
@@ -59,6 +60,8 @@ type Machine = {
   // What the engine does with a prompt beneath every plugin, before it enters: it raises the UserPromptSubmit
   // hooks there.
   enters?: (text: string) => Promise<void>
+  // What `hook.py lookup-check` prints for a call's input: a PreToolUse command hook's output, or nothing.
+  check?: (payload: Record<string, unknown>) => unknown
 }
 
 // What the module read, the pythons it tried, each look it ran and each other phi.py command it asked, every one
@@ -74,6 +77,8 @@ type Seen = {
   logged: string[]
   sent: { to: string; text: string }[]
   submitted: string[]
+  // Each run of `hook.py lookup-check`: its command line past the script, its environment and its input.
+  checks: { args: string[]; env: Readonly<Record<string, string>> | undefined; payload: Record<string, unknown> }[]
 }
 
 // A path as the test wrote it: the engine hands a hook the path resolved on the machine the test runs on.
@@ -94,6 +99,7 @@ function machine(on: On, has: Machine): Seen {
     logged: [],
     sent: [],
     submitted: [],
+    checks: [],
   }
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.measure', (_, e) => ({ changed: e.changed }))
@@ -155,10 +161,17 @@ function machine(on: On, has: Machine): Seen {
 
     return { value: Object.keys(files).some(file => file === path || file.startsWith(`${path}/`)) }
   })
+  on('session.info', () => ({ value: { transcriptPath: TRANSCRIPT } }))
   on('process.run', async (_, e) => {
     const at = e.argv.findIndex(arg => arg.endsWith('/scripts/phi.py'))
+    const hook = e.argv.findIndex(arg => arg.endsWith('/scripts/hook.py'))
     let stdout = ''
-    if (at >= 0) {
+    if (hook >= 0) {
+      const payload = JSON.parse(e.init?.stdin ?? '{}') as Record<string, unknown>
+      seen.checks.push({ args: e.argv.slice(hook + 1), env: e.init?.env, payload })
+      const out = has.check?.(payload)
+      stdout = out === undefined ? '' : `${JSON.stringify(out)}\n`
+    } else if (at >= 0) {
       const args = e.argv.slice(at + 1)
       seen.calls.push({ argv: e.argv, env: e.init?.env })
       if (args[0] === 'rules') {
@@ -1106,4 +1119,318 @@ test('a prompt with no id, one no prompt.submit carried and a write that fails k
   expect(entered).toEqual({ text: 'disk full' })
   // The failed write is said to the debug log once, and the prompt entered all the same.
   expect(seen.logged.map(line => line.split(':')[0])).toEqual(["a prompt's origin was not kept"])
+})
+
+// The store of a project, where phi.py leaves its markers, and a tool call as the engine puts it to `tool.check`.
+const PHI = '/work/project/.claude/p4/phi'
+const ALLOW = { decision: 'allow' } as const
+let calls = 0
+function call(tool: string, input: Record<string, unknown>, agentId?: string): never {
+  calls += 1
+
+  return { tool, input, tool_use_id: `toolu_${calls}`, ...(agentId === undefined ? {} : { agentId }) } as never
+}
+function bash(command: string, more: Record<string, unknown> = {}): never {
+  return call('Bash', { command, ...more })
+}
+
+test('a call python has no check for starts no process, and a listed one runs hook.py with the hook input', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  mock.clock(on)
+  const seen = machine(on, {})
+  on('tool.check', () => ALLOW)
+
+  for (const [tool, input] of [
+    ['Read', { file_path: 'a.py' }],
+    ['Grep', { pattern: 'git push' }],
+    ['EnterWorktree', { name: 'the-flush' }],
+    ['Agent', { prompt: 'git log', subagent_type: 'Explore' }],
+    ['mcp__ccd_turn__update_plan', { advance: true }],
+    ['Edit', { file_path: 'a.py', old_string: 'a', new_string: 'b' }],
+  ] as const) {
+    expect(await $.tool.check(call(tool, input))).toEqual(ALLOW)
+  }
+  expect(seen.checks).toEqual([])
+  expect(seen.calls).toEqual([])
+  expect(seen.tried).toEqual([])
+
+  for (const [tool, input] of [
+    ['WebFetch', { url: 'https://example.com' }],
+    ['WebSearch', { query: 'flush' }],
+    ['SendMessage', { to: 'local_x', message: 'go ahead' }],
+    ['mcp__ccd_session_mgmt__send_message', { session_id: 'local_x', message: 'go ahead' }],
+    ['mcp__ccd_session_mgmt__archive_session', { session_id: 'self' }],
+    ['mcp__ccd_session__start_session', { title: 'x' }],
+  ] as const) {
+    expect(await $.tool.check(call(tool, input))).toEqual(ALLOW)
+  }
+  expect(seen.checks.map(check => check.payload.tool_name)).toEqual([
+    'WebFetch',
+    'WebSearch',
+    'SendMessage',
+    'mcp__ccd_session_mgmt__send_message',
+    'mcp__ccd_session_mgmt__archive_session',
+    'mcp__ccd_session__start_session',
+  ])
+  const first = seen.checks[0]
+  expect(first?.args).toEqual(['lookup-check'])
+  expect(first?.payload).toEqual({
+    session_id: 'cli-0001',
+    transcript_path: TRANSCRIPT,
+    cwd: '/work/project',
+    hook_event_name: 'PreToolUse',
+    tool_name: 'WebFetch',
+    tool_input: { url: 'https://example.com' },
+    tool_use_id: first?.payload.tool_use_id,
+  })
+  expect(String(first?.payload.tool_use_id).startsWith('toolu_')).toBe(true)
+  expect(first?.env?.CLAUDE_PROJECT_DIR).toBe('/work/project')
+  expect(first?.env?.CLAUDE_CODE_SESSION_ID).toBe('cli-0001')
+  expect(String(first?.env?.CLAUDE_PLUGIN_ROOT).length > 0).toBe(true)
+})
+
+test('git opens the check only as a word of a shell command, and so does what may land work', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  mock.clock(on)
+  const seen = machine(on, {})
+  on('tool.check', () => ALLOW)
+
+  // A path that holds `github` starts no python for a plain shell call.
+  for (const command of ['ls', 'ls github', 'cat .gitignore', 'ls ~/git/x', 'digit', 'echo legit', 'ls C:/code/github/x']) {
+    await $.tool.check(bash(command, { description: 'list github' }))
+  }
+  await $.tool.check(call('PowerShell', { command: 'Get-ChildItem digit' }))
+  expect(seen.checks).toEqual([])
+
+  const git = [
+    'git status',
+    'cd a && git log',
+    'ls; git diff',
+    'cd repo\ngit push',
+    'cd repo\tgit push',
+    'cd repo\r\ngit push',
+    'git\npush',
+    'git.exe push',
+    'cd a && C:/Git/bin/git.exe push',
+    'git-lfs push',
+    'git.cmd push',
+    'cd a && git-lfs push',
+    'cd repo\ngit.cmd push',
+    '/usr/bin/git pull',
+    'C:\\Git\\bin\\git pull',
+    '"C:/Program Files/Git/bin/git" pull',
+    'gh pr view 7',
+    'cd a && gh api repos/x/y/git/refs -X PATCH',
+    'npm run merge-queue',
+    'rsync push-target',
+    // however git or gh is called, as test_relay.py puts them to phi.py's branch guard
+    'gh pr merge 12',
+    'gh api -X PATCH repos/o/r/git/refs/heads/main -f sha=abc',
+    '/usr/bin/git push',
+    '/usr/bin/git rebase main',
+    'C:\\Git\\bin\\git rebase main',
+    '"/usr/bin/git" pull',
+    '"/usr/bin/git" rebase main',
+    'bash -lc "git push"',
+    '{ git push; }',
+    'sudo -u x git push',
+    'cmd /c git push',
+  ]
+  for (const command of git) await $.tool.check(bash(command))
+  expect(seen.checks.map(check => (check.payload.tool_input as { command: string }).command)).toEqual(git)
+
+  await $.tool.check(bash('sleep 600', { run_in_background: true }))
+  await $.tool.check(call('PowerShell', { command: 'git status' }))
+  expect(seen.checks.length).toBe(git.length + 2)
+})
+
+test('a plain shell call is checked only where the store has a failure model that weighs shell calls', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const model = `${PHI}/models/lookups-model.json`
+  const seen = machine(on, {})
+  on('tool.check', () => ALLOW)
+
+  await $.tool.check(bash('pytest -q'))
+  expect(seen.checks).toEqual([])
+
+  // A store has a model only once a training round passed one, and the last answer is believed for a minute.
+  seen.files[model] = '{"shell":{"w":{"pytest":0.4}},"web":{}}\n{"more":1}\n'
+  await $.tool.check(bash('pytest -q'))
+  expect(seen.checks).toEqual([])
+  await clock.advance(60_000)
+  await $.tool.check(bash('pytest -q'))
+  expect(seen.checks.length).toBe(1)
+
+  seen.files[model] = '{"shell":{"w":{}},"web":{"w":{"a":1}}}\n'
+  await clock.advance(60_000)
+  await $.tool.check(bash('pytest -q'))
+  expect(seen.checks.length).toBe(1)
+
+  // An older layout's model is read where the newest has none.
+  delete seen.files[model]
+  seen.files['/work/project/.claude/p4/recall/models/lookups-model.json'] = '{"shell":{"w":{"ls":1}}}\n'
+  await clock.advance(60_000)
+  await $.tool.check(bash('ls'))
+  expect(seen.checks.length).toBe(2)
+})
+
+test('a session that owes a nudge and a puppeteer are checked at each edit and shell call', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  mock.clock(on)
+  const seen = machine(on, {})
+  on('tool.check', () => ALLOW)
+  const edit = (): never => call('Edit', { file_path: 'a.py', old_string: 'a', new_string: 'b' })
+
+  // Another session's marker opens nothing for this one.
+  seen.files[`${PHI}/.nudge/cli-0002`] = ''
+  seen.files[`${PHI}/.puppeteers/cli-0002`] = ''
+  await $.tool.check(edit())
+  await $.tool.check(bash('ls'))
+  expect(seen.checks).toEqual([])
+
+  seen.files[`${PHI}/.nudge/cli-0001`] = ''
+  await $.tool.check(edit())
+  await $.tool.check(call('Write', { file_path: 'a.py', content: 'x' }))
+  await $.tool.check(call('NotebookEdit', { notebook_path: 'a.ipynb', new_source: 'x' }))
+  await $.tool.check(bash('ls'))
+  expect(seen.checks.map(check => check.payload.tool_name)).toEqual(['Edit', 'Write', 'NotebookEdit', 'Bash'])
+
+  delete seen.files[`${PHI}/.nudge/cli-0001`]
+  seen.files[`${PHI}/.puppeteers/cli-0001`] = ''
+  await $.tool.check(call('MultiEdit', { file_path: 'a.py', edits: [] }))
+  expect(seen.checks.length).toBe(5)
+  // A tool hook.py has no check for is not read for either.
+  await $.tool.check(call('Read', { file_path: 'a.py' }))
+  expect(seen.checks.length).toBe(5)
+})
+
+test("only a subagent's own marker opens the check for it, at any tool, with its id in the input", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  mock.clock(on)
+  const seen = machine(on, {})
+  on('tool.check', () => ALLOW)
+  // Ids as the Agent tool gives them. A marker a subagent left behind opens the check for no other subagent.
+  const old = 'a5f0c2d9e8b7a6f41'
+  const fresh = 'a389c1db97089b3bf'
+
+  seen.files[`${PHI}/.agents/${old}`] = ''
+  await $.tool.check(call('Read', { file_path: 'a.py' }, fresh))
+  expect(seen.checks).toEqual([])
+
+  seen.files[`${PHI}/.agents/${fresh}`] = ''
+  await $.tool.check(call('Read', { file_path: 'a.py' }, fresh))
+  expect(seen.checks.map(check => [check.payload.tool_name, check.payload.agent_id])).toEqual([['Read', fresh]])
+
+  // The main conversation's own read beside it is not checked, and a subagent's listed call is, marked or not.
+  await $.tool.check(call('Read', { file_path: 'a.py' }))
+  await $.tool.check(call('WebFetch', { url: 'https://example.com' }, `${old}x`))
+  expect(seen.checks.map(check => check.payload.agent_id)).toEqual([fresh, `${old}x`])
+})
+
+test("python's refusal is the call's error, and its words for the model ride on the reason", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  mock.clock(on)
+  const held = 'phi (p4-phi): this push lands on main, which another session holds.'
+  const news = 'phi (p4-phi): flush.py changed since this subagent started.'
+  let answer: unknown = {
+    hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: held },
+  }
+  const seen = machine(on, { check: () => answer })
+  on('tool.check', () => ALLOW)
+
+  expect(await $.tool.check(bash('git push'))).toEqual({ decision: 'deny', reason: held })
+
+  answer = {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: held,
+      additionalContext: news,
+    },
+  }
+  expect(await $.tool.check(bash('git push'))).toEqual({ decision: 'deny', reason: `${held}\n\n${news}` })
+
+  answer = { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: held } }
+  // The engine names the plugin whose hook asks, so the question is the person's to answer.
+  expect(await $.tool.check(bash('git push'))).toEqual({ decision: 'ask', reason: held, plugin: 'p4-phi' })
+  expect(seen.checks.length).toBe(3)
+})
+
+test('what a check says beside a call reaches the model with the result, once, after the hooks beneath', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  mock.clock(on)
+  const earlier = 'An earlier session fetched this page: the flush is described in section 4.'
+  machine(on, {
+    check: () => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: earlier } }),
+  })
+  on('tool.check', () => ALLOW)
+  on('classic.PostToolUse', () => ({ additionalContext: ['a row was written'] }))
+  on('classic.PostToolUseFailure', () => ({}))
+  const ran = { tool_name: 'WebFetch', tool_input: { url: 'https://example.com' }, tool_response: 'ok' }
+
+  const first = call('WebFetch', { url: 'https://example.com' }) as { tool_use_id: string }
+  expect(await $.tool.check(first as never)).toEqual(ALLOW)
+  expect(await $.classic.PostToolUse({ ...ran, tool_use_id: first.tool_use_id })).toEqual({
+    additionalContext: ['a row was written', earlier],
+  })
+  expect(await $.classic.PostToolUse({ ...ran, tool_use_id: first.tool_use_id })).toEqual({
+    additionalContext: ['a row was written'],
+  })
+
+  // A call that fails gets it with the failure, and a call no check spoke of gets nothing added.
+  const second = call('WebFetch', { url: 'https://example.com/2' }) as { tool_use_id: string }
+  await $.tool.check(second as never)
+  expect(
+    await $.classic.PostToolUseFailure({
+      tool_name: 'WebFetch',
+      tool_input: { url: 'https://example.com/2' },
+      tool_use_id: second.tool_use_id,
+      error: 'timeout',
+    }),
+  ).toEqual({ additionalContext: [earlier] })
+  expect(
+    await $.classic.PostToolUseFailure({ tool_name: 'Read', tool_input: {}, tool_use_id: 'toolu_other', error: 'x' }),
+  ).toEqual({})
+})
+
+test('a question about a call nobody made, a call already refused and a check that fails judge nothing', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  mock.clock(on)
+  let verdict: { decision: 'allow' | 'deny'; reason?: string } = ALLOW
+  let isBroken = false
+  const seen = machine(on, {
+    check: () => {
+      if (isBroken) return 'not a hook output'
+
+      return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'no' } }
+    },
+  })
+  on('tool.check', () => verdict)
+
+  // A plugin's `$.tool.check` asks of no call: by the types its question carries no call id. The test kit gives
+  // every question an id, so an empty one stands for none here.
+  expect(await $.tool.check({ tool: 'Bash', input: { command: 'git push' }, tool_use_id: '' } as never)).toEqual(ALLOW)
+  expect(seen.checks).toEqual([])
+
+  verdict = { decision: 'deny', reason: 'a rule refused it' }
+  expect(await $.tool.check(bash('git push'))).toEqual(verdict)
+  expect(seen.checks).toEqual([])
+
+  verdict = ALLOW
+  isBroken = true
+  expect(await $.tool.check(bash('git push'))).toEqual(ALLOW)
+  expect(seen.checks.length).toBe(1)
+
+})
+
+test('with no python found a call goes on unjudged', async ($, on) => {
+  mock.env(on, {})
+  mock.clock(on)
+  const seen = machine(on, { files: {}, check: () => ({ hookSpecificOutput: { permissionDecision: 'deny' } }) })
+  on('tool.check', () => ALLOW)
+
+  expect(await $.tool.check(call('WebSearch', { query: 'flush' }))).toEqual(ALLOW)
+  expect(seen.checks).toEqual([])
+  expect(seen.logged).toEqual(['no working python found, so no look runs'])
 })

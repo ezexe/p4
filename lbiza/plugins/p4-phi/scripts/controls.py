@@ -452,8 +452,8 @@ def worker_first(home, s, prompt, store):
 
 
 def mark_puppeteer(home, cli):
-    """A file named by the puppeteer's CLI session id, which `recall-hook.sh lookup-check` reads so each of its tool
-    calls reaches phi.py, not only the ones its gate lists."""
+    """A file named by the puppeteer's CLI session id, which the plugin's hooks module reads so each of its edits
+    and shell calls reaches phi.py, not only the ones its filters pass."""
     name = PHI.SAFE.sub("_", str(cli or ""))[:80]
     if not home or not name:
         return

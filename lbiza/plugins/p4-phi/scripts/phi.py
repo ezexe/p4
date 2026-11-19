@@ -23,7 +23,8 @@ The hooks, each in its h_ function:
 - Stop keeps the turn and appends it to the parent session's reports, sends the turn back while steps the session
   tree can settle are open, runs a writing child's issue gate, counts a child marked report when done as archived,
   tells the orchestrator to push issue-closing commits and makes the anchors.
-- The checks before and after a tool call ride on the retrieval hooks' entries, through `routed`.
+- The checks before a tool call are run by the plugin's hooks module, through `hook.py lookup-check`, and the
+  records after one ride on the retrieval hooks' entries, both through `routed`.
 
 Commands: note, done, task, shard, show, tree, background, detach, reparent, disposable, request, proof and controls,
 with the watcher's commands from puppeteer.py; `--help` gives the arguments of each. `rules` is the hooks module's
@@ -1754,8 +1755,9 @@ def h_plan(payload):
 # --- the nudge: an orchestrator doing a work step itself ------------------------------------------------------
 #
 # The marker <store>/phi/.nudge/<CLI session id> exists while an orchestrator's step in progress is a work step it
-# has not been nudged on; recall-hook.sh lets an Edit, Write or shell call through to python only while a marker names
-# the call's session, so every other call pays nothing.
+# has not been nudged on. The plugin's hooks module runs the check of a session's own edit only while this marker or
+# a puppeteer's names the session, and that of its plain shell call only then or where the store's failure model
+# weighs shell calls, so every other such call starts no python.
 
 NUDGE_LOOKING = (LOOKING | frozenset("""uniq basename dirname realpath stat du df env type command jq less more nl
 column od xxd sha1sum sha256sum md5sum cmp comm false read set ps tasklist whoami hostname uname history
@@ -2404,7 +2406,7 @@ def pair_parts(me, s, req, changed="", notice=lambda text: text):
         answers = controls.answers_text(me.home, s) if s.get("puppeteer") else ""
         return [p for p in (told, answers) if p]
     RAN["pair"] = "puppeteer"
-    controls.mark_puppeteer(me.store or me.home, me.cli)   # so the hook's gate hands phi.py each of its tool calls
+    controls.mark_puppeteer(me.store or me.home, me.cli)   # so the hooks module hands phi.py each edit and shell call
     if not s.get("puppeteerSeen"):
         s["puppeteerSeen"] = now()                 # said once, and kept, so a filing is never silent
         out.append("phi (p4-phi): " + controls.rule_text(me.home, s))
@@ -3155,8 +3157,8 @@ def replay(me, s, transcript):
 
 
 def routed(name, payload):
-    """A phi.py handler run from a retrieval hook's entry, with the hook output phi.py would give and its log
-    line."""
+    """A phi.py handler run from hook.py, at a retrieval hook's entry or at the hooks module's check before a tool
+    call, with the hook output phi.py would give and its log line."""
     if os.environ.get("P4_PHI") == "0":
         return None
     event, fn = ROUTED[name]
@@ -3194,8 +3196,9 @@ def h_agent_launch(payload):
 
 def h_agent_start(payload):
     """SubagentStart, from the retrieval hook's entry: the subagent bound by the `agent_id` the input carries to the
-    launching session's step in progress, and its marker opened under phi/.agents/ for recall-hook.sh's gate. An
-    input with no `agent_type` is no subagent the Agent tool started and is left alone."""
+    launching session's step in progress, and its marker opened under phi/.agents/ for the plugin's hooks module,
+    which checks each call of a subagent a marker names. An input with no `agent_type` is no subagent the Agent
+    tool started and is left alone."""
     agent_id = str(payload.get("agent_id") or "")
     me = Me(payload)
     if not agent_id or not payload.get("agent_type") or not me.home or not me.id:
@@ -3229,9 +3232,9 @@ def agent_transcript(payload):
 
 
 def h_agent_call(payload):
-    """A subagent's tool call, before it runs, routed from the retrieval hook's check: warned of what changed beside
+    """A subagent's tool call, before it runs, routed from hook.py's `lookup-check`: warned of what changed beside
     the launching session, held against its own transcript for when it started and what it has heard already.
-    recall-hook.sh lets a subagent's check through only while phi/.agents/ names it."""
+    The plugin's hooks module runs a subagent's check, at any tool, only while phi/.agents/ names it."""
     agent_id = str(payload.get("agent_id") or "")
     me = Me(payload)
     if not agent_id or not me.home or not me.id:

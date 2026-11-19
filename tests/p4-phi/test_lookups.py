@@ -151,13 +151,6 @@ class Record(Base):
             kept = [json.loads(l) for l in f]
         self.assertEqual([k["tool"] for k in kept], ["WebFetch"])     # the tracked file: findings, not every call
 
-    def test_tools_with_nothing_to_check_never_start_python(self):
-        r = run_hook("lookup-check", pre("Read", {"file_path": "README.md"}, proj=self.proj), self.proj)
-        self.assertEqual((r.returncode, r.stdout), (0, ""))
-        r = run_hook("lookup-check", pre("Bash", {"command": "ls"}, proj=self.proj), self.proj)
-        self.assertEqual((r.returncode, r.stdout), (0, ""))
-        self.assertFalse(os.path.exists(lk.db_path(self.p4)))    # no failure model: a command ends before python too
-
     def test_a_failure_keeps_its_signature_and_the_command_that_worked_next(self):
         bad = {"command": "python tools/probe.py --port narwhal"}
         err = "Exit code 1\nTraceback (most recent call last):\n  File \"tools/probe.py\", line 3\n" \
@@ -375,7 +368,9 @@ class Check(Base):
         for tool, inp in (("Read", {"file_path": "README.md"}), ("Edit", {"file_path": "a", "old_string": "x",
                           "new_string": "y"}), ("Bash", {"command": "ls"}), ("Agent", {"prompt": "find the port"})):
             self.assertIsNone(self.out(run_hook("lookup-check", pre(tool, inp, proj=self.proj), self.proj)))
-        self.assertEqual(self.checks(), [])                   # recall-hook.sh ends these before python: nothing to log
+        # The plugin's hooks module ends these before python, as hooks/register.test.ts holds it to. Handed one all
+        # the same, lookups.py stops none and logs each as a check that said nothing.
+        self.assertEqual(self.checks(), ["silent"] * 4)
 
     def test_a_corrupt_database_never_fails_a_call(self):
         self.record_fetch()
@@ -513,8 +508,9 @@ class HooksJson(unittest.TestCase):
     def test_matchers(self):
         import test_hooks
         h = test_hooks.own_hooks(HOOKS_JSON, "/hooks/recall-hook.sh")
-        self.assertEqual([m["matcher"] for m in h["PreToolUse"]], ["Agent", ".*"])
-        self.assertEqual(h["PreToolUse"][1]["hooks"][0]["command"].split()[-1], "lookup-check")
+        # the check before a call is the hooks module's, at `tool.check`: no entry starts a shell for every tool
+        self.assertEqual([m["matcher"] for m in h["PreToolUse"]], ["Agent"])
+        self.assertEqual(h["PreToolUse"][0]["hooks"][0]["command"].split()[-1], "agent")
         for ev in ("PostToolUse", "PostToolUseFailure"):
             self.assertEqual(h[ev][0]["matcher"], ".*")
             self.assertEqual(h[ev][0]["hooks"][0]["command"].split()[-1], "lookup-record")

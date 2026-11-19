@@ -721,7 +721,7 @@ class FindingsGoUp(unittest.TestCase):
     CREATE = "gh issue create -R ezexe/demo --title x --body y"
 
     def pre(self, host, command, tool="Bash", **env):
-        """One shell call through the `lookup-check` entry hooks.json runs before every tool call: its
+        """One shell call through `lookup-check`, which the hooks module runs for a checked call: its
         hookSpecificOutput, {} when the hook said nothing."""
         self._calls = getattr(self, "_calls", 0) + 1
         body = {"session_id": CLI.get(host, host), "cwd": self.work, "hook_event_name": "PreToolUse",

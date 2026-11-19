@@ -68,7 +68,7 @@ class Supervisor(unittest.TestCase):
                              P4_PHI_BOOK=handed))
 
     def pre(self, host, tool, inp):
-        """One PreToolUse call through `recall-hook.sh lookup-check`, as hooks.json runs it: the reason or the
+        """One call's check through `recall-hook.sh lookup-check`, which runs what the hooks module runs: the reason or the
         context it hands, '' for none, and the decision."""
         t = self.t
         self._pre = getattr(self, "_pre", 0) + 1

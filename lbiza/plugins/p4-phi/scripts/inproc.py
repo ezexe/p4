@@ -11,9 +11,9 @@ command when the test process starts with P4_INPROC=0. It knows:
   sh <hooks>/run-hook.sh <name>            p4-phi's runner: `${CLAUDE_PLUGIN_ROOT}/scripts/phi.py hook <name>`, exit 0
                                            whatever the script does, and nothing at all when P4_PHI=0
   sh <hooks>/recall-hook.sh <name> ...     the recall runner: `${CLAUDE_PLUGIN_ROOT}/scripts/hook.py <name> ...`, exit
-                                           0, with the script's lookup-check gate, which ends a call with no python,
-                                           and its rule that detaches a clean lookup-record, run here to its end with
-                                           its output dropped
+                                           0, with its rule that detaches a clean lookup-record, run here to its end
+                                           with its output dropped. `lookup-check` runs as the plugin's hooks module
+                                           runs it, for a call its own tests passed: the script alone
   sh <hooks>/run-hook.sh <part> ...        p4-temportal's runner: memory, scratchpad or lifetime, as
                                            `${CLAUDE_PLUGIN_ROOT}/hooks/<script> ...`, exit 0
   <python> [flags] <script>.py ...         a script of a prepared folder: its `if __name__ == "__main__":` block, with
@@ -192,75 +192,9 @@ def _fresh_modules(stand_ins):
 
 # --- what the runners do before python starts ---------------------------------------------------------------------
 
-def _any(payload, words):
-    return any(w in payload for w in words)
-
-
-def _tool(*names):
-    return [f'"tool_name":"{n}"'.encode() for n in names] + [f'"tool_name": "{n}"'.encode() for n in names]
-
-
-EDITS = _tool("Edit", "Write", "MultiEdit", "NotebookEdit")
-WEB = _tool("WebFetch", "WebSearch")
-SHELLS = _tool("Bash", "PowerShell")
-OTHERS = [b"mcp__ccd_session_mgmt__archive_session", b"mcp__ccd_session__start_session",
-          b"mcp__ccd_session_mgmt__send_message"] + _tool(
-    "SendMessage")                                 # a message to another session: phi.py's go-guard reads it
-LONG = re.compile(rb"test_.*\.py|pytest|py\.test|unittest|npm.*test|npm.*build|cargo.*test|cargo.*build|go.*test|"
-                  rb"go.*build|make.*test|make.*build", re.S)
 KEEP = re.compile(rb"mcp__ccd_turn__update_plan|mcp__ccd_turn__wrap_up|temportal.*memory|PostToolUseFailure|Traceback|Error|Exception|"
                   rb"not found|not recognized|No such file|fatal:|denied|ENAMETOOLONG|unexpected EOF|cannot access|"
                   rb"unterminated", re.S)
-
-
-# what may land work however git or gh is called: push, merge, or the program gh, ezexe/p4#232
-LANDS = re.compile(rb"push|merge|(?:[^A-Za-z0-9_.-]|\\[ntr])gh[^A-Za-z0-9_-]")
-
-
-def gate(payload, project):
-    """recall-hook.sh's lookup-check gate: True when it lets python run, False when the script ends with exit 0.
-    `payload` is the hook's input as bytes, `project` the folder CLAUDE_PROJECT_DIR names, '.' read from the call's
-    working folder."""
-    phi = os.path.join(project, ".claude", "p4", "phi")
-    sub = nudge = False
-    if b'"agent_id"' in payload:                    # a subagent's call: only its own marker, left at its start
-        try:
-            own = [os.fsencode(n) for n in os.listdir(os.path.join(phi, ".agents")) if not n.startswith(".")]
-        except OSError:
-            own = []
-        sub = any(b'"agent_id":"' + n + b'"' in payload or b'"agent_id": "' + n + b'"' in payload for n in own)
-    for folder in (".nudge", ".puppeteers"):        # a session owing a nudge, and a puppeteer
-        try:
-            marks = sorted(n for n in os.listdir(os.path.join(phi, folder)) if not n.startswith("."))
-        except OSError:
-            marks = []
-        for n in marks:
-            if not os.path.exists(os.path.join(phi, folder, n)):
-                break
-            if os.fsencode(n) in payload:
-                nudge = True
-                break
-    if not sub:
-        if _any(payload, EDITS):
-            if not nudge:
-                return False
-        elif not _any(payload, WEB + SHELLS + OTHERS):
-            return False
-    if not sub and not nudge and b"git" not in payload and not LANDS.search(payload) and not LONG.search(payload) \
-            and _any(payload, SHELLS):
-        line = None
-        for m in (("phi", "models"), ("recall", "models"), ("models",)):
-            path = os.path.join(project, ".claude", "p4", *m, "lookups-model.json")
-            if os.access(path, os.R_OK):
-                try:
-                    with open(path, "rb") as f:
-                        line = f.readline()
-                except OSError:
-                    line = b""
-                break
-        if line is None or b'"shell":{"w":{}' in line:
-            return False
-    return True
 
 
 def detaches(payload, env):
@@ -408,10 +342,7 @@ def _here(args, p, kw, clock, stand_ins):
         out = f"p4-temportal: unknown part '{(rest[:1] or [''])[0]}'; nothing was done\n".encode()
     elif kind == "recall-hook" and (rest[:1] or [""])[0] in ("lookup-check", "lookup-record"):
         payload = data.rstrip(b"\n")                                # payload=$(cat)
-        project = os.path.join(os.path.abspath(kw.get("cwd") or os.getcwd()), envu.get("CLAUDE_PROJECT_DIR") or ".")
-        if rest[0] == "lookup-check" and not gate(payload, project):
-            pass
-        elif rest[0] == "lookup-record" and detaches(payload, envu):
+        if rest[0] == "lookup-record" and detaches(payload, envu):
             _call(script, rest, payload, env, kw.get("cwd"), clock, stand_ins)
         else:
             _, out, err = _call(script, rest, payload, env, kw.get("cwd"), clock, stand_ins)

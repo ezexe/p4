@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """hook.py <name>: the p4-phi hooks that hooks/recall-hook.sh runs with Claude Code's JSON payload on stdin: the
-store's layout and catch-up, retrieval, the lookups around every tool call, and training. Every handler resolves
+store's layout and catch-up, retrieval, the record of every tool call, and training. The check before a tool call
+is here too, and the plugin's hooks module runs it with a PreToolUse hook's payload. Every handler resolves
 `.claude/p4/` from CLAUDE_PROJECT_DIR or the payload's `cwd`, prints only what its row below names, and on any failure
 exits 0 with one `systemMessage` for ezexe, never context for the model. Each row gives the handler's name, the
 event and matcher hooks/hooks.json runs it on, and what it does.
@@ -31,10 +32,13 @@ event and matcher hooks/hooks.json runs it on, and what it does.
                  session's step in progress. Then the lines of the Agent call that launched it as
                  `additionalContext`: the plugin's hooks module binds the subagent's id to that call's id at
                  `agent.spawn`, and launch_of reads the pair. Nothing where no launch is bound or it kept no line.
-  lookup-check   PreToolUse, matcher `.*`. The first answer of phi.py's checks that PHI_CHECK names for the tool,
-                 or else lookups.py's check: an earlier finding beside a web call, an earlier failure before a
-                 command expected to fail. A subagent's call also gets phi.py's word of what changed since its
-                 launch beside that answer, when there is one.
+  lookup-check   No entry of hooks.json. The plugin's hooks module, hooks/register.ts, runs it at `tool.check`, only
+                 for a call python has a check for, and reads what it prints as a PreToolUse hook's output: a deny
+                 or an ask is the verdict, `additionalContext` reaches the model beside the call's result or in a
+                 deny's reason, and a `systemMessage` goes to the debug log. The first answer of phi.py's checks
+                 that PHI_CHECK names for the tool, or else lookups.py's check: an earlier finding beside a web
+                 call, an earlier failure before a command expected to fail. A subagent's call also gets phi.py's
+                 word of what changed since its launch beside that answer, when there is one.
   lookup-record  PostToolUse and PostToolUseFailure, matcher `.*`. phi.py's records that PHI_RECORD names for the
                  tool, whose answer is returned for `update_plan`, Write and Edit; otherwise lookups.py writes the
                  call's row and tells a failure what other sessions did about it.
@@ -704,7 +708,7 @@ def h_subagent_stop(payload):
     return None
 
 
-# --- `lookup-check` and `lookup-record`, before and after every tool call -------------------------------
+# --- `lookup-check` before a checked tool call, and `lookup-record` after every tool call ---------------
 
 PHI_CHECK = {"mcp__ccd_session__start_session": "start-advice",
              "mcp__ccd_session_mgmt__archive_session": "self-archive",
@@ -725,8 +729,10 @@ PHI_TIE = {"Bash": "issue-tie", "PowerShell": "issue-tie"}
 def phi_route(payload, table):
     """phi.py's handlers that `table` names for this tool, run in this process in their order until one answers:
     that answer, or None. A failure in phi.py is swallowed and never touches the lookup hooks. A session registers a
-    plugin's hooks when it loads the plugin, at its start or at `/reload-plugins`, and the lookup hooks already run
-    on every tool, so a check added to phi.py needs no hook of its own in hooks.json."""
+    plugin's hooks when it loads the plugin, at its start or at `/reload-plugins`, and the record hooks already run
+    on every tool, so a record added to phi.py needs no hook of its own in hooks.json. A check added to phi.py
+    needs none either, and its tool must be one hooks/register.ts lists, where the plugin's hooks module tells
+    which calls python has a check for."""
     names = table.get(str(payload.get("tool_name") or ""))
     for name in (names,) if isinstance(names, str) else names or ():
         try:
