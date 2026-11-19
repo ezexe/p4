@@ -1837,6 +1837,24 @@ class NativeGoal(unittest.TestCase):
         with open(path, encoding="utf-8") as f:
             self.assertEqual(f.read(), "{not json")
 
+    def test_a_brief_no_prompt_hook_saw_gives_its_done_line_at_the_first_stop(self):
+        """Seen in the desktop app on Claude Code 2.1.326: a copy of the plugin loaded from a session's mods folder
+        starts after the session's first message, so no prompt hook saw the brief. The Stop hook took the task from
+        the transcript's turn and kept no done line, and the worker got no goal. The line is kept where the task is,
+        and the look after that Stop answers it as the goal, once."""
+        self.stop("I ported half the flush.", "u1", **self.ON)
+        s = self.t.session(KID)
+        self.assertTrue(s.get("task"), "the task, from the transcript's turn")
+        self.assertEqual(s.get("doneLine"), self.LINE)
+        self.assertEqual(self.phi("look", **self.ON).get("goal"), self.LINE)
+        self.assertNotIn("goal", self.phi("look", **self.ON), "answered once")
+
+    def test_with_the_setting_off_the_first_stop_keeps_the_task_and_no_done_line(self):
+        self.stop("I ported half the flush.", "u1")
+        s = self.t.session(KID)
+        self.assertTrue(s.get("task"))
+        self.assertNotIn("doneLine", s)
+
     def test_the_done_line_is_the_goal_the_look_answers_once_the_first_turn_has_ended(self):
         self.brief(**self.ON)
         self.assertEqual(self.t.session(KID).get("doneLine"), self.LINE)

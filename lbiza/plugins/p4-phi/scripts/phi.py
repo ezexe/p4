@@ -2678,6 +2678,11 @@ def h_stop(payload):
     s.pop("done", None)
     if not s.get("task"):
         s["task"], s["taskAt"] = row["prompt"], row["time"]
+        # No prompt hook saw this session's brief, as where the plugin was loaded after the session's first message:
+        # seen in the desktop app, where a copy loaded from the mods folder kept the task here and no done line, so
+        # the worker got no goal. The line is taken where the task is, from the turn's whole request.
+        if GOAL and spawned_from(s) and plans.done_line(turn.get("prompt")):
+            s["doneLine"] = plans.done_line(turn.get("prompt"))
     if GOAL and payload.get("transcript_path"):
         s["transcript"] = str(payload["transcript_path"])   # where goal_verdict reads the goal's last row
     save_session(me.home, s)

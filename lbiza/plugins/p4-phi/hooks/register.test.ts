@@ -619,6 +619,27 @@ test('each turn of a worker sends one report, a long one cut and an empty one na
   expect(seen.sent[1]?.text).toBe("phi (p4-phi): this session ended a turn with no report: the turn's end was error.")
 })
 
+test('a report that repeats the one before it is not sent, and the same words after another report are', async ($, on) => {
+  // Seen in the desktop app on Claude Code 2.1.326: two turns that both answered `ok` sent the same report twice,
+  // the starter's inbox dropped the second with "it repeated your previous message", and the app's notice of that
+  // started a turn of the worker.
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { look: () => STARTED })
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.turn.complete({ ...TURN, answer: 'ok' })
+  await $.turn.complete({ ...TURN, turnId: 't2', answer: ' ok\n' })
+  await clock.settle()
+  expect(seen.sent.length).toBe(1)
+
+  await $.turn.complete({ ...TURN, turnId: 't3', answer: 'The flush is ported.' })
+  await $.turn.complete({ ...TURN, turnId: 't4', answer: 'ok' })
+  await clock.settle()
+  expect(seen.sent.map(one => one.text.split('\n\n')[1])).toEqual(['ok', 'The flush is ported.', 'ok'])
+})
+
 test("a subagent's turn, a turn the person stopped and a session nobody started send no report", async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   const clock = mock.clock(on)

@@ -938,7 +938,10 @@ def route(home, s, text, by, store, back="", d=None, hand=False):
         return (f"{refused}: send it by `SendMessage` with `to` `{k}`, to \"{title(k, ks)}\", a live session whose "
                 f"task covers it")
     worker = terminal(home, s, text, d, hand)
-    if worker and worker[2] and worker[2].get("started"):
+    # A worker whose worktree is there was started, though terminal_acts, which runs after this, has not marked it
+    # yet. Seen in the desktop app: the prompt after a worker's start handed the start lines for it once more.
+    if worker and worker[2] and (worker[2].get("started")
+                                 or os.path.isdir(f"{worker[1]}/.claude/worktrees/{worker[0]}")):
         return (f"{refused}, and it went to the terminal worker `{worker[0]}` at {worker[2].get('time')}: its "
                 f"message and its note `report-{worker[0]}.md` say where it stands")
     if worker:
@@ -1003,7 +1006,7 @@ def wait_acts(home, s, d, by, store, hand=False):
         out.append((key, "step", True,
                     f"due: {what} waited on \"{title(k, ks)}\" `{k}`, whose work is on its repository's default "
                     f"branch now. Do it in this turn; where it wants a session of its own, "
-                    f"{route(home, s, text, by, store, d=d, hand=hand)}.{tail}"))
+                    f"{route(home, s, text, by, store, k, d, hand)}.{tail}"))   # never back to the one it waited on
     return out
 
 

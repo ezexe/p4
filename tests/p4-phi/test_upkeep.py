@@ -348,6 +348,23 @@ class Waits(Base):
         self.assertIn("start its session with the call", mine)
         self.assertNotIn("refuses", mine)
 
+    def test_a_due_step_does_not_go_by_message_to_the_session_it_waited_on(self):
+        """Seen in the desktop app on Claude Code 2.1.326: a step that waited on a finished session was sent by
+        message to that same session, since three words of the step were in its task, while the same handing had
+        the orchestrator archive it. The session a step waited on is done with its task, so the step goes on to
+        another live session that fits, and with none to a session of its own."""
+        self.turn_on()
+        step = "Check the last row of the narwhal ports table against the store"
+        self.assertGreaterEqual(len(phi.plans.words(step) & phi.plans.words(self.t.session(KID).get("task"))), 3,
+                                "the step fits the task of the session it waits on")
+        self.t.cli(TOP, "upkeep", "wait", step, "--on", KID)
+        self.commit()
+        self.finish(report="The last row is written now.")
+        due = flat(self.lines(self.said(), "due:")[0])
+        self.assertIn(f"waited on \"{KID_TITLE}\" `{KID}`", due)
+        self.assertNotIn(f"with `to` `{KID}`", due)
+        self.assertIn("no live session's task covers it", due)
+
 
 class Leftovers(Base):
     def test_after_an_archive_the_clean_worktree_and_the_merged_branch_go_by_gits_own_commands(self):
@@ -730,6 +747,25 @@ class TerminalWorker(Base):
         self.seat()
         self.left_item()
         return re.findall(r"named `(upkeep-[0-9a-f]{8})`", self.said())[0]
+
+    def test_a_due_step_whose_worker_has_its_worktree_is_not_handed_to_start_once_more(self):
+        """Seen in the desktop app on Claude Code 2.1.326: the first prompt after a terminal worker's start handed
+        the due step's start lines again, since the mark that the worker was started is written after the step's
+        line is built. A worker whose worktree exists was started, so the line says where the step went."""
+        self.seat()
+        self.turn_on()
+        self.t.cli(TOP, "upkeep", "wait", "Tabulate the quarterly almanac of quince harvests", "--on", KID)
+        self.commit()
+        self.finish(report="The last row is written now.")
+        first = " ".join(self.lines(self.said(), "due:")[0].split())
+        name = re.search(r"named `(upkeep-[0-9a-f]{8})`", first).group(1)
+        self.assertIn("start a worker in the Terminal panel for it", first)
+        self.worker(name, os.getpid())                  # its run made the worktree and holds the lock
+        got = self.said()
+        again = " ".join(self.lines(got, "due:")[0].split())
+        self.assertNotIn("start a worker in the Terminal panel", again)
+        self.assertIn(f"it went to the terminal worker `{name}`", again)
+        self.assertNotIn("worker-settings.json`, once for all of them", got, "and the form is not said again")
 
     def test_once_its_run_has_ended_and_its_work_is_landed_its_tab_worktree_and_branch_go(self):
         name = self.started()

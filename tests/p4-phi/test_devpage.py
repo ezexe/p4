@@ -273,6 +273,56 @@ class Page(unittest.TestCase):
             self.assertIn(f"<code>{reader}</code>", live, reader)
             self.assertIn(f"def {function}(", read(os.path.join(SRC, module + ".py")), reader)
 
+    def test_live_checks_holds_the_pane_the_goal_the_terminal_worker_and_the_plan_folder(self):
+        """The checks that needed a session on screen, a worker of the app and an orchestrator with a finished
+        session under it: a row each, the four things they showed wrong with what changed, the route by which a
+        desktop session got the copy, and what no session a session starts could reach, said as not confirmed."""
+        page = read(PAGE)
+        live = page.split('<section id="live-checks"', 1)[1].split("</section>", 1)[0]
+        for said in ("with the origin <code>composer</code>", "<code>p4-phi's pane is open.</code> 56 milliseconds later",
+                     "<code>placement</code> <code>dock</code>, 26 body columns",
+                     "no-surface: no surface is attached",
+                     "the pane drew the new text at 14:45:04.5",
+                     "<code>This session keeps no board and no ledger: it is no puppeteer and no orchestrator, or no "
+                     "look has run yet.</code>",
+                     "<code>\"met\":false,\"sentinel\":true</code>", "<code>durationMs</code> 12829",
+                     "kept <code>over</code> <code>met</code> with the evaluator's reason",
+                     "start a worker in the Terminal panel for it, named <code>upkeep-08dc6384</code>",
+                     "<code>worker-settings.json</code>, <code>brief-upkeep-08dc6384.md</code> and "
+                     "<code>start-upkeep-08dc6384.ps1</code>", "<code>{\"tab_id\":\"c1\"}</code>",
+                     "<code>claude session upkeep-08dc6384 (pid 10844)</code>",
+                     "<code>is_running_command</code> false",
+                     "<code>Deleted branch worktree-upkeep-08dc6384 (was eabd9b9)</code>",
+                     "Three were seen and three were not.", "<code>\"wake_when_done\": true</code>",
+                     "<code>plansDirectory</code> to <code>.claude/p4/temportal/plans</code>",
+                     "twenty-five linked sessions",
+                     "is already taken by an installed plugin (p4-phi@p4-marketplace), which takes precedence.",
+                     "Can't create a worktree in this repository yet",
+                     "hears its own plugin's drawings alone",
+                     "A brief no prompt hook saw gave no goal.",
+                     "A report that repeated the one before it started a turn for nothing.",
+                     "it repeated your previous message",
+                     "A due step went back to the session it had waited on.",
+                     "The lines that start a terminal worker were handed a second time."):
+            self.assertIn(said, live, said)
+        self.assertNotIn("seven linked sessions", live)
+        self.assertEqual(live.count("<tr><td>"), 14)
+        session = page.split('<section id="a-development-session"', 1)[1].split("</section>", 1)[0]
+        self.assertIn("the copy under <code>.claude/skills/</code> did not load", session)
+        self.assertIn("a desktop session gets the copy through its mods folder", session)
+        open_still = page.split('id="not-confirmed"', 1)[1]
+        self.assertIn("Three lines p4-phi hands were not seen in the app.", open_still)
+        for tool in ("mcp__ccd_session__list_start_targets", "mcp__ccd_host__get_storage_usage",
+                     "mcp__ccd_host__discard_kept_worktree"):       # each is still a word of the code's own
+            self.assertIn(f"<code>{tool}</code>", open_still, tool)
+            self.assertTrue(any(tool in read(os.path.join(SRC, f)) for f in ("controls.py", "upkeep.py")), tool)
+        # what the section says changed, held against the code
+        self.assertIn("if (text === reported) return", read(os.path.join(os.path.dirname(SRC), "hooks", "register.ts")))
+        upkeep = read(os.path.join(SRC, "upkeep.py"))
+        self.assertIn("route(home, s, text, by, store, k, d, hand)", upkeep)
+        self.assertIn('os.path.isdir(f"{worker[1]}/.claude/worktrees/{worker[0]}")', upkeep)
+        self.assertIn('s["doneLine"] = plans.done_line(turn.get("prompt"))', read(os.path.join(SRC, "phi.py")))
+
     def test_every_link_of_the_page_leads_somewhere(self):
         page = read(PAGE)
         ids = set(re.findall(r'\bid="([^"]+)"', page))

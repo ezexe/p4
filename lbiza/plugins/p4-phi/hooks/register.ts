@@ -240,6 +240,8 @@ let looking: Promise<Answer | undefined> | undefined
 let asking: Promise<void> | undefined
 // The main conversation is inside a turn.
 let isInTurn = false
+// The last report handed to `$.session.send` for the starter, as its whole text.
+let reported: string | undefined
 // The whole points of the usage last written to usage.json, and the writes, one after another.
 let written: string | undefined
 let writing: Promise<void> = Promise.resolve()
@@ -559,6 +561,11 @@ async function report($: EngineInterface, answer: string, reason: TurnCompleteRe
     const to = await starterOf($)
     if (!to) return
     const text = reportText(answer, reason)
+    // A report that repeats the one before it is not sent. Seen in the desktop app on Claude Code 2.1.326: the
+    // receiver's inbox dropped such a message, "it repeated your previous message", and the app's notice of that
+    // started a turn of the worker, whose own report then went to the starter.
+    if (text === reported) return
+    reported = text
     let sent = await $.session.send({ to: { sessionId: to }, text })
     if (!sent.isDelivered) {
       keep(await ask($, ['look', '--folder'], LOOK_MS))

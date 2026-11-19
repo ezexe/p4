@@ -290,6 +290,7 @@ Every key is optional, and the file need not exist.
 `puppeteer` set to `false` gives an orchestrator no watcher and no start draft on ezexe's message.
 `goal` set to `true` gives a worker Claude Code's own goal, with the line `Done looks like:` of its brief as the condition, and stands the Stop hook's send-back down while that goal is set.
 `phi.py goal on` and `phi.py goal off` write the key and print how it stands, since a session writes nothing under `.claude` with its own tools.
+Where no prompt hook saw a worker's brief, as when the plugin was loaded after the session's first message, the line is kept at the first Stop the plugin sees, where the task is.
 `app_tools` set to `true` has the hooks module ask the desktop app's own tools for the session and the sessions linked to it after a look, once a minute at most and never while a turn of the session runs, and write the answers to `app.json` beside the prompt's origin.
 `phi.py` then reads a session's title, folders, archive state, permission mode, branch and named starter from that file while it is under five minutes old, and from the app's record file for a session the file does not hold and for everything the tools do not answer: the CLI session ids, a session with no starter named, and the worktree path.
 With it unset no tool of the app is called and the record files are read as before.
