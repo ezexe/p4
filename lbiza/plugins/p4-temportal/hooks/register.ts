@@ -21,12 +21,22 @@
 // none. It starts one as the slash command `/compact`, by `$.command.run`. Seen in the desktop app on Claude Code
 // 2.1.326: `$.session.compact` is refused in a session a program started, "compaction here runs inside a turn (a
 // /compact prompt)", and the command compacts there, with this module's own `session.compact` hook hearing it.
+//
+// And it hands the plugins' python the settings Claude Code loaded. At `classic.SessionStart`, above every
+// SessionStart command hook, it reads each source by `$.settings.read({ source })`, keeps the few keys p4 reads,
+// and adds them to the hook input as `p4_settings`, which each command hook beneath gets on stdin. p4conf.py's
+// settings keeper takes the managed settings from there, every managed tier merged, where it knew one managed file,
+// and p4_memory.py takes all four sources for its line on a write block. Seen on Claude Code 2.1.328 in a
+// `claude -p` run from a scratch project: each source came back as its file holds it, `flag` as `--settings` gave
+// it and `policy` empty with no managed settings, and a field the module added to the input was on the stdin of
+// a command hook of the same event.
 
 import type {
   EngineInterface,
   ProcessRunResult,
   Register,
   SessionMessage,
+  Settings,
   Timer,
   ToolCallResult,
 } from 'claude-code'
@@ -125,6 +135,17 @@ const COMPACT_AT = 70
 // How long the main conversation is quiet before the module looks at the context. It is well inside the five
 // minutes a prompt cache entry lives, so the summary's request reads the conversation from the cache.
 const QUIET_MS = 60_000
+
+// The field of a SessionStart hook's input that holds the settings this module read, which is p4conf.py's
+// HANDED_KEY, and the sources it reads, which are p4conf.py's HANDED_SOURCES. `flag`, what `--settings` carries, is
+// one run's and is left out.
+const HANDED = 'p4_settings'
+const SOURCES = ['user', 'project', 'local', 'policy'] as const
+
+// The keys of a source the plugins' python reads whole. Of `env` it reads the P4_ variables, of `enabledPlugins`
+// the p4 plugins, and of `permissions` the write block and the directories added to it.
+const WHOLE = ['autoMemoryDirectory', 'plansDirectory', 'autoMemoryEnabled'] as const
+const PERMISSIONS = ['blockWritesOutsideWorkingDirectories', 'additionalDirectories'] as const
 
 // What `lifetime.py tick` prints: the lines of what it moved and cleared, the seconds until the next sweep, and
 // the line `temportal.compact_at`.
@@ -488,7 +509,62 @@ async function compactWhenDue($: EngineInterface): Promise<void> {
   }
 }
 
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+// The entries of an object whose name starts with `prefix`, or nothing where the value is no object.
+function named(value: unknown, prefix: string): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined
+
+  return Object.fromEntries(Object.entries(value).filter(([name]) => name.startsWith(prefix)))
+}
+
+// What of one source's settings is handed on: the keys the plugins' python reads and no other, since a source
+// crosses with its `env` and its helper commands unfiltered. A `permissions` that is no object is handed as null,
+// which p4_memory.py reads as a permissions object it cannot read.
+function kept(settings: Settings): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const key of WHOLE) if (settings[key] !== undefined) out[key] = settings[key]
+  const plugins = named(settings.enabledPlugins, 'p4-')
+  if (plugins !== undefined) out.enabledPlugins = plugins
+  const env = named(settings.env, 'P4_')
+  if (env !== undefined) out.env = env
+  const permissions = settings.permissions
+  if (isRecord(permissions)) {
+    const held = PERMISSIONS.filter(key => key in permissions)
+    out.permissions = Object.fromEntries(held.map(key => [key, permissions[key]]))
+  } else if (permissions !== undefined) {
+    out.permissions = null
+  }
+
+  return out
+}
+
+// The settings of every source of SOURCES, or none where one read failed: a source left out would read as a
+// source that holds nothing.
+async function settingsRead($: EngineInterface): Promise<Record<string, unknown> | undefined> {
+  try {
+    const out: Record<string, unknown> = {}
+    for (const source of SOURCES) out[source] = kept(await $.settings.read({ source }))
+
+    return out
+  } catch (error) {
+    note($, `the settings were not read, so the plugin's python reads the settings files: ${reason(error)}`)
+
+    return undefined
+  }
+}
+
 export const register: Register = on => {
+  // Above every SessionStart command hook: the settings as Claude Code loaded them, added to the input those hooks
+  // read on stdin. With none read the input goes down as it came.
+  on('classic.SessionStart', async ($, e, next) => {
+    const settings = await settingsRead($)
+
+    return next(settings === undefined ? e : ({ ...e, [HANDED]: settings } as typeof e))
+  })
+
   // The session does not wait for its first sweep, and it does wait for the command, which is then listed from the
   // first prompt.
   on('session.start', async ($, e, next) => {

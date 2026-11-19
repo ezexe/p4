@@ -1331,6 +1331,106 @@ class ClaudeSettings(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(src, "old.md")), "copied, never moved")
         self.assertEqual(self.read(self.local())["autoMemoryDirectory"], self.memory())
 
+    def handed(self, target=None, **sources):
+        """The settings as p4-temportal's hooks module adds them to a SessionStart hook's input, taken for this
+        project's local file: each source an object, `policy` the managed settings."""
+        payload = {p4conf.HANDED_KEY: {s: sources.get(s, {}) for s in p4conf.HANDED_SOURCES}}
+        self.addCleanup(p4conf.hand_settings, {}, "")
+        self.assertTrue(p4conf.hand_settings(payload, target or p4conf.settings_file(self.project)))
+        return payload
+
+    def test_the_managed_settings_a_hooks_module_handed_are_the_ones_the_keeper_reads(self):
+        """`$.settings.read({ source: "policy" })` gives the managed settings of every managed tier, where the keeper
+        knew one managed file. Handed a policy that names a folder for plans and one for memory, the keeper writes
+        neither key, though no settings file on this disk names either, and says the memory folder once, by the
+        name of the managed settings."""
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        self.handed(policy={"plansDirectory": "managed/plans", "autoMemoryDirectory": "D:/managed"})
+        asks = p4conf.keep_settings(self.project, tell=True)["asks"]
+        got = self.read(self.local()) if os.path.exists(self.local()) else {}
+        self.assertNotIn("plansDirectory", got)
+        self.assertNotIn("autoMemoryDirectory", got)
+        self.assertTrue(any("`autoMemoryDirectory` in the managed settings names D:/managed" in a for a in asks), asks)
+        self.assertEqual(p4conf.keep_settings(self.project, tell=True)["asks"], [], "said once")
+        self.assertEqual(p4conf.read_record(os.path.join(self.project, ".claude", "p4"))["otherMemory"],
+                         [["the managed settings", "D:/managed"]])
+
+    def test_with_no_settings_handed_the_keeper_reads_the_files(self):
+        """A hook input that holds no settings, one that lacks a source, and settings handed for another project's
+        local file each leave none handed for this project, so the keeper reads the files and writes both keys. The
+        user and project settings are read from their files whatever was handed: the keeper writes a file for every
+        later session, and a session started with some sources left out loaded less than the files hold."""
+        p4 = os.path.join(self.project, ".claude", "p4")
+        os.makedirs(p4)
+        policy = {"plansDirectory": "managed/plans", "autoMemoryDirectory": "D:/managed"}
+        self.addCleanup(p4conf.hand_settings, {}, "")
+        target = p4conf.settings_file(self.project)
+        self.assertFalse(p4conf.hand_settings({"hook_event_name": "SessionStart"}, target))
+        self.assertFalse(p4conf.hand_settings({p4conf.HANDED_KEY: {"policy": policy}}, target), "three sources lack")
+        self.assertFalse(p4conf.hand_settings({p4conf.HANDED_KEY: "all of them"}, target))
+        self.assertIsNone(p4conf.handed(target))
+        self.handed(target=p4conf.settings_file(os.path.join(self.tmp, "another")), policy=policy)
+        self.assertIsNone(p4conf.handed(target), "handed for another project's file")
+        p4conf.keep_settings(self.project)
+        got = self.read(self.local())
+        self.assertEqual((got["autoMemoryDirectory"], got["plansDirectory"]), (self.memory(), PLANS))
+        self.handed(user={"plansDirectory": "handed/plans"}, project={"autoMemoryDirectory": "D:/handed"})
+        p4conf.keep_settings(self.project)
+        got = self.read(self.local())
+        self.assertEqual((got["autoMemoryDirectory"], got["plansDirectory"]), (self.memory(), PLANS),
+                         "a handed user or project value moves nothing: their files are read")
+        _write(os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "settings.json"), {"plansDirectory": "plans"})
+        p4conf.keep_settings(self.project)
+        self.assertNotIn("plansDirectory", self.read(self.local()), "the user file is read beside handed settings")
+
+    def test_a_plugin_the_handed_managed_settings_switch_off_is_off(self):
+        """The managed settings decide first whether a plugin is enabled, and the ones a hooks module handed stand
+        for the managed file. With none handed, the files decide as before."""
+        target = p4conf.settings_file(self.project)
+        self.assertTrue(p4conf.plugin_enabled("p4-phi", target))
+        _write(self.local(), {"enabledPlugins": {"p4-phi@p4-marketplace": True}})
+        self.handed(policy={"enabledPlugins": {"p4-phi@p4-marketplace": False}})
+        self.assertFalse(p4conf.plugin_enabled("p4-phi", target), "the managed settings win over the local file")
+        self.handed(local={"enabledPlugins": {"p4-phi@p4-marketplace": False}})
+        self.assertTrue(p4conf.plugin_enabled("p4-phi", target), "the local file is read, never the handed local")
+        p4conf.hand_settings({}, target)
+        self.assertTrue(p4conf.plugin_enabled("p4-phi", target))
+        _write(self.local(), {"enabledPlugins": {"p4-phi@p4-marketplace": False}})
+        self.assertFalse(p4conf.plugin_enabled("p4-phi", target))
+
+    def test_the_start_hook_takes_the_settings_on_its_input(self):
+        """watch, which p4-phi's SessionStart hook runs, takes the settings off the hook's input before any check, so
+        the whole check reads the managed settings from them. A start whose input holds none clears the ones an
+        earlier call took."""
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        payload = self.handed(policy={"autoMemoryDirectory": "D:/managed"})
+        p4conf.hand_settings({}, "")
+        got = p4conf.watch(self.project, dict(payload, source="startup", hook_event_name="SessionStart"))
+        self.assertTrue(any("in the managed settings names D:/managed" in a for a in got["asks"]), got)
+        self.assertIsNotNone(p4conf.handed(p4conf.settings_file(self.project)))
+        p4conf.watch(self.project, {"source": "startup", "hook_event_name": "SessionStart"})
+        self.assertIsNone(p4conf.handed(p4conf.settings_file(self.project)))
+        self.assertEqual(self.read(self.local())["autoMemoryDirectory"], self.memory(), "the files hold no other")
+
+    def test_a_handed_managed_value_the_managed_file_holds_is_named_by_that_file(self):
+        """A value of the handed managed settings that the platform's managed file holds too is named by that file,
+        as it is where nothing was handed, so a start with a hooks module and one without record the same line."""
+        from unittest import mock
+        managed = os.path.join(self.tmp, "managed-settings.json")
+        _write(managed, {"autoMemoryDirectory": "D:/managed"})
+        target = p4conf.settings_file(self.project)
+        with mock.patch.dict(p4conf.MANAGED, {"win": [managed], "darwin": [managed], "linux": [managed]}):
+            files = p4conf._elsewhere("autoMemoryDirectory", target, sys.platform)
+            self.handed(policy={"autoMemoryDirectory": "D:/managed"})
+            self.assertEqual(p4conf._elsewhere("autoMemoryDirectory", target, sys.platform), files)
+            self.assertEqual(files, [(managed, "D:/managed")])
+            self.handed(policy={"autoMemoryDirectory": "D:/another-tier"})
+            self.assertEqual(p4conf._elsewhere("autoMemoryDirectory", target, sys.platform),
+                             [(p4conf.MANAGED_NAME, "D:/another-tier")], "the merged value, and not the file's")
+            self.handed()
+            self.assertEqual(p4conf._elsewhere("autoMemoryDirectory", target, sys.platform), [],
+                             "the managed settings Claude Code loaded hold none")
+
     def test_another_folder_named_elsewhere_is_said_once(self):
         conf = os.environ["CLAUDE_CONFIG_DIR"]
         _write(os.path.join(conf, "settings.json"), {"autoMemoryDirectory": "D:/mine"})

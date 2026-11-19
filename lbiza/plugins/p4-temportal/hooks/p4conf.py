@@ -1512,17 +1512,60 @@ def _config_dir():
     return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
 
 
+# Claude Code's hooks module API reads the settings by `$.settings.read({ source })`, each source as the engine
+# loaded it: `user`, `project`, `local`, and `policy`, which is the managed settings with every managed tier merged,
+# where MANAGED knows one file for each platform. p4-temportal's hooks module reads the four at
+# `classic.SessionStart`, keeps the keys p4 reads, and adds them to the hook input under HANDED_KEY, which every
+# SessionStart command hook beneath the module gets on stdin. hand_settings takes them for the session's local
+# file. The keeper takes the managed settings from there, and reads the user, project and local files itself
+# whoever handed what: it writes a file for every later session, and a session started with some sources left out
+# loaded less than the files hold. With none handed, as at a ConfigChange, in a command run by hand and in a session
+# that loads no hooks module, it reads the managed file as before.
+HANDED_KEY = "p4_settings"
+HANDED_SOURCES = ("user", "project", "local", "policy")
+MANAGED_NAME = "the managed settings"   # what names a managed value no managed file of MANAGED holds
+_HANDED = None                          # (the local file they were handed for, {source: settings})
+
+
+def hand_settings(payload, target):
+    """Take the settings a hooks module added to the hook input `payload` for the session whose local settings file
+    is `target`. True when they were taken: each source of HANDED_SOURCES is there as an object. Anything else
+    leaves none handed, so every read goes to the files."""
+    global _HANDED
+    got = payload.get(HANDED_KEY) if isinstance(payload, dict) else None
+    taken = isinstance(got, dict) and all(isinstance(got.get(s), dict) for s in HANDED_SOURCES)
+    _HANDED = (_norm(target), {s: got[s] for s in HANDED_SOURCES}) if taken else None
+    return taken
+
+
+def handed(target):
+    """{source: settings} as a hooks module handed them for the session whose local settings file is `target`, or
+    None where none were handed for it."""
+    return _HANDED[1] if _HANDED is not None and _HANDED[0] == _norm(target) else None
+
+
+def _named(f):
+    """A settings file's path with forward slashes, and MANAGED_NAME as it is."""
+    return f if f == MANAGED_NAME else fwd(f)
+
+
 def _elsewhere(key, target, platform):
-    """[(file, value)] of `key` in the user, project and managed settings files, each a file Claude Code reads beside
-    the local one, so a local value would override the choice they hold."""
-    files = [os.path.join(_config_dir(), "settings.json"), os.path.join(os.path.dirname(target), "settings.json")]
-    files += next((v for k, v in MANAGED.items() if platform.startswith(k)), [])
-    out = []
-    for f in files:
-        v = _get(read_json(f) or {}, key)
-        if v is not _NONE and v is not None:
-            out.append((f, v))
-    return out
+    """[(file, value)] of `key` in the user, project and managed settings, each read by Claude Code beside the local
+    file, so a local value would override the choice they hold. The managed settings are the ones a hooks module
+    handed for `target`, by handed, and the platform's managed file where none were. A handed value is named by
+    that file where the file holds it, and by MANAGED_NAME where another managed tier does."""
+    def held(files):
+        found = [(f, _get(read_json(f) or {}, key)) for f in files]
+        return [(f, v) for f, v in found if v is not _NONE and v is not None]
+    out = held([os.path.join(_config_dir(), "settings.json"), os.path.join(os.path.dirname(target), "settings.json")])
+    managed = held(next((v for k, v in MANAGED.items() if platform.startswith(k)), []))
+    got = handed(target)
+    if got is None:
+        return out + managed
+    v = _get(got["policy"], key)
+    if v is _NONE or v is None:
+        return out
+    return out + [(next((f for f, w in managed if w == v), MANAGED_NAME), v)]
 
 
 def wants(p4, target, platform=None):
@@ -1678,13 +1721,16 @@ def _phi_copy():
 def plugin_enabled(name, target, platform=None):
     """False when a settings file switches the plugin `name` of MARKET off for a session whose local file is
     `target`. The first file that names it under `enabledPlugins` decides, in the order of settings.md, "Settings
-    precedence": the managed file, the local file, the project's, the user's. True when none names it."""
+    precedence": the managed settings, the local file, the project's, the user's. True when none names it. The
+    managed settings are the ones a hooks module handed for `target`, by handed, and the platform's managed file
+    where none were."""
     platform = platform or sys.platform
-    files = list(next((v for k, v in MANAGED.items() if platform.startswith(k)), []))
+    got = handed(target)
+    files = [] if got is not None else list(next((v for k, v in MANAGED.items() if platform.startswith(k)), []))
     files += [target, os.path.join(os.path.dirname(target), "settings.json"),
               os.path.join(_config_dir(), "settings.json")]
-    for f in files:
-        named = (read_json(f) or {}).get("enabledPlugins")
+    for layer in ([got["policy"]] if got is not None else []) + [read_json(f) or {} for f in files]:
+        named = layer.get("enabledPlugins")
         if isinstance(named, dict) and isinstance(named.get(f"{name}@{MARKET}"), bool):
             return named[f"{name}@{MARKET}"]
     return True
@@ -1928,10 +1974,10 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
             rec["asked"] = others
         else:
             rec.pop("asked", None)
-        seen = [[fwd(f), v] for f, v in other]
+        seen = [[_named(f), v] for f, v in other]
         if seen and rec.get("otherMemory") != seen:
             f, v = other[0]
-            out["asks"].append(f"`autoMemoryDirectory` in {fwd(f)} names {v}, so Claude Code loads auto memory from "
+            out["asks"].append(f"`autoMemoryDirectory` in {_named(f)} names {v}, so Claude Code loads auto memory from "
                                f"there and not from the store's {fwd(sub(p4, 'memory'))}")
         if seen:
             rec["otherMemory"] = seen
@@ -2142,13 +2188,16 @@ def watch(project, payload):
     `claude` command used in turn are each read once. At a ConfigChange of a settings file: keep_settings on the
     keys the record owns.
     A newer Claude Code than any the record holds leaves the versions between the two in the record's `changelog`
-    part, as the sections read_changelog owes. Returns {"asks": the lines for ezexe}."""
+    part, as the sections read_changelog owes. The settings a hooks module added to `payload` are taken first, by
+    hand_settings, so each check below reads the managed settings from them. Returns {"asks": the lines for
+    ezexe}."""
     out = {"asks": []}
     if os.environ.get(SETTINGS_ENV) == "0":
         return out
     p4 = os.path.join(main_root(project)[0], ".claude", "p4")
     if not os.path.isdir(p4):
         return out
+    hand_settings(payload, settings_file(project))
     if payload.get("hook_event_name") == "ConfigChange":
         if payload.get("source") in CONFIG_SOURCES:
             keep_settings(project, owned_only=True, p4=p4)
@@ -2176,7 +2225,7 @@ def watch(project, payload):
         note["plugins"] = plugins
     target = settings_file(project)
     unread = (rec.get("unreadable") or {}).get(fwd(target), "none")
-    other = [[fwd(f), v] for f, v in _elsewhere("autoMemoryDirectory", target, sys.platform)
+    other = [[_named(f), v] for f, v in _elsewhere("autoMemoryDirectory", target, sys.platform)
              if not _same_value("autoMemoryDirectory", v, fwd(sub(p4, "memory")))]
     phi = (rec.get(PHI_PART) or {}).get(fwd(target))    # whether p4-phi ran at the last whole check of this file
     if (not note and section_of(p4) == rec.get("section") and unread in ("none", _mtime(target))

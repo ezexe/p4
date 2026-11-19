@@ -293,6 +293,55 @@ class WriteBlock(unittest.TestCase):
         put(self.user, json.dumps({"permissions": {"blockWritesOutsideWorkingDirectories": True}}))
         self.assertEqual(run("migrate", self.wt, self.store, CLAUDE_CODE_DISABLE_AUTO_MEMORY="1"), "")
 
+    def handed(self, **sources):
+        """A SessionStart hook's input as p4-temportal's hooks module hands it down: the settings of each source
+        as `$.settings.read` gave them, `policy` the managed settings."""
+        return {"hook_event_name": "SessionStart", "source": "startup",
+                "p4_settings": {s: sources.get(s, {}) for s in ("user", "project", "local", "policy")}}
+
+    def test_the_settings_the_hooks_module_handed_are_read_in_place_of_the_files(self):
+        """With the settings on the hook's input, the block, the added directories and who chose the folder come
+        from them. A block only the managed settings hold is said with no settings file on the disk, and files that
+        hold a block are not read."""
+        block = {"permissions": {"blockWritesOutsideWorkingDirectories": True}}
+        chose = {"autoMemoryDirectory": self.store}
+        out = run("migrate", self.wt, self.store, payload=self.handed(policy=block, project=chose))
+        self.assertTrue(self.warned(out, "this checkout"), out)
+        out = run("migrate", self.wt, self.store, payload=self.handed(policy={"permissions": None}, project=chose))
+        self.assertTrue(self.warned(out, "this checkout"), "managed permissions that are no object fail closed")
+        added = {"permissions": dict(block["permissions"], additionalDirectories=[self.main])}
+        self.assertEqual(run("migrate", self.wt, self.store, payload=self.handed(user=added, project=chose)), "",
+                         "a directory the user added holds the store")
+        self.assertEqual(run("migrate", self.wt, self.store, payload=self.handed(project=added, local=chose)),
+                         run("migrate", self.wt, self.store, payload=self.handed(project=block, local=chose)),
+                         "a directory the repository added counts for nothing")
+        self.assertEqual(run("migrate", self.wt, self.store, payload=self.handed(policy=block, user=chose)), "",
+                         "a folder the user chose stays writable")
+        put(self.user, json.dumps(block))
+        put(os.path.join(self.wt, ".claude", "settings.local.json"), json.dumps(chose))
+        self.assertEqual(run("migrate", self.wt, self.store, payload=self.handed(project=chose)), "",
+                         "the files hold a block, and the handed settings hold none")
+
+    def test_with_no_settings_handed_the_files_are_read(self):
+        """A hook input with no settings, as in a session that loads no hooks module, and one that lacks a source
+        each send every read to the files."""
+        put(self.user, json.dumps({"permissions": {"blockWritesOutsideWorkingDirectories": True}}))
+        put(os.path.join(self.wt, ".claude", "settings.local.json"), json.dumps({"autoMemoryDirectory": self.store}))
+        for payload in ({"hook_event_name": "SessionStart"}, {"p4_settings": {"user": {}, "policy": {}}},
+                        {"p4_settings": dict(self.handed()["p4_settings"], local="none")}):
+            self.assertTrue(self.warned(run("migrate", self.wt, self.store, payload=payload), "this checkout"), payload)
+
+    def test_a_setting_is_read_from_the_handed_sources_by_precedence(self):
+        """autoMemoryEnabled false in a handed source switches the line off, local over project over user."""
+        block = {"permissions": {"blockWritesOutsideWorkingDirectories": True}}
+        chose = dict(block, autoMemoryDirectory=self.store)
+        on = run("migrate", self.wt, self.store, payload=self.handed(project=chose))
+        self.assertTrue(self.warned(on, "this checkout"), on)
+        off = self.handed(project=chose, user={"autoMemoryEnabled": False})
+        self.assertEqual(run("migrate", self.wt, self.store, payload=off), "")
+        back = self.handed(project=chose, user={"autoMemoryEnabled": False}, local={"autoMemoryEnabled": True})
+        self.assertTrue(self.warned(run("migrate", self.wt, self.store, payload=back), "this checkout"))
+
 
 class AutoMemoryDirectory(unittest.TestCase):
     """The auto memory directory is keyed by the git repository, so a worktree and a subdirectory find the main

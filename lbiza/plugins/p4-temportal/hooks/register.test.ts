@@ -97,6 +97,8 @@ type Machine = {
   compacted?: SessionCompactResult
   // What a slash command the module runs waits on before it answers, or why the engine rejects it.
   command?: () => Promise<void>
+  // What each source of the settings holds, as Claude Code loaded it. With none given, every read is refused.
+  settings?: Readonly<Record<string, Record<string, unknown>>>
 }
 
 // What the module read, the pythons it tried, the commands it registered, each lifetime.py command it ran with its
@@ -115,6 +117,9 @@ type Seen = {
   summarized: { trigger: string; instructions: string | undefined; agentId: string | undefined }[]
   commands: { command: string; args: string }[]
   measured: unknown[]
+  // The sources of the settings the module read, and the input each SessionStart command hook would get on stdin.
+  sources: (string | undefined)[]
+  starts: Record<string, unknown>[]
 }
 
 // A path as the test wrote it: the engine hands a hook the path resolved on the machine the test runs on.
@@ -136,8 +141,22 @@ function machine(on: On, has: Machine): Seen {
     summarized: [],
     commands: [],
     measured: [],
+    sources: [],
+    starts: [],
   }
   on('session.start', (_, e) => ({ cwd: e.cwd }))
+  // The SessionStart command hooks, which run beneath every hooks module and read this input on stdin.
+  on('classic.SessionStart', (_, e) => {
+    seen.starts.push({ ...e })
+
+    return {}
+  })
+  on('settings.read', (_, e) => {
+    seen.sources.push(e.source)
+    if (has.settings === undefined) return { deny: 'the settings are closed to this plugin' }
+
+    return { value: has.settings[e.source ?? ''] ?? {} }
+  })
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   on('session.usage', (_, e) => {
@@ -1018,4 +1037,63 @@ test('where the tool cannot be registered the debug log says so, and the command
   expect(seen.tools).toEqual([])
   expect(seen.debugged.length).toBe(1)
   expect(seen.debugged[0]?.startsWith('the tool lifetime was not registered: ')).toBe(true)
+})
+
+test('a start hands every SessionStart command hook the settings of each source, the keys p4 reads and no other', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const seen = machine(on, {
+    settings: {
+      user: {
+        autoMemoryDirectory: '~/notes',
+        model: 'opus',
+        apiKeyHelper: '/bin/secret',
+        env: { P4_PHI_MAX_CHILDREN: '6', ANTHROPIC_AUTH_TOKEN: 'secret' },
+        enabledPlugins: { 'p4-phi@p4-marketplace': true, 'other@market': true },
+        permissions: { allow: ['Bash(ls *)'], additionalDirectories: ['~/beside'] },
+      },
+      project: { plansDirectory: 'docs/plans', autoMemoryEnabled: false },
+      policy: { permissions: { blockWritesOutsideWorkingDirectories: true }, hooks: {} },
+    },
+  })
+
+  await $.classic.SessionStart({ source: 'startup' })
+
+  expect(seen.sources).toEqual(['user', 'project', 'local', 'policy'])
+  expect(seen.starts.length).toBe(1)
+  expect(seen.starts[0]?.source).toBe('startup')
+  expect(seen.starts[0]?.p4_settings).toEqual({
+    user: {
+      autoMemoryDirectory: '~/notes',
+      enabledPlugins: { 'p4-phi@p4-marketplace': true },
+      env: { P4_PHI_MAX_CHILDREN: '6' },
+      permissions: { additionalDirectories: ['~/beside'] },
+    },
+    project: { plansDirectory: 'docs/plans', autoMemoryEnabled: false },
+    local: {},
+    policy: { permissions: { blockWritesOutsideWorkingDirectories: true } },
+  })
+})
+
+test('a permissions that is no object is handed as null, and an env or enabledPlugins that is none is left out', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const seen = machine(on, { settings: { policy: { permissions: 'all', env: ['P4_X'], enabledPlugins: 7 } } })
+
+  await $.classic.SessionStart({ source: 'resume' })
+
+  expect(seen.starts[0]?.p4_settings).toEqual({ user: {}, project: {}, local: {}, policy: { permissions: null } })
+})
+
+test('where the settings cannot be read the input goes down as it came, and the debug log says so once', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const seen = machine(on, {})
+
+  await $.classic.SessionStart({ source: 'startup' })
+  await $.classic.SessionStart({ source: 'clear' })
+
+  expect(seen.starts.map(start => start.source)).toEqual(['startup', 'clear'])
+  expect(seen.starts.some(start => 'p4_settings' in start)).toBe(false)
+  const said = seen.debugged.filter(text => text.startsWith('the settings were not read'))
+  expect(said.length).toBe(1)
+  expect(said[0]).toContain("so the plugin's python reads the settings files")
+  expect(said[0]).toContain('the settings are closed to this plugin')
 })

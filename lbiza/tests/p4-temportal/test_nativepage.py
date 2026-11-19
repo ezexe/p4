@@ -105,6 +105,19 @@ class Page(unittest.TestCase):
         self.assertNotIn("no plugin moves a plan", settings)
         self.assertEqual(settings.count("<tr><td><code>plansDirectory</code></td>"), 2)
 
+    def test_the_settings_come_from_the_hooks_module_where_it_loads(self):
+        """The memory row says where the plugin's python gets Claude Code's settings: from the hooks module, by
+        `$.settings.read` at classic.SessionStart, with the file reads kept where no module loads, and what the live
+        check saw. What the hand-over rests on, and no page states, is among what the docs do not confirm."""
+        text = page()
+        row = rows(text)["memory"]
+        for said in ("<code>$.settings.read</code>", "<code>classic.SessionStart</code>", "<code>p4_settings</code>",
+                     "every managed tier merged", "loads no module", "2.1.328", "<code>flag</code>"):
+            self.assertIn(said, row, said)
+        open_still = text.split('id="not-confirmed"', 1)[1].split("</section>", 1)[0]
+        self.assertIn("a field a module adds to the input", open_still)
+        self.assertIn("<code>$.settings.read</code>", open_still)
+
     def test_the_page_says_what_was_set_out_and_what_the_docs_do_not_confirm(self):
         text = page()
         set_out = text.split('id="set-out"', 1)[1].split("</section>", 1)[0]

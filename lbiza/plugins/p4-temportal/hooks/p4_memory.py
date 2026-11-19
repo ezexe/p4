@@ -73,17 +73,36 @@ def repo_root(root):
         d = up
 
 
-def setting(root, name):
-    """A key of Claude Code's settings by its precedence, local over project over user, or None."""
+def sources(root):
+    """[(source, settings)] of a session started in `root`, in Claude Code's order of precedence: `policy`, the
+    managed settings, then `local`, `project` and `user`. Where p4-temportal's hooks module added the settings to
+    the hook's input, they are the ones it read by `$.settings.read`, each source as Claude Code loaded it and
+    `policy` with every managed tier merged, by p4conf.handed. Where it added none, each file is read: a file that is
+    not there is left out, and one that holds no JSON object gives None."""
+    got = p4conf.handed(p4conf.settings_file(root))
+    if got is not None:
+        return [(source, got[source]) for source in ("policy", "local", "project", "user")]
     home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-    for path in (os.path.join(root, ".claude", "settings.local.json"), os.path.join(root, ".claude", "settings.json"),
-                 os.path.join(home, "settings.json")):
+    out = []
+    for source, path in (("policy", managed_settings()),
+                         ("local", os.path.join(root, ".claude", "settings.local.json")),
+                         ("project", os.path.join(root, ".claude", "settings.json")),
+                         ("user", os.path.join(home, "settings.json"))):
+        if not os.path.exists(path):
+            continue
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, ValueError):
-            continue
-        if isinstance(data, dict) and name in data:
+            data = None
+        out.append((source, data if isinstance(data, dict) else None))
+    return out
+
+
+def setting(root, name):
+    """A key of Claude Code's settings by its precedence, local over project over user, or None."""
+    for source, data in sources(root):
+        if source != "policy" and data is not None and name in data:
             return data[name]
     return None
 
@@ -101,49 +120,30 @@ def managed_settings():
 
 def write_block(root):
     """-> (blocked, additional directories). By the settings reference, key blockWritesOutsideWorkingDirectories, a
-    true in any loaded file turns the block on, and so does a managed file whose permissions object cannot be read.
-    Only user and managed additionalDirectories are counted, since repository settings may not add a directory to
-    the block's working directories."""
-    home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-    files = [("repo", os.path.join(root, ".claude", "settings.local.json")),
-             ("repo", os.path.join(root, ".claude", "settings.json")),
-             ("user", os.path.join(home, "settings.json")), ("managed", managed_settings())]
+    true in any loaded source turns the block on, and so do managed settings whose permissions object cannot be
+    read. Only user and managed additionalDirectories are counted, since repository settings may not add a directory
+    to the block's working directories."""
     blocked, extra = False, []
-    for kind, path in files:
-        if not os.path.exists(path):
-            continue
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-            perms = data.get("permissions", {}) if isinstance(data, dict) else None
-        except (OSError, ValueError):
-            perms = None
+    for source, data in sources(root):
+        perms = data.get("permissions", {}) if data is not None else None
         if not isinstance(perms, dict):
-            blocked = blocked or kind == "managed"      # an unreadable managed permissions object fails closed
+            blocked = blocked or source == "policy"     # an unreadable managed permissions object fails closed
             continue
         blocked = blocked or perms.get("blockWritesOutsideWorkingDirectories") is True
-        if kind != "repo":
+        if source in ("user", "policy"):
             extra += [os.path.normpath(os.path.join(root, os.path.expanduser(d)))
                       for d in perms.get("additionalDirectories") or [] if isinstance(d, str)]
     return blocked, extra
 
 
 def chosen_by_user(root):
-    """autoMemoryDirectory takes effect from a file of the user's own: by the settings reference, the write block
-    leaves auto memory .md files writable, but not in a directory the repository chose. The file that sets it is the
-    first holding the key in Claude Code's order, managed, local, project, user. Managed and user settings are the
-    user's, the project file is the repository's, and the local file is the user's only while local_is_users."""
-    home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-    for kind, path in (("user", managed_settings()), ("local", os.path.join(root, ".claude", "settings.local.json")),
-                       ("repo", os.path.join(root, ".claude", "settings.json")),
-                       ("user", os.path.join(home, "settings.json"))):
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-        except (OSError, ValueError):
-            continue
-        if isinstance(data, dict) and isinstance(data.get("autoMemoryDirectory"), str):
-            return kind == "user" or (kind == "local" and local_is_users(root))
+    """autoMemoryDirectory takes effect from a source of the user's own: by the settings reference, the write block
+    leaves auto memory .md files writable, but not in a directory the repository chose. The source that sets it is
+    the first holding the key in Claude Code's order, managed, local, project, user. Managed and user settings are
+    the user's, the project file is the repository's, and the local file is the user's only while local_is_users."""
+    for source, data in sources(root):
+        if data is not None and isinstance(data.get("autoMemoryDirectory"), str):
+            return source in ("policy", "user") or (source == "local" and local_is_users(root))
     return False
 
 
@@ -254,6 +254,8 @@ def main():
     sub = sys.argv[1] if len(sys.argv) > 1 else ""
     payload = payload_from_stdin()
     try:
+        # the settings the hooks module read, where it added them to this hook's input
+        p4conf.hand_settings(payload, p4conf.settings_file(project_root(payload)))
         if sub == "migrate":
             if auto_memory_off(project_root(payload)):
                 return 0                # auto memory is off: Claude Code saves none, so no block keeps it from saving

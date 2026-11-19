@@ -94,7 +94,9 @@ def configure(payload, write=True, root=None):
 
 
 def layout(payload):
-    """Files in an earlier place of the store's layout are moved into each plugin's folder first."""
+    """Files in an earlier place of the store's layout are moved into each plugin's folder first. The settings keeper
+    that move can start takes the settings the hooks module added to the hook's input, by p4conf.hand_settings."""
+    p4conf.hand_settings(payload, p4conf.settings_file(project_root(payload)))
     lines = p4conf.migrate_layout(os.path.join(project_root(payload), ".claude", "p4"))
     if lines:
         print("p4-temportal: " + "; ".join(lines) + ".")

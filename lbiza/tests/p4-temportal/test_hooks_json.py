@@ -67,6 +67,28 @@ class ModuleTest(unittest.TestCase):
         self.assertRegex(text, r"(?m)^export const register: Register = ")
         self.assertTrue((SRC / "register.test.ts").is_file(), "its tests, for `claude plugin test`")
 
+    def test_the_module_hands_the_settings_it_read_to_the_start_hooks(self):
+        """The types file of the bundled skill plugin-authoring gives `$.settings.read({ source })` as "one source's
+        settings as loaded" and puts the hooks modules above the command hooks in a classic event's chain. So the
+        module reads the four sources at classic.SessionStart and adds them to the input under the name p4conf.py
+        reads them by, and a start hook of this plugin takes them before it reads a settings file."""
+        import ast
+        text = (SRC / "register.ts").read_text(encoding="utf-8")
+        names = {}
+        for node in ast.parse((SRC / "p4conf.py").read_text(encoding="utf-8")).body:
+            if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") in ("HANDED_KEY", "HANDED_SOURCES"):
+                names[node.targets[0].id] = ast.literal_eval(node.value)
+        self.assertIn(f"const HANDED = '{names['HANDED_KEY']}'", text)
+        listed = ", ".join(f"'{source}'" for source in names["HANDED_SOURCES"])
+        self.assertIn(f"const SOURCES = [{listed}] as const", text)
+        self.assertIn("on('classic.SessionStart'", text)
+        self.assertIn("$.settings.read({ source })", text)
+        for script in ("p4_memory.py", "scratchpad.py"):
+            self.assertIn("p4conf.hand_settings(payload, p4conf.settings_file(project_root(payload)))",
+                          (SRC / script).read_text(encoding="utf-8"), script)
+        for word in ("classic.SessionStart", "$.settings.read", names["HANDED_KEY"]):
+            self.assertIn(word, FILE["description"])
+
     def test_no_command_hook_runs_the_retention_sweep(self):
         """The module sweeps at a session's start, on its timer and at the session's end, and it runs lifetime.py with
         no `sh`. A SessionEnd command hook shares 1.5 seconds with every other one, which a plugin's `timeout` does
