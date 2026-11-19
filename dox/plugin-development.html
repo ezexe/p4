@@ -216,7 +216,7 @@ pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--p
 <ul>
 <li>By hand, at the close of a body of work, and after a change to the words a case rests on: the two built-in rules of <code>scripts/phi.py</code>, the description of <code>skills/phi/SKILL.md</code>, <code>agents/check.md</code>, or the SessionStart entries of <code>hooks/hooks.json</code>.</li>
 <li>Again when the pinned model moves to a newer one, so a change of model is read apart from a change of the plugin.</li>
-<li>It gates no landing. A landing rests on <code>python -X utf8 suite/run.py</code> and <code>claude plugin validate</code>, which call no model. Source, <code>plugin-evals.md</code>, the note under the opening: every eval run is a real model call on the account, counted against the plan's usage or the API bill. Source, the same page, "How a case is scored": one run of an agent that is not deterministic tells little, which is why a case runs three times.</li>
+<li>It gates no landing. A landing rests on <code>python -m pytest</code> and <code>claude plugin validate</code>, which call no model. Source, <code>plugin-evals.md</code>, the note under the opening: every eval run is a real model call on the account, counted against the plan's usage or the API bill. Source, the same page, "How a case is scored": one run of an agent that is not deterministic tells little, which is why a case runs three times.</li>
 </ul>
 <h3>The command</h3>
 <p>From the plugin's folder, <code>lbiza/plugins/p4-phi</code>:</p>
@@ -243,7 +243,7 @@ pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--p
 <tr><td><code>hands-the-rules-at-start</code></td><td>The SessionStart hook, which hands a session both built-in rules.</td><td>The run's trace holds the opening words of each rule.</td></tr>
 </tbody></table></div>
 <ul>
-<li><code>scripts/test_evals.py</code> reads the folder in the suite that gates a landing: every case parses and names a grader, no case lists a tool outside the read-only set, and the words a case rests on are still in the rule, the skill's description and the agent's name.</li>
+<li><code>tests/p4-phi/test_evals.py</code> reads the folder in the tests that gate a landing: every case parses and names a grader, no case lists a tool outside the read-only set, and the words a case rests on are still in the rule, the skill's description and the agent's name.</li>
 </ul>
 <h3>The first run</h3>
 <p>The whole suite, run once with the command above on 2026-11-19, with Claude Code 2.1.328 and p4-phi 0.11.41: 48 runs in 590 seconds, an estimate of $2.13, and exit status 0. One run of each case with the plugin alone, on p4-phi 0.11.44 as it landed, passed every case as well, at an estimate of $0.44.</p>

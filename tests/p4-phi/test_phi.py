@@ -1,0 +1,2145 @@
+#!/usr/bin/env python3
+"""phi.py: what linked sessions hand each other, kept on the app's own session tree.
+
+    python -m pytest tests/p4-phi/test_phi.py
+
+Checked: a handed-over task read out of its wrapper, a forked session's too, and a paste read as the person's own
+words; a session's last turn with no human prompt, found from the transcript's end; which session started a session,
+from the app's record, with nothing in the payload saying it; the sessions above it given their files from their
+records; a `spawnedFrom` the app writes late read from the notes folder first and corrected by the record; a session
+with no store of its own living in its parent session's store; every finished turn kept, done or not, once per turn;
+its report appended to the parent session's reports and given to that session at its next message, once; a
+worker given the tasks and notes of the sessions above it and the last turn of its siblings; an orchestrator
+given the last turns of the orchestrators before it, with no likeness of words involved; a note refused without
+a source; a session detached to top level, and reparented; a session's own turns after a clear; silence where
+there is nothing to say; no standing instruction for a message about something else, which the app's own session
+tools carry; a feature step as a new topic; a turn another session began told only what the start tool's own text
+lacks; the caps on depth and live children;
+the task changed by its command; the rules built into p4-phi at a session's start, the store's feedback and user
+memories never handed again, which the app loads, and a memory changed mid-session given once; the pieces past
+the prompt's cap held on a page; a hook never failing a call; hooks.json's shape and the words given to a session.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import unittest
+
+# the folder of the code these tests run
+SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
+                                    "lbiza", "plugins", "p4-phi", "scripts"))
+sys.path.insert(0, SRC)
+import phi  # noqa: E402
+import relay  # noqa: E402
+import inproc  # noqa: E402
+
+inproc.prepare(SRC)              # a hook or a command runs in this process, as its own process would run it
+ROOT = os.path.dirname(SRC)
+RUN = os.path.join(ROOT, "hooks", "run-hook.sh").replace("\\", "/")
+HOOKS_JSON = os.path.join(ROOT, "hooks", "hooks.json")
+START, PROMPT, STOP = "session-start", "user-prompt-submit", "stop"
+
+TOP, KID, KID2, GRAND = "local_top00001", "local_kid00001", "local_kid00002", "local_grand001"
+CLI = {TOP: "aaaa1111-0000-4000-8000-000000000000", KID: "bbbb2222-0000-4000-8000-000000000000",
+       KID2: "cccc3333-0000-4000-8000-000000000000", GRAND: "dddd4444-0000-4000-8000-000000000000"}
+TASK = "Make the narwhal exporter write its ports table to the store"
+BRIEF = "Find why the narwhal exporter drops the last row of the ports table and fix it"
+LONG = ("The last row was dropped by an off-by-one in flush_rows. " + "It is fixed and the suite passes. " * 30).strip()
+# P4_PHI_TEST_TMP names a folder the tests are given for their fixtures, in place of the system temp folder, so a
+# run's fixtures, and anything a test leaves running there, sit in a folder its caller chose and clears. It must lie
+# outside any git repository and any project with a store, since phi reads a fixture's repository and stores by
+# walking up from it.
+FIXTURES = os.environ.get("P4_PHI_TEST_TMP", "")
+if FIXTURES:
+    os.makedirs(FIXTURES, exist_ok=True)
+    tempfile.tempdir = FIXTURES
+
+
+def write(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+
+
+def read(path, wait=5.0, gone=1.0):
+    """The text of `path`. A file p4-phi rewrites goes in by os.replace, and on Windows a read that meets the replace
+    raises PermissionError for a moment, or finds no file for a moment under load, so a refused read is tried again
+    until `wait` runs out, and a missing file until `gone` does."""
+    start = time.time()
+    while True:
+        try:
+            with open(path, encoding="utf-8") as f:
+                return f.read()
+        except PermissionError:
+            if time.time() - start >= wait:
+                raise
+        except FileNotFoundError:
+            if time.time() - start >= gone:
+                raise
+        time.sleep(0.02)
+
+
+def jload(path):
+    return json.loads(read(path))
+
+
+class Tree:
+    """A project with a store, and the app's session records beside it."""
+
+    def __init__(self, tmp, store=True):
+        self.tmp = tmp
+        self.proj = os.path.join(tmp, "proj")
+        os.makedirs(os.path.join(self.proj, ".claude", "p4") if store else self.proj)
+        self.p4 = os.path.join(self.proj, ".claude", "p4")
+        self.app = os.path.join(tmp, "app", "acct", "org")
+        os.makedirs(self.app)
+
+    def record(self, host, started_by="", title="", cwd=None):
+        d = {"sessionId": host, "cliSessionId": CLI.get(host, host), "cwd": cwd or self.proj,
+             "originCwd": cwd or self.proj, "title": title or host}
+        if started_by:
+            d["spawnedFrom"] = {"sessionId": started_by, "taskId": "task_1", "title": title, "sideSession": True}
+            d["startChain"] = {"firstSessionId": TOP, "depth": 1}
+        write(os.path.join(self.app, host + ".json"), json.dumps(d))
+
+    def env(self, host, proj=None, **more):
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE_", "P4_PHI"))}
+        env.update({"CLAUDE_PLUGIN_ROOT": ROOT, "CLAUDE_PROJECT_DIR": proj or self.proj,
+                    "P4_PHI_APP_SESSIONS": os.path.join(self.tmp, "app"), "P4_PHI_WAIT": "0",
+                    "P4_PHI_STORES": os.path.join(self.tmp, "p4-stores.json"),
+                    "P4_PHI_BOOK": "0", "P4_PHI_WATCH": "0",
+                    "CLAUDE_CONFIG_DIR": os.path.join(self.tmp, "claude-config"),   # never the machine's own settings
+                    **more})
+        if host:
+            env["CLAUDE_CODE_HOST_SESSION_ID"] = host
+            env["CLAUDE_CODE_SESSION_ID"] = CLI.get(host, host)
+        return env
+
+    def hook(self, name, host, payload=None, proj=None, cli=None, clock=None, **more):
+        payload = {"session_id": cli or CLI.get(host, host), "cwd": proj or self.proj, **(payload or {})}
+        return inproc.run(["sh", RUN, name], input=json.dumps(payload), capture_output=True, text=True,
+                          env=self.env(host, proj, **more), timeout=60, clock=clock)
+
+    def say(self, host, prompt, **more):
+        return self.hook(PROMPT, host, {"hook_event_name": "UserPromptSubmit", "prompt": prompt}, **more)
+
+    def cli(self, host, *args, proj=None, clock=None):
+        return inproc.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), *args],
+                          capture_output=True, text=True, env=self.env(host, proj), cwd=proj or self.proj,
+                          timeout=60, clock=clock)
+
+    def stop(self, host, prompt, calls=(), report="done", uuid="u0", **kw):
+        t = transcript(os.path.join(self.tmp, host + uuid + ".jsonl"), prompt, calls, report, uuid)
+        return self.hook(STOP, host, {"hook_event_name": "Stop", "transcript_path": t,
+                                      "last_assistant_message": report}, **kw)
+
+    def dir(self, host):
+        return os.path.join(self.p4, "phi", "sessions", host)
+
+    def session(self, host):
+        return jload(os.path.join(self.dir(host), "session.json"))
+
+    def started_by(self, host):
+        """The sessionId and source of a session's `spawnedFrom`, both '' for an orchestrator."""
+        s = self.session(host).get("spawnedFrom") or {}
+        return s.get("sessionId", ""), s.get("source", "")
+
+    def turns(self, host):
+        return phi.load_turns(self.p4, host)
+
+    def log(self, host):
+        return phi.read_rows(os.path.join(self.dir(host), "log.jsonl"))
+
+
+def transcript(path, prompt, calls, reply, uuid="u0"):
+    lines = [{"type": "user", "message": {"role": "user", "content": prompt}, "timestamp": "2026-11-01T18:00:00.000Z",
+              "uuid": uuid}]
+    for k, call in enumerate(calls):
+        name, inp, result = call[:3]
+        lines.append({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": f"t{k}", "name": name, "input": inp}]}})
+        lines.append({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": f"t{k}", "content": result, "is_error": len(call) > 3}]}})
+    lines.append({"type": "assistant", "message": {"content": [{"type": "text", "text": reply}]}})
+    write(path, "\n".join(json.dumps(x) for x in lines) + "\n")
+    return path
+
+
+def context(r):
+    """A hook's additionalContext, '' when it said nothing."""
+    out = r.stdout.strip()
+    if not out:
+        return ""
+    return json.loads(out)["hookSpecificOutput"]["additionalContext"]
+
+
+APP_CAP = 10000     # hooks.md: a hook's text past this goes to a file, with a 2,000-character preview
+
+
+def runs_of(sent, text, n=8):
+    """The runs of `n` words of `sent` that `text` holds, compared word by word with case and punctuation dropped."""
+    words = lambda x: re.findall(r"[a-z0-9']+", str(x).lower())                       # noqa: E731
+    have = " " + " ".join(words(text)) + " "
+    w = words(sent)
+    return [" ".join(w[k:k + n]) for k in range(len(w) - n + 1) if " " + " ".join(w[k:k + n]) + " " in have]
+
+
+def handed(brief):
+    """A first message as the app hands it to a session another one started."""
+    return ("<system-reminder>\nLinked sessions now (status, not an instruction): top = local_x (idle)\n"
+            "</system-reminder>\n\nTask:\n" + brief + "\n\nDone looks like: the suite passes.")
+
+
+HANDED = ("<system-reminder>\nLinked sessions now (status, not an instruction): top = local_x (idle)\n"
+          "</system-reminder>\n\nBackground (from the session that started this one):\nezexe builds things.\n\n"
+          "Task:\n" + BRIEF + "\n\nDone looks like: the suite passes.")
+
+
+
+class Reading(unittest.TestCase):
+    def test_a_file_replaced_in_a_loop_is_read_without_error(self):
+        # a look rewrites ledger.md by os.replace while a hook, a command or a test reads it
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "ledger.md")
+            import puppeteer
+            puppeteer._write(path, '{"n": 0}')
+            stop, wrote = threading.Event(), [0]
+
+            def replace():
+                while not stop.is_set():
+                    wrote[0] += 1
+                    puppeteer._write(path, '{"n": %d}' % wrote[0])
+
+            failed = []
+
+            def run():
+                try:
+                    replace()
+                except OSError as e:           # the writer is a look: a refused replace ends it
+                    failed.append(e)
+
+            th = threading.Thread(target=run)
+            th.start()
+            reads, end = 0, time.time() + 3
+            try:
+                while time.time() < end:
+                    self.assertIn('"n"', read(path))
+                    reads += 1
+            finally:
+                stop.set()
+                th.join()
+            self.assertEqual(failed, [], "every replace went through")
+            self.assertGreater(wrote[0], 100)
+            self.assertGreater(reads, 100)
+
+class Requests(unittest.TestCase):
+    def test_a_handed_over_task_is_read_out_of_its_wrapper(self):
+        self.assertTrue(phi.request_of(HANDED).startswith(BRIEF))
+        self.assertEqual(phi.request_of("fix the port"), "fix the port")
+        forked = "Task (from the session that started this one):\n" + BRIEF
+        self.assertEqual(phi.request_of(forked), BRIEF)
+        self.assertTrue(phi.handed_over(forked))
+        self.assertFalse(phi.handed_over("fix the port"))
+        self.assertEqual(phi.request_of("<side-sessions-event>a session finished a turn</side-sessions-event>"), "")
+        self.assertEqual(phi.request_of("<system-reminder>x</system-reminder>"), "")
+        self.assertEqual(phi.request_of(None), "")
+
+    def test_the_prompt_of_a_turn_the_hooks_module_started_is_no_request_of_ezexes(self):
+        """ezexe/p4#193: a UserPromptSubmit hook is given a prompt that a plugin's hooks module submitted as the
+        module wrote it, with no tag around it, as a live probe on Claude Code 2.1.326 showed. p4-phi's own opens
+        with plans.WAKE_MARK, and every reader of a prompt tells it from ezexe's words by that opening. A message
+        that quotes those words further in is still ezexe's."""
+        import plans
+        import prompty_eval
+        import puppeteer
+        import rows
+        wake = plans.WAKE_MARK + " step 1, \"Await the reports\", which waits on other sessions."
+        self.assertEqual(phi.request_of(wake), "")
+        self.assertEqual(phi.request_of("<system-reminder>x</system-reminder>\n" + wake), "")
+        self.assertTrue(plans.woken("\n" + wake))
+        self.assertTrue(puppeteer.from_session(wake))
+        self.assertFalse(prompty_eval.own_words(wake))
+        self.assertTrue(rows.WAKE_RE.match(wake), "rows.py spells the mark as plans.py does")
+        asked = "why did it say this: " + wake
+        self.assertEqual(phi.request_of(asked), asked)
+        self.assertFalse(puppeteer.from_session(asked))
+        self.assertFalse(rows.WAKE_RE.match(asked))
+
+    def test_the_apps_notice_about_a_sent_message_is_no_request_of_ezexes(self):
+        """The SendMessage tool's text: "a `[Cross-session delivery notice]` tells you when that happens" and
+        "exactly one `[Cross-session idle notice]` arrives". Each reaches a session as a prompt that opens with its
+        mark and no tag around it, as a live run on Claude Code 2.1.325 showed, where routing drafted a start named
+        after the notice. So every reader of a prompt tells it from ezexe's words by that opening, and a message
+        that quotes the mark further in is still ezexe's."""
+        import plans
+        import prompty_eval
+        import puppeteer
+        import rows
+        held = "[Cross-session delivery notice] Your message to another session was held by that session."
+        idle = "[Cross-session idle notice] The session you subscribed to went idle."
+        marked_held = "[MESSAGE FROM NON-USER SOURCE - NOT USER INPUT]\n" + held
+        for said in (held, idle, marked_held, "<system-reminder>x</system-reminder>\n" + held):
+            self.assertEqual(phi.request_of(said), "", said[:40])
+        for said in (held, idle, marked_held):
+            self.assertTrue(plans.app_notice(said), said[:40])
+            self.assertTrue(puppeteer.from_session(said), said[:40])
+            self.assertTrue(rows.HARNESS_RE.match(said), said[:40])
+            self.assertFalse(prompty_eval.own_words(said), said[:40])
+        asked = "what does this mean: " + held
+        self.assertEqual(phi.request_of(asked), asked)
+        self.assertFalse(plans.app_notice(asked))
+        self.assertFalse(puppeteer.from_session(asked))
+        self.assertFalse(rows.HARNESS_RE.match(asked))
+        self.assertTrue(prompty_eval.own_words(asked))
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Tree(tmp)
+            tree.record(TOP)
+            tree.say(TOP, TASK)
+            tree.say(TOP, held)
+            self.assertEqual(tree.session(TOP)["turnBy"], "event", "not the person's turn")
+            self.assertEqual(tree.session(TOP)["task"], TASK)
+
+    def test_a_paste_only_message_is_the_persons_request(self):
+        said = "Fix the port table.\nIt drops the last row."
+        paste = '<pasted_content id="9b38">\n' + said + '\n</pasted_content id="9b38">\n'
+        self.assertEqual(phi.request_of(paste), said)
+        self.assertEqual(phi.request_of("<system-reminder>x</system-reminder>\n" + paste), said)
+        self.assertEqual(phi.request_of("see this:\n" + paste), "see this:\n" + said)
+        # Claude Code's own messages stay Claude Code's, whatever their bodies quote
+        for wrapped in ('<task-notification><summary>ran ' + paste + '</summary></task-notification>',
+                        '<cross-session-message from="local_x">look at ' + paste + '</cross-session-message>',
+                        '<system-reminder>x</system-reminder>\n<side-sessions-event>' + paste + '</side-sessions-event>'):
+            self.assertEqual(phi.request_of(wrapped), "", wrapped[:40])
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Tree(tmp)
+            tree.record(TOP)
+            tree.say(TOP, TASK)
+            tree.say(TOP, '<cross-session-message from="local_x">look at ' + paste + '</cross-session-message>')
+            self.assertEqual(tree.session(TOP)["turnBy"], "session", "not the person's turn")
+            self.assertEqual(tree.session(TOP)["task"], TASK)
+        # a pasted page of markup is still the person's message
+        self.assertEqual(phi.request_of('<pasted_content id="a1"><b>bold</b></pasted_content id="a1">'), "<b>bold</b>")
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Tree(tmp)
+            tree.record(TOP)
+            tree.say(TOP, paste)
+            s = tree.session(TOP)
+            self.assertEqual(s["turnBy"], "user")
+            self.assertEqual(s["task"], said)
+            t = transcript(os.path.join(tmp, "t.jsonl"), paste, [], "ok")
+            self.assertEqual(phi.last_turn(t)["prompt"], said)
+
+    def test_last_turn_of_a_session_no_human_spoke_to(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            t = transcript(os.path.join(tmp, "t.jsonl"), HANDED, [
+                ("Edit", {"file_path": "E:/x/src/export/flush.py"}, "ok"),
+                ("Bash", {"command": "cd /e/x && python -m pytest tests/test_flush.py 2>&1 | tail -3"}, "OK"),
+                ("Bash", {"command": "cat notes.txt"}, "words"),
+                ("Bash", {"command": "python -c \"print('a\"b')\""}, "unexpected EOF while looking for matching", 1),
+                ("mcp__ccd_session__start_session", {"title": "Check the ports"}, "started")], "fixed")
+            turn = phi.last_turn(t)
+            self.assertTrue(turn["prompt"].startswith(BRIEF))
+            self.assertEqual(turn["uuid"], "u0")
+            row = phi.turn_of(turn, "fixed")
+            self.assertEqual(sorted(row), ["done", "failed", "id", "prompt", "report", "steps"])
+            self.assertIn("edited export/flush.py", row["steps"])
+            self.assertIn("ran `python -m pytest tests/test_flush.py`", row["steps"])
+            self.assertIn("started the session \"Check the ports\"", row["steps"])
+            self.assertFalse(any("cat notes" in s for s in row["steps"]))
+            self.assertEqual(len(row["failed"]), 1)
+            self.assertIn("quotes", row["failed"][0])
+            self.assertEqual(row["report"], "fixed")
+
+    def test_the_last_turn_is_found_from_the_transcripts_end(self):
+        """A turn that began in the transcript's last lines is found from its end, the same turn the whole file
+        gives."""
+        held = phi.TURN_WINDOWS
+        with tempfile.TemporaryDirectory() as tmp:
+            p = transcript(os.path.join(tmp, "t.jsonl"), BRIEF,
+                           [("Edit", {"file_path": f"a/b{k}.py"}, "x" * 3000) for k in range(6)], "one")
+            whole = phi.last_turn(p)
+            self.assertEqual(len(whole["calls"]), 6)
+            try:
+                phi.TURN_WINDOWS = (2000, 6000)
+                self.assertEqual(phi.last_turn(p), whole, "its request lies before both windows: the same turn")
+                with open(p, "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"type": "user", "uuid": "u2", "message": {"content": "and the docs"}}) + "\n")
+                    f.write(json.dumps({"type": "assistant", "message": {"content": [
+                        {"type": "tool_use", "id": "z", "name": "Write", "input": {"file_path": "a/docs.md"}}]}}) + "\n")
+                near = phi.last_turn(p)
+                self.assertEqual((near["prompt"], near["uuid"], len(near["calls"])), ("and the docs", "u2", 1))
+                phi.TURN_WINDOWS = ()
+                self.assertEqual(phi.last_turn(p), near, "the whole file gives the same turn")
+            finally:
+                phi.TURN_WINDOWS = held
+            rows, end = phi.read_from(p, 0)
+            self.assertEqual((len(rows), end), (16, os.path.getsize(p)))
+            with open(p, "a", encoding="utf-8") as f:
+                f.write('{"type": "user", "message": {"content": "a line still being wri')
+            again, stop = phi.read_from(p, end)
+            self.assertEqual((again, stop), ([], end), "a line with no newline yet waits for the next read")
+
+    def test_a_harness_message_does_not_open_a_turn(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = transcript(os.path.join(tmp, "t.jsonl"), BRIEF, [("Edit", {"file_path": "a/b.py"}, "ok")], "one")
+            with open(p, "a", encoding="utf-8") as f:
+                f.write(json.dumps({"type": "user", "uuid": "u9", "message": {
+                    "content": "<side-sessions-event>a session finished a turn</side-sessions-event>"}}) + "\n")
+                f.write(json.dumps({"type": "assistant", "message": {"content": [
+                    {"type": "tool_use", "id": "z", "name": "Write", "input": {"file_path": "a/c.py"}}]}}) + "\n")
+            turn = phi.last_turn(p)
+            self.assertEqual(turn["uuid"], "u0")
+            self.assertEqual(len(turn["calls"]), 2)
+
+
+class Sessions(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP, title="Narwhal exporter")
+        self.t.record(KID, TOP, "Fix the dropped row")
+        self.t.record(KID2, TOP, "Check the ports table")
+        self.t.record(GRAND, KID, "Bisect flush_rows")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_no_session_is_told_a_scratchpad_directory_in_the_store(self):
+        """ezexe/p4#241: the scratchpad is the app's, so no session, with a parent or none, is told a folder under the
+        store's temportal/tmp, at its start, at its first message or at a start after a clear."""
+        t = self.t
+        said = []
+        for host, first in ((TOP, TASK), (KID, HANDED)):
+            said.append(context(t.hook(START, host, {"hook_event_name": "SessionStart", "source": "startup"})))
+            said.append(context(t.say(host, first)))
+            said.append(context(t.hook(START, host, {"hook_event_name": "SessionStart", "source": "clear"})))
+        self.assertIn("background for this session", said[4], "the started session's first message ran")
+        plugin = ROOT.replace("\\", "/")                   # a clone of the plugin may itself sit under such a folder
+        for text in said:
+            self.assertNotIn("temportal/tmp", text.replace("\\", "/").replace(plugin, "<plugin>"))
+            self.assertNotIn("scratchpad directory is", text)
+
+    def test_which_session_started_it_comes_from_the_apps_record(self):
+        self.t.hook(START, KID, {"hook_event_name": "SessionStart", "source": "startup"})
+        s = self.t.session(KID)
+        self.assertEqual(s["spawnedFrom"], {"sessionId": TOP, "source": "record"})      # the app's own field name
+        self.assertEqual(s["startChain"], {"firstSessionId": TOP, "depth": 1})
+        self.assertEqual(s["title"], "Fix the dropped row")
+        self.assertEqual(s["cliSessionIds"], [CLI[KID]])
+        self.assertNotIn("spawnedFrom", self.t.session(TOP))       # an orchestrator: its record, started by none
+
+    def test_a_fork_source_with_no_app_record_is_kept_as_a_fork(self):
+        """ezexe/p4#144: hooks.md, SessionStart input, `source` is "fork" for a new session forked from an existing
+        one, so a fork is known with no `forkedFromSessionId` in an app record."""
+        lone = "local_fork00001"
+        self.t.hook(START, lone, {"hook_event_name": "SessionStart", "source": "fork"})
+        self.assertTrue(self.t.session(lone).get("forked"))
+        self.t.hook(START, KID, {"hook_event_name": "SessionStart", "source": "startup"})
+        self.assertFalse(self.t.session(KID).get("forked"))
+
+    def test_session_title_on_stdin_titles_a_session_with_no_app_record(self):
+        """ezexe/p4#146: hooks.md, SessionStart and UserPromptSubmit carry `session_title`, the session's custom
+        title; with no app record it is the session's title, and an app record's title still wins."""
+        lone = "local_named0001"
+        self.t.hook(START, lone, {"hook_event_name": "SessionStart", "source": "startup",
+                                  "session_title": "Port the flush"})
+        self.assertEqual(self.t.session(lone).get("title"), "Port the flush")
+        self.t.hook(PROMPT, KID, {"hook_event_name": "UserPromptSubmit", "prompt": "fix it",
+                                  "session_title": "Another name"})
+        self.assertEqual(self.t.session(KID).get("title"), "Fix the dropped row")
+
+    def test_configure_takes_an_integer_for_a_float_setting(self):
+        """ezexe/p4#159: phi/phi.json's `"wait_s": 3` is a number for WAIT_S, which is a float."""
+        os.makedirs(os.path.join(self.t.p4, "phi"), exist_ok=True)
+        write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"wait_s": 3, "rules": 1}))
+        before = (phi.WAIT_S, phi.RULES)
+        try:
+            phi.configure(self.t.p4)
+            self.assertEqual(phi.WAIT_S, 3)
+            self.assertEqual(phi.RULES, before[1], "a number is still not taken for a true/false setting")
+        finally:
+            phi.WAIT_S, phi.RULES = before
+
+    def test_a_starters_process_never_adds_its_transcript_to_its_childs_record(self):
+        """ezexe/p4#191: a hook of the starter's process that handles its child's record, as when it reads the
+        child's report, reports the starter's transcript id; the child's cliSessionIds keep only the child's own."""
+        self.t.say(TOP, "start the fix")
+        self.t.hook(START, KID, {"hook_event_name": "SessionStart", "source": "startup"})
+        self.t.say(KID, "fix it", cli=CLI[TOP])                     # the starter's transcript handles the child
+        self.t.stop(KID, "fix it", report="Fixed.", cli=CLI[TOP])
+        self.assertEqual(self.t.session(KID)["cliSessionIds"], [CLI[KID]])
+        self.assertEqual(self.t.session(TOP)["cliSessionIds"], [CLI[TOP]])
+        self.t.say(KID, "and the rest", cli=KID + "-resumed")      # a transcript no record names is the child's own
+        self.assertEqual(self.t.session(KID)["cliSessionIds"], [CLI[KID], KID + "-resumed"])
+
+    def test_a_deep_session_gets_every_session_above_it(self):
+        self.t.say(GRAND, "bisect it")
+        self.assertEqual(self.t.started_by(GRAND)[0], KID)
+        self.assertEqual(self.t.started_by(KID)[0], TOP)
+        self.assertEqual(phi.chain_of(self.t.p4, GRAND), [KID, TOP])
+
+    def test_a_session_outside_the_app_is_a_top_session(self):
+        cli = "eeee5555-0000-4000-8000-000000000000"
+        self.t.hook(PROMPT, "", {"hook_event_name": "UserPromptSubmit", "prompt": TASK}, cli=cli)
+        s = self.t.session(cli)
+        self.assertNotIn("spawnedFrom", s)
+        self.assertEqual(s["task"], TASK)
+
+    def test_the_host_id_missing_from_the_environment_is_found_by_the_cli_id(self):
+        r = inproc.run(["sh", RUN, PROMPT], input=json.dumps({"session_id": CLI[KID], "cwd": self.t.proj,
+                                                              "prompt": BRIEF}),
+                       capture_output=True, text=True, env=self.t.env(""), timeout=60)
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(self.t.started_by(KID), (TOP, "record"))
+
+    def test_a_record_the_app_writes_late_is_waited_for(self):
+        late = "local_late0001"
+        write(os.path.join(self.t.app, late + ".json"), json.dumps({"sessionId": late, "cwd": self.t.proj}))
+        self.t.hook(START, late, {"hook_event_name": "SessionStart", "source": "startup"})
+        self.assertEqual(self.t.started_by(late), ("", ""))
+        # the record is written on the call's own clock, at the hook's first wait past 0.4 s: only once the hook is
+        # waiting, however late a loaded machine starts the hook
+        c = inproc.Clock()
+        c.after(0.4, lambda: self.t.record(late, TOP, "Late session"))
+        self.t.say(late, HANDED, clock=c, P4_PHI_WAIT="5")
+        self.assertEqual(self.t.started_by(late), (TOP, "record"))
+        self.assertEqual(self.t.session(late)["title"], "Late session")
+        self.assertGreaterEqual(self.t.log(late)[-1]["waited_ms"], 400, "it waited for the record")
+        self.assertLess(self.t.log(late)[-1]["waited_ms"], 3000)
+
+    def test_a_record_that_says_nothing_yet_is_read_from_the_notes_folder(self):
+        lost = "local_lost0001"
+        write(os.path.join(self.t.app, lost + ".json"), json.dumps({"sessionId": lost, "cwd": self.t.proj}))
+        prompt = HANDED + "\n\nShared notes folder for this group of sessions (outside the repo): " \
+            "C:\\Users\\x\\AppData\\Local\\Claude-Data\\c\\side-session-notes\\" + KID
+        self.t.say(lost, prompt, P4_PHI_WAIT="30")
+        self.assertEqual(self.t.started_by(lost), (KID, "notes folder"))
+        self.assertNotIn("waited_ms", self.t.log(lost)[-1])         # the folder names it: nothing to wait for
+        self.assertNotIn("Shared notes folder", self.t.session(lost)["task"])
+        self.t.say(lost, "go on")
+        self.assertEqual(self.t.started_by(lost), (KID, "notes folder"))    # a record still silent changes nothing
+        self.t.record(lost, KID2, "Lost session")
+        self.t.say(lost, "go on")
+        self.assertEqual(self.t.started_by(lost), (KID2, "record"))         # the record wins over the folder
+
+    def test_a_users_message_waits_for_nothing(self):
+        self.t.record("local_plain001")
+        self.t.say("local_plain001", TASK, P4_PHI_WAIT="5")
+        self.assertNotIn("waited_ms", self.t.log("local_plain001")[-1])
+
+    def test_a_session_with_no_store_lives_in_its_parent_sessions_store(self):
+        work = os.path.join(self.t.tmp, "worktree")
+        os.makedirs(work)
+        self.t.record(KID, TOP, "Fix the dropped row", cwd=work)
+        self.t.say(KID, HANDED, proj=work)
+        self.assertTrue(self.t.session(KID)["task"].startswith(BRIEF))
+        self.assertFalse(os.path.exists(os.path.join(work, ".claude")))
+
+    def test_no_store_anywhere_gives_the_built_in_rules_and_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Tree(tmp, store=False)
+            t.record(TOP)
+            r = t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"})
+            self.assertEqual((r.returncode, context(r)), (0, phi.builtin_text()), "the built-in rules, with no store")
+            r = t.say(TOP, TASK)
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, ""))
+            self.assertFalse(os.path.exists(os.path.join(t.proj, ".claude")), "nothing written")
+
+    def test_the_first_session_of_a_store_hears_the_built_in_rules_alone(self):
+        r = self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"})
+        self.assertEqual((r.returncode, context(r)), (0, phi.builtin_text()), "no memories: the built-in rules")
+        self.assertEqual(self.t.say(TOP, TASK).stdout.strip(), "")
+        self.assertEqual(self.t.session(TOP)["task"], TASK)
+
+
+class Turns(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP, title="Narwhal exporter")
+        self.t.record(KID, TOP, "Fix the dropped row")
+        self.t.record(KID2, TOP, "Check the ports table")
+        self.t.record(GRAND, KID, "Bisect flush_rows")
+        self.t.say(TOP, TASK)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def kid_stops(self, host=KID, report=LONG, uuid="u0", prompt=HANDED):
+        return self.t.stop(host, prompt, [("Edit", {"file_path": "E:/x/src/export/flush.py"}, "ok"),
+                                          ("Bash", {"command": "python -m pytest tests/test_flush.py"}, "OK")], report, uuid)
+
+    def test_every_finished_turn_is_kept_not_done_until_something_showed_it(self):
+        r = self.kid_stops()
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, ""))
+        turns = self.t.turns(KID)
+        self.assertEqual(len(turns), 1)
+        t = turns[0]
+        self.assertEqual(t["done"], "")
+        self.assertTrue(t["prompt"].startswith(BRIEF))
+        self.assertEqual(t["steps"], ["edited export/flush.py", "ran `python -m pytest tests/test_flush.py`"])
+        self.assertEqual(t["report"], LONG[:phi.REPORT_CHARS])
+        self.assertEqual((t["sessionId"], t["cliSessionId"]), (KID, CLI[KID]))
+
+    def test_a_turn_that_only_talked_is_still_kept(self):
+        self.t.stop(KID, "what is the port for?", [], "It is 4000.")
+        self.assertEqual([t["steps"] for t in self.t.turns(KID)], [[]])
+
+    def test_a_turn_is_kept_once_however_often_it_finishes(self):
+        self.kid_stops(report="first")
+        self.kid_stops(report="second")
+        self.assertEqual([t["report"] for t in self.t.turns(KID)], ["second"])
+        self.kid_stops(report="third", uuid="u1", prompt="now the header row")
+        self.assertEqual(len(self.t.turns(KID)), 2)
+
+    def test_done_is_said_with_what_showed_it(self):
+        r = self.t.cli(KID, "done", "test_flush.py: 14 tests OK")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.kid_stops()
+        self.assertEqual(self.t.turns(KID)[0]["done"], "test_flush.py: 14 tests OK")
+        self.kid_stops(uuid="u1", prompt="and the header row")      # it was that turn's, not the next one's
+        self.assertEqual(self.t.turns(KID)[-1]["done"], "")
+        self.assertNotEqual(self.t.cli(KID, "done", "ok").returncode, 0)
+
+    def test_the_report_reaches_the_parent_session_once(self):
+        self.kid_stops()
+        text = context(self.t.say(TOP, "<side-sessions-event>Fix the dropped row finished a turn</side-sessions-event>"))
+        self.assertIn("reports of this session's workers", text)
+        self.assertIn("Fix the dropped row", text)
+        self.assertIn(LONG, text)                       # more than the 400 characters the app delivers
+        self.assertGreater(len(LONG), 400)
+        self.assertIn("edited export/flush.py", text)
+        self.assertIn("not shown done", text)
+        self.assertEqual(self.t.say(TOP, "and now?").stdout.strip(), "")
+
+    def test_a_report_the_hooks_module_sent_is_not_repeated_beside_the_message_that_holds_it(self):
+        """ezexe/p4#157: the hooks module's message to a starter holds the worker's report, and the starter's prompt
+        hook hands the reports kept for it beside that same message. A report the message already holds is named
+        with its steps and its page and not repeated, and one the message does not hold is handed whole."""
+        self.kid_stops()
+        sent = ("<cross-session-message from=\"uds:x\" from-session=\"" + KID + "\" from-plugin=\"p4-phi\">\n"
+                "phi (p4-phi): this session ended a turn. Its report follows, and needs no reply.\n\n" + LONG
+                + "\n</cross-session-message>")
+        text = context(self.t.say(TOP, sent))
+        self.assertIn("reports of this session's workers", text)
+        self.assertIn("  reported: in the message this turn began with", text)
+        self.assertNotIn(LONG, text)
+        self.assertIn("edited export/flush.py", text)
+        self.assertIn("its page: ", text)
+        self.kid_stops(report="The header row is fixed too, in flush_header, and the suite passes.", uuid="u1",
+                       prompt="now the header row")
+        text = context(self.t.say(TOP, sent))           # an older message: the newer report is not in it
+        self.assertIn("reported: The header row is fixed too", text)
+        self.assertTrue(phi.in_message(LONG, sent))
+        self.assertFalse(phi.in_message("Done.", "Done."), "too short a report to tell by")
+
+    def test_only_the_latest_turn_of_a_session_is_given(self):
+        self.kid_stops(report="first try")
+        self.kid_stops(report="second try")
+        text = context(self.t.say(TOP, "well?"))
+        self.assertIn("second try", text)
+        self.assertNotIn("first try", text)
+
+    def test_a_sessions_own_turn_lists_its_child_sessions(self):
+        self.t.cli(KID, "done", "test_flush.py: 14 tests OK")
+        self.kid_stops()
+        self.t.stop(TOP, TASK, [], "The session I started fixed it.")
+        t = self.t.turns(TOP)[0]
+        self.assertEqual(t["sessions"], ["\"Fix the dropped row\": done"])
+        page = read(os.path.join(self.t.dir(TOP), "session.md"))
+        self.assertIn("# Narwhal exporter", page)
+        self.assertIn("an orchestrator", page)
+        self.assertIn("## Workers", page)
+        self.assertIn("Fix the dropped row", page)
+        for sent in (TASK, BRIEF):               # ezexe/p4#204: a child is pointed to this page, so it quotes no prompt
+            self.assertEqual(runs_of(sent, page), [], sent)
+        tops = phi.load_reports(self.t.p4, "")
+        self.assertEqual(tops[-1]["sessionId"], TOP)
+        self.assertTrue(os.path.exists(os.path.join(self.t.p4, "phi", "reports.jsonl")))
+        self.assertIn("Narwhal exporter", read(os.path.join(self.t.p4, "phi", "sessions.md")))
+
+    def test_a_report_goes_to_the_parent_session_not_to_the_top_level_session(self):
+        self.t.stop(GRAND, "bisect flush_rows", [], "It is commit abc.")
+        self.assertEqual([r["sessionId"] for r in phi.load_reports(self.t.p4, KID)], [GRAND])
+        self.assertEqual(phi.load_reports(self.t.p4, TOP), [])
+        self.assertIn(f"started by `{KID}`", read(os.path.join(self.t.dir(GRAND), "session.md")))
+
+
+class TurnEnds(unittest.TestCase):
+    """A turn that ends with no Stop, read by puppeteer.working from the session's log."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP, title="Narwhal exporter")
+        self.t.say(TOP, TASK)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_a_turn_that_ends_on_an_api_error_is_ended(self):
+        """ezexe/p4#161: StopFailure runs in place of Stop when a turn ends on an API error, so its entry logs the
+        turn's end with the error, and keeps no turn row."""
+        import puppeteer
+        self.assertTrue(puppeteer.working(self.t.p4, TOP))
+        r = self.t.hook("stop-failure", TOP, {"hook_event_name": "StopFailure", "error": "rate_limit",
+                                              "error_details": "429 Too Many Requests",
+                                              "last_assistant_message": "API Error: Rate limit reached"})
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+        self.assertFalse(puppeteer.working(self.t.p4, TOP))
+        row = self.t.log(TOP)[-1]
+        self.assertEqual((row["hook"], row["event"], row["ended"]), ("stop", "StopFailure", "rate_limit"))
+        self.assertEqual(self.t.turns(TOP), [])
+
+
+class Background(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP, title="Narwhal exporter")
+        self.t.record(KID, TOP, "Fix the dropped row")
+        self.t.record(KID2, TOP, "Check the ports table")
+        self.t.say(TOP, TASK)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def start(self, host, source="startup"):
+        return context(self.t.hook(START, host, {"hook_event_name": "SessionStart", "source": source}))
+
+    def test_a_started_session_is_given_the_sessions_above_by_title_and_their_notes(self):
+        r = self.t.cli(TOP, "note", "The ports table is written by flush_rows in export/flush.py",
+                       "--source", "export/flush.py:40")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("background for this session", self.start(KID), "a fresh child's start waits for its brief")
+        text = context(self.t.say(KID, HANDED))
+        self.assertIn("background for this session", text)
+        self.assertIn("from its parent session", text)
+        self.assertNotIn(TASK, text, "the task above is named by its session's title")
+        self.assertIn("by title; this session's task is part of the first's: \"Narwhal exporter\"", text)
+        self.assertIn("flush_rows in export/flush.py", text)
+        self.assertIn("export/flush.py:40", text)
+        self.assertIn("Narwhal exporter", text)
+        self.assertNotIn("background for this session", context(self.t.say(KID, "go on")), "given once")
+        self.assertEqual([(r["hook"], r["spawnedFrom"]) for r in self.t.log(KID)],
+                         [(START, TOP), (PROMPT, TOP), (PROMPT, TOP)])
+
+    def test_a_child_whose_cli_id_is_its_host_id_unprefixed_still_gets_its_background(self):
+        # the app gives many workers a CLI id equal to the host id without "local_"
+        same = KID2.removeprefix("local_")
+        self.t.cli(TOP, "note", "The ports table is written by flush_rows in export/flush.py", "--source", "x")
+        context(self.t.hook(START, KID2, {"hook_event_name": "SessionStart", "source": "startup"}, cli=same,
+                            CLAUDE_CODE_SESSION_ID=same))
+        text = context(self.t.hook(PROMPT, KID2, {"hook_event_name": "UserPromptSubmit", "prompt": HANDED},
+                                   cli=same, CLAUDE_CODE_SESSION_ID=same))
+        self.assertIn("background for this session", text)
+        self.assertIn("\"Narwhal exporter\"", text)
+
+    def test_background_missed_at_the_start_comes_with_the_first_message(self):
+        self.assertIn("\"Narwhal exporter\"", context(self.t.say(KID, HANDED)))
+
+    def test_a_coworker_is_handed_no_run_of_the_prompts_above_it(self):
+        """ezexe/p4#204: a coworker's first message, under a worker and an orchestrator, holds no run of eight words
+        of the orchestrator's first prompt or of the worker's, and names the sessions above by title."""
+        t = self.t
+        t.stop(TOP, TASK, report="Planned the exporter; the dropped row goes to a worker.")
+        t.say(KID, HANDED)
+        t.stop(KID, HANDED, [], "Started a coworker to bisect.")
+        t.record(GRAND, KID, "Bisect flush_rows")
+        t.record("local_grand002", KID, "Time the flush")
+        t.say("local_grand002", handed("Time each flush and say which one is slow."))
+        t.stop("local_grand002", "Time each flush and say which one is slow.", [], "The third flush is slow.")
+        text = context(t.say(GRAND, handed("Bisect the history of flush_rows for the commit that lost the row.")))
+        self.assertIn("background for this session", text)
+        self.assertIn("\"Fix the dropped row\", \"Narwhal exporter\"", text)
+        self.assertIn("The third flush is slow.", text, "a sibling's turn by its report")
+        for sent in (TASK, BRIEF, "Time each flush and say which one is slow."):
+            self.assertEqual(runs_of(sent, text, 8 if len(sent.split()) >= 8 else len(sent.split())), [], sent)
+
+    def test_a_session_is_given_the_last_turn_of_its_siblings(self):
+        self.t.stop(KID, HANDED, [("Edit", {"file_path": "src/export/flush.py"}, "ok"),
+                                  ("Bash", {"command": "python -c \"x\""}, "No module named 'numpy'", 1)],
+                    "Stopped: the fix needs ezexe's word on the format.")
+        self.start(KID2)
+        text = context(self.t.say(KID2, "Check the ports table"))          # no path named: the whole background
+        self.assertIn("the other workers of \"Narwhal exporter\"", text)
+        self.assertIn("Fix the dropped row", text)
+        self.assertIn("not shown done", text)
+        self.assertIn("edited export/flush.py", text)
+        self.assertIn("ezexe's word on the format", text)
+        self.assertIn("numpy", text)
+        self.assertNotIn("- \"Check the ports table\", ", text)     # not its own turns: it has none
+
+    def test_a_session_with_no_title_is_named_by_its_id_and_never_by_its_prompt(self):
+        """ezexe/p4#204: title_of falls back to a cut of a session's prompt, so a session with no title, such as a CLI
+        one, is shown to others by its id: in a background, in a report row and in a turn's list of workers, and so on
+        the pages a child is pointed to."""
+        t = self.t
+        t.record("local_grand002", KID, "Time the flush")
+        sent = "Time each flush of the ports table and say which one of them is slow."
+        t.say(KID, HANDED)
+        t.say("local_grand002", handed(sent))
+        for sid in (KID, "local_grand002"):                     # no title in the app's record or in p4-phi's
+            for path in (os.path.join(t.app, sid + ".json"), os.path.join(t.dir(sid), "session.json")):
+                d = jload(path)
+                d.pop("title", None)
+                write(path, json.dumps(d))
+        t.stop("local_grand002", sent, [], "The third flush is slow.")
+        t.stop(KID, HANDED, [], "Started a coworker to time the flush.")
+        t.record(GRAND, KID, "Bisect flush_rows")
+        text = context(t.say(GRAND, handed("Bisect the history of flush_rows for the commit that lost the row.")))
+        self.assertIn(f"\"{KID}\"", text)
+        self.assertIn("The third flush is slow.", text)
+        pages = read(os.path.join(t.dir(TOP), "session.md")) + read(os.path.join(t.dir(KID), "session.md"))
+        self.assertIn(f"\"local_grand002\"", pages)
+        for said in (BRIEF, sent):
+            self.assertEqual(runs_of(said, text), [], said)
+            self.assertEqual(runs_of(said, pages), [], said)
+
+    def test_the_next_top_level_session_is_given_the_one_before_whatever_its_words(self):
+        self.t.stop(TOP, TASK, [("Edit", {"file_path": "src/export/flush.py"}, "ok")], "Half done.")
+        other = "local_top00002"
+        self.t.record(other, title="Something else entirely")
+        self.assertEqual(self.start(other), phi.builtin_text())   # in the app a start is given no background,
+        # since its parent session is not known yet; it has the built-in rules, the store having no memories here
+        text = context(self.t.say(other, "paint the fence green"))
+        self.assertIn("the orchestrators in this project before this one", text)
+        self.assertIn("\"Narwhal exporter\"", text)
+        self.assertNotIn(TASK, text, "its turn by its title and report, never its prompt")
+        self.assertIn("Half done.", text)
+
+    def test_a_session_no_app_runs_is_given_it_at_its_start(self):
+        self.t.stop(TOP, TASK, [], "Half done.")
+        cli = "eeee5555-0000-4000-8000-000000000000"
+        text = context(self.t.hook(START, "", {"hook_event_name": "SessionStart", "source": "startup"}, cli=cli))
+        self.assertIn("Half done.", text)
+
+    def test_a_note_needs_its_source(self):
+        r = self.t.cli(TOP, "note", "The ports table is written by flush_rows")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("source", r.stderr)
+        self.assertEqual(phi.load_notes(self.t.p4, TOP), [])
+
+    def test_a_session_is_given_its_own_turns_after_a_clear_and_none_after_a_compaction(self):
+        """https://code.claude.com/docs/en/context-window.md, "What survives compaction": "When a long session
+        compacts, Claude Code summarizes the conversation history to fit the context window", and the row "Context
+        that hooks added earlier" reads "Summarized with the rest of the conversation". The summary carries the
+        session's own turns and the background it was handed, so a start after a compaction hands neither again. A
+        clear keeps nothing, so a start after it hands the background with the session's own turns."""
+        self.t.say(KID, HANDED)
+        self.t.stop(KID, HANDED, [("Edit", {"file_path": "src/export/flush.py"}, "ok")], "Half done.")
+        text = self.start(KID, "compact")
+        for gone in ("This session's own turns so far", "Half done.", "edited export/flush.py",
+                     "background for this session"):
+            self.assertNotIn(gone, text, gone)
+        self.assertIn("act-don't-wait", text, "the built-in rules still come")
+        text = self.start(KID, "clear")
+        self.assertIn("This session's own turns so far", text)
+        self.assertIn("Half done.", text)
+        self.assertIn("edited export/flush.py", text)
+
+    def test_a_session_is_detached_to_top_level(self):
+        self.t.stop(KID, HANDED, [], "Half done.")
+        r = self.t.cli(TOP, "detach", KID)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.t.started_by(KID), ("", "detached"))
+        self.assertNotIn("Half done.", self.start(KID2))            # no longer one of the sessions beside it
+        self.assertEqual(phi.load_reports(self.t.p4, "")[-1]["sessionId"], KID)
+        self.t.say(KID, "more")
+        self.assertEqual(self.t.started_by(KID), ("", "detached"))  # the app's record does not put it back
+
+    def test_a_session_is_reparented(self):
+        self.t.record(GRAND, KID, "Bisect flush_rows")
+        self.t.stop(GRAND, "bisect flush_rows", [], "It is commit abc.")
+        r = self.t.cli(TOP, "reparent", GRAND, KID2)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.t.started_by(GRAND), (KID2, "reparented"))
+        self.assertEqual(phi.load_reports(self.t.p4, KID2)[-1]["sessionId"], GRAND)
+        self.assertIn("It is commit abc.", context(self.t.say(KID2, "go on")))
+        self.t.say(GRAND, "more")
+        self.assertEqual(self.t.started_by(GRAND)[0], KID2)        # the app's record does not move it back
+        self.assertNotEqual(self.t.cli(TOP, "reparent", KID2, GRAND).returncode, 0)    # no loops
+        self.assertNotEqual(self.t.cli(TOP, "reparent", TOP, GRAND).returncode, 0)
+
+    def test_the_tree_is_printed(self):
+        self.t.stop(KID, HANDED, [], "Half done.")
+        out = self.t.cli(TOP, "tree").stdout
+        self.assertIn("- \"Narwhal exporter\" `", out)
+        self.assertIn("  - \"Fix the dropped row\" `", out)
+        self.assertIn("not shown done, 1 turn", out)
+
+    def test_show_prints_a_sessions_page(self):
+        out = self.t.cli(TOP, "show").stdout
+        self.assertIn("# Narwhal exporter", out)
+        self.assertIn("an orchestrator", out)
+
+    def test_off_is_off(self):
+        self.t.cli(TOP, "note", "The ports table is written by flush_rows", "--source", "flush.py:40")
+        r = self.t.hook(START, KID, {"hook_event_name": "SessionStart", "source": "startup"}, P4_PHI="0")
+        self.assertEqual(r.stdout.strip(), "")
+        self.assertFalse(os.path.exists(self.t.dir(KID)))
+
+
+class NewTask(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP, title="Narwhal exporter")
+        self.t.record(KID, TOP, "Fix the dropped row")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def say(self, host, prompt, **more):
+        return context(self.t.say(host, prompt, P4_PHI_BOOK="1", **more))
+
+    def test_no_standing_instruction_is_handed_for_a_message_about_something_else(self):
+        """The app's own `hand_off_to_session` and `start_session` with `initiation` `offer` say in their tool
+        descriptions when a message about something else goes to another session, so p4-phi hands no instruction of
+        its own and keeps no standing.md."""
+        for host, words in ((TOP, TASK), (TOP, "also, what colour should the fence be?"), (KID, HANDED),
+                            (KID, "and what about the fence?")):
+            said = self.say(host, words)
+            self.assertNotIn("about something else", said, words)
+            self.assertNotIn("stay with the task", said, words)
+        for host in (TOP, KID):
+            self.assertFalse(os.path.exists(os.path.join(self.t.dir(host), "standing.md")))
+
+    def test_a_top_level_sessions_new_topic_is_a_new_top_level_session_detached_to_top_level(self):
+        self.say(TOP, TASK)
+        told = self.say(KID, "Task:\nPick the fence colour. ezexe's words: \"the fence colour?\" "
+                        + phi.NEW_TOP_BRIEF + " " + phi.new_top_first_act())
+        self.assertIn("p4-phi detached it to top level at this first message", told)
+        self.assertIn("call `mcp__ccd_session_mgmt__detach_session` with `\"self\"`", told)
+        self.assertNotIn("detached it to top level", self.say(KID, "and again"), "said at the first message only")
+        s = phi.load_session(self.t.p4, KID)
+        self.assertEqual(phi.spawned_from(s), "", "detached at its first hook")
+        self.assertEqual(s["spawnedFrom"]["source"], "detached")
+        self.assertEqual(s["spawnedFrom"]["from"], TOP)
+        self.say(KID, "carry on")
+        self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID)), "", "the app's record does not undo it")
+        self.assertIn(KID, relay._siblings(self.t.p4, phi.load_session(self.t.p4, TOP)),
+                      "orchestrators are siblings")
+        self.t.record(KID2, TOP, "a plain child")
+        self.say(KID2, "Task:\nWrite the docs; this is not a new top")
+        self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID2)), TOP, "an unmarked brief stays a child")
+        r = self.t.cli(KID2, "detach")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID2)), "", "phi.py detach with no id: itself")
+
+    def test_a_feature_step_in_a_broadly_tasked_top_is_a_new_topic(self):
+        """A broad task does not swallow every feature step of its task list."""
+        self.say(TOP, "Sort out the claude dev desktop app files in appdata or temp, and the plugins around them")
+        r = self.t.hook("plan", TOP, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                                      "tool_input": {"items": [{"content": "Build the child-session issue loop feature",
+                                                                "status": "pending"},
+                                                               {"content": "Move the tmp folders", "status": "pending"}]},
+                                      "tool_response": "Plan updated."}, P4_PHI_BOOK="1")
+        ctx = context(r)
+        self.assertIn("step 1 \"Build the child-session issue loop feature\" is a new feature", ctx)
+        self.assertNotIn("step 2 \"Move", ctx.split("is a new feature")[0])
+
+    def test_a_detached_top_level_session_is_never_counted_as_archived_on_its_former_parent(self):
+        """Counting as archived, the archive lines and parent steps read spawnedFrom.sessionId, never its `from`."""
+        import plans
+        self.say(TOP, TASK)
+        stale = phi.load_session(self.t.p4, KID) or phi.ensure_session(self.t.p4, KID)
+        self.say(KID, "Task:\nPick the fence colour, archive when done. " + phi.NEW_TOP_BRIEF)
+        self.assertEqual(phi.load_session(self.t.p4, KID)["spawnedFrom"]["from"], TOP)
+        phi.save_session(self.t.p4, dict(stale, spawnedFrom={"sessionId": TOP, "source": "record"}))
+        self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID)), "", "an older copy never undoes a detach")
+        self.t.hook("plan", KID, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                                  "tool_input": {"items": [{"content": "Pick it", "status": "completed"}]},
+                                  "tool_response": "Plan updated."})
+        self.t.stop(KID, "Pick the fence colour", report="Picked green; done.")
+        s = phi.load_session(self.t.p4, KID)
+        self.assertFalse(s.get("doneRetired"), "an orchestrator is counted as archived on no parent")
+        self.assertEqual(plans.root_of(self.t.p4, s), "")
+        self.assertFalse(phi.load_notes(self.t.p4, TOP), "no replaces: note on the former parent session")
+        self.assertNotIn(KID, json.dumps(phi.load_session(self.t.p4, TOP).get("staleChildren") or []))
+        self.assertNotIn("counts them as archived", self.say(TOP, "carry on"))
+
+    def test_the_detach_notice_reaches_a_new_orchestrator_whose_brief_names_the_plugin_at_a_long_path(self):
+        """The lines beside a prompt repeat the plugin's path, and a notice that asks the session to act now leads
+        them. A new orchestrator's brief names phi.py where a landing clone keeps the plugin, 106 characters deep, so
+        its first message gets the new-task instruction and a start draft, and the detach notice reaches it whole,
+        inside the 2,000 characters the app shows of a text past its cap."""
+        land = "E:/projects/p4-phi/.claude/p4/temportal/tmp/83e32f0d-9d33-427a-93fc-f0c8db9acc23/land/lbiza/plugins/p4-phi"
+        script = os.path.join(SRC, "phi.py").replace("\\", "/")
+        brief = phi.NEW_TOP_BRIEF + " " + phi.new_top_first_act().replace(script, land + "/scripts/phi.py")
+        self.assertIn(land, brief)
+        self.say(TOP, TASK)
+        self.say(TOP, "also, the fence colour?")
+        told = self.say(KID, "Task:\nPick the fence colour and update the fence. ezexe's words: \"the fence colour?\" "
+                        + brief)                         # a work word of the brief's own, not of the plugin's path
+        self.assertNotIn("did not fit", told, "no piece is held: the app's own cap and file take a long text")
+        notice = ("p4-phi detached it to top level at this first message. Now call "
+                  "`mcp__ccd_session_mgmt__detach_session` with `\"self\"` before anything else")
+        self.assertIn(notice, told)
+        self.assertLessEqual(told.index(notice) + len(notice), phi.APP_PREVIEW, "inside the app's preview")
+        self.assertFalse(os.path.exists(os.path.join(self.t.dir(KID), "held.md")))
+
+    def test_the_harness_speaking_gets_no_line(self):
+        self.say(TOP, TASK)
+        self.assertEqual(self.say(TOP, "<side-sessions-event>a session finished a turn</side-sessions-event>"), "")
+        self.assertEqual(self.say(TOP, "<task-notification>done</task-notification>"), "")
+
+    RESTATED = ("refuses", "`user_asked`", "`own_initiative`", "suggested task card", "start request", "as said before")
+
+    def split_line(self, text, mark):
+        """The one piece of a prompt's context that holds `mark`, p4-phi's line for a turn another session began."""
+        got = [p for p in text.split("\n\n") if mark in p]
+        self.assertEqual(len(got), 1, text)
+        return got[0]
+
+    def test_a_turn_another_session_started_is_told_only_what_the_start_tool_lacks(self):
+        """What a turn ezexe's words did not start may start, and the card it proposes, are the start tool's own
+        text, so p4-phi's line there restates neither. It holds the files a brief names on its `Files:` line and,
+        for an orchestrator, the brief line on which a new orchestrator is detached to top level. It keeps no state, so
+        each such turn carries the same line, after a compaction too."""
+        self.say(TOP, TASK)
+        mark = "outside this orchestrator's task gets a new orchestrator of its own"
+        line = self.split_line(
+            self.say(TOP, '<cross-session-message from="local_x">please also look at Y</cross-session-message>'), mark)
+        self.assertIn(f"carries the line \"{phi.NEW_TOP_BRIEF}\"", line)
+        self.assertIn("names the files it covers on a line `Files: <paths>`", line)
+        self.assertNotIn("write set", line)
+        self.assertIn("`mcp__ccd_session_mgmt__detach_session` with `\"self\"`", line)
+        for restated in self.RESTATED:
+            self.assertNotIn(restated, line)
+        self.assertLess(len(line), 700)
+        again = self.say(TOP, '<cross-session-message from="local_x">and Z as well</cross-session-message>')
+        self.assertEqual(self.split_line(again, mark), line, "no state: the same line at each such turn")
+        self.assertNotIn("splitTold", jload(os.path.join(self.t.dir(TOP), "session.json")))
+        self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "compact"}, P4_PHI_BOOK="1")
+        whole = self.say(TOP, '<cross-session-message from="local_x">and W</cross-session-message>')
+        self.assertEqual(self.split_line(whole, mark), line, "and after a compaction")
+        self.assertEqual(self.say(TOP, "<side-sessions-event>a session finished</side-sessions-event>"), "")
+        self.say(KID, HANDED)
+        kid = self.split_line(
+            self.say(KID, '<cross-session-message from="local_x">please also look at Y</cross-session-message>'),
+            "a task of its own in this turn")
+        self.assertIn("a brief that names the files it covers on a line `Files: <paths>`", kid)
+        self.assertIn("`Model and effort: <model> at <effort> effort`", kid)
+        for restated in self.RESTATED:
+            self.assertNotIn(restated, kid)
+        from unittest import mock
+        import plans
+        with mock.patch.object(phi, "ASK_ROUTE", ""):
+            route, asked = phi.new_top_route(False), phi.new_top_route(True)
+        self.assertIn("a line `Files: <paths>`", route, "the files it covers, which the start tool's text lacks")
+        self.assertIn("Both moves are needed: the app's detach to top level", route, "and the detach")
+        for restated in self.RESTATED + ("`initiation`",):
+            self.assertNotIn(restated, route)
+            self.assertNotIn(restated, plans.CARD_EACH)
+        self.assertIn("`initiation` `user_asked`", asked, "a turn ezexe began names the start it asked for")
+        with open(phi.__file__, encoding="utf-8") as f:
+            self.assertNotIn("splitTold", f.read(), "the once-then-short state is gone")
+
+    def test_a_deep_or_full_session_starts_no_session(self):
+        """The caps: three deep in the tree, or eight live children."""
+        home = self.t.p4
+        self.say(TOP, TASK)
+        chain = ["local_d1", "local_d2", "local_d3"]
+        above = TOP
+        for sid in chain:
+            write(os.path.join(home, "phi", "sessions", sid, "session.json"),
+                  json.dumps({"sessionId": sid, "spawnedFrom": {"sessionId": above}, "task": "t"}))
+            above = sid
+        self.assertEqual(phi.depth_of(home, phi.load_session(home, "local_d3")), 3)
+        self.assertIn("start no session", phi.caps_text(home, phi.load_session(home, "local_d3")))
+        self.assertEqual(phi.caps_text(home, phi.load_session(home, "local_d1")), "")
+        for k in range(8):
+            write(os.path.join(home, "phi", "sessions", f"local_k{k}", "session.json"),
+                  json.dumps({"sessionId": f"local_k{k}", "spawnedFrom": {"sessionId": TOP}}))
+        self.assertIn("live sessions of its own", phi.caps_text(home, phi.load_session(home, TOP)))
+
+    def test_a_project_sets_its_caps_in_p4_json(self):
+        """ezexe/p4#125: the caps a project would decide are p4.json `phi` keys; a value of the wrong type or out of
+        range keeps the default, and a store that sets none gets the defaults back."""
+        import plans
+        import puppeteer
+        home = self.t.p4
+        self.say(TOP, TASK)
+        write(os.path.join(home, "p4.json"), json.dumps({"phi": {
+            "max_depth": 1, "max_children": 2, "sibling_turns": 1, "own_turns": 1, "chain_max": 2, "turn_steps": 4,
+            "tree_checks": 2, "keep_going_max": 1, "watch_s": 10, "stale_s": 3600}}))
+        try:
+            phi.project_conf(home)
+            self.assertEqual((phi.MAX_DEPTH, phi.MAX_CHILDREN, phi.OTHERS, phi.OWN, phi.CHAIN_MAX, phi.TURN_STEPS,
+                              phi.TREE_CHECKS), (1, 2, 1, 1, 2, 4, 2))
+            self.assertEqual((plans.KEEP_GOING_MAX, puppeteer.WATCH_S, puppeteer.STALE_S), (1, 10.0, 3600.0))
+            write(os.path.join(home, "phi", "sessions", KID, "session.json"),
+                  json.dumps({"sessionId": KID, "spawnedFrom": {"sessionId": TOP}, "task": "t"}))
+            self.assertIn("start no session", phi.caps_text(home, phi.load_session(home, KID)), "one deep is the most")
+            write(os.path.join(home, "p4.json"), json.dumps({"phi": {
+                "max_depth": "3", "max_children": 0, "keep_going_max": 9, "watch_s": True}}))
+            phi.project_conf(home)
+            self.assertEqual((phi.MAX_DEPTH, phi.MAX_CHILDREN, plans.KEEP_GOING_MAX, puppeteer.WATCH_S),
+                             (3, 8, 2, 5.0), "a value that does not fit keeps the default")
+            self.assertEqual((phi.OTHERS, puppeteer.STALE_S), (5, 86400.0), "and unset ones")
+            for odd in ([1, 2], "deep", 4):            # a `phi` that is no section raises nothing and keeps the defaults
+                write(os.path.join(home, "p4.json"), json.dumps({"phi": odd}))
+                phi.MAX_DEPTH = 7
+                phi.project_conf(home)
+                self.assertEqual((phi.MAX_DEPTH, phi.TURN_STEPS), (3, 12), odd)
+            import p4conf
+            self.assertEqual(phi.CAP_DEFAULTS, {k: p4conf.DEFAULTS["phi"][k] for k in phi.CAPS},
+                             "each default is the one p4conf.py declares, whatever a constant held before")
+        finally:
+            phi.project_conf("")
+
+    def test_act_dont_wait_rides_with_the_rules(self):
+        self.assertIn("act-don't-wait", phi.BUILT_IN)
+        self.assertIn("authority", phi.BUILT_IN)
+
+    def test_the_built_in_rule_asks_a_worker_for_no_line_to_its_starter(self):
+        """ezexe/p4#157: the plugin's hooks module sends a worker's report to its starter at each turn's end with
+        `$.session.send`, which by plugins/mods/api.md "makes the same delivery the SendMessage tool makes", and
+        cross-session-messaging.md says "When the receiving session is idle, Claude Code starts a new turn with the
+        message." So the rule asks no worker for a closing line, and the limit that line worked around is logged no
+        more. A child's own question to its parent session stays the child's to send."""
+        for gone in ("ends each turn with one SendMessage line", "whose starter waits on it",
+                     "only beside its next message"):
+            self.assertNotIn(gone, phi.BUILT_IN)
+        self.assertIn("A child asks its parent session with SendMessage", phi.BUILT_IN)
+        with open(os.path.join(SRC, "claude_code_limits.json"), encoding="utf-8") as f:
+            logged = json.load(f)
+        self.assertNotIn(157, [row["issue"] for row in logged])
+        self.assertFalse([row["issue"] for row in logged if "notify_when_idle" in row["terms"]])
+
+    def test_the_built_in_rule_leaves_how_a_question_is_laid_out_to_the_apps_own_tools(self):
+        """tools-reference.md, "AskUserQuestion tool behavior": "Claude uses `AskUserQuestion` to ask you
+        multiple-choice questions when it needs a decision or a clarification.", and the desktop app's turn-end tool
+        puts a decision that waits on ezexe as one question with buttons. So the built-in rule names both tools and
+        holds no sentence of its own on how a question is laid out, and it keeps every sentence that text lacks or
+        that no docs page states: the decision by research with its decisions file, the session tree, the matters
+        of ezexe's authority with the push of green issue-closing commits excepted, a child's question to its
+        parent session, and the go a project's rules ask for."""
+        for gone in ("It goes as a click", "never as a paragraph", "whose buttons are the answers", "the go first",
+                     "typed text only", "no click can carry"):
+            self.assertNotIn(gone, phi.BUILT_IN)
+        self.assertIn("goes to ezexe, by the app's own `mcp__ccd_turn__wrap_up` or `AskUserQuestion`:", phi.BUILT_IN)
+        for kept in (phi.DECIDE, "decisions.md in the scratchpad directory the app names",
+                     "a question reaches ezexe only once those cannot settle it",
+                     "the parent's task list and notes, siblings' work and the project's rules can settle",
+                     "permissions or security settings, credentials, spending",
+                     "but for the push of green issue-closing commits, which p4-phi orders at once",
+                     "A child asks its parent session with SendMessage",
+                     "that go is ezexe's to give, by a button"):
+            self.assertIn(kept, phi.BUILT_IN)
+
+    def test_a_started_sessions_task_is_its_brief(self):
+        self.say(TOP, TASK)
+        self.say(KID, HANDED)
+        self.assertIn(BRIEF, self.t.session(KID)["task"])
+
+    def test_the_address_book_comes_by_its_page_after_a_compaction_and_whole_after_a_clear(self):
+        """A compaction's summary keeps the conversation, the book the session was handed among it, and no exact id
+        or path: the start after it names book.md and hands no entry that did not change. A clear keeps nothing."""
+        self.say(TOP, TASK)                          # its first look: the book whole
+        r = self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "compact"}, P4_PHI_BOOK="1")
+        text = context(r)
+        self.assertIn("this session's address book, unchanged since it last looked, is whole on", text)
+        self.assertIn("/book.md", text.replace("\\", "/"))
+        self.assertNotIn("this session's address book, whole on", text)
+        self.assertNotIn("about something else", text)
+        r = self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "clear"}, P4_PHI_BOOK="1")
+        self.assertIn("this session's address book, whole on", context(r))
+
+    def test_the_task_is_changed_by_its_command(self):
+        self.say(TOP, TASK)
+        r = self.t.cli(TOP, "task", "Make the narwhal importer read the ports table back")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        s = self.t.session(TOP)
+        self.assertEqual(s["task"], "Make the narwhal importer read the ports table back")
+        self.assertEqual(s["earlierTasks"][0]["task"], TASK)        # the task before it is kept
+        self.assertNotEqual(self.t.cli(TOP, "task", "x").returncode, 0)
+
+    def test_off_in_the_stores_settings(self):
+        write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"book": False}))
+        env = {k: v for k, v in self.t.env(TOP).items() if k != "P4_PHI_BOOK"}
+        for prompt in (TASK, "and the next part"):
+            r = inproc.run(["sh", RUN, PROMPT], input=json.dumps({"session_id": CLI[TOP], "cwd": self.t.proj,
+                                                                  "prompt": prompt}),
+                           capture_output=True, text=True, env=env, timeout=60)
+            self.assertEqual(r.stdout.strip(), "")
+
+    def test_the_older_new_task_names_turn_the_book_off_and_book_wins(self):
+        """A store or a run that set `new_task` or P4_PHI_NEW_TASK before the rename keeps its address book off;
+        phi.json's `book` wins over `new_task`, and P4_PHI_BOOK over P4_PHI_NEW_TASK."""
+        env = {k: v for k, v in self.t.env(TOP).items() if k != "P4_PHI_BOOK"}
+
+        def said(prompt, **more):
+            r = inproc.run(["sh", RUN, PROMPT], input=json.dumps({"session_id": CLI[TOP], "cwd": self.t.proj,
+                                                                  "prompt": prompt}),
+                           capture_output=True, text=True, env={**env, **more}, timeout=60)
+            return r.stdout
+        conf = os.path.join(self.t.p4, "phi", "phi.json")
+        write(conf, json.dumps({"new_task": False}))
+        self.assertNotIn("address book", said(TASK))
+        write(conf, json.dumps({"new_task": False, "book": True}))
+        self.assertIn("address book", said(TASK + " again"), "book wins")
+        os.remove(conf)
+        held = {k: os.environ.get(k) for k in ("P4_PHI_BOOK", "P4_PHI_NEW_TASK")}
+        try:
+            for book, new_task, want in (("", "0", False), ("1", "0", True), ("0", "1", False)):
+                for k, v in (("P4_PHI_BOOK", book), ("P4_PHI_NEW_TASK", new_task)):
+                    os.environ.pop(k, None) if not v else os.environ.__setitem__(k, v)
+                phi.BOOK = not want
+                phi.configure(self.t.p4)
+                self.assertIs(phi.BOOK, want, (book, new_task))
+        finally:
+            phi.BOOK = True
+            for k, v in held.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+
+
+class NeverFails(unittest.TestCase):
+    def test_broken_input_and_broken_files_end_quietly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Tree(tmp)
+            t.record(TOP)
+            t.record(KID, TOP)
+            for name in (START, PROMPT, STOP, "nonsense"):
+                r = inproc.run(["sh", RUN, name], input="{not json", capture_output=True, text=True,
+                               env=t.env(KID), timeout=60)
+                self.assertEqual((r.returncode, r.stdout.strip()), (0, ""), name)
+            t.say(TOP, TASK)
+            write(os.path.join(t.dir(TOP), "session.json"), "{broken")
+            write(os.path.join(t.dir(TOP), "reports.jsonl"), "not json\n")
+            write(os.path.join(t.app, KID + ".json"), "{broken")
+            for name, payload in ((START, {"source": "startup"}), (PROMPT, {"prompt": "x"}),
+                                  (STOP, {"transcript_path": os.path.join(tmp, "missing.jsonl")})):
+                for host in (TOP, KID):
+                    r = t.hook(name, host, payload)
+                    self.assertEqual(r.returncode, 0, (name, host, r.stderr))
+                    self.assertEqual(r.stderr.strip(), "", (name, host))
+
+    def test_a_failing_hook_leaves_a_line_naming_it_and_its_error(self):
+        """A hook whose handler raises still ends quietly, and its session's log.jsonl names the hook and the error."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Tree(tmp)
+            t.record(TOP)
+            t.say(TOP, TASK)
+
+            def broken(payload):
+                raise ValueError("the handler broke")
+
+            payload = {"session_id": CLI.get(TOP, TOP), "cwd": t.proj, "hook_event_name": "Stop",
+                       "transcript_path": os.path.join(tmp, "missing.jsonl")}
+            r = inproc.run(["sh", RUN, STOP], input=json.dumps(payload), capture_output=True, text=True,
+                           env=t.env(TOP), timeout=60, stand_ins={"phi.HOOKS": {**phi.HOOKS, STOP: ("Stop", broken)}})
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, ""))
+            rows = t.log(TOP)
+            self.assertTrue(any(x.get("hook") == STOP and "ValueError: the handler broke" in str(x.get("error"))
+                                for x in rows), rows[-3:])
+
+
+def memory(p4, name, kind, body):
+    write(os.path.join(p4, "temportal", "memory", name + ".md"),
+          f"---\nname: {name}\ndescription: about {name}\nmetadata:\n  type: {kind}\n---\n\n{body}\n")
+
+
+class Rules(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP, title="Narwhal exporter")
+        self.t.record(KID, TOP, "Fix the dropped row")
+        p4 = self.t.p4
+        memory(p4, "tabs-not-spaces", "feedback",
+               "Indent with tabs in the exporter.\n\n**Why:** ezexe's editor.\n\n**How to apply:** every file.")
+        memory(p4, "long-rule", "feedback", "Run the ports check before a commit. " * 200)
+        memory(p4, "where-the-build-is", "project", "The build lives in out/Narwhal.")
+        write(os.path.join(p4, "temportal", "memory", "MEMORY.md"), "# Memory index\n\n- [Long](long-rule.md) — x\n"
+              "- [Tabs](tabs-not-spaces.md) — y\n")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def start(self, host, source="startup"):
+        return context(self.t.hook(START, host, {"hook_event_name": "SessionStart", "source": source}))
+
+    def live(self, prompt, conf):
+        return context(self.t.say(TOP, prompt, CLAUDE_CONFIG_DIR=conf))
+
+    def test_a_reworded_memory_reaches_an_open_session_once(self):
+        """A memory another session changes mid-session reaches sessions already open."""
+        conf = os.path.join(self._tmp.name, "conf")
+        os.makedirs(conf)
+        self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"}, CLAUDE_CONFIG_DIR=conf)
+        self.assertNotIn("memories changed", self.live("Build the exporter", conf))
+        memory(self.t.p4, "tabs-not-spaces", "feedback", "Indent with four spaces in the exporter, never tabs.")
+        got = self.live("carry on", conf)
+        self.assertIn("feedback and user memories changed since this session last looked", got)
+        self.assertIn("four spaces in the exporter", got)
+        self.assertIn("Removed, no longer rules", got)
+        self.assertIn("Indent with tabs in the exporter", got)
+        self.assertNotIn("memories changed", self.live("and now", conf), "nothing repeats")
+
+    def test_a_memory_whose_issue_landed_is_handed_as_a_pointer_not_a_rule(self):
+        """ezexe/p4#226: a memory cut back to a pointer once its issue landed, whose front matter holds `landed:`, and
+        one whose body says the plugin carries its rule, are no rules to hand an open session, while a changed
+        preference still is."""
+        conf = os.path.join(self._tmp.name, "conf")
+        os.makedirs(conf)
+        p4 = self.t.p4
+        memory(p4, "ask-before-push", "feedback", "A session asks ezexe before it pushes a branch of its own.")
+        self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"}, CLAUDE_CONFIG_DIR=conf)
+        self.assertNotIn("memories changed", self.live("Build the exporter", conf))
+        write(os.path.join(p4, "temportal", "memory", "ask-before-push.md"),
+              "---\nname: ask-before-push\ndescription: carried by the plugin since ezexe/demo#7 landed in abc1234\n"
+              "metadata:\n  type: feedback\nissue: ezexe/demo#7\nlanded: abc1234\n---\n\n"
+              "The plugin holds this rule since ezexe/demo#7 landed in abc1234: `scripts/phi.py`.\n")
+        memory(p4, "one-child-a-task", "feedback", "p4-phi carries this now: a session starts one child for each task.")
+        memory(p4, "tabs-not-spaces", "feedback", "Indent with four spaces in the exporter, never tabs.")
+        got = self.live("carry on", conf)
+        changed = got.split("Changed or added:")[1].split("Removed, no longer rules")[0]
+        self.assertIn("four spaces in the exporter", changed, "a changed preference is still handed")
+        self.assertNotIn("ask-before-push", changed, "a pointer is not handed as a rule")
+        self.assertNotIn("one-child-a-task", changed, "a memory the plugin carries is not handed as a rule")
+        self.assertIn("ask-before-push", got.split("Removed, no longer rules")[1], "the pointer leaves the rules")
+        self.assertNotIn("ask-before-push", [n for n, _ in phi.memory_rules(p4, rules_only=True)])
+        self.assertIn("ask-before-push", [n for n, _ in phi.memory_rules(p4)], "its name is still read")
+
+    def test_a_line_added_to_the_global_claude_md_is_left_to_the_app(self):
+        """memory.md: the app reads CLAUDE.md again after a compaction, so p4-phi hands no line of it."""
+        conf = os.path.join(self._tmp.name, "conf")
+        write(os.path.join(conf, "CLAUDE.md"), "# Global\n\n- Call the user ezexe.\n")
+        self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"}, CLAUDE_CONFIG_DIR=conf)
+        self.live("Build the exporter", conf)
+        write(os.path.join(conf, "CLAUDE.md"), "# Global\n\n- Call the user ezexe.\n- Never write parentheticals.\n")
+        self.assertNotIn("parentheticals", self.live("carry on", conf))
+
+    def test_each_memory_reaches_a_session_once(self):
+        """ezexe/p4#130: a memory's line in the index is the one form a session is handed at its start, so p4-phi
+        hands the built-in rules whole and no line of a feedback or user memory, at a start, a clear or a compaction."""
+        for host in (TOP, KID):
+            for source in ("startup", "clear", "compact"):
+                text = self.start(host, source)
+                self.assertIn("- " + phi.BUILT_IN, text, (host, source))
+                for word in ("tabs-not-spaces", "Indent with tabs", "long-rule", "Run the ports check", "out/Narwhal"):
+                    self.assertNotIn(word, text, (host, source))
+                self.assertLessEqual(len(text), APP_CAP)
+
+
+    def test_a_resume_is_not_told_again_and_a_compaction_is(self):
+        self.start(TOP)
+        self.assertNotIn("act-don't-wait", self.start(TOP, "resume"))
+        self.assertIn("act-don't-wait", self.start(TOP, "compact"))
+
+    def test_no_ceiling_or_page_of_p4_phis_own_and_the_acting_lines_lead_past_the_apps_cap(self):
+        """Audit candidate 10. hooks.md, "JSON output": "A hook's `additionalContext`, `systemMessage`, and
+        `initialUserMessage` strings, and its plain stdout, are capped at 10,000 characters", and over the limit
+        "Claude Code saves the output to a file in the session directory. It replaces the output with the file path
+        and a preview of up to the first 2,000 characters." So p4-phi keeps no ceiling beside a prompt and no page
+        for what would pass one: every piece passes whole. What the app's cut lacks, by the same section, "Claude
+        Code doesn't ask Claude to read the file, so keep anything Claude must always see within the cap": the
+        lines that ask the session to act lead, and one line asks for the file only when they pass the preview."""
+        for mod, names in ((phi, ("fit", "PROMPT_CHARS", "HELD_HEAD")), (relay, ("hold", "held_path", "HELD_HEAD",
+                                                                                 "HELD_BYTES"))):
+            for name in names:
+                self.assertFalse(hasattr(mod, name), f"{mod.__name__}.{name}")
+        self.assertNotIn("prompt_chars", phi.SETTINGS)
+        self.assertEqual((phi.APP_CAP, phi.APP_PREVIEW), (APP_CAP, 2000))
+        parts = ["first piece " + "a" * 1500, "second piece " + "b" * 3000, "act: third piece " + "c" * 900,
+                 "last line " + "d" * 6000]
+        text = phi.acting_first(parts, [parts[2]])
+        self.assertEqual(text, "\n\n".join([parts[2], parts[0], parts[1], parts[3]]),
+                         "every piece whole, the acting one first and the rest in their order")
+        self.assertGreater(len(text), APP_CAP, "past the app's cap, which is the app's to cut and keep")
+        self.assertLessEqual(text.index(parts[2]) + len(parts[2]), phi.APP_PREVIEW, "the acting line in the preview")
+        self.assertEqual(phi.acting_first(["x", "", "y"]), "x\n\ny")
+        long_acts = ["act one " + "e" * 1200, "act two " + "f" * 1200]
+        text = phi.acting_first(parts + long_acts, long_acts)
+        self.assertTrue(text.startswith(phi.READ_ALL + "\n\n" + long_acts[0]),
+                        "the acting lines alone pass the preview: the line that asks for the app's file leads them")
+        short = phi.acting_first(long_acts + ["rest"], long_acts)
+        self.assertLessEqual(len(short), APP_CAP)
+        self.assertNotIn(phi.READ_ALL, short, "under the cap the app shows all of it")
+        self.t.say(TOP, TASK)
+        for k in range(40):
+            relay.warn(self.t.p4, TOP, f"note:{k}", f"warning {k:02d} of forty: " + "a sibling changed the layout. " * 10)
+        ctx = context(self.t.say(TOP, "what now?"))
+        self.assertGreater(len(ctx), APP_CAP)
+        self.assertTrue(ctx.startswith(phi.READ_ALL + "\n\n" + relay.STOP_HEAD + "(1) warning 00 of forty"), ctx[:300])
+        self.assertIn("(40) warning 39 of forty", ctx, "every warning whole")
+        self.assertNotIn("did not fit", ctx)
+        self.assertFalse(os.path.exists(os.path.join(self.t.dir(TOP), "held.md")), "no page of p4-phi's own")
+
+    def test_the_built_in_rules_come_beside_the_background(self):
+        self.t.say(TOP, TASK)
+        text = self.start(KID)
+        self.assertIn("act-don't-wait", text)
+        self.assertLessEqual(len(text), APP_CAP)
+        first = context(self.t.say(KID, HANDED))                         # a fresh child's background: its first message
+        self.assertIn("background for this session", first)
+        self.assertLessEqual(len(first), APP_CAP)
+
+    def test_the_start_and_first_message_text_past_9500_characters_passes_whole_act_lines_first(self):
+        """ezexe/p4#243 D9: p4-phi cuts no text of its own at a session's start or first message; past 10,000
+        characters the app's own overflow file takes it, so the lines that ask the session to act come first, inside
+        the app's preview, and the rest follows whole."""
+        t = self.t
+        write(os.path.join(t.p4, "phi", "phi.json"), json.dumps({"background_chars": 12000}))
+        t.say(TOP, TASK)
+        for k in range(12):                                         # notes long enough to fill a 12,000 background
+            r = t.cli(TOP, "note", f"replaces: part {k} of the old exporter, " + "the ports table rows. " * 200,
+                      "--source", f"export/part{k}.py:1")
+            self.assertEqual(r.returncode, 0, r.stderr)
+        t.stop(TOP, TASK, report="Half done: " + "the flush writes the ports table. " * 40)
+        first = context(t.say(KID, HANDED))
+        self.assertGreater(len(first), 9500)
+        self.assertIn("Each turn's report is kept either way", first, "the background's last line, whole")
+        self.assertNotIn("did not fit", first)
+        self.assertFalse(os.path.exists(os.path.join(t.dir(KID), "held.md")), "no page of p4-phi's own")
+        self.assertLess(first.index("phi (p4-phi): this is this session's first message"),
+                        first.index("background for this session"), "the act line leads, inside the app's preview")
+        later = context(t.say(KID, "go on"))
+        self.assertNotIn("did not fit", later, "a later prompt has no ceiling of p4-phi's own either")
+        self.assertFalse(os.path.exists(os.path.join(t.dir(KID), "held.md")))
+        start = context(t.hook(START, KID, {"hook_event_name": "SessionStart", "source": "clear"}, P4_PHI_BOOK="1"))
+        self.assertGreater(len(start), 9500)
+        self.assertIn("Each turn's report is kept either way", start, "the background's last line, whole")
+        self.assertLess(start.index("act-don't-wait"), 2000, "the rules inside the app's 2,000-character preview")
+        self.assertLess(start.index("act-don't-wait"), start.index("background for this session"))
+
+    def test_an_orchestrators_long_command_runs_as_sent(self):
+        """ezexe/p4#243 D4 and row S22: the app moves a foreground command to the background at its timeout,
+        tools-reference.md, "Foreground commands that move to the background", so p4-phi neither rewrites an
+        orchestrator's lone test command nor hands a line beside it."""
+        t = self.t
+        t.say(TOP, TASK)
+        inp = {"command": "cd scripts && python -I -X utf8 test_flush.py 2>&1 | tail -3", "description": "Run tests"}
+        body = {"session_id": CLI[TOP], "cwd": t.proj, "hook_event_name": "PreToolUse", "tool_name": "Bash",
+                "tool_input": inp, "tool_use_id": "toolu_d4"}
+        r = inproc.run(["sh", os.path.join(ROOT, "hooks", "recall-hook.sh"), "lookup-check"], input=json.dumps(body),
+                       capture_output=True, text=True, timeout=60,
+                       env=t.env(TOP, CLAUDE_PLUGIN_DATA=os.path.join(t.tmp, "data")))
+        self.assertEqual((r.returncode, r.stderr.strip(), r.stdout.strip()), (0, "", ""), "the call runs as sent")
+
+    def test_the_start_text_carries_every_line_with_any_background(self):
+        """A puppeteer whose p4.json names a shared store this machine has not seen, started again after a
+        clear and after a compaction, with the default start background and with one set longer than the app's cap:
+        each start text carries the missing-home line, the rules and the address book, whole after a clear and by
+        its page after a compaction, and stays within the app's cap with the default background; after a compaction
+        the line that names its board comes first."""
+        t = self.t
+        write(os.path.join(t.tmp, "claude_desktop_config.json"), json.dumps({"preferences": {"epitaxyPrefs": {
+            "dframe-group-scopes": {"acct/org": {"groups": [{"id": "cg-1", "name": "puppeteers"}],
+                                                 "assignments": {"code:" + TOP: "cg-1"}}}}}}))
+        write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"home": "git@example.com:team/elsewhere.git"}}))
+        t.say(TOP, TASK, P4_PHI_BOOK="1")
+        calls = ([("Edit", {"file_path": f"src/export/flush_part_{k}.py"}, "ok") for k in range(14)]
+                 + [("Bash", {"command": f"python -I tests/test_part_{k}.py"}, f"No module named 'part{k}'", 1)
+                    for k in range(4)])
+        for n, host in enumerate([f"local_top0000{k}" for k in range(2, 6)] + [TOP] * 3):
+            if host != TOP:
+                t.record(host, title=f"Narwhal importer, part {n}")
+            t.stop(host, "Build the next part of the narwhal tools and check it. " * 5, calls,
+                   "Built and checked: " + "the part reads the ports table back and its check passes. " * 8,
+                   uuid=f"u{n}")
+        sizes = {}
+        for chars in (phi.BACKGROUND_CHARS, 2 * APP_CAP):
+            write(os.path.join(t.p4, "phi", "phi.json"), json.dumps({"background_chars": chars}))
+            for source in ("clear", "compact"):
+                text = context(t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": source},
+                                      P4_PHI_BOOK="1"))
+                sizes[f"{source}, background_chars {chars}"] = len(text)
+                self.assertIn("this session's address book, whole on" if source == "clear" else
+                              "this session's address book, unchanged since it last looked, is whole on", text, source)
+                self.assertIn("names the shared store git@example.com:team/elsewhere.git", text, source)
+                self.assertIn("act-don't-wait", text, "the built-in rules come with any background")
+                if source == "compact":
+                    self.assertTrue(text.startswith("phi (p4-phi): this session is a puppeteer and its "
+                                                    "context was compacted"), text[:200])
+        self.assertLessEqual(max(v for k, v in sizes.items() if k.endswith(str(phi.BACKGROUND_CHARS))), APP_CAP, sizes)
+
+    def test_past_the_apps_cap_the_notices_lead_and_the_address_book_comes_last(self):
+        """ezexe/p4#243 D9: past 10,000 characters the app hands Claude a preview of the first 2,000 and the file's
+        path. A clear's start text with a long background and a long address book keeps the notices inside that
+        preview, the built-in rules before the background, and the book last."""
+        t = self.t
+        subprocess.run(["git", "init", "-q", t.p4], check=True, capture_output=True)
+        gd = subprocess.run(["git", "-C", t.p4, "rev-parse", "--absolute-git-dir"], capture_output=True,
+                            text=True).stdout.strip()
+        write(os.path.join(gd, relay.TRACK_STATE), json.dumps(
+            {"fails": 1, "next": time.time() + 3600, "reason": "index.lock is held", "owed": []}))
+        write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"track": True,
+                                                                  "home": "git@example.com:team/elsewhere.git"}}))
+        write(os.path.join(t.p4, "phi", "phi.json"), json.dumps({"background_chars": 2 * APP_CAP}))
+        t.say(TOP, TASK, P4_PHI_BOOK="1")
+        for k in range(24):
+            host = f"local_wkr{k:05d}"
+            t.record(host, TOP, f"Port part {k} of the narwhal exporter's flush to the new writer")
+            t.say(host, f"Port part {k} of the flush.\nFiles: src/export/flush_part_{k}.py, tests/test_part_{k}.py")
+        calls = [("Edit", {"file_path": f"src/export/flush_part_{k}.py"}, "ok") for k in range(14)]
+        for n in range(3):
+            t.stop(TOP, "Build the next part of the narwhal tools and check it. " * 5, calls,
+                   "Built and checked: " + "the part reads the ports table back and its check passes. " * 8,
+                   uuid=f"u{n}")
+        for k in range(2, 6):                                       # orchestrators before it, past the app's cap
+            host = f"local_top0000{k}"
+            t.record(host, title=f"Narwhal importer, part {k}")
+            t.stop(host, "Build the next part of the narwhal tools and check it. " * 5, calls,
+                   "Built and checked: " + "the part reads the ports table back and its check passes. " * 8,
+                   uuid=f"o{k}")
+        text = context(t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "clear"},
+                              P4_PHI_BOOK="1"))
+        self.assertGreater(len(text), APP_CAP, "past the app's cap, so only the preview is seen whole")
+        for line in ("the session tree's first commit in", "names the shared store git@example.com:team/elsewhere.git"):
+            self.assertIn(line, text)
+            self.assertLessEqual(text.index(line) + len(line), 2000, f"inside the app's preview: {line}")
+        book = text.index("this session's address book")
+        for later in ("built-in, act-don't-wait", "built-in, levels", "background for this session"):
+            self.assertLess(text.index(later), book, f"{later} comes before the address book")
+        self.assertLess(text.index("built-in, levels"), text.index("background for this session"))
+
+    def test_off_is_silence_and_no_memories_is_the_built_in_rules_alone(self):
+        write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"rules": False}))
+        self.assertEqual(self.start(TOP), "")
+        os.remove(os.path.join(self.t.p4, "phi", "phi.json"))
+        for f in os.listdir(os.path.join(self.t.p4, "temportal", "memory")):
+            os.remove(os.path.join(self.t.p4, "temportal", "memory", f))
+        self.assertEqual(self.start(TOP), phi.builtin_text(), "act-don't-wait holds in a project with no memories")
+
+    def test_the_built_in_rule_names_research_and_the_decisions_file(self):
+        """A question research can answer is decided by the session and logged with its source, never put to ezexe."""
+        line = next(x for x in self.start(TOP).splitlines() if "act-don't-wait" in x)
+        for word in ("code", "history", "issues", "documentation", "decisions file", "decisions.md", "source"):
+            self.assertIn(word, line)
+
+    def test_many_memories_leave_the_start_text_as_it_is(self):
+        """However many memories the store holds, the start carries the built-in rules whole and none of them."""
+        for k in range(400):
+            memory(self.t.p4, f"a-rather-long-memory-name-number-{k:03d}", "feedback", f"Rule {k} of the many.")
+        for source in ("startup", "clear", "compact"):
+            got = self.start(KID, source)
+            self.assertIn("- " + phi.BUILT_IN, got, source)
+            self.assertNotIn("a-rather-long-memory-name", got, source)
+        self.assertFalse(os.path.exists(os.path.join(self.t.p4, "phi", "rules.md")), "no page copies them")
+
+    def test_a_failed_first_commit_is_told_at_the_next_start_once(self):
+        """ezexe/p4#218: a store whose index.lock fails the tree's first commit; the next start says so once."""
+        p4 = self.t.p4
+        for args in (("init", "-q"), ("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty",
+                                       "-m", "store")):
+            subprocess.run(["git", "-C", p4, *args], check=True, capture_output=True)
+        write(os.path.join(p4, "p4.json"), json.dumps({"phi": {"track": True}}))
+        gd = subprocess.run(["git", "-C", p4, "rev-parse", "--absolute-git-dir"], capture_output=True,
+                            text=True).stdout.strip()
+        write(os.path.join(gd, "index.lock"), "")               # a stale lock of git's own: every commit fails
+        self.assertFalse(relay.track(p4, first_only=True, wait=True))
+        told = self.start(TOP)
+        self.assertEqual(told.count("the session tree's first commit in"), 1, told)
+        self.assertIn("index.lock", told)
+        self.assertNotIn("the session tree's first commit in", self.start(TOP), "said once")
+
+    def test_a_fork_gets_the_built_in_rules_alone(self):
+        """A fork's inherited conversation already holds the store's feedback and user memories, and so does every
+        other session's start."""
+        self.assertEqual(phi.rules_text(), phi.builtin_text())
+
+    def test_act_dont_wait_yields_to_a_projects_go_ahead(self):
+        """A project rule that waits for ezexe's go makes that go ezexe's; p4.json can turn it off."""
+        self.assertIn("that go is ezexe's to give", phi.BUILT_IN)
+        self.assertIn("act-don't-wait", self.start(TOP))
+        write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"act_dont_wait": False}}))
+        got = self.start(TOP)
+        self.assertNotIn("act-don't-wait", got)
+        self.assertIn("built-in, levels", got, "the other built-in rule still comes")
+        try:
+            phi.project_conf(self.t.p4)
+            self.assertNotIn("act-don't-wait", phi.builtin_text())
+            self.assertIn("built-in, levels", phi.builtin_text(), "the other built-in rule stands on its own")
+            write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"act_dont_wait": False, "levels": False}}))
+            phi.project_conf(self.t.p4)
+            self.assertEqual(phi.builtin_text(), "")
+        finally:
+            phi.project_conf("")
+
+    def test_the_levels_rule_is_given_with_no_configuration_and_p4_json_turns_it_off(self):
+        """On in every project, a store or none; only p4.json's phi.levels: false leaves it out."""
+        got = self.start(TOP)
+        for word in ("built-in, levels", "the built-in subagent `Explore`", "`p4-phi:check`",
+                     "`run_in_background: true`"):
+            self.assertIn(word, got)
+        self.assertNotIn("p4-phi:runner", got)
+        self.assertNotIn("ezexe", phi.LEVELS, "it addresses the session and names no person")
+        self.assertIn("built-in, levels", phi.builtin_text())
+        with tempfile.TemporaryDirectory() as tmp:
+            bare = Tree(tmp, store=False)
+            bare.record(TOP)
+            r = bare.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"})
+            self.assertIn("built-in, levels", context(r), "a project with no store")
+        write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"levels": False}}))
+        off = self.start(KID)
+        self.assertNotIn("built-in, levels", off)
+        self.assertIn("act-don't-wait", off)
+
+    def test_the_levels_rule_leaves_waiting_sleeping_and_polling_to_the_apps_own_tools(self):
+        """The Agent tool's and the shell tools' own descriptions tell a session that a background subagent or command
+        notifies it when it ends, that a foreground `sleep` is blocked and never to poll, and sub-agents.md says "A
+        background subagent's results reach Claude as a completion notification in a later turn". So the rule handed
+        at a session's start holds no sentence of its own on waiting, and still names the background route."""
+        self.assertIn(phi.LEVELS, self.start(TOP))
+        for word in ("sleep", "poll", "never wait", "wait for it", "completion notification", "Once one is started"):
+            self.assertNotIn(word, phi.LEVELS, word)
+        self.assertIn("`run_in_background: true`", phi.LEVELS)
+
+    def test_a_read_across_files_goes_to_the_built_in_explore_subagent_on_a_small_model(self):
+        """sub-agents.md: Explore is "A fast, read-only agent optimized for searching and analyzing codebases." and
+        runs on "the parent conversation's model", and "The per-invocation `model` parameter" is first in the page's
+        model order. So the plugin ships no search agent, and the rule names `Explore` with `model` `haiku` on the
+        call."""
+        self.assertFalse(os.path.exists(os.path.join(ROOT, "agents", "sweep.md")), "the plugin's own copy is gone")
+        self.assertIn("goes to the built-in subagent `Explore`, with `model` `haiku` on the Agent call", phi.LEVELS)
+        self.assertNotIn("sweep", phi.LEVELS)
+        self.assertNotIn("p4-phi:sweep", self.start(TOP))
+
+    def test_the_levels_rule_names_no_read_of_the_plan_limits(self):
+        """The built-in rule `levels` handed at a session's start tells it to read no plan limit before a start or
+        an Agent call: how much of the plan a piece of work spends is ezexe's, and a session neither weighs it nor
+        stops for it. The rule names no stop or restart of a running session either."""
+        got = self.start(TOP)
+        self.assertIn("built-in, levels:", got)
+        for word in ("get_usage", "plan limits", "stop_session", "restart", "start it again", "set_session_model"):
+            self.assertNotIn(word, phi.LEVELS, word)
+
+    def test_the_levels_rule_says_a_workflow_script_names_a_model_for_each_stage(self):
+        """workflows.md, "Cost": "A model the script names for a stage counts as the per-invocation model in that
+        order. When nothing else assigns one, the agent runs on your session's model." So the rule handed at a
+        session's start tells it to name a model for each stage, in the page's words, and the skill quotes both
+        sentences with the page."""
+        got = self.start(TOP)
+        self.assertIn("A Workflow script names a model for each stage", got)
+        for quote in ("\"A model the script names for a stage counts as the per-invocation model\"",
+                      "\"runs on your session's model\""):
+            self.assertIn(quote, phi.LEVELS)
+        with open(os.path.join(ROOT, "skills", "phi", "SKILL.md"), encoding="utf-8") as f:
+            skill = f.read()
+        self.assertIn("A Workflow script names a model for each stage: https://code.claude.com/docs/en/workflows.md "
+                      "says \"A model the script names for a stage counts as the per-invocation model in that order.\" "
+                      "and \"When nothing else assigns one, the agent runs on your session's model.\"", skill)
+
+    def test_the_skill_gives_the_line_that_starts_a_terminal_team_and_p4_writes_the_variable_nowhere(self):
+        """desktop.md, "What's not available in Desktop": coordinated teams "are available in the CLI, not in
+        Desktop". agent-teams.md, "Enable agent teams": "Spawning teammates also requires an interactive session."
+        So a desktop session starts a terminal session that leads the team and talks to it by message. The skill
+        gives that line with its conditions, as a live run showed them, and no settings keeper or hooks module
+        writes the variable, since every session of the project reads the file it would go into."""
+        with open(os.path.join(ROOT, "skills", "phi", "SKILL.md"), encoding="utf-8") as f:
+            skill = f.read()
+        head, _, rest = skill.partition("## A team in a terminal session")
+        self.assertTrue(rest, "the section is there")
+        section = rest.split("\n## ", 1)[0]
+        for word in ("https://code.claude.com/docs/en/desktop.md, \"What's not available in Desktop\"",
+                     "\"are available in the CLI, not in Desktop\"",
+                     "https://code.claude.com/docs/en/agent-teams.md, \"Enable agent teams\"",
+                     "\"Spawning teammates also requires an interactive session.\"",
+                     "`mcp__terminal__run_in_terminal`",
+                     "`$env:CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1'; claude --permission-mode <mode> '<task>'`",
+                     "`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --permission-mode <mode> '<task>'`",
+                     "the starting session's own permission mode",
+                     "The `cwd` is never a worktree folder",
+                     "`ListAgents`", "`SendMessage`",
+                     "both screens are ezexe's to answer in the tab",
+                     "No part of p4 writes `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` into a settings file",
+                     "`mcp__terminal__stop_terminal_tab`",
+                     "`[Cross-session delivery notice]`", "`[Cross-session idle notice]`"):
+            self.assertIn(word, section, word)
+        self.assertIn("when a step wants an agent team", head.split("---")[1], "the description brings the skill up")
+        plugins = os.path.dirname(ROOT)
+        for path in (os.path.join(ROOT, "scripts", "p4conf.py"), os.path.join(ROOT, "hooks", "register.ts"),
+                     os.path.join(plugins, "p4-temportal", "hooks", "p4conf.py"),
+                     os.path.join(plugins, "p4-temportal", "hooks", "register.ts")):
+            with open(path, encoding="utf-8") as f:
+                self.assertNotIn("AGENT_TEAMS", f.read(), path)
+
+    def test_no_p4_setting_names_a_subagents_model_and_the_pages_name_claude_codes_own_routes(self):
+        """sub-agents.md, "Choose a model": "When more than one source sets a model, Claude Code uses the first in
+        this order", the call's `model`, the definition's `model` field, `CLAUDE_CODE_SUBAGENT_MODEL`, the main
+        conversation's model. So p4.json holds no key for a subagent's model or effort, `phi.child_levels` takes a
+        worker's kinds only, and the skill and the README name the native routes with the page."""
+        import p4conf
+        plans = phi.plans
+        for key in p4conf.DEFAULTS["phi"]:
+            self.assertNotIn("agent", key, "no key of p4.json's phi section names a subagent")
+        self.assertEqual(sorted(plans.CHILD_LEVELS_DEFAULT), ["build", "design", "static"])
+        given = plans.child_levels({"check": {"model": "claude-haiku-5-5", "effort": "low"},
+                                    "Explore": {"model": "opus"}})
+        self.assertEqual(given, plans.CHILD_LEVELS_DEFAULT, "a subagent's name is no kind of worker")
+        with open(os.path.join(ROOT, "skills", "phi", "SKILL.md"), encoding="utf-8") as f:
+            skill = f.read()
+        with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as f:
+            readme = f.read()
+        for page in (skill, readme):
+            for word in ("sub-agents.md", "\"Choose a model\"", "`CLAUDE_CODE_SUBAGENT_MODEL`",
+                         "`CLAUDE_CODE_SUBAGENT_MODEL_FORCE`", "`Explore`", "`p4-phi:check`"):
+                self.assertIn(word, page, word)
+        self.assertIn("No p4 setting names a subagent's model or effort, since Claude Code sets both", skill)
+        self.assertIn("p4-phi has no setting for a subagent's model or effort, since Claude Code sets both.", readme)
+
+    def test_a_review_of_a_code_change_goes_to_the_bundled_code_review_skill_and_check_reads_the_rest(self):
+        """code-review-local.md: "Claude can start `/code-review` on its own, without you typing the command" and
+        "without `--fix`, the review's instructions ask Claude for a report only." Its target "can be a pull request
+        number, a branch name, a file path, or a Git revision range", so the plugin's own reviewer is kept for a
+        result that is no code change, and its description sends a code change to the skill."""
+        self.assertIn("a review of a code change that should not lean on this session's own view goes to the bundled "
+                      "skill `code-review`, run with the Skill tool on that change's commits or paths and without "
+                      "`--fix`, so it reports and changes no file", phi.LEVELS)
+        self.assertIn("such a read of a result that is no code change goes to the subagent `p4-phi:check`", phi.LEVELS)
+        self.assertNotIn("a read of a diff", phi.LEVELS, "a diff is the skill's")
+        with open(os.path.join(ROOT, "agents", "check.md"), encoding="utf-8") as f:
+            front = f.read().split("---")[1]
+        said = next(line for line in front.splitlines() if line.startswith("description:"))
+        self.assertIn("a result that is no code change", said)
+        self.assertIn("A code change goes to the bundled skill `code-review` instead.", said)
+        self.assertNotIn("diff", said)
+        self.assertIn("tools: Read, Grep, Glob", front, "it still holds no tool that writes or runs")
+        self.assertEqual(sorted(os.listdir(os.path.join(ROOT, "agents"))), ["check.md"], "the plugin's one agent")
+
+
+class Ids(unittest.TestCase):
+    def test_the_hosts_id_without_its_prefix_is_a_real_cli_session(self):
+        # the app pairs the two ids this way for many sessions; it is no stray id
+        old = {k: os.environ.get(k) for k in ("CLAUDE_CODE_HOST_SESSION_ID", "CLAUDE_CODE_SESSION_ID")}
+        os.environ["CLAUDE_CODE_HOST_SESSION_ID"] = "local_26c9fe71-aaaa"
+        try:
+            me = phi.Me({"session_id": "26c9fe71-aaaa"}, p4=tempfile.mkdtemp())
+            self.assertEqual(me.cli, "26c9fe71-aaaa")
+            self.assertEqual(me.id, "local_26c9fe71-aaaa")
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+
+class Wiring(unittest.TestCase):
+    def test_hooks_json(self):
+        d = {ev: [g for g in gs if all("/hooks/run-hook.sh" in x["command"] for x in g["hooks"])]
+             for ev, gs in jload(HOOKS_JSON)["hooks"].items()}
+        d = {ev: gs for ev, gs in d.items() if gs}                  # phi.py's own; retrieval's run recall-hook.sh
+        self.assertEqual(sorted(d), ["SessionEnd", "SessionStart", "Stop", "StopFailure", "UserPromptSubmit"],
+                         "frozen: the checks around a tool call ride on the retrieval hooks' entries")
+        for event, name in (("SessionStart", START), ("UserPromptSubmit", PROMPT), ("Stop", STOP),
+                            ("StopFailure", "stop-failure"), ("SessionEnd", "session-end")):
+            cmd = d[event][0]["hooks"][0]["command"]
+            self.assertIn("run-hook.sh", cmd)
+            self.assertTrue(cmd.endswith(" " + name), cmd)
+
+    def test_runners_write_nothing_to_temp(self):
+        """The proven interpreter is kept in the plugin's install, not in %TEMP%."""
+        for name in ("run-hook.sh", "recall-hook.sh"):
+            with open(os.path.join(ROOT, "hooks", name), encoding="utf-8") as f:
+                text = f.read()
+            self.assertIn('known="${CLAUDE_PLUGIN_ROOT}/.python"', text, name)
+            for word in ("TMPDIR", "TEMP", "/tmp"):
+                self.assertNotIn(word, text.replace("%TEMP%", ""), f"{name} names {word}")
+
+    def test_manifests(self):
+        p = jload(os.path.join(ROOT, ".claude-plugin", "plugin.json"))
+        self.assertEqual(p["name"], "p4-phi")
+        m = jload(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(ROOT))), ".claude-plugin",
+                               "marketplace.json"))
+        self.assertIn("p4-phi", [x["name"] for x in m["plugins"]])
+        self.assertTrue(os.path.exists(os.path.join(ROOT, "skills", "phi", "SKILL.md")))
+
+    def test_the_repository_holds_one_catalog_at_its_root_with_each_plugin_named_by_its_folder_from_there(self):
+        """The marketplace has one catalog, `.claude-plugin/marketplace.json` at the repository's root, the place
+        `claude plugin marketplace add ezexe/p4` reads with no `path`. Each source is spelled from that root, by
+        https://code.claude.com/docs/en/plugins/marketplace-reference.md, "Marketplace file": "The directory that
+        contains `.claude-plugin/` is called the marketplace root, and every relative plugin source resolves from
+        it". `lbiza/` holds no catalog of its own: found there by `path`, Claude Code 2.1.328 looked for
+        `./plugins/p4-phi` at the clone's root and did not find it. An entry pins no version, since each
+        plugin.json's decides, by plugins/loading.md, "How Claude Code computes the version": "The `version` field
+        in the plugin's manifest comes first". The catalog still maps p4-phi's former name to it."""
+        repo = os.path.dirname(os.path.dirname(os.path.dirname(ROOT)))
+        root = jload(os.path.join(repo, ".claude-plugin", "marketplace.json"))
+        self.assertFalse(os.path.exists(os.path.join(repo, "lbiza", ".claude-plugin", "marketplace.json")),
+                         "a second catalog would have to be kept in step with the first")
+        self.assertEqual(root["name"], "p4-marketplace")
+        self.assertEqual((root.get("renames") or {}).get("p4-recall"), "p4-phi")
+        folders = os.path.join(repo, "lbiza", "plugins")
+        self.assertEqual(sorted(p["name"] for p in root["plugins"]),
+                         sorted(d for d in os.listdir(folders)
+                                if os.path.isfile(os.path.join(folders, d, ".claude-plugin", "plugin.json"))))
+        for p in root["plugins"]:
+            self.assertEqual(p["source"], "./lbiza/plugins/" + p["name"])
+            self.assertNotIn("version", p, "each plugin.json's version decides")
+            self.assertTrue(p.get("description"), p["name"])
+            manifest = jload(os.path.join(repo, "lbiza", "plugins", p["name"], ".claude-plugin", "plugin.json"))
+            self.assertEqual(manifest["name"], p["name"])
+            self.assertTrue(manifest.get("version"), p["name"])
+
+    def test_the_words_given_to_a_session_hold_no_banned_name(self):
+        """Every string the session modules can hand a session: each literal and f-string part, docstrings, keys and
+        regex sources aside; owner is banned outside puppeteer.py, whose code owner is that word's programming sense."""
+        import ast
+        for name in ("phi.py", "relay.py", "plans.py", "controls.py", "starts.py", "puppeteer.py", "issues.py",
+                     "gaps.py"):
+            tree, skip = ast.parse(read(os.path.join(SRC, name))), set()
+            for n in ast.walk(tree):
+                if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n.body \
+                        and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant):
+                    skip.add(id(n.body[0].value))
+                elif isinstance(n, ast.Subscript):
+                    skip.add(id(n.slice))
+                elif isinstance(n, ast.Dict):
+                    skip.update(id(k) for k in n.keys if k is not None)
+                elif isinstance(n, ast.Call) and n.args and getattr(n.func, "attr", "") in ("get", "pop", "setdefault",
+                                                                                            "compile"):
+                    skip.add(id(n.args[0]))
+            given = "\n".join(n.value for n in ast.walk(tree) if isinstance(n, ast.Constant)
+                              and isinstance(n.value, str) and id(n) not in skip).lower()
+            for word in ("ghost", "memo", "rollup", "node", "play", "steer", "goal") + (
+                    ("owner",) if name != "puppeteer.py" else ()):
+                self.assertNotRegex(given, rf"\b{word}s?\b", f"{word} in {name}")
+
+
+class FixtureFolder(unittest.TestCase):
+    def test_a_tree_is_made_in_the_folder_the_tests_are_given(self):
+        with tempfile.TemporaryDirectory() as given:
+            folder = os.path.join(given, "fixtures")
+            code = ("import tempfile, test_phi\nwith tempfile.TemporaryDirectory() as d:\n"
+                    "    print(test_phi.Tree(d).p4)")
+            env = {**os.environ, "P4_PHI_TEST_TMP": folder}
+            r = subprocess.run([sys.executable, "-X", "utf8", "-c", code],
+                               cwd=os.path.dirname(os.path.abspath(__file__)), env=env, capture_output=True,
+                               text=True, timeout=60)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertTrue(os.path.normcase(r.stdout.strip()).startswith(os.path.normcase(folder)), r.stdout)
+
+
+class StatePage(unittest.TestCase):
+    """A session whose p4-phi task names a state page resumes from it after a clear, and at a turn's end is told to
+    read its context share with the app's `get_usage` and to clear itself past the line."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = t = Tree(self._tmp.name)
+        t.record(TOP, title="Build the narwhal exporter")
+        self.page = os.path.join(t.tmp, "tmp", "state.md").replace("\\", "/")
+        t.say(TOP, "Build the exporter")
+        t.cli(TOP, "task", f"Build the narwhal exporter. State page: {self.page}")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def wrap_up(self, used, uuid):
+        """TOP's `wrap_up`, answered through `recall-hook.sh lookup-record`, with a transcript whose last assistant
+        row holds `used` tokens of usage, which p4-phi does not read."""
+        t = self.t
+        path = os.path.join(t.tmp, f"wrap{uuid}.jsonl")
+        transcript(path, "Build the exporter", [], "Built.", uuid)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "assistant", "message": {"content": [], "usage": {
+                "input_tokens": 2000, "cache_creation_input_tokens": 8000,
+                "cache_read_input_tokens": used - 10000}}}) + "\n")
+        body = {"session_id": CLI.get(TOP, TOP), "cwd": t.proj, "hook_event_name": "PostToolUse",
+                "tool_name": "mcp__ccd_turn__wrap_up", "tool_input": {"recap": "Built."},
+                "tool_response": "Nothing is pending.", "transcript_path": path, "tool_use_id": f"toolu_wrap{uuid}"}
+        r = inproc.run(["sh", os.path.join(ROOT, "hooks", "recall-hook.sh"), "lookup-record"],
+                       input=json.dumps(body), capture_output=True, text=True, timeout=60, env=t.env(TOP))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return context(r)
+
+    def test_a_session_whose_task_names_a_state_page_gets_its_path_first_after_a_clear(self):
+        ctx = context(self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "clear"}))
+        self.assertTrue(ctx.startswith("phi (p4-phi): ") and self.page in ctx.split("\n", 1)[0], ctx[:300])
+
+    def test_a_wrap_up_names_the_apps_usage_read_whatever_the_transcript_holds(self):
+        """The app counts a session's context: the description of `mcp__ccd_session_mgmt__get_usage` gives `context`
+        as "that session's window as the composer shows it — tokens used, percent, where auto-compact starts". So
+        p4-phi sums no usage row of the transcript against a window of its own. The line at a `wrap_up` names that
+        call on `"self"` and the share phi.clear_at sets, and reads the same whatever the transcript's last row
+        holds and whatever a store's phi.context_window says."""
+        import controls
+        said = self.wrap_up(130000, "1")
+        self.assertIn('`mcp__ccd_session_mgmt__get_usage` on `"self"`', said)
+        self.assertIn(f"past {controls.CLEAR_AT} percent", said)
+        self.assertIn(self.page, said)
+        self.assertIn('`mcp__ccd_session_mgmt__clear_session` with `"self"`', said)
+        self.assertLess(said.index("get_usage"), said.index("clear_session"), "the read comes before the clear")
+        self.assertNotRegex(said, r"context is at \d+ percent", "p4-phi states no share of its own")
+        self.assertEqual(self.wrap_up(20000, "2"), said, "the transcript's usage row is not read")
+        write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"context_window": 1000, "clear_at": 40}}))
+        low = self.wrap_up(20000, "3")
+        self.assertIn("past 40 percent", low, "phi.clear_at sets the line")
+        self.assertEqual(low.replace("past 40 percent", f"past {controls.CLEAR_AT} percent"), said,
+                         "phi.context_window steers nothing")
+        for name in ("context_used", "WINDOW"):
+            self.assertFalse(hasattr(controls, name), f"controls.{name} measures no context")
+
+
+class ClearFamily(unittest.TestCase):
+    """ezexe/p4#244. No page and no tool clears a session together with the sessions it started: `/clear` starts one
+    conversation over, and the app's `clear_session` takes one session a call, this one or an idle session this one
+    started. So a worker that keeps a state page is handed, at a turn's end, one `clear_session` call for each
+    coworker p4-phi's records hold idle with an empty queue, ahead of its own, to make where `get_usage` reads its
+    context past the line; and every session that keeps a state page is told at each turn's end to bring it up to
+    date, so a clear its worker makes loses nothing."""
+
+    KID3 = "local_kid00003"
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = t = Tree(self._tmp.name)
+        CLI.setdefault(self.KID3, "ffff6666-0000-4000-8000-000000000000")
+        self.page = {h: os.path.join(t.tmp, "pad", h, "state.md").replace("\\", "/")
+                     for h in (TOP, KID, KID2, self.KID3)}
+        t.record(TOP, title="Build the narwhal exporter")
+        t.say(TOP, "Build the exporter")
+        t.cli(TOP, "task", f"Build the narwhal exporter. State page: {self.page[TOP]}")
+        for host, part in ((KID, "flush"), (KID2, "ports"), (self.KID3, "retry")):
+            t.record(host, started_by=TOP, title=f"the {part} coworker")
+            t.say(host, handed(f"Build the {part} of the exporter.\nFiles: src/{part}.py\n"
+                               f"State page: {self.page[host]}"))
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def wrap_up(self, host, uuid):
+        """`host`'s `wrap_up`, answered through `recall-hook.sh lookup-record` as the app runs it, with
+        P4_RECALL_SYNC unset, so the gate's detach rule is part of what is tested."""
+        t = self.t
+        path = transcript(os.path.join(t.tmp, f"wrap-{host}-{uuid}.jsonl"), "Build it", [], "Built.", uuid)
+        body = {"session_id": CLI.get(host, host), "cwd": t.proj, "hook_event_name": "PostToolUse",
+                "tool_name": "mcp__ccd_turn__wrap_up", "tool_input": {"recap": "Built."},
+                "tool_response": "Nothing is pending.", "transcript_path": path,
+                "tool_use_id": f"toolu_wrap{host}{uuid}"}
+        env = t.env(host)
+        env.pop("P4_RECALL_SYNC", None)
+        r = inproc.run(["sh", os.path.join(ROOT, "hooks", "recall-hook.sh"), "lookup-record"],
+                       input=json.dumps(body), capture_output=True, text=True, timeout=60, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return context(r)
+
+    def plan(self, host, status):
+        return self.t.hook("plan", host, {"hook_event_name": "PostToolUse",
+                                          "tool_name": "mcp__ccd_turn__update_plan",
+                                          "tool_input": {"items": [{"content": "Build the part", "status": status}]},
+                                          "tool_response": "Plan shown."})
+
+    def test_a_worker_past_the_line_clears_its_idle_coworkers_before_itself(self):
+        t, kid3 = self.t, self.KID3
+        own = '`mcp__ccd_session_mgmt__clear_session` with `"self"`'
+        theirs = "`mcp__ccd_session_mgmt__clear_session` on its id"
+        for host in (KID, KID2):                    # a message, every plan step completed, a Stop, nothing running
+            self.plan(host, "completed")
+            t.stop(host, "Build the part", report="Built and checked.")
+        said = self.wrap_up(TOP, "1")               # KID3 has a message and no Stop yet: it is inside a turn
+        for host in (KID, KID2, kid3):
+            self.assertNotIn(host, said, "a report this session has not been handed yet holds its coworker")
+        self.assertNotIn(theirs, said)
+        t.say(TOP, "what came in?")                 # TOP is handed both reports
+        said = self.wrap_up(TOP, "2")
+        self.assertIn(f"bring this session's state page up to date at {self.page[TOP]}", said)
+        self.assertLess(said.index(self.page[TOP]), said.index("get_usage"), "the page first, whatever it reads")
+        self.assertIn('`mcp__ccd_session_mgmt__get_usage` on `"self"`', said)
+        self.assertIn(own, said)
+        for host in (KID, KID2):
+            self.assertIn(f"`{host}`", said)
+            self.assertLess(said.index(theirs), said.index(f"`{host}`"))
+            self.assertLess(said.index(f"`{host}`"), said.index(own), "a coworker's clear comes ahead of its own")
+        self.assertNotIn(kid3, said, "a coworker inside a turn is named nowhere")
+        self.assertIn("A coworker clear the app refuses leaves that coworker as it is", said)
+        self.assertIn("the last call of this turn", said.split(own, 1)[1])
+        mine = self.wrap_up(KID, "3")               # a coworker's own turn's end
+        self.assertIn(f"bring this session's state page up to date at {self.page[KID]}", mine)
+        self.assertIn("one the session that started it makes", mine)
+        self.assertLess(mine.index(self.page[KID]), mine.index("get_usage"), "whatever its context reads")
+        for other in (TOP, KID2, kid3):
+            self.assertNotIn(other, mine, "it names no other session")
+        self.assertNotIn(theirs, mine, "and no clear of another session")
+        self.plan(KID2, "in_progress")              # an open plan step
+        said = self.wrap_up(TOP, "4")
+        self.assertIn(f"`{KID}`", said)
+        self.assertNotIn(KID2, said, "a coworker that holds a step is named nowhere")
+        path = transcript(os.path.join(t.tmp, "kid-check.jsonl"), "Run the long check", [], "Started it.", "u1")
+        t.hook(STOP, KID, {"hook_event_name": "Stop", "transcript_path": path, "last_assistant_message": "Started it.",
+                           "background_tasks": [{"id": "bcheck001", "type": "shell", "status": "running",
+                                                 "command": "python -m pytest tests/test_ports.py"}]})
+        t.record(GRAND, started_by=TOP, title="the docs coworker")       # a coworker whose task names no state page
+        t.say(GRAND, handed("Write the exporter's docs.\nFiles: docs/export.md"))
+        t.stop(GRAND, "Write the docs", report="Written.")
+        t.say(TOP, "and now?")                      # TOP is handed KID's and the docs coworker's reports
+        said = self.wrap_up(TOP, "5")
+        self.assertNotIn(KID, said, "a coworker with a background task still running is named nowhere")
+        self.assertNotIn(GRAND, said, "nor one with no state page to resume from, since a clear would lose its work")
+        self.assertNotIn(theirs, said)
+        self.assertIn(own, said, "its own clear stays")
+        self.assertEqual(self.wrap_up(GRAND, "6"), "", "a session that keeps no state page is handed nothing")
+
+
+ASKS_WRITE = re.compile(r"\b(?:writes?|written|keeps?|kept|saves?|saved|logs?|logged|rewrit\w*|puts?|records?|"
+                        r"recorded|append\w*|stores?|stored|edits?|go there|up to date at)\b", re.I)
+UNDER_CLAUDE = re.compile(r"(?:^|[\s`'\"(:])([^\s`'\"(]*\.claude/[^\s`'\")]*)")
+# The pages p4-phi's own scripts write in the store, which a session reads and never writes: a line may say they are
+# kept or rewritten there. A state page or a decisions file is not among them, since a session writes those.
+OWN_PAGES = ("book.md", "session.md", "sessions.md", "standing.md", "board.md", "rules.md", "ledger.md")
+
+
+def writes_under_claude(text, plugin=ROOT):
+    """Each sentence of `text` that asks for a write and names a path under a .claude folder; the plugin's own
+    folder, which the commands it hands name, is left out, since an install keeps it under ~/.claude, and so are the
+    pages p4-phi itself writes."""
+    text = text.replace("\\", "/").replace(plugin.replace("\\", "/"), "<plugin>")
+    out = []
+    for x in re.split(r"(?<=[.;:!?])\s+|\n", text):
+        paths = [p.rstrip(".,;:") for p in UNDER_CLAUDE.findall(x)]
+        if ASKS_WRITE.search(x) and any(p.rsplit("/", 1)[-1] not in OWN_PAGES for p in paths):
+            out.append(x)
+    return out
+
+
+class NoWriteUnderClaude(unittest.TestCase):
+    """Row B7 of the plugin defaults inventory: every write under .claude asks ezexe, even in bypass mode, so no line
+    p4-phi hands a session names a place under .claude to write. A state page is kept in the app's scratchpad."""
+
+    PUP, WORKER, CO = "local_pup00001", "local_wrk00001", "local_cow00001"
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = t = Tree(self._tmp.name)
+        t.record(TOP, title="Narwhal exporter")
+        t.record(KID, TOP, "Fix the dropped row")
+        t.record(self.PUP, title="Control the exporter tree")
+        t.record(self.WORKER, started_by=self.PUP, title="Puppeteer's standing worker")
+        t.record(self.CO, started_by=self.WORKER, title="a standing coworker")
+        write(os.path.join(t.tmp, "claude_desktop_config.json"), json.dumps({"preferences": {"epitaxyPrefs": {
+            "dframe-group-scopes": {"acct/org": {"groups": [{"id": "cg-1", "name": "puppeteers", "mode": "code"}],
+                                                 "assignments": {"code:" + self.PUP: "cg-1"}}}}}}))
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def pad(self, host):
+        return os.path.join(self.t.tmp, "temp", CLI.get(host, host), "scratchpad").replace("\\", "/")
+
+    def run_hook(self, name, host, payload):
+        return context(self.t.hook(name, host, {"scratchpad_dir": self.pad(host), **payload}, P4_PHI_BOOK="1"))
+
+    def wrap_up(self, host):
+        t = self.t
+        path = transcript(os.path.join(t.tmp, f"wrap-{host}.jsonl"), "Check the archives", [], "Checked.")
+        body ={"session_id": CLI.get(host, host), "cwd": t.proj, "hook_event_name": "PostToolUse",
+                "tool_name": "mcp__ccd_turn__wrap_up", "tool_input": {"recap": "Checked."},
+                "tool_response": "Nothing is pending.", "transcript_path": path, "tool_use_id": f"toolu_wrap{host}",
+                "scratchpad_dir": self.pad(host)}
+        r = inproc.run(["sh", os.path.join(ROOT, "hooks", "recall-hook.sh"), "lookup-record"],
+                       input=json.dumps(body), capture_output=True, text=True, timeout=60, env=t.env(host))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return context(r)
+
+    def test_no_line_handed_to_a_session_names_a_place_under_claude_to_write(self):
+        import controls
+        said = {}
+        for host, first in ((TOP, TASK), (KID, HANDED), (self.PUP, "Control the trees"),
+                            (self.WORKER, "Run the puppeteer's checks.\n" + controls.WORKER_BRIEF),
+                            (self.CO, "Check the archives.\nFiles: none")):
+            said[host, "start"] = self.run_hook(START, host, {"hook_event_name": "SessionStart", "source": "startup"})
+            said[host, "first"] = self.run_hook(PROMPT, host, {"hook_event_name": "UserPromptSubmit",
+                                                                "prompt": first})
+        for host in (TOP, KID, self.WORKER, self.CO):
+            for source in ("compact", "clear"):
+                said[host, source] = self.run_hook(START, host, {"hook_event_name": "SessionStart", "source": source})
+        said[self.WORKER, "wrap_up"] = self.wrap_up(self.WORKER)
+        for key, text in said.items():
+            self.assertEqual(writes_under_claude(text), [], key)
+        page = self.pad(self.WORKER) + "/state.md"
+        self.assertIn(page, said[self.WORKER, "first"], "a standing worker keeps its state page in its scratchpad")
+        self.assertIn(page, said[self.WORKER, "clear"].split("\n", 1)[0], "and is handed it first after a clear")
+        self.assertIn(page, said[self.WORKER, "wrap_up"], "and brings it up to date there before it clears")
+        self.assertIn("decisions.md in the scratchpad directory the app names", said[TOP, "start"])
+        for source in ("compact", "clear"):              # the scan has the address book
+            self.assertIn("address book", said[TOP, source], source)
+
+
+class UsageOnRecord(unittest.TestCase):
+    """A command hook is given no context fill and no plan limit, and a mod is: `$.session.usage()` "returns context
+    window use and plan limits", https://code.claude.com/docs/en/plugins/mods/api.md. The plugin's hooks module
+    writes them to usage.json in the session's folder, and phi.usage_of reads the file back."""
+
+    # The line hooks/register.test.ts holds the module to, from what a live probe was answered on Claude Code 2.1.325.
+    RECORD = ('{"at":1794942221358,"context":{"tokens":575167,"window":1000000,"percent":58},'
+              '"rateLimits":[{"kind":"seven_day","percentUsed":82,"resetsAt":"2026-11-21T06:00:00.000Z"}]}\n')
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.t = Tree(self._tmp.name)
+        self.path = os.path.join(self.t.dir(TOP), phi.USAGE_FILE)
+
+    def test_the_record_the_module_writes_is_read_back(self):
+        self.assertEqual(phi.usage_of(self.t.p4, TOP), {}, "no module ran for the session: no record")
+        write(self.path, self.RECORD)
+        self.assertEqual(phi.usage_of(self.t.p4, TOP), {
+            "at": 1794942221.358,
+            "context": {"tokens": 575167, "window": 1000000, "percent": 58},
+            "rateLimits": [{"kind": "seven_day", "percentUsed": 82.0, "resetsAt": "2026-11-21T06:00:00.000Z"}]})
+        self.assertEqual(os.listdir(self.t.dir(TOP)), [phi.USAGE_FILE], "a read writes nothing")
+
+    def test_a_fresh_window_and_a_session_off_a_subscription_are_read_with_what_they_have(self):
+        write(self.path, '{"at":1794942221358,"context":{"window":200000},"rateLimits":[]}\n')
+        self.assertEqual(phi.usage_of(self.t.p4, TOP), {
+            "at": 1794942221.358, "context": {"tokens": None, "window": 200000, "percent": None}, "rateLimits": []})
+        write(self.path, json.dumps({"at": 1, "context": {"tokens": 10, "window": 200000, "percent": 0},
+                                     "rateLimits": [{"kind": "five_hour", "percentUsed": 23.5},
+                                                    {"kind": "spend_limit", "percentUsed": "much"}, "x"]}))
+        got = phi.usage_of(self.t.p4, TOP)
+        self.assertEqual(got["rateLimits"], [{"kind": "five_hour", "percentUsed": 23.5, "resetsAt": ""}],
+                         "a window with no reset time, and an entry that is no window left out")
+        self.assertEqual(got["context"], {"tokens": 10, "window": 200000, "percent": 0})
+
+    def test_a_file_that_is_no_record_reads_as_none(self):
+        """`$.fs.write` "isn't atomic: it replaces the file's content in place, so another process can read a partly
+        written file", https://code.claude.com/docs/en/plugins/mods/reference.md, so a file cut short is no record."""
+        for text in (self.RECORD[:40], "", "[]", '{"context": {"percent": 58}}', '{"context": {"window": true}}',
+                     '{"context": "full"}'):
+            write(self.path, text)
+            self.assertEqual(phi.usage_of(self.t.p4, TOP), {}, text)
+        self.assertEqual(phi.usage_of(self.t.p4, ""), {}, "no session")
+        self.assertEqual(phi.usage_of(self.t.p4, "local_nobody"), {})
+        self.assertFalse(os.path.exists(self.t.dir("local_nobody")), "a read makes no folder")
+
+    def test_the_module_writes_the_file_and_the_line_this_reader_is_held_to(self):
+        hooks = os.path.join(ROOT, "hooks")
+        module = read(os.path.join(hooks, "register.ts"))
+        for call in ("$.session.usage()", "on('session.measure'", f"/{phi.USAGE_FILE}`", "['look', '--folder']"):
+            self.assertIn(call, module)
+        held = read(os.path.join(hooks, "register.test.ts")).replace("' +\n  '", "")
+        self.assertIn(self.RECORD.strip()[len('{"at":1794942221358,'):], held,
+                      "the module's test and this one hold the same line")
+
+
+class Stamps(unittest.TestCase):
+    """ezexe/p4#248: phi.now_exact orders two writes of one minute, so its seconds and its thousandths come from one
+    read of the clock. Read apart, a stamp taken in a second's first thousandths kept the second before and sorted
+    almost a second early, and the later of two writes lost."""
+
+    def test_a_later_stamp_is_never_earlier_across_a_second_boundary(self):
+        real = time.time
+        base = float(int(real())) + 0.9996             # four ten-thousandths before a second ends
+        reads = iter([base, base + 0.0008, base + 0.5, base + 1.0])
+        phi.time.time = lambda: next(reads)
+        try:
+            stamps = [phi.now_exact() for _ in range(4)]
+        finally:
+            phi.time.time = real
+        self.assertEqual(stamps, sorted(stamps), "each stamp sorts at or after the one before it")
+        self.assertEqual(stamps[0][-4:], ".999")
+        self.assertEqual(stamps[1][-4:], ".000")
+        self.assertNotEqual(stamps[0][:19], stamps[1][:19], "the second moved with the thousandths")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=1)

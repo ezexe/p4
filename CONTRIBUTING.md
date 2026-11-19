@@ -26,4 +26,15 @@ Live hook behaviour is checked that way from a scratch project, never in the pro
 Each landing names its proof: the clone path and the commit its tests and live checks ran on.
 A landing that changes a plugin's files bumps the version in that plugin's `.claude-plugin/plugin.json`, the one file that holds it, since the catalog `.claude-plugin/marketplace.json` at the repository's root carries no version.
 An installed copy is a copy in Claude Code's plugin cache, which takes the new version at the next auto-update pass where auto-update is on for `p4-marketplace`, and at `claude plugin update <plugin>@p4-marketplace` otherwise.
-GitHub runs the `suite` check of [`.github/workflows/suite.yml`](.github/workflows/suite.yml) on every pull request and every push to `main`: on a Windows runner and with no credentials, it runs every test with `python -X utf8 suite/run.py`, then `claude plugin validate --strict` on the catalog and on each plugin, and `claude plugin test` on each plugin's hooks module.
+
+## Tests
+
+Every test of the repository is under `tests/`, in the folder named after the plugin whose code it runs, and pytest runs them.
+`python -m venv .venv` and then `.venv/bin/python -m pip install --group dev` set the test tools up once in a checkout, with `.venv\Scripts\python.exe` in place of `.venv/bin/python` on Windows.
+`.venv/bin/python -m pytest` runs every test, on a worker for each logical processor and eight at most, and `.venv/bin/python -m pytest tests/p4-phi/test_relay.py` runs one file.
+[`pyproject.toml`](pyproject.toml) names the tools and pytest's settings.
+[`tests/conftest.py`](tests/conftest.py) gives each worker a temp folder, a home and git settings of its own and none of a session's variables, so a run from a Claude Code session sees nothing of that session and spends nothing.
+A test file reaches the code it runs by its `SRC` folder, and a test of a new python file goes in `tests/<plugin>/test_<name>.py`.
+A hooks module's `register.test.ts` stays beside the module inside its plugin, where `claude plugin test` reads it.
+A landing rests on a local run of `python -m pytest` that passes.
+GitHub runs the `tests` workflow of [`.github/workflows/tests.yml`](.github/workflows/tests.yml) on every pull request and every push to `main`, with no credentials: its `pytest` job runs every test on a Windows runner, and its `plugins` job runs `claude plugin validate --strict` on the catalog and on each plugin and `claude plugin test` on each plugin's hooks module.

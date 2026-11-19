@@ -108,8 +108,9 @@ The script stops before it makes or tops up `.venv` when the Python that will ru
 
 Claude Code copies a plugin installed from a marketplace it clones into its plugin cache, `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`, so a change to the plugin's code or its `hooks/hooks.json` reaches such an install only with a new version.
 A plugin's version lives in one file, its own `lbiza/plugins/<plugin>/.claude-plugin/plugin.json`, and each such change bumps it there.
-No entry of the catalog `.claude-plugin/marketplace.json` carries a version, since the manifest's version comes first when Claude Code computes one, and `test_wiring.py` in `lbiza/plugins/p4-phi/hooks/` holds every entry of the catalog to that.
-The `suite` check of [`.github/workflows/suite.yml`](.github/workflows/suite.yml) runs on every pull request and every push to `main`: every test of the repository through `python -X utf8 suite/run.py`, `claude plugin validate --strict` on the catalog and on each plugin, and `claude plugin test` on each plugin's hooks module.
+No entry of the catalog `.claude-plugin/marketplace.json` carries a version, since the manifest's version comes first when Claude Code computes one, and `tests/p4-phi/test_wiring.py` holds every entry of the catalog to that.
+The `tests` workflow of [`.github/workflows/tests.yml`](.github/workflows/tests.yml) runs on every pull request and every push to `main`: every test under `tests/` through `python -m pytest`, `claude plugin validate --strict` on the catalog and on each plugin, and `claude plugin test` on each plugin's hooks module.
+[CONTRIBUTING.md](CONTRIBUTING.md#tests) says how to run the tests in a checkout.
 An install takes the new version at Claude Code's next auto-update pass where auto-update is on for `p4-marketplace`, and at `claude plugin update <plugin>@p4-marketplace` where it is off, as it is by default for a marketplace like this one.
 A session that is running keeps the version it loaded until `/reload-plugins` or its next start.
 A marketplace added from a local folder, by `claude plugin marketplace add` with the path of a checkout's root, runs the plugins in place, so the machine that holds that folder sees a change at its next session start or `/reload-plugins` without a version change.

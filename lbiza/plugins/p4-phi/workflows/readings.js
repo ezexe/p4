@@ -19,7 +19,7 @@ export const meta = {
 const MOST = 4 // the options one AskUserQuestion takes, so the readings one run works
 
 // The words that carry no content, as scripts/plans.py COMMON and scripts/puppeteer.py STOP hold them:
-// scripts/test_readings.py holds the two lists here to those two.
+// tests/p4-phi/test_readings.py holds the two lists here to those two.
 const COMMON = `the and for with from that this into onto then than when what which each step steps plan run
 make add fix test tests check update write read build its their them they any all are was were has have had not
 but use used using new old one two first next last`

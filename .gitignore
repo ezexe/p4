@@ -4,9 +4,10 @@
 # what Claude Code and the plugins write for a session started in this checkout: its settings and its store
 .claude/
 
-# compiled Python files
+# compiled Python files, and what pytest keeps between runs
 __pycache__/
 *.py[cod]
+.pytest_cache/
 
 # the interpreter each plugin's hook runner proved once, written by hooks/run-hook.sh and hooks/recall-hook.sh
 lbiza/plugins/*/.python

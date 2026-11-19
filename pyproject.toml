@@ -1,0 +1,17 @@
+# The tests of this repository: `python -m pip install --group dev` once, then `python -m pytest`.
+# The plugins themselves need only the standard library, so this file names no package to build or install.
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0",
+    "pytest-xdist>=3.8",
+    "pytest-timeout>=2.4",
+]
+
+[tool.pytest.ini_options]
+minversion = "9.0"
+testpaths = ["tests"]
+# A worker for each logical processor, eight at most by tests/conftest.py, and an idle worker takes tests from a busy one.
+addopts = ["-n", "auto", "--dist", "worksteal"]
+# A test still running after this many seconds is taken as hung: its stacks are printed and the run fails.
+timeout = 300
