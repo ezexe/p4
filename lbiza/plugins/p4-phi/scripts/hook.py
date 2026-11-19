@@ -699,7 +699,7 @@ def h_subagent_stop(payload):
 
 # --- `lookup-check` and `lookup-record`, before and after every tool call -------------------------------
 
-PHI_CHECK = {"mcp__ccd_session__start_session": "start-advice", "EnterWorktree": "branch-guard",
+PHI_CHECK = {"mcp__ccd_session__start_session": "start-advice",
              "mcp__ccd_session_mgmt__archive_session": "self-archive",
              "SendMessage": "go-guard", "mcp__ccd_session_mgmt__send_message": "go-guard",
              "Bash": ("issue-guard", "store-guard", "branch-guard", "restart-check", "nudge", "puppeteer-tool"),

@@ -964,7 +964,11 @@ class ForkOrFresh(ThreeSessions):
             return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
         self.assertEqual(guard(B, "git switch -c mine")["permissionDecision"], "ask", "it moves the shared checkout")
         self.assertEqual(guard(B, "git checkout -b mine")["permissionDecision"], "ask")
-        self.assertIsNone(guard(B, "", tool="EnterWorktree"), "entering a worktree is Claude Code's own way apart")
+        import hook
+        self.assertNotIn("EnterWorktree", hook.PHI_CHECK,
+                         "entering a worktree is Claude Code's own way apart: no check is routed for the tool")
+        self.assertEqual({t for t, names in hook.PHI_CHECK.items() if "branch-guard" in names},
+                         {"Bash", "PowerShell"}, "the guard reads shell calls alone")
         self.assertIsNone(guard(B, "git worktree add ../wt -b mine"), "a worktree made moves no checkout")
         self.assertIsNone(guard(B, "git branch mine"), "a branch made without a move")
         self.assertIsNone(guard(B, "git status && git commit -qm x"), "ordinary git is never asked")
@@ -986,7 +990,6 @@ class ForkOrFresh(ThreeSessions):
         for cmd in ("git switch -c mine", "git checkout -b mine", "git switch main", "git checkout feature/x",
                     "git worktree add ../wt -b mine", "git branch mine"):
             self.assertIsNone(guard(GRAND, cmd, cwd=own), f"its own worktree: {cmd}")
-        self.assertIsNone(guard(GRAND, "", tool="EnterWorktree", cwd=own))
         self.assertIn("merges and pushes", guard(GRAND, "git push origin HEAD", cwd=own)["permissionDecisionReason"],
                       "landing stays the orchestrator's")
         self.assertEqual(guard(reader, "git switch main", cwd=own)["permissionDecision"], "ask",

@@ -388,6 +388,26 @@ class Gate(unittest.TestCase):
         self.assertTrue(self.check("Read", {"file_path": "a.py"}, agent_id=new).startswith("RAN "))
         self.assertTrue(self.modelled("Read", {"file_path": "a.py"}, agent_id=new))
 
+    def test_entering_a_worktree_ends_in_the_gate_with_no_python(self):
+        """hook.PHI_CHECK routed EnterWorktree to phi.py's branch guard, which has answered nothing for the tool since
+        each session that writes has a worktree of its own. So the entry, the gate's line and the model's are gone:
+        the call ends in the shell, as a Read does, while a start_session call beside it still reaches hook.py."""
+        for tool_input in ({"name": "the-flush"}, {"path": "../wt"}, {}):
+            self.assertEqual(self.check("EnterWorktree", tool_input), "", tool_input)
+            self.assertFalse(self.modelled("EnterWorktree", tool_input), tool_input)
+        self.assertTrue(self.check("mcp__ccd_session__start_session", {"title": "x"}).startswith("RAN "))
+        self.assertTrue(self.modelled("mcp__ccd_session__start_session", {"title": "x"}))
+        with open(RECALL, encoding="utf-8") as f:
+            self.assertNotIn("EnterWorktree", f.read())
+        sys.path.insert(0, SCRIPTS)
+        try:
+            import hook
+            import inproc
+        finally:
+            sys.path.remove(SCRIPTS)
+        self.assertNotIn("EnterWorktree", hook.PHI_CHECK)
+        self.assertFalse(any(b"EnterWorktree" in w for w in inproc.OTHERS))
+
     def test_a_read_ends_in_the_gate_and_a_web_call_reaches_hook_py(self):
         self.assertEqual(self.check("Read", {"file_path": "a.py"}), "")
         self.assertTrue(self.check("WebFetch", {"url": "https://example.com"}).startswith("RAN "))

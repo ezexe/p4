@@ -43,7 +43,7 @@ if [ "$name" = lookup-check ]; then
     *mcp__ccd_session_mgmt__archive_session*) ;;  # a child archiving itself: phi.py keeps its report first
     # a message to another session: phi.py's go-guard reads it
     *'"tool_name":"SendMessage"'*|*'"tool_name": "SendMessage"'*|*mcp__ccd_session_mgmt__send_message*) ;;
-    *mcp__ccd_session__start_session*|*'"tool_name":"EnterWorktree"'*|*'"tool_name": "EnterWorktree"'*) ;;
+    *mcp__ccd_session__start_session*) ;;
     *) exit 0 ;;
   esac
   [ "$sub" = 1 ] || [ "$nudge" = 1 ] || case "$payload" in

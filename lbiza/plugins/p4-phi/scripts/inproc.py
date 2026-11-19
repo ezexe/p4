@@ -205,7 +205,7 @@ WEB = _tool("WebFetch", "WebSearch")
 SHELLS = _tool("Bash", "PowerShell")
 OTHERS = [b"mcp__ccd_session_mgmt__archive_session", b"mcp__ccd_session__start_session",
           b"mcp__ccd_session_mgmt__send_message"] + _tool(
-    "EnterWorktree", "SendMessage")                # a message to another session: phi.py's go-guard reads it
+    "SendMessage")                                 # a message to another session: phi.py's go-guard reads it
 LONG = re.compile(rb"test_.*\.py|pytest|py\.test|unittest|npm.*test|npm.*build|cargo.*test|cargo.*build|go.*test|"
                   rb"go.*build|make.*test|make.*build", re.S)
 KEEP = re.compile(rb"mcp__ccd_turn__update_plan|mcp__ccd_turn__wrap_up|temportal.*memory|PostToolUseFailure|Traceback|Error|Exception|"

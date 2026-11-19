@@ -2850,7 +2850,8 @@ def h_branch_guard(payload):
     pushes. A child that shares its starter's checkout, as one started with `use_worktree: false` does, is asked
     before it moves that checkout to another branch, since the move is its starter's too. A session in a git
     worktree of its own, as own_checkout reads it, is asked about no branch it makes or moves to and no worktree it
-    makes or enters, since its checkout is its own. Silent otherwise, and for EnterWorktree."""
+    makes or enters, since its checkout is its own. Silent otherwise. No check is routed here for the
+    EnterWorktree tool, which is Claude Code's own way into a worktree."""
     me = Me(payload)
     if not me.home or not me.id:
         return None
