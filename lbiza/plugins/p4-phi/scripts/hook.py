@@ -714,8 +714,10 @@ def h_subagent_stop(payload):
 PHI_CHECK = {"mcp__ccd_session__start_session": "start-advice",
              "mcp__ccd_session_mgmt__archive_session": "self-archive",
              "SendMessage": "go-guard", "mcp__ccd_session_mgmt__send_message": "go-guard",
-             "Bash": ("issue-guard", "store-guard", "branch-guard", "restart-check", "nudge", "puppeteer-tool"),
-             "PowerShell": ("issue-guard", "store-guard", "branch-guard", "restart-check", "nudge", "puppeteer-tool"),
+             "Bash": ("cards-guard", "issue-guard", "store-guard", "branch-guard", "restart-check", "nudge",
+                      "puppeteer-tool"),
+             "PowerShell": ("cards-guard", "issue-guard", "store-guard", "branch-guard", "restart-check", "nudge",
+                            "puppeteer-tool"),
              "Edit": ("nudge", "puppeteer-tool"), "Write": ("nudge", "puppeteer-tool"),
              "NotebookEdit": ("nudge", "puppeteer-tool")}
 PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "mcp__ccd_turn__wrap_up": "wrap-up", "Write": "memory-gap",

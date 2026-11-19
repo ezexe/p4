@@ -27,6 +27,7 @@ what is there, and records what it owns in the store's RECORD.
 import copy
 import filecmp
 import glob
+import hashlib
 import json
 import os
 import re
@@ -149,7 +150,8 @@ OPEN = ("temportal.cache",)
 
 # Keys read when a project sets them and never written by default, so a later change to the code's own value reaches
 # every store: kept as set, never called unknown.
-READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.clear_at", "temportal.compact_at", "claude")
+READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.clear_at", "temportal.compact_at", "claude",
+                 "phi.cards")
 
 # Keys no plugin reads, top-level or dotted: never returned or called unknown, and dropped from p4.json when it is
 # rewritten for another reason. The memory section and the scratchpad tmp keys went with p4-temportal's move to the
@@ -995,7 +997,8 @@ def configure(module_globals, p4, dotted, names, write=True):
 # only ever applies to the store of the session's own project, by env_applies.
 ENV_PREFIX = "P4_"
 ENV_SKIP = ("recall.updated",)            # who last set recall.inject and learn, and when: a record, not a setting
-ENV_SET_ONLY = tuple(k for k in READ_WHEN_SET if k.startswith("phi."))
+# `phi.cards` has no variable: what is settled with no approval card is in force by the store's file alone, cards_on.
+ENV_SET_ONLY = tuple(k for k in READ_WHEN_SET if k.startswith("phi.") and k != "phi.cards")
 # A name the rule would give that an older variable of other meaning already has: P4_PHI_WATCH_S is puppeteer.py's
 # tick for one run, used whether or not a session is busy, while phi.watch_s is the tick of a busy watcher only.
 ENV_NAMES = {"phi.watch_s": "P4_PHI_WATCH_SECONDS"}
@@ -1256,7 +1259,7 @@ PLANS = "temportal/plans"        # the store's folder of plan files, from the st
 ENV_KEY = "env"                  # where the P4_* variables go: each one p4 owns is the dotted key env.<name>
 # Raised by one whenever the keys this copy writes change, so a store's next start runs the whole check: the record
 # holds the KEEPER of the copy that last ran it.
-KEEPER = 7
+KEEPER = 8
 PAST_MAX = 5                     # texts kept per variable of those p4 wrote and later replaced or removed
 # The class of keys ezexe decides, by #246: every key of the topics "Permission settings", "Sandbox settings",
 # "Authentication and providers" and "Enterprise and managed settings" of settings-reference.md, the table
@@ -1711,6 +1714,84 @@ DENY_RULES = ("mcp__ccd_session_mgmt__set_session_model",)
 PHI = "p4-phi"
 PHI_PART = "phi"
 
+# --- what is settled before a session's start, with no approval card -------------------------------------------------
+# A session another session started stops on no approval card for work its brief covers. desktop.md names the prompt
+# an approval card. permissions.md, "Manage permissions": allow rules "let Claude Code use the specified tool without
+# manual approval". permission-modes.md, "Actions no mode auto-approves", lists what prompts in every mode, with
+# "Tools matched by an explicit ask rule" first, and a question a hook raises is put to a person in every mode too:
+# on 2026-11-19 the transcripts of this tree held 39 approvals of p4-phi's own branch guard and 32 of the ask rule
+# on the archive tool, every one in a session that bypasses permission prompts.
+# What may be settled with no card is a permission, so it is ezexe's to decide. The whole set is CARD_SET, kept here
+# and nowhere else, and it is in force for a store only while `phi.cards` in that store's p4.json holds
+# card_set_id(), the name of the set as this copy has it. `phi.py cards on <id>` writes the key, behind an approval
+# card p4-phi raises for that command in every permission mode, so the yes is ezexe's own press and covers the set
+# whole. A copy whose set differs has another id, so a changed set is in force nowhere until ezexe has said yes to
+# it. The key is read from the file alone and has no variable. Nothing in the set lifts a deny rule, and nothing
+# in it touches a credential.
+CARDS_KEY = "phi.cards"
+CARD_TOOLS = ("mcp__p4-phi__note", "mcp__p4-phi__done", "mcp__p4-phi__tree", "mcp__p4-phi__goal",
+              "mcp__p4-temportal__lifetime", "mcp__p4-native__native")
+CARD_SET = (
+    ("tools", "The project's local settings file holds an allow rule for each tool a p4 hooks module declares: "
+              + ", ".join(f"`{t}`" for t in CARD_TOOLS) + "."),
+    ("archive", "Where `phi.upkeep` is on, an entry of `permissions.ask` in that file that is exactly `"
+                + ASK_RULES[0] + "` is taken out, also where p4's record no longer holds it as p4's own."),
+    ("own-branch", "In a session another session started that works in a git worktree of its own, p4-phi's branch "
+                   "guard asks nothing before `git rebase`, `git merge` and `git pull`, which move that worktree's "
+                   "own branch and nothing else."),
+    ("push", "In such a session p4-phi's branch guard asks nothing before `git push` where the session's brief "
+             "tells it to push."),
+    ("refusal", "In a session another session started, every other call a guard of p4-phi raises a card for is "
+                "refused instead, with the reason and the session to ask by SendMessage: a push its brief does not "
+                "tell it to make, a move of a shared checkout to another branch, a hand push or pull of a store, "
+                "and a start p4-phi advises another way."),
+    ("start", "A session another session started is refused a start whose `permission_mode` is of another class "
+              "than its own, since every message between the two would be held, and a start in another folder, "
+              "on another host or in the cloud, which the top session makes in a turn of ezexe's."),
+)
+
+
+def card_set_id():
+    """The name of CARD_SET as this copy has it: ten hex characters of its hash, which `phi.cards` holds while the
+    set is in force."""
+    return hashlib.sha256(json.dumps(CARD_SET, ensure_ascii=False).encode("utf-8")).hexdigest()[:10]
+
+
+def cards_on(p4):
+    """True when ezexe's yes to the set stands for the store `p4`: `phi.cards` in its p4.json is this copy's
+    card_set_id(). The file alone is read, so no variable puts the set in force."""
+    try:
+        return bool(p4) and _get(_load_file(p4, write=False, warn=False), CARDS_KEY) == card_set_id()
+    except Exception:  # noqa: BLE001 — a store that cannot be read has the set off
+        return False
+
+
+def card_tool_rules(p4, phi):
+    """The allow rules of CARD_SET's `tools` that the keeper wants for a store: every tool of CARD_TOOLS where p4-phi
+    runs and the set is in force, none where it does not or the set is off, and None where this copy cannot tell
+    whether p4-phi runs, which leaves the entries as they are."""
+    if phi is None:
+        return None
+    return list(CARD_TOOLS) if phi and cards_on(p4) else []
+
+
+def _adopt_ask(new, rec, name):
+    """CARD_SET's `archive`: an entry of `permissions.ask` that is exactly a rule of ASK_RULES and that the record
+    does not hold becomes p4's own entry, so the keeper, which wants none where `phi.upkeep` is on, takes it out. A
+    store started anew loses the record of the entry p4 wrote, and the entry then stood as a person's."""
+    cur = _get(new, ASK_KEY)
+    if not isinstance(cur, list):
+        return
+    part = rec.setdefault("askRules", {})
+    mine = dict(part.get(name) or {})
+    entries = list(mine.get("entries") or [])
+    found = [r for r in ASK_RULES if r in cur and r not in entries]
+    if found:
+        hand = [h for h in (mine.get("hand") or []) if h not in found]
+        part[name] = {"entries": entries + found, "hand": hand, "gen": mine.get("gen", 0)}
+    elif not part:
+        rec.pop("askRules", None)
+
 
 def _phi_copy():
     """The scripts folder of this copy when it is p4-phi's own, which sits beside phi.py; '' for any other copy."""
@@ -1921,6 +2002,9 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
     _keep_rules(new, rec, name, allow_rules(platform, conf), owned_only)
     phi = phi_on(project, target, platform, rec)        # None: this copy cannot tell, and leaves both rules
     ask = list(ASK_RULES) if phi and not upkeep_on(p4) else []
+    if phi and not ask and not owned_only and cards_on(p4):
+        _adopt_ask(new, rec, name)                      # a leftover entry of p4's own text, taken out below
+    _keep_rules(new, rec, name, card_tool_rules(p4, phi), owned_only, ALLOW_KEY, "toolRules")
     _keep_rules(new, rec, name, None if phi is None else ask, owned_only, ASK_KEY, "askRules")
     _keep_rules(new, rec, name, None if phi is None else list(DENY_RULES) if phi else [], owned_only, DENY_KEY,
                 "denyRules")

@@ -233,26 +233,43 @@ def _args(nxt):
     return args
 
 
+def _lands(exe, nxt, verbs):
+    """What one program's name and the words after it run that lands work, '' for none."""
+    if exe == "git":
+        k = 0
+        while k < len(nxt) and nxt[k].startswith("-") and nxt[k] not in SEPS:
+            k += 2 if nxt[k] in GIT_VALUED else 1
+        if k < len(nxt) and nxt[k].lower() in verbs:
+            return f"git {nxt[k].lower()}"
+    elif exe == "gh" and "merge" in verbs:
+        args = _args(nxt)
+        low = [a.lower() for a in args]
+        if low[:2] == ["pr", "merge"]:
+            return "gh pr merge"
+        if low[:1] == ["api"]:
+            return _gh_api(args[1:])
+    return ""
+
+
 def landing(cmd, verbs=LANDS):
     """What a shell line runs that lands work, '' for none, read as `_scan` reads a line: git or git.exe, by the
     last part of its path, followed past its own options by one of `verbs`; `gh pr merge`; a `gh api` call with a
     method other than GET; or a graphql mutation that names a merge or a ref."""
+    return _scan(cmd, lambda exe, nxt: _lands(exe, nxt, verbs))
+
+
+def landings(cmd, verbs=LANDS):
+    """Every command of a shell line that lands work, in the line's order and each once, as `landing` names it. A
+    line that rebases and then pushes holds both, where `landing` names the first alone."""
+    found = []
+
     def hit(exe, nxt):
-        if exe == "git":
-            k = 0
-            while k < len(nxt) and nxt[k].startswith("-") and nxt[k] not in SEPS:
-                k += 2 if nxt[k] in GIT_VALUED else 1
-            if k < len(nxt) and nxt[k].lower() in verbs:
-                return f"git {nxt[k].lower()}"
-        elif exe == "gh" and "merge" in verbs:
-            args = _args(nxt)
-            low = [a.lower() for a in args]
-            if low[:2] == ["pr", "merge"]:
-                return "gh pr merge"
-            if low[:1] == ["api"]:
-                return _gh_api(args[1:])
-        return ""
-    return _scan(cmd, hit)
+        got = _lands(exe, nxt, verbs)
+        if got and got not in found:
+            found.append(got)
+        return ""                                  # never the scan's answer, so it reads on to the line's end
+    _scan(cmd, hit)
+    return found
 
 
 GH_VALUED = {"-R", "--repo"}                       # gh's options that take the next word as their value

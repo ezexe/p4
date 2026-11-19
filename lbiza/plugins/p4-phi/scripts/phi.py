@@ -67,6 +67,7 @@ import controls  # noqa: E402  a puppeteer filed in the sidebar section, and the
 
 controls.PHI = sys.modules[__name__]
 import upkeep  # noqa: E402  the upkeep of a session tree: archive calls, follow-through, waits and leftovers
+import cards  # noqa: E402  the approval cards that can stop a started session, and what is settled before its start
 
 upkeep.PHI = sys.modules[__name__]
 
@@ -2442,6 +2443,9 @@ def h_user_prompt_submit(payload):
         if declared is not None:                   # the files its brief says it covers, kept and shown on its page
             s["fileSet"] = declared
             RAN["files"] = len(declared)
+    if "pushes" not in s and spawned_from(s) and not load_turns(me.home, s["sessionId"]):
+        s["pushes"] = cards.brief_pushes(payload.get("prompt"))   # its brief, whole: the branch guard reads it
+        RAN["pushes"] = s["pushes"]
     if s.get("doneRetired") or s.get("archived"):
         s["doneRetired"] = s["archived"] = False   # messaged again: a live session once more
         s["reopened"] = now()
@@ -3235,6 +3239,14 @@ def h_start_advice(payload):
     if starts.claim(me.home, inp.get("prompt"), me.id, card=card):
         RAN["claimed"] = "card" if card else True   # a start request's call, given exactly: the asker decided it
         return None
+    mine = load_session(me.home, me.id)
+    parent, on = spawned_from(mine), cards_on(me)
+    if on and parent:                               # the step before a start: nothing left for its session to ask
+        why = cards.before_start(inp, upkeep.mode_of(me.id), parent, issues.lander(me.home, mine))
+        if why:
+            RAN["before_start"] = True
+            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                           "permissionDecisionReason": why}}
     brief = str(inp.get("prompt") or "")
     if brief and NEW_TOP.search(brief):
         mine = load_session(me.home, me.id)
@@ -3253,16 +3265,36 @@ def h_start_advice(payload):
     advised, why, own_tree = relay.advise_start(me.home, me.id, inp, size, apart=fork_apart(here))
     RAN.update(advice=advised, wanted=wanted, transcript=size, own_tree=own_tree)
     if own_tree:                                    # a fresh start of a writer that would share this plain folder
-        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
-                                       "permissionDecisionReason": f"phi (p4-phi) advises `use_worktree: true` "
-                                                                   f"here: {why}."}}
+        return cards.raised(on, parent, f"phi (p4-phi) advises `use_worktree: true` here: {why}.")
     # a fresh start in a worktree of its own is never advised to fork: the start tool's own text says `use_worktree`
     # is "rejected with \"fork\"", and of a fork that "from a plain checkout it shares the folder"
     if advised == wanted or (advised == "fork" and inp.get("use_worktree") is True):
         return None
-    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
-                                   "permissionDecisionReason": f"phi (p4-phi) advises context \"{advised}\" here, "
-                                                               f"not \"{wanted}\": {why}."}}
+    return cards.raised(on, parent, f"phi (p4-phi) advises context \"{advised}\" here, not \"{wanted}\": {why}.")
+
+
+def cards_on(me):
+    """Whether the set of what p4-phi settles with no approval card is in force for this session's project, by
+    p4conf.cards_on: ezexe's yes to the set as this copy has it stands in the store's p4.json."""
+    return p4conf.cards_on(me.store or me.home)
+
+
+def brief_pushes(me, s, payload):
+    """Whether this session's brief tells it to push, as kept at its first message. A session that began before the
+    key existed has none, so its first message is read from its transcript once and kept."""
+    if "pushes" not in s:
+        first = ""
+        for d in read_rows(payload.get("transcript_path") or ""):
+            content = (d.get("message") or {}).get("content") if d.get("type") == "user" else None
+            if isinstance(content, list):
+                content = "\n".join(str(b.get("text") or "") for b in content
+                                    if isinstance(b, dict) and b.get("type") == "text")
+            if isinstance(content, str) and content.strip():
+                first = content
+                break
+        s["pushes"] = cards.brief_pushes(first or s.get("task"))
+        save_session(me.home, s)
+    return s["pushes"] is True
 
 
 QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
@@ -3321,30 +3353,32 @@ def h_branch_guard(payload):
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     if name not in SHELL_TOOLS:
         return None
-    if BRANCH_MOVE.search(QUOTED.sub("''", str(inp.get("command") or ""))) \
-            and not own_checkout(me.home, s, str(payload.get("cwd") or s.get("cwd") or "")):
+    on, parent = cards_on(me), spawned_from(s)
+    own = own_checkout(me.home, s, str(payload.get("cwd") or s.get("cwd") or ""))
+    if BRANCH_MOVE.search(QUOTED.sub("''", str(inp.get("command") or ""))) and not own:
         what = "moving the checkout to another branch, which in a shared checkout moves the parent's too"
     elif issues.landing(inp.get("command")):
-        verb = issues.landing(inp.get("command"))
+        verbs = issues.landings(inp.get("command"))
+        if on and own:                             # the set: a worktree's own branch, and a push its brief names
+            left = [v for v in verbs if v not in cards.OWN_BRANCH
+                    and not (v == "git push" and brief_pushes(me, s, payload))]
+            if not left:
+                RAN["branch_guard"] = "unasked: " + ", ".join(verbs)
+                return None
+            verbs = left
+        verb = verbs[0]
         RAN["branch_guard"] = verb
-        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
-                                       "permissionDecisionReason": f"phi (p4-phi): this session is a child, and `"
-                                                                   f"{verb}` lands work, which only the tree's "
-                                                                   f"orchestrator does: a child that writes works "
-                                                                   f"in its own worktree, commits there on its own "
-                                                                   f"branch and reports, a `Closes #N` commit "
-                                                                   f"included, and the tree's orchestrator merges "
-                                                                   f"and pushes. Ask its parent session, "
-                                                                   f"{spawned_from(s)}, with SendMessage instead."}}
+        return cards.raised(on, parent, f"phi (p4-phi): this session is a child, and `{verb}` lands work, which "
+                                        f"only the tree's orchestrator does: a child that writes works in its own "
+                                        f"worktree, commits there on its own branch and reports, a `Closes #N` "
+                                        f"commit included, and the tree's orchestrator merges and pushes. Ask its "
+                                        f"parent session, {parent}, with SendMessage instead.")
     else:
         return None
     RAN["branch_guard"] = what
-    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
-                                   "permissionDecisionReason": f"phi (p4-phi): this session is a child, and {what} is "
-                                                               f"asked first: this session works in the checkout of "
-                                                               f"the session that started it. A session that writes "
-                                                               f"is started with `use_worktree: true` and moves only "
-                                                               f"its own."}}
+    return cards.raised(on, parent, f"phi (p4-phi): this session is a child, and {what} is asked first: this "
+                                    f"session works in the checkout of the session that started it. A session "
+                                    f"that writes is started with `use_worktree: true` and moves only its own.")
 
 
 STORE_MOVE = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b([^\n|;&]*?)\b(push|pull)(?![\w-])([^\n|;&]*)")
@@ -3404,12 +3438,35 @@ def h_store_guard(payload):
     whose = (f" This session is a child, and the sync is its tree's orchestrator's to run, \"{title}\" `{top}`, the "
              f"one session that lands and pushes: ask that session with SendMessage, and run neither here."
              if top else "")
+    return cards.raised(cards_on(me) if me.home else False, top,
+                        f"phi (p4-phi): this is {what} in the store {store}. A store moves only by `{sync}`, since "
+                        f"two machines write the same files and a plain merge or a line-union damages them. Then "
+                        f"check each entry the sync names as changed.{whose}")
+
+
+def h_cards_guard(payload):
+    """PreToolUse on a shell call that runs `phi.py cards on`: the one approval card the set has. What p4-phi
+    settles with no card is a permission, so the yes is ezexe's own press on Claude Code's card, which a hook's
+    `ask` raises in every permission mode, and the card's text is the set whole. A session another session started
+    is refused the command: the top session brings the set to ezexe."""
+    if str(payload.get("tool_name") or "") not in SHELL_TOOLS:
+        return None
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    if not cards.CARDS_ON.search(str(inp.get("command") or "")):
+        return None
+    me = Me(payload)
+    s = load_session(me.home, me.id) if me.home and me.id else {}
+    RAN["cards_guard"] = True
+    if spawned_from(s):
+        top, title = issues.lander(me.home, s)
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                       "permissionDecisionReason": (
+                                           f"phi (p4-phi): `phi.py cards on` is refused in a session another "
+                                           f"session started. What p4-phi settles with no approval card is "
+                                           f"ezexe's to decide, in the top session \"{title}\" `{top}`: send it "
+                                           f"the set with SendMessage, as `phi.py cards` prints it.")}}
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
-                                   "permissionDecisionReason": f"phi (p4-phi): this is {what} in the store {store}. "
-                                                               f"A store moves only by `{sync}`, since two machines "
-                                                               f"write the same files and a plain merge or a "
-                                                               f"line-union damages them. Then check each entry the "
-                                                               f"sync names as changed.{whose}"}}
+                                   "permissionDecisionReason": cards.approval(me.store or me.home)}}
 
 
 def once(home, sid, kind, payload):
@@ -3653,12 +3710,13 @@ HOOKS = {"session-start": ("SessionStart", h_session_start),
          "start-advice": ("PreToolUse", h_start_advice),
          "branch-guard": ("PreToolUse", h_branch_guard),
          "store-guard": ("PreToolUse", h_store_guard),
+         "cards-guard": ("PreToolUse", h_cards_guard),
          "plan": ("PostToolUse", h_plan),
          "memory-gap": ("PostToolUse", h_memory_gap),
          "task-stop": ("PostToolUse", h_task_stop),
          "self-archive": ("PreToolUse", h_self_archive)}
-ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "store-guard", "plan", "memory-gap",
-                                     "self-archive", "task-stop")})
+ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "store-guard", "cards-guard", "plan",
+                                     "memory-gap", "self-archive", "task-stop")})
 ROUTED["nudge"] = ("PreToolUse", h_nudge)
 ROUTED["puppeteer-tool"] = ("PreToolUse", h_puppeteer_tool)
 ROUTED["wrap-up"] = ("PostToolUse", h_wrap_up)
@@ -3805,7 +3863,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="phi.py: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
-                 "request", "proof", "controls", "gaps", "upkeep", "goal", "app_tools"):
+                 "request", "proof", "controls", "gaps", "upkeep", "goal", "app_tools", "cards"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in, this session's when left out")
         p.add_argument("--session", default="", help="the sessionId, this session's when left out")
@@ -3830,6 +3888,12 @@ def main(argv=None):
                            help="on and off write `app_tools` in the store's phi.json, which is on unless set off "
                                 "and has the hooks module ask the desktop app's own tools for sessions; none "
                                 "prints how the key stands")
+        if name == "cards":
+            p.add_argument("act", nargs="?", default="", choices=("", "on", "off"),
+                           help="on puts the set of what p4-phi settles with no approval card in force for the "
+                                "store, behind one approval card that is ezexe's yes to the set whole; off takes "
+                                "it out; none prints the set, its id, how it stands and every kind of card")
+            p.add_argument("set", nargs="?", default="", help="with on: the id of the set, as `phi.py cards` prints it")
         if name == "detach":
             p.add_argument("moved", nargs="?", default="", help="the session to detach to top level, this one when "
                                                                 "left out")
@@ -3907,6 +3971,20 @@ def main(argv=None):
         if a.cmd == "tree":
             print(tree_text(me.home) or "no sessions yet")
             return 0
+        if a.cmd == "cards":                       # the project's setting, which needs no session
+            store = a.p4 or me.store or me.home
+            if not a.act:
+                for line in cards.text(store):
+                    print(line)
+                return 0
+            if a.act == "on" and spawned_from(load_session(me.home, safe_id(me.id)) if me.id else {}):
+                print("phi: `cards on` is refused in a session another session started: the top session brings "
+                      "the set to ezexe", file=sys.stderr)
+                return 2
+            status, lines = cards.switch(store, a.act == "on", a.set)
+            for line in lines:
+                print(line, file=sys.stderr if status else sys.stdout)
+            return status
         if a.cmd == "upkeep" and a.act in ("on", "off"):   # the project's setting, which needs no session
             store = a.p4 or me.store or me.home
             for line in upkeep.set_on(store, a.act == "on"):

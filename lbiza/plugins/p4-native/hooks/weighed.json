@@ -1058,7 +1058,7 @@
   "/fewer-permission-prompts": {
    "kind": "command",
    "declined": {
-    "p4-phi": "the keeper writes exact allow rules and no wider list.",
+    "p4-phi": "the keeper writes exact allow rules, for `phi.py` and, once ezexe has said yes to the set of `p4conf.CARD_SET`, for each tool a p4 hooks module declares, and no wider list.",
     "p4-temportal": "permissions."
    }
   },
@@ -1974,7 +1974,7 @@
   "PermissionRequest": {
    "kind": "hook",
    "declined": {
-    "p4-phi": "allowing or denying a call in ezexe's place is ezexe's own, and the guard answers earlier, at `tool.check`.",
+    "p4-phi": "allowing or denying a call in ezexe's place is ezexe's own, and the guard answers earlier, at `tool.check`: what is settled with no approval card is the set of `p4conf.CARD_SET`, in force by ezexe's yes alone, as allow rules of the keeper and as the guard's own answers.",
     "p4-temportal": "allowing or denying a call in ezexe's place is ezexe's own to decide.",
     "p4-native": "allowing or denying a call in ezexe's place is ezexe's own to decide."
    }

@@ -221,6 +221,23 @@ Where a step or an item wants a new session on a turn no person began, which the
 Such a worker has no row in the sidebar, no Changes card and no archive, and once its run has ended and its work is on the default branch upkeep names the close of its tab, the unlock of its worktree and their removal.
 The skill page lists what upkeep cannot do, a start on a turn no person began among them.
 
+## Approval cards and a session's start
+
+A session another session started stops on no approval card for work its brief covers, once ezexe has said yes to the set of what p4-phi settles with no card.
+What needs ezexe is settled by the top session before the start, and never by the started session in the middle of its work.
+The page `docs/claude-settings.html`, "Approval cards and a session's start", lists every kind of card, what raises it, and how it is settled before a start or why it stays.
+
+- The set is `p4conf.CARD_SET`, kept in `p4conf.py` and nowhere else: an allow rule for each tool a p4 hooks module declares, the leftover ask rule on the archive tool taken out where `phi.upkeep` is on, a worktree's own branch moved unasked, a push made unasked where the brief tells the session to push, a refusal with the session to ask in place of every other card a guard of p4-phi raised, and a refusal of a start that would leave its session cut off or waiting.
+- It is in force for a store only while `phi.cards` in that store's `p4.json` holds the set's name, which `phi.py cards` prints with the set and every kind of card.
+- `phi.py cards on <id>` puts it in force and `phi.py cards off` takes it out. For the first, p4-phi's guard raises one approval card in every permission mode, with the set whole as its text, so the yes is ezexe's own press in the top session. A session another session started is refused the command.
+- A copy of p4-phi whose set differs has another name, so a changed set is in force nowhere until ezexe has said yes to it.
+- With the set off nothing changes: each guard raises Claude Code's approval card as before.
+
+What Claude Code and the app already do is configured or called.
+The rules are entries of `permissions.allow` in the project's local settings file, which a new session reads at its start, by `permissions.md`.
+The card for the yes is a hook's `ask`, which Claude Code puts to a person in every mode.
+A started session's mode is the start call's own `permission_mode`, left out so that it inherits its starter's, since `cross-session-messaging.md` holds every message between a session that bypasses permission prompts and one that does not.
+
 ## A puppeteer and the sessions it controls
 
 A puppeteer is the orchestrator ezexe files in the sidebar section "puppeteers", which controls the orchestrators of other trees.
@@ -330,6 +347,7 @@ Every key is optional.
 | `tree_checks` | 6 | the read-only checks of its trees, 0 to 100, an orchestrator runs in one work step |
 | `keep_going_max` | 2 | the times, 0 to 7, one turn is sent back while it has open steps, counted together with the turns in a row the hooks module starts for work a wait left unmoved, and the most turns it starts for upkeep until ezexe's own message begins one |
 | `upkeep` | false | true has a session that started others handed their upkeep as acts that wait on nobody, with no ask rule on the archive tool; `phi.py upkeep on` and `off` set it |
+| `cards` | none | the name of the set of what p4-phi settles with no approval card, as `phi.py cards` prints it, which puts that set in force; read from the file alone, with no variable, and written by `phi.py cards on <id>` behind one approval card that is ezexe's yes to the set whole |
 | `watch_s` | 5.0 | the watcher's tick in seconds, 1 to 600 |
 | `stale_s` | 86400.0 | the seconds, 60 to 2,592,000, after which an orchestrator with open work and no turn is stale |
 

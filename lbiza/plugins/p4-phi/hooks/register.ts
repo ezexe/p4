@@ -109,6 +109,10 @@ const GIT_WORD = [
 const LANDS = /push|merge|[^A-Za-z0-9_.-]gh[^A-Za-z0-9_-]|\\[ntr]gh[^A-Za-z0-9_-]/
 // A command started in the background, which phi.py's restart check reads.
 const IN_BACKGROUND = /"run_in_background":\s?true/
+// `phi.py cards on`, which puts in force the set of what p4-phi settles with no approval card: phi.py's guard
+// raises the one approval card the set has, so the yes is ezexe's own. Between the script's name and the word
+// stand the closing quote, as the call's JSON text escapes it, and a space.
+const CARDS_ON = /phi\.py[^A-Za-z0-9]{1,4}cards[^A-Za-z0-9]{1,4}on[^A-Za-z0-9]/
 // Where a store keeps the failure model a plain shell call is checked by, newest layout first, and how long what
 // its first line said is believed: a training round's new model is read within this long.
 const SHELL_MODELS = ['phi/models', 'recall/models', 'models']
@@ -830,6 +834,7 @@ async function isChecked(
   if (!isListed) return false
   if (!isEdit && !isShell) return true
   if (isShell && (GIT_WORD.some(word => word.test(text)) || LANDS.test(text) || IN_BACKGROUND.test(text))) return true
+  if (isShell && CARDS_ON.test(text)) return true
   // A top-level session that owes a nudge, and a puppeteer, whose every edit and shell call phi.py reads.
   if ((await isMarked($, `${phi}/.nudge`, sessionId)) || (await isMarked($, `${phi}/.puppeteers`, sessionId))) return true
 
