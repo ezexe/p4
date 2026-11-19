@@ -1446,6 +1446,22 @@ class NativeCalls(unittest.TestCase):
         for at in named:                           # and none of them names it alone
             self.assertIn("`mcp__ccd_sidebar__list_groups`", source[at:at + 260], source[at:at + 80])
 
+    def test_the_page_of_the_puppeteer_says_the_rule_as_controls_hands_it(self):
+        """The script of docs/puppeteer.html shows the rule a puppeteer is told once. Its function RULE holds the
+        words of controls.RULE as rule_text fills them where `phi.upkeep` is off, with the page's own names for the
+        section, the command, the board and the restated task, so the two tools that answer a section's id stand
+        beside `move_sessions` there too."""
+        page = read(os.path.join(SRC, "..", "..", "..", "..", "docs", "puppeteer.html"))
+        names = {"section": "SECTION", "cmd": "PHI", "board": "boardPath()", "restate": "RESTATE"}
+        text = "phi (p4-phi): " + controls.RULE.format(
+            worker=controls.WORKER_BRIEF, archives=controls.ARCHIVES[0], asks=controls.ARCHIVES[1],
+            **{key: "\x00" + name + "\x00" for key, name in names.items()})
+        parts = text.split("\x00")                 # words and names by turns, joined as the script joins them
+        said = "+".join(part if i % 2 else json.dumps(part, ensure_ascii=False) for i, part in enumerate(parts))
+        self.assertIn("\nfunction RULE(){return " + said + "}\n", page)
+        self.assertIn("`mcp__ccd_sidebar__list_sections` or `mcp__ccd_sidebar__list_groups` answers it, never in", said)
+        self.assertIn('var RESTATE=' + json.dumps(phi.RESTATE) + ";", page)
+
     def test_a_line_that_says_something_waits_on_ezexe_names_the_push_notification(self):
         """PushNotification's text: "Keep the message under 200 characters, one line, no markdown", and the tools
         reference has it send "a desktop notification from a local session"."""
