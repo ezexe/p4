@@ -1,0 +1,57 @@
+name: suite
+
+# A second read of every push to main and of every pull request, on a machine that is not ezexe's: every test of the
+# repository through suite/run.py, then Claude Code's own checks of the catalog and the two plugins.
+# It holds no secret and asks for no token beyond a read of the checkout.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: suite-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  suite:
+    # Windows, where the hook runners are sh scripts that run under Git Bash and four skip marks of p4-phi's tests
+    # let their tests run. On ubuntu-latest four tests of test_relay.py fail, since they name paths by a drive letter.
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Run every test
+        # Git Bash runs the command, as a session's Bash tool does, so one Git Bash lives through the run. Git for
+        # Windows maps /tmp for every sh from the temp folder of the first one alive, and with none alive a hook's sh
+        # can find /tmp in a temp folder a test has since removed, and warn of it on stderr.
+        # suite.json's budget of 10 s is for ezexe's machine. This one is for a hosted runner with 4 logical
+        # processors, where a pass took 113 to 193 s: three times the slowest.
+        shell: bash
+        run: python -X utf8 suite/run.py --budget 600
+      - name: Install Claude Code
+        if: ${{ !cancelled() }}
+        run: |
+          npm install -g @anthropic-ai/claude-code@latest
+          claude --version
+      - name: Validate the catalog
+        if: ${{ !cancelled() }}
+        run: claude plugin validate lbiza --strict
+      - name: Validate p4-phi
+        if: ${{ !cancelled() }}
+        run: claude plugin validate lbiza/plugins/p4-phi --strict
+      - name: Validate p4-temportal
+        if: ${{ !cancelled() }}
+        run: claude plugin validate lbiza/plugins/p4-temportal --strict
+      - name: Test p4-phi's hooks module
+        if: ${{ !cancelled() }}
+        run: claude plugin test lbiza/plugins/p4-phi
+      - name: Test p4-temportal's hooks module
+        if: ${{ !cancelled() }}
+        run: claude plugin test lbiza/plugins/p4-temportal
