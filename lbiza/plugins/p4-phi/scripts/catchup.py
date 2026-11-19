@@ -19,8 +19,9 @@ prints nothing when nothing is behind. Otherwise one `systemMessage` for ezexe, 
 P4_PHI_CATCHUP=0 turns it off.
 
 An installed p4 plugin behind its marketplace, and a former name the marketplace's `renames` map gives, are Claude
-Code's own: marketplace auto-update, once ezexe turns it on for p4-marketplace, updates the installed copies after a
-session starts, and a renamed plugin's settings keys are rewritten by the renames map, by
+Code's own: marketplace auto-update, which is on for p4-marketplace where a settings file sets `autoUpdate` on its
+`extraKnownMarketplaces` entry, as ezexe's user settings do, updates the installed copies after a session starts,
+and a renamed plugin's settings keys are rewritten by the renames map, by
 https://code.claude.com/docs/en/plugins/install.md and https://code.claude.com/docs/en/plugins/host-marketplace.md.
 So are the version folders no install uses: Claude Code marks a previous version when an update or uninstall orphans
 it and removes it 14 days later, by https://code.claude.com/docs/en/plugins/loading.md.
