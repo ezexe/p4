@@ -711,6 +711,71 @@ LEAVE = ("Each is git's own command with no force, and `-d` is never `-D`: where
          "so in one line.")
 
 
+# A session that made no commit has nothing to land, so "every commit of it on the default branch" holds for it
+# with no work behind the words, and "finished" is read off its task list alone. A probe is such a session: it waits
+# for its next step from whoever drives it, and that need not be its starter. On 2026-11-19 the archive of a probe
+# was handed to its starter three times as finished and landed while another session still drove it through a
+# plugin's prompts. So the archive of a session with no commit of its own is handed only while nobody but its
+# starter drives it: its latest turn that somebody's words began was not begun by another live session's message
+# or by the prompt of a plugin other than p4-phi, whose own prompts wake a session and drive none.
+PLUGIN_SAID = re.compile(r"\AThe ([\w.-]+) plugin sent a message:")
+OWN_PLUGIN = "p4-phi"
+
+
+def teller(by, origin, prompt):
+    """Who sent the words that began a turn, kept on the turn's row as `from`: the sending session's id for another
+    session's message, by the wrapper Claude Code puts around it, the plugin's name for a prompt a hooks module
+    submitted, by the origin's `name` or the line Claude Code heads it with, and '' for ezexe's own words and for
+    an event."""
+    if by == "session":
+        import rows
+        return rows.sender_of(prompt)
+    if by == "plugin":
+        m = PLUGIN_SAID.match(str(prompt or "").lstrip())
+        return str((origin or {}).get("name") or (m.group(1) if m else ""))
+    return ""
+
+
+def driver(home, sid, s):
+    """Who but its starter drives a started session, as words for a line, '' for nobody: the sender of its latest
+    turn that somebody's words began, where that is another live session of the tree or a plugin other than
+    p4-phi."""
+    starter = relay._parent(s)
+    for r in reversed(relay._rows(os.path.join(relay._dir(home, sid), "turns.jsonl"))):
+        by = r.get("by")
+        if by == "plugin":
+            m = PLUGIN_SAID.match(str(r.get("prompt") or "").lstrip())
+            name = str(r.get("from") or (m.group(1) if m else ""))
+            if name == OWN_PLUGIN:
+                continue                           # p4-phi's own wake: the turn before says who drives it
+            return f"the plugin {name}" if name else ""
+        if by == "session":
+            sender = str(r.get("from") or "")
+            other = relay._session(home, sender) if sender and sender != starter else {}
+            live = bool(other) and not other.get("archived") and not relay.archived_in_app(other)
+            return f"\"{title(sender, other)}\" `{sender}`" if live else ""
+        if by == "user":
+            return ""
+    return ""
+
+
+def made_commits(trees):
+    """True when a session made a commit of its own, so that its work can be read as landed or not: in a worktree
+    of its own the reflog of `HEAD` holds more than the commit the worktree was made at, and in a checkout it
+    shares its first and latest turn read different heads. A worktree that is gone, or that git cannot read, counts
+    as one with work in it."""
+    for t in trees:
+        if not t["there"]:
+            return True
+        if t["linked"]:
+            log = _out(t["path"], "reflog", "show", "--format=%H", "HEAD")
+            if log is None or len(set(log.split())) != 1:
+                return True
+        elif t.get("first") and t.get("last") and t["first"] != t["last"]:
+            return True
+    return False
+
+
 def archive_acts(home, s, d, hand):
     out, sid = [], s["sessionId"]
     told = unread(home, s)
@@ -719,6 +784,8 @@ def archive_acts(home, s, d, hand):
         if k in told or not finished(home, k, ks) or PHI.puppeteer.held_tasks(home, k):
             continue
         ok, why, trees = landing(home, k, ks)
+        if ok and not made_commits(trees) and driver(home, k, ks):
+            continue                               # nothing of it to land, and another still drives it
         name = f"\"{title(k, ks)}\" `{k}`"
         if not ok:
             flows = relay.push_workflows(t["path"] for t in trees if t["there"])

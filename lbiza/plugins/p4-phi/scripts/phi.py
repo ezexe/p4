@@ -2423,12 +2423,14 @@ def h_user_prompt_submit(payload):
     if not load_turns(me.home, s["sessionId"]) and puppeteer.arrived(s, payload.get("prompt")):
         RAN["drafted"] = s.get("draft")             # its start draft
     # whose words the prompt is, by the origin Claude Code stamped on it, which the hooks module kept for this hook
-    by = rows.whose(rows.origin_of(payload, session_dir(me.home, s["sessionId"])))
+    origin = rows.origin_of(payload, session_dir(me.home, s["sessionId"]))
+    by = rows.whose(origin)
     RAN["origin"] = by
     req = request_of(payload.get("prompt"), by)
     s["turnBy"] = "session" if by == "session" else "user" if req or by == "user" else (
         "session" if from_peer(payload.get("prompt"), by) else "event")
     s["toldBy"] = by                               # '' where the origin did not say and the text's opening told
+    s["toldFrom"] = upkeep.teller(by, origin, payload.get("prompt"))   # the session or the plugin that sent them
     s.pop("waitEnded", None)                       # the wait the turn before ended on: this turn's end says anew
     if not plans.woken(payload.get("prompt")):
         s.pop("woke", None)                        # a turn no wake started: the hooks module's count starts over
@@ -2667,6 +2669,8 @@ def h_stop(payload):
         row["done"] = clean(done["text"])[:400]
     if s.get("toldBy"):
         row["by"] = s["toldBy"]                    # whose words began the turn, where the prompt's origin said
+        if s.get("toldFrom"):
+            row["from"] = s["toldFrom"]            # and who sent them, which upkeep reads before an archive
     if UPKEEP and spawned_from(s):                 # the row keeps a report cut to REPORT_CHARS, and a list of what
         left = upkeep.left_of(report if isinstance(report, str) else "")   # is left often ends a long one
         if left:

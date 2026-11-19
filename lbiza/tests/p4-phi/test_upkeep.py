@@ -207,6 +207,61 @@ class Archive(Base):
         self.t.say(KID, "One more thing: check the empty table.")       # a turn of it runs again
         self.assertEqual(self.lines(self.said(), "archive:"), [])
 
+    def test_a_session_with_no_commit_that_another_still_drives_is_not_named(self):
+        """A session that made no commit has nothing to land, so "finished and landed" holds for it with no work
+        behind the words. On 2026-11-19 the archive of a probe was handed to its starter three times while another
+        session still drove it through a plugin's prompts. Its archive is handed only while nobody but its starter
+        drives it: not after a turn the prompt of a plugin other than p4-phi began, nor after one another live
+        session's message began. p4-phi's own wake drives nobody, the starter's own message makes it the starter's
+        again, and a session with a commit of its own is named whoever drives it."""
+        self.turn_on()
+
+        def turn(prompt, origin, uuid, host=KID):
+            write(os.path.join(self.t.dir(host), "origin.json"), json.dumps({"promptId": uuid, **origin}))
+            r = self.t.hook("user-prompt-submit", host, {"hook_event_name": "UserPromptSubmit", "prompt": prompt,
+                                                         "prompt_id": uuid})
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(self.t.cli(host, "done", "the step ran").returncode, 0)
+            self.t.stop(host, prompt, report="The step ran.", uuid=uuid)
+
+        self.finish(report="Ready, and nothing is committed.")
+        self.assertEqual(len(self.lines(self.said(), "archive:")), 1, "no commit and nobody else: named as before")
+        turn("The z-card-probe plugin sent a message:\nWrite your plan.", {"kind": "plugin", "name": "z-card-probe"},
+             "p1")
+        self.assertEqual(self.t.turns(KID)[-1].get("from"), "z-card-probe", "the sender is kept on the turn's row")
+        self.assertEqual(upkeep.driver(self.t.p4, KID, self.t.session(KID)), "the plugin z-card-probe")
+        self.assertEqual(self.lines(self.said(), "archive:"), [], "another plugin's prompt drives it")
+        turn("The p4-phi plugin sent a message:\nphi (p4-phi): a step is due.", {"kind": "plugin", "name": "p4-phi"},
+             "p2")
+        self.assertEqual(self.lines(self.said(), "archive:"), [], "p4-phi's own wake changes nothing of who drives it")
+        self.t.record(KID2, TOP, KID2_TITLE)
+        self.t.say(KID2, handed(BRIEF))
+        peer = f"<cross-session-message from=\"{KID2}\" from-name=\"a sibling\">One more step.</cross-session-message>"
+        turn(peer, {"kind": "peer"}, "p3")
+        self.assertEqual(self.t.turns(KID)[-1].get("from"), KID2)
+        self.assertIn(KID2, upkeep.driver(self.t.p4, KID, self.t.session(KID)))
+        self.assertEqual(self.lines(self.said(), "archive:"), [], "a live sibling drives it")
+        mine = f"<cross-session-message from=\"{TOP}\" from-name=\"top\">Thank you, that is all.</cross-session-message>"
+        turn(mine, {"kind": "peer"}, "p4")
+        self.assertEqual(upkeep.driver(self.t.p4, KID, self.t.session(KID)), "")
+        named = self.lines(self.said(), "archive:")
+        self.assertEqual(len(named), 1, "its starter's own message makes it the starter's again")
+        self.assertIn(f"`{KID}`", named[0])
+
+    def test_a_session_with_a_commit_of_its_own_is_named_whoever_drives_it(self):
+        self.turn_on()
+        self.commit()
+        self.finish(report="The last row is written now.")
+        write(os.path.join(self.t.dir(KID), "origin.json"), json.dumps({"promptId": "p1", "kind": "plugin",
+                                                                       "name": "z-card-probe"}))
+        said = "The z-card-probe plugin sent a message:\nSay what you pushed."
+        self.t.hook("user-prompt-submit", KID, {"hook_event_name": "UserPromptSubmit", "prompt": said,
+                                                "prompt_id": "p1"})
+        self.assertEqual(self.t.cli(KID, "done", "ran the push again and it passed").returncode, 0)
+        self.t.stop(KID, said, report="The fix is pushed.", uuid="p1")
+        self.assertTrue(upkeep.made_commits(upkeep.trees_of(self.t.p4, KID, self.t.session(KID))))
+        self.assertEqual(len(self.lines(self.said(), "archive:")), 1, "its work is on the default branch: named")
+
     def test_the_call_is_handed_three_times_and_then_left(self):
         self.turn_on()
         self.commit()
