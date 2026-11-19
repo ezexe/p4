@@ -15,6 +15,8 @@
 // no shell line. And it is a pane beside the chat, which no command hook can draw: a puppeteer's board, the ledger
 // of ezexe's requests and an orchestrator's ledger of its sessions, as python wrote them into the session's
 // folder, opened by the command `/phi-pane` and read anew after each look while it is open.
+// And where a project turns `app_tools` on it asks the desktop app's own tools for the session and the sessions
+// linked to it, which no command hook can call, and keeps the answers for python.
 
 import { atom, read, update } from 'claude-code'
 import type {
@@ -160,13 +162,28 @@ const PAGE_CHARS = 24_000
 // what another version of this module stored, which outlives a reload.
 const shown = atom({ plugin: 'p4-phi', key: 'pages' } as const, [], { shape: 'pages-1' })
 
+// The desktop app's own tools for sessions, which a session of the app has and no other session does. Where a
+// store's phi.json turns `app_tools` on, the module asks them what phi.py otherwise reads from the app's record
+// files, which no docs page describes, and keeps the answers in this file for python: phi.APP_FILE. `get_session`
+// answers this session, and `list_sessions` the sessions linked to it, the archived ones too.
+const APP_FILE = 'app.json'
+const APP_SELF = 'mcp__ccd_session_mgmt__get_session'
+const APP_LIST = 'mcp__ccd_session_mgmt__list_sessions'
+// The most sessions one answer lists, the least time between two rounds of calls, and how long one call is waited
+// for. Python believes the file for phi.APP_FRESH_S, which is longer than the time between two rounds.
+const APP_MOST = 100
+const APP_MS = 60_000
+const APP_CALL_MS = 5_000
+
 // What `phi.py look` prints, as puppeteer.look answers it: the times are seconds. `starter` is the session that
 // started this one, as the address `$.session.send` takes, and `move` the prompt that starts a turn here. `upkeep`
 // is the prompt of a turn for the upkeep of the sessions this one started, answered only where a project turns
 // `phi.upkeep` on, every one of those sessions is idle and python's count of such turns is inside its budget.
 // `rules` is what `phi.py rules` prints alone: the text of the system prompt's section. `goal` is the condition of
 // the native goal this session is to be given, answered once and only where a store's phi.json turns `goal` on.
+// `app_tools` is true where that file turns `app_tools` on: the app's own tools are asked after such a look.
 type Answer = {
+  app_tools?: boolean
   rules?: string
   dir?: string
   starter?: string
@@ -239,6 +256,12 @@ let shellModel: { at: number; isWeighted: boolean } | undefined
 // `$.state`, as JSON: the same pages write nothing, so they draw nothing.
 let isPaneOpen = false
 let paged: string | undefined
+
+// The app's own tools: one of them rejected or refused a call, so none is called again while the module lives.
+// The calls not yet settled, since a call given up on can still be running, and when the last round began.
+let isAppAbsent = false
+let appFlying = 0
+let appAt = Number.NEGATIVE_INFINITY
 
 // What was said to the debug log, each line once.
 const said = new Set<string>()
@@ -464,6 +487,8 @@ async function look($: EngineInterface, isEvent: boolean): Promise<void> {
     const prompt = answer?.move || answer?.upkeep
     if (answer?.goal) setGoal($, answer.goal)
     else if (prompt) wake($, prompt)
+    // The app's own tools are asked after a look that starts no turn, where the store turns them on.
+    if (answer?.app_tools === true && !answer.goal && !prompt) void askApp($)
     arm($, dueAfter() - ((await $.clock.now()) - now))
   } catch (error) {
     note($, `the watcher's timer failed: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
@@ -943,6 +968,92 @@ async function spawnBound($: EngineInterface, agentId: string): Promise<void> {
     await spawned.get(agentId)
   } catch (error) {
     note($, `a subagent's start was not held: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
+  }
+}
+
+// What a tool of the app answered, as the JSON it printed: the text the model would read, else the tool's own
+// result, whether a text or text blocks. Nothing for an error, or for an answer that is no JSON object or list.
+function answered(out: ToolCallResult): unknown {
+  if (out.deny !== undefined || out.isError === true) return undefined
+  const result: unknown = out.result
+  const blocks = Array.isArray(result) ? result.map(block => String((block as { text?: unknown })?.text ?? '')) : []
+  for (const text of [out.text, typeof result === 'string' ? result : undefined, blocks.join('')]) {
+    try {
+      const parsed: unknown = JSON.parse(text ?? '')
+      if (typeof parsed === 'object' && parsed !== null) return parsed
+    } catch {
+      // no JSON: the next form
+    }
+  }
+
+  return undefined
+}
+
+// One call of a tool of the app, through `$.tool.call`: the session's hooks and its permission check run for it,
+// with no dialog. A session the app did not start has no such tool, and the call rejects: from then on none is
+// called again. So it is after a refusal, as of a session off the person's machine. A call that outlasts its wait
+// is given up on, and answers nothing.
+async function appCall($: EngineInterface, tool: string, input: Record<string, unknown>): Promise<unknown> {
+  let wait: Timer | undefined
+  const isLate = new Promise<'late'>(resolve => {
+    wait = $.clock.after(APP_CALL_MS, () => resolve('late'))
+  })
+  appFlying += 1
+  const call = $.tool.call({ ...input, tool } as never).finally(() => {
+    appFlying -= 1
+  })
+  try {
+    const out = await Promise.race([call, isLate])
+    if (out === 'late') {
+      note($, `${tool} did not answer in ${APP_CALL_MS} ms`)
+
+      return undefined
+    }
+    if (out.deny !== undefined) {
+      isAppAbsent = true
+      note($, `${tool} was refused, so the app's tools are not asked again: ${out.deny.slice(0, 200)}`)
+    }
+
+    return answered(out)
+  } catch (error) {
+    isAppAbsent = true
+    note($, `${tool} is no tool of this session: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
+
+    return undefined
+  } finally {
+    wait?.cancel()
+  }
+}
+
+// Where the app's answers are kept for python: beside a prompt's origin, in the session's folder under the store's
+// served folder, rows.origin_dir in python, which phi.py finds by the session's id before it knows the tree's
+// store, and in the session's folder in the tree's store for a project that has none.
+async function appFile($: EngineInterface, sessionId: string): Promise<string | undefined> {
+  const models = `${slashed(await $.session.root())}/${MODELS}`
+  if (await $.fs.exists(models)) return `${models}/served/start-${named(sessionId)}/${APP_FILE}`
+
+  return folder === undefined ? undefined : `${folder}/${APP_FILE}`
+}
+
+// One round of calls after a look that answered `app_tools`: this session as the app holds it, and the sessions
+// linked to it, written as the tools answered them. No round runs while a turn of the main conversation does, nor
+// within a minute of the last, nor while a call of an earlier round has not settled. Nothing waits on it.
+async function askApp($: EngineInterface): Promise<void> {
+  try {
+    if (isAppAbsent || isInTurn || appFlying > 0) return
+    const now = await $.clock.now()
+    if (now - appAt < APP_MS) return
+    appAt = now
+    const file = await appFile($, await $.session.id())
+    if (file === undefined) return
+    const own = await appCall($, APP_SELF, { session_id: 'self' })
+    const linked = isAppAbsent
+      ? undefined
+      : await appCall($, APP_LIST, { linked: true, include_archived: true, limit: APP_MOST })
+    if (own === undefined && linked === undefined) return
+    await $.fs.write(file, `${JSON.stringify({ at: now, self: own, sessions: linked })}\n`)
+  } catch (error) {
+    note($, `the app's tools were not asked: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
   }
 }
 

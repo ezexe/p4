@@ -76,6 +76,7 @@ TURNS = True
 BOOK = True
 RULES = True
 GOAL = False                     # phi.json `goal`: true has a worker's line `Done looks like:` set as its native goal
+APP_TOOLS = False                # phi.json `app_tools`: true has the hooks module ask the app's own tools for sessions
 # hooks.md, "JSON output": "A hook's `additionalContext`, `systemMessage`, and `initialUserMessage` strings, and its
 # plain stdout, are capped at 10,000 characters", each string "measured separately", and over the limit "Claude Code
 # saves the output to a file in the session directory. It replaces the output with the file path and a preview of up
@@ -105,7 +106,7 @@ WAIT_S = 2.0                     # how long a handed-over first message waits fo
 SCAN_RECORDS = 60                # the newest records searched for a CLI session id, when the host id is missing
 SETTINGS = {"background": "BACKGROUND", "reports": "REPORTS", "turns": "TURNS", "book": "BOOK",
             "rules": "RULES", "background_chars": "BACKGROUND_CHARS", "reports_chars": "REPORTS_CHARS", "wait_s": "WAIT_S",
-            "goal": "GOAL"}
+            "goal": "GOAL", "app_tools": "APP_TOOLS"}
 SHELL_TOOLS = ("Bash", "PowerShell")
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 LOOKING = frozenset("""cat head tail sed grep rg ls find wc awk echo cd for printf date sleep tr file which where test
@@ -240,6 +241,8 @@ def configure(home):
         globals()["RULES"] = os.environ["P4_PHI_RULES"] == "1"
     if os.environ.get("P4_PHI_GOAL") in ("0", "1"):
         globals()["GOAL"] = os.environ["P4_PHI_GOAL"] == "1"
+    if os.environ.get("P4_PHI_APP_TOOLS") in ("0", "1"):
+        globals()["APP_TOOLS"] = os.environ["P4_PHI_APP_TOOLS"] == "1"
     if "book" not in d and isinstance(d.get("new_task"), bool):   # the key's name before book, read as an alias
         globals()["BOOK"] = d["new_task"]
     for name in ("P4_PHI_BOOK", "P4_PHI_NEW_TASK"):  # P4_PHI_BOOK first; the older name as its alias
@@ -278,16 +281,113 @@ def app_roots():
     return out
 
 
+# --- the app's own tools for sessions, asked by the hooks module -----------------------------------------------------
+#
+# The record files below are the desktop app's own, and no docs page describes them. The app has tools that answer a
+# session, `mcp__ccd_session_mgmt__get_session` and `mcp__ccd_session_mgmt__list_sessions`, which a command hook
+# cannot call and the plugin's hooks module can, by `$.tool.call`. Where phi.json turns `app_tools` on, the module
+# asks both after a look and writes what they answered to APP_FILE: `self`, the session's own answer, and
+# `sessions`, the sessions linked to it. A session is read from that file first, and from its record file where the
+# file is absent, older than APP_FRESH_S or does not hold the session: a session the app did not start has no such
+# tool, as a `claude -p` run or a terminal worker, and a hook can run before the module's first look.
+#
+# The tools answer less than a record holds, so AppRow answers a key the tools gave and reads the record file, once,
+# for any other. They name no CLI session, so `cliSessionId` and `lastAssistantCliSessionId`, which own_host and
+# own_clis read, are the record's. APP_SAME are the keys both give under one name, and `parentSessionId` of
+# `get_session` and `startedBy` of `list_sessions` are the record's `spawnedFrom.sessionId`. Held against the record
+# files of this machine, the starter 186 answers of `get_session` and 936 rows of `list_sessions` named was the
+# record's in each. An answer that names no starter leaves `spawnedFrom` to the record: a row of `list_sessions`
+# names none for a session moved to top level, where the record still does, in 170 rows, and started_by waits on
+# the record of a session just started, which the app writes its starter into after the session's first hook.
+# `worktreePath` differed in 11 answers of 13 and is left to the record too.
+APP_FILE = "app.json"            # in rows.origin_dir of the CLI session, else in the session's folder in the tree's store
+APP_FRESH_S = 300.0              # how long the file is believed after the module wrote it
+APP_SAME = ("sessionId", "title", "cwd", "originCwd", "isArchived", "permissionMode", "branch")
+APP_AT = {"cli": "", "project": "", "folder": ""}   # whose file is read: Me sets it, and the environment says it before
+ANSWERS = {}                     # APP_FILE's path -> (each session it holds by its id, the id of `self`), read once a process
+
+
+class AppRow(dict):
+    """A session as the app's tools answered it, under the names its record file gives the same things. A key the
+    tools did not answer is read from the record file, which is opened once and only then."""
+
+    def __init__(self, sid, given):
+        super().__init__(given)
+        self.sid, self.rest = sid, None
+
+    def record(self):
+        if self.rest is None:
+            self.rest = read_record(safe_id(self.sid) + ".json")
+        return self.rest
+
+    def get(self, key, default=None):
+        return dict.get(self, key, default) if dict.__contains__(self, key) else self.record().get(key, default)
+
+    def __missing__(self, key):
+        return self.record()[key]
+
+    def __contains__(self, key):
+        return dict.__contains__(self, key) or key in self.record()
+
+
+def from_tools(row):
+    """A tool's answer of one session under its record's names. An answer with no starter says nothing of one."""
+    out = {k: row[k] for k in APP_SAME if row.get(k) is not None}
+    above = row.get("parentSessionId") or row.get("startedBy")
+    if above:
+        out["spawnedFrom"] = {"sessionId": above, **({"name": row["name"]} if row.get("name") else {})}
+    return out
+
+
+def app_files():
+    """Where the hooks module may have written the app's answers for this process's CLI session."""
+    cli = APP_AT["cli"] or os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
+    project = APP_AT["project"] or os.environ.get("CLAUDE_PROJECT_DIR") or ""
+    served = rows.origin_dir(project, cli) if cli else ""
+    return [os.path.join(d, APP_FILE) for d in (served, APP_AT["folder"]) if d]
+
+
+def app_answers():
+    """What the app's tools answered the hooks module, from the first file that is there and fresh: each session it
+    holds by its id, as the tool gave it, and the id of the session the file is of. ({}, '') where no such file
+    is."""
+    for path in app_files():
+        if path not in ANSWERS:
+            held, own = {}, ""
+            try:
+                fresh = 0 <= time.time() - os.path.getmtime(path) <= APP_FRESH_S
+            except OSError:
+                fresh = False
+            d = read_json(path) if fresh else {}
+            mine = d.get("self") if isinstance(d.get("self"), dict) else {}
+            for row in [mine] + [r for r in (d.get("sessions") if isinstance(d.get("sessions"), list) else [])
+                                 if isinstance(r, dict)]:
+                sid = str(row.get("sessionId") or "")
+                if sid.startswith("local_") and sid not in held:
+                    held[sid] = row
+            ANSWERS[path] = (held, str(mine.get("sessionId") or "") if mine.get("sessionId") in held else "")
+        if ANSWERS[path][0]:
+            return ANSWERS[path]
+    return {}, ""
+
+
+def app_answer(sid):
+    """A session as the app's tools answered it, an AppRow, or None where the module left no fresh answer of it."""
+    row = app_answers()[0].get(str(sid or ""))
+    return AppRow(sid, from_tools(row)) if row else None
+
+
 RECORDS = {}
 
 
 def app_record(sid):
-    """The app's record of a session, {} when there is none to read. Read once a process."""
+    """The app's record of a session, {} when there is none to read: what the app's tools answered the hooks module
+    of it, where they did, else its record file. Read once a process."""
     name = safe_id(sid) + ".json"
     if not sid or not name.startswith("local_"):
         return {}
     if sid not in RECORDS:
-        RECORDS[sid] = read_record(name)
+        RECORDS[sid] = app_answer(sid) or read_record(name)
     return RECORDS[sid]
 
 
@@ -336,6 +436,10 @@ def record_of_cli(cli):
     newest records are searched."""
     if not cli:
         return {}
+    if cli == (APP_AT["cli"] or os.environ.get("CLAUDE_CODE_SESSION_ID") or ""):
+        own = app_answers()[1]                     # the module of this CLI session asked the app which session it is
+        if own:
+            return app_record(own)
     for root in app_roots():
         files = glob.glob(os.path.join(root, "*", "*", "local_*.json"))
         try:
@@ -403,6 +507,8 @@ class Me:
         payload = payload or {}
         self.hint = ""
         self.cli = str(payload.get("session_id") or os.environ.get("CLAUDE_CODE_SESSION_ID") or "")
+        APP_AT.update(cli=self.cli, folder="",       # whose answers of the app's tools app_record reads first
+                      project=os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd())
         self.title = clean(payload.get("session_title"))[:120]
         host = (os.environ.get("CLAUDE_CODE_HOST_SESSION_ID") or "") if host is None else host
         # A CLI id equal to the host id without "local_" is normal: the app gives many workers that pair of
@@ -423,6 +529,8 @@ class Me:
                 self.home = own_store(self.rec, self.id, project) or self.home
             self.home, self.home_missing = relay.tree_home(self.home)   # a shared store, when p4.json names one
         self.store = self.store or self.home
+        if self.home and self.id and not session:  # where the module writes them for a project with no store
+            APP_AT["folder"] = session_dir(self.home, self.id)
         if self.title and self.id:
             GIVEN_TITLES[self.id] = self.title
         if host and not session and not own_host(self, host, payload):
@@ -446,6 +554,8 @@ def own_host(me, host, payload):
     cli = me.cli
     if not cli or safe_id(host) == "local_" + cli:
         return True
+    if me.home and cli in (load_session(me.home, host).get("cliSessionIds") or []):
+        return True                                # phi's own record answers before the app's record file is opened
     named = {str(me.rec.get(k) or "") for k in ("cliSessionId", "lastAssistantCliSessionId")} - {""}
     if not named or cli in named:
         return True
@@ -609,7 +719,7 @@ def ensure_session(home, sid, rec=None, cli="", depth=0, hint=""):
     if GIVEN_TITLES.get(sid) and not s.get("title"):   # no app record titled it: the hook's session_title
         s["title"] = GIVEN_TITLES[sid]
         changed = True
-    for c in own_clis(sid, rec, cli):
+    for c in ([] if cli and cli in (s.get("cliSessionIds") or []) else own_clis(sid, rec, cli)):   # held already: no read
         if c not in s.setdefault("cliSessionIds", []):
             s["cliSessionIds"].append(c)
             changed = True
@@ -2786,12 +2896,14 @@ def goal_verdict(home, sid):
 
 
 def goal_look(a, me):
-    """`phi.py look` where phi.json turns `goal` on: puppeteer.look's answer, and with it `goal`, the condition the
-    hooks module sets as the session's native goal, where one is due. The verdict of a goal already set is read
-    first, at every look."""
+    """`phi.py look` where phi.json turns `goal` or `app_tools` on: puppeteer.look's answer, and with it `goal`, the
+    condition the hooks module sets as the session's native goal, where one is due, and `app_tools`, which has the
+    module ask the app's own tools for sessions. The verdict of a goal already set is read first, at every look."""
     out = puppeteer.look(me.home, me.id, net=a.net, folder_only=False)
     due = ""
-    if not out.get("off"):
+    if APP_TOOLS and not out.get("off"):
+        out["app_tools"] = True
+    if GOAL and not out.get("off"):
         try:
             goal_verdict(me.home, safe_id(me.id))
             due = goal_due(me.home, safe_id(me.id))
@@ -3641,7 +3753,7 @@ def main(argv=None):
         return 2
     configure(me.home)
     try:
-        if a.cmd == "look" and GOAL and not a.folder:   # a worker's native goal rides the answer of its look
+        if a.cmd == "look" and (GOAL or APP_TOOLS) and not a.folder:   # a worker's native goal rides its look's answer
             return goal_look(a, me)
         if a.cmd == "goal":                        # ahead of ensure_session: it makes no session's folder either
             if a.act in ("on", "off"):             # the project's setting, which needs no session

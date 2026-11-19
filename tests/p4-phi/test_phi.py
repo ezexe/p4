@@ -2488,5 +2488,139 @@ class ToolCommands(unittest.TestCase):
         self.assertIn(TOP, r.stdout)
 
 
+class AppTools(unittest.TestCase):
+    """Where phi.json turns `app_tools` on, the plugin's hooks module asks the desktop app's own tools for sessions,
+    `get_session` and `list_sessions`, and leaves what they answered in app.json. A session is read from that file
+    first, and from the app's record file, which no docs page describes, where the file is absent, stale or does not
+    hold the session, and for a key the tools do not answer. With the setting off no look asks for the tools."""
+
+    ON = {"P4_PHI_APP_TOOLS": "1"}
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP, title="top")
+        self.t.say(TOP, TASK)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def answers(self, host, own=None, linked=None, age=0.0, folder=""):
+        """What the module writes for the CLI session of `host`: the answer of `get_session` for the session itself
+        and the rows of `list_sessions`, in the store's served folder, or in `folder`."""
+        if not folder:
+            os.makedirs(phi.p4conf.sub(self.t.p4, "models"), exist_ok=True)
+            folder = phi.rows.origin_dir(self.t.proj, CLI[host])
+        path = os.path.join(folder, phi.APP_FILE)
+        d = {"at": 0, **({"self": own} if own else {}), **({"sessions": linked} if linked is not None else {})}
+        write(path, json.dumps(d) + "\n")
+        if age:
+            os.utime(path, (time.time() - age, time.time() - age))
+        return path
+
+    def read(self, host, sid, key):
+        """One key of the app's record of `sid`, as a process of the session `host` reads it."""
+        code = "import json, sys, phi\nme = phi.Me()\nprint(json.dumps(phi.app_record(sys.argv[1]).get(sys.argv[2])))"
+        r = subprocess.run([sys.executable, "-I", "-X", "utf8", "-c", "import sys\nsys.path.insert(0, sys.argv.pop(1))\n"
+                            + code, SRC, sid, key], capture_output=True, text=True, env=self.t.env(host),
+                           cwd=self.t.proj, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout.strip().splitlines()[-1])
+
+    def look(self, *args, **env):
+        r = inproc.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "look", *args],
+                       capture_output=True, text=True, cwd=self.t.proj, timeout=60,
+                       env=self.t.env(TOP, P4_PHI_WATCH="1", P4_PHI_WATCH_NET="0", **env))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout.strip().splitlines()[-1])
+
+    def test_a_look_asks_for_the_tools_only_where_the_setting_is_on(self):
+        self.assertNotIn("app_tools", self.look())
+        self.assertIs(self.look(**self.ON).get("app_tools"), True)
+        self.assertNotIn("app_tools", self.look("--folder", **self.ON), "the folder question asks for nothing")
+        write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"app_tools": True}))
+        self.assertIs(self.look().get("app_tools"), True)
+        self.assertNotIn("app_tools", self.look(P4_PHI_APP_TOOLS="0"))
+        self.assertIs(phi.APP_TOOLS, False, "off unless a project turns it on")
+
+    def test_a_session_is_read_from_the_tools_answer_and_the_rest_from_its_record(self):
+        self.t.record(KID, TOP, title="the record's title")
+        self.answers(KID, own={"sessionId": KID, "title": "the tool's title", "cwd": self.t.proj,
+                               "originCwd": self.t.proj, "isArchived": False, "parentSessionId": TOP,
+                               "detached": False, "group": None, "worktreePath": "elsewhere"})
+        self.assertEqual(self.read(KID, KID, "title"), "the tool's title")
+        self.assertEqual(self.read(KID, KID, "spawnedFrom"), {"sessionId": TOP})
+        self.assertEqual(self.read(KID, KID, "cliSessionId"), CLI[KID], "the tools name no CLI session")
+        self.assertEqual(self.read(KID, KID, "startChain"), {"firstSessionId": TOP, "depth": 1})
+        self.assertIsNone(self.read(KID, KID, "worktreePath"), "not the tool's, which differs from the record's")
+        self.assertEqual(self.read(KID, TOP, "title"), "top", "a session the file does not hold is its record's")
+
+    def test_a_session_with_no_record_file_is_served_by_the_tools_alone(self):
+        self.answers(TOP, own={"sessionId": TOP, "title": "top", "cwd": self.t.proj},
+                     linked=[{"sessionId": KID, "title": "port the flush", "cwd": self.t.proj, "isArchived": True,
+                              "startedBy": TOP, "name": "flush"}])
+        self.assertEqual(self.read(TOP, KID, "title"), "port the flush")
+        self.assertEqual(self.read(TOP, KID, "spawnedFrom"), {"sessionId": TOP, "name": "flush"})
+        self.assertIs(self.read(TOP, KID, "isArchived"), True)
+        self.assertIsNone(self.read(TOP, KID, "cliSessionId"))
+
+    def test_an_answer_with_no_starter_leaves_the_starter_to_the_record(self):
+        """`list_sessions` names no starter for a session moved to top level, where its record still does, and the
+        app writes a new session's starter into its record after the session's first hook."""
+        self.t.record(KID, TOP)
+        self.t.record(KID2, TOP)
+        self.answers(KID2, own={"sessionId": KID2, "title": "just started", "cwd": self.t.proj},
+                     linked=[{"sessionId": KID, "title": "moved to top level", "cwd": self.t.proj}])
+        self.assertEqual(self.read(KID2, KID, "title"), "moved to top level")
+        self.assertEqual((self.read(KID2, KID, "spawnedFrom") or {}).get("sessionId"), TOP)
+        self.assertEqual((self.read(KID2, KID2, "spawnedFrom") or {}).get("sessionId"), TOP)
+
+    def test_a_stale_file_and_another_sessions_file_are_not_read(self):
+        self.t.record(KID, TOP, title="the record's title")
+        path = self.answers(KID, own={"sessionId": KID, "title": "the tool's title"}, age=phi.APP_FRESH_S + 60)
+        self.assertEqual(self.read(KID, KID, "title"), "the record's title", "older than the file is believed")
+        os.utime(path)
+        self.assertEqual(self.read(KID, KID, "title"), "the tool's title")
+        self.assertEqual(self.read(TOP, KID, "title"), "the record's title", "the file of another CLI session")
+
+    def test_a_project_with_no_served_folder_reads_the_file_in_the_session_folder(self):
+        self.t.record(KID, TOP, title="the record's title")
+        self.t.say(KID, BRIEF)
+        self.answers(KID, own={"sessionId": KID, "title": "the tool's title", "parentSessionId": TOP},
+                     linked=[{"sessionId": KID2, "title": "a sibling", "startedBy": TOP}], folder=self.t.dir(KID))
+        self.assertEqual(self.read(KID, KID2, "title"), "a sibling")
+
+    def test_a_hook_takes_the_session_and_its_starter_from_the_tools_with_no_record_file(self):
+        self.answers(KID, own={"sessionId": KID, "title": "port the flush", "cwd": self.t.proj,
+                               "parentSessionId": TOP})
+        self.assertEqual(self.t.say(KID, BRIEF).returncode, 0)
+        self.assertEqual(self.t.started_by(KID), (TOP, "record"))
+        self.assertEqual(self.t.session(KID)["title"], "port the flush")
+        self.assertEqual(self.t.session(KID)["cliSessionIds"], [CLI[KID]])
+
+    def test_a_hook_with_no_host_id_finds_its_session_in_the_modules_file(self):
+        """A hook whose environment names no host session searched the newest record files for its CLI id. The
+        module's file is that CLI session's own, so the session it answers is the one."""
+        self.answers(KID, own={"sessionId": KID, "title": "port the flush", "cwd": self.t.proj,
+                               "parentSessionId": TOP})
+        env = {k: v for k, v in self.t.env(KID).items() if k != "CLAUDE_CODE_HOST_SESSION_ID"}
+        code = "import json, sys\nsys.path.insert(0, sys.argv[1])\nimport phi\nprint(phi.Me().id)"
+        r = subprocess.run([sys.executable, "-I", "-X", "utf8", "-c", code, SRC], capture_output=True, text=True,
+                           env=env, cwd=self.t.proj, timeout=60)
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, KID), r.stderr)
+
+    def test_a_scripted_run_under_an_inherited_host_id_has_no_file_and_stays_itself(self):
+        """The check of a scripted run rests on `cliSessionId` of the host's record file, which the tools do not
+        give: with the host session's answers on disk, a run under another CLI id is still no such session."""
+        scripted = "cccc3333-0000-4000-8000-000000000000"
+        self.t.record(KID, TOP)
+        self.t.say(KID, BRIEF)
+        self.answers(KID, own={"sessionId": KID, "title": "port the flush", "parentSessionId": TOP})
+        before = json.dumps(self.t.session(KID), sort_keys=True)
+        self.t.say(KID, "Two questions, answered from your context alone.", cli=scripted)
+        self.assertEqual(json.dumps(self.t.session(KID), sort_keys=True), before)
+        self.assertEqual(self.t.session(scripted).get("cliSessionIds"), [scripted])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

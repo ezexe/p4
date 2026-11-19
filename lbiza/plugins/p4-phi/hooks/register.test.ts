@@ -1824,3 +1824,174 @@ test('where no surface draws a pane the command says why, and a pane nobody open
   await clock.settle()
   expect((await $.command.run(TYPED)).text).toBe(`p4-phi's pane is open and not drawn: ${reason}`)
 })
+
+// A look where the store's phi.json turns `app_tools` on, and what the desktop app's two tools for sessions answer:
+// one JSON text, as the model reads it. The field names are the tools' own.
+const APP_ON: Answer = { ...ORCHESTRATOR, app_tools: true }
+const APP_SELF = { sessionId: 'local_top00001', title: 'port the flush', cwd: '/work/project', group: null }
+const APP_LINKED = [{ sessionId: 'local_kid00001', title: 'the flush', startedBy: 'local_top00001', name: 'flush' }]
+const APP_KEPT = `{"at":0,"self":${JSON.stringify(APP_SELF)},"sessions":${JSON.stringify(APP_LINKED)}}\n`
+
+// The calls of the app's tools the module made, each with its input, and the app's answers beneath them.
+function app(on: On, answers?: (tool: string) => unknown): Record<string, unknown>[] {
+  const calls: Record<string, unknown>[] = []
+  on('tool.call', (_, e) => {
+    const { tool_use_id: _id, ...input } = e as Record<string, unknown>
+    calls.push(input)
+    const given = answers?.(String(e.tool))
+    if (given !== undefined) return given as never
+    const said = JSON.stringify(String(e.tool).endsWith('get_session') ? APP_SELF : APP_LINKED)
+
+    return { result: [{ type: 'text', text: said }], text: said } as never
+  })
+
+  return calls
+}
+
+function kept(seen: Seen): { path: string; text: string }[] {
+  return seen.wrote.filter(write => write.path.endsWith('/app.json'))
+}
+
+test("where a look answers app_tools the app's tools are asked for the session and its linked ones, and python is left the answers", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { files: { ...STORE }, look: () => APP_ON })
+  const calls = app(on)
+
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(calls).toEqual([
+    { tool: 'mcp__ccd_session_mgmt__get_session', session_id: 'self' },
+    { tool: 'mcp__ccd_session_mgmt__list_sessions', linked: true, include_archived: true, limit: 100 },
+  ])
+  expect(kept(seen)).toEqual([{ path: `${BOUND_IN}/app.json`, text: APP_KEPT }])
+})
+
+test('a project with no store keeps the answers in the session folder, and with the setting off no tool is called', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let isOn = false
+  const seen = machine(on, { look: () => (isOn ? APP_ON : ORCHESTRATOR) })
+  const calls = app(on)
+
+  await $.session.start(START)
+  await clock.advance(600_000)
+  expect(calls).toEqual([])
+  expect(kept(seen)).toEqual([])
+
+  isOn = true
+  await clock.advance(5_000)
+  expect(calls.length).toBe(2)
+  expect(kept(seen).map(write => write.path)).toEqual([`${FOLDER}/app.json`])
+})
+
+test("the app's tools are asked once a minute at most, and never while a turn of the session runs", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let moves = ''
+  const seen = machine(on, { files: { ...STORE }, look: () => (moves ? { ...APP_ON, move: moves } : APP_ON) })
+  const calls = app(on)
+
+  // The first look starts a turn for work a wait left unmoved, so nothing is asked of the app beside it.
+  moves = MOVE
+  await $.session.start(START)
+  await clock.settle()
+  expect(seen.submitted).toEqual([MOVE])
+  expect(calls).toEqual([])
+
+  // While a turn runs the looks go on and ask nothing, and the look at its end asks.
+  moves = ''
+  await $.turn.start({ text: 'port the flush', turnId: 't1' })
+  await clock.advance(120_000)
+  expect(calls).toEqual([])
+  await $.turn.complete(TURN)
+  await clock.advance(5_000)
+  expect(calls.length).toBe(2)
+
+  // The looks of the next 50 seconds ask nothing more, and one past the minute asks again.
+  await clock.advance(50_000)
+  expect(calls.length).toBe(2)
+  await clock.advance(15_000)
+  expect(calls.length).toBe(4)
+  expect(kept(seen).length).toBe(2)
+})
+
+test('a session with no such tool is asked once, the debug log says so, and nothing is written', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { files: { ...STORE }, look: () => APP_ON })
+  const calls: string[] = []
+  on('tool.call', (_, e) => {
+    calls.push(String(e.tool))
+    throw new Error('No such tool available: mcp__ccd_session_mgmt__get_session')
+  })
+
+  await $.session.start(START)
+  await clock.advance(600_000)
+
+  expect(calls).toEqual(['mcp__ccd_session_mgmt__get_session'])
+  expect(kept(seen)).toEqual([])
+  expect(seen.logged.filter(line => line.includes('is no tool of this session')).length).toBe(1)
+  expect(seen.looks.length).toBeGreaterThan(2)
+})
+
+test("a refusal ends the asking too, and an answer that is an error or no JSON is not kept", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { files: { ...STORE }, look: () => APP_ON })
+  let round = 0
+  const calls = app(on, tool => {
+    if (tool.endsWith('get_session')) round += 1
+    if (round === 1) return tool.endsWith('get_session') ? { result: 'gone', text: 'gone', isError: true } : { result: 'Sessions: none', text: 'Sessions: none' }
+
+    return { deny: 'a session off this machine does not reach the desktop app' }
+  })
+
+  await $.session.start(START)
+  await clock.settle()
+  expect(calls.length).toBe(2)
+  expect(kept(seen)).toEqual([])
+
+  await clock.advance(600_000)
+  expect(calls.length).toBe(3)
+  expect(kept(seen)).toEqual([])
+  expect(seen.logged.filter(line => line.includes('was refused')).length).toBe(1)
+})
+
+test('a call that does not answer is given up on after a short wait, and no second round starts while it runs', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { files: { ...STORE }, look: () => APP_ON })
+  let answer: (() => void) | undefined
+  const held = new Promise<void>(resolve => {
+    answer = resolve
+  })
+  const calls: string[] = []
+  on('tool.call', async (_, e) => {
+    calls.push(String(e.tool))
+    if (String(e.tool).endsWith('get_session')) await held
+    const said = JSON.stringify(String(e.tool).endsWith('get_session') ? APP_SELF : APP_LINKED)
+
+    return { result: said, text: said } as never
+  })
+
+  await $.session.start(START)
+  await clock.advance(4_000)
+  expect(calls).toEqual(['mcp__ccd_session_mgmt__get_session'])
+  expect(seen.looks.length).toBe(1)
+
+  // The wait runs out: the linked sessions are asked and kept without the session's own answer.
+  await clock.advance(2_000)
+  expect(calls.length).toBe(2)
+  expect(kept(seen).map(write => write.text)).toEqual([`{"at":0,"sessions":${JSON.stringify(APP_LINKED)}}\n`])
+  expect(seen.logged.filter(line => line.includes('did not answer')).length).toBe(1)
+
+  // The looks go on meanwhile, and no round starts while the first call has not settled.
+  await clock.advance(300_000)
+  expect(calls.length).toBe(2)
+  expect(seen.looks.length).toBeGreaterThan(10)
+  answer?.()
+  await clock.advance(50_000)
+  expect(calls.length).toBe(4)
+})
