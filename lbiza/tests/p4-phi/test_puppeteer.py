@@ -165,6 +165,10 @@ class Linear(Base):
         self.assertEqual((call["initiation"], call["context"], call["use_worktree"]), ("user_asked", "fresh", True),
                          "a worker's draft writes, so it gets a git worktree and a branch of its own")
         self.assertIn(puppeteer.WORKTREE_LINE, call["prompt"], "its brief says where it works and who lands it")
+        # docs/plugin-development.html, "Plan mode for a worker": a worker started in plan mode comes out of it in
+        # auto, and under a starter that bypasses permission prompts every message between the two is then held,
+        # so a draft names no permission mode and its worker starts in its starter's own
+        self.assertNotIn("permission_mode", call, "a worker starts in its starter's permission mode")
         self.assertNotIn(RETRY, call["prompt"], "the brief quotes no sentence of the message")
         self.assertIn("Report when done.", call["prompt"])
         self.assertGreaterEqual(len(call["background"]), 80)

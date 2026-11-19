@@ -229,6 +229,20 @@ class Page(unittest.TestCase):
                      "The same ask in a session of the desktop app is not yet seen."):
             self.assertIn(said, asked, said)
         self.assertIn("which the Plan pane does not show", covers)
+        plan = section.split('<h3 id="plan-mode-for-a-worker">Plan mode for a worker</h3>', 1)[1]
+        for said in ("<code>permission_mode</code>", "<code>permission-modes.md</code>",
+                     "\"edits stay blocked until you approve the plan\"", "Claude Code 2.1.326",
+                     "<code>User has approved your plan.</code>", "3.7 seconds", "<code>plan_mode_exit</code>",
+                     "<code>\"source\":\"user_temporary\"</code>", "The transcript does not tell who approved.",
+                     "<code>cross-session-messaging.md</code>", "\"holds each message for your approval\"",
+                     "every report of the worker was held by its starter",
+                     "<code>set_session_permission_mode</code>", "<code>--permission-mode plan</code>",
+                     "Claude Code 2.1.328", "<code>No matching deferred tools found</code>",
+                     "So the start draft hands no <code>permission_mode</code>",
+                     "A terminal worker cannot leave plan mode at all.", "Not seen: whether the Plan pane drew"):
+            self.assertIn(said, plan, said)
+        self.assertNotIn('"permission_mode"', read(os.path.join(SRC, "puppeteer.py")),
+                         "the draft's call is built with no permission mode, as the page says")
         open_still = page.split('id="not-confirmed"', 1)[1]
         self.assertNotIn("What the desktop app's Plan pane holds.", open_still, "a look at the pane settled it")
         self.assertIn("Whether a forked session's first prompt runs as a command", open_still)
