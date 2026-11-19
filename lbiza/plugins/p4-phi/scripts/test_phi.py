@@ -268,6 +268,40 @@ class Requests(unittest.TestCase):
         self.assertFalse(puppeteer.from_session(asked))
         self.assertFalse(rows.WAKE_RE.match(asked))
 
+    def test_the_apps_notice_about_a_sent_message_is_no_request_of_ezexes(self):
+        """The SendMessage tool's text: "a `[Cross-session delivery notice]` tells you when that happens" and
+        "exactly one `[Cross-session idle notice]` arrives". Each reaches a session as a prompt that opens with its
+        mark and no tag around it, as a live run on Claude Code 2.1.325 showed, where routing drafted a start named
+        after the notice. So every reader of a prompt tells it from ezexe's words by that opening, and a message
+        that quotes the mark further in is still ezexe's."""
+        import plans
+        import prompty_eval
+        import puppeteer
+        import rows
+        held = "[Cross-session delivery notice] Your message to another session was held by that session."
+        idle = "[Cross-session idle notice] The session you subscribed to went idle."
+        marked_held = "[MESSAGE FROM NON-USER SOURCE - NOT USER INPUT]\n" + held
+        for said in (held, idle, marked_held, "<system-reminder>x</system-reminder>\n" + held):
+            self.assertEqual(phi.request_of(said), "", said[:40])
+        for said in (held, idle, marked_held):
+            self.assertTrue(plans.app_notice(said), said[:40])
+            self.assertTrue(puppeteer.from_session(said), said[:40])
+            self.assertTrue(rows.HARNESS_RE.match(said), said[:40])
+            self.assertFalse(prompty_eval.own_words(said), said[:40])
+        asked = "what does this mean: " + held
+        self.assertEqual(phi.request_of(asked), asked)
+        self.assertFalse(plans.app_notice(asked))
+        self.assertFalse(puppeteer.from_session(asked))
+        self.assertFalse(rows.HARNESS_RE.match(asked))
+        self.assertTrue(prompty_eval.own_words(asked))
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Tree(tmp)
+            tree.record(TOP)
+            tree.say(TOP, TASK)
+            tree.say(TOP, held)
+            self.assertEqual(tree.session(TOP)["turnBy"], "event", "not the person's turn")
+            self.assertEqual(tree.session(TOP)["task"], TASK)
+
     def test_a_paste_only_message_is_the_persons_request(self):
         said = "Fix the port table.\nIt drops the last row."
         paste = '<pasted_content id="9b38">\n' + said + '\n</pasted_content id="9b38">\n'
@@ -1571,6 +1605,40 @@ class Rules(unittest.TestCase):
         self.assertIn("A Workflow script names a model for each stage: https://code.claude.com/docs/en/workflows.md "
                       "says \"A model the script names for a stage counts as the per-invocation model in that order.\" "
                       "and \"When nothing else assigns one, the agent runs on your session's model.\"", skill)
+
+    def test_the_skill_gives_the_line_that_starts_a_terminal_team_and_p4_writes_the_variable_nowhere(self):
+        """desktop.md, "What's not available in Desktop": coordinated teams "are available in the CLI, not in
+        Desktop". agent-teams.md, "Enable agent teams": "Spawning teammates also requires an interactive session."
+        So a desktop session starts a terminal session that leads the team and talks to it by message. The skill
+        gives that line with its conditions, as a live run showed them, and no settings keeper or hooks module
+        writes the variable, since every session of the project reads the file it would go into."""
+        with open(os.path.join(ROOT, "skills", "phi", "SKILL.md"), encoding="utf-8") as f:
+            skill = f.read()
+        head, _, rest = skill.partition("## A team in a terminal session")
+        self.assertTrue(rest, "the section is there")
+        section = rest.split("\n## ", 1)[0]
+        for word in ("https://code.claude.com/docs/en/desktop.md, \"What's not available in Desktop\"",
+                     "\"are available in the CLI, not in Desktop\"",
+                     "https://code.claude.com/docs/en/agent-teams.md, \"Enable agent teams\"",
+                     "\"Spawning teammates also requires an interactive session.\"",
+                     "`mcp__terminal__run_in_terminal`",
+                     "`$env:CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1'; claude --permission-mode <mode> '<task>'`",
+                     "`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --permission-mode <mode> '<task>'`",
+                     "the starting session's own permission mode",
+                     "The `cwd` is never a worktree folder",
+                     "`ListAgents`", "`SendMessage`",
+                     "both screens are ezexe's to answer in the tab",
+                     "No part of p4 writes `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` into a settings file",
+                     "`mcp__terminal__stop_terminal_tab`",
+                     "`[Cross-session delivery notice]`", "`[Cross-session idle notice]`"):
+            self.assertIn(word, section, word)
+        self.assertIn("when a step wants an agent team", head.split("---")[1], "the description brings the skill up")
+        plugins = os.path.dirname(ROOT)
+        for path in (os.path.join(ROOT, "scripts", "p4conf.py"), os.path.join(ROOT, "hooks", "register.ts"),
+                     os.path.join(plugins, "p4-temportal", "hooks", "p4conf.py"),
+                     os.path.join(plugins, "p4-temportal", "hooks", "register.ts")):
+            with open(path, encoding="utf-8") as f:
+                self.assertNotIn("AGENT_TEAMS", f.read(), path)
 
     def test_no_p4_setting_names_a_subagents_model_and_the_pages_name_claude_codes_own_routes(self):
         """sub-agents.md, "Choose a model": "When more than one source sets a model, Claude Code uses the first in

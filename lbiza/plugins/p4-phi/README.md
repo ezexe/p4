@@ -88,6 +88,12 @@ p4-phi has no setting for a subagent's model or effort, since Claude Code sets b
 | `p4-phi:check`, the plugin's own | `model: inherit` and `effort: high` in `agents/check.md` | A `model` or an `effort` on the Agent call: "The parameter overrides the `effort` field", and for the effort "The `CLAUDE_CODE_EFFORT_LEVEL` environment variable takes precedence over both." |
 | Every subagent | One model under `env` of a settings file: "set `CLAUDE_CODE_SUBAGENT_MODEL` to that model and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` to `1`" | "While `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is on, Claude Code ignores the `model` field in subagent definitions, and Claude can't pass a model when it starts a subagent." |
 
+### A team in a terminal session
+
+Agent teams run in the terminal `claude` command and not in the desktop app, so a desktop session that wants one starts a terminal session to lead it, from the app's Terminal panel, and talks to that lead by message.
+The skill's section "A team in a terminal session" gives the line to type and its conditions: the project's root as the folder, the starting session's own permission mode, and two screens that are ezexe's to answer once.
+p4-phi writes `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` into no settings file, since every session of the project reads that file.
+
 ## A puppeteer and the sessions it controls
 
 A puppeteer is the orchestrator ezexe files in the sidebar section "puppeteers", which controls the orchestrators of other trees.

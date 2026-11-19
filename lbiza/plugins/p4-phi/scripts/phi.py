@@ -695,6 +695,8 @@ def request_of(prompt):
         return ""                                  # Claude Code speaking, whatever its body quotes
     if plans.woken(text):
         return ""                                  # the plugin's hooks module speaking: the prompt of a turn it started
+    if plans.app_notice(text):
+        return ""                                  # the app speaking: its notice about a message this session sent
     # A paste is the person's message whatever it holds, but only where the message itself begins with the block or
     # with their own words: a notification or another session's message that quotes a pasted block stays Claude Code's.
     return PASTED.sub(lambda m: m.group(1), text).strip()

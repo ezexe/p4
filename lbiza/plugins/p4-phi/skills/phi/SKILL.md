@@ -1,6 +1,6 @@
 ---
 name: phi
-description: What linked sessions hand each other. Use when a message from ezexe is about something other than this session's task, when starting a session for part of the task, when a worker or coworker you started has finished a turn, when a finding should outlast this session, when something showed the task done, or when asked what the sessions hold, to print the tree, to detach to top level or reparent a session, or when this session is a puppeteer filed in the sidebar section "puppeteers" or is controlled by one.
+description: What linked sessions hand each other. Use when a message from ezexe is about something other than this session's task, when starting a session for part of the task, when a worker or coworker you started has finished a turn, when a finding should outlast this session, when something showed the task done, or when asked what the sessions hold, to print the tree, to detach to top level or reparent a session, when a step wants an agent team, or when this session is a puppeteer filed in the sidebar section "puppeteers" or is controlled by one.
 ---
 
 # p4-phi: what linked sessions hand each other
@@ -77,6 +77,22 @@ A subagent that wrote files is listed on the ledger under Level misses once it s
 Before a session creates anything new, such as a module, a page, a format or a kind of test, it finds the documented terms for it and a published implementation guide for that kind of work, logs both with their sources in its decisions file, and builds by them: a writing worker's first message and every start draft carry that line.
 A task list whose first creating step has no such research step before it is advised one, once.
 A question that the code, the history, the issues or the current outside documentation can answer is researched and decided by the session, which logs the decision with its source in its decisions file, the one its brief names or `decisions.md` in the scratchpad directory the app names: the act-don't-wait rule every session is handed and every start draft carry that line, and a question reaches ezexe only once research cannot settle it.
+
+## A team in a terminal session
+
+Agent teams run in the terminal `claude` command and not in the desktop app: https://code.claude.com/docs/en/desktop.md, "What's not available in Desktop", says coordinated teams "are available in the CLI, not in Desktop", and https://code.claude.com/docs/en/agent-teams.md, "Enable agent teams", says "Spawning teammates also requires an interactive session."
+So a desktop session that wants a team starts a terminal session to lead one, hands it the task by message and gets the answer back by message.
+A team fits a step that is one question to read, review or argue from several sides at once.
+Work that writes files in parallel stays with workers, since the lead and its teammates all work in the lead's folder, where each worker has a worktree of its own.
+The session types one line into the app's Terminal panel with `mcp__terminal__run_in_terminal`, with `cwd` the project's root: in PowerShell `$env:CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1'; claude --permission-mode <mode> '<task>'`, and in a POSIX shell `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --permission-mode <mode> '<task>'`.
+`<mode>` is the starting session's own permission mode, which `mcp__ccd_session_mgmt__get_session` on `"self"` gives as `permissionMode`: a message between two sessions in different modes is held at the terminal until the person there approves it, and one between sessions in the same mode arrives by itself.
+`<task>` says what team to form, what it is to settle, and that the result goes back with `SendMessage` to the session that messages it.
+The `cwd` is never a worktree folder: a terminal session takes the folder it starts in as its project, so p4's hooks would set up a second store inside the worktree.
+The lead then shows in `ListAgents` as a peer named after its folder, such as `p4-phi-f1`: the session sends it the task with `SendMessage` to that name, and the answer arrives as a message from that name.
+The first start in a folder stops at Claude Code's folder trust screen, and the first start in bypass mode at its warning: a session types a line into a tab and presses no key in a running program, so both screens are ezexe's to answer in the tab, once for a machine and folder.
+No part of p4 writes `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` into a settings file: every session of the project reads that file, the variable does nothing in the desktop app, and in a terminal session it makes each subagent Claude names a teammate.
+When the answer is back, the session closes the tab with `mcp__terminal__stop_terminal_tab` and `close: true`, and where ezexe typed in the tab the app refuses that close, so the session asks ezexe to close it.
+The app's own notice about a message the session sent, which opens with `[Cross-session delivery notice]` or `[Cross-session idle notice]`, is no message of ezexe's and no work: p4-phi drafts no start for it and keeps it as a notification.
 
 ## What a `Files:` line says
 

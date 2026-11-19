@@ -1318,6 +1318,19 @@ def woken(prompt):
     return str(prompt or "").lstrip().startswith(WAKE_MARK)
 
 
+# The app's own notice about a message this session sent to another session: that it is held, released, denied or
+# expired, or that the other session went idle. The SendMessage tool's text names both, "a `[Cross-session delivery
+# notice]` tells you when that happens" and "exactly one `[Cross-session idle notice]` arrives", and each reaches a
+# session as a prompt that opens with its mark, with no tag around it. Its words are the app's, never ezexe's.
+APP_NOTICE = re.compile(r"\A\s*(?:\[MESSAGE FROM NON-USER SOURCE\b[^\]\n]*\]\s*)?"
+                        r"\[Cross-session (?:delivery|idle) notice\]")
+
+
+def app_notice(prompt):
+    """True for a prompt that is the app's notice about a message this session sent to another session."""
+    return bool(APP_NOTICE.match(str(prompt or "")))
+
+
 def wakes(disk):
     """How many turns in a row the hooks module started for a session, by its session.json."""
     w = disk.get("woke") if isinstance(disk, dict) else None

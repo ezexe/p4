@@ -1090,7 +1090,8 @@ def readings_of(req):
 SESSION_MARK = re.compile(r"\A\s*(?:" + re.escape(plans.WAKE_MARK) + r"|Another Claude session sent a message:|"
                           r"<cross-session-message\b|"
                           r"<side-sessions-event\b|<task-notification\b|<command-name\b|<command-message\b|"
-                          r"<local-command|\[SYSTEM NOTIFICATION\b|"
+                          r"<local-command|\[SYSTEM NOTIFICATION\b|\[MESSAGE FROM NON-USER SOURCE\b|"
+                          r"\[Cross-session (?:delivery|idle) notice\]|"
                           r"(?:Stop|SubagentStop|UserPromptSubmit) hook (?:feedback|blocking))", re.I)
 
 

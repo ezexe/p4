@@ -69,6 +69,7 @@ def own_words(prompt):
     return bool(p) and not p.startswith("<") and "cross-session-message" not in p and "task-notification" not in p \
         and "phi draft drf-" not in p and "phi reading grp-" not in p and "phi start request req-" not in p \
         and not p.startswith("phi (p4-phi): the turn before this one ended on") \
+        and not p.startswith("[Cross-session ") and not p.startswith("[MESSAGE FROM NON-USER SOURCE") \
         and not p.startswith("This session is being continued from a previous conversation")
 
 

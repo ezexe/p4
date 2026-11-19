@@ -31,8 +31,11 @@ import store as st  # noqa: E402
 FP_CHARS = 300
 ADDRESSED_CHARS = 300
 RECOMMENDED_CHARS = 300
-HARNESS_RE = re.compile(r"^\s*<(task-notification|system-reminder|local-command|command-name|command-message|"
-                        r"bash-input|bash-stdout|user-prompt-submit-hook)", re.I)
+HARNESS_RE = re.compile(r"^\s*(?:<(task-notification|system-reminder|local-command|command-name|command-message|"
+                        r"bash-input|bash-stdout|user-prompt-submit-hook)|"
+                        # the app's notice about a message this session sent, as plans.APP_NOTICE spells it
+                        r"(?:\[MESSAGE FROM NON-USER SOURCE\b[^\]\n]*\]\s*)?\[Cross-session (?:delivery|idle) notice\])",
+                        re.I)
 PEER_RE = re.compile(r"^\s*(Another Claude session sent a message:\s*)?<cross-session-message\b", re.I)
 # the prompt of a turn p4-phi's hooks module started: it opens with plans.WAKE_MARK, and its words are not ezexe's
 WAKE_RE = re.compile(r"^\s*phi \(p4-phi\): the turn before this one ended on\b")
