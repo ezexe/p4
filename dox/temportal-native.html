@@ -161,9 +161,9 @@ footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);font-si
         <tr id="row-lifetimes"><th scope="row">How long the store's files stay</th>
           <td><p><code>b01f260</code>: it "clears what is no longer relevant, as a browser does with its cache and cookies".</p></td>
           <td><p><code>claude-directory.md</code>: the retention sweep covers Claude Code's own folders under <code>~/.claude</code> and nothing a project keeps.</p></td>
-          <td><p>Cache rules and cookies in <code>lifetime.py</code>, swept by the hooks module at a start, on its timer and past a session's end, and the slash command <code>/lifetime</code>.</p><p><code>lifetime.py</code> still answers <code>sweep</code> and <code>session-end</code>, which the command hooks before the module ran.</p></td>
+          <td><p>Cache rules and cookies in <code>lifetime.py</code>, swept by the hooks module at a start, on its timer and past a session's end, the slash command <code>/lifetime</code> for ezexe, and the tool <code>mcp__p4-temportal__lifetime</code> for a session, which takes the same four commands.</p><p>Seen on Claude Code 2.1.328 in a scripted session from a scratch project: the tool was in the session's list, a <code>set</code> wrote the cookie, and a refused <code>set</code> came back as the call's error.</p><p><code>lifetime.py</code> still answers <code>sweep</code> and <code>session-end</code>, which the command hooks before the module ran.</p></td>
           <td><p>Nothing.</p></td>
-          <td><p>All of it is the plugin's own. A session cannot set a lifetime itself, since the Skill tool refuses a command a module registers. The second part registers the four commands as a tool for the model, served at <code>tool.run</code>, the event that fires once Claude Code allowed the call. The commands <code>sweep</code> and <code>session-end</code> go with the fourth part.</p></td>
+          <td><p>All of it is the plugin's own. The Skill tool refuses a command a module registers, so a session sets a lifetime through the tool. The module serves it at <code>tool.run</code>, the event that fires once Claude Code allowed the call, so the permission check stands before a file is deleted. The commands <code>sweep</code> and <code>session-end</code> go with the fourth part.</p></td>
           <td class="n">2</td></tr>
         <tr id="row-commands"><th scope="row">Commands on memory and context</th>
           <td><p>Nothing.</p></td>
@@ -175,10 +175,10 @@ footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);font-si
         <tr id="row-tools"><th scope="row">The session's own commands and tools</th>
           <td><p>Nothing in the commits or issues. This row is from an audit that held every slash command and tool of a desktop session against the plugin.</p></td>
           <td><p><code>commands.md</code> lists <code>/clear</code>, <code>/compact</code>, <code>/resume</code> and <code>/memory</code>. A session also has the Skill tool, the file tools Write, Edit and NotebookEdit, and a shell tool, each behind Claude Code's own permission check.</p></td>
-          <td><p>It relies on <code>/clear</code>, <code>/compact</code> and <code>/resume</code> as sources of a session's start, on <code>/memory</code> through <code>autoMemoryDirectory</code>, on the Skill tool for its skill page, and on the file tools for memory. It uses no shell tool, since the skill page hands no line of <code>lifetime.py</code>.</p></td>
+          <td><p>It relies on <code>/clear</code>, <code>/compact</code> and <code>/resume</code> as sources of a session's start, on <code>/memory</code> through <code>autoMemoryDirectory</code>, on the Skill tool for its skill page, and on the file tools for memory. It uses no shell tool: the skill page hands no line of <code>lifetime.py</code>, which issues 112 and 113 kept off the page.</p></td>
           <td><p>Its copy of the settings keeper keeps the ask rule on the app's archive tool and the deny rule on its model tool, as p4-phi's copy does. Whether it writes them where p4-phi is not installed is left open.</p></td>
-          <td><p>The skill page hands the <code>lifetime.py</code> lines with their path. A session whose Claude Code loads no hooks module then sets, clears and sweeps through a shell tool, with Claude Code's permission check before each.</p></td>
-          <td class="n">3</td></tr>
+          <td><p>A call of its own by which a session sets, clears and sweeps, behind Claude Code's permission check. The tool of the second part is that call, so the skill page names the tool and still hands no shell line.</p></td>
+          <td class="n">2</td></tr>
       </tbody>
     </table></div>
   </section>
@@ -188,8 +188,8 @@ footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);font-si
     <p class="intro">Each part lands by itself, and this page is brought up with it.</p>
     <ol>
       <li id="part-1"><strong>Compaction.</strong> The hooks module tells the summary what to keep, adds the list of the files the session wrote behind the summary, and starts a compaction at a quiet moment below the automatic line. It came first because it was the one row where a session loses what it needs and the plugin did nothing. It landed in p4-temportal 0.3.28.</li>
-      <li id="part-2"><strong>A session sets a lifetime itself.</strong> The four commands of <code>/lifetime</code> become a tool the model can call, registered by the hooks module and served once Claude Code allowed the call.</li>
-      <li id="part-3"><strong>The skill page names what Claude Code keeps.</strong> It says which native command or setting keeps each thing, so a session reaches for that and builds no copy by hand, and it hands the <code>lifetime.py</code> lines for a session with no hooks module.</li>
+      <li id="part-2"><strong>A session sets a lifetime itself.</strong> The four commands of <code>/lifetime</code> become a tool the model can call, registered by the hooks module and served once Claude Code allowed the call. It landed in p4-temportal 0.3.29.</li>
+      <li id="part-3"><strong>The skill page names what Claude Code keeps.</strong> It says which native command or setting keeps each thing, so a session reaches for that and builds no copy by hand.</li>
       <li id="part-4"><strong>The leftovers of the copies go.</strong> The commands the scripts still answer for sessions of older versions are deleted, since an installed version runs the scripts of its own folder in Claude Code's plugin cache.</li>
       <li id="part-5"><strong>Plan files.</strong> A store that asks for it gets <code>plansDirectory</code> written by the settings keeper, behind a live check of a plan written under <code>.claude/p4/</code>.</li>
     </ol>

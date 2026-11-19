@@ -43,6 +43,18 @@ class SkillCommands(unittest.TestCase):
         self.assertIn("give ezexe the line to type", text)
         self.assertIn("`.claude/p4/temportal/expires.json`", text)
 
+    def test_the_page_hands_a_session_the_tool(self):
+        """The hooks module registers the four commands as the tool `mcp__p4-temportal__lifetime`, served once Claude
+        Code allowed the call. The page names the tool, what it takes, and ToolSearch for a session whose list does
+        not hold it yet, and it still hands no shell line."""
+        text = SKILL.read_text(encoding="utf-8")
+        module = (HOOKS / "register.ts").read_text(encoding="utf-8")
+        self.assertIn("const TOOL_ID = 'mcp__p4-temportal__lifetime'", module)
+        said = next(line for line in text.splitlines() if "`mcp__p4-temportal__lifetime`" in line)
+        for word in ("`command`", "`path`", "`lifetime`", "ToolSearch", "asks ezexe"):
+            self.assertIn(word, said, word)
+        self.assertLess(text.index("`mcp__p4-temportal__lifetime`"), text.index("give ezexe the line to type"))
+
     def test_the_project_is_not_left_to_fill(self):
         # ezexe/p4#113: lifetime.py finds the store from CLAUDE_PROJECT_DIR or the working directory without --p4.
         text = SKILL.read_text(encoding="utf-8")

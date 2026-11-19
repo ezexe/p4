@@ -136,8 +136,7 @@ class ModuleTest(unittest.TestCase):
         """`/lifetime` hands lifetime.py the word typed after it, so each of the module's four is a command of
         lifetime.py's own parser, and the command is registered and answered by one literal name. By
         https://code.claude.com/docs/en/plugins/mods/api.md, "Add a command": "Register it, then handle `command.run`
-        for its name." The module hooks no tool event: the page serves a registered tool at `tool.call`, where an
-        answer skips the permission check."""
+        for its name." """
         import re
         text = (SRC / "register.ts").read_text(encoding="utf-8")
         main = (SRC / "lifetime.py").read_text(encoding="utf-8")
@@ -147,8 +146,24 @@ class ModuleTest(unittest.TestCase):
             self.assertIn(f'sp.add_parser("{name}"', main)
         self.assertIn("name: 'lifetime',", text)
         self.assertIn("on('command.run', { command: 'lifetime' }", text)
-        self.assertEqual(re.findall(r"on\('(tool\.\w+)'", text), [])
-        self.assertNotIn("$.tool.register", text)
+
+    def test_the_tool_runs_the_same_commands_once_its_call_is_allowed(self):
+        """The module registers one tool, `lifetime`, and serves it at `tool.run`, which the API types of Claude Code
+        2.1.326 give as the event that fires once a call is allowed. It hooks no `tool.call`, where
+        https://code.claude.com/docs/en/plugins/mods/api.md, "Add a tool", serves a tool and an answer skips the
+        permission check: a `set`, a `clear` and a `now` end in deleted files. The tool takes the four commands the
+        slash command takes, and hands a path after `--`, which lifetime.py's parser reads as the end of options."""
+        import re
+        text = (SRC / "register.ts").read_text(encoding="utf-8")
+        self.assertEqual(re.findall(r"on\('(tool\.\w+)'", text), ["tool.run"])
+        self.assertIn("on('tool.run', { tool: TOOL_ID }", text)
+        self.assertIn("const TOOL_ID = 'mcp__p4-temportal__lifetime'", text)
+        self.assertEqual(text.count("$.tool.register("), 1)
+        self.assertIn("name: 'lifetime',\n  description:", text)
+        self.assertIn("enum: ['list', 'set', 'clear', 'now']", text)
+        self.assertEqual(re.findall(r"\['(\w+)', \d\],", text), ["list", "set", "clear", "now"])
+        self.assertIn("['--', ...rest]", text)
+        self.assertIn(".catch(() => ({", text.split("on('tool.run'", 1)[1].split("\n\n", 1)[0])
 
 
 class NoGitBashTest(unittest.TestCase):

@@ -56,7 +56,13 @@ It runs the retention sweep, `lifetime.py tick`, at a session's start, again whe
 The sweep at the end runs in a process that `lifetime.py tick --let-go` starts and lets go of, since the `session.end` hooks of every module share the SessionEnd budget, 1.5 seconds by default, by https://code.claude.com/docs/en/plugins/mods/reference.md, "Limits".
 What a sweep moved or cleared is a dim line of the transcript, which the model does not read.
 The module registers the slash command `/lifetime`, whose `list`, `set <path> <lifetime>`, `clear <path>` and `now` each run the command of `lifetime.py` by that name.
-The command is ezexe's: Claude Code's Skill tool refuses a command a module registers, so a session cannot run it, and the skill page tells a session to give ezexe the line to type.
+The command is ezexe's: Claude Code's Skill tool refuses a command a module registers, so a session cannot run it.
+A session has the same four as the tool `mcp__p4-temportal__lifetime`, which the module registers by `$.tool.register`: `command` is `list`, `set`, `clear` or `now`, with `path` and `lifetime` for a set and `path` for a clear.
+The module serves the tool at `tool.run`, the event that fires once Claude Code allowed the call, so the permission check stands before a set, a clear and a sweep, which end in deleted files, and p4 writes no allow rule for the tool.
+It hooks no `tool.call`, where https://code.claude.com/docs/en/plugins/mods/api.md serves a registered tool and an answer skips that check.
+What `lifetime.py` printed is the tool's result, what it refused with is the call's error, and the words of a call go after `--`, so a path that opens with a dash is no option.
+Seen on Claude Code 2.1.328, in a `claude -p` run of the plugin from a scratch project, told to use no shell command: `mcp__p4-temportal__lifetime` was in the session's tool list, the session loaded it with ToolSearch, a `list` printed the two cache rules, a `set` of `notebook/probe.md` to `7d` printed its expiry and `expires.json` held the cookie, and a `set` of a path outside `temportal/` came back as the call's error with the line of `lifetime.py`.
+That run allowed the tool by `--allowedTools`, so the ask before a call was not seen.
 At `session.compact`, the event of every compaction in the API types of Claude Code 2.1.326, the module adds a keep list to what the summary is told: every session id, file path, branch, commit hash, decision with its source and open item, and the path of every state page and hand-over note.
 The list goes after what was typed behind `/compact`, and once.
 Behind the summary the module adds one message, the ledger: the paths of the files the session wrote or edited, read from the transcript's calls of Write, Edit and NotebookEdit with no model, the last 60 with a count of the older ones.
@@ -69,9 +75,10 @@ Seen in the desktop app on Claude Code 2.1.326, in a session another session sta
 The module's own `session.compact` hook heard that compaction with the trigger `manual`, the message it added was in the context afterwards, and the message added at one compaction was among the messages of the next.
 The event lacks a call that starts a compaction outside a turn in such a session, a trigger that tells the plugin's compaction from one ezexe typed, and any summary string to check, so the SessionStart command hook for the source `compact` stays.
 Not seen live: a compaction Claude Code starts by itself, and the compaction of a subagent's transcript.
-The module registers no tool for the model, since an answer at `tool.call`, where https://code.claude.com/docs/en/plugins/mods/api.md serves a registered tool, skips the permission check, and `tool.run`, which fires once a call is allowed, is no event on Claude Code 2.1.322, where a module that hooks it does not load.
+`tool.run` is in the API types of Claude Code 2.1.326 and is no event on 2.1.322, where a module that hooks it does not load.
 No command hook runs the sweep, so where the module does not load nothing is cleared until `lifetime.py now` is run by hand.
-The module needs Claude Code v2.1.287 or later, and it does not load in a session started with `--safe-mode` or `--bare`, where `disableAllHooks` is set, or where managed settings block mods, by https://code.claude.com/docs/en/plugins/mods/create.md.
+The module was seen to load on Claude Code 2.1.326 and 2.1.328.
+A hooks module needs Claude Code v2.1.287 or later, and it does not load in a session started with `--safe-mode` or `--bare`, where `disableAllHooks` is set, or where managed settings block mods, by https://code.claude.com/docs/en/plugins/mods/create.md.
 
 ## Windows
 

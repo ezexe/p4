@@ -43,7 +43,9 @@ ezexe lists, sets and clears lifetimes with the slash command `/lifetime`, which
 - `/lifetime clear notebook/<file>` removes an expiry and keeps the file.
 - `/lifetime now` runs the retention sweep at once.
 
-A session cannot run `/lifetime` itself, since Claude Code's Skill tool refuses a command a hooks module registers, so when a lifetime should be set or cleared, give ezexe the line to type.
+A session cannot run `/lifetime` itself, since Claude Code's Skill tool refuses a command a hooks module registers.
+A session calls the tool `mcp__p4-temportal__lifetime` for the same four: `command` is `list`, `set`, `clear` or `now`, a set takes `path` and `lifetime`, a clear takes `path`, Claude Code asks ezexe about the call where its permission mode asks, and ToolSearch loads the tool where the session's list does not hold it yet.
+Where no such tool exists, as in a session whose Claude Code loads no hooks module, give ezexe the line to type.
 What is set can be read without the command: the cookies are in `.claude/p4/temportal/expires.json` and the cache rules in `.claude/p4/p4.json`.
 A path is read from the working folder, or from `temportal/` as `/lifetime list` prints it, and one with a space goes in quotes.
 No lifetime ends with a session: a file that goes when its session goes belongs in that session's scratchpad, which Claude Code deletes with the session's transcript.

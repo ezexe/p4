@@ -5,10 +5,12 @@
 // registers. It finds the python that find-python.sh proved for the plugin's runner, as p4-phi's module does, and it
 // starts no `sh`.
 //
-// It registers no tool for the model. A tool's call is served at `tool.call`, by plugins/mods/api.md, "Add a tool",
-// where an answer skips the permission check, and `set`, `clear` and `now` end in deleted files. The event that
-// fires once a call is allowed, `tool.run`, is in the API types of Claude Code 2.1.326 and is no event on 2.1.322,
-// where a module that hooks it does not load.
+// It registers the same four commands as the tool `lifetime` for the model, `mcp__p4-temportal__lifetime`, so a
+// session sets, clears and lists lifetimes itself. The tool is served at `tool.run`, the event that fires once
+// Claude Code allowed the call, so its permission check stands before a `set`, a `clear` and a `now`, which end in
+// deleted files. plugins/mods/api.md, "Add a tool", serves a tool at `tool.call`, where an answer skips that
+// check. `tool.run` is in the API types of Claude Code 2.1.326 and is no event on 2.1.322, where a module that
+// hooks it does not load.
 //
 // It also keeps a compaction from losing what a session needs afterwards, at `session.compact`, the event of every
 // compaction, whoever started it. On the way down it adds the keep list to what the summary is told. On the way up
@@ -20,7 +22,14 @@
 // 2.1.326: `$.session.compact` is refused in a session a program started, "compaction here runs inside a turn (a
 // /compact prompt)", and the command compacts there, with this module's own `session.compact` hook hearing it.
 
-import type { EngineInterface, ProcessRunResult, Register, SessionMessage, Timer } from 'claude-code'
+import type {
+  EngineInterface,
+  ProcessRunResult,
+  Register,
+  SessionMessage,
+  Timer,
+  ToolCallResult,
+} from 'claude-code'
 
 // What find-python.sh runs to prove an interpreter: the interpreter prints its own path.
 const PROOF = "import sys; print(sys.executable.replace(chr(92), '/'))"
@@ -55,6 +64,34 @@ const USAGE =
   '30m, 12h, 7d, 2w or an ISO date, after which the retention sweep deletes it. clear removes a lifetime and keeps ' +
   'the file. now runs the retention sweep, which deletes what is past its lifetime. A path is read from the ' +
   'working folder, or from temportal/ as list prints it, and one with a space goes in quotes.'
+
+// The tool a session calls for the same four commands: what the model reads of it, and the input it takes. It
+// waits behind ToolSearch as an MCP server's tool does, since few sessions set a lifetime.
+const TOOL = {
+  name: 'lifetime',
+  description:
+    'p4-temportal: list, set or clear the lifetimes of the files kept under .claude/p4/temportal/, or run the ' +
+    'retention sweep. `command` is list, set, clear or now. list shows every cookie and cache rule. set gives ' +
+    'the file or folder at `path` a `lifetime` of 30m, 12h, 7d, 2w or an ISO date, after which the retention ' +
+    'sweep deletes it. clear removes the lifetime of `path` and keeps the file. now runs the retention sweep, ' +
+    'which deletes what is past its lifetime. A path is read from the working folder, or from temportal/ as list ' +
+    'prints it.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      command: { type: 'string', enum: ['list', 'set', 'clear', 'now'] },
+      path: { type: 'string' },
+      lifetime: { type: 'string' },
+    },
+    required: ['command'],
+  },
+} as const
+// The tool's name as a call carries it.
+const TOOL_ID = 'mcp__p4-temportal__lifetime'
+// What a call that fits none of the four commands is refused with.
+const TOOL_USAGE =
+  'p4-temportal: `command` is list, set, clear or now. set takes `path` and `lifetime`, clear takes `path`, and ' +
+  'list and now take neither.'
 
 // What a summary is told to keep, added to the instructions of every compaction.
 const KEEP =
@@ -309,20 +346,54 @@ function words(text: string): string[] {
   return found.map(word => (/^(["']).*\1$/s.test(word) ? word.slice(1, -1) : word))
 }
 
-// One command of `/lifetime`: what lifetime.py printed for it, or the line it refused with. A new cookie can be due
-// before the timer's next sweep, so a `set` is followed by a sweep, which sets the timer by that cookie.
+// One command of lifetime.py with its words: whether it ended well, and what it printed or the line it refused
+// with. A new cookie can be due before the timer's next sweep, so a `set` is followed by a sweep, which sets the
+// timer by that cookie.
+async function command(
+  $: EngineInterface,
+  name: string,
+  rest: readonly string[],
+): Promise<{ isDone: boolean; text: string }> {
+  const ran = await run($, [name, ...rest], SWEEP_MS)
+  if (ran === undefined) return { isDone: false, text: `lifetime.py ${name} did not run, and the debug log says why.` }
+  const isDone = ran.exitCode === 0
+  if (name === 'set' && isDone) void sweep($)
+  const printed = (isDone ? ran.stdout : ran.stderr || ran.stdout).trim()
+
+  return { isDone, text: printed || `lifetime.py ${name} printed nothing and exited ${ran.exitCode}.` }
+}
+
+// One command of `/lifetime` as typed: what lifetime.py printed for it, or the line it refused with.
 async function lifetime($: EngineInterface, typed: string): Promise<string> {
   const [name = '', ...rest] = words(typed)
   if (TAKES.get(name) !== rest.length) return USAGE
-  const ran = await run($, [name, ...rest], SWEEP_MS)
-  if (ran === undefined) return `lifetime.py ${name} did not run, and the debug log says why.`
-  if (name === 'set' && ran.exitCode === 0) void sweep($)
-  const printed = (ran.exitCode === 0 ? ran.stdout : ran.stderr || ran.stdout).trim()
 
-  return printed || `lifetime.py ${name} printed nothing and exited ${ran.exitCode}.`
+  return (await command($, name, rest)).text
 }
 
-// The slash command, registered at each start of the module. A name that is taken is refused with a throw.
+// One text field of a tool call's input, trimmed, and '' for one left out.
+function field(e: unknown, name: string): string {
+  const value = (e as Record<string, unknown>)[name]
+
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+// One call of the tool, once Claude Code allowed it: the command of lifetime.py it names, with the words that
+// command takes and no others. What the command printed is the tool's result, and what it refused with is the
+// call's error. The words come after `--`, so a path that opens with a dash is no option.
+async function called($: EngineInterface, e: unknown): Promise<ToolCallResult> {
+  const name = field(e, 'command')
+  const given = { set: ['path', 'lifetime'], clear: ['path'], list: [], now: [] }[name]
+  const rest = (given ?? []).map(key => field(e, key))
+  const others = ['path', 'lifetime'].filter(key => !(given ?? []).includes(key) && field(e, key))
+  if (given === undefined || rest.includes('') || others.length > 0) return { deny: TOOL_USAGE }
+  const { isDone, text } = await command($, name, rest.length > 0 ? ['--', ...rest] : [])
+
+  return isDone ? { result: text } : { deny: text }
+}
+
+// The slash command and the tool, registered at each start of the module. A name that is taken is refused with a
+// throw, and each is registered whatever became of the other.
 async function offer($: EngineInterface): Promise<void> {
   try {
     await $.command.register({
@@ -332,6 +403,11 @@ async function offer($: EngineInterface): Promise<void> {
     })
   } catch (error) {
     note($, `/lifetime was not registered: ${reason(error)}`)
+  }
+  try {
+    await $.tool.register(TOOL)
+  } catch (error) {
+    note($, `the tool lifetime was not registered: ${reason(error)}`)
   }
 }
 
@@ -466,6 +542,11 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'lifetime' }, async ($, e) => ({ text: await lifetime($, e.args) }))
+
+  // A call of the tool, once it is allowed. Nothing runs beneath, since the tool is nothing but that command.
+  on('tool.run', { tool: TOOL_ID }, ($, e) => called($, e)).catch(() => ({
+    deny: 'p4-temportal could not run lifetime.py.',
+  }))
 
   // After a /clear or a resume the process goes on, and the timer with it. Every other reason ends the process.
   on('session.end', async ($, e, next) => {

@@ -581,6 +581,15 @@ class Lifetime(unittest.TestCase):
                           "cookie  notebook/notes.md  expires" in listed, first.stdout, again.stdout),
                          (0, "", True, True, "cleared\n", "no expiry was set\n"))
 
+    def test_set_and_clear_take_their_words_after_two_dashes(self):
+        """The module's tool hands a path after `--`, so a path that opens with a dash is a path and no option."""
+        put(os.path.join(self.t, "notebook", "-old notes.md"))
+        s = run("--p4", self.p4, "set", "--", "notebook/-old notes.md", "7d", cwd=self.root)
+        kept = sorted(lifetime.read_expires(self.p4))
+        c = run("--p4", self.p4, "clear", "--", "notebook/-old notes.md", cwd=self.root)
+        self.assertEqual((s.returncode, s.stderr, kept, c.stdout, lifetime.read_expires(self.p4)),
+                         (0, "", ["notebook/-old notes.md"], "cleared\n", {}))
+
     def test_a_path_the_working_folder_holds_is_read_from_it_first(self):
         """A relative path that names a file of the working folder is that file, so one outside temportal/ is refused
         though temportal/ holds a file by the same words."""

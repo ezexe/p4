@@ -9,6 +9,8 @@ const START = { cwd: '/', surface: 'desktop', isInteractive: true } as const
 const EXIT = { reason: 'prompt_input_exit', sessionId: 'cli-0001', resume: { id: 'cli-0001' } } as const
 // What the engine stamps on a command a person types: Enter at the prompt, on the main screen at 80 columns.
 const TYPED = { origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
+// The module's tool as a call names it.
+const TOOL = 'mcp__p4-temportal__lifetime'
 // A turn of the main conversation, as the engine starts one and ends it.
 const BEGUN = { text: 'go on', turnId: 't1' } as const
 const TURN = { answer: 'done', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as const
@@ -87,6 +89,8 @@ type Machine = {
   tick?: (args: readonly string[]) => Answer | string | Promise<Answer | string>
   says?: (args: readonly string[]) => Said
   isTaken?: boolean
+  // Whether the name of the tool lifetime is taken.
+  isToolTaken?: boolean
   // What the session's context reads at this moment.
   usage?: () => SessionUsage
   // What the engine's own compaction answers, where it is not the summary alone.
@@ -101,7 +105,7 @@ type Seen = {
   read: string[]
   tried: string[][]
   offered: { name: string; description: string; argumentHint?: string }[]
-  tools: string[]
+  tools: { name: string; description: string; inputSchema: unknown; isDeferred: unknown }[]
   ran: string[][]
   calls: { argv: readonly string[]; env: Readonly<Record<string, string>> | undefined; timeoutMs: number | undefined }[]
   shown: string[]
@@ -159,9 +163,10 @@ function machine(on: On, has: Machine): Seen {
 
     return { value: { command: e.name } }
   })
-  // The module registers no tool: a test that sees one fails on what it counts here.
+  // A tool the module registers, named as the engine names a plugin's tool.
   on('tool.register', (_, e) => {
-    seen.tools.push(e.name)
+    if (has.isToolTaken === true) return { deny: '"lifetime" refused: the name is taken' }
+    seen.tools.push({ name: e.name, description: e.description, inputSchema: e.inputSchema, isDeferred: e.isDeferred })
 
     return { value: { tool: `mcp__p4-temportal__${e.name}` } }
   })
@@ -884,7 +889,7 @@ test('while a compaction the module started runs it starts no second', async ($,
   expect(seen.commands.length).toBe(2)
 })
 
-test('the module registers no tool for the model, whose call would run with no permission check', async ($, on) => {
+test('the start registers one tool for the model, lifetime, which takes a command and its words', async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   const clock = mock.clock(on)
   const seen = machine(on, {})
@@ -893,5 +898,124 @@ test('the module registers no tool for the model, whose call would run with no p
   await clock.settle()
 
   expect(seen.offered.map(command => command.name)).toEqual(['lifetime'])
+  expect(seen.tools.map(tool => [tool.name, tool.isDeferred])).toEqual([['lifetime', undefined]])
+  expect(seen.tools[0]?.inputSchema).toEqual({
+    type: 'object',
+    properties: {
+      command: { type: 'string', enum: ['list', 'set', 'clear', 'now'] },
+      path: { type: 'string' },
+      lifetime: { type: 'string' },
+    },
+    required: ['command'],
+  })
+  for (const word of ['list', 'set', 'clear', 'now', '`path`', '`lifetime`', '.claude/p4/temportal/']) {
+    expect(seen.tools[0]?.description.includes(word)).toBe(true)
+  }
+})
+
+test('a call of the tool runs the command of lifetime.py it names, and what that printed is its result', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { says: args => ({ out: `ran ${args[0]}\n` }) })
+
+  const list = await $.tool.run({ tool: TOOL, command: 'list' } as never)
+  const now = await $.tool.run({ tool: TOOL, command: ' now ' } as never)
+  const clear = await $.tool.run({ tool: TOOL, command: 'clear', path: '-old notes.md' } as never)
+  await clock.settle()
+
+  expect([list, now, clear]).toEqual([{ result: 'ran list' }, { result: 'ran now' }, { result: 'ran clear' }])
+  expect(seen.ran).toEqual([['list'], ['now'], ['clear', '--', '-old notes.md']])
+  expect(seen.calls[0]?.env).toEqual({ CLAUDE_PROJECT_DIR: '/work/project' })
+})
+
+test('a set by the tool takes a path and a lifetime, and the sweep after it sets the timer by the new cookie', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let hasCookie = false
+  const seen = machine(on, {
+    tick: () => ({ said: [], wait_s: hasCookie ? 300 : 3600 }),
+    says: () => {
+      hasCookie = true
+
+      return { out: 'notebook/a page.html: expires 2026-11-19T08:05\n' }
+    },
+  })
+  await $.session.start(START)
+  await clock.settle()
+
+  const set = await $.tool.run({ tool: TOOL, command: 'set', path: 'notebook/a page.html', lifetime: '5m' } as never)
+  await clock.settle()
+  const after = seen.ran.map(args => [...args])
+  await clock.advance(300_000)
+
+  expect(set).toEqual({ result: 'notebook/a page.html: expires 2026-11-19T08:05' })
+  expect(after).toEqual([['tick'], ['set', '--', 'notebook/a page.html', '5m'], ['tick']])
+  expect(seen.ran.at(-1)).toEqual(['tick'])
+  expect(seen.ran.length).toBe(4)
+})
+
+test('a call that fits none of the four commands is refused with what the tool takes, and nothing runs', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, {})
+  const refused = {
+    deny:
+      'p4-temportal: `command` is list, set, clear or now. set takes `path` and `lifetime`, clear takes `path`, ' +
+      'and list and now take neither.',
+  }
+
+  const answers = [
+    await $.tool.run({ tool: TOOL } as never),
+    await $.tool.run({ tool: TOOL, command: 'sweep' } as never),
+    await $.tool.run({ tool: TOOL, command: 'set', path: 'notebook/a.md' } as never),
+    await $.tool.run({ tool: TOOL, command: 'set', path: '  ', lifetime: '7d' } as never),
+    await $.tool.run({ tool: TOOL, command: 'clear' } as never),
+    await $.tool.run({ tool: TOOL, command: 'clear', path: 'notebook/a.md', lifetime: '7d' } as never),
+    await $.tool.run({ tool: TOOL, command: 'now', path: 'notebook/a.md' } as never),
+    await $.tool.run({ tool: TOOL, command: 'list', path: 7 } as never),
+  ]
+  await clock.settle()
+
+  expect(answers.slice(0, 7)).toEqual(Array.from({ length: 7 }, () => refused))
+  expect(answers[7]).toEqual({ result: 'lifetime.py list printed nothing and exited 0.' })
+  expect(seen.ran).toEqual([['list']])
+})
+
+test('a refusal of lifetime.py is the error of the call, and so is a call with no python', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const refused = 'lifetime.py: memory/MEMORY.md is in memory/, which is never cleared'
+  const seen = machine(on, { says: () => ({ code: 2, err: `${refused}\n` }) })
+
+  const set = await $.tool.run({ tool: TOOL, command: 'set', path: 'memory/MEMORY.md', lifetime: '7d' } as never)
+  await clock.settle()
+
+  expect(set).toEqual({ deny: refused })
+  expect(seen.ran).toEqual([['set', '--', 'memory/MEMORY.md', '7d']])
+})
+
+test('with no python the tool says that lifetime.py did not run', async ($, on) => {
+  mock.env(on, {})
+  const clock = mock.clock(on)
+  const seen = machine(on, { files: {}, pythons: {} })
+
+  const list = await $.tool.run({ tool: TOOL, command: 'list' } as never)
+  await clock.settle()
+
+  expect(list).toEqual({ deny: 'lifetime.py list did not run, and the debug log says why.' })
+  expect(seen.debugged).toEqual(['no working python found, so no retention sweep runs'])
+})
+
+test('where the tool cannot be registered the debug log says so, and the command is registered all the same', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { isToolTaken: true })
+
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(seen.offered.map(command => command.name)).toEqual(['lifetime'])
   expect(seen.tools).toEqual([])
+  expect(seen.debugged.length).toBe(1)
+  expect(seen.debugged[0]?.startsWith('the tool lifetime was not registered: ')).toBe(true)
 })
