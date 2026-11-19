@@ -213,6 +213,30 @@ class Linear(Base):
         self.assertNotIn("test_z.py", prompt)
         self.assertNotIn("its regression test passing", prompt)
 
+    def test_a_python_files_tests_are_found_in_the_tests_folders_above_it_too(self):
+        """A project that keeps its tests in a `tests` folder, at its top or beside the code, as pytest's good
+        practices lay a project out, has them named too: the folder nearest the file first, in each the file named
+        after the python file and then the ones that import it. No folder above the project is read, and none whose
+        name starts with a dot."""
+        t = self.t
+        for name, text in (("src/pkg/x.py", "x = 1\n"), ("src/pkg/tests/test_u.py", "from x import x\n"),
+                           ("tests/unit/test_w.py", "import x\n"), ("tests/unit/test_v.py", "import os\n"),
+                           ("tests/test_x.py", "import unittest\n"), ("tests/.kept/test_h.py", "import x\n")):
+            write(os.path.join(t.proj, name), text)
+        write(os.path.join(os.path.dirname(t.proj), "tests", "test_x.py"), "import x\n")
+        self.assertEqual(puppeteer.test_files(t.proj, ["src/pkg/x.py"]),
+                         ["src/pkg/tests/test_u.py", "tests/test_x.py", "tests/unit/test_w.py"])
+        top = t.proj.replace("\\", "/")
+        self.assertEqual(puppeteer.test_files(t.proj, [f"{top}/src/pkg/x.py"]),
+                         [f"{top}/src/pkg/tests/test_u.py", f"{top}/tests/test_x.py", f"{top}/tests/unit/test_w.py"])
+        self.assertEqual(puppeteer.test_files(t.proj, ["src/pkg/gone.py", "src/pkg/tests/test_u.py"]), [])
+        for i in range(puppeteer.TESTS_MOST + 2):
+            write(os.path.join(t.proj, "tests", f"test_more{i}.py"), "import x\n")
+        got = puppeteer.test_files(t.proj, ["src/pkg/x.py"])
+        self.assertEqual(len(got), puppeteer.TESTS_MOST)
+        self.assertEqual(got[:2], ["src/pkg/tests/test_u.py", "tests/test_x.py"],
+                         "the file named after it is named before the ones that only import it")
+
     def test_a_start_draft_is_an_instruction_that_quotes_no_sentence_of_the_message(self):
         """The draft's brief states the task, its files, what done looks like and the model and effort as an
         instruction to the session it starts: no sentence of the message beyond the title, and no line on who asked

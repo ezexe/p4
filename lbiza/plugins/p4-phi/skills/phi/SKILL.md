@@ -25,7 +25,7 @@ Once a commit that closes that issue is on the remote default branch, the next S
 
 The push line has the orchestrator run the full suite once, on the commit being pushed, as one background command, and keep the verdict with `note "suite green at <hash>"`.
 Where a note of the tree holds that commit's hash green, the line names the note and the suite is not run again for that hash.
-A start draft names the test files of the paths its brief covers, the one beside each python file and those of its folder that import it, and never a whole suite.
+A start draft names the test files of the paths its brief covers, the one named after each python file and those that import it, beside the file and in the `tests` folders above it, and never a whole suite.
 
 A store moves only by `python -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/p4.py" sync --push --p4 "<store>"`.
 A hand `git pull` or `git push` inside a store is asked first with that command named, ahead of every other check on the call, and a session another session started is told that its tree's orchestrator runs the sync.

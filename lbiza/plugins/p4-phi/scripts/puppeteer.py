@@ -1196,13 +1196,51 @@ def topic_of(req):
 
 TESTS_MOST = 6                   # the test files one brief names
 TESTS_SCANNED = 60               # the test files of one folder read for an import
+TESTS_WALKED = 2000              # the files of one `tests` folder looked at for a test file's name
 TEST_BYTES = 64 * 1024           # of each, the part read
+
+
+def _above(base, folder):
+    """`folder` and each folder above it up to `base`, nearest first, each as (how the brief's path spells it, where
+    it is). A folder outside `base` is climbed no further than itself."""
+    if not os.path.isabs(folder):
+        bits = [b for b in folder.split("/") if b]
+        for i in range(len(bits), -1, -1):
+            spelled = "/".join(bits[:i])
+            yield spelled, os.path.join(base or "", spelled)
+        return
+    top = os.path.normcase(os.path.normpath(base)) if base else ""
+    at = folder.rstrip("/") or folder
+    while True:
+        yield at, at
+        here, up = os.path.normcase(os.path.normpath(at)), os.path.dirname(at)
+        if not top or up == at or here == top or not here.startswith(top + os.sep):
+            return
+        at = up
+
+
+def _tests_under(folder):
+    """The test files under a `tests` folder, as paths from it with forward slashes, sorted, with TESTS_WALKED files
+    looked at at most and no folder whose name starts with a dot."""
+    found, seen = [], 0
+    for d, dirs, files in os.walk(folder):
+        dirs[:] = sorted(x for x in dirs if not x.startswith(".") and x not in ("__pycache__", "node_modules"))
+        for f in sorted(files):
+            seen += 1
+            if f.startswith("test_") and f.endswith(".py"):
+                found.append(os.path.relpath(os.path.join(d, f), folder).replace("\\", "/"))
+        if seen >= TESTS_WALKED:
+            break
+    return sorted(found)
 
 
 def test_files(base, paths):
     """The test files of the paths a brief covers, TESTS_MOST at most, each as the brief's own path spells its
-    folder: for a python file, `test_<name>.py` beside it and the test files of its folder that import it. A brief
-    names these, and never a whole suite, so its worker runs the tests its change touches, ezexe/p4#234."""
+    folder: for a python file, `test_<name>.py` and the test files that import it, beside it and in the `tests`
+    folder of its folder and of each folder above it up to `base`, nearest first and the one named after it first.
+    A `tests` folder at a project's top or beside the code is where pytest's good practices lay a project's tests,
+    https://docs.pytest.org/en/stable/explanation/goodpractices.html. A brief names these, and never a whole suite,
+    so its worker runs the tests its change touches, ezexe/p4#234."""
     out = []
     for p in paths:
         p = str(p).replace("\\", "/")
@@ -1210,25 +1248,35 @@ def test_files(base, paths):
         stem, ext = os.path.splitext(name)
         if ext != ".py" or name.startswith("test_"):
             continue
-        at = folder if os.path.isabs(folder) else os.path.join(base or "", folder)
-        try:
-            beside = sorted(n for n in os.listdir(at) if n.startswith("test_") and n.endswith(".py"))
-        except OSError:
-            continue
         imports = re.compile(rf"^\s*(?:import|from)\s+{re.escape(stem)}\b", re.M)
-        for n in beside[:TESTS_SCANNED]:
-            hit = n == f"test_{stem}.py"
-            if not hit:
+        for nearest, (spelled, at) in enumerate(_above(base, folder)):
+            held = []                                   # (how it is spelled, where it is, its test files)
+            if not nearest:
                 try:
-                    with open(os.path.join(at, n), encoding="utf-8", errors="replace") as f:
-                        hit = bool(imports.search(f.read(TEST_BYTES)))
+                    held.append((spelled, at, sorted(n for n in os.listdir(at)
+                                                     if n.startswith("test_") and n.endswith(".py"))))
                 except OSError:
-                    hit = False
-            named = f"{folder}/{n}" if folder else n
-            if hit and named not in out:
-                out.append(named)
-            if len(out) >= TESTS_MOST:
-                return out
+                    pass
+            tests = os.path.join(at, "tests")
+            if os.path.isdir(tests):
+                held.append((f"{spelled}/tests" if spelled else "tests", tests, _tests_under(tests)))
+            for where, root, names in held:
+                hits = [n for n in names if n.rsplit("/", 1)[-1] == f"test_{stem}.py"]
+                for n in names[:TESTS_SCANNED]:
+                    if n in hits:
+                        continue
+                    try:
+                        with open(os.path.join(root, n), encoding="utf-8", errors="replace") as f:
+                            if imports.search(f.read(TEST_BYTES)):
+                                hits.append(n)
+                    except OSError:
+                        pass
+                for n in hits:
+                    named = f"{where}/{n}" if where else n
+                    if named not in out:
+                        out.append(named)
+                    if len(out) >= TESTS_MOST:
+                        return out
     return out
 
 
