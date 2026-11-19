@@ -501,7 +501,7 @@ def line(home, s, store=""):
             f"{page_path(home, s['sessionId'])}.")
     if any(r["waits"] for r in note):
         text += (" A request that waits on ezexe is put to it as the question of this turn's `mcp__ccd_turn__wrap_up`,"
-                 " with buttons that answer it.")
+                 " with buttons that answer it. " + relay.PUSH)
     if note:
         text += (" A question this turn puts to ezexe about a request starts with its id, as \"ask-1: ...\", so the "
                  "answer finds its row.")

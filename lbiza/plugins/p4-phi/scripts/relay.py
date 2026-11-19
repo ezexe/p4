@@ -228,6 +228,16 @@ def gone(home, s):
 DRIVES = bool(os.path.splitdrive("C:/x")[0])
 
 
+# tools-reference.md has `PushNotification` send "a desktop notification from a local session", and desktop.md, "Get
+# notified when a session finishes", has the app itself notify only "when a Code session finishes a task and you
+# aren't currently viewing that session", which does not say that something waits. The tool's own text: "Notify when
+# there's a real chance they've walked away and there's something worth coming back for", "Keep the message under 200
+# characters, one line, no markdown", and it skips one that would be a duplicate. Not every session lists the tool.
+PUSH = ("Where this session's tool list holds `PushNotification`, also send one that says what waits, in one line "
+        "under 200 characters: the app's own notice at a turn's end says that a session finished a task, and not "
+        "that a card or a question is open.")
+
+
 def norm(p, base=""):
     """A path or glob as one form: absolute when a base is given, forward slashes, no trailing slash, case folded
     on Windows."""

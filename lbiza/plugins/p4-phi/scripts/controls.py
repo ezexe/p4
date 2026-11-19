@@ -33,8 +33,10 @@ The watcher every orchestrator has is puppeteer.py's and is another thing.
                puppeteer is told once to keep what is not on its board with `note`. Claude Code compacts a
                session by itself and p4-phi asks ezexe nothing about it. p4-phi speaks only
                when one of its hooks fires, so a boundary reached while the puppeteer is idle is told
-               beside its next message: a command hook with `asyncRewake` could wake it at once, `SendMessage` with
-               `notify_when_idle` could tell it when a controlled session goes idle, and p4-phi uses neither.
+               beside its next message. `SendMessage` with `notify_when_idle` tells it when a controlled session
+               goes idle, so `idle_watch` hands that call once for each controlled session that works, and the
+               app's idle notice then opens the turn the boundary is told in. A command hook with `asyncRewake`
+               could wake it at once, and p4-phi uses none.
   open issues  an open issue of a repository a controlled session works in is the puppeteer's to resolve. When a
                controlled tree has closed or a controlled session has reported done, the puppeteer is handed the
                ones no live session holds, each once, beside the running orchestrator whose topic covers it or as
@@ -1090,6 +1092,40 @@ def boundary(home, s):
             f"context fills, and the board's path is the first thing it is handed after that.")
 
 
+# The SendMessage tool's own text: "To hear when a session ON THIS MACHINE finishes what it is doing, pass
+# `notify_when_idle: true` (from the main conversation only) — one-shot and opt-in: exactly one `[Cross-session idle
+# notice]` arrives when it next goes idle (or exits)", "if it never signals within the subscription's lifetime ... the
+# notice says the subscription expired instead", and "Omit `message` for a pure subscription that costs that session
+# nothing". The notice reaches the puppeteer as a prompt, plans.app_notice, and the boundary is told beside it.
+IDLE_WATCH = ("phi (p4-phi): to hear while this session is idle that a controlled session went idle, subscribe once "
+              "to each one that works: {calls}. Each call is `SendMessage` with `notify_when_idle: true` and no "
+              "`message`, a subscription that costs that session nothing, made from the main conversation for a "
+              "session on this machine. One `[Cross-session idle notice]` then opens a turn here when that session "
+              "goes idle or exits, or says that the subscription expired, and p4-phi tells what closed beside it. "
+              "A subscription is spent by its one notice, so p4-phi names the call again once that session works "
+              "after a later report.")
+
+
+def idle_watch(home, s):
+    """The line that has a puppeteer subscribe to each controlled session that works, with `SendMessage` and
+    `notify_when_idle`, and an empty string where none is new: one is handed once for a session's stretch of work,
+    and again once it works after a later report. The caller saves what was told."""
+    rows = controlled(s)
+    told = s.get("idleWatch") if isinstance(s.get("idleWatch"), dict) else {}
+    new = {}
+    for e in rows:
+        sid, store = e["sessionId"], e.get("store") or ""
+        if standing(store, sid)[0] != "working":
+            continue
+        when = last_report(store, sid)[0] or "-"
+        if told.get(sid) != when:
+            new[sid] = when
+    if not new:
+        return ""
+    s["idleWatch"] = {**{k: v for k, v in told.items() if any(e["sessionId"] == k for e in rows)}, **new}
+    return IDLE_WATCH.format(calls="; ".join(f"\"{full_title(k)}\" with `to` `{k}`" for k in new))
+
+
 def complete_text(ready):
     """The line naming the controlled sessions p4-phi's records hold complete, which no tool of the app tells, and
     an empty string when there are none. Archiving is the app's: it asks ezexe before the archive tool runs. Where
@@ -1164,7 +1200,9 @@ def take(home, s, old):
 def request_call(r):
     """The exact start_session input for a request addressed to a puppeteer: a new orchestrator in
     the environment of the session that filed the request, in that project's own checkout, where it lands its
-    tree's work, so `use_worktree` is false, as starts.use_worktree gives a new orchestrator."""
+    tree's work, so `use_worktree` is false, as starts.use_worktree gives a new orchestrator. `wake_when_done`
+    is true, which by the start tool's schema "also continues you if this session never gets its task some other
+    way, such as a brief that is not sent", and is "not with own_initiative", so no card carries it."""
     project = os.path.dirname(os.path.dirname(os.path.abspath(r["store"]))).replace("\\", "/")
     bg = str(r.get("background") or "")
     if len(bg) < starts.BACKGROUND_MIN:
@@ -1174,6 +1212,7 @@ def request_call(r):
         brief += "\n\n" + PHI.NEW_TOP_BRIEF + " " + PHI.new_top_first_act()
     return plans.with_level({"initiation": "user_asked", "title": r["title"], "context": "fresh",
                              "use_worktree": starts.use_worktree(brief), "cwd": project, "background": bg,
+                             "wake_when_done": True,
                              "prompt": brief + "\n\n" + starts.marker(r["id"], r["requester"])},
                             r["title"] + "\n" + r["brief"])     # a fresh start names its model and effort
 
@@ -1187,7 +1226,9 @@ def requests_text(home, s):
              f"{filing(r['store'], s)}: `mcp__ccd_session__start_session` with "
              f"{json.dumps(request_call(r), ensure_ascii=False)}" for r in rows]
     return ("phi (p4-phi): controlled sessions ask this puppeteer for new orchestrators. This turn ezexe "
-            "began, so for each either start it with exactly the call given and then file it with "
+            "began. Each call passes `cwd`, and the start tool's text has `mcp__ccd_session__list_start_targets` "
+            "list the valid names, so call that first, once: a folder it does not list is named to ezexe in one "
+            "line and never guessed. For each either start it with exactly the call given and then file it with "
             "`mcp__ccd_sidebar__move_sessions` where named, never in the section this session is filed in, or decline "
             f"it with `{PHI.commands()} controls --decline <request id> \"<why>\"` and one line to ezexe. p4-phi "
             "records a started one as controlled at this session's next hook:\n" + "\n".join(lines))

@@ -1380,7 +1380,11 @@ def call_of(d):
     """The exact start_session input that starts a draft. A worker's draft writes, so it passes `use_worktree: true`
     and the worker gets a git worktree and a branch of its own. A new orchestrator lands in this checkout, so it
     passes false, as starts.use_worktree says."""
-    call = {"initiation": "user_asked", "title": d["title"], "context": d["context"], "prompt": d["brief"]}
+    # the start tool's schema, of `wake_when_done`: true "also continues you if this session never gets its task
+    # some other way, such as a brief that is not sent; default false; not with own_initiative". Every call here
+    # runs at once, as `user_asked`, and no card is built here.
+    call = {"initiation": "user_asked", "title": d["title"], "context": d["context"], "prompt": d["brief"],
+            "wake_when_done": True}
     if d["context"] == "fresh":
         call.update(use_worktree=bool(d.get("parent")), background=d["background"])
     # a fresh draft names its model and effort, judged by the message it came from as well as its brief; the

@@ -271,6 +271,8 @@ class FollowThrough(Base):
         self.assertIn("no person began this turn", got)
         self.assertIn("`mcp__ccd_session__start_session` with `initiation` `own_initiative`", got)
         self.assertIn("tell ezexe in one line that the card waits", got)
+        self.assertIn("`PushNotification`, also send one that says what waits", got)
+        self.assertNotIn("wake_when_done", got, "the start tool refuses it on a card")
 
     def test_a_successor_is_started_on_a_turn_ezexe_began(self):
         self.turn_on()
@@ -491,6 +493,9 @@ class Leftovers(Base):
         self.assertEqual(len(named), 1, got)
         self.assertIn("holds 1 uncommitted change", named[0])
         self.assertIn("Name each to ezexe once", named[0])
+        self.assertIn("`mcp__ccd_host__get_storage_usage` lists it", named[0])
+        self.assertIn("`mcp__ccd_host__discard_kept_worktree`", named[0])
+        self.assertIn("never on `phi.upkeep` alone", named[0])
         again = self.said()
         self.assertEqual(self.lines(again, "left on disk") + self.lines(again, "leftovers of"), [])
         self.assertTrue(os.path.isdir(self.wt), "left as it is")

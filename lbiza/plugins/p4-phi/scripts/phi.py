@@ -2458,6 +2458,9 @@ def pair_parts(me, s, req, changed="", notice=lambda text: text):
         if not pieces[0].startswith("phi (p4-phi): a boundary: "):
             pieces[0] = notice(pieces[0])
         out += pieces
+    watch = controls.idle_watch(me.home, s)
+    if watch:
+        out.append(watch)
     try:
         unheld = controls.open_issues_text(me.home, s)
     except Exception:  # noqa: BLE001  a listing it cannot read never costs the message its other lines

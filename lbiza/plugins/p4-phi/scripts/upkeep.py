@@ -946,7 +946,7 @@ def route(home, s, text, by, store, back="", d=None, hand=False):
                 f"as the lines after these acts say, which waits on nobody")
     return (f"{refused}, and no live session's task covers it: show it as the app's card, `{START}` with "
             f"`initiation` `own_initiative` and a brief that holds its words, and tell ezexe in one line that the "
-            f"card waits")
+            f"card waits. {relay.PUSH[:-1]}")
 
 
 def item_acts(home, s, d, by, store, hand):
@@ -1026,6 +1026,18 @@ def agent_trees(home, sid):
     return list(seen.values())
 
 
+# The app keeps the worktree it made for a session that is archived with uncommitted changes, and two of its tools are
+# for exactly that. get_storage_usage's own text: it reports the worktrees "kept after archiving because they hold
+# uncommitted changes, and for which sessions", and is "Read-only; nothing is asked". discard_kept_worktree's: it
+# deletes them, "discarding those changes for good", "The user approves each call on a card ... in every permission
+# mode", and "Use it only when the user asked to discard that session's leftover work". So the line names both and
+# makes neither call ezexe's standing word.
+KEPT = (" Where the app itself kept one of these at the archive, `mcp__ccd_host__get_storage_usage` lists it with its "
+        "session and its size, and asks nothing. `mcp__ccd_host__discard_kept_worktree` with that `session_id` "
+        "deletes it and its uncommitted changes for good, behind the app's own card in every mode: call it only once "
+        "ezexe has said to discard that session's leftover work, and never on `phi.upkeep` alone.")
+
+
 def leftover_acts(home, s, d, hand):
     """After an archive, and for this session's own subagents: the removal of each clean, merged worktree and branch,
     and, once, the name of each one that is dirty or unmerged."""
@@ -1048,10 +1060,11 @@ def leftover_acts(home, s, d, hand):
         if fresh:
             if hand:
                 d["named"] = (d["named"] + [f"tree:{h[0]}" for h in fresh])[-400:]
+            kept = KEPT if k and any("uncommitted change" in w for _, w in fresh) else ""
             out.append((f"named:{k or 'agents'}:{fresh[0][0][-40:]}", "named", False,
                         f"left on disk, of {whose}: " + "; ".join(f"{t}, since {w}" for t, w in fresh)
                         + ". Name each to ezexe once, in one line, and leave it: a removal by force and a deletion "
-                          "of unmerged work are ezexe's."))
+                          "of unmerged work are ezexe's." + kept))
     return out
 
 
