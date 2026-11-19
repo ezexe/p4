@@ -44,6 +44,11 @@ def uses():
             for name in re.findall(r"\bon\('([a-z]+\.[A-Za-z.]+)'", text):
                 kind = "hook" if name.startswith("classic.") else "event"
                 out.append((kind, name.removeprefix("classic."), folder.name))
+            # a glob stands for the events its hook tests `next.event` against, which is how a module names an
+            # event an older Claude Code lacks
+            if re.search(r"\bon\('[a-z]+\.\*'", text):
+                for name in re.findall(r"next\.event === '([a-z]+\.[A-Za-z.]+)'", text):
+                    out.append(("event", name, folder.name))
             for name in re.findall(r"\$\.([a-z]+\.[A-Za-z]+)\(", text):
                 out.append(("method", "$." + name, folder.name))
             for name in re.findall(r"'(mcp__ccd_\w+__\w+|PushNotification)'", text):
@@ -147,6 +152,16 @@ class RecordTest(unittest.TestCase):
         self.assertIn(("method", "$.state.get", "p4-phi"), found)
         self.assertIn(("method", "$.state.set", "p4-phi"), found)
         self.assertEqual(ROWS["$.state.set"]["used"], ["p4-phi"])
+
+    def test_a_glob_counts_as_the_events_its_hook_tests(self):
+        """p4-temportal names `tool.*` and answers where `next.event` is `tool.run`, so it loads on a Claude Code
+        with no such event. It still uses `tool.run`, and it reads the version to register no tool where the
+        event is missing."""
+        found = uses()
+        self.assertIn(("event", "tool.run", "p4-temportal"), found)
+        self.assertIn(("method", "$.session.version", "p4-temportal"), found)
+        self.assertEqual(ROWS["tool.run"]["used"], ["p4-phi", "p4-temportal"])
+        self.assertEqual(ROWS["$.session.version"]["used"], ["p4-native", "p4-temportal"])
 
     def test_an_open_row_names_a_plugin_and_what_it_would_replace_or_add_there(self):
         """`open` lists plugins of this repository, and `would` holds one sentence for each of them and for no

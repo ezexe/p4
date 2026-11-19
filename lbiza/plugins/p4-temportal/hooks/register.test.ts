@@ -91,6 +91,8 @@ type Machine = {
   isTaken?: boolean
   // Whether the name of the tool lifetime is taken.
   isToolTaken?: boolean
+  // The version of Claude Code and the release it is built from, or none where the read is refused.
+  version?: () => { version: string; base?: string } | undefined
   // What the session's context reads at this moment.
   usage?: () => SessionUsage
   // What the engine's own compaction answers, where it is not the summary alone.
@@ -190,6 +192,11 @@ function machine(on: On, has: Machine): Seen {
     seen.tools.push({ name: e.name, description: e.description, inputSchema: e.inputSchema, isDeferred: e.isDeferred })
 
     return { value: { tool: `mcp__p4-temportal__${e.name}` } }
+  })
+  on('session.version', () => {
+    const version = has.version === undefined ? { version: '2.1.328', base: '2.1.328' } : has.version()
+
+    return version === undefined ? { deny: 'the version is closed to this plugin' } : { value: version }
   })
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
   on('session.root', () => ({ value: '/work/project' }))
@@ -1040,6 +1047,57 @@ test('where the tool cannot be registered the debug log says so, and the command
   expect(seen.tools).toEqual([])
   expect(seen.debugged.length).toBe(1)
   expect(seen.debugged[0]?.startsWith('the tool lifetime was not registered: ')).toBe(true)
+})
+
+for (const version of ['2.1.311', '2.1.322', '2.1.325', '2.0.400', '1.9.999']) {
+  test(`on Claude Code ${version}, which has no tool.run, no tool is registered and the command is`, async ($, on) => {
+    mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+    const clock = mock.clock(on)
+    const seen = machine(on, { version: () => ({ version, base: version }) })
+
+    await $.session.start(START)
+    await clock.settle()
+
+    expect(seen.offered.map(command => command.name)).toEqual(['lifetime'])
+    expect(seen.tools).toEqual([])
+    expect(seen.debugged).toEqual([
+      'the tool lifetime is not registered: this Claude Code has no `tool.run` event to serve it at',
+    ])
+  })
+}
+
+const RUNS: [string, { version: string; base?: string } | undefined][] = [
+  ['2.1.326', { version: '2.1.326', base: '2.1.326' }],
+  ['2.2.0', { version: '2.2.0', base: '2.2.0' }],
+  ['3.0.1', { version: '3.0.1', base: '3.0.1' }],
+  ['a development build of 2.1.328', { version: '2.1.328-dev.20261119.t101500.sha1a2b3c4', base: '2.1.328-dev' }],
+  ['2.1.330 with no release named', { version: '2.1.330' }],
+  ['a version spelled as no release', { version: 'from source' }],
+  ['a version that cannot be read', undefined],
+]
+for (const [what, version] of RUNS) {
+  test(`on Claude Code ${what} the tool is registered`, async ($, on) => {
+    mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+    const clock = mock.clock(on)
+    const seen = machine(on, { version: () => version })
+
+    await $.session.start(START)
+    await clock.settle()
+
+    expect(seen.tools.map(tool => tool.name)).toEqual(['lifetime'])
+    expect(seen.debugged).toEqual([])
+  })
+}
+
+test('a call of the tool goes down at tool.call as it came, so lifetime.py runs once, at the tool.run beneath it', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const seen = machine(on, { says: args => ({ out: `ran ${args[0]}
+` }) })
+
+  const out = await $.tool.call({ tool: TOOL, command: 'now' } as never)
+
+  expect(out).toEqual({ result: 'ran now' })
+  expect(seen.ran).toEqual([['now']])
 })
 
 test('a start hands every SessionStart command hook the settings of each source, the keys p4 reads and no other', async ($, on) => {

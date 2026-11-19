@@ -149,8 +149,9 @@ class Page(unittest.TestCase):
                 "as one chain", "the first session's start wrote the key", "neither asked about nor refused",
                 "the session after the one whose start wrote it")),
             "an older build": (open_still, (
-                "Seen on Claude Code 2.1.322", "does not load there at all", "<code>tool.run</code> is no event",
-                "The command hooks ran all the same", "was not seen on it")),
+                "Seen on Claude Code 2.1.322 and 2.1.311", "<code>tool.run</code> is no event on either",
+                "<code>hooks module p4-temportal@inline loaded</code>", "names the glob <code>tool.*</code>",
+                "registers no tool there", "was seen on those builds")),
         }
         for what, (where, words) in seen.items():
             for said in words:

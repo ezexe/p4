@@ -14,6 +14,9 @@ claude plugin install p4-native@p4-marketplace
 The plugin is a hooks module alone, `hooks/register.ts`, whose functions run inside Claude Code.
 It runs no command hook and starts no process at a session's start, and it carries no copy of `p4conf.py`, since it writes no setting.
 A hooks module needs Claude Code v2.1.287 or later, and it does not load in a session started with `--safe-mode` or `--bare`, where `disableAllHooks` is set, or where managed settings block mods, by https://code.claude.com/docs/en/plugins/mods/create.md.
+The lowest Claude Code this module was seen to load on is 2.1.311, the oldest on the machine it was tried on, and it loads on 2.1.322 too: the debug log of a `claude -p` run on each holds `hooks module p4-native@inline loaded` with the events `session.start,prompt.submit,turn.start,turn.complete,session.compact,tool.call,classic.PostToolUse,command.run`.
+Both builds know every event the module names and lack one method it calls, `$.session.info`, so the map's entry is written there with no `platform`.
+A call of a method the build lacks throws where it is made, before there is a promise to catch, and until p4-native 0.5.9 that cost the whole map on those builds, with the debug line `the capability map was not read: $.session.info is not a function`.
 
 ## The capability map
 
@@ -103,7 +106,7 @@ The probe of a plugin's own compaction asks for a compaction that this module's 
 - `agent-teams-in-the-desktop-app`, by hand: the settings keeper does not write `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`, and a team is led from a terminal session.
 - `message-held-across-permission-modes`, by hand: a message to a session in another permission mode is not relied on.
 - `skills-copy-named-like-an-installed-plugin`, by hand: a development copy is checked live through a session's mods folder.
-- `unknown-event-in-a-module`, by hand: each p4 hooks module hooks only events of Claude Code 2.1.326.
+- `unknown-event-in-a-module`, by hand: a p4 hooks module names an event an older Claude Code lacks by a glob and tests `next.event`, as p4-temportal does for `tool.run`, and p4-phi's module names `tool.run` itself.
 - `reload-plugins-and-session-start`, by hand: no p4 plugin relies on `/reload-plugins` running its SessionStart hooks again.
 - `output-styles-stacking`, by hand: p4-phi ships its rule to act and not wait as no output style.
 - `wake-when-done-on-a-card`, by hand: no card p4-phi's upkeep proposes carries `wake_when_done`.

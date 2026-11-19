@@ -10,7 +10,12 @@
 // Claude Code allowed the call, so its permission check stands before a `set`, a `clear` and a `now`, which end in
 // deleted files. plugins/mods/api.md, "Add a tool", serves a tool at `tool.call`, where an answer skips that
 // check. `tool.run` is in the API types of Claude Code 2.1.326 and is no event on 2.1.322, where a module that
-// hooks it does not load.
+// names it does not load. So the module names the glob `tool.*` under the tool's matcher and answers where
+// `next.event` is `tool.run`, as the API types say of `on`: "To span versions, ... hook a glob such as `prompt.*`
+// and test `next.event`." On a build with no `tool.run` it registers no tool, since nothing would serve one there,
+// and the sweeps, `/lifetime`, the compaction hooks and the settings it hands on run all the same. Seen on Claude
+// Code 2.1.322 in a `claude -p` run: the module loaded, and a tool registered with nothing but a glob over it was
+// answered "no tool.call hook answered this call".
 //
 // It also keeps a compaction from losing what a session needs afterwards, at `session.compact`, the event of every
 // compaction, whoever started it. On the way down it adds the keep list to what the summary is told. On the way up
@@ -183,6 +188,9 @@ const made = new Set<string>()
 const edited = new Set<string>()
 const MOST_PLANS = 20
 const PLAN = /[\\/]plans[\\/][^\\/]+\.md$/i
+
+// The first Claude Code whose API types declare `tool.run`: the types of 2.1.325 have none.
+const RUNS_FROM = [2, 1, 326] as const
 
 // What was said to the debug log, each line once.
 const said = new Set<string>()
@@ -455,8 +463,27 @@ async function called($: EngineInterface, e: unknown): Promise<ToolCallResult> {
   return isDone ? { result: text } : { deny: text }
 }
 
+// Whether this Claude Code raises `tool.run`, by the release its version is built from. A version that cannot be
+// read or is spelled as no release counts as one that does, which every build since 2.1.326 is.
+async function hasRun($: EngineInterface): Promise<boolean> {
+  try {
+    const { base, version } = await $.session.version()
+    const parts = /^(\d+)\.(\d+)\.(\d+)/.exec(base ?? version)
+    if (parts === null) return true
+    for (const [at, least] of RUNS_FROM.entries()) {
+      const part = Number(parts[at + 1])
+      if (part !== least) return part > least
+    }
+
+    return true
+  } catch {
+    return true
+  }
+}
+
 // The slash command and the tool, registered at each start of the module. A name that is taken is refused with a
-// throw, and each is registered whatever became of the other.
+// throw, and each is registered whatever became of the other. The tool is left out on a Claude Code with no
+// `tool.run`, where a call of it would find nothing to answer.
 async function offer($: EngineInterface): Promise<void> {
   try {
     await $.command.register({
@@ -466,6 +493,11 @@ async function offer($: EngineInterface): Promise<void> {
     })
   } catch (error) {
     note($, `/lifetime was not registered: ${reason(error)}`)
+  }
+  if (!(await hasRun($))) {
+    note($, 'the tool lifetime is not registered: this Claude Code has no `tool.run` event to serve it at')
+
+    return
   }
   try {
     await $.tool.register(TOOL)
@@ -678,10 +710,13 @@ export const register: Register = on => {
 
   on('command.run', { command: 'lifetime' }, async ($, e) => ({ text: await lifetime($, e.args) }))
 
-  // A call of the tool, once it is allowed. Nothing runs beneath, since the tool is nothing but that command.
-  on('tool.run', { tool: TOOL_ID }, ($, e) => called($, e)).catch(() => ({
-    deny: 'p4-temportal could not run lifetime.py.',
-  }))
+  // A call of the tool, once it is allowed: of the tool's events the glob selects, `tool.run` alone is answered,
+  // and nothing runs beneath it, since the tool is nothing but that command. Every other event of the tool goes
+  // down as it came, `tool.call` among them, so the permission check stands. The glob stands for `tool.run`
+  // because a module that names an event its Claude Code lacks is refused whole.
+  on('tool.*', { tool: TOOL_ID }, ($, e, next) => (next.event === 'tool.run' ? called($, e) : next(e))).catch(
+    ($, e, next) => (next.event === 'tool.run' ? { deny: 'p4-temportal could not run lifetime.py.' } : next(e)),
+  )
 
   // After a /clear or a resume the process goes on, and the timer with it. Every other reason ends the process.
   on('session.end', async ($, e, next) => {

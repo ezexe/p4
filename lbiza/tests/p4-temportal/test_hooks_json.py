@@ -199,21 +199,44 @@ class ModuleTest(unittest.TestCase):
 
     def test_the_tool_runs_the_same_commands_once_its_call_is_allowed(self):
         """The module registers one tool, `lifetime`, and serves it at `tool.run`, which the API types of Claude Code
-        2.1.326 give as the event that fires once a call is allowed. It hooks no `tool.call`, where
+        2.1.326 give as the event that fires once a call is allowed. It answers at no `tool.call`, where
         https://code.claude.com/docs/en/plugins/mods/api.md, "Add a tool", serves a tool and an answer skips the
         permission check: a `set`, a `clear` and a `now` end in deleted files. The tool takes the four commands the
         slash command takes, and hands a path after `--`, which lifetime.py's parser reads as the end of options."""
         import re
         text = (SRC / "register.ts").read_text(encoding="utf-8")
-        self.assertEqual(re.findall(r"on\('(tool\.\w+)'", text), ["tool.run"])
-        self.assertIn("on('tool.run', { tool: TOOL_ID }", text)
+        self.assertEqual(re.findall(r"on\('(tool\.[\w*]+)'", text), ["tool.*"])
+        self.assertIn("on('tool.*', { tool: TOOL_ID }, ($, e, next) => "
+                      "(next.event === 'tool.run' ? called($, e) : next(e)))", text)
         self.assertIn("const TOOL_ID = 'mcp__p4-temportal__lifetime'", text)
         self.assertEqual(text.count("$.tool.register("), 1)
         self.assertIn("name: 'lifetime',\n  description:", text)
         self.assertIn("enum: ['list', 'set', 'clear', 'now']", text)
         self.assertEqual(re.findall(r"\['(\w+)', \d\],", text), ["list", "set", "clear", "now"])
         self.assertIn("['--', ...rest]", text)
-        self.assertIn(".catch(() => ({", text.split("on('tool.run'", 1)[1].split("\n\n", 1)[0])
+        caught = text.split("on('tool.*'", 1)[1].split("\n\n", 1)[0]
+        self.assertIn("next.event === 'tool.run' ? { deny: 'p4-temportal could not run lifetime.py.' } : next(e)", caught)
+
+    def test_the_module_names_no_event_an_older_claude_code_lacks(self):
+        """A module that names an event its Claude Code does not know is refused whole, and `tool.run` is no event on
+        2.1.311 and 2.1.322. The API types say of `on`: "To span versions, ... hook a glob such as `prompt.*` and
+        test `next.event`." So the module names `tool.run` in no registration, and on a build older than the first
+        whose types declare the event it registers no tool, since nothing would serve one there."""
+        import re
+        text = (SRC / "register.ts").read_text(encoding="utf-8")
+        self.assertNotIn("on('tool.run'", text)
+        self.assertIn("const RUNS_FROM = [2, 1, 326] as const", text)
+        offer = text.split("async function offer(", 1)[1].split("\n}\n", 1)[0]
+        self.assertLess(offer.index("await $.command.register("), offer.index("if (!(await hasRun($)))"))
+        self.assertLess(offer.index("if (!(await hasRun($)))"), offer.index("await $.tool.register(TOOL)"))
+        has_run = text.split("async function hasRun(", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("await $.session.version()", has_run)
+        self.assertEqual(has_run.count("return true"), 3, "no release read, a newer one, and a read that failed")
+        # every event the module names by itself is one Claude Code 2.1.311 knows, as `claude plugin validate` of
+        # that build read it
+        named = set(re.findall(r"\bon\('([a-z]+\.[A-Za-z.]+)'", text))
+        self.assertEqual(named, {"classic.SessionStart", "classic.PostToolUse", "session.start", "session.compact",
+                                 "turn.start", "turn.complete", "command.run", "session.end"})
 
 
 class FileChangedTest(unittest.TestCase):

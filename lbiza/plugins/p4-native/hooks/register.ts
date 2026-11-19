@@ -265,16 +265,28 @@ async function now($: EngineInterface): Promise<string> {
   return new Date(await $.clock.now().catch(() => 0)).toISOString()
 }
 
-// Asks the engine each fact. A call that rejects leaves its fact out, so one refusal never costs the whole map.
+// What one question to the engine answered, or nothing where the call rejects or this Claude Code has no such
+// method: a call of a method a build lacks throws where it is made, before there is a promise to catch.
+async function asked<T>(ask: () => Promise<T>): Promise<T | undefined> {
+  try {
+    return await ask()
+  } catch {
+    return undefined
+  }
+}
+
+// Asks the engine each fact. A call that rejects leaves its fact out, and so does a method this Claude Code lacks,
+// so one refusal never costs the whole map. Seen on Claude Code 2.1.322 and 2.1.311, which have no
+// `$.session.info`: the entry is written with no `platform`.
 async function survey($: EngineInterface): Promise<Host> {
   const [version, info, surfaces, tools, at] = await Promise.all([
-    $.session.version().catch(() => undefined),
-    $.session.info().catch(() => undefined),
-    $.session.surfaces().catch(() => []),
-    $.tool.list().catch(() => []),
+    asked(() => $.session.version()),
+    asked(() => $.session.info()),
+    asked(() => $.session.surfaces()),
+    asked(() => $.tool.list()),
     now($),
   ])
-  const facts: Facts = { isRepl, surfaces, tools, version, platform: info?.platform }
+  const facts: Facts = { isRepl, surfaces: surfaces ?? [], tools: tools ?? [], version, platform: info?.platform }
 
   return hostOf(facts, at)
 }

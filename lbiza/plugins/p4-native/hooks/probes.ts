@@ -218,10 +218,12 @@ export const PROBES: readonly Probe[] = [
   },
   {
     id: 'unknown-event-in-a-module',
-    decision: 'Each p4 hooks module hooks only events of Claude Code 2.1.326, the oldest build it was seen to load on.',
+    decision:
+      'A p4 hooks module names an event an older Claude Code lacks by a glob and tests `next.event`, as ' +
+      "p4-temportal serves its tool under `tool.*`, and p4-phi's module names `tool.run` itself.",
     fault:
       'A hooks module that names an event the build does not know loads none of itself, as `tool.run` is no ' +
-      'event on Claude Code 2.1.322.',
+      'event on Claude Code 2.1.311 and 2.1.322, where a glob that selects an event the build has loads.',
     was: 'blocked',
     fits: anywhere,
     kind: 'by hand',

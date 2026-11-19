@@ -53,6 +53,18 @@ class MapTest(unittest.TestCase):
             self.assertIn(call, MODULE)
         self.assertNotIn("$.env.", MODULE)
 
+    def test_a_method_the_build_lacks_costs_one_fact_and_not_the_map(self):
+        """A call of a method this Claude Code lacks throws where it is made, before there is a promise to catch.
+        Seen on Claude Code 2.1.322 and 2.1.311, which have no `$.session.info`: the whole map went unread with
+        "$.session.info is not a function". So each fact is asked inside a function whose throw is caught."""
+        survey = MODULE.split("async function survey(", 1)[1].split("\n}\n", 1)[0]
+        for call in ("$.session.version()", "$.session.info()", "$.session.surfaces()", "$.tool.list()"):
+            self.assertIn(f"asked(() => {call})", survey, call)
+        self.assertNotIn(").catch(", survey)
+        asked = MODULE.split("async function asked<T>(", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("return await ask()", asked)
+        self.assertIn("} catch {\n    return undefined", asked)
+
     def test_the_map_is_one_file_of_the_store_named_alike_by_the_module_and_both_pages(self):
         self.assertIn("const STORE = '.claude/p4'", MODULE)
         self.assertIn("const FILE = 'native/host.json'", MODULE)
