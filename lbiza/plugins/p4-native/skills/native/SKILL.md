@@ -1,6 +1,6 @@
 ---
 name: native
-description: What this host is and can do, as p4-native read it at the session's start. The desktop app or a terminal, interactive or scripted, the Claude Code version, and which tools of the desktop app and of Claude Code answer in this session. Use before relying on a tool of the desktop app or on a feature one host has and another lacks, when a step differs between the desktop app, a terminal and a scripted run, and when asked what this session can do or where the capability map is kept.
+description: What this host is and can do, as p4-native read it at the session's start, and the conditions it watches for a decision the platform blocked. The desktop app or a terminal, interactive or scripted, the Claude Code version, and which tools of the desktop app and of Claude Code answer in this session. Use before relying on a tool of the desktop app or on a feature one host has and another lacks, when a step differs between the desktop app, a terminal and a scripted run, when a line from p4-native says a watched condition changed, and when asked what this session can do or where the capability map is kept.
 ---
 
 # native
@@ -24,6 +24,17 @@ It builds no copy of anything Claude Code or the desktop app does: it asks the e
 - The file holds the newest 24 sessions, so an older session's entry is gone and reads as not known.
 - A project with no `.claude/p4` gets no file, and the tool still answers.
 - A session whose hooks modules did not load has no entry, which reads as not known and never as a terminal.
+
+## Watched conditions
+
+- p4-native keeps one probe for each decision of p4-phi and p4-temportal that the platform blocked or a fault of the host shaped.
+- Call the tool with `command` set to `probes` to list them, each with its decision, the fault as it was seen, and the answer kept for this kind of host.
+- Call it with `command` set to `probe` to read the asked probes anew, which changes nothing in the session.
+- An answer is `blocked` for the fault as it was seen and `open` for the fault gone.
+- The probes run by themselves only when the Claude Code version of this kind of host changed, at the first turn, and never at a session's start.
+- A line that begins `p4-native: the watched condition` reached this session as context because an answer changed, and it is told once.
+- On such a line, tell ezexe which decision can be reopened and what was seen, and change nothing by yourself: reopening a decision is ezexe's.
+- A line that begins `p4-native: Claude Code changed from` names the conditions no probe reads by itself, and `/release-notes` is where ezexe reads what changed.
 
 ## What to do with it
 

@@ -38,8 +38,9 @@ class StartTest(unittest.TestCase):
     def test_the_module_starts_no_process_and_the_session_does_not_wait_for_the_map(self):
         self.assertNotIn("$.process.", MODULE)
         start = MODULE.split("on('session.start'", 1)[1].split("\n  })", 1)[0]
-        self.assertIn("void look($)", start)
+        self.assertIn("starting = look($)", start)
         self.assertNotIn("await look($)", start)
+        self.assertNotIn("await starting", start)
         self.assertIn("await offer($)", start, "the command and the tool are listed from the first prompt")
 
 
