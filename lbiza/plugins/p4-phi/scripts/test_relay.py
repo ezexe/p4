@@ -139,12 +139,12 @@ class Paths(unittest.TestCase):
         self.assertEqual(relay.norm("/mnt/e/projects/x"), relay.norm("E:/projects/x"))
 
     def test_a_path_on_a_missing_drive_never_hangs(self):
-        """A mark's path on a drive this machine lacks gets no repository at once and warns nobody, and that mark is
-        still handed on."""
+        """A mark's path on a drive this machine lacks gets no repository at once, and that mark is still handed
+        on."""
         import time
         t0 = time.time()
         self.assertEqual(relay.repo_of("s:/replaces"), "")
-        self.assertTrue(relay.too_broad("s:/replaces", "E:/x"))
+        self.assertFalse(relay.drive_ok("s:/replaces"))
         self.assertLess(time.time() - t0, 5)
         tmp = tempfile.mkdtemp()
         try:
@@ -182,8 +182,6 @@ class Paths(unittest.TestCase):
             for p in (repo, os.path.join(repo, "lib"), os.path.join(repo, "lib", "deep", "x.py"),
                       os.path.join(repo, "lib", "not", "made", "y.py")):
                 self.assertEqual(relay.repo_of(p), relay.norm(says.stdout.strip()), p)
-            self.assertTrue(relay.too_broad(relay.norm(repo), os.path.join(tmp, "p4")), "a repository's top folder")
-            self.assertFalse(relay.too_broad(relay.norm(os.path.join(repo, "lib")), os.path.join(tmp, "p4")))
             self.assertEqual(asked, [], "no git process for a path under a .git")
         finally:
             relay._git = real
@@ -903,33 +901,75 @@ class ThreeSessions(unittest.TestCase):
         self.assertNotIn("phi (p4-phi): what", ctx)
         self.assertNotIn("stop before", ctx)
 
-    def test_a_child_a_sibling_supersedes_is_listed_as_ready_to_archive(self):
-        """A finished child whose work a sibling's newer note supersedes is counted as archived and listed on
-        ready-to-archive.md."""
+    def plan(self, host, inp):
+        """An update_plan call of `host`'s, through the plan hook."""
+        r = self.t.hook("plan", host, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                                       "tool_input": inp, "tool_response": "Plan updated."})
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def finish_under_a_step(self, uuid="a1"):
+        """A, the child for the parent's step on the layout, finished: its work shown done and committed."""
         t = self.t
-        t.cli(A, "shard", self.x("lib"))
+        self.plan(TOP, {"items": [{"content": "Move the layout of the store into recall", "status": "in_progress"},
+                                  {"content": "Fold recall into the plugin", "status": "pending"}]})
+        self.plan(A, {"items": [{"content": "Rename the folders", "status": "completed"},
+                                {"content": "Commit the move", "status": "completed"}]})
+        self.assertEqual(relay._session(t.p4, A).get("rootStep"), "1", "its parent step, by its brief's words")
         self.assertEqual(t.cli(A, "done", "test_layout.py: 3 tests OK").returncode, 0)
-        self.assertEqual(t.stop(A, "move the layout", report="Moved the layout into lib.", uuid="a1").returncode, 0)
-        t.cli(B, "note", f"replaces: `{self.x('lib', 'x.py')}` with p4conf's layout", "--source", "commit abc123")
-        self.assertEqual(t.stop(B, "replace x", uuid="b1").returncode, 0)
+        self.assertEqual(t.stop(A, "move the layout", report="Moved the layout into lib.", uuid=uuid).returncode, 0)
+
+    def test_a_child_a_sibling_supersedes_is_listed_as_ready_to_archive(self):
+        """A finished child whose work a sibling's newer note supersedes, by its words on the child's parent step, is
+        counted as archived and listed on ready-to-archive.md."""
+        t = self.t
+        self.finish_under_a_step()
+        t.cli(B, "note", "replaces: the move of the store layout into recall with the move into phi",
+              "--source", "abc123")
+        self.assertEqual(t.stop(B, "replace it", uuid="b1").returncode, 0)
         self.assertEqual(t.session(A)["stale"]["by"], B, "superseded by the sibling's newer note")
         self.assertIn(A, open(relay.ready_path(t.p4), encoding="utf-8").read(), "listed on ready-to-archive.md")
+
+    def test_a_note_that_names_a_finished_childs_file_or_owned_path_supersedes_nothing(self):
+        """relay.superseded held the paths a newer note names against a finished child's changed files and owned
+        paths, as absolute paths. Each session that writes has a git worktree of its own, so the two never name one
+        file, and the child's work stands on its own branch until the tree's orchestrator merges it. That arm is
+        gone, here with both sessions in one folder, where the paths did meet: a note that names the child's very
+        file and owned path, and says nothing of its parent step, marks it stale no longer."""
+        t = self.t
+        self.assertFalse(hasattr(relay, "too_broad"), "its last caller was that arm")
+        t.cli(A, "shard", self.x("lib"))
+        path = self.x("lib", "x.py")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("more = 2\n")
+        subprocess.run(["git", "-C", self.work, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "x"],
+                       check=True, capture_output=True)
+        self.assertEqual(t.cli(A, "done", "test_layout.py: 3 tests OK").returncode, 0)
+        self.assertEqual(t.stop(A, "edit x", [("Edit", {"file_path": path}, "ok")], report="Edited x.",
+                                uuid="a1").returncode, 0)
+        self.assertTrue(relay.finished(t.p4, A))
+        self.assertEqual(relay.edited_files(t.p4, A), [relay.norm(path)])
+        t.cli(B, "note", f"replaces: `{path}` with p4conf's table", "--source", "commit abc123")
+        self.assertEqual(t.stop(B, "replace x", uuid="b1").returncode, 0)
+        self.assertNotIn("stale", t.session(A))
+        anchor = json.load(open(relay.anchor_path(t.p4, TOP), encoding="utf-8"))
+        self.assertIn(A, anchor["nodes"], "still in the anchor")
+        self.assertEqual(anchor["nodes"][B]["marks"][0]["paths"], [relay.norm(path)], "the note keeps its path")
+        mark = (B, "the recall work", anchor["nodes"][B]["marks"][0])
+        self.assertIsNone(relay.superseded(t.p4, A, t.session(A), [mark]), "no parent step: no note supersedes it")
 
     def test_a_superseded_child_messaged_again_leaves_the_page(self):
         """A superseded session that is messaged again is live: it leaves ready-to-archive.md at that message, and
         the Stop that clears its mark leaves a page without it."""
         t = self.t
-        t.cli(A, "shard", self.x("lib"))
-        self.assertEqual(t.cli(A, "done", "test_layout.py: 3 tests OK").returncode, 0)
-        self.assertEqual(t.stop(A, "move the layout", report="Moved the layout into lib.", uuid="s1").returncode, 0)
-        t.cli(B, "note", f"replaces: `{self.x('lib', 'x.py')}` with p4conf's layout", "--source", "commit abc123")
-        self.assertEqual(t.stop(B, "replace x", uuid="s2").returncode, 0)
+        self.finish_under_a_step(uuid="s1")
+        t.cli(B, "note", "replaces: the move of the store layout into recall with the move into phi",
+              "--source", "abc123")
+        self.assertEqual(t.stop(B, "replace it", uuid="s2").returncode, 0)
         self.assertIn(A, open(relay.ready_path(t.p4), encoding="utf-8").read(), "superseded: listed")
         t.say(A, "go on with the layout")
         self.assertNotIn(A, open(relay.ready_path(t.p4), encoding="utf-8").read(), "messaged again: off the page")
         self.assertEqual(t.stop(A, "go on with the layout", report="Went on.", uuid="s3").returncode, 0)
         self.assertNotIn(A, open(relay.ready_path(t.p4), encoding="utf-8").read(), "the Stop leaves it off")
-
 
 class ForkOrFresh(ThreeSessions):
     """The advice on start_session, a fork's pinned agenda, and a fresh child's slice of the parent's anchor."""

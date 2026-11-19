@@ -640,18 +640,6 @@ def show(p, base):
     return p
 
 
-def too_broad(p, home):
-    """A path no warning is raised for: the store itself or a folder above it, a repository's top folder, or a
-    drive. A note that names one of those names everything in it, which is no conflict with any one file. A path on
-    a drive this machine does not have is no conflict either."""
-    if not drive_ok(p):
-        return True
-    h = norm(home)
-    if covers(p, h) or re.fullmatch(r"[a-z]:", p or "", re.I):
-        return True
-    return bool(repo_of(p) == p and os.path.isdir(p))
-
-
 FAR_WHOLE = 400                  # notes that do not touch a session are still shown when all of them are this short
 STOP_HEAD = "phi (p4-phi): stop before any tool runs. "      # the head of the warnings, which lead a session's text
 
@@ -1371,27 +1359,28 @@ def finished(home, sid):
 
 
 def superseded(home, sid, s, others_marks):
-    """The newer note that supersedes a finished session's work: one naming a file of its last delta or its owned
-    paths, or sharing words with its parent step. None when there is none."""
+    """The newer note that supersedes a finished session's work: one whose words bear on its parent step. None when
+    there is none, and for a session with no parent step. No path a note names is held against the session's files
+    or owned paths: those lie in the session's own worktree, on its own branch, which no other session's note
+    replaces on disk, and whether its work stands beside another's is settled when the tree's orchestrator merges
+    the branches."""
     import plans
     turns = _rows(os.path.join(_dir(home, sid), "turns.jsonl"))
     last = turns[-1] if turns else {}
     since = str(last.get("time") or "")
-    files = (last.get("delta") or {}).get("files") or []
-    shard = shard_of(s)
     root = str(s.get("rootStep") or "")
     root_text = ""
     if root and _parent(s):
         st = plans.step_of(plans.load(home, _parent(s)), root)
         root_text = (st or {}).get("content", "") or plans.load(home, sid).get("rootText", "")
+    if not root_text:
+        return None
     for nid, title, m in others_marks:
         if str(m.get("time") or "") < since:
             continue
         if s.get("unstaled") and str(m.get("time") or "") <= str(s.get("unstaled")):
             continue                                  # it re-based onto this note already
-        hits = [p for p in m.get("paths") or [] if not too_broad(p, home)
-                and (any(covers(p, f) or covers(f, p) for f in files) or any(overlap(p, x) for x in shard))]
-        if hits or (root_text and plans.bears(m.get("claim"), root_text)):
+        if plans.bears(m.get("claim"), root_text):
             return nid, title, m
     return None
 
