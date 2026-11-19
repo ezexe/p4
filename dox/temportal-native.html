@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>p4-temportal and what Claude Code keeps · p4-phi dox</title>
+<meta name="description" content="One table of what a project keeps over time: what was set out for p4-temportal, what Claude Code does by itself and the docs page that says so, what the plugin does today, what it only configures, what the native feature lacks, and the order the parts are built in.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='1' width='14' height='14' rx='4' fill='%230b6b66'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#f5f3ec; --panel:#fffdf7; --sunk:#efece2; --ink:#1d1c19; --soft:#5d5a52; --line:#d9d4c6;
+  --phi:#0b6b66; --phi-bg:#dcefec;
+  --mono:ui-monospace,"Cascadia Code","SF Mono",Menlo,Consolas,monospace;
+  --sans:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#131418; --panel:#1b1d23; --sunk:#16171c; --ink:#e9e6dd; --soft:#a29e93; --line:#33363f;
+    --phi:#62d2c6; --phi-bg:#16312f;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#131418; --panel:#1b1d23; --sunk:#16171c; --ink:#e9e6dd; --soft:#a29e93; --line:#33363f;
+  --phi:#62d2c6; --phi-bg:#16312f;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 var(--sans)}
+.wrap{max-width:1180px;margin:0 auto;padding:24px 16px 64px}
+a{color:var(--phi)}
+code{font:.88em var(--mono);background:var(--sunk);border-radius:4px;padding:1px 4px;overflow-wrap:anywhere}
+:focus-visible{outline:2px solid var(--phi);outline-offset:2px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.mark{font:600 13px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--phi);text-decoration:none}
+.mark:hover{text-decoration:underline}
+.pill{font:600 12px/1 var(--mono);color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:9px 13px;cursor:pointer;white-space:nowrap}
+.pill:hover{border-color:var(--phi)}
+h1{font-size:clamp(30px,5.4vw,44px);line-height:1.08;letter-spacing:-.02em;margin:16px 0 10px;text-wrap:balance}
+.lede{color:var(--soft);max-width:76ch;margin:0 0 18px}
+nav.toc{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}
+nav.toc a{font:600 13px/1 var(--sans);text-decoration:none;color:var(--soft);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:8px 12px}
+nav.toc a:hover{border-color:var(--phi);color:var(--ink)}
+section{margin:30px 0 0}
+h2{font-size:23px;letter-spacing:-.01em;margin:0 0 6px;scroll-margin-top:12px}
+p.intro{color:var(--soft);max-width:76ch;margin:0 0 12px}
+table{border-collapse:collapse;width:100%;font-size:14px;background:var(--panel)}
+.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:14px;margin:0 0 12px}
+th,td{padding:9px 12px;border-top:1px solid var(--line);text-align:left;vertical-align:top;min-width:17ch}
+thead th{background:var(--sunk);border-top:0;font-weight:650}
+tbody th{background:var(--sunk);font-weight:650;min-width:13ch}
+td p{margin:0 0 6px} td p:last-child{margin:0}
+td.n,th.n{min-width:7ch}
+ul,ol{padding-left:20px;max-width:80ch}
+li{margin:0 0 6px}
+footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);font-size:14px;color:var(--soft)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <a class="mark" href="index.html">← p4-phi · dox</a>
+    <button class="pill" id="theme" type="button" aria-label="Switch between light and dark">theme</button>
+  </div>
+  <h1>p4-temportal and what Claude Code keeps</h1>
+  <p class="lede">p4-temportal is the plugin for what a project keeps over time. Claude Code keeps most of it by itself: a conversation past its context window, auto memory, checkpoints, transcripts, a scratchpad for each session, worktrees and plan files. This page sets each of them in one table: what was set out for the plugin, what Claude Code does and the docs page that says so, what the plugin does today, what it only configures, and what the native feature lacks, which is the one thing the plugin builds. Every docs page named here is under <code>https://code.claude.com/docs/en/</code>, and <a href="https://code.claude.com/docs/llms.txt">the index</a> lists them.</p>
+  <nav class="toc" aria-label="Sections">
+    <a href="#set-out">What was set out</a>
+    <a href="#the-table">The table</a>
+    <a href="#the-order">The order of the parts</a>
+    <a href="#not-confirmed">What the docs do not confirm</a>
+  </nav>
+
+  <section id="set-out" aria-labelledby="set-out-h">
+    <h2 id="set-out-h">What was set out</h2>
+    <p class="intro">Read from the commits of ezexe/p4 that touch p4-memory, p4-scratchpad and p4-temportal, and from its closed issues.</p>
+    <ul>
+      <li>The first design page, added in <code>f2323b2</code>, set the plugin out to "keep the memory and scratchpad overrides into p4 so its trackable", under the rule to "only enhance" the app "where evidence shows it will". The two overrides "change where files live, not how the model behaves."</li>
+      <li><code>b01f260</code> made p4-memory and p4-scratchpad one plugin "for what Claude Code leaves in AppData and temp", which "clears what is no longer relevant, as a browser does with its cache and cookies".</li>
+      <li><code>58bdde0</code> wrote the rule the plugin has followed since: "a p4 copy of a native feature is replaced and deleted", and the only part kept is one the native feature lacks. <code>CONTRIBUTING.md</code> holds it as "Native first".</li>
+      <li>Under that rule the memory mirror went for <code>autoMemoryDirectory</code> in <code>7ac9910</code>, the scratchpad links went for the app's own scratchpad in <code>6f3fb9a</code>, the ask before a write went for ask rules in <code>8b0d3d8</code>, and the lifetime that ended with a session went in <code>464483f</code>.</li>
+      <li>The commits and issues name memory, the scratchpad, temp files and lifetimes. They name compaction only as a source of a session's start, and never checkpoints, plan files or worktrees. The plugin is now set out wider: it picks up every native feature about what a project keeps over time, and extends each only where it lacks, with compaction first.</li>
+    </ul>
+  </section>
+
+  <section id="the-table" aria-labelledby="the-table-h">
+    <h2 id="the-table-h">The table</h2>
+    <p class="intro">A row is one thing a project keeps. The last column gives the part of the work that row belongs to, in the order below, or says that nothing is built for it.</p>
+    <div class="scroll"><table>
+      <thead><tr><th>What is kept</th><th>Set out for the plugin</th><th>What Claude Code does, and the page</th><th>p4-temportal today</th><th>What it only configures</th><th>What the native feature lacks, which the plugin adds</th><th class="n">Part</th></tr></thead>
+      <tbody>
+        <tr id="row-compaction"><th scope="row">A conversation past its context window</th>
+          <td><p>Nothing in the commits or issues. Issue 155 settled p4-phi "with no PreCompact entry", since "Claude Code compacts a session by itself".</p></td>
+          <td><p>It compacts by itself. <code>model-config.md</code>, "Default auto-compact thresholds": "Models running with a native 1M window compact before the window fills, at about 967K tokens by default." <code>autoCompactWindow</code> and <code>/autocompact</code> move that line.</p><p><code>settings-reference.md</code>, <code>idleCompaction</code>: it "compacts a long conversation that you've stepped away from", once "about an hour has passed since the last request" and the context has reached 200,000 tokens, a count <code>env-vars.md</code> lets <code>CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS</code> lower to 100,000 and no further.</p><p>The summary takes instructions three ways: <code>/compact</code> with words after it, by <code>commands.md</code>; a section "Compact instructions" in the project's CLAUDE.md, by <code>costs.md</code>; and a <code>PreCompact</code> hook, by <code>hooks.md</code>: "Claude Code uses its stdout as instructions for the compaction summary."</p><p><code>context-window.md</code>, "What survives compaction": CLAUDE.md, unscoped rules, auto memory and the plan are "Re-injected from disk", and of the files read or edited "Claude Code re-reads up to five, most recently modified first".</p></td>
+          <td><p>Nothing. No hook of the plugin acts on a compaction, and its one start hook that matches the source <code>compact</code> moves a store's layout.</p></td>
+          <td><p>The automatic line is ezexe's, by <code>autoCompactWindow</code>, and the plugin writes neither it nor <code>idleCompaction</code>.</p><p>The instructions go in through the hooks module's event <code>session.compact</code>, whose <code>instructions</code> the types file of the bundled skill plugin-authoring gives as "What the summary should keep or stress".</p></td>
+          <td><p>A keep list that holds in every project with no file of the project written: every session id, file path, branch, commit hash, decision with its source, open item, and the path of any state page or hand-over note. The native ways are a section a person writes into each project's CLAUDE.md, or words typed at each <code>/compact</code>.</p><p>A compaction at a quiet moment below the automatic line. Idle compaction waits an hour without a request, which a session its workers keep waking never has, and the automatic one runs where the window fills, in the middle of a turn. The plugin starts one after a turn of the main conversation ends, past a line its settings give.</p><p>A way back to what the summary left out: where the whole conversation still is on disk.</p></td>
+          <td class="n">1</td></tr>
+        <tr id="row-memory"><th scope="row">Auto memory</th>
+          <td><p><code>f2323b2</code>: "keep the memory and scratchpad overrides into p4 so its trackable". Issue 92: <code>autoMemoryDirectory</code> replaces the pointer, the mirror and the sweep.</p></td>
+          <td><p><code>memory.md</code>: "Each project gets its own memory directory at <code>~/.claude/projects/&lt;project&gt;/memory/</code>", and "The first 200 lines of <code>MEMORY.md</code>, or the first 25KB, whichever comes first, are loaded at the start of every conversation." <code>settings-reference.md</code>, <code>autoMemoryDirectory</code>: "Store auto memory in a directory of your choice instead of the per-project default."</p></td>
+          <td><p>It configures. The settings keeper of <code>p4conf.py</code> writes <code>autoMemoryDirectory</code>, naming the store's <code>temportal/memory</code>, into the project's <code>.claude/settings.local.json</code>, and Claude Code writes and loads the memory there itself.</p><p>It copies nothing. <code>p4_memory.py</code> still answers <code>mirror</code> and <code>sweep</code>, the two commands of the copy, by doing nothing.</p></td>
+          <td><p><code>autoMemoryDirectory</code>, and nothing else of memory.</p></td>
+          <td><p>A line at a start in a worktree or a subfolder when <code>blockWritesOutsideWorkingDirectories</code> may keep Claude Code from saving memory in the main checkout's store. <code>settings-reference.md</code> gives the block and tells no session of it. <code>p4_memory.py migrate</code> prints the line, and stays.</p></td>
+          <td class="n">3</td></tr>
+        <tr id="row-consolidation"><th scope="row">Memory consolidation</th>
+          <td><p>Nothing.</p></td>
+          <td><p>No docs page read names a pass that merges or prunes memory. <code>claude-directory.md</code>: "<code>MEMORY.md</code> and topic files stay until you or Claude edits or deletes them." The desktop app lists a skill <code>consolidate-memory</code>, "Reflective pass over your memory files".</p></td>
+          <td><p>Nothing, and no lifetime ever clears <code>memory/</code>.</p></td>
+          <td><p>Nothing. The skill page names the app's skill where a session is asked to prune memory.</p></td>
+          <td><p>Nothing known.</p></td>
+          <td class="n">2</td></tr>
+        <tr id="row-rules"><th scope="row">Rules files</th>
+          <td><p>Issue 226: a behaviour rule leaves the memory files and moves to a plugin.</p></td>
+          <td><p><code>memory.md</code>: a rule under <code>.claude/rules/</code> without <code>paths</code> loads at a start, and "A path-scoped rule loads when Claude uses the Read, Write, or Edit tool on a matching file." <code>context-window.md</code>: unscoped rules are "Re-injected from disk" after a compaction.</p></td>
+          <td><p>Nothing. p4-phi holds its own rules as a section of the system prompt.</p></td>
+          <td><p>Nothing.</p></td>
+          <td><p>Nothing.</p></td>
+          <td class="n">none</td></tr>
+        <tr id="row-checkpoints"><th scope="row">Checkpoints and rewind</th>
+          <td><p>Nothing.</p></td>
+          <td><p><code>checkpointing.md</code>: "checkpointing automatically captures the state of your code before each prompt you send that starts a turn", it keeps "file snapshots for the 100 most recent checkpoints in a session", and <code>/rewind</code> restores code, conversation or both, or summarizes from a message. <code>fileCheckpointingEnabled</code> turns it off.</p></td>
+          <td><p>Nothing of checkpoints. The retention sweep removes a file the store's git tracks with the removal staged, so its last version stays in the store's history.</p></td>
+          <td><p>Nothing. <code>fileCheckpointingEnabled</code> is ezexe's.</p></td>
+          <td><p>A way back for a file a lifetime cleared. <code>checkpointing.md</code>: "A file that only Bash commands changed isn't tracked." The sweep is a script, so no checkpoint holds what it removed, and the staged removal in the store's git is kept for that.</p></td>
+          <td class="n">built</td></tr>
+        <tr id="row-transcripts"><th scope="row">Transcripts and how long they stay</th>
+          <td><p>Issue 131: "the app's retention sweep deletes the scratchpad with its transcript, after <code>cleanupPeriodDays</code>". Issue 246: p4 "reads and watches and never writes" that key.</p></td>
+          <td><p><code>claude-directory.md</code>, "Cleaned up automatically": at a start Claude Code deletes transcripts, file history, plans, debug logs and more once they are older than <code>cleanupPeriodDays</code>, 30 days unless set. <code>desktopSessionCleanupPeriodDays</code> sets an age limit for the desktop app's transcripts.</p></td>
+          <td><p>It leaves them where Claude Code puts them, and the skill page says so.</p></td>
+          <td><p>Nothing. Both keys are ezexe's.</p></td>
+          <td><p>Nothing for the transcript itself. The compaction part names a session's transcript as where the whole conversation is after a compaction, for as long as this sweep keeps it.</p></td>
+          <td class="n">1</td></tr>
+        <tr id="row-scratchpad"><th scope="row">A session's scratch files</th>
+          <td><p><code>b01f260</code>: one plugin "for what Claude Code leaves in AppData and temp". Issue 131: "The scratchpad is the app's."</p></td>
+          <td><p><code>claude-directory.md</code>, "Session scratchpad directory": one folder for each session under the system temp directory, named to hooks as <code>scratchpad_dir</code>, and "Scratchpad files last as long as the session's transcript".</p></td>
+          <td><p>It leaves each scratchpad to the app, and the skill page sends temporary files there.</p><p>At every start <code>scratchpad.py tmp-unlink</code> still looks for scratchpads that version 0.3.9 linked into the store, and the script still answers four commands of the copy by doing nothing.</p></td>
+          <td><p>Nothing.</p></td>
+          <td><p>Nothing.</p></td>
+          <td class="n">3</td></tr>
+        <tr id="row-worktrees"><th scope="row">Worktrees</th>
+          <td><p>Nothing.</p></td>
+          <td><p><code>worktrees.md</code>: "for an unnamed session, Claude removes the worktree and its branch automatically", and worktrees of subagents and background sessions are swept "once they are older than your <code>cleanupPeriodDays</code> setting."</p></td>
+          <td><p>Nothing. The worktrees of a session tree are p4-phi's upkeep, which the <a href="session-tree.html">session tree</a> page sets out.</p></td>
+          <td><p>Nothing.</p></td>
+          <td><p>Nothing.</p></td>
+          <td class="n">none</td></tr>
+        <tr id="row-plans"><th scope="row">Plan files</th>
+          <td><p>The skill page, since <code>384a314</code>: "Transcripts, plans, file history and subagent memory stay where Claude Code puts them too."</p></td>
+          <td><p><code>settings-reference.md</code>, <code>plansDirectory</code>: "Choose where Claude Code stores the plan files it writes in plan mode", as "a path relative to the project root", and unset "Claude Code uses <code>~/.claude/plans</code>", which <code>claude-directory.md</code> lists as cleaned up after <code>cleanupPeriodDays</code>. <code>permission-modes.md</code> names what plan mode may write: "The current session's own plan files in <code>~/.claude/plans/</code>, or in the <code>plansDirectory</code> you set".</p></td>
+          <td><p>It leaves them in <code>~/.claude/plans</code>, where plans of every project lie together and go after 30 days.</p></td>
+          <td><p><code>plansDirectory</code>, for a project that keeps its plans: the key then names a folder of the store, as <code>autoMemoryDirectory</code> does for memory.</p></td>
+          <td><p>Nothing known. The part first checks live that a plan written under <code>.claude/p4/</code> asks ezexe nothing, and writes the key only where a store's settings ask for it.</p></td>
+          <td class="n">4</td></tr>
+        <tr id="row-notebook"><th scope="row">The notebook and saved code</th>
+          <td><p><code>eed8107</code> made the notebook <code>temportal/notebook</code>, and <code>80ca12d</code> brought saved code back as <code>temportal/src</code>.</p></td>
+          <td><p>Nothing. No docs page gives a project a folder of notes or of code kept for reuse beside its memory.</p></td>
+          <td><p>It keeps both in the store, moves the notebook's logs, build output and binaries into its <code>.out/</code> at a start, and can name saved code the repository uses.</p></td>
+          <td><p>Nothing.</p></td>
+          <td><p>All of it is the plugin's own. Moving a notebook file into <code>.out/</code> when it appears, by the <code>FileChanged</code> hook, is left: <code>hooks.md</code> gives a watched path as a file, and no page says a watched folder raises the event for a new file in it.</p></td>
+          <td class="n">left</td></tr>
+        <tr id="row-lifetimes"><th scope="row">How long the store's files stay</th>
+          <td><p><code>b01f260</code>: it "clears what is no longer relevant, as a browser does with its cache and cookies".</p></td>
+          <td><p><code>claude-directory.md</code>: the retention sweep covers Claude Code's own folders under <code>~/.claude</code> and nothing a project keeps.</p></td>
+          <td><p>Cache rules and cookies in <code>lifetime.py</code>, swept by the hooks module at a start, on its timer and past a session's end, and the slash command <code>/lifetime</code>.</p><p><code>lifetime.py</code> still answers <code>sweep</code> and <code>session-end</code>, which the command hooks before the module ran.</p></td>
+          <td><p>Nothing.</p></td>
+          <td><p>All of it is the plugin's own. A session cannot set a lifetime itself, since the Skill tool refuses a command a module registers. A tool for the model, served at <code>tool.run</code> once the call is allowed, waits for that event to load in every build ezexe runs.</p></td>
+          <td class="n">3</td></tr>
+        <tr id="row-commands"><th scope="row">Commands on memory and context</th>
+          <td><p>Nothing.</p></td>
+          <td><p><code>commands.md</code>: <code>/memory</code>, <code>/context</code>, <code>/compact</code>, <code>/autocompact</code>, <code>/rewind</code>, <code>/recap</code>, <code>/export</code>, <code>/resume</code> and <code>/clear</code>.</p></td>
+          <td><p>The skill page names none of them.</p></td>
+          <td><p>Nothing. The skill page names each command where a session would otherwise do the thing by hand.</p></td>
+          <td><p>Nothing.</p></td>
+          <td class="n">2</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section id="the-order" aria-labelledby="the-order-h">
+    <h2 id="the-order-h">The order of the parts</h2>
+    <p class="intro">Each part lands by itself, and this page is brought up with it.</p>
+    <ol>
+      <li id="part-1"><strong>Compaction.</strong> The hooks module tells the summary what to keep, starts a compaction at a quiet moment below the automatic line, and leaves the session a way back to the whole conversation. It comes first because it is the one row where a session loses what it needs and the plugin does nothing.</li>
+      <li id="part-2"><strong>The skill page names what Claude Code keeps.</strong> It says which native command or setting keeps each thing, so a session reaches for that and builds no copy by hand.</li>
+      <li id="part-3"><strong>The leftovers of the copies go.</strong> The commands the scripts still answer for sessions of older versions are deleted, since an installed version runs the scripts of its own folder in Claude Code's plugin cache.</li>
+      <li id="part-4"><strong>Plan files.</strong> A store that asks for it gets <code>plansDirectory</code> written by the settings keeper, behind a live check of a plan written under <code>.claude/p4/</code>.</li>
+    </ol>
+  </section>
+
+  <section id="not-confirmed" aria-labelledby="not-confirmed-h">
+    <h2 id="not-confirmed-h">What the docs do not confirm</h2>
+    <ul>
+      <li>No page read says anything of a pass that consolidates memory. The skill <code>consolidate-memory</code> is listed in a desktop session and on no docs page.</li>
+      <li><code>plugins/mods/reference.md</code> gives <code>session.compact</code> one line, "The conversation is about to be compacted", and lists <code>compact</code> among the methods of <code>$.session</code> with no words. What the event's input holds and what a plugin's own compaction does is read from the types file of the bundled skill plugin-authoring, and checked live before anything is built on it.</li>
+      <li><code>claude-directory.md</code> lists <code>plans/</code> as cleaned up automatically and does not say whether the sweep reaches a <code>plansDirectory</code> a project names.</li>
+      <li><code>hooks.md</code> does not say whether a folder in <code>watchPaths</code> raises <code>FileChanged</code> for a new file in it.</li>
+    </ul>
+  </section>
+
+  <footer>The plugin's code is in <a href="https://github.com/ezexe/p4">ezexe/p4</a> under <code>lbiza/plugins/p4-temportal</code>, and its skill page is <code>skills/temportal/SKILL.md</code> there. The docs pages were read through <a href="https://code.claude.com/docs/llms.txt">the docs index</a>: <code>context-window.md</code>, <code>model-config.md</code>, <code>settings-reference.md</code>, <code>env-vars.md</code>, <code>hooks.md</code>, <code>commands.md</code>, <code>costs.md</code>, <code>memory.md</code>, <code>checkpointing.md</code>, <code>claude-directory.md</code>, <code>worktrees.md</code>, <code>permission-modes.md</code> and <code>plugins/mods/reference.md</code>.</footer>
+</div>
+<script>
+(function(){
+  var root=document.documentElement,key="dox-theme",btn=document.getElementById("theme");
+  function stored(){try{return localStorage.getItem(key)}catch(e){return null}}
+  function current(){return root.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")}
+  function label(){btn.textContent=current()==="dark"?"light theme":"dark theme"}
+  var s=stored(); if(s==="dark"||s==="light")root.setAttribute("data-theme",s);
+  label();
+  try{matchMedia("(prefers-color-scheme: dark)").addEventListener("change",label)}catch(e){}
+  btn.addEventListener("click",function(){var n=current()==="dark"?"light":"dark";root.setAttribute("data-theme",n);try{localStorage.setItem(key,n)}catch(e){}label()});
+})();
+</script>
+</body>
+</html>
