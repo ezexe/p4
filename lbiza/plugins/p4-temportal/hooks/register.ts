@@ -94,6 +94,8 @@ const TOOL_USAGE =
   'list and now take neither.'
 
 // What a summary is told to keep, added to the instructions of every compaction.
+// compact.py holds the same words for the PreCompact command hook, which prints them where no module loads and is
+// silent where the instructions it is handed already hold them.
 const KEEP =
   'Keep each of these verbatim in the summary, one to a line: every session id, every file path, every branch, ' +
   'every commit hash, every decision with its source, every open item, and the path of every state page and ' +

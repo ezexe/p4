@@ -45,6 +45,14 @@ class RunHookTest(unittest.TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("unknown part 'nosuch'", json.loads(out.stdout)["systemMessage"])
 
+    def test_the_compact_part_says_a_failure_on_stderr_and_prints_nothing(self):
+        """At PreCompact a hook's stdout is the summary's instructions, by https://code.claude.com/docs/en/hooks.md,
+        "PreCompact output", so a runner that finds no python prints nothing there and says so on stderr."""
+        (self.root / "hooks" / "find-python.sh").unlink()
+        out = self.run_hook("compact", "keep")
+        self.assertEqual((out.returncode, out.stdout), (0, ""), out.stderr)
+        self.assertIn("no working python found", out.stderr)
+
     def test_find_python_equals_p4_phis(self):
         phi = SRC.parent.parent / "p4-phi" / "hooks" / "find-python.sh"
         if not phi.is_file():

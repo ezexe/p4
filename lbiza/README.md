@@ -68,6 +68,8 @@ Seen on Claude Code 2.1.328, in a `claude -p` run of the plugin from a scratch p
 That run allowed the tool by `--allowedTools`, so the ask before a call was not seen.
 At `session.compact`, the event of every compaction in the API types of Claude Code 2.1.326, the module adds a keep list to what the summary is told: every session id, file path, branch, commit hash, decision with its source and open item, and the path of every state page and hand-over note.
 The list goes after what was typed behind `/compact`, and once.
+A session where the module does not load is told the same list by the `PreCompact` command hook `compact.py keep`, whose stdout Claude Code uses as instructions for the summary, by https://code.claude.com/docs/en/hooks.md, "PreCompact output".
+That hook prints nothing where the `custom_instructions` it is handed already hold the list, which they do beneath the module: seen on Claude Code 2.1.328 in a `claude -p` run from a scratch project, a `/compact` with no words after it handed a `PreCompact` hook the module's list.
 Behind the summary the module adds one message, the ledger: the paths of the files the session wrote or edited, read from the transcript's calls of Write, Edit and NotebookEdit with no model, the last 60 with a count of the older ones.
 A compaction runs over the messages since the one before, so a ledger takes the paths of the ledger before it, which is among those messages.
 A minute after a turn of the main conversation ended, with no turn begun since, the module reads the context by `$.session.usage`, and where it is at or past `temportal.compact_at` it compacts the session by running `/compact` with the keep list.

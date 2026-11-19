@@ -166,6 +166,47 @@ class ModuleTest(unittest.TestCase):
         self.assertIn(".catch(() => ({", text.split("on('tool.run'", 1)[1].split("\n\n", 1)[0])
 
 
+class PreCompactTest(unittest.TestCase):
+    """A session where the hooks module does not load is told the keep list by a command hook. By
+    https://code.claude.com/docs/en/hooks.md, "PreCompact output": "When a PreCompact hook exits 0 and doesn't block,
+    Claude Code uses its stdout as instructions for the compaction summary." """
+
+    def keep(self, payload, sub="keep"):
+        import subprocess
+        import sys
+        ran = subprocess.run([sys.executable, "-I", "-X", "utf8", str(SRC / "compact.py"), sub],
+                             input=json.dumps(payload), capture_output=True, text=True, encoding="utf-8", timeout=60)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        return ran.stdout
+
+    def module_keep(self):
+        import re
+        text = (SRC / "register.ts").read_text(encoding="utf-8")
+        return "".join(re.findall(r"'([^']*)'", re.search(r"(?m)^const KEEP =\n((?:  .+\n)+)", text).group(1)))
+
+    def test_every_compaction_runs_the_keep_hook_once(self):
+        for trigger in ("manual", "auto"):
+            self.assertEqual(sum("compact keep" in c for c in runs("PreCompact", trigger)), 1, trigger)
+        self.assertIn("PreCompact", FILE["description"])
+
+    def test_the_hook_prints_the_modules_keep_list_word_for_word(self):
+        for told in (None, "", "Stress the open review."):
+            got = self.keep({"hook_event_name": "PreCompact", "trigger": "auto", "custom_instructions": told})
+            self.assertEqual(got, self.module_keep() + "\n", told)
+        self.assertEqual(self.keep({}), self.module_keep() + "\n", "an input with no instructions hands the list")
+
+    def test_the_hook_is_silent_where_the_instructions_already_hold_the_list(self):
+        """The module adds the list at `session.compact`, and runs `/compact` with the list as its words. Seen on
+        Claude Code 2.1.328, a PreCompact hook beneath the module is handed the list as `custom_instructions`, so
+        this hook prints nothing there and the summary is told the list once."""
+        for told in (self.module_keep(), "Stress the open review.\n\n" + self.module_keep()):
+            got = self.keep({"hook_event_name": "PreCompact", "trigger": "manual", "custom_instructions": told})
+            self.assertEqual(got, "", told)
+
+    def test_an_unknown_subcommand_prints_no_instructions(self):
+        self.assertEqual(self.keep({}, sub="nosuch"), "")
+
+
 class NoGitBashTest(unittest.TestCase):
     def test_a_hook_that_cannot_start_never_blocks_a_call(self):
         """ezexe/p4#121: on Windows without Git Bash, Claude Code runs a shell-form hook in PowerShell, where `sh` is
