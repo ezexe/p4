@@ -2728,7 +2728,8 @@ def h_stop(payload):
                                        relay.owed(list(dict.fromkeys(c[0] for c in new))),   # what each still owes
                                        relay.worktree_branches(s["sessionId"], cur, new),    # the branch to merge
                                        relay.green_notes(me.home, [s["sessionId"]] + chain_of(me.home, s["sessionId"]),
-                                                         new)))                               # a verdict kept by hash
+                                                         new),                                # a verdict kept by hash
+                                       relay.push_workflows(c[0] for c in new)))              # its own tests on a push
             RAN["push_owes"] = True
             cur["closesTold"] = (told + [c[1] for c in new])[-100:]
             save_session(me.home, cur)

@@ -721,11 +721,16 @@ def archive_acts(home, s, d, hand):
         ok, why, trees = landing(home, k, ks)
         name = f"\"{title(k, ks)}\" `{k}`"
         if not ok:
+            flows = relay.push_workflows(t["path"] for t in trees if t["there"])
+            run = (f"the checks its task named and the test files of the paths it touches, then the push, then "
+                   f"the run of the repository's workflow {' and '.join(f'`{n}`' for n, _ in flows)} on the pushed "
+                   f"commit read with `gh run watch <run id> --exit-status`") if flows else \
+                "the full suite once on the commit being pushed, then the push"
             out.append((f"land:{k}", "land", True,
                         f"land first: {name} is finished and its work is not landed: {'; '.join(why)}. An "
                         f"uncommitted change is its own to commit, so ask it by `SendMessage` to `{k}`. A commit "
                         f"that is not on the default branch is landed as the push line says: its branch merged into "
-                        f"the default branch, the full suite once on the commit being pushed, then the push. It is "
+                        f"the default branch, {run}. It is "
                         f"archived at the turn after."))
             continue
         key = f"archive:{k}"

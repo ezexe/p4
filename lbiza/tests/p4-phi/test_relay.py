@@ -380,6 +380,70 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn("Once it passes, push that repository's main", line)
         self.assertNotIn("its suites pass", line, "no count, no commit and no record left to each reader")
 
+    OLD_RUN = ("Run the full suite once, on the commit being pushed, in this session, as one background command, "
+               "and keep its verdict under that commit's hash with `phi.py note \"suite green at <hash>\" --source "
+               "\"<the command>\"`, so no session runs it again for that hash. Once it passes, push that "
+               "repository's main and sync each store it touches with `p4.py sync --push`, without asking ezexe, "
+               "and say in one line what was pushed. A force-push, a history rewrite or a deletion still waits on "
+               "ezexe's go, asked as a `mcp__ccd_turn__wrap_up` question whose first button is that go.")
+
+    def workflow(self, name, text):
+        write(os.path.join(self.work, ".github", "workflows", name), text)
+
+    def test_a_repository_whose_workflow_runs_on_push_gets_the_workflow_line_and_no_full_local_run(self):
+        """Where a workflow of the repository runs its tests on every push to the default branch, the push line has
+        the named checks and the touched paths' test files run, then the push, then that workflow's run on the pushed
+        commit read with `gh run watch`, and it names no full local run. The note says the workflow was green."""
+        self.workflow("tests.yml", "name: tests\n\n# every push\non:\n  pull_request:\n  push:\n    branches: [main]\n"
+                                   "  workflow_call:\n\njobs:\n  pytest:\n    runs-on: ubuntu-latest\n")
+        self.workflow("pages.yml", "name: pages\non:\n  push:\n    branches: [main]\n    paths:\n      - \"docs/**\"\n")
+        self.workflow("release.yml", "name: release\non:\n  push:\n    branches: [main]\n")
+        flows = relay.push_workflows([self.work])
+        self.assertEqual(flows, [("tests", "tests.yml")], "the tests workflow alone: no pages, no release")
+        commits = [(self.work, "abc1234def0", "lib: fix x", ["#5"])]
+        line = relay.push_text("the child", A, commits, workflows=flows)
+        self.assertIn("That repository's own workflow `tests` runs every test on a push to the default branch, so "
+                      "before the push run only the checks the task named and the test files of the paths the commits "
+                      "touch, in this session. Once they pass, push that repository's main", line)
+        self.assertIn("After the push, read the run of `tests` on the pushed commit: find it with `gh run list "
+                      "--workflow tests.yml --commit <the pushed commit's full hash>`, watch it with `gh run watch "
+                      "<run id> --exit-status` as one background command", line)
+        self.assertIn("`phi.py note \"workflow tests green at <hash>\" --source \"gh run watch <run id> "
+                      "--exit-status\"`", line)
+        self.assertNotIn("full suite", line, "no full local run")
+        self.assertNotIn("suite green at", line)
+        self.assertIn("A force-push, a history rewrite or a deletion still waits on ezexe's go", line)
+        green = relay.push_text("the child", A, commits, green=[("abc1234def0", "workflow tests green at abc1234")],
+                                workflows=flows)
+        self.assertIn("A note holds abc1234def0 green", green)
+        self.assertNotIn("before the push run only", green)
+
+    def test_a_repository_with_no_workflow_gets_the_old_line_unchanged(self):
+        """Where no workflow of the repository runs its tests on a push to the default branch, a local run is the
+        only run, and the push line is word for word what it was."""
+        commits = [(self.work, "abc1234def0", "lib: fix x", ["#5"])]
+        self.assertEqual(relay.push_workflows([self.work]), [], "no .github/workflows folder")
+        head = ("phi (p4-phi): \"the child\" `" + A + "` finished with commits that close issues: abc1234def0 "
+                "\"lib: fix x\" closes #5 in " + self.work + ". Green work that closes an issue is landed at once. ")
+        self.assertEqual(relay.push_text("the child", A, commits, workflows=relay.push_workflows([self.work])),
+                         head + self.OLD_RUN)
+        self.workflow("pages.yml", "name: pages\non:\n  push:\n    branches: [main]\n    paths:\n      - \"docs/**\"\n")
+        self.workflow("ci.yml", "name: ci\non:\n  pull_request:\n  workflow_dispatch:\n")
+        self.workflow("tests.yml", "name: tests\non:\n  push:\n    branches:\n      - release/**\n")
+        self.workflow("checks.yml", "name: checks\non:\n  push:\n    tags: ['v*']\n")
+        self.assertEqual(relay.push_workflows([self.work]), [],
+                         "a paths filter, no push event, another branch and tags only: none runs on each push")
+        self.assertEqual(relay.push_text("the child", A, commits, workflows=relay.push_workflows([self.work])),
+                         head + self.OLD_RUN)
+
+    def test_on_push_reads_the_forms_an_on_key_takes(self):
+        for text, want in (("on: push\n", True), ("on: [push, pull_request]\n", True), ("on: pull_request\n", False),
+                           ("on:\n  - push\n  - pull_request\n", True), ("'on':\n  push:\n", True),
+                           ("on:\n  push:\n    branches-ignore: [main]\n", False),
+                           ("on:\n  push:\n    branches-ignore:\n      - 'dev/**'\n", True),
+                           ("on:\n  push:\n    branches: ['*']  # all\n", True), ("jobs: {}\n", False)):
+            self.assertIs(relay._on_push(text, "main"), want, text)
+
     def test_a_push_line_for_a_hash_noted_green_says_not_to_run_again(self):
         """ezexe/p4#234: once a note of the tree names the closing commit's hash as green, the push line names the note
         and has the suite not run again for that hash. A note names one hash and holds no other green."""

@@ -26,7 +26,8 @@ A feedback memory whose rule an open issue will build into the plugin is tied to
 p4-phi writes that line when the `gh issue create` that files the issue carries the memory's `Finding:` line with its `source:`, and whoever files it another way writes the line by hand.
 Once a commit that closes that issue is on the remote default branch, the next Stop whose turn ran a push, pull, fetch or merge cuts the memory back to one pointer line naming the issue and the code that carries its rule, and rewrites the memory's own line in the memory index to match.
 
-The push line has the orchestrator run the full suite once, on the commit being pushed, as one background command, and keep the verdict with `note "suite green at <hash>"`.
+Where the repository holds a workflow under `.github/workflows/` that runs its tests on every push to the default branch, the push line has the orchestrator run the checks the task named and the test files of the paths the commits touch, push, then read that workflow's run on the pushed commit with `gh run watch <run id> --exit-status` as one background command, and keep the verdict with `note "workflow <name> green at <hash>"`.
+Where the repository holds no such workflow, the push line has the orchestrator run the full suite once, on the commit being pushed, as one background command, and keep the verdict with `note "suite green at <hash>"`, since a local run is then the only run.
 Where a note of the tree holds that commit's hash green, the line names the note and the suite is not run again for that hash.
 A start draft names the test files of the paths its brief covers, the one named after each python file and those that import it, beside the file and in the `tests` folders above it, and never a whole suite.
 

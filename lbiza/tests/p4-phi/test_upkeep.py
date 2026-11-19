@@ -178,6 +178,15 @@ class Archive(Base):
         self.assertIn(f"\"{KID_TITLE}\" `{KID}`", land[0])
         self.assertIn("1 commit of `worktree-kid`", land[0])
         self.assertIn("not on origin/main", land[0])
+        self.assertIn("the full suite once on the commit being pushed, then the push", land[0],
+                      "no workflow of the repository runs on a push, so a local run is the only run")
+        import relay
+        flow = os.path.join(self.wt, ".github", "workflows", "tests.yml")
+        os.makedirs(os.path.dirname(flow))
+        with open(flow, "w", encoding="utf-8") as fh:
+            fh.write("name: tests\non:\n  push:\n    branches: [main]\n")
+        self.assertEqual(relay.push_workflows([self.wt]), [("tests", "tests.yml")])
+        os.remove(flow)
         git(self.wt, "push", "-q", "origin", "HEAD:main")          # landed: the next turn hands the call
         self.assertEqual(len(self.lines(self.said(), "archive:")), 1)
 

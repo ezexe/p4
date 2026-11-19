@@ -1724,7 +1724,106 @@ def green_notes(home, sids, commits):
     return out
 
 
-def push_text(child_title, child, commits, owes=(), branches=(), green=()):
+TESTS_NAME = re.compile(r"(?<![a-z])(tests?|ci|checks?)(?![a-z])", re.I)
+_FILTERS = ("branches", "branches-ignore", "paths", "paths-ignore", "tags", "tags-ignore")
+
+
+def _yaml_list(inline, block):
+    """The entries of a YAML list given inline as `[a, b]` or one scalar, or as the `- a` lines under its key."""
+    inline = inline.strip()
+    items = inline.strip("[]").split(",") if inline else [x.strip()[1:] for x in block if x.strip().startswith("-")]
+    return [x.strip().strip("'\"") for x in items if x.strip().strip("'\"")]
+
+
+def _indent(line):
+    return len(line) - len(line.lstrip())
+
+
+def _on_push(text, branch):
+    """True when a workflow file's `on:` has it run on every push to `branch`: `push` is among its events with no
+    `paths` filter, and its `branches` or `branches-ignore`, where it has one, lets the branch through. A push event
+    with only `tags` runs on no branch. Read by indentation, which is how GitHub's own workflows are written."""
+    lines = [re.sub(r"(^|\s)#.*$", "", x).rstrip() for x in text.replace("\r\n", "\n").split("\n")]
+    lines = [x for x in lines if x.strip()]
+    at = next((i for i, x in enumerate(lines) if re.match(r"""^["']?on["']?\s*:""", x)), None)
+    if at is None:
+        return False
+    inline = lines[at].split(":", 1)[1].strip()
+    if inline:                                     # `on: push`, `on: [push, pull_request]`
+        return not inline.startswith("{") and "push" in _yaml_list(inline, ())
+    body = []
+    for x in lines[at + 1:]:
+        if not x[0].isspace():
+            break
+        body.append(x)
+    if not body:
+        return False
+    top = _indent(body[0])
+    if body[0].strip().startswith("-"):            # the events as a block list
+        return "push" in _yaml_list("", [x for x in body if _indent(x) == top])
+    got = next((i for i, x in enumerate(body) if _indent(x) == top and re.match(r"push\s*:", x.strip())), None)
+    if got is None:
+        return False
+    if body[got].split(":", 1)[1].strip().strip("{} "):
+        return False                               # a flow mapping of filters: not read, so not counted
+    sub, keys, cur = [], {}, None
+    for x in body[got + 1:]:
+        if _indent(x) <= top:
+            break
+        sub.append(x)
+    low = _indent(sub[0]) if sub else 0
+    for x in sub:
+        m = re.match(r"([\w-]+)\s*:(.*)$", x.strip()) if _indent(x) == low else None
+        if m:
+            cur = m.group(1)
+            keys[cur] = [m.group(2), []]
+        elif cur:
+            keys[cur][1].append(x)
+    got = {k: _yaml_list(*v) for k, v in keys.items() if k in _FILTERS}
+    if "paths" in got or "paths-ignore" in got:
+        return False
+    if "branches" in got:
+        return any(fnmatch.fnmatchcase(branch, p.replace("**", "*")) for p in got["branches"])
+    if "branches-ignore" in got:
+        return not any(fnmatch.fnmatchcase(branch, p.replace("**", "*")) for p in got["branches-ignore"])
+    return "tags" not in got and "tags-ignore" not in got
+
+
+def push_workflows(repos):
+    """[(name, file)] for each workflow under `.github/workflows/` of the checkouts `repos` that runs the
+    repository's tests on every push to its default branch: one _on_push holds for the default branch of the remote,
+    `main` where git names none, and whose name or file name says tests, ci or checks, so a workflow that only
+    publishes or releases is never read as the verdict on a push. Empty where a repository holds none, and then a
+    local run is the only run."""
+    out = []
+    for repo in dict.fromkeys(r for r in repos if r and os.path.isdir(r)):
+        top = _git(repo, "rev-parse", "--show-toplevel")
+        root = top.stdout.strip() if top is not None and top.returncode == 0 and top.stdout.strip() else repo
+        ref = _git(repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+        branch = (ref.stdout.strip() if ref is not None and ref.returncode == 0 else "").partition("/")[2]
+        if not branch:
+            old = _git(repo, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/master")
+            new = _git(repo, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main")
+            branch = "master" if (old is not None and old.returncode == 0
+                                  and not (new is not None and new.returncode == 0)) else "main"
+        folder = os.path.join(root, ".github", "workflows")
+        for f in sorted(os.listdir(folder)) if os.path.isdir(folder) else ():
+            if not f.lower().endswith((".yml", ".yaml")):
+                continue
+            try:
+                with open(os.path.join(folder, f), encoding="utf-8") as fh:
+                    text = fh.read()
+            except (OSError, UnicodeDecodeError):
+                continue
+            m = re.search(r"^name\s*:\s*(.+?)\s*$", re.sub(r"(?m)\s#.*$", "", text), re.M)
+            name = m.group(1).strip("'\"") if m else os.path.splitext(f)[0]
+            if (TESTS_NAME.search(name) or TESTS_NAME.search(os.path.splitext(f)[0])) and _on_push(text, branch) \
+                    and (name, f) not in out:
+                out.append((name, f))
+    return out
+
+
+def push_text(child_title, child, commits, owes=(), branches=(), green=(), workflows=()):
     """The orchestrator's line: land a finished child's issue-closing commits now, without asking. It has the full
     suite run once, on the commit being pushed, by the orchestrator, as one background command, with the verdict
     kept by `phi.py note` under that commit's hash; with `green`, what green_notes found, it names the note and has
@@ -1734,7 +1833,10 @@ def push_text(child_title, child, commits, owes=(), branches=(), green=()):
     orchestrator's checkout. The line is ezexe's standing word to land green work that closes an issue and says
     so, since by the app's own default a session merges a branch of a session it started only when ezexe says so.
     With `owes`, what the change still owes comes first: finished before the push, or named in the report before
-    it."""
+    it. With `workflows`, what push_workflows found, the repository's own workflow runs every test on the push, so
+    the line has the checks the task named and the test files of the touched paths run before the push, and that
+    workflow's run on the pushed commit read after it, in place of the local run of every test. With none, the line
+    is word for word what it was, since a local run is then the only run."""
     named = "; ".join(f"{sha} \"{_short(subj, 80)}\" closes {', '.join(n)} in {repo}" for repo, sha, subj, n in commits)
     owes = [x for x in owes if x]
     first = ""
@@ -1760,11 +1862,28 @@ def push_text(child_title, child, commits, owes=(), branches=(), green=()):
         suite = ("Run the full suite once, on the commit being pushed, in this session, as one background command, "
                  "and keep its verdict under that commit's hash with `phi.py note \"suite green at <hash>\" --source "
                  "\"<the command>\"`, so no session runs it again for that hash. Once it passes, push")
+    after = ""
+    workflows = [(n, f) for n, f in workflows if n and f]
+    if workflows:
+        names = " and ".join(f"`{n}`" for n, _ in workflows)
+        one = len(workflows) == 1
+        if not green:
+            suite = (f"That repository's own workflow {names} runs every test on a push to the default branch, so "
+                     f"before the push run only the checks the task named and the test files of the paths the "
+                     f"commits touch, in this session. Once they pass, push")
+        after = (f" After the push, read the run of {names} on the pushed commit: find {'it' if one else 'each'} "
+                 f"with " + " and ".join(f"`gh run list --workflow {f} --commit <the pushed commit's full hash>`"
+                                         for _, f in workflows)
+                 + f", watch {'it' if one else 'each'} with `gh run watch <run id> --exit-status` as one background "
+                   f"command, and keep {'its' if one else 'each'} verdict under that commit's hash with `phi.py "
+                   f"note \"workflow {workflows[0][0] if one else '<name>'} green at <hash>\" --source \"gh run "
+                   f"watch <run id> --exit-status\"`, so no session reads it again for that hash. Mend what a "
+                   f"failed run shows.")
     return (f"phi (p4-phi): \"{child_title}\" `{child}` finished with commits that close issues: {named}. "
             f"Green work that closes an issue is landed at once.{merge} "
             f"{suite} that repository's main and sync each store it touches with "
             f"`p4.py sync --push`, without asking ezexe, and say in one line what was "
-            f"{'merged and ' if merge else ''}pushed.{first} A force-push, a "
+            f"{'merged and ' if merge else ''}pushed.{after}{first} A force-push, a "
             f"history rewrite or a deletion still waits on ezexe's go, asked as a `mcp__ccd_turn__wrap_up` question "
             f"whose first button is that go.")
 
