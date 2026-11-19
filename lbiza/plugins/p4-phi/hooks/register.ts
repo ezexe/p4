@@ -250,8 +250,15 @@ let starter: string | undefined
 // The look in flight, and the question of the folder and the starter in flight.
 let looking: Promise<Answer | undefined> | undefined
 let asking: Promise<void> | undefined
-// The main conversation is inside a turn.
+// The main conversation is inside a turn, and that turn was begun by the notice Claude Code sends a session whose
+// message to another session was held, refused or dropped.
 let isInTurn = false
+let isNoticeTurn = false
+// How such a notice opens, as the SendMessage tool's own text names it: "a `[Cross-session delivery notice]` tells
+// you when that happens". cross-session-messaging.md, "Control inbound messages": a session that bypasses
+// permission prompts holds each message of one that does not, and the other way round, and past the deadline it
+// "drops the message and reports it as expired to a sender it can reach".
+const DELIVERY_NOTICE = /^\s*\[Cross-session delivery notice\]/
 // The last report handed to `$.session.send` for the starter, as its whole text.
 let reported: string | undefined
 // The whole points of the usage last written to usage.json, and the writes, one after another.
@@ -565,11 +572,19 @@ function reportText(answer: string, reason: TurnCompleteReason): string {
 
 // At the end of a turn of a session another session started: its report goes to that session, where a message
 // starts a turn when the session is idle. A turn the person stopped is theirs to speak of. A starter that runs under
-// a new id since a clear or a resume is asked of python once more.
-async function report($: EngineInterface, answer: string, reason: TurnCompleteReason): Promise<void> {
+// a new id since a clear or a resume is asked of python once more. A turn begun by a delivery notice sends none:
+// seen in the desktop app on Claude Code 2.1.326, a worker in auto mode whose starter bypassed permission prompts
+// had each report held there, the notice of each started a turn of the worker, and that turn's report was held in
+// its turn, 44 times in five minutes, until the worker was detached.
+async function report(
+  $: EngineInterface,
+  answer: string,
+  reason: TurnCompleteReason,
+  isNotice: boolean,
+): Promise<void> {
   try {
     switches ??= readSwitches($)
-    if ((await switches).isPhiOff || reason === 'aborted') return
+    if ((await switches).isPhiOff || reason === 'aborted' || isNotice) return
     const to = await starterOf($)
     if (!to) return
     const text = reportText(answer, reason)
@@ -1139,7 +1154,10 @@ export const register: Register = on => {
   })
 
   on('turn.start', ($, e, next) => {
-    if (e.agentId === undefined) isInTurn = true
+    if (e.agentId === undefined) {
+      isInTurn = true
+      isNoticeTurn = DELIVERY_NOTICE.test(e.text ?? '')
+    }
 
     return next(e)
   })
@@ -1151,7 +1169,8 @@ export const register: Register = on => {
   on('turn.complete', ($, e, next) => {
     if (e.agentId === undefined) {
       isInTurn = false
-      void report($, e.answer, e.reason)
+      void report($, e.answer, e.reason, isNoticeTurn)
+      isNoticeTurn = false
     }
     if (e.agentId === undefined || isWatching) void look($, true)
 

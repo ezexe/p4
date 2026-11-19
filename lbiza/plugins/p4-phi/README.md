@@ -81,6 +81,8 @@ Not seen at the event: ezexe's own typing in the desktop app, whose transcript r
 The module asks python once who started the session, with the question of where its folder is, and sends that session the turn's last message at `turn.complete`, cut to 4,000 characters.
 Claude Code raises `turn.complete` once a turn, after its last Stop hook answered, so a turn the Stop hook sends back raises no report.
 A turn ezexe stopped sends none, and neither does a puppeteer's standing worker or coworker, whose first line asks it for the message its turn ends with.
+A turn that Claude Code's own `[Cross-session delivery notice]` began sends none either, since that notice says a message of this session was held, refused or dropped, and a report of it would be held in its turn.
+By `cross-session-messaging.md`, "Control inbound messages", a session that bypasses permission prompts holds each message of one that does not, and the other way round, so a worker in another class of permission mode than its starter reaches it only once ezexe approves each message or `crossSessionInbound` is `accept`.
 p4-phi still keeps each report for the starter's next message, and names one that the message already holds without repeating it.
 It keeps them because a send is only queued: `plugins/mods/api.md` says the call "resolves once the message is queued", and `cross-session-messaging.md` says the receiving session may hold or refuse it and that a message reaches only a running session.
 

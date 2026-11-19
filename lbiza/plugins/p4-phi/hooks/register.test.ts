@@ -640,6 +640,39 @@ test('a report that repeats the one before it is not sent, and the same words af
   expect(seen.sent.map(one => one.text.split('\n\n')[1])).toEqual(['ok', 'The flush is ported.', 'ok'])
 })
 
+test('a turn begun by the notice of a held message sends no report, and the turn after it does', async ($, on) => {
+  // Seen in the desktop app on Claude Code 2.1.326: a worker in auto mode under a starter that bypassed permission
+  // prompts had each report held, the notice of each started a turn of the worker, and that turn's report was
+  // held in its turn, every six seconds until the worker was detached.
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { look: () => STARTED })
+  const held =
+    '[Cross-session delivery notice] Your message to another session was held by that session ' +
+    '(recipient: uds:/tmp/cc-msg-1; msg_id: 0a1b). Not delivered yet.'
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.turn.start({ text: 'port the flush', turnId: 't1' })
+  await $.turn.complete({ ...TURN, answer: REPORT })
+  await clock.settle()
+  expect(seen.sent.length).toBe(1)
+
+  await $.turn.start({ text: held, turnId: 't2' })
+  await $.turn.complete({ ...TURN, turnId: 't2', answer: 'Held: 0a1b, not delivered.' })
+  await $.turn.start({ text: `  ${held.replace('was held by that session', 'was not approved before expiry')}`, turnId: 't3' })
+  await $.turn.complete({ ...TURN, turnId: 't3', answer: 'Expired: 0a1b.' })
+  await clock.settle()
+  expect(seen.sent.length).toBe(1)
+
+  // A notice in a subagent's turn leaves the main conversation's turn as it was, and a later turn reports again.
+  await $.turn.start({ text: 'run the test of the flush', turnId: 't4' })
+  await $.turn.start({ text: held, turnId: 's1', agentId: 'a1' })
+  await $.turn.complete({ ...TURN, turnId: 't4', answer: 'The test of the flush passes.' })
+  await clock.settle()
+  expect(seen.sent.map(one => one.text.split('\n\n')[1])).toEqual([REPORT, 'The test of the flush passes.'])
+})
+
 test("a subagent's turn, a turn the person stopped and a session nobody started send no report", async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   const clock = mock.clock(on)
